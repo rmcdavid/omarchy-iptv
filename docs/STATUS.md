@@ -85,7 +85,7 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M2-01 | Sources screen: in-guide playlist entry, source history, per-source cache, Xtream form (docs/M2-SOURCES.md) | PO+UX+ARCH -> FE -> QA | doing | specs done 2026-09-13 (UX-SOURCES.md, ARCHITECTURE-SOURCES.md + SR1-SR10); FE lane 1 (Model+Guide), FE lane 2 (Service+helper), QA plan lane running in worktrees |
+| M2-01 | Sources screen: in-guide playlist entry, source history, per-source cache, Xtream form (docs/M2-SOURCES.md) | PO+UX+ARCH -> FE -> QA | doing | lane 2 merged 807b1fc (service API, caches, helper verbs, 39 harness scenarios); QA plan merged 88da356 (196 cases, 14 fixtures); rulings SR11-SR32 issued; lane 1 (Model+Guide) finishing; then integration (shim swap, SR11-SR32 service side, harness verbs) and the QA pass |
 | M2-02 | Multiple playlists | - | merged into M2-01 | the source history is the multi-playlist model |
 | M2-03 | Channel numbers + numeric zap | - | todo | |
 | M2-04 | Channel logos | - | todo | |
