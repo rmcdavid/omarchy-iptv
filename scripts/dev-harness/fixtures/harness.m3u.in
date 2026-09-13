@@ -1,0 +1,43 @@
+#EXTM3U url-tvg="http://127.0.0.1:9/epg.xml"
+#EXTINF:-1 tvg-id="harness.live" tvg-name="Harness Live" group-title="Harness",Harness Live
+__LIVE__
+#EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" tvg-logo="http://127.0.0.1:9/bbc1.png" group-title="UK | ENTERTAINMENT",BBC One HD
+http://127.0.0.1:9/dead/bbc1.m3u8
+#EXTINF:-1 tvg-id="bbc2.uk" group-title="UK | ENTERTAINMENT",BBC Two HD
+http://127.0.0.1:9/dead/bbc2.m3u8
+#EXTINF:-1 tvg-id="itv1.uk" group-title="UK | ENTERTAINMENT",ITV1 HD
+http://127.0.0.1:9/dead/itv1.m3u8
+#EXTINF:-1 tvg-id="skysports.uk" group-title="UK | SPORTS",Sky Sports Main Event
+http://127.0.0.1:9/dead/ssme.m3u8
+#EXTINF:-1 tvg-id="skyfootball.uk" group-title="UK | SPORTS",Sky Sports Football
+http://127.0.0.1:9/dead/ssf.m3u8
+#EXTINF:-1 tvg-id="skynews.uk" group-title="UK | NEWS",Sky News
+http://127.0.0.1:9/dead/skynews.m3u8
+#EXTINF:-1 tvg-id="bbcnews.uk" group-title="UK | NEWS",BBC News
+http://127.0.0.1:9/dead/bbcnews.m3u8
+#EXTINF:-1 tvg-id="expired.uk" group-title="UK | NEWS",GB News
+http://127.0.0.1:9/dead/gbnews.m3u8
+#EXTINF:-1 tvg-id="aljazeera.qa" group-title="World News",Al Jazeera English
+#EXTVLCOPT:http-user-agent=Harness/1.0
+#EXTVLCOPT:http-referrer=http://127.0.0.1:9/
+http://127.0.0.1:9/dead/aje.m3u8
+#EXTINF:-1 tvg-id="dw.de" group-title="World News",DW English
+http://127.0.0.1:9/dead/dw.m3u8
+#EXTINF:-1 tvg-id="arte.de" group-title="DE | KULTUR",Arte HD
+http://127.0.0.1:9/dead/arte.m3u8
+#EXTINF:-1 tvg-id="zdf.de" group-title="DE | KULTUR",ZDF HD
+http://127.0.0.1:9/dead/zdf.m3u8
+#EXTINF:-1 tvg-id="teleq.ca" group-title="CA | FRANCAIS",Télé-Québec
+http://127.0.0.1:9/dead/teleq.m3u8
+#EXTINF:-1 tvg-id="kids1" group-title="Animation;Kids;Religious",Cartoon Corner
+http://127.0.0.1:9/dead/kids1.m3u8
+#EXTINF:-1 tvg-id="kids2" group-title="Animation;Kids",Toon Town
+http://127.0.0.1:9/dead/kids2.m3u8
+#EXTINF:-1,A Very Long Channel Name That Will Certainly Need Eliding In The Bar Label And In The Row
+http://127.0.0.1:9/dead/long.m3u8
+#EXTINF:-1,Ungrouped Plain Channel
+http://127.0.0.1:9/dead/plain.m3u8
+#EXTINF:-1 tvg-id="ru1" group-title="RU",Первый канал
+http://127.0.0.1:9/dead/ru1.m3u8
+#EXTINF:-1 tvg-id="pl1" group-title="PL | INFORMACYJNE",TVN24
+http://127.0.0.1:9/dead/tvn24.m3u8
