@@ -85,7 +85,7 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M2-01 | Sources screen: in-guide playlist entry, source history, per-source cache, Xtream form (docs/M2-SOURCES.md) | PO+UX+ARCH -> FE -> QA | doing | started 2026-09-13; UX-SOURCES.md and ARCHITECTURE-SOURCES.md in progress |
+| M2-01 | Sources screen: in-guide playlist entry, source history, per-source cache, Xtream form (docs/M2-SOURCES.md) | PO+UX+ARCH -> FE -> QA | doing | specs done 2026-09-13 (UX-SOURCES.md, ARCHITECTURE-SOURCES.md + SR1-SR10); FE lane 1 (Model+Guide), FE lane 2 (Service+helper), QA plan lane running in worktrees |
 | M2-02 | Multiple playlists | - | merged into M2-01 | the source history is the multi-playlist model |
 | M2-03 | Channel numbers + numeric zap | - | todo | |
 | M2-04 | Channel logos | - | todo | |
@@ -161,6 +161,7 @@ Release regression on 502f4b3 (QA, 2026-09-13, `docs/QA-RESULTS.md` section "Rel
 | 2026-09-13 | S-01: raw-title prefix applied to mpv `title` only (force-media-title is not property-expanded by mpv, verified live) | FE, accepted by PO |
 | 2026-09-13 | v0.1.0 released and published: github.com/rmcdavid/omarchy-iptv made PUBLIC at the user's request; GitHub release created | PO |
 | 2026-09-13 | M2 starts with the Sources lane (user request); Xtream helper and multiple playlists fold into it; detached/idle mpv is lane 2 | PO |
+| 2026-09-13 | Sources reconciliation SR1-SR10 (ARCHITECTURE-SOURCES.md): UX names for the view model over state-file names via Model.sourceView; cancelProbe added; mask token **** with type/output visible; architecture caps canonical (label 64, credentials 256); UX 5.4 codes canonical; lane 1 merges first | PO |
 
 ## Blockers
 
