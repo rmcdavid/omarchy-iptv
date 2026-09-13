@@ -194,6 +194,11 @@ check("fallbackScope never lands on the header", Model.fallbackScope(Model.scope
 check("fallbackScope no entries keeps the id", [Model.fallbackScope([], "g:UK"), Model.fallbackScope(null, "")], ["g:UK", "all"])
 check("favoriteSet from ids or a state", [Model.favoriteSet(["a", "b"]).b, Model.favoriteSet({ favorites: ["c"] }).c, Model.favoriteSet(null).x], [true, true, undefined])
 check("scopeIndex", [Model.scopeIndex(entries, "all"), Model.scopeIndex(entries, "g:UK"), Model.scopeIndex(entries, "zz")], [2, 4, -1])
+// D-LIVE-16: pinned entries show the column from the top, a group is brought into view.
+check("columnAnchor pinned scopes scroll to the top", [Model.columnAnchor(entries, "recent"), Model.columnAnchor(entries, "favorites"), Model.columnAnchor(entries, "all")], [{ index: 0, top: true }, { index: 1, top: true }, { index: 2, top: true }])
+check("columnAnchor All is still top without Recent", Model.columnAnchor(Model.scopeEntries(channels, null), "all"), { index: 1, top: true })
+check("columnAnchor group is contained, not topped", [Model.columnAnchor(entries, "g:UK"), Model.columnAnchor(entries, "g:One World")], [{ index: 4, top: false }, { index: 8, top: false }])
+check("columnAnchor unknown scope or no column", [Model.columnAnchor(entries, "g:Gone"), Model.columnAnchor(entries, ""), Model.columnAnchor([], "all"), Model.columnAnchor(null, "all")], [{ index: -1, top: false }, { index: -1, top: false }, { index: -1, top: false }, { index: -1, top: false }])
 check("initialScope favorites when present", Model.initialScope(channels, state), "favorites")
 check("initialScope all when no favorites", Model.initialScope(channels, null), "all")
 check("cursorFor playing row", Model.cursorFor(channels, "4"), 3)

@@ -356,9 +356,8 @@ Item {
     else if (root.cursorIndex < 0) root.cursorIndex = 0
 
     Qt.callLater(function() {
-      if (root.rowCount > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
-      var at = Model.scopeIndex(root.scopeList, root.scopeId)
-      if (at >= 0 && groupModel.count > at) groupList.positionViewAtIndex(at, ListView.Contain)
+      root.scrollToCursor()
+      root.positionColumn()
     })
   }
 
@@ -385,8 +384,22 @@ Item {
     root.setScope(Model.moveScope(root.scopeList, root.scopeId, delta))
   }
 
+  // Column position (UX 2.2 / 2.3, D-LIVE-16): a pinned entry (Recent,
+  // Favorites, All) shows the column from the top, a group is brought into
+  // view. Only against a laid-out view: on a reopen the layer surface is
+  // mapped after open() returns, so a Contain issued then saw a 0-height
+  // view and parked All at the top edge with Favorites hidden above it. The
+  // views call back in from onHeightChanged once they have their size.
+  function positionColumn() {
+    if (!root.opened || !root.showColumn || groupList.height <= 0) return
+    var anchor = Model.columnAnchor(root.scopeList, root.scopeId)
+    if (anchor.index < 0 || anchor.index >= groupModel.count) return
+    if (anchor.top) groupList.positionViewAtBeginning()
+    else groupList.positionViewAtIndex(anchor.index, ListView.Contain)
+  }
+
   function scrollToCursor() {
-    if (root.rowCount > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+    if (root.rowCount > 0 && resultList.height > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
   }
 
   function moveCursorBy(delta, wrap) {
@@ -782,6 +795,7 @@ Item {
                 cacheBuffer: root.groupEntryHeight * 4
                 Accessible.role: Accessible.List
                 Accessible.name: root.copy.accessibleGroups
+                onHeightChanged: root.positionColumn()
 
                 delegate: Item {
                   id: groupRow
@@ -895,6 +909,7 @@ Item {
                 cacheBuffer: root.rowHeight * 4
                 Accessible.role: Accessible.List
                 Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
+                onHeightChanged: root.scrollToCursor()
 
                 delegate: BorderSurface {
                   id: row

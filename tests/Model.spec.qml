@@ -176,6 +176,19 @@ TestCase {
     compare(Model.hostOf("/home/x/list.m3u"), "local file")
   }
 
+  function test_columnAnchor() {
+    // D-LIVE-16: pinned entries show the column from the top; groups are contained.
+    var entries = Model.scopeEntries(channels, userState)
+    var all = Model.columnAnchor(entries, "all")
+    compare(all.index, 2)
+    compare(all.top, true)
+    var group = Model.columnAnchor(entries, "g:UK")
+    compare(group.index, 4)
+    compare(group.top, false)
+    compare(Model.columnAnchor(entries, "g:Gone").index, -1)
+    compare(Model.columnAnchor(null, "all").index, -1)
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)

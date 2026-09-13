@@ -516,6 +516,15 @@ function scopeIndex(entries, scopeId) {
   return -1
 }
 
+// Where the group column sits for the selected scope (UX 2.2 / 2.3,
+// D-LIVE-16): a pinned entry (Recent, Favorites, All) shows the column from
+// the top so every pinned entry is visible; a group is brought into view
+// (ListView.Contain). index is -1 when the scope is not in the column.
+function columnAnchor(entries, scopeId) {
+  var index = scopeIndex(entries, scopeId)
+  return { index: index, top: index >= 0 && isPinnedScope(scopeId) }
+}
+
 // A scope that is no longer in the column (the last Recent entry removed, a
 // group gone after a refresh) must not keep the cursor on a hidden entry:
 // fall back to Favorites when it has channels, else All (UX 2.2, D-LIVE-07).
@@ -1337,6 +1346,7 @@ if (typeof module !== "undefined") {
     effectiveScope: effectiveScope,
     moveScope: moveScope,
     scopeIndex: scopeIndex,
+    columnAnchor: columnAnchor,
     fallbackScope: fallbackScope,
     initialScope: initialScope,
     cursorFor: cursorFor,
