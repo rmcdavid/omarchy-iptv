@@ -1,0 +1,24 @@
+#EXTM3U url-tvg="http://127.0.0.1:9/qa-src-a.xml"
+# QA fixture: source A for the Sources scenarios (docs/QA-SOURCES.md, section 8 "Fixture catalogue").
+#  - 8 channels in 3 groups (Alpha News, Alpha Sports, Alpha Kids); the probe result line must read "8 channels in 3 groups"
+#  - every stream URL points at 127.0.0.1:9 (TCP discard, connection refused) so nothing is ever fetched from the network
+#  - t:qa.shared is also in qa-src-b.m3u under another group: a favorite on it survives a switch (SR9, D14)
+#  - "Alpha Kids Two" has no tvg-id, so its id is u:<fnv1a32 of its URL> = u:502142db and exists only in this source
+#  - the url-tvg hint points at the discard port: epgUrlHint is never surfaced or fetched in v0.2 (ARCH 6.7)
+#  - served by the harness as http://127.0.0.1:8765/qa-src-a.m3u -> source key 584a58e5; as a path the key depends on the path
+#EXTINF:-1 tvg-id="qa.a.news1" tvg-name="Alpha News One" group-title="Alpha News",Alpha News One
+http://127.0.0.1:9/alpha/news1.m3u8
+#EXTINF:-1 tvg-id="qa.a.news2" group-title="Alpha News",Alpha News Two
+http://127.0.0.1:9/alpha/news2.m3u8
+#EXTINF:-1 tvg-id="qa.shared" group-title="Alpha News",Shared Channel
+http://127.0.0.1:9/alpha/shared.m3u8
+#EXTINF:-1 tvg-id="qa.a.sport1" group-title="Alpha Sports",Alpha Sports One
+http://127.0.0.1:9/alpha/sport1.m3u8
+#EXTINF:-1 tvg-id="qa.a.sport2" group-title="Alpha Sports",Alpha Sports Two
+http://127.0.0.1:9/alpha/sport2.m3u8
+#EXTINF:-1 tvg-id="qa.a.kids1" group-title="Alpha Kids",Alpha Kids One
+http://127.0.0.1:9/alpha/kids1.m3u8
+#EXTINF:-1 group-title="Alpha Kids",Alpha Kids Two
+http://127.0.0.1:9/alpha/kids2.m3u8
+#EXTINF:-1 tvg-id="qa.a.kids3" group-title="Alpha Kids",Alpha Kids Three
+http://127.0.0.1:9/alpha/kids3.m3u8
