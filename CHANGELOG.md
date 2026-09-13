@@ -51,6 +51,8 @@ cases), a security review, and a live-shell pass on the reference machine
 - Setting an EPG URL from empty triggers the fetch immediately.
 
 ### Known limitations
+- Clearing `playlistUrl` at runtime leaves the previous list drawn under the
+  "No playlist configured" text until the guide is reopened (D-LIVE-19).
 - The player is started by the shell, so `omarchy restart shell` ends
   playback.
 - The first channel's stream URL is visible to other local accounts via `ps`

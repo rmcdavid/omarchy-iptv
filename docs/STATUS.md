@@ -67,19 +67,19 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 | M1.1-03 | Performance check (10k playlist, large EPG) | QA | done | all within budget: playlist 11k parse 530 ms, overlay open ~64 ms net on 11k cache, filter <= 6.7 ms, EPG 41 MB gz 2.9 s, --now-only 37 ms |
 | M1.1-04 | Security review (G4) | ARCH | done | docs/SECURITY-REVIEW.md: pass with findings (S-01 P2, 7 P3); all eight fixed and merged 134fbe1 (256 node, 144 python) |
 | M1.1-05 | Fix round 1 (P1/P2) | FE | done | security round merged 134fbe1; QA-defect round merged 2ce0b52; all 23 items verified by M1.1-06 |
-| M1.1-06 | Regression re-test | QA | done (harness) | docs/QA-RESULTS.md "Regression on 2ce0b52": 23/23 fixes verified, 137 cases re-run with 0 regressions, gates green (271 node, 144 python, 18 qml, validate 0); new P3s D-LIVE-16/17/18; live-shell block (12 cases) unchanged |
+| M1.1-06 | Regression re-test | QA | done | QA-RESULTS.md: regression on 2ce0b52 (23/23 fixes, 0 regressions) and release regression on 502f4b3 (D-LIVE-16..18 verified, 120 cases, 0 regressions) |
 | M1.1-07 | Docs polish + known limitations | FE+UX | done | README (limits, disable note, third-party bar, behavior notes, D-LIVE-18), UX 6.3/6.4 wording, ARCHITECTURE 12.1, CHANGELOG.md |
-| M1.1-08 | Dead-stream hardening | FE | doing | D-LIVE-16/17/18 fix lane started 2026-09-13 |
+| M1.1-08 | Dead-stream hardening | FE | done | merged 502f4b3: column positioning, SIGTERM->SIGKILL stop ladder, playlist warnings in footer; verified by QA |
 
 ### Release
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| REL-01 | Clean install via git clone | QA | todo | Deps: M1.1-06 |
-| REL-02 | Uninstall leaves only cache + state | QA | todo | Deps: REL-01 |
-| REL-03 | Version 0.1.0 + CHANGELOG + final check.sh | FE | todo | Deps: REL-02 |
-| REL-04 | PO acceptance vs PRODUCT.md | PO | todo | Deps: REL-03 |
-| REL-05 | Tag v0.1.0 + push + re-install at tag | PO | todo | Deps: REL-04 |
+| REL-01 | Clean install via git clone | QA | done | live machine 2026-09-13: clone, validate, rescan, enable, bar set; then fast-forwarded to the release build and shell restarted (QA-RESULTS.md live section) |
+| REL-02 | Uninstall leaves only cache + state | QA | done (by inspection) | not executed on the live machine to keep the delivered install; runtime writes verified limited to cache, state, runtime dirs (harness + code review); README Uninstall documents all three |
+| REL-03 | Version 0.1.0 + CHANGELOG + final check.sh | FE | done | manifest 0.1.0; CHANGELOG.md 0.1.0 section; check.sh all green on 502f4b3 (299 node, 144 python, 21 qml) |
+| REL-04 | PO acceptance vs PRODUCT.md | PO | done | US1-US8 verified (harness + live shell); quality bar met except multi-monitor (single output available); 0 open P1/P2; accepted 2026-09-13 |
+| REL-05 | Tag v0.1.0 + push + re-install at tag | PO | done | tag v0.1.0 created; no remote configured (gh not logged in), push deferred to the user; installed clone fast-forwarded to the tag |
 
 ### M2 Backlog (unscheduled)
 
@@ -170,10 +170,11 @@ Release regression on 502f4b3 (QA, 2026-09-13, `docs/QA-RESULTS.md` section "Rel
 
 ## Next up
 
-1. Live-shell verification on the reference machine (12 blocked cases): install by git clone into ~/.config/omarchy/plugins, rescan, enable, `omarchy bar set` playlistUrl, keybinding and menu row from contrib/, theme switch, restart shell; commands in docs/QA-RESULTS.md section 7. Needs the user's go-ahead.
-2. Tag v0.1.0 once the live-shell cases pass (v0.1.0-rc1 is tagged on the harness-verified build).
-3. M1.1-08: D-LIVE-16 column scroll on reopen, D-LIVE-17 SIGKILL escalation, and rendering playlist warnings in the guide (D-LIVE-18).
-4. M2 backlog per docs/PLAN.md section 10 (detached/idle mpv first: removes S-03 and the restart-shell limitation).
+1. Push the repository and the v0.1.0 tag to a remote of the user's choice (none configured; `gh auth login` first if GitHub).
+2. M2 lane 1: Sources screen in the guide (enter/paste a playlist and EPG URL, history of sources with per-source cache, Xtream URL helper), per the PO assessment of 2026-09-13.
+3. M2 lane 2: detached/idle mpv so playback survives `omarchy restart shell` and no URL appears on the mpv command line (removes S-03).
+4. M1.2 cosmetic: D-LIVE-19 (clearing playlistUrl at runtime leaves the old list drawn under the empty state); EPG helper warnings not rendered.
+5. Remaining M2 backlog per docs/PLAN.md section 10.
 
 ## Handoff notes
 
