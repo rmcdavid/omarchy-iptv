@@ -70,6 +70,14 @@ MAX_SOURCE_BYTES = 64 * 1024 * 1024
 MAX_CHANNELS = 50000
 MAX_GROUPS = 2000
 DEFAULT_TIMEOUT = 20
+# `--timeout` is a per-socket-operation timeout; a server that trickles one
+# byte per second would keep the helper alive forever (S-05). Every HTTP
+# download also runs under a wall-clock budget of max(HTTP_DEADLINE_MIN,
+# 3 x --timeout) seconds, read in chunks so the check runs often. Tests
+# shrink the budget through HTTP_DEADLINE_ENV; the service never sets it.
+HTTP_DEADLINE_MIN = 60.0
+HTTP_DEADLINE_ENV = "OMARCHY_IPTV_HTTP_DEADLINE"
+HTTP_CHUNK = 256 * 1024
 DEFAULT_IPC_TIMEOUT = 2.0
 UNGROUPED = "Ungrouped"
 
@@ -585,6 +593,17 @@ def split_userinfo(url: str) -> tuple[str, str]:
     return urllib.parse.urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment)), auth
 
 
+def http_deadline(timeout: float) -> float:
+    """Wall-clock budget in seconds for one download (see HTTP_DEADLINE_MIN)."""
+    override = os.environ.get(HTTP_DEADLINE_ENV, "")
+    if override:
+        try:
+            return max(0.05, float(override))
+        except ValueError:
+            pass
+    return max(HTTP_DEADLINE_MIN, 3.0 * float(timeout))
+
+
 def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes:
     import base64
     import http.client
@@ -596,9 +615,24 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
     if auth:
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
     request = urllib.request.Request(target, headers=headers)
+    budget = http_deadline(timeout)
+    deadline = time.monotonic() + budget
+    chunks: list[bytes] = []
+    total = 0
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = response.read(MAX_SOURCE_BYTES + 1)
+            # read1: at most one socket read per call, so a trickling server
+            # cannot park us inside read() past the deadline check.
+            while total <= MAX_SOURCE_BYTES:
+                if time.monotonic() >= deadline:
+                    raise HelperError("timeout", "%s download from %s exceeded %.0f s" % (label, host, budget))
+                chunk = response.read1(HTTP_CHUNK)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+    except HelperError:
+        raise
     except urllib.error.HTTPError as error:
         raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
     except urllib.error.URLError as error:
@@ -606,9 +640,9 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
         raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(reason)))
     except (TimeoutError, OSError, ValueError, http.client.HTTPException) as error:
         raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(error)))
-    if len(data) > MAX_SOURCE_BYTES:
+    if total > MAX_SOURCE_BYTES:
         raise HelperError("too_large", "%s from %s exceeds %d MB" % (label, host, MAX_SOURCE_BYTES // (1024 * 1024)))
-    return data
+    return b"".join(chunks)
 
 
 def fetch_bytes(url: str, timeout: float, label: str = "playlist") -> bytes:

@@ -1,5 +1,10 @@
-"""CLI-level tests for bin/omarchy-iptv (subprocess, temp cache dir)."""
+"""CLI-level tests for bin/omarchy-iptv (subprocess, temp cache dir).
+
+Network tests talk to throw-away servers on 127.0.0.1 only, never the
+network.
+"""
 import gzip
+import http.server
 import json
 import os
 import pathlib
@@ -7,12 +12,83 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+
+from helper_loader import load_helper
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HELPER = ROOT / "bin" / "omarchy-iptv"
 FIXTURES = ROOT / "tests" / "fixtures"
+helper = load_helper()
+SMALL_PLAYLIST = b"#EXTM3U\n#EXTINF:-1 tvg-id=\"local.test\",Local\nhttp://stream.example.test/x.m3u8\n"
+
+
+class LocalHttp:
+    """Loopback HTTP server for hardening tests. `seen[path]` holds the request
+    headers of the last request for that path. Routes:
+      /playlist   a small valid playlist
+      /trickle    a 200 that drips playlist lines forever (S-05)
+    Extra routes: {path: callable(handler)}."""
+
+    def __init__(self, routes=None):
+        seen = self.seen = {}
+        table = self.routes = {"/playlist": self.serve_playlist, "/trickle": self.serve_trickle}
+        if routes:
+            table.update(routes)
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                seen[self.path] = dict(self.headers.items())
+                route = table.get(self.path)
+                if route is None:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                route(self)
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def url(self, path, userinfo=""):
+        return "http://%s127.0.0.1:%d%s" % (userinfo + "@" if userinfo else "", self.port, path)
+
+    @staticmethod
+    def serve_playlist(handler):
+        handler.send_response(200)
+        handler.send_header("Content-Type", "audio/x-mpegurl")
+        handler.send_header("Content-Length", str(len(SMALL_PLAYLIST)))
+        handler.end_headers()
+        handler.wfile.write(SMALL_PLAYLIST)
+
+    @staticmethod
+    def serve_trickle(handler):
+        handler.send_response(200)
+        handler.send_header("Content-Type", "audio/x-mpegurl")
+        handler.send_header("Content-Length", str(10 ** 9))
+        handler.end_headers()
+        line = b"#EXTINF:-1,Drip\nhttp://stream.example.test/drip.m3u8\n"
+        try:
+            while True:
+                handler.wfile.write(line)
+                handler.wfile.flush()
+                time.sleep(0.05)
+        except OSError:
+            return   # the client gave up: the deadline fired
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
 
 
 def run(*args, env=None):
@@ -204,6 +280,50 @@ class HardeningTest(unittest.TestCase):
             self.assertEqual(status["error"]["code"], "network")
             self.assertEqual(status["sourceHost"], "127.0.0.1")
             self.assertTrue((pathlib.Path(tmp) / "playlist-status.json").is_file())
+
+    def test_local_http_download_reads_the_whole_body_in_chunks(self):
+        server = LocalHttp()
+        self.addCleanup(server.close)
+        with tempfile.TemporaryDirectory() as tmp:
+            code, status, stderr = run("playlist", "--url", server.url("/playlist"), "--cache-dir", tmp, "--timeout", "5")
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(status["channelCount"], 1)
+            self.assertEqual(status["sourceHost"], "127.0.0.1")
+            self.assertEqual(server.seen["/playlist"]["User-Agent"], helper.USER_AGENT)
+            self.assertNotIn("Authorization", server.seen["/playlist"])
+
+    def test_trickling_server_trips_the_wall_clock_deadline(self):
+        # S-05: --timeout is per socket operation; a server that keeps sending
+        # a byte at a time must still be cut off by the wall-clock budget.
+        server = LocalHttp()
+        self.addCleanup(server.close)
+        with tempfile.TemporaryDirectory() as tmp:
+            started = time.monotonic()
+            code, status, stderr = run("playlist", "--url", server.url("/trickle"), "--cache-dir", tmp, "--timeout", "5",
+                                       env={helper.HTTP_DEADLINE_ENV: "1"})
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 4.0, "deadline did not fire (%.1f s)" % elapsed)
+            self.assertEqual(code, 1)
+            self.assertEqual(status["error"]["code"], "timeout")
+            self.assertEqual(status["error"]["message"], "playlist download from 127.0.0.1 exceeded 1 s")
+            self.assertEqual(status["sourceHost"], "127.0.0.1")
+            self.assertNotIn("/trickle", json.dumps(status) + stderr)
+            self.assertIn("exceeded 1 s", stderr)
+
+    def test_default_deadline_is_sixty_seconds_or_three_times_the_timeout(self):
+        original = os.environ.pop(helper.HTTP_DEADLINE_ENV, None)
+        try:
+            self.assertEqual(helper.http_deadline(20), 60.0)
+            self.assertEqual(helper.http_deadline(0.5), 60.0)
+            self.assertEqual(helper.http_deadline(30), 90.0)
+            os.environ[helper.HTTP_DEADLINE_ENV] = "junk"
+            self.assertEqual(helper.http_deadline(20), 60.0)
+            os.environ[helper.HTTP_DEADLINE_ENV] = "0.25"
+            self.assertEqual(helper.http_deadline(20), 0.25)
+        finally:
+            os.environ.pop(helper.HTTP_DEADLINE_ENV, None)
+            if original is not None:
+                os.environ[helper.HTTP_DEADLINE_ENV] = original
 
     def test_status_file_written_on_failure_with_fetched_at_carried_over(self):
         with tempfile.TemporaryDirectory() as tmp:

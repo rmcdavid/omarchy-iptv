@@ -846,6 +846,8 @@ function statusReason(status) {
     not_found: "File not found",
     unsafe_path: "Path not allowed",
     unsupported_scheme: "Unsupported URL",
+    timeout: "Timed out",
+    helper_timeout: "Helper timed out",
     too_large: "Source too large",
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
