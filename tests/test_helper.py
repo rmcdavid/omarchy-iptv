@@ -70,28 +70,82 @@ class PlaylistCommandTest(unittest.TestCase):
             self.assertEqual(status["error"]["code"], "empty_playlist")
 
 
-class StubCommandTest(unittest.TestCase):
-    def test_stubs_return_not_implemented_json(self):
+class CliContractTest(unittest.TestCase):
+    SUBCOMMANDS = ("playlist", "epg", "play", "stop", "status", "state")
+
+    def test_every_subcommand_is_implemented(self):
+        # Exit 3 (not implemented) must never appear; failures are structured errors.
         with tempfile.TemporaryDirectory() as tmp:
-            for args in (["epg", "--url", "http://h.test/e.xml", "--cache-dir", tmp],
-                         ["play", "--id", "t:x", "--cache-dir", tmp],
-                         ["stop"], ["status"], ["state", "dump", "--state-dir", tmp]):
+            missing = os.path.join(tmp, "no.sock")
+            cases = (
+                (["epg", "--now-only", "--cache-dir", tmp], "no_cache"),
+                (["play", "--id", "t:x", "--cache-dir", tmp, "--socket", missing], "no_cache"),
+                (["play", "--url", "http://h.test/a.m3u8", "--socket", missing], "not_running"),
+                (["stop", "--socket", missing], "not_running"),
+                (["status", "--socket", missing], "not_running"),
+            )
+            for args, expected in cases:
                 code, payload, _ = run(*args)
-                self.assertEqual(code, 3, args)
-                self.assertEqual(payload["ok"], False)
-                self.assertEqual(payload["error"]["code"], "not_implemented")
-                self.assertEqual(payload["error"]["message"], "not implemented")
+                self.assertEqual(code, 1, args)
+                self.assertFalse(payload["ok"])
+                self.assertEqual(payload["kind"], args[0])
+                self.assertEqual(payload["error"]["code"], expected, args)
+            code, payload, _ = run("state", "--state-dir", tmp, "show")
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["kind"], "state")
 
-    def test_usage_error(self):
-        code, payload, _ = run("playlist")
-        self.assertEqual(code, 2)
-        self.assertIsNone(payload)
+    def test_usage_errors_exit_2_without_json(self):
+        for args in (["playlist"], ["play"], ["play", "--id", "a", "--url", "b"], ["state"], ["state", "favorite", "add"], ["bogus"]):
+            code, payload, _ = run(*args)
+            self.assertEqual(code, 2, args)
+            self.assertIsNone(payload, args)
 
-    def test_help(self):
+    def test_help_lists_every_subcommand(self):
         completed = subprocess.run([sys.executable, str(HELPER), "--help"], capture_output=True, text=True, timeout=30)
         self.assertEqual(completed.returncode, 0)
-        self.assertIn("playlist", completed.stdout)
+        for name in self.SUBCOMMANDS:
+            self.assertIn(name, completed.stdout)
+        self.assertNotIn("TODO", completed.stdout)
 
+    def test_xdg_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
+                "XDG_STATE_HOME": os.path.join(tmp, "state"),
+                "XDG_RUNTIME_DIR": os.path.join(tmp, "run"),
+            }
+            code, status, _ = run("playlist", "--url", str(FIXTURES / "basic.m3u"), env=env)
+            self.assertEqual(code, 0)
+            cache = pathlib.Path(tmp) / "cache" / "omarchy-iptv"
+            self.assertTrue((cache / "channels.json").is_file())
+            self.assertEqual(cache.stat().st_mode & 0o777, 0o700)
+            code, payload, _ = run("state", "favorite", "add", "t:bbc1.uk", env=env)
+            self.assertEqual(code, 0)
+            self.assertTrue((pathlib.Path(tmp) / "state" / "omarchy-iptv" / "state.json").is_file())
+            code, payload, _ = run("status", env=env)
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["error"]["code"], "not_running")
+            self.assertFalse(payload["running"])
+
+    def test_exactly_one_json_line_on_stdout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for args in (["playlist", "--url", str(FIXTURES / "basic.m3u"), "--cache-dir", tmp],
+                         ["playlist", "--url", "/nonexistent.m3u", "--cache-dir", tmp],
+                         ["status", "--socket", os.path.join(tmp, "none.sock")]):
+                completed = subprocess.run([sys.executable, str(HELPER), *args], capture_output=True, text=True, timeout=30)
+                self.assertEqual(len(completed.stdout.strip().splitlines()), 1, args)
+                json.loads(completed.stdout)
+
+    def test_stderr_and_stdout_never_contain_the_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "https://user:secretpw@h.test/get.php?username=u&password=p&type=m3u_plus"
+            completed = subprocess.run([sys.executable, str(HELPER), "playlist", "--url", url, "--cache-dir", tmp, "--timeout", "0.001"],
+                                       capture_output=True, text=True, timeout=30)
+            self.assertEqual(completed.returncode, 1)
+            for secret in ("secretpw", "password=p", "get.php"):
+                self.assertNotIn(secret, completed.stdout + completed.stderr)
+            self.assertIn("h.test", completed.stdout)
 
 if __name__ == "__main__":
     unittest.main()

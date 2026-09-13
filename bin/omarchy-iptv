@@ -3,45 +3,55 @@
 
 Standard library only (python3 is a hard dependency of Omarchy through uwsm).
 Every subcommand prints exactly one JSON object on stdout; human-readable
-detail goes to stderr. Never prints the playlist/EPG URL (it may embed
-credentials); errors carry the host name only.
+detail goes to stderr. Never prints a playlist/EPG/stream URL (it may embed
+credentials): every message passes through `redact_urls`, errors carry the
+host name only.
 
 Exit codes:
   0  ok
-  1  runtime error (JSON error object on stdout, text on stderr)
+  1  runtime error (JSON error object on stdout, one line on stderr)
   2  usage error (argparse)
-  3  not implemented (scaffold stubs)
+  3  reserved (not implemented; no subcommand uses it any more)
 
-Subcommands (contract of record: docs/ARCHITECTURE.md):
-  playlist --url U [--cache-dir D] [--timeout S]      fetch+parse M3U -> channels.json
-  epg --url U [--cache-dir D] [--timeout S] [--now-only]  XMLTV -> epg-now.json   (stub)
-  play --id ID [--cache-dir D] [--socket P]          loadfile over mpv IPC        (stub)
-  stop [--socket P]                                  quit over mpv IPC            (stub)
-  status [--socket P]                                query mpv over IPC           (stub)
-  state --state-dir D (dump | favorite ID | recent ID)  state.json maintenance    (stub)
+Subcommands (contract of record: docs/ARCHITECTURE.md section 5):
+  playlist --url U [--cache-dir D] [--timeout S]
+      fetch + parse M3U -> channels.json, playlist-status.json
+  epg [--url U] [--cache-dir D] [--timeout S] [--ttl S] [--force] [--now-only]
+      XMLTV -> epg-window.json (private cache), epg-now.json, epg-status.json
+  play (--id ID | --url U) [--cache-dir D] [--socket P] [--ipc-timeout S]
+      switch the running mpv to a channel over its JSON IPC socket
+  stop [--socket P] [--ipc-timeout S]
+      ask the running mpv to quit
+  status [--socket P] [--ipc-timeout S]
+      query the running mpv (media title, host of the path, pause, idle, version)
+  state [--state-dir D] show | favorite add ID | favorite remove ID | clear-recents
+      inspect or edit state.json atomically
 """
 from __future__ import annotations
 
 import argparse
+import bisect
+import calendar
 import gzip
+import io
 import json
 import os
 import re
+import socket
+import stat
 import sys
 import tempfile
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
-from typing import Any
+import zlib
+from typing import Any, BinaryIO
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 USER_AGENT = "omarchy-iptv/" + VERSION
 
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_USAGE = 2
-EXIT_NOT_IMPLEMENTED = 3
 
 # Schemes a stream URL may use. Anything else is dropped at parse time so it
 # can never reach mpv (neither as argv nor over IPC).
@@ -51,15 +61,43 @@ SOURCE_SCHEMES = {"http", "https", "file"}
 
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
 DEFAULT_TIMEOUT = 20
+DEFAULT_IPC_TIMEOUT = 2.0
 UNGROUPED = "Ungrouped"
 
 CHANNELS_FILE = "channels.json"
 PLAYLIST_STATUS_FILE = "playlist-status.json"
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
+# Helper-private programme window (not a QML contract). Line 1 is a JSON
+# header; every following line is "<channel id>\t<records>" so that a
+# 10k-channel window loads with str.split instead of a JSON parse.
+EPG_WINDOW_FILE = "epg-window.txt"
+STATE_FILE = "state.json"
+
+# EPG window kept in the private cache: programmes overlapping
+# [now - EPG_PAST_SECONDS, now + EPG_FUTURE_SECONDS] at fetch time.
+EPG_PAST_SECONDS = 2 * 3600
+EPG_FUTURE_SECONDS = 12 * 3600
+EPG_DEFAULT_TTL = 6 * 3600
+EPG_REFETCH_MARGIN = 2 * 3600     # re-download when the window ends sooner than this
+EPG_VALID_MAX = 300               # epg-now.json is never declared valid longer than this
+EPG_MAX_TITLE = 200
+EPG_MAX_PER_CHANNEL = 400
+EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no successor
+# One record per programme, 'SSSSSSSSSS EEEEEEEEEE "title"' (fixed-width
+# epochs, JSON-encoded title), joined by DEL. The fixed prefix lets bisect and
+# plain string comparison find now/next, and the pre-encoded title lets the
+# recompute emit epg-now.json by concatenation (no per-channel encoder work).
+EPG_RECORD_SEP = "\x7f"
+
+MPV_DEFAULT_USER_AGENT = "libmpv"   # mpv 0.41 `--list-options` default, used when option-info is unavailable
 
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9-]+$")
 _SAFE_OPTION = re.compile(r"^[A-Za-z0-9_.\-]+$")
+_URL_LIKE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
+_URL_ANYWHERE = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
+_CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
+_XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
 
 
 class HelperError(Exception):
@@ -101,12 +139,57 @@ def default_socket_path() -> str:
     return os.path.join(runtime_dir(), "mpv.sock")
 
 
+def socket_path(explicit: str | None = None) -> str:
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+    return default_socket_path()
+
+
 def ensure_private_dir(path: str) -> None:
     os.makedirs(path, mode=0o700, exist_ok=True)
     try:
         os.chmod(path, 0o700)
     except OSError:
         pass
+
+
+# ------------------------------------------------------------- redaction
+
+def url_host(url: str) -> str:
+    """Host name of a URL, never the userinfo, path or query."""
+    try:
+        return urllib.parse.urlsplit(url).hostname or ""
+    except ValueError:
+        return ""
+
+
+def source_host(url: str) -> str:
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
+    if parts.scheme in ("http", "https"):
+        return parts.hostname or ""
+    return "local file"
+
+
+def redact_urls(text: Any) -> str:
+    """Replace every URL inside `text` with scheme://host (R12)."""
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        trailing = ""
+        while raw and raw[-1] in ".,;:!?)]":
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        host = url_host(raw)
+        return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
+
+    return _URL_ANYWHERE.sub(replace, "" if text is None else str(text))
+
+
+def log(message: str) -> None:
+    sys.stderr.write("omarchy-iptv: %s\n" % redact_urls(message))
 
 
 # ------------------------------------------------------- normalization
@@ -169,6 +252,7 @@ def parse_attrs(text: str) -> tuple[dict[str, str], str]:
 
     Returns (attrs, remainder). Attribute values may contain commas; the
     remainder starts at the first character that is not an attribute.
+    Keys are lower-cased; when a key repeats, the last non-empty value wins.
     """
     attrs: dict[str, str] = {}
     pos = 0
@@ -176,13 +260,19 @@ def parse_attrs(text: str) -> tuple[dict[str, str], str]:
         match = _ATTR_QUOTED.match(text, pos) or _ATTR_BARE.match(text, pos)
         if not match:
             break
-        attrs[match.group(1).lower()] = match.group(2).strip()
+        key = match.group(1).lower()
+        value = match.group(2).strip()
+        if value or key not in attrs:
+            attrs[key] = value
         pos = match.end()
     return attrs, text[pos:]
 
 
 def parse_extinf(line: str) -> tuple[dict[str, str], str]:
-    """#EXTINF:<duration> [attrs],<title> -> (attrs, title)."""
+    """#EXTINF:<duration> [attrs],<title> -> (attrs, title).
+
+    The comma is optional: `#EXTINF:-1 tvg-id="x" Name` yields title "Name".
+    """
     body = line[len("#EXTINF:"):]
     match = re.match(r"\s*(-?\d+(?:\.\d+)?)?", body)
     body = body[match.end():] if match else body
@@ -200,25 +290,46 @@ def stream_scheme(url: str) -> str:
         return ""
 
 
+def is_stream_url(url: str) -> bool:
+    return not url.startswith("-") and stream_scheme(url) in STREAM_SCHEMES
+
+
 def clean_header_value(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").strip()
+
+
+def split_groups(value: str) -> list[str]:
+    """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped)."""
+    groups: list[str] = []
+    for part in value.split(";"):
+        name = part.strip()
+        if name and name not in groups:
+            groups.append(name)
+    return groups
 
 
 def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
                  vlcopt: dict[str, str], kodiprop: dict[str, str],
                  warnings: list[str]) -> dict[str, Any]:
-    name = title or attrs.get("tvg-name", "") or url
-    group = attrs.get("group-title", "").strip() or extgrp or UNGROUPED
+    tvg_id = attrs.get("tvg-id", "").strip()
+    tvg_name = attrs.get("tvg-name", "").strip()
+    # Never fall back to the URL itself: the name is rendered everywhere (R12).
+    name = title or tvg_name or tvg_id or url_host(url) or "Unnamed channel"
+    group_text = attrs.get("group-title", "").strip() or extgrp
+    groups = split_groups(group_text) if group_text else []
+    # Ruling R5: multi-group entries list under the FIRST group; the whole
+    # group string stays searchable through searchKey and `groups`.
+    group = groups[0] if groups else UNGROUPED
     channel: dict[str, Any] = {
         "id": "",
         "name": name,
         "group": group,
         "url": url,
     }
-    tvg_id = attrs.get("tvg-id", "").strip()
+    if len(groups) > 1:
+        channel["groups"] = groups
     if tvg_id:
         channel["tvgId"] = tvg_id
-    tvg_name = attrs.get("tvg-name", "").strip()
     if tvg_name and tvg_name != name:
         channel["tvgName"] = tvg_name
     logo = attrs.get("tvg-logo", "").strip()
@@ -250,7 +361,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["headers"] = headers
     if options:
         channel["options"] = options
-    channel["searchKey"] = search_key(name, group)
+    channel["searchKey"] = search_key(name, " ".join(groups) if groups else group)
     return channel
 
 
@@ -258,11 +369,13 @@ def parse_m3u(text: str) -> dict[str, Any]:
     """Tolerant M3U/M3U8 parser.
 
     Understands #EXTM3U (url-tvg / x-tvg-url hint), #EXTINF with quoted or
-    bare attributes and a title that may contain commas, #EXTGRP (persists
-    until the next #EXTGRP, like VLC; group-title wins), #EXTVLCOPT and
-    #KODIPROP (apply to the next URL line only). Unknown comments are
-    ignored. URL lines with a scheme outside STREAM_SCHEMES or starting with
-    "-" are skipped and counted.
+    bare attributes and a title that may contain commas (comma optional),
+    #EXTGRP (persists until the next #EXTGRP, like VLC; group-title wins),
+    #EXTVLCOPT and #KODIPROP (apply to the next URL line only). Unknown
+    comments are ignored. Accepts a BOM, CRLF and blank lines. URL lines
+    with a scheme outside STREAM_SCHEMES or starting with "-" are skipped
+    and counted; lines that are not URLs at all are ignored and counted
+    without consuming the pending #EXTINF.
     """
     channels: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -273,6 +386,8 @@ def parse_m3u(text: str) -> dict[str, Any]:
     epg_hint = ""
     skipped_scheme = 0
     skipped_orphan = 0
+    skipped_stray = 0
+    skipped_no_url = 0
 
     if text.startswith("\ufeff"):
         text = text[1:]
@@ -286,6 +401,8 @@ def parse_m3u(text: str) -> dict[str, Any]:
             epg_hint = attrs.get("url-tvg") or attrs.get("x-tvg-url") or epg_hint
             continue
         if line.startswith("#EXTINF:"):
+            if pending is not None:
+                skipped_no_url += 1
             pending = parse_extinf(line)
             continue
         if line.startswith("#EXTGRP:"):
@@ -301,13 +418,17 @@ def parse_m3u(text: str) -> dict[str, Any]:
             continue
         if line.startswith("#"):
             continue
-        # A URL line.
+        if not line.startswith("-") and not _URL_LIKE.match(line):
+            # Free text between entries: keep the pending #EXTINF.
+            skipped_stray += 1
+            continue
+        # A URL (or option-looking) line.
         if pending is None:
             skipped_orphan += 1
             vlcopt, kodiprop = {}, {}
             continue
         url = line
-        if url.startswith("-") or stream_scheme(url) not in STREAM_SCHEMES:
+        if not is_stream_url(url):
             skipped_scheme += 1
         else:
             attrs, title = pending
@@ -315,10 +436,16 @@ def parse_m3u(text: str) -> dict[str, Any]:
         pending = None
         vlcopt, kodiprop = {}, {}
 
+    if pending is not None:
+        skipped_no_url += 1
     if skipped_scheme:
         warnings.append("%d entries skipped: unsupported URL scheme" % skipped_scheme)
     if skipped_orphan:
         warnings.append("%d URL lines without #EXTINF skipped" % skipped_orphan)
+    if skipped_no_url:
+        warnings.append("%d #EXTINF entries without a URL skipped" % skipped_no_url)
+    if skipped_stray:
+        warnings.append("%d stray lines ignored" % skipped_stray)
     assign_ids(channels)
     return {"channels": channels, "warnings": warnings, "epgUrlHint": epg_hint}
 
@@ -343,88 +470,115 @@ def assign_ids(channels: list[dict[str, Any]]) -> None:
 
 # ------------------------------------------------------------------- IO
 
-def source_host(url: str) -> str:
-    try:
-        parts = urllib.parse.urlsplit(url)
-    except ValueError:
-        return ""
-    if parts.scheme in ("http", "https"):
-        return parts.hostname or ""
-    return "local file"
-
-
-def resolve_source(url: str) -> tuple[str, str]:
+def resolve_source(url: str, label: str = "playlist") -> tuple[str, str]:
     """-> ("http", url) or ("file", absolute path). Refuses anything else."""
     value = (url or "").strip()
     if not value:
-        raise HelperError("no_source", "no playlist URL configured")
+        raise HelperError("no_source", "no %s URL configured" % label)
     if value.startswith("~") or value.startswith("/"):
         return "file", os.path.expanduser(value)
     scheme = stream_scheme(value)
     if scheme in ("http", "https"):
         return "http", value
     if scheme == "file":
-        path = urllib.request.url2pathname(urllib.parse.urlsplit(value).path)
-        return "file", path
+        return "file", file_url_to_path(value)
     raise HelperError("unsupported_scheme", "unsupported source scheme '%s' (use http, https or an absolute path)" % (scheme or "none"))
 
 
-def read_local_source(path: str) -> bytes:
+def file_url_to_path(value: str) -> str:
+    import urllib.request
+    return urllib.request.url2pathname(urllib.parse.urlsplit(value).path)
+
+
+def read_local_source(path: str, label: str = "playlist") -> bytes:
     real = os.path.realpath(path)
     if not os.path.isabs(real) or real.startswith("/proc/") or real.startswith("/sys/") or real.startswith("/dev/"):
         raise HelperError("unsafe_path", "refusing to read %s" % real)
     if not os.path.isfile(real):
-        raise HelperError("not_found", "playlist file not found: %s" % real)
+        raise HelperError("not_found", "%s file not found: %s" % (label, real))
     size = os.path.getsize(real)
     if size > MAX_SOURCE_BYTES:
-        raise HelperError("too_large", "playlist file is larger than %d MB" % (MAX_SOURCE_BYTES // (1024 * 1024)))
+        raise HelperError("too_large", "%s file is larger than %d MB" % (label, MAX_SOURCE_BYTES // (1024 * 1024)))
     with open(real, "rb") as handle:
         return handle.read(MAX_SOURCE_BYTES + 1)
 
 
-def read_http_source(url: str, timeout: float) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
+def split_userinfo(url: str) -> tuple[str, str]:
+    """-> (URL without user:pass@, "user:pass" or ""). urllib does not accept
+    userinfo in the netloc, so it is sent as HTTP Basic auth instead."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.username is None:
+        return url, ""
+    host = parts.hostname or ""
+    if ":" in host:
+        host = "[" + host + "]"
+    if parts.port is not None:
+        host = "%s:%d" % (host, parts.port)
+    auth = "%s:%s" % (urllib.parse.unquote(parts.username), urllib.parse.unquote(parts.password or ""))
+    return urllib.parse.urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment)), auth
+
+
+def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes:
+    import base64
+    import http.client
+    import urllib.error
+    import urllib.request
+    host = source_host(url)
+    target, auth = split_userinfo(url)
+    headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
+    if auth:
+        headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
+    request = urllib.request.Request(target, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = response.read(MAX_SOURCE_BYTES + 1)
-            encoding = (response.headers.get("Content-Encoding") or "").lower()
     except urllib.error.HTTPError as error:
-        raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, source_host(url)))
+        raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
     except urllib.error.URLError as error:
         reason = getattr(error, "reason", error)
-        raise HelperError("network", "could not reach %s: %s" % (source_host(url), reason))
-    except (TimeoutError, OSError) as error:
-        raise HelperError("network", "could not reach %s: %s" % (source_host(url), error))
+        raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(reason)))
+    except (TimeoutError, OSError, ValueError, http.client.HTTPException) as error:
+        raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(error)))
     if len(data) > MAX_SOURCE_BYTES:
-        raise HelperError("too_large", "response from %s exceeds %d MB" % (source_host(url), MAX_SOURCE_BYTES // (1024 * 1024)))
-    if encoding == "gzip" and not data.startswith(b"\x1f\x8b"):
-        return data
+        raise HelperError("too_large", "%s from %s exceeds %d MB" % (label, host, MAX_SOURCE_BYTES // (1024 * 1024)))
     return data
+
+
+def fetch_bytes(url: str, timeout: float, label: str = "playlist") -> bytes:
+    kind, target = resolve_source(url, label)
+    if kind == "file":
+        return read_local_source(target, label)
+    return read_http_source(target, timeout, label)
 
 
 def decode_text(data: bytes) -> str:
     if data[:2] == b"\x1f\x8b":
         try:
             data = gzip.decompress(data)
-        except (OSError, EOFError) as error:
+        except (OSError, EOFError, zlib.error) as error:
             raise HelperError("bad_gzip", "could not decompress source: %s" % error)
     return data.decode("utf-8", errors="replace")
 
 
 def fetch_source(url: str, timeout: float) -> str:
-    kind, target = resolve_source(url)
-    data = read_local_source(target) if kind == "file" else read_http_source(target, timeout)
-    return decode_text(data)
+    return decode_text(fetch_bytes(url, timeout, "playlist"))
 
 
-def write_json_atomic(path: str, payload: Any) -> None:
+def open_xml_stream(data: bytes) -> BinaryIO:
+    """Bytes -> readable stream; gzip is detected by magic bytes, not by name."""
+    if data[:2] == b"\x1f\x8b":
+        return gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb")
+    return io.BytesIO(data)
+
+
+def write_text_atomic(path: str, text: str) -> None:
+    """Temp file in the same (0700) directory, chmod 0600, rename over `path`."""
     directory = os.path.dirname(path)
     ensure_private_dir(directory)
     fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=directory)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
-            handle.write("\n")
+            handle.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
     except BaseException:
@@ -433,6 +587,18 @@ def write_json_atomic(path: str, payload: Any) -> None:
         except OSError:
             pass
         raise
+
+
+def write_json_atomic(path: str, payload: Any) -> None:
+    # json.dumps (one-shot C encoder) is several times faster than json.dump.
+    write_text_atomic(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+def json_string(text: str) -> str:
+    """JSON string literal; the common quote-free case skips the encoder."""
+    if '"' in text or "\\" in text:
+        return json.dumps(text, ensure_ascii=False)
+    return '"' + text + '"'
 
 
 def read_json(path: str) -> Any:
@@ -449,13 +615,24 @@ def emit(payload: Any) -> None:
 
 
 def error_payload(kind: str, error: HelperError, **extra: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {"ok": False, "kind": kind, "error": {"code": error.code, "message": error.message}}
+    payload: dict[str, Any] = {
+        "ok": False,
+        "kind": kind,
+        "error": {"code": error.code, "message": redact_urls(error.message)},
+    }
     payload.update(error.extra)
     payload.update(extra)
     return payload
 
 
-# ------------------------------------------------------------ commands
+def write_status_quietly(path: str, status: dict[str, Any]) -> None:
+    try:
+        write_json_atomic(path, status)
+    except OSError as io_error:
+        log("could not write %s: %s" % (os.path.basename(path), io_error))
+
+
+# ------------------------------------------------------------ playlist
 
 def cmd_playlist(args: argparse.Namespace) -> int:
     directory = cache_dir(args.cache_dir)
@@ -503,21 +680,750 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             stale=stale,
             durationMs=int((time.monotonic() - started) * 1000),
         )
-        try:
-            write_json_atomic(status_path, status)
-        except OSError as io_error:
-            sys.stderr.write("omarchy-iptv: could not write status: %s\n" % io_error)
-        sys.stderr.write("omarchy-iptv: playlist: %s\n" % error.message)
+        write_status_quietly(status_path, status)
+        log("playlist: %s" % error.message)
         emit(status)
         return EXIT_ERROR
 
 
-def cmd_not_implemented(args: argparse.Namespace) -> int:
-    payload = {"ok": False, "kind": args.command, "error": {"code": "not_implemented", "message": "not implemented"}}
-    sys.stderr.write("omarchy-iptv: %s: not implemented\n" % args.command)
-    emit(payload)
-    return EXIT_NOT_IMPLEMENTED
+# ----------------------------------------------------------------- EPG
 
+def parse_xmltv_time(raw: str | None, cache: dict[str, int | None]) -> int | None:
+    """`20260912213000 +0100` -> epoch seconds. Missing offset means UTC.
+
+    Shorter forms (YYYYMMDD, YYYYMMDDHH, YYYYMMDDHHMM) are padded with zeros.
+    Returns None for anything unparseable. `cache` is keyed by the raw
+    string because a feed repeats the same few thousand boundaries.
+    """
+    if not raw:
+        return None
+    if raw in cache:
+        return cache[raw]
+    match = _XMLTV_TIME.match(raw.strip())
+    if not match:
+        cache[raw] = None
+        return None
+    year, month, day, hour, minute, second = (int(match.group(index) or 0) for index in range(1, 7))
+    try:
+        ts = calendar.timegm((year, month, day, hour, minute, second, 0, 0, 0))
+    except (ValueError, OverflowError):
+        cache[raw] = None
+        return None
+    if match.group(7):
+        offset = int(match.group(8)) * 3600 + int(match.group(9)) * 60
+        ts -= offset if match.group(7) == "+" else -offset
+    cache[raw] = ts
+    return ts
+
+
+def clean_title(text: str | None) -> str:
+    if not text:
+        return ""
+    return _CONTROL_WS.sub(" ", text).strip()[:EPG_MAX_TITLE]
+
+
+def build_alias(channels_doc: Any) -> tuple[dict[str, str] | None, int]:
+    """Playlist tvg-ids -> alias map (exact id and, when free, its lower-case
+    form) so XMLTV ids match case-sensitively first, case-insensitively
+    second. Returns (None, 0) when no channel cache exists."""
+    if not isinstance(channels_doc, dict) or not isinstance(channels_doc.get("channels"), list):
+        return None, 0
+    alias: dict[str, str] = {}
+    total = 0
+    for channel in channels_doc["channels"]:
+        total += 1
+        tvg = channel.get("tvgId") if isinstance(channel, dict) else None
+        if isinstance(tvg, str) and tvg:
+            alias[tvg] = tvg
+    for tvg in list(alias):
+        low = tvg.lower()
+        if low not in alias:
+            alias[low] = tvg
+    return alias, total
+
+
+def source_key(url: str) -> str:
+    import hashlib
+    return hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def encode_record(start: int, stop: int, title: str) -> str:
+    """See EPG_RECORD_SEP. `start`/`stop` are non-negative epoch seconds."""
+    return "%010d %010d %s" % (start, stop, json.dumps(title, ensure_ascii=False))
+
+
+def encode_records(items: list[tuple[int, int | None, str]]) -> tuple[str, int]:
+    """Sort, infer missing stops, drop duplicates, cap, and pack a channel's
+    programmes into the record string described at EPG_RECORD_SEP."""
+    items.sort(key=lambda item: item[0])
+    records: list[str] = []
+    last: tuple[int, int, str] | None = None
+    count = len(items)
+    for index, (start, stop, title) in enumerate(items):
+        if stop is None:
+            stop = start + EPG_DEFAULT_DURATION
+            for later in range(index + 1, count):
+                if items[later][0] > start:
+                    stop = items[later][0]
+                    break
+        if stop <= start or start < 0:
+            continue
+        current = (start, stop, title)
+        if current == last:
+            continue
+        last = current
+        records.append(encode_record(start, stop, title))
+        if len(records) >= EPG_MAX_PER_CHANNEL:
+            break
+    return EPG_RECORD_SEP.join(records), len(records)
+
+
+def parse_xmltv(stream: BinaryIO, now: int, alias: dict[str, str] | None) -> dict[str, Any]:
+    """Stream-parse XMLTV into per-channel record strings for the window.
+
+    `alias` (from build_alias) restricts the result to playlist channels and
+    maps XMLTV ids onto playlist tvg-ids; None keeps every channel under its
+    XMLTV id. Elements are released as soon as they are processed.
+    """
+    import xml.etree.ElementTree as ET
+    window_start = now - EPG_PAST_SECONDS
+    window_end = now + EPG_FUTURE_SECONDS
+    time_cache: dict[str, int | None] = {}
+    pending: dict[str, list[tuple[int, int | None, str]]] = {}
+    seen_ids: set[str] = set()
+    channel_elements = 0
+    bad_time = 0
+    no_title = 0
+    unknown = 0
+    total_programmes = 0
+    root: Any = None
+    try:
+        for event, elem in ET.iterparse(stream, events=("start", "end")):
+            if event == "start":
+                if root is None:
+                    root = elem
+                continue
+            tag = elem.tag
+            if tag == "programme":
+                total_programmes += 1
+                cid = _CONTROL_WS.sub(" ", elem.get("channel") or "").strip()
+                key = cid if alias is None else (alias.get(cid) or alias.get(cid.lower()))
+                if not key:
+                    unknown += 1
+                else:
+                    seen_ids.add(key)
+                    start = parse_xmltv_time(elem.get("start"), time_cache)
+                    if start is None:
+                        bad_time += 1
+                    else:
+                        stop = parse_xmltv_time(elem.get("stop"), time_cache)
+                        effective_stop = stop if stop is not None else start + EPG_DEFAULT_DURATION
+                        if effective_stop > window_start and start < window_end:
+                            title_elem = elem.find("title")
+                            title = clean_title(title_elem.text if title_elem is not None else "")
+                            if title:
+                                pending.setdefault(key, []).append((start, stop, title))
+                            else:
+                                no_title += 1
+                if root is not None:
+                    root.clear()
+            elif tag == "channel":
+                channel_elements += 1
+                if root is not None:
+                    root.clear()
+    except ET.ParseError as error:
+        raise HelperError("bad_xml", "could not parse EPG XML: %s" % error)
+    except (OSError, EOFError, zlib.error) as error:
+        raise HelperError("bad_gzip", "could not decompress EPG: %s" % error)
+    if total_programmes == 0:
+        raise HelperError("empty_epg", "no programmes found in the EPG")
+
+    channels: dict[str, str] = {}
+    kept = 0
+    for key, items in pending.items():
+        blob, count = encode_records(items)
+        if count:
+            channels[key] = blob
+            kept += count
+    warnings: list[str] = []
+    if bad_time:
+        warnings.append("%d programmes with unreadable times skipped" % bad_time)
+    if no_title:
+        warnings.append("%d programmes without a title skipped" % no_title)
+    if alias is not None and unknown:
+        warnings.append("%d programmes for channels not in the playlist dropped" % unknown)
+    return {
+        "channels": channels,
+        "seenIds": seen_ids,
+        "windowStart": window_start,
+        "windowEnd": window_end,
+        "epgChannels": len(seen_ids),
+        "channelElements": channel_elements,
+        "programmeCount": kept,
+        "warnings": warnings,
+    }
+
+
+def count_matched(channels_doc: Any, seen_ids: set[str]) -> int:
+    matched = 0
+    for channel in channels_doc.get("channels", []):
+        tvg = channel.get("tvgId") if isinstance(channel, dict) else None
+        if isinstance(tvg, str) and tvg in seen_ids:
+            matched += 1
+    return matched
+
+
+def channels_mtime(path: str) -> int | None:
+    try:
+        return int(os.stat(path).st_mtime_ns)
+    except OSError:
+        return None
+
+
+def window_lines(channels: dict[str, str]) -> list[str]:
+    """'"<id>"\t<records>' per channel; the id is stored JSON-encoded."""
+    return ["%s\t%s" % (json_string(cid), blob) for cid, blob in channels.items()]
+
+
+def write_window(path: str, meta: dict[str, Any], channels: dict[str, str]) -> None:
+    lines = [json.dumps(meta, ensure_ascii=False, separators=(",", ":"))]
+    lines.extend(window_lines(channels))
+    write_text_atomic(path, "\n".join(lines) + "\n")
+
+
+def load_window(path: str) -> dict[str, Any] | None:
+    """-> the header keys plus "lines" (the raw channel lines), or None."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    head, _, body = text.partition("\n")
+    try:
+        meta = json.loads(head)
+    except ValueError:
+        return None
+    if not isinstance(meta, dict) or meta.get("version") != 1:
+        return None
+    window = dict(meta)
+    window["lines"] = body.split("\n")
+    return window
+
+
+def window_channels(window: dict[str, Any]) -> dict[str, str]:
+    """Channel id -> record blob (diagnostics and tests; not the hot path)."""
+    out: dict[str, str] = {}
+    for line in window.get("lines", []):
+        cid, tab, blob = line.partition("\t")
+        if tab:
+            out[json.loads(cid)] = blob
+    return out
+
+
+def needs_refetch(window: dict[str, Any], url: str, now: int, ttl: float, channels_path: str) -> str:
+    """Empty string when the cached window is still good, else the reason."""
+    if window.get("sourceKey") != source_key(url):
+        return "source changed"
+    fetched_at = int(window.get("fetchedAt") or 0)
+    if now - fetched_at >= ttl or fetched_at > now + 60:
+        return "cache older than ttl"
+    if int(window.get("windowEnd") or 0) - now < EPG_REFETCH_MARGIN:
+        return "window nearly exhausted"
+    if window.get("channelsMtime") != channels_mtime(channels_path):
+        return "playlist changed"
+    return ""
+
+
+def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str, Any]:
+    channels_path = os.path.join(directory, CHANNELS_FILE)
+    data = fetch_bytes(url, timeout, "EPG")
+    channels_doc = read_json(channels_path)
+    mtime = channels_mtime(channels_path)
+    alias, channel_total = build_alias(channels_doc)
+    parsed = parse_xmltv(open_xml_stream(data), now, alias)
+    matched = count_matched(channels_doc, parsed["seenIds"]) if alias is not None else None
+    warnings = list(parsed["warnings"])
+    if alias is not None and matched == 0:
+        warnings.append("no EPG channel id matches a playlist tvg-id")
+    meta = {
+        "version": 1,
+        "fetchedAt": now,
+        "sourceHost": source_host(url),
+        "sourceKey": source_key(url),
+        "channelsMtime": mtime,
+        "windowStart": parsed["windowStart"],
+        "windowEnd": parsed["windowEnd"],
+        "restricted": alias is not None,
+        "channelTotal": channel_total if alias is not None else None,
+        "matched": matched,
+        "epgChannels": parsed["epgChannels"],
+        "programmeCount": parsed["programmeCount"],
+        "warnings": warnings,
+    }
+    write_window(os.path.join(directory, EPG_WINDOW_FILE), meta, parsed["channels"])
+    window = dict(meta)
+    window["lines"] = window_lines(parsed["channels"])
+    return window
+
+
+def record_to_dict(record: str) -> dict[str, Any]:
+    return {"title": json.loads(record[22:]), "start": int(record[:10]), "stop": int(record[11:21])}
+
+
+def programme_json(record: str) -> str:
+    start = record[:10]
+    stop = record[11:21]
+    if start[0] == "0" or stop[0] == "0":
+        start, stop = str(int(start)), str(int(stop))  # no leading zeros in JSON numbers
+    return '{"title":' + record[22:] + ',"start":' + start + ',"stop":' + stop + "}"
+
+
+def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, int]:
+    """-> (JSON fragments `"id":{"now":...,"next":...}`, validUntil, channels with a `now`).
+
+    `now` is the programme with the latest start <= now that has not ended
+    (a few earlier records are probed so an overlapped long programme still
+    counts); `next` is the first programme starting after now. The hot path
+    for 10k channels: fixed-width record prefixes make bisect and string
+    comparison enough, and the output is assembled as text.
+    """
+    sep = EPG_RECORD_SEP
+    bisect_right = bisect.bisect_right
+    now_str = "%010d" % now
+    now_key = now_str + "~"
+    boundary = "%010d" % (now + EPG_VALID_MAX)
+    now_count = 0
+    fragments: list[str] = []
+    for line in window["lines"]:
+        cid, tab, blob = line.partition("\t")
+        if not tab:
+            continue
+        records = blob.split(sep)
+        index = bisect_right(records, now_key)
+        current = None
+        probe = index - 1
+        floor = index - 5
+        while probe >= 0 and probe > floor:
+            record = records[probe]
+            if record[11:21] > now_str:
+                current = record
+                break
+            probe -= 1
+        following = records[index] if index < len(records) else None
+        if current is None and following is None:
+            continue
+        parts: list[str] = []
+        if current is not None:
+            parts.append('"now":' + programme_json(current))
+            if current[11:21] < boundary:
+                boundary = current[11:21]
+            now_count += 1
+        if following is not None:
+            parts.append('"next":' + programme_json(following))
+            if following[:10] < boundary:
+                boundary = following[:10]
+        fragments.append(cid + ":{" + ",".join(parts) + "}")
+    return fragments, max(int(boundary), now + 1), now_count
+
+
+def write_epg_now(directory: str, window: dict[str, Any], now: int) -> tuple[int, int]:
+    fragments, valid_until, now_count = compute_now_next(window, now)
+    head = json.dumps({
+        "version": 1,
+        "generatedAt": now,
+        "validUntil": valid_until,
+        "fetchedAt": window.get("fetchedAt"),
+        "sourceHost": window.get("sourceHost", ""),
+    }, ensure_ascii=False, separators=(",", ":"))
+    text = head[:-1] + ',"channels":{' + ",".join(fragments) + "}}\n"
+    write_text_atomic(os.path.join(directory, EPG_NOW_FILE), text)
+    return valid_until, now_count
+
+
+def cmd_epg(args: argparse.Namespace) -> int:
+    directory = cache_dir(args.cache_dir)
+    now = int(args.now) if args.now else int(time.time())
+    window_path = os.path.join(directory, EPG_WINDOW_FILE)
+    status_path = os.path.join(directory, EPG_STATUS_FILE)
+    channels_path = os.path.join(directory, CHANNELS_FILE)
+    url = (args.url or "").strip()
+    started = time.monotonic()
+    window = load_window(window_path)
+    previous = read_json(status_path) or {}
+    try:
+        if args.now_only:
+            if window is None:
+                raise HelperError("no_cache", "no cached EPG window yet; fetch the EPG first")
+            from_cache = True
+            reason = ""
+        else:
+            if not url:
+                raise HelperError("no_source", "no EPG URL configured")
+            reason = "forced" if args.force else ("no cache" if window is None else needs_refetch(window, url, now, args.ttl, channels_path))
+            if reason:
+                window = fetch_window(url, args.timeout, now, directory)
+                from_cache = False
+            else:
+                from_cache = True
+        assert window is not None
+        valid_until, now_count = write_epg_now(directory, window, now)
+        fetched_at = int(window.get("fetchedAt") or 0)
+        status = {
+            "ok": True,
+            "kind": "epg",
+            "sourceHost": window.get("sourceHost", ""),
+            "fetchedAt": fetched_at,
+            "generatedAt": now,
+            "validUntil": valid_until,
+            "durationMs": int((time.monotonic() - started) * 1000),
+            "fromCache": from_cache,
+            "matched": window.get("matched"),
+            "channelTotal": window.get("channelTotal"),
+            "epgChannels": window.get("epgChannels", 0),
+            "programmeCount": window.get("programmeCount", 0),
+            "nowCount": now_count,
+            "warnings": list(window.get("warnings") or []),
+            "stale": from_cache and (now - fetched_at > args.ttl),
+            "error": None,
+        }
+        write_json_atomic(status_path, status)
+        emit(status)
+        return EXIT_OK
+    except HelperError as error:
+        if window is not None:
+            try:
+                write_epg_now(directory, window, now)
+            except OSError as io_error:
+                log("could not refresh %s: %s" % (EPG_NOW_FILE, io_error))
+        host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
+        status = error_payload(
+            "epg", error,
+            sourceHost=host,
+            fetchedAt=window.get("fetchedAt") if window else (previous.get("fetchedAt") if isinstance(previous, dict) else None),
+            stale=window is not None,
+            matched=window.get("matched") if window else None,
+            channelTotal=window.get("channelTotal") if window else None,
+            durationMs=int((time.monotonic() - started) * 1000),
+        )
+        write_status_quietly(status_path, status)
+        log("epg: %s" % error.message)
+        emit(status)
+        return EXIT_ERROR
+
+
+# ------------------------------------------------------------- mpv IPC
+
+class MpvIpc:
+    """Minimal client for mpv's JSON IPC: one request at a time, replies
+    correlated by request_id, unsolicited events skipped."""
+
+    def __init__(self, path: str, timeout: float) -> None:
+        self.path = path
+        self.timeout = timeout
+        self.sock: socket.socket | None = None
+        self.buffer = b""
+        self.next_id = 1
+        self.refused = False
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        try:
+            sock.connect(self.path)
+        except FileNotFoundError:
+            sock.close()
+            raise HelperError("not_running", "mpv socket not found")
+        except ConnectionRefusedError:
+            sock.close()
+            self.refused = True
+            raise HelperError("not_running", "mpv socket not reachable")
+        except TimeoutError:
+            sock.close()
+            raise HelperError("not_running", "mpv socket did not accept the connection")
+        except OSError as error:
+            sock.close()
+            raise HelperError("ipc_error", "could not connect to mpv: %s" % (error.strerror or error))
+        self.sock = sock
+
+    def close(self) -> None:
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+            self.sock = None
+
+    def read_line(self, deadline: float) -> bytes | None:
+        """One JSON line from mpv, or None once mpv closed the connection."""
+        assert self.sock is not None
+        while b"\n" not in self.buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HelperError("ipc_error", "mpv did not answer within %.1f s" % self.timeout)
+            self.sock.settimeout(remaining)
+            try:
+                chunk = self.sock.recv(65536)
+            except TimeoutError:
+                raise HelperError("ipc_error", "mpv did not answer within %.1f s" % self.timeout)
+            except (ConnectionResetError, BrokenPipeError):
+                return None
+            except OSError as error:
+                raise HelperError("ipc_error", "could not read from mpv: %s" % (error.strerror or error))
+            if not chunk:
+                return None
+            self.buffer += chunk
+        line, _, self.buffer = self.buffer.partition(b"\n")
+        return line
+
+    def request(self, command: list[Any], allow_close: bool = False) -> dict[str, Any]:
+        """Send `command` and return mpv's reply object for it.
+
+        With allow_close, mpv closing the connection after the request was
+        sent counts as `{"error": "success"}` (used by `quit`).
+        """
+        assert self.sock is not None
+        request_id = self.next_id
+        self.next_id += 1
+        payload = json.dumps({"command": command, "request_id": request_id}, ensure_ascii=False) + "\n"
+        try:
+            self.sock.sendall(payload.encode("utf-8"))
+        except (ConnectionResetError, BrokenPipeError):
+            if allow_close:
+                return {"error": "success", "request_id": request_id}
+            raise HelperError("ipc_error", "mpv closed the connection")
+        except OSError as error:
+            raise HelperError("ipc_error", "could not write to mpv: %s" % (error.strerror or error))
+        deadline = time.monotonic() + self.timeout
+        while True:
+            line = self.read_line(deadline)
+            if line is None:
+                if allow_close:
+                    return {"error": "success", "request_id": request_id}
+                raise HelperError("ipc_error", "mpv closed the connection")
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(message, dict) and message.get("request_id") == request_id:
+                return message
+
+    def command(self, *args: Any) -> Any:
+        """Run a command; an mpv-side error becomes HelperError(ipc_error)."""
+        reply = self.request(list(args))
+        if reply.get("error") != "success":
+            # Property names are safe to print; values (URLs) never are.
+            what = " ".join(str(part) for part in args[:2]) if args[0] in ("set_property", "get_property") else str(args[0])
+            raise HelperError("ipc_error", "mpv refused %s: %s" % (what, reply.get("error") or "unknown error"))
+        return reply.get("data")
+
+    def try_command(self, *args: Any) -> tuple[bool, Any]:
+        """Like command(), but an mpv-side error yields (False, None)."""
+        reply = self.request(list(args))
+        if reply.get("error") != "success":
+            return False, None
+        return True, reply.get("data")
+
+
+def load_channels(directory: str) -> list[dict[str, Any]]:
+    document = read_json(os.path.join(directory, CHANNELS_FILE))
+    if not isinstance(document, dict) or not isinstance(document.get("channels"), list):
+        raise HelperError("no_cache", "channel cache not found; refresh the playlist first")
+    return document["channels"]
+
+
+def find_channel(channels: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
+    for channel in channels:
+        if isinstance(channel, dict) and channel.get("id") == wanted:
+            return channel
+    raise HelperError("unknown_channel", "channel %s is not in the playlist cache" % wanted)
+
+
+def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str, Any]]:
+    """Ordered (property, value) pairs applying the channel's HTTP headers.
+
+    Every property is always set: a channel without headers resets
+    user-agent / referrer / http-header-fields so nothing leaks from the
+    previous channel.
+    """
+    user_agent = ""
+    referrer = ""
+    fields: list[str] = []
+    for name, value in headers.items():
+        if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.match(name):
+            continue
+        cleaned = clean_header_value(value)
+        lower = name.lower()
+        if lower == "user-agent":
+            user_agent = cleaned
+        elif lower in ("referer", "referrer"):
+            referrer = cleaned
+        elif cleaned:
+            fields.append("%s: %s" % (name, cleaned))
+    if not user_agent:
+        ok, default = client.try_command("get_property", "option-info/user-agent/default-value")
+        user_agent = default if ok and isinstance(default, str) and default else MPV_DEFAULT_USER_AGENT
+    return [("user-agent", user_agent), ("referrer", referrer), ("http-header-fields", fields)]
+
+
+def cmd_play(args: argparse.Namespace) -> int:
+    client = MpvIpc(socket_path(args.socket), args.ipc_timeout)
+    try:
+        if args.id:
+            channel = find_channel(load_channels(cache_dir(args.cache_dir)), args.id)
+            url = str(channel.get("url") or "")
+            name = str(channel.get("name") or "") or url_host(url) or "channel"
+            headers = channel.get("headers") if isinstance(channel.get("headers"), dict) else {}
+        else:
+            url = (args.url or "").strip()
+            name = url_host(url) or "stream"
+            headers = {}
+        if not is_stream_url(url):
+            raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+        client.connect()
+        for prop in ("title", "force-media-title"):
+            ok, _ = client.try_command("set_property", prop, name)
+            if not ok:
+                log("play: mpv refused to set %s" % prop)
+        for prop, value in header_properties(headers, client):
+            client.command("set_property", prop, value)
+        client.command("loadfile", url, "replace")
+        emit({"ok": True, "kind": "play", "id": args.id or None, "name": name})
+        return EXIT_OK
+    except HelperError as error:
+        log("play: %s" % error.message)
+        emit(error_payload("play", error, id=args.id or None))
+        return EXIT_ERROR
+    finally:
+        client.close()
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    client = MpvIpc(socket_path(args.socket), args.ipc_timeout)
+    try:
+        client.connect()
+        reply = client.request(["quit"], allow_close=True)
+        if reply.get("error") != "success":
+            raise HelperError("ipc_error", "mpv refused quit: %s" % reply.get("error"))
+        emit({"ok": True, "kind": "stop"})
+        return EXIT_OK
+    except HelperError as error:
+        log("stop: %s" % error.message)
+        emit(error_payload("stop", error))
+        return EXIT_ERROR
+    finally:
+        client.close()
+
+
+def unlink_stale_socket(path: str) -> bool:
+    try:
+        if stat.S_ISSOCK(os.lstat(path).st_mode):
+            os.unlink(path)
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    path = socket_path(args.socket)
+    client = MpvIpc(path, args.ipc_timeout)
+    try:
+        try:
+            client.connect()
+        except HelperError as error:
+            if client.refused and unlink_stale_socket(path):
+                log("status: removed stale socket file")
+            raise
+        values: dict[str, Any] = {}
+        for prop in ("media-title", "path", "pause", "idle-active", "mpv-version"):
+            ok, data = client.try_command("get_property", prop)
+            values[prop] = data if ok else None
+        path_value = values["path"]
+        emit({
+            "ok": True,
+            "kind": "status",
+            "running": True,
+            "mediaTitle": values["media-title"] if isinstance(values["media-title"], str) else None,
+            "pathHost": (url_host(path_value) or ("local file" if path_value.startswith("/") else "")) if isinstance(path_value, str) and path_value else None,
+            "paused": bool(values["pause"]) if values["pause"] is not None else None,
+            "idle": bool(values["idle-active"]) if values["idle-active"] is not None else None,
+            "mpvVersion": values["mpv-version"] if isinstance(values["mpv-version"], str) else None,
+        })
+        return EXIT_OK
+    except HelperError as error:
+        log("status: %s" % error.message)
+        emit(error_payload("status", error, running=False))
+        return EXIT_ERROR
+    finally:
+        client.close()
+
+
+# --------------------------------------------------------------- state
+
+def default_state() -> dict[str, Any]:
+    return {"version": 1, "favorites": [], "recents": [], "lastPlayed": None}
+
+
+def normalize_played(entry: Any) -> dict[str, Any] | None:
+    if not isinstance(entry, dict) or not entry.get("id"):
+        return None
+    try:
+        at = int(entry.get("at") or 0)
+    except (TypeError, ValueError):
+        at = 0
+    return {"id": str(entry["id"]), "name": str(entry.get("name") or ""), "at": at}
+
+
+def normalize_state(raw: Any) -> dict[str, Any]:
+    """Tolerant reader mirroring Model.parseState: unknown shapes fall back
+    to an empty state, entries are de-duplicated and coerced."""
+    state = default_state()
+    if not isinstance(raw, dict):
+        return state
+    favorites = raw.get("favorites")
+    if isinstance(favorites, list):
+        for item in favorites:
+            key = str(item or "")
+            if key and key not in state["favorites"]:
+                state["favorites"].append(key)
+    recents = raw.get("recents")
+    if isinstance(recents, list):
+        for item in recents:
+            entry = normalize_played(item)
+            if entry is not None:
+                state["recents"].append(entry)
+    state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
+    return state
+
+
+def cmd_state(args: argparse.Namespace) -> int:
+    directory = state_dir(args.state_dir)
+    path = os.path.join(directory, STATE_FILE)
+    state = normalize_state(read_json(path))
+    action = args.action
+    try:
+        if action == "favorite":
+            key = str(args.id or "").strip()
+            if not key:
+                raise HelperError("usage", "favorite needs a channel id")
+            if args.op == "add":
+                if key not in state["favorites"]:
+                    state["favorites"].append(key)
+            else:
+                state["favorites"] = [item for item in state["favorites"] if item != key]
+            write_json_atomic(path, state)
+        elif action == "clear-recents":
+            state["recents"] = []
+            write_json_atomic(path, state)
+        emit({"ok": True, "kind": "state", "action": action, "state": state})
+        return EXIT_OK
+    except HelperError as error:
+        log("state: %s" % error.message)
+        emit(error_payload("state", error, action=action))
+        return EXIT_ERROR
+
+
+# -------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="omarchy-iptv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -530,32 +1436,46 @@ def build_parser() -> argparse.ArgumentParser:
     playlist.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="network timeout in seconds")
     playlist.set_defaults(func=cmd_playlist)
 
-    epg = sub.add_parser("epg", help="fetch and parse XMLTV into epg-now.json (TODO)")
-    epg.add_argument("--url", required=False, default="")
-    epg.add_argument("--cache-dir", default=None)
-    epg.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+    epg = sub.add_parser("epg", help="fetch XMLTV (plain or gzip) and write epg-now.json")
+    epg.add_argument("--url", required=False, default="", help="http(s) URL or absolute path; optional with --now-only")
+    epg.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
+    epg.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="network timeout in seconds")
+    epg.add_argument("--ttl", type=float, default=EPG_DEFAULT_TTL, help="seconds before the cached programme window is re-downloaded (default %d)" % EPG_DEFAULT_TTL)
+    epg.add_argument("--force", action="store_true", help="re-download even when the cached window is fresh")
     epg.add_argument("--now-only", action="store_true", help="recompute now/next from the cached programme window without fetching")
-    epg.set_defaults(func=cmd_not_implemented)
+    epg.add_argument("--now", type=int, default=0, help=argparse.SUPPRESS)
+    epg.set_defaults(func=cmd_epg)
 
-    play = sub.add_parser("play", help="switch the running mpv to a channel over IPC (TODO)")
-    play.add_argument("--id", required=True, help="channel id from channels.json")
-    play.add_argument("--cache-dir", default=None)
+    play = sub.add_parser("play", help="switch the running mpv to a channel over IPC")
+    target = play.add_mutually_exclusive_group(required=True)
+    target.add_argument("--id", default="", help="channel id from channels.json")
+    target.add_argument("--url", default="", help="play a raw stream URL (IPC play verb); name = host, no headers")
+    play.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
     play.add_argument("--socket", default=None, help="default: $XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock")
-    play.set_defaults(func=cmd_not_implemented)
+    play.add_argument("--ipc-timeout", type=float, default=DEFAULT_IPC_TIMEOUT, help="seconds to wait for mpv (default %.0f)" % DEFAULT_IPC_TIMEOUT)
+    play.set_defaults(func=cmd_play)
 
-    stop = sub.add_parser("stop", help="ask the running mpv to quit over IPC (TODO)")
-    stop.add_argument("--socket", default=None)
-    stop.set_defaults(func=cmd_not_implemented)
+    stop = sub.add_parser("stop", help="ask the running mpv to quit over IPC")
+    stop.add_argument("--socket", default=None, help="default: $XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock")
+    stop.add_argument("--ipc-timeout", type=float, default=DEFAULT_IPC_TIMEOUT, help="seconds to wait for mpv (default %.0f)" % DEFAULT_IPC_TIMEOUT)
+    stop.set_defaults(func=cmd_stop)
 
-    status = sub.add_parser("status", help="query the running mpv over IPC (TODO)")
-    status.add_argument("--socket", default=None)
-    status.set_defaults(func=cmd_not_implemented)
+    status = sub.add_parser("status", help="query the running mpv over IPC")
+    status.add_argument("--socket", default=None, help="default: $XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock")
+    status.add_argument("--ipc-timeout", type=float, default=DEFAULT_IPC_TIMEOUT, help="seconds to wait for mpv (default %.0f)" % DEFAULT_IPC_TIMEOUT)
+    status.set_defaults(func=cmd_status)
 
-    state = sub.add_parser("state", help="inspect or edit state.json (TODO)")
-    state.add_argument("action", choices=["dump", "favorite", "recent"])
-    state.add_argument("id", nargs="?", default="")
-    state.add_argument("--state-dir", default=None)
-    state.set_defaults(func=cmd_not_implemented)
+    state = sub.add_parser("state", help="inspect or edit state.json")
+    state.add_argument("--state-dir", default=None, help="default: $XDG_STATE_HOME/omarchy-iptv")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--state-dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    actions = state.add_subparsers(dest="action", required=True)
+    actions.add_parser("show", parents=[common], help="print the current state")
+    favorite = actions.add_parser("favorite", parents=[common], help="add or remove a favorite")
+    favorite.add_argument("op", choices=["add", "remove"])
+    favorite.add_argument("id", help="channel id from channels.json")
+    actions.add_parser("clear-recents", parents=[common], help="empty the Recent list")
+    state.set_defaults(func=cmd_state)
     return parser
 
 
@@ -566,6 +1486,14 @@ def main(argv: list[str] | None = None) -> int:
         return int(args.func(args))
     except KeyboardInterrupt:
         return 130
+    except Exception as error:
+        # A bug. The traceback is the bug report, but it must not carry a URL
+        # (section 9), so it is redacted and paired with a structured error.
+        import traceback
+        sys.stderr.write(redact_urls(traceback.format_exc()))
+        message = "%s: %s" % (type(error).__name__, error)
+        emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": redact_urls(message)}})
+        return EXIT_ERROR
 
 
 if __name__ == "__main__":
