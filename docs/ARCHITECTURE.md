@@ -482,3 +482,24 @@ and security.
 | R11 | Stream failure | Non-zero exit without a user stop: notification per UX 6.4, session-only `failedAt` on the channel, alert glyph on its row. |
 | R12 | Notifications and privacy | Manual refresh (`r`, middle click, IPC `refresh`) notifies on success and failure; timer refresh notifies only on failure. Never render a playlist or EPG URL beyond scheme and host anywhere: guide, tooltip, notification, console. |
 | R13 | Animation and placement | No open/close animation (UX 5.8). The overlay leaves `screen` unset so Hyprland maps it on the focused monitor. |
+
+### 12.1 Amendments after the security review (2026-09-13)
+
+Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
+
+- S-01: the mpv window title is passed as `$>` + name (property expansion
+  disabled for the rest of the string). `force-media-title` is not expanded
+  by mpv, so it carries the plain name.
+- S-02: `state.json` is created 0600 by the helper verb `state init`
+  (`O_EXCL`), which `Service.qml` runs after the directory bootstrap.
+- S-04: display names never start with `-`; the failure notification body
+  is wrapped in curly quotes so it can never parse as a flag.
+- S-05: HTTP reads run under a wall-clock deadline of `max(60 s, 3 x
+  --timeout)` (code `timeout`); `Service.qml` watchdogs kill a helper that
+  exceeds 180 s and report `helper_timeout` without a URL.
+- S-06: redirects to non-http(s) targets are refused (`unsafe_redirect`);
+  `Authorization` and `Cookie` are dropped when scheme, host, or port change.
+- S-07: `MAX_CHANNELS = 50000`, `MAX_GROUPS = 2000` in the helper, mirrored
+  by `Model.prepareChannels`; overflow produces warnings, never an error.
+- S-03 is documented in the README (first-play URL visible in `ps`); the M2
+  detached/idle mpv rework removes it.

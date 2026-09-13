@@ -113,6 +113,21 @@ omarchy-shell io.github.rmcdavid.iptv status              # JSON
   it running.
 - A stream that fails or ends shows a desktop notification naming the
   channel; the guide marks the row until the channel plays again.
+- The first channel you play is passed to mpv on its command line, so its
+  stream URL (credentials included) is visible to other local accounts via
+  `ps` until mpv exits; later channels travel only over the private IPC
+  socket. M2 will start mpv idle so no URL is ever on the command line.
+- Channel names are shown verbatim except that leading dashes are stripped
+  and mpv property expansion is disabled for the window title.
+
+## Limits
+
+- Playlists are capped at 50,000 channels and 2,000 groups; extra channels
+  are skipped and extra groups fold into Ungrouped, with a warning in the
+  guide.
+- Downloads (playlist and EPG) must finish within 60 seconds; redirects to
+  anything but http(s) are refused and credentials are dropped when a
+  redirect changes host.
 
 ## Files it writes
 

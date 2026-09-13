@@ -176,7 +176,7 @@ cursor to row 0 (or to the playing channel if it is in the new list).
 |---|---|---|
 | lead (`Style.space(24)` wide) | Favorite star, filled | Empty for non-favorites. Clicking the lead slot toggles favorite without playing. |
 | name | `tvg-name` or `#EXTINF` title | `Style.font.title`, elide right. Bold (`Font.Bold`) only on the channel that is currently playing. |
-| trail (`Style.space(20)` wide) | Playing glyph, or failed glyph | Playing: `󰐊` U+F040A. Failed this session: `󰀦` U+F0026. Otherwise empty. |
+| trail (`Style.space(20)` wide) | Playing glyph, or failed glyph | Playing: `ó°` U+F040A. Failed this session: `ó°¦` U+F0026. Otherwise empty. |
 | right meta | `until HH:MM` when EPG has a current programme | `Style.font.caption`, opacity 0.52, right aligned. Hidden without EPG. |
 | detail line | `Group - Now: X - Next: Y` | `Style.font.bodySmall`, opacity 0.52, elide right. Group segment is omitted when the selected column entry is that group. `Now:`/`Next:` segments are omitted without EPG data. A failed channel shows `Failed HH:MM - Space to retry` in place of the EPG segments. |
 | progress | Thin bar, fraction of current programme elapsed | Only with EPG and a current programme. See 5.6. |
@@ -334,23 +334,23 @@ glyphs.
 |  Search channels...                                                     Favorites - 6 channels |
 |                                                                                                |
 |  Recent           3 |                                                                          |
-|  Favorites        6 |> 󰓎  Sky Sports Main Event                              󰐊     until 21:30 |
+|  Favorites        6 |> ó°  Sky Sports Main Event                              ó°     until 21:30 |
 |  All          1,204 |>     Now: Premier League: Arsenal v Spurs - Next: Match Replay           |
 |                     |>     ===============================-----------------------------------  |
 |  GROUPS             |                                                                          |
-|  UK | SPORTS    142 |  󰓎  BBC One HD                                                until 20:00 |
+|  UK | SPORTS    142 |  ó°  BBC One HD                                                until 20:00 |
 |  UK | ENTERTAIN  96 |      Now: EastEnders - Next: The One Show                                |
 |  UK | NEWS       38 |      ============---------------------------------------------------      |
 |  UK | KIDS       24 |                                                                          |
-|  UK | MOVIES     57 |  󰓎  Al Jazeera English                                        until 20:30 |
+|  UK | MOVIES     57 |  ó°  Al Jazeera English                                        until 20:30 |
 |  US | NEWS       41 |      Now: Newshour - Next: Inside Story                                  |
 |  PL | INFORMAC.  19 |      ===========================--------------------------------------    |
 |  DE | SPORT      33 |                                                                          |
-|  ...                |  󰓎  Arte HD                                                   until 21:15 |
+|  ...                |  ó°  Arte HD                                                   until 21:15 |
 |                     |      Now: Karambolage - Next: Tracks                                     |
 |                     |      ====----------------------------------------------------------      |
 |                     |                                                                          |
-|  󰐊 Sky Sports Main Event - s stop          Enter play - Up/Down move - Left/Right group - Tab keys - Esc close |
+|  ó° Sky Sports Main Event - s stop          Enter play - Up/Down move - Left/Right group - Tab keys - Esc close |
 +------------------------------------------------------------------------------------------------+
 ```
 
@@ -366,7 +366,7 @@ card is centered. The top-right scope label and the footer are
 |  sky                                                                        in All - 14 matches |
 |                                                                                                |
 |  Recent           3 |                                                                          |
-|  Favorites        6 |> 󰓎  Sky Sports Main Event                              󰐊     until 21:30 |
+|  Favorites        6 |> ó°  Sky Sports Main Event                              ó°     until 21:30 |
 |  All          1,204 |>     UK | SPORTS - Now: Premier League: Arsenal v Spurs - Next: Match Re |
 |                     |>     ===============================-----------------------------------  |
 |  GROUPS             |                                                                          |
@@ -382,7 +382,7 @@ card is centered. The top-right scope label and the footer are
 |                     |      UK | ENTERTAINMENT - Now: Portrait Artist of the Year - Next: Tate  |
 |                     |      ==============================-----------------------------------    |
 |                     |                                                                          |
-|  󰐊 Sky Sports Main Event - s stop                Enter play - Up/Down move - Left/Right narrow - Tab keys |
+|  ó° Sky Sports Main Event - s stop                Enter play - Up/Down move - Left/Right narrow - Tab keys |
 +------------------------------------------------------------------------------------------------+
 ```
 
@@ -396,7 +396,7 @@ label would read `in UK | SPORTS - 9 matches`.
  lead(24)  name (title, elide) ..................... trail(20)  right meta (caption)
  |         |                                          |          |
  v         v                                          v          v
- 󰓎         Sky Sports Main Event                     󰐊          until 21:30
+ ó°         Sky Sports Main Event                     ó°          until 21:30
            Now: Premier League: Arsenal v Spurs - Next: Match Replay          <- bodySmall, 0.52
            ===============================-----------------------------------   <- Style.space(2) tall
            ^ fill = Util.alpha(Color.accent, 0.55)    ^ track = Util.alpha(fg, 0.12)
@@ -405,13 +405,13 @@ label would read `in UK | SPORTS - 9 matches`.
 Same row, no EPG configured, inside its own group (single-line row):
 
 ```
- 󰓎         Sky Sports Main Event                     󰐊
+ ó°         Sky Sports Main Event                     ó°
 ```
 
 Same row after a failed play this session:
 
 ```
-           Sky Sports Main Event                     󰀦
+           Sky Sports Main Event                     ó°¦
            Failed 21:12 - Space to retry
 ```
 
@@ -424,7 +424,7 @@ Same row after a failed play this session:
 |                                                                                                |
 |                                                                                                |
 |                                                                                                |
-|                                             󰔂                                                  |
+|                                             ó°                                                  |
 |                                                                                                |
 |                                    No playlist configured                                      |
 |                                                                                                |
@@ -459,7 +459,7 @@ convenience; not required for keyboard users).
 |                                                                                                |
 |                                                                                                |
 |                                                                                                |
-|                                             󰇘                                                  |
+|                                             ó°                                                  |
 |                                                                                                |
 |                                     Loading playlist...                                        |
 |                                                                                                |
@@ -483,10 +483,10 @@ and the footer says `Refreshing...`.
 |                                                                                                |
 |  Search channels...                                                     Favorites - 6 channels |
 |                                                                                                |
-|  󰀦  Playlist refresh failed (HTTP 503) - showing cached copy from 12:40 - r retry              |
+|  ó°¦  Playlist refresh failed (HTTP 503) - showing cached copy from 12:40 - r retry              |
 |                                                                                                |
 |  Recent           3 |                                                                          |
-|  Favorites        6 |> 󰓎  Sky Sports Main Event                                    until 21:30 |
+|  Favorites        6 |> ó°  Sky Sports Main Event                                    until 21:30 |
 |  All          1,204 |>     Now: Premier League: Arsenal v Spurs - Next: Match Replay           |
 |                     |>     ===============================-----------------------------------  |
 |  GROUPS             |                                                                          |
@@ -497,7 +497,7 @@ and the footer says `Refreshing...`.
 ```
 
 Banner spec: height `Style.space(28)`, radius `Style.cornerRadius`, fill
-`Util.alpha(Color.urgent, 0.10)`, glyph `󰀦` in `Color.urgent`, text in
+`Util.alpha(Color.urgent, 0.10)`, glyph `ó°¦` in `Color.urgent`, text in
 `Color.menu.text` at `Style.font.bodySmall`. The word "failed" carries the
 meaning; the tint is decoration. The banner appears with a 140 ms opacity
 fade and stays until the next successful refresh. The footer's
@@ -506,7 +506,7 @@ fade and stays until the next successful refresh. The footer's
 Error, no cache at all (empty state, column hidden):
 
 ```
-                                             󰔃
+                                             ó°
 
                                    Playlist failed to load
 
@@ -520,10 +520,10 @@ Error, no cache at all (empty state, column hidden):
 Three coordinated cues, all present at once:
 
 ```
-  row:     󰓎  Sky Sports Main Event                              󰐊     until 21:30
+  row:     ó°  Sky Sports Main Event                              ó°     until 21:30
            ^ name is Font.Bold                                   ^ playing glyph in the trail slot
 
-  footer:  󰐊 Sky Sports Main Event - s stop          (left side of the footer, Style.font.caption)
+  footer:  ó° Sky Sports Main Event - s stop          (left side of the footer, Style.font.caption)
 
   column:  no change (the column never highlights on playback)
 ```
@@ -540,18 +540,18 @@ Horizontal bar (`Style.bar.sizeHorizontal` tall). The icon sits in a
 the label is a `Text` in `Style.font.body` clipped to a max width.
 
 ```
-idle, ready (dimmed glyph, no label):          [ 󰔂 ]
+idle, ready (dimmed glyph, no label):          [ ó° ]
 
-not configured (dimmed glyph, tooltip):        [ 󰔂 ]      tooltip: "IPTV - no playlist configured"
+not configured (dimmed glyph, tooltip):        [ ó° ]      tooltip: "IPTV - no playlist configured"
 
-playing (glyph + label, elided at max width):  [ 󰕧 Sky Sports Main Ev.. ]
+playing (glyph + label, elided at max width):  [ ó°§ Sky Sports Main Ev.. ]
                                                   |<-- Style.space(180) -->|
 
-playing, short name:                           [ 󰕧 Arte HD ]
+playing, short name:                           [ ó°§ Arte HD ]
 
-error, not playing (television-off glyph):     [ 󰔃 ]      tooltip: "IPTV - playlist error, open the guide"
+error, not playing (television-off glyph):     [ ó° ]      tooltip: "IPTV - playlist error, open the guide"
 
-refreshing (any state; tooltip only):          [ 󰔂 ]      tooltip: "IPTV - refreshing playlist..."
+refreshing (any state; tooltip only):          [ ó° ]      tooltip: "IPTV - refreshing playlist..."
 ```
 
 Vertical bar (`Style.bar.sizeVertical` wide): icon only, label never shown,
@@ -559,7 +559,7 @@ the channel name lives in the tooltip. Same three glyphs.
 
 ```
  +----+
- | 󰕧 |   tooltip: "Playing Sky Sports Main Event"
+ | ó°§ |   tooltip: "Playing Sky Sports Main Event"
  +----+
 ```
 
@@ -643,15 +643,15 @@ the channel name lives in the tooltip. Same three glyphs.
 
 | Meaning | Glyph | Codepoint | Nerd Font name |
 |---|---|---|---|
-| IPTV idle / not configured (bar), empty-state icon | 󰔂 | U+F0502 | nf-md-television |
-| Playing (bar) | 󰕧 | U+F0567 | nf-md-television_play (also the menu-entry icon in the contract) |
-| Playlist error, no cache (bar + empty state) | 󰔃 | U+F0503 | nf-md-television_off |
-| Favorite (row lead) | 󰓎 | U+F04CE | nf-md-star |
-| Playing (row trail, footer) | 󰐊 | U+F040A | nf-md-play |
-| Failed this session (row trail), banner, notifications | 󰀦 | U+F0026 | nf-md-alert |
-| Loading (empty state) | 󰇘 | U+F01D8 | nf-md-dots_horizontal |
-| Refresh (notification glyph) | 󰑐 | U+F0450 | nf-md-refresh |
-| Recent (notification / future use) | 󰋚 | U+F02DA | nf-md-history |
+| IPTV idle / not configured (bar), empty-state icon | ó° | U+F0502 | nf-md-television |
+| Playing (bar) | ó°§ | U+F0567 | nf-md-television_play (also the menu-entry icon in the contract) |
+| Playlist error, no cache (bar + empty state) | ó° | U+F0503 | nf-md-television_off |
+| Favorite (row lead) | ó° | U+F04CE | nf-md-star |
+| Playing (row trail, footer) | ó° | U+F040A | nf-md-play |
+| Failed this session (row trail), banner, notifications | ó°¦ | U+F0026 | nf-md-alert |
+| Loading (empty state) | ó° | U+F01D8 | nf-md-dots_horizontal |
+| Refresh (notification glyph) | ó° | U+F0450 | nf-md-refresh |
+| Recent (notification / future use) | ó° | U+F02DA | nf-md-history |
 
 Do not use color to distinguish these; each carries meaning by shape. Bar
 glyph dimming for idle uses `Qt.darker(bar.barForeground, 1.55)` (tailscale
@@ -733,7 +733,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 | Row failed detail | `Failed 21:12 - Space to retry` |
 | Footer status, normal | `1,204 channels - updated 12:40` |
 | Footer status, cached | `1,204 channels - cached 12:40 - offline` |
-| Footer status, playing | `󰐊 Sky Sports Main Event - s stop` |
+| Footer status, playing | `ó° Sky Sports Main Event - s stop` |
 | Footer status, transient | `Refreshing...`, `Refreshed - 1,204 channels`, `Stopped`, `Added to Favorites`, `Removed from Favorites`, `Removed from Recent` |
 | Footer status, bounded search | `First 200 of 1,240 - keep typing` |
 | Footer status, EPG pending | `Guide data loading...` |
@@ -757,7 +757,7 @@ Only the key names render at the higher opacity (0.7); the verbs stay at
 | Not configured | `No playlist configured` | `Set your M3U URL or path, then press r to load it:` / command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` / `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` / `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` |
 | Loading, no cache | `Loading playlist...` | `Fetching from <host>` |
 | Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out after 30 s`, `Not an M3U file`, `File not found` (local path) |
-| Fetch failed, cache present (banner) | -- | `󰀦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
+| Fetch failed, cache present (banner) | -- | `ó°¦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
 | EPG failed (banner, low emphasis) | -- | `Guide data unavailable (<reason>) - channels still work - r retry` |
 | Playlist parsed but empty | `Playlist has no channels` | `Parsed 0 channels from <host> - check the URL points at an M3U` |
 | No favorites yet (Favorites list empty) | `No favorites yet` | `Press f on any channel to pin it here` |
@@ -780,12 +780,12 @@ Bar tooltips (`bar.showTooltip`):
 
 | Event | Headline | Body | Glyph | Urgency |
 |---|---|---|---|---|
-| Stream failed | `Stream failed` | `Sky Sports Main Event did not play` (append ` - <mpv reason>` when mpv gives one, e.g. `HTTP 403`) | `󰔃` U+F0503 | normal |
-| Playlist refreshed (manual `r` / middle click only) | `Playlist refreshed` | `1,204 channels in 38 groups` | `󰑐` U+F0450 | low |
-| Playlist error, cache used | `Playlist error` | `Could not fetch the playlist (<reason>). Using cached copy from 12:40.` | `󰀦` U+F0026 | normal |
-| Playlist error, no cache | `Playlist error` | `Could not fetch the playlist (<reason>). Open the guide for details.` | `󰀦` | normal |
-| EPG error | `Guide data error` | `Could not fetch the EPG (<reason>). Channels still work.` | `󰀦` | low |
-| mpv missing | `mpv not found` | `Install mpv to play channels.` | `󰔃` | critical |
+| Stream failed | `Stream failed` | `“Sky Sports Main Event” did not play` (the name is wrapped in curly quotes so a name starting with `-` can never be read as a flag, security finding S-04; append ` - <mpv reason>` when mpv gives one, e.g. `HTTP 403`) | `ó°` U+F0503 | normal |
+| Playlist refreshed (manual `r` / middle click only) | `Playlist refreshed` | `1,204 channels in 38 groups` | `ó°` U+F0450 | low |
+| Playlist error, cache used | `Playlist error` | `Could not fetch the playlist (<reason>). Using cached copy from 12:40.` | `ó°¦` U+F0026 | normal |
+| Playlist error, no cache | `Playlist error` | `Could not fetch the playlist (<reason>). Open the guide for details.` | `ó°¦` | normal |
+| EPG error | `Guide data error` | `Could not fetch the EPG (<reason>). Channels still work.` | `ó°¦` | low |
+| mpv missing | `mpv not found` | `Install mpv to play channels.` | `ó°` | critical |
 
 Rules: never include the playlist URL or query string in any notification
 (credentials). Timer-driven refreshes are silent on success. Use
@@ -888,7 +888,7 @@ keyboard focus of an overlay already ends on Esc).
 | 11 | Bar label: marquee or elide? | Elide right at `Style.space(barLabelMaxWidth)`, default 180; full name in the tooltip. A marquee under live TV is distracting. |
 | 12 | Vertical bar | Icon only; tooltip carries the name. (First-class vertical layout is M2 per PRODUCT.md.) |
 | 13 | Open/close animation | None, matching clipboard/menu/emojis and the 150 ms budget. |
-| 14 | Which glyphs | 󰔂 idle, 󰕧 playing, 󰔃 error, 󰓎 favorite, 󰐊 playing row, 󰀦 failed/alert, 󰇘 loading, 󰑐 refresh (all verified in the installed font). |
+| 14 | Which glyphs | ó° idle, ó°§ playing, ó° error, ó° favorite, ó° playing row, ó°¦ failed/alert, ó° loading, ó° refresh (all verified in the installed font). |
 | 15 | Refresh notifications | Only for manual refresh (`r`, middle click). Timer refreshes are silent unless they fail. |
 | 16 | Where do settings live for a plugin that is both bar-widget and overlay? | The empty state names the command (`omarchy bar set ...`) and the file (`~/.config/omarchy/shell.json`); the architect decides whether the overlay reads the bar-layout entry or a `plugins[]` entry, and the README states which. Copy does not change either way. |
 | 17 | Digits | Ignored in list mode (reserved for M2 channel numbers); literal in search mode. |
