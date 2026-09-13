@@ -17,6 +17,16 @@ import "Model.js" as Model
 // mode-aware hints. Pure decisions live in Model.js (ranking, scope rules,
 // the mode state machine); this file only renders and dispatches.
 //
+// M2-01 Sources (docs/UX-SOURCES.md under the rulings of
+// docs/ARCHITECTURE-SOURCES.md): the first-run empty state carries the
+// playlist / EPG input, a pinned `Sources` row under the group column and
+// the `o` key open the Sources list (switch / add / edit / remove with a
+// ConfirmDialog), and the add / edit / Xtream forms are qs.Ui TextFields
+// with the PanelKeyCatcher blocked while a field has focus. URLs exist on
+// screen only inside a form field, masked (Model.maskUrl) until revealed.
+// Every service access for the Sources API is guarded so the guide still
+// loads against a service that lacks it.
+//
 // Host contract (shell.qml panel loader): `shell`, `manifest` and `service`
 // are injected after load; open(payloadJson)/close()/toggle() are called by
 // summon/hide/toggle. Dismiss through shell.hide(manifest.id) so the host's
@@ -38,7 +48,15 @@ Item {
   // Model.js; replaced on every transition so bindings notice.
   property var guide: Model.guideState(Model.SCOPE_ALL)
   readonly property string mode: guide.mode
-  readonly property bool searchMode: mode !== "list"
+  readonly property bool searchMode: mode === "search"
+  readonly property bool listMode: mode === "list"
+  readonly property bool guideMode: searchMode || listMode
+  readonly property bool inSources: mode === "sources"
+  readonly property bool formActive: mode === "sourceEdit" || mode === "sourceXtream"
+  readonly property bool confirmOpen: mode === "confirmRemove"
+  // The PanelKeyCatcher is live in the two list-like modes only; search
+  // mode, the forms and the confirm dialog block it (UX-SOURCES 2).
+  readonly property bool catcherLive: listMode || inSources
   readonly property string query: guide.query
   readonly property string scopeId: guide.scopeId
   readonly property string effectiveScope: Model.effectiveScope(scopeId, query)
@@ -105,7 +123,49 @@ Item {
     accessibleCard: "IPTV guide",
     accessibleSearch: "Search channels",
     accessibleGroups: "Groups",
-    accessibleChannels: "Channels in "
+    accessibleChannels: "Channels in ",
+    // ---- Sources (UX-SOURCES.md 5.1); codes, transients and row strings
+    // come from Model.js (sourceErrorMessage, sourceTransient, sourceDetail).
+    sourcesTitle: "Sources",
+    addSourceTitle: "Add source",
+    editSourceTitle: "Edit source",
+    xtreamTitle: "Add Xtream login",
+    firstRunProse: "Paste or type your M3U URL or path, then press Enter",
+    firstRunTerminal: "Or from a terminal:  omarchy bar set " + root.pluginId + " playlistUrl <url>",
+    fieldLabel: "Label",
+    fieldPlaylist: "Playlist",
+    fieldEpg: "EPG",
+    fieldServer: "Server",
+    fieldUsername: "Username",
+    fieldPassword: "Password",
+    placeholderOptional: "optional",
+    placeholderPlaylist: "https://host/playlist.m3u or /path/to/list.m3u",
+    placeholderEpg: "optional" + Model.SEP + "XMLTV URL, .xml or .xml.gz",
+    placeholderServer: "http://host:port",
+    linkXtream: "Use Xtream login instead",
+    linkSaved: "Saved sources",
+    buttonLoad: "Load",
+    buttonSave: "Save",
+    buttonCancel: "Cancel",
+    buttonRemove: "Remove",
+    xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
+    rowAdd: "Add source",
+    rowXtream: "Add Xtream login",
+    tooltipShow: "Show query" + Model.SEP + Model.SOURCE_KEYS.reveal,
+    tooltipHide: "Hide query" + Model.SEP + Model.SOURCE_KEYS.reveal,
+    tooltipEdit: "Edit",
+    tooltipRemove: "Remove",
+    accessibleSources: "Sources",
+    accessibleFirstRun: "Set up a playlist",
+    accessibleLabel: "Label, optional",
+    accessiblePlaylist: "Playlist URL or path",
+    accessibleEpg: "EPG URL, optional",
+    accessibleServer: "Server URL",
+    accessibleUsername: "Username",
+    accessiblePassword: "Password",
+    accessibleShow: "Show query",
+    accessibleHide: "Hide query",
+    accessibleSaved: "Saved sources, "
   })
 
   // ---- timing constants, in one place (UX.md 5.9)
@@ -160,6 +220,63 @@ Item {
   readonly property int nowSec: serviceReady ? service.nowSec : Math.floor(Date.now() / 1000)
   readonly property bool showColumn: hasChannels && !narrow
   readonly property bool scopeIsGroup: Model.isGroupScope(effectiveScope)
+
+  // ---- Sources (M2-01). Every access is guarded: the service may lack the
+  // Sources API (the harness before Lane 2 merges) and the guide must still
+  // load and behave as shipped.
+  readonly property bool sourcesApi: serviceReady && service.sources !== undefined && service.sources !== null
+  readonly property var sourceList: sourcesApi ? Model.asList(service.sources) : []
+  readonly property int sourceCount: sourceList.length
+  readonly property string activeSourceId: sourcesApi && service.activeSourceId !== undefined && service.activeSourceId !== null ? String(service.activeSourceId) : ""
+  readonly property var activeSource: root.findSourceView(root.activeSourceId)
+  readonly property string activeSourceLabel: activeSource ? String(activeSource.label) : ""
+  readonly property bool probing: serviceReady && service.probing === true
+  readonly property bool switching: serviceReady && service.switching === true
+  readonly property var form: guide.form
+  readonly property string formFocus: form ? String(form.focus) : ""
+  readonly property bool formProbing: form ? form.probing === true : false
+  readonly property var formError: form ? form.error : null
+  readonly property bool firstRunForm: formActive && form !== null && form.origin === "firstRun"
+  readonly property bool firstRunHead: firstRunForm && form.kind === "url"
+  readonly property var formFieldIds: form ? Model.formFields(form) : []
+  readonly property int sourceCursor: guide.sourceCursor
+  readonly property int sourceRowCount: Model.sourcesRowCount(sourceCount)
+  readonly property string sourceCursorKind: Model.sourcesRowKind(sourceCursor, sourceCount)
+  // Set by the form key handler right before the TextField pastes, so the
+  // next text change is trimmed and re-masked as a paste (UX-SOURCES 2.3).
+  property bool pasteArmed: false
+  property string pendingProbeId: ""
+  property string pendingCursorId: ""
+  property string switchPendingId: ""
+  // D9: Qt's clipboard through the TextField is the paste path. Flip to
+  // true only if harness scenario H4 finds the layer-shell surface pastes
+  // empty; the service's wl-paste verb (requestClipboard / clipboardText)
+  // is then used and guarded here.
+  readonly property bool pasteViaProcess: false
+  readonly property bool headerShowsSearch: guideMode || firstRunHead
+  readonly property string headerTitle: {
+    if (root.mode === "sourceEdit") return root.form && root.form.sourceId !== "" ? root.copy.editSourceTitle : root.copy.addSourceTitle
+    if (root.mode === "sourceXtream") return root.copy.xtreamTitle
+    if (root.inSources || root.confirmOpen) return root.copy.sourcesTitle
+    return ""
+  }
+  readonly property string headerRight: {
+    if (root.guideMode) return root.scopeLabelText
+    if (root.inSources || root.confirmOpen) return Model.sourcesHeaderCount(root.sourceCount)
+    return ""
+  }
+  readonly property string formAccessibleName: {
+    if (root.firstRunHead) return root.copy.accessibleFirstRun
+    return root.headerTitle
+  }
+  readonly property string confirmMessage: {
+    var view = root.sourceAt(root.sourceCursor)
+    return view ? Model.confirmRemoveMessage(view.label, view.active) : ""
+  }
+
+  onFormFocusChanged: if (root.formActive) Qt.callLater(root.focusFormItem)
+  onFormActiveChanged: if (root.opened) root.refocus()
+  onFormProbingChanged: if (root.opened && root.formActive) root.refocus()
 
   // Per-row decorations (star, playing cue, failure notice, EPG now/next)
   // are resolved by each delegate from these lookups, so only the visible
@@ -238,7 +355,9 @@ Item {
     warning: root.warningText,
     count: root.serviceReady ? root.service.channels.length : 0,
     lastUpdated: root.serviceReady ? root.service.lastUpdated : "",
-    stale: root.serviceStatus === "cached"
+    stale: root.serviceStatus === "cached",
+    activeLabel: root.activeSourceLabel,
+    sourceCount: root.sourceCount
   })
 
   readonly property string keyColor: Util.alpha(root.foreground, 0.7).toString()
@@ -247,7 +366,7 @@ Item {
     var empty = ""
     if (root.emptyKind === "loading") empty = "loading"
     else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service") empty = "error"
-    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty })
+    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, cursorKind: root.sourceCursorKind, form: root.form })
     var out = []
     for (var i = 0; i < pairs.length; i++) {
       out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
@@ -271,20 +390,29 @@ Item {
     if (typeof payload.scope === "string" && payload.scope !== "") next = Model.withScope(next, payload.scope)
     else if (typeof payload.group === "string" && payload.group !== "") next = Model.withScope(next, Model.groupScopeId(payload.group))
     if (typeof payload.query === "string" && payload.query !== "") next = Model.withQuery(next, payload.query)
+    // UX-SOURCES 1.2: unconfigured opens straight into the first-run form.
+    if (root.serviceReady && !root.configured) next = Model.openFirstRun(next)
     root.guide = next
     root.transientText = ""
     root.enterPending = false
+    root.pasteArmed = false
+    root.pendingProbeId = ""
+    root.pendingCursorId = ""
+    root.switchPendingId = ""
     root.opened = true
     root.disarmPointer()
     root.rebuildDisplay()
     root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
     root.scrollToCursor()
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    root.refocus()
   }
 
   function close() {
     root.opened = false
     transientTimer.stop()
+    // The form state (the only place a URL lives in this file) is dropped
+    // with the overlay (UX-SOURCES 6.9).
+    if (root.form !== null || !root.guideMode) root.guide = Model.guideState(root.scopeId)
   }
 
   function dismiss() {
@@ -516,9 +644,18 @@ Item {
   }
 
   function handleEscape() {
-    var result = Model.onEscape(root.guide)
-    if (result.close) root.dismiss()
-    else root.applyGuide(result.state, true)
+    root.applyEscapeResult(Model.onEscape(root.guide))
+  }
+
+  // Applies an onEscape / closeForm result: cancels a running probe, closes
+  // the overlay, clears the query (shipped path), or changes mode.
+  function applyEscapeResult(result) {
+    if (result.cancelProbe && root.serviceReady && typeof root.service.cancelProbe === "function") root.service.cancelProbe()
+    if (result.close) { root.dismiss(); return }
+    if (root.guideMode && result.state.mode === root.mode) { root.applyGuide(result.state, true); return }
+    root.setGuide(result.state)
+    if (root.guideMode) root.rebuildDisplay()
+    root.refocus()
   }
 
   function switchMode() {
@@ -526,18 +663,26 @@ Item {
   }
 
   // Keys both modes share and PanelKeyCatcher does not consume:
-  // PgUp/PgDn, Home/End, Delete.
+  // PgUp/PgDn, Home/End, Delete. In Sources they drive the source cursor.
   function handleSharedKey(event) {
+    if (root.inSources) {
+      if (event.key === Qt.Key_PageUp) { root.moveSourceCursorBy(-root.sourcePageSize(), false); return true }
+      if (event.key === Qt.Key_PageDown) { root.moveSourceCursorBy(root.sourcePageSize(), false); return true }
+      if (event.key === Qt.Key_Home) { root.selectSourceAbsolute(0); return true }
+      if (event.key === Qt.Key_End) { root.selectSourceAbsolute(root.sourceRowCount - 1); return true }
+      if (event.key === Qt.Key_Delete) { root.startRemove(); return true }
+      return false
+    }
     if (event.key === Qt.Key_PageUp) { root.moveCursorBy(-root.pageSize(), false); return true }
     if (event.key === Qt.Key_PageDown) { root.moveCursorBy(root.pageSize(), false); return true }
     if (event.key === Qt.Key_Home) {
       // UX 8 #22: Home with a query active in list mode jumps the column to All.
-      if (!root.searchMode && root.hasQuery && root.effectiveScope !== Model.SCOPE_ALL) root.setScope(Model.SCOPE_ALL)
+      if (root.listMode && root.hasQuery && root.effectiveScope !== Model.SCOPE_ALL) root.setScope(Model.SCOPE_ALL)
       else root.selectAbsolute(0)
       return true
     }
     if (event.key === Qt.Key_End) { root.selectAbsolute(root.rowCount - 1); return true }
-    if (event.key === Qt.Key_Delete && !root.searchMode) { root.removeAt(root.cursorIndex); return true }
+    if (event.key === Qt.Key_Delete && root.listMode) { root.removeAt(root.cursorIndex); return true }
     return false
   }
 
@@ -566,11 +711,552 @@ Item {
     if (t === "f" || t === "F") root.toggleFavoriteAt(root.cursorIndex)
     else if (t === "s" || t === "S") root.stopPlayback()
     else if (t === "r" || t === "R") root.refresh()
+    else if (t.toLowerCase() === Model.SOURCE_KEYS.open) root.openSources()
     else if (t === "/") {
       root.swallowKey = true
       root.switchMode()
     }
     // digits and everything else: ignored (M2 channel numbers)
+  }
+
+  // Sources-mode letters (UX-SOURCES 2.2); x / X arrive as deleteRequested.
+  function handleSourcesLetter(text) {
+    var t = String(text || "").toLowerCase()
+    if (t === Model.SOURCE_KEYS.open) root.leaveSources()
+    else if (t === Model.SOURCE_KEYS.add) root.openAddForm()
+    else if (t === Model.SOURCE_KEYS.xtream) root.openXtreamForm()
+    else if (t === Model.SOURCE_KEYS.edit) root.openEditForm()
+    else if (t === Model.SOURCE_KEYS.remove) root.startRemove()
+    // h / l / Tab / "/" / r / s / f / digits: ignored here (UX-SOURCES 8 #20, #27)
+  }
+
+  // ------------------------------------------------------------ sources (M2-01)
+
+  function findSourceView(id) {
+    var key = String(id || "")
+    if (key === "") return null
+    for (var i = 0; i < root.sourceList.length; i++) {
+      if (root.sourceList[i] && String(root.sourceList[i].id) === key) return root.sourceList[i]
+    }
+    return null
+  }
+
+  function sourceIndexOf(id) {
+    var key = String(id || "")
+    if (key === "") return -1
+    for (var i = 0; i < root.sourceList.length; i++) {
+      if (root.sourceList[i] && String(root.sourceList[i].id) === key) return i
+    }
+    return -1
+  }
+
+  function sourceAt(index) {
+    return index >= 0 && index < root.sourceList.length ? root.sourceList[index] : null
+  }
+
+  // Replace the state object without the channel-cursor reset of applyGuide.
+  function setGuide(next) {
+    root.guide = next
+    root.disarmPointer()
+  }
+
+  // Key focus per mode (UX-SOURCES 7.3): the focused form element, or the
+  // key catcher (also while a probe freezes the form, so Esc still cancels).
+  function refocus() {
+    if (root.formActive && !root.formProbing) Qt.callLater(root.focusFormItem)
+    else Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function openSources() {
+    if (!root.serviceReady) return
+    root.setGuide(Model.openSources(root.guide, root.sourceList))
+    root.scrollToSourceCursor()
+    root.refocus()
+  }
+
+  function leaveSources() {
+    root.setGuide(Model.closeSources(root.guide))
+    if (root.guideMode) root.rebuildDisplay()
+    root.refocus()
+  }
+
+  function sourcePageSize() {
+    return Math.max(1, Math.floor(sourceListView.height / (root.detailRowHeight + root.rowSpacing)) - 1)
+  }
+
+  function scrollToSourceCursor() {
+    if (root.sourceRowCount > 0 && sourceListView.height > 0) sourceListView.positionViewAtIndex(root.sourceCursor, ListView.Contain)
+  }
+
+  function moveSourceCursorBy(delta, wrap) {
+    if (root.sourceRowCount === 0) return
+    root.setGuide(Model.withSourceCursor(root.guide, Model.moveCursor(root.sourceCursor, delta, root.sourceRowCount, wrap)))
+    root.scrollToSourceCursor()
+  }
+
+  function selectSourceAbsolute(index) {
+    if (root.sourceRowCount === 0) return
+    root.setGuide(Model.withSourceCursor(root.guide, Math.max(0, Math.min(index, root.sourceRowCount - 1))))
+    root.scrollToSourceCursor()
+  }
+
+  function selectSourceFromPointer(index, item, mouse) {
+    if (!pointerGate.moved(item, mouse)) return
+    root.guide = Model.withSourceCursor(root.guide, index)
+  }
+
+  // Keeps the cursor on a row whose index moved (the list sorts the active
+  // source first) and clamps it after a removal.
+  function syncSourceCursor() {
+    if (!root.opened) return
+    if (root.pendingCursorId !== "") {
+      var at = root.sourceIndexOf(root.pendingCursorId)
+      if (at >= 0) {
+        root.pendingCursorId = ""
+        root.guide = Model.withSourceCursor(root.guide, at)
+      }
+    }
+    if (root.sourceCursor >= root.sourceRowCount) root.guide = Model.withSourceCursor(root.guide, Math.max(0, root.sourceRowCount - 1))
+    root.scrollToSourceCursor()
+  }
+
+  // Enter (stay false) / Space (stay true) on a Sources row (UX-SOURCES 1.4).
+  function activateSourceRow(index, stay) {
+    var kind = Model.sourcesRowKind(index, root.sourceCount)
+    root.guide = Model.withSourceCursor(root.guide, index)
+    if (kind === "add") root.openAddForm()
+    else if (kind === "xtream") root.openXtreamForm()
+    else if (kind === "source") root.switchToSource(index, stay)
+  }
+
+  function switchToSource(index, stay) {
+    var view = root.sourceAt(index)
+    if (!view) return
+    if (view.active) {
+      if (!stay) root.leaveSources()
+      return
+    }
+    if (!root.sourcesApi || typeof root.service.switchSource !== "function") {
+      root.showTransient(Model.sourceErrorMessage("not_ready"))
+      return
+    }
+    var result = root.service.switchSource(view.id)
+    if (!result || result.ok !== true) {
+      root.showTransient(Model.sourceErrorMessage(result ? result.code : "unknown_source"))
+      return
+    }
+    root.switchPendingId = String(view.id)
+    root.showTransient(Model.sourceTransient("switched", { label: view.label, channelCount: view.channelCount }))
+    if (stay) {
+      // The check glyph moves at once; the list re-sorts, the cursor follows.
+      root.pendingCursorId = String(view.id)
+      root.syncSourceCursor()
+      return
+    }
+    root.leaveToGuide()
+  }
+
+  // A fresh search-mode view on the initial scope (UX-SOURCES 1.4 step 3).
+  function leaveToGuide() {
+    var channels = root.serviceReady ? root.service.channels : []
+    var userState = root.serviceReady ? root.service.userState : null
+    root.guide = Model.afterSwitch(Model.initialScope(channels, userState))
+    root.cursorIndex = 0
+    root.disarmPointer()
+    root.rebuildDisplay()
+    root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
+    root.scrollToCursor()
+    root.refocus()
+  }
+
+  function showSwitched(id) {
+    if (root.switchPendingId === "" || String(id) !== root.switchPendingId) return
+    root.switchPendingId = ""
+    var view = root.findSourceView(id)
+    var count = root.serviceReady ? root.service.channels.length : -1
+    root.showTransient(Model.sourceTransient("switched", { label: view ? view.label : root.activeSourceLabel, channelCount: count }))
+  }
+
+  // The service's `configured` flipped while the guide is open: the CLI
+  // cleared or set the playlist (SR8), or a removal emptied the settings.
+  function onConfiguredFlip() {
+    if (!root.opened || !root.serviceReady) return
+    if (!root.configured && root.guideMode) root.enterFirstRun()
+    else if (root.configured && root.firstRunHead && !root.formProbing) root.leaveToGuide()
+  }
+
+  // ---- forms (UX-SOURCES 1.2, 1.5, 1.6, 1.8)
+
+  function enterFirstRun() {
+    root.setGuide(Model.openFirstRun(root.guide))
+    root.refocus()
+  }
+
+  function openAddForm() {
+    root.setGuide(Model.openAddForm(root.guide))
+    root.refocus()
+  }
+
+  function openEditForm() {
+    var view = root.sourceAt(root.sourceCursor)
+    if (!view || !root.sourcesApi || typeof root.service.sourceForEdit !== "function") return
+    // The only call that hands a URL to the guide; it goes into the form
+    // state and the edit fields, nowhere else.
+    var rec = root.service.sourceForEdit(view.id)
+    if (!rec) return
+    root.setGuide(Model.openEditForm(root.guide, view.id, { label: String(rec.label || ""), playlist: String(rec.playlistUrl || ""), epg: String(rec.epgUrl || "") }))
+    root.refocus()
+  }
+
+  function openXtreamForm() {
+    root.setGuide(Model.openXtreamForm(root.guide, root.form ? root.form.origin : "sources"))
+    root.refocus()
+  }
+
+  function cancelForm() {
+    root.applyEscapeResult(Model.closeForm(root.guide, "cancel"))
+  }
+
+  function focusOpts() {
+    return { savedSources: root.sourceCount }
+  }
+
+  // Enter on the focused element: fields and Save / Load submit, the links
+  // and Cancel follow their action.
+  function activateFormFocus() {
+    var focus = root.formFocus
+    if (focus === "cancel") root.cancelForm()
+    else if (focus === "xtream") root.openXtreamForm()
+    else if (focus === "savedSources") root.openSources()
+    else root.submitForm()
+  }
+
+  function failForm(error) {
+    root.setGuide(Model.withFormError(root.guide, error))
+    root.refocus()
+  }
+
+  // A synchronous action result -> error line. `duplicate` names the
+  // existing source's label; the copy always comes from Model.js.
+  function resultError(result, field) {
+    var code = result && result.code ? String(result.code) : "not_ready"
+    var dup = code === "duplicate" && result ? root.findSourceView(result.id) : null
+    return { code: code, field: field, message: Model.sourceErrorMessage(code, { label: dup ? dup.label : "", field: field === "epg" ? "epg" : "" }) }
+  }
+
+  // A `duplicate` of a record that never fetched (an earlier add that
+  // failed, D8) is retried instead of refused.
+  function retryIfUnfetched(result) {
+    if (!result || result.code !== "duplicate" || typeof root.service.retrySource !== "function") return result
+    var view = root.findSourceView(result.id)
+    if (!view || Number(view.channelCount) >= 0) return result
+    return root.service.retrySource(result.id)
+  }
+
+  function startProbe(id, host, kind) {
+    root.pendingProbeId = String(id || "")
+    root.setGuide(Model.withFormProbing(root.guide, true, { host: host, kind: kind }))
+    root.refocus()
+  }
+
+  function submitForm() {
+    var f = root.form
+    if (!f || f.probing) return
+    if (f.kind === "xtream") { root.submitXtream(); return }
+    var values = Model.formSubmitValues(f)
+    var v = Model.validateUrlForm(values, root.sourceList, f.sourceId)
+    if (!v.ok) { root.failForm(v.error); return }
+    if (!root.sourcesApi) { root.failForm(root.resultError(null, "playlist")); return }
+    var result
+    if (f.sourceId !== "") {
+      if (typeof root.service.updateSource !== "function") { root.failForm(root.resultError(null, "playlist")); return }
+      var changed = Model.normalizeSourceUrl(values.playlist) !== Model.normalizeSourceUrl(f.original.playlist)
+      result = root.service.updateSource(f.sourceId, { label: v.label, playlistUrl: v.playlistUrl, epgUrl: v.epgUrl })
+      if (!result || result.ok !== true) { root.failForm(root.resultError(result, "playlist")); return }
+      if (changed) { root.startProbe(result.id ? result.id : f.sourceId, v.host, v.kind); return }
+      root.finishForm("saved", { id: f.sourceId, channelCount: -1, groupCount: 0 })
+      return
+    }
+    if (typeof root.service.addSource !== "function") { root.failForm(root.resultError(null, "playlist")); return }
+    result = root.retryIfUnfetched(root.service.addSource({ label: v.label, playlistUrl: v.playlistUrl, epgUrl: v.epgUrl, kind: v.kind }))
+    if (!result || result.ok !== true) { root.failForm(root.resultError(result, "playlist")); return }
+    root.startProbe(result.id, v.host, v.kind)
+  }
+
+  function submitXtream() {
+    var f = root.form
+    var values = Model.formSubmitValues(f)
+    var x = Model.xtreamUrls(values.server, values.username, values.password)
+    if (!x.ok) { root.failForm({ code: x.code, field: x.field, message: x.message }); return }
+    var lv = Model.validateLabel(values.label, root.sourceList, "")
+    if (!lv.ok) { root.failForm({ code: lv.code, field: "label", message: lv.message }); return }
+    if (!root.sourcesApi || typeof root.service.buildXtreamSource !== "function") { root.failForm(root.resultError(null, "server")); return }
+    var result = root.service.buildXtreamSource({ server: values.server, username: values.username, password: values.password, label: lv.label })
+    // UX-SOURCES 6.5: the password leaves the form state as soon as the
+    // URLs are built; the form is never shown pre-filled again.
+    root.guide = Model.withFormValue(root.guide, "password", "")
+    result = root.retryIfUnfetched(result)
+    if (!result || result.ok !== true) { root.failForm(root.resultError(result, "server")); return }
+    root.startProbe(result.id, x.host, "url")
+  }
+
+  // sourceProbeFinished({ ok, id, channelCount, groupCount, reason, host }) (SR3).
+  function onProbeFinished(result) {
+    var r = result || {}
+    if (!root.opened || !root.formActive || !root.formProbing) return
+    var id = String(r.id !== undefined && r.id !== null ? r.id : (r.sourceId !== undefined ? r.sourceId : ""))
+    if (root.pendingProbeId !== "" && id !== "" && id !== root.pendingProbeId) return
+    if (r.ok === true) {
+      var event = root.form.sourceId !== "" ? "saved" : (root.firstRunForm ? "loaded" : "added")
+      root.finishForm(event, { id: id, host: String(r.host || root.form.probeHost), channelCount: Number(r.channelCount), groupCount: Number(r.groupCount) })
+      return
+    }
+    var field = root.form.kind === "xtream" ? "server" : "playlist"
+    root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind) })
+  }
+
+  // Leave the form after a successful save: first run lands in the guide
+  // with the counts transient, Sources lands on the saved row.
+  function finishForm(event, info) {
+    var result = Model.closeForm(root.guide, "saved")
+    root.pendingProbeId = ""
+    var counts = { channelCount: isFinite(Number(info.channelCount)) ? Number(info.channelCount) : -1, groupCount: Number(info.groupCount) || 0 }
+    if (result.state.mode === "search") {
+      root.guide = result.state
+      root.cursorIndex = 0
+      root.disarmPointer()
+      root.rebuildDisplay()
+      root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
+      root.scrollToCursor()
+      root.showTransient(Model.sourceTransient("loaded", counts))
+      root.refocus()
+      return
+    }
+    root.setGuide(result.state)
+    root.pendingCursorId = String(info.id || "")
+    root.syncSourceCursor()
+    root.showTransient(Model.sourceTransient(event === "saved" ? "saved" : "added", { host: info.host, channelCount: counts.channelCount, groupCount: counts.groupCount }))
+    root.refocus()
+  }
+
+  // ---- removal (UX-SOURCES 1.7)
+
+  function startRemove() {
+    if (!root.inSources || root.sourceCursorKind !== "source") return
+    removeDialog.selectedIndex = 1
+    root.setGuide(Model.startRemove(root.guide, root.sourceCount))
+    root.refocus()
+  }
+
+  function cancelRemove() {
+    root.setGuide(Model.withMode(root.guide, "sources"))
+    root.refocus()
+  }
+
+  function confirmRemove() {
+    var view = root.sourceAt(root.sourceCursor)
+    if (!view || !root.sourcesApi || typeof root.service.removeSource !== "function") { root.cancelRemove(); return }
+    var result = root.service.removeSource(view.id)
+    if (!result || result.ok !== true) {
+      root.cancelRemove()
+      root.showTransient(Model.sourceErrorMessage(result ? result.code : "not_ready"))
+      return
+    }
+    root.showTransient(Model.sourceTransient("removed", { label: view.label, wasActive: view.active }))
+    var remaining = root.findSourceView(view.id) ? root.sourceCount - 1 : root.sourceCount
+    root.setGuide(Model.afterRemove(root.guide, remaining))
+    root.refocus()
+  }
+
+  // ---- fields (UX-SOURCES 2.3, 4.4)
+
+  function formValue(id) {
+    return root.form && root.form.values ? String(root.form.values[id] || "") : ""
+  }
+
+  function fieldMaskable(id) { return Model.fieldMaskable(root.form, id) }
+  function fieldMasked(id) { return Model.fieldMasked(root.form, id) }
+
+  // What the TextField shows: the masked rendering or the raw value.
+  function fieldDisplay(id) {
+    return root.fieldMasked(id) ? Model.maskUrl(root.formValue(id)) : root.formValue(id)
+  }
+
+  function fieldLabelText(id) {
+    if (id === "label") return root.copy.fieldLabel
+    if (id === "playlist") return root.copy.fieldPlaylist
+    if (id === "epg") return root.copy.fieldEpg
+    if (id === "server") return root.copy.fieldServer
+    if (id === "username") return root.copy.fieldUsername
+    if (id === "password") return root.copy.fieldPassword
+    return ""
+  }
+
+  // The Label placeholder live-updates to the label Model.deriveLabel would
+  // give the current Playlist / Server value (UX-SOURCES 1.5, 5.1).
+  function fieldPlaceholder(id) {
+    if (id === "label") {
+      var f = root.form
+      var derived = ""
+      if (f && f.kind === "xtream") {
+        var s = Model.validateSourceUrl(f.values.server)
+        if (s.ok && s.kind === "http") derived = Model.deriveLabel(s.url)
+      } else if (f) {
+        var p = Model.validateSourceUrl(f.values.playlist)
+        if (p.ok) derived = Model.deriveLabel(p.url, p.kind)
+      }
+      return derived !== "" ? derived : root.copy.placeholderOptional
+    }
+    if (id === "playlist") return root.copy.placeholderPlaylist
+    if (id === "epg") return root.copy.placeholderEpg
+    if (id === "server") return root.copy.placeholderServer
+    return ""
+  }
+
+  function fieldAccessibleName(id) {
+    if (id === "label") return root.copy.accessibleLabel
+    if (id === "playlist") return root.copy.accessiblePlaylist
+    if (id === "epg") return root.copy.accessibleEpg
+    if (id === "server") return root.copy.accessibleServer
+    if (id === "username") return root.copy.accessibleUsername
+    if (id === "password") return root.copy.accessiblePassword
+    return ""
+  }
+
+  function fieldItem(id) {
+    for (var i = 0; i < fieldsRepeater.count; i++) {
+      var row = fieldsRepeater.itemAt(i)
+      if (row && row.fieldId === id) return row.input
+    }
+    return null
+  }
+
+  function focusFormItem() {
+    if (!root.formActive || root.formProbing) return
+    var focus = root.formFocus
+    var item = root.fieldItem(focus)
+    if (!item) {
+      if (focus === "xtream") item = xtreamLink
+      else if (focus === "savedSources") item = savedLink
+      else if (focus === "cancel") item = cancelButton
+      else item = submitButton
+    }
+    if (item && item.visible && item.enabled) item.forceActiveFocus()
+  }
+
+  // A field or button gained focus (mouse or our own forceActiveFocus):
+  // keep the form state in step, which re-masks the element being left.
+  function fieldFocused(id) {
+    if (root.formActive && root.formFocus !== id) root.guide = Model.withFormFocus(root.guide, id)
+  }
+
+  // Text changed inside a TextField (typing, native paste, primary
+  // selection): sanitize at the boundary and store it in the form state. A
+  // masked field is readOnly, so a change there can only be our binding.
+  function fieldEdited(id, text) {
+    if (!root.formActive || root.fieldMasked(id)) return
+    var value = String(text)
+    if (value === root.formValue(id)) return
+    var limit = Model.formLimit(id)
+    var typed = true
+    var clean
+    if (root.pasteArmed) {
+      root.pasteArmed = false
+      clean = Model.isUrlField(id) ? Model.sanitizeInput(value, limit) : Model.sanitizeTyping(value, limit)
+      typed = false
+    } else {
+      clean = Model.sanitizeTyping(value, limit)
+    }
+    root.guide = Model.withFormValue(root.guide, id, clean, { typed: typed })
+  }
+
+  function setFieldValue(id, value, typed) {
+    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeTyping(value, Model.formLimit(id)), { typed: typed })
+  }
+
+  function toggleRevealField(id) {
+    if (!root.formActive || !root.fieldMaskable(id)) return
+    root.fieldFocused(id)
+    root.guide = Model.toggleReveal(root.guide, id)
+    root.placeCaretAtEnd()
+  }
+
+  function placeCaretAtEnd() {
+    Qt.callLater(function() {
+      var item = root.fieldItem(root.formFocus)
+      if (item && !item.readOnly) {
+        item.forceActiveFocus()
+        item.cursorPosition = item.length
+      }
+    })
+  }
+
+  function clipboardText() {
+    var text = Quickshell.clipboardText
+    return text === undefined || text === null ? "" : String(text)
+  }
+
+  // Paste into a masked field replaces the whole value and masks it again
+  // before the next frame (UX-SOURCES 2.3, 6.6).
+  function pasteReplace(id) {
+    if (root.pasteViaProcess) { root.pasteInto(id); return }
+    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeInput(root.clipboardText(), Model.formLimit(id)))
+  }
+
+  // wl-paste fallback path (D9): asks the service, which answers through a
+  // `clipboardText(text)` signal; guarded because the verb may not exist.
+  function pasteInto(id) {
+    if (root.serviceReady && typeof root.service.requestClipboard === "function") root.service.requestClipboard()
+  }
+
+  function pasteFromProcess(text) {
+    if (!root.formActive || !Model.isFormField(root.form, root.formFocus)) return
+    root.guide = Model.withFormValue(root.guide, root.formFocus, Model.sanitizeInput(text, Model.formLimit(root.formFocus)))
+  }
+
+  // Form keys seen before the focused TextField / Button (Keys.forwardTo):
+  // Tab / Shift+Tab / Up / Down, Enter, Esc, Ctrl+U, Ctrl+R, paste and the
+  // masked-field replacement rules. Everything else falls through to Qt's
+  // native editing (caret, selection, Ctrl+Backspace, Ctrl+A).
+  function handleFormKey(event) {
+    var f = root.form
+    if (!f) return false
+    var key = event.key
+    var focus = root.formFocus
+    var isPaste = event.matches(StandardKey.Paste)
+    if (!isPaste) root.pasteArmed = false
+    if (key === Qt.Key_Escape) { root.handleEscape(); return true }
+    if (f.probing) return true
+    // Shift+Tab arrives as Key_Backtab or as Key_Tab with the modifier
+    // depending on the input path (the PanelKeyCatcher checks both too).
+    var backward = key === Qt.Key_Backtab || (key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier)) || key === Qt.Key_Up
+    if (backward) { root.setGuide(Model.moveFormFocus(root.guide, -1, root.focusOpts())); return true }
+    if (key === Qt.Key_Tab || key === Qt.Key_Down) { root.setGuide(Model.moveFormFocus(root.guide, 1, root.focusOpts())); return true }
+    if (key === Qt.Key_Return || key === Qt.Key_Enter) { root.activateFormFocus(); return true }
+    if (!Model.isFormField(f, focus)) return false
+    var masked = root.fieldMasked(focus)
+    if (key === Qt.Key_U && event.modifiers === Qt.ControlModifier) { root.setFieldValue(focus, "", true); return true }
+    if (key === Qt.Key_R && event.modifiers === Qt.ControlModifier) {
+      if (root.fieldMaskable(focus)) root.toggleRevealField(focus)
+      return true
+    }
+    if (isPaste) {
+      if (masked) { root.pasteReplace(focus); return true }
+      if (root.pasteViaProcess) { root.pasteInto(focus); return true }
+      root.pasteArmed = true
+      return false
+    }
+    if (!masked) return false
+    // Masked = fully selected (UX-SOURCES 2.3): typing, Backspace and
+    // Ctrl+Backspace replace or clear the whole value; navigation is a no-op.
+    if (key === Qt.Key_Backspace || key === Qt.Key_Delete) { root.setFieldValue(focus, "", true); return true }
+    if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return true
+    if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
+      root.setFieldValue(focus, event.text, true)
+      root.placeCaretAtEnd()
+      return true
+    }
+    return true
   }
 
   ListModel { id: groupModel }
@@ -598,12 +1284,28 @@ Item {
   // favorite star) are delegate bindings over the service's maps.
   Connections {
     target: root.service
+    // The Sources signals (SR3) may not exist on the service yet.
+    ignoreUnknownSignals: true
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     // UX 6.1: a manual refresh ends with `Refreshed - N channels` in the
     // status slot for the transient window (D-LIVE-05).
     function onPlaylistRefreshed(channelCount, manual) {
       if (manual && root.opened) root.showTransient(root.copy.transientRefreshed + Model.SEP + Model.pluralChannels(channelCount))
+    }
+    function onSourceProbeFinished(result) { root.onProbeFinished(result) }
+    function onSourcesChanged() { root.syncSourceCursor() }
+    function onSourceSwitched(id) { root.showSwitched(id) }
+    function onSourcesPersistFailed(reason) { if (root.opened) root.showTransient(Model.sourceErrorMessage("persist_failed")) }
+    function onConfiguredChanged() { root.onConfiguredFlip() }
+    function onClipboardText(text) { root.pasteFromProcess(text) }
+  }
+
+  // Form key handler target (Keys.forwardTo on every field and button).
+  Item {
+    id: formKeys
+    Keys.onPressed: function(event) {
+      if (root.formActive && root.handleFormKey(event)) event.accepted = true
     }
   }
 
@@ -647,11 +1349,23 @@ Item {
       Item {
         id: keyHost
         anchors.fill: parent
+        // Above the content while the confirm dialog is open (clipboard precedent).
+        z: root.confirmOpen ? 20 : 0
 
         Keys.onPressed: function(event) {
           if (root.swallowKey) {
             root.swallowKey = false
             event.accepted = true
+            return
+          }
+          if (root.confirmOpen) {
+            if (removeDialog.handleKey(event)) event.accepted = true
+            return
+          }
+          if (root.formActive) {
+            // Reached only while no field has focus (the form is frozen by a
+            // probe): Esc cancels it.
+            if (root.handleFormKey(event)) event.accepted = true
             return
           }
           if (root.searchMode) {
@@ -664,8 +1378,12 @@ Item {
         PanelKeyCatcher {
           id: keyCatcher
           anchors.fill: parent
-          blocked: root.searchMode
+          blocked: !root.catcherLive
           onMoveRequested: function(dx, dy) {
+            if (root.inSources) {
+              if (dy !== 0) root.moveSourceCursorBy(dy, true)
+              return
+            }
             if (dy !== 0) root.moveCursorBy(dy, true)
             else if (dx !== 0) root.moveScopeBy(dx)
           }
@@ -673,12 +1391,43 @@ Item {
           onActivateRequested: {
             var enter = root.enterPending
             root.enterPending = false
-            root.activate(!enter)
+            if (root.inSources) root.activateSourceRow(root.sourceCursor, !enter)
+            else root.activate(!enter)
           }
           onCloseRequested: root.handleEscape()
-          onDeleteRequested: root.removeAt(root.cursorIndex)
-          onTabRequested: function(direction) { root.switchMode() }
-          onTextKey: function(text) { root.handleListLetter(text) }
+          onDeleteRequested: {
+            if (root.inSources) root.startRemove()
+            else root.removeAt(root.cursorIndex)
+          }
+          onTabRequested: function(direction) { if (!root.inSources) root.switchMode() }
+          onTextKey: function(text) {
+            if (root.inSources) root.handleSourcesLetter(text)
+            else root.handleListLetter(text)
+          }
+        }
+
+        // Remove confirmation (UX-SOURCES 1.7 / 3.5): the kit dialog with
+        // the guide's menu tokens, `Remove` preselected as the clipboard
+        // preselects `Delete`; its own scrim cancels only the dialog.
+        ConfirmDialog {
+          id: removeDialog
+          anchors.fill: parent
+          opened: root.confirmOpen
+          z: 10
+          message: root.confirmMessage
+          cancelText: root.copy.buttonCancel
+          confirmText: root.copy.buttonRemove
+          background: root.background
+          foreground: root.foreground
+          scrim: root.scrim
+          selectedBackground: root.selectedBackground
+          selectedText: root.selectedText
+          fontFamily: root.fontFamily
+          cornerRadius: root.cornerRadius
+          Accessible.role: Accessible.Dialog
+          Accessible.name: root.confirmMessage
+          onCanceled: root.cancelRemove()
+          onConfirmed: root.confirmRemove()
         }
       }
 
@@ -698,6 +1447,7 @@ Item {
 
           Text {
             id: searchLine
+            visible: root.headerShowsSearch
             textFormat: Text.PlainText
             anchors.left: parent.left
             anchors.right: scopeLabel.left
@@ -714,12 +1464,30 @@ Item {
             Accessible.description: root.query
           }
 
+          // Screen title for Sources and the forms opened from it (UX-SOURCES 4.2).
+          Text {
+            id: headerTitle
+            visible: !root.headerShowsSearch
+            textFormat: Text.PlainText
+            anchors.left: parent.left
+            anchors.right: scopeLabel.left
+            anchors.rightMargin: Style.spacing.md
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.headerTitle
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+            elide: Text.ElideRight
+            Accessible.role: Accessible.Heading
+            Accessible.name: root.headerTitle
+          }
+
           Text {
             id: scopeLabel
             textFormat: Text.PlainText
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.scopeLabelText
+            text: root.headerRight
             color: root.foreground
             opacity: 0.52
             font.family: root.fontFamily
@@ -779,8 +1547,10 @@ Item {
           height: parent.height - root.headerHeight - root.footerHeight - root.contentSpacing * 2 - (banner.visible ? root.bannerHeight + root.contentSpacing : 0)
 
           Row {
+            id: guideRow
             anchors.fill: parent
             spacing: 0
+            visible: root.guideMode
 
             // Group column (UX 2.2 / 2.3)
             Item {
@@ -793,7 +1563,8 @@ Item {
                 id: groupList
                 anchors.left: parent.left
                 anchors.top: parent.top
-                anchors.bottom: parent.bottom
+                anchors.bottom: pinnedSeparator.top
+                anchors.bottomMargin: Style.space(6)
                 width: root.columnWidth
                 model: groupModel
                 clip: true
@@ -883,6 +1654,80 @@ Item {
                   root.columnWheel = step.remainder
                   if (step.steps !== 0) root.moveScopeBy(step.steps > 0 ? -1 : 1)
                   wheel.accepted = true
+                }
+              }
+
+              // Pinned `Sources` row (UX-SOURCES 3.7 / 4.5): below the group
+              // ListView, never scrolls, a button rather than a scope (h / l
+              // never land on it; hover paints the kit hover fill).
+              Rectangle {
+                id: pinnedSeparator
+                anchors.left: parent.left
+                anchors.bottom: pinnedSources.top
+                anchors.bottomMargin: Style.space(6)
+                width: root.columnWidth
+                height: Style.normalBorderWidth
+                color: Util.alpha(root.border, 0.28)
+              }
+
+              Rectangle {
+                id: pinnedSources
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                width: root.columnWidth
+                height: root.groupEntryHeight
+                radius: root.cornerRadius
+                color: pinnedMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+                Behavior on color { ColorAnimation { duration: 60 } }
+                Accessible.role: Accessible.Button
+                Accessible.name: Model.sourcesRowAccessibleName(root.sourceCount)
+
+                Text {
+                  id: pinnedGlyph
+                  textFormat: Text.PlainText
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: Model.GLYPHS.sources
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.iconSmall
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.left: pinnedGlyph.right
+                  anchors.leftMargin: Style.spacing.labelGap
+                  anchors.right: pinnedCount.left
+                  anchors.rightMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.copy.sourcesTitle
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  id: pinnedCount
+                  textFormat: Text.PlainText
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: Model.formatCount(root.sourceCount)
+                  color: root.foreground
+                  opacity: 0.45
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  horizontalAlignment: Text.AlignRight
+                }
+
+                MouseArea {
+                  id: pinnedMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.openSources()
                 }
               }
 
@@ -1130,7 +1975,9 @@ Item {
             anchors.centerIn: parent
             width: Math.min(body.width, Style.space(640))
             spacing: Style.space(8)
-            visible: root.emptyKind !== ""
+            // The Sources screens own the body in their modes; the
+            // unconfigured state normally shows as the first-run form.
+            visible: root.emptyKind !== "" && root.guideMode
 
             readonly property string glyph: {
               if (root.emptyKind === "loading") return Model.GLYPHS.loading
@@ -1249,6 +2096,524 @@ Item {
               font.pixelSize: Style.font.body
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.WordWrap
+            }
+          }
+
+          // ---- Sources list (UX-SOURCES 3.2 / 4.1): every saved source as a
+          // two-line row, then a separator and the two action rows. Rows
+          // render view objects only (label, host, counts); never a URL.
+          Item {
+            id: sourcesHost
+            anchors.fill: parent
+            visible: root.inSources || root.confirmOpen
+            clip: true
+
+            ListView {
+              id: sourceListView
+              anchors.fill: parent
+              model: root.sourceRowCount
+              clip: true
+              spacing: root.rowSpacing
+              boundsBehavior: Flickable.StopAtBounds
+              cacheBuffer: root.detailRowHeight * 4
+              Accessible.role: Accessible.List
+              Accessible.name: root.copy.accessibleSources
+              onHeightChanged: root.scrollToSourceCursor()
+
+              delegate: Item {
+                id: srow
+                required property int index
+
+                readonly property string rowKind: Model.sourcesRowKind(srow.index, root.sourceCount)
+                readonly property bool isSource: srow.rowKind === "source"
+                readonly property var source: srow.isSource ? (root.sourceList[srow.index] || null) : null
+                readonly property bool hasCursor: srow.index === root.sourceCursor
+                readonly property bool active: !!(srow.source && srow.source.active)
+                readonly property string label: srow.source ? String(srow.source.label) : (srow.rowKind === "add" ? root.copy.rowAdd : root.copy.rowXtream)
+                readonly property string detail: srow.source ? Model.sourceDetail(srow.source, root.narrow) : ""
+                readonly property string meta: srow.source && !root.narrow ? String(srow.source.lastUsedText) : ""
+                readonly property string leadGlyph: srow.isSource ? (srow.active ? Model.GLYPHS.check : "") : (srow.rowKind === "add" ? Model.GLYPHS.plus : Model.GLYPHS.key)
+                // The separator before the action rows travels with the first of them.
+                readonly property bool separatorAbove: srow.rowKind === "add"
+                readonly property int separatorHeight: srow.separatorAbove ? Style.space(6) * 2 + Style.normalBorderWidth : 0
+                readonly property color primaryColor: srow.hasCursor ? root.selectedText : root.foreground
+
+                width: ListView.view.width
+                height: (srow.isSource ? root.detailRowHeight : root.singleRowHeight) + srow.separatorHeight
+                Accessible.role: Accessible.ListItem
+                Accessible.name: srow.source ? Model.sourceAccessibleName(srow.source) : srow.label
+                Accessible.focused: srow.hasCursor
+                Accessible.selected: srow.active
+
+                Rectangle {
+                  visible: srow.separatorAbove
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.leftMargin: Style.space(12)
+                  anchors.rightMargin: Style.space(12)
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(6)
+                  height: Style.normalBorderWidth
+                  color: Util.alpha(root.border, 0.28)
+                }
+
+                BorderSurface {
+                  id: srowBody
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.topMargin: srow.separatorHeight
+                  height: srow.isSource ? root.detailRowHeight : root.singleRowHeight
+                  radius: root.cornerRadius
+                  color: srow.hasCursor ? root.selectedBackground : "transparent"
+                  borderSpec: srow.hasCursor ? root.selectedBorderSpec : root.noBorderSpec
+
+                  MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onPositionChanged: function(mouse) { root.selectSourceFromPointer(srow.index, srow, mouse) }
+                    onClicked: root.activateSourceRow(srow.index, false)
+                  }
+
+                  Item {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.space(12)
+                    anchors.rightMargin: Style.space(12)
+                    anchors.topMargin: Style.space(8)
+                    anchors.bottomMargin: Style.space(8)
+
+                    Text {
+                      id: slead
+                      width: root.leadWidth
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      height: Style.font.title + Style.space(2)
+                      textFormat: Text.PlainText
+                      text: srow.leadGlyph
+                      color: srow.primaryColor
+                      opacity: srow.isSource ? 1 : 0.7
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                      horizontalAlignment: Text.AlignHCenter
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
+                    // Edit / remove buttons on the cursor row only (UX-SOURCES 4.1).
+                    Row {
+                      id: sactions
+                      visible: srow.hasCursor && srow.isSource
+                      anchors.right: parent.right
+                      anchors.verticalCenter: slead.verticalCenter
+                      spacing: Style.space(6)
+
+                      PanelActionButton {
+                        iconText: Model.GLYPHS.pencil
+                        tooltipText: root.copy.tooltipEdit
+                        foreground: root.foreground
+                        fontFamily: root.fontFamily
+                        Accessible.role: Accessible.Button
+                        Accessible.name: root.copy.tooltipEdit + " " + srow.label
+                        onClicked: root.openEditForm()
+                      }
+
+                      PanelActionButton {
+                        iconText: Model.GLYPHS.closeCircle
+                        tooltipText: root.copy.tooltipRemove
+                        foreground: root.foreground
+                        hoverColor: root.urgent
+                        fontFamily: root.fontFamily
+                        Accessible.role: Accessible.Button
+                        Accessible.name: root.copy.tooltipRemove + " " + srow.label
+                        onClicked: root.startRemove()
+                      }
+                    }
+
+                    Text {
+                      id: smeta
+                      anchors.right: sactions.visible ? sactions.left : parent.right
+                      anchors.rightMargin: sactions.visible ? Style.space(8) : 0
+                      anchors.top: parent.top
+                      height: slead.height
+                      textFormat: Text.PlainText
+                      text: srow.meta
+                      visible: text !== ""
+                      color: root.foreground
+                      opacity: 0.52
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      horizontalAlignment: Text.AlignRight
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
+                    Text {
+                      id: slabel
+                      anchors.left: slead.right
+                      anchors.right: smeta.visible ? smeta.left : (sactions.visible ? sactions.left : parent.right)
+                      anchors.rightMargin: Style.space(6)
+                      anchors.top: parent.top
+                      height: slead.height
+                      textFormat: Text.PlainText
+                      text: srow.label
+                      color: srow.primaryColor
+                      opacity: srow.isSource ? 1 : 0.7
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.title
+                      font.bold: srow.active
+                      elide: Text.ElideRight
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
+                    Text {
+                      visible: srow.isSource
+                      anchors.left: slead.right
+                      anchors.right: parent.right
+                      anchors.top: slabel.bottom
+                      textFormat: Text.PlainText
+                      text: srow.detail
+                      color: root.foreground
+                      opacity: 0.52
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      elide: Text.ElideRight
+                    }
+                  }
+                }
+              }
+            }
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              height: Math.min(Style.space(28), parent.height / 2)
+              visible: opacity > 0
+              opacity: sourceListView.contentHeight > sourceListView.height
+                ? Math.max(0, Math.min(1, (sourceListView.contentY - sourceListView.originY) / height))
+                : 0
+              gradient: Gradient {
+                GradientStop { position: 0; color: root.background }
+                GradientStop { position: 1; color: Util.alpha(root.background, 0) }
+              }
+            }
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              height: Math.min(Style.space(28), parent.height / 2)
+              visible: opacity > 0
+              opacity: sourceListView.contentHeight > sourceListView.height
+                ? Math.max(0, Math.min(1, (sourceListView.originY + sourceListView.contentHeight - sourceListView.height - sourceListView.contentY) / height))
+                : 0
+              gradient: Gradient {
+                GradientStop { position: 0; color: Util.alpha(root.background, 0) }
+                GradientStop { position: 1; color: root.background }
+              }
+            }
+          }
+
+          // ---- form column (UX-SOURCES 3.1 / 3.3 / 3.4 / 4.2): the first-run
+          // input (in the empty-state column's place), the add / edit form
+          // and the Xtream form. One Repeater over Model.formFields renders
+          // the fields; the form state in Model.js owns values, focus,
+          // reveal, error and probing.
+          Column {
+            id: formColumn
+            anchors.centerIn: parent
+            width: Math.min(body.width, Style.space(640))
+            spacing: Style.spacing.rowGap
+            visible: root.formActive
+            Accessible.role: Accessible.Dialog
+            Accessible.name: root.formAccessibleName
+
+            readonly property int labelWidth: Style.space(96)
+            readonly property int eyeSlot: Style.space(22) + Style.spacing.controlGap
+            readonly property int fieldX: root.narrow ? 0 : labelWidth + Style.spacing.controlGap
+            readonly property int fieldWidth: width - fieldX - eyeSlot
+
+            Text {
+              visible: root.firstRunHead
+              width: parent.width
+              text: Model.GLYPHS.tv
+              color: root.selectedText
+              opacity: 0.8
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.displayLarge
+              horizontalAlignment: Text.AlignHCenter
+            }
+
+            Text {
+              visible: root.firstRunHead
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.copy.unconfiguredTitle
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+              horizontalAlignment: Text.AlignHCenter
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              visible: root.firstRunHead
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.copy.firstRunProse
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              horizontalAlignment: Text.AlignHCenter
+              wrapMode: Text.WordWrap
+            }
+
+            Repeater {
+              id: fieldsRepeater
+              model: root.formFieldIds
+
+              delegate: Item {
+                id: fieldRow
+                required property int index
+                required property string modelData
+
+                readonly property string fieldId: fieldRow.modelData
+                readonly property alias input: field
+                readonly property bool maskable: root.fieldMaskable(fieldRow.fieldId)
+                readonly property bool masked: root.fieldMasked(fieldRow.fieldId)
+                readonly property bool hasError: !!(root.formError && root.formError.field === fieldRow.fieldId)
+
+                width: parent.width
+                height: root.narrow ? fieldLabel.implicitHeight + Style.spacing.labelGap + field.implicitHeight : field.implicitHeight
+
+                PanelSectionHeader {
+                  id: fieldLabel
+                  x: 0
+                  y: root.narrow ? 0 : Math.round((field.height - height) / 2)
+                  width: root.narrow ? parent.width : formColumn.labelWidth
+                  text: root.fieldLabelText(fieldRow.fieldId)
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  elide: Text.ElideRight
+                }
+
+                TextField {
+                  id: field
+                  x: formColumn.fieldX
+                  y: root.narrow ? fieldLabel.implicitHeight + Style.spacing.labelGap : 0
+                  width: formColumn.fieldWidth
+                  text: root.fieldDisplay(fieldRow.fieldId)
+                  readOnly: fieldRow.masked
+                  password: fieldRow.fieldId === "password"
+                  maximumLength: Model.formLimit(fieldRow.fieldId)
+                  placeholderText: root.fieldPlaceholder(fieldRow.fieldId)
+                  enabled: !root.formProbing
+                  foreground: root.foreground
+                  accent: fieldRow.hasError ? root.urgent : root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  horizontalPadding: Style.spacing.controlPaddingX
+                  verticalPadding: Style.spacing.inputPaddingY
+                  activeFocusOnTab: false
+                  Keys.forwardTo: [formKeys]
+                  Accessible.role: Accessible.EditableText
+                  Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
+                  // A screen reader never gets the query (UX-SOURCES 6.7).
+                  Accessible.description: fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : ""
+                  Accessible.passwordEdit: fieldRow.fieldId === "password"
+                  onTextChanged: root.fieldEdited(fieldRow.fieldId, text)
+                  onActiveFocusChanged: if (activeFocus) root.fieldFocused(fieldRow.fieldId)
+                }
+
+                // Eye button in the reserved slot, only when there is something to mask.
+                PanelActionButton {
+                  visible: fieldRow.maskable
+                  anchors.right: parent.right
+                  anchors.verticalCenter: field.verticalCenter
+                  iconText: fieldRow.masked ? Model.GLYPHS.eye : Model.GLYPHS.eyeOff
+                  tooltipText: fieldRow.masked ? root.copy.tooltipShow : root.copy.tooltipHide
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  enabled: !root.formProbing
+                  Accessible.role: Accessible.Button
+                  Accessible.name: fieldRow.masked ? root.copy.accessibleShow : root.copy.accessibleHide
+                  Accessible.checked: !fieldRow.masked
+                  onClicked: root.toggleRevealField(fieldRow.fieldId)
+                }
+              }
+            }
+
+            // Result / error line (UX-SOURCES 4.2 / 4.3): the banner's inner
+            // row, local to the form, its space reserved so fields never jump.
+            Rectangle {
+              id: resultLine
+              x: formColumn.fieldX
+              width: formColumn.fieldWidth
+              height: Style.space(28)
+              radius: root.cornerRadius
+
+              readonly property bool isError: root.formError !== null
+              readonly property string lineText: {
+                if (root.formError) return String(root.formError.message)
+                if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)
+                return ""
+              }
+
+              opacity: lineText !== "" ? 1 : 0
+              Behavior on opacity { NumberAnimation { duration: root.bannerFadeMs; easing.type: Easing.OutCubic } }
+              color: isError ? Util.alpha(root.urgent, 0.10) : Style.normalFillFor(root.foreground, root.accent)
+              Accessible.role: Accessible.AlertMessage
+              Accessible.name: lineText
+
+              Row {
+                anchors.fill: parent
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
+                spacing: Style.space(8)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  text: resultLine.isError ? Model.GLYPHS.alert : Model.GLYPHS.loading
+                  color: resultLine.isError ? root.urgent : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.icon
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width - Style.space(28)
+                  textFormat: Text.PlainText
+                  text: resultLine.lineText
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                }
+              }
+            }
+
+            // Link rows (UX-SOURCES 1.2, 1.5): Saved sources (n) on first run
+            // with a history, Use Xtream login instead while adding.
+            Row {
+              x: formColumn.fieldX
+              spacing: Style.space(10)
+              visible: savedLink.visible || xtreamLink.visible
+
+              Button {
+                id: savedLink
+                visible: root.firstRunHead && root.sourceCount > 0
+                focusable: true
+                activeFocusOnTab: false
+                bordered: false
+                text: root.copy.linkSaved + " (" + Model.formatCount(root.sourceCount) + ")"
+                fontSize: Style.font.bodySmall
+                fontFamily: root.fontFamily
+                foreground: root.foreground
+                accent: root.accent
+                enabled: !root.formProbing
+                Keys.forwardTo: [formKeys]
+                Accessible.role: Accessible.Button
+                Accessible.name: root.copy.accessibleSaved + Model.formatCount(root.sourceCount)
+                onActiveFocusChanged: if (activeFocus) root.fieldFocused("savedSources")
+                onClicked: root.openSources()
+              }
+
+              Button {
+                id: xtreamLink
+                visible: root.form !== null && root.form.kind === "url" && root.form.sourceId === ""
+                focusable: true
+                activeFocusOnTab: false
+                bordered: false
+                text: root.copy.linkXtream
+                fontSize: Style.font.bodySmall
+                fontFamily: root.fontFamily
+                foreground: root.foreground
+                accent: root.accent
+                enabled: !root.formProbing
+                Keys.forwardTo: [formKeys]
+                Accessible.role: Accessible.Button
+                Accessible.name: root.copy.linkXtream
+                onActiveFocusChanged: if (activeFocus) root.fieldFocused("xtream")
+                onClicked: root.openXtreamForm()
+              }
+            }
+
+            Text {
+              visible: root.form !== null && root.form.kind === "xtream"
+              x: formColumn.fieldX
+              width: formColumn.fieldWidth
+              textFormat: Text.PlainText
+              text: root.copy.xtreamProse
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            // Cancel / Save (Load on first run), right-aligned in the field column.
+            Row {
+              anchors.right: parent.right
+              anchors.rightMargin: formColumn.eyeSlot
+              spacing: Style.space(10)
+
+              Button {
+                id: cancelButton
+                visible: !root.firstRunHead
+                focusable: true
+                activeFocusOnTab: false
+                bordered: true
+                text: root.copy.buttonCancel
+                fontFamily: root.fontFamily
+                foreground: root.foreground
+                accent: root.accent
+                enabled: !root.formProbing
+                Keys.forwardTo: [formKeys]
+                Accessible.role: Accessible.Button
+                Accessible.name: root.copy.buttonCancel
+                onActiveFocusChanged: if (activeFocus) root.fieldFocused("cancel")
+                onClicked: root.cancelForm()
+              }
+
+              Button {
+                id: submitButton
+                focusable: true
+                activeFocusOnTab: false
+                bordered: true
+                text: root.firstRunHead ? root.copy.buttonLoad : root.copy.buttonSave
+                fontFamily: root.fontFamily
+                foreground: root.foreground
+                accent: root.accent
+                enabled: !root.formProbing
+                Keys.forwardTo: [formKeys]
+                Accessible.role: Accessible.Button
+                Accessible.name: text
+                onActiveFocusChanged: if (activeFocus) root.fieldFocused(root.firstRunHead ? "load" : "save")
+                onClicked: root.submitForm()
+              }
+            }
+
+            // First run keeps the terminal command (S5 parity); click copies.
+            Text {
+              id: terminalCaption
+              visible: root.firstRunHead
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.copy.firstRunTerminal
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              horizontalAlignment: Text.AlignHCenter
+              elide: Text.ElideMiddle
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.copyCommand(root.copy.unconfiguredCommand)
+              }
             }
           }
         }
