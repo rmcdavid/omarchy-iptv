@@ -662,7 +662,10 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
             # cannot park us inside read() past the deadline check.
             while total <= MAX_SOURCE_BYTES:
                 if time.monotonic() >= deadline:
-                    raise HelperError("timeout", "%s download from %s exceeded %.0f s" % (label, host, budget))
+                    # No seconds in the message: the guide renders the code as
+                    # "Timed out" and the README states the deadline, so a
+                    # number here could only disagree with them (D-LIVE-11).
+                    raise HelperError("timeout", "%s download from %s exceeded its deadline" % (label, host))
                 chunk = response.read1(HTTP_CHUNK)
                 if not chunk:
                     break

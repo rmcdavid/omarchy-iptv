@@ -379,10 +379,13 @@ class HardeningTest(unittest.TestCase):
             self.assertLess(elapsed, 4.0, "deadline did not fire (%.1f s)" % elapsed)
             self.assertEqual(code, 1)
             self.assertEqual(status["error"]["code"], "timeout")
-            self.assertEqual(status["error"]["message"], "playlist download from 127.0.0.1 exceeded 1 s")
+            # D-LIVE-11: the message never states a duration (the guide shows
+            # "Timed out", the README states the deadline).
+            self.assertEqual(status["error"]["message"], "playlist download from 127.0.0.1 exceeded its deadline")
+            self.assertNotRegex(status["error"]["message"], r"\d+ ?s\b")
             self.assertEqual(status["sourceHost"], "127.0.0.1")
             self.assertNotIn("/trickle", json.dumps(status) + stderr)
-            self.assertIn("exceeded 1 s", stderr)
+            self.assertIn("exceeded its deadline", stderr)
 
     def test_default_deadline_is_sixty_seconds_or_three_times_the_timeout(self):
         original = os.environ.pop(helper.HTTP_DEADLINE_ENV, None)
