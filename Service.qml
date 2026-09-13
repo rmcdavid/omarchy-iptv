@@ -112,6 +112,7 @@ Item {
   property bool wantFocus: false
   property int focusAttempts: 0
   property var pendingPlayId: ""
+  property var previousPlaying: null       // restored when a switch over IPC fails
   property string controlKind: ""
   property var mpvStderrTail: []
   property string lastError: ""
@@ -149,6 +150,7 @@ Item {
     root.healthFailures = 0
     root.lastError = ""
     root.failedAt = Model.withoutFailed(root.failedAt, key)
+    root.previousPlaying = mpvProc.running ? root.nowPlaying : null
     root.nowPlaying = {
       id: key,
       name: String(channel.name || ""),
@@ -253,7 +255,7 @@ Item {
   function statusSummary() {
     return {
       configured: root.configured,
-      source: root.sourceLabel,
+      sourceHost: root.sourceHost,
       status: root.status,
       channels: root.channels.length,
       groups: Model.groupChannels(root.channels).length,
@@ -368,7 +370,12 @@ Item {
           // mpv vanished between two zaps: start a fresh player.
           var channel = root.channelIndex[root.nowPlaying.id]
           if (channel && !mpvProc.running) root.launchMpv(channel)
+        } else if (mpvProc.running && root.previousPlaying) {
+          // The switch did not happen; mpv still plays the previous channel.
+          root.nowPlaying = root.previousPlaying
         }
+      } else if (root.previousPlaying && status.ok === true) {
+        root.previousPlaying = null
       }
     } else if (kind === "stop") {
       if (status.ok !== true && status.error && String(status.error.code) === "not_running" && !mpvProc.running) {
@@ -404,7 +411,7 @@ Item {
   }
 
   function rememberStderr(line) {
-    var clean = Model.scrubUrls(String(line || "").replace(/\s+$/, ""))
+    var clean = Model.redactUrls(String(line || "").replace(/\s+$/, ""))
     if (clean === "") return
     var tail = root.mpvStderrTail.slice()
     tail.push(clean)
@@ -667,7 +674,7 @@ Item {
     stderr: StdioCollector {
       id: playlistStderr
       waitForEnd: true
-      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv playlist:", Model.scrubUrls(text.trim()))
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv playlist:", Model.redactUrls(text.trim()))
     }
     onExited: root.handlePlaylistExit(playlistStdout.text)
   }
@@ -679,7 +686,7 @@ Item {
     stderr: StdioCollector {
       id: epgStderr
       waitForEnd: true
-      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv epg:", Model.scrubUrls(text.trim()))
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv epg:", Model.redactUrls(text.trim()))
     }
     onExited: root.handleEpgExit(epgStdout.text, epgProc.nowOnly)
   }

@@ -29,6 +29,17 @@ check("searchKey empty group", Model.searchKey("CNN", null), "cnn")
 check("searchKey multi-group string stays whole", Model.searchKey("Kids TV", "Animation;Kids;Religious"), "kids tv animation kids religious")
 check("searchKey equals fold(name + ' ' + group)", Model.searchKey("A", "B"), Model.normalizeText("A" + " " + "B"))
 check("normalizeText null", Model.normalizeText(null), "")
+// D-QA-08 / docs/QA.md fold vectors (tests/fixtures/qa-nonascii/qa-unicode.m3u)
+check("normalizeText NFD decomposed e-acute folds", Model.normalizeText("Cafe\u0301 NFD"), "cafe nfd")
+check("normalizeText NFC and NFD agree", Model.normalizeText("Caf\u00e9"), Model.normalizeText("Cafe\u0301"))
+check("normalizeText uppercase accents", Model.normalizeText("\u00c9COLE UPPERCASE ACCENT"), "ecole uppercase accent")
+check("normalizeText Polish", Model.normalizeText("TVP \u0141\u00f3d\u017a"), "tvp lodz")
+check("normalizeText letters outside the table fold via NFD", Model.normalizeText("\u01fa \u0151 \u1ebf \u00f8"), "a o e o")
+check("normalizeText en dash is not ASCII punctuation, kept", Model.normalizeText("Das Erste \u2013 Stra\u00dfe"), "das erste \u2013 strasse")
+check("normalizeText Cyrillic short i keeps its breve (recomposed)", Model.normalizeText("\u041f\u0435\u0440\u0432\u044b\u0439"), "\u043f\u0435\u0440\u0432\u044b\u0439")
+check("normalizeText Vietnamese stacked marks fold", Model.normalizeText("Vi\u1ec7t"), "viet")
+check("normalizeText Arabic / CJK kept", [Model.normalizeText("\u0627\u0644\u062c\u0632\u064a\u0631\u0629"), Model.normalizeText("NHK \u7dcf\u5408")], ["\u0627\u0644\u062c\u0632\u064a\u0631\u0629", "nhk \u7dcf\u5408"])
+check("normalizeText emoji kept", Model.normalizeText("Emoji \ud83d\udcfa Channel"), "emoji \ud83d\udcfa channel")
 check("normalizeText ss/ae/oe ligatures", Model.normalizeText("Stra\u00dfe \u00e6 \u0153"), "strasse ae oe")
 check("tokenize", Model.tokenize("  BBC   one "), ["bbc", "one"])
 check("tokenize empty", Model.tokenize("   "), [])
@@ -45,6 +56,8 @@ check("channelId url hash", Model.channelId({ url: "foobar" }), "u:bf9cf968")
 check("channelId null", Model.channelId(null), "")
 check("indexById first wins", Object.keys(Model.indexById([{ id: "a", name: 1 }, { id: "a", name: 2 }, { id: "b" }])), ["a", "b"])
 check("findByUrl", Model.findByUrl([{ id: "a", url: "http://x" }, { id: "b", url: "http://y" }], "http://y").id, "b")
+check("asList copies array-likes and passes arrays through", (() => { const a = [1]; const like = { length: 2, 0: "x", 1: "y" }; return [Model.asList(a) === a, Model.asList(like), Model.asList(null), Model.asList("str")] })(), [true, ["x", "y"], [], []])
+check("favorites-first works with an array-like favorites list", Model.filterChannels([{ id: "1", name: "BBC One", group: "UK" }, { id: "5", name: "BBC Two", group: "UK" }], "bbc", 10, { favorites: { length: 1, 0: "5" } }).rows.map(c => c.id), ["5", "1"])
 check("findByUrl miss", Model.findByUrl([{ id: "a", url: "http://x" }], "http://z"), null)
 
 // ---- channels / groups ----
@@ -67,6 +80,14 @@ check("prepareChannels ungrouped", [prepared[2].group, prepared[2].primaryGroup,
 check("prepareChannels nameKey when name equals group", prepared[3].nameKey, "uk")
 check("prepareChannels does not mutate input", (() => { const src = [{ name: "X", url: "u" }]; Model.prepareChannels(src); return Object.keys(src[0]) })(), ["name", "url"])
 check("prepareChannels null", Model.prepareChannels(null), [])
+check("displayName never a URL (D-QA-02)", Model.prepareChannels([
+  { name: "http://h.test/live/1.m3u8", tvgName: "Real Name", url: "http://h.test/live/1.m3u8" },
+  { name: "", url: "http://h.test/2" },
+  { name: "rtsp://cam/1", url: "rtsp://cam/1" },
+  { name: "  Fine  ", url: "u" }
+]).map(c => c.name), ["Real Name", "Channel 2", "Channel 3", "Fine"])
+check("displayName recomputes searchKey when the name was replaced", Model.prepareChannels([{ name: "http://h.test/x", tvgName: "Arte", group: "DE", searchKey: "http h test x de" }])[0].searchKey, "arte de")
+check("looksLikeUrl", [Model.looksLikeUrl("http://x"), Model.looksLikeUrl("udp://@239.0.0.1:1234"), Model.looksLikeUrl("BBC One"), Model.looksLikeUrl("")], [true, true, false, false])
 
 check("groupChannels playlist order with counts", Model.groupChannels(prepared).map(g => g.name + ":" + g.count), ["UK:2", "CA:1", "Ungrouped:1"])
 check("groupChannels null", Model.groupChannels(null), [])
@@ -227,7 +248,7 @@ check("statusReason network flavours", [
   Model.statusReason({ ok: false, error: { code: "network", message: "weird" } })
 ], ["Timed out", "Could not resolve host", "Connection refused", "Network error"])
 check("statusReason table", [Model.statusReason({ ok: false, error: { code: "not_found" } }), Model.statusReason({ ok: false, error: { code: "empty_playlist" } }), Model.statusReason({ ok: false, error: { code: "not_implemented" } })], ["File not found", "Playlist has no channels", "Helper command not implemented"])
-check("statusReason unknown code scrubs URLs from the message", Model.statusReason({ ok: false, error: { code: "odd", message: "bad http://u:p@h.test/x?y" } }), "bad http://h.test")
+check("statusReason unknown code redacts URLs from the message", Model.statusReason({ ok: false, error: { code: "odd", message: "bad http://u:p@h.test/x?y" } }), "bad h.test")
 check("statusReason ok", Model.statusReason({ ok: true }), "")
 check("statusHost", [Model.statusHost({ sourceHost: "h.test" }), Model.statusHost(null)], ["h.test", ""])
 check("statusHealthy", [Model.statusHealthy({ ok: true, running: true }), Model.statusHealthy({ ok: false, running: false }), Model.statusHealthy(null)], [true, false, false])
@@ -253,6 +274,8 @@ check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency
 check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"] })
 check("splitMpvArgs rejects --script and --config-dir", Model.splitMpvArgs("--script=/e.lua --config-dir=/x --scripts=/y --input-ipc-client=fd://3").args, [])
 check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [] })
+check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"] })
+check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
 const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", name: "BBC One", url: "--not-an-option", headers: {}, extraArgs: ["--profile=low-latency"] })
@@ -270,7 +293,7 @@ const tvOff = "\udb81\udd03", alert = "\udb80\udc26", refreshGlyph = "\udb81\udc
 check("notifyArgv streamFailed", Model.notifyArgv("streamFailed", { name: "Sky Sports", reason: "HTTP 403" }),
   ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", "Sky Sports did not play" + SEP + "HTTP 403"])
 check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), ["X did not play"])
-check("notifyArgv streamFailed scrubs URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), ["X did not play" + SEP + "Failed to open https://h.test"])
+check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), ["X did not play" + SEP + "Failed to open h.test"])
 check("notifyArgv playlistRefreshed", Model.notifyArgv("playlistRefreshed", { channelCount: 1204, groupCount: 38 }).slice(3), ["-u", "low", "-g", refreshGlyph, "-r", "74012", "Playlist refreshed", "1,204 channels in 38 groups"])
 check("notifyArgv playlistError with cache", Model.notifyArgv("playlistError", { reason: "HTTP 503", cachedAt: "12:40" }).slice(-2), ["Playlist error", "Could not fetch the playlist (HTTP 503). Using cached copy from 12:40."])
 check("notifyArgv playlistError without cache", Model.notifyArgv("playlistError", { reason: "Timed out" }).slice(-1), ["Could not fetch the playlist (Timed out). Open the guide for details."])
@@ -284,8 +307,11 @@ check("sourceLabel https", Model.sourceLabel("HTTPS://Host.Test/x.m3u"), "https:
 check("sourceLabel local", [Model.sourceLabel("/home/x/list.m3u"), Model.sourceLabel("~/l.m3u"), Model.sourceLabel("file:///tmp/x.m3u")], ["local file", "local file", "local file"])
 check("sourceLabel empty / junk", [Model.sourceLabel(""), Model.sourceLabel("ftp"), Model.sourceLabel(null)], ["", "unknown source", ""])
 check("hostOf", [Model.hostOf("http://u:p@h.test/x"), Model.hostOf("/x"), Model.hostOf("")], ["h.test", "local file", ""])
-check("scrubUrls keeps scheme+host only", Model.scrubUrls("open https://a.b/c/d?e=f and rtsp://u:p@h:554/x fine"), "open https://a.b and rtsp://h fine")
-check("scrubUrls no urls", Model.scrubUrls("plain text"), "plain text")
+check("redactUrls replaces every URL by its host (D-QA-01)", Model.redactUrls("Failed to open http://user:pass@tv.example.net:8080/get.php?u=1&p=2."), "Failed to open tv.example.net")
+check("redactUrls several URLs", Model.redactUrls("open https://a.b/c/d?e=f and rtsp://u:p@h:554/x fine"), "open a.b and h fine")
+check("redactUrls no urls", Model.redactUrls("plain text"), "plain text")
+check("redactUrls empty host", Model.redactUrls("x file:///etc/passwd y"), "x [url] y")
+check("scrubUrls is an alias of redactUrls", Model.scrubUrls("see http://h.test/p"), "see h.test")
 
 // ---- formatting ----
 check("formatCount", [Model.formatCount(0), Model.formatCount(999), Model.formatCount(1204), Model.formatCount(1234567), Model.formatCount("x")], ["0", "999", "1,204", "1,234,567", "0"])

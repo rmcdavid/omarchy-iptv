@@ -123,8 +123,33 @@ function str(value) {
   return String(value === undefined || value === null ? "" : value)
 }
 
+// Always a real Array. Values that cross the QML boundary (a `property var`
+// holding an object literal, a QVariantList) are array-like but fail
+// Array.isArray in the Qt engine; copy them so every caller can use Array
+// methods safely. Plain arrays are returned as-is (no copy on the hot path).
+function asList(value) {
+  if (Array.isArray(value)) return value
+  if (value && typeof value === "object" && typeof value.length === "number") {
+    var out = []
+    for (var i = 0; i < value.length; i++) out.push(value[i])
+    return out
+  }
+  return []
+}
+
+// Combining marks U+0300..U+036F are stripped after NFD, but only behind a
+// Latin base letter, so every accented Latin letter folds (not only the
+// FOLD_GROUPS table) while Cyrillic/Greek/Vietnamese-style marks on other
+// scripts recompose unchanged (NFC), byte-identical to the helper's output.
+var LATIN_COMBINING_RE = /([a-z])[\u0300-\u036f]+/g
+
+function decompose(text) {
+  if (typeof text.normalize !== "function") return text
+  return text.normalize("NFD").replace(LATIN_COMBINING_RE, "$1").normalize("NFC")
+}
+
 function normalizeText(value) {
-  var text = str(value).toLowerCase()
+  var text = decompose(str(value).toLowerCase())
   var out = ""
   for (var i = 0; i < text.length; i++) {
     var ch = text.charAt(i)
@@ -202,7 +227,7 @@ function channelId(channel) {
 
 function indexById(channels) {
   var index = {}
-  var list = Array.isArray(channels) ? channels : []
+  var list = asList(channels)
   for (var i = 0; i < list.length; i++) {
     var id = channelId(list[i])
     if (id !== "" && index[id] === undefined) index[id] = list[i]
@@ -213,7 +238,7 @@ function indexById(channels) {
 function findByUrl(channels, url) {
   var target = str(url)
   if (target === "") return null
-  var list = Array.isArray(channels) ? channels : []
+  var list = asList(channels)
   for (var i = 0; i < list.length; i++) if (list[i] && str(list[i].url) === target) return list[i]
   return null
 }
@@ -227,11 +252,25 @@ function primaryGroup(channel) {
   return first === "" ? UNGROUPED : first
 }
 
+// A channel name is never a URL (D-QA-02): an empty or URL-shaped name
+// falls back to tvg-name, then to a positional label.
+function looksLikeUrl(text) {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(str(text)) || /^(rtp|udp|rtsp|mms):/i.test(str(text))
+}
+
+function displayName(channel, position) {
+  var name = str(channel && channel.name).replace(/^\s+|\s+$/g, "")
+  if (name !== "" && !looksLikeUrl(name)) return name
+  var tvg = str(channel && channel.tvgName).replace(/^\s+|\s+$/g, "")
+  if (tvg !== "" && !looksLikeUrl(tvg)) return tvg
+  return "Channel " + (Number(position) > 0 ? Math.floor(Number(position)) : "?")
+}
+
 // One pass at load time (off the open path): guarantees `id`, `searchKey`,
 // `nameKey` and `primaryGroup` on every row so a keystroke never normalizes
 // 10k strings. Returns new objects; never mutates the cache rows.
 function prepareChannels(channels) {
-  var list = Array.isArray(channels) ? channels : []
+  var list = asList(channels)
   var out = []
   var groupKeys = {}
   for (var i = 0; i < list.length; i++) {
@@ -240,13 +279,13 @@ function prepareChannels(channels) {
     var row = {}
     for (var key in src) row[key] = src[key]
     row.id = channelId(src)
-    row.name = str(src.name)
+    row.name = displayName(src, out.length + 1)
     row.group = str(src.group)
     row.primaryGroup = primaryGroup(src)
     var grp = row.group
     if (groupKeys[grp] === undefined) groupKeys[grp] = normalizeText(grp)
     var groupKey = groupKeys[grp]
-    if (typeof row.searchKey !== "string" || row.searchKey === "") row.searchKey = searchKey(row.name, grp)
+    if (typeof row.searchKey !== "string" || row.searchKey === "" || row.name !== str(src.name)) row.searchKey = searchKey(row.name, grp)
     if (groupKey !== "" && row.searchKey.length > groupKey.length && row.searchKey.substring(row.searchKey.length - groupKey.length - 1) === " " + groupKey) {
       row.nameKey = row.searchKey.substring(0, row.searchKey.length - groupKey.length - 1)
     } else if (groupKey !== "" && row.searchKey === groupKey) {
@@ -284,7 +323,8 @@ function matchRank(key, tokens, nameKey) {
 
 function favoriteSet(favorites) {
   var set = {}
-  var list = Array.isArray(favorites) ? favorites : (favorites && Array.isArray(favorites.favorites) ? favorites.favorites : [])
+  var list = asList(favorites)
+  if (list.length === 0 && favorites && typeof favorites === "object" && favorites.favorites) list = asList(favorites.favorites)
   for (var i = 0; i < list.length; i++) set[str(list[i])] = true
   return set
 }
@@ -293,7 +333,7 @@ function favoriteSet(favorites) {
 // only materializes `limit` rows: best tier first, favorites first inside a
 // tier, playlist order inside that. `favorites` is an id array or a state.
 function filterChannels(channels, query, limit, favorites) {
-  var list = Array.isArray(channels) ? channels : []
+  var list = asList(channels)
   var max = limit > 0 ? Math.floor(limit) : MAX_ROWS_DEFAULT
   var tokens = tokenize(query)
   if (tokens.length === 0) {
@@ -325,7 +365,7 @@ function filterChannels(channels, query, limit, favorites) {
 
 // Playlist groups in first-seen order (R5), each with its channel count.
 function groupChannels(channels) {
-  var list = Array.isArray(channels) ? channels : []
+  var list = asList(channels)
   var seen = {}
   var order = []
   for (var i = 0; i < list.length; i++) {
@@ -379,7 +419,7 @@ function countRecents(list, st) {
 // Group column entries (UX 2.2): Recent (hidden while empty), Favorites
 // (always), All, then a "GROUPS" header and one entry per playlist group.
 function scopeEntries(channels, state) {
-  var list = Array.isArray(channels) ? channels : []
+  var list = asList(channels)
   var st = state || emptyState()
   var out = []
   var recents = countRecents(list, st)
@@ -396,7 +436,7 @@ function scopeEntries(channels, state) {
 
 // Candidate rows for a scope id. Favorites/Recent resolve through the state.
 function channelsForScope(channels, scopeId, state) {
-  var list = Array.isArray(channels) ? channels : []
+  var list = asList(channels)
   var id = str(scopeId)
   if (id === SCOPE_ALL || id === "") return list
   var st = state || emptyState()
@@ -439,7 +479,7 @@ function effectiveScope(scopeId, query) {
 
 // Next selectable column entry (skips the header row), wrapping (UX 2.3).
 function moveScope(entries, scopeId, delta) {
-  var list = Array.isArray(entries) ? entries : []
+  var list = asList(entries)
   var ids = []
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].kind !== "header" && list[i].id !== "") ids.push(list[i].id)
   if (ids.length === 0) return str(scopeId)
@@ -450,7 +490,7 @@ function moveScope(entries, scopeId, delta) {
 }
 
 function scopeIndex(entries, scopeId) {
-  var list = Array.isArray(entries) ? entries : []
+  var list = asList(entries)
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === str(scopeId) && list[i].kind !== "header") return i
   return -1
 }
@@ -458,12 +498,12 @@ function scopeIndex(entries, scopeId) {
 // Default entry on open (UX 2.2): Favorites when it has entries, else All.
 function initialScope(channels, state) {
   var st = state || emptyState()
-  return countFavorites(Array.isArray(channels) ? channels : [], st) > 0 ? SCOPE_FAVORITES : SCOPE_ALL
+  return countFavorites(asList(channels), st) > 0 ? SCOPE_FAVORITES : SCOPE_ALL
 }
 
 // Cursor starts on the playing channel when it is in the list, else row 0.
 function cursorFor(rows, playingId) {
-  var list = Array.isArray(rows) ? rows : []
+  var list = asList(rows)
   var id = str(playingId)
   if (id === "") return 0
   for (var i = 0; i < list.length; i++) if (channelId(list[i]) === id) return i
@@ -577,7 +617,7 @@ function zapRing(channels, state, nowPlaying) {
 
 // Wrap-around neighbour inside an ordered list.
 function nextInGroup(list, currentId, delta) {
-  var rows = Array.isArray(list) ? list : []
+  var rows = asList(list)
   if (rows.length === 0) return null
   var step = delta < 0 ? -1 : 1
   var at = -1
@@ -596,15 +636,17 @@ function parseState(text) {
   var state = emptyState()
   var parsed = parseJsonObject(text)
   if (!parsed) return state
-  if (Array.isArray(parsed.favorites)) {
-    for (var i = 0; i < parsed.favorites.length; i++) {
-      var id = str(parsed.favorites[i])
+  var favs = asList(parsed.favorites)
+  if (favs.length > 0) {
+    for (var i = 0; i < favs.length; i++) {
+      var id = str(favs[i])
       if (id !== "" && state.favorites.indexOf(id) === -1) state.favorites.push(id)
     }
   }
-  if (Array.isArray(parsed.recents)) {
-    for (var r = 0; r < parsed.recents.length; r++) {
-      var entry = parsed.recents[r]
+  var recs = asList(parsed.recents)
+  if (recs.length > 0) {
+    for (var r = 0; r < recs.length; r++) {
+      var entry = recs[r]
       if (!entry || typeof entry !== "object" || !entry.id) continue
       state.recents.push({ id: String(entry.id), name: str(entry.name), at: Number(entry.at) || 0 })
     }
@@ -616,13 +658,13 @@ function parseState(text) {
 }
 
 function isFavorite(state, id) {
-  return !!(state && Array.isArray(state.favorites) && state.favorites.indexOf(str(id)) !== -1)
+  return !!(state && asList(state.favorites).indexOf(str(id)) !== -1)
 }
 
 // Returns a new favorites array; never mutates the input.
 function toggleFavorite(favorites, id) {
   var key = str(id)
-  var list = Array.isArray(favorites) ? favorites.slice() : []
+  var list = asList(favorites).slice()
   if (key === "") return list
   var at = list.indexOf(key)
   if (at === -1) list.push(key)
@@ -636,7 +678,7 @@ function pushRecent(recents, channel, max, nowSec) {
   var cap = max > 0 ? Math.floor(max) : 10
   var out = []
   if (id !== "") out.push({ id: id, name: str(channel.name), at: Math.floor(Number(nowSec) || 0) })
-  var list = Array.isArray(recents) ? recents : []
+  var list = asList(recents)
   for (var i = 0; i < list.length && out.length < cap; i++) {
     if (list[i] && list[i].id !== id) out.push(list[i])
   }
@@ -650,7 +692,7 @@ function recordPlayed(state, channel, max, nowSec) {
   var id = channelId(channel)
   return {
     version: STATE_VERSION,
-    favorites: Array.isArray(st.favorites) ? st.favorites.slice() : [],
+    favorites: asList(st.favorites).slice(),
     recents: pushRecent(st.recents, channel, max, nowSec),
     lastPlayed: id === "" ? st.lastPlayed : { id: id, name: str(channel.name), at: Math.floor(Number(nowSec) || 0) }
   }
@@ -660,8 +702,8 @@ function withFavorites(state, favorites) {
   var st = state || emptyState()
   return {
     version: STATE_VERSION,
-    favorites: Array.isArray(favorites) ? favorites.slice() : [],
-    recents: Array.isArray(st.recents) ? st.recents.slice() : [],
+    favorites: asList(favorites).slice(),
+    recents: asList(st.recents).slice(),
     lastPlayed: st.lastPlayed || null
   }
 }
@@ -670,11 +712,11 @@ function removeRecent(state, id) {
   var st = state || emptyState()
   var key = str(id)
   var recents = []
-  var list = Array.isArray(st.recents) ? st.recents : []
+  var list = asList(st.recents)
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].id !== key) recents.push(list[i])
   return {
     version: STATE_VERSION,
-    favorites: Array.isArray(st.favorites) ? st.favorites.slice() : [],
+    favorites: asList(st.favorites).slice(),
     recents: recents,
     lastPlayed: st.lastPlayed || null
   }
@@ -684,11 +726,11 @@ function removeRecent(state, id) {
 function trimRecents(state, max) {
   var st = state || emptyState()
   var cap = max > 0 ? Math.floor(max) : 10
-  var list = Array.isArray(st.recents) ? st.recents : []
+  var list = asList(st.recents)
   if (list.length <= cap) return st
   return {
     version: STATE_VERSION,
-    favorites: Array.isArray(st.favorites) ? st.favorites.slice() : [],
+    favorites: asList(st.favorites).slice(),
     recents: list.slice(0, cap),
     lastPlayed: st.lastPlayed || null
   }
@@ -764,7 +806,7 @@ function parseHelperStatus(text, kind) {
       doc[counters[i]] = isFinite(n) ? n : 0
     }
   }
-  if (doc.warnings !== undefined && !Array.isArray(doc.warnings)) doc.warnings = []
+  if (doc.warnings !== undefined) doc.warnings = asList(doc.warnings)
   return doc
 }
 
@@ -879,7 +921,7 @@ function splitMpvArgs(text) {
   for (var i = 0; i < parts.length; i++) {
     var token = parts[i]
     if (token === "") continue
-    var ok = /^--[a-z0-9][a-z0-9-]*(=.*)?$/i.test(token)
+    var ok = /^--[a-z0-9][a-z0-9-]*(=.*)?$/.test(token)
     var name = token.indexOf("=") === -1 ? token : token.substring(0, token.indexOf("="))
     if (!ok || MPV_RESERVED[name] === true || name.indexOf("--no-") === 0 && MPV_RESERVED["--" + name.substring(5)] === true) rejected.push(token)
     else args.push(token)
@@ -924,7 +966,7 @@ function buildMpvArgv(params) {
     "--ytdl=no"
   ]
   argv = argv.concat(headerArgs(p.headers))
-  if (Array.isArray(p.extraArgs)) argv = argv.concat(p.extraArgs)
+  argv = argv.concat(asList(p.extraArgs))
   argv.push("--")
   argv.push(str(p.url))
   return argv
@@ -983,11 +1025,18 @@ function hostOf(url) {
   return at === -1 ? label : label.substring(at + 3)
 }
 
-// Replace every URL in free text by its scheme + host (R12).
-function scrubUrls(text) {
-  return str(text).replace(/([a-z][a-z0-9+.-]*):\/\/(?:[^@\/\s]*@)?([^\/\s?#:]+)[^\s]*/gi, function(all, scheme, host) {
-    return scheme.toLowerCase() + "://" + host
+// Replace every `scheme://...` in free text by its host alone (R12, D-QA-01):
+// userinfo, port, path and query are gone. Applied at every sink that can
+// carry mpv or helper output (notifications, lastError, console, tooltips).
+function redactUrls(text) {
+  return str(text).replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^@\/\s]*@)?([^\/\s?#:]*)[^\s]*/gi, function(all, host) {
+    return host !== "" ? host : "[url]"
   })
+}
+
+// Older name kept for callers; same behaviour.
+function scrubUrls(text) {
+  return redactUrls(text)
 }
 
 // ------------------------------------------------------------ formatting
@@ -1063,7 +1112,7 @@ function formatEpgLine(entry, nowSec) {
 
 function joinParts(parts) {
   var out = []
-  var list = Array.isArray(parts) ? parts : []
+  var list = asList(parts)
   for (var i = 0; i < list.length; i++) if (str(list[i]) !== "") out.push(str(list[i]))
   return out.join(SEP)
 }
@@ -1185,6 +1234,7 @@ if (typeof module !== "undefined") {
     SETTING_RANGES: SETTING_RANGES,
     NOTIFY_IDS: NOTIFY_IDS,
     FOLD_GROUPS: FOLD_GROUPS,
+    asList: asList,
     normalizeText: normalizeText,
     searchKey: searchKey,
     tokenize: tokenize,
@@ -1251,7 +1301,10 @@ if (typeof module !== "undefined") {
     notifyArgv: notifyArgv,
     sourceLabel: sourceLabel,
     hostOf: hostOf,
+    redactUrls: redactUrls,
     scrubUrls: scrubUrls,
+    displayName: displayName,
+    looksLikeUrl: looksLikeUrl,
     formatClock: formatClock,
     formatCount: formatCount,
     pluralChannels: pluralChannels,
