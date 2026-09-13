@@ -27,12 +27,12 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M1-01 | Helper skeleton, paths, atomic writes, status.json | FE | todo | Deps: M0-07 |
-| M1-02 | M3U parser + tests | FE | todo | Deps: M1-01 |
-| M1-03 | Playlist fetch + cache + stale handling | FE | todo | Deps: M1-02 |
-| M1-04 | XMLTV EPG streaming parse + now/next | FE | todo | Deps: M1-02 |
-| M1-05 | mpv control over IPC socket | FE | todo | Deps: M1-01 |
-| M1-06 | State file (favorites, recents) | FE | todo | Deps: M1-01 |
+| M1-01 | Helper skeleton, paths, atomic writes, status.json | FE | review | merged f03fef2 (lane A); structured errors, redaction, atomic 0600 writes |
+| M1-02 | M3U parser + tests | FE | review | merged f03fef2; 61 parser tests incl. QA fixtures; 10k parse 467 ms |
+| M1-03 | Playlist fetch + cache + stale handling | FE | review | merged f03fef2; codes bad_url, not_a_playlist added |
+| M1-04 | XMLTV EPG streaming parse + now/next | FE | review | merged f03fef2; --now seam, --now-only 75 ms for 10k, private window cache |
+| M1-05 | mpv control over IPC socket | FE | review | merged f03fef2; play/stop/status with fake-mpv tests (23) |
+| M1-06 | State file (favorites, recents) | FE | review | merged f03fef2; helper `state` subcommand + Service.qml FileView |
 
 ### M1 MVP - Lane B (Model.js + QML)
 
@@ -51,21 +51,21 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 |---|---|---|---|---|
 | M1-13 | Refresh scheduler + cached hint | FE | review | merged 514acef (Service.qml timers, cached banner) |
 | M1-14 | Notifications | FE | review | merged 514acef; URL-redacted per D-QA-01 |
-| M1-15 | Playback wiring end to end | FE | review | QML side merged 514acef; needs lane A play/stop/status |
+| M1-15 | Playback wiring end to end | FE | review | both lanes merged f03fef2; live verification pending |
 | M1-16 | IpcHandler commands | FE | review | merged 514acef: toggle play stop next previous refresh status |
 | M1-17 | QML unit tests (spec.qml) | FE | review | Model.spec.qml 16 passed; Guide/BarWidget specs not possible under qmltestrunner (PanelWindow), harness covers them |
 | M1-18 | README | FE (UX review) | review | PO rewrote README e03f2f8 + contrib/ snippets |
-| M1-19 | scripts/check.sh green | FE | todo | Deps: M1-17, M1-18 |
+| M1-19 | scripts/check.sh green | FE | done | f03fef2: validate ok, 244 node, 127 python, 16 qml, ascii ok |
 | M1-20 | FE smoke on live shell (US1-US8 once) | FE | todo | Deps: M1-13..M1-19 |
 
 ### M1.1 Hardening
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M1.1-01 | Live-shell functional QA (docs/QA.md matrix) | QA | todo | Deps: M1-20 |
-| M1.1-02 | Theme-switch check | QA | todo | Deps: M1-20 |
-| M1.1-03 | Performance check (10k playlist, large EPG) | QA | todo | Deps: M1-20, M0-08 |
-| M1.1-04 | Security review (G4) | ARCH | todo | Deps: M1-20 |
+| M1.1-01 | Live-shell functional QA (docs/QA.md matrix) | QA | doing | started 2026-09-12 on main f03fef2 |
+| M1.1-02 | Theme-switch check | QA | doing | part of the live pass |
+| M1.1-03 | Performance check (10k playlist, large EPG) | QA | doing | part of the live pass |
+| M1.1-04 | Security review (G4) | ARCH | doing | started 2026-09-12 on main f03fef2, report in docs/SECURITY-REVIEW.md |
 | M1.1-05 | Fix round 1 (P1/P2) | FE | todo | Deps: M1.1-01..04 |
 | M1.1-06 | Regression re-test | QA | todo | Deps: M1.1-05 |
 | M1.1-07 | Docs polish + known limitations | FE+UX | todo | Deps: M1.1-06 |
