@@ -34,11 +34,11 @@ class NormalizationTest(unittest.TestCase):
         self.assertEqual(helper.search_key("CNN", None), "cnn")
 
     def test_decomposed_latin_accents_fold_but_other_scripts_keep_their_marks(self):
-        # D-QA-08: NFKD, drop U+0300-U+036F after an ASCII letter, NFC. Mirror in Model.js.
+        # D-QA-08: NFD, drop U+0300-U+036F after an ASCII letter, NFC -- same as Model.js decompose().
         self.assertEqual(helper.normalize_text("Cafe\u0301 NFD"), "cafe nfd")
         self.assertEqual(helper.normalize_text("\u0418\u0306 \u0439"), "\u0439 \u0439")      # Cyrillic short i keeps its breve
         self.assertEqual(helper.normalize_text("\u1ec7"), "e")                               # Vietnamese e with two marks
-        self.assertEqual(helper.normalize_text("\ufb01lm"), "film")                          # compatibility ligature
+        self.assertEqual(helper.normalize_text("\ufb01lm"), "\ufb01lm")                      # NFD (not NFKD): ligatures untouched, like Model.js
         self.assertEqual(helper.normalize_text("\ud55c\uae00"), "\ud55c\uae00")              # Hangul recomposes
         self.assertEqual(helper.normalize_text("\u03ac"), "\u03ac")                          # Greek alpha with tonos kept
 

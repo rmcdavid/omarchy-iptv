@@ -224,13 +224,13 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 
 def normalize_text(value: Any) -> str:
     """Lower-case, fold Latin diacritics (precomposed via FOLD, decomposed via
-    NFKD + dropping U+0300-U+036F after an ASCII letter, then NFC so every
+    NFD + dropping U+0300-U+036F after an ASCII letter, then NFC so every
     other script recomposes), ASCII punctuation to one space (D-QA-08).
-    Model.js normalizeText must apply the same steps."""
+    Mirrors Model.js decompose()/normalizeText byte for byte (NFD, not NFKD)."""
     text = ("" if value is None else str(value)).lower()
     if not text.isascii():
         import unicodedata
-        text = unicodedata.normalize("NFC", _LATIN_MARKS.sub(r"\1", unicodedata.normalize("NFKD", text))).lower()
+        text = unicodedata.normalize("NFC", _LATIN_MARKS.sub(r"\1", unicodedata.normalize("NFD", text)))
     folded = "".join(FOLD.get(ch, ch) for ch in text)
     return _PUNCT.sub(" ", folded).strip(" ")
 
