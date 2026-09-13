@@ -150,6 +150,14 @@ _CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
 # Mirrors Model.sanitizeInput: C0 controls, DEL and C1 controls are dropped.
 _CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.S)
+# Model.validateSourceUrl's scheme match: JS `.` stops at CR, LF, U+2028 and U+2029.
+_SOURCE_SCHEME_RE = re.compile("^([A-Za-z][A-Za-z0-9+.\\-]*):([^\\n\\r\u2028\u2029]*)$")
+_AUTHORITY_END = re.compile(r"[/?#]")
+_BARE_HOST_CHARS = re.compile(r"[:\[\]]")
+_ASCII_DIGITS = re.compile(r"^[0-9]+$")
+_ZERO_WIDTH = re.compile("[\u200b-\u200d\u2060\ufeff]")
+_IPV6_LITERAL = re.compile(r"^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$")
+_URL_SPACE = re.compile("[\\s\ufeff]")          # JS \s includes U+FEFF, Python's does not
 _BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
 
@@ -346,11 +354,21 @@ def truncate_utf16(text: str, limit: int) -> str:
 
 
 def sanitize_input(value: Any, limit: int) -> str:
-    """Control characters (CR, LF, TAB included) removed, ASCII space and
-    NBSP trimmed, capped at `limit` UTF-16 units. Applied at every field
-    boundary and again inside validate_source_url."""
-    text = _CONTROL_CHARS.sub("", "" if value is None else str(value))
+    """Model.sanitizeInput: one leading byte-order mark (a paste artefact,
+    SR15) dropped, control characters (CR, LF, TAB included) removed, ASCII
+    space and NBSP trimmed, capped at `limit` UTF-16 units. Applied at every
+    field boundary and again inside validate_source_url."""
+    text = "" if value is None else str(value)
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    text = _CONTROL_CHARS.sub("", text)
     return truncate_utf16(text.strip(" \u00a0"), limit)
+
+
+def cap_code_points(text: str, limit: int) -> str:
+    """Model.capCodePoints: the label cap counts Unicode code points, not
+    UTF-16 units (SR22: JS [...s].length, Python len)."""
+    return text[:limit]
 
 
 def _validation(ok: bool, code: str, message: str, kind: str = "", url: str = "", host: str = "") -> dict[str, Any]:
@@ -364,29 +382,49 @@ def _validate_path(path: str) -> dict[str, Any]:
     return _validation(True, "ok", "", "file", path, "")
 
 
-def validate_source_url(text: Any) -> dict[str, Any]:
-    """-> {ok, code, message, kind, url, host}; `url` is the normalized form
-    (the source identity). Codes: empty, too_long, scheme, invalid,
-    relative_path, unsafe_path (UX-SOURCES.md 5.4 + the helper's own
-    unsafe_path). Messages never contain a URL."""
+def looks_like_host(text: str) -> bool:
+    """SR12: a "." or ":" before the first "/" reads as a host."""
+    return re.search(r"[.:]", text.split("/", 1)[0]) is not None
+
+
+def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
+    """Mirror of Model.validateSourceUrl(text, {origin}) -> {ok, code,
+    message, kind, url, host}; `url` is the normalized form (the source
+    identity): scheme and host lower-cased, numeric port normalized (leading
+    zeros stripped, the scheme default dropped), empty path `/`, query
+    verbatim, fragment dropped, userinfo kept. Codes: empty, too_long,
+    scheme, invalid, relative_path, unsafe_path (UX-SOURCES.md 5.4, SR6).
+    `origin` "cli" accepts `~` paths verbatim (SR11; expanded by the reader),
+    the forms refuse them. The authority refuses backslashes, zero-width
+    characters, ports above 65535 and bracket literals that are not IPv6
+    (SR15). Messages never contain a URL."""
+    cli = origin == "cli"
     value = sanitize_input(text, MAX_SOURCE_URL + 1)
     if value == "":
         return _validation(False, "empty", "no source URL or path given")
     if utf16_length(value) > MAX_SOURCE_URL:
         return _validation(False, "too_long", "source URL longer than %d characters" % MAX_SOURCE_URL)
+    if value.startswith("//"):
+        return _validation(False, "scheme", "scheme-relative URLs are not supported (use http or https)")
     if value.startswith("/"):
         return _validate_path(value)
-    if value.startswith("~") or value.startswith("./") or value.startswith("../"):
+    if value.startswith("~"):
+        if cli:
+            return _validation(True, "ok", "", "file", value, "")
+        return _validation(False, "relative_path", "use an absolute path (starts with /, not ~)")
+    if value in (".", "..") or value.startswith("./") or value.startswith("../"):
         return _validation(False, "relative_path", "use an absolute path (starts with /)")
-    match = _SCHEME_RE.match(value)
+    match = _SOURCE_SCHEME_RE.match(value)
     if not match:
-        return _validation(False, "scheme", "use http, https, file or an absolute path")
+        if looks_like_host(value):
+            return _validation(False, "scheme", "use http, https, file or an absolute path")
+        return _validation(False, "relative_path", "use an absolute path (starts with /)")
     scheme = match.group(1).lower()
     rest = match.group(2)
     if scheme == "file":
         if not rest.startswith("//"):
             return _validation(False, "invalid", "file URL is missing the two slashes after the scheme")
-        after = rest[2:]
+        after = re.sub(r"[?#].*$", "", rest[2:], flags=re.S)
         slash = after.find("/")
         if slash == -1:
             return _validation(False, "invalid", "file URL has no path")
@@ -397,40 +435,51 @@ def validate_source_url(text: Any) -> dict[str, Any]:
             path = urllib.parse.unquote(path, errors="strict")
         except UnicodeDecodeError:
             return _validation(False, "invalid", "file URL path is not valid UTF-8")
+        if not path.startswith("/"):
+            return _validation(False, "invalid", "file URL path is not absolute")
         return _validate_path(path)
     if scheme not in ("http", "https"):
         return _validation(False, "scheme", "unsupported source scheme '%s' (use http, https or an absolute path)" % scheme)
     if not rest.startswith("//"):
         return _validation(False, "invalid", "URL is missing the two slashes after the scheme")
-    after = rest[2:]
-    if re.search(r"\s", after):
+    if _URL_SPACE.search(rest):
         return _validation(False, "invalid", "URL contains whitespace")
-    end = len(after)
-    for stop in "/?#":
-        index = after.find(stop)
-        if index != -1 and index < end:
-            end = index
-    authority, tail = after[:end], after[end:]
+    body = rest[2:]
+    cut = _AUTHORITY_END.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    tail = "" if cut is None else body[cut.start():]
+    if "\\" in authority or _ZERO_WIDTH.search(authority):
+        return _validation(False, "invalid", "URL host contains an invalid character")
     at = authority.rfind("@")
     userinfo = authority[:at] if at != -1 else ""
     hostport = authority[at + 1:] if at != -1 else authority
+    port = ""
     if hostport.startswith("["):
         close = hostport.find("]")
         if close == -1:
             return _validation(False, "invalid", "unterminated IPv6 literal")
         host = hostport[:close + 1]
-        port_part = hostport[close + 1:]
-        if port_part and not port_part.startswith(":"):
-            return _validation(False, "invalid", "unexpected text after the IPv6 literal")
-        port = port_part[1:]
+        if not _IPV6_LITERAL.match(host):
+            return _validation(False, "invalid", "bracket literal is not an IPv6 address")
+        after_host = hostport[close + 1:]
+        if after_host:
+            if not after_host.startswith(":"):
+                return _validation(False, "invalid", "unexpected text after the IPv6 literal")
+            port = after_host[1:]
     else:
         colon = hostport.rfind(":")
         host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
-    host = host.lower()
+        if _BARE_HOST_CHARS.search(host):
+            return _validation(False, "invalid", "URL host contains an invalid character")
     if host == "":
         return _validation(False, "invalid", "URL has no host name")
-    if port != "" and not port.isdigit():
-        return _validation(False, "invalid", "URL port is not a number")
+    host = host.lower()
+    if port != "":
+        if not _ASCII_DIGITS.match(port):
+            return _validation(False, "invalid", "URL port is not a number")
+        port = port.lstrip("0") or "0"
+        if int(port) > 65535:
+            return _validation(False, "invalid", "URL port is above 65535")
     if port == ("80" if scheme == "http" else "443"):
         port = ""
     hash_at = tail.find("#")
@@ -479,45 +528,50 @@ def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
     return key
 
 
+def host_port_of(url: str) -> str:
+    """Model.hostPortOf: host[:port] of a URL, lower-cased; "" for paths."""
+    match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://(?:[^@/?#]*@)?([^/?#]+)", url)
+    return match.group(1).lower() if match else ""
+
+
 def derive_label(url: str, kind: str) -> str:
-    """UX-SOURCES.md 5.6: host (lower-case, leading www. removed, :port kept)
-    for http(s); the file name for paths; capped at MAX_LABEL."""
-    if kind == "file":
-        name = os.path.basename(url.rstrip("/"))
-        label = name or "local file"
-    else:
-        after = url.split("://", 1)[1] if "://" in url else url
-        end = len(after)
-        for stop in "/?#":
-            index = after.find(stop)
-            if index != -1 and index < end:
-                end = index
-        hostport = after[:end]
-        at = hostport.rfind("@")
-        if at != -1:
-            hostport = hostport[at + 1:]
-        if hostport.startswith("www."):
-            hostport = hostport[4:]
-        label = hostport or "source"
-    return truncate_utf16(label, MAX_LABEL)
+    """Model.deriveLabel (UX-SOURCES.md 5.6): host (lower-case, leading www.
+    removed, :port kept when it is not the default) for http(s); the file
+    name for paths; capped at MAX_LABEL code points (SR19, SR20, SR22)."""
+    text = "" if url is None else str(url)
+    checked = validate_source_url(text, origin="cli")
+    if kind == "file" or checked["kind"] == "file":
+        source = checked["url"] if checked["ok"] else text
+        name = source.rstrip("/").rsplit("/", 1)[-1]
+        return cap_code_points(sanitize_input(name, MAX_SOURCE_URL), MAX_LABEL) or "local file"
+    hostport = host_port_of(checked["url"] if checked["ok"] else text)
+    if hostport == "":
+        return cap_code_points(sanitize_input(text, MAX_SOURCE_URL), MAX_LABEL)
+    if hostport.startswith("www."):
+        hostport = hostport[4:]
+    return cap_code_points(sanitize_input(hostport, MAX_SOURCE_URL), MAX_LABEL)
+
+
+def label_key(text: Any) -> str:
+    """Model.labelKey: the case-insensitive comparison form (SR21)."""
+    return sanitize_input(text, MAX_SOURCE_URL).lower()
 
 
 def unique_label(label: str, existing: list[str]) -> str:
-    """Append " 2", " 3", ... while `label` is taken (case-insensitive)."""
-    taken = {sanitize_input(item, MAX_LABEL).lower() for item in existing}
-    base = sanitize_input(label, MAX_LABEL)
+    """Model.uniqueLabel: " 2", " 3", ... appended while `label` is taken by
+    another source (case-insensitive, SR21); the cap counts code points
+    (SR22). Derived labels only; a typed label is refused instead."""
+    taken = {label_key(item) for item in existing}
+    base = cap_code_points(sanitize_input(label, MAX_SOURCE_URL), MAX_LABEL) or "source"
     if base.lower() not in taken:
         return base
-    suffix = 2
-    while True:
+    for suffix in range(2, 1000):
         tail = " %d" % suffix
-        candidate = truncate_utf16(base, MAX_LABEL - len(tail)).rstrip(" ") + tail
+        candidate = cap_code_points(base, MAX_LABEL - len(tail)) + tail
         if candidate.lower() not in taken:
             return candidate
-        suffix += 1
+    return base
 
-
-# ------------------------------------------------------------------ M3U
 
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')
 _ATTR_BARE = re.compile(r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)')
@@ -1983,11 +2037,12 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
     url = raw.get("url")
     if not isinstance(url, str):
         return None
-    playlist = validate_source_url(url)
+    playlist = validate_source_url(url, origin="cli")
     if not playlist["ok"]:
         return None
-    epg = validate_source_url(raw.get("epgUrl")) if isinstance(raw.get("epgUrl"), str) else None
-    label = sanitize_input(raw.get("label"), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
+    epg = validate_source_url(raw.get("epgUrl"), origin="cli") if isinstance(raw.get("epgUrl"), str) else None
+    # SR22: the helper truncates an over-cap label on read, never errors.
+    label = cap_code_points(sanitize_input(raw.get("label"), MAX_SOURCE_URL), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
     origin = raw.get("origin")
     return {
         "key": key,
@@ -2059,12 +2114,13 @@ def public_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_custom_label(cleaned: str, others: list[str]) -> str:
-    """A label the user typed: capped (label_too_long) and unique among
-    `others` case-insensitively (label_taken); never rewritten (UX 5.6)."""
-    if utf16_length(cleaned) > MAX_LABEL:
+    """A label the user typed (Model.validateLabel): refused over MAX_LABEL
+    code points (label_too_long, never cut, SR22) and when another source
+    has it case-insensitively (label_taken); never rewritten (UX 5.6)."""
+    custom = sanitize_input(cleaned, MAX_SOURCE_URL)
+    if len(custom) > MAX_LABEL:
         raise HelperError("label_too_long", "label longer than %d characters" % MAX_LABEL, field="label")
-    custom = sanitize_input(cleaned, MAX_LABEL)
-    if custom.lower() in {item.lower() for item in others}:
+    if custom.lower() in {label_key(item) for item in others}:
         raise HelperError("label_taken", "a source named '%s' already exists" % custom, field="label")
     return custom
 
