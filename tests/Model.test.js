@@ -280,7 +280,15 @@ check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
 const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", name: "BBC One", url: "--not-an-option", headers: {}, extraArgs: ["--profile=low-latency"] })
 check("buildMpvArgv starts with mpv and ipc socket", argv.slice(0, 2), ["mpv", "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock"])
-check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=no", "--keep-open=no", "--title=BBC One", "--force-media-title=BBC One", "--msg-level=all=error", "--ytdl=no"])
+check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=no", "--keep-open=no", "--title=$>BBC One", "--force-media-title=BBC One", "--msg-level=all=error", "--ytdl=no"])
+// S-01: mpv expands ${property} in --title; the "$>" raw marker keeps a
+// playlist-controlled name literal. force-media-title is not expanded by mpv.
+check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpvWindowTitle("BBC One"), Model.mpvWindowTitle(null)], ["$>", "$>BBC One", "$>"])
+check("buildMpvArgv title is never property-expanded (S-01)", (() => {
+  const a = Model.buildMpvArgv({ socketPath: "/s", name: "${path} ${options/input-ipc-server}", url: "http://u:p@h.test/x" })
+  return [a.indexOf("--title=$>${path} ${options/input-ipc-server}") !== -1, a.indexOf("--force-media-title=${path} ${options/input-ipc-server}") !== -1, a.filter(t => t.indexOf("--title=") === 0).length]
+})(), [true, true, 1])
+check("buildMpvArgv default name is prefixed too", Model.buildMpvArgv({ socketPath: "/s", url: "u" }).indexOf("--title=$>IPTV") !== -1, true)
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", name: "N", url: "u", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 check("buildMpvArgv url after --", argv.slice(-2), ["--", "--not-an-option"])
 check("buildMpvArgv extra args before --", argv.indexOf("--profile=low-latency") < argv.indexOf("--"), true)

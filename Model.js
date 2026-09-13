@@ -945,6 +945,20 @@ function headerArgs(headers) {
   return out
 }
 
+// mpv property-expands `--title` (man mpv: "Properties are expanded"), so a
+// playlist entry named "${path}" would put the stream URL, credentials and
+// all, into the window title (S-01, R12). "$>" turns expansion off for the
+// rest of the string; verified on mpv 0.41 with `expand-text` over IPC:
+// "$>${path}" stays literal. `force-media-title` is NOT expanded (verified:
+// media-title returned "$>${path}" verbatim), so it carries the plain name;
+// a prefix there would show up literally in the OSC and `media-title`.
+// The helper's cmd_play applies the same prefix on the IPC path.
+var MPV_RAW_PREFIX = "$>"
+
+function mpvWindowTitle(name) {
+  return MPV_RAW_PREFIX + str(name)
+}
+
 // Full argv for the first launch (ARCHITECTURE.md section 3). The URL always
 // follows "--" so a playlist entry can never be parsed as an mpv option.
 function buildMpvArgv(params) {
@@ -957,7 +971,7 @@ function buildMpvArgv(params) {
     "--force-window=immediate",
     "--idle=no",
     "--keep-open=no",
-    "--title=" + name,
+    "--title=" + mpvWindowTitle(name),
     "--force-media-title=" + name,
     "--msg-level=all=error",
     // Live streams never need yt-dlp; without this mpv shells out to it on
@@ -1296,6 +1310,8 @@ if (typeof module !== "undefined") {
     settingsFrom: settingsFrom,
     splitMpvArgs: splitMpvArgs,
     headerArgs: headerArgs,
+    MPV_RAW_PREFIX: MPV_RAW_PREFIX,
+    mpvWindowTitle: mpvWindowTitle,
     buildMpvArgv: buildMpvArgv,
     focusPlayerArgv: focusPlayerArgv,
     notifyArgv: notifyArgv,

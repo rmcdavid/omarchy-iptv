@@ -92,6 +92,12 @@ EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no succes
 EPG_RECORD_SEP = "\x7f"
 
 MPV_DEFAULT_USER_AGENT = "libmpv"   # mpv 0.41 `--list-options` default, used when option-info is unavailable
+# mpv property-expands the `title` option ("${path}" would render the stream
+# URL, credentials included, in the window title; S-01). "$>" disables
+# expansion for the rest of the string (verified on mpv 0.41 via expand-text).
+# `force-media-title` is not expanded (verified) and stays raw so media-title
+# and the OSC show the plain name. Mirrors Model.MPV_RAW_PREFIX.
+MPV_RAW_PREFIX = "$>"
 
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9-]+$")
 _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-looking (D-QA-09)
@@ -1342,8 +1348,8 @@ def cmd_play(args: argparse.Namespace) -> int:
         if not is_stream_url(url):
             raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
         client.connect()
-        for prop in ("title", "force-media-title"):
-            ok, _ = client.try_command("set_property", prop, name)
+        for prop, value in (("title", MPV_RAW_PREFIX + name), ("force-media-title", name)):
+            ok, _ = client.try_command("set_property", prop, value)
             if not ok:
                 log("play: mpv refused to set %s" % prop)
         for prop, value in header_properties(headers, client):
