@@ -1,0 +1,24 @@
+#EXTM3U
+#EXTGRP:Sports
+#EXTINF:0 tvg-id=espn.us tvg-chno=12,ESPN
+#EXTVLCOPT:http-user-agent=VLC/3.0.20
+#EXTVLCOPT:http-referrer=http://ref.example.test/
+#EXTVLCOPT:network-caching=1000
+http://stream.example.test/espn.m3u8
+#EXTINF:-1 group-title="Movies" tvg-id="espn.us",Duplicate tvg id
+http://stream.example.test/dup.m3u8
+#EXTINF:-1,Still Sports via EXTGRP
+#KODIPROP:inputstream.adaptive.manifest_type=hls
+#KODIPROP:inputstream.adaptive.stream_headers=User-Agent=Kodi%2F20&X-Forwarded-For=1.2.3.4
+http://stream.example.test/sports2.m3u8
+#EXTINF:-1,Local file entry must be skipped
+file:///etc/passwd
+#EXTINF:-1,Plugin entry must be skipped
+plugin://plugin.video.something/?id=1
+#EXTINF:-1,Option injection must be skipped
+--script=/tmp/evil.lua
+#EXTINF:-1,Same URL twice A
+http://stream.example.test/same.m3u8
+#EXTINF:-1,Same URL twice B
+http://stream.example.test/same.m3u8
+http://stream.example.test/orphan.m3u8

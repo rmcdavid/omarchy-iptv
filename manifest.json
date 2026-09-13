@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.rmcdavid.iptv",
+  "name": "IPTV",
+  "version": "0.1.0",
+  "author": "David McDavid",
+  "license": "MIT",
+  "description": "Live TV channel guide for Omarchy: type to find a channel, Enter plays it in mpv.",
+  "kinds": ["bar-widget", "overlay", "service"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "overlay": "Guide.qml",
+    "service": "Service.qml"
+  },
+  "barWidget": {
+    "displayName": "IPTV",
+    "description": "TV glyph plus the channel now playing. Left click opens the guide, right click stops, scroll zaps, middle click refreshes.",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "playlistUrl": "",
+      "epgUrl": "",
+      "refreshMinutes": 60,
+      "mpvArgs": "",
+      "showChannelName": true,
+      "maxRecents": 10
+    },
+    "schema": [
+      { "key": "playlistUrl", "type": "string", "label": "Playlist URL or absolute path (M3U/M3U8)" },
+      { "key": "epgUrl", "type": "string", "label": "EPG URL (XMLTV, plain or .gz, optional)" },
+      { "key": "refreshMinutes", "type": "integer", "label": "Refresh playlist every (minutes)", "min": 5, "max": 1440, "step": 5, "defaultValue": 60 },
+      { "key": "mpvArgs", "type": "string", "label": "Extra mpv options (space separated, --key=value)" },
+      { "key": "showChannelName", "type": "boolean", "label": "Show channel name in the bar", "defaultValue": true },
+      { "key": "maxRecents", "type": "integer", "label": "Recent channels to keep", "min": 1, "max": 50, "step": 1, "defaultValue": 10 }
+    ]
+  }
+}

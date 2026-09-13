@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+node_modules/
+*.log
+*.swp
+.DS_Store
+# local scratch (never commit caches or state)
+/tmp/
