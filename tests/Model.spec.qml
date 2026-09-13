@@ -66,10 +66,33 @@ TestCase {
     compare(ids(Model.filterChannels(channels, "bbc", 10, { favorites: ["5"] }).rows), ["5", "1", "2"])
     compare(ids(Model.filterChannels(channels, "bbc", 10, { favorites: ["2"] }).rows), ["1", "5", "2"])
     compare(ids(Model.filterChannels(channels, "bbc uk", 10).rows), ["1", "5"])
-    var capped = Model.filterChannels(channels, "", 2)
-    compare(capped.total, 7)
+    // D-LIVE-01: the cap is for search results; an empty query browses every row.
+    var browse = Model.filterChannels(channels, "", 2)
+    compare(browse.total, 7)
+    compare(browse.rows.length, 7)
+    compare(browse.truncated, false)
+    var capped = Model.filterChannels(channels, "b", 1)
+    compare(capped.rows.length, 1)
     compare(capped.truncated, true)
     compare(Model.MAX_ROWS_DEFAULT, 200)
+  }
+
+  function test_ungroupedLastAndFallbackScope() {
+    // D-LIVE-06: Ungrouped closes the column even when it appears first.
+    var rows = Model.prepareChannels([{ name: "A", url: "1" }, { name: "B", group: "News", url: "2" }, { name: "C", group: "Kids", url: "3" }])
+    var names = Model.groupChannels(rows).map(function(g) { return g.name })
+    compare(names, ["News", "Kids", "Ungrouped"])
+    // D-LIVE-07: an emptied Recent falls back to Favorites, else All.
+    compare(Model.fallbackScope(Model.scopeEntries(channels, userState), "recent"), "recent")
+    compare(Model.fallbackScope(Model.scopeEntries(channels, { version: 1, favorites: ["5"], recents: [], lastPlayed: null }), "recent"), "favorites")
+    compare(Model.fallbackScope(Model.scopeEntries(channels, null), "recent"), "all")
+  }
+
+  function test_statusReasonTable() {
+    // D-LIVE-03 / D-LIVE-11: terse reasons, no helper sentence, no seconds.
+    compare(Model.statusReason({ ok: false, error: { code: "not_a_playlist", message: "source from h is not an M3U playlist" } }), "Not an M3U playlist")
+    compare(Model.statusReason({ ok: false, error: { code: "timeout", message: "playlist download from h exceeded its deadline" } }), "Timed out")
+    compare(Model.statusReason({ ok: false, error: { code: "network", message: "could not reach h: timed out" } }), "Timed out")
   }
 
   function test_scopeEntriesAndLists() {

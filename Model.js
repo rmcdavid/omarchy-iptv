@@ -344,12 +344,16 @@ function favoriteSet(favorites) {
 // Bounded filter: scans every candidate (10k short strings is a few ms) but
 // only materializes `limit` rows: best tier first, favorites first inside a
 // tier, playlist order inside that. `favorites` is an id array or a state.
+// The cap applies to SEARCH results only (R3, UX 2.6): with no query every
+// channel of the scope is returned (the same array, never a copy) so the
+// guide can browse all of them; its ListView instantiates visible rows only
+// (D-LIVE-01). Callers must not mutate the returned rows.
 function filterChannels(channels, query, limit, favorites) {
   var list = asList(channels)
   var max = limit > 0 ? Math.floor(limit) : MAX_ROWS_DEFAULT
   var tokens = tokenize(query)
   if (tokens.length === 0) {
-    return { rows: list.slice(0, max), total: list.length, truncated: list.length > max }
+    return { rows: list, total: list.length, truncated: false }
   }
   var favs = favoriteSet(favorites)
   var buckets = []
@@ -376,19 +380,24 @@ function filterChannels(channels, query, limit, favorites) {
 // ------------------------------------------------------------ groups / scopes
 
 // Playlist groups in first-seen order (R5), each with its channel count.
+// The synthetic `Ungrouped` bucket is always the last group, wherever its
+// first channel sits in the playlist (UX 2.2 item 4, D-LIVE-06).
 function groupChannels(channels) {
   var list = asList(channels)
   var seen = {}
   var order = []
+  var ungrouped = null
   for (var i = 0; i < list.length; i++) {
     if (!list[i]) continue
     var name = primaryGroup(list[i])
     if (seen[name] === undefined) {
       seen[name] = { name: name, kind: "group", count: 0 }
-      order.push(seen[name])
+      if (name === UNGROUPED) ungrouped = seen[name]
+      else order.push(seen[name])
     }
     seen[name].count++
   }
+  if (ungrouped !== null) order.push(ungrouped)
   return order
 }
 
@@ -505,6 +514,24 @@ function scopeIndex(entries, scopeId) {
   var list = asList(entries)
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === str(scopeId) && list[i].kind !== "header") return i
   return -1
+}
+
+// A scope that is no longer in the column (the last Recent entry removed, a
+// group gone after a refresh) must not keep the cursor on a hidden entry:
+// fall back to Favorites when it has channels, else All (UX 2.2, D-LIVE-07).
+// A scope that is still listed is returned unchanged.
+function fallbackScope(entries, scopeId) {
+  var list = asList(entries)
+  var id = str(scopeId) || SCOPE_ALL
+  if (list.length === 0) return id
+  var favorites = 0
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i]
+    if (!entry || entry.kind === "header" || str(entry.id) === "") continue
+    if (entry.id === id) return id
+    if (entry.id === SCOPE_FAVORITES) favorites = Number(entry.count) || 0
+  }
+  return favorites > 0 ? SCOPE_FAVORITES : SCOPE_ALL
 }
 
 // Default entry on open (UX 2.2): Favorites when it has entries, else All.
@@ -852,6 +879,7 @@ function statusReason(status) {
     too_large: "Source too large",
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
+    not_a_playlist: "Not an M3U playlist",
     not_m3u: "Not an M3U file",
     not_xmltv: "Not an XMLTV file",
     no_source: "No playlist configured",
@@ -1112,6 +1140,15 @@ function epgFraction(nowSec, start, stop) {
   return Math.max(0, Math.min(1, (t - a) / (b - a)))
 }
 
+// epg-now.json is stale once its `validUntil` (the next programme boundary
+// the helper computed) has passed; missing or malformed meta counts as stale
+// so a fresh fetch is always preferred over no data (D-LIVE-02).
+function epgNowStale(meta, nowSec) {
+  var until = meta && typeof meta === "object" ? Number(meta.validUntil) : NaN
+  if (!isFinite(until) || until <= 0) return true
+  return until <= (Number(nowSec) || 0)
+}
+
 // epg-now entry -> flat row fields. An expired `now` (stop <= nowSec) yields
 // no current programme so a row never shows a stale title; `next` is kept.
 function epgFields(entry, nowSec) {
@@ -1224,10 +1261,14 @@ function barAccessibleName(opts) {
 // ------------------------------------------------------------ footer
 
 // Footer status (UX 6.1). Priority: transient > bounded search > playing >
-// EPG pending > counts.
+// EPG pending > counts. The empty states (not configured, loading, error
+// without a cache; UX 4.4 - 4.6) carry their message in the body and leave
+// the status slot blank, so `0 channels` or `Refreshing...` never shows
+// there (D-LIVE-09); only a transient may.
 function footerStatus(opts) {
   var o = opts || {}
   if (str(o.transient) !== "") return str(o.transient)
+  if (o.configured === false || !(Number(o.count) > 0)) return ""
   if (o.truncated) return "First " + formatCount(o.cap || MAX_ROWS_DEFAULT) + " of " + formatCount(o.resultTotal) + SEP + "keep typing"
   if (str(o.playingName) !== "") return GLYPHS.play + " " + str(o.playingName) + SEP + "s stop"
   if (o.refreshing) return "Refreshing" + ELLIPSIS
@@ -1283,6 +1324,7 @@ if (typeof module !== "undefined") {
     primaryGroup: primaryGroup,
     prepareChannels: prepareChannels,
     matchRank: matchRank,
+    favoriteSet: favoriteSet,
     filterChannels: filterChannels,
     groupChannels: groupChannels,
     groupScopeId: groupScopeId,
@@ -1295,6 +1337,7 @@ if (typeof module !== "undefined") {
     effectiveScope: effectiveScope,
     moveScope: moveScope,
     scopeIndex: scopeIndex,
+    fallbackScope: fallbackScope,
     initialScope: initialScope,
     cursorFor: cursorFor,
     scopeLabel: scopeLabel,
@@ -1350,6 +1393,7 @@ if (typeof module !== "undefined") {
     formatCount: formatCount,
     pluralChannels: pluralChannels,
     epgFraction: epgFraction,
+    epgNowStale: epgNowStale,
     epgFields: epgFields,
     formatEpgLine: formatEpgLine,
     joinParts: joinParts,

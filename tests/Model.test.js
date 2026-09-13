@@ -105,6 +105,11 @@ check("displayName cleaned name keeps a matching searchKey", Model.prepareChanne
 check("looksLikeUrl", [Model.looksLikeUrl("http://x"), Model.looksLikeUrl("udp://@239.0.0.1:1234"), Model.looksLikeUrl("BBC One"), Model.looksLikeUrl("")], [true, true, false, false])
 
 check("groupChannels playlist order with counts", Model.groupChannels(prepared).map(g => g.name + ":" + g.count), ["UK:2", "CA:1", "Ungrouped:1"])
+// D-LIVE-06 / UX 2.2: Ungrouped is the last column entry wherever its first channel sits.
+check("groupChannels keeps Ungrouped last", Model.groupChannels([
+  { name: "A", url: "1" }, { name: "B", group: "News", url: "2" }, { name: "C", group: "", url: "3" }, { name: "D", group: "Padded", url: "4" }, { name: "E", group: "News", url: "5" }
+]).map(g => g.name + ":" + g.count), ["News:2", "Padded:1", "Ungrouped:2"])
+check("groupChannels only ungrouped", Model.groupChannels([{ name: "A", url: "1" }]).map(g => g.name), ["Ungrouped"])
 check("groupChannels null", Model.groupChannels(null), [])
 check("groupScopeId / scopeName round trip", Model.scopeName(Model.groupScopeId("UK | SPORTS")), "UK | SPORTS")
 check("scopeName pinned", [Model.scopeName("recent"), Model.scopeName("favorites"), Model.scopeName("all")], ["Recent", "Favorites", "All"])
@@ -120,8 +125,16 @@ const channels = Model.prepareChannels([
   { id: "6", name: "The One Show", group: "UK", searchKey: "the one show uk" },
   { id: "7", name: "Rai Uno", group: "One World", searchKey: "rai uno one world" }
 ])
-check("filterChannels empty query keeps order", Model.filterChannels(channels, "", 2).rows.map(c => c.id), ["1", "2"])
-check("filterChannels empty query total/truncated", (() => { const r = Model.filterChannels(channels, "", 2); return [r.total, r.truncated] })(), [7, true])
+// D-LIVE-01 / R3: the cap bounds search results only; an empty query browses the whole scope.
+check("filterChannels empty query keeps order and is never capped", Model.filterChannels(channels, "", 2).rows.map(c => c.id), ["1", "2", "3", "4", "5", "6", "7"])
+check("filterChannels empty query total/truncated", (() => { const r = Model.filterChannels(channels, "", 2); return [r.total, r.truncated] })(), [7, false])
+check("filterChannels empty query returns the scope array itself (no copy)", Model.filterChannels(channels, "  ", 2).rows === channels, true)
+check("filterChannels blank query on 11k rows is uncapped", (() => {
+  const many = []
+  for (let i = 0; i < 11041; i++) many.push({ id: "c" + i, name: "Chan " + i, group: "G", searchKey: "chan " + i + " g" })
+  const r = Model.filterChannels(many, "", 200)
+  return [r.rows.length, r.total, r.truncated]
+})(), [11041, 11041, false])
 check("filterChannels ranks name-start > word-start > name-contains > group", Model.filterChannels(channels, "one", 10).rows.map(c => c.id), ["3", "1", "6", "7"])
 check("filterChannels favorites first inside a tier", Model.filterChannels(channels, "bbc", 10, ["5"]).rows.map(c => c.id), ["5", "1", "2"])
 check("filterChannels favorites accepted as a state object", Model.filterChannels(channels, "bbc", 10, { favorites: ["5"] }).rows.map(c => c.id), ["5", "1", "2"])
@@ -172,6 +185,14 @@ check("moveScope wraps forward over the header", [Model.moveScope(entries, "all"
 check("moveScope wraps backward", Model.moveScope(entries, "recent", -1), "g:One World")
 check("moveScope unknown scope", Model.moveScope(entries, "nope", 1), "recent")
 check("moveScope empty entries", Model.moveScope([], "x", 1), "x")
+// D-LIVE-07: a hidden scope (Recent emptied, a group gone) falls back to Favorites, else All.
+check("fallbackScope keeps a listed scope", [Model.fallbackScope(entries, "recent"), Model.fallbackScope(entries, "g:UK"), Model.fallbackScope(entries, "all")], ["recent", "g:UK", "all"])
+check("fallbackScope hidden Recent -> Favorites when it has channels", Model.fallbackScope(Model.scopeEntries(channels, { version: 1, favorites: ["5"], recents: [], lastPlayed: null }), "recent"), "favorites")
+check("fallbackScope hidden Recent -> All when Favorites is empty", Model.fallbackScope(Model.scopeEntries(channels, null), "recent"), "all")
+check("fallbackScope vanished group -> All", Model.fallbackScope(Model.scopeEntries(channels, null), "g:Gone"), "all")
+check("fallbackScope never lands on the header", Model.fallbackScope(Model.scopeEntries(channels, null), ""), "all")
+check("fallbackScope no entries keeps the id", [Model.fallbackScope([], "g:UK"), Model.fallbackScope(null, "")], ["g:UK", "all"])
+check("favoriteSet from ids or a state", [Model.favoriteSet(["a", "b"]).b, Model.favoriteSet({ favorites: ["c"] }).c, Model.favoriteSet(null).x], [true, true, undefined])
 check("scopeIndex", [Model.scopeIndex(entries, "all"), Model.scopeIndex(entries, "g:UK"), Model.scopeIndex(entries, "zz")], [2, 4, -1])
 check("initialScope favorites when present", Model.initialScope(channels, state), "favorites")
 check("initialScope all when no favorites", Model.initialScope(channels, null), "all")
@@ -263,6 +284,8 @@ check("statusReason network flavours", [
   Model.statusReason({ ok: false, error: { code: "network", message: "weird" } })
 ], ["Timed out", "Could not resolve host", "Connection refused", "Network error"])
 check("statusReason table", [Model.statusReason({ ok: false, error: { code: "not_found" } }), Model.statusReason({ ok: false, error: { code: "empty_playlist" } }), Model.statusReason({ ok: false, error: { code: "not_implemented" } })], ["File not found", "Playlist has no channels", "Helper command not implemented"])
+// D-LIVE-03: the helper's HTML-body code maps to the terse reason, never its sentence (which names the host).
+check("statusReason not_a_playlist is terse", Model.statusReason({ ok: false, error: { code: "not_a_playlist", message: "source from 127.0.0.1 is not an M3U playlist (no #EXTM3U or #EXTINF lines)" } }), "Not an M3U playlist")
 // S-05: helper deadline and service watchdog codes never echo the message (which could carry a host).
 check("statusReason timeout codes", [Model.statusReason({ ok: false, error: { code: "timeout", message: "playlist download from h.test exceeded 60 s" } }), Model.statusReason({ ok: false, error: { code: "helper_timeout", message: "helper timed out" } })], ["Timed out", "Helper timed out"])
 check("statusReason unsafe redirect (S-06)", Model.statusReason({ ok: false, error: { code: "unsafe_redirect", message: "playlist from h.test redirected to an unsupported scheme 'ftp'" } }), "Unsafe redirect")
@@ -396,6 +419,11 @@ check("footerStatus transient wins", Model.footerStatus({ count: 5, playingName:
 check("footerStatus bounded search", Model.footerStatus({ count: 5, truncated: true, resultTotal: 1240, cap: 200 }), "First 200 of 1,240" + SEP + "keep typing")
 check("footerStatus refreshing", Model.footerStatus({ count: 5, refreshing: true }), "Refreshing\u2026")
 check("footerStatus epg pending", Model.footerStatus({ count: 5, epgPending: true }), "Guide data loading\u2026")
+// D-LIVE-09 / UX 4.4-4.6: empty states leave the status slot blank; only a transient shows.
+check("footerStatus blank when not configured", [Model.footerStatus({ configured: false, count: 0, refreshing: true }), Model.footerStatus({ configured: false, count: 0, transient: "Set a playlist first" })], ["", "Set a playlist first"])
+check("footerStatus blank without channels (loading / error)", [Model.footerStatus({ configured: true, count: 0, refreshing: true }), Model.footerStatus({ configured: true, count: 0, lastUpdated: "12:40" })], ["", ""])
+// D-LIVE-02: epg-now.json is stale once validUntil has passed or is missing.
+check("epgNowStale", [Model.epgNowStale({ validUntil: 200 }, 100), Model.epgNowStale({ validUntil: 100 }, 100), Model.epgNowStale({}, 100), Model.epgNowStale(null, 100), Model.epgNowStale({ validUntil: "x" }, 1)], [false, true, true, true, true])
 check("footerHints search", Model.footerHints({ mode: "search", query: "" }).map(h => h[0]), ["Enter", "Up/Down", "Left/Right", "Tab", "Esc"])
 check("footerHints search with query says clear/narrow", Model.footerHints({ mode: "search", query: "x" }).slice(2), [["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]])
 check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s r /")
