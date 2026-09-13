@@ -207,6 +207,17 @@ TestCase {
     compare(Model.healthTick(2, false).check, true)
   }
 
+  function test_playlistWarnings() {
+    // D-LIVE-18: one footer line, URL-free, empty without warnings.
+    var status = Model.parseHelperStatus('{"ok": true, "kind": "playlist", "warnings": ["truncated to 50000 channels (500 entries skipped)", "see http://u:p@h.test/x"]}', "playlist")
+    compare(Model.statusWarnings(status), ["truncated to 50000 channels (500 entries skipped)", "see h.test"])
+    compare(Model.warningLine(Model.statusWarnings(status)), "Playlist warning: truncated to 50000 channels (500 entries skipped) (+1 more)")
+    compare(Model.warningLine([]), "")
+    compare(Model.statusWarnings({ ok: false, warnings: ["x"] }), [])
+    compare(Model.footerStatus({ count: 50000, lastUpdated: "01:53", warning: "Playlist warning: x" }), "Playlist warning: x")
+    compare(Model.footerStatus({ count: 5, playingName: "Arte", warning: "Playlist warning: x" }), Model.GLYPHS.play + " Arte" + Model.SEP + "s stop")
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)

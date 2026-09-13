@@ -146,6 +146,10 @@ Item {
   readonly property bool stopping: stopStage !== ""
   property bool playAfterExit: false
   property int healthSkips: 0
+  // Warnings of the last successful playlist load (D-LIVE-18), URL-free;
+  // the guide shows them until the next successful load without warnings.
+  // A failed refresh keeps them: the cache in use is still that load's.
+  property var playlistWarnings: []
 
   // Emitted after a successful playlist helper run; the guide shows
   // `Refreshed - N channels` for a manual refresh (UX 6.1, D-LIVE-05).
@@ -369,6 +373,7 @@ Item {
       recents: root.userState.recents.length,
       epg: { configured: root.epgConfigured, loaded: root.epgLoaded, pending: root.epgPending, reason: root.epgReason },
       playlistReason: root.statusReason,
+      warnings: root.playlistWarnings,
       lastError: root.lastError
     }
   }
@@ -397,7 +402,8 @@ Item {
 
   function applyPlaylistStatus(text) {
     root.playlistStatus = Model.parseHelperStatus(text, "playlist")
-    if (root.playlistStatus.ok !== true) root.lastError = root.statusReason
+    if (root.playlistStatus.ok === true) root.playlistWarnings = Model.statusWarnings(root.playlistStatus)
+    else root.lastError = root.statusReason
   }
 
   function applyEpgStatus(text) {
@@ -666,6 +672,7 @@ Item {
     // A new source starts clean: the previous source's reason and host must
     // not stay on screen while its first fetch runs (UX 4.5, D-LIVE-10).
     root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
+    root.playlistWarnings = []
     root.lastError = ""
     root.refreshPlaylist(true)
   }

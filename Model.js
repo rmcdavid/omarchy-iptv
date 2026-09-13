@@ -921,6 +921,28 @@ function statusHealthy(status) {
   return !!(status && status.ok === true && status.running !== false)
 }
 
+// Warnings of a successful helper run (D-LIVE-18): strings only, every URL
+// reduced to its host (R12), empty for a failed run so the caller keeps the
+// warnings of the load whose cache is still in use.
+function statusWarnings(status) {
+  if (!status || status.ok !== true) return []
+  var list = asList(status.warnings)
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var text = redactUrls(str(list[i])).replace(/^\s+|\s+$/g, "")
+    if (text !== "") out.push(text)
+  }
+  return out
+}
+
+// Footer line for playlist warnings (UX 6 tone, D-LIVE-18): the first
+// warning and, when there are several, how many more; "" without warnings.
+function warningLine(warnings) {
+  var list = statusWarnings({ ok: true, warnings: warnings })
+  if (list.length === 0) return ""
+  return "Playlist warning: " + list[0] + (list.length > 1 ? " (+" + (list.length - 1) + " more)" : "")
+}
+
 // ------------------------------------------------------------ player shutdown
 
 // Next rung of the shutdown ladder (D-LIVE-17). `stage` is the rung already
@@ -1304,7 +1326,8 @@ function barAccessibleName(opts) {
 // ------------------------------------------------------------ footer
 
 // Footer status (UX 6.1). Priority: transient > bounded search > playing >
-// EPG pending > counts. The empty states (not configured, loading, error
+// refreshing > EPG pending > playlist warning (D-LIVE-18, until the next
+// clean load) > counts. The empty states (not configured, loading, error
 // without a cache; UX 4.4 - 4.6) carry their message in the body and leave
 // the status slot blank, so `0 channels` or `Refreshing...` never shows
 // there (D-LIVE-09); only a transient may.
@@ -1316,6 +1339,7 @@ function footerStatus(opts) {
   if (str(o.playingName) !== "") return GLYPHS.play + " " + str(o.playingName) + SEP + "s stop"
   if (o.refreshing) return "Refreshing" + ELLIPSIS
   if (o.epgPending) return "Guide data loading" + ELLIPSIS
+  if (str(o.warning) !== "") return str(o.warning)
   var out = pluralChannels(o.count)
   if (str(o.lastUpdated) !== "") out += SEP + (o.stale ? "cached " + str(o.lastUpdated) + SEP + "offline" : "updated " + str(o.lastUpdated))
   else if (o.stale) out += SEP + "cached" + SEP + "offline"
@@ -1417,6 +1441,8 @@ if (typeof module !== "undefined") {
     statusReason: statusReason,
     statusHost: statusHost,
     statusHealthy: statusHealthy,
+    statusWarnings: statusWarnings,
+    warningLine: warningLine,
     stopEscalation: stopEscalation,
     healthTick: healthTick,
     findBarEntry: findBarEntry,

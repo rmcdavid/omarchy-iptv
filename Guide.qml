@@ -221,6 +221,11 @@ Item {
 
   readonly property string scopeLabelText: root.hasChannels ? Model.scopeLabel(root.scopeId, root.query, root.resultTotal) : ""
 
+  // Playlist warnings of the last load (D-LIVE-18): one low-key line in the
+  // footer status slot, URL-free (Model.statusWarnings), kept until a clean
+  // load replaces it. Text only, so the list never moves when it appears.
+  readonly property string warningText: root.serviceReady ? Model.warningLine(root.service.playlistWarnings) : ""
+
   readonly property string footerStatusText: Model.footerStatus({
     transient: root.transientText,
     configured: root.configured,
@@ -230,6 +235,7 @@ Item {
     playingName: root.playingName,
     refreshing: root.serviceReady && root.service.refreshing,
     epgPending: root.serviceReady && root.service.epgPending,
+    warning: root.warningText,
     count: root.serviceReady ? root.service.channels.length : 0,
     lastUpdated: root.serviceReady ? root.service.lastUpdated : "",
     stale: root.serviceStatus === "cached"
