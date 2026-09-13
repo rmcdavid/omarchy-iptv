@@ -9,14 +9,21 @@ import "Model.js" as Model
 // (manifest kind "overlay", keepLoaded so the layer-shell window stays
 // mounted between summons and opens in well under 150 ms).
 //
-// Modeled on the first-party clipboard/emoji pickers: scrim + centered card
-// on the [menu] theme surface, search-as-you-type, arrows/PgUp/PgDn, Enter.
+// Implements docs/UX.md: scrim + centered card on the [menu] surface, a
+// synthetic search line (no TextField), two keyboard modes (search on open;
+// Tab or "/" for list mode with j/k/h/l, f, x, s, r, Space, Enter, Esc),
+// a left group column (Recent / Favorites / All / GROUPS), rows with EPG
+// now/next + progress hairline, banners, empty states and a footer with
+// mode-aware hints. Pure decisions live in Model.js (ranking, scope rules,
+// the mode state machine); this file only renders and dispatches.
+//
 // Host contract (shell.qml panel loader): `shell`, `manifest` and `service`
 // are injected after load; open(payloadJson)/close()/toggle() are called by
 // summon/hide/toggle. Dismiss through shell.hide(manifest.id) so the host's
 // open-state stays in sync (same as Emojis.qml).
 //
-// Payload (JSON string) keys, all optional: {"query": "bbc", "group": "UK"}.
+// Payload (JSON string) keys, all optional:
+//   {"query": "bbc", "scope": "favorites" | "all" | "recent" | "g:UK", "group": "UK"}
 Item {
   id: root
 
@@ -26,46 +33,184 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "io.github.rmcdavid.iptv"
   property bool opened: false
-  property string filterText: ""
-  property string groupName: ""            // "" = all channels
-  property int selectedIndex: 0
-  property bool cursorActive: false
-  property int totalMatches: 0
+
+  // ---- guide state (R8). `guide` is the pure state machine object from
+  // Model.js; replaced on every transition so bindings notice.
+  property var guide: Model.guideState(Model.SCOPE_ALL)
+  readonly property string mode: guide.mode
+  readonly property bool searchMode: mode !== "list"
+  readonly property string query: guide.query
+  readonly property string scopeId: guide.scopeId
+  readonly property string effectiveScope: Model.effectiveScope(scopeId, query)
+  readonly property bool hasQuery: Model.tokenize(query).length > 0
+  property int cursorIndex: 0
+  property int resultTotal: 0
   property bool truncated: false
+  property bool rowsHaveDetail: false
+  property var scopeList: []
+  property string groupSignature: ""
+  property string transientText: ""
+  property bool enterPending: false
+  // Set when a list-mode key switches to search mode: the same key event
+  // then propagates to the search handler and must not become query text.
+  property bool swallowKey: false
+  property int columnWheel: 0
   readonly property int maxRows: Model.MAX_ROWS_DEFAULT
 
-  // Shares the [menu] surface tokens with the clipboard and emoji pickers;
-  // every color below is a theme token (PRODUCT.md decision 7).
+  // ---- microcopy, in one place (UX.md 5.9, section 6). Strings shared with
+  // the bar and notifications live in Model.js (footerStatus, footerHints,
+  // barTooltip, notifyArgv, rowDetail, scopeLabel, noMatchesTitle).
+  readonly property var copy: ({
+    searchPlaceholder: "Search channels" + Model.ELLIPSIS,
+    serviceTitle: "Service not loaded",
+    serviceProse: "Run omarchy restart shell",
+    unconfiguredTitle: "No playlist configured",
+    unconfiguredProse: "Set your M3U URL or path, then press r to load it:",
+    unconfiguredCommand: "omarchy bar set " + root.pluginId + " playlistUrl <url>",
+    unconfiguredEpg: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>",
+    unconfiguredWhere: "Settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
+    loadingTitle: "Loading playlist" + Model.ELLIPSIS,
+    loadingFrom: "Fetching from ",
+    loadingProse: "Fetching playlist",
+    errorTitle: "Playlist failed to load",
+    errorCheck: "check playlistUrl",
+    emptyPlaylistTitle: "Playlist has no channels",
+    emptyPlaylistProse: "Parsed 0 channels from ",
+    emptyPlaylistCheck: "check the URL points at an M3U",
+    noFavoritesTitle: "No favorites yet",
+    noFavoritesProse: "Press f on any channel to pin it here",
+    noMatchesAll: "Esc clears the search",
+    noMatchesGroup: "h/l other groups" + Model.SEP + "Home for All",
+    emptyScopeTitle: "No channels in ",
+    bannerPlaylist: "Playlist refresh failed (",
+    bannerCached: "showing cached copy",
+    bannerRetry: "r retry",
+    bannerEpg: "Guide data unavailable (",
+    bannerEpgStill: "channels still work",
+    bannerEpgPending: "Guide data loading" + Model.ELLIPSIS,
+    transientRefreshing: "Refreshing" + Model.ELLIPSIS,
+    transientStopped: "Stopped",
+    transientFavAdded: "Added to Favorites",
+    transientFavRemoved: "Removed from Favorites",
+    transientRecentRemoved: "Removed from Recent",
+    transientCopied: "Copied",
+    accessibleCard: "IPTV guide",
+    accessibleSearch: "Search channels",
+    accessibleGroups: "Groups",
+    accessibleChannels: "Channels in "
+  })
+
+  // ---- timing constants, in one place (UX.md 5.9)
+  readonly property int bannerFadeMs: 140
+  readonly property int transientMs: 3000
+  readonly property int filterDebounceMs: 40
+  readonly property int filterDebounceThreshold: 2000
+
+  // ---- theme tokens: shares the [menu] surface with the clipboard and
+  // emoji pickers (PRODUCT.md decision 7). No literal colors.
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color border: Color.menu.border
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
+  property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)
+  property var noBorderSpec: Border.none()
   property color scrim: Color.menu.scrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
+  property color accent: Color.accent
+  property color urgent: Color.urgent
   readonly property int cornerRadius: Style.cornerRadius
   property string fontFamily: Style.font.menuFamily
-  property int contentMargin: Style.spacing.panelPadding
-  property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
-  property int contentSpacing: Style.spacing.md
-  // TODO(UX): final card geometry, two-pane (groups | channels) vs single list.
-  property int cardWidth: Math.min(Style.space(900), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(Style.space(620), panel.height - Style.gapsOut * 2)
-  property int rowHeight: Math.max(Style.space(46), Style.font.title + Style.font.caption + Style.spacing.rowPaddingX)
 
+  // ---- metrics (UX.md 5.1 / 5.2)
+  property int contentMargin: Style.spacing.panelPadding
+  property int contentSpacing: Style.spacing.md
+  property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
+  property int bannerHeight: Style.space(28)
+  property int columnWidth: Style.space(200)
+  property int groupEntryHeight: Math.max(Style.space(32), Style.font.body + Style.spacing.controlPaddingY * 2)
+  property int detailRowHeight: Math.max(Style.space(52), Style.font.title + Style.font.bodySmall + Style.space(2) + Style.spacing.rowPaddingX * 2)
+  property int singleRowHeight: Math.max(Style.space(38), Style.font.title + Style.spacing.rowPaddingX * 2)
+  readonly property int rowHeight: rowsHaveDetail ? detailRowHeight : singleRowHeight
+  property int rowSpacing: Style.space(4)
+  property int footerHeight: Math.max(Style.space(20), Style.font.caption + Style.space(6))
+  property int leadWidth: Style.space(24)
+  property int trailWidth: Style.space(20)
+  property int cardWidth: Math.min(Style.space(960), panel.width - Style.gapsOut * 2)
+  property int cardHeight: Math.min(Style.space(620), panel.height - Style.gapsOut * 2)
+  readonly property bool narrow: cardWidth < Style.space(720)
+
+  // ---- derived from the service
   readonly property bool serviceReady: service !== null
   readonly property bool configured: serviceReady && service.configured === true
-  readonly property var playlistError: serviceReady && service.playlistStatus && service.playlistStatus.ok !== true ? service.playlistStatus.error : null
-  readonly property bool stale: serviceReady && service.playlistStatus && service.playlistStatus.stale === true
-  readonly property string statusLine: {
-    if (!root.serviceReady) return "Service not loaded. Run: omarchy restart shell"
-    if (!root.configured) return "No playlist configured. Run: omarchy bar set " + root.pluginId + " playlistUrl <url>"
-    if (root.playlistError) return String(root.playlistError.message || "Playlist error") + (root.stale ? " (showing cached channels)" : "")
-    if (root.service.refreshing) return "Refreshing playlist..."
-    var text = root.totalMatches + " channel" + (root.totalMatches === 1 ? "" : "s")
-    if (root.truncated) text += ", showing first " + root.maxRows + " - keep typing"
-    if (root.stale) text += " (cached)"
-    return text
+  readonly property bool hasChannels: serviceReady && service.channels.length > 0
+  readonly property bool epgConfigured: serviceReady && service.epgConfigured === true
+  readonly property bool epgLoaded: serviceReady && service.epgLoaded === true
+  readonly property string serviceStatus: serviceReady ? String(service.status) : "ready"
+  readonly property string playingId: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.id) : ""
+  readonly property string playingName: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.name) : ""
+  readonly property int nowSec: serviceReady ? service.nowSec : Math.floor(Date.now() / 1000)
+  readonly property bool showColumn: hasChannels && !narrow
+  readonly property bool scopeIsGroup: Model.isGroupScope(effectiveScope)
+
+  // Empty-state kind: "" while rows exist.
+  readonly property string emptyKind: {
+    if (!root.serviceReady) return "service"
+    if (!root.configured) return "unconfigured"
+    if (!root.hasChannels) {
+      if (root.serviceStatus === "error") return "error"
+      return "loading"
+    }
+    if (displayModel.count > 0) return ""
+    if (root.hasQuery) return "noMatches"
+    if (root.effectiveScope === Model.SCOPE_FAVORITES) return "noFavorites"
+    return "emptyScope"
+  }
+
+  // Banner kind (R8): none | playlistError | epgError | epgPending.
+  readonly property string bannerKind: {
+    if (!root.serviceReady || !root.hasChannels) return "none"
+    if (root.serviceStatus === "cached" && root.service.playlistFailed) return "playlistError"
+    if (root.epgConfigured && root.service.epgFailed && !root.epgLoaded) return "epgError"
+    if (root.epgConfigured && root.service.epgPending && root.service.epgRefreshing) return "epgPending"
+    return "none"
+  }
+  readonly property string bannerText: {
+    if (root.bannerKind === "playlistError") {
+      return root.copy.bannerPlaylist + root.service.statusReason + ")" + Model.SEP + root.copy.bannerCached + (root.service.lastUpdated !== "" ? " from " + root.service.lastUpdated : "") + Model.SEP + root.copy.bannerRetry
+    }
+    if (root.bannerKind === "epgError") return root.copy.bannerEpg + root.service.epgReason + ")" + Model.SEP + root.copy.bannerEpgStill + Model.SEP + root.copy.bannerRetry
+    if (root.bannerKind === "epgPending") return root.copy.bannerEpgPending
+    return ""
+  }
+
+  readonly property string scopeLabelText: root.hasChannels ? Model.scopeLabel(root.scopeId, root.query, root.resultTotal) : ""
+
+  readonly property string footerStatusText: Model.footerStatus({
+    transient: root.transientText,
+    truncated: root.truncated,
+    resultTotal: root.resultTotal,
+    cap: root.maxRows,
+    playingName: root.playingName,
+    refreshing: root.serviceReady && root.service.refreshing,
+    epgPending: root.serviceReady && root.service.epgPending,
+    count: root.serviceReady ? root.service.channels.length : 0,
+    lastUpdated: root.serviceReady ? root.service.lastUpdated : "",
+    stale: root.serviceStatus === "cached"
+  })
+
+  readonly property string keyColor: Util.alpha(root.foreground, 0.7).toString()
+  readonly property string verbColor: Util.alpha(root.foreground, 0.45).toString()
+  readonly property string footerHintText: {
+    var empty = ""
+    if (root.emptyKind === "loading") empty = "loading"
+    else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service") empty = "error"
+    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty })
+    var out = []
+    for (var i = 0; i < pairs.length; i++) {
+      out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
+    }
+    return out.join("<font color=\"" + root.verbColor + "\">" + Model.SEP + "</font>")
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -78,22 +223,30 @@ Item {
   function open(payloadJson) {
     root.resolveService()
     var payload = Model.parseJsonObject(payloadJson) || {}
-    root.filterText = typeof payload.query === "string" ? payload.query : ""
-    if (typeof payload.group === "string") root.groupName = payload.group
+    var channels = root.serviceReady ? root.service.channels : []
+    var userState = root.serviceReady ? root.service.userState : null
+    var next = Model.guideState(Model.initialScope(channels, userState))
+    if (typeof payload.scope === "string" && payload.scope !== "") next = Model.withScope(next, payload.scope)
+    else if (typeof payload.group === "string" && payload.group !== "") next = Model.withScope(next, Model.groupScopeId(payload.group))
+    if (typeof payload.query === "string" && payload.query !== "") next = Model.withQuery(next, payload.query)
+    root.guide = next
+    root.transientText = ""
+    root.enterPending = false
     root.opened = true
-    root.selectedIndex = 0
-    root.cursorActive = true
     root.disarmPointer()
     root.rebuildDisplay()
+    root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
+    root.scrollToCursor()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function close() {
     root.opened = false
+    transientTimer.stop()
   }
 
   function dismiss() {
-    root.opened = false
+    root.close()
     if (root.shell && typeof root.shell.hide === "function") root.shell.hide(root.pluginId)
   }
 
@@ -104,88 +257,136 @@ Item {
 
   // ------------------------------------------------------------ model
 
+  // The rows currently shown (plain channel objects, same order as the
+  // ListModel) so actions never re-derive from role data.
+  property var currentRows: []
+
   function candidates() {
     if (!root.serviceReady) return []
-    return Model.channelsInGroup(root.service.channels, root.groupName, root.service.userState)
+    return Model.channelsForScope(root.service.channels, root.effectiveScope, root.service.userState)
+  }
+
+  function scheduleRebuild() {
+    if (!root.opened) return
+    var big = root.serviceReady && root.service.channels.length > root.filterDebounceThreshold
+    rebuildTimer.interval = big ? root.filterDebounceMs : 0
+    rebuildTimer.restart()
+  }
+
+  function rebuildGroups() {
+    if (!root.serviceReady) {
+      root.scopeList = []
+      groupModel.clear()
+      root.groupSignature = ""
+      return
+    }
+    var entries = Model.scopeEntries(root.service.channels, root.service.userState)
+    var parts = []
+    for (var i = 0; i < entries.length; i++) parts.push(entries[i].id + "=" + entries[i].count)
+    var signature = parts.join("|")
+    root.scopeList = entries
+    if (signature === root.groupSignature) return
+    root.groupSignature = signature
+    groupModel.clear()
+    for (var j = 0; j < entries.length; j++) {
+      groupModel.append({ scopeId: entries[j].id, label: entries[j].label, count: entries[j].count, kind: entries[j].kind })
+    }
   }
 
   function rebuildDisplay() {
-    // The service can be handed over after this overlay loads; resolve lazily.
     root.resolveService()
-    var result = Model.filterChannels(root.candidates(), root.filterText, root.maxRows)
-    var nowSec = Math.floor(Date.now() / 1000)
+    root.rebuildGroups()
     var favorites = root.serviceReady ? root.service.userState.favorites : []
-    var epg = root.serviceReady ? root.service.epgNow : ({})
-    root.totalMatches = result.total
+    var result = Model.filterChannels(root.candidates(), root.query, root.maxRows, favorites)
+    var epg = root.serviceReady && root.epgLoaded ? root.service.epgNow : ({})
+    var failed = root.serviceReady ? root.service.failedAt : ({})
+    var playing = root.playingId
+    var now = root.nowSec
+    var showGroup = !root.scopeIsGroup
+    var anyDetail = showGroup || root.epgConfigured
+    root.resultTotal = result.total
     root.truncated = result.truncated
+    root.currentRows = result.rows
 
     displayModel.clear()
     for (var i = 0; i < result.rows.length; i++) {
       var channel = result.rows[i]
       var id = Model.channelId(channel)
       var tvg = String(channel.tvgId || "")
-      var line = Model.formatEpgLine(tvg !== "" ? epg[tvg] : null, nowSec)
+      var fields = Model.epgFields(tvg !== "" ? epg[tvg] : null, now)
+      var failedAt = failed && failed[id] ? String(failed[id]) : ""
+      if (failedAt !== "") anyDetail = true
       displayModel.append({
         channelId: id,
         name: String(channel.name || ""),
-        group: String(channel.group || Model.UNGROUPED),
+        group: Model.primaryGroup(channel),
+        showGroup: showGroup,
         favorite: favorites.indexOf(id) !== -1,
-        epgNow: line.now,
-        epgNext: line.next
+        playing: playing !== "" && id === playing,
+        failedAt: failedAt,
+        nowTitle: fields.nowTitle,
+        nextTitle: fields.nextTitle,
+        nowStart: fields.nowStart,
+        nowStop: fields.nowStop,
+        until: fields.until
       })
     }
+    root.rowsHaveDetail = anyDetail
 
-    if (displayModel.count === 0) root.selectedIndex = 0
-    else if (root.selectedIndex >= displayModel.count) root.selectedIndex = displayModel.count - 1
-    else if (root.selectedIndex < 0) root.selectedIndex = 0
+    if (displayModel.count === 0) root.cursorIndex = 0
+    else if (root.cursorIndex >= displayModel.count) root.cursorIndex = displayModel.count - 1
+    else if (root.cursorIndex < 0) root.cursorIndex = 0
 
     Qt.callLater(function() {
-      if (displayModel.count > 0) resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+      if (displayModel.count > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+      var at = Model.scopeIndex(root.scopeList, root.scopeId)
+      if (at >= 0 && groupModel.count > at) groupList.positionViewAtIndex(at, ListView.Contain)
     })
   }
 
-  function select(delta) {
+  function applyGuide(next, rebuild) {
+    root.guide = next
+    root.cursorIndex = 0
+    root.disarmPointer()
+    if (rebuild) root.rebuildDisplay()
+  }
+
+  function setQuery(text) {
+    root.applyGuide(Model.withQuery(root.guide, text), false)
+    root.scheduleRebuild()
+  }
+
+  function setScope(id) {
+    root.applyGuide(Model.withScope(root.guide, id), true)
+    root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
+    root.scrollToCursor()
+  }
+
+  function moveScopeBy(delta) {
+    if (root.scopeList.length === 0) return
+    root.setScope(Model.moveScope(root.scopeList, root.scopeId, delta))
+  }
+
+  function scrollToCursor() {
+    if (displayModel.count > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+  }
+
+  function moveCursorBy(delta, wrap) {
     if (displayModel.count === 0) return
     root.disarmPointer()
-    if (!root.cursorActive) {
-      root.cursorActive = true
-      root.selectedIndex = delta < 0 ? displayModel.count - 1 : 0
-    } else {
-      root.selectedIndex = Math.max(0, Math.min(displayModel.count - 1, root.selectedIndex + delta))
-    }
-    resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+    root.cursorIndex = Model.moveCursor(root.cursorIndex, delta, displayModel.count, wrap)
+    root.scrollToCursor()
   }
 
   function selectAbsolute(index) {
     if (displayModel.count === 0) return
     root.disarmPointer()
-    root.cursorActive = true
-    root.selectedIndex = Math.max(0, Math.min(index, displayModel.count - 1))
-    resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+    root.cursorIndex = Math.max(0, Math.min(index, displayModel.count - 1))
+    root.scrollToCursor()
   }
 
   function pageSize() {
-    return Math.max(1, Math.floor(resultList.height / root.rowHeight))
-  }
-
-  function setFilter(nextFilter) {
-    root.filterText = nextFilter
-    root.selectedIndex = 0
-    root.cursorActive = true
-    root.disarmPointer()
-    root.rebuildDisplay()
-  }
-
-  function cycleGroup(delta) {
-    if (!root.serviceReady) return
-    var groups = Model.groupChannels(root.service.channels, root.service.userState)
-    var names = [""]
-    for (var i = 0; i < groups.length; i++) names.push(groups[i].name)
-    var at = names.indexOf(root.groupName)
-    if (at === -1) at = 0
-    root.groupName = names[(at + delta + names.length) % names.length]
-    root.selectedIndex = 0
-    root.rebuildDisplay()
+    return Math.max(1, Math.floor(resultList.height / (root.rowHeight + root.rowSpacing)) - 1)
   }
 
   function disarmPointer() {
@@ -194,41 +395,171 @@ Item {
 
   function selectFromPointer(index, item, mouse) {
     if (!pointerGate.moved(item, mouse)) return
-    root.cursorActive = true
-    root.selectedIndex = index
+    root.cursorIndex = index
+  }
+
+  function showTransient(text) {
+    root.transientText = text
+    transientTimer.restart()
   }
 
   // ------------------------------------------------------------ actions
 
-  function activateIndex(index) {
-    if (!root.serviceReady || index < 0 || index >= displayModel.count) return
-    var row = displayModel.get(index)
+  function rowAt(index) {
+    if (index < 0 || index >= root.currentRows.length) return null
+    return root.currentRows[index]
+  }
+
+  // Enter (keepOpen false): play, close, focus mpv. Space (keepOpen true):
+  // play and stay (preview / zapping).
+  function activate(keepOpen) {
+    var channel = root.rowAt(root.cursorIndex)
+    if (!channel || !root.serviceReady) return
+    var from = Model.launchScope(root.scopeId, root.query, channel)
+    if (keepOpen) {
+      root.service.play(Model.channelId(channel), true, from)
+      root.transientText = ""
+      root.rebuildDisplay()
+      return
+    }
     root.dismiss()
-    root.service.playId(row.channelId)
+    root.service.play(Model.channelId(channel), false, from)
+  }
+
+  function activateIndex(index, keepOpen) {
+    root.cursorIndex = index
+    root.activate(keepOpen)
   }
 
   function toggleFavoriteAt(index) {
-    if (!root.serviceReady || index < 0 || index >= displayModel.count) return
-    root.service.toggleFavorite(displayModel.get(index).channelId)
+    var channel = root.rowAt(index)
+    if (!channel || !root.serviceReady) return
+    var added = root.service.toggleFavorite(Model.channelId(channel))
+    root.showTransient(added ? root.copy.transientFavAdded : root.copy.transientFavRemoved)
+    root.rebuildDisplay()
+  }
+
+  // x / Delete: remove from Recent, or unfavorite in Favorites; no-op elsewhere.
+  function removeAt(index) {
+    var channel = root.rowAt(index)
+    if (!channel || !root.serviceReady) return
+    if (root.effectiveScope === Model.SCOPE_RECENT) {
+      root.service.removeRecent(Model.channelId(channel))
+      root.showTransient(root.copy.transientRecentRemoved)
+      root.rebuildDisplay()
+    } else if (root.effectiveScope === Model.SCOPE_FAVORITES) {
+      root.toggleFavoriteAt(index)
+    }
+  }
+
+  function stopPlayback() {
+    if (!root.serviceReady) return
+    root.service.stop()
+    root.showTransient(root.copy.transientStopped)
     root.rebuildDisplay()
   }
 
   function refresh() {
-    if (root.serviceReady) root.service.refreshPlaylist(true)
+    if (!root.serviceReady) return
+    root.service.refresh()
+    root.showTransient(root.copy.transientRefreshing)
   }
 
+  function copyCommand(text) {
+    Quickshell.execDetached(["wl-copy", String(text)])
+    root.showTransient(root.copy.transientCopied)
+  }
+
+  function handleEscape() {
+    var result = Model.onEscape(root.guide)
+    if (result.close) root.dismiss()
+    else root.applyGuide(result.state, true)
+  }
+
+  function switchMode() {
+    root.guide = Model.toggleMode(root.guide)
+  }
+
+  // Keys both modes share and PanelKeyCatcher does not consume:
+  // PgUp/PgDn, Home/End, Delete.
+  function handleSharedKey(event) {
+    if (event.key === Qt.Key_PageUp) { root.moveCursorBy(-root.pageSize(), false); return true }
+    if (event.key === Qt.Key_PageDown) { root.moveCursorBy(root.pageSize(), false); return true }
+    if (event.key === Qt.Key_Home) {
+      // UX 8 #22: Home with a query active in list mode jumps the column to All.
+      if (!root.searchMode && root.hasQuery && root.effectiveScope !== Model.SCOPE_ALL) root.setScope(Model.SCOPE_ALL)
+      else root.selectAbsolute(0)
+      return true
+    }
+    if (event.key === Qt.Key_End) { root.selectAbsolute(displayModel.count - 1); return true }
+    if (event.key === Qt.Key_Delete && !root.searchMode) { root.removeAt(root.cursorIndex); return true }
+    return false
+  }
+
+  // Search mode (UX 3.2): printable keys edit the query; arrows move.
+  function handleSearchKey(event) {
+    if (event.key === Qt.Key_Escape) { root.handleEscape(); return true }
+    if (Util.editsFilter(event, root.query)) { root.setQuery(Util.editedFilter(event, root.query)); return true }
+    if (event.key === Qt.Key_Down) { root.moveCursorBy(1, true); return true }
+    if (event.key === Qt.Key_Up) { root.moveCursorBy(-1, true); return true }
+    if (event.key === Qt.Key_Right) { root.moveScopeBy(1); return true }
+    if (event.key === Qt.Key_Left) { root.moveScopeBy(-1); return true }
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.activate(false); return true }
+    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { root.switchMode(); return true }
+    if (root.handleSharedKey(event)) return true
+    if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return false
+    if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
+      root.setQuery(root.query + event.text)
+      return true
+    }
+    return false
+  }
+
+  // List-mode single-letter commands delivered by PanelKeyCatcher.textKey.
+  function handleListLetter(text) {
+    var t = String(text || "")
+    if (t === "f" || t === "F") root.toggleFavoriteAt(root.cursorIndex)
+    else if (t === "s" || t === "S") root.stopPlayback()
+    else if (t === "r" || t === "R") root.refresh()
+    else if (t === "/") {
+      root.swallowKey = true
+      root.switchMode()
+    }
+    // digits and everything else: ignored (M2 channel numbers)
+  }
+
+  onNowSecChanged: if (root.opened) root.scheduleRebuild()
+
   ListModel { id: displayModel }
+  ListModel { id: groupModel }
 
   PointerMoveGate {
     id: pointerGate
     referenceItem: card
   }
 
+  Timer {
+    id: rebuildTimer
+    interval: 0
+    repeat: false
+    onTriggered: root.rebuildDisplay()
+  }
+
+  Timer {
+    id: transientTimer
+    interval: root.transientMs
+    repeat: false
+    onTriggered: root.transientText = ""
+  }
+
   Connections {
     target: root.service
-    function onChannelsChanged() { if (root.opened) root.rebuildDisplay() }
-    function onUserStateChanged() { if (root.opened) root.rebuildDisplay() }
-    function onEpgNowChanged() { if (root.opened) root.rebuildDisplay() }
+    function onChannelsChanged() { root.scheduleRebuild() }
+    function onUserStateChanged() { root.scheduleRebuild() }
+    function onEpgNowChanged() { root.scheduleRebuild() }
+    function onFailedAtChanged() { root.scheduleRebuild() }
+    function onNowPlayingChanged() { root.scheduleRebuild() }
+    function onPlayingChanged() { root.scheduleRebuild() }
   }
 
   PanelWindow {
@@ -261,69 +592,53 @@ Item {
       borderSpec: root.borderSpec
       padding: root.contentMargin
       Accessible.role: Accessible.Dialog
-      Accessible.name: "IPTV channel guide"
+      Accessible.name: root.copy.accessibleCard
 
       MouseArea { anchors.fill: parent; onClicked: {} }
 
+      // Key host: search-mode keys and the shared extras live here; the
+      // PanelKeyCatcher child owns list mode and is blocked in search mode
+      // so every key falls through to this handler (UX 3, R1).
       Item {
-        id: keyCatcher
+        id: keyHost
         anchors.fill: parent
-        focus: true
 
-        // Keyboard map (draft, see ARCHITECTURE.md "Open risks" and UX.md):
-        // letters filter; arrows / Ctrl+J / Ctrl+K move; PgUp/PgDn/Home/End;
-        // Tab / Shift+Tab cycle groups; Enter plays; Ctrl+F favorite;
-        // Ctrl+R refresh; Esc clears the filter, then the group, then closes.
-        Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
-          var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
-          if (event.key === Qt.Key_Escape) {
-            if (root.filterText) root.setFilter("")
-            else if (root.groupName !== "") { root.groupName = ""; root.rebuildDisplay() }
-            else root.dismiss()
+          if (root.swallowKey) {
+            root.swallowKey = false
             event.accepted = true
-          } else if (Util.editsFilter(event, root.filterText)) {
-            root.setFilter(Util.editedFilter(event, root.filterText))
-            event.accepted = true
-          } else if (event.key === Qt.Key_Up || (ctrl && event.key === Qt.Key_K)) {
-            root.select(-1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Down || (ctrl && event.key === Qt.Key_J)) {
-            root.select(1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_PageUp) {
-            root.select(-root.pageSize())
-            event.accepted = true
-          } else if (event.key === Qt.Key_PageDown) {
-            root.select(root.pageSize())
-            event.accepted = true
-          } else if (event.key === Qt.Key_Home) {
-            root.selectAbsolute(0)
-            event.accepted = true
-          } else if (event.key === Qt.Key_End) {
-            root.selectAbsolute(displayModel.count - 1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-            root.cycleGroup(event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (root.cursorActive) root.activateIndex(root.selectedIndex)
-            else if (displayModel.count > 0) root.cursorActive = true
-            event.accepted = true
-          } else if (ctrl && event.key === Qt.Key_F) {
-            root.toggleFavoriteAt(root.selectedIndex)
-            event.accepted = true
-          } else if (ctrl && event.key === Qt.Key_R) {
-            root.refresh()
-            event.accepted = true
-          } else if (!ctrl && event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
-            root.setFilter(root.filterText + event.text)
-            event.accepted = true
+            return
           }
+          if (root.searchMode) {
+            if (root.handleSearchKey(event)) event.accepted = true
+            return
+          }
+          if (root.handleSharedKey(event)) event.accepted = true
+        }
+
+        PanelKeyCatcher {
+          id: keyCatcher
+          anchors.fill: parent
+          blocked: root.searchMode
+          onMoveRequested: function(dx, dy) {
+            if (dy !== 0) root.moveCursorBy(dy, true)
+            else if (dx !== 0) root.moveScopeBy(dx)
+          }
+          onReturnRequested: root.enterPending = true
+          onActivateRequested: {
+            var enter = root.enterPending
+            root.enterPending = false
+            root.activate(!enter)
+          }
+          onCloseRequested: root.handleEscape()
+          onDeleteRequested: root.removeAt(root.cursorIndex)
+          onTabRequested: function(direction) { root.switchMode() }
+          onTextKey: function(text) { root.handleListLetter(text) }
         }
       }
 
       Column {
+        id: layout
         anchors.fill: parent
         anchors.topMargin: card.contentTopInset
         anchors.rightMargin: card.contentRightInset
@@ -331,169 +646,587 @@ Item {
         anchors.leftMargin: card.contentLeftInset
         spacing: root.contentSpacing
 
-        // Header: search text (or placeholder) + active group.
-        Rectangle {
+        // ---- header: synthetic search line + scope label
+        Item {
           width: parent.width
           height: root.headerHeight
-          radius: root.cornerRadius
-          color: "transparent"
 
           Text {
+            id: searchLine
             textFormat: Text.PlainText
             anchors.left: parent.left
-            anchors.right: groupLabel.left
+            anchors.right: scopeLabel.left
             anchors.rightMargin: Style.spacing.md
             anchors.verticalCenter: parent.verticalCenter
-            text: root.filterText || "Search channels..."
+            text: root.query !== "" ? root.query : root.copy.searchPlaceholder
             color: root.foreground
-            opacity: root.filterText ? 1 : 0.58
+            opacity: root.query !== "" ? 1 : 0.58
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
+            Accessible.role: Accessible.EditableText
+            Accessible.name: root.copy.accessibleSearch
+            Accessible.description: root.query
           }
 
           Text {
-            id: groupLabel
+            id: scopeLabel
             textFormat: Text.PlainText
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.groupName === "" ? "All groups" : root.groupName
-            color: root.selectedText
+            text: root.scopeLabelText
+            color: root.foreground
+            opacity: 0.52
             font.family: root.fontFamily
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.caption
           }
         }
 
-        // Status / error line. Real helper error text lands here (US1).
-        Text {
+        // ---- banner (UX 4.6 / 5.7)
+        Rectangle {
+          id: banner
           width: parent.width
-          textFormat: Text.PlainText
-          text: root.statusLine
-          color: root.playlistError ? Color.urgent : root.foreground
-          opacity: root.playlistError ? 1 : 0.7
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+          height: root.bannerHeight
+          radius: root.cornerRadius
+          visible: root.bannerKind !== "none"
+          color: root.bannerKind === "epgPending"
+            ? Style.normalFillFor(root.foreground, root.accent)
+            : Util.alpha(root.urgent, 0.10)
+          opacity: visible ? 1 : 0
+          Behavior on opacity { NumberAnimation { duration: root.bannerFadeMs; easing.type: Easing.OutCubic } }
+          Accessible.role: Accessible.AlertMessage
+          Accessible.name: root.bannerText
+
+          Row {
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(10)
+            spacing: Style.space(8)
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.bannerKind === "epgPending" ? Model.GLYPHS.loading : Model.GLYPHS.alert
+              color: root.bannerKind === "epgPending" ? root.foreground : root.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.icon
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - Style.space(28)
+              textFormat: Text.PlainText
+              text: root.bannerText
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+          }
         }
 
+        // ---- body: group column + channel list (or an empty state)
         Item {
+          id: body
           width: parent.width
-          height: parent.height - root.headerHeight - Style.font.caption - root.contentSpacing * 2
+          height: parent.height - root.headerHeight - root.footerHeight - root.contentSpacing * 2 - (banner.visible ? root.bannerHeight + root.contentSpacing : 0)
 
-          ListView {
-            id: resultList
+          Row {
             anchors.fill: parent
-            model: displayModel
-            clip: true
-            spacing: Style.space(2)
-            boundsBehavior: Flickable.StopAtBounds
+            spacing: 0
 
-            delegate: Rectangle {
-              id: row
-              required property int index
-              required property string channelId
-              required property string name
-              required property string group
-              required property bool favorite
-              required property string epgNow
-              required property string epgNext
+            // Group column (UX 2.2 / 2.3)
+            Item {
+              id: columnHost
+              visible: root.showColumn
+              width: visible ? root.columnWidth + Style.normalBorderWidth + root.contentMargin : 0
+              height: parent.height
 
-              readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
-
-              width: ListView.view.width
-              height: root.rowHeight
-              radius: root.cornerRadius
-              color: hasCursor ? root.selectedBackground : "transparent"
-              Accessible.role: Accessible.ListItem
-              Accessible.name: row.name + (row.favorite ? ", favorite" : "")
-
-              Column {
+              ListView {
+                id: groupList
                 anchors.left: parent.left
-                anchors.right: star.left
-                anchors.leftMargin: Style.spacing.rowPaddingX
-                anchors.rightMargin: Style.spacing.md
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.spacing.xxs
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: root.columnWidth
+                model: groupModel
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                cacheBuffer: root.groupEntryHeight * 4
+                Accessible.role: Accessible.List
+                Accessible.name: root.copy.accessibleGroups
 
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: row.name
-                  color: row.hasCursor ? root.selectedText : root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.title
-                  elide: Text.ElideRight
-                }
+                delegate: Item {
+                  id: groupRow
+                  required property int index
+                  required property string scopeId
+                  required property string label
+                  required property int count
+                  required property string kind
 
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  // TODO(UX): EPG "Now ... until 21:30" and "Next ..." layout.
-                  text: row.epgNow !== "" ? row.group + "  -  " + row.epgNow : row.group
-                  color: root.foreground
-                  opacity: 0.6
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
+                  readonly property bool isHeader: kind === "header"
+                  readonly property bool selected: !isHeader && scopeId === root.scopeId
+
+                  width: ListView.view.width
+                  height: isHeader ? root.groupEntryHeight + Style.space(10) : root.groupEntryHeight
+                  Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
+                  Accessible.name: isHeader ? label : label + ", " + Model.pluralChannels(count)
+                  Accessible.selected: selected
+
+                  PanelSectionHeader {
+                    visible: groupRow.isHeader
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(10)
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
+                    text: groupRow.label
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                  }
+
+                  Rectangle {
+                    visible: !groupRow.isHeader
+                    anchors.fill: parent
+                    radius: root.cornerRadius
+                    color: groupRow.selected ? root.selectedBackground : "transparent"
+
+                    Text {
+                      textFormat: Text.PlainText
+                      anchors.left: parent.left
+                      anchors.right: countText.left
+                      anchors.leftMargin: Style.space(10)
+                      anchors.rightMargin: Style.space(6)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: groupRow.label
+                      color: groupRow.selected ? root.selectedText : root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      id: countText
+                      textFormat: Text.PlainText
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(10)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: Model.formatCount(groupRow.count)
+                      color: root.foreground
+                      opacity: 0.45
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      horizontalAlignment: Text.AlignRight
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.setScope(groupRow.scopeId)
+                    }
+                  }
                 }
               }
 
-              Text {
-                id: star
-                anchors.right: parent.right
-                anchors.rightMargin: Style.spacing.rowPaddingX
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: row.favorite ? "󰓎" : ""
-                color: root.selectedText
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.title
-              }
-
+              // Wheel over the column moves the selection one entry per tick (UX 7.3).
               MouseArea {
+                anchors.fill: groupList
+                acceptedButtons: Qt.NoButton
+                onWheel: function(wheel) {
+                  var step = Util.wheelSteps(root.columnWheel, wheel.angleDelta.y)
+                  root.columnWheel = step.remainder
+                  if (step.steps !== 0) root.moveScopeBy(step.steps > 0 ? -1 : 1)
+                  wheel.accepted = true
+                }
+              }
+
+              Rectangle {
+                anchors.left: groupList.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: Style.normalBorderWidth
+                color: Util.alpha(root.border, 0.28)
+              }
+            }
+
+            // Channel list (UX 2.4 / 4.3 / 5.4 / 5.6)
+            Item {
+              id: listHost
+              width: parent.width - columnHost.width
+              height: parent.height
+              clip: true
+
+              ListView {
+                id: resultList
                 anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onPositionChanged: function(mouse) { root.selectFromPointer(row.index, row, mouse) }
-                onClicked: {
-                  root.cursorActive = true
-                  root.selectedIndex = row.index
-                  root.activateIndex(row.index)
+                model: displayModel
+                clip: true
+                spacing: root.rowSpacing
+                boundsBehavior: Flickable.StopAtBounds
+                cacheBuffer: root.rowHeight * 4
+                Accessible.role: Accessible.List
+                Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
+
+                delegate: BorderSurface {
+                  id: row
+                  required property int index
+                  required property string channelId
+                  required property string name
+                  required property string group
+                  required property bool showGroup
+                  required property bool favorite
+                  required property bool playing
+                  required property string failedAt
+                  required property string nowTitle
+                  required property string nextTitle
+                  required property int nowStart
+                  required property int nowStop
+                  required property string until
+
+                  readonly property bool hasCursor: index === root.cursorIndex
+                  readonly property string detail: Model.rowDetail({ showGroup: showGroup, group: group, failedAt: failedAt, nowTitle: nowTitle, nextTitle: nextTitle })
+                  readonly property bool showProgress: nowTitle !== "" && nowStop > nowStart && failedAt === ""
+                  readonly property real fraction: showProgress ? Model.epgFraction(root.nowSec, nowStart, nowStop) : 0
+                  readonly property color primaryColor: hasCursor ? root.selectedText : root.foreground
+
+                  width: ListView.view.width
+                  height: root.rowHeight
+                  radius: root.cornerRadius
+                  color: hasCursor ? root.selectedBackground : "transparent"
+                  borderSpec: hasCursor ? root.selectedBorderSpec : root.noBorderSpec
+                  Accessible.role: Accessible.ListItem
+                  Accessible.name: Model.rowAccessibleName({ name: name, favorite: favorite, playing: playing, nowTitle: nowTitle, until: until, failedAt: failedAt })
+                  Accessible.focused: hasCursor
+
+                  Item {
+                    id: rowContent
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.space(12)
+                    anchors.rightMargin: Style.space(12)
+                    anchors.topMargin: Style.space(8)
+                    anchors.bottomMargin: Style.space(8)
+
+                    // lead slot: favorite star
+                    Text {
+                      id: lead
+                      width: root.leadWidth
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      height: Style.font.title + Style.space(2)
+                      textFormat: Text.PlainText
+                      text: row.favorite ? Model.GLYPHS.star : ""
+                      color: row.primaryColor
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                      horizontalAlignment: Text.AlignHCenter
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
+                    // right meta: until HH:MM
+                    Text {
+                      id: meta
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      height: lead.height
+                      textFormat: Text.PlainText
+                      text: row.until !== "" && row.failedAt === "" ? "until " + row.until : ""
+                      visible: text !== ""
+                      width: visible ? implicitWidth : 0
+                      color: root.foreground
+                      opacity: 0.52
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      horizontalAlignment: Text.AlignRight
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
+                    // trail slot: playing or failed glyph
+                    Text {
+                      id: trail
+                      width: root.trailWidth
+                      anchors.right: meta.left
+                      anchors.rightMargin: meta.visible ? Style.space(8) : 0
+                      anchors.top: parent.top
+                      height: lead.height
+                      textFormat: Text.PlainText
+                      text: row.playing ? Model.GLYPHS.play : (row.failedAt !== "" ? Model.GLYPHS.alert : "")
+                      color: row.primaryColor
+                      opacity: row.failedAt !== "" && !row.playing ? 0.8 : 1
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                      horizontalAlignment: Text.AlignHCenter
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
+                    Text {
+                      id: nameText
+                      anchors.left: lead.right
+                      anchors.right: trail.left
+                      anchors.rightMargin: Style.space(6)
+                      anchors.top: parent.top
+                      height: lead.height
+                      textFormat: Text.PlainText
+                      text: row.name
+                      color: row.primaryColor
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.title
+                      font.bold: row.playing
+                      elide: Text.ElideRight
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
+                    Text {
+                      id: detailText
+                      visible: root.rowsHaveDetail
+                      anchors.left: lead.right
+                      anchors.right: parent.right
+                      anchors.top: nameText.bottom
+                      textFormat: Text.PlainText
+                      text: row.detail
+                      color: root.foreground
+                      opacity: 0.52
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      elide: Text.ElideRight
+                    }
+
+                    // EPG progress hairline (UX 5.6)
+                    Rectangle {
+                      id: track
+                      visible: root.rowsHaveDetail && row.showProgress
+                      anchors.left: lead.right
+                      anchors.right: meta.visible ? meta.left : parent.right
+                      anchors.bottom: parent.bottom
+                      height: Style.space(2)
+                      radius: Math.min(root.cornerRadius, Style.space(1))
+                      color: Util.alpha(root.foreground, 0.12)
+
+                      Rectangle {
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: parent.width * row.fraction
+                        radius: parent.radius
+                        color: row.hasCursor ? Util.alpha(root.selectedText, 0.7) : Util.alpha(root.accent, 0.55)
+                      }
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onPositionChanged: function(mouse) { root.selectFromPointer(row.index, row, mouse) }
+                    onClicked: root.activateIndex(row.index, false)
+                  }
+
+                  // Lead-slot hit target (UX 7.3): toggles favorite without playing.
+                  MouseArea {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: Math.max(Style.space(28), Style.space(12) + root.leadWidth)
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleFavoriteAt(row.index)
+                  }
+                }
+              }
+
+              // Scroll edge fades (UX 5.2), strength tracks the hidden distance.
+              Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: Math.min(Style.space(28), parent.height / 2)
+                visible: opacity > 0
+                opacity: resultList.contentHeight > resultList.height
+                  ? Math.max(0, Math.min(1, (resultList.contentY - resultList.originY) / height))
+                  : 0
+                gradient: Gradient {
+                  GradientStop { position: 0; color: root.background }
+                  GradientStop { position: 1; color: Util.alpha(root.background, 0) }
+                }
+              }
+
+              Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: Math.min(Style.space(28), parent.height / 2)
+                visible: opacity > 0
+                opacity: resultList.contentHeight > resultList.height
+                  ? Math.max(0, Math.min(1, (resultList.originY + resultList.contentHeight - resultList.height - resultList.contentY) / height))
+                  : 0
+                gradient: Gradient {
+                  GradientStop { position: 0; color: Util.alpha(root.background, 0) }
+                  GradientStop { position: 1; color: root.background }
                 }
               }
             }
           }
 
+          // ---- empty states (UX 4.4 / 4.5 / 4.6 / 6.3)
           Column {
+            id: emptyState
             anchors.centerIn: parent
+            width: Math.min(body.width, Style.space(640))
             spacing: Style.space(8)
-            visible: displayModel.count === 0
+            visible: root.emptyKind !== ""
+
+            readonly property string glyph: {
+              if (root.emptyKind === "loading") return Model.GLYPHS.loading
+              if (root.emptyKind === "error" || root.emptyKind === "service") return Model.GLYPHS.tvOff
+              return Model.GLYPHS.tv
+            }
+            readonly property bool emptyPlaylist: root.emptyKind === "error" && root.service.statusReason === root.copy.emptyPlaylistTitle
+            readonly property string title: {
+              if (root.emptyKind === "service") return root.copy.serviceTitle
+              if (root.emptyKind === "unconfigured") return root.copy.unconfiguredTitle
+              if (root.emptyKind === "loading") return root.copy.loadingTitle
+              if (root.emptyKind === "error") return emptyState.emptyPlaylist ? root.copy.emptyPlaylistTitle : root.copy.errorTitle
+              if (root.emptyKind === "noFavorites") return root.copy.noFavoritesTitle
+              if (root.emptyKind === "noMatches") return Model.noMatchesTitle(root.query, root.scopeId)
+              return root.copy.emptyScopeTitle + Model.scopeName(root.effectiveScope)
+            }
+            readonly property string prose: {
+              if (root.emptyKind === "service") return root.copy.serviceProse
+              if (root.emptyKind === "unconfigured") return root.copy.unconfiguredProse
+              if (root.emptyKind === "loading") return root.service.sourceHost !== "" ? root.copy.loadingFrom + root.service.sourceHost : root.copy.loadingProse
+              if (root.emptyKind === "error") {
+                if (emptyState.emptyPlaylist) return root.copy.emptyPlaylistProse + root.service.statusHost + Model.SEP + root.copy.emptyPlaylistCheck
+                return root.service.statusReason + " from " + root.service.statusHost + Model.SEP + root.copy.errorCheck
+              }
+              if (root.emptyKind === "noFavorites") return root.copy.noFavoritesProse
+              if (root.emptyKind === "noMatches") return root.scopeIsGroup ? root.copy.noMatchesGroup : root.copy.noMatchesAll
+              return ""
+            }
+            readonly property string command: root.copy.unconfiguredCommand
 
             Text {
-              text: "󰕧"
+              width: parent.width
+              text: emptyState.glyph
               color: root.selectedText
               opacity: 0.8
               font.family: root.fontFamily
               font.pixelSize: Style.font.displayLarge
               horizontalAlignment: Text.AlignHCenter
-              width: parent.width
             }
 
             Text {
+              width: parent.width
               textFormat: Text.PlainText
-              text: {
-                if (!root.configured || root.playlistError) return root.statusLine
-                if (!root.serviceReady || root.service.channels.length === 0) return "No channels yet"
-                return "No matches for \"" + root.filterText + "\""
-              }
+              text: emptyState.title
               color: root.foreground
               opacity: 0.7
               font.family: root.fontFamily
               font.pixelSize: Style.font.title
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.WordWrap
-              width: Math.min(root.cardWidth - root.contentMargin * 2, Style.space(600))
             }
+
+            Text {
+              width: parent.width
+              visible: text !== ""
+              textFormat: Text.PlainText
+              text: emptyState.prose
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              horizontalAlignment: Text.AlignHCenter
+              wrapMode: Text.WordWrap
+            }
+
+            // Command box (UX 4.4); click copies with wl-copy.
+            Rectangle {
+              visible: root.emptyKind === "unconfigured"
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: Math.min(parent.width, commandText.implicitWidth + Style.space(16))
+              height: commandText.implicitHeight + Style.space(16)
+              radius: root.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+
+              Text {
+                id: commandText
+                anchors.centerIn: parent
+                width: parent.width - Style.space(16)
+                textFormat: Text.PlainText
+                text: emptyState.command
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                elide: Text.ElideMiddle
+                horizontalAlignment: Text.AlignHCenter
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.copyCommand(emptyState.command)
+              }
+            }
+
+            Text {
+              visible: root.emptyKind === "unconfigured"
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.copy.unconfiguredEpg
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              horizontalAlignment: Text.AlignHCenter
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              visible: root.emptyKind === "unconfigured"
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.copy.unconfiguredWhere
+              color: root.foreground
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              horizontalAlignment: Text.AlignHCenter
+              wrapMode: Text.WordWrap
+            }
+          }
+        }
+
+        // ---- footer (UX 5.7 / 6.1 / 6.2)
+        Item {
+          width: parent.width
+          height: root.footerHeight
+
+          Text {
+            id: footerStatus
+            textFormat: Text.PlainText
+            anchors.left: parent.left
+            anchors.right: footerHints.left
+            anchors.rightMargin: Style.spacing.md
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.footerStatusText
+            color: root.foreground
+            opacity: 0.45
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+            Accessible.role: Accessible.StaticText
+            Accessible.name: root.footerStatusText
+          }
+
+          Text {
+            id: footerHints
+            // Our own microcopy only (no user strings), so StyledText is safe.
+            textFormat: Text.StyledText
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(implicitWidth, parent.width * 0.7)
+            text: root.footerHintText
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideLeft
+            horizontalAlignment: Text.AlignRight
           }
         }
       }
