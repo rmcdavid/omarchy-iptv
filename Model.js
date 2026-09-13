@@ -37,7 +37,9 @@ var HEALTH_SKIPS_BEFORE_RESTART = 3
 var FAVORITES_GROUP = "Favorites"
 var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
-var STATE_VERSION = 1
+// state.json schema (docs/ARCHITECTURE-SOURCES.md 2.1): version 2 adds the
+// `sources` history and `cacheLayout`; parseState still reads version 1.
+var STATE_VERSION = 2
 
 // Column / scope ids (UX.md 2.2, 2.7). Real groups are "g:<group name>".
 var SCOPE_RECENT = "recent"
@@ -61,7 +63,16 @@ var GLYPHS = {
   alert: "\udb80\udc26",     // U+F0026 nf-md-alert             failed / banner
   loading: "\udb80\uddd8",   // U+F01D8 nf-md-dots_horizontal   loading
   refresh: "\udb81\udc50",   // U+F0450 nf-md-refresh           refresh notification
-  history: "\udb80\udeda"    // U+F02DA nf-md-history           recent
+  history: "\udb80\udeda",   // U+F02DA nf-md-history           recent
+  // Sources screens (UX-SOURCES.md 4.6)
+  sources: "\udb81\udc11",   // U+F0411 nf-md-playlist_play     pinned Sources row
+  check: "\udb80\udd2c",     // U+F012C nf-md-check             active source marker
+  eye: "\udb80\ude08",       // U+F0208 nf-md-eye               reveal a masked URL
+  eyeOff: "\udb80\ude09",    // U+F0209 nf-md-eye_off           hide it again
+  plus: "\udb81\udc15",      // U+F0415 nf-md-plus              Add source row
+  key: "\udb80\udf06",       // U+F0306 nf-md-key               Add Xtream login row
+  pencil: "\udb80\udfeb",    // U+F03EB nf-md-pencil            edit action button
+  closeCircle: "\udb80\udd59" // U+F0159 nf-md-close_circle     remove action button
 }
 
 // Settings clamps (R2). `showChannelName` is `!== false`; strings are trimmed.
@@ -579,15 +590,35 @@ function scopeLabel(scopeId, query, count) {
 
 // ------------------------------------------------------------ guide state machine
 
-// Pure reducer for the two keyboard modes (UX 3, R1). Guide.qml keeps one
-// object and replaces it on every transition so bindings notice.
+// Pure reducer for the keyboard modes (UX 3, R1; UX-SOURCES 1.9). Guide.qml
+// keeps one object and replaces it on every transition so bindings notice.
+// `search` and `list` are the shipped guide modes; `sources`, `sourceEdit`,
+// `sourceXtream` and `confirmRemove` are the Sources screens. `returnMode`
+// remembers where Sources was opened from, `form` holds the open form
+// (section "sources" below), `sourceCursor` is the Sources list cursor.
+var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove"]
+
+function guideMode(mode) {
+  var m = str(mode)
+  return GUIDE_MODES.indexOf(m) === -1 ? "search" : m
+}
+
 function guideState(scopeId) {
-  return { mode: "search", query: "", scopeId: str(scopeId) || SCOPE_ALL, restoreScopeId: "", cursorIndex: 0 }
+  return { mode: "search", query: "", scopeId: str(scopeId) || SCOPE_ALL, restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0 }
 }
 
 function copyGuide(st) {
   var src = st || guideState()
-  return { mode: src.mode === "list" ? "list" : "search", query: str(src.query), scopeId: str(src.scopeId) || SCOPE_ALL, restoreScopeId: str(src.restoreScopeId), cursorIndex: Number(src.cursorIndex) || 0 }
+  return {
+    mode: guideMode(src.mode),
+    query: str(src.query),
+    scopeId: str(src.scopeId) || SCOPE_ALL,
+    restoreScopeId: str(src.restoreScopeId),
+    cursorIndex: Number(src.cursorIndex) || 0,
+    returnMode: str(src.returnMode),
+    form: src.form ? copyForm(src.form) : null,
+    sourceCursor: Math.max(0, Math.floor(Number(src.sourceCursor) || 0))
+  }
 }
 
 function withQuery(st, query) {
@@ -622,7 +653,7 @@ function withScope(st, scopeId) {
 
 function withMode(st, mode) {
   var next = copyGuide(st)
-  next.mode = mode === "list" ? "list" : "search"
+  next.mode = guideMode(mode)
   return next
 }
 
@@ -632,17 +663,41 @@ function withCursor(st, index) {
   return next
 }
 
-// Tab / Shift+Tab / "/" toggle between the modes (UX 3.1, 3.2).
+// Tab / Shift+Tab / "/" toggle between the guide modes (UX 3.1, 3.2). No-op
+// on the Sources screens (UX-SOURCES 2.2: Tab is ignored there).
 function toggleMode(st) {
   var cur = copyGuide(st)
+  if (cur.mode !== "list" && cur.mode !== "search") return cur
   return withMode(cur, cur.mode === "list" ? "search" : "list")
 }
 
-// Esc: a non-empty query clears (mode unchanged); an empty one closes.
+// Esc, per mode (UX 3 and UX-SOURCES 2.3): the guide clears a non-empty
+// query, else closes; Sources returns to `returnMode`; the confirm dialog
+// returns to Sources; a form opened from Sources cancels in one press; a
+// first-run form clears the focused field first, then moves to another
+// field that still has text, and only closes (or returns to its parent
+// form) when every field is empty. While a probe runs, Esc cancels it and
+// thaws the form (`cancelProbe` tells the caller to ask the service).
 function onEscape(st) {
   var cur = copyGuide(st)
-  if (cur.query !== "") return { state: withQuery(cur, ""), close: false }
-  return { state: cur, close: true }
+  var out = { state: cur, close: false, cancelProbe: false }
+  if (cur.mode === "confirmRemove") { out.state = withMode(cur, "sources"); return out }
+  if (cur.mode === "sources") { out.state = closeSources(cur); return out }
+  if (cur.mode === "sourceEdit" || cur.mode === "sourceXtream") {
+    var f = cur.form
+    if (!f) { out.state = withMode(cur, "search"); return out }
+    if (f.probing) { out.state = withFormProbing(cur, false); out.cancelProbe = true; return out }
+    if (f.origin !== "firstRun") return closeForm(cur, "cancel")
+    if (isFormField(f, f.focus) && str(f.values[f.focus]) !== "") { out.state = withFormValue(cur, f.focus, ""); return out }
+    var other = firstFieldWithText(f)
+    if (other !== "") { out.state = withFormFocus(cur, other); return out }
+    if (f.parent) return closeForm(cur, "cancel")
+    out.close = true
+    return out
+  }
+  if (cur.query !== "") { out.state = withQuery(cur, ""); return out }
+  out.close = true
+  return out
 }
 
 // Wrapping cursor move (j/k, Up/Down); clamped page move (PgUp/PgDn).
@@ -688,13 +743,48 @@ function nextInGroup(list, currentId, delta) {
 // ------------------------------------------------------------ state
 
 function emptyState() {
-  return { version: STATE_VERSION, favorites: [], recents: [], lastPlayed: null }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: [] }
 }
 
+// Every reducer builds its result here so `sources` and `cacheLayout` are
+// carried through favorites / recents changes (ARCHITECTURE-SOURCES 2.1).
+function cloneState(state, patch) {
+  var st = state || emptyState()
+  var out = {
+    version: STATE_VERSION,
+    cacheLayout: Number(st.cacheLayout) === CACHE_LAYOUT ? CACHE_LAYOUT : 0,
+    favorites: asList(st.favorites).slice(),
+    recents: asList(st.recents).slice(),
+    lastPlayed: st.lastPlayed || null,
+    sources: asList(st.sources).slice()
+  }
+  var p = patch || {}
+  for (var key in p) if (key !== "version") out[key] = p[key]
+  return out
+}
+
+function withCacheLayout(state, layout) {
+  return cloneState(state, { cacheLayout: Number(layout) === CACHE_LAYOUT ? CACHE_LAYOUT : 0 })
+}
+
+// v1 (no `sources`) and v2 text both yield a v2 object (ARCHITECTURE-SOURCES
+// 2.2); records failing the field rules are dropped, duplicate `url` or
+// `key` keeps the first, the array is capped at MAX_SOURCES.
 function parseState(text) {
   var state = emptyState()
   var parsed = parseJsonObject(text)
   if (!parsed) return state
+  state.cacheLayout = Number(parsed.cacheLayout) === CACHE_LAYOUT ? CACHE_LAYOUT : 0
+  var srcs = asList(parsed.sources)
+  var seenUrl = {}
+  var seenKey = {}
+  for (var s = 0; s < srcs.length && state.sources.length < MAX_SOURCES; s++) {
+    var rec = normalizeSourceRecord(srcs[s])
+    if (!rec || seenUrl[rec.url] || seenKey[rec.key]) continue
+    seenUrl[rec.url] = true
+    seenKey[rec.key] = true
+    state.sources.push(rec)
+  }
   var favs = asList(parsed.favorites)
   if (favs.length > 0) {
     for (var i = 0; i < favs.length; i++) {
@@ -749,22 +839,14 @@ function pushRecent(recents, channel, max, nowSec) {
 function recordPlayed(state, channel, max, nowSec) {
   var st = state || emptyState()
   var id = channelId(channel)
-  return {
-    version: STATE_VERSION,
-    favorites: asList(st.favorites).slice(),
+  return cloneState(st, {
     recents: pushRecent(st.recents, channel, max, nowSec),
-    lastPlayed: id === "" ? st.lastPlayed : { id: id, name: str(channel.name), at: Math.floor(Number(nowSec) || 0) }
-  }
+    lastPlayed: id === "" ? st.lastPlayed || null : { id: id, name: str(channel.name), at: Math.floor(Number(nowSec) || 0) }
+  })
 }
 
 function withFavorites(state, favorites) {
-  var st = state || emptyState()
-  return {
-    version: STATE_VERSION,
-    favorites: asList(favorites).slice(),
-    recents: asList(st.recents).slice(),
-    lastPlayed: st.lastPlayed || null
-  }
+  return cloneState(state, { favorites: asList(favorites).slice() })
 }
 
 function removeRecent(state, id) {
@@ -773,12 +855,7 @@ function removeRecent(state, id) {
   var recents = []
   var list = asList(st.recents)
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].id !== key) recents.push(list[i])
-  return {
-    version: STATE_VERSION,
-    favorites: asList(st.favorites).slice(),
-    recents: recents,
-    lastPlayed: st.lastPlayed || null
-  }
+  return cloneState(st, { recents: recents })
 }
 
 // Trim recents to the configured cap (settings can shrink after the fact).
@@ -787,12 +864,7 @@ function trimRecents(state, max) {
   var cap = max > 0 ? Math.floor(max) : 10
   var list = asList(st.recents)
   if (list.length <= cap) return st
-  return {
-    version: STATE_VERSION,
-    favorites: asList(st.favorites).slice(),
-    recents: list.slice(0, cap),
-    lastPlayed: st.lastPlayed || null
-  }
+  return cloneState(st, { recents: list.slice(0, cap) })
 }
 
 // Session-only failure memory (R11): { id: "HH:MM" }. New objects every time.
@@ -907,7 +979,22 @@ function statusReason(status) {
     no_output: "Helper produced no output",
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
-    ipc_error: "mpv did not answer"
+    ipc_error: "mpv did not answer",
+    // Source validation and cache verbs (ARCHITECTURE-SOURCES 2.3, 3.1, 4.3)
+    empty: "No playlist configured",
+    too_long: "URL too long",
+    bad_url: "Invalid URL",
+    invalid: "Invalid URL",
+    scheme: "Unsupported URL",
+    relative_path: "Relative path not allowed",
+    bad_key: "Invalid cache key",
+    duplicate: "Source already listed",
+    too_many: "Too many sources",
+    busy: "Another fetch is running",
+    unknown_source: "Unknown source",
+    not_ready: "Sources not loaded yet",
+    persist_failed: "Could not save settings",
+    cancelled: "Cancelled"
   }
   if (table[code]) return table[code]
   return scrubUrls(message) || "Unknown error"
@@ -1343,22 +1430,1301 @@ function footerStatus(opts) {
   var out = pluralChannels(o.count)
   if (str(o.lastUpdated) !== "") out += SEP + (o.stale ? "cached " + str(o.lastUpdated) + SEP + "offline" : "updated " + str(o.lastUpdated))
   else if (o.stale) out += SEP + "cached" + SEP + "offline"
+  // UX-SOURCES 5.3: with two or more saved sources the counts line carries
+  // the active source's label so a switch is visible at a glance.
+  if (str(o.activeLabel) !== "" && Number(o.sourceCount) > 1) out = str(o.activeLabel) + SEP + out
   return out
 }
 
-// Footer hint pairs [key, verb] (UX 6.2); the guide styles keys and verbs at
-// different opacities.
+// Footer hint pairs [key, verb] (UX 6.2, UX-SOURCES 5.3); the guide styles
+// keys and verbs at different opacities. `o.form` is the open form (its
+// focused element decides the set), `o.cursorKind` the Sources row kind,
+// `o.sourcesExist` adds `o sources` to the error empty state.
 function footerHints(opts) {
   var o = opts || {}
+  var mode = str(o.mode)
+  if (mode === "confirmRemove") return [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]]
+  if (mode === "sourceEdit" || mode === "sourceXtream") return formHints(o.form)
+  if (mode === "sources") {
+    if (o.cursorKind === "add" || o.cursorKind === "xtream") return [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]]
+    return [["j/k", "move"], ["Enter", "switch"], [SOURCE_KEYS.add, "add"], [SOURCE_KEYS.xtream, "Xtream"], [SOURCE_KEYS.edit, "edit"], [SOURCE_KEYS.remove, "remove"], ["Esc", "back"]]
+  }
   if (o.empty === "loading") return [["Esc", "close"]]
-  if (o.empty) return [["r", "reload"], ["Esc", "close"]]
-  if (o.mode === "list") {
-    return [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"]]
+  if (o.empty) {
+    if (o.sourcesExist) return [["r", "reload"], [SOURCE_KEYS.open, "sources"], ["Esc", "close"]]
+    return [["r", "reload"], ["Esc", "close"]]
+  }
+  if (mode === "list") {
+    return [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"], [SOURCE_KEYS.open, "sources"]]
   }
   if (str(o.query) !== "") {
     return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]]
   }
   return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "group"], ["Tab", "keys"], ["Esc", "close"]]
+}
+
+// Hints for an open form (UX-SOURCES 2.3 / 5.3): the submit verb is `load`
+// on the first-run URL form, `save` elsewhere; Esc reads `cancel` for forms
+// from Sources and `clear` / `back` / `close` for the first-run rule.
+function formHints(form) {
+  var f = form || {}
+  if (f.probing) return [["Esc", "cancel"]]
+  var firstRun = f.origin === "firstRun"
+  var submit = firstRun && f.kind !== "xtream" ? "load" : "save"
+  var esc = "cancel"
+  if (firstRun) {
+    if (formHasText(f)) esc = "clear"
+    else esc = f.parent ? "back" : "close"
+  }
+  var focus = str(f.focus)
+  if (!isFormField(f, focus)) return [["Enter", "activate"], ["Tab", "next field"], ["Esc", esc]]
+  if (f.kind === "xtream") return [["Enter", submit], ["Tab", "next field"], ["Esc", esc]]
+  var value = f.values ? str(f.values[focus]) : ""
+  var maskable = isUrlField(focus) && maskUrl(value) !== value
+  var revealed = maskable && !!(f.revealed && f.revealed[focus])
+  if (maskable && !revealed) return [["Enter", submit], ["Tab", "next field"], [SOURCE_KEYS.reveal, "reveal"], [SOURCE_KEYS.paste, "replace"], ["Esc", esc]]
+  if (revealed) return [["Enter", submit], ["Tab", "next field"], [SOURCE_KEYS.reveal, "hide"], ["Esc", esc]]
+  return [["Enter", submit], ["Tab", "next field"], [SOURCE_KEYS.paste, "paste"], ["Esc", esc]]
+}
+
+// ------------------------------------------------------------ sources (M2-01)
+//
+// docs/ARCHITECTURE-SOURCES.md section 3 (state records, keys, validation,
+// masking, Xtream, reducers) and docs/UX-SOURCES.md 5.4-5.8 / 8.1 (codes,
+// copy, view objects, form state) under the reconciliation rulings SR1-SR10:
+// the state file keeps the architecture's field names (`key`, `url`,
+// `epgUrl`, `lastUsed`, `fetchedAt`), the guide only ever sees `sourceView`
+// objects with the UX names (`id`, `hasEpg`, `cachedAt`, `lastUsedAt`), the
+// user-facing validation codes are the UX 5.4 list, every cap lives in
+// LIMITS (SR5), and `maskUrl` keeps `type` / `output` readable (SR4).
+// Nothing here logs, renders or touches I/O; no function ever returns a URL
+// except `validateSourceUrl`, `xtreamUrls`, `sourceForEdit` and the state
+// reducers, which the service alone consumes.
+
+var CACHE_LAYOUT = 2
+var MAX_SOURCES = 50
+var MAX_SOURCE_URL = 2048
+var MAX_LABEL = 64
+var MAX_XTREAM_SERVER = 512
+var MAX_XTREAM_FIELD = 256
+var SOURCES_DIR = "sources"
+var MASK = "****"
+var MASK_CLEAR_PARAMS = ["type", "output"]
+var LIMITS = { url: MAX_SOURCE_URL, label: MAX_LABEL, server: MAX_XTREAM_SERVER, user: MAX_XTREAM_FIELD, pass: MAX_XTREAM_FIELD, sources: MAX_SOURCES }
+// The keys of the Sources screens, next to the hint table so the two cannot
+// drift (UX-SOURCES 4.8). Guide.qml never spells a key.
+var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
+var SOURCE_KEY_RE = /^[0-9a-f]{8}(-[0-9]{1,3})?$/
+var SOURCE_ORIGINS = ["guide", "xtream", "cli", "migrated"]
+var URL_FIELDS = ["playlist", "epg"]
+var FORM_LIMITS = { label: MAX_LABEL, playlist: MAX_SOURCE_URL, epg: MAX_SOURCE_URL, server: MAX_XTREAM_SERVER, username: MAX_XTREAM_FIELD, password: MAX_XTREAM_FIELD }
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+// ---- input hygiene (ARCHITECTURE-SOURCES 3.1 / 6.1)
+
+var CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/g
+var EDGE_SPACE_RE = /^[ \u00a0]+|[ \u00a0]+$/g
+
+function capLength(text, limit) {
+  var max = Number(limit) > 0 ? Math.floor(Number(limit)) : MAX_SOURCE_URL
+  return text.length > max ? text.substring(0, max) : text
+}
+
+// Field boundary rule: control characters (CR, LF, TAB, the C1 range)
+// removed so a multi-line paste collapses to one line, ASCII space and NBSP
+// trimmed, then capped at `limit` UTF-16 units. Applied to every paste, on
+// submit, and again inside the validators.
+function sanitizeInput(text, limit) {
+  return capLength(str(text).replace(CONTROL_RE, "").replace(EDGE_SPACE_RE, ""), limit)
+}
+
+// While typing (UX-SOURCES 2.3): controls removed and capped, edges kept so
+// a label can be typed with spaces; the trim happens on paste and submit.
+function sanitizeTyping(text, limit) {
+  return capLength(str(text).replace(CONTROL_RE, ""), limit)
+}
+
+function lowerFirst(text) {
+  var t = str(text)
+  return t === "" ? t : t.charAt(0).toLowerCase() + t.substring(1)
+}
+
+// User-facing sentence per result code (UX-SOURCES 5.4, numbers from
+// LIMITS per SR5). Service / helper code names (`bad_url`, `bad_server`,
+// ...) map onto the same sentences so any action result can be shown.
+// `opts.field === "epg"` yields the `EPG: ...` variant; `opts.label` fills
+// the duplicate / label_taken sentences.
+function sourceErrorMessage(code, opts) {
+  var o = opts || {}
+  var c = str(code)
+  var quoted = QUOTE_OPEN + str(o.label) + QUOTE_CLOSE
+  var schemeText = "Start with http://, https://, or / for a local file"
+  var invalidText = "Invalid URL" + SEP + "check the host"
+  var serverText = "Server must start with http:// or https://"
+  var table = {
+    empty: "Enter a playlist URL or path",
+    scheme: schemeText,
+    unsupported_scheme: schemeText,
+    invalid: invalidText,
+    bad_url: invalidText,
+    relative_path: "Use an absolute path (starts with /, not ~)",
+    unsafe_path: "Path not allowed (/proc, /sys and /dev)",
+    too_long: "Too long" + SEP + "max " + formatCount(MAX_SOURCE_URL) + " characters",
+    duplicate: str(o.label) !== "" ? "Already in Sources as " + quoted : "Already in Sources",
+    label_too_long: "Label too long" + SEP + "max " + formatCount(MAX_LABEL) + " characters",
+    label_taken: "A source named " + quoted + " already exists",
+    server_empty: "Enter the server URL",
+    server_scheme: serverText,
+    bad_server: serverText,
+    server_path: "Server is just http://host:port" + SEP + "no path",
+    server_too_long: "Server URL too long" + SEP + "max " + formatCount(MAX_XTREAM_SERVER) + " characters",
+    user_empty: "Enter the username",
+    pass_empty: "Enter the password",
+    bad_credentials: "Enter the username and password",
+    user_too_long: "Username too long" + SEP + "max " + formatCount(MAX_XTREAM_FIELD) + " characters",
+    pass_too_long: "Password too long" + SEP + "max " + formatCount(MAX_XTREAM_FIELD) + " characters",
+    too_many: "Source limit reached" + SEP + "max " + formatCount(MAX_SOURCES) + " sources",
+    busy: "Busy" + SEP + "wait for the current fetch to finish",
+    unknown_source: "Source not found",
+    not_ready: "Not ready yet" + SEP + "try again in a moment",
+    persist_failed: "Could not save settings" + SEP + "run omarchy bar set",
+    cancelled: "Cancelled"
+  }
+  var text = table[c] || ""
+  if (text === "") return c === "" || c === "ok" ? "" : "Could not save the source (" + c + ")"
+  if (o.field === "epg") return "EPG: " + lowerFirst(text)
+  return text
+}
+
+// Older name from the architecture: same sentences.
+function sourceReason(code) {
+  return sourceErrorMessage(code)
+}
+
+// ---- URL validation (ARCHITECTURE-SOURCES 3.1 with the UX 5.4 codes, SR6)
+//
+// Accepted: absolute paths, `file://` URLs (normalized to the path) and
+// `http(s)://` URLs with a host. The normalized `url` is the source's
+// identity: scheme and host lowercased, default port dropped, empty path
+// `/`, query verbatim (provider tokens are case-sensitive), fragment
+// dropped, userinfo kept. `~`, `./` and `../` paths are refused
+// (`relative_path`, UX 5.4); `/proc`, `/sys`, `/dev` are refused
+// (`unsafe_path`, section 6.2). `opts.kind === "epg"` makes an empty value
+// ok (the EPG is optional) and prefixes the messages with `EPG:`.
+function validateSourceUrl(text, opts) {
+  var o = opts || {}
+  var field = o.kind === "epg" ? "epg" : "playlist"
+  function fail(code) {
+    return { ok: false, code: code, message: sourceErrorMessage(code, { field: field }), field: field, kind: "", url: "", host: "" }
+  }
+  function pass(kind, url, host) {
+    return { ok: true, code: "ok", message: "", field: field, kind: kind, url: url, host: host }
+  }
+  function filePath(path) {
+    if (/^\/(proc|sys|dev)(\/|$)/.test(path)) return fail("unsafe_path")
+    return pass("file", path, "")
+  }
+  var s = sanitizeInput(text, MAX_SOURCE_URL + 1)
+  if (s === "") return field === "epg" ? pass("", "", "") : fail("empty")
+  if (s.length > MAX_SOURCE_URL) return fail("too_long")
+  // `//host/x` is a scheme-relative URL, not a path the user means.
+  if (s.indexOf("//") === 0) return fail("scheme")
+  if (s.charAt(0) === "/") return filePath(s)
+  if (s.charAt(0) === "~" || s === "." || s === ".." || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
+  var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/)
+  if (!m) return fail("scheme")
+  var scheme = m[1].toLowerCase()
+  var rest = m[2]
+  if (scheme === "file") {
+    if (rest.indexOf("//") !== 0) return fail("invalid")
+    var after = rest.substring(2).replace(/[?#].*$/, "")
+    var slash = after.indexOf("/")
+    if (slash === -1) return fail("invalid")
+    var decoded
+    try { decoded = decodeURIComponent(after.substring(slash)) } catch (e) { return fail("invalid") }
+    if (decoded.charAt(0) !== "/") return fail("invalid")
+    return filePath(decoded)
+  }
+  if (scheme !== "http" && scheme !== "https") return fail("scheme")
+  if (rest.indexOf("//") !== 0) return fail("invalid")
+  if (/\s/.test(rest)) return fail("invalid")
+  var body = rest.substring(2)
+  var cut = body.search(/[\/?#]/)
+  var authority = cut === -1 ? body : body.substring(0, cut)
+  var tail = cut === -1 ? "" : body.substring(cut)
+  var userinfo = ""
+  var hostport = authority
+  var at = authority.lastIndexOf("@")
+  if (at !== -1) {
+    userinfo = authority.substring(0, at)
+    hostport = authority.substring(at + 1)
+  }
+  var host = ""
+  var port = ""
+  if (hostport.charAt(0) === "[") {
+    var close = hostport.indexOf("]")
+    if (close === -1) return fail("invalid")
+    host = hostport.substring(0, close + 1)
+    var afterHost = hostport.substring(close + 1)
+    if (afterHost !== "") {
+      if (afterHost.charAt(0) !== ":") return fail("invalid")
+      port = afterHost.substring(1)
+    }
+  } else {
+    var colon = hostport.lastIndexOf(":")
+    host = colon === -1 ? hostport : hostport.substring(0, colon)
+    port = colon === -1 ? "" : hostport.substring(colon + 1)
+    if (/[:\[\]]/.test(host)) return fail("invalid")
+  }
+  if (host === "") return fail("invalid")
+  host = host.toLowerCase()
+  if (port !== "" && !/^[0-9]+$/.test(port)) return fail("invalid")
+  if ((scheme === "http" && port === "80") || (scheme === "https" && port === "443")) port = ""
+  var hash = tail.indexOf("#")
+  if (hash !== -1) tail = tail.substring(0, hash)
+  var q = tail.indexOf("?")
+  var path = q === -1 ? tail : tail.substring(0, q)
+  var query = q === -1 ? "" : tail.substring(q + 1)
+  if (path === "") path = "/"
+  var url = scheme + "://" + (userinfo !== "" ? userinfo + "@" : "") + host + (port !== "" ? ":" + port : "") + path + (query !== "" ? "?" + query : "")
+  return pass("http", url, host)
+}
+
+// Normalized identity of an accepted URL, "" when it does not validate.
+function normalizeSourceUrl(text) {
+  var v = validateSourceUrl(text)
+  return v.ok ? v.url : ""
+}
+
+function isUrlField(field) {
+  return URL_FIELDS.indexOf(str(field)) !== -1
+}
+
+// ---- keys and lookups (ARCHITECTURE-SOURCES 3.2, D4)
+
+function sourceKey(url) {
+  return fnv1a32(url)
+}
+
+function isSourceKey(key) {
+  return SOURCE_KEY_RE.test(str(key))
+}
+
+function findSource(sources, key) {
+  var k = str(key)
+  if (k === "") return null
+  var list = asList(sources)
+  for (var i = 0; i < list.length; i++) if (list[i] && str(list[i].key) === k) return list[i]
+  return null
+}
+
+function findSourceByUrl(sources, url) {
+  var u = str(url)
+  if (u === "") return null
+  var list = asList(sources)
+  for (var i = 0; i < list.length; i++) if (list[i] && str(list[i].url) === u) return list[i]
+  return null
+}
+
+// The record with this url keeps its key; otherwise fnv1a32(url), suffixed
+// `-2`, `-3`, ... while another record already uses it (harmless collision).
+function allocateSourceKey(sources, url) {
+  var existing = findSourceByUrl(sources, url)
+  if (existing) return str(existing.key)
+  var base = sourceKey(url)
+  var key = base
+  for (var n = 2; findSource(sources, key) !== null; n++) key = base + "-" + n
+  return key
+}
+
+// `<cacheDir>/sources/<key>`; "" when either input is empty or the key is
+// not a key (the helper validates again before it touches the path).
+function sourceCacheDir(cacheDir, key) {
+  var dir = str(cacheDir).replace(/\/+$/, "")
+  if (dir === "" || !isSourceKey(key)) return ""
+  return dir + "/" + SOURCES_DIR + "/" + str(key)
+}
+
+// ---- labels (UX-SOURCES 5.6)
+
+function hostPortOf(url) {
+  var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@\/?#]*@)?([^\/?#]+)/i)
+  return m ? m[1].toLowerCase() : ""
+}
+
+// Default label: the host (lowercase, leading `www.` dropped, `:port` kept
+// when present) for URLs and the Xtream server; the file name for paths.
+function deriveLabel(url, kind) {
+  var text = str(url)
+  var k = str(kind)
+  var v = validateSourceUrl(text)
+  if (k === "file" || v.kind === "file") {
+    var path = v.ok ? v.url : text
+    var name = path.replace(/\/+$/, "").split("/").pop()
+    return sanitizeInput(name, MAX_LABEL) || "local file"
+  }
+  var hostport = hostPortOf(v.ok ? v.url : text)
+  if (hostport === "") return sanitizeInput(text, MAX_LABEL)
+  return sanitizeInput(hostport.replace(/^www\./, ""), MAX_LABEL)
+}
+
+function labelKey(text) {
+  return sanitizeInput(text, MAX_LABEL + 1).toLowerCase()
+}
+
+// `existing` is a list of labels or of records / views ({ label, id | key }).
+// `selfId` excludes the record being edited.
+function labelTaken(label, existing, selfId) {
+  var want = labelKey(label)
+  if (want === "") return false
+  var list = asList(existing)
+  var self = str(selfId)
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i]
+    if (item === null || item === undefined) continue
+    var key, id
+    if (typeof item === "object") {
+      key = labelKey(item.label)
+      id = str(item.id !== undefined ? item.id : item.key)
+    } else {
+      key = labelKey(item)
+      id = ""
+    }
+    if (self !== "" && id === self) continue
+    if (key === want) return true
+  }
+  return false
+}
+
+// Appends ` 2`, ` 3`, ... while the label is taken (case-insensitive);
+// derived labels only, a typed label is rejected with `label_taken` instead.
+function uniqueLabel(label, existing, selfId) {
+  var base = sanitizeInput(label, MAX_LABEL)
+  if (base === "") base = "source"
+  if (!labelTaken(base, existing, selfId)) return base
+  for (var n = 2; n < 1000; n++) {
+    var suffix = " " + n
+    var candidate = capLength(base, MAX_LABEL - suffix.length) + suffix
+    if (!labelTaken(candidate, existing, selfId)) return candidate
+  }
+  return base
+}
+
+// Architecture name: derived + unique in one call.
+function defaultSourceLabel(url, kind, existingLabels) {
+  return uniqueLabel(deriveLabel(url, kind), existingLabels)
+}
+
+function validateLabel(label, existing, selfId) {
+  var text = sanitizeInput(label, MAX_LABEL + 1)
+  if (text.length > MAX_LABEL) return { ok: false, code: "label_too_long", field: "label", message: sourceErrorMessage("label_too_long"), label: text }
+  if (labelTaken(text, existing, selfId)) return { ok: false, code: "label_taken", field: "label", message: sourceErrorMessage("label_taken", { label: text }), label: text }
+  return { ok: true, code: "ok", field: "", message: "", label: text }
+}
+
+// ---- masking (SR4, UX-SOURCES 4.4)
+
+function maskQuery(query) {
+  var parts = str(query).split("&")
+  var out = []
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i]
+    var eq = part.indexOf("=")
+    if (eq === -1) { out.push(part); continue }
+    var name = part.substring(0, eq)
+    out.push(MASK_CLEAR_PARAMS.indexOf(name.toLowerCase()) !== -1 ? part : name + "=" + MASK)
+  }
+  return out.join("&")
+}
+
+// Fixed token `****` for the userinfo, every query value (except `type` and
+// `output`, never secrets) and the fragment; scheme, host, port, path and
+// query keys stay. Paths and anything that is not a URL come back unchanged,
+// so `maskUrl(v) === v` means "nothing to mask" (no eye button, Ctrl+R no-op).
+function maskUrl(url) {
+  var text = str(url)
+  var m = text.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/)
+  if (!m) return text
+  if (m[1].toLowerCase() === "file") return text
+  var authority = m[2]
+  var at = authority.lastIndexOf("@")
+  if (at !== -1) authority = MASK + "@" + authority.substring(at + 1)
+  var query = m[4] !== undefined ? "?" + maskQuery(m[4].substring(1)) : ""
+  var fragment = m[5] !== undefined ? "#" + MASK : ""
+  return m[1] + "://" + authority + m[3] + query + fragment
+}
+
+// ---- Xtream Codes (ARCHITECTURE-SOURCES 3.4 / D10, UX-SOURCES 1.8, 5.4)
+
+// RFC 3986 unreserved set only (A-Za-z0-9-._~), identical to Python
+// quote(v, safe="") so node, the Qt engine and the helper agree.
+function encodeQueryValue(value) {
+  return encodeURIComponent(str(value)).replace(/[!'()*]/g, function(ch) {
+    return "%" + ch.charCodeAt(0).toString(16).toUpperCase()
+  })
+}
+
+// Builds the get.php / xmltv.php URLs from server, username and password.
+// Accepts positional arguments or one object. The server must carry its
+// scheme (no guessing, UX 8 #9) and nothing after host[:port] (UX 8 #10);
+// a trailing slash is tolerated. Codes are the UX 5.4 Xtream set.
+function xtreamUrls(server, username, password) {
+  var o = server !== null && typeof server === "object" ? server : { server: server, username: username, password: password }
+  function fail(code, field) {
+    return { ok: false, code: code, field: field, message: sourceErrorMessage(code), playlistUrl: "", epgUrl: "", host: "", base: "" }
+  }
+  var srv = sanitizeInput(o.server, MAX_XTREAM_SERVER + 1)
+  if (srv === "") return fail("server_empty", "server")
+  if (srv.length > MAX_XTREAM_SERVER) return fail("server_too_long", "server")
+  if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(srv)) return fail("server_scheme", "server")
+  var v = validateSourceUrl(srv)
+  if (!v.ok) return fail(v.code === "scheme" ? "server_scheme" : "invalid", "server")
+  if (v.kind !== "http") return fail("server_scheme", "server")
+  var m = v.url.match(/^(https?:\/\/[^\/?#@]+)\/?$/)
+  if (!m) return fail(v.url.indexOf("@") !== -1 && v.url.indexOf("@") < v.url.indexOf("/", 8) ? "invalid" : "server_path", "server")
+  var base = m[1]
+  var user = sanitizeInput(o.username, MAX_XTREAM_FIELD + 1)
+  if (user === "") return fail("user_empty", "username")
+  if (user.length > MAX_XTREAM_FIELD) return fail("user_too_long", "username")
+  var pass = sanitizeInput(o.password, MAX_XTREAM_FIELD + 1)
+  if (pass === "") return fail("pass_empty", "password")
+  if (pass.length > MAX_XTREAM_FIELD) return fail("pass_too_long", "password")
+  var creds = "username=" + encodeQueryValue(user) + "&password=" + encodeQueryValue(pass)
+  return {
+    ok: true, code: "ok", field: "", message: "",
+    playlistUrl: base + "/get.php?" + creds + "&type=m3u_plus&output=ts",
+    epgUrl: base + "/xmltv.php?" + creds,
+    host: v.host,
+    base: base
+  }
+}
+
+// UX 8.1 name: `{ ok, code, field, message }` (plus the built URLs on ok).
+function validateXtream(fields) {
+  return xtreamUrls(fields || {})
+}
+
+// ---- view objects (SR1, UX-SOURCES 5.2, 7.1)
+
+function pluralGroups(n) {
+  var v = Math.floor(Number(n) || 0)
+  return formatCount(v) + (v === 1 ? " group" : " groups")
+}
+
+// `1,475 channels in 28 groups`
+function countsLine(channelCount, groupCount) {
+  return pluralChannels(channelCount) + " in " + pluralGroups(groupCount)
+}
+
+function sameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+// `used 21:30` (today), `used yesterday`, `used 3 Sep` (this year), `used 3
+// Sep 2025` (older), `never used` (0). Local time, 24-hour clock.
+function formatLastUsed(atSec, nowSec) {
+  var at = Number(atSec) || 0
+  if (at <= 0) return "never used"
+  var d = new Date(at * 1000)
+  var now = Number(nowSec) > 0 ? new Date(Number(nowSec) * 1000) : new Date()
+  if (sameDay(d, now)) return "used " + formatClock(at)
+  var yesterday = new Date(now.getTime())
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (sameDay(d, yesterday)) return "used yesterday"
+  var text = "used " + d.getDate() + " " + MONTHS[d.getMonth()]
+  if (d.getFullYear() !== now.getFullYear()) text += " " + d.getFullYear()
+  return text
+}
+
+// Architecture wording, kept for callers that want an interval.
+function formatAgo(nowSec, atSec) {
+  var at = Number(atSec) || 0
+  if (at <= 0) return ""
+  var diff = Math.max(0, Math.floor((Number(nowSec) || 0) - at))
+  if (diff < 60) return "just now"
+  if (diff < 3600) return Math.floor(diff / 60) + " min ago"
+  if (diff < 86400) return Math.floor(diff / 3600) + " h ago"
+  return Math.floor(diff / 86400) + " d ago"
+}
+
+// One state record -> the view object the guide binds (SR1). `kind` is the
+// UX kind (`url` | `file` | `xtream`), `host` never a URL, `channelCount`
+// -1 until the first successful fetch. `errorReason` is the session-only
+// probe failure (already redacted) the service may attach.
+function sourceView(source, activeKey, nowSec, errorReason) {
+  var s = source || {}
+  var key = str(s.key)
+  var kind = str(s.kind) === "file" ? "file" : (str(s.origin) === "xtream" ? "xtream" : "url")
+  var fetched = Number(s.fetchedAt) > 0
+  return {
+    id: key,
+    label: str(s.label),
+    kind: kind,
+    host: kind === "file" ? "local file" : hostPortOf(s.url),
+    hasEpg: str(s.epgUrl) !== "",
+    channelCount: fetched ? Math.max(0, Math.floor(Number(s.channelCount) || 0)) : -1,
+    groupCount: fetched ? Math.max(0, Math.floor(Number(s.groupCount) || 0)) : 0,
+    cachedAt: fetched ? Math.floor(Number(s.fetchedAt)) : 0,
+    lastUsedAt: Math.max(0, Math.floor(Number(s.lastUsed) || 0)),
+    lastUsedText: formatLastUsed(s.lastUsed, nowSec),
+    active: key !== "" && key === str(activeKey),
+    origin: str(s.origin),
+    errorReason: str(errorReason)
+  }
+}
+
+// Every record as a view, active first, then last used (newest first),
+// then added (newest first). `errors` is the service's { key: reason } map.
+function sourceViews(state, activeKey, nowSec, errors) {
+  var st = state || emptyState()
+  var errs = errors && typeof errors === "object" ? errors : {}
+  var list = asList(st.sources)
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i]) continue
+    var view = sourceView(list[i], activeKey, nowSec, errs[str(list[i].key)])
+    view.addedAt = Math.floor(Number(list[i].addedAt) || 0)
+    out.push(view)
+  }
+  out.sort(function(a, b) {
+    if (a.active !== b.active) return a.active ? -1 : 1
+    if (a.lastUsedAt !== b.lastUsedAt) return b.lastUsedAt - a.lastUsedAt
+    if (a.addedAt !== b.addedAt) return b.addedAt - a.addedAt
+    return a.label < b.label ? -1 : (a.label > b.label ? 1 : 0)
+  })
+  for (var j = 0; j < out.length; j++) delete out[j].addedAt
+  return out
+}
+
+// Architecture name.
+function sourceRows(state, activeKey, nowSec, errors) {
+  return sourceViews(state, activeKey, nowSec, errors)
+}
+
+// Row detail (UX-SOURCES 5.2): `active` (active source only), `used ...` on
+// narrow cards, host, `Xtream`, counts or `not loaded yet` (a probe failure
+// replaces it with the redacted reason), `EPG`.
+function sourceDetail(view, narrow) {
+  var v = view || {}
+  var parts = []
+  if (v.active) parts.push("active")
+  if (narrow) parts.push(str(v.lastUsedText) || formatLastUsed(v.lastUsedAt))
+  parts.push(str(v.host))
+  if (v.kind === "xtream") parts.push("Xtream")
+  if (Number(v.channelCount) >= 0) parts.push(countsLine(v.channelCount, v.groupCount))
+  else parts.push(str(v.errorReason) !== "" ? str(v.errorReason) : "not loaded yet")
+  if (v.hasEpg) parts.push("EPG")
+  return joinParts(parts)
+}
+
+// UX-SOURCES 7.1 row name.
+function sourceAccessibleName(view) {
+  var v = view || {}
+  var out = str(v.label) + ", " + str(v.host)
+  out += ", " + (Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
+  if (v.active) out += ", active"
+  if (v.hasEpg) out += ", EPG"
+  var used = str(v.lastUsedText) || formatLastUsed(v.lastUsedAt)
+  out += ", " + (used === "never used" ? used : "last " + used)
+  return out
+}
+
+// Header right slot: `3 sources`, `1 source`, `No sources`.
+function sourcesHeaderCount(n) {
+  var v = Math.floor(Number(n) || 0)
+  if (v <= 0) return "No sources"
+  return formatCount(v) + (v === 1 ? " source" : " sources")
+}
+
+// Pinned column row name (UX-SOURCES 7.1).
+function sourcesRowAccessibleName(n) {
+  return "Sources, " + formatCount(n) + " saved"
+}
+
+// Confirm dialog message (UX-SOURCES 5.7).
+function confirmRemoveMessage(label, active) {
+  var quoted = QUOTE_OPEN + str(label) + QUOTE_CLOSE
+  if (active) return "Remove " + quoted + "? It is the active source; the guide returns to setup."
+  return "Remove " + quoted + "? Its cache is deleted too."
+}
+
+// Result-line strings (UX-SOURCES 5.5). Hosts only, never a URL.
+function fetchingLine(host, kind) {
+  if (kind === "file") return "Reading the file" + ELLIPSIS
+  return "Fetching from " + str(host) + ELLIPSIS
+}
+
+function probeFailureLine(reason, host, kind) {
+  var text = redactUrls(str(reason)) || "Unknown error"
+  if (kind === "file" || str(host) === "") return text
+  return text + " from " + str(host)
+}
+
+// Footer transients (UX-SOURCES 5.3).
+function sourceTransient(event, opts) {
+  var o = opts || {}
+  var counts = Number(o.channelCount) >= 0 ? countsLine(o.channelCount, o.groupCount) : ""
+  if (event === "loaded") return counts
+  if (event === "added") return "Added " + str(o.host) + (counts !== "" ? SEP + counts : "")
+  if (event === "saved") return "Saved" + (counts !== "" ? SEP + counts : "")
+  if (event === "switched") return "Switched to " + str(o.label) + (Number(o.channelCount) >= 0 ? SEP + pluralChannels(o.channelCount) : "")
+  if (event === "removed") return "Removed " + str(o.label) + (o.wasActive ? SEP + "no active source" : "")
+  return ""
+}
+
+// ---- state records and reducers (ARCHITECTURE-SOURCES 2.1, 3.5)
+
+function normalizeSourceRecord(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var key = str(raw.key)
+  var url = str(raw.url)
+  if (!isSourceKey(key) || url === "" || url.length > MAX_SOURCE_URL) return null
+  var kind = str(raw.kind)
+  if (kind !== "http" && kind !== "file") kind = url.charAt(0) === "/" ? "file" : "http"
+  var epg = str(raw.epgUrl)
+  if (epg.length > MAX_SOURCE_URL) epg = ""
+  var origin = str(raw.origin)
+  if (SOURCE_ORIGINS.indexOf(origin) === -1) origin = "guide"
+  var label = sanitizeInput(raw.label, MAX_LABEL)
+  if (label === "") label = deriveLabel(url, kind)
+  return {
+    key: key,
+    url: url,
+    epgUrl: epg,
+    kind: kind,
+    label: label,
+    labelCustom: raw.labelCustom === true,
+    origin: origin,
+    addedAt: Math.max(0, Math.floor(Number(raw.addedAt) || 0)),
+    lastUsed: Math.max(0, Math.floor(Number(raw.lastUsed) || 0)),
+    fetchedAt: Math.max(0, Math.floor(Number(raw.fetchedAt) || 0)),
+    channelCount: Math.max(0, Math.floor(Number(raw.channelCount) || 0)),
+    groupCount: Math.max(0, Math.floor(Number(raw.groupCount) || 0))
+  }
+}
+
+function copySourceRecord(rec, patch) {
+  var out = {}
+  for (var k in rec) out[k] = rec[k]
+  var p = patch || {}
+  for (var q in p) out[q] = p[q]
+  return out
+}
+
+function replaceSource(state, key, patch) {
+  var st = state || emptyState()
+  var list = asList(st.sources)
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push(list[i] && str(list[i].key) === str(key) ? copySourceRecord(list[i], patch) : list[i])
+  return cloneState(st, { sources: out })
+}
+
+function nowInt(nowSec) {
+  return Math.max(0, Math.floor(Number(nowSec) || 0))
+}
+
+function sourceLabels(state) {
+  return asList(state ? state.sources : []).map(function(s) { return { id: str(s.key), label: str(s.label) } })
+}
+
+function reducerFail(state, code, key, opts) {
+  return { ok: false, code: code, message: sourceErrorMessage(code, opts), state: state, key: str(key) }
+}
+
+// fields = { playlistUrl, epgUrl, label, origin }. Codes: the UX 5.4 URL
+// codes, `label_too_long`, `label_taken` (a typed label that collides),
+// `duplicate` (with the existing key), `too_many`. An empty label derives
+// one from the URL and keeps `labelCustom: false`.
+function addSource(state, fields, nowSec) {
+  var st = cloneState(state)
+  var f = fields || {}
+  var pv = validateSourceUrl(f.playlistUrl)
+  if (!pv.ok) return reducerFail(st, pv.code, "")
+  var ev = validateSourceUrl(f.epgUrl, { kind: "epg" })
+  if (!ev.ok) return reducerFail(st, ev.code, "", { field: "epg" })
+  var dup = findSourceByUrl(st.sources, pv.url)
+  if (dup) return reducerFail(st, "duplicate", dup.key, { label: dup.label })
+  if (st.sources.length >= MAX_SOURCES) return reducerFail(st, "too_many", "")
+  var lv = validateLabel(f.label, sourceLabels(st), "")
+  if (!lv.ok) return reducerFail(st, lv.code, "", { label: lv.label })
+  var origin = SOURCE_ORIGINS.indexOf(str(f.origin)) === -1 ? "guide" : str(f.origin)
+  var label = lv.label !== "" ? lv.label : uniqueLabel(deriveLabel(pv.url, pv.kind), sourceLabels(st))
+  var now = nowInt(nowSec)
+  var key = allocateSourceKey(st.sources, pv.url)
+  var rec = {
+    key: key, url: pv.url, epgUrl: ev.url, kind: pv.kind, label: label, labelCustom: lv.label !== "",
+    origin: origin, addedAt: now, lastUsed: now, fetchedAt: 0, channelCount: 0, groupCount: 0
+  }
+  return { ok: true, code: "ok", message: "", state: cloneState(st, { sources: st.sources.concat([rec]) }), key: key }
+}
+
+// fields = { label, playlistUrl, epgUrl } (each optional). A label change
+// sets `labelCustom` (an empty label re-derives it). A changed playlist URL
+// yields a NEW record (new key, `fetchedAt: 0`, label / addedAt copied) and
+// leaves the old one in place until the service confirms the probe;
+// `replacedKey` names the old record.
+function updateSource(state, key, fields, nowSec) {
+  var st = cloneState(state)
+  var rec = findSource(st.sources, key)
+  if (!rec) return { ok: false, code: "unknown_source", message: sourceErrorMessage("unknown_source"), state: st, key: str(key), urlChanged: false, replacedKey: "" }
+  var f = fields || {}
+  var patch = {}
+  if (f.label !== undefined) {
+    var lv = validateLabel(f.label, sourceLabels(st), rec.key)
+    if (!lv.ok) return { ok: false, code: lv.code, message: lv.message, state: st, key: rec.key, urlChanged: false, replacedKey: "" }
+    patch.label = lv.label !== "" ? lv.label : uniqueLabel(deriveLabel(rec.url, rec.kind), sourceLabels(st), rec.key)
+    patch.labelCustom = lv.label !== ""
+  }
+  if (f.epgUrl !== undefined) {
+    var ev = validateSourceUrl(f.epgUrl, { kind: "epg" })
+    if (!ev.ok) return { ok: false, code: ev.code, message: ev.message, state: st, key: rec.key, urlChanged: false, replacedKey: "" }
+    patch.epgUrl = ev.url
+  }
+  var urlChanged = false
+  var newKey = rec.key
+  if (f.playlistUrl !== undefined) {
+    var pv = validateSourceUrl(f.playlistUrl)
+    if (!pv.ok) return { ok: false, code: pv.code, message: pv.message, state: st, key: rec.key, urlChanged: false, replacedKey: "" }
+    if (pv.url !== rec.url) {
+      var dup = findSourceByUrl(st.sources, pv.url)
+      if (dup) return { ok: false, code: "duplicate", message: sourceErrorMessage("duplicate", { label: dup.label }), state: st, key: str(dup.key), urlChanged: false, replacedKey: "" }
+      if (st.sources.length >= MAX_SOURCES) return { ok: false, code: "too_many", message: sourceErrorMessage("too_many"), state: st, key: rec.key, urlChanged: false, replacedKey: "" }
+      urlChanged = true
+      newKey = allocateSourceKey(st.sources, pv.url)
+      var replacement = copySourceRecord(rec, patch)
+      replacement.key = newKey
+      replacement.url = pv.url
+      replacement.kind = pv.kind
+      replacement.fetchedAt = 0
+      replacement.channelCount = 0
+      replacement.groupCount = 0
+      replacement.lastUsed = nowInt(nowSec)
+      if (!replacement.labelCustom) replacement.label = uniqueLabel(deriveLabel(pv.url, pv.kind), sourceLabels(st))
+      return { ok: true, code: "ok", message: "", state: cloneState(st, { sources: st.sources.concat([replacement]) }), key: newKey, urlChanged: true, replacedKey: rec.key }
+    }
+  }
+  return { ok: true, code: "ok", message: "", state: replaceSource(st, rec.key, patch), key: rec.key, urlChanged: urlChanged, replacedKey: "" }
+}
+
+function removeSource(state, key) {
+  var st = cloneState(state)
+  var removed = findSource(st.sources, key)
+  if (!removed) return { state: st, removed: null }
+  var out = []
+  for (var i = 0; i < st.sources.length; i++) if (st.sources[i] !== removed) out.push(st.sources[i])
+  return { state: cloneState(st, { sources: out }), removed: removed }
+}
+
+function touchSource(state, key, nowSec) {
+  var st = cloneState(state)
+  if (!findSource(st.sources, key)) return st
+  return replaceSource(st, key, { lastUsed: nowInt(nowSec) })
+}
+
+// Copies the counts of a successful `playlist` status onto the record so
+// the list shows them without opening N status files. `nowSec` is the
+// fallback when the status carries no fetchedAt.
+function withSourceStats(state, key, status, nowSec) {
+  var st = cloneState(state)
+  if (!status || status.ok !== true || !findSource(st.sources, key)) return st
+  var fetched = Math.floor(Number(status.fetchedAt) || 0)
+  if (fetched <= 0) fetched = Math.floor(Number(status.generatedAt) || 0)
+  if (fetched <= 0) fetched = Math.max(1, nowInt(nowSec))
+  return replaceSource(st, key, {
+    fetchedAt: fetched,
+    channelCount: Math.max(0, Math.floor(Number(status.channelCount) || 0)),
+    groupCount: Math.max(0, Math.floor(Number(status.groupCount) || 0))
+  })
+}
+
+function activeSourceKey(state, playlistUrl) {
+  var url = normalizeSourceUrl(playlistUrl)
+  if (url === "") return ""
+  var rec = findSourceByUrl(state ? state.sources : [], url)
+  return rec ? str(rec.key) : ""
+}
+
+// D3 / SR8: the settings are the source of truth for the active source; the
+// history follows. A known URL bumps `lastUsed` only when the active key
+// actually changed and adopts a changed (valid) EPG URL; an unknown URL is
+// added with a derived label and `origin` "migrated" on the very first v2
+// run (no history, legacy cache layout) or "cli" afterwards. Beyond
+// MAX_SOURCES the least recently used non-active records are evicted.
+// `invalid` carries the validation result for a set but invalid URL (D16).
+function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec, origin) {
+  var st = cloneState(state)
+  var out = { state: st, changed: false, activeKey: "", added: "", evicted: [], invalid: null }
+  var raw = sanitizeInput(playlistUrl, MAX_SOURCE_URL + 1)
+  if (raw === "") return out
+  var pv = validateSourceUrl(raw)
+  if (!pv.ok) { out.invalid = pv; return out }
+  var ev = validateSourceUrl(epgUrl, { kind: "epg" })
+  var epg = ev.ok ? ev.url : ""
+  var now = nowInt(nowSec)
+  var rec = findSourceByUrl(st.sources, pv.url)
+  if (rec) {
+    var patch = {}
+    if (str(rec.key) !== str(previousActiveKey)) patch.lastUsed = now
+    if (ev.ok && epg !== str(rec.epgUrl)) patch.epgUrl = epg
+    var keys = 0
+    for (var k in patch) keys++
+    if (keys > 0) { out.state = replaceSource(st, rec.key, patch); out.changed = true }
+    out.activeKey = str(rec.key)
+    return out
+  }
+  var kind = str(origin) !== "" && SOURCE_ORIGINS.indexOf(str(origin)) !== -1 ? str(origin) : (st.sources.length === 0 && st.cacheLayout !== CACHE_LAYOUT ? "migrated" : "cli")
+  var key = allocateSourceKey(st.sources, pv.url)
+  var record = {
+    key: key, url: pv.url, epgUrl: epg, kind: pv.kind,
+    label: uniqueLabel(deriveLabel(pv.url, pv.kind), sourceLabels(st)), labelCustom: false,
+    origin: kind, addedAt: now, lastUsed: now, fetchedAt: 0, channelCount: 0, groupCount: 0
+  }
+  var sources = st.sources.concat([record])
+  while (sources.length > MAX_SOURCES) {
+    var victim = -1
+    for (var i = 0; i < sources.length; i++) {
+      if (sources[i].key === key) continue
+      if (victim === -1 || Number(sources[i].lastUsed) < Number(sources[victim].lastUsed)) victim = i
+    }
+    if (victim === -1) break
+    out.evicted.push(str(sources[victim].key))
+    sources.splice(victim, 1)
+  }
+  out.state = cloneState(st, { sources: sources })
+  out.changed = true
+  out.activeKey = key
+  out.added = key
+  return out
+}
+
+// The only function that hands a URL to the guide: the edit form's values.
+function sourceForEdit(state, key) {
+  var rec = findSource(state ? state.sources : [], key)
+  if (!rec) return null
+  var view = sourceView(rec, "", 0, "")
+  return {
+    id: str(rec.key), key: str(rec.key), label: str(rec.label), labelCustom: rec.labelCustom === true,
+    kind: view.kind, host: view.host, origin: str(rec.origin),
+    playlistUrl: str(rec.url), epgUrl: str(rec.epgUrl),
+    playlistMasked: maskUrl(rec.url), epgMasked: maskUrl(rec.epgUrl)
+  }
+}
+
+// IPC `status` list: label / host / counts, never a URL.
+function sourcesSummary(state, activeKey) {
+  var views = sourceViews(state, activeKey, 0, null)
+  var out = []
+  for (var i = 0; i < views.length; i++) {
+    out.push({ id: views[i].id, key: views[i].id, label: views[i].label, host: views[i].host, active: views[i].active, channelCount: views[i].channelCount, lastUsed: views[i].lastUsedAt })
+  }
+  return out
+}
+
+// Full bar entry for `shell.updateEntryInline`: every own key of `entry`
+// copied (keys we do not own must survive the wholesale replace), `patch`
+// applied, `id` forced.
+function entryWith(entry, patch) {
+  var out = {}
+  var src = entry && typeof entry === "object" ? entry : {}
+  for (var k in src) out[k] = src[k]
+  var p = patch || {}
+  for (var q in p) out[q] = p[q]
+  if (str(out.id) === "" && str(src.id) !== "") out.id = str(src.id)
+  return out
+}
+
+// A cache is stale when its status is not ok, has no fetchedAt, or is older
+// than refreshMinutes.
+function cacheStale(status, refreshMinutes, nowSec) {
+  if (!status || status.ok !== true) return true
+  var fetched = Number(status.fetchedAt) || 0
+  if (fetched <= 0) return true
+  var minutes = clampSetting("refreshMinutes", refreshMinutes)
+  return (Number(nowSec) || 0) - fetched >= minutes * 60
+}
+
+// ---- form state and the Sources transitions (UX-SOURCES 1.9, 2.3, 7.3)
+//
+// form = { kind: "url" | "xtream", origin: "firstRun" | "sources", sourceId,
+//          values: { label, playlist, epg } | { label, server, username, password },
+//          original: the values the edit form opened with, focus: element id,
+//          revealed: { playlist, epg } (true = raw value shown / typed),
+//          error: null | { code, field, message }, probing, probeHost,
+//          probeKind, parent: the form to return to (Xtream from a URL form) }
+
+function formFields(form) {
+  var f = form || {}
+  if (f.kind === "xtream") return ["label", "server", "username", "password"]
+  return f.origin === "firstRun" ? ["playlist", "epg"] : ["label", "playlist", "epg"]
+}
+
+function isFormField(form, id) {
+  return formFields(form).indexOf(str(id)) !== -1
+}
+
+function formLimit(field) {
+  return FORM_LIMITS[str(field)] || MAX_SOURCE_URL
+}
+
+function emptyValues(kind) {
+  if (kind === "xtream") return { label: "", server: "", username: "", password: "" }
+  return { label: "", playlist: "", epg: "" }
+}
+
+function copyValues(kind, values) {
+  var out = emptyValues(kind)
+  var src = values || {}
+  for (var k in out) out[k] = str(src[k])
+  return out
+}
+
+function copyForm(form) {
+  var f = form || {}
+  var kind = f.kind === "xtream" ? "xtream" : "url"
+  return {
+    kind: kind,
+    origin: f.origin === "firstRun" ? "firstRun" : "sources",
+    sourceId: str(f.sourceId),
+    values: copyValues(kind, f.values),
+    original: copyValues(kind, f.original),
+    focus: str(f.focus),
+    revealed: { playlist: !!(f.revealed && f.revealed.playlist), epg: !!(f.revealed && f.revealed.epg) },
+    error: f.error && str(f.error.code) !== "" ? { code: str(f.error.code), field: str(f.error.field), message: str(f.error.message) } : null,
+    probing: f.probing === true,
+    probeHost: str(f.probeHost),
+    probeKind: str(f.probeKind),
+    parent: f.parent ? copyForm(f.parent) : null
+  }
+}
+
+// A fresh form. Initial focus (UX 8 #25): `Label` when editing, `Playlist`
+// when adding (first run included), `Server` on the Xtream form.
+function formState(kind, origin, sourceId, values) {
+  var k = kind === "xtream" ? "xtream" : "url"
+  var id = str(sourceId)
+  var f = copyForm({ kind: k, origin: origin, sourceId: id, values: values, original: values })
+  f.focus = k === "xtream" ? "server" : (id !== "" ? "label" : "playlist")
+  return f
+}
+
+// Tab order (UX-SOURCES 7.3): fields, then link rows, then buttons.
+// `opts.savedSources` (> 0) adds the `Saved sources (n)` link on first run.
+function formFocusOrder(form, opts) {
+  var f = form || {}
+  var o = opts || {}
+  var order = formFields(f).slice()
+  if (f.kind === "xtream") return order.concat(["save", "cancel"])
+  if (f.origin === "firstRun") {
+    if (Number(o.savedSources) > 0) order.push("savedSources")
+    order.push("xtream")
+    order.push("load")
+    return order
+  }
+  if (str(f.sourceId) === "") order.push("xtream")
+  return order.concat(["save", "cancel"])
+}
+
+function formHasText(form) {
+  var f = form || {}
+  var fields = formFields(f)
+  for (var i = 0; i < fields.length; i++) if (f.values && str(f.values[fields[i]]) !== "") return true
+  return false
+}
+
+function firstFieldWithText(form) {
+  var f = form || {}
+  var fields = formFields(f)
+  for (var i = 0; i < fields.length; i++) if (f.values && str(f.values[fields[i]]) !== "") return fields[i]
+  return ""
+}
+
+function guideWithForm(st, form) {
+  var next = copyGuide(st)
+  next.form = form
+  return next
+}
+
+// Open a form. `kind` "url" | "xtream"; `origin` "firstRun" | "sources";
+// `sourceId` for edits; `values` pre-fill (from `sourceForEdit`). A URL form
+// that is open becomes the Xtream form's `parent` (values kept, UX 1.2).
+function openForm(st, kind, origin, sourceId, values) {
+  var cur = copyGuide(st)
+  var form = formState(kind, origin, sourceId, values)
+  if (kind === "xtream" && cur.form && cur.form.kind === "url" && (cur.mode === "sourceEdit" || cur.mode === "sources")) {
+    form.parent = copyForm(cur.form)
+    form.origin = form.parent.origin
+  }
+  var next = guideWithForm(cur, form)
+  next.mode = kind === "xtream" ? "sourceXtream" : "sourceEdit"
+  return next
+}
+
+// The first-run form: the unconfigured empty state contains the input.
+function openFirstRun(st) {
+  var next = copyGuide(st)
+  next.returnMode = ""
+  return openForm(next, "url", "firstRun", "", null)
+}
+
+function openAddForm(st) {
+  return openForm(st, "url", "sources", "", null)
+}
+
+function openEditForm(st, sourceId, values) {
+  return openForm(st, "url", "sources", sourceId, values)
+}
+
+function openXtreamForm(st, origin) {
+  var cur = copyGuide(st)
+  var from = str(origin) || (cur.form ? cur.form.origin : "sources")
+  return openForm(cur, "xtream", from, "", null)
+}
+
+// Leave a form. "cancel" returns to the parent form (values kept), to
+// Sources, or asks the caller to close the guide (first run, every field
+// empty); "saved" lands in `search` (first run) or `sources`.
+function closeForm(st, outcome) {
+  var cur = copyGuide(st)
+  var f = cur.form
+  var out = { state: cur, close: false, cancelProbe: false }
+  if (!f) { out.state = withMode(cur, "search"); return out }
+  if (outcome === "cancel" && f.parent) {
+    var back = guideWithForm(cur, copyForm(f.parent))
+    back.mode = back.form.kind === "xtream" ? "sourceXtream" : "sourceEdit"
+    out.state = back
+    return out
+  }
+  var next = guideWithForm(cur, null)
+  if (f.origin === "firstRun") {
+    if (outcome === "cancel") { out.state = cur; out.close = true; return out }
+    next.mode = "search"
+    next.returnMode = ""
+    out.state = next
+    return out
+  }
+  // Back to Sources; `returnMode` survives so Esc there still lands where
+  // Sources was opened from.
+  next.mode = "sources"
+  out.state = next
+  return out
+}
+
+function withFormPatch(st, patch) {
+  var cur = copyGuide(st)
+  if (!cur.form) return cur
+  var f = cur.form
+  for (var k in patch) f[k] = patch[k]
+  return cur
+}
+
+// Set a field value (already sanitized by the caller for typing; capped
+// here). Typing reveals the field (`opts.typed`), a paste re-masks it; an
+// error on that field clears.
+function withFormValue(st, field, value, opts) {
+  var cur = copyGuide(st)
+  if (!cur.form || !isFormField(cur.form, field)) return cur
+  var o = opts || {}
+  var id = str(field)
+  var f = cur.form
+  f.values[id] = capLength(str(value), formLimit(id))
+  if (isUrlField(id)) f.revealed[id] = o.typed === true && f.values[id] !== ""
+  if (f.error && f.error.field === id) f.error = null
+  return cur
+}
+
+function withFormFocus(st, id) {
+  var cur = copyGuide(st)
+  if (!cur.form) return cur
+  var f = cur.form
+  var target = str(id)
+  if (f.focus === target) return cur
+  if (isUrlField(f.focus)) f.revealed[f.focus] = false
+  f.focus = target
+  return cur
+}
+
+function moveFormFocus(st, delta, opts) {
+  var cur = copyGuide(st)
+  if (!cur.form) return cur
+  var order = formFocusOrder(cur.form, opts)
+  var at = order.indexOf(cur.form.focus)
+  var step = Number(delta) < 0 ? -1 : 1
+  var next = at === -1 ? (step < 0 ? order.length - 1 : 0) : (at + step + order.length) % order.length
+  return withFormFocus(cur, order[next])
+}
+
+function fieldMaskable(form, field) {
+  var f = form || {}
+  var id = str(field)
+  if (!isUrlField(id) || !f.values) return false
+  var value = str(f.values[id])
+  return maskUrl(value) !== value
+}
+
+function fieldRevealed(form, field) {
+  var f = form || {}
+  return !!(f.revealed && f.revealed[str(field)])
+}
+
+function fieldMasked(form, field) {
+  return fieldMaskable(form, field) && !fieldRevealed(form, field)
+}
+
+// Ctrl+R / eye: toggles only when the value has something to mask.
+function toggleReveal(st, field) {
+  var cur = copyGuide(st)
+  if (!cur.form || !fieldMaskable(cur.form, field)) return cur
+  cur.form.revealed[str(field)] = !cur.form.revealed[str(field)]
+  return cur
+}
+
+function withFormReveal(st, field, revealed) {
+  var cur = copyGuide(st)
+  if (!cur.form || !isUrlField(field)) return cur
+  cur.form.revealed[str(field)] = revealed === true
+  return cur
+}
+
+// Error line + focus on the offending field (UX 5.4: one error at a time).
+function withFormError(st, error) {
+  var cur = copyGuide(st)
+  if (!cur.form) return cur
+  var e = error && str(error.code) !== "" ? { code: str(error.code), field: str(error.field), message: str(error.message) } : null
+  cur.form.error = e
+  cur.form.probing = false
+  if (e && isFormField(cur.form, e.field)) return withFormFocus(cur, e.field)
+  return cur
+}
+
+// Freeze / thaw the form around a probe. Every URL field re-masks on
+// submit (UX 4.4); `opts.host` / `opts.kind` feed the fetching line.
+function withFormProbing(st, probing, opts) {
+  var cur = copyGuide(st)
+  if (!cur.form) return cur
+  var o = opts || {}
+  cur.form.probing = probing === true
+  if (probing) {
+    cur.form.error = null
+    cur.form.revealed = { playlist: false, epg: false }
+    cur.form.probeHost = str(o.host)
+    cur.form.probeKind = str(o.kind)
+  }
+  return cur
+}
+
+// Values as submitted: every field trimmed (UX 2.3).
+function formSubmitValues(form) {
+  var f = copyForm(form)
+  var out = {}
+  for (var k in f.values) out[k] = sanitizeInput(f.values[k], formLimit(k))
+  return out
+}
+
+// Synchronous validation of the URL form (UX 5.4): first failing field in
+// form order. `existing` is the source view list (labels + ids), `selfId`
+// the source being edited. Returns the normalized URLs and the label to
+// send to the service (empty label = let the service derive it).
+function validateUrlForm(values, existing, selfId) {
+  var v = values || {}
+  var lv = validateLabel(v.label, existing, selfId)
+  if (!lv.ok) return { ok: false, error: { code: lv.code, field: "label", message: lv.message } }
+  var pv = validateSourceUrl(v.playlist)
+  if (!pv.ok) return { ok: false, error: { code: pv.code, field: "playlist", message: pv.message } }
+  var ev = validateSourceUrl(v.epg, { kind: "epg" })
+  if (!ev.ok) return { ok: false, error: { code: ev.code, field: "epg", message: ev.message } }
+  var dup = null
+  var list = asList(existing)
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i]
+    if (item && typeof item === "object" && str(item.url) !== "" && normalizeSourceUrl(item.url) === pv.url && str(item.id !== undefined ? item.id : item.key) !== str(selfId)) dup = item
+  }
+  if (dup) return { ok: false, error: { code: "duplicate", field: "playlist", message: sourceErrorMessage("duplicate", { label: dup.label }) } }
+  return { ok: true, error: null, label: lv.label, playlistUrl: pv.url, epgUrl: ev.url, kind: pv.kind === "file" ? "file" : "url", host: pv.host }
+}
+
+// Sources list rows: every source, then `Add source`, then `Add Xtream login`.
+function sourcesRowCount(sourceCount) {
+  return Math.max(0, Math.floor(Number(sourceCount) || 0)) + 2
+}
+
+function sourcesRowKind(index, sourceCount) {
+  var n = Math.max(0, Math.floor(Number(sourceCount) || 0))
+  var i = Math.floor(Number(index))
+  if (!isFinite(i) || i < 0) return ""
+  if (i < n) return "source"
+  if (i === n) return "add"
+  if (i === n + 1) return "xtream"
+  return ""
+}
+
+// Cursor on entry: the active source, else row 0 (the Add row when empty).
+function sourcesInitialCursor(views) {
+  var list = asList(views)
+  for (var i = 0; i < list.length; i++) if (list[i] && list[i].active) return i
+  return 0
+}
+
+// After a removal the cursor keeps its index, clamped to the sources left
+// (never parked on an action row while sources remain).
+function cursorAfterRemove(index, remaining) {
+  var n = Math.max(0, Math.floor(Number(remaining) || 0))
+  if (n === 0) return 0
+  return Math.max(0, Math.min(Math.floor(Number(index) || 0), n - 1))
+}
+
+function openSources(st, views) {
+  var cur = copyGuide(st)
+  if (cur.mode === "sources" || cur.mode === "confirmRemove") return cur
+  cur.returnMode = cur.mode === "sourceEdit" || cur.mode === "sourceXtream" ? "sourceEdit" : cur.mode
+  cur.mode = "sources"
+  cur.sourceCursor = sourcesInitialCursor(views)
+  return cur
+}
+
+// Esc / `o` in Sources: back to where it was opened from, nothing else
+// changes. The first-run form (returnMode `sourceEdit`) survives in `form`.
+function closeSources(st) {
+  var cur = copyGuide(st)
+  var back = cur.returnMode
+  cur.returnMode = ""
+  if (back === "sourceEdit" || back === "sourceXtream") {
+    if (cur.form) { cur.mode = cur.form.kind === "xtream" ? "sourceXtream" : "sourceEdit"; return cur }
+    return openFirstRun(cur)
+  }
+  cur.mode = back === "list" ? "list" : "search"
+  return cur
+}
+
+function withSourceCursor(st, index) {
+  var cur = copyGuide(st)
+  cur.sourceCursor = Math.max(0, Math.floor(Number(index) || 0))
+  return cur
+}
+
+function startRemove(st, sourceCount) {
+  var cur = copyGuide(st)
+  if (cur.mode !== "sources" || sourcesRowKind(cur.sourceCursor, sourceCount) !== "source") return cur
+  cur.mode = "confirmRemove"
+  return cur
+}
+
+// After a confirmed removal: Sources stays open while sources remain, the
+// first-run form shows when the list is empty (UX 1.7).
+function afterRemove(st, remaining) {
+  var cur = copyGuide(st)
+  if (Number(remaining) > 0) {
+    cur.mode = "sources"
+    cur.sourceCursor = cursorAfterRemove(cur.sourceCursor, remaining)
+    return cur
+  }
+  cur.form = null
+  return openFirstRun(cur)
+}
+
+// Guide state after a switch that leaves Sources: a fresh search-mode state
+// on the initial scope (query cleared, UX 1.4 step 3).
+function afterSwitch(scopeId) {
+  return guideState(scopeId)
 }
 
 if (typeof module !== "undefined") {
@@ -1480,6 +2846,108 @@ if (typeof module !== "undefined") {
     barTooltip: barTooltip,
     barAccessibleName: barAccessibleName,
     footerStatus: footerStatus,
-    footerHints: footerHints
+    footerHints: footerHints,
+    formHints: formHints,
+    // ---- sources (M2-01)
+    STATE_VERSION: STATE_VERSION,
+    CACHE_LAYOUT: CACHE_LAYOUT,
+    MAX_SOURCES: MAX_SOURCES,
+    MAX_SOURCE_URL: MAX_SOURCE_URL,
+    MAX_LABEL: MAX_LABEL,
+    MAX_XTREAM_SERVER: MAX_XTREAM_SERVER,
+    MAX_XTREAM_FIELD: MAX_XTREAM_FIELD,
+    SOURCES_DIR: SOURCES_DIR,
+    MASK: MASK,
+    MASK_CLEAR_PARAMS: MASK_CLEAR_PARAMS,
+    LIMITS: LIMITS,
+    SOURCE_KEYS: SOURCE_KEYS,
+    SOURCE_KEY_RE: SOURCE_KEY_RE,
+    GUIDE_MODES: GUIDE_MODES,
+    sanitizeInput: sanitizeInput,
+    sanitizeTyping: sanitizeTyping,
+    sourceErrorMessage: sourceErrorMessage,
+    sourceReason: sourceReason,
+    validateSourceUrl: validateSourceUrl,
+    normalizeSourceUrl: normalizeSourceUrl,
+    isUrlField: isUrlField,
+    sourceKey: sourceKey,
+    isSourceKey: isSourceKey,
+    findSource: findSource,
+    findSourceByUrl: findSourceByUrl,
+    allocateSourceKey: allocateSourceKey,
+    sourceCacheDir: sourceCacheDir,
+    deriveLabel: deriveLabel,
+    labelTaken: labelTaken,
+    uniqueLabel: uniqueLabel,
+    defaultSourceLabel: defaultSourceLabel,
+    validateLabel: validateLabel,
+    maskUrl: maskUrl,
+    encodeQueryValue: encodeQueryValue,
+    xtreamUrls: xtreamUrls,
+    validateXtream: validateXtream,
+    pluralGroups: pluralGroups,
+    countsLine: countsLine,
+    formatLastUsed: formatLastUsed,
+    formatAgo: formatAgo,
+    sourceView: sourceView,
+    sourceViews: sourceViews,
+    sourceRows: sourceRows,
+    sourceDetail: sourceDetail,
+    sourceAccessibleName: sourceAccessibleName,
+    sourcesHeaderCount: sourcesHeaderCount,
+    sourcesRowAccessibleName: sourcesRowAccessibleName,
+    confirmRemoveMessage: confirmRemoveMessage,
+    fetchingLine: fetchingLine,
+    probeFailureLine: probeFailureLine,
+    sourceTransient: sourceTransient,
+    cloneState: cloneState,
+    withCacheLayout: withCacheLayout,
+    normalizeSourceRecord: normalizeSourceRecord,
+    addSource: addSource,
+    updateSource: updateSource,
+    removeSource: removeSource,
+    touchSource: touchSource,
+    withSourceStats: withSourceStats,
+    activeSourceKey: activeSourceKey,
+    reconcileSources: reconcileSources,
+    sourceForEdit: sourceForEdit,
+    sourcesSummary: sourcesSummary,
+    entryWith: entryWith,
+    cacheStale: cacheStale,
+    formFields: formFields,
+    isFormField: isFormField,
+    formLimit: formLimit,
+    copyForm: copyForm,
+    formState: formState,
+    formFocusOrder: formFocusOrder,
+    formHasText: formHasText,
+    openForm: openForm,
+    openFirstRun: openFirstRun,
+    openAddForm: openAddForm,
+    openEditForm: openEditForm,
+    openXtreamForm: openXtreamForm,
+    closeForm: closeForm,
+    withFormValue: withFormValue,
+    withFormFocus: withFormFocus,
+    moveFormFocus: moveFormFocus,
+    fieldMaskable: fieldMaskable,
+    fieldRevealed: fieldRevealed,
+    fieldMasked: fieldMasked,
+    toggleReveal: toggleReveal,
+    withFormReveal: withFormReveal,
+    withFormError: withFormError,
+    withFormProbing: withFormProbing,
+    formSubmitValues: formSubmitValues,
+    validateUrlForm: validateUrlForm,
+    sourcesRowCount: sourcesRowCount,
+    sourcesRowKind: sourcesRowKind,
+    sourcesInitialCursor: sourcesInitialCursor,
+    cursorAfterRemove: cursorAfterRemove,
+    openSources: openSources,
+    closeSources: closeSources,
+    withSourceCursor: withSourceCursor,
+    startRemove: startRemove,
+    afterRemove: afterRemove,
+    afterSwitch: afterSwitch
   }
 }
