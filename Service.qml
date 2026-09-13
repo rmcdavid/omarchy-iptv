@@ -455,12 +455,14 @@ Item {
   // ------------------------------------------------------------ sources API (SR2)
   // Every action returns { ok, code, message, id } synchronously (`id` = the
   // record concerned, "" when none; `field` names the offending form field
-  // on a validation failure). Codes: ok, empty, scheme, invalid,
-  // relative_path, unsafe_path, too_long, duplicate (id = the existing
-  // record), too_many, label_taken, label_too_long, server_empty,
-  // server_scheme, server_path, user_empty, pass_empty, user_too_long,
-  // pass_too_long, busy, unknown_source, not_ready, persist_failed.
-  // Asynchronous outcomes arrive through sourceProbeFinished.
+  // on a validation failure). Codes (UX-SOURCES 5.4, SR17, SR18): ok, empty,
+  // scheme, invalid, relative_path, unsafe_path, too_long, duplicate (id =
+  // the existing record), too_many, label_taken, label_too_long,
+  // server_empty, server_scheme, server_path, server_userinfo,
+  // server_too_long, user_empty, pass_empty, user_too_long, pass_too_long,
+  // busy, unknown_source, not_ready, persist_failed. Messages are
+  // Model.sourceErrorMessage sentences. Asynchronous outcomes arrive through
+  // sourceProbeFinished.
 
   function sourceResult(ok, code, message, id, field) {
     var out = { ok: ok, code: code, message: message || "", id: id || "" }
@@ -1236,11 +1238,10 @@ Item {
   // ------------------------------------------------------------ helpers
 
   // Host for the probe signal (UX-SOURCES 5.5): Model.hostOf, never a path,
-  // query or userinfo; "" for a local file so the failure line is the
-  // reason alone.
+  // query or userinfo; `local file` for a path (the guide's failure line
+  // drops the host for kind `file`, the `Added` transient shows it).
   function hostForRecord(rec) {
-    if (!rec) return ""
-    return rec.kind === "file" ? "" : Model.hostOf(rec.url)
+    return rec ? Model.hostOf(rec.url) : ""
   }
 
   // The form field a failed action concerns (for the harness; the guide
