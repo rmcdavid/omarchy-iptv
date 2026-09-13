@@ -1,0 +1,11 @@
+<!doctype html>
+<!-- QA fixture: what a provider portal returns instead of a playlist (login page).
+     Expected: no channels; UX 6.3 reason "Not an M3U file" (the helper may report
+     empty_playlist; the guide must still show a readable reason, never a traceback). -->
+<html><head><title>Login</title></head>
+<body>
+<h1>Please sign in</h1>
+<form method="post" action="/login"><input name="username"><input name="password" type="password"></form>
+<p>#EXTINF:-1,Fake Entry Inside HTML</p>
+<p>http://stream.example.test/inside-html.m3u8</p>
+</body></html>

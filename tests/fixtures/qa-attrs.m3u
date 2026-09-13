@@ -1,0 +1,55 @@
+#EXTM3U x-tvg-url="http://epg.example.test/x.xml.gz" url-tvg="http://epg.example.test/guide.xml.gz"
+# QA fixture: #EXTINF attribute edge cases and channel identity (docs/QA.md, "Fixture catalogue").
+#  - both EPG hint attributes on #EXTM3U (url-tvg must win, it is the older/wider convention)
+#  - bare (unquoted) values, uppercase attribute names, repeated attributes, empty values
+#  - duplicate tvg-id across HD/SD (ids must fall back to u:<hash>), exact duplicate URL (u:<hash>#2)
+#  - titles with commas, float and zero durations, a broken #EXTINF without a comma
+#  - an empty title with a credentialed URL (the name must NOT become the URL, see D-QA-02)
+#  - HLS-style #EXT-X- tags and blank lines between #EXTINF and its URL are ignored
+#EXT-X-VERSION:3
+#EXTINF:-1 tvg-id=espn.us tvg-chno=12 group-title=Sports,Bare Attributes
+http://stream.example.test/bare.m3u8
+#EXTINF:-1 tvg-id="hd.test" tvg-name="Dup HD" group-title="Dup",Duplicate tvg-id HD
+http://stream.example.test/dup-hd.m3u8
+#EXTINF:-1 tvg-id="hd.test" tvg-name="Dup SD" group-title="Dup",Duplicate tvg-id SD
+http://stream.example.test/dup-sd.m3u8
+#EXTINF:-1 group-title="Dup",Exact Duplicate URL A
+http://stream.example.test/same.m3u8
+#EXTINF:-1 group-title="Dup",Exact Duplicate URL B
+http://stream.example.test/same.m3u8
+#EXTINF:-1 tvg-id="comma.test" group-title="News, World",Title, With, Commas
+http://stream.example.test/comma.m3u8
+#EXTINF:12.5 tvg-id="float.test",Float Duration
+http://stream.example.test/float.m3u8
+#EXTINF:0 tvg-id="zero.test",Zero Duration
+http://stream.example.test/zero.m3u8
+#EXTINF:-1 tvg-id="nocomma.test" Broken EXTINF Without Comma
+http://stream.example.test/nocomma.m3u8
+#EXTINF:-1 tvg-id="notitle.test" tvg-name="Name From tvg-name",
+http://stream.example.test/notitle.m3u8
+#EXTINF:-1,
+http://user:secret@stream.example.test/live/user/secret/1.ts
+#EXTINF:-1 tvg-logo="https://logos.example.test/ok.png" tvg-id="logo.test",Logo Https
+http://stream.example.test/logo.m3u8
+#EXTINF:-1 tvg-logo="file:///etc/passwd" tvg-id="badlogo.test",Logo File Scheme Dropped
+http://stream.example.test/badlogo.m3u8
+#EXTINF:-1 TVG-ID="upper.test" GROUP-TITLE="Upper",Uppercase Attribute Names
+http://stream.example.test/upper.m3u8
+#EXTINF:-1 tvg-id="unq-space.test" group-title=News Sports,Unquoted Value With Space
+http://stream.example.test/unqspace.m3u8
+#EXTINF:-1 tvg-id="dupattr.test" group-title="First" group-title="Second",Repeated Attribute
+http://stream.example.test/dupattr.m3u8
+#EXTINF:-1 tvg-id="empty-attr.test" group-title="",Empty group-title Attribute
+http://stream.example.test/emptyattr.m3u8
+#EXTINF:-1 tvg-id="  spaced.id  ",Whitespace In tvg-id
+http://stream.example.test/spaced.m3u8
+#EXTINF:-1 tvg-id="blank.test",Blank Lines Before URL
+
+http://stream.example.test/blank.m3u8
+#EXTINF:-1 tvg-id="lost.test",First Of Two EXTINF Is Lost
+#EXTINF:-1 tvg-id="kept.test",Second Of Two EXTINF Is Kept
+http://stream.example.test/kept.m3u8
+#EXTINF:-1 tvg-id="tab.test"	group-title="Tabbed",Tab Separated Attributes
+http://stream.example.test/tab.m3u8
+#EXTINF:-1 tvg-id="long.test",Long Title word00 word01 word02 word03 word04 word05 word06 word07 word08 word09 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24 word25 word26 word27 word28 word29 word30 word31 word32 word33 word34 word35 word36 word37 word38 word39
+http://stream.example.test/long.m3u8
