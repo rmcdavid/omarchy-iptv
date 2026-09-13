@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<!--
+  QA fixture: XMLTV pair for qa-src-a.m3u (docs/QA-SOURCES.md, section 8).
+  Purpose: prove that the EPG of a source lands in that source's own cache directory
+  (sources/<key>/epg-now.json, epg-status.json, epg-window.txt), that the row detail
+  carries the "EPG" segment / hasEpg is true only for this source, and that the
+  startup prune ages these files for inactive sources (ARCH 2.3, 4.4 step 7).
+  Programmes:
+    qa.a.news1   one "evergreen" programme 2026-01-01Z .. 2030-01-01Z: it is inside the
+                 helper's [now - 2 h, now + 12 h] window at any real clock until 2030, so the
+                 guide row shows "Now: Alpha Evergreen" with no "Next:" (verified on the shipped helper).
+    qa.a.news2   same, "Alpha Evergreen Two"
+    qa.shared    T0-pinned pair for the epg "now=1789244100" seam (T0 = 2026-09-12T20:15:00Z,
+                 QA.md TC-EPG-06): now = "Shared Now" (20:00Z-21:00Z), next = "Shared Next" (21:00Z-22:00Z).
+                 At the real clock these are outside the window and the row has no EPG line.
+    qa.b.movie1  belongs to qa-src-b.m3u only: with A's channels.json present the alias filter
+                 drops it and the helper counts it under the unknown-id warning; never an error.
+  The file stays ASCII (scripts/check.sh) by using a character reference in one title.
+-->
+<tv date="20260912" generator-info-name="omarchy-iptv-qa" source-info-name="qa-sources-fixture">
+  <channel id="qa.a.news1"><display-name lang="en">Alpha News One</display-name></channel>
+  <channel id="qa.a.news2"><display-name lang="en">Alpha News Two</display-name></channel>
+  <channel id="qa.shared"><display-name lang="en">Shared Channel</display-name></channel>
+  <channel id="qa.b.movie1"><display-name lang="en">Bravo Movie One</display-name></channel>
+  <programme start="20260101000000 +0000" stop="20300101000000 +0000" channel="qa.a.news1"><title lang="en">Alpha Evergreen</title></programme>
+  <programme start="20260101000000 +0000" stop="20300101000000 +0000" channel="qa.a.news2"><title lang="en">Alpha Evergreen Two &#8211; Caf&#233;</title></programme>
+  <programme start="20260912190000 +0000" stop="20260912200000 +0000" channel="qa.shared"><title lang="en">Shared Before</title></programme>
+  <programme start="20260912200000 +0000" stop="20260912210000 +0000" channel="qa.shared"><title lang="en">Shared Now</title></programme>
+  <programme start="20260912210000 +0000" stop="20260912220000 +0000" channel="qa.shared"><title lang="en">Shared Next</title></programme>
+  <programme start="20260101000000 +0000" stop="20300101000000 +0000" channel="qa.b.movie1"><title lang="en">Bravo Evergreen</title></programme>
+</tv>
