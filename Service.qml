@@ -343,8 +343,13 @@ Item {
     root.controlKind = ""
     var status = Model.parseHelperStatus(text, kind)
     if (kind === "status") {
+      var code = status.error ? String(status.error.code) : ""
       if (Model.statusHealthy(status)) {
         root.healthFailures = 0
+      } else if (code === "not_implemented" || code === "no_output") {
+        // The helper cannot tell (stub or crash): neither healthy nor a
+        // strike, so a missing subcommand never reaps a working player.
+        if (root.healthFailures === 0) console.warn("omarchy-iptv: status check unavailable:", Model.statusReason(status))
       } else {
         root.healthFailures += 1
         if (root.healthFailures >= root.healthFailuresBeforeRestart && mpvProc.running) {
@@ -690,6 +695,11 @@ Item {
     // The one and only mpv instance (decision 2). Destroying this object
     // kills mpv, which is why the service is keepLoaded.
     id: mpvProc
+    // mpv prints its messages ("Failed to open ...") on stdout; keep stderr
+    // too for loader/driver errors.
+    stdout: SplitParser {
+      onRead: function(line) { root.rememberStderr(line) }
+    }
     stderr: SplitParser {
       onRead: function(line) { root.rememberStderr(line) }
     }

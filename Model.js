@@ -917,7 +917,11 @@ function buildMpvArgv(params) {
     "--keep-open=no",
     "--title=" + name,
     "--force-media-title=" + name,
-    "--msg-level=all=error"
+    "--msg-level=all=error",
+    // Live streams never need yt-dlp; without this mpv shells out to it on
+    // every dead URL (seconds of delay and noise per failed zap). User
+    // mpvArgs come later, so `--ytdl=yes` can re-enable it.
+    "--ytdl=no"
   ]
   argv = argv.concat(headerArgs(p.headers))
   if (Array.isArray(p.extraArgs)) argv = argv.concat(p.extraArgs)

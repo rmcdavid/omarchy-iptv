@@ -51,6 +51,9 @@ Item {
   property string groupSignature: ""
   property string transientText: ""
   property bool enterPending: false
+  // Set when a list-mode key switches to search mode: the same key event
+  // then propagates to the search handler and must not become query text.
+  property bool swallowKey: false
   property int columnWheel: 0
   readonly property int maxRows: Model.MAX_ROWS_DEFAULT
 
@@ -475,7 +478,10 @@ Item {
     if (t === "f" || t === "F") root.toggleFavoriteAt(root.cursorIndex)
     else if (t === "s" || t === "S") root.stopPlayback()
     else if (t === "r" || t === "R") root.refresh()
-    else if (t === "/") root.switchMode()
+    else if (t === "/") {
+      root.swallowKey = true
+      root.switchMode()
+    }
     // digits and everything else: ignored (M2 channel numbers)
   }
 
@@ -555,6 +561,11 @@ Item {
         anchors.fill: parent
 
         Keys.onPressed: function(event) {
+          if (root.swallowKey) {
+            root.swallowKey = false
+            event.accepted = true
+            return
+          }
           if (root.searchMode) {
             if (root.handleSearchKey(event)) event.accepted = true
             return
