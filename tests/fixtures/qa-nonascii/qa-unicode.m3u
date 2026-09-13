@@ -1,0 +1,29 @@
+#EXTM3U
+# QA fixture (UTF-8, LF): names and groups outside ASCII (docs/QA.md, TC-PARSE-UNI-*).
+#  - Latin diacritics fold to ASCII in searchKey (Télé Québec -> tele quebec, Łódź -> lodz, ß -> ss)
+#  - Cyrillic, Arabic, CJK are kept intact and lowercased where applicable
+#  - non-ASCII punctuation (en dash U+2013) is NOT folded by design; only ASCII punctuation collapses
+#  - precomposed (NFC) vs decomposed (NFD) e-acute: only NFC folds today (see D-QA-08)
+#  - an emoji (astral plane, 4-byte UTF-8) must round-trip through channels.json and the fnv1a32 id
+#EXTINF:-1 tvg-id="tele.quebec" group-title="Québec",Télé Québec
+http://stream.example.test/tele-quebec.m3u8
+#EXTINF:-1 tvg-id="lodz.pl" group-title="Polska",TVP Łódź
+http://stream.example.test/lodz.m3u8
+#EXTINF:-1 tvg-id="ard.de" group-title="Deutschland",Das Erste – Straße
+http://stream.example.test/ard.m3u8
+#EXTINF:-1 tvg-id="perviy.ru" group-title="Россия",Первый канал
+http://stream.example.test/perviy.m3u8
+#EXTINF:-1 tvg-id="aljazeera.qa" group-title="العربية",الجزيرة
+http://stream.example.test/aljazeera.m3u8
+#EXTINF:-1 tvg-id="nhk.jp" group-title="日本",NHK 総合
+http://stream.example.test/nhk.m3u8
+#EXTINF:-1 tvg-id="emoji.test" group-title="Fun",Emoji 📺 Channel
+http://stream.example.test/emoji.m3u8
+#EXTINF:-1 tvg-id="nfc.test" group-title="Normalisation",Café NFC
+http://stream.example.test/nfc.m3u8
+#EXTINF:-1 tvg-id="nfd.test" group-title="Normalisation",Café NFD
+http://stream.example.test/nfd.m3u8
+#EXTINF:-1 tvg-id="upper.test" group-title="Normalisation",ÉCOLE UPPERCASE ACCENT
+http://stream.example.test/ecole.m3u8
+#EXTINF:-1 tvg-id="urlutf8.test" group-title="Normalisation",Non ASCII In URL Path
+http://stream.example.test/live/été.m3u8

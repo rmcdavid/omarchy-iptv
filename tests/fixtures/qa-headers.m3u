@@ -1,0 +1,46 @@
+#EXTM3U
+# QA fixture: per-channel headers from #EXTVLCOPT / #KODIPROP and injection attempts (docs/QA.md, SEC-*).
+#  - user-agent / referrer map to headers; other VLC options are stored, never applied (ARCH 8.2)
+#  - a bare CR (0x0D) inside a value and %0D%0A inside KODIPROP must be neutralised (SEC-03)
+#  - header names are validated (^[A-Za-z0-9-]+$); a bad name is dropped with a warning
+#  - option lines before #EXTINF and after it both apply to the next URL; nothing leaks to the entry after
+#  - shell metacharacters in values must survive verbatim (argv only, never bash -c)
+#EXTINF:-1 tvg-id="vlc.test",VLC User Agent And Referrer
+#EXTVLCOPT:http-user-agent=Mozilla/5.0 (QA) VLC/3.0.20
+#EXTVLCOPT:http-referrer=https://ref.example.test/player
+#EXTVLCOPT:network-caching=1500
+http://stream.example.test/vlc.m3u8
+#EXTINF:-1 tvg-id="clean.test",Next Entry Has No Headers
+http://stream.example.test/clean.m3u8
+#EXTVLCOPT:http-user-agent=Before/1.0
+#EXTINF:-1 tvg-id="before.test",VLCOPT Before EXTINF
+http://stream.example.test/before.m3u8
+#EXTINF:-1 tvg-id="cr.test",Bare CR Inside User Agent
+#EXTVLCOPT:http-user-agent=Evil/1.0X-Injected: yes
+http://stream.example.test/cr.m3u8
+#EXTINF:-1 tvg-id="kodi.test",KODIPROP Headers And Manifest Type
+#KODIPROP:inputstream.adaptive.manifest_type=hls
+#KODIPROP:inputstreamaddon=inputstream.adaptive
+#KODIPROP:inputstream.adaptive.stream_headers=User-Agent=Kodi%2F20.2&Referer=https%3A%2F%2Fref.example.test%2F&X-Forwarded-For=1.2.3.4
+http://stream.example.test/kodi.m3u8
+#EXTINF:-1 tvg-id="kodicrlf.test",KODIPROP Percent Encoded CRLF And Bad Name
+#KODIPROP:inputstream.adaptive.manifest_headers=X-Inject=a%0D%0AX-Evil%3A%20b&Bad%0AName=x&X-Ok=1
+http://stream.example.test/kodicrlf.m3u8
+#EXTINF:-1 tvg-id="meta.test",Shell Metacharacters In Value
+#EXTVLCOPT:http-user-agent=UA "quoted" 'single' $(id) `id` ; & | > /tmp/x
+http://stream.example.test/meta.m3u8
+#EXTINF:-1 tvg-id="optkey.test",Option Looking VLCOPT Key
+#EXTVLCOPT:--script=/tmp/evil.lua
+#EXTVLCOPT:http-user-agent=--script=/tmp/evil.lua
+http://stream.example.test/optkey.m3u8
+#EXTINF:-1 tvg-id="emptyua.test",Empty User Agent Value
+#EXTVLCOPT:http-user-agent=
+http://stream.example.test/emptyua.m3u8
+#EXTINF:-1 tvg-id="case.test",Uppercase VLCOPT Key
+#EXTVLCOPT:HTTP-USER-AGENT=Upper/1.0
+http://stream.example.test/case.m3u8
+#EXTINF:-1 tvg-id="orphanopt.test",Options Then Skipped URL Then Clean Entry
+#EXTVLCOPT:http-user-agent=Leak/1.0
+file:///etc/passwd
+#EXTINF:-1 tvg-id="afterskip.test",Entry After Skipped URL Must Not Inherit Leak
+http://stream.example.test/afterskip.m3u8

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<!--
+  QA fixture: XMLTV edge cases (docs/QA.md, "Fixture catalogue" and TC-EPG-*).
+  Reference instant for assertions: T0 = 2026-09-12T20:15:00Z = epoch 1789244100.
+  Run the helper with its clock pinned to T0 (recommended: an "epg" flag "now=1789244100", see QA.md TC-EPG).
+  (XML comments may not contain a double hyphen, hence the spelling above.)
+  Channels:
+    bbc1.uk          +0100 offsets; now = "Six O'Clock News" (19:00Z-20:30Z), next = "Regional News" (20:30Z-21:30Z)
+    cnn.us           -0500 offsets; now = "The Lead" (20:00Z-21:00Z), next = "Situation Room" (21:00Z-22:00Z)
+    overlap.test     two programmes both current at T0: "Overlap A" (19:45Z-20:45Z) and "Overlap B" (20:00Z-21:00Z);
+                     expected now = latest start <= T0 ("Overlap B"), next = "After Overlap" (21:00Z)
+    gap.test         "Ended Earlier" stopped 19:00Z, "Starts Later" starts 21:00Z -> now absent, next = "Starts Later"
+    nostop.test      programme with no stop attribute starting 20:00Z; treated as current, stop = next start or omitted
+    notz.test        timestamps without an offset (assume UTC): now = "No Offset Now" (20:00Z-21:00Z)
+    short.test       12-digit timestamps (YYYYMMDDhhmm) with offset: now = "Short Format" (20:00Z-20:45Z)
+    unicode.test     titles and display-name use XML character references (file stays ASCII); decoded text must be UTF-8
+    00sReplay.us@SD  iptv-org style id with '@'
+    nochannel.test   <channel> element with no programmes -> no entry, no error
+    orphan.test      programmes with no <channel> element -> still keyed by id (or ignored), never a crash
+    far.test         programmes three days out -> outside the +-24 h window, dropped (ARCH 7)
+    halfhour.test    +0530 offset (India): now = "Half Hour Offset" (20:00Z-21:00Z)
+-->
+<tv date="20260912" generator-info-name="omarchy-iptv-qa" source-info-name="qa-fixture">
+  <channel id="bbc1.uk"><display-name lang="en">BBC One</display-name><icon src="https://logos.example.test/bbc1.png"/></channel>
+  <channel id="cnn.us"><display-name>CNN</display-name></channel>
+  <channel id="overlap.test"><display-name>Overlap</display-name></channel>
+  <channel id="gap.test"><display-name>Gap</display-name></channel>
+  <channel id="nostop.test"><display-name>No Stop</display-name></channel>
+  <channel id="notz.test"><display-name>No Offset</display-name></channel>
+  <channel id="short.test"><display-name>Short Format</display-name></channel>
+  <channel id="unicode.test"><display-name lang="ru">&#x41F;&#x435;&#x440;&#x432;&#x44B;&#x439; &#x43A;&#x430;&#x43D;&#x430;&#x43B;</display-name><display-name lang="fr">T&#xE9;l&#xE9; Qu&#xE9;bec</display-name></channel>
+  <channel id="00sReplay.us@SD"><display-name>00s Replay</display-name></channel>
+  <channel id="nochannel.test"><display-name>Never Scheduled</display-name></channel>
+  <channel id="far.test"><display-name>Far Future</display-name></channel>
+  <channel id="halfhour.test"><display-name>Half Hour</display-name></channel>
+
+  <programme start="20260912180000 +0100" stop="20260912200000 +0100" channel="bbc1.uk"><title lang="en">Pointless</title><desc>Earlier programme, already over at T0.</desc></programme>
+  <programme start="20260912200000 +0100" stop="20260912213000 +0100" channel="bbc1.uk"><title lang="en">Six O'Clock News</title><desc>Now at T0.</desc><category>News</category><episode-num system="xmltv_ns">0.1.0/1</episode-num></programme>
+  <programme start="20260912213000 +0100" stop="20260912223000 +0100" channel="bbc1.uk"><title lang="en">Regional News</title></programme>
+  <programme start="20260912223000 +0100" stop="20260913000000 +0100" channel="bbc1.uk"><title lang="en">Late Film &amp; Discussion</title></programme>
+
+  <programme start="20260912140000 -0500" stop="20260912150000 -0500" channel="cnn.us"><title>Earlier Show</title></programme>
+  <programme start="20260912150000 -0500" stop="20260912160000 -0500" channel="cnn.us"><title>The Lead</title></programme>
+  <programme start="20260912160000 -0500" stop="20260912170000 -0500" channel="cnn.us"><title>Situation Room</title></programme>
+
+  <programme start="20260912194500 +0000" stop="20260912204500 +0000" channel="overlap.test"><title>Overlap A</title></programme>
+  <programme start="20260912200000 +0000" stop="20260912210000 +0000" channel="overlap.test"><title>Overlap B</title></programme>
+  <programme start="20260912210000 +0000" stop="20260912220000 +0000" channel="overlap.test"><title>After Overlap</title></programme>
+
+  <programme start="20260912180000 +0000" stop="20260912190000 +0000" channel="gap.test"><title>Ended Earlier</title></programme>
+  <programme start="20260912210000 +0000" stop="20260912220000 +0000" channel="gap.test"><title>Starts Later</title></programme>
+
+  <programme start="20260912200000 +0000" channel="nostop.test"><title>No Stop Attribute</title></programme>
+  <programme start="20260912210000 +0000" stop="20260912220000 +0000" channel="nostop.test"><title>After No Stop</title></programme>
+
+  <programme start="20260912200000" stop="20260912210000" channel="notz.test"><title>No Offset Now</title></programme>
+  <programme start="20260912210000" stop="20260912220000" channel="notz.test"><title>No Offset Next</title></programme>
+
+  <programme start="202609122000 +0000" stop="202609122045 +0000" channel="short.test"><title>Short Format</title></programme>
+  <programme start="202609122045 +0000" stop="202609122130 +0000" channel="short.test"><title>Short Format Next</title></programme>
+
+  <programme start="20260912200000 +0000" stop="20260912210000 +0000" channel="unicode.test"><title lang="fr">T&#xE9;l&#xE9;journal &#x2014; &#xC9;dition sp&#xE9;ciale</title><sub-title>&#x41D;&#x43E;&#x432;&#x43E;&#x441;&#x442;&#x438;</sub-title></programme>
+  <programme start="20260912210000 +0000" stop="20260912220000 +0000" channel="unicode.test"><title lang="ar">&#x627;&#x644;&#x62C;&#x632;&#x64A;&#x631;&#x629;</title></programme>
+
+  <programme start="20260912193000 +0000" stop="20260912203000 +0000" channel="00sReplay.us@SD"><title>Replay Block 1</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="00sReplay.us@SD"><title>Replay Block 2</title></programme>
+
+  <programme start="20260912200000 +0000" stop="20260912210000 +0000" channel="orphan.test"><title>Orphan Programme</title></programme>
+
+  <programme start="20260915200000 +0000" stop="20260915210000 +0000" channel="far.test"><title>Three Days Out</title></programme>
+  <programme start="20260909200000 +0000" stop="20260909210000 +0000" channel="far.test"><title>Three Days Ago</title></programme>
+
+  <programme start="20260913013000 +0530" stop="20260913023000 +0530" channel="halfhour.test"><title>Half Hour Offset</title></programme>
+  <programme start="20260913023000 +0530" stop="20260913033000 +0530" channel="halfhour.test"><title>Half Hour Offset Next</title></programme>
+</tv>
