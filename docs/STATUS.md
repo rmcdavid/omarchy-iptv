@@ -100,7 +100,23 @@ Format: D-<n> | severity P1/P2/P3 | task | repro | state (open/fixed/verified).
 
 | ID | Sev | Task | Repro | State |
 |---|---|---|---|---|
-| - | - | - | none yet | - |
+| D-LIVE-01 | P2 | M1.1-01 | TC-BRW-09/10, TC-RFR-10: with no query, All and any group over 200 channels show only 200 rows and the footer `First 200 of N - keep typing`; End/PgDn stop at row 199, channels 201+ unreachable by browsing, the `cached HH:MM - offline` footer never visible on such lists (UX 2.2 says All = every channel; R3 caps search results only). Evidence shots/run3-banner.png, harness/shots/run6-cap.png | open |
+| D-LIVE-02 | P2 | M1.1-01 | TC-CFG-06: setting `epgUrl` from empty at runtime (the `omarchy bar set ... epgUrl` first-run path) never spawns the epg helper; `epg.pending` stays true, footer `Guide data loading...` until a manual `r`; non-empty -> non-empty changes fetch within 300 ms. Reproduced 4x (run6, run8a, run9, run9b), 4 s process watch shows no helper | open |
+| D-LIVE-03 | P3 | M1.1-01 | TC-RFR-09: HTML body renders the raw helper sentence `source from 127.0.0.1 is not an M3U playlist (...) from 127.0.0.1 - check playlistUrl`; `Model.statusReason` knows `not_m3u`, the helper emits `not_a_playlist`. Expected UX 6.3 `Not an M3U file`. harness/shots/run2-notm3u.png | open |
+| D-LIVE-04 | P3 | M1.1-01 | TC-FAV-08, SEC-14: `state.json` written by the Service FileView is mode 644 (ARCH: 0600; dir is 700, every helper file is 600). Names and ids only, no URLs | open |
+| D-LIVE-05 | P3 | M1.1-01 | TC-RFR-01, TC-BAR-08: after `r` the footer holds `Refreshing...` for the whole 3 s transient then jumps to `N channels - updated HH:MM`; `Refreshed - N channels` (UX 6.1) never shows although the helper finished in ~40 ms and the notification fired | open |
+| D-LIVE-06 | P3 | M1.1-01 | TC-BRW-21: `Ungrouped` appears at its first-seen position (between News and Padded on qa-groups.m3u) instead of last (UX 2.2). harness/shots/run1-open.png | open |
+| D-LIVE-07 | P3 | M1.1-01 | TC-FAV-05: removing the last Recent entry hides the column entry but leaves the cursor scope on `recent` (`No channels in Recent`, `Recent - 0 channels`, no highlighted entry). shots/run1-recent-removed-card.png | open |
+| D-LIVE-08 | P3 | M1.1-01 | TC-EPG-04: EPG fetch failure with an earlier window loaded sends the `Guide data error` notification but shows no `Guide data unavailable (...)` banner (`bannerKind` requires `!epgLoaded`). harness/shots/run5-epg-404.png | open |
+| D-LIVE-09 | P3 | M1.1-01 | TC-UI-01: `r` in the not-configured state shows the `Refreshing...` transient for 3 s although nothing runs | open |
+| D-LIVE-10 | P3 | M1.1-01 | TC-UI-02: with no cache, switching from a failed source to a new URL keeps the old source's error text (naming the old host) on screen with footer `Refreshing...` for the whole fetch instead of `Loading playlist... / Fetching from <new host>` | open |
+| D-LIVE-11 | P3 | M1.1-01 | TC-CFG-02: timeout wording disagrees: helper default 20 s, guide reason `Timed out`, UX 6.3 `Timed out after 30 s`, README Limits `60 seconds` | open |
+| D-LIVE-12 | P3 | M1.1-01 | TC-BAR-09: Enter/Space on the already-playing channel from another list (e.g. Favorites) keeps the previous `launchedFrom`, so the zap ring does not follow the list the user is on | open |
+| D-LIVE-13 | P3 | M1-18 | TC-INST-05/10, TC-BAR-12, TC-UI-13: README lacks the `settings are lost on disable` note, lists two leftover dirs (runtime dir missing from Uninstall), no third-party-bar limitation, no qmllint warning baseline | open |
+| D-LIVE-14 | P3 | M1-19 | TC-UI-13: qmllint reports 6 `signal-handler-parameters` and 1 `uncreatable-type` warnings on top of the recorded baseline categories (57 missing-property, 42 unqualified); 0 errors | open |
+| D-LIVE-15 | P3 | M1.1-08 | PERF-06 run 2 / TC-PLAY-09: after the hung-mpv health-check sequence (SIGSTOP, two `mpv unresponsive` restarts, SIGCONT, stop) the next play logged `play failed: mpv did not answer` and opened no window for 6.6 s; the following play worked; plain stop -> play does not reproduce | open |
+
+Found by QA in the dev-harness pass on f03fef2 (2026-09-12/13); full steps, expected-vs-actual quotes and evidence paths per defect are in `docs/QA-RESULTS.md` section 8, results per test case in sections 3-7. Severity per PLAN.md section 6: D-LIVE-01 and D-LIVE-02 degrade US2 and US6; the rest are cosmetic, wording, docs or hardening.
 
 ## Decisions log
 

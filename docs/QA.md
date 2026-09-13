@@ -1,7 +1,8 @@
 # Omarchy IPTV - QA test plan, fixtures and live-shell runbook
 
-Owner: QA. Status: v0.1 (2026-09-12), written during M0-08 while the FE
-lanes build M1. Governs M1.1-01 (functional), M1.1-02 (theme), M1.1-03
+Owner: QA. Status: v0.2 (2026-09-13): v0.1 written during M0-08 while the FE
+lanes build M1; v0.2 carries the corrections found during the harness pass
+(docs/QA-RESULTS.md, defects D-LIVE-nn in docs/STATUS.md). Governs M1.1-01 (functional), M1.1-02 (theme), M1.1-03
 (performance), the QA half of M1.1-04 (security evidence), M1.1-06
 (regression), REL-01 and REL-02.
 
@@ -121,7 +122,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-PLAY-06 | `s` stops (UX 3.1) | M 5.4 US3 step 6 | footer `Stopped` for 3 s then the count; mpv exits; no notification; bar idle |
 | TC-PLAY-07 | user quits mpv (`q`) | M 5.4 US3 step 6 | bar idle, cues clear, no notification (exit 0) |
 | TC-PLAY-08 | per-channel headers reach mpv as argv | M 5.4 US3 step 8 with `gen-dead.m3u` (2 % entries carry `#EXTVLCOPT`) or `qa-headers.m3u`; A `Model.test.js` (`headerArgs`, `buildMpvArgv`) | `ps -o args=` shows `--user-agent=...`, `--referrer=...`, URL after `--` |
-| TC-PLAY-09 | hung mpv reaped by the health check (decision 12), optional | M 5.4 US3 step 9 | `kill -STOP <mpv>`: after two failed `status` polls mpv is SIGTERMed and relaunched once |
+| TC-PLAY-09 | hung mpv reaped by the health check (decision 12), optional | M 5.4 US3 step 9 | `kill -STOP <mpv>`: after two failed `status` polls (10 s each) the console logs `mpv unresponsive, restarting player` and mpv is SIGTERMed; the relaunch follows once mpv actually exits (send `kill -CONT` after a SIGSTOP test, mpv traps SIGTERM) |
 | TC-PLAY-10 | zapping bursts (UX 1.2) | M 5.4 US3 step 4 | Space three times within 2 s ends on the third channel; no dropped zap, no second mpv |
 | TC-PLAY-11 | mpv dies with the shell (R10) | M 5.4 US5 step 6 | documented limitation, README states it; recorded, not a defect |
 | TC-PLAY-12 | zap in under two seconds of interaction (PRODUCT) | M 5.4 US3 step 1 | open + 3 letters + Enter to first frame under 2 s (stopwatch) |
@@ -190,7 +191,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-RFR-06 | startup offline uses the cache | M 5.4 US7 step 6 | after `omarchy restart shell` with the server down the guide renders from cache immediately, then the banner appears |
 | TC-RFR-07 | list changes while the guide is open | M 5.4 US7 step 7 | rows rebuild, cursor index clamped |
 | TC-RFR-08 | playlist parsed but empty (`qa-empty.m3u` served) | M 5.4 US7 step 8 | `Playlist has no channels` / `Parsed 0 channels from <host> - check the URL points at an M3U`; previous cache kept and marked stale |
-| TC-RFR-09 | not an M3U (`qa-not-m3u.html` served) | M 5.4 US7 step 8 | reason `Not an M3U file` (see D-QA-13) |
+| TC-RFR-09 | not an M3U (`qa-not-m3u.html` served) | M 5.4 US7 step 8 | reason `Not an M3U file` (helper code `not_a_playlist`, D-QA-13; the guide must map that code, D-LIVE-03) |
 | TC-RFR-10 | stale cache marked in bar tooltip | M 5.4 US7 step 3 | tooltip carries `(cached)` or the footer does (UX 6.3 puts it in the footer; either is acceptable, both is best) |
 
 #### States, microcopy, theme (UX 4.x, 5.x, 6.x, QB1)
@@ -235,7 +236,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-PARSE-06 | BOM + CRLF | A `test_crlf_and_bom` (exists); A* `qa-nonascii/qa-bom-crlf.m3u` | 3 channels, no `\r` in URLs, `#EXTGRP` persists across CRLF |
 | TC-PARSE-07 | unicode names, folding, non-Latin kept | A `NormalizationTest` (exists); A* `qa-nonascii/qa-unicode.m3u` | section 7 |
 | TC-PARSE-08 | scheme allow-list | A `test_attributes_fixture` (3 skipped); A* `qa-schemes.m3u` | 13 allowed (14 until D-QA-07), 21 skipped, 2 orphans |
-| TC-PARSE-09 | empty playlist and HTML page | A `test_empty_playlist_is_an_error` (exists); A* `qa-empty.m3u`, `qa-not-m3u.html` | `empty_playlist`; `not_m3u` (D-QA-13) |
+| TC-PARSE-09 | empty playlist and HTML page | A `test_empty_playlist_is_an_error` (exists); A* `qa-empty.m3u`, `qa-not-m3u.html` | `empty_playlist`; `not_a_playlist` (lane A's code name for the D-QA-13 case; v0.1 wrote `not_m3u`) |
 | TC-PARSE-10 | 10k parse time and cache size | PERF-01 | |
 | TC-PARSE-11 | XMLTV plain/gz/offsets | TC-EPG-05..11 | |
 | TC-MODEL-01 | normalisation and id vectors shared with the helper | A `node tests/Model.test.js`, `tests/Model.spec.qml`, `tests/test_playlist.py::test_fold_table_matches_model_js` (exist) | identical vectors |
@@ -647,8 +648,11 @@ codepoints for `...`, quotes and the middle dot).
    `--user-agent=Mozilla/5.0 (X11; Linux x86_64) gen-playlist/1.0` as one item
    [TC-CFG-08, TC-PLAY-08, SEC-06]. Reset: `omarchy bar set io.github.rmcdavid.iptv mpvArgs ''`.
 9. Optional: `kill -STOP $(pgrep -f wayland-app-id=omarchy-iptv)`; within ~30 s
-   the health check SIGTERMs it and relaunches the channel once; `kill -CONT`
-   is not needed after SIGTERM [TC-PLAY-09].
+   (two 10 s health polls) the console logs `mpv unresponsive, restarting
+   player` and mpv gets SIGTERM. mpv installs a SIGTERM handler, so a
+   SIGSTOPped mpv stays stopped with the signal pending (v0.1 wrongly said
+   `kill -CONT` is not needed): run `kill -CONT <pid>` yourself, then check
+   that mpv exits and the channel is relaunched once [TC-PLAY-09].
 10. Make mpv fullscreen (`f` in mpv), open the guide: it draws above; Esc:
     mpv still fullscreen, not paused, not muted [TC-PLAY-14].
 
@@ -765,8 +769,9 @@ codepoints for `...`, quotes and the middle dot).
 8. Serve `qa-empty.m3u` and `qa-not-m3u.html` in turn (copy them into the
    served directory, point `playlistUrl` at them): `Playlist has no channels`
    / `Parsed 0 channels from 127.0.0.1 - check the URL points at an M3U`, then
-   the `Not an M3U file` reason (D-QA-13 tracks the current `empty_playlist`
-   wording); the previous cache is kept and marked stale [TC-RFR-08, TC-RFR-09].
+   the `Not an M3U file` reason (helper code `not_a_playlist`; at f03fef2 the
+   guide shows the raw helper sentence instead, D-LIVE-03); the previous cache
+   is kept and marked stale [TC-RFR-08, TC-RFR-09].
 9. Restore `playlistUrl` to the US list.
 
 #### US8 Install and uninstall
@@ -910,7 +915,7 @@ the ones the lanes already addressed.
 | D-QA-10 | P3 | `bin/omarchy-iptv` `make_channel`, `Model.js` `headerArgs` | empty `#EXTVLCOPT:http-user-agent=` yields `headers.User-Agent: ""` and an empty `--user-agent=` argv item | drop empty header values |
 | D-QA-11 | P3 | `Model.js` `splitMpvArgs` | the token regex is case-insensitive but the reserved lookup is not: `--INPUT-IPC-SERVER=x` is accepted; mpv then exits 1 (`option not found`), surfacing as a stream failure instead of the documented console warning | lowercase-only regex (mpv option names are lowercase) |
 | D-QA-12 | P3 | `bin/omarchy-iptv` `read_local_source` | error messages embed the resolved local path (`playlist file not found: /home/...`, `refusing to read /proc/...`); UX 6.3 wants `File not found`; ARCH 9 says no URLs/paths in output | user-facing message without the path; path on stderr only |
-| D-QA-13 | P3 | `bin/omarchy-iptv` `cmd_playlist` | an HTML login page (`qa-not-m3u.html`) is reported as `empty_playlist` / `no playable channels found`; UX 6.3 distinguishes `Not an M3U file` | new code `not_m3u` when neither `#EXTM3U` nor any `#EXTINF` is present |
+| D-QA-13 | P3 | `bin/omarchy-iptv` `cmd_playlist` | an HTML login page (`qa-not-m3u.html`) is reported as `empty_playlist` / `no playable channels found`; UX 6.3 distinguishes `Not an M3U file` | new code when neither `#EXTM3U` nor any `#EXTINF` is present (shipped as `not_a_playlist` in f03fef2; `Model.statusReason` still only knows `not_m3u`, D-LIVE-03) |
 | D-QA-14 | P3 | `BarWidget.qml` | label elided at 24 characters (`Model.elide`) instead of `Style.space(barLabelMaxWidth)`; single glyph for all states (R7 wants U+F0502 / U+F0567 / U+F0503); tooltips differ from UX 6.3 | lane B scope (M1-11); listed so the matrix has an owner |
 | D-QA-15 | P3 | `Service.qml` IPC `status` | returns `nowPlaying.url` (full stream URL with provider credentials) on the console; R12 says never beyond scheme+host. ARCH section 5 lists `path` in the mpv status contract, so this needs a PO ruling | return `host` instead of `url`, or redact to scheme+host |
 | D-QA-16 | P3 | `Service.qml` `notify()`, `mpvProc.onExited` | headline `Could not play <name>`, urgency `critical`, glyph U+F0567 for every notification; UX 6.4: `Stream failed` / `<name> did not play`, normal, glyph U+F0503, `-r <id>`; refresh/EPG notifications absent | lane B scope (M1-14) |
@@ -953,7 +958,7 @@ jq -c '.channels[] | {id, name, group, searchKey, headers}' /tmp/omarchy-iptv-qa
 | `qa-headers.m3u` | `#EXTVLCOPT` UA/referrer/other, `#KODIPROP` stream/manifest headers and options, option line before `#EXTINF`, bare CR (0x0D) inside a value, percent-encoded CRLF, unsafe header name, shell metacharacters, option-looking key, empty value, uppercase key, no leak past a skipped URL | 11 channels, warnings `dropped header with unsafe name for KODIPROP Percent Encoded CRLF And Bad Name` and `1 entries skipped: unsupported URL scheme`; `vlc.test` headers `User-Agent`/`Referer` + `options.vlc:network-caching`; `clean.test` no headers; `before.test` `Before/1.0`; `cr.test` `Evil/1.0 X-Injected: yes` (single line); `kodi.test` three headers + two `kodi:` options; `kodicrlf.test` `X-Inject: a  X-Evil: b`, `X-Ok: 1`, `Bad\nName` dropped; `meta.test` value verbatim; `optkey.test` UA `--script=/tmp/evil.lua` as a value only [and `options.vlc:--script`, D-QA-09]; `emptyua.test` no header [empty header, D-QA-10]; `case.test` `Upper/1.0`; `afterskip.test` no headers |
 | `qa-schemes.m3u` | allow-listed schemes, case, whitespace, option-looking suffix inside the line, every dropped scheme including mpv pseudo-protocols, orphan URL lines | 13 allowed [14: `http://` accepted, D-QA-07]; warnings `21 entries skipped: unsupported URL scheme`, `2 URL lines without #EXTINF skipped` |
 | `qa-empty.m3u` | valid header, no entries | exit 1, code `empty_playlist`, guide `Playlist has no channels` |
-| `qa-not-m3u.html` | provider login page instead of a playlist | exit 1, code `not_m3u` [`empty_playlist`, D-QA-13]; the fake `#EXTINF` inside `<p>` is not an entry |
+| `qa-not-m3u.html` | provider login page instead of a playlist | exit 1, code `not_a_playlist` (verified at f03fef2; v0.1 expected the name `not_m3u`); the fake `#EXTINF` inside `<p>` is not an entry |
 | `qa-epg.xml` | XMLTV: +0100 / -0500 / +0530 / no offset / 12-digit timestamps, overlap, gap, missing stop, far-future/past, orphan programme, channel without programmes, `@SD` id, character references for non-ASCII, `&amp;`, `<desc>`/`<category>`/`<episode-num>`/`<icon>` ignored | 27 programmes, 12 channels; expected now/next at T0 = 1789244100 listed in the file header comment (TC-EPG-06/07) |
 | `qa-nonascii/qa-epg.xml.gz` | gzip twin of `qa-epg.xml` (deterministic) | identical `epg-now.json` (TC-EPG-05) |
 | `qa-nonascii/qa-unicode.m3u` | UTF-8 names and groups: French, Polish, German (en dash, sharp s), Russian, Arabic, Japanese, emoji, NFC vs NFD, uppercase accent, non-ASCII URL path | 11 channels; `searchKey`s `tele quebec quebec`, `tvp lodz polska`, `das erste <U+2013> strasse deutschland`, Cyrillic/Arabic/CJK lowercased and kept, `emoji <U+1F4FA> channel fun`, `cafe nfc normalisation`, `cafe nfd normalisation` [`cafe<U+0301> nfd ...`, D-QA-08], `ecole uppercase accent normalisation`; ids `t:<tvg-id>` |
