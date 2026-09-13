@@ -818,3 +818,30 @@ two use different names, the following applies and both lanes code to it.
 | SR8 | CLI parity | `omarchy bar set ... playlistUrl` reconciles into the history with a derived label and `origin: cli`; an invalid value synthesizes an error status and never runs the helper (D16). |
 | SR9 | Favorites and recents | Global, keyed by channel id, unchanged (D14). |
 | SR10 | Lanes | Lane 1: `Model.js`, `Guide.qml`, `tests/Model.test.js`, `tests/Model.spec.qml`, `tests/fixtures/source-urls.json`. Lane 2: `Service.qml`, `bin/omarchy-iptv`, `tests/test_*.py`, `scripts/dev-harness/*`. Both build against the interface in this document; the product owner merges Lane 1 first. |
+
+## Reconciliation rulings, round 2 (product owner, 2026-09-13, answering QA-SOURCES.md section 10)
+
+| # | Answers | Ruling |
+|---|---|---|
+| SR11 | SRC-DEC-01 | `~` paths: the CLI path (`omarchy bar set`, origin `cli`) keeps accepting and expanding them (no regression from 0.1.0); the forms refuse them with the UX `relative_path` message. `validateSourceUrl(text, {kind, origin})` takes `origin` (`form` default, `cli`). The fixture pins both contexts. |
+| SR12 | SRC-DEC-02 | One heuristic in Model.js, mirrored in Python: leading `//` -> `scheme`; text that looks like a host (contains `.` or `:` before any `/`, or contains `/` after a host-like token) -> `scheme`; otherwise -> `relative_path`. |
+| SR13 | SRC-DEC-03 | `unsafe_path` stays synchronous with the message `Path not allowed`. |
+| SR14 | SRC-DEC-04 | Duplicates are detected on the normalized URL (D4). |
+| SR15 | SRC-DEC-05 | Adopt every parity fix QA listed: reject ports above 65535, bracket literals that are not valid IPv6 (`[hex:.%25]`), U+200B-U+200D, U+2060, U+FEFF, and backslashes in the authority; normalize numeric ports (leading zeros stripped, default ports dropped); `sanitizeInput` strips a leading U+FEFF. Vectors go into `tests/fixtures/source-urls.json` and both validators must pass them. |
+| SR16 | SRC-DEC-06 | No auto-prefix anywhere: an Xtream server without `http(s)://` is `server_scheme`. D10's prefixing is withdrawn. |
+| SR17 | SRC-DEC-07 | New code `server_userinfo`: `Server must not contain a username or password - enter them below`. |
+| SR18 | SRC-DEC-08 | Credentials are never silently truncated: over-cap username/password/server produce `user_too_long` / `pass_too_long` / `server_too_long` (new code, `Server too long - max 512 characters`). `sanitizeInput` caps only labels and free text; URLs over cap are `too_long`. |
+| SR19 | SRC-DEC-09 | Derived labels include `:port` when the port is non-default (UX 5.6). |
+| SR20 | SRC-DEC-10 | `www.` is stripped from derived labels (UX 5.6). |
+| SR21 | SRC-DEC-11 | Duplicate derived labels get ` 2`, ` 3` suffixes, compared case-insensitively (UX 5.6). |
+| SR22 | SRC-DEC-12 | The label cap (64) counts Unicode code points in both languages (JS `[...s].length`, Python `len`). Enforced on write (forms and CLI); the helper truncates to the cap on read without error. |
+| SR23 | SRC-DEC-13 | A failed add or first-run probe saves nothing (UX 1.2); the form keeps its values so re-submitting is the retry. An existing never-fetched record (CLI origin) stays with `not loaded yet`, and Enter on it retries. |
+| SR24 | SRC-DEC-14 | `too_many` copy: `Sources is full (50) - remove one first`; at the cap the `Add source` and `Add Xtream login` rows and the `a`/`c` keys show that message instead of opening a form. |
+| SR25 | SRC-DEC-15 | Persist failure copy on the result line: `Could not save settings - try omarchy bar set`. No argv CLI fallback in M2-01 (signal only; fallback deferred). The harness stubs nothing. |
+| SR26 | SRC-DEC-16 | Enter is the retry. Rows never show error text, only `not loaded yet`; the result line shows the reason when a retry fails. `errorReason` stays on the view object for the result line. |
+| SR27 | SRC-DEC-17 | SR4 stands (`type` and `output` visible). The UX wireframes 3.1.2, 3.3.1, and 4.4 are to be read with those two values un-masked; the lead fixes the wireframes in a docs pass. |
+| SR28 | SRC-DEC-18 | One spelling everywhere: `Not an M3U playlist`. |
+| SR29 | SRC-DEC-19 | `Model.LIMITS` is canonical; named constants may alias it. |
+| SR30 | SRC-DEC-20 | At the v0.2.0 release the installed clone's `origin` is re-pointed to `https://github.com/rmcdavid/omarchy-iptv.git` so `omarchy plugin update` behaves as for any user. |
+| SR31 | SRC-DEC-21 | The harness gains verbs `cancelProbe`, `editMasked(id)` (masked strings only), `signals()`, `state()` exposing the form fields (masked values and lengths, focus, mode, returnMode), and `failPersist` to simulate a persist failure. |
+| SR32 | SRC-DEC-22 | List order: the active source first, then by `lastUsedAt` descending, then never-used sources in the order added. UX 5.2 adopts this sentence. |
