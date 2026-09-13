@@ -541,7 +541,8 @@ Item {
 
   Component.onCompleted: {
     // Argv-only. Creates the private cache/state/runtime dirs before any
-    // FileView write or mpv socket bind can need them (open risk 2).
+    // FileView write or mpv socket bind can need them (open risk 2), then
+    // state.json itself with mode 0600 (stateInitProc, S-02).
     mkdirProc.running = true
     whichProc.running = true
   }
@@ -718,6 +719,22 @@ Item {
   Process {
     id: mkdirProc
     command: ["mkdir", "-p", "-m", "700", root.cacheDir, root.stateDir, root.runtimeDir]
+    onExited: stateInitProc.running = true
+  }
+
+  Process {
+    // S-02: FileView creates a missing file with mode 0644 and keeps the
+    // mode of an existing one, so the helper pre-creates state.json 0600
+    // (O_EXCL, so the check-and-create is race-free; an existing file is
+    // only chmod-ed) before the first saveState(), which dirsReady gates.
+    // Argv only; the helper prints one JSON line that is discarded.
+    id: stateInitProc
+    command: ["python3", root.helperPath, "state", "--state-dir", root.stateDir, "init"]
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state init:", Model.redactUrls(text.trim()))
+    }
     onExited: {
       root.dirsReady = true
       if (root.stateSavePending) root.saveState()

@@ -24,8 +24,8 @@ Subcommands (contract of record: docs/ARCHITECTURE.md section 5):
       ask the running mpv to quit
   status [--socket P] [--ipc-timeout S]
       query the running mpv (media title, host of the path, pause, idle, version)
-  state [--state-dir D] show | favorite add ID | favorite remove ID | clear-recents
-      inspect or edit state.json atomically
+  state [--state-dir D] show | init | favorite add ID | favorite remove ID | clear-recents
+      inspect or edit state.json atomically (init: create it 0600 when missing)
 """
 from __future__ import annotations
 
@@ -1573,12 +1573,38 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     return state
 
 
+def init_state_file(path: str, state: dict[str, Any]) -> bool:
+    """Create `path` with mode 0600 when missing (S-02). Quickshell's FileView,
+    which the service uses to write state.json, creates a missing file 0644
+    and keeps the mode of an existing one, so the service runs `state init`
+    once at startup before its first write. O_EXCL makes the check-and-create
+    atomic: a file that appears in between is left alone. An existing file
+    is not rewritten; only its mode is tightened. Returns True when created."""
+    ensure_private_dir(os.path.dirname(path))
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(state, ensure_ascii=False, separators=(",", ":")) + "\n")
+    os.chmod(path, 0o600)
+    return True
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     directory = state_dir(args.state_dir)
     path = os.path.join(directory, STATE_FILE)
     state = normalize_state(read_json(path))
     action = args.action
     try:
+        if action == "init":
+            created = init_state_file(path, state)
+            emit({"ok": True, "kind": "state", "action": action, "created": created, "state": state})
+            return EXIT_OK
         if action == "favorite":
             key = str(args.id or "").strip()
             if not key:
@@ -1648,6 +1674,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--state-dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     actions = state.add_subparsers(dest="action", required=True)
     actions.add_parser("show", parents=[common], help="print the current state")
+    actions.add_parser("init", parents=[common], help="create state.json with mode 0600 when missing (the service runs this before its first write)")
     favorite = actions.add_parser("favorite", parents=[common], help="add or remove a favorite")
     favorite.add_argument("op", choices=["add", "remove"])
     favorite.add_argument("id", help="channel id from channels.json")
