@@ -295,6 +295,71 @@ class HardeningTest(unittest.TestCase):
         self.assertEqual(channel["logo"], "https://l.test/a.png")
 
 
+class CapTest(unittest.TestCase):
+    """S-07: channels.json stays bounded whatever the source contains."""
+
+    @staticmethod
+    def playlist(count, group_of):
+        lines = ["#EXTM3U"]
+        for i in range(count):
+            lines.append('#EXTINF:-1 group-title="%s",Ch %d' % (group_of(i), i))
+            lines.append("http://x.test/%d" % i)
+        return "\n".join(lines) + "\n"
+
+    def test_channel_count_is_capped_with_a_warning(self):
+        extra = 5
+        started = time.perf_counter()
+        result = helper.parse_m3u(self.playlist(helper.MAX_CHANNELS + extra, lambda i: "G%d" % (i % 10)))
+        elapsed = time.perf_counter() - started
+        channels = result["channels"]
+        self.assertEqual(helper.MAX_CHANNELS, 50000)
+        self.assertEqual(len(channels), helper.MAX_CHANNELS)
+        self.assertEqual(channels[-1]["name"], "Ch %d" % (helper.MAX_CHANNELS - 1))
+        self.assertIn("truncated to 50000 channels (%d entries skipped)" % extra, result["warnings"])
+        self.assertEqual(len({c["id"] for c in channels}), helper.MAX_CHANNELS)
+        self.assertLess(elapsed, 5.0, "parse of %d entries took %.1f s" % (helper.MAX_CHANNELS + extra, elapsed))
+
+    def test_channel_count_at_the_cap_is_not_a_warning(self):
+        result = helper.parse_m3u(self.playlist(helper.MAX_CHANNELS, lambda i: "G"))
+        self.assertEqual(len(result["channels"]), helper.MAX_CHANNELS)
+        self.assertEqual(result["warnings"], [])
+
+    def test_group_count_is_capped_into_ungrouped_with_a_warning(self):
+        extra = 100
+        # One channel already Ungrouped, then one unique group per channel.
+        result = helper.parse_m3u(self.playlist(helper.MAX_GROUPS + extra + 1, lambda i: "" if i == 0 else "Group %d" % i))
+        channels = result["channels"]
+        self.assertEqual(helper.MAX_GROUPS, 2000)
+        groups = [c["group"] for c in channels]
+        self.assertEqual(len(channels), helper.MAX_GROUPS + extra + 1)
+        # Ungrouped seen first counts as one of the MAX_GROUPS buckets.
+        self.assertEqual(len(set(groups)), helper.MAX_GROUPS)
+        self.assertEqual(groups[0], "Ungrouped")
+        self.assertEqual(groups[1], "Group 1")
+        self.assertEqual(groups[helper.MAX_GROUPS - 1], "Group %d" % (helper.MAX_GROUPS - 1))   # 1999 named + Ungrouped
+        self.assertEqual(set(groups[helper.MAX_GROUPS:]), {"Ungrouped"})
+        self.assertIn("group count capped at 2000; %d channels listed under Ungrouped" % (extra + 1), result["warnings"])
+        # The provider's group stays searchable.
+        moved = channels[helper.MAX_GROUPS]
+        self.assertEqual(moved["searchKey"], "ch %d group %d" % (helper.MAX_GROUPS, helper.MAX_GROUPS))
+
+    def test_group_cap_allows_ungrouped_as_one_extra_bucket(self):
+        # No Ungrouped channel before the cap: overflow creates it as bucket MAX_GROUPS + 1.
+        result = helper.parse_m3u(self.playlist(helper.MAX_GROUPS + 3, lambda i: "Group %d" % i))
+        groups = [c["group"] for c in result["channels"]]
+        self.assertEqual(len(set(groups)), helper.MAX_GROUPS + 1)
+        self.assertEqual(groups[-3:], ["Ungrouped"] * 3)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "groups.m3u")
+            with open(source, "w", encoding="ascii") as handle:
+                handle.write(self.playlist(helper.MAX_GROUPS + 3, lambda i: "Group %d" % i))
+            code, status = run_main("playlist", "--url", source, "--cache-dir", tmp)
+            self.assertEqual(code, 0)
+            self.assertEqual(status["channelCount"], helper.MAX_GROUPS + 3)
+            self.assertEqual(status["groupCount"], helper.MAX_GROUPS + 1)
+            self.assertTrue(any(w.startswith("group count capped") for w in status["warnings"]))
+
+
 class RedactionTest(unittest.TestCase):
     def test_redact_urls_keeps_scheme_and_host_only(self):
         text = "HTTP 404 from http://user:pw@h.test/get.php?u=a&p=b and file:///etc/x and rtsp://cam.test:554/s"

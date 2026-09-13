@@ -61,6 +61,14 @@ STREAM_SCHEMES = {"http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms",
 SOURCE_SCHEMES = {"http", "https", "file"}
 
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
+# Bounds on what channels.json may carry (S-07): the shell parses that file
+# on its UI thread and the guide builds one column row per group. A 64 MB
+# source of 40-byte entries would otherwise be ~1.5 M channels. Real lists
+# top out around 11k channels / 1k groups; entries beyond MAX_CHANNELS are
+# dropped with a warning, groups beyond MAX_GROUPS fold into UNGROUPED
+# (which may exist as one extra bucket, so at most MAX_GROUPS + 1 groups).
+MAX_CHANNELS = 50000
+MAX_GROUPS = 2000
 DEFAULT_TIMEOUT = 20
 DEFAULT_IPC_TIMEOUT = 2.0
 UNGROUPED = "Ungrouped"
@@ -415,7 +423,9 @@ def parse_m3u(text: str) -> dict[str, Any]:
     comments are ignored. Accepts a BOM, CRLF and blank lines. Location
     lines outside STREAM_SCHEMES (bare paths, option-looking lines, free
     text, URLs without a host) are skipped and counted; an #EXTINF that is
-    followed by another #EXTINF is counted as having no URL.
+    followed by another #EXTINF is counted as having no URL. Output is
+    bounded by MAX_CHANNELS and MAX_GROUPS (S-07); a channel moved to
+    UNGROUPED keeps its provider group in `groups` and `searchKey`.
     """
     channels: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -427,6 +437,9 @@ def parse_m3u(text: str) -> dict[str, Any]:
     skipped_scheme = 0
     skipped_orphan = 0
     skipped_no_url = 0
+    over_cap = 0
+    regrouped = 0
+    seen_groups: set[str] = set()
     is_playlist = False
 
     if text.startswith("\ufeff"):
@@ -469,9 +482,18 @@ def parse_m3u(text: str) -> dict[str, Any]:
         url = line
         if not is_stream_url(url):
             skipped_scheme += 1
+        elif len(channels) >= MAX_CHANNELS:
+            over_cap += 1
         else:
             attrs, title = pending
-            channels.append(make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1))
+            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1)
+            group = channel["group"]
+            if group not in seen_groups:
+                if len(seen_groups) >= MAX_GROUPS and group != UNGROUPED:
+                    channel["group"] = group = UNGROUPED
+                    regrouped += 1
+                seen_groups.add(group)
+            channels.append(channel)
         pending = None
         vlcopt, kodiprop = {}, {}
 
@@ -483,6 +505,10 @@ def parse_m3u(text: str) -> dict[str, Any]:
         warnings.append("%d URL lines without #EXTINF skipped" % skipped_orphan)
     if skipped_no_url:
         warnings.append("%d #EXTINF entries without a URL skipped" % skipped_no_url)
+    if over_cap:
+        warnings.append("truncated to %d channels (%d entries skipped)" % (MAX_CHANNELS, over_cap))
+    if regrouped:
+        warnings.append("group count capped at %d; %d channels listed under %s" % (MAX_GROUPS, regrouped, UNGROUPED))
     assign_ids(channels)
     return {"channels": channels, "warnings": warnings, "epgUrlHint": epg_hint, "isPlaylist": is_playlist}
 

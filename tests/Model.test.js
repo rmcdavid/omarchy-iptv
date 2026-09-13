@@ -80,6 +80,12 @@ check("prepareChannels ungrouped", [prepared[2].group, prepared[2].primaryGroup,
 check("prepareChannels nameKey when name equals group", prepared[3].nameKey, "uk")
 check("prepareChannels does not mutate input", (() => { const src = [{ name: "X", url: "u" }]; Model.prepareChannels(src); return Object.keys(src[0]) })(), ["name", "url"])
 check("prepareChannels null", Model.prepareChannels(null), [])
+check("prepareChannels caps a tampered cache at MAX_CHANNELS (S-07)", (() => {
+  const many = []
+  for (let i = 0; i < Model.MAX_CHANNELS + 7; i++) many.push({ id: "c" + i, name: "C " + i, group: "G", searchKey: "c " + i + " g" })
+  const rows = Model.prepareChannels(many)
+  return [Model.MAX_CHANNELS, rows.length, rows[rows.length - 1].id]
+})(), [50000, 50000, "c49999"])
 check("displayName never a URL (D-QA-02)", Model.prepareChannels([
   { name: "http://h.test/live/1.m3u8", tvgName: "Real Name", url: "http://h.test/live/1.m3u8" },
   { name: "", url: "http://h.test/2" },

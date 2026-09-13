@@ -20,6 +20,9 @@
 // ring, R11 session-only failedAt, R12 notification privacy.
 
 var MAX_ROWS_DEFAULT = 200
+// Helper-side cap on channels.json (bin/omarchy-iptv MAX_CHANNELS, S-07);
+// prepareChannels re-applies it so a hand-edited cache stays bounded too.
+var MAX_CHANNELS = 50000
 var FAVORITES_GROUP = "Favorites"
 var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
@@ -282,7 +285,7 @@ function prepareChannels(channels) {
   var list = asList(channels)
   var out = []
   var groupKeys = {}
-  for (var i = 0; i < list.length; i++) {
+  for (var i = 0; i < list.length && out.length < MAX_CHANNELS; i++) {
     var src = list[i]
     if (!src || typeof src !== "object") continue
     var row = {}
@@ -1247,6 +1250,7 @@ function footerHints(opts) {
 if (typeof module !== "undefined") {
   module.exports = {
     MAX_ROWS_DEFAULT: MAX_ROWS_DEFAULT,
+    MAX_CHANNELS: MAX_CHANNELS,
     FAVORITES_GROUP: FAVORITES_GROUP,
     RECENT_GROUP: RECENT_GROUP,
     UNGROUPED: UNGROUPED,
