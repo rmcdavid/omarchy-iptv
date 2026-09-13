@@ -229,7 +229,7 @@ check("onEscape null", Model.onEscape(null).close, true)
 check("moveCursor wraps", [Model.moveCursor(0, -1, 5, true), Model.moveCursor(4, 1, 5, true), Model.moveCursor(2, 1, 5, true)], [4, 0, 3])
 check("moveCursor page clamps", [Model.moveCursor(1, -10, 5, false), Model.moveCursor(1, 10, 5, false)], [0, 4])
 check("moveCursor empty list", Model.moveCursor(3, 1, 0, true), 0)
-check("copy is defensive on garbage state", Model.withMode({ mode: "weird", query: 5 }, "list"), { mode: "list", query: "5", scopeId: "all", restoreScopeId: "", cursorIndex: 0 })
+check("copy is defensive on garbage state", Model.withMode({ mode: "weird", query: 5 }, "list"), { mode: "list", query: "5", scopeId: "all", restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0 })
 
 // ---- zap ring ----
 check("launchScope from Favorites is Favorites", Model.launchScope("favorites", "", { group: "UK" }), "favorites")
@@ -262,7 +262,7 @@ check("trimRecents", Model.trimRecents({ version: 1, favorites: [], recents: [{ 
 check("trimRecents returns same object when within cap", (() => { const st = Model.emptyState(); return Model.trimRecents(st, 5) === st })(), true)
 check("parseState tolerates garbage", Model.parseState("not json"), Model.emptyState())
 check("parseState sanitizes", Model.parseState('{"favorites":["a","a",""],"recents":[{"id":"x","name":"X","at":"7"},{"bad":1}],"lastPlayed":{"id":"x"}}'),
-  { version: 1, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 } })
+  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, sources: [] })
 check("parseState tolerates unknown keys", Model.parseState('{"version":9,"favorites":["a"],"future":true}').favorites, ["a"])
 check("isFavorite", [Model.isFavorite(state, "5"), Model.isFavorite(state, "4"), Model.isFavorite(null, "5")], [true, false, false])
 check("withFailed / withoutFailed are copies", (() => { const a = {}; const b = Model.withFailed(a, "x", "21:12"); const c = Model.withoutFailed(b, "x"); return [Object.keys(a).length, b.x, Object.keys(c).length] })(), [0, "21:12", 0])
@@ -431,7 +431,7 @@ check("footerStatus blank without channels (loading / error)", [Model.footerStat
 check("epgNowStale", [Model.epgNowStale({ validUntil: 200 }, 100), Model.epgNowStale({ validUntil: 100 }, 100), Model.epgNowStale({}, 100), Model.epgNowStale(null, 100), Model.epgNowStale({ validUntil: "x" }, 1)], [false, true, true, true, true])
 check("footerHints search", Model.footerHints({ mode: "search", query: "" }).map(h => h[0]), ["Enter", "Up/Down", "Left/Right", "Tab", "Esc"])
 check("footerHints search with query says clear/narrow", Model.footerHints({ mode: "search", query: "x" }).slice(2), [["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]])
-check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s r /")
+check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s r / o")
 check("footerHints empty states", [Model.footerHints({ empty: "error" }), Model.footerHints({ empty: "loading" })], [[["r", "reload"], ["Esc", "close"]], [["Esc", "close"]]])
 
 // ---- player shutdown ladder (D-LIVE-17) ----
@@ -478,6 +478,354 @@ check("footerStatus warning yields to transient, search cap, playing, refreshing
 ], ["Stopped", "First 200 of 300" + SEP + "keep typing", "\udb81\udc0a Arte" + SEP + "s stop", "Refreshing\u2026", "Guide data loading\u2026"])
 check("footerStatus warning needs a loaded playlist", [Model.footerStatus({ configured: false, count: 0, warning: "W" }), Model.footerStatus({ configured: true, count: 0, warning: "W" })], ["", ""])
 check("footerStatus no warning keeps the counts line", Model.footerStatus({ count: 5, lastUpdated: "12:40", warning: "" }), "5 channels" + SEP + "updated 12:40")
+
+// ============================================================ sources (M2-01)
+// docs/ARCHITECTURE-SOURCES.md section 3 and docs/UX-SOURCES.md 5.4-5.8 /
+// 8.1 under the rulings SR1-SR10. The shared validation vectors live in
+// tests/fixtures/source-urls.json (also run by Lane 2's Python mirror).
+const fs = require("fs")
+const path = require("path")
+const ELL = "\u2026"
+
+// ---- constants (SR5) ----
+check("LIMITS are the canonical caps", Model.LIMITS, { url: 2048, label: 64, server: 512, user: 256, pass: 256, sources: 50 })
+check("architecture constant names agree with LIMITS", [Model.MAX_SOURCE_URL, Model.MAX_LABEL, Model.MAX_XTREAM_SERVER, Model.MAX_XTREAM_FIELD, Model.MAX_SOURCES, Model.STATE_VERSION, Model.CACHE_LAYOUT, Model.SOURCES_DIR], [2048, 64, 512, 256, 50, 2, 2, "sources"])
+check("MASK and the clear params", [Model.MASK, Model.MASK_CLEAR_PARAMS], ["****", ["type", "output"]])
+check("SOURCE_KEYS table", Model.SOURCE_KEYS, { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" })
+check("Sources glyphs are supplementary-plane Nerd Font codepoints", ["sources", "check", "eye", "eyeOff", "plus", "key", "pencil", "closeCircle"].map(k => Model.GLYPHS[k].codePointAt(0).toString(16)), ["f0411", "f012c", "f0208", "f0209", "f0415", "f0306", "f03eb", "f0159"])
+check("guide modes", Model.GUIDE_MODES, ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove"])
+
+// ---- sanitizeInput (ARCHITECTURE-SOURCES 3.1 / 6.1) ----
+check("sanitizeInput strips CR LF TAB and C1, trims space and NBSP", Model.sanitizeInput("\u00a0 http://h.test/a\r\nb\tc\u0085 \u00a0", 100), "http://h.test/abc")
+check("sanitizeInput caps at the limit in UTF-16 units", Model.sanitizeInput("abcdef", 3), "abc")
+check("sanitizeInput null / number", [Model.sanitizeInput(null, 5), Model.sanitizeInput(42, 5)], ["", "42"])
+check("sanitizeInput default cap is the URL cap", Model.sanitizeInput("x".repeat(3000)).length, 2048)
+check("sanitizeTyping keeps edges (a label can be typed with spaces)", Model.sanitizeTyping(" NAS \n", 10), " NAS ")
+check("sanitizeTyping still caps and strips controls", Model.sanitizeTyping("a bcdefgh", 4), "abcd")
+
+// ---- validateSourceUrl: every case of the shared fixture (SR6) ----
+const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-urls.json"), "utf8"))
+check("fixture has every UX 5.4 URL code plus unsafe_path", [...new Set(fixture.filter(c => !c.ok).map(c => c.code))].sort(), ["empty", "invalid", "relative_path", "scheme", "too_long", "unsafe_path"])
+check("fixture covers files, IDN, IPv6, userinfo, fragments, control characters and the cap", fixture.length >= 75, true)
+for (const c of fixture) {
+  const r = Model.validateSourceUrl(c.input, c.origin ? { origin: c.origin } : undefined)
+  const name = "fixture " + JSON.stringify(c.input.length > 48 ? c.input.slice(0, 45) + "..." : c.input) + (c.origin ? " [" + c.origin + "]" : "") + (c.note ? " (" + c.note + ")" : "")
+  if (c.ok) check(name, [r.ok, r.kind, r.url, r.host, Model.sourceKey(r.url)], [true, c.kind, c.url, c.host, c.key])
+  else check(name, [r.ok, r.code], [false, c.code])
+}
+// JS-only vectors (kept out of the shared fixture until the Python mirror
+// agrees; ARCHITECTURE-SOURCES 3.1 steps 4 and 5): a file URL's query and
+// fragment are dropped like urlsplit().path, two ports are not a port, a
+// bare "." is a relative path.
+check("validateSourceUrl file URL query and fragment dropped", Model.validateSourceUrl("file:///srv/tv/list.m3u?x=1#f").url, "/srv/tv/list.m3u")
+check("validateSourceUrl two ports are invalid", Model.validateSourceUrl("http://h.test:80:1/").code, "invalid")
+check("validateSourceUrl bare dot is a relative path", Model.validateSourceUrl(".").code, "relative_path")
+check("validateSourceUrl origin cli accepts ~ verbatim, forms refuse it (SR11)", [Model.validateSourceUrl("~/tv/list.m3u", { origin: "cli" }).url, Model.validateSourceUrl("~/tv/list.m3u", { origin: "cli" }).kind, Model.validateSourceUrl("~/tv/list.m3u").code, Model.validateSourceUrl("~/tv/list.m3u", { origin: "form" }).code], ["~/tv/list.m3u", "file", "relative_path", "relative_path"])
+check("looksLikeHost heuristic (SR12)", ["list.m3u", "localhost:8080/x", "provider.test/list.m3u", "playlist", "Videos/list.m3u", ""].map(Model.looksLikeHost), [true, true, true, false, false, false])
+check("validateSourceUrl port normalization and bounds (SR15)", [Model.validateSourceUrl("http://h.test:0080/x").url, Model.validateSourceUrl("http://h.test:0/x").url, Model.validateSourceUrl("http://h.test:65536/x").code, Model.validateSourceUrl("http://[::1]:00443/x").url], ["http://h.test/x", "http://h.test:0/x", "invalid", "http://[::1]:443/x"])
+check("sanitizeInput strips a leading BOM only (SR15)", [Model.sanitizeInput("\ufeffhttp://h.test/x"), Model.sanitizeInput("a\ufeffb")], ["http://h.test/x", "a\ufeffb"])
+check("statusReason: one spelling for a non-M3U source (SR28)", [Model.statusReason({ ok: false, error: { code: "not_m3u", message: "" } }), Model.statusReason({ ok: false, error: { code: "not_a_playlist", message: "" } })], ["Not an M3U playlist", "Not an M3U playlist"])
+check("codePointLength / capCodePoints count code points, not UTF-16 units (SR22)", [Model.codePointLength("a\ud83d\udce1b"), Model.capCodePoints("a\ud83d\udce1b", 2), Model.validateLabel("\ud83d\udce1".repeat(64), [], "").ok, Model.validateLabel("\ud83d\udce1".repeat(65), [], "").code, Model.uniqueLabel("\ud83d\udce1".repeat(70), []).length], [3, "a\ud83d\udce1", true, "label_too_long", 128])
+check("formCapacity is the cap plus slack so over-cap input is refused, not cut (SR18)", [Model.formCapacity("playlist") > Model.formLimit("playlist"), Model.withFormValue(Model.openFirstRun(Model.guideState("all")), "playlist", "http://h.test/" + "a".repeat(2100)).form.values.playlist.length > 2048, Model.validateUrlForm({ label: "", playlist: "http://h.test/" + "a".repeat(2100), epg: "" }, [], "").error.code], [true, true, "too_long"])
+check("validateSourceUrl result shape", Object.keys(Model.validateSourceUrl("http://h.test/x")).sort(), ["code", "field", "host", "kind", "message", "ok", "url"])
+check("validateSourceUrl message is the UX copy", Model.validateSourceUrl("provider.test/x").message, "Start with http://, https://, or / for a local file")
+check("validateSourceUrl too_long quotes LIMITS.url", Model.validateSourceUrl("/" + "x".repeat(2100)).message, "Too long" + SEP + "max 2,048 characters")
+check("validateSourceUrl epg: empty is fine (optional)", Model.validateSourceUrl("   ", { kind: "epg" }), { ok: true, code: "ok", message: "", field: "epg", kind: "", url: "", host: "" })
+check("validateSourceUrl epg: errors carry the EPG prefix", [Model.validateSourceUrl("x.test/e.xml", { kind: "epg" }).message, Model.validateSourceUrl("http://h .test/", { kind: "epg" }).message, Model.validateSourceUrl("~/e.xml", { kind: "epg" }).message], ["EPG: start with http://, https://, or / for a local file", "EPG: invalid URL" + SEP + "check the host", "EPG: use an absolute path (starts with /, not ~)"])
+check("validateSourceUrl null", Model.validateSourceUrl(null).code, "empty")
+check("normalizeSourceUrl", [Model.normalizeSourceUrl(" HTTP://H.test:80/x#f "), Model.normalizeSourceUrl("ftp://x"), Model.normalizeSourceUrl("file:///a/b.m3u")], ["http://h.test/x", "", "/a/b.m3u"])
+check("isUrlField", [Model.isUrlField("playlist"), Model.isUrlField("epg"), Model.isUrlField("label"), Model.isUrlField("server")], [true, true, false, false])
+
+// ---- copy per code (UX 5.4) ----
+check("sourceErrorMessage playlist codes", ["empty", "scheme", "invalid", "relative_path", "too_long", "unsafe_path"].map(Model.sourceErrorMessage), [
+  "Enter a playlist URL or path",
+  "Start with http://, https://, or / for a local file",
+  "Invalid URL" + SEP + "check the host",
+  "Use an absolute path (starts with /, not ~)",
+  "Too long" + SEP + "max 2,048 characters",
+  "Path not allowed"
+])
+check("sourceErrorMessage label and duplicate codes quote the label", [Model.sourceErrorMessage("duplicate", { label: "Provider" }), Model.sourceErrorMessage("duplicate"), Model.sourceErrorMessage("label_taken", { label: "Provider" }), Model.sourceErrorMessage("label_too_long")], ["Already in Sources as " + Q("Provider"), "Already in Sources", "A source named " + Q("Provider") + " already exists", "Label too long" + SEP + "max 64 characters"])
+check("sourceErrorMessage Xtream codes", ["server_empty", "server_scheme", "server_path", "user_empty", "pass_empty", "user_too_long", "pass_too_long", "server_too_long"].map(Model.sourceErrorMessage), [
+  "Enter the server URL", "Server must start with http:// or https://", "Server is just http://host:port" + SEP + "no path", "Enter the username", "Enter the password", "Username too long" + SEP + "max 256 characters", "Password too long" + SEP + "max 256 characters", "Server too long" + SEP + "max 512 characters"
+])
+check("sourceErrorMessage service codes (SR24, SR25)", [Model.sourceErrorMessage("too_many"), Model.sourceErrorMessage("persist_failed"), Model.sourceErrorMessage("busy") !== "", Model.sourceErrorMessage("unknown_source") !== "", Model.sourceErrorMessage("not_ready") !== ""], ["Sources is full (50)" + SEP + "remove one first", "Could not save settings" + SEP + "try omarchy bar set", true, true, true])
+check("sourceErrorMessage architecture names map onto the UX sentences", [Model.sourceErrorMessage("bad_url"), Model.sourceErrorMessage("unsupported_scheme"), Model.sourceErrorMessage("bad_server")], [Model.sourceErrorMessage("invalid"), Model.sourceErrorMessage("scheme"), Model.sourceErrorMessage("server_scheme")])
+check("sourceErrorMessage unknown / ok / empty", [Model.sourceErrorMessage("weird"), Model.sourceErrorMessage("ok"), Model.sourceErrorMessage("")], ["Could not save the source (weird)", "", ""])
+check("sourceReason is the same table", Model.sourceReason("too_many"), Model.sourceErrorMessage("too_many"))
+check("statusReason knows the new codes", [Model.statusReason({ ok: false, error: { code: "too_long", message: "x" } }), Model.statusReason({ ok: false, error: { code: "bad_key", message: "x" } }), Model.statusReason({ ok: false, error: { code: "invalid", message: "http://u:p@h.test/x" } })], ["URL too long", "Invalid cache key", "Invalid URL"])
+
+// ---- keys (D4) ----
+check("sourceKey vectors", [Model.sourceKey("https://iptv-org.github.io/iptv/countries/us.m3u"), Model.sourceKey("http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"), Model.sourceKey("/srv/tv/local.m3u")], ["d5977d8a", "d990c2e4", "b0eed9fb"])
+check("isSourceKey", ["d5977d8a", "d5977d8a-2", "d5977d8a-999", "D5977D8A", "d5977d8", "../x", "d5977d8a/..", "d5977d8a-1000"].map(Model.isSourceKey), [true, true, true, false, false, false, false, false])
+const collided = [{ key: "d5977d8a", url: "http://other.test/x" }, { key: "d5977d8a-2", url: "http://other2.test/x" }]
+check("allocateSourceKey suffixes on a collision", Model.allocateSourceKey(collided, "https://iptv-org.github.io/iptv/countries/us.m3u"), "d5977d8a-3")
+check("allocateSourceKey returns the existing key for a known url", Model.allocateSourceKey(collided, "http://other2.test/x"), "d5977d8a-2")
+check("allocateSourceKey on an empty list is the plain hash", Model.allocateSourceKey([], "/srv/tv/local.m3u"), "b0eed9fb")
+check("findSource / findSourceByUrl with a forced collision", [Model.findSource(collided, "d5977d8a-2").url, Model.findSourceByUrl(collided, "http://other.test/x").key, Model.findSource(collided, "nope"), Model.findSourceByUrl(null, "x")], ["http://other2.test/x", "d5977d8a", null, null])
+check("sourceCacheDir", [Model.sourceCacheDir("/c/omarchy-iptv/", "d5977d8a"), Model.sourceCacheDir("/c", "d5977d8a-2"), Model.sourceCacheDir("/c", "../x"), Model.sourceCacheDir("", "d5977d8a"), Model.sourceCacheDir("/c", "")], ["/c/omarchy-iptv/sources/d5977d8a", "/c/sources/d5977d8a-2", "", "", ""])
+
+// ---- labels (UX 5.6) ----
+check("deriveLabel host with port, www stripped, lowercased", [Model.deriveLabel("http://www.NAS.local:9981/playlist"), Model.deriveLabel("https://tv.example.net/get.php?u=1"), Model.deriveLabel("http://192.168.1.10:9981/x"), Model.deriveLabel("http://h.test:80/x")], ["nas.local:9981", "tv.example.net", "192.168.1.10:9981", "h.test"])
+check("deriveLabel file name for paths and file URLs", [Model.deriveLabel("/home/dag/tv/channels.m3u"), Model.deriveLabel("file:///srv/tv/a%20b.m3u", "file"), Model.deriveLabel("/", "file")], ["channels.m3u", "a b.m3u", "local file"])
+check("deriveLabel never exceeds LIMITS.label", Model.deriveLabel("http://" + "h".repeat(100) + ".test/x").length, 64)
+check("deriveLabel on junk is the junk, capped", Model.deriveLabel("weird"), "weird")
+check("uniqueLabel appends 2, 3 case-insensitively", [Model.uniqueLabel("tv.example.net", ["TV.example.net"]), Model.uniqueLabel("tv.example.net", ["tv.example.net", "tv.example.net 2"]), Model.uniqueLabel("fresh", ["other"])], ["tv.example.net 2", "tv.example.net 3", "fresh"])
+check("uniqueLabel accepts records and skips selfId", [Model.uniqueLabel("A", [{ id: "1", label: "a" }], "1"), Model.uniqueLabel("A", [{ key: "1", label: "a" }], "2")], ["A", "A 2"])
+check("uniqueLabel keeps the suffix inside the cap", Model.uniqueLabel("x".repeat(64), ["x".repeat(64)]).length, 64)
+check("defaultSourceLabel = derive + unique", Model.defaultSourceLabel("http://h.test/x", "http", ["h.test"]), "h.test 2")
+check("validateLabel ok / empty ok / too long / taken", [Model.validateLabel(" NAS ", ["Other"], "").label, Model.validateLabel("", [], "").ok, Model.validateLabel("x".repeat(65), [], "").code, Model.validateLabel("provider", [{ id: "1", label: "Provider" }], "").code, Model.validateLabel("provider", [{ id: "1", label: "Provider" }], "1").ok], ["NAS", true, "label_too_long", "label_taken", true])
+check("validateLabel message quotes the typed label", Model.validateLabel("Provider", ["provider"], "").message, "A source named " + Q("Provider") + " already exists")
+check("labelTaken null-safe", [Model.labelTaken("", ["x"]), Model.labelTaken("x", null), Model.labelTaken("x", [null, 5, "X"])], [false, false, true])
+
+// ---- masking (SR4 / UX 4.4) ----
+check("maskUrl masks every query value except type and output", Model.maskUrl("http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"), "http://provider.example.test/get.php?username=****&password=****&type=m3u_plus&output=ts")
+check("maskUrl masks userinfo, keeps a bare flag, keeps the port", Model.maskUrl("http://u:p@h.test:8080/x?token=abc&flag"), "http://****@h.test:8080/x?token=****&flag")
+check("maskUrl masks the fragment", Model.maskUrl("http://user:pw@tv.example.net:8080/get.php?username=tomasz&password=s3cret&type=m3u_plus&output=ts#x"), "http://****@tv.example.net:8080/get.php?username=****&password=****&type=m3u_plus&output=ts#****")
+check("maskUrl leaves a plain URL alone (nothing to mask)", Model.maskUrl("https://iptv-org.github.io/iptv/countries/us.m3u"), "https://iptv-org.github.io/iptv/countries/us.m3u")
+check("maskUrl never masks paths, file URLs or non-URLs", [Model.maskUrl("/home/dag/tv/channels.m3u?x=1"), Model.maskUrl("file:///srv/a.m3u?x=1"), Model.maskUrl("tv.example?x=1"), Model.maskUrl(""), Model.maskUrl(null)], ["/home/dag/tv/channels.m3u?x=1", "file:///srv/a.m3u?x=1", "tv.example?x=1", "", ""])
+check("maskUrl fixed length whatever the secret length", Model.maskUrl("http://h.test/x?k=" + "s".repeat(500)), "http://h.test/x?k=****")
+check("maskUrl keeps a bare ? and an empty value", [Model.maskUrl("http://h.test/x?"), Model.maskUrl("http://h.test/x?a=")], ["http://h.test/x?", "http://h.test/x?a=****"])
+check("maskUrl clear params are case-insensitive", Model.maskUrl("http://h.test/x?TYPE=m3u&Output=ts&Pw=1"), "http://h.test/x?TYPE=m3u&Output=ts&Pw=****")
+
+// ---- Xtream (D10, UX 1.8 / 5.4) ----
+check("encodeQueryValue equals Python quote(v, safe='')", Model.encodeQueryValue("a b!*'()~-._/@:+"), "a%20b%21%2A%27%28%29~-._%2F%40%3A%2B")
+check("encodeQueryValue non-ASCII is UTF-8 percent-encoded uppercase", Model.encodeQueryValue("p\u00e4\u00df"), "p%C3%A4%C3%9F")
+const xt = Model.xtreamUrls("http://Provider.Example.TEST:8080/", "u", "p")
+check("xtreamUrls builds get.php and xmltv.php", [xt.ok, xt.playlistUrl, xt.epgUrl, xt.host, xt.base], [true, "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", "http://provider.example.test:8080/xmltv.php?username=u&password=p", "provider.example.test", "http://provider.example.test:8080"])
+check("xtreamUrls percent-encodes the credentials", Model.xtreamUrls("https://h.test/", "a b", "p&q").playlistUrl, "https://h.test/get.php?username=a%20b&password=p%26q&type=m3u_plus&output=ts")
+check("xtreamUrls accepts one object (service call shape)", Model.xtreamUrls({ server: "https://h.test", username: "u", password: "p" }).epgUrl, "https://h.test/xmltv.php?username=u&password=p")
+check("xtreamUrls default ports are dropped so the key is stable", Model.xtreamUrls("http://H.test:80", "u", "p").base, "http://h.test")
+check("xtreamUrls server_empty / server_scheme (no guessing) / server_path (UX 8 #9, #10)", [Model.xtreamUrls("", "u", "p").code, Model.xtreamUrls("h.test:8080", "u", "p").code, Model.xtreamUrls("ftp://h.test", "u", "p").code, Model.xtreamUrls("/srv/x", "u", "p").code, Model.xtreamUrls("http://h.test/get.php?username=x", "u", "p").code, Model.xtreamUrls("http://h.test/c", "u", "p").code, Model.xtreamUrls("http://h.test/?x=1", "u", "p").code], ["server_empty", "server_scheme", "server_scheme", "server_scheme", "server_path", "server_path", "server_path"])
+check("xtreamUrls invalid host / server_userinfo (SR17)", [Model.xtreamUrls("http://h .test", "u", "p").code, Model.xtreamUrls("http://u:p@h.test", "u", "p").code, Model.xtreamUrls("http://u@h.test:8080/", "u", "p").message, Model.xtreamUrls("http://", "u", "p").code], ["invalid", "server_userinfo", "Server must not contain a username or password" + SEP + "enter them below", "invalid"])
+check("xtreamUrls credential codes", [Model.xtreamUrls("http://h.test", "", "p").code, Model.xtreamUrls("http://h.test", "u", "  ").code, Model.xtreamUrls("http://h.test", "u".repeat(257), "p").code, Model.xtreamUrls("http://h.test", "u", "p".repeat(257)).code, Model.xtreamUrls("http://" + "h".repeat(520), "u", "p").code], ["user_empty", "pass_empty", "user_too_long", "pass_too_long", "server_too_long"])
+check("xtreamUrls failure names the field and carries the copy", Model.xtreamUrls("http://h.test", "u", "").field + "|" + Model.xtreamUrls("http://h.test", "u", "").message, "password|Enter the password")
+check("xtreamUrls failure carries no URL fields", (() => { const r = Model.xtreamUrls("http://h.test/x", "u", "p"); return [r.playlistUrl, r.epgUrl, r.base, r.host] })(), ["", "", "", ""])
+check("xtreamUrls strips control characters from every field", Model.xtreamUrls("http://h.test\n", "u\ru", "p\tp").playlistUrl, "http://h.test/get.php?username=uu&password=pp&type=m3u_plus&output=ts")
+check("validateXtream is the UX name for the same check", [Model.validateXtream({ server: "x", username: "u", password: "p" }).code, Model.validateXtream(null).code, Model.validateXtream({ server: "http://h.test", username: "u", password: "p" }).ok], ["server_scheme", "server_empty", true])
+
+// ---- formatting (UX 5.2) ----
+const local = (y, m, d, h, mi) => Math.floor(new Date(y, m - 1, d, h, mi).getTime() / 1000)
+const nowSep = local(2026, 9, 13, 21, 40)
+check("pluralGroups / countsLine", [Model.pluralGroups(1), Model.pluralGroups(28), Model.pluralGroups(null), Model.countsLine(1475, 28), Model.countsLine(1, 1)], ["1 group", "28 groups", "0 groups", "1,475 channels in 28 groups", "1 channel in 1 group"])
+check("formatLastUsed today / yesterday / this year / older / never", [Model.formatLastUsed(local(2026, 9, 13, 21, 30), nowSep), Model.formatLastUsed(local(2026, 9, 12, 23, 59), nowSep), Model.formatLastUsed(local(2026, 9, 3, 10, 0), nowSep), Model.formatLastUsed(local(2025, 9, 3, 10, 0), nowSep), Model.formatLastUsed(0, nowSep), Model.formatLastUsed(null, nowSep)], ["used 21:30", "used yesterday", "used 3 Sep", "used 3 Sep 2025", "never used", "never used"])
+check("formatLastUsed year boundary: 31 Dec seen on 1 Jan is yesterday", Model.formatLastUsed(local(2025, 12, 31, 12, 0), local(2026, 1, 1, 8, 0)), "used yesterday")
+check("formatLastUsed without nowSec uses the clock (never used stays)", Model.formatLastUsed(0), "never used")
+check("formatAgo (architecture wording)", [Model.formatAgo(1000, 990), Model.formatAgo(1000, 1000 - 720), Model.formatAgo(1000 + 3 * 3600, 1000), Model.formatAgo(1000 + 2 * 86400, 1000), Model.formatAgo(5, 0)], ["just now", "12 min ago", "3 h ago", "2 d ago", ""])
+check("sourcesHeaderCount", [Model.sourcesHeaderCount(0), Model.sourcesHeaderCount(1), Model.sourcesHeaderCount(3), Model.sourcesHeaderCount(null)], ["No sources", "1 source", "3 sources", "No sources"])
+check("sourcesRowAccessibleName", Model.sourcesRowAccessibleName(3), "Sources, 3 saved")
+check("confirmRemoveMessage", [Model.confirmRemoveMessage("NAS Tvheadend", false), Model.confirmRemoveMessage("Provider", true)], ["Remove " + Q("NAS Tvheadend") + "? Its cache is deleted too.", "Remove " + Q("Provider") + "? It is the active source; the guide returns to setup."])
+check("fetchingLine", [Model.fetchingLine("tv.example.net", "url"), Model.fetchingLine("", "file")], ["Fetching from tv.example.net" + ELL, "Reading the file" + ELL])
+check("probeFailureLine url / path / redacted", [Model.probeFailureLine("HTTP 403 Forbidden", "tv.example.net", "url"), Model.probeFailureLine("File not found", "", "file"), Model.probeFailureLine("could not open http://u:p@h.test/x", "h.test", "url"), Model.probeFailureLine("", "h.test", "url")], ["HTTP 403 Forbidden from tv.example.net", "File not found", "could not open h.test from h.test", "Unknown error from h.test"])
+check("sourceTransient strings (UX 5.3)", [
+  Model.sourceTransient("loaded", { channelCount: 1475, groupCount: 28 }),
+  Model.sourceTransient("added", { host: "tv.example.net", channelCount: 1475, groupCount: 28 }),
+  Model.sourceTransient("saved", {}),
+  Model.sourceTransient("saved", { channelCount: 1475, groupCount: 28 }),
+  Model.sourceTransient("switched", { label: "NAS Tvheadend", channelCount: 84 }),
+  Model.sourceTransient("switched", { label: "NAS", channelCount: -1 }),
+  Model.sourceTransient("removed", { label: "NAS Tvheadend" }),
+  Model.sourceTransient("removed", { label: "Provider", wasActive: true }),
+  Model.sourceTransient("nope", {})
+], ["1,475 channels in 28 groups", "Added tv.example.net" + SEP + "1,475 channels in 28 groups", "Saved", "Saved" + SEP + "1,475 channels in 28 groups", "Switched to NAS Tvheadend" + SEP + "84 channels", "Switched to NAS", "Removed NAS Tvheadend", "Removed Provider" + SEP + "no active source", ""])
+
+// ---- view objects (SR1, UX 5.2 / 7.1) ----
+const recProvider = { key: "d990c2e4", url: "http://tv.example.net:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://tv.example.net:8080/xmltv.php?username=u&password=p", kind: "http", label: "Provider", labelCustom: true, origin: "xtream", addedAt: 100, lastUsed: local(2026, 9, 13, 21, 30), fetchedAt: 200, channelCount: 1475, groupCount: 28 }
+const recNas = { key: "11111111", url: "http://nas.local:9981/playlist", epgUrl: "http://nas.local:9981/xmltv", kind: "http", label: "NAS Tvheadend", labelCustom: true, origin: "guide", addedAt: 50, lastUsed: local(2026, 9, 12, 9, 0), fetchedAt: 210, channelCount: 84, groupCount: 6 }
+const recCli = { key: "d5977d8a", url: "https://iptv-org.github.io/iptv/countries/us.m3u", epgUrl: "", kind: "http", label: "iptv-org", labelCustom: true, origin: "cli", addedAt: 300, lastUsed: 0, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+const recFile = { key: "b0eed9fb", url: "/srv/tv/channels.m3u", epgUrl: "", kind: "file", label: "channels.m3u", labelCustom: false, origin: "guide", addedAt: 10, lastUsed: local(2026, 9, 3, 12, 0), fetchedAt: 220, channelCount: 12, groupCount: 1 }
+const state4 = { version: 2, cacheLayout: 2, favorites: [], recents: [], lastPlayed: null, sources: [recFile, recNas, recProvider, recCli] }
+const viewProvider = Model.sourceView(recProvider, "d990c2e4", nowSep)
+check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080", hasEpg: true, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "" })
+check("sourceView never fetched: channelCount -1, file host is 'local file'", [Model.sourceView(recCli, "", nowSep).channelCount, Model.sourceView(recCli, "", nowSep).cachedAt, Model.sourceView(recFile, "", nowSep).host, Model.sourceView(recFile, "", nowSep).kind, Model.sourceView(recNas, "", nowSep).kind], [-1, 0, "local file", "file", "url"])
+check("sourceView null-safe", Model.sourceView(null, "", 0).id, "")
+check("sourceView attaches the session error", Model.sourceView(recCli, "", nowSep, "Connection refused").errorReason, "Connection refused")
+const views4 = Model.sourceViews(state4, "d990c2e4", nowSep, { d5977d8a: "Connection refused" })
+check("sourceViews: active first, then last used desc, never used last", views4.map(v => v.id), ["d990c2e4", "11111111", "b0eed9fb", "d5977d8a"])
+check("sourceViews rows carry no url key and no ://", [views4.some(v => "url" in v || "epgUrl" in v), JSON.stringify(views4).indexOf("://")], [false, -1])
+check("sourceViews attaches per-key errors", views4[3].errorReason, "Connection refused")
+check("sourceRows is the architecture name", Model.sourceRows(state4, "", 0).length, 4)
+check("sourceViews null / empty", [Model.sourceViews(null, "", 0), Model.sourceViews({ sources: [null] }, "", 0)], [[], []])
+check("sourceDetail wide", [Model.sourceDetail(views4[0], false), Model.sourceDetail(views4[1], false), Model.sourceDetail(views4[2], false), Model.sourceDetail(views4[3], false)], [
+  "active" + SEP + "tv.example.net:8080" + SEP + "Xtream" + SEP + "1,475 channels in 28 groups" + SEP + "EPG",
+  "nas.local:9981" + SEP + "84 channels in 6 groups" + SEP + "EPG",
+  "local file" + SEP + "12 channels in 1 group",
+  "iptv-org.github.io" + SEP + "not loaded yet"
+])
+check("sourceDetail narrow moves 'used' right after 'active'", [Model.sourceDetail(views4[0], true), Model.sourceDetail(views4[3], true)], ["active" + SEP + "used 21:30" + SEP + "tv.example.net:8080" + SEP + "Xtream" + SEP + "1,475 channels in 28 groups" + SEP + "EPG", "never used" + SEP + "iptv-org.github.io" + SEP + "not loaded yet"])
+check("sourceDetail never carries error text (SR26): errorReason stays on the view for the result line", [Model.sourceDetail(Model.sourceView(recCli, "", nowSep), false), views4[3].errorReason], ["iptv-org.github.io" + SEP + "not loaded yet", "Connection refused"])
+check("sourceAccessibleName", [Model.sourceAccessibleName(views4[0]), Model.sourceAccessibleName(Model.sourceView(recCli, "", nowSep))], ["Provider, tv.example.net:8080, 1,475 channels in 28 groups, active, EPG, last used 21:30", "iptv-org, iptv-org.github.io, not loaded yet, never used"])
+
+// ---- state v2 and reducers (ARCHITECTURE-SOURCES 2.1, 2.2, 3.5) ----
+check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: [] })
+check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, sources: [recFile] })
+check("cloneState copies the arrays", (() => { const src = { sources: [recFile] }; const out = Model.cloneState(src); out.sources.push(recNas); return src.sources.length })(), 1)
+check("withCacheLayout", [Model.withCacheLayout(state4, 0).cacheLayout, Model.withCacheLayout(Model.emptyState(), 2).cacheLayout, Model.withCacheLayout(Model.emptyState(), 5).cacheLayout], [0, 2, 0])
+check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, sources: [] })
+check("parseState v2 round-trips records", Model.parseState(JSON.stringify(state4)).sources, state4.sources)
+check("parseState drops invalid records, duplicate urls and keys keep the first", Model.parseState(JSON.stringify({ version: 2, sources: [recNas, { key: "bad key", url: "http://x.test/" }, { key: "22222222", url: recNas.url }, { key: "11111111", url: "http://other.test/" }, { key: "33333333", url: "" }, "junk"] })).sources.map(s => s.key), ["11111111"])
+check("parseState coerces and defaults a sparse record", Model.parseState(JSON.stringify({ version: 2, sources: [{ key: "abcdef12", url: "http://h.test/x", channelCount: "7", origin: "weird", labelCustom: "yes" }] })).sources[0], { key: "abcdef12", url: "http://h.test/x", epgUrl: "", kind: "http", label: "h.test", labelCustom: false, origin: "guide", addedAt: 0, lastUsed: 0, fetchedAt: 0, channelCount: 7, groupCount: 0 })
+check("parseState caps sources at 50", Model.parseState(JSON.stringify({ version: 2, sources: Array.from({ length: 60 }, (_, i) => ({ key: (10000000 + i).toString(16).padStart(8, "0"), url: "http://h" + i + ".test/" })) })).sources.length, 50)
+check("parseState cacheLayout 2 read, other values 0", [Model.parseState('{"version":2,"cacheLayout":2}').cacheLayout, Model.parseState('{"version":2,"cacheLayout":"x"}').cacheLayout], [2, 0])
+check("recordPlayed carries sources", Model.recordPlayed(state4, { id: "c1", name: "C" }, 10, 5).sources.length, 4)
+check("withFavorites carries sources", Model.withFavorites(state4, ["c1"]).sources.length, 4)
+check("removeRecent carries sources", Model.removeRecent(state4, "x").sources.length, 4)
+check("trimRecents carries sources", Model.trimRecents({ ...state4, recents: [{ id: "1" }, { id: "2" }] }, 1).sources.length, 4)
+check("normalizeSourceRecord rejects junk", [Model.normalizeSourceRecord(null), Model.normalizeSourceRecord({ key: "abcdef12", url: "x".repeat(2049) })], [null, null])
+
+const addOk = Model.addSource(Model.emptyState(), { playlistUrl: " HTTP://Provider.Example.TEST:80/get.php?username=u&password=p&type=m3u_plus&output=ts ", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", label: "", origin: "xtream" }, 1000)
+check("addSource normalizes, derives the label, allocates the key", [addOk.ok, addOk.key, addOk.state.sources[0]], [true, "d990c2e4", { key: "d990c2e4", url: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", kind: "http", label: "provider.example.test", labelCustom: false, origin: "xtream", addedAt: 1000, lastUsed: 1000, fetchedAt: 0, channelCount: 0, groupCount: 0 }])
+check("addSource does not mutate the input state", Model.emptyState().sources.length, 0)
+check("addSource typed label is custom; unknown origin is guide", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u", label: " NAS ", origin: "junk" }, 2000); return [r.state.sources[1].label, r.state.sources[1].labelCustom, r.state.sources[1].origin, r.state.sources[1].kind, r.key] })(), ["NAS", true, "guide", "file", "b0eed9fb"])
+check("addSource codes: empty, scheme, invalid, relative_path, unsafe_path, too_long", ["", "x.test/a", "http://h .test/", "~/a", "/proc/x", "/" + "x".repeat(2100)].map(u => Model.addSource(Model.emptyState(), { playlistUrl: u }).code), ["empty", "scheme", "invalid", "relative_path", "unsafe_path", "too_long"])
+check("addSource bad EPG is rejected with the EPG copy", (() => { const r = Model.addSource(Model.emptyState(), { playlistUrl: "http://h.test/x", epgUrl: "ftp://e" }); return [r.code, r.message] })(), ["scheme", "EPG: start with http://, https://, or / for a local file"])
+check("addSource duplicate returns the existing key (case-changed host, default port)", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "http://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }); return [r.code, r.key, r.message] })(), ["duplicate", "d990c2e4", "Already in Sources as " + Q("provider.example.test")])
+check("addSource label_taken for a typed collision; derived labels get a suffix", (() => { const taken = Model.addSource(addOk.state, { playlistUrl: "http://other.test/", label: "Provider.Example.TEST" }); const derived = Model.addSource(addOk.state, { playlistUrl: "http://provider.example.test/other.m3u" }); return [taken.code, derived.state.sources[1].label] })(), ["label_taken", "provider.example.test 2"])
+check("addSource label_too_long", Model.addSource(Model.emptyState(), { playlistUrl: "http://h.test/", label: "x".repeat(65) }).code, "label_too_long")
+const full50 = { version: 2, cacheLayout: 2, favorites: [], recents: [], lastPlayed: null, sources: Array.from({ length: 50 }, (_, i) => ({ key: (10000000 + i).toString(16).padStart(8, "0"), url: "http://h" + i + ".test/", epgUrl: "", kind: "http", label: "h" + i, labelCustom: false, origin: "cli", addedAt: i, lastUsed: i, fetchedAt: 0, channelCount: 0, groupCount: 0 })) }
+check("addSource too_many at the cap", Model.addSource(full50, { playlistUrl: "http://new.test/" }).code, "too_many")
+check("addSource result never carries a URL on failure", JSON.stringify(Model.addSource(full50, { playlistUrl: "http://new.test/" })).indexOf("new.test"), -1)
+
+const twoState = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u" }, 2000).state
+check("updateSource label only: labelCustom, state otherwise intact", (() => { const r = Model.updateSource(twoState, "d990c2e4", { label: "Provider" }, 3000); return [r.ok, r.urlChanged, r.replacedKey, r.state.sources[0].label, r.state.sources[0].labelCustom, r.state.sources.length] })(), [true, false, "", "Provider", true, 2])
+check("updateSource empty label re-derives and clears labelCustom", (() => { const r = Model.updateSource(Model.updateSource(twoState, "d990c2e4", { label: "Custom" }).state, "d990c2e4", { label: "" }); return [r.state.sources[0].label, r.state.sources[0].labelCustom] })(), ["provider.example.test", false])
+check("updateSource label_taken against another record, not itself", [Model.updateSource(twoState, "d990c2e4", { label: "LOCAL.m3u" }).code, Model.updateSource(twoState, "d990c2e4", { label: "provider.example.test" }).ok], ["label_taken", true])
+check("updateSource epg only", (() => { const r = Model.updateSource(twoState, "b0eed9fb", { epgUrl: " http://E.test:80/x.xml " }); return [r.ok, r.urlChanged, r.state.sources[1].epgUrl] })(), [true, false, "http://e.test/x.xml"])
+check("updateSource bad epg", Model.updateSource(twoState, "b0eed9fb", { epgUrl: "~/x" }).code, "relative_path")
+check("updateSource same playlist url (normalized) is not a change", Model.updateSource(twoState, "d990c2e4", { playlistUrl: "HTTP://provider.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }).urlChanged, false)
+const moved = Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", label: "Provider" }, 4000)
+check("updateSource changed url: new record with a new key, old kept until the probe confirms", [moved.ok, moved.urlChanged, moved.key, moved.replacedKey, moved.state.sources.length, moved.state.sources[2].fetchedAt, moved.state.sources[2].label, moved.state.sources[2].addedAt, moved.state.sources[2].lastUsed, moved.state.sources[0].url === twoState.sources[0].url], [true, true, "85ac744a", "d990c2e4", 3, 0, "Provider", 1000, 4000, true])
+check("updateSource changed url with a derived label re-derives it", Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://new.test/x" }).state.sources[2].label, "new.test")
+check("updateSource duplicate / unknown / too_many", [Model.updateSource(twoState, "d990c2e4", { playlistUrl: "/srv/tv/local.m3u" }).code, Model.updateSource(twoState, "nope", { label: "x" }).code, Model.updateSource(full50, "00989680", { playlistUrl: "http://new.test/" }).code], ["duplicate", "unknown_source", "too_many"])
+check("removeSource", (() => { const r = Model.removeSource(twoState, "b0eed9fb"); return [r.removed.key, r.state.sources.length, Model.removeSource(twoState, "nope").removed, twoState.sources.length] })(), ["b0eed9fb", 1, null, 2])
+check("touchSource bumps lastUsed, unknown key is a no-op", [Model.touchSource(twoState, "b0eed9fb", 9000).sources[1].lastUsed, Model.touchSource(twoState, "nope", 9000).sources[1].lastUsed], [9000, 2000])
+check("withSourceStats copies the counts of an ok status", Model.withSourceStats(twoState, "d990c2e4", { ok: true, fetchedAt: 5000, channelCount: "1475", groupCount: 28 }).sources[0], { ...twoState.sources[0], fetchedAt: 5000, channelCount: 1475, groupCount: 28 })
+check("withSourceStats ignores a failed status, falls back to nowSec", [Model.withSourceStats(twoState, "d990c2e4", { ok: false }).sources[0].fetchedAt, Model.withSourceStats(twoState, "d990c2e4", { ok: true, channelCount: 3 }, 777).sources[0].fetchedAt], [0, 777])
+check("activeSourceKey normalizes before matching", [Model.activeSourceKey(twoState, "HTTP://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts"), Model.activeSourceKey(twoState, "file:///srv/tv/local.m3u"), Model.activeSourceKey(twoState, "http://other.test/"), Model.activeSourceKey(twoState, ""), Model.activeSourceKey(null, "x")], ["d990c2e4", "b0eed9fb", "", "", ""])
+
+// reconcile (D3 / SR8)
+check("reconcileSources: empty playlistUrl is a no-op", Model.reconcileSources(twoState, "", "", "", 1), { state: twoState, changed: false, activeKey: "", added: "", evicted: [], invalid: null })
+check("reconcileSources: invalid value synthesizes the validation result, never adds", (() => { const r = Model.reconcileSources(twoState, "ftp://x", "", "", 1); return [r.changed, r.activeKey, r.invalid.code, r.state.sources.length] })(), [false, "", "scheme", 2])
+check("reconcileSources: known url, same active key -> unchanged", (() => { const r = Model.reconcileSources(twoState, "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", twoState.sources[0].epgUrl, "d990c2e4", 5000); return [r.changed, r.activeKey, r.state.sources[0].lastUsed] })(), [false, "d990c2e4", 1000])
+check("reconcileSources: known url, key changed -> lastUsed bumped only", (() => { const r = Model.reconcileSources(twoState, "/srv/tv/local.m3u", "", "d990c2e4", 5000); return [r.changed, r.activeKey, r.added, r.state.sources[1].lastUsed, r.state.sources[0].lastUsed] })(), [true, "b0eed9fb", "", 5000, 1000])
+check("reconcileSources: adopts a changed valid epgUrl, ignores an invalid one", [Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000).state.sources[1].epgUrl, Model.reconcileSources(twoState, "/srv/tv/local.m3u", "ftp://e", "b0eed9fb", 5000).changed], ["http://e.test/x.xml", false])
+check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, "d5977d8a", "d5977d8a", "cli", "iptv-org.github.io", 6000, 0, false])
+check("reconcileSources: first v2 run (no history, legacy layout) tags the record migrated", [Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.emptyState(), "http://x.test/", "", "", 1, "cli").state.sources[0].origin], ["migrated", "cli", "cli"])
+check("reconcileSources: derived label is made unique", Model.reconcileSources(twoState, "http://provider.example.test/second.m3u", "", "", 1).state.sources[2].label, "provider.example.test 2")
+check("reconcileSources: at the cap the least recently used non-active record is evicted", (() => { const r = Model.reconcileSources(full50, "http://new.test/", "", "00989680", 999); return [r.state.sources.length, r.evicted, r.state.sources.some(s => s.key === "00989680"), r.state.sources.some(s => s.url === "http://new.test/")] })(), [50, ["00989680"], false, true])
+check("reconcileSources: eviction never drops the new active record", Model.reconcileSources(full50, "http://new.test/", "", "", 0).state.sources.some(s => s.url === "http://new.test/"), true)
+check("reconcileSources does not mutate the input", twoState.sources.length, 2)
+
+check("sourceForEdit is the only URL carrier: masked and raw forms", Model.sourceForEdit(twoState, "d990c2e4"), { id: "d990c2e4", key: "d990c2e4", label: "provider.example.test", labelCustom: false, kind: "xtream", host: "provider.example.test", origin: "xtream", playlistUrl: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", playlistMasked: "http://provider.example.test/get.php?username=****&password=****&type=m3u_plus&output=ts", epgMasked: "http://provider.example.test/xmltv.php?username=****&password=****" })
+check("sourceForEdit unknown", [Model.sourceForEdit(twoState, "nope"), Model.sourceForEdit(null, "x")], [null, null])
+check("sourcesSummary carries no URL", (() => { const s = Model.sourcesSummary(twoState, "d990c2e4"); return [JSON.stringify(s).indexOf("://"), s[0], s.length] })(), [-1, { id: "d990c2e4", key: "d990c2e4", label: "provider.example.test", host: "provider.example.test", active: true, channelCount: -1, lastUsed: 1000 }, 2])
+check("entryWith keeps foreign keys, applies the patch, forces id", Model.entryWith({ id: "io.github.rmcdavid.iptv", refreshMinutes: 30, mpvArgs: "--x", playlistUrl: "old" }, { playlistUrl: "new", epgUrl: "" }), { id: "io.github.rmcdavid.iptv", refreshMinutes: 30, mpvArgs: "--x", playlistUrl: "new", epgUrl: "" })
+check("entryWith null-safe", Model.entryWith(null, { playlistUrl: "x" }), { playlistUrl: "x" })
+check("cacheStale", [Model.cacheStale(null, 360, 1000), Model.cacheStale({ ok: false, fetchedAt: 900 }, 360, 1000), Model.cacheStale({ ok: true }, 360, 1000), Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 15 * 60), Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 15 * 60 - 1), Model.cacheStale({ ok: true, fetchedAt: 1000 }, 5, 1000 + 14 * 60)], [true, true, true, true, false, false])
+
+// ---- guide state machine: forms and Sources (UX-SOURCES 1.9, 2.3, 7.3) ----
+check("guideState gains returnMode, form, sourceCursor", Model.guideState("all"), { mode: "search", query: "", scopeId: "all", restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0 })
+check("withMode accepts the new modes and falls back to search", ["sources", "sourceEdit", "sourceXtream", "confirmRemove", "junk"].map(m => Model.withMode(Model.guideState("all"), m).mode), ["sources", "sourceEdit", "sourceXtream", "confirmRemove", "search"])
+check("toggleMode is a no-op outside search / list", Model.toggleMode(Model.withMode(Model.guideState("all"), "sources")).mode, "sources")
+const fr = Model.openFirstRun(Model.guideState("all"))
+check("openFirstRun: sourceEdit, url form, origin firstRun, focus Playlist", [fr.mode, fr.form.kind, fr.form.origin, fr.form.sourceId, fr.form.focus, fr.form.values, fr.form.probing, fr.form.error, fr.form.parent], ["sourceEdit", "url", "firstRun", "", "playlist", { label: "", playlist: "", epg: "" }, false, null, null])
+check("formFields per form", [Model.formFields(fr.form), Model.formFields({ kind: "url", origin: "sources" }), Model.formFields({ kind: "xtream" })], [["playlist", "epg"], ["label", "playlist", "epg"], ["label", "server", "username", "password"]])
+check("formFocusOrder first run (with and without saved sources)", [Model.formFocusOrder(fr.form, { savedSources: 3 }), Model.formFocusOrder(fr.form, {})], [["playlist", "epg", "savedSources", "xtream", "load"], ["playlist", "epg", "xtream", "load"]])
+check("formFocusOrder add / edit / xtream", [Model.formFocusOrder(Model.openAddForm(Model.guideState("all")).form), Model.formFocusOrder(Model.openEditForm(Model.guideState("all"), "k1", { label: "P" }).form), Model.formFocusOrder(Model.openXtreamForm(Model.guideState("all"), "sources").form)], [["label", "playlist", "epg", "xtream", "save", "cancel"], ["label", "playlist", "epg", "save", "cancel"], ["label", "server", "username", "password", "save", "cancel"]])
+check("formLimit per field", ["label", "playlist", "epg", "server", "username", "password", "x"].map(Model.formLimit), [64, 2048, 2048, 512, 256, 256, 2048])
+check("openAddForm focuses Playlist, openEditForm focuses Label with the values and original", (() => { const a = Model.openAddForm(Model.guideState("all")); const e = Model.openEditForm(Model.guideState("all"), "k1", { label: "P", playlist: "http://h.test/x?t=1", epg: "" }); return [a.form.focus, a.form.sourceId, e.form.focus, e.form.sourceId, e.form.values.playlist, e.form.original.playlist, e.form.revealed] })(), ["playlist", "", "label", "k1", "http://h.test/x?t=1", "http://h.test/x?t=1", { playlist: false, epg: false }])
+check("edit form opens masked", Model.fieldMasked(Model.openEditForm(Model.guideState("all"), "k1", { playlist: "http://h.test/x?t=1" }).form, "playlist"), true)
+check("openXtreamForm focuses Server, origin follows the argument", (() => { const x = Model.openXtreamForm(Model.withMode(Model.guideState("all"), "sources"), "sources"); return [x.mode, x.form.kind, x.form.origin, x.form.focus, x.form.parent, x.form.values] })(), ["sourceXtream", "xtream", "sources", "server", null, { label: "", server: "", username: "", password: "" }])
+const typed = Model.withFormValue(fr, "playlist", "http://h.test/x?token=1", { typed: true })
+check("withFormValue typed: value set, field revealed while typing (never masked mid-typing)", [typed.form.values.playlist, typed.form.revealed.playlist, Model.fieldMaskable(typed.form, "playlist"), Model.fieldMasked(typed.form, "playlist")], ["http://h.test/x?token=1", true, false === Model.fieldMasked(typed.form, "playlist") ? true : true, false])
+const pasted = Model.withFormValue(fr, "playlist", "http://h.test/x?token=1")
+check("withFormValue paste: masked immediately", [Model.fieldMasked(pasted.form, "playlist"), pasted.form.revealed.playlist], [true, false])
+check("withFormValue caps at the field capacity (cap + slack) and ignores unknown fields", [Model.withFormValue(fr, "playlist", "x".repeat(3000)).form.values.playlist.length, Model.withFormValue(fr, "label", "x").form.values.label, Model.withFormValue(fr, "nope", "x").form.values], [Model.formCapacity("playlist"), "", { label: "", playlist: "", epg: "" }])
+check("withFormValue clears an error on that field only", (() => { const e = Model.withFormError(pasted, { code: "invalid", field: "playlist", message: "m" }); return [Model.withFormValue(e, "playlist", "y").form.error, Model.withFormValue(e, "epg", "y").form.error.code] })(), [null, "invalid"])
+check("fieldMaskable / fieldRevealed on a plain value", [Model.fieldMaskable(Model.withFormValue(fr, "playlist", "http://h.test/x").form, "playlist"), Model.fieldRevealed(fr.form, "playlist"), Model.fieldMasked(null, "playlist")], [false, false, false])
+check("toggleReveal: reveal, hide, no-op when nothing to mask", [Model.toggleReveal(pasted, "playlist").form.revealed.playlist, Model.toggleReveal(Model.toggleReveal(pasted, "playlist"), "playlist").form.revealed.playlist, Model.toggleReveal(Model.withFormValue(fr, "playlist", "http://h.test/x"), "playlist").form.revealed.playlist, Model.toggleReveal(fr, "label").form.revealed], [true, false, false, { playlist: false, epg: false }])
+check("withFormReveal explicit", Model.withFormReveal(pasted, "playlist", true).form.revealed.playlist, true)
+const revealed = Model.toggleReveal(pasted, "playlist")
+check("withFormFocus re-masks the field being left", (() => { const n = Model.withFormFocus(revealed, "epg"); return [n.form.focus, n.form.revealed.playlist] })(), ["epg", false])
+check("withFormFocus same field keeps the reveal", Model.withFormFocus(revealed, "playlist").form.revealed.playlist, true)
+check("moveFormFocus wraps both ways and re-masks", (() => { const a = Model.moveFormFocus(revealed, 1, { savedSources: 0 }); const b = Model.moveFormFocus(a, -1, {}); const w = Model.moveFormFocus(Model.withFormFocus(fr, "load"), 1, {}); const wb = Model.moveFormFocus(fr, -1, {}); return [a.form.focus, a.form.revealed.playlist, b.form.focus, w.form.focus, wb.form.focus] })(), ["epg", false, "playlist", "playlist", "load"])
+check("moveFormFocus from an unknown focus lands on the first / last element", [Model.moveFormFocus(Model.withFormFocus(fr, "zzz"), 1, {}).form.focus, Model.moveFormFocus(Model.withFormFocus(fr, "zzz"), -1, {}).form.focus], ["playlist", "load"])
+check("withFormError sets the line, thaws, and focuses the field", (() => { const e = Model.withFormError(Model.withFormProbing(Model.withFormFocus(pasted, "epg"), true), { code: "invalid", field: "playlist", message: "Invalid URL" }); return [e.form.error, e.form.probing, e.form.focus] })(), [{ code: "invalid", field: "playlist", message: "Invalid URL" }, false, "playlist"])
+check("withFormError with a non-field keeps the focus; null clears", [Model.withFormError(pasted, { code: "probe", field: "", message: "x" }).form.focus, Model.withFormError(Model.withFormError(pasted, { code: "x", field: "playlist", message: "m" }), null).form.error], ["playlist", null])
+check("withFormProbing freezes, clears the error, re-masks, records host / kind", (() => { const p = Model.withFormProbing(Model.withFormError(revealed, { code: "x", field: "playlist", message: "m" }), true, { host: "h.test", kind: "url" }); return [p.form.probing, p.form.error, p.form.revealed.playlist, p.form.probeHost, p.form.probeKind, Model.withFormProbing(p, false).form.probing] })(), [true, null, false, "h.test", "url", false])
+check("formHasText / formSubmitValues trims every field", [Model.formHasText(fr.form), Model.formHasText(pasted.form), Model.formSubmitValues(Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", " NAS ", { typed: true }).form)], [false, true, { label: "NAS", playlist: "", epg: "" }])
+check("copyForm deep-copies values, revealed, error and parent", (() => { const f = { kind: "xtream", origin: "firstRun", values: { label: "L", server: "S", username: "U", password: "P" }, parent: { kind: "url", origin: "firstRun", values: { playlist: "x" } } }; const c = Model.copyForm(f); c.values.server = "changed"; c.parent.values.playlist = "changed"; return [f.values.server, f.parent.values.playlist, c.kind, c.parent.kind, c.parent.parent, c.revealed] })(), ["S", "x", "xtream", "url", null, { playlist: false, epg: false }])
+
+// Esc rules (UX 2.3)
+check("onEscape first run: focused field with text clears it", (() => { const r = Model.onEscape(pasted); return [r.close, r.cancelProbe, r.state.form.values.playlist, r.state.mode] })(), [false, false, "", "sourceEdit"])
+check("onEscape first run: focused field empty, another has text -> focus moves there, nothing closes", (() => { const r = Model.onEscape(Model.withFormFocus(pasted, "epg")); return [r.close, r.state.form.focus, r.state.form.values.playlist] })(), [false, "playlist", "http://h.test/x?token=1"])
+check("onEscape first run: focus on a button with text elsewhere -> focus moves", Model.onEscape(Model.withFormFocus(pasted, "load")).state.form.focus, "playlist")
+check("onEscape first run: every field empty -> close the guide", (() => { const r = Model.onEscape(fr); return [r.close, r.state.mode] })(), [true, "sourceEdit"])
+check("onEscape while fetching cancels the probe and thaws, values kept", (() => { const r = Model.onEscape(Model.withFormProbing(pasted, true, { host: "h.test" })); return [r.close, r.cancelProbe, r.state.form.probing, r.state.form.values.playlist, r.state.mode] })(), [false, true, false, "http://h.test/x?token=1", "sourceEdit"])
+const addForm = Model.withFormValue(Model.openAddForm(Model.openSources(Model.withMode(Model.guideState("all"), "list"), [])), "playlist", "http://h.test/x", { typed: true })
+check("onEscape form from Sources: one press cancels to Sources, nothing kept", (() => { const r = Model.onEscape(addForm); return [r.close, r.state.mode, r.state.form, r.state.returnMode] })(), [false, "sources", null, "list"])
+check("onEscape Xtream form from Sources cancels to Sources", Model.onEscape(Model.openXtreamForm(Model.openSources(Model.guideState("all"), []), "sources")).state.mode, "sources")
+const xFromFirst = Model.openXtreamForm(pasted)
+check("Xtream from the first-run form keeps the URL form as parent with its values", [xFromFirst.mode, xFromFirst.form.origin, xFromFirst.form.parent.kind, xFromFirst.form.parent.values.playlist, xFromFirst.form.focus], ["sourceXtream", "firstRun", "url", "http://h.test/x?token=1", "server"])
+check("onEscape Xtream[firstRun] with a typed server clears it first", Model.onEscape(Model.withFormValue(xFromFirst, "server", "http://s", { typed: true })).state.form.values.server, "")
+check("onEscape Xtream[firstRun], all empty -> back to the first-run form, values intact", (() => { const r = Model.onEscape(xFromFirst); return [r.close, r.state.mode, r.state.form.kind, r.state.form.values.playlist, r.state.form.parent] })(), [false, "sourceEdit", "url", "http://h.test/x?token=1", null])
+check("Xtream from the add form returns to the add form on Esc (values kept)", (() => { const x = Model.openXtreamForm(addForm); const r = Model.onEscape(x); return [x.form.origin, x.form.parent.values.playlist, r.state.mode, r.state.form.values.playlist, r.state.form.sourceId] })(), ["sources", "http://h.test/x", "sourceEdit", "http://h.test/x", ""])
+check("onEscape in Sources returns to returnMode with the view untouched", (() => { const g = Model.withCursor(Model.withQuery(Model.withMode(Model.guideState("g:UK"), "list"), "bbc"), 4); const s = Model.openSources(g, []); const r = Model.onEscape(s); return [s.mode, s.returnMode, r.state.mode, r.state.query, r.state.scopeId, r.state.cursorIndex, r.state.returnMode] })(), ["sources", "list", "list", "bbc", "g:UK", 4, ""])
+check("onEscape in confirmRemove returns to Sources", Model.onEscape(Model.withMode(Model.guideState("all"), "confirmRemove")).state.mode, "sources")
+check("onEscape guide modes unchanged", [Model.onEscape(Model.withQuery(Model.guideState("all"), "x")).state.query, Model.onEscape(Model.guideState("all")).close], ["", true])
+check("onEscape on a form mode without a form recovers to search", Model.onEscape(Model.withMode(Model.guideState("all"), "sourceEdit")).state.mode, "search")
+
+// closeForm outcomes
+check("closeForm saved: first run -> search, Sources -> sources, form dropped", [Model.closeForm(pasted, "saved").state.mode, Model.closeForm(pasted, "saved").state.form, Model.closeForm(addForm, "saved").state.mode, Model.closeForm(Model.openXtreamForm(addForm), "saved").state.mode, Model.closeForm(Model.openXtreamForm(addForm), "saved").state.form], ["search", null, "sources", "sources", null])
+check("closeForm cancel on first run asks to close; without a form recovers", [Model.closeForm(fr, "cancel").close, Model.closeForm(Model.guideState("all"), "cancel").state.mode], [true, "search"])
+
+// Sources list transitions
+check("sourcesRowCount / sourcesRowKind", [Model.sourcesRowCount(3), Model.sourcesRowCount(0), Model.sourcesRowKind(0, 3), Model.sourcesRowKind(2, 3), Model.sourcesRowKind(3, 3), Model.sourcesRowKind(4, 3), Model.sourcesRowKind(5, 3), Model.sourcesRowKind(0, 0), Model.sourcesRowKind(1, 0), Model.sourcesRowKind(-1, 3)], [5, 2, "source", "source", "add", "xtream", "", "add", "xtream", ""])
+check("sourcesInitialCursor: active row, else 0", [Model.sourcesInitialCursor(views4), Model.sourcesInitialCursor([{ active: false }, { active: true }]), Model.sourcesInitialCursor([]), Model.sourcesInitialCursor(null)], [0, 1, 0, 0])
+check("cursorAfterRemove clamps to the sources left", [Model.cursorAfterRemove(2, 2), Model.cursorAfterRemove(0, 2), Model.cursorAfterRemove(1, 0), Model.cursorAfterRemove(-3, 2)], [1, 0, 0, 0])
+check("openSources from list / search / first run remembers returnMode", [Model.openSources(Model.withMode(Model.guideState("all"), "list"), views4).returnMode, Model.openSources(Model.guideState("all"), views4).returnMode, Model.openSources(fr, views4).returnMode, Model.openSources(xFromFirst, views4).returnMode], ["list", "search", "sourceEdit", "sourceEdit"])
+check("openSources puts the cursor on the active source and is idempotent", [Model.openSources(Model.guideState("all"), views4).sourceCursor, Model.openSources(Model.guideState("all"), Model.sourceViews(state4, "d5977d8a", nowSep)).sourceCursor, Model.openSources(Model.openSources(Model.guideState("all"), views4), []).mode], [0, 0, "sources"])
+check("closeSources returns to the first-run form with its values", (() => { const s = Model.openSources(pasted, views4); const b = Model.closeSources(s); return [b.mode, b.form.values.playlist, b.returnMode] })(), ["sourceEdit", "http://h.test/x?token=1", ""])
+check("closeSources with a lost form reopens first run; unknown returnMode is search", [Model.closeSources({ mode: "sources", returnMode: "sourceEdit" }).form.origin, Model.closeSources({ mode: "sources", returnMode: "junk" }).mode], ["firstRun", "search"])
+check("withSourceCursor", Model.withSourceCursor(Model.guideState("all"), 3).sourceCursor, 3)
+const inSources = Model.withSourceCursor(Model.openSources(Model.guideState("all"), views4), 1)
+check("startRemove only from a source row", [Model.startRemove(inSources, 4).mode, Model.startRemove(Model.withSourceCursor(inSources, 4), 4).mode, Model.startRemove(Model.guideState("all"), 4).mode], ["confirmRemove", "sources", "search"])
+check("afterRemove: sources remain -> Sources with the cursor clamped; none -> first-run form", (() => { const a = Model.afterRemove(Model.withSourceCursor(Model.startRemove(inSources, 4), 3), 3); const b = Model.afterRemove(Model.startRemove(inSources, 4), 0); return [a.mode, a.sourceCursor, b.mode, b.form.origin, b.form.focus] })(), ["sources", 2, "sourceEdit", "firstRun", "playlist"])
+check("afterSwitch is a fresh search state", Model.afterSwitch("favorites"), Model.guideState("favorites"))
+check("openForm from Sources keeps returnMode so Esc after save / cancel still lands in the origin mode", [Model.openAddForm(Model.openSources(Model.withMode(Model.guideState("all"), "list"), [])).returnMode, Model.closeForm(Model.openAddForm(Model.openSources(Model.withMode(Model.guideState("all"), "list"), [])), "saved").state.returnMode], ["list", "list"])
+
+// validateUrlForm (synchronous validation, first failing field in form order)
+const existingViews = [{ id: "k1", label: "Provider", url: "http://h.test/x" }, { id: "k2", label: "NAS" }]
+check("validateUrlForm ok returns normalized urls, label and view kind", Model.validateUrlForm({ label: " New ", playlist: " HTTP://H2.test:80/y ", epg: "" }, existingViews, ""), { ok: true, error: null, label: "New", playlistUrl: "http://h2.test/y", epgUrl: "", kind: "url", host: "h2.test" })
+check("validateUrlForm file kind", Model.validateUrlForm({ label: "", playlist: "/srv/x.m3u", epg: "" }, [], "").kind, "file")
+check("validateUrlForm order: label, playlist, epg", [Model.validateUrlForm({ label: "provider", playlist: "", epg: "" }, existingViews, "").error.code, Model.validateUrlForm({ label: "", playlist: "", epg: "ftp://x" }, existingViews, "").error.field, Model.validateUrlForm({ label: "", playlist: "http://h.test/", epg: "ftp://x" }, existingViews, "").error.message], ["label_taken", "playlist", "EPG: start with http://, https://, or / for a local file"])
+check("validateUrlForm duplicate against the view list, not against itself", [Model.validateUrlForm({ label: "", playlist: "http://H.test/x", epg: "" }, existingViews, "").error, Model.validateUrlForm({ label: "Provider", playlist: "http://h.test/x", epg: "" }, existingViews, "k1").ok], [{ code: "duplicate", field: "playlist", message: "Already in Sources as " + Q("Provider") }, true])
+check("validateUrlForm null-safe", Model.validateUrlForm(null, null, null).error.code, "empty")
+
+// ---- footer (UX-SOURCES 5.3) ----
+check("footerStatus prefixes the active label with 2+ sources only", [Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS Tvheadend", sourceCount: 2 }), Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS", sourceCount: 1 }), Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", stale: true, activeLabel: "NAS", sourceCount: 3 })], ["NAS Tvheadend" + SEP + "84 channels" + SEP + "updated 09:12", "84 channels" + SEP + "updated 09:12", "NAS" + SEP + "84 channels" + SEP + "cached 09:12" + SEP + "offline"])
+check("footerStatus transient and playing beat the prefix", [Model.footerStatus({ count: 5, transient: "Switched to NAS", activeLabel: "NAS", sourceCount: 2 }), Model.footerStatus({ count: 5, playingName: "Arte", activeLabel: "NAS", sourceCount: 2 })], ["Switched to NAS", Model.GLYPHS.play + " Arte" + SEP + "s stop"])
+check("footerHints sources: source row / action row", [Model.footerHints({ mode: "sources", cursorKind: "source" }), Model.footerHints({ mode: "sources", cursorKind: "add" }), Model.footerHints({ mode: "sources", cursorKind: "xtream" }).length], [[["j/k", "move"], ["Enter", "switch"], ["a", "add"], ["c", "Xtream"], ["e", "edit"], ["x", "remove"], ["Esc", "back"]], [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]], 3])
+check("footerHints confirmRemove", Model.footerHints({ mode: "confirmRemove" }), [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]])
+check("footerHints error empty state adds o sources when sources exist", [Model.footerHints({ empty: "error", sourcesExist: true }), Model.footerHints({ empty: "error", sourcesExist: false }), Model.footerHints({ empty: "loading", sourcesExist: true })], [[["r", "reload"], ["o", "sources"], ["Esc", "close"]], [["r", "reload"], ["Esc", "close"]], [["Esc", "close"]]])
+check("footerHints form: plain / masked / revealed / button / xtream / fetching", [
+  Model.footerHints({ mode: "sourceEdit", form: addForm.form }),
+  Model.footerHints({ mode: "sourceEdit", form: Model.withFormValue(addForm, "playlist", "http://h.test/x?t=1").form }),
+  Model.footerHints({ mode: "sourceEdit", form: Model.toggleReveal(Model.withFormValue(addForm, "playlist", "http://h.test/x?t=1"), "playlist").form }),
+  Model.footerHints({ mode: "sourceEdit", form: Model.withFormFocus(addForm, "save").form }),
+  Model.footerHints({ mode: "sourceXtream", form: Model.openXtreamForm(addForm).form }),
+  Model.footerHints({ mode: "sourceEdit", form: Model.withFormProbing(addForm, true).form })
+], [
+  [["Enter", "save"], ["Tab", "next field"], ["Ctrl+V", "paste"], ["Esc", "cancel"]],
+  [["Enter", "save"], ["Tab", "next field"], ["Ctrl+R", "reveal"], ["Ctrl+V", "replace"], ["Esc", "cancel"]],
+  [["Enter", "save"], ["Tab", "next field"], ["Ctrl+R", "hide"], ["Esc", "cancel"]],
+  [["Enter", "activate"], ["Tab", "next field"], ["Esc", "cancel"]],
+  [["Enter", "save"], ["Tab", "next field"], ["Esc", "cancel"]],
+  [["Esc", "cancel"]]
+])
+check("footerHints first run: Enter load, Esc close / clear / back", [Model.footerHints({ mode: "sourceEdit", form: fr.form }), Model.footerHints({ mode: "sourceEdit", form: pasted.form })[4], Model.footerHints({ mode: "sourceXtream", form: xFromFirst.form })[0], Model.footerHints({ mode: "sourceXtream", form: Model.openXtreamForm(fr).form })[2]], [[["Enter", "load"], ["Tab", "next field"], ["Ctrl+V", "paste"], ["Esc", "close"]], ["Esc", "clear"], ["Enter", "save"], ["Esc", "back"]])
+check("footerHints form mode without a form is the fetching-free minimum", Model.footerHints({ mode: "sourceEdit", form: null }), [["Enter", "activate"], ["Tab", "next field"], ["Esc", "cancel"]])
+check("footerHints list mode ends with o sources", Model.footerHints({ mode: "list" }).slice(-1), [["o", "sources"]])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
