@@ -24,8 +24,8 @@ Subcommands (contract of record: docs/ARCHITECTURE.md section 5):
       ask the running mpv to quit
   status [--socket P] [--ipc-timeout S]
       query the running mpv (media title, host of the path, pause, idle, version)
-  state [--state-dir D] show | favorite add ID | favorite remove ID | clear-recents
-      inspect or edit state.json atomically
+  state [--state-dir D] show | init | favorite add ID | favorite remove ID | clear-recents
+      inspect or edit state.json atomically (init: create it 0600 when missing)
 """
 from __future__ import annotations
 
@@ -61,7 +61,23 @@ STREAM_SCHEMES = {"http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms",
 SOURCE_SCHEMES = {"http", "https", "file"}
 
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
+# Bounds on what channels.json may carry (S-07): the shell parses that file
+# on its UI thread and the guide builds one column row per group. A 64 MB
+# source of 40-byte entries would otherwise be ~1.5 M channels. Real lists
+# top out around 11k channels / 1k groups; entries beyond MAX_CHANNELS are
+# dropped with a warning, groups beyond MAX_GROUPS fold into UNGROUPED
+# (which may exist as one extra bucket, so at most MAX_GROUPS + 1 groups).
+MAX_CHANNELS = 50000
+MAX_GROUPS = 2000
 DEFAULT_TIMEOUT = 20
+# `--timeout` is a per-socket-operation timeout; a server that trickles one
+# byte per second would keep the helper alive forever (S-05). Every HTTP
+# download also runs under a wall-clock budget of max(HTTP_DEADLINE_MIN,
+# 3 x --timeout) seconds, read in chunks so the check runs often. Tests
+# shrink the budget through HTTP_DEADLINE_ENV; the service never sets it.
+HTTP_DEADLINE_MIN = 60.0
+HTTP_DEADLINE_ENV = "OMARCHY_IPTV_HTTP_DEADLINE"
+HTTP_CHUNK = 256 * 1024
 DEFAULT_IPC_TIMEOUT = 2.0
 UNGROUPED = "Ungrouped"
 
@@ -92,6 +108,12 @@ EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no succes
 EPG_RECORD_SEP = "\x7f"
 
 MPV_DEFAULT_USER_AGENT = "libmpv"   # mpv 0.41 `--list-options` default, used when option-info is unavailable
+# mpv property-expands the `title` option ("${path}" would render the stream
+# URL, credentials included, in the window title; S-01). "$>" disables
+# expansion for the rest of the string (verified on mpv 0.41 via expand-text).
+# `force-media-title` is not expanded (verified) and stays raw so media-title
+# and the OSC show the plain name. Mirrors Model.MPV_RAW_PREFIX.
+MPV_RAW_PREFIX = "$>"
 
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9-]+$")
 _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-looking (D-QA-09)
@@ -100,6 +122,7 @@ _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-loo
 # "\u0439" must not fold to "\u0438").
 _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
 _URL_ANYWHERE = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
+_LEADING_DASHES = re.compile(r"^[\s\-]+")
 _CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
 _XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
 
@@ -326,13 +349,20 @@ def split_groups(value: str) -> list[str]:
     return groups
 
 
+def clean_name(value: str) -> str:
+    """Display-name candidate: never starts with "-" (S-04). The name is an
+    argv item for omarchy-notification-send, where "--urgency=x did not play"
+    would be parsed as an option. Mirrors Model.cleanName."""
+    return _LEADING_DASHES.sub("", value or "").strip()
+
+
 def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
                  vlcopt: dict[str, str], kodiprop: dict[str, str],
                  warnings: list[str], index: int = 1) -> dict[str, Any]:
     tvg_id = attrs.get("tvg-id", "").strip()
     tvg_name = attrs.get("tvg-name", "").strip()
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).
-    name = title or tvg_name or tvg_id or "Channel %d" % index
+    name = clean_name(title) or clean_name(tvg_name) or clean_name(tvg_id) or "Channel %d" % index
     group_text = attrs.get("group-title", "").strip() or extgrp
     groups = split_groups(group_text) if group_text else []
     # Ruling R5: multi-group entries list under the FIRST group; the whole
@@ -401,7 +431,9 @@ def parse_m3u(text: str) -> dict[str, Any]:
     comments are ignored. Accepts a BOM, CRLF and blank lines. Location
     lines outside STREAM_SCHEMES (bare paths, option-looking lines, free
     text, URLs without a host) are skipped and counted; an #EXTINF that is
-    followed by another #EXTINF is counted as having no URL.
+    followed by another #EXTINF is counted as having no URL. Output is
+    bounded by MAX_CHANNELS and MAX_GROUPS (S-07); a channel moved to
+    UNGROUPED keeps its provider group in `groups` and `searchKey`.
     """
     channels: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -413,6 +445,9 @@ def parse_m3u(text: str) -> dict[str, Any]:
     skipped_scheme = 0
     skipped_orphan = 0
     skipped_no_url = 0
+    over_cap = 0
+    regrouped = 0
+    seen_groups: set[str] = set()
     is_playlist = False
 
     if text.startswith("\ufeff"):
@@ -455,9 +490,18 @@ def parse_m3u(text: str) -> dict[str, Any]:
         url = line
         if not is_stream_url(url):
             skipped_scheme += 1
+        elif len(channels) >= MAX_CHANNELS:
+            over_cap += 1
         else:
             attrs, title = pending
-            channels.append(make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1))
+            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1)
+            group = channel["group"]
+            if group not in seen_groups:
+                if len(seen_groups) >= MAX_GROUPS and group != UNGROUPED:
+                    channel["group"] = group = UNGROUPED
+                    regrouped += 1
+                seen_groups.add(group)
+            channels.append(channel)
         pending = None
         vlcopt, kodiprop = {}, {}
 
@@ -469,6 +513,10 @@ def parse_m3u(text: str) -> dict[str, Any]:
         warnings.append("%d URL lines without #EXTINF skipped" % skipped_orphan)
     if skipped_no_url:
         warnings.append("%d #EXTINF entries without a URL skipped" % skipped_no_url)
+    if over_cap:
+        warnings.append("truncated to %d channels (%d entries skipped)" % (MAX_CHANNELS, over_cap))
+    if regrouped:
+        warnings.append("group count capped at %d; %d channels listed under %s" % (MAX_GROUPS, regrouped, UNGROUPED))
     assign_ids(channels)
     return {"channels": channels, "warnings": warnings, "epgUrlHint": epg_hint, "isPlaylist": is_playlist}
 
@@ -545,6 +593,53 @@ def split_userinfo(url: str) -> tuple[str, str]:
     return urllib.parse.urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment)), auth
 
 
+def request_origin(url: str) -> tuple[str, str, int | None]:
+    """(scheme, host, port): the scope a credential belongs to."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return "", "", None
+
+
+def make_opener(label: str, host: str) -> Any:
+    """urlopen replacement whose redirect handler (S-06) refuses non-http(s)
+    targets (urllib's default happily follows a 302 to ftp://) and drops
+    Authorization / Cookie when the origin (scheme, host, port) changes, so
+    a provider that bounces to a third party never receives the user's
+    credentials. urllib itself refuses file:/data: targets and loops with a
+    3xx HTTPError, which read_http_source maps to the same error code."""
+    import urllib.request
+
+    class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+            scheme = stream_scheme(newurl)
+            if scheme not in ("http", "https"):
+                try:
+                    fp.close()
+                except OSError:
+                    pass
+                raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme '%s'" % (label, host, scheme or "none"))
+            new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None and request_origin(newurl) != request_origin(req.full_url):
+                for name in ("Authorization", "Cookie"):
+                    new.remove_header(name)
+            return new
+
+    return urllib.request.build_opener(SafeRedirectHandler())
+
+
+def http_deadline(timeout: float) -> float:
+    """Wall-clock budget in seconds for one download (see HTTP_DEADLINE_MIN)."""
+    override = os.environ.get(HTTP_DEADLINE_ENV, "")
+    if override:
+        try:
+            return max(0.05, float(override))
+        except ValueError:
+            pass
+    return max(HTTP_DEADLINE_MIN, 3.0 * float(timeout))
+
+
 def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes:
     import base64
     import http.client
@@ -556,19 +651,39 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
     if auth:
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
     request = urllib.request.Request(target, headers=headers)
+    opener = make_opener(label, host)
+    budget = http_deadline(timeout)
+    deadline = time.monotonic() + budget
+    chunks: list[bytes] = []
+    total = 0
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = response.read(MAX_SOURCE_BYTES + 1)
+        with opener.open(request, timeout=timeout) as response:
+            # read1: at most one socket read per call, so a trickling server
+            # cannot park us inside read() past the deadline check.
+            while total <= MAX_SOURCE_BYTES:
+                if time.monotonic() >= deadline:
+                    raise HelperError("timeout", "%s download from %s exceeded %.0f s" % (label, host, budget))
+                chunk = response.read1(HTTP_CHUNK)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+    except HelperError:
+        raise
     except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            # urllib refused the redirect itself (file:, data:, a loop); its
+            # message carries the target URL, so it is not repeated here.
+            raise HelperError("unsafe_redirect", "%s redirect from %s not followed" % (label, host))
         raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
     except urllib.error.URLError as error:
         reason = getattr(error, "reason", error)
         raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(reason)))
     except (TimeoutError, OSError, ValueError, http.client.HTTPException) as error:
         raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(error)))
-    if len(data) > MAX_SOURCE_BYTES:
+    if total > MAX_SOURCE_BYTES:
         raise HelperError("too_large", "%s from %s exceeds %d MB" % (label, host, MAX_SOURCE_BYTES // (1024 * 1024)))
-    return data
+    return b"".join(chunks)
 
 
 def fetch_bytes(url: str, timeout: float, label: str = "playlist") -> bytes:
@@ -1342,8 +1457,8 @@ def cmd_play(args: argparse.Namespace) -> int:
         if not is_stream_url(url):
             raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
         client.connect()
-        for prop in ("title", "force-media-title"):
-            ok, _ = client.try_command("set_property", prop, name)
+        for prop, value in (("title", MPV_RAW_PREFIX + name), ("force-media-title", name)):
+            ok, _ = client.try_command("set_property", prop, value)
             if not ok:
                 log("play: mpv refused to set %s" % prop)
         for prop, value in header_properties(headers, client):
@@ -1458,12 +1573,38 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     return state
 
 
+def init_state_file(path: str, state: dict[str, Any]) -> bool:
+    """Create `path` with mode 0600 when missing (S-02). Quickshell's FileView,
+    which the service uses to write state.json, creates a missing file 0644
+    and keeps the mode of an existing one, so the service runs `state init`
+    once at startup before its first write. O_EXCL makes the check-and-create
+    atomic: a file that appears in between is left alone. An existing file
+    is not rewritten; only its mode is tightened. Returns True when created."""
+    ensure_private_dir(os.path.dirname(path))
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(state, ensure_ascii=False, separators=(",", ":")) + "\n")
+    os.chmod(path, 0o600)
+    return True
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     directory = state_dir(args.state_dir)
     path = os.path.join(directory, STATE_FILE)
     state = normalize_state(read_json(path))
     action = args.action
     try:
+        if action == "init":
+            created = init_state_file(path, state)
+            emit({"ok": True, "kind": "state", "action": action, "created": created, "state": state})
+            return EXIT_OK
         if action == "favorite":
             key = str(args.id or "").strip()
             if not key:
@@ -1533,6 +1674,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--state-dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     actions = state.add_subparsers(dest="action", required=True)
     actions.add_parser("show", parents=[common], help="print the current state")
+    actions.add_parser("init", parents=[common], help="create state.json with mode 0600 when missing (the service runs this before its first write)")
     favorite = actions.add_parser("favorite", parents=[common], help="add or remove a favorite")
     favorite.add_argument("op", choices=["add", "remove"])
     favorite.add_argument("id", help="channel id from channels.json")

@@ -214,6 +214,26 @@ class HardeningTest(unittest.TestCase):
             self.assertNotIn("secret", name)
             self.assertNotIn("pw", name)
 
+    def test_names_never_start_with_a_dash(self):
+        # S-04: the name becomes an argv item for omarchy-notification-send,
+        # where "--urgency=x did not play" would be parsed as an option.
+        text = ('#EXTM3U\n#EXTINF:-1,--urgency=critical\nhttp://x.test/1\n'
+                '#EXTINF:-1 tvg-name="-Real Name",---\nhttp://x.test/2\n'
+                '#EXTINF:-1 tvg-id="-dashed.id" tvg-name="--",- \nhttp://x.test/3\n'
+                '#EXTINF:-1 tvg-id="--",--\nhttp://x.test/4\n'
+                '#EXTINF:-1,-Minus TV\nhttp://x.test/5\n'
+                '#EXTINF:-1,A-B Sports -\nhttp://x.test/6\n')
+        channels = helper.parse_m3u(text)["channels"]
+        names = [c["name"] for c in channels]
+        self.assertEqual(names, ["urgency=critical", "Real Name", "dashed.id", "Channel 4", "Minus TV", "A-B Sports -"])
+        for name in names:
+            self.assertFalse(name.startswith("-"), name)
+        self.assertEqual(channels[2]["tvgId"], "-dashed.id")      # ids stay raw for EPG matching
+        self.assertEqual(channels[1]["tvgName"], "-Real Name")     # attribute kept verbatim
+        self.assertEqual(channels[0]["searchKey"], "urgency critical ungrouped")
+        self.assertEqual(helper.clean_name("  - x "), "x")
+        self.assertEqual(helper.clean_name(None), "")
+
     def test_duplicate_attribute_keys_last_non_empty_wins(self):
         attrs, title = helper.parse_extinf('#EXTINF:-1 tvg-id="" tvg-id="real" tvg-name="A" tvg-name="" tvg-logo="http://a" tvg-logo="http://b",X')
         self.assertEqual(attrs, {"tvg-id": "real", "tvg-name": "A", "tvg-logo": "http://b"})
@@ -273,6 +293,71 @@ class HardeningTest(unittest.TestCase):
         channel = self.parse('#EXTM3U\n#EXTINF:-1 tvg-chno="12" tvg-logo="https://l.test/a.png",A\nhttp://x.test/a\n')["channels"][0]
         self.assertEqual(channel["chno"], "12")
         self.assertEqual(channel["logo"], "https://l.test/a.png")
+
+
+class CapTest(unittest.TestCase):
+    """S-07: channels.json stays bounded whatever the source contains."""
+
+    @staticmethod
+    def playlist(count, group_of):
+        lines = ["#EXTM3U"]
+        for i in range(count):
+            lines.append('#EXTINF:-1 group-title="%s",Ch %d' % (group_of(i), i))
+            lines.append("http://x.test/%d" % i)
+        return "\n".join(lines) + "\n"
+
+    def test_channel_count_is_capped_with_a_warning(self):
+        extra = 5
+        started = time.perf_counter()
+        result = helper.parse_m3u(self.playlist(helper.MAX_CHANNELS + extra, lambda i: "G%d" % (i % 10)))
+        elapsed = time.perf_counter() - started
+        channels = result["channels"]
+        self.assertEqual(helper.MAX_CHANNELS, 50000)
+        self.assertEqual(len(channels), helper.MAX_CHANNELS)
+        self.assertEqual(channels[-1]["name"], "Ch %d" % (helper.MAX_CHANNELS - 1))
+        self.assertIn("truncated to 50000 channels (%d entries skipped)" % extra, result["warnings"])
+        self.assertEqual(len({c["id"] for c in channels}), helper.MAX_CHANNELS)
+        self.assertLess(elapsed, 5.0, "parse of %d entries took %.1f s" % (helper.MAX_CHANNELS + extra, elapsed))
+
+    def test_channel_count_at_the_cap_is_not_a_warning(self):
+        result = helper.parse_m3u(self.playlist(helper.MAX_CHANNELS, lambda i: "G"))
+        self.assertEqual(len(result["channels"]), helper.MAX_CHANNELS)
+        self.assertEqual(result["warnings"], [])
+
+    def test_group_count_is_capped_into_ungrouped_with_a_warning(self):
+        extra = 100
+        # One channel already Ungrouped, then one unique group per channel.
+        result = helper.parse_m3u(self.playlist(helper.MAX_GROUPS + extra + 1, lambda i: "" if i == 0 else "Group %d" % i))
+        channels = result["channels"]
+        self.assertEqual(helper.MAX_GROUPS, 2000)
+        groups = [c["group"] for c in channels]
+        self.assertEqual(len(channels), helper.MAX_GROUPS + extra + 1)
+        # Ungrouped seen first counts as one of the MAX_GROUPS buckets.
+        self.assertEqual(len(set(groups)), helper.MAX_GROUPS)
+        self.assertEqual(groups[0], "Ungrouped")
+        self.assertEqual(groups[1], "Group 1")
+        self.assertEqual(groups[helper.MAX_GROUPS - 1], "Group %d" % (helper.MAX_GROUPS - 1))   # 1999 named + Ungrouped
+        self.assertEqual(set(groups[helper.MAX_GROUPS:]), {"Ungrouped"})
+        self.assertIn("group count capped at 2000; %d channels listed under Ungrouped" % (extra + 1), result["warnings"])
+        # The provider's group stays searchable.
+        moved = channels[helper.MAX_GROUPS]
+        self.assertEqual(moved["searchKey"], "ch %d group %d" % (helper.MAX_GROUPS, helper.MAX_GROUPS))
+
+    def test_group_cap_allows_ungrouped_as_one_extra_bucket(self):
+        # No Ungrouped channel before the cap: overflow creates it as bucket MAX_GROUPS + 1.
+        result = helper.parse_m3u(self.playlist(helper.MAX_GROUPS + 3, lambda i: "Group %d" % i))
+        groups = [c["group"] for c in result["channels"]]
+        self.assertEqual(len(set(groups)), helper.MAX_GROUPS + 1)
+        self.assertEqual(groups[-3:], ["Ungrouped"] * 3)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "groups.m3u")
+            with open(source, "w", encoding="ascii") as handle:
+                handle.write(self.playlist(helper.MAX_GROUPS + 3, lambda i: "Group %d" % i))
+            code, status = run_main("playlist", "--url", source, "--cache-dir", tmp)
+            self.assertEqual(code, 0)
+            self.assertEqual(status["channelCount"], helper.MAX_GROUPS + 3)
+            self.assertEqual(status["groupCount"], helper.MAX_GROUPS + 1)
+            self.assertTrue(any(w.startswith("group count capped") for w in status["warnings"]))
 
 
 class RedactionTest(unittest.TestCase):

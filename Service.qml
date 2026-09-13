@@ -44,6 +44,10 @@ Item {
   readonly property int focusRetryMs: 500
   readonly property int focusRetries: 6
   readonly property int healthFailuresBeforeRestart: 2
+  // Watchdog bound for one playlist/EPG helper run (S-05). The helper has
+  // its own 60 s download deadline; this is the belt and braces for a
+  // helper that is stuck anywhere else (DNS, TLS, a parser bug).
+  readonly property int helperTimeoutMs: 180 * 1000
 
   // ---- settings (decision 7, R2). shell.barConfig is refreshed by the host on
   // every shell.json change (shell.qml syncPluginApis), so these re-evaluate
@@ -120,6 +124,8 @@ Item {
   property bool manualEpgRefresh: false
   property bool playlistRerun: false
   property bool epgRerun: false
+  property bool playlistTimedOut: false     // set by the watchdog before it kills the helper
+  property bool epgTimedOut: false
   property bool dirsReady: false
   property bool stateSavePending: false
 
@@ -308,11 +314,25 @@ Item {
     root.epgLoaded = parsed.ok
   }
 
+  // Status JSON for a helper the watchdog killed (S-05): fixed text, host
+  // only, so every sink (guide, notification, console) stays URL-free.
+  function helperTimeoutStatus(kind, stale) {
+    return JSON.stringify({
+      ok: false,
+      kind: kind,
+      stale: stale,
+      sourceHost: kind === "epg" ? Model.hostOf(root.epgUrl) : root.sourceHost,
+      error: { code: "helper_timeout", message: "helper timed out" }
+    })
+  }
+
   function runPlaylistHelper() {
     if (!root.configured || playlistProc.running) return
     root.playlistAttempted = true
+    root.playlistTimedOut = false
     playlistProc.command = ["python3", root.helperPath, "playlist", "--url", root.playlistUrl, "--cache-dir", root.cacheDir]
     playlistProc.running = true
+    playlistWatchdog.restart()
   }
 
   // `epg --url` fetches (the helper honours its own TTL, decision 5);
@@ -329,7 +349,9 @@ Item {
       epgProc.nowOnly = false
       epgProc.command = ["python3", root.helperPath, "epg", "--url", root.epgUrl, "--cache-dir", root.cacheDir]
     }
+    root.epgTimedOut = false
     epgProc.running = true
+    epgWatchdog.restart()
   }
 
   function runControl(kind, args) {
@@ -396,6 +418,13 @@ Item {
     var extra = Model.splitMpvArgs(root.mpvArgs)
     if (extra.rejected.length > 0) console.warn("omarchy-iptv: ignoring mpvArgs tokens:", extra.rejected.join(" "))
     root.mpvStderrTail = []
+    // Known exposure (S-03, documented in the README): the FIRST channel's
+    // stream URL and header values sit in mpv's argv for the life of the
+    // process, readable by other local accounts through /proc/<pid>/cmdline
+    // (`ps aux`), even after zapping to other channels over IPC. Later
+    // channels only ever travel over the 0600 socket. Removing it means
+    // starting mpv idle and loading the first channel over IPC too, which
+    // is the M2 detached-mpv rework (R10); not changed in M1.
     mpvProc.command = Model.buildMpvArgv({
       socketPath: root.socketPath,
       name: channel.name,
@@ -451,11 +480,20 @@ Item {
   }
 
   function handlePlaylistExit(text) {
-    root.applyPlaylistStatus(text)
+    playlistWatchdog.stop()
+    var timedOut = root.playlistTimedOut
+    root.playlistTimedOut = false
+    if (timedOut) {
+      // The killed helper wrote no status file for this run; reloading the
+      // one on disk would replace this error with the previous result.
+      root.applyPlaylistStatus(root.helperTimeoutStatus("playlist", root.cacheLoaded))
+    } else {
+      root.applyPlaylistStatus(text)
+      playlistStatusFile.reload()
+    }
     // Deterministic reload; do not rely on inotify surviving the helper's
     // atomic rename (ARCHITECTURE.md, open risk 1).
     channelsFile.reload()
-    playlistStatusFile.reload()
     var manual = root.manualRefresh
     root.manualRefresh = false
     var status = root.playlistStatus
@@ -471,11 +509,16 @@ Item {
   }
 
   function handleEpgExit(text, nowOnly) {
-    var status = Model.parseHelperStatus(text, "epg")
+    epgWatchdog.stop()
+    var timedOut = root.epgTimedOut
+    root.epgTimedOut = false
+    var status = Model.parseHelperStatus(timedOut ? root.helperTimeoutStatus("epg", root.epgLoaded) : text, "epg")
     if (!nowOnly) {
       root.epgStatus = status
       root.manualEpgRefresh = false
       if (status.ok !== true) root.notify("epgError", { reason: Model.statusReason(status) })
+    } else if (timedOut) {
+      console.warn("omarchy-iptv: epg --now-only helper timed out")
     }
     epgFile.reload()
     if (root.epgRerun) {
@@ -505,7 +548,8 @@ Item {
 
   Component.onCompleted: {
     // Argv-only. Creates the private cache/state/runtime dirs before any
-    // FileView write or mpv socket bind can need them (open risk 2).
+    // FileView write or mpv socket bind can need them (open risk 2), then
+    // state.json itself with mode 0600 (stateInitProc, S-02).
     mkdirProc.running = true
     whichProc.running = true
   }
@@ -626,6 +670,33 @@ Item {
   }
 
   Timer {
+    // Watchdog (S-05): a playlist helper still running after helperTimeoutMs
+    // is terminated; handlePlaylistExit then reports "helper timed out"
+    // (status `error` without a cache, `cached` with one). No URL is logged.
+    id: playlistWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!playlistProc.running) return
+      console.warn("omarchy-iptv: playlist helper exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      root.playlistTimedOut = true
+      playlistProc.signal(15)
+    }
+  }
+
+  Timer {
+    id: epgWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!epgProc.running) return
+      console.warn("omarchy-iptv: epg helper exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      root.epgTimedOut = true
+      epgProc.signal(15)
+    }
+  }
+
+  Timer {
     // If mpv ignores `quit` (hung), terminate it.
     id: stopFallbackTimer
     interval: root.stopFallbackMs
@@ -655,6 +726,22 @@ Item {
   Process {
     id: mkdirProc
     command: ["mkdir", "-p", "-m", "700", root.cacheDir, root.stateDir, root.runtimeDir]
+    onExited: stateInitProc.running = true
+  }
+
+  Process {
+    // S-02: FileView creates a missing file with mode 0644 and keeps the
+    // mode of an existing one, so the helper pre-creates state.json 0600
+    // (O_EXCL, so the check-and-create is race-free; an existing file is
+    // only chmod-ed) before the first saveState(), which dirsReady gates.
+    // Argv only; the helper prints one JSON line that is discarded.
+    id: stateInitProc
+    command: ["python3", root.helperPath, "state", "--state-dir", root.stateDir, "init"]
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state init:", Model.redactUrls(text.trim()))
+    }
     onExited: {
       root.dirsReady = true
       if (root.stateSavePending) root.saveState()

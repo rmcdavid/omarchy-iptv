@@ -83,7 +83,13 @@ ShellRoot {
     }
     function toggle(id, payloadJson) { return isPluginOpen(id) ? hide(id) : summon(id, payloadJson) }
     function isPluginOpen(id) { return guideLoader.item ? guideLoader.item.opened === true : false }
-    function updateEntryInline(id, entry) { harness.log("updateEntryInline", JSON.stringify(entry)); return true }
+    // Keys only: the entry carries playlistUrl / epgUrl, which may embed
+    // credentials and must not reach the terminal (S-08).
+    function updateEntryInline(id, entry) {
+      var e = entry || {}
+      harness.log("updateEntryInline", id, "keys:", Object.keys(e).join(","), "playlist", e.playlistUrl ? "(set)" : "(none)", "epg", e.epgUrl ? "(set)" : "(none)")
+      return true
+    }
   }
 
   // ---- fake PluginBarApi (Ui/PluginBarApi.qml surface)

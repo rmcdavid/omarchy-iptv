@@ -142,6 +142,8 @@ TestCase {
     compare(argv[0], "mpv")
     compare(argv[argv.length - 2], "--")
     compare(argv[argv.length - 1], "http://u")
+    compare(argv.indexOf("--title=$>N") !== -1, true)   // S-01: raw marker, never property-expanded
+    compare(argv.indexOf("--force-media-title=N") !== -1, true)
     compare(Model.splitMpvArgs("--Profile=x --no-idle --cache=yes").args, ["--cache=yes"])
   }
 

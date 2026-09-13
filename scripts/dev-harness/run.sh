@@ -27,6 +27,11 @@
 #   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr symlink so hyprctl works)
 #   fixtures/ generated playlist / test.ts (MPEG-TS, like a live stream; an MP4 with a trailing moov is not seekable over HTTP)
 # Never run against a real network stream from here; the fixture uses 127.0.0.1 only.
+# The playlist/EPG URL is never printed (it may carry credentials); only
+# scheme://host is echoed (S-08). Everything this script starts (fixture
+# HTTP server, Quickshell, the harness mpv) is reaped by an EXIT trap, so a
+# Ctrl-C or SIGTERM leaves nothing behind; SIGKILL cannot be trapped, so the
+# next start also reaps a stale fixture server.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -35,6 +40,35 @@ REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
 SHELL_DIR=${OMARCHY_PATH:-/usr/share/omarchy}/shell
 SERVE_PORT=8765
+SERVER_PID=""
+QS_PID=""
+
+# scheme://host of a source URL, "local file" for a path, "(none)" when unset.
+source_label() {
+  local src=$1 re='^([A-Za-z][A-Za-z0-9+.-]*)://([^@/?#]*@)?([^/:?#]+)'
+  if [[ -z $src ]]; then
+    echo "(none)"
+  elif [[ $src =~ $re ]]; then
+    local scheme=${BASH_REMATCH[1],,}
+    if [[ $scheme == file ]]; then echo "local file"; else echo "$scheme://${BASH_REMATCH[3]}"; fi
+  else
+    echo "local file"
+  fi
+}
+
+fixture_server_pattern() {
+  echo "http.server $SERVE_PORT --bind 127.0.0.1 --directory $SCRATCH/fixtures"
+}
+
+cleanup() {
+  [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null
+  [[ -n $QS_PID ]] && kill "$QS_PID" 2>/dev/null
+  # Belt and braces: only processes bound to THIS scratch dir are matched.
+  pkill -f "quickshell -p $SCRATCH/root" 2>/dev/null
+  pkill -f "$(fixture_server_pattern)" 2>/dev/null
+  pkill -f "input-ipc-server=$SCRATCH/runtime/omarchy-iptv/mpv.sock" 2>/dev/null
+  return 0
+}
 
 prepare_root() {
   mkdir -p "$SCRATCH/root" "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime" "$SCRATCH/fixtures"
@@ -89,6 +123,8 @@ start_server() {
     ffmpeg -loglevel error -y -f lavfi -i "testsrc=size=320x240:rate=15" -f lavfi -i "sine=frequency=440:sample_rate=22050" \
       -t 120 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 32k -f mpegts "$video" || { echo "[run.sh] ffmpeg failed"; exit 1; }
   fi
+  # A previous run killed with SIGKILL could not clean up: reap its server.
+  pkill -f "$(fixture_server_pattern)" 2>/dev/null && sleep 0.2
   python3 -m http.server "$SERVE_PORT" --bind 127.0.0.1 --directory "$SCRATCH/fixtures" >/dev/null 2>&1 &
   SERVER_PID=$!
   echo "[run.sh] serving $SCRATCH/fixtures on http://127.0.0.1:$SERVE_PORT (pid $SERVER_PID)"
@@ -136,7 +172,10 @@ case $cmd in
     done
     prepare_root
     if (( ! KEEP )); then rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv"; mkdir -p "$SCRATCH/cache" "$SCRATCH/state"; fi
-    SERVER_PID=""
+    # Always reap what we start: normal exit, --timeout, Ctrl-C, SIGTERM.
+    trap cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     live="http://127.0.0.1:9/dead/live.m3u8"
     if (( SERVE )); then start_server; live="http://127.0.0.1:$SERVE_PORT/test.ts"; fi
     write_fixture "$live"
@@ -150,16 +189,18 @@ case $cmd in
     export OMARCHY_IPTV_VERTICAL="$VERTICAL"
     export OMARCHY_IPTV_SHOW_NAME="$SHOW_NAME"
     export OMARCHY_IPTV_LABEL_MAX="$LABEL_MAX"
-    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s playlist=$OMARCHY_IPTV_PLAYLIST"
+    # scheme://host only: the URL may carry provider credentials (S-08).
+    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
+    # Background + wait (instead of a pipeline) so the PID is known to cleanup.
     if (( TIMEOUT > 0 )); then
-      timeout --signal=TERM --kill-after=3 "$TIMEOUT" quickshell -p "$SCRATCH/root" 2>&1 | sed -u 's/^/[qs] /'
+      timeout --signal=TERM --kill-after=3 "$TIMEOUT" quickshell -p "$SCRATCH/root" > >(sed -u 's/^/[qs] /') 2>&1 &
     else
-      quickshell -p "$SCRATCH/root" 2>&1 | sed -u 's/^/[qs] /'
+      quickshell -p "$SCRATCH/root" > >(sed -u 's/^/[qs] /') 2>&1 &
     fi
-    status=${PIPESTATUS[0]}
-    [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null
-    # Belt and braces: never leave a harness mpv behind.
-    pkill -f "input-ipc-server=$SCRATCH/runtime/omarchy-iptv/mpv.sock" 2>/dev/null
+    QS_PID=$!
+    wait "$QS_PID"
+    status=$?
+    QS_PID=""
     echo "[run.sh] quickshell exited with $status (124 = timeout, expected)"
     ;;
   *)

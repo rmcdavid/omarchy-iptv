@@ -20,6 +20,9 @@
 // ring, R11 session-only failedAt, R12 notification privacy.
 
 var MAX_ROWS_DEFAULT = 200
+// Helper-side cap on channels.json (bin/omarchy-iptv MAX_CHANNELS, S-07);
+// prepareChannels re-applies it so a hand-edited cache stays bounded too.
+var MAX_CHANNELS = 50000
 var FAVORITES_GROUP = "Favorites"
 var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
@@ -258,10 +261,19 @@ function looksLikeUrl(text) {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(str(text)) || /^(rtp|udp|rtsp|mms):/i.test(str(text))
 }
 
+// A rendered name never starts with "-" (S-04): it is handed to
+// omarchy-notification-send as an argv item, and a body such as
+// "--urgency=x did not play" would be parsed as an option and suppress the
+// toast. Leading dashes and whitespace are dropped; an all-dash name falls
+// through to the next candidate. Mirrors clean_name in bin/omarchy-iptv.
+function cleanName(text) {
+  return str(text).replace(/^[\s-]+/, "").replace(/\s+$/, "")
+}
+
 function displayName(channel, position) {
-  var name = str(channel && channel.name).replace(/^\s+|\s+$/g, "")
+  var name = cleanName(channel && channel.name)
   if (name !== "" && !looksLikeUrl(name)) return name
-  var tvg = str(channel && channel.tvgName).replace(/^\s+|\s+$/g, "")
+  var tvg = cleanName(channel && channel.tvgName)
   if (tvg !== "" && !looksLikeUrl(tvg)) return tvg
   return "Channel " + (Number(position) > 0 ? Math.floor(Number(position)) : "?")
 }
@@ -273,7 +285,7 @@ function prepareChannels(channels) {
   var list = asList(channels)
   var out = []
   var groupKeys = {}
-  for (var i = 0; i < list.length; i++) {
+  for (var i = 0; i < list.length && out.length < MAX_CHANNELS; i++) {
     var src = list[i]
     if (!src || typeof src !== "object") continue
     var row = {}
@@ -834,6 +846,9 @@ function statusReason(status) {
     not_found: "File not found",
     unsafe_path: "Path not allowed",
     unsupported_scheme: "Unsupported URL",
+    timeout: "Timed out",
+    helper_timeout: "Helper timed out",
+    unsafe_redirect: "Unsafe redirect",
     too_large: "Source too large",
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
@@ -945,8 +960,25 @@ function headerArgs(headers) {
   return out
 }
 
+// mpv property-expands `--title` (man mpv: "Properties are expanded"), so a
+// playlist entry named "${path}" would put the stream URL, credentials and
+// all, into the window title (S-01, R12). "$>" turns expansion off for the
+// rest of the string; verified on mpv 0.41 with `expand-text` over IPC:
+// "$>${path}" stays literal. `force-media-title` is NOT expanded (verified:
+// media-title returned "$>${path}" verbatim), so it carries the plain name;
+// a prefix there would show up literally in the OSC and `media-title`.
+// The helper's cmd_play applies the same prefix on the IPC path.
+var MPV_RAW_PREFIX = "$>"
+
+function mpvWindowTitle(name) {
+  return MPV_RAW_PREFIX + str(name)
+}
+
 // Full argv for the first launch (ARCHITECTURE.md section 3). The URL always
 // follows "--" so a playlist entry can never be parsed as an mpv option.
+// The URL (and header values) stay visible in the mpv process's argv
+// (`ps`, /proc/<pid>/cmdline) until mpv exits: S-03, README "Playback
+// notes"; the M2 idle-start rework removes it.
 function buildMpvArgv(params) {
   var p = params || {}
   var name = str(p.name) || "IPTV"
@@ -957,7 +989,7 @@ function buildMpvArgv(params) {
     "--force-window=immediate",
     "--idle=no",
     "--keep-open=no",
-    "--title=" + name,
+    "--title=" + mpvWindowTitle(name),
     "--force-media-title=" + name,
     "--msg-level=all=error",
     // Live streams never need yt-dlp; without this mpv shells out to it on
@@ -980,13 +1012,18 @@ function focusPlayerArgv() {
 // ------------------------------------------------------------ notifications
 
 // argv for omarchy-notification-send per UX 6.4. Bodies never carry a URL.
+// Options come first, then the constant headline, then the body. The
+// wrapper (busctl-based) takes the body positionally unless it looks like
+// one of its own flags (`--urgency=...`, `-g`, ...), so the body is built to
+// never start with "-": the playlist-controlled name is quoted with the
+// typographic quotes and cleaned of leading dashes (S-04).
 function notifyArgv(event, params) {
   var p = params || {}
   var spec = null
-  var name = str(p.name) || "Channel"
+  var name = cleanName(p.name) || "Channel"
   var reason = scrubUrls(str(p.reason))
   if (event === "streamFailed") {
-    spec = { title: "Stream failed", body: name + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
+    spec = { title: "Stream failed", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
   } else if (event === "playlistRefreshed") {
     spec = { title: "Playlist refreshed", body: pluralChannels(p.channelCount) + " in " + formatCount(p.groupCount) + (Number(p.groupCount) === 1 ? " group" : " groups"), glyph: GLYPHS.refresh, urgency: "low", id: NOTIFY_IDS.playlistRefreshed }
   } else if (event === "playlistError") {
@@ -1219,6 +1256,7 @@ function footerHints(opts) {
 if (typeof module !== "undefined") {
   module.exports = {
     MAX_ROWS_DEFAULT: MAX_ROWS_DEFAULT,
+    MAX_CHANNELS: MAX_CHANNELS,
     FAVORITES_GROUP: FAVORITES_GROUP,
     RECENT_GROUP: RECENT_GROUP,
     UNGROUPED: UNGROUPED,
@@ -1296,6 +1334,8 @@ if (typeof module !== "undefined") {
     settingsFrom: settingsFrom,
     splitMpvArgs: splitMpvArgs,
     headerArgs: headerArgs,
+    MPV_RAW_PREFIX: MPV_RAW_PREFIX,
+    mpvWindowTitle: mpvWindowTitle,
     buildMpvArgv: buildMpvArgv,
     focusPlayerArgv: focusPlayerArgv,
     notifyArgv: notifyArgv,
@@ -1303,6 +1343,7 @@ if (typeof module !== "undefined") {
     hostOf: hostOf,
     redactUrls: redactUrls,
     scrubUrls: scrubUrls,
+    cleanName: cleanName,
     displayName: displayName,
     looksLikeUrl: looksLikeUrl,
     formatClock: formatClock,

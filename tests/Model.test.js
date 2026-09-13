@@ -80,6 +80,12 @@ check("prepareChannels ungrouped", [prepared[2].group, prepared[2].primaryGroup,
 check("prepareChannels nameKey when name equals group", prepared[3].nameKey, "uk")
 check("prepareChannels does not mutate input", (() => { const src = [{ name: "X", url: "u" }]; Model.prepareChannels(src); return Object.keys(src[0]) })(), ["name", "url"])
 check("prepareChannels null", Model.prepareChannels(null), [])
+check("prepareChannels caps a tampered cache at MAX_CHANNELS (S-07)", (() => {
+  const many = []
+  for (let i = 0; i < Model.MAX_CHANNELS + 7; i++) many.push({ id: "c" + i, name: "C " + i, group: "G", searchKey: "c " + i + " g" })
+  const rows = Model.prepareChannels(many)
+  return [Model.MAX_CHANNELS, rows.length, rows[rows.length - 1].id]
+})(), [50000, 50000, "c49999"])
 check("displayName never a URL (D-QA-02)", Model.prepareChannels([
   { name: "http://h.test/live/1.m3u8", tvgName: "Real Name", url: "http://h.test/live/1.m3u8" },
   { name: "", url: "http://h.test/2" },
@@ -87,6 +93,15 @@ check("displayName never a URL (D-QA-02)", Model.prepareChannels([
   { name: "  Fine  ", url: "u" }
 ]).map(c => c.name), ["Real Name", "Channel 2", "Channel 3", "Fine"])
 check("displayName recomputes searchKey when the name was replaced", Model.prepareChannels([{ name: "http://h.test/x", tvgName: "Arte", group: "DE", searchKey: "http h test x de" }])[0].searchKey, "arte de")
+// S-04: a rendered name never starts with "-" (argv item for the notification wrapper).
+check("cleanName strips leading dashes and whitespace", [Model.cleanName("--urgency=x"), Model.cleanName(" - Sports "), Model.cleanName("---"), Model.cleanName(null), Model.cleanName("A-B")], ["urgency=x", "Sports", "", "", "A-B"])
+check("displayName never starts with a dash (S-04)", Model.prepareChannels([
+  { name: "--urgency=critical", url: "u1" },
+  { name: "---", tvgName: "-Real Name", url: "u2" },
+  { name: "- ", tvgName: "--", url: "u3" },
+  { name: "-Minus TV", url: "u4" }
+]).map(c => c.name), ["urgency=critical", "Real Name", "Channel 3", "Minus TV"])
+check("displayName cleaned name keeps a matching searchKey", Model.prepareChannels([{ name: "--Sports", group: "UK", searchKey: "sports uk" }])[0].searchKey, "sports uk")
 check("looksLikeUrl", [Model.looksLikeUrl("http://x"), Model.looksLikeUrl("udp://@239.0.0.1:1234"), Model.looksLikeUrl("BBC One"), Model.looksLikeUrl("")], [true, true, false, false])
 
 check("groupChannels playlist order with counts", Model.groupChannels(prepared).map(g => g.name + ":" + g.count), ["UK:2", "CA:1", "Ungrouped:1"])
@@ -248,6 +263,9 @@ check("statusReason network flavours", [
   Model.statusReason({ ok: false, error: { code: "network", message: "weird" } })
 ], ["Timed out", "Could not resolve host", "Connection refused", "Network error"])
 check("statusReason table", [Model.statusReason({ ok: false, error: { code: "not_found" } }), Model.statusReason({ ok: false, error: { code: "empty_playlist" } }), Model.statusReason({ ok: false, error: { code: "not_implemented" } })], ["File not found", "Playlist has no channels", "Helper command not implemented"])
+// S-05: helper deadline and service watchdog codes never echo the message (which could carry a host).
+check("statusReason timeout codes", [Model.statusReason({ ok: false, error: { code: "timeout", message: "playlist download from h.test exceeded 60 s" } }), Model.statusReason({ ok: false, error: { code: "helper_timeout", message: "helper timed out" } })], ["Timed out", "Helper timed out"])
+check("statusReason unsafe redirect (S-06)", Model.statusReason({ ok: false, error: { code: "unsafe_redirect", message: "playlist from h.test redirected to an unsupported scheme 'ftp'" } }), "Unsafe redirect")
 check("statusReason unknown code redacts URLs from the message", Model.statusReason({ ok: false, error: { code: "odd", message: "bad http://u:p@h.test/x?y" } }), "bad h.test")
 check("statusReason ok", Model.statusReason({ ok: true }), "")
 check("statusHost", [Model.statusHost({ sourceHost: "h.test" }), Model.statusHost(null)], ["h.test", ""])
@@ -280,7 +298,15 @@ check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
 const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", name: "BBC One", url: "--not-an-option", headers: {}, extraArgs: ["--profile=low-latency"] })
 check("buildMpvArgv starts with mpv and ipc socket", argv.slice(0, 2), ["mpv", "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock"])
-check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=no", "--keep-open=no", "--title=BBC One", "--force-media-title=BBC One", "--msg-level=all=error", "--ytdl=no"])
+check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=no", "--keep-open=no", "--title=$>BBC One", "--force-media-title=BBC One", "--msg-level=all=error", "--ytdl=no"])
+// S-01: mpv expands ${property} in --title; the "$>" raw marker keeps a
+// playlist-controlled name literal. force-media-title is not expanded by mpv.
+check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpvWindowTitle("BBC One"), Model.mpvWindowTitle(null)], ["$>", "$>BBC One", "$>"])
+check("buildMpvArgv title is never property-expanded (S-01)", (() => {
+  const a = Model.buildMpvArgv({ socketPath: "/s", name: "${path} ${options/input-ipc-server}", url: "http://u:p@h.test/x" })
+  return [a.indexOf("--title=$>${path} ${options/input-ipc-server}") !== -1, a.indexOf("--force-media-title=${path} ${options/input-ipc-server}") !== -1, a.filter(t => t.indexOf("--title=") === 0).length]
+})(), [true, true, 1])
+check("buildMpvArgv default name is prefixed too", Model.buildMpvArgv({ socketPath: "/s", url: "u" }).indexOf("--title=$>IPTV") !== -1, true)
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", name: "N", url: "u", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 check("buildMpvArgv url after --", argv.slice(-2), ["--", "--not-an-option"])
 check("buildMpvArgv extra args before --", argv.indexOf("--profile=low-latency") < argv.indexOf("--"), true)
@@ -290,10 +316,22 @@ check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focus
 
 // ---- notifications ----
 const tvOff = "\udb81\udd03", alert = "\udb80\udc26", refreshGlyph = "\udb81\udc50"
+const Q = (s) => String.fromCharCode(0x201c) + s + String.fromCharCode(0x201d)   // typographic quotes, file stays ASCII
 check("notifyArgv streamFailed", Model.notifyArgv("streamFailed", { name: "Sky Sports", reason: "HTTP 403" }),
-  ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", "Sky Sports did not play" + SEP + "HTTP 403"])
-check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), ["X did not play"])
-check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), ["X did not play" + SEP + "Failed to open h.test"])
+  ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", Q("Sky Sports") + " did not play" + SEP + "HTTP 403"])
+check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), [Q("X") + " did not play"])
+check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), [Q("X") + " did not play" + SEP + "Failed to open h.test"])
+// S-04: the wrapper reads a body matching --urgency=* / --icon=* / -g ... as an option.
+check("notifyArgv body never starts with a dash (S-04)", (() => {
+  const out = []
+  for (const name of ["--urgency=critical", "-g", "--icon=x", "--exec", "-", "", null]) {
+    const a = Model.notifyArgv("streamFailed", { name: name, reason: "-r 1" })
+    out.push(a.slice(9).every(item => item.charAt(0) !== "-"))
+  }
+  return out
+})(), [true, true, true, true, true, true, true])
+check("notifyArgv streamFailed cleans and quotes a hostile name", Model.notifyArgv("streamFailed", { name: "--urgency=critical" }).slice(-1), [Q("urgency=critical") + " did not play"])
+check("notifyArgv streamFailed falls back to Channel for an all-dash name", Model.notifyArgv("streamFailed", { name: "---" }).slice(-1), [Q("Channel") + " did not play"])
 check("notifyArgv playlistRefreshed", Model.notifyArgv("playlistRefreshed", { channelCount: 1204, groupCount: 38 }).slice(3), ["-u", "low", "-g", refreshGlyph, "-r", "74012", "Playlist refreshed", "1,204 channels in 38 groups"])
 check("notifyArgv playlistError with cache", Model.notifyArgv("playlistError", { reason: "HTTP 503", cachedAt: "12:40" }).slice(-2), ["Playlist error", "Could not fetch the playlist (HTTP 503). Using cached copy from 12:40."])
 check("notifyArgv playlistError without cache", Model.notifyArgv("playlistError", { reason: "Timed out" }).slice(-1), ["Could not fetch the playlist (Timed out). Open the guide for details."])

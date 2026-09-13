@@ -41,6 +41,36 @@ class StateCommandTest(unittest.TestCase):
         self.assertEqual(payload, {"ok": True, "kind": "state", "action": "show", "state": EMPTY})
         self.assertFalse(self.path.exists())
 
+    def test_init_creates_an_empty_private_state_file(self):
+        # S-02: the service's FileView would create the file 0644; init runs first.
+        code, payload, _ = self.state("init")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "init", "created": True, "state": EMPTY})
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
+        code, payload, _ = self.state("init")
+        self.assertEqual(code, 0)
+        self.assertFalse(payload["created"])
+
+    def test_init_keeps_an_existing_file_and_tightens_its_mode(self):
+        self.path.parent.mkdir(parents=True)
+        content = json.dumps({"version": 1, "favorites": ["t:keep"], "recents": [], "lastPlayed": None}, indent=2) + "\n"
+        self.path.write_text(content, encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        code, payload, _ = self.state("init")
+        self.assertEqual(code, 0)
+        self.assertFalse(payload["created"])
+        self.assertEqual(payload["state"]["favorites"], ["t:keep"])
+        self.assertEqual(self.path.read_text(encoding="utf-8"), content)   # not rewritten
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    def test_init_state_file_is_exclusive(self):
+        os.makedirs(self.dir, mode=0o700)
+        self.assertTrue(helper.init_state_file(str(self.path), helper.default_state()))
+        self.assertFalse(helper.init_state_file(str(self.path), {"version": 1, "favorites": ["x"], "recents": [], "lastPlayed": None}))
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
+
     def test_favorite_add_is_idempotent_and_ordered(self):
         for cid in ("t:bbc1.uk", "u:3f2a9c11", "t:bbc1.uk"):
             code, payload, _ = self.state("favorite", "add", cid)
