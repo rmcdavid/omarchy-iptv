@@ -678,11 +678,12 @@ function toggleMode(st) {
 // field that still has text, and only closes (or returns to its parent
 // form) when every field is empty. While a probe runs, Esc cancels it and
 // thaws the form (`cancelProbe` tells the caller to ask the service).
-function onEscape(st) {
+// `opts` reaches closeSources (`configured`, UX 1.7).
+function onEscape(st, opts) {
   var cur = copyGuide(st)
   var out = { state: cur, close: false, cancelProbe: false }
   if (cur.mode === "confirmRemove") { out.state = withMode(cur, "sources"); return out }
-  if (cur.mode === "sources") { out.state = closeSources(cur); return out }
+  if (cur.mode === "sources") { out.state = closeSources(cur, opts); return out }
   if (cur.mode === "sourceEdit" || cur.mode === "sourceXtream") {
     var f = cur.form
     if (!f) { out.state = withMode(cur, "search"); return out }
@@ -1728,8 +1729,9 @@ function validateSourceUrl(text, opts) {
 }
 
 // Normalized identity of an accepted URL, "" when it does not validate.
-function normalizeSourceUrl(text) {
-  var v = validateSourceUrl(text)
+// `opts` reaches validateSourceUrl (the settings path passes origin `cli`).
+function normalizeSourceUrl(text, opts) {
+  var v = validateSourceUrl(text, opts)
   return v.ok ? v.url : ""
 }
 
@@ -2108,12 +2110,14 @@ function probeFailureLine(reason, host, kind) {
   return text + " from " + str(host)
 }
 
-// Footer transients (UX-SOURCES 5.3).
+// Footer transients (UX-SOURCES 5.3). `added` names the new source by its
+// label (`Added list.m3u`, `Added tv.example.net`), never `local file`;
+// `host` is the fallback when the caller has no label.
 function sourceTransient(event, opts) {
   var o = opts || {}
   var counts = Number(o.channelCount) >= 0 ? countsLine(o.channelCount, o.groupCount) : ""
   if (event === "loaded") return counts
-  if (event === "added") return "Added " + str(o.host) + (counts !== "" ? SEP + counts : "")
+  if (event === "added") return "Added " + (str(o.label) !== "" ? str(o.label) : str(o.host)) + (counts !== "" ? SEP + counts : "")
   if (event === "saved") return "Saved" + (counts !== "" ? SEP + counts : "")
   if (event === "switched") return "Switched to " + str(o.label) + (Number(o.channelCount) >= 0 ? SEP + pluralChannels(o.channelCount) : "")
   if (event === "removed") return "Removed " + str(o.label) + (o.wasActive ? SEP + "no active source" : "")
@@ -2210,7 +2214,10 @@ function addSource(state, fields, nowSec) {
 // sets `labelCustom` (an empty label re-derives it). A changed playlist URL
 // yields a NEW record (new key, `fetchedAt: 0`, label / addedAt copied) and
 // leaves the old one in place until the service confirms the probe;
-// `replacedKey` names the old record.
+// `replacedKey` names the old record. An edit never counts against
+// MAX_SOURCES: the replacement takes the old record's place, so the
+// transient 51st entry is not a `too_many` (the service keeps it in memory
+// and drops the old record before the new one lands in the history).
 function updateSource(state, key, fields, nowSec) {
   var st = cloneState(state)
   var rec = findSource(st.sources, key)
@@ -2236,7 +2243,6 @@ function updateSource(state, key, fields, nowSec) {
     if (pv.url !== rec.url) {
       var dup = findSourceByUrl(st.sources, pv.url)
       if (dup) return { ok: false, code: "duplicate", message: sourceErrorMessage("duplicate", { label: dup.label }), state: st, key: str(dup.key), urlChanged: false, replacedKey: "" }
-      if (st.sources.length >= MAX_SOURCES) return { ok: false, code: "too_many", message: sourceErrorMessage("too_many"), state: st, key: rec.key, urlChanged: false, replacedKey: "" }
       urlChanged = true
       newKey = allocateSourceKey(st.sources, pv.url)
       var replacement = copySourceRecord(rec, patch)
@@ -2285,8 +2291,10 @@ function withSourceStats(state, key, status, nowSec) {
   })
 }
 
+// The settings value is a CLI-origin value (SR11): a `~` path set through
+// `omarchy bar set` must resolve to its record like any other.
 function activeSourceKey(state, playlistUrl) {
-  var url = normalizeSourceUrl(playlistUrl)
+  var url = normalizeSourceUrl(playlistUrl, { origin: "cli" })
   if (url === "") return ""
   var rec = findSourceByUrl(state ? state.sources : [], url)
   return rec ? str(rec.key) : ""
@@ -2304,9 +2312,11 @@ function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec,
   var out = { state: st, changed: false, activeKey: "", added: "", evicted: [], invalid: null }
   var raw = sanitizeInput(playlistUrl, MAX_SOURCE_URL + 1)
   if (raw === "") return out
-  var pv = validateSourceUrl(raw)
+  // The settings are the CLI path: `~` paths stay accepted here (SR11,
+  // no 0.1.0 regression) while the forms keep refusing them.
+  var pv = validateSourceUrl(raw, { origin: "cli" })
   if (!pv.ok) { out.invalid = pv; return out }
-  var ev = validateSourceUrl(epgUrl, { kind: "epg" })
+  var ev = validateSourceUrl(epgUrl, { kind: "epg", origin: "cli" })
   var epg = ev.ok ? ev.url : ""
   var now = nowInt(nowSec)
   var rec = findSourceByUrl(st.sources, pv.url)
@@ -2741,12 +2751,21 @@ function openSources(st, views) {
 
 // Esc / `o` in Sources: back to where it was opened from, nothing else
 // changes. The first-run form (returnMode `sourceEdit`) survives in `form`.
-function closeSources(st) {
+// `opts.configured === false` (the active source was removed while Sources
+// stayed open, or the CLI cleared the playlist meanwhile, UX 1.7 / SR8):
+// the guide behind Sources is first run now, so the return lands in the
+// first-run form (with its `Saved sources (n)` link) instead of a guide mode.
+function closeSources(st, opts) {
   var cur = copyGuide(st)
+  var o = opts || {}
   var back = cur.returnMode
   cur.returnMode = ""
   if (back === "sourceEdit" || back === "sourceXtream") {
     if (cur.form) { cur.mode = cur.form.kind === "xtream" ? "sourceXtream" : "sourceEdit"; return cur }
+    return openFirstRun(cur)
+  }
+  if (o.configured === false) {
+    cur.form = null
     return openFirstRun(cur)
   }
   cur.mode = back === "list" ? "list" : "search"

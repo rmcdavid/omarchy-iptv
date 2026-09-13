@@ -628,6 +628,11 @@ check("sourceTransient strings (UX 5.3)", [
   Model.sourceTransient("removed", { label: "Provider", wasActive: true }),
   Model.sourceTransient("nope", {})
 ], ["1,475 channels in 28 groups", "Added tv.example.net" + SEP + "1,475 channels in 28 groups", "Saved", "Saved" + SEP + "1,475 channels in 28 groups", "Switched to NAS Tvheadend" + SEP + "84 channels", "Switched to NAS", "Removed NAS Tvheadend", "Removed Provider" + SEP + "no active source", ""])
+check("sourceTransient added names the label (a path's file name, never `local file`), host is the fallback", [
+  Model.sourceTransient("added", { label: "list.m3u", host: "local file", channelCount: 20, groupCount: 9 }),
+  Model.sourceTransient("added", { label: "NAS Tvheadend", host: "nas.local", channelCount: -1 }),
+  Model.sourceTransient("added", { label: "", host: "tv.example.net", channelCount: 3, groupCount: 1 })
+], ["Added list.m3u" + SEP + "20 channels in 9 groups", "Added NAS Tvheadend", "Added tv.example.net" + SEP + "3 channels in 1 group"])
 
 // ---- view objects (SR1, UX 5.2 / 7.1) ----
 const recProvider = { key: "d990c2e4", url: "http://tv.example.net:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://tv.example.net:8080/xmltv.php?username=u&password=p", kind: "http", label: "Provider", labelCustom: true, origin: "xtream", addedAt: 100, lastUsed: local(2026, 9, 13, 21, 30), fetchedAt: 200, channelCount: 1475, groupCount: 28 }
@@ -696,7 +701,9 @@ check("updateSource same playlist url (normalized) is not a change", Model.updat
 const moved = Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", label: "Provider" }, 4000)
 check("updateSource changed url: new record with a new key, old kept until the probe confirms", [moved.ok, moved.urlChanged, moved.key, moved.replacedKey, moved.state.sources.length, moved.state.sources[2].fetchedAt, moved.state.sources[2].label, moved.state.sources[2].addedAt, moved.state.sources[2].lastUsed, moved.state.sources[0].url === twoState.sources[0].url], [true, true, "85ac744a", "d990c2e4", 3, 0, "Provider", 1000, 4000, true])
 check("updateSource changed url with a derived label re-derives it", Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://new.test/x" }).state.sources[2].label, "new.test")
-check("updateSource duplicate / unknown / too_many", [Model.updateSource(twoState, "d990c2e4", { playlistUrl: "/srv/tv/local.m3u" }).code, Model.updateSource(twoState, "nope", { label: "x" }).code, Model.updateSource(full50, "00989680", { playlistUrl: "http://new.test/" }).code], ["duplicate", "unknown_source", "too_many"])
+check("updateSource duplicate / unknown", [Model.updateSource(twoState, "d990c2e4", { playlistUrl: "/srv/tv/local.m3u" }).code, Model.updateSource(twoState, "nope", { label: "x" }).code], ["duplicate", "unknown_source"])
+check("updateSource at the cap: a playlist-URL edit never counts against MAX_SOURCES (the replacement takes the old record's place)", (() => { const r = Model.updateSource(full50, "00989680", { playlistUrl: "http://new.test/" }, 5); return [r.ok, r.code, r.urlChanged, r.replacedKey, r.state.sources.length, r.state.sources.some(s => s.url === "http://new.test/"), Model.removeSource(r.state, r.replacedKey).state.sources.length] })(), [true, "ok", true, "00989680", 51, true, 50])
+check("updateSource at the cap: label / EPG edits and a duplicate stay unaffected", [Model.updateSource(full50, "00989680", { label: "Renamed" }).ok, Model.updateSource(full50, "00989680", { epgUrl: "http://e.test/x.xml" }).ok, Model.updateSource(full50, "00989680", { playlistUrl: "http://h1.test/" }).code], [true, true, "duplicate"])
 check("removeSource", (() => { const r = Model.removeSource(twoState, "b0eed9fb"); return [r.removed.key, r.state.sources.length, Model.removeSource(twoState, "nope").removed, twoState.sources.length] })(), ["b0eed9fb", 1, null, 2])
 check("touchSource bumps lastUsed, unknown key is a no-op", [Model.touchSource(twoState, "b0eed9fb", 9000).sources[1].lastUsed, Model.touchSource(twoState, "nope", 9000).sources[1].lastUsed], [9000, 2000])
 check("withSourceStats copies the counts of an ok status", Model.withSourceStats(twoState, "d990c2e4", { ok: true, fetchedAt: 5000, channelCount: "1475", groupCount: 28 }).sources[0], { ...twoState.sources[0], fetchedAt: 5000, channelCount: 1475, groupCount: 28 })
@@ -715,6 +722,13 @@ check("reconcileSources: derived label is made unique", Model.reconcileSources(t
 check("reconcileSources: at the cap the least recently used non-active record is evicted", (() => { const r = Model.reconcileSources(full50, "http://new.test/", "", "00989680", 999); return [r.state.sources.length, r.evicted, r.state.sources.some(s => s.key === "00989680"), r.state.sources.some(s => s.url === "http://new.test/")] })(), [50, ["00989680"], false, true])
 check("reconcileSources: eviction never drops the new active record", Model.reconcileSources(full50, "http://new.test/", "", "", 0).state.sources.some(s => s.url === "http://new.test/"), true)
 check("reconcileSources does not mutate the input", twoState.sources.length, 2)
+// SR11: the settings path is the CLI path. `omarchy bar set ... playlistUrl ~/list.m3u`
+// reconciles into the history and becomes active; the forms keep refusing `~`.
+const tildeRec = Model.reconcileSources(twoState, "~/list.m3u", "~/epg.xml", "d990c2e4", 7000)
+check("reconcileSources: a CLI `~` path is accepted verbatim (kind file, label from the file name, origin cli), never settingsInvalid", (() => { const s = tildeRec.state.sources[2]; return [tildeRec.invalid, tildeRec.changed, tildeRec.added !== "", tildeRec.activeKey === tildeRec.added, s.url, s.epgUrl, s.kind, s.label, s.origin, s.fetchedAt] })(), [null, true, true, true, "~/list.m3u", "~/epg.xml", "file", "list.m3u", "cli", 0])
+check("activeSourceKey resolves the CLI `~` record; a second reconcile of the same value is a no-op", [Model.activeSourceKey(tildeRec.state, "~/list.m3u"), Model.activeSourceKey(tildeRec.state, " ~/list.m3u "), Model.reconcileSources(tildeRec.state, "~/list.m3u", "~/epg.xml", tildeRec.activeKey, 8000).changed, Model.sourceView(tildeRec.state.sources[2], tildeRec.activeKey, 8000, "").host], [tildeRec.added, tildeRec.added, false, "local file"])
+check("the forms still refuse `~` (SR11): addSource, updateSource, validateUrlForm", [Model.addSource(tildeRec.state, { playlistUrl: "~/other.m3u" }).code, Model.updateSource(tildeRec.state, "d990c2e4", { playlistUrl: "~/other.m3u" }).code, Model.validateUrlForm({ label: "", playlist: "~/list.m3u", epg: "" }, [], "").error.code, Model.activeSourceKey(tildeRec.state, "./list.m3u")], ["relative_path", "relative_path", "relative_path", ""])
+check("reconcileSources: a `~` path that is a form-only refusal elsewhere still fails the CLI rules it shares (relative ./, unsafe /proc)", [Model.reconcileSources(twoState, "./list.m3u", "", "", 1).invalid.code, Model.reconcileSources(twoState, "/proc/x", "", "", 1).invalid.code], ["relative_path", "unsafe_path"])
 
 check("sourceForEdit is the only URL carrier: masked and raw forms", Model.sourceForEdit(twoState, "d990c2e4"), { id: "d990c2e4", key: "d990c2e4", label: "provider.example.test", labelCustom: false, kind: "xtream", host: "provider.example.test", origin: "xtream", playlistUrl: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", playlistMasked: "http://provider.example.test/get.php?username=****&password=****&type=m3u_plus&output=ts", epgMasked: "http://provider.example.test/xmltv.php?username=****&password=****" })
 check("sourceForEdit unknown", [Model.sourceForEdit(twoState, "nope"), Model.sourceForEdit(null, "x")], [null, null])
@@ -787,6 +801,21 @@ check("openSources from list / search / first run remembers returnMode", [Model.
 check("openSources puts the cursor on the active source and is idempotent", [Model.openSources(Model.guideState("all"), views4).sourceCursor, Model.openSources(Model.guideState("all"), Model.sourceViews(state4, "d5977d8a", nowSep)).sourceCursor, Model.openSources(Model.openSources(Model.guideState("all"), views4), []).mode], [0, 0, "sources"])
 check("closeSources returns to the first-run form with its values", (() => { const s = Model.openSources(pasted, views4); const b = Model.closeSources(s); return [b.mode, b.form.values.playlist, b.returnMode] })(), ["sourceEdit", "http://h.test/x?token=1", ""])
 check("closeSources with a lost form reopens first run; unknown returnMode is search", [Model.closeSources({ mode: "sources", returnMode: "sourceEdit" }).form.origin, Model.closeSources({ mode: "sources", returnMode: "junk" }).mode], ["firstRun", "search"])
+// UX 1.7 / QA SRC-H07: the active source was removed while Sources stayed
+// open (other sources remain); Esc / `o` must land in the first-run form
+// (with the `Saved sources (n)` link), not in the M1 empty state.
+check("closeSources unconfigured: from list / search the return is the first-run form with focus in Playlist", (() => {
+  const fromList = Model.closeSources(Model.openSources(Model.withMode(Model.guideState("g:UK"), "list"), views4), { configured: false })
+  const fromSearch = Model.closeSources(Model.openSources(Model.guideState("all"), views4), { configured: false })
+  return [fromList.mode, fromList.form.origin, fromList.form.focus, fromList.returnMode, fromList.scopeId, fromSearch.mode, fromSearch.form.origin]
+})(), ["sourceEdit", "firstRun", "playlist", "", "g:UK", "sourceEdit", "firstRun"])
+check("closeSources configured / no opts keep the shipped return; unconfigured with a first-run form keeps its values", [Model.closeSources(Model.openSources(Model.withMode(Model.guideState("all"), "list"), views4), { configured: true }).mode, Model.closeSources(Model.openSources(Model.withMode(Model.guideState("all"), "list"), views4), {}).mode, Model.closeSources(Model.openSources(pasted, views4), { configured: false }).form.values.playlist], ["list", "list", "http://h.test/x?token=1"])
+check("onEscape in Sources after the active source was removed: the remove -> Esc path ends in the first-run form", (() => {
+  const s = Model.withSourceCursor(Model.openSources(Model.withMode(Model.guideState("all"), "list"), views4), 0)
+  const afterRm = Model.afterRemove(Model.startRemove(s, 4), 3)
+  const esc = Model.onEscape(afterRm, { configured: false })
+  return [afterRm.mode, esc.close, esc.cancelProbe, esc.state.mode, esc.state.form.origin, Model.onEscape(afterRm, { configured: true }).state.mode, Model.onEscape(afterRm).state.mode]
+})(), ["sources", false, false, "sourceEdit", "firstRun", "list", "list"])
 check("withSourceCursor", Model.withSourceCursor(Model.guideState("all"), 3).sourceCursor, 3)
 const inSources = Model.withSourceCursor(Model.openSources(Model.guideState("all"), views4), 1)
 check("startRemove only from a source row", [Model.startRemove(inSources, 4).mode, Model.startRemove(Model.withSourceCursor(inSources, 4), 4).mode, Model.startRemove(Model.guideState("all"), 4).mode], ["confirmRemove", "sources", "search"])

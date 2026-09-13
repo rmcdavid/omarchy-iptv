@@ -643,8 +643,11 @@ Item {
     root.showTransient(root.copy.transientCopied)
   }
 
+  // `configured` rides along so Esc in Sources lands in the first-run form
+  // when the guide behind it is unconfigured (UX 1.7: the active source
+  // was removed while Sources stayed open).
   function handleEscape() {
-    root.applyEscapeResult(Model.onEscape(root.guide))
+    root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
   }
 
   // Applies an onEscape / closeForm result: cancels a running probe, closes
@@ -775,7 +778,7 @@ Item {
   }
 
   function leaveSources() {
-    root.setGuide(Model.closeSources(root.guide))
+    root.setGuide(Model.closeSources(root.guide, { configured: root.configured }))
     if (root.guideMode) root.rebuildDisplay()
     root.refocus()
   }
@@ -879,6 +882,10 @@ Item {
 
   // The service's `configured` flipped while the guide is open: the CLI
   // cleared or set the playlist (SR8), or a removal emptied the settings.
+  // In Sources (and its confirm dialog / forms) nothing moves: the list stays
+  // open (UX 1.7) and the Esc / `o` return reads `configured` at that moment
+  // (handleEscape / leaveSources), landing in the first-run form when the
+  // guide behind Sources is unconfigured by then.
   function onConfiguredFlip() {
     if (!root.opened || !root.serviceReady) return
     if (!root.configured && root.guideMode) root.enterFirstRun()
@@ -1060,7 +1067,11 @@ Item {
     root.setGuide(result.state)
     root.pendingCursorId = String(info.id || "")
     root.syncSourceCursor()
-    root.showTransient(Model.sourceTransient(event === "saved" ? "saved" : "added", { host: info.host, channelCount: counts.channelCount, groupCount: counts.groupCount }))
+    // UX 5.3 / 5.5: `Added <label> - N channels in M groups`; the label is
+    // the recorded one (the file name for a path, never `local file`), the
+    // probe host only when the record is not in the list yet.
+    var added = root.findSourceView(info.id)
+    root.showTransient(Model.sourceTransient(event === "saved" ? "saved" : "added", { label: added ? String(added.label) : "", host: info.host, channelCount: counts.channelCount, groupCount: counts.groupCount }))
     root.refocus()
   }
 
@@ -2525,15 +2536,22 @@ Item {
             }
 
             // Link rows (UX-SOURCES 1.2, 1.5): Saved sources (n) on first run
-            // with a history, Use Xtream login instead while adding.
+            // with a history, Use Xtream login instead while adding. The row's
+            // visibility is computed from the same conditions as the links,
+            // never from the links' own `visible`: a child's `visible` reads
+            // false while its parent is hidden, so a row that once hid (the
+            // form is null at start) would never show again.
             Row {
+              id: linkRow
+              readonly property bool showSaved: root.firstRunHead && root.sourceCount > 0
+              readonly property bool showXtream: root.form !== null && root.form.kind === "url" && root.form.sourceId === ""
               x: formColumn.fieldX
               spacing: Style.space(10)
-              visible: savedLink.visible || xtreamLink.visible
+              visible: showSaved || showXtream
 
               Button {
                 id: savedLink
-                visible: root.firstRunHead && root.sourceCount > 0
+                visible: linkRow.showSaved
                 focusable: true
                 activeFocusOnTab: false
                 bordered: false
@@ -2552,7 +2570,7 @@ Item {
 
               Button {
                 id: xtreamLink
-                visible: root.form !== null && root.form.kind === "url" && root.form.sourceId === ""
+                visible: linkRow.showXtream
                 focusable: true
                 activeFocusOnTab: false
                 bordered: false

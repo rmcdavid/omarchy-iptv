@@ -408,6 +408,24 @@ TestCase {
     compare(rm.mode, "confirmRemove")
     compare(Model.afterRemove(rm, 1).sourceCursor, 0)
     compare(Model.afterRemove(rm, 0).form.origin, "firstRun")
+    // UX 1.7: the active source removed while Sources stays open, then Esc
+    // -> the first-run form (Saved sources link), not the M1 empty state.
+    var stayed = Model.afterRemove(rm, 1)
+    compare(stayed.mode, "sources")
+    var escUnconfigured = Model.onEscape(stayed, { configured: false })
+    compare(escUnconfigured.close, false)
+    compare(escUnconfigured.state.mode, "sourceEdit")
+    compare(escUnconfigured.state.form.origin, "firstRun")
+    compare(escUnconfigured.state.form.focus, "playlist")
+    compare(escUnconfigured.state.returnMode, "")
+    compare(Model.onEscape(stayed, { configured: true }).state.mode, "list")
+    // SR11: a CLI `~` path reconciles and resolves as the active source.
+    var tilde = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "~/list.m3u", "", "", 1)
+    compare(tilde.invalid, null)
+    compare(tilde.state.sources[0].kind, "file")
+    compare(Model.activeSourceKey(tilde.state, "~/list.m3u"), tilde.added)
+    compare(Model.addSource(tilde.state, { playlistUrl: "~/x.m3u" }).code, "relative_path")
+    compare(Model.sourceTransient("added", { label: "list.m3u", host: "local file", channelCount: 20, groupCount: 9 }), "Added list.m3u · 20 channels in 9 groups")
     compare(Model.validateUrlForm({ label: "", playlist: "x.test/a", epg: "" }, [], "").error.code, "scheme")
     compare(Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS", sourceCount: 2 }), "NAS · 84 channels · updated 09:12")
   }
