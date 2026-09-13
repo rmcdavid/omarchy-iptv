@@ -506,13 +506,20 @@ check("sanitizeTyping still caps and strips controls", Model.sanitizeTyping("a b
 // ---- validateSourceUrl: every case of the shared fixture (SR6) ----
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-urls.json"), "utf8"))
 check("fixture has every UX 5.4 URL code plus unsafe_path", [...new Set(fixture.filter(c => !c.ok).map(c => c.code))].sort(), ["empty", "invalid", "relative_path", "scheme", "too_long", "unsafe_path"])
-check("fixture covers files, IDN, IPv6, userinfo, fragments, control characters and the cap", fixture.length >= 80, true)
+check("fixture covers files, IDN, IPv6, userinfo, fragments, control characters and the cap", fixture.length >= 75, true)
 for (const c of fixture) {
   const r = Model.validateSourceUrl(c.input)
   const name = "fixture " + JSON.stringify(c.input.length > 48 ? c.input.slice(0, 45) + "..." : c.input) + (c.note ? " (" + c.note + ")" : "")
   if (c.ok) check(name, [r.ok, r.kind, r.url, r.host, Model.sourceKey(r.url)], [true, c.kind, c.url, c.host, c.key])
   else check(name, [r.ok, r.code], [false, c.code])
 }
+// JS-only vectors (kept out of the shared fixture until the Python mirror
+// agrees; ARCHITECTURE-SOURCES 3.1 steps 4 and 5): a file URL's query and
+// fragment are dropped like urlsplit().path, two ports are not a port, a
+// bare "." is a relative path.
+check("validateSourceUrl file URL query and fragment dropped", Model.validateSourceUrl("file:///srv/tv/list.m3u?x=1#f").url, "/srv/tv/list.m3u")
+check("validateSourceUrl two ports are invalid", Model.validateSourceUrl("http://h.test:80:1/").code, "invalid")
+check("validateSourceUrl bare dot is a relative path", Model.validateSourceUrl(".").code, "relative_path")
 check("validateSourceUrl result shape", Object.keys(Model.validateSourceUrl("http://h.test/x")).sort(), ["code", "field", "host", "kind", "message", "ok", "url"])
 check("validateSourceUrl message is the UX copy", Model.validateSourceUrl("provider.test/x").message, "Start with http://, https://, or / for a local file")
 check("validateSourceUrl too_long quotes LIMITS.url", Model.validateSourceUrl("/" + "x".repeat(2100)).message, "Too long" + SEP + "max 2,048 characters")

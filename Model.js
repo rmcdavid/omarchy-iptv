@@ -1627,8 +1627,6 @@ function validateSourceUrl(text, opts) {
   var s = sanitizeInput(text, MAX_SOURCE_URL + 1)
   if (s === "") return field === "epg" ? pass("", "", "") : fail("empty")
   if (s.length > MAX_SOURCE_URL) return fail("too_long")
-  // `//host/x` is a scheme-relative URL, not a path the user means.
-  if (s.indexOf("//") === 0) return fail("scheme")
   if (s.charAt(0) === "/") return filePath(s)
   if (s.charAt(0) === "~" || s === "." || s === ".." || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
   var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/)

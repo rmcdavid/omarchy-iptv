@@ -1006,6 +1006,13 @@ Item {
     if (!root.opened || !root.formActive || !root.formProbing) return
     var id = String(r.id !== undefined && r.id !== null ? r.id : (r.sourceId !== undefined ? r.sourceId : ""))
     if (root.pendingProbeId !== "" && id !== "" && id !== root.pendingProbeId) return
+    if (r.cancelled === true) {
+      // UX-SOURCES 5.5: no line, the form thaws with its values.
+      root.pendingProbeId = ""
+      root.setGuide(Model.withFormProbing(root.guide, false))
+      root.refocus()
+      return
+    }
     if (r.ok === true) {
       var event = root.form.sourceId !== "" ? "saved" : (root.firstRunForm ? "loaded" : "added")
       root.finishForm(event, { id: id, host: String(r.host || root.form.probeHost), channelCount: Number(r.channelCount), groupCount: Number(r.groupCount) })
@@ -2405,6 +2412,9 @@ Item {
                   width: formColumn.fieldWidth
                   text: root.fieldDisplay(fieldRow.fieldId)
                   readOnly: fieldRow.masked
+                  // A masked field is shown from its start so scheme and host
+                  // are always readable (UX-SOURCES 4.4); no caret scrolling.
+                  autoScroll: !fieldRow.masked
                   password: fieldRow.fieldId === "password"
                   maximumLength: Model.formLimit(fieldRow.fieldId)
                   placeholderText: root.fieldPlaceholder(fieldRow.fieldId)
