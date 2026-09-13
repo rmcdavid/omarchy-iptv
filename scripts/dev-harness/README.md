@@ -109,11 +109,21 @@ $H ipc switchSource <key>      $H ipc retrySource <key>     $H ipc removeSource 
 $H ipc cancelProbe             # while probing: discards the probe's cache dir
 $H ipc xtream http://127.0.0.1:8765 user 'pa ss'       # -> addSource of the built URLs
 $H ipc sources                 # JSON of service.sources (id/label/host/kind/counts, no URL)
-$H ipc sourceEdit <key>        # the edit-form view with playlistMasked / epgMasked only
+$H ipc editMasked <key>        # the edit-form view with playlistMasked / epgMasked only (alias: sourceEdit)
+$H ipc signals                 # the last 20 source signal payloads (sourceProbeFinished, sourceSwitched,
+                               #   sourceRemoved, sourcesPersistFailed, configuredChanged), oldest first
+$H ipc failPersist true        # the fake updateEntryInline refuses every change until `failPersist false`
 $H ipc activeCache             # cache/omarchy-iptv/sources/<key> of the active source
 $H ipc set playlistUrl /path   # CLI parity: reconciles into the history (origin cli)
-$H ipc state                   # + activeSourceKey, cacheReady, probing, switching, sourceErrors, settingsInvalid
+$H ipc state                   # + activeSourceKey, cacheReady, probing, switching, sourceErrors, settingsInvalid,
+                               #   canAddSource; guide: returnMode, sourceCursor(Kind), formFocus, formActive,
+                               #   formProbing and `form` (kind, origin, sourceId, focus, error, values as
+                               #   { value: masked, length, masked, revealed } per field; credentials are ****)
 ```
+
+`state().guide.form` masks with the plugin's own `Model.js`, which `run.sh`
+copies into the scratch root next to `shell.qml`; a raw form value never
+reaches the terminal.
 
 `run.sh --source2 SRC` seeds the history with a second, never-fetched
 record before start (helper `state source add`), so `switchSource` takes
@@ -123,11 +133,12 @@ new `channels.json` being applied).
 
 `run.sh scenario` runs `sources-scenario.sh`: a scripted pass over H1
 (migration from a v0.1 cache + v1 state), H5 (add failure keeps the active
-source), H2 (add, probe, switch), H6/H8 (five switches each way against a
-generated 10k list, median must stay under 150 ms), probe cancel (a silent
-loopback server), H9 (CLI parity through `set playlistUrl`), H11
-(duplicate), H7 (remove the active source) and privacy greps over the log
-and IPC output. It prints one PASS/FAIL line per check and a summary; the
+source and saves nothing, SR23), H2 (add, probe, switch), H6/H8 (five
+switches each way against a generated 10k list, median must stay under
+150 ms), probe cancel (a silent loopback server), H9 (CLI parity through
+`set playlistUrl`), H11 (duplicate), H12 (label / EPG edits, `editMasked`),
+H7 (remove the active source), a `failPersist` switch (SR25) and privacy
+greps over the log and IPC output. It prints one PASS/FAIL line per check and a summary; the
 harness log is `$SCRATCH/scenario.log`.
 
 Pitfalls seen in the QA and fix passes: `wtype space` types the letters

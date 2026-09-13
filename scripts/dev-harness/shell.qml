@@ -3,6 +3,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import "Model.js" as Model
 
 // Dev harness for io.github.rmcdavid.iptv -- a standalone Quickshell config
 // that loads the three plugin entry points straight from the repo with fake
@@ -29,6 +30,11 @@ ShellRoot {
   readonly property string repoRoot: Quickshell.env("OMARCHY_IPTV_ROOT")
   readonly property string pluginId: "io.github.rmcdavid.iptv"
   property string lastTooltip: ""
+  // The last 20 source signal payloads (URL-free by contract), for `signals()`.
+  property var signalLog: []
+  // `failPersist true` makes the fake updateEntryInline refuse every change
+  // (SR25: the service only signals sourcesPersistFailed, no argv fallback).
+  property bool persistFails: false
   property var barEntry: ({
     id: harness.pluginId,
     playlistUrl: Quickshell.env("OMARCHY_IPTV_PLAYLIST") || "",
@@ -51,6 +57,42 @@ ShellRoot {
     var parts = []
     for (var i = 0; i < arguments.length; i++) parts.push(String(arguments[i]))
     console.log("[harness] " + parts.join(" "))
+  }
+
+  function record(name, payload) {
+    var next = harness.signalLog.slice()
+    next.push({ signal: name, at: Date.now(), payload: payload })
+    while (next.length > 20) next.shift()
+    harness.signalLog = next
+    harness.log(name, JSON.stringify(payload))
+  }
+
+  // The guide form as `state()` reports it: URL fields and the server pass
+  // through Model.maskUrl, credentials become the mask token, and every
+  // field carries its length, so a scenario can verify a paste without the
+  // value reaching the terminal (docs/QA-SOURCES.md section 6).
+  function formSnapshot(g) {
+    var f = g.form
+    if (!f) return null
+    var values = {}
+    var fields = Model.formFields(f)
+    for (var i = 0; i < fields.length; i++) {
+      var id = fields[i]
+      var raw = String(f.values && f.values[id] !== undefined && f.values[id] !== null ? f.values[id] : "")
+      var shown
+      if (id === "password" || id === "username") shown = raw === "" ? "" : Model.MASK
+      else if (Model.isUrlField(id) || id === "server") shown = Model.maskUrl(raw)
+      else shown = raw
+      values[id] = {
+        value: shown, length: raw.length,
+        masked: Model.isUrlField(id) ? Model.fieldMasked(f, id) : id === "password",
+        revealed: Model.isUrlField(id) ? Model.fieldRevealed(f, id) : false
+      }
+    }
+    return {
+      kind: f.kind, origin: f.origin, sourceId: f.sourceId, focus: f.focus, probing: f.probing === true,
+      probeHost: f.probeHost, probeKind: f.probeKind, error: f.error, values: values, parent: f.parent ? f.parent.kind : ""
+    }
   }
 
   // Change a setting at runtime the way `omarchy bar set` would: the host
@@ -91,6 +133,7 @@ ShellRoot {
     function updateEntryInline(id, entry) {
       var e = entry || {}
       harness.log("updateEntryInline", id, "keys:", Object.keys(e).join(","), "playlist", e.playlistUrl ? "(set)" : "(none)", "epg", e.epgUrl ? "(set)" : "(none)")
+      if (harness.persistFails) { harness.log("updateEntryInline refused (failPersist)"); return false }
       if (String(id) !== harness.pluginId || typeof e !== "object") return false
       var next = { id: harness.pluginId }
       for (var k in e) if (k !== "id") next[k] = e[k]
@@ -102,14 +145,17 @@ ShellRoot {
     }
   }
 
-  // Source signals (URL-free payloads by contract) go to the log so a
-  // scripted scenario can follow them in the [qs] output.
+  // Source signals (URL-free payloads by contract) go to the log and to the
+  // `signals()` ring so a scripted scenario can follow them. The clipboard
+  // answer (clipboardText) is deliberately not observed: it may carry
+  // credentials.
   Connections {
     target: serviceLoader.item
-    function onSourceProbeFinished(result) { harness.log("sourceProbeFinished", JSON.stringify(result)) }
-    function onSourceSwitched(id) { harness.log("sourceSwitched", id, "channels", serviceLoader.item ? serviceLoader.item.channels.length : -1) }
-    function onSourceRemoved(id) { harness.log("sourceRemoved", id) }
-    function onSourcesPersistFailed(reason) { harness.log("sourcesPersistFailed", reason) }
+    function onSourceProbeFinished(result) { harness.record("sourceProbeFinished", result) }
+    function onSourceSwitched(id) { harness.record("sourceSwitched", { id: id, channels: serviceLoader.item ? serviceLoader.item.channels.length : -1 }) }
+    function onSourceRemoved(id) { harness.record("sourceRemoved", { id: id }) }
+    function onSourcesPersistFailed(reason) { harness.record("sourcesPersistFailed", { reason: reason }) }
+    function onConfiguredChanged() { harness.record("configuredChanged", { configured: serviceLoader.item ? serviceLoader.item.configured : null }) }
   }
 
   // ---- fake PluginBarApi (Ui/PluginBarApi.qml surface)
@@ -253,6 +299,15 @@ ShellRoot {
       if (!e) return "null"
       return JSON.stringify({ id: e.id, label: e.label, labelCustom: e.labelCustom, kind: e.kind, origin: e.origin, host: e.host, playlistMasked: e.playlistMasked, epgMasked: e.epgMasked })
     }
+    // SR31 name for the same view: masked strings only.
+    function editMasked(key: string): string { return sourceEdit(key) }
+    // The last 20 source signal payloads, oldest first.
+    function signals(): string { return JSON.stringify(harness.signalLog) }
+    // "true" (or no argument) makes every updateEntryInline refuse; "false" restores it.
+    function failPersist(on: string): string {
+      harness.persistFails = !(String(on) === "false" || String(on) === "0")
+      return harness.persistFails ? "persist fails" : "persist ok"
+    }
     function widget(): string {
       var w = barLoader.item
       if (!w) return "{}"
@@ -269,7 +324,13 @@ ShellRoot {
           rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, bannerKind: g.bannerKind, bannerText: g.bannerText,
           scopeLabel: g.scopeLabelText, footer: g.footerStatusText, warning: g.warningText, narrow: g.narrow, showColumn: g.showColumn,
           cursorName: g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0 ? g.currentRows[g.cursorIndex].name : "",
-          scopes: g.scopeList.map(function(e) { return e.id + "=" + e.count })
+          scopes: g.scopeList.map(function(e) { return e.id + "=" + e.count }),
+          // Sources screens (SR31): mode transitions, the cursor and the form
+          // with masked values and lengths.
+          returnMode: g.guide ? String(g.guide.returnMode || "") : "",
+          sourceCursor: g.sourceCursor, sourceCursorKind: g.sourceCursorKind, sourceCount: g.sourceCount,
+          formFocus: g.formFocus, formActive: g.formActive, formProbing: g.formProbing,
+          form: harness.formSnapshot(g)
         }
       }
       if (s) {
@@ -287,6 +348,8 @@ ShellRoot {
         out.service.settingsInvalid = s.settingsInvalid ? { code: s.settingsInvalid.code } : null
         out.service.cacheLayout = s.userState.cacheLayout
         out.service.sourceCount = s.sourceCount
+        out.service.canAddSource = s.canAddSource
+        out.service.persistFails = harness.persistFails
       }
       return JSON.stringify(out)
     }
