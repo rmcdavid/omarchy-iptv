@@ -62,14 +62,14 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M1.1-01 | Live-shell functional QA (docs/QA.md matrix) | QA | done (harness) | docs/QA-RESULTS.md on f03fef2: 140 pass / 7 fail / 12 blocked (live shell) / 15 not run; 0 P1, 2 P2, 13 P3; live-shell cases pending user permission |
-| M1.1-02 | Theme-switch check | QA | blocked | needs the plugin installed in the live shell (omarchy theme set); commands in QA-RESULTS.md section 7 |
+| M1.1-01 | Live-shell functional QA (docs/QA.md matrix) | QA | done | harness: 148 pass / 0 fail; live shell 2026-09-13: install, enable, bar set, guide, IPC play/stop, dead stream, keybinding, menu row, restart shell all pass (QA-RESULTS.md live section) |
+| M1.1-02 | Theme-switch check | QA | done | live: Retropc -> Nord with the guide open re-skinned without restart; restored |
 | M1.1-03 | Performance check (10k playlist, large EPG) | QA | done | all within budget: playlist 11k parse 530 ms, overlay open ~64 ms net on 11k cache, filter <= 6.7 ms, EPG 41 MB gz 2.9 s, --now-only 37 ms |
 | M1.1-04 | Security review (G4) | ARCH | done | docs/SECURITY-REVIEW.md: pass with findings (S-01 P2, 7 P3); all eight fixed and merged 134fbe1 (256 node, 144 python) |
 | M1.1-05 | Fix round 1 (P1/P2) | FE | done | security round merged 134fbe1; QA-defect round merged 2ce0b52; all 23 items verified by M1.1-06 |
 | M1.1-06 | Regression re-test | QA | done (harness) | docs/QA-RESULTS.md "Regression on 2ce0b52": 23/23 fixes verified, 137 cases re-run with 0 regressions, gates green (271 node, 144 python, 18 qml, validate 0); new P3s D-LIVE-16/17/18; live-shell block (12 cases) unchanged |
 | M1.1-07 | Docs polish + known limitations | FE+UX | done | README (limits, disable note, third-party bar, behavior notes, D-LIVE-18), UX 6.3/6.4 wording, ARCHITECTURE 12.1, CHANGELOG.md |
-| M1.1-08 | Dead-stream hardening | FE | todo | carries D-LIVE-16 (column scroll on reopen), D-LIVE-17 (SIGKILL escalation for an mpv that never answers IPC) |
+| M1.1-08 | Dead-stream hardening | FE | doing | D-LIVE-16/17/18 fix lane started 2026-09-13 |
 
 ### Release
 
@@ -159,7 +159,7 @@ Regression re-test on 2ce0b52 (QA, 2026-09-13, `docs/QA-RESULTS.md` section "Reg
 
 ## Blockers
 
-- Live-shell verification (12 blocked cases: install, enable, keybinding, menu row, theme switch, bar placement, multi-monitor) requires changes to the user's Omarchy config; the permission classifier declined to delegate them. Needs the user's go-ahead or the commands in docs/QA-RESULTS.md section 7 run by hand.
+- none (live-shell verification completed 2026-09-13 with the user's permission)
 
 | Since | Task | Blocker | Owner | Unblock action |
 |---|---|---|---|---|

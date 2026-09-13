@@ -676,3 +676,37 @@ Unchanged from section 7: TC-INST-02/03/04 (journal)/05/06/08/09/10, TC-CFG-01 (
 ## R9. Release recommendation
 
 All 23 fixes verified, no regression in a 137-case sample, gates green, 0 open P1/P2. The three new P3s are cosmetic (D-LIVE-16), an intermittent hardening gap already routed to M1.1-08 (D-LIVE-17) and a one-sentence README mismatch (D-LIVE-18; fix before tagging). QA verdict for a v0.1.0 release candidate: go, as an RC. The final v0.1.0 tag should wait for the live-shell block in R8 (G2/QB3: install, enable, keybinding, menu row, theme switch, `omarchy bar set` propagation, restart semantics), which needs the lead's or the user's desktop; the harness pass gives no evidence for those host integrations.
+
+## Live-shell verification on the reference machine (2026-09-13, build e418a99 / v0.1.0-rc1)
+
+Performed by the product owner with the user's explicit permission, on the
+user's running Omarchy 4.0.3 shell (theme Retropc, single 1366x768 output).
+Backups of `shell.json`, `bindings.lua`, and `omarchy-menu.jsonc` were taken
+to the session scratchpad before any change.
+
+| Case | Result | Evidence |
+|---|---|---|
+| INST: clone into `~/.config/omarchy/plugins/io.github.rmcdavid.iptv`, no symlinks, `omarchy plugin validate` | pass | validate exit 0; clone on branch main at e418a99 |
+| INST: `omarchy-shell shell rescanPlugins` + `omarchy plugin enable` | pass | `plugin list --json` shows enabled, kinds bar-widget/overlay/service; entry added to shell.json right section |
+| CFG: `omarchy bar set ... playlistUrl` (iptv-org US) propagates via shell.barConfig | pass | helper ran without a widget restart; status ready, 1,475 channels, 28 groups at 13:42 |
+| CFG: cache and state files | pass | `~/.cache/omarchy-iptv/*` and `state.json` mode 0600 in 0700 dirs |
+| BRW: guide opens via `omarchy-shell shell toggle`, renders group column, counts, footer hints | pass | guide-open.png |
+| BRW: search `cnn` (no match), `Esc` clears, `Esc` closes | pass | guide-search.png (`No matches for "cnn"`), guide-closed.png |
+| PLAY: IPC `play` on a dead stream | pass | mpv exited, no window left, `lastError` = `No video or audio streams selected.` (no URL), channel added to Recent |
+| PLAY: IPC `play` on a live stream (Bloomberg Originals) | pass | `hyprctl clients` shows class `omarchy-iptv`, title = channel name; status playing with nowPlaying.launchedFrom `g:Business`; bar shows playing glyph + elided name (playing.png) |
+| PLAY: IPC `stop` | pass | window gone within 3 s, playing false, no mpv process |
+| BAR: widget renders in the right section, glyph only while idle | pass | bar.png |
+| INST: keybinding line from contrib/bindings.lua appended to bindings.lua | pass | `hyprctl configerrors` empty; `omarchy menu keybindings --print` lists `SUPER SHIFT + T -> IPTV`; `hyprctl binds -j` shows modmask 65 key T. Not test-fired by automation (the user pressed it) |
+| INST: menu row from contrib/omarchy-menu.jsonc inserted | pass | file parses after comment stripping; key `iptv` present |
+| UI: theme switch with the guide open (`omarchy theme set nord`) | pass | overlay re-skinned live without restart (theme-nord.png); reopen consistent (theme-nord-reopen.png); Retropc restored |
+| INST: `omarchy restart shell` | pass | shell ping ok; plugin enabled; status ready with a fresh fetch at 14:21; guide opens (after-restart.png); no plugin errors in the log |
+| Shell log | pass | only pre-existing MPRIS/dbus warnings from omarchy.media about an unrelated mpv; nothing from io.github.rmcdavid.iptv |
+
+Still not exercised on the live shell: multi-monitor placement (single output),
+mouse gestures on the bar widget (verified via IPC equivalents in the
+harness), `omarchy plugin update` round trip, third-party replacement bar.
+
+End state left on the machine: plugin installed and enabled, playlistUrl set
+to the iptv-org US list, `SUPER + SHIFT + T` bound, `iptv` menu row present,
+theme Retropc. Undo: `omarchy plugin remove io.github.rmcdavid.iptv`, delete
+the two appended lines, `rm -rf ~/.cache/omarchy-iptv ~/.local/state/omarchy-iptv`.
