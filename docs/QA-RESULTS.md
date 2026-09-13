@@ -522,3 +522,157 @@ Evidence: run4 console lines `play failed: mpv did not answer` (x2) and the PERF
 - `bin/__pycache__` and `tests/__pycache__` exist in the working tree from test runs (`helper_loader.py` imports the helper), not from runtime; `.gitignore` covers them.
 - QA.md corrections made in this pass (v0.2): helper code name `not_a_playlist` (was `not_m3u`) in TC-PARSE-09, TC-RFR-09, 5.4 US7 step 8, the fixture table and D-QA-13; TC-PLAY-09 / 5.4 US3 step 9 no longer claim `kill -CONT is not needed` (mpv traps SIGTERM).
 
+
+# Regression on 2ce0b52 (M1.1-06)
+
+Owner: QA. Written 2026-09-13 after the re-test of 2026-09-13 01:22 - 01:58. Code under test: `main` at `76ad317` (docs-only on top of `2ce0b52`, the merge of the security fix round S-01..S-08 at `134fbe1` and the QA-defect fix round D-LIVE-01..15 at `dc5e9a3`/`1acf232`/`c969871`); `git diff --stat 2ce0b52 76ad317 -- bin Model.js Service.qml Guide.qml BarWidget.qml manifest.json scripts` is empty. Same method as the first pass (section 1): dev harness with fake shell/bar/settings, scratch XDG dirs under `/tmp/claude-1000/omarchy-iptv-qa2/harness`, the notification shim, quickshell killed by PID between runs; nothing installed, nothing under `~/.config` or `~/.local/state` touched, no `omarchy theme set` / `hyprctl dispatch|reload` / `omarchy plugin ...` / `omarchy bar set` / sudo. Same machine (Omarchy 4.0.3-1, Quickshell 0.3.1, Hyprland 0.56.2, mpv 0.41.0, Python 3.14.7, node 26.8.1, one 1366x768 output). Evidence: `/tmp/claude-1000/omarchy-iptv-qa2/`: `logs/run<N>.log` harness consoles, `logs/run<N>-cmd.log` command transcripts, `logs/notifications.log`, `logs/s05-trickle.log`, `logs/s06-redirect.log`, `logs/qmllint.txt`, `logs/perf03-node.log`, `shots/*.png` (48 grim screenshots, inspected), `gen/gen-50500.m3u` (sha256 `4f944330...c212`, 50,500 entries / 7,152 group titles), `fixtures/sec.m3u`, `cache-perf/*`. No pointer automation was available again (no ydotool/dotool), so the mouse cases stay `not run`.
+
+Harness pitfall added to the section 1 list: a `wtype` string sent while the guide is in list mode is read as commands (`r` refreshes, `s` stops, `f` favorites) and a later Tab keeps the old query, so one run-5 sequence went wrong and was redone as run5b; `ipc open '{}'` resets mode and query, and `ipc query <text>` / `ipc activate` avoid the ambiguity.
+
+Conventions as in section 1: ` - ` stands for U+00B7 and `...` for U+2026 in quoted microcopy; the curly quotes of the S-04 body are written `"` here. Runs: run1 `index.m3u` (11,041), run2 `gen-500.m3u` + XMLTV, run3/3b/3c `qa-groups.m3u` (+ `qa-unicode.m3u` via a runtime `playlistUrl` change), run4/4b unconfigured and error states, run5/5b/5c/8/9 `--serve` with `fixtures/sec.m3u` (channels named `${path}`, `BBC ${options/input-ipc-server}`, `-u critical`, `--urgency=x`, Live A/B/C, Dead D, Live E), run6 `gen-50500.m3u`, run7 `qa-attrs.m3u` (privacy).
+
+## R1. Gates
+
+`omarchy plugin validate .` -> exit 0, no output. `scripts/check.sh` (21.9 s) tail:
+
+```
+271 checks, 0 failure(s)
+All Model.js tests passed.
+ok   node tests
+== python3 -m unittest discover -s tests
+Ran 144 tests in 20.097s
+OK
+ok   python tests
+== qmltestrunner tests/Model.spec.qml
+ok   qml spec (18 passed)
+== ascii check (code files)
+ok   ascii check
+check.sh: all green
+```
+
+qmllint (D-LIVE-14): 0 errors; 57 `missing-property`, 51 `unqualified`, 1 `uncreatable-type` (PanelWindow, `Guide.qml:591`), 0 `signal-handler-parameters`; `Service.qml` 0 warnings, `BarWidget.qml` 14, `Guide.qml` 95. All three categories are the README baseline; `unqualified` went 42 -> 51 with the Guide rework (same category).
+
+## R2. Defect verification
+
+| Defect | Result | Repro re-run and evidence |
+|---|---|---|
+| D-LIVE-01 (P2) | verified fixed | run1 `index.m3u`: open state `rows 11041, resultTotal 11041, truncated false`, footer `11,041 channels - updated 01:27`, scope label `All - 11,041 channels`; End -> cursor 11040 (a Chinese-named channel, `shots/run1-end.png`), Home -> 0, PgDn +8 (visible-1) x3 -> 24, PgUp -> 16, Up on row 0 wraps to 11040, Down on the last row wraps to 0, PgDn at End and PgUp at Home clamp; query `a` -> 200 rows, `First 200 of 8,579 - keep typing`, End -> 199 (`shots/run1-cap.png`); Ctrl+U -> 11,041 again; `4k` -> 7 matches. Same on run6 (50,000 rows, End -> 49,999). Wheel: not run (no pointer) |
+| D-LIVE-02 (P2) | verified fixed | run2 `gen-500.m3u` started with `epgUrl` empty (`epg: {configured false, loaded false, pending false}`): `ipc set epgUrl .../gen-500.xml` (the `omarchy bar set` path through `shell.barConfig`) -> `python3 bin/omarchy-iptv epg` seen in the process watch within 300 ms, `epg.loaded true` at +747 ms, `epg-now.json` 43,658 B, rows carry `Now:`/`Next:`/`until` (`shots/run2-epg-loaded.png`); clear to empty then set again (the run8a repro) -> loaded at +593 ms; Pluto `.gz` -> loaded, 0 matches, no banner |
+| D-LIVE-03 (P3) | verified fixed | run4: `playlistUrl http://127.0.0.1:8766/qa-not-m3u.html` -> `playlistReason: Not an M3U playlist`, host `127.0.0.1` (`shots/run4-notm3u.png`); helper code still `not_a_playlist` |
+| D-LIVE-04 (P3) / S-02 | verified fixed | run3: after the first `f`, `700 state/omarchy-iptv`, `600 state.json`; still 600 after a FileView write on restart (run3b) and after rewriting a garbage file (run3c) |
+| D-LIVE-05 (P3) | verified fixed | keyboard `r` polled every ~60 ms: run2 `Refreshing...` +71..+490 ms then `Refreshed - 500 channels` at +604 ms; run3 `Refreshed - 10 channels` at +493 ms, `10 channels - updated 01:35` after the 3 s transient; IPC `refresh` on run1 -> `Refreshed - 11,041 channels`; notification `Playlist refreshed` / `10 channels in 8 groups` low unchanged |
+| D-LIVE-06 (P3) | verified fixed | run3 scopes `favorites, all, Animation, UK \| SPORTS, Sports, Movies, News, Padded, Leading Semicolon, Ungrouped` (`shots/run3-open.png`); run6 last entries `Group 1780 One, Group 2051 Action, Ungrouped=2091` |
+| D-LIVE-07 (P3) | verified fixed | run3: `x` on the only Recent row -> footer `Removed from Recent`, scope `favorites` (2 rows, cursor on `EXTGRP One`), `recent` gone from the column (`shots/run3-recent-removed.png`) |
+| D-LIVE-08 (P3) | verified fixed | run2 with gen-500 EPG loaded: `epgUrl http://127.0.0.1:8766/nope.xml` -> `bannerKind epgError`, `Guide data unavailable (HTTP 404 Not Found) - channels still work - r retry` with the neutral fill (`shots/run2-epg-404b.png`), notification `Guide data error` / `Could not fetch the EPG (HTTP 404 Not Found). Channels still work.` low, rows keep the old window; the banner survives `r` (playlist refresh succeeds, EPG 404 again) and clears 400 ms after the good URL is restored |
+| D-LIVE-09 (P3) | verified fixed | run4 `--playlist none`: Tab, `r` -> footer `Set a playlist first` (`shots/run4-set-first.png`), no helper process, status slot blank otherwise |
+| D-LIVE-10 (P3) | verified fixed | run4 from the not-M3U error: `playlistUrl http://10.255.255.1/x.m3u` -> at +500 ms `emptyKind loading`, `sourceHost 10.255.255.1`, `playlistReason ""`, screen `Loading playlist...` / `Fetching from 10.255.255.1`, hint `Esc close` (`shots/run4-loading.png`) |
+| D-LIVE-11 (P3) | verified fixed | guide `Timed out` after ~20 s (run4, `shots/run4-timeout.png`), notification `Could not fetch the playlist (Timed out). Open the guide for details.`; helper CLI message `playlist download from 127.0.0.1 exceeded its deadline` (no seconds, `logs/s05-trickle.log`); README `within 60 seconds`; UX 6.3 `Timed out` |
+| D-LIVE-12 (P3) | verified fixed | run5b: A played from All -> `launchedFrom g:Local`; Space on A from Favorites (A, E) -> no reload (same pid), `launchedFrom favorites`; `zap 1` -> E, `zap 1` -> A, `zap -1` -> E |
+| D-LIVE-13 (P3) | verified fixed (docs) | README: disable note (line 167), `$XDG_RUNTIME_DIR/omarchy-iptv` in Uninstall (161), third-party bars (172), qmllint baseline (179-182) |
+| D-LIVE-14 (P3) | verified fixed | R1: only baseline categories remain; `Service.qml` clean |
+| D-LIVE-15 (P3) | verified fixed | run5b faithful sequence: A playing, `kill -STOP`, two `mpv unresponsive, restarting player` lines in 32 s, `kill -CONT`, `ipc stop`, 3 s (mpv count 0) -> open, `live b`, Enter: window 426 ms, title `Harness Live B`, `time-pos 2.0` at +1 s, no new `play failed`; next play (E) reused the pid. run5 (one restart before CONT): 406 ms. See D-LIVE-17 for a related new observation |
+| S-01 (P2) | verified fixed | run5: Enter on the channel named `${path}` -> `hyprctl clients -j` title `${path}` (literal), argv `--title=$>${path}`, `--force-media-title=${path}`, mpv `title` property `$>${path}`, bar label `${path}` (`shots/run5-s01.png`); the IPC path (`set_property title` on the next channel) shows `BBC ${options/input-ipc-server}` literally; run8 `play t:s01` over the service IPC -> title `${path}` |
+| S-02 (P3) | verified fixed | = D-LIVE-04 |
+| S-03 (P3) | verified (docs) | README Playback notes lines 121-124 and ARCHITECTURE 12.1 document the first-launch argv; behaviour unchanged by design (run5b argv tail `-- http://127.0.0.1:8765/...`) |
+| S-04 (P3) | verified fixed | helper strips leading dashes at parse time (`-u critical` -> `u critical`, `--urgency=x` -> `urgency=x`, `cache-perf/sec/channels.json`); run5 Space on `u critical` -> notification argv `--app-name IPTV -u normal -g U+F0503 -r 74011 'Stream failed' '"u critical" did not play - Failed to open 127.0.0.1'` with U+201C/U+201D around the name, row `Failed 01:43 - Space to retry`; run3/run7 bodies `"Multi Group Channel" did not play - ...`, `"Channel 11" did not play - ...` |
+| S-05 (P3) | verified fixed | trickle server (one M3U line every 2 s, never ends) on 127.0.0.1:8769: `playlist --url` exit 1, `{"code": "timeout", "message": "playlist download from 127.0.0.1 exceeded its deadline"}` at wall 60.19 s / `durationMs 60052`, maxrss 30 MB (`logs/s05-trickle.log`); service watchdog 180 s present (`Service.qml:759-767`), not exercised |
+| S-06 (P3) | verified fixed | `logs/s06-redirect.log`, source `http://user:secretpw@127.0.0.1:8767/...`: 302 to another origin (8768) -> ok, origin B received no `Authorization`; same-origin 302 -> ok, header kept; 302 to `ftp://` -> `unsafe_redirect` `redirected to an unsupported scheme 'ftp'`; 302 to `file:///etc/passwd` -> `unsafe_redirect` `redirect from 127.0.0.1 not followed`; no `secretpw` in stdout/stderr (QA SEC-20 now covered) |
+| S-07 (P3) | verified fixed | CLI on `gen-50500.m3u` (50,500 entries, 7,152 group titles): 50,000 channels, 2,001 groups, warnings `truncated to 50000 channels (500 entries skipped)` and `group count capped at 2000; 2091 channels listed under Ungrouped`, 2,644/2,721 ms, maxrss 109 MB, `channels.json` 12,406,541 B; run6 guide: `Loading playlist...` at +1.4 s, 50,000 rows at +6.4 s from harness start, 2,004 column entries, open 97-139 ms IPC / 120-153 ms layer (R4), End -> 49,999, `a` -> `First 200 of 41,021`, RSS 553 MB. The warnings are not shown in the guide: D-LIVE-18 |
+| S-08 (P3) | verified fixed | every run prints `playlist=local file epg=(none)` only; `--serve` runs (5, 5b, 5c, 8, 9) end with the fixture server on 8765 reaped and no harness mpv/quickshell left (`stop.sh` output `leftovers: none`); SIGKILL of `run.sh` not tested |
+
+Verification counts: 23 verified fixed (15 D-LIVE, 8 S), 0 still open, 0 partially fixed, 0 reopened.
+
+## R3. Regression sample
+
+137 cases re-run with the first-pass methods (results per case below; cases not listed keep their first-pass result). No regression: every case that passed on f03fef2 passes on 2ce0b52; the seven first-pass failures and SEC-20 now pass.
+
+| Category | Re-run | Result | Notes |
+|---|---|---|---|
+| INST | 01, 04, 07 | pass | gates (R1); consoles carry only the portal WARN and the intentional helper-stderr relays (host only) and `ignoring mpvArgs tokens`; `find . -newermt '2026-09-13 01:22'` inside the plugin dir lists nothing before the docs edits |
+| CFG | 02, 03, 04, 05, 06, 08, 12, 13 | pass | run4 `HTTP 404 Not Found`, `Could not resolve host`, `Unsupported URL`; run3 absolute path; CFG-06 = D-LIVE-02; run8 mpvArgs `--profile=fast --hwdec=auto-safe` kept, `--input-ipc-server=/tmp/x --title=X --no-idle` dropped with the console warning; run3 playlist switched 10 -> 11 -> 10 channels with the guide open; CFG-13 = R5 |
+| BRW | 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 25 | pass | run3: opens on All while Favorites is empty and on Favorites once populated (run3b); `kids` -> 1, `tele`/`TELE quebec`/`cafe`/`ecole` on `qa-unicode.m3u` -> 1/1/2/1 with accents, Backspace / Ctrl+Backspace / Ctrl+U; typing on Favorites jumps to All and Ctrl+U restores Favorites; Right from All -> `g:Movies`, Left x3 wraps to `g:Interactive` (run1); Esc clears then closes; Tab commits `spo` (3 matches), `q w 4` in list mode ignored, `/` back to search; `x` no-op on All, `s` -> `Stopped`; `No matches for "zzzz" in Animation` / `h/l other groups - Home for All` (`shots/run3-nomatch-group.png`) and `No matches for "zzzz"`; `4k` -> 7 on index; `Multi Group Channel` under Animation, found by `kids`; `ipc open '{"query":"sky"}'` prefills; every wtype key landed in the guide; BRW-08 node spot check `kids` on us.m3u: `Kids Movie Club` first |
+| PLAY | 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 12, 14 | pass | run5b/8/9: fresh launch window 436/437/457 ms, class `omarchy-iptv`, one mpv, `--ytdl=no`, `--` then the URL last; B reuses the pid; Enter on the playing row: `time-pos 3.3 -> 5.5`, guide closed, same pid; Space keeps the guide open with the play glyph, bold name and footer `U+F040A <name> - s stop` (`shots/run5-space-cues.png`); dead channel: notification with the quoted body, row `Failed HH:MM - Space to retry` (`shots/run3-failed-row.png`), Recent gains it, bar idle; `s`: mpv gone 358 ms, footer `Stopped`, no notification, widget idle; `q` in mpv: exits, no notification; STOP detection: `mpv unresponsive, restarting player` and a relaunched pid after CONT (run5); three Space presses end on the third row with one mpv; headers `--user-agent=QA-Agent/1.0` / `--referrer=...` on a fresh launch; run9: `f` in mpv -> Hyprland `fullscreen: 2`, guide layer above, after Esc still fullscreen, `pause false`, `mute false`, time-pos advancing (`shots/run9-over-fullscreen.png`) |
+| BAR | 01, 02, 03, 04, 09 | pass | idle `{U+F0502, "", IPTV - click to open the guide}`; `IPTV - no playlist configured`; playing `{U+F0567, Harness Live A, Playing Harness Live A}` width 136; error `{U+F0503, IPTV - playlist error, open the guide}`; ring via `service.zap`: from a group C -> B -> A, from Favorites A <-> E with wrap, from Recent the channel's group |
+| FAV | 01-10 | pass | star + `Added to Favorites` / `Removed from Favorites`; `No favorites yet` (`shots/run3-fav-empty.png`); order C, A, B (`state.json` favorites `t:grp1.test, t:multi.test, t:pipe.test`); `f` at index 1 inside Favorites keeps cursor 1; FAV-05 = D-LIVE-07; Recent first after a play, replay moves B to the top (run8); dead channel recorded in Recent; favorites survive `--keep` restart with `state.json` 600; `garbage{{{` -> empty lists, no warning, `f` rewrites valid JSON; favorites count 2 across `r` |
+| EPG | 01, 02, 03, 04, 05-11, 12 | pass | guide opens on the loading state while the playlist loads (run6); rows `Lifestyle - Now: Magazine Daily - Next: Movie Magazine`, `until 02:00`, hairline; rows without `tvg-id` show the group only (`shots/run2-epg-loaded.png`); EPG-04 = D-LIVE-08; 05-11 `tests/test_epg.py` in check.sh (144 python tests); hairline crop differs by 6.8 px after 66 s (`shots/run2-t0-row.png` vs `run2-t1-row.png`); 10 keys typed during the gen-10k.xml.gz parse, query `sky sports` intact |
+| RFR | 01, 03, 04, 05, 06, 07, 08, 09, 10 | pass | RFR-01 = D-LIVE-05; banner `Playlist refresh failed (Connection refused) - showing cached copy from 01:37 - r retry`, notification `... Using cached copy from 01:37.` (`shots/run4-banner.png`); `r` twice in 100 ms -> one notification; refresh while A plays: same pid, `time-pos 0.8 -> 4.1`; `--keep` restart with the server down: 10 cached rows at +1.1 s with the banner and `10 channels - cached 01:37 - offline` (`shots/run4-cached-start.png`), banner gone after a successful `r`; cursor 49,999 on the 50k list -> 9 after switching to the 10-channel list; `Playlist has no channels`; RFR-09 = D-LIVE-03; the cached footer is now visible on every list size |
+| UI | 01, 02, 03, 04, 06, 07, 08, 09, 10, 11, 12, 13, 14 | pass | `shots/run4-unconfigured.png` (footer blank, column hidden, `r reload - Esc close`), `run4-loading.png`, `run4-banner.png`, cues `run5-space-cues.png`; no hex/white/black/`Qt.rgba(` in `*.qml`; all 21 `font.family` bind the host font; layer mapped 75-99 ms after the toggle call; hint strings verbatim in the screenshots (`Esc clear` variant in `run3-nomatch-group.png`); labels `All - 11,041 channels`, `in All - 8,579 matches`, `Favorites - 0 channels`, `Interactive - 1 channel`; glyphs rendered; qmllint per R1; card 960x620 centred in every shot |
+| A11Y | 05, 06 | pass | derived from PLAY-01/03/14 and PERF-02/03 |
+| PARSE | 01-11 | pass | `tests/test_playlist.py` via check.sh; CLI `qa-not-m3u.html` -> `not_a_playlist`, `qa-empty.m3u` -> `empty_playlist`, exit 1 |
+| MODEL | 01-07 | pass | 271 node checks, 18 QML spec cases, `test_fold_table_matches_model_js` |
+| SEC | 01, 02, 03, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 | pass | greps for shell strings / sudo / XMLHttpRequest empty; argv tail `--`, URL; R5 privacy; `/proc/self/environ` -> `unsafe_path`; `ftp://` -> `unsupported_scheme`; modes `700` cache/state/runtime dirs, `600` `channels.json` / `playlist-status.json` / `epg-*` / `state.json` / `mpv.sock` (owner ricky); no symlinks; service IPC `play` with `http://evil.example.test/x`, `u:deadbeef`, `file:///etc/passwd`, `-- --script=/tmp/x` -> `unknown`, nothing launched; SEC-20 by the S-06 mock (`file:` and `ftp:` both refused now) |
+| PERF | 01-07 | pass | section R4 |
+
+Not re-run (first-pass result kept): TC-CFG-07/09/10/11, TC-BRW-02/19/23/24, TC-PLAY-13, TC-BAR-05/06/07/08/10/11/12, TC-FAV-11, TC-RFR-02, TC-A11Y-01/02/03, SEC-10, TC-MODEL-08.
+
+## R4. Performance, first pass vs now
+
+| ID | Budget | f03fef2 (first pass) | 2ce0b52 (now) | Method (unchanged) |
+|---|---|---|---|---|
+| PERF-01 | `playlist` < 1 s | gen-10k 464 / 479 ms (wall 0.59 s); index 523 / 530 ms (wall 0.64 s); us 67 / 76 ms; maxrss 25-52 MB | gen-10k 484 / 475 ms (wall 0.60 s); index 552 / 548 ms (wall 0.67 s); us 74 / 71 ms; maxrss 25-51 MB; `channels.json` 2,610,946 / 3,209,652 B unchanged | `bin/timeit.py` wrapper, two runs each, `durationMs` from the JSON |
+| PERF-02 | open < 150 ms with the 10k cache | IPC 111-140 ms (median 118) minus baseline 53-55 = ~64 ms; layer map 149 / 174 / 176 ms | IPC 65 / 72 / 67 / 69 / 75 ms (median 69) minus baseline 52-58 = ~12-17 ms; layer map 75 / 81 / 99 ms; 50k cache (new): IPC 97-139 ms, layer 120 / 120 / 153 ms | `date +%s%N` around `h.sh ipc toggle`; `hyprctl layers -j` poll for the `omarchy-iptv` namespace |
+| PERF-03 | keystroke < 30 ms, no drops | 38 keys in order, settled <= 117 ms after the last key; single key 154-194 ms incl. spawn; filter `a` 6.72 ms, `news` 2.30, `alpha news` 1.93, `zz` 1.58, `abc news live` 1.89; groupChannels 4.64 ms | 38 keys in order, settled 95 ms after the last key (one poll); single key 126 ms incl. spawn; filter `a` 6.55 ms (best 5.06), `news` 2.15, `alpha news` 1.80, `zz` 1.50, `abc news live` 1.76, empty query 0.00 ms (same array); groupChannels 4.77 ms; prepareChannels 37 ms | `wtype -d 20` x18 + `-d 1` x20; node 50 iterations on `cache-perf/index/channels.json` |
+| PERF-04 | `epg` < 4 s, RSS < 300 MB | gen-10k.xml.gz wall 2.88 s / 2757 ms, maxrss 60 MB, `epg-now.json` 908,876 B (5,840 channels); `--now-only` 37 ms; Pluto 322-393 ms; gen-real.xml 229 ms | wall 2.79 / 2.78 s, 2672 / 2663 ms, maxrss 52-60 MB, `epg-now.json` 908,939 B (5,840 channels), `epg-window.txt` 3,189,425 B; `--now-only` 35 ms; Pluto 317 / 319 ms (0 matches, warnings as before); gen-real.xml 238 ms | same wrapper, `--force` |
+| PERF-05 | informational | 305 MB after the 11k load, 383 after 20 opens, 438 before / 381 after 20 more | 332 MB after the 11k load, 322 after 8 opens, 325 after 20, 323 after 40 (no growth); 553 MB after the 50k load (new) | `ps -o rss= -p <harness pid>` |
+| PERF-06 | zap < 2 s | local: window 594 / 673 ms, `time-pos` 1.9 s one second later; ABC News Live 523 ms | local: window 436 / 437 / 457 ms after the last key, `time-pos` 0.6-2.0 s one second later; after the hung-mpv sequence 426 ms; no network channel played this pass | keys + `hyprctl clients -j` poll every 50 ms + `bin/mpvq.py` |
+| PERF-07 | no stall | pass | pass: `abc news` typed during the 11k refresh (17 matches while `Refreshing...`), `sky sports` during the 41 MB EPG parse | as before |
+
+## R5. Privacy sweep re-run (SEC-07, TC-CFG-13)
+
+run7, `qa-attrs.m3u`, Space on `Channel 11` (`u:46b30f8f`, credentialed URL, DNS failure). Hits for `user:` / `secret` / `stream.example.test/` / `/live/`: harness console 0, `notifications.log` 0 (body `"Channel 11" did not play - Failed to open stream.example.test`), service IPC `status` 0 (`nowPlaying`, `lastError` host only; run8 dump), harness state dump 0, widget JSON 0, `state.json` 0 (`recents: [{id: u:46b30f8f, name: Channel 11}]`), `playlist-status.json` 0, `channels.json` 1 (by design). Screenshot `shots/run7-failed-card.png`. Verdict: pass, unchanged.
+
+## R6. New defects (rows in docs/STATUS.md)
+
+### D-LIVE-16  P3  found 2026-09-13 at 2ce0b52 - browse / Guide.qml group column position on reopen
+
+Steps: 1. `h.sh --open --playlist downloads/index.m3u` (30 groups; `gen-500.m3u` with 20 groups reproduces too: the column must be taller than the card body). 2. Look at the column: correct, `Favorites` then `All` at the top (`shots/run1-open.png`). 3. Esc (or `ipc close`), then reopen with `ipc toggle` / `ipc open '{}'` while Favorites is empty (the guide lands on All).
+
+Expected: UX 2.2 order with Recent/Favorites/All at the top; the column should open scrolled to the top, i.e. to the selected scope (All is the second entry).
+
+Actual: the column starts at `All`; `Favorites` sits above the viewport and is invisible until the user presses Left/h (`shots/run1-reopen.png`, `run1-reopen2.png`, `run1-now.png`, `run2-reopen.png`). Every reopen that lands on All reproduces; a reopen that lands on Favorites (favorites non-empty) is correct (`run1-reopen-fav.png`); a column that fits the card (qa-groups, 8 groups) is correct (`run3-reopen.png`). Confirms the fix-round dev's observation. Severity P3 (PLAN 6: cosmetic; Favorites is one keypress away and no story is blocked), though it hides the entry that teaches `f`. Likely cause: `rebuildDisplay` positions the column with `groupList.positionViewAtIndex(at, ListView.Contain)` inside `Qt.callLater` (`Guide.qml:359-361`) before the column has its final height on reopen, so `Contain` for index 1 scrolls it to the top edge; FE to confirm.
+
+### D-LIVE-17  P3  found 2026-09-13 at 2ce0b52 - playback / Service.qml stop and health paths never escalate past SIGTERM (intermittent trigger)
+
+Steps (as observed, run5b, `--serve` with `fixtures/sec.m3u`): 1. Fresh launch A (Enter), `ipc stop`, wait 0.4 s; fresh launch E, stop, 0.4 s; fresh launch B. 2. The third mpv (pid 1343432) mapped its window in 457 ms but never answered on the IPC socket (`bin/mpvq.py` -> `timed out`, helper calls -> `mpv did not answer`). 3. `ipc stop`, then `s` in list mode.
+
+Expected: TC-PLAY-06 `s`: mpv gone within a second, footer `Stopped`; ARCH: one player, the service always able to end it.
+
+Actual: the process stayed alive for ~2 minutes across `ipc stop`, `s`, ~10 plays and zaps; `stopFallbackTimer` and the health check send only `signal(15)` (`Service.qml:421`, `:787`) and a wedged mpv ignores SIGTERM; the health timer skipped every poll because a control call (2 s deadline, retried with backoff per D-LIVE-15) was always in flight, so no `mpv unresponsive` line appeared in that phase; `nowPlaying`/bar tooltip moved to A, C, E while the window stayed on `Harness Live B` (`logs/run5b.log` lines 21-34: three `play failed: mpv did not answer`). It ended only after an external `kill -STOP` / `kill -CONT` (D-LIVE-15 step) let the pending SIGTERM through. Not reproduced on demand: 8 consecutive launch/stop cycles with the same timing (run5c: IPC answered every time, stops 230-263 ms) and the 16 launches of runs 5, 8 and 9 were clean; the same no-SIGKILL gap is deterministic for a `SIGSTOP`ped mpv (TC-PLAY-09: two SIGTERMs, never reaped until CONT). Root cause of the wedge unknown (first-launch IPC never came up). Suggested fix: escalate to `signal(9)` a few seconds after an ignored SIGTERM in both paths and do not let in-flight control calls starve the health timer indefinitely. Route: M1.1-08 dead-stream hardening. Evidence: `logs/run5b-cmd.log`, `logs/run5b.log`, `logs/run5c-cmd.log`.
+
+### D-LIVE-18  P3  found 2026-09-13 at 76ad317 - docs / README Limits vs Guide.qml (helper warnings never rendered)
+
+Steps: run6, `h.sh --open --playlist gen/gen-50500.m3u`; wait for the load; read the guide.
+
+Expected: README Limits (76ad317): `extra channels are skipped and extra groups fold into Ungrouped, with a warning in the guide`.
+
+Actual: `playlist-status.json` carries `warnings: ["truncated to 50000 channels (500 entries skipped)", "group count capped at 2000; 2091 channels listed under Ungrouped"]` but the guide shows `bannerKind none`, footer `50,000 channels - updated 01:53`, no warning text anywhere in the guide or service state (`shots/run6-open.png`); `Guide.qml`/`Service.qml` never read `warnings` (only `Model.js:848` normalises the field). Either render the helper warnings (banner or footer, also useful for the existing `dropped header` / `no EPG channel id matches` warnings) or reword the README sentence. Docs-only fix acceptable for v0.1.0.
+
+## R7. Updated counts (174 cases)
+
+| Category | Cases | pass | fail | blocked | not run |
+|---|---|---|---|---|---|
+| INST | 10 | 3 | 0 | 7 | 0 |
+| CFG | 13 | 13 | 0 | 0 | 0 |
+| BRW | 25 | 19 | 0 | 2 | 4 |
+| PLAY | 14 | 11 | 0 | 1 | 2 |
+| BAR | 12 | 8 | 0 | 0 | 4 |
+| FAV | 11 | 10 | 0 | 0 | 1 |
+| EPG | 12 | 12 | 0 | 0 | 0 |
+| RFR | 10 | 9 | 0 | 0 | 1 |
+| UI | 14 | 13 | 0 | 1 | 0 |
+| A11Y | 6 | 5 | 0 | 1 | 0 |
+| PARSE | 11 | 11 | 0 | 0 | 0 |
+| MODEL | 8 | 7 | 0 | 0 | 1 |
+| SEC | 21 | 19 | 0 | 0 | 2 |
+| PERF | 7 | 7 | 0 | 0 | 0 |
+| **Total** | **174** | **148** | **0** | **12** | **14** |
+
+Changes against section 2: TC-CFG-06, TC-BRW-21, TC-FAV-08, TC-EPG-04, TC-RFR-01, TC-RFR-09 and SEC-14 fail -> pass; SEC-20 not run -> pass (S-06 mock). Open defects: 0 P1, 0 P2, 3 P3 (D-LIVE-16, 17, 18). D-LIVE-16 is reported through TC-BRW-05/06 (their own expectations still hold); D-LIVE-17 through TC-PLAY-06 (the deterministic re-run passes, the one intermittent instance is recorded above); D-LIVE-18 has no test-case row (README sentence added in 76ad317).
+
+## R8. Still blocked: needs live shell
+
+Unchanged from section 7: TC-INST-02/03/04 (journal)/05/06/08/09/10, TC-CFG-01 (`omarchy bar set` -> `shell.barConfig`), TC-CFG-07 (timer re-arm), TC-BRW-01, TC-BRW-04, TC-PLAY-11, TC-UI-05, TC-A11Y-04 (second monitor); the mouse cases TC-BRW-02/19/23, TC-BAR-06/07/08, TC-FAV-11 and the click part of TC-A11Y-03 need a hand on the mouse; TC-BRW-24 needs `hyprctl keyword monitor`. The command list in section 7 still applies; the D-LIVE-02 remark in it is obsolete (the EPG now loads on the first `omarchy bar set ... epgUrl`).
+
+## R9. Release recommendation
+
+All 23 fixes verified, no regression in a 137-case sample, gates green, 0 open P1/P2. The three new P3s are cosmetic (D-LIVE-16), an intermittent hardening gap already routed to M1.1-08 (D-LIVE-17) and a one-sentence README mismatch (D-LIVE-18; fix before tagging). QA verdict for a v0.1.0 release candidate: go, as an RC. The final v0.1.0 tag should wait for the live-shell block in R8 (G2/QB3: install, enable, keybinding, menu row, theme switch, `omarchy bar set` propagation, restart semantics), which needs the lead's or the user's desktop; the harness pass gives no evidence for those host integrations.
