@@ -345,6 +345,100 @@ def generate_xmltv(path, channel_count, per_channel, first_start):
         handle.write("</tv>\n")
 
 
+T0 = 1789244100   # 2026-09-12T20:15:00Z, the reference instant of docs/QA.md TC-EPG-*
+QA_XMLTV = str(FIXTURES / "qa-epg.xml")
+QA_XMLTV_GZ = str(FIXTURES / "qa-nonascii" / "qa-epg.xml.gz")
+
+
+def prog(title, start, stop):
+    return {"title": title, "start": start, "stop": stop}
+
+
+class QaEpgFixtureTest(unittest.TestCase):
+    def epg(self, source, cache, *extra):
+        return run("epg", "--url", source, "--cache-dir", cache, "--now", str(T0), *extra)
+
+    def test_qa_epg_now_next_at_t0(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, status, stderr = self.epg(QA_XMLTV, tmp)
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(status["epgChannels"], 12)
+            self.assertEqual(status["programmeCount"], 25)
+            self.assertIsNone(status["matched"])
+            self.assertEqual(status["validUntil"], T0 + 300)
+            self.assertEqual(status["warnings"], [])
+            channels = read(os.path.join(tmp, "epg-now.json"))["channels"]
+            self.assertEqual(channels["bbc1.uk"], {"now": prog("Six O'Clock News", T0 - 4500, 1789245000), "next": prog("Regional News", 1789245000, 1789248600)})
+            self.assertEqual(channels["cnn.us"], {"now": prog("The Lead", T0 - 900, T0 + 2700), "next": prog("Situation Room", T0 + 2700, T0 + 6300)})
+            self.assertEqual(channels["overlap.test"], {"now": prog("Overlap B", T0 - 900, T0 + 2700), "next": prog("After Overlap", T0 + 2700, T0 + 6300)})
+            self.assertEqual(channels["gap.test"], {"next": prog("Starts Later", T0 + 2700, T0 + 6300)})
+            self.assertEqual(channels["nostop.test"], {"now": prog("No Stop Attribute", T0 - 900, T0 + 2700), "next": prog("After No Stop", T0 + 2700, T0 + 6300)})
+            self.assertEqual(channels["notz.test"], {"now": prog("No Offset Now", T0 - 900, T0 + 2700), "next": prog("No Offset Next", T0 + 2700, T0 + 6300)})
+            self.assertEqual(channels["short.test"], {"now": prog("Short Format", T0 - 900, T0 + 1800), "next": prog("Short Format Next", T0 + 1800, T0 + 4500)})
+            self.assertEqual(channels["unicode.test"]["now"]["title"], "T\u00e9l\u00e9journal \u2014 \u00c9dition sp\u00e9ciale")
+            self.assertEqual(channels["unicode.test"]["next"]["title"], "\u0627\u0644\u062c\u0632\u064a\u0631\u0629")
+            self.assertEqual(channels["00sReplay.us@SD"], {"now": prog("Replay Block 1", T0 - 2700, T0 + 900), "next": prog("Replay Block 2", T0 + 900, T0 + 4500)})
+            self.assertEqual(channels["orphan.test"], {"now": prog("Orphan Programme", T0 - 900, T0 + 2700)})
+            self.assertEqual(channels["halfhour.test"], {"now": prog("Half Hour Offset", T0 - 900, T0 + 2700), "next": prog("Half Hour Offset Next", T0 + 2700, T0 + 6300)})
+            self.assertNotIn("far.test", channels)
+            self.assertNotIn("nochannel.test", channels)
+            self.assertEqual(len(channels), 11)
+
+    def test_qa_gzip_twin_gives_identical_output(self):
+        with tempfile.TemporaryDirectory() as plain, tempfile.TemporaryDirectory() as gz:
+            code, _, stderr = self.epg(QA_XMLTV, plain)
+            self.assertEqual(code, 0, stderr)
+            code, status, stderr = self.epg(QA_XMLTV_GZ, gz)
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(status["programmeCount"], 25)
+            self.assertEqual(pathlib.Path(plain, "epg-now.json").read_bytes(), pathlib.Path(gz, "epg-now.json").read_bytes())
+
+    def test_qa_restricted_to_playlist_ids_with_at_sign_and_case_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            playlist = os.path.join(tmp, "list.m3u")
+            pathlib.Path(playlist).write_text(
+                "#EXTM3U\n"
+                "#EXTINF:-1 tvg-id=\"00sReplay.us@SD\",00s Replay\nhttp://stream.example.test/replay.m3u8\n"
+                "#EXTINF:-1 tvg-id=\"BBC1.UK\",BBC One (HD)\nhttp://stream.example.test/bbc1.m3u8\n"
+                "#EXTINF:-1 tvg-id=\"nochannel.test\",Never Scheduled\nhttp://stream.example.test/never.m3u8\n"
+                "#EXTINF:-1 tvg-id=\"missing.test\",Missing\nhttp://stream.example.test/missing.m3u8\n", encoding="utf-8")
+            code, _, stderr = run("playlist", "--url", playlist, "--cache-dir", tmp)
+            self.assertEqual(code, 0, stderr)
+            code, status, stderr = self.epg(QA_XMLTV, tmp)
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(status["matched"], 2)
+            self.assertEqual(status["channelTotal"], 4)
+            self.assertEqual(status["epgChannels"], 2)
+            channels = read(os.path.join(tmp, "epg-now.json"))["channels"]
+            self.assertEqual(sorted(channels), ["00sReplay.us@SD", "BBC1.UK"])
+            self.assertEqual(channels["BBC1.UK"]["now"]["title"], "Six O'Clock News")
+            self.assertIn("dropped", " ".join(status["warnings"]))
+
+    def test_inflated_gzip_bomb_is_too_large(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bomb = os.path.join(tmp, "bomb.xml.gz")
+            pathlib.Path(bomb).write_bytes(gzip.compress(b"<tv><x>" + b"A" * (65 << 20) + b"</x></tv>", compresslevel=1))
+            self.assertLess(os.path.getsize(bomb), 1 << 20)
+            code, status, _ = self.epg(bomb, tmp)
+            self.assertEqual(code, 1)
+            self.assertEqual(status["error"]["code"], "too_large")
+
+    def test_entity_expansion_bomb_is_refused_quickly(self):
+        # SEC-19: libexpat's amplification limit turns a billion-laughs document into bad_xml.
+        with tempfile.TemporaryDirectory() as tmp:
+            entities = ["<!ENTITY a0 \"lol lol lol lol lol lol lol lol lol lol\">"]
+            for level in range(1, 9):
+                entities.append("<!ENTITY a%d \"%s\">" % (level, "&a%d;" % (level - 1) * 10))
+            document = "<?xml version=\"1.0\"?><!DOCTYPE tv [%s]><tv><programme start=\"20260912200000\" channel=\"x\"><title>&a8;</title></programme></tv>" % "".join(entities)
+            source = os.path.join(tmp, "bomb.xml")
+            pathlib.Path(source).write_text(document, encoding="ascii")
+            started = time.perf_counter()
+            code, status, _ = self.epg(source, tmp)
+            self.assertLess(time.perf_counter() - started, 5.0)
+            self.assertEqual(code, 1)
+            self.assertEqual(status["error"]["code"], "bad_xml")
+
+
 class EpgPerformanceTest(unittest.TestCase):
     def test_now_only_10k_channels_is_fast(self):
         with tempfile.TemporaryDirectory() as tmp:

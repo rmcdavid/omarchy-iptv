@@ -1,10 +1,13 @@
 """CLI-level tests for bin/omarchy-iptv (subprocess, temp cache dir)."""
+import gzip
 import json
 import os
 import pathlib
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -146,6 +149,74 @@ class CliContractTest(unittest.TestCase):
             for secret in ("secretpw", "password=p", "get.php"):
                 self.assertNotIn(secret, completed.stdout + completed.stderr)
             self.assertIn("h.test", completed.stdout)
+
+
+class HardeningTest(unittest.TestCase):
+    """Size caps, unsafe paths, timeouts and status bookkeeping (docs/QA.md test inventory)."""
+
+    def test_sparse_65mb_file_is_too_large_without_reading_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            huge = os.path.join(tmp, "huge.m3u")
+            open(huge, "wb").close()
+            os.truncate(huge, 65 * 1024 * 1024)
+            started = time.monotonic()
+            code, status, stderr = run("playlist", "--url", huge, "--cache-dir", tmp)
+            self.assertLess(time.monotonic() - started, 2.0)
+            self.assertEqual(code, 1)
+            self.assertEqual(status["error"]["code"], "too_large")
+            self.assertNotIn(tmp, json.dumps(status) + stderr)   # base name only (D-QA-12)
+            self.assertIn("huge.m3u", status["error"]["message"])
+
+    def test_unsafe_paths_are_refused_without_echoing_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            link = os.path.join(tmp, "link.m3u")
+            os.symlink("/proc/self/environ", link)
+            for source in ("/proc/self/environ", "/dev/zero", "/sys/kernel/vmcoreinfo", link):
+                code, status, stderr = run("playlist", "--url", source, "--cache-dir", tmp)
+                self.assertEqual(code, 1, source)
+                self.assertEqual(status["error"]["code"], "unsafe_path", source)
+                self.assertNotIn("/proc/self", json.dumps(status) + stderr)
+            code, status, _ = run("playlist", "--url", "/nonexistent/dir/list.m3u", "--cache-dir", tmp)
+            self.assertEqual(status["error"]["code"], "not_found")
+            self.assertEqual(status["error"]["message"], "playlist file not found: list.m3u")
+
+    def test_gzip_bomb_playlist_is_too_large(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bomb = os.path.join(tmp, "bomb.m3u.gz")
+            with open(bomb, "wb") as handle:
+                handle.write(gzip.compress(b"#EXTM3U\n" + b"\0" * (65 << 20), compresslevel=1))
+            self.assertLess(os.path.getsize(bomb), 1 << 20)
+            code, status, _ = run("playlist", "--url", bomb, "--cache-dir", tmp)
+            self.assertEqual(code, 1)
+            self.assertEqual(status["error"]["code"], "too_large")
+
+    def test_timeout_is_honoured_against_a_silent_server(self):
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)   # accepts the TCP handshake, never answers
+        self.addCleanup(listener.close)
+        port = listener.getsockname()[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            started = time.monotonic()
+            code, status, _ = run("playlist", "--url", "http://127.0.0.1:%d/list.m3u" % port, "--cache-dir", tmp, "--timeout", "0.5")
+            self.assertLess(time.monotonic() - started, 5.0)
+            self.assertEqual(code, 1)
+            self.assertEqual(status["error"]["code"], "network")
+            self.assertEqual(status["sourceHost"], "127.0.0.1")
+            self.assertTrue((pathlib.Path(tmp) / "playlist-status.json").is_file())
+
+    def test_status_file_written_on_failure_with_fetched_at_carried_over(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, first, _ = run("playlist", "--url", str(FIXTURES / "basic.m3u"), "--cache-dir", tmp)
+            self.assertEqual(code, 0)
+            code, status, _ = run("playlist", "--url", os.path.join(tmp, "missing.m3u"), "--cache-dir", tmp)
+            self.assertEqual(code, 1)
+            written = json.loads((pathlib.Path(tmp) / "playlist-status.json").read_text(encoding="utf-8"))
+            self.assertEqual(written, status)
+            self.assertFalse(written["ok"])
+            self.assertTrue(written["stale"])
+            self.assertEqual(written["fetchedAt"], first["fetchedAt"])
+            self.assertEqual(written["sourceHost"], "local file")
 
 if __name__ == "__main__":
     unittest.main()
