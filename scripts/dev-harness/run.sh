@@ -78,6 +78,8 @@ prepare_root() {
   ln -sfn "$SHELL_DIR/Commons" "$SCRATCH/root/Commons"
   ln -sfn "$SHELL_DIR/Ui" "$SCRATCH/root/Ui"
   cp "$HERE/shell.qml" "$SCRATCH/root/shell.qml"
+  # The harness masks form values with the plugin's own Model.js (state()).
+  cp "$ROOT/Model.js" "$SCRATCH/root/Model.js"
   # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
   [[ -d $REAL_RUNTIME/hypr ]] && ln -sfn "$REAL_RUNTIME/hypr" "$SCRATCH/runtime/hypr"
 }

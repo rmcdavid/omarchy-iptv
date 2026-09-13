@@ -85,11 +85,18 @@ class SanitizeTest(unittest.TestCase):
         self.assertEqual(helper.sanitize_input("a\U0001F4FAb", 2), "a")
         self.assertEqual(helper.sanitize_input("a\U0001F4FAb", 3), "a\U0001F4FA")
 
+    def test_leading_bom_is_dropped_once(self):
+        # SR15: one leading byte-order mark goes (a paste artefact); a BOM
+        # that is not leading before the control strip stays, as in Model.js.
+        self.assertEqual(helper.sanitize_input("\ufeffx", 5), "x")
+        self.assertEqual(helper.sanitize_input("\ufeff\ufeffx", 5), "\ufeffx")
+        self.assertEqual(helper.sanitize_input("\t\ufeffx", 5), "\ufeffx")
+
 
 class ValidateSourceUrlTest(unittest.TestCase):
-    def check(self, text, ok, code_or_kind, url, host):
-        result = helper.validate_source_url(text)
-        label = repr(text[:60])
+    def check(self, text, ok, code_or_kind, url, host, origin="form"):
+        result = helper.validate_source_url(text, origin=origin)
+        label = repr(text[:60]) + " origin=" + origin
         self.assertEqual(result["ok"], ok, label)
         if ok:
             self.assertEqual(result["code"], "ok", label)
@@ -110,11 +117,52 @@ class ValidateSourceUrlTest(unittest.TestCase):
             self.skipTest("tests/fixtures/source-urls.json not authored yet (Lane 1)")
         cases = json.loads(FIXTURE.read_text(encoding="utf-8"))
         self.assertGreater(len(cases), 0)
+        origins = set()
         for case in cases:
+            # SR11: the fixture pins both contexts through its `origin` field.
+            origin = case.get("origin", "form")
+            origins.add(origin)
             if case["ok"]:
-                self.check(case["input"], True, case["kind"], case["url"], case.get("host", ""))
+                self.check(case["input"], True, case["kind"], case["url"], case.get("host", ""), origin)
+                if "key" in case:
+                    self.assertEqual(helper.source_cache_key(case["url"]), case["key"], repr(case["input"][:60]))
             else:
-                self.check(case["input"], False, case["code"], "", "")
+                self.check(case["input"], False, case["code"], "", "", origin)
+        self.assertEqual(origins, {"form", "cli"})
+
+    def test_tilde_depends_on_origin(self):
+        # SR11: the CLI path keeps accepting ~ (verbatim; the reader expands
+        # it), the forms refuse it.
+        self.assertEqual(helper.validate_source_url("~/tv/list.m3u")["code"], "relative_path")
+        self.assertEqual(helper.validate_source_url("~/tv/list.m3u", origin="form")["code"], "relative_path")
+        for text in ("~/tv/list.m3u", "~"):
+            result = helper.validate_source_url(text, origin="cli")
+            self.assertEqual((result["ok"], result["kind"], result["url"], result["host"]), (True, "file", text, ""), text)
+        self.assertEqual(helper.validate_source_url("./x.m3u", origin="cli")["code"], "relative_path")
+
+    def test_scheme_versus_relative_path_heuristic(self):
+        # SR12: leading // and host-like text (a . or : before any /) are
+        # `scheme`; anything else without a scheme is `relative_path`.
+        for text, code in (("//h.test/list.m3u", "scheme"), ("provider.test/list.m3u", "scheme"), ("localhost:8080/list.m3u", "scheme"),
+                           ("list.m3u/", "scheme"), ("list.m3u", "scheme"), ("C:\\tv\\list.m3u", "scheme"),
+                           ("playlist", "relative_path"), ("Videos/list.m3u", "relative_path"), (".", "relative_path"),
+                           ("..", "relative_path"), ("./list.m3u", "relative_path"), ("../tv/list.m3u", "relative_path")):
+            self.assertEqual(helper.validate_source_url(text)["code"], code, text)
+
+    def test_authority_parity_rules(self):
+        # SR15: the checks QA listed, mirrored from Model.validateSourceUrl.
+        for text in ("http://h.test:65536/x", "http://[1.2.3.4]/x", "http://[zz::1]/x", "http://[::1]x/", "http://[::1/x",
+                     "http://h\u200b.test/x", "http://h.test\u2060:8080/x", "http://h.test\ufeff/x", "http://h\\.test/x",
+                     "http://a:b:c/x", "http://h.test:\u0661\u0662/x", "http://h.test/x\u2028y", "http://h.test/x\u00a0y"):
+            self.assertFalse(helper.validate_source_url(text)["ok"], repr(text))
+        self.assertEqual(helper.validate_source_url("http://h.test:0080/x")["url"], "http://h.test/x")
+        self.assertEqual(helper.validate_source_url("https://h.test:08080/x")["url"], "https://h.test:8080/x")
+        self.assertEqual(helper.validate_source_url("http://h.test:65535/x")["url"], "http://h.test:65535/x")
+        self.assertEqual(helper.validate_source_url("http://h.test:0/x")["url"], "http://h.test:0/x")
+        self.assertEqual(helper.validate_source_url("http://[::1%25eth0]/x")["host"], "[::1%25eth0]")
+        self.assertEqual(helper.validate_source_url("http://[2001:DB8::1]/x")["url"], "http://[2001:db8::1]/x")
+        self.assertEqual(helper.validate_source_url("\ufeffhttp://h.test/x")["url"], "http://h.test/x")
+        self.assertEqual(helper.validate_source_url("file:///srv/tv/a.m3u?x=1#f")["url"], "/srv/tv/a.m3u")
 
     def test_query_is_kept_verbatim_and_fragment_dropped(self):
         result = helper.validate_source_url("HTTPS://H.Test/get.php?Token=AbC%2f&x#frag")
@@ -150,8 +198,9 @@ class ResolveSourceTest(unittest.TestCase):
         self.assertEqual(helper.resolve_source("http://h.test/a\x00b\n"), ("http", "http://h.test/ab"))
 
     def test_code_mapping(self):
-        for value, code in (("", "no_source"), ("ftp://h.test/x", "unsupported_scheme"), ("relative/x.m3u", "unsupported_scheme"),
-                            ("http://:80/", "bad_url"), ("./x.m3u", "bad_url"), ("/proc/self/environ", "unsafe_path")):
+        # SR12: `provider.test/x` reads as a host without a scheme, `relative/x.m3u` as a relative path.
+        for value, code in (("", "no_source"), ("ftp://h.test/x", "unsupported_scheme"), ("provider.test/x.m3u", "unsupported_scheme"),
+                            ("relative/x.m3u", "bad_url"), ("http://:80/", "bad_url"), ("./x.m3u", "bad_url"), ("/proc/self/environ", "unsafe_path")):
             with self.assertRaises(helper.HelperError) as caught:
                 helper.resolve_source(value)
             self.assertEqual(caught.exception.code, code, value)
@@ -194,6 +243,38 @@ class KeysAndLabelsTest(unittest.TestCase):
         self.assertEqual(helper.unique_label("tv.example.net", ["tv.example.net", "tv.example.net 2"]), "tv.example.net 3")
         long = "x" * helper.MAX_LABEL
         self.assertEqual(len(helper.unique_label(long, [long])), helper.MAX_LABEL)
+        self.assertEqual(helper.unique_label("", []), "source")
+
+    def test_derive_label_normalizes_first(self):
+        # SR19 / SR20 on un-normalized input: default port dropped, leading
+        # zeros stripped, host lower-cased, www. removed; ~ from the CLI.
+        self.assertEqual(helper.derive_label("HTTP://WWW.H.Test:0080/x", "http"), "h.test")
+        self.assertEqual(helper.derive_label("https://h.test:08080/x", "http"), "h.test:8080")
+        self.assertEqual(helper.derive_label("~/tv/list.m3u", "file"), "list.m3u")
+        self.assertEqual(helper.derive_label("~", "file"), "~")
+
+    def test_label_cap_counts_code_points(self):
+        # SR22: 64 code points, whatever their UTF-16 width; over-cap typed
+        # labels are refused, over-cap stored labels are cut on read.
+        astral = "\U0001F4FA" * helper.MAX_LABEL
+        self.assertEqual(helper.derive_label("/srv/tv/" + astral + "x.m3u", "file"), astral)
+        self.assertEqual(helper.unique_label(astral, [astral]), astral[:helper.MAX_LABEL - 2] + " 2")
+        self.assertEqual(helper.check_custom_label(astral, []), astral)
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.check_custom_label(astral + "x", [])
+        self.assertEqual(caught.exception.code, "label_too_long")
+        with self.assertRaises(helper.HelperError) as taken:
+            helper.check_custom_label("Provider", ["PROVIDER"])
+        self.assertEqual(taken.exception.code, "label_taken")
+        record = helper.normalize_source(dict(SOURCE, label=astral + "x"))
+        self.assertEqual(record["label"], astral)
+
+    def test_cli_tilde_record_survives_a_reload(self):
+        # SR11: a record written for `omarchy bar set ... ~/list.m3u` keeps
+        # its verbatim path through the helper's own state rewrites.
+        record = helper.normalize_source(dict(SOURCE, key="dc327328", url="~/tv/list.m3u", kind="file", epgUrl="~/tv/guide.xml"))
+        self.assertEqual((record["url"], record["kind"], record["epgUrl"]), ("~/tv/list.m3u", "file", "~/tv/guide.xml"))
+        self.assertEqual(helper.public_source(record)["host"], "local file")
 
 
 SOURCE = {

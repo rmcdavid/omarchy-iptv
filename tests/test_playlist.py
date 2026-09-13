@@ -154,8 +154,10 @@ class SourceTest(unittest.TestCase):
         for bad in ("ftp://h.test/x.m3u", "relative/path.m3u", "javascript:alert(1)", "", "data:text/plain,x"):
             with self.assertRaises(helper.HelperError):
                 helper.resolve_source(bad)
-        # A protocol-relative URL starts with "/" and is simply a local path that will not exist.
-        self.assertEqual(helper.resolve_source("//h.test/x.m3u"), ("file", "//h.test/x.m3u"))
+        # SR12: a protocol-relative URL is a scheme error, never a local path.
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.resolve_source("//h.test/x.m3u")
+        self.assertEqual(caught.exception.code, "unsupported_scheme")
 
     def test_http_source_without_host_is_bad_url(self):
         for bad in ("http://", "https:///list.m3u", "http://:8080/x"):

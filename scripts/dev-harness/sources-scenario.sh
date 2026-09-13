@@ -70,6 +70,14 @@ wait_log() {   # wait_log <regex> <secs>: the harness log gains a matching line
   return 1
 }
 last_log() { grep -E "$1" "$LOG" | tail -1; }
+wait_gone() {  # wait_gone <path> <secs>: a queued `cache remove` has run
+  local p=$1 secs=$2 i
+  for ((i = 0; i < secs * 10; i++)); do
+    [[ ! -e $p ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
 
 echo "== setup (scratch $SCRATCH)"
 "$RUN" clean >/dev/null
@@ -119,8 +127,7 @@ check "state.json mode 600" '[[ "$(stat -c %a "$STATE")" == 600 ]]'
 check "activeCache() is the per-source dir" '[[ "$(ipc activeCache)" == "$CACHE/sources/$K1" ]]'
 check "no playlist helper run for a fresh cache (freshness)" '! grep -q "omarchy-iptv playlist:" "$LOG"'
 
-echo "== H5 add failure keeps the active source"
-: >"$SCRATCH/mark"; before=$(wc -l <"$LOG")
+echo "== H5 add failure keeps the active source and saves nothing (SR23)"
 res=$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")
 check "addSource returned ok with an id" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
 KBAD=$(py "d['id']" "$res")
@@ -128,19 +135,20 @@ wait_log 'sourceProbeFinished .*"ok":false' 15 || bad "probe result did not arri
 line=$(last_log 'sourceProbeFinished')
 check "reason is 'Connection refused' from 127.0.0.1" '[[ "$line" == *Connection\ refused* && "$line" == *host*127.0.0.1* ]]'
 check "active key unchanged, channels still 20" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''channels'\'']")" == 20 ]]'
-check "record listed with an error marker, channelCount -1" \
-  '[[ "$(py "[ (s['\''errorReason'\''], s['\''channelCount'\'']) for s in d if s['\''id'\'']=='\''$KBAD'\''][0]" "$(ipc sources)")" == "('\''Connection refused'\'', -1)" ]]'
+wait_gone "$CACHE/sources/$KBAD" 5
+check "nothing saved: no record, no directory, state.json untouched by the add" \
+  '[[ "$(py "len([s for s in d if s['\''id'\'']=='\''$KBAD'\''])" "$(ipc sources)")" == 0 && ! -e "$CACHE/sources/$KBAD" && "$(python3 -c "import json;print(len(json.load(open(\"$STATE\"))[\"sources\"]))")" == 1 ]]'
+check "signals() lists the failed probe, host only" 'ipc signals | grep -q "sourceProbeFinished" && ! ipc signals | grep -q "://"'
 check "sources() carries no URL" '! ipc sources | grep -q "://"'
-check "duplicate of the unfetched record re-probes (retry semantics)" '[[ "$(py "d['\''code'\'']" "$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")")" == ok ]]'
+check "re-submitting is a fresh add with the same id (the form is the retry)" '[[ "$(py "(d['\''code'\''], d['\''id'\''])" "$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")")" == "('\''ok'\'', '\''$KBAD'\'')" ]]'
 wait_for false 15 svc "['probing']" || true
-res=$(ipc removeSource "$KBAD")
-check "removeSource of the failed record ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
+check "removeSource of the never-recorded id -> unknown_source" '[[ "$(py "d['\''code'\'']" "$(ipc removeSource "$KBAD")")" == unknown_source ]]'
 
 echo "== H2 add + probe + switch (10k fixture)"
 res=$(ipc addSource "$FIX/gen-10k.m3u" "" "")
 K2=$(py "d['id']" "$res")
 check "addSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true && -n "$K2" ]]'
-wait_log "sourceSwitched $K2" 30 || bad "sourceSwitched($K2) not observed"
+wait_log "sourceSwitched .*\"id\":\"$K2\"" 30 || bad "sourceSwitched($K2) not observed"
 check "probe ok with $CHANNELS_10K channels" '[[ "$(last_log sourceProbeFinished)" == *"\"ok\":true"*"\"channelCount\":$CHANNELS_10K"* ]]'
 check "new source active, channels loaded" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(svc "['\''channels'\'']")" == "$CHANNELS_10K" ]]'
 check "updateEntryInline logged with keys only" 'grep -q "updateEntryInline io.github.rmcdavid.iptv keys:" "$LOG" && ! grep "updateEntryInline" "$LOG" | grep -q "gen-10k"'
@@ -185,6 +193,20 @@ check "invalid CLI value synthesizes an error and runs no helper" \
   'ipc set playlistUrl "ftp://h.test/x" >/dev/null; sleep 0.3; [[ "$(svc "['\''settingsInvalid'\'']['\''code'\'']")" == scheme && "$(svc "['\''configured'\'']")" == true && "$(svc "['\''channels'\'']")" == 0 ]] && ! grep -q "h.test" "$LOG"'
 ipc set playlistUrl "$FIX/basic.m3u" >/dev/null; wait_for 3 10 svc "['channels']" || true
 
+echo "== H12 edit: label and EPG commit at once, editMasked masks (SR4, SR22)"
+res=$(ipc updateSource "$K2" '{"label":"Ten Thousand"}')
+check "label edit ok, no probe" '[[ "$(py "d['\''ok'\'']" "$res")" == true && "$(svc "['\''probing'\'']")" == false ]]'
+check "label stored with labelCustom" '[[ "$(python3 -c "import json;s=[x for x in json.load(open(\"$STATE\"))[\"sources\"] if x[\"key\"]==\"$K2\"][0];print(s[\"label\"],s[\"labelCustom\"])")" == "Ten Thousand True" ]]'
+check "label_taken is case-insensitive (SR21)" '[[ "$(py "d['\''code'\'']" "$(ipc updateSource "$K1" '\''{"label":"ten thousand"}'\'')")" == label_taken ]]'
+check "65 code points -> label_too_long (SR22)" '[[ "$(py "d['\''code'\'']" "$(ipc updateSource "$K1" "{\"label\":\"$(printf 'x%.0s' $(seq 65))\"}")")" == label_too_long ]]'
+res=$(ipc updateSource "$K2" '{"epgUrl":"http://u:p@127.0.0.1:9/e.xml?token=abc&type=x"}')
+check "EPG edit of an inactive source commits without a probe" '[[ "$(py "d['\''ok'\'']" "$res")" == true && "$(svc "['\''probing'\'']")" == false ]]'
+masked=$(ipc editMasked "$K2")
+check "editMasked: userinfo and query values masked, type kept, no raw URL field" \
+  '[[ "$masked" == *"http://****@127.0.0.1:9/e.xml?token=****&type=x"* && "$masked" != *"u:p@"* && "$masked" != *"abc"* && "$masked" != *playlistUrl* ]]'
+ipc updateSource "$K2" '{"epgUrl":""}' >/dev/null
+check "empty label restores the derived one" '[[ "$(py "d['\''ok'\'']" "$(ipc updateSource "$K2" '\''{"label":""}'\'')")" == true && "$(python3 -c "import json;s=[x for x in json.load(open(\"$STATE\"))[\"sources\"] if x[\"key\"]==\"$K2\"][0];print(s[\"label\"],s[\"labelCustom\"])")" == "gen-10k.m3u False" ]]'
+
 echo "== H7 remove active"
 res=$(ipc removeSource "$K3")
 check "removeSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
@@ -194,8 +216,20 @@ check "first-run state: unconfigured, 0 channels, activeCache empty" '[[ "$(svc 
 check "sources/$K3 gone, K1 and K2 intact" '[[ ! -e "$CACHE/sources/$K3" && -f "$CACHE/sources/$K1/channels.json" && -f "$CACHE/sources/$K2/channels.json" ]]'
 check "updateEntryInline logged 'playlist (none)'" 'grep -q "playlist (none)" "$LOG"'
 check "history keeps the two other sources" '[[ "$(py "len(d)" "$(ipc sources)")" == 2 ]]'
-res=$(ipc switchSource "$K1"); wait_log "sourceSwitched $K1" 10 || bad "switch back after removal failed"
+res=$(ipc switchSource "$K1"); wait_log "sourceSwitched .*\"id\":\"$K1\"" 10 || bad "switch back after removal failed"
 check "switch after removal restores the guide (20 channels)" '[[ "$(svc "['\''channels'\'']")" == 20 ]]'
+
+echo "== SR25 persist failure (failPersist): signal only, no argv fallback"
+ipc failPersist true >/dev/null
+res=$(ipc switchSource "$K2")
+check "switchSource with a refusing host -> persist_failed with the SR25 copy" \
+  '[[ "$(py "d['\''code'\'']" "$res")" == persist_failed && "$(py "d['\''message'\'']" "$res")" == "Could not save settings"*"try omarchy bar set" ]]'
+check "sourcesPersistFailed signalled, active unchanged, switching released" \
+  'wait_log "sourcesPersistFailed" 3 && [[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''switching'\'']")" == false ]]'
+check "no omarchy bar argv fallback in the log" '! grep -q "omarchy bar" "$LOG"'
+ipc failPersist false >/dev/null
+res=$(ipc switchSource "$K2"); wait_log "sourceSwitched .*\"id\":\"$K2\"" 10 || bad "switch after failPersist false did not complete"
+check "switch works again once the host accepts" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" ]]'
 
 echo "== privacy"
 check "harness log carries no fixture path or URL from source operations" '! grep -E "sourceProbeFinished|sourceSwitched|updateEntryInline" "$LOG" | grep -qE "://|$FIX"'
