@@ -1,0 +1,5 @@
+#EXTM3U
+# QA fixture: a valid header with no entries -> helper error code empty_playlist,
+# guide empty state "Playlist has no channels" (UX 6.3).
+#EXT-X-VERSION:3
+#EXTGRP:Nothing

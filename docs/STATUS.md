@@ -20,7 +20,7 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 | M0-05 | UX.md | UX | done | docs/UX.md (918 lines), commit d9a1916 |
 | M0-06 | Scaffold passing validate + check.sh | ARCH | done | commit 42015dc; validate exit 0; check.sh all green (61 node checks, 28 python tests, 8 qml) |
 | M0-07 | Schema freeze / interface review | PM+ARCH+UX | done | PO reconciled ARCH vs UX: ARCHITECTURE.md section 12 (R1-R13); manifest updated (refreshMinutes 360, barLabelMaxWidth) |
-| M0-08 | QA test plan + fixtures (docs/QA.md, tests/fixtures/) | QA | doing | Launched 2026-09-12 in parallel with M1 lanes; QA-owned fixtures use the qa- prefix |
+| M0-08 | QA test plan + fixtures (docs/QA.md, tests/fixtures/) | QA | done | merged c0d5f42: docs/QA.md (174 cases), qa- fixtures, scripts/gen-playlist.py, scripts/qa-live.sh; 18 scaffold defects pre-filed (4 P2) and routed to the lanes |
 | M0-09 | QA-ASSETS.md (public playlists, EPG sources) | PO | done | docs/QA-ASSETS.md, committed 0157fd6 |
 
 ### M1 MVP - Lane A (helper)
@@ -128,6 +128,9 @@ Format: D-<n> | severity P1/P2/P3 | task | repro | state (open/fixed/verified).
 | 2026-09-12 | mpv stays an attached Process in M1 (ARCH decision 2); PM risk R3 detached-mpv mitigation deferred to M2 | PO |
 | 2026-09-12 | IPC verbs: toggle, play, stop, next, previous, refresh, status. Service actions add removeRecent, focusPlayer, zap over the launch-list ring | PO |
 | 2026-09-12 | M1 runs as three parallel worktree lanes: FE lane A (bin/omarchy-iptv + python tests), FE lane B (Model.js, Service.qml, Guide.qml, BarWidget.qml, JS/QML tests), QA (docs/QA.md, qa- fixtures, generator script). PO merges, then QA runs the live-shell pass | PO |
+| 2026-09-12 | Privacy rulings from QA defects: a channel name never falls back to a URL (title, tvg-name, tvg-id, then Channel <n>); every notification, status line, tooltip, console line and IPC status output is URL-redacted to the host (Model.redactUrls); IPC status carries no stream URL | PO |
+| 2026-09-12 | Helper epg gets a --now <epoch> clock seam for deterministic tests; HTML bodies are not_a_playlist; local-path errors show the basename only | PO |
+| 2026-09-12 | Live QA pass on this machine: plugin installed by git clone into ~/.config/omarchy/plugins, keybinding and menu row added with backups and restored afterwards unless the pass succeeds (then left in place as the delivered state), theme check retropc -> tokyo-night -> retropc, EPG-matched checks use the generator pair (file://) plus the Pluto XMLTV for real gzip | PO |
 
 ## Blockers
 

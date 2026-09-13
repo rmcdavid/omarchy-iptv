@@ -1,0 +1,3 @@
+// Omarchy IPTV: add inside ~/.config/omarchy/extensions/omarchy-menu.jsonc
+// (the file hot-reloads on save). Type "tv" in the menu to find it.
+"iptv": {"icon":"󰕧","label":"IPTV","aliases":["tv","iptv"],"action":"omarchy-shell shell toggle io.github.rmcdavid.iptv"},
