@@ -96,6 +96,15 @@ Item {
   property var cacheJob: null
   property var recentSaves: []                         // texts this service wrote to state.json (own-write reloads are skipped)
   property double switchStartedAt: 0
+  property double switchReadMs: 0                      // debug timing: file read, parse+prepare+index, binding fan-out
+  property double switchParseMs: 0
+  property double switchAssignMs: 0
+  // Two-entry LRU of prepared channel data keyed by the exact channels.json
+  // text (section 4.5 mitigation): switching back to a source skips
+  // parse + prepare + index. A refresh rewrites the file, so a stale entry
+  // simply never matches again.
+  property var preparedLru: []
+  readonly property int preparedLruSize: 2
   readonly property bool probing: sourceProbeProc.running
   readonly property string probingId: probingKey
   readonly property string activeSourceKey: root.activeSourceKeyFor(root.userState, root.playlistUrl)
@@ -106,7 +115,7 @@ Item {
   }
   readonly property string activeCacheDir: (root.stateLoaded && root.cacheReady && root.activeSourceKey !== "")
     ? root.sourceCacheDir(root.cacheDir, root.activeSourceKey) : ""
-  readonly property int sourceCount: root.userState.sources.length
+  readonly property int sourceCount: Model.asList(root.userState.sources).length
   readonly property bool canAddSource: root.sourceCount < root.limits.sources && !root.probing
   // View objects for the guide (SR1); `sourcesChanged` is this property's
   // change signal (SR3) and fires on every state, settings or error change.
@@ -119,7 +128,9 @@ Item {
   property var epgNow: ({})                 // tvg-id -> { now, next }
   property var epgMeta: ({})
   // Named userState: `state` would shadow QQuickItem.state.
-  property var userState: Model.emptyState()
+  // v2 shape from the start (Model.emptyState() is still v1 until Lane 1
+  // lands; TODO(lane1): replace with Model.emptyState()).
+  property var userState: ({ version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: [] })
   property var playlistStatus: ({ ok: false, kind: "playlist", stale: false, error: null })
   property var epgStatus: ({ ok: false, kind: "epg", stale: false, error: null })
   property bool playlistAttempted: false
@@ -681,10 +692,29 @@ Item {
   // ------------------------------------------------------------ internals
 
   function applyChannels(text) {
-    var parsed = Model.parseChannels(text)
-    root.channels = parsed.ok ? Model.prepareChannels(parsed.channels) : []
-    root.channelIndex = Model.indexById(root.channels)
-    root.channelsMeta = parsed.meta
+    var t0 = Date.now()
+    root.switchReadMs = root.switching ? t0 - root.switchStartedAt : 0
+    var prepared = null
+    var lru = root.preparedLru
+    for (var i = 0; i < lru.length; i++) {
+      if (lru[i].text === text) { prepared = lru[i]; break }
+    }
+    if (!prepared) {
+      var parsed = Model.parseChannels(text)
+      var channels = parsed.ok ? Model.prepareChannels(parsed.channels) : []
+      prepared = { text: text, channels: channels, channelIndex: Model.indexById(channels), channelsMeta: parsed.meta }
+    }
+    if (text !== "" && prepared.channels.length > 0) {
+      var next = [prepared]
+      for (var k = 0; k < lru.length && next.length < root.preparedLruSize; k++) if (lru[k] !== prepared) next.push(lru[k])
+      root.preparedLru = next
+    }
+    var t1 = Date.now()
+    root.channels = prepared.channels
+    root.channelIndex = prepared.channelIndex
+    root.channelsMeta = prepared.channelsMeta
+    root.switchParseMs = t1 - t0
+    root.switchAssignMs = Date.now() - t1
   }
 
   // state.json -> userState (v1 files migrate in memory, section 2.2), then
@@ -1028,7 +1058,10 @@ Item {
     if (!root.switching) return
     switchTimeout.stop()
     root.switching = false
-    if (root.debugTiming) console.info("omarchy-iptv switch " + Math.round(Date.now() - root.switchStartedAt) + " ms (" + root.channels.length + " channels)")
+    if (root.debugTiming) {
+      console.info("omarchy-iptv switch " + Math.round(Date.now() - root.switchStartedAt) + " ms (" + root.channels.length + " channels; read "
+                   + Math.round(root.switchReadMs) + " ms, prepare " + Math.round(root.switchParseMs) + " ms, bindings " + Math.round(root.switchAssignMs) + " ms)")
+    }
     root.sourceSwitched(root.activeSourceKey)
   }
 

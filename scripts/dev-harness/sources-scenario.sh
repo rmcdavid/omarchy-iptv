@@ -38,8 +38,9 @@ ok()   { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
 check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
-# JSON helper: jq-less field access, `py '<expr over d>' <json>`.
-py()   { python3 -c 'import json,sys; d=json.loads(sys.argv[2]); print(eval(sys.argv[1]))' "$1" "$2" 2>/dev/null; }
+# JSON helper: jq-less field access, `py '<expr over d>' <json>`; booleans
+# print as JSON (true / false), everything else as Python prints it.
+py()   { python3 -c 'import json,sys; d=json.loads(sys.argv[2]); v=eval(sys.argv[1]); print(json.dumps(v) if isinstance(v, bool) else v)' "$1" "$2" 2>/dev/null; }
 svc()  { py "d['service']$1" "$(ipc state)"; }
 key_of() { python3 -c 'import json,sys; s=[x for x in json.load(open(sys.argv[1]))["sources"] if x["label"]==sys.argv[2]]; print(s[0]["key"] if s else "")' "$STATE" "$1"; }
 
@@ -121,11 +122,11 @@ check "no playlist helper run for a fresh cache (freshness)" '! grep -q "omarchy
 echo "== H5 add failure keeps the active source"
 : >"$SCRATCH/mark"; before=$(wc -l <"$LOG")
 res=$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")
-check "addSource returned ok with an id" '[[ "$(py "d['\''ok'\'']" "$res")" == True ]]'
+check "addSource returned ok with an id" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
 KBAD=$(py "d['id']" "$res")
 wait_log 'sourceProbeFinished .*"ok":false' 15 || bad "probe result did not arrive"
 line=$(last_log 'sourceProbeFinished')
-check "reason is 'Connection refused' from 127.0.0.1" '[[ "$line" == *"Connection refused"* && "$line" == *'"host":"127.0.0.1"'* ]]'
+check "reason is 'Connection refused' from 127.0.0.1" '[[ "$line" == *Connection\ refused* && "$line" == *host*127.0.0.1* ]]'
 check "active key unchanged, channels still 20" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''channels'\'']")" == 20 ]]'
 check "record listed with an error marker, channelCount -1" \
   '[[ "$(py "[ (s['\''errorReason'\''], s['\''channelCount'\'']) for s in d if s['\''id'\'']=='\''$KBAD'\''][0]" "$(ipc sources)")" == "('\''Connection refused'\'', -1)" ]]'
@@ -133,12 +134,12 @@ check "sources() carries no URL" '! ipc sources | grep -q "://"'
 check "duplicate of the unfetched record re-probes (retry semantics)" '[[ "$(py "d['\''code'\'']" "$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")")" == ok ]]'
 wait_for false 15 svc "['probing']" || true
 res=$(ipc removeSource "$KBAD")
-check "removeSource of the failed record ok" '[[ "$(py "d['\''ok'\'']" "$res")" == True ]]'
+check "removeSource of the failed record ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
 
 echo "== H2 add + probe + switch (10k fixture)"
 res=$(ipc addSource "$FIX/gen-10k.m3u" "" "")
 K2=$(py "d['id']" "$res")
-check "addSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == True && -n "$K2" ]]'
+check "addSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true && -n "$K2" ]]'
 wait_log "sourceSwitched $K2" 30 || bad "sourceSwitched($K2) not observed"
 check "probe ok with $CHANNELS_10K channels" '[[ "$(last_log sourceProbeFinished)" == *"\"ok\":true"*"\"channelCount\":$CHANNELS_10K"* ]]'
 check "new source active, channels loaded" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(svc "['\''channels'\'']")" == "$CHANNELS_10K" ]]'
@@ -150,9 +151,9 @@ for i in 1 2 3 4 5; do
   ipc switchSource "$K1" >/dev/null; wait_for false 10 svc "['switching']" || bad "switch to K1 #$i timed out"
   ipc switchSource "$K2" >/dev/null; wait_for false 10 svc "['switching']" || bad "switch to K2 #$i timed out"
 done
-mapfile -t times < <(grep -oE 'omarchy-iptv switch [0-9]+ ms \([0-9]+ channels\)' "$LOG" | tail -10)
+mapfile -t times < <(grep -oE 'omarchy-iptv switch [0-9]+ ms \([^)]*\)' "$LOG" | tail -10)
 printf '     %s\n' "${times[@]}"
-stats=$(printf '%s\n' "${times[@]}" | grep -oE 'switch [0-9]+ ms \(1?[0-9]{4,5} channels' | grep -oE '[0-9]+ ms' | grep -oE '[0-9]+' | sort -n | python3 -c 'import sys; v=[int(x) for x in sys.stdin]; print("median %d ms max %d ms (n=%d)" % (v[len(v)//2], max(v), len(v)) if v else "no samples")')
+stats=$(printf '%s\n' "${times[@]}" | grep -E "\($CHANNELS_10K channels" | grep -oE 'switch [0-9]+' | grep -oE '[0-9]+' | sort -n | python3 -c 'import sys; v=[int(x) for x in sys.stdin]; print("median %d ms max %d ms (n=%d)" % (v[len(v)//2], max(v), len(v)) if v else "no samples")')
 echo "     10k-side switch: $stats"
 median=$(echo "$stats" | grep -oE 'median [0-9]+' | grep -oE '[0-9]+')
 check "median 10k switch under 150 ms ($stats)" '[[ -n "$median" && "$median" -lt 150 ]]'
@@ -163,11 +164,11 @@ echo "== cancel probe discards the temp dir"
 res=$(ipc addSource "http://127.0.0.1:$SILENT_PORT/slow.m3u" "" "")
 KSLOW=$(py "d['id']" "$res")
 sleep 1
-check "probing while the silent server hangs" '[[ "$(svc "['\''probing'\'']")" == True ]]'
+check "probing while the silent server hangs" '[[ "$(svc "['\''probing'\'']")" == true ]]'
 res=$(ipc cancelProbe)
 wait_log 'sourceProbeFinished .*"cancelled":true' 10 || bad "cancelled probe result not observed"
 sleep 0.5
-check "probing false, record dropped" '[[ "$(svc "['\''probing'\'']")" == False && "$(py "len([s for s in d if s['\''id'\'']=='\''$KSLOW'\''])" "$(ipc sources)")" == 0 ]]'
+check "probing false, record dropped" '[[ "$(svc "['\''probing'\'']")" == false && "$(py "len([s for s in d if s['\''id'\'']=='\''$KSLOW'\''])" "$(ipc sources)")" == 0 ]]'
 check "temp directory sources/$KSLOW gone" '[[ ! -e "$CACHE/sources/$KSLOW" ]]'
 check "active still K2" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" ]]'
 
@@ -181,15 +182,15 @@ wait_for 3 20 svc "['channels']" || bad "first fetch of the CLI source did not l
 check "first fetch ran (no cache yet) and loaded 3 channels" '[[ "$(svc "['\''channels'\'']")" == 3 && -f "$CACHE/sources/$K3/channels.json" ]]'
 check "H11 duplicate of the active URL -> duplicate with its id" '[[ "$(py "(d['\''code'\''], d['\''id'\''])" "$(ipc addSource "$FIX/basic.m3u" "" "")")" == "('\''duplicate'\'', '\''$K3'\'')" ]]'
 check "invalid CLI value synthesizes an error and runs no helper" \
-  'ipc set playlistUrl "ftp://h.test/x" >/dev/null; sleep 0.3; [[ "$(svc "['\''settingsInvalid'\'']['\''code'\'']")" == scheme && "$(svc "['\''configured'\'']")" == True && "$(svc "['\''channels'\'']")" == 0 ]] && ! grep -q "h.test" "$LOG"'
+  'ipc set playlistUrl "ftp://h.test/x" >/dev/null; sleep 0.3; [[ "$(svc "['\''settingsInvalid'\'']['\''code'\'']")" == scheme && "$(svc "['\''configured'\'']")" == true && "$(svc "['\''channels'\'']")" == 0 ]] && ! grep -q "h.test" "$LOG"'
 ipc set playlistUrl "$FIX/basic.m3u" >/dev/null; wait_for 3 10 svc "['channels']" || true
 
 echo "== H7 remove active"
 res=$(ipc removeSource "$K3")
-check "removeSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == True ]]'
-wait_for False 10 svc "['configured']" || bad "settings were not cleared"
+check "removeSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
+wait_for false 10 svc "['configured']" || bad "settings were not cleared"
 sleep 0.5
-check "first-run state: unconfigured, 0 channels, activeCache empty" '[[ "$(svc "['\''configured'\'']")" == False && "$(svc "['\''channels'\'']")" == 0 && "$(ipc activeCache)" == "" ]]'
+check "first-run state: unconfigured, 0 channels, activeCache empty" '[[ "$(svc "['\''configured'\'']")" == false && "$(svc "['\''channels'\'']")" == 0 && "$(ipc activeCache)" == "" ]]'
 check "sources/$K3 gone, K1 and K2 intact" '[[ ! -e "$CACHE/sources/$K3" && -f "$CACHE/sources/$K1/channels.json" && -f "$CACHE/sources/$K2/channels.json" ]]'
 check "updateEntryInline logged 'playlist (none)'" 'grep -q "playlist (none)" "$LOG"'
 check "history keeps the two other sources" '[[ "$(py "len(d)" "$(ipc sources)")" == 2 ]]'
