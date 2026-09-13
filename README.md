@@ -85,8 +85,13 @@ Guide keys (full map in `docs/UX.md` section 3):
 | list | / or Tab | back to search mode; Esc clears the query, then closes |
 
 Lists: Recent and Favorites are pinned at the top of the group column, then
-All, then every group in playlist order. With an EPG configured, rows show
-what is on now, when it ends, and what is next.
+All, then every group in playlist order, with Ungrouped last. Browsing with an
+empty query reaches every channel in the list; only search results are capped
+at 200 rows (the footer says `keep typing`). With an EPG configured, rows show
+what is on now, when it ends, and what is next. If a guide-data fetch fails,
+a banner stays until the next successful fetch while the old data keeps
+working. Pressing `r` before a playlist is configured just says
+`Set a playlist first`.
 
 Bar widget: left click opens or closes the guide, right click stops
 playback, the scroll wheel zaps through the list the channel was started
