@@ -6,12 +6,15 @@
 #   run.sh shot [name]               screenshot the focused output into the scratch dir
 #   run.sh key <wtype args...>       send keys to the focused surface (wtype)
 #   run.sh clean                     wipe the scratch dirs (cache, state, runtime)
+#   run.sh scenario                  scripted Sources verification (sources-scenario.sh)
 #
 # Options for start:
 #   --open              open the guide right after load
 #   --timeout N         kill quickshell after N seconds (default 15; 0 = no limit)
 #   --playlist SRC      playlist URL/path (default: generated fixture with dead local URLs; "none" = unconfigured)
 #   --epg URL           EPG URL (default: none)
+#   --source2 SRC       seed the source history (state.json v2) with a second, never-fetched
+#                       source before start (helper `state source add`); printed as scheme://host
 #   --serve             serve a generated test video on 127.0.0.1:8765 and point the
 #                       fixture's "Harness Live" channel at it (exercises the mpv path locally)
 #   --fake-epg          drop a synthetic epg-now.json into the scratch cache (guide EPG rows)
@@ -151,15 +154,20 @@ case $cmd in
     rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"
     echo "[run.sh] cleaned $SCRATCH"
     ;;
+  scenario)
+    shift
+    exec "$HERE/sources-scenario.sh" "$@"
+    ;;
   start|--*)
     [[ $cmd == start ]] && shift
-    OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0
+    OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
         --timeout) TIMEOUT=$2; shift ;;
         --playlist) PLAYLIST=$2; shift ;;
         --epg) EPG=$2; shift ;;
+        --source2) SOURCE2=$2; shift ;;
         --serve) SERVE=1 ;;
         --fake-epg) FAKE_EPG=1 ;;
         --vertical) VERTICAL=1 ;;
@@ -181,6 +189,12 @@ case $cmd in
     write_fixture "$live"
     (( FAKE_EPG )) && write_fake_epg
     harness_env
+    if [[ -n $SOURCE2 ]]; then
+      # A second history record, never fetched (fetchedAt 0): the switch
+      # path through a probe. Output is the helper's, hosts only.
+      seeded=$(python3 "$ROOT/bin/omarchy-iptv" state --state-dir "$SCRATCH/state/omarchy-iptv" source add --url "$SOURCE2" --origin cli)
+      echo "[run.sh] source2=$(source_label "$SOURCE2") key=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("key", "?"))' "$seeded")"
+    fi
     export OMARCHY_IPTV_ROOT="$ROOT"
     if [[ $PLAYLIST == none ]]; then export OMARCHY_IPTV_PLAYLIST=""
     else export OMARCHY_IPTV_PLAYLIST="${PLAYLIST:-$SCRATCH/fixtures/harness.m3u}"; fi

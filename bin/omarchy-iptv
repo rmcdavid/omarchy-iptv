@@ -26,6 +26,10 @@ Subcommands (contract of record: docs/ARCHITECTURE.md section 5):
       query the running mpv (media title, host of the path, pause, idle, version)
   state [--state-dir D] show | init | favorite add ID | favorite remove ID | clear-recents
       inspect or edit state.json atomically (init: create it 0600 when missing)
+  state [--state-dir D] source list | add --url U [--epg-url E] [--label L] | update KEY ... | remove KEY
+      the source history (state.json version 2); output carries hosts, never URLs
+  cache [--cache-dir D] migrate [--key K] | remove --key K | prune [--keep K ...] [--active K]
+      per-source cache directories under <cache-dir>/sources/<key>/ (M2-01, D5/D6)
 """
 from __future__ import annotations
 
@@ -90,6 +94,25 @@ EPG_STATUS_FILE = "epg-status.json"
 # 10k-channel window loads with str.split instead of a JSON parse.
 EPG_WINDOW_FILE = "epg-window.txt"
 STATE_FILE = "state.json"
+# Per-source cache layout (ARCHITECTURE-SOURCES.md D5/D6): every source keeps
+# the five file names above inside <cache-dir>/sources/<key>/. The key is
+# fnv1a32 of the normalized playlist URL (8 hex digits, "-2", "-3" on a
+# collision); it is validated before it ever becomes a path component.
+SOURCES_DIR = "sources"
+SOURCE_KEY_RE = re.compile(r"^[0-9a-f]{8}(-[0-9]{1,3})?$")
+CACHE_FILES = (CHANNELS_FILE, PLAYLIST_STATUS_FILE, EPG_NOW_FILE, EPG_STATUS_FILE, EPG_WINDOW_FILE)
+EPG_CACHE_FILES = (EPG_WINDOW_FILE, EPG_NOW_FILE, EPG_STATUS_FILE)
+TEMP_PREFIX = ".tmp-"
+DEFAULT_EPG_MAX_AGE = 86400
+# state.json version 2 (ARCHITECTURE-SOURCES.md section 2.1); caps per SR5.
+STATE_VERSION = 2
+CACHE_LAYOUT = 2
+MAX_SOURCES = 50
+MAX_SOURCE_URL = 2048
+MAX_LABEL = 64
+SOURCE_ORIGINS = ("guide", "xtream", "cli", "migrated")
+SOURCE_KINDS = ("http", "file")
+UNSAFE_PATH_PREFIXES = ("/proc", "/sys", "/dev")
 
 # EPG window kept in the private cache: programmes overlapping
 # [now - EPG_PAST_SECONDS, now + EPG_FUTURE_SECONDS] at fetch time.
@@ -124,6 +147,10 @@ _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
 _URL_ANYWHERE = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 _CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
+# Mirrors Model.sanitizeInput: C0 controls, DEL and C1 controls are dropped.
+_CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
+_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.S)
+_BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
 
 
@@ -173,7 +200,26 @@ def socket_path(explicit: str | None = None) -> str:
 
 
 def ensure_private_dir(path: str) -> None:
-    os.makedirs(path, mode=0o700, exist_ok=True)
+    """mkdir -p with every directory this call creates set to 0700 (the
+    per-source layout means the helper may be the first to create
+    <cache-dir>/sources/, which must be private like its children)."""
+    missing: list[str] = []
+    current = path
+    while current and not os.path.isdir(current):
+        missing.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    for directory in reversed(missing):
+        try:
+            os.mkdir(directory, 0o700)
+        except FileExistsError:
+            continue
+        try:
+            os.chmod(directory, 0o700)
+        except OSError:
+            pass
     try:
         os.chmod(path, 0o700)
     except OSError:
@@ -273,6 +319,202 @@ def fnv1a32(value: Any) -> str:
         hash_ ^= byte
         hash_ = (hash_ * 0x01000193) & 0xFFFFFFFF
     return "%08x" % hash_
+
+
+# -------------------------------------------------------------- sources
+# Python mirror of Model.sanitizeInput / validateSourceUrl / sourceKey /
+# deriveLabel (ARCHITECTURE-SOURCES.md section 3, codes per UX-SOURCES.md
+# 5.4 as ruled by SR6). Both sides run tests/fixtures/source-urls.json.
+
+def utf16_length(text: str) -> int:
+    """Length in UTF-16 code units, the unit JS strings and caps use."""
+    return len(text) + sum(1 for ch in text if ord(ch) > 0xFFFF)
+
+
+def truncate_utf16(text: str, limit: int) -> str:
+    if utf16_length(text) <= limit:
+        return text
+    out: list[str] = []
+    used = 0
+    for ch in text:
+        width = 2 if ord(ch) > 0xFFFF else 1
+        if used + width > limit:
+            break
+        out.append(ch)
+        used += width
+    return "".join(out)
+
+
+def sanitize_input(value: Any, limit: int) -> str:
+    """Control characters (CR, LF, TAB included) removed, ASCII space and
+    NBSP trimmed, capped at `limit` UTF-16 units. Applied at every field
+    boundary and again inside validate_source_url."""
+    text = _CONTROL_CHARS.sub("", "" if value is None else str(value))
+    return truncate_utf16(text.strip(" \u00a0"), limit)
+
+
+def _validation(ok: bool, code: str, message: str, kind: str = "", url: str = "", host: str = "") -> dict[str, Any]:
+    return {"ok": ok, "code": code, "message": message, "kind": kind, "url": url, "host": host}
+
+
+def _validate_path(path: str) -> dict[str, Any]:
+    for prefix in UNSAFE_PATH_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return _validation(False, "unsafe_path", "paths under /proc, /sys and /dev are not allowed")
+    return _validation(True, "ok", "", "file", path, "")
+
+
+def validate_source_url(text: Any) -> dict[str, Any]:
+    """-> {ok, code, message, kind, url, host}; `url` is the normalized form
+    (the source identity). Codes: empty, too_long, scheme, invalid,
+    relative_path, unsafe_path (UX-SOURCES.md 5.4 + the helper's own
+    unsafe_path). Messages never contain a URL."""
+    value = sanitize_input(text, MAX_SOURCE_URL + 1)
+    if value == "":
+        return _validation(False, "empty", "no source URL or path given")
+    if utf16_length(value) > MAX_SOURCE_URL:
+        return _validation(False, "too_long", "source URL longer than %d characters" % MAX_SOURCE_URL)
+    if value.startswith("/"):
+        return _validate_path(value)
+    if value.startswith("~") or value.startswith("./") or value.startswith("../"):
+        return _validation(False, "relative_path", "use an absolute path (starts with /)")
+    match = _SCHEME_RE.match(value)
+    if not match:
+        return _validation(False, "scheme", "use http, https, file or an absolute path")
+    scheme = match.group(1).lower()
+    rest = match.group(2)
+    if scheme == "file":
+        if not rest.startswith("//"):
+            return _validation(False, "invalid", "file URL is missing the two slashes after the scheme")
+        after = rest[2:]
+        slash = after.find("/")
+        if slash == -1:
+            return _validation(False, "invalid", "file URL has no path")
+        path = after[slash:]
+        if _BAD_ESCAPE.search(path):
+            return _validation(False, "invalid", "file URL has a malformed percent escape")
+        try:
+            path = urllib.parse.unquote(path, errors="strict")
+        except UnicodeDecodeError:
+            return _validation(False, "invalid", "file URL path is not valid UTF-8")
+        return _validate_path(path)
+    if scheme not in ("http", "https"):
+        return _validation(False, "scheme", "unsupported source scheme '%s' (use http, https or an absolute path)" % scheme)
+    if not rest.startswith("//"):
+        return _validation(False, "invalid", "URL is missing the two slashes after the scheme")
+    after = rest[2:]
+    if re.search(r"\s", after):
+        return _validation(False, "invalid", "URL contains whitespace")
+    end = len(after)
+    for stop in "/?#":
+        index = after.find(stop)
+        if index != -1 and index < end:
+            end = index
+    authority, tail = after[:end], after[end:]
+    at = authority.rfind("@")
+    userinfo = authority[:at] if at != -1 else ""
+    hostport = authority[at + 1:] if at != -1 else authority
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        if close == -1:
+            return _validation(False, "invalid", "unterminated IPv6 literal")
+        host = hostport[:close + 1]
+        port_part = hostport[close + 1:]
+        if port_part and not port_part.startswith(":"):
+            return _validation(False, "invalid", "unexpected text after the IPv6 literal")
+        port = port_part[1:]
+    else:
+        colon = hostport.rfind(":")
+        host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
+    host = host.lower()
+    if host == "":
+        return _validation(False, "invalid", "URL has no host name")
+    if port != "" and not port.isdigit():
+        return _validation(False, "invalid", "URL port is not a number")
+    if port == ("80" if scheme == "http" else "443"):
+        port = ""
+    hash_at = tail.find("#")
+    if hash_at != -1:
+        tail = tail[:hash_at]
+    query_at = tail.find("?")
+    path = tail if query_at == -1 else tail[:query_at]
+    query = "" if query_at == -1 else tail[query_at + 1:]
+    if path == "":
+        path = "/"
+    url = "%s://%s%s%s%s%s" % (scheme, userinfo + "@" if userinfo else "", host, ":" + port if port else "", path, "?" + query if query else "")
+    return _validation(True, "ok", "", "http", url, host)
+
+
+def source_cache_key(url: str) -> str:
+    """Cache directory name of a normalized playlist URL (Model.sourceKey)."""
+    return fnv1a32(url)
+
+
+def find_source(sources: list[dict[str, Any]], key: str) -> dict[str, Any] | None:
+    for record in sources:
+        if record.get("key") == key:
+            return record
+    return None
+
+
+def find_source_by_url(sources: list[dict[str, Any]], url: str) -> dict[str, Any] | None:
+    for record in sources:
+        if record.get("url") == url:
+            return record
+    return None
+
+
+def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
+    """The record's key when the URL is known, else fnv1a32 with a "-2",
+    "-3", ... suffix while another record already uses that key."""
+    existing = find_source_by_url(sources, url)
+    if existing is not None:
+        return str(existing["key"])
+    base = source_cache_key(url)
+    key = base
+    suffix = 2
+    while find_source(sources, key) is not None:
+        key = "%s-%d" % (base, suffix)
+        suffix += 1
+    return key
+
+
+def derive_label(url: str, kind: str) -> str:
+    """UX-SOURCES.md 5.6: host (lower-case, leading www. removed, :port kept)
+    for http(s); the file name for paths; capped at MAX_LABEL."""
+    if kind == "file":
+        name = os.path.basename(url.rstrip("/"))
+        label = name or "local file"
+    else:
+        after = url.split("://", 1)[1] if "://" in url else url
+        end = len(after)
+        for stop in "/?#":
+            index = after.find(stop)
+            if index != -1 and index < end:
+                end = index
+        hostport = after[:end]
+        at = hostport.rfind("@")
+        if at != -1:
+            hostport = hostport[at + 1:]
+        if hostport.startswith("www."):
+            hostport = hostport[4:]
+        label = hostport or "source"
+    return truncate_utf16(label, MAX_LABEL)
+
+
+def unique_label(label: str, existing: list[str]) -> str:
+    """Append " 2", " 3", ... while `label` is taken (case-insensitive)."""
+    taken = {sanitize_input(item, MAX_LABEL).lower() for item in existing}
+    base = sanitize_input(label, MAX_LABEL)
+    if base.lower() not in taken:
+        return base
+    suffix = 2
+    while True:
+        tail = " %d" % suffix
+        candidate = truncate_utf16(base, MAX_LABEL - len(tail)).rstrip(" ") + tail
+        if candidate.lower() not in taken:
+            return candidate
+        suffix += 1
 
 
 # ------------------------------------------------------------------ M3U
@@ -541,26 +783,27 @@ def assign_ids(channels: list[dict[str, Any]]) -> None:
 
 # ------------------------------------------------------------------- IO
 
+# validate_source_url codes -> the helper's runtime error codes of 0.1 (the
+# guide renders these through Model.statusReason; CLI users see them too).
+_RESOLVE_CODES = {"empty": "no_source", "scheme": "unsupported_scheme", "invalid": "bad_url", "relative_path": "bad_url"}
+
+
 def resolve_source(url: str, label: str = "playlist") -> tuple[str, str]:
-    """-> ("http", url) or ("file", absolute path). Refuses anything else."""
+    """-> ("http", normalized url) or ("file", absolute path). Refuses
+    anything else through validate_source_url (D11: the guide and the
+    helper accept exactly the same set; the 2,048-character cap and control
+    characters are enforced here too). A leading `~` is expanded first, as
+    in 0.1, for values set from the command line."""
     value = (url or "").strip()
-    if not value:
-        raise HelperError("no_source", "no %s URL configured" % label)
-    if value.startswith("~") or value.startswith("/"):
-        return "file", os.path.expanduser(value)
-    scheme = stream_scheme(value)
-    if scheme in ("http", "https"):
-        if not url_host(value):
-            raise HelperError("bad_url", "%s URL has no host name" % label)
-        return "http", value
-    if scheme == "file":
-        return "file", file_url_to_path(value)
-    raise HelperError("unsupported_scheme", "unsupported source scheme '%s' (use http, https or an absolute path)" % (scheme or "none"))
-
-
-def file_url_to_path(value: str) -> str:
-    import urllib.request
-    return urllib.request.url2pathname(urllib.parse.urlsplit(value).path)
+    if value.startswith("~"):
+        value = os.path.expanduser(value)
+    result = validate_source_url(value)
+    if not result["ok"]:
+        code = _RESOLVE_CODES.get(result["code"], result["code"])
+        if code == "no_source":
+            raise HelperError(code, "no %s URL configured" % label)
+        raise HelperError(code, "%s %s" % (label, result["message"]))
+    return result["kind"], result["url"]
 
 
 def read_local_source(path: str, label: str = "playlist") -> bytes:
@@ -1538,10 +1781,178 @@ def cmd_status(args: argparse.Namespace) -> int:
         client.close()
 
 
+# --------------------------------------------------------------- cache
+# Per-source cache directories (ARCHITECTURE-SOURCES.md section 2.3). QML
+# never composes a delete: the service asks for `cache migrate | remove |
+# prune` with keys only. Every key is validated against SOURCE_KEY_RE, the
+# target is realpath-checked to stay under <cache-dir>/sources/, symlinked
+# directories are refused, and only the five known file names plus .tmp-*
+# leftovers are ever unlinked (an unknown file keeps its directory). Output
+# names keys and base names only, never a path (R12).
+
+def sources_root(directory: str) -> str:
+    return os.path.join(directory, SOURCES_DIR)
+
+
+def check_source_key(key: Any) -> str:
+    if not isinstance(key, str) or not SOURCE_KEY_RE.match(key):
+        raise HelperError("bad_key", "invalid cache key")
+    return key
+
+
+def source_dir(directory: str, key: Any) -> str:
+    """Validated <cache-dir>/sources/<key>; raises bad_key for anything that
+    is not a key, escapes the sources directory, or is a symlink."""
+    key = check_source_key(key)
+    root = sources_root(directory)
+    target = os.path.join(root, key)
+    if not os.path.realpath(target).startswith(os.path.realpath(root) + os.sep):
+        raise HelperError("bad_key", "cache key escapes the sources directory")
+    if os.path.islink(target):
+        raise HelperError("bad_key", "cache key is a symbolic link")
+    return target
+
+
+def is_temp_name(name: str) -> bool:
+    return name.startswith(TEMP_PREFIX)
+
+
+def remove_regular(path: str) -> bool:
+    """Unlink a regular file or a symlink (never following it); False when
+    the name is a directory or missing."""
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return False
+    if stat.S_ISDIR(mode):
+        return False
+    os.unlink(path)
+    return True
+
+
+def clear_source_dir(path: str) -> tuple[list[str], list[str]]:
+    """Delete the known cache files inside `path` and rmdir it when nothing
+    else is left. -> (removed names, kept names)."""
+    removed: list[str] = []
+    kept: list[str] = []
+    try:
+        names = sorted(os.listdir(path))
+    except FileNotFoundError:
+        return removed, kept
+    for name in names:
+        if (name in CACHE_FILES or is_temp_name(name)) and remove_regular(os.path.join(path, name)):
+            removed.append(name)
+        else:
+            kept.append(name)
+    if not kept:
+        os.rmdir(path)
+    return removed, kept
+
+
+def cache_migrate(directory: str, key: str | None) -> dict[str, Any]:
+    """Move the 0.1 single-cache files into sources/<key>/ (os.replace, same
+    filesystem, atomic); without a key they are deleted. Idempotent."""
+    ensure_private_dir(directory)
+    ensure_private_dir(sources_root(directory))
+    target = source_dir(directory, key) if key else None
+    if target is not None:
+        ensure_private_dir(target)
+    moved: list[str] = []
+    removed: list[str] = []
+    for name in CACHE_FILES:
+        legacy = os.path.join(directory, name)
+        try:
+            mode = os.lstat(legacy).st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISDIR(mode):
+            continue
+        if target is None or os.path.lexists(os.path.join(target, name)):
+            os.unlink(legacy)
+            removed.append(name)
+        else:
+            os.replace(legacy, os.path.join(target, name))
+            moved.append(name)
+    for name in sorted(os.listdir(directory)):
+        if is_temp_name(name) and remove_regular(os.path.join(directory, name)):
+            removed.append(name)
+    return {"key": key or "", "moved": moved, "removed": removed}
+
+
+def cache_remove(directory: str, key: str) -> dict[str, Any]:
+    removed, kept = clear_source_dir(source_dir(directory, key))
+    return {"key": key, "removed": removed, "kept": kept}
+
+
+def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age: float) -> dict[str, Any]:
+    """Delete every sources/<key> not in `keep`; age the EPG files of kept,
+    non-active keys older than `epg_max_age` seconds. Names that are not
+    keys (and symlinks) are skipped, never touched."""
+    keep_set = {check_source_key(item) for item in keep}
+    if active:
+        check_source_key(active)
+    root = sources_root(directory)
+    ensure_private_dir(root)
+    removed: list[str] = []
+    aged: list[str] = []
+    skipped: list[str] = []
+    kept_dirs: list[str] = []
+    now = time.time()
+    for entry in sorted(os.scandir(root), key=lambda item: item.name):
+        name = entry.name
+        if not SOURCE_KEY_RE.match(name) or entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+            skipped.append(name)
+            continue
+        if name not in keep_set:
+            _, kept = clear_source_dir(entry.path)
+            (kept_dirs if kept else removed).append(name)
+            continue
+        if name == active:
+            continue
+        touched = False
+        for file_name in EPG_CACHE_FILES:
+            path = os.path.join(entry.path, file_name)
+            try:
+                st = os.lstat(path)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(st.st_mode) and now - st.st_mtime >= epg_max_age:
+                os.unlink(path)
+                touched = True
+        if touched:
+            aged.append(name)
+    return {"removed": removed, "agedEpg": aged, "skipped": skipped, "kept": kept_dirs}
+
+
+def cmd_cache(args: argparse.Namespace) -> int:
+    directory = cache_dir(args.cache_dir)
+    action = args.action
+    try:
+        if action == "migrate":
+            payload = cache_migrate(directory, args.key or None)
+        elif action == "remove":
+            payload = cache_remove(directory, args.key)
+        else:
+            payload = cache_prune(directory, list(args.keep or []), args.active or None, args.epg_max_age)
+        result: dict[str, Any] = {"ok": True, "kind": "cache", "action": action}
+        result.update(payload)
+        emit(result)
+        return EXIT_OK
+    except HelperError as error:
+        log("cache %s: %s" % (action, error.message))
+        emit(error_payload("cache", error, action=action))
+        return EXIT_ERROR
+
+
 # --------------------------------------------------------------- state
+# state.json version 2 (ARCHITECTURE-SOURCES.md section 2): the 0.1 keys
+# unchanged plus `cacheLayout` and the `sources` history. A version-1 file
+# reads as version 2 with an empty history; the first write upgrades it.
+# Every `state` action prints the state through public_state(), which
+# replaces `url` / `epgUrl` by their hosts: stdout must never carry a URL.
 
 def default_state() -> dict[str, Any]:
-    return {"version": 1, "favorites": [], "recents": [], "lastPlayed": None}
+    return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "sources": []}
 
 
 def normalize_played(entry: Any) -> dict[str, Any] | None:
@@ -1554,9 +1965,51 @@ def normalize_played(entry: Any) -> dict[str, Any] | None:
     return {"id": str(entry["id"]), "name": str(entry.get("name") or ""), "at": at}
 
 
+def non_negative_int(value: Any) -> int:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
+
+
+def normalize_source(raw: Any) -> dict[str, Any] | None:
+    """One history record per the section 2.1 field rules; None drops it."""
+    if not isinstance(raw, dict):
+        return None
+    key = raw.get("key")
+    if not isinstance(key, str) or not SOURCE_KEY_RE.match(key):
+        return None
+    url = raw.get("url")
+    if not isinstance(url, str):
+        return None
+    playlist = validate_source_url(url)
+    if not playlist["ok"]:
+        return None
+    epg = validate_source_url(raw.get("epgUrl")) if isinstance(raw.get("epgUrl"), str) else None
+    label = sanitize_input(raw.get("label"), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
+    origin = raw.get("origin")
+    return {
+        "key": key,
+        "url": playlist["url"],
+        "epgUrl": epg["url"] if epg is not None and epg["ok"] else "",
+        "kind": playlist["kind"],
+        "label": label,
+        "labelCustom": raw.get("labelCustom") is True,
+        "origin": origin if origin in SOURCE_ORIGINS else "guide",
+        "addedAt": non_negative_int(raw.get("addedAt")),
+        "lastUsed": non_negative_int(raw.get("lastUsed")),
+        "fetchedAt": non_negative_int(raw.get("fetchedAt")),
+        "channelCount": non_negative_int(raw.get("channelCount")),
+        "groupCount": non_negative_int(raw.get("groupCount")),
+    }
+
+
 def normalize_state(raw: Any) -> dict[str, Any]:
     """Tolerant reader mirroring Model.parseState: unknown shapes fall back
-    to an empty state, entries are de-duplicated and coerced."""
+    to an empty state, entries are de-duplicated and coerced. A version-1
+    file (0.1.0) yields `sources: []`, `cacheLayout: 0`; records that fail
+    the field rules are dropped, a repeated url or key keeps the first."""
     state = default_state()
     if not isinstance(raw, dict):
         return state
@@ -1573,7 +2026,145 @@ def normalize_state(raw: Any) -> dict[str, Any]:
             if entry is not None:
                 state["recents"].append(entry)
     state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
+    state["cacheLayout"] = CACHE_LAYOUT if raw.get("cacheLayout") == CACHE_LAYOUT else 0
+    sources = raw.get("sources")
+    if isinstance(sources, list):
+        for item in sources:
+            record = normalize_source(item)
+            if record is None or len(state["sources"]) >= MAX_SOURCES:
+                continue
+            if find_source(state["sources"], record["key"]) or find_source_by_url(state["sources"], record["url"]):
+                continue
+            state["sources"].append(record)
     return state
+
+
+def public_source(record: dict[str, Any]) -> dict[str, Any]:
+    """The record with `url` / `epgUrl` replaced by `host` / `epgHost`."""
+    out: dict[str, Any] = {}
+    for name, value in record.items():
+        if name == "url":
+            out["host"] = source_host(value) if record.get("kind") == "http" else "local file"
+        elif name == "epgUrl":
+            out["epgHost"] = "" if not value else (source_host(value) if not value.startswith("/") else "local file")
+        else:
+            out[name] = value
+    return out
+
+
+def public_state(state: dict[str, Any]) -> dict[str, Any]:
+    out = dict(state)
+    out["sources"] = [public_source(record) for record in state.get("sources", [])]
+    return out
+
+
+def check_custom_label(cleaned: str, others: list[str]) -> str:
+    """A label the user typed: capped (label_too_long) and unique among
+    `others` case-insensitively (label_taken); never rewritten (UX 5.6)."""
+    if utf16_length(cleaned) > MAX_LABEL:
+        raise HelperError("label_too_long", "label longer than %d characters" % MAX_LABEL, field="label")
+    custom = sanitize_input(cleaned, MAX_LABEL)
+    if custom.lower() in {item.lower() for item in others}:
+        raise HelperError("label_taken", "a source named '%s' already exists" % custom, field="label")
+    return custom
+
+
+def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any, origin: str, now: int) -> str:
+    """Append a history record (the CLI counterpart of Model.addSource);
+    raises the UX-SOURCES.md 5.4 codes plus duplicate / too_many /
+    label_taken / label_too_long. Returns the new key."""
+    playlist = validate_source_url(url)
+    if not playlist["ok"]:
+        raise HelperError(playlist["code"], "playlist %s" % playlist["message"])
+    epg = ""
+    if epg_url is not None and sanitize_input(epg_url, MAX_SOURCE_URL + 1) != "":
+        checked = validate_source_url(epg_url)
+        if not checked["ok"]:
+            raise HelperError(checked["code"], "EPG %s" % checked["message"], field="epgUrl")
+        epg = checked["url"]
+    sources = state["sources"]
+    existing = find_source_by_url(sources, playlist["url"])
+    if existing is not None:
+        raise HelperError("duplicate", "already in the source history as '%s'" % existing["label"], key=existing["key"])
+    if len(sources) >= MAX_SOURCES:
+        raise HelperError("too_many", "the source history holds at most %d sources" % MAX_SOURCES)
+    labels = [record["label"] for record in sources]
+    cleaned = _CONTROL_CHARS.sub("", "" if label is None else str(label)).strip(" \u00a0")
+    if cleaned != "":
+        final_label, label_custom = check_custom_label(cleaned, labels), True
+    else:
+        final_label, label_custom = unique_label(derive_label(playlist["url"], playlist["kind"]), labels), False
+    key = allocate_source_key(sources, playlist["url"])
+    sources.append({
+        "key": key,
+        "url": playlist["url"],
+        "epgUrl": epg,
+        "kind": playlist["kind"],
+        "label": final_label,
+        "labelCustom": label_custom,
+        "origin": origin if origin in SOURCE_ORIGINS else "cli",
+        "addedAt": now,
+        "lastUsed": now,
+        "fetchedAt": 0,
+        "channelCount": 0,
+        "groupCount": 0,
+    })
+    return key
+
+
+def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any, label: Any, now: int) -> tuple[str, str]:
+    """Edit a record in place. A changed playlist URL re-keys it (fetchedAt
+    and the counts reset; the caller moves or removes the cache directory).
+    -> (key, replaced key or "")."""
+    sources = state["sources"]
+    record = find_source(sources, check_source_key(key))
+    if record is None:
+        raise HelperError("unknown_source", "no source with that key")
+    replaced = ""
+    if url is not None:
+        playlist = validate_source_url(url)
+        if not playlist["ok"]:
+            raise HelperError(playlist["code"], "playlist %s" % playlist["message"])
+        if playlist["url"] != record["url"]:
+            other = find_source_by_url(sources, playlist["url"])
+            if other is not None:
+                raise HelperError("duplicate", "already in the source history as '%s'" % other["label"], key=other["key"])
+            replaced = record["key"]
+            record["url"] = playlist["url"]
+            record["kind"] = playlist["kind"]
+            record["key"] = allocate_source_key([item for item in sources if item is not record], playlist["url"])
+            record["fetchedAt"] = 0
+            record["channelCount"] = 0
+            record["groupCount"] = 0
+            if not record["labelCustom"]:
+                record["label"] = unique_label(derive_label(playlist["url"], playlist["kind"]),
+                                               [item["label"] for item in sources if item is not record])
+    if epg_url is not None:
+        if sanitize_input(epg_url, MAX_SOURCE_URL + 1) == "":
+            record["epgUrl"] = ""
+        else:
+            checked = validate_source_url(epg_url)
+            if not checked["ok"]:
+                raise HelperError(checked["code"], "EPG %s" % checked["message"], field="epgUrl")
+            record["epgUrl"] = checked["url"]
+    if label is not None:
+        cleaned = _CONTROL_CHARS.sub("", str(label)).strip(" \u00a0")
+        others = [item["label"] for item in sources if item is not record]
+        if cleaned == "":
+            record["label"] = unique_label(derive_label(record["url"], record["kind"]), others)
+            record["labelCustom"] = False
+        else:
+            record["label"] = check_custom_label(cleaned, others)
+            record["labelCustom"] = True
+    return record["key"], replaced
+
+
+def remove_source_record(state: dict[str, Any], key: str) -> dict[str, Any]:
+    record = find_source(state["sources"], check_source_key(key))
+    if record is None:
+        raise HelperError("unknown_source", "no source with that key")
+    state["sources"] = [item for item in state["sources"] if item is not record]
+    return record
 
 
 def init_state_file(path: str, state: dict[str, Any]) -> bool:
@@ -1603,10 +2194,11 @@ def cmd_state(args: argparse.Namespace) -> int:
     path = os.path.join(directory, STATE_FILE)
     state = normalize_state(read_json(path))
     action = args.action
+    extra: dict[str, Any] = {}
     try:
         if action == "init":
             created = init_state_file(path, state)
-            emit({"ok": True, "kind": "state", "action": action, "created": created, "state": state})
+            emit({"ok": True, "kind": "state", "action": action, "created": created, "state": public_state(state)})
             return EXIT_OK
         if action == "favorite":
             key = str(args.id or "").strip()
@@ -1621,11 +2213,26 @@ def cmd_state(args: argparse.Namespace) -> int:
         elif action == "clear-recents":
             state["recents"] = []
             write_json_atomic(path, state)
-        emit({"ok": True, "kind": "state", "action": action, "state": state})
+        elif action == "source":
+            extra["op"] = args.op
+            now = int(args.now) if getattr(args, "now", 0) else int(time.time())
+            if args.op == "add":
+                extra["key"] = add_source_record(state, args.url, args.epg_url, args.label, args.origin, now)
+                write_json_atomic(path, state)
+            elif args.op == "update":
+                extra["key"], extra["replacedKey"] = update_source_record(state, args.key, args.url, args.epg_url, args.label, now)
+                write_json_atomic(path, state)
+            elif args.op == "remove":
+                extra["removed"] = remove_source_record(state, args.key)["key"]
+                write_json_atomic(path, state)
+        payload: dict[str, Any] = {"ok": True, "kind": "state", "action": action}
+        payload.update(extra)
+        payload["state"] = public_state(state)
+        emit(payload)
         return EXIT_OK
     except HelperError as error:
         log("state: %s" % error.message)
-        emit(error_payload("state", error, action=action))
+        emit(error_payload("state", error, action=action, **extra))
         return EXIT_ERROR
 
 
@@ -1682,7 +2289,39 @@ def build_parser() -> argparse.ArgumentParser:
     favorite.add_argument("op", choices=["add", "remove"])
     favorite.add_argument("id", help="channel id from channels.json")
     actions.add_parser("clear-recents", parents=[common], help="empty the Recent list")
+    source = actions.add_parser("source", parents=[common], help="list or edit the source history (state.json v2); output shows hosts, never URLs")
+    ops = source.add_subparsers(dest="op", required=True)
+    ops.add_parser("list", parents=[common], help="print the history")
+    add = ops.add_parser("add", parents=[common], help="append a source (validated and normalized like the guide does)")
+    add.add_argument("--url", required=True, help="playlist http(s) URL, file:// URL or absolute path")
+    add.add_argument("--epg-url", default=None, help="optional XMLTV URL or path")
+    add.add_argument("--label", default=None, help="custom label (default: derived from the host or file name)")
+    add.add_argument("--origin", default="cli", choices=list(SOURCE_ORIGINS), help="record origin (default cli)")
+    add.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
+    update = ops.add_parser("update", parents=[common], help="change the label, playlist URL or EPG URL of a source")
+    update.add_argument("key", help="source key (8 hex digits)")
+    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache)")
+    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it")
+    update.add_argument("--label", default=None, help="new label; an empty string restores the derived one")
+    update.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
+    remove = ops.add_parser("remove", parents=[common], help="drop a source from the history (its cache dir: `cache remove`)")
+    remove.add_argument("key", help="source key")
     state.set_defaults(func=cmd_state)
+
+    cache = sub.add_parser("cache", help="per-source cache directories under <cache-dir>/sources/<key>/")
+    cache.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
+    cache_common = argparse.ArgumentParser(add_help=False)
+    cache_common.add_argument("--cache-dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    cache_actions = cache.add_subparsers(dest="action", required=True)
+    migrate = cache_actions.add_parser("migrate", parents=[cache_common], help="move the 0.1 single-cache files into sources/<key>/ (deleted without --key); idempotent")
+    migrate.add_argument("--key", default="", help="key of the active source that owns the legacy files")
+    remove_dir = cache_actions.add_parser("remove", parents=[cache_common], help="delete the known cache files of one source and its directory")
+    remove_dir.add_argument("--key", required=True, help="source key")
+    prune = cache_actions.add_parser("prune", parents=[cache_common], help="delete the directories of keys not listed; age the EPG files of inactive ones")
+    prune.add_argument("--keep", nargs="*", default=[], help="keys to keep (every key in the history)")
+    prune.add_argument("--active", default="", help="the active key: its EPG files are never aged")
+    prune.add_argument("--epg-max-age", type=float, default=DEFAULT_EPG_MAX_AGE, help="seconds after which inactive EPG files are deleted (default %d)" % DEFAULT_EPG_MAX_AGE)
+    cache.set_defaults(func=cmd_cache)
     return parser
 
 

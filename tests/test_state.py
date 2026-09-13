@@ -13,7 +13,15 @@ import unittest
 from helper_loader import load_helper
 
 helper = load_helper()
-EMPTY = {"version": 1, "favorites": [], "recents": [], "lastPlayed": None}
+# state.json version 2 (ARCHITECTURE-SOURCES.md 2.1): the 0.1 keys plus the
+# cache layout marker and the source history.
+EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "sources": []}
+
+
+def v2(**patch):
+    state = dict(EMPTY)
+    state.update(patch)
+    return state
 
 
 def run(*args):
@@ -68,7 +76,7 @@ class StateCommandTest(unittest.TestCase):
     def test_init_state_file_is_exclusive(self):
         os.makedirs(self.dir, mode=0o700)
         self.assertTrue(helper.init_state_file(str(self.path), helper.default_state()))
-        self.assertFalse(helper.init_state_file(str(self.path), {"version": 1, "favorites": ["x"], "recents": [], "lastPlayed": None}))
+        self.assertFalse(helper.init_state_file(str(self.path), v2(favorites=["x"])))
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
 
     def test_favorite_add_is_idempotent_and_ordered(self):
@@ -77,7 +85,7 @@ class StateCommandTest(unittest.TestCase):
             self.assertEqual(code, 0)
         self.assertEqual(payload["state"]["favorites"], ["t:bbc1.uk", "u:3f2a9c11"])
         written = json.loads(self.path.read_text(encoding="utf-8"))
-        self.assertEqual(written, {"version": 1, "favorites": ["t:bbc1.uk", "u:3f2a9c11"], "recents": [], "lastPlayed": None})
+        self.assertEqual(written, v2(favorites=["t:bbc1.uk", "u:3f2a9c11"]))
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
 
@@ -101,10 +109,11 @@ class StateCommandTest(unittest.TestCase):
         }), encoding="utf-8")
         code, payload, _ = self.state("clear-recents")
         self.assertEqual(code, 0)
-        self.assertEqual(payload["state"], {
-            "version": 1, "favorites": ["t:bbc1.uk"], "recents": [],
-            "lastPlayed": {"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1757700000},
-        })
+        # A v1 file is written back as v2 (section 2.2): favorites and lastPlayed kept.
+        self.assertEqual(payload["state"], v2(
+            favorites=["t:bbc1.uk"],
+            lastPlayed={"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1757700000},
+        ))
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), payload["state"])
 
     def test_tolerates_malformed_and_foreign_content(self):
@@ -121,12 +130,11 @@ class StateCommandTest(unittest.TestCase):
             "unknownKey": True,
         }), encoding="utf-8")
         code, payload, _ = self.state("show")
-        self.assertEqual(payload["state"], {
-            "version": 1,
-            "favorites": ["t:a", "7"],
-            "recents": [{"id": "t:a", "name": "", "at": 12}, {"id": "t:b", "name": "", "at": 0}],
-            "lastPlayed": {"id": "t:a", "name": "", "at": 0},
-        })
+        self.assertEqual(payload["state"], v2(
+            favorites=["t:a", "7"],
+            recents=[{"id": "t:a", "name": "", "at": 12}, {"id": "t:b", "name": "", "at": 0}],
+            lastPlayed={"id": "t:a", "name": "", "at": 0},
+        ))
 
     def test_state_dir_after_the_action_also_works(self):
         code, payload, _ = run("state", "favorite", "add", "t:x", "--state-dir", self.dir)
