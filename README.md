@@ -22,7 +22,7 @@ The plugin ships no content. Bring a playlist you are entitled to use.
 ## Install
 
 ```bash
-omarchy plugin add <git-url-of-this-repo> --enable
+omarchy plugin add https://github.com/rmcdavid/omarchy-iptv.git --enable
 omarchy bar set io.github.rmcdavid.iptv playlistUrl "https://iptv-org.github.io/iptv/countries/us.m3u"
 omarchy bar set io.github.rmcdavid.iptv epgUrl "https://example.test/xmltv.php?username=U&password=P"
 ```
