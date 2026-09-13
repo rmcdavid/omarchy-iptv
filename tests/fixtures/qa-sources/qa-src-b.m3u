@@ -1,0 +1,17 @@
+#EXTM3U
+# QA fixture: source B for the Sources scenarios (docs/QA-SOURCES.md, section 8).
+#  - 5 channels in 2 groups (Bravo Movies, Bravo Docs): a switch from A must change the footer to "5 channels", the column to 2 groups
+#  - t:qa.shared reappears here (group Bravo Docs): the favorite set on it under source A is still listed after the switch (SR9)
+#  - "Bravo Docs Two" has no tvg-id: its u:<hash> id exists only here, so A's u:e4f9a3c8 favorite is invisible (not deleted) while B is active
+#  - no url-tvg hint and no EPG: the row detail must carry no "EPG" segment and hasEpg must be false
+#  - served by the harness as http://127.0.0.1:8765/qa-src-b.m3u -> source key 733cf68c
+#EXTINF:-1 tvg-id="qa.b.movie1" group-title="Bravo Movies",Bravo Movie One
+http://127.0.0.1:9/bravo/movie1.m3u8
+#EXTINF:-1 tvg-id="qa.b.movie2" group-title="Bravo Movies",Bravo Movie Two
+http://127.0.0.1:9/bravo/movie2.m3u8
+#EXTINF:-1 tvg-id="qa.shared" group-title="Bravo Docs",Shared Channel
+http://127.0.0.1:9/bravo/shared.m3u8
+#EXTINF:-1 tvg-id="qa.b.doc1" group-title="Bravo Docs",Bravo Docs One
+http://127.0.0.1:9/bravo/doc1.m3u8
+#EXTINF:-1 group-title="Bravo Docs",Bravo Docs Two
+http://127.0.0.1:9/bravo/doc2.m3u8
