@@ -118,6 +118,10 @@ omarchy-shell io.github.rmcdavid.iptv status              # JSON
   it running.
 - A stream that fails or ends shows a desktop notification naming the
   channel; the guide marks the row until the channel plays again.
+- Stop clears the bar and guide immediately. If mpv ignores the quit request
+  it is terminated, and if it ignores that too it is killed, within about
+  four seconds. Playing a channel while the old player is still shutting
+  down starts a fresh player once it has exited.
 - The first channel you play is passed to mpv on its command line, so its
   stream URL (credentials included) is visible to other local accounts via
   `ps` until mpv exits; later channels travel only over the private IPC
@@ -128,10 +132,10 @@ omarchy-shell io.github.rmcdavid.iptv status              # JSON
 ## Limits
 
 - Playlists are capped at 50,000 channels and 2,000 groups; extra channels
-  are skipped and extra groups fold into Ungrouped. The warning is recorded
-  in `~/.cache/omarchy-iptv/playlist-status.json` and in the output of
-  `omarchy-shell io.github.rmcdavid.iptv status`; the guide does not show
-  it yet.
+  are skipped and extra groups fold into Ungrouped. The guide footer shows
+  `Playlist warning: ...` after such a load, and the warnings are also in
+  `~/.cache/omarchy-iptv/playlist-status.json` and in the output of
+  `omarchy-shell io.github.rmcdavid.iptv status`.
 - Downloads (playlist and EPG) must finish within 60 seconds; redirects to
   anything but http(s) are refused and credentials are dropped when a
   redirect changes host.

@@ -3,9 +3,12 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.1.0-rc1 (unreleased)
+## 0.1.0 (2026-09-13)
 
-First release candidate of the M1 scope from `docs/PRODUCT.md`.
+First release: the M1 scope from `docs/PRODUCT.md`, verified by automated
+gates, a harness QA pass (148 of 174 cases, the rest live-shell or mouse
+cases), a security review, and a live-shell pass on the reference machine
+(install, enable, settings, guide, playback, theme switch, shell restart).
 
 ### Added
 - Omarchy shell plugin `io.github.rmcdavid.iptv` with three kinds: a bar
@@ -37,12 +40,21 @@ First release candidate of the M1 scope from `docs/PRODUCT.md`.
   drop credentials on cross-host redirects; playlists are capped at 50,000
   channels and 2,000 groups.
 
+### Fixed before release
+- Group column positions correctly on open and reopen with many groups.
+- A player that ignores quit is terminated, then killed, within about four
+  seconds; stop clears state immediately; play during shutdown relaunches.
+- Playlist warnings (caps, overflow) are shown in the guide footer and in
+  the IPC `status` output.
+- Browsing with an empty query reaches every channel; only search results
+  are capped at 200 rows.
+- Setting an EPG URL from empty triggers the fetch immediately.
+
 ### Known limitations
 - The player is started by the shell, so `omarchy restart shell` ends
   playback.
 - The first channel's stream URL is visible to other local accounts via `ps`
   for the life of the mpv process (later channels travel over the IPC socket).
 - Vertical bars show the glyph only.
-- Live-shell verification (keybinding, menu row, theme switch, multi-monitor)
-  is pending on the reference machine; everything else was verified in the
-  dev harness.
+- Multi-monitor placement and the third-party replacement-bar path were not
+  exercised on the reference machine (single output, stock bar).
