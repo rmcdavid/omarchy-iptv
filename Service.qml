@@ -418,6 +418,13 @@ Item {
     var extra = Model.splitMpvArgs(root.mpvArgs)
     if (extra.rejected.length > 0) console.warn("omarchy-iptv: ignoring mpvArgs tokens:", extra.rejected.join(" "))
     root.mpvStderrTail = []
+    // Known exposure (S-03, documented in the README): the FIRST channel's
+    // stream URL and header values sit in mpv's argv for the life of the
+    // process, readable by other local accounts through /proc/<pid>/cmdline
+    // (`ps aux`), even after zapping to other channels over IPC. Later
+    // channels only ever travel over the 0600 socket. Removing it means
+    // starting mpv idle and loading the first channel over IPC too, which
+    // is the M2 detached-mpv rework (R10); not changed in M1.
     mpvProc.command = Model.buildMpvArgv({
       socketPath: root.socketPath,
       name: channel.name,

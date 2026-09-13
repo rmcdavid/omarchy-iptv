@@ -976,6 +976,9 @@ function mpvWindowTitle(name) {
 
 // Full argv for the first launch (ARCHITECTURE.md section 3). The URL always
 // follows "--" so a playlist entry can never be parsed as an mpv option.
+// The URL (and header values) stay visible in the mpv process's argv
+// (`ps`, /proc/<pid>/cmdline) until mpv exits: S-03, README "Playback
+// notes"; the M2 idle-start rework removes it.
 function buildMpvArgv(params) {
   var p = params || {}
   var name = str(p.name) || "IPTV"
