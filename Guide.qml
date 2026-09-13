@@ -45,10 +45,16 @@ Item {
   readonly property bool hasQuery: Model.tokenize(query).length > 0
   property int cursorIndex: 0
   property int resultTotal: 0
+  // Number of rows in currentRows; the channel ListView's integer model, so
+  // an 11k-channel scope costs one property write and the view instantiates
+  // only the visible delegates (D-LIVE-01, PERF-02).
+  property int rowCount: 0
   property bool truncated: false
-  property bool rowsHaveDetail: false
   property var scopeList: []
   property string groupSignature: ""
+  // The column only needs recomputing when channels or the user state
+  // change, not on every keystroke.
+  property bool groupsDirty: true
   property string transientText: ""
   property bool enterPending: false
   // Set when a list-mode key switches to search mode: the same key event
@@ -89,6 +95,8 @@ Item {
     bannerEpgStill: "channels still work",
     bannerEpgPending: "Guide data loading" + Model.ELLIPSIS,
     transientRefreshing: "Refreshing" + Model.ELLIPSIS,
+    transientRefreshed: "Refreshed",
+    transientUnconfigured: "Set a playlist first",
     transientStopped: "Stopped",
     transientFavAdded: "Added to Favorites",
     transientFavRemoved: "Removed from Favorites",
@@ -153,6 +161,31 @@ Item {
   readonly property bool showColumn: hasChannels && !narrow
   readonly property bool scopeIsGroup: Model.isGroupScope(effectiveScope)
 
+  // Per-row decorations (star, playing cue, failure notice, EPG now/next)
+  // are resolved by each delegate from these lookups, so only the visible
+  // rows pay for them and a favorite toggle, a zap or the 30 s EPG tick
+  // never rebuilds the list (D-LIVE-01).
+  readonly property var favoriteSet: Model.favoriteSet(root.serviceReady ? root.service.userState.favorites : [])
+  readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : ({})
+  readonly property var epgMap: root.serviceReady && root.epgLoaded ? root.service.epgNow : ({})
+  // Two-line rows whenever the detail line can have content for this list
+  // (UX 2.4): a mixed list shows the group, EPG adds now/next, and inside a
+  // single group a failed channel still needs its `Failed HH:MM` line.
+  readonly property bool rowsHaveDetail: !root.scopeIsGroup || root.epgConfigured || root.anyFailedInScope(root.failedMap, root.effectiveScope)
+
+  // Inside a single group only the (few) failed ids are checked, never the
+  // rows: a failed channel of this group means two-line rows.
+  function anyFailedInScope(failed, scope) {
+    if (!failed || !root.serviceReady || !Model.isGroupScope(scope)) return false
+    var name = Model.scopeName(scope)
+    var index = root.service.channelIndex
+    for (var id in failed) {
+      var channel = index ? index[id] : null
+      if (channel && Model.primaryGroup(channel) === name) return true
+    }
+    return false
+  }
+
   // Empty-state kind: "" while rows exist.
   readonly property string emptyKind: {
     if (!root.serviceReady) return "service"
@@ -161,17 +194,19 @@ Item {
       if (root.serviceStatus === "error") return "error"
       return "loading"
     }
-    if (displayModel.count > 0) return ""
+    if (root.rowCount > 0) return ""
     if (root.hasQuery) return "noMatches"
     if (root.effectiveScope === Model.SCOPE_FAVORITES) return "noFavorites"
     return "emptyScope"
   }
 
-  // Banner kind (R8): none | playlistError | epgError | epgPending.
+  // Banner kind (R8): none | playlistError | epgError | epgPending. An EPG
+  // fetch failure shows the banner even while an earlier window is still
+  // rendered (UX 6.3, D-LIVE-08); it stays until a fetch succeeds.
   readonly property string bannerKind: {
     if (!root.serviceReady || !root.hasChannels) return "none"
     if (root.serviceStatus === "cached" && root.service.playlistFailed) return "playlistError"
-    if (root.epgConfigured && root.service.epgFailed && !root.epgLoaded) return "epgError"
+    if (root.epgConfigured && root.service.epgFailed) return "epgError"
     if (root.epgConfigured && root.service.epgPending && root.service.epgRefreshing) return "epgPending"
     return "none"
   }
@@ -188,6 +223,7 @@ Item {
 
   readonly property string footerStatusText: Model.footerStatus({
     transient: root.transientText,
+    configured: root.configured,
     truncated: root.truncated,
     resultTotal: root.resultTotal,
     cap: root.maxRows,
@@ -278,8 +314,11 @@ Item {
       root.scopeList = []
       groupModel.clear()
       root.groupSignature = ""
+      root.groupsDirty = true
       return
     }
+    if (!root.groupsDirty && root.scopeList.length > 0) return
+    root.groupsDirty = false
     var entries = Model.scopeEntries(root.service.channels, root.service.userState)
     var parts = []
     for (var i = 0; i < entries.length; i++) parts.push(entries[i].id + "=" + entries[i].count)
@@ -293,52 +332,31 @@ Item {
     }
   }
 
+  // Recomputes the row set. Rows are the channel objects themselves (the
+  // scope array for an empty query, the ranked hits for a search); the
+  // ListView reads them by index through its integer model, so no per-row
+  // copy is made here and the whole scope is browsable (D-LIVE-01).
   function rebuildDisplay() {
     root.resolveService()
     root.rebuildGroups()
+    // The cursor's scope may have left the column (last Recent entry
+    // removed, a group gone after a refresh): move to a visible entry
+    // before the rows are resolved (UX 2.2, D-LIVE-07).
+    var fallback = Model.fallbackScope(root.scopeList, root.scopeId)
+    if (fallback !== root.scopeId) root.guide = Model.withScope(root.guide, fallback)
     var favorites = root.serviceReady ? root.service.userState.favorites : []
     var result = Model.filterChannels(root.candidates(), root.query, root.maxRows, favorites)
-    var epg = root.serviceReady && root.epgLoaded ? root.service.epgNow : ({})
-    var failed = root.serviceReady ? root.service.failedAt : ({})
-    var playing = root.playingId
-    var now = root.nowSec
-    var showGroup = !root.scopeIsGroup
-    var anyDetail = showGroup || root.epgConfigured
     root.resultTotal = result.total
     root.truncated = result.truncated
     root.currentRows = result.rows
+    root.rowCount = result.rows.length
 
-    displayModel.clear()
-    for (var i = 0; i < result.rows.length; i++) {
-      var channel = result.rows[i]
-      var id = Model.channelId(channel)
-      var tvg = String(channel.tvgId || "")
-      var fields = Model.epgFields(tvg !== "" ? epg[tvg] : null, now)
-      var failedAt = failed && failed[id] ? String(failed[id]) : ""
-      if (failedAt !== "") anyDetail = true
-      displayModel.append({
-        channelId: id,
-        name: String(channel.name || ""),
-        group: Model.primaryGroup(channel),
-        showGroup: showGroup,
-        favorite: favorites.indexOf(id) !== -1,
-        playing: playing !== "" && id === playing,
-        failedAt: failedAt,
-        nowTitle: fields.nowTitle,
-        nextTitle: fields.nextTitle,
-        nowStart: fields.nowStart,
-        nowStop: fields.nowStop,
-        until: fields.until
-      })
-    }
-    root.rowsHaveDetail = anyDetail
-
-    if (displayModel.count === 0) root.cursorIndex = 0
-    else if (root.cursorIndex >= displayModel.count) root.cursorIndex = displayModel.count - 1
+    if (root.rowCount === 0) root.cursorIndex = 0
+    else if (root.cursorIndex >= root.rowCount) root.cursorIndex = root.rowCount - 1
     else if (root.cursorIndex < 0) root.cursorIndex = 0
 
     Qt.callLater(function() {
-      if (displayModel.count > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+      if (root.rowCount > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
       var at = Model.scopeIndex(root.scopeList, root.scopeId)
       if (at >= 0 && groupModel.count > at) groupList.positionViewAtIndex(at, ListView.Contain)
     })
@@ -368,20 +386,20 @@ Item {
   }
 
   function scrollToCursor() {
-    if (displayModel.count > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+    if (root.rowCount > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
   }
 
   function moveCursorBy(delta, wrap) {
-    if (displayModel.count === 0) return
+    if (root.rowCount === 0) return
     root.disarmPointer()
-    root.cursorIndex = Model.moveCursor(root.cursorIndex, delta, displayModel.count, wrap)
+    root.cursorIndex = Model.moveCursor(root.cursorIndex, delta, root.rowCount, wrap)
     root.scrollToCursor()
   }
 
   function selectAbsolute(index) {
-    if (displayModel.count === 0) return
+    if (root.rowCount === 0) return
     root.disarmPointer()
-    root.cursorIndex = Math.max(0, Math.min(index, displayModel.count - 1))
+    root.cursorIndex = Math.max(0, Math.min(index, root.rowCount - 1))
     root.scrollToCursor()
   }
 
@@ -459,8 +477,16 @@ Item {
     root.rebuildDisplay()
   }
 
+  // r / middle click: `Refreshing...` while the helper runs, then
+  // `Refreshed - N channels` from the service's playlistRefreshed signal
+  // (UX 6.1, D-LIVE-05). Nothing to reload without a playlist: a short hint
+  // only (D-LIVE-09).
   function refresh() {
     if (!root.serviceReady) return
+    if (!root.configured) {
+      root.showTransient(root.copy.transientUnconfigured)
+      return
+    }
     root.service.refresh()
     root.showTransient(root.copy.transientRefreshing)
   }
@@ -491,7 +517,7 @@ Item {
       else root.selectAbsolute(0)
       return true
     }
-    if (event.key === Qt.Key_End) { root.selectAbsolute(displayModel.count - 1); return true }
+    if (event.key === Qt.Key_End) { root.selectAbsolute(root.rowCount - 1); return true }
     if (event.key === Qt.Key_Delete && !root.searchMode) { root.removeAt(root.cursorIndex); return true }
     return false
   }
@@ -528,9 +554,6 @@ Item {
     // digits and everything else: ignored (M2 channel numbers)
   }
 
-  onNowSecChanged: if (root.opened) root.scheduleRebuild()
-
-  ListModel { id: displayModel }
   ListModel { id: groupModel }
 
   PointerMoveGate {
@@ -552,14 +575,17 @@ Item {
     onTriggered: root.transientText = ""
   }
 
+  // Only the row SET depends on these; decorations (playing, failed, EPG,
+  // favorite star) are delegate bindings over the service's maps.
   Connections {
     target: root.service
-    function onChannelsChanged() { root.scheduleRebuild() }
-    function onUserStateChanged() { root.scheduleRebuild() }
-    function onEpgNowChanged() { root.scheduleRebuild() }
-    function onFailedAtChanged() { root.scheduleRebuild() }
-    function onNowPlayingChanged() { root.scheduleRebuild() }
-    function onPlayingChanged() { root.scheduleRebuild() }
+    function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
+    function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
+    // UX 6.1: a manual refresh ends with `Refreshed - N channels` in the
+    // status slot for the transient window (D-LIVE-05).
+    function onPlaylistRefreshed(channelCount, manual) {
+      if (manual && root.opened) root.showTransient(root.copy.transientRefreshed + Model.SEP + Model.pluralChannels(channelCount))
+    }
   }
 
   PanelWindow {
@@ -689,9 +715,11 @@ Item {
           height: root.bannerHeight
           radius: root.cornerRadius
           visible: root.bannerKind !== "none"
-          color: root.bannerKind === "epgPending"
-            ? Style.normalFillFor(root.foreground, root.accent)
-            : Util.alpha(root.urgent, 0.10)
+          // Only the playlist failure is urgent-tinted; the EPG banners are
+          // low emphasis (UX 6.3): the alert glyph and the word carry it.
+          color: root.bannerKind === "playlistError"
+            ? Util.alpha(root.urgent, 0.10)
+            : Style.normalFillFor(root.foreground, root.accent)
           opacity: visible ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: root.bannerFadeMs; easing.type: Easing.OutCubic } }
           Accessible.role: Accessible.AlertMessage
@@ -857,7 +885,10 @@ Item {
               ListView {
                 id: resultList
                 anchors.fill: parent
-                model: displayModel
+                // Integer model over root.currentRows: setting the count is
+                // O(1) for any scope size and only the visible delegates
+                // (plus cacheBuffer) are ever created (D-LIVE-01).
+                model: root.rowCount
                 clip: true
                 spacing: root.rowSpacing
                 boundsBehavior: Flickable.StopAtBounds
@@ -868,18 +899,24 @@ Item {
                 delegate: BorderSurface {
                   id: row
                   required property int index
-                  required property string channelId
-                  required property string name
-                  required property string group
-                  required property bool showGroup
-                  required property bool favorite
-                  required property bool playing
-                  required property string failedAt
-                  required property string nowTitle
-                  required property string nextTitle
-                  required property int nowStart
-                  required property int nowStop
-                  required property string until
+
+                  // The row's channel and its decorations are resolved here,
+                  // per instantiated delegate, from the service's lookups.
+                  readonly property var channel: row.index < root.rowCount ? (root.currentRows[row.index] || null) : null
+                  readonly property string channelId: row.channel ? Model.channelId(row.channel) : ""
+                  readonly property string name: row.channel ? String(row.channel.name || "") : ""
+                  readonly property string group: row.channel ? Model.primaryGroup(row.channel) : ""
+                  readonly property string tvgId: row.channel ? String(row.channel.tvgId || "") : ""
+                  readonly property bool showGroup: !root.scopeIsGroup
+                  readonly property bool favorite: row.channelId !== "" && root.favoriteSet[row.channelId] === true
+                  readonly property bool playing: row.channelId !== "" && row.channelId === root.playingId
+                  readonly property string failedAt: row.channelId !== "" && root.failedMap[row.channelId] ? String(root.failedMap[row.channelId]) : ""
+                  readonly property var epg: Model.epgFields(row.tvgId !== "" ? root.epgMap[row.tvgId] : null, root.nowSec)
+                  readonly property string nowTitle: row.epg.nowTitle
+                  readonly property string nextTitle: row.epg.nextTitle
+                  readonly property int nowStart: row.epg.nowStart
+                  readonly property int nowStop: row.epg.nowStop
+                  readonly property string until: row.epg.until
 
                   readonly property bool hasCursor: index === root.cursorIndex
                   readonly property string detail: Model.rowDetail({ showGroup: showGroup, group: group, failedAt: failedAt, nowTitle: nowTitle, nextTitle: nextTitle })
@@ -929,7 +966,10 @@ Item {
                       textFormat: Text.PlainText
                       text: row.until !== "" && row.failedAt === "" ? "until " + row.until : ""
                       visible: text !== ""
-                      width: visible ? implicitWidth : 0
+                      // Natural width, no `width: implicitWidth` binding: rows
+                      // are reused now (D-LIVE-01), and a live text change
+                      // re-entering width through visible -> implicitWidth
+                      // is a binding loop. Neighbours anchor on `visible`.
                       color: root.foreground
                       opacity: 0.52
                       font.family: root.fontFamily
@@ -942,7 +982,7 @@ Item {
                     Text {
                       id: trail
                       width: root.trailWidth
-                      anchors.right: meta.left
+                      anchors.right: meta.visible ? meta.left : parent.right
                       anchors.rightMargin: meta.visible ? Style.space(8) : 0
                       anchors.top: parent.top
                       height: lead.height

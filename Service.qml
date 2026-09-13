@@ -128,6 +128,18 @@ Item {
   property bool epgTimedOut: false
   property bool dirsReady: false
   property bool stateSavePending: false
+  // D-LIVE-15: a `stop` that arrives while a helper call is in flight is
+  // sent as soon as that call returns; a `play` over IPC that finds no
+  // socket (player just relaunched) or no answer is retried with backoff.
+  property bool stopPending: false
+  property int playRetries: 0
+  readonly property int relaunchDelayMs: 200
+  readonly property int playRetryBaseMs: 300
+  readonly property int playRetryMax: 3        // 300 + 600 + 900 ms = 1.8 s
+
+  // Emitted after a successful playlist helper run; the guide shows
+  // `Refreshed - N channels` for a manual refresh (UX 6.1, D-LIVE-05).
+  signal playlistRefreshed(int channelCount, bool manual)
 
   // ------------------------------------------------------------ public API (R9)
 
@@ -146,6 +158,18 @@ Item {
     var key = Model.channelId(channel)
     // Enter on the row already playing: no reload, just focus (UX 8 #4).
     if (mpvProc.running && root.nowPlaying && root.nowPlaying.id === key) {
+      // Re-selected from another list: the zap ring follows the list the
+      // user is in (UX 3.4, D-LIVE-12). A new object so bindings notice.
+      var from = String(launchedFrom || "")
+      if (from !== "" && from !== String(root.nowPlaying.launchedFrom)) {
+        root.nowPlaying = {
+          id: root.nowPlaying.id,
+          name: root.nowPlaying.name,
+          group: root.nowPlaying.group,
+          launchedFrom: from,
+          since: root.nowPlaying.since
+        }
+      }
       if (!keepOpen) root.focusPlayer()
       return true
     }
@@ -153,6 +177,10 @@ Item {
     root.userStopped = false
     root.relaunchPending = false
     root.relaunched = false
+    root.stopPending = false
+    root.playRetries = 0
+    relaunchTimer.stop()
+    playRetryTimer.stop()
     root.healthFailures = 0
     root.lastError = ""
     root.failedAt = Model.withoutFailed(root.failedAt, key)
@@ -188,13 +216,19 @@ Item {
     root.pendingPlayId = ""
     root.wantFocus = false
     focusTimer.stop()
+    // Nothing queued may resurrect the player after a stop (D-LIVE-15).
+    relaunchTimer.stop()
+    playRetryTimer.stop()
+    root.relaunchPending = false
+    root.playRetries = 0
     if (!mpvProc.running) {
+      root.stopPending = false
       root.nowPlaying = null
       return
     }
     root.userStopped = true
-    root.relaunchPending = false
-    if (!controlProc.running) root.runControl("stop", ["stop", "--socket", root.socketPath])
+    if (controlProc.running) root.stopPending = true
+    else root.runControl("stop", ["stop", "--socket", root.socketPath])
     stopFallbackTimer.restart()
   }
 
@@ -234,8 +268,12 @@ Item {
 
   // Debounced: settings changes, timers and the bar's middle click all funnel
   // through here so the helper never runs twice for one user action.
+  // The URL settings are read directly, never through the derived
+  // `configured` / `epgConfigured` bindings: from on<Url>Changed those may
+  // not have been re-evaluated yet, which is what kept an epgUrl set at
+  // runtime from ever loading (D-LIVE-02).
   function refreshPlaylist(force) {
-    if (!root.configured) return
+    if (root.playlistUrl === "") return
     if (playlistProc.running) {
       if (force) root.playlistRerun = true
       return
@@ -244,7 +282,7 @@ Item {
   }
 
   function refreshEpg(force) {
-    if (!root.epgConfigured) return
+    if (root.epgUrl === "") return
     if (epgProc.running) {
       if (force) root.epgRerun = true
       return
@@ -327,7 +365,7 @@ Item {
   }
 
   function runPlaylistHelper() {
-    if (!root.configured || playlistProc.running) return
+    if (root.playlistUrl === "" || playlistProc.running) return
     root.playlistAttempted = true
     root.playlistTimedOut = false
     playlistProc.command = ["python3", root.helperPath, "playlist", "--url", root.playlistUrl, "--cache-dir", root.cacheDir]
@@ -344,7 +382,7 @@ Item {
       epgProc.nowOnly = true
       epgProc.command = ["python3", root.helperPath, "epg", "--now-only", "--cache-dir", root.cacheDir]
     } else {
-      if (!root.epgConfigured) return
+      if (root.epgUrl === "") return
       root.epgAttempted = true
       epgProc.nowOnly = false
       epgProc.command = ["python3", root.helperPath, "epg", "--url", root.epgUrl, "--cache-dir", root.cacheDir]
@@ -386,23 +424,42 @@ Item {
     } else if (kind === "play") {
       if (status.ok !== true && status.error) {
         var reason = Model.statusReason(status)
-        root.lastError = reason
-        console.warn("omarchy-iptv: play failed:", reason)
-        if (String(status.error.code) === "not_running" && root.nowPlaying) {
+        var code = String(status.error.code)
+        if (code === "not_running" && root.nowPlaying && !mpvProc.running) {
           // mpv vanished between two zaps: start a fresh player.
+          root.lastError = reason
           var channel = root.channelIndex[root.nowPlaying.id]
-          if (channel && !mpvProc.running) root.launchMpv(channel)
-        } else if (mpvProc.running && root.previousPlaying) {
+          if (channel) root.launchMpv(channel)
+        } else if ((code === "not_running" || code === "ipc_error") && mpvProc.running && root.nowPlaying
+                   && !root.userStopped && root.playRetries < root.playRetryMax) {
+          // The socket of a player that just (re)started is not up yet, or
+          // mpv did not answer in time: retry with backoff instead of
+          // losing the zap (D-LIVE-15).
+          root.playRetries += 1
+          playRetryTimer.interval = root.playRetryBaseMs * root.playRetries
+          playRetryTimer.restart()
+        } else {
+          root.lastError = reason
+          console.warn("omarchy-iptv: play failed:", reason)
           // The switch did not happen; mpv still plays the previous channel.
-          root.nowPlaying = root.previousPlaying
+          if (mpvProc.running && root.previousPlaying) root.nowPlaying = root.previousPlaying
         }
-      } else if (root.previousPlaying && status.ok === true) {
+      } else if (status.ok === true) {
+        root.playRetries = 0
         root.previousPlaying = null
       }
     } else if (kind === "stop") {
       if (status.ok !== true && status.error && String(status.error.code) === "not_running" && !mpvProc.running) {
         root.nowPlaying = null
       }
+    }
+    // A stop requested while this call was in flight goes out now and
+    // cancels any queued zap.
+    if (root.stopPending) {
+      root.stopPending = false
+      root.pendingPlayId = ""
+      if (mpvProc.running) root.runControl("stop", ["stop", "--socket", root.socketPath])
+      return
     }
     // Apply the last queued zap of a burst.
     if (root.pendingPlayId !== "" && mpvProc.running) {
@@ -451,18 +508,24 @@ Item {
   function handleMpvExit(exitCode, exitStatus) {
     stopFallbackTimer.stop()
     focusTimer.stop()
+    playRetryTimer.stop()
     var current = root.nowPlaying
     var stopped = root.userStopped
     var relaunch = root.relaunchPending
     root.userStopped = false
     root.relaunchPending = false
+    root.stopPending = false
     root.pendingPlayId = ""
+    root.playRetries = 0
     if (relaunch && current && !stopped) {
       var channel = root.channelIndex[current.id]
       if (channel) {
         root.relaunched = true
         root.wantFocus = false
-        root.launchMpv(channel)
+        // Deferred, not from inside the exit handler: the old socket file
+        // is gone and an in-flight helper call has returned by then, and a
+        // stop() in the meantime cancels it (D-LIVE-15).
+        relaunchTimer.restart()
         return
       }
     }
@@ -499,6 +562,11 @@ Item {
     var status = root.playlistStatus
     if (status.ok === true) {
       if (manual) root.notify("playlistRefreshed", { channelCount: status.channelCount, groupCount: status.groupCount })
+      root.playlistRefreshed(Number(status.channelCount) || 0, manual)
+      // US6: the EPG follows the playlist (the helper restricts programmes
+      // to the playlist's ids). Fetch it when none is loaded or its now/next
+      // window has expired; a run already in flight is repeated (D-LIVE-02).
+      if (root.epgUrl !== "" && (!root.epgLoaded || Model.epgNowStale(root.epgMeta, Math.floor(Date.now() / 1000)))) root.refreshEpg(true)
     } else {
       root.notify("playlistError", { reason: root.statusReason, cachedAt: status.stale === true ? root.lastUpdated : "" })
     }
@@ -527,9 +595,18 @@ Item {
     }
   }
 
-  onPlaylistUrlChanged: root.refreshPlaylist(true)
+  onPlaylistUrlChanged: {
+    // A new source starts clean: the previous source's reason and host must
+    // not stay on screen while its first fetch runs (UX 4.5, D-LIVE-10).
+    root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
+    root.lastError = ""
+    root.refreshPlaylist(true)
+  }
   onEpgUrlChanged: {
-    if (!root.epgConfigured) {
+    // Same rule as refreshEpg: read the setting itself. With the derived
+    // `epgConfigured` (stale false on an empty -> value change) this handler
+    // took the "cleared" branch and the first EPG never loaded (D-LIVE-02).
+    if (root.epgUrl === "") {
       root.epgLoaded = false
       root.epgAttempted = false
       root.epgNow = ({})
@@ -591,6 +668,12 @@ Item {
     watchChanges: true
     printErrors: false
     onLoaded: {
+      // The file is the last known fetch result at startup. Later, a
+      // `--now-only` recompute rewrites it with ok:true although the source
+      // was not contacted; that must not clear the `Guide data unavailable`
+      // banner, which stays until a fetch succeeds (UX 4.6, D-LIVE-08).
+      // handleEpgExit owns the status of every `--url` run.
+      if (epgProc.nowOnly) return
       root.applyEpgStatus(text())
       root.epgAttempted = true
     }
@@ -705,6 +788,36 @@ Item {
   }
 
   Timer {
+    // One automatic relaunch after the health check reaped a hung player,
+    // a moment after its exit (D-LIVE-15). Skipped once the user stopped or
+    // a play() already started a new player.
+    id: relaunchTimer
+    interval: root.relaunchDelayMs
+    repeat: false
+    onTriggered: {
+      if (mpvProc.running || root.userStopped || !root.nowPlaying) return
+      var channel = root.channelIndex[root.nowPlaying.id]
+      if (channel) root.launchMpv(channel)
+      else root.nowPlaying = null
+    }
+  }
+
+  Timer {
+    // Retry of a `play` over IPC that found no socket or no answer
+    // (D-LIVE-15). If another helper call is in flight the retry is queued
+    // as the burst target and applied when that call returns.
+    id: playRetryTimer
+    interval: root.playRetryBaseMs
+    repeat: false
+    onTriggered: {
+      if (!mpvProc.running || root.userStopped || !root.nowPlaying) return
+      var id = String(root.nowPlaying.id)
+      if (controlProc.running) root.pendingPlayId = id
+      else root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.cacheDir])
+    }
+  }
+
+  Timer {
     // The mpv window maps a moment after launch; retry the focus dispatch a
     // few times so Enter lands on the player (UX 7.5).
     id: focusTimer
@@ -723,10 +836,18 @@ Item {
 
   // ------------------------------------------------------------ processes
 
+  // Process.exited(exitCode, exitStatus) carries a QProcess::ExitStatus that
+  // the linter cannot resolve from the Quickshell.Io qmltypes, so every
+  // inline `onExited:` (typed or not) trips [signal-handler-parameters].
+  // The handlers therefore live in Connections blocks, which lint clean and
+  // behave identically at runtime (D-LIVE-14).
   Process {
     id: mkdirProc
     command: ["mkdir", "-p", "-m", "700", root.cacheDir, root.stateDir, root.runtimeDir]
-    onExited: stateInitProc.running = true
+  }
+  Connections {
+    target: mkdirProc
+    function onExited(exitCode, exitStatus) { stateInitProc.running = true }
   }
 
   Process {
@@ -742,7 +863,10 @@ Item {
       waitForEnd: true
       onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state init:", Model.redactUrls(text.trim()))
     }
-    onExited: {
+  }
+  Connections {
+    target: stateInitProc
+    function onExited(exitCode, exitStatus) {
       root.dirsReady = true
       if (root.stateSavePending) root.saveState()
     }
@@ -752,7 +876,10 @@ Item {
     id: whichProc
     command: ["which", "mpv"]
     stdout: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode, exitStatus) { root.mpvAvailable = exitCode === 0 }
+  }
+  Connections {
+    target: whichProc
+    function onExited(exitCode, exitStatus) { root.mpvAvailable = exitCode === 0 }
   }
 
   Process {
@@ -763,7 +890,10 @@ Item {
       waitForEnd: true
       onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv playlist:", Model.redactUrls(text.trim()))
     }
-    onExited: root.handlePlaylistExit(playlistStdout.text)
+  }
+  Connections {
+    target: playlistProc
+    function onExited(exitCode, exitStatus) { root.handlePlaylistExit(playlistStdout.text) }
   }
 
   Process {
@@ -775,14 +905,20 @@ Item {
       waitForEnd: true
       onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv epg:", Model.redactUrls(text.trim()))
     }
-    onExited: root.handleEpgExit(epgStdout.text, epgProc.nowOnly)
+  }
+  Connections {
+    target: epgProc
+    function onExited(exitCode, exitStatus) { root.handleEpgExit(epgStdout.text, epgProc.nowOnly) }
   }
 
   Process {
     id: controlProc
     stdout: StdioCollector { id: controlStdout; waitForEnd: true }
     stderr: StdioCollector { id: controlStderr; waitForEnd: true }
-    onExited: root.handleControlResult(controlStdout.text)
+  }
+  Connections {
+    target: controlProc
+    function onExited(exitCode, exitStatus) { root.handleControlResult(controlStdout.text) }
   }
 
   Process {
@@ -797,7 +933,10 @@ Item {
     stderr: SplitParser {
       onRead: function(line) { root.rememberStderr(line) }
     }
-    onExited: function(exitCode, exitStatus) { root.handleMpvExit(exitCode, exitStatus) }
+  }
+  Connections {
+    target: mpvProc
+    function onExited(exitCode, exitStatus) { root.handleMpvExit(exitCode, exitStatus) }
   }
 
   // omarchy-shell io.github.rmcdavid.iptv toggle | play <id-or-url> | stop |
