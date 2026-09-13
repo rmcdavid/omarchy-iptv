@@ -106,6 +106,7 @@ _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-loo
 # "\u0439" must not fold to "\u0438").
 _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
 _URL_ANYWHERE = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
+_LEADING_DASHES = re.compile(r"^[\s\-]+")
 _CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
 _XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
 
@@ -332,13 +333,20 @@ def split_groups(value: str) -> list[str]:
     return groups
 
 
+def clean_name(value: str) -> str:
+    """Display-name candidate: never starts with "-" (S-04). The name is an
+    argv item for omarchy-notification-send, where "--urgency=x did not play"
+    would be parsed as an option. Mirrors Model.cleanName."""
+    return _LEADING_DASHES.sub("", value or "").strip()
+
+
 def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
                  vlcopt: dict[str, str], kodiprop: dict[str, str],
                  warnings: list[str], index: int = 1) -> dict[str, Any]:
     tvg_id = attrs.get("tvg-id", "").strip()
     tvg_name = attrs.get("tvg-name", "").strip()
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).
-    name = title or tvg_name or tvg_id or "Channel %d" % index
+    name = clean_name(title) or clean_name(tvg_name) or clean_name(tvg_id) or "Channel %d" % index
     group_text = attrs.get("group-title", "").strip() or extgrp
     groups = split_groups(group_text) if group_text else []
     # Ruling R5: multi-group entries list under the FIRST group; the whole

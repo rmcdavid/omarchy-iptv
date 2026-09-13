@@ -214,6 +214,26 @@ class HardeningTest(unittest.TestCase):
             self.assertNotIn("secret", name)
             self.assertNotIn("pw", name)
 
+    def test_names_never_start_with_a_dash(self):
+        # S-04: the name becomes an argv item for omarchy-notification-send,
+        # where "--urgency=x did not play" would be parsed as an option.
+        text = ('#EXTM3U\n#EXTINF:-1,--urgency=critical\nhttp://x.test/1\n'
+                '#EXTINF:-1 tvg-name="-Real Name",---\nhttp://x.test/2\n'
+                '#EXTINF:-1 tvg-id="-dashed.id" tvg-name="--",- \nhttp://x.test/3\n'
+                '#EXTINF:-1 tvg-id="--",--\nhttp://x.test/4\n'
+                '#EXTINF:-1,-Minus TV\nhttp://x.test/5\n'
+                '#EXTINF:-1,A-B Sports -\nhttp://x.test/6\n')
+        channels = helper.parse_m3u(text)["channels"]
+        names = [c["name"] for c in channels]
+        self.assertEqual(names, ["urgency=critical", "Real Name", "dashed.id", "Channel 4", "Minus TV", "A-B Sports -"])
+        for name in names:
+            self.assertFalse(name.startswith("-"), name)
+        self.assertEqual(channels[2]["tvgId"], "-dashed.id")      # ids stay raw for EPG matching
+        self.assertEqual(channels[1]["tvgName"], "-Real Name")     # attribute kept verbatim
+        self.assertEqual(channels[0]["searchKey"], "urgency critical ungrouped")
+        self.assertEqual(helper.clean_name("  - x "), "x")
+        self.assertEqual(helper.clean_name(None), "")
+
     def test_duplicate_attribute_keys_last_non_empty_wins(self):
         attrs, title = helper.parse_extinf('#EXTINF:-1 tvg-id="" tvg-id="real" tvg-name="A" tvg-name="" tvg-logo="http://a" tvg-logo="http://b",X')
         self.assertEqual(attrs, {"tvg-id": "real", "tvg-name": "A", "tvg-logo": "http://b"})

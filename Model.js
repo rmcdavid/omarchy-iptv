@@ -258,10 +258,19 @@ function looksLikeUrl(text) {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(str(text)) || /^(rtp|udp|rtsp|mms):/i.test(str(text))
 }
 
+// A rendered name never starts with "-" (S-04): it is handed to
+// omarchy-notification-send as an argv item, and a body such as
+// "--urgency=x did not play" would be parsed as an option and suppress the
+// toast. Leading dashes and whitespace are dropped; an all-dash name falls
+// through to the next candidate. Mirrors clean_name in bin/omarchy-iptv.
+function cleanName(text) {
+  return str(text).replace(/^[\s-]+/, "").replace(/\s+$/, "")
+}
+
 function displayName(channel, position) {
-  var name = str(channel && channel.name).replace(/^\s+|\s+$/g, "")
+  var name = cleanName(channel && channel.name)
   if (name !== "" && !looksLikeUrl(name)) return name
-  var tvg = str(channel && channel.tvgName).replace(/^\s+|\s+$/g, "")
+  var tvg = cleanName(channel && channel.tvgName)
   if (tvg !== "" && !looksLikeUrl(tvg)) return tvg
   return "Channel " + (Number(position) > 0 ? Math.floor(Number(position)) : "?")
 }
@@ -994,13 +1003,18 @@ function focusPlayerArgv() {
 // ------------------------------------------------------------ notifications
 
 // argv for omarchy-notification-send per UX 6.4. Bodies never carry a URL.
+// Options come first, then the constant headline, then the body. The
+// wrapper (busctl-based) takes the body positionally unless it looks like
+// one of its own flags (`--urgency=...`, `-g`, ...), so the body is built to
+// never start with "-": the playlist-controlled name is quoted with the
+// typographic quotes and cleaned of leading dashes (S-04).
 function notifyArgv(event, params) {
   var p = params || {}
   var spec = null
-  var name = str(p.name) || "Channel"
+  var name = cleanName(p.name) || "Channel"
   var reason = scrubUrls(str(p.reason))
   if (event === "streamFailed") {
-    spec = { title: "Stream failed", body: name + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
+    spec = { title: "Stream failed", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
   } else if (event === "playlistRefreshed") {
     spec = { title: "Playlist refreshed", body: pluralChannels(p.channelCount) + " in " + formatCount(p.groupCount) + (Number(p.groupCount) === 1 ? " group" : " groups"), glyph: GLYPHS.refresh, urgency: "low", id: NOTIFY_IDS.playlistRefreshed }
   } else if (event === "playlistError") {
@@ -1319,6 +1333,7 @@ if (typeof module !== "undefined") {
     hostOf: hostOf,
     redactUrls: redactUrls,
     scrubUrls: scrubUrls,
+    cleanName: cleanName,
     displayName: displayName,
     looksLikeUrl: looksLikeUrl,
     formatClock: formatClock,

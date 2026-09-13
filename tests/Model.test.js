@@ -87,6 +87,15 @@ check("displayName never a URL (D-QA-02)", Model.prepareChannels([
   { name: "  Fine  ", url: "u" }
 ]).map(c => c.name), ["Real Name", "Channel 2", "Channel 3", "Fine"])
 check("displayName recomputes searchKey when the name was replaced", Model.prepareChannels([{ name: "http://h.test/x", tvgName: "Arte", group: "DE", searchKey: "http h test x de" }])[0].searchKey, "arte de")
+// S-04: a rendered name never starts with "-" (argv item for the notification wrapper).
+check("cleanName strips leading dashes and whitespace", [Model.cleanName("--urgency=x"), Model.cleanName(" - Sports "), Model.cleanName("---"), Model.cleanName(null), Model.cleanName("A-B")], ["urgency=x", "Sports", "", "", "A-B"])
+check("displayName never starts with a dash (S-04)", Model.prepareChannels([
+  { name: "--urgency=critical", url: "u1" },
+  { name: "---", tvgName: "-Real Name", url: "u2" },
+  { name: "- ", tvgName: "--", url: "u3" },
+  { name: "-Minus TV", url: "u4" }
+]).map(c => c.name), ["urgency=critical", "Real Name", "Channel 3", "Minus TV"])
+check("displayName cleaned name keeps a matching searchKey", Model.prepareChannels([{ name: "--Sports", group: "UK", searchKey: "sports uk" }])[0].searchKey, "sports uk")
 check("looksLikeUrl", [Model.looksLikeUrl("http://x"), Model.looksLikeUrl("udp://@239.0.0.1:1234"), Model.looksLikeUrl("BBC One"), Model.looksLikeUrl("")], [true, true, false, false])
 
 check("groupChannels playlist order with counts", Model.groupChannels(prepared).map(g => g.name + ":" + g.count), ["UK:2", "CA:1", "Ungrouped:1"])
@@ -298,10 +307,22 @@ check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focus
 
 // ---- notifications ----
 const tvOff = "\udb81\udd03", alert = "\udb80\udc26", refreshGlyph = "\udb81\udc50"
+const Q = (s) => "“" + s + "”"
 check("notifyArgv streamFailed", Model.notifyArgv("streamFailed", { name: "Sky Sports", reason: "HTTP 403" }),
-  ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", "Sky Sports did not play" + SEP + "HTTP 403"])
-check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), ["X did not play"])
-check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), ["X did not play" + SEP + "Failed to open h.test"])
+  ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", Q("Sky Sports") + " did not play" + SEP + "HTTP 403"])
+check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), [Q("X") + " did not play"])
+check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), [Q("X") + " did not play" + SEP + "Failed to open h.test"])
+// S-04: the wrapper reads a body matching --urgency=* / --icon=* / -g ... as an option.
+check("notifyArgv body never starts with a dash (S-04)", (() => {
+  const out = []
+  for (const name of ["--urgency=critical", "-g", "--icon=x", "--exec", "-", "", null]) {
+    const a = Model.notifyArgv("streamFailed", { name: name, reason: "-r 1" })
+    out.push(a.slice(9).every(item => item.charAt(0) !== "-"))
+  }
+  return out
+})(), [true, true, true, true, true, true, true])
+check("notifyArgv streamFailed cleans and quotes a hostile name", Model.notifyArgv("streamFailed", { name: "--urgency=critical" }).slice(-1), [Q("urgency=critical") + " did not play"])
+check("notifyArgv streamFailed falls back to Channel for an all-dash name", Model.notifyArgv("streamFailed", { name: "---" }).slice(-1), [Q("Channel") + " did not play"])
 check("notifyArgv playlistRefreshed", Model.notifyArgv("playlistRefreshed", { channelCount: 1204, groupCount: 38 }).slice(3), ["-u", "low", "-g", refreshGlyph, "-r", "74012", "Playlist refreshed", "1,204 channels in 38 groups"])
 check("notifyArgv playlistError with cache", Model.notifyArgv("playlistError", { reason: "HTTP 503", cachedAt: "12:40" }).slice(-2), ["Playlist error", "Could not fetch the playlist (HTTP 503). Using cached copy from 12:40."])
 check("notifyArgv playlistError without cache", Model.notifyArgv("playlistError", { reason: "Timed out" }).slice(-1), ["Could not fetch the playlist (Timed out). Open the guide for details."])
