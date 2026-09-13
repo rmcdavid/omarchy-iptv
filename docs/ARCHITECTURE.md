@@ -459,3 +459,26 @@ Manual QA on the live shell (QA role, machine of record):
     (`iterparse`) and cap at 64 MB compressed or bail with `too_large`.
 12. Vertical bars: the widget shows the glyph only (`vertical` check);
     first-class vertical layout is M2 per PRODUCT.md.
+
+## 12. Product owner rulings (reconciliation with UX.md, 2026-09-12)
+
+These rulings override earlier sections of this document where they differ.
+The STATUS.md decisions log mirrors them. UX.md is authoritative for
+interaction and visuals; this document is authoritative for data, processes,
+and security.
+
+| # | Topic | Ruling |
+|---|---|---|
+| R1 | Guide keyboard model | UX.md section 3 is authoritative and supersedes decision 9 and open risk 8. Two modes: search mode on open (printable characters filter; Up/Down, PgUp/PgDn, Home/End, Left/Right, Enter, Esc, Tab as in UX 3.2), and list mode entered with Tab or `/` (UX 3.1: j/k/h/l, f, x, s, r, Space, Enter, Esc). No Ctrl chords. Esc clears the query first, then closes. Implement with `PanelKeyCatcher { blocked: searchMode }` and a synthetic filter line (clipboard pattern, no `TextField`). |
+| R2 | Settings schema | Keys: `playlistUrl`, `epgUrl`, `refreshMinutes` (default 360, min 15, max 1440, step 15), `mpvArgs`, `showChannelName`, `maxRecents`, and new `barLabelMaxWidth` (integer, default 180, min 60, max 600, step 10, widget-only). The refresh default is raised because providers rate-limit playlist downloads. `Model.js` clamps follow. Settings live on the bar-layout entry read through `shell.barConfig` (decision 7); the README states this, which resolves UX section 8 item 16. |
+| R3 | Result cap | 200 rows (UX 2.6) with the footer `First 200 of N - keep typing`. Supersedes 300 in decision 4. |
+| R4 | Search key and ranking | `searchKey = fold(name + " " + group)`; the helper must include the group. Terms are ANDed. Ranking tiers per UX 2.5: name starts with the query, then a word in the name starts with it, then name contains it, then group contains it; favorites first inside a tier; playlist order inside that. |
+| R5 | Sort and recents | Playlist order for groups and All; Favorites in the order added; Recent most-recent-first, capped by `maxRecents`; a recent is recorded on the play command, not on playback success. Multi-group `A;B;C` lists the channel under the FIRST group with the whole string searchable. |
+| R6 | Card and layout | UX 5.1 and 5.2 (card `min(space(960), screen)` by `min(space(620), screen)`, group column `space(200)`, column hidden under `space(720)`). Supersedes the 900 width in the scaffold. |
+| R7 | Bar widget | Glyph per state, never color-only: idle U+F0502, playing U+F0567, error U+F0503. On horizontal bars, when `showChannelName`, the name is elided at `Style.space(barLabelMaxWidth)`; vertical bars show the glyph only; the tooltip carries the full name and status (UX 6.3). Left click toggles the guide, right click stops, middle click refreshes, wheel zaps one step per tick via `Util.wheelSteps`. |
+| R8 | Model fields the guide binds | Per UX 8.1: per channel `favorite`, `playing` (exactly one true), `failedAt` (session-only HH:MM), `epgNow {title, start, stop}`, `epgNext {title}`, `epgFraction` recomputed on a 30 s tick. Guide state: `mode`, `query`, `scopeId`, `cursorIndex`, `status` (ready, loading, refreshing, cached, error), `statusReason`, `statusHost`, `lastUpdated`, `bannerKind`, `resultTotal`, `nowPlaying {name, group, launchedFrom}`. |
+| R9 | Service actions and IPC | Service: `play(id, keepOpen)`, `stop()`, `toggleFavorite(id)`, `removeRecent(id)`, `refresh()`, `zap(delta)` over the zap ring (the list the channel was launched from, UX 3.4; Recent is never a ring), `focusPlayer()` = argv `["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"]`. `IpcHandler` verbs: `toggle`, `play`, `stop`, `next`, `previous` (rename `prev`), `refresh`, `status`. |
+| R10 | mpv ownership | Decision 2 stands for M1: attached `Process`, so mpv exits with the shell. The PM's detached-mpv mitigation (risk R3) is deferred to M2. The README documents the limitation. |
+| R11 | Stream failure | Non-zero exit without a user stop: notification per UX 6.4, session-only `failedAt` on the channel, alert glyph on its row. |
+| R12 | Notifications and privacy | Manual refresh (`r`, middle click, IPC `refresh`) notifies on success and failure; timer refresh notifies only on failure. Never render a playlist or EPG URL beyond scheme and host anywhere: guide, tooltip, notification, console. |
+| R13 | Animation and placement | No open/close animation (UX 5.8). The overlay leaves `screen` unset so Hyprland maps it on the focused monitor. |

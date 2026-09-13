@@ -16,11 +16,11 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 | M0-01 | PRODUCT.md | PO | done | docs/PRODUCT.md v0.1, 2026-09-12 |
 | M0-02 | Plugin contract digest | PO | done | docs/OMARCHY-PLUGIN-CONTRACT.md, facts verified on this machine |
 | M0-03 | PLAN.md + STATUS.md | PM | done | docs/PLAN.md (273 lines), docs/STATUS.md; ASCII-only checked |
-| M0-04 | ARCHITECTURE.md | ARCH | doing | In progress in parallel; must resolve every `[ARCH-SLOT]` in PLAN.md |
-| M0-05 | UX.md | UX | doing | In progress in parallel; must resolve every `[UX-SLOT]` in PLAN.md |
-| M0-06 | Scaffold passing validate + check.sh | ARCH | todo | Deps: M0-04 |
-| M0-07 | Schema freeze / interface review | PM+ARCH+UX | todo | Deps: M0-04, M0-05, M0-06 |
-| M0-08 | QA test plan + fixtures (docs/QA.md, tests/fixtures/) | QA | todo | Deps: M0-04; sources and multi-group call in docs/QA-ASSETS.md |
+| M0-04 | ARCHITECTURE.md | ARCH | done | docs/ARCHITECTURE.md, commit 42015dc; PO rulings R1-R13 appended as section 12 |
+| M0-05 | UX.md | UX | done | docs/UX.md (918 lines), commit d9a1916 |
+| M0-06 | Scaffold passing validate + check.sh | ARCH | done | commit 42015dc; validate exit 0; check.sh all green (61 node checks, 28 python tests, 8 qml) |
+| M0-07 | Schema freeze / interface review | PM+ARCH+UX | done | PO reconciled ARCH vs UX: ARCHITECTURE.md section 12 (R1-R13); manifest updated (refreshMinutes 360, barLabelMaxWidth) |
+| M0-08 | QA test plan + fixtures (docs/QA.md, tests/fixtures/) | QA | doing | Launched 2026-09-12 in parallel with M1 lanes; QA-owned fixtures use the qa- prefix |
 | M0-09 | QA-ASSETS.md (public playlists, EPG sources) | PO | done | docs/QA-ASSETS.md, committed 0157fd6 |
 
 ### M1 MVP - Lane A (helper)
@@ -123,6 +123,11 @@ Format: D-<n> | severity P1/P2/P3 | task | repro | state (open/fixed/verified).
 | 2026-09-12 | Test runners: `python3 -m unittest`, `node Model.test.js` (dev-only node), `qmltestrunner` for `*.spec.qml`; all wired into `scripts/check.sh` | PM |
 | 2026-09-12 | Schema freeze gate M0-07: after it, any schema/interface change needs a log entry here before code changes | PM |
 | 2026-09-12 | Defect severity: P1 blocks a story, P2 degrades, P3 cosmetic; release needs zero open P1/P2 | PM |
+| 2026-09-12 | Reconciliation rulings R1-R13 in ARCHITECTURE.md section 12: UX keyboard model (search mode on open, Tab or / to list mode, no Ctrl chords) supersedes ARCH decision 9; result cap 200; searchKey = fold(name + " " + group) with UX 2.5 ranking; card per UX 5.1; bar glyphs per state, name elided at barLabelMaxWidth | PO |
+| 2026-09-12 | Settings frozen: playlistUrl, epgUrl, refreshMinutes (default 360, min 15), mpvArgs, showChannelName, maxRecents, barLabelMaxWidth (default 180); read from the bar-layout entry via shell.barConfig | PO |
+| 2026-09-12 | mpv stays an attached Process in M1 (ARCH decision 2); PM risk R3 detached-mpv mitigation deferred to M2 | PO |
+| 2026-09-12 | IPC verbs: toggle, play, stop, next, previous, refresh, status. Service actions add removeRecent, focusPlayer, zap over the launch-list ring | PO |
+| 2026-09-12 | M1 runs as three parallel worktree lanes: FE lane A (bin/omarchy-iptv + python tests), FE lane B (Model.js, Service.qml, Guide.qml, BarWidget.qml, JS/QML tests), QA (docs/QA.md, qa- fixtures, generator script). PO merges, then QA runs the live-shell pass | PO |
 
 ## Blockers
 
