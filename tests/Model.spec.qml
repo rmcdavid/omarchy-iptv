@@ -189,6 +189,24 @@ TestCase {
     compare(Model.columnAnchor(null, "all").index, -1)
   }
 
+  function test_stopLadder() {
+    // D-LIVE-17: quit -> SIGTERM -> SIGKILL, each after its grace period.
+    compare(Model.STOP_QUIT_GRACE_MS, 2000)
+    compare(Model.STOP_KILL_GRACE_MS, 2000)
+    var step = Model.stopEscalation("")
+    compare(step.action, "quit")
+    compare(step.waitMs, 2000)
+    step = Model.stopEscalation(step.action)
+    compare(step.signal, 15)
+    step = Model.stopEscalation(step.action)
+    compare(step.signal, 9)
+    compare(step.waitMs, 0)
+    compare(Model.stopEscalation("kill").signal, 0)
+    compare(Model.healthTick(0, true).skips, 1)
+    compare(Model.healthTick(2, true).restart, true)
+    compare(Model.healthTick(2, false).check, true)
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)

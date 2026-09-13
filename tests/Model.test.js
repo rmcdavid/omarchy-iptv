@@ -434,6 +434,29 @@ check("footerHints search with query says clear/narrow", Model.footerHints({ mod
 check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s r /")
 check("footerHints empty states", [Model.footerHints({ empty: "error" }), Model.footerHints({ empty: "loading" })], [[["r", "reload"], ["Esc", "close"]], [["Esc", "close"]]])
 
+// ---- player shutdown ladder (D-LIVE-17) ----
+check("shutdown timing constants", [Model.STOP_QUIT_GRACE_MS, Model.STOP_KILL_GRACE_MS, Model.HEALTH_SKIPS_BEFORE_RESTART], [2000, 2000, 3])
+check("stopEscalation: idle -> quit over IPC, then wait the quit grace", Model.stopEscalation(""), { action: "quit", signal: 0, waitMs: 2000 })
+check("stopEscalation: quit ignored -> SIGTERM, then wait the kill grace", Model.stopEscalation("quit"), { action: "term", signal: 15, waitMs: 2000 })
+check("stopEscalation: SIGTERM ignored -> SIGKILL, nothing left to arm", Model.stopEscalation("term"), { action: "kill", signal: 9, waitMs: 0 })
+check("stopEscalation: after SIGKILL only the exit is awaited", Model.stopEscalation("kill"), { action: "kill", signal: 0, waitMs: 0 })
+check("stopEscalation: null and unknown stages", [Model.stopEscalation(null), Model.stopEscalation("bogus")], [{ action: "quit", signal: 0, waitMs: 2000 }, { action: "kill", signal: 0, waitMs: 0 }])
+check("stopEscalation: the full ladder ends in SIGKILL within two grace periods", (function() {
+  var stage = "", waited = 0, sent = []
+  for (var i = 0; i < 5; i++) {
+    var step = Model.stopEscalation(stage)
+    if (step.signal) sent.push(step.signal)
+    stage = step.action
+    if (step.waitMs === 0) break
+    waited += step.waitMs
+  }
+  return { stage: stage, waited: waited, sent: sent }
+})(), { stage: "kill", waited: 4000, sent: [15, 9] })
+check("healthTick: a free tick probes and resets the skip run", [Model.healthTick(0, false), Model.healthTick(2, false)], [{ check: true, restart: false, skips: 0 }, { check: true, restart: false, skips: 0 }])
+check("healthTick: busy ticks are skipped and counted", [Model.healthTick(0, true), Model.healthTick(1, true)], [{ check: false, restart: false, skips: 1 }, { check: false, restart: false, skips: 2 }])
+check("healthTick: the third busy tick in a row restarts the player", Model.healthTick(2, true), { check: false, restart: true, skips: 0 })
+check("healthTick: null / negative skips", [Model.healthTick(null, true), Model.healthTick(-5, true), Model.healthTick("x", false)], [{ check: false, restart: false, skips: 1 }, { check: false, restart: false, skips: 1 }, { check: true, restart: false, skips: 0 }])
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")

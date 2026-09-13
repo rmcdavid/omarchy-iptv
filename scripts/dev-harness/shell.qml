@@ -224,6 +224,8 @@ ShellRoot {
       if (s) {
         out.service = s.statusSummary()
         out.service.failedAt = s.failedAt
+        out.service.stopStage = s.stopStage
+        out.service.healthSkips = s.healthSkips
       }
       return JSON.stringify(out)
     }
