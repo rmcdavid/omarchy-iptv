@@ -57,6 +57,49 @@ Item {
   property int columnWheel: 0
   readonly property int maxRows: Model.MAX_ROWS_DEFAULT
 
+  // ---- microcopy, in one place (UX.md 5.9, section 6). Strings shared with
+  // the bar and notifications live in Model.js (footerStatus, footerHints,
+  // barTooltip, notifyArgv, rowDetail, scopeLabel, noMatchesTitle).
+  readonly property var copy: ({
+    searchPlaceholder: "Search channels" + Model.ELLIPSIS,
+    serviceTitle: "Service not loaded",
+    serviceProse: "Run omarchy restart shell",
+    unconfiguredTitle: "No playlist configured",
+    unconfiguredProse: "Set your M3U URL or path, then press r to load it:",
+    unconfiguredCommand: "omarchy bar set " + root.pluginId + " playlistUrl <url>",
+    unconfiguredEpg: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>",
+    unconfiguredWhere: "Settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
+    loadingTitle: "Loading playlist" + Model.ELLIPSIS,
+    loadingFrom: "Fetching from ",
+    loadingProse: "Fetching playlist",
+    errorTitle: "Playlist failed to load",
+    errorCheck: "check playlistUrl",
+    emptyPlaylistTitle: "Playlist has no channels",
+    emptyPlaylistProse: "Parsed 0 channels from ",
+    emptyPlaylistCheck: "check the URL points at an M3U",
+    noFavoritesTitle: "No favorites yet",
+    noFavoritesProse: "Press f on any channel to pin it here",
+    noMatchesAll: "Esc clears the search",
+    noMatchesGroup: "h/l other groups" + Model.SEP + "Home for All",
+    emptyScopeTitle: "No channels in ",
+    bannerPlaylist: "Playlist refresh failed (",
+    bannerCached: "showing cached copy",
+    bannerRetry: "r retry",
+    bannerEpg: "Guide data unavailable (",
+    bannerEpgStill: "channels still work",
+    bannerEpgPending: "Guide data loading" + Model.ELLIPSIS,
+    transientRefreshing: "Refreshing" + Model.ELLIPSIS,
+    transientStopped: "Stopped",
+    transientFavAdded: "Added to Favorites",
+    transientFavRemoved: "Removed from Favorites",
+    transientRecentRemoved: "Removed from Recent",
+    transientCopied: "Copied",
+    accessibleCard: "IPTV guide",
+    accessibleSearch: "Search channels",
+    accessibleGroups: "Groups",
+    accessibleChannels: "Channels in "
+  })
+
   // ---- timing constants, in one place (UX.md 5.9)
   readonly property int bannerFadeMs: 140
   readonly property int transientMs: 3000
@@ -134,10 +177,10 @@ Item {
   }
   readonly property string bannerText: {
     if (root.bannerKind === "playlistError") {
-      return "Playlist refresh failed (" + root.service.statusReason + ")" + Model.SEP + "showing cached copy" + (root.service.lastUpdated !== "" ? " from " + root.service.lastUpdated : "") + Model.SEP + "r retry"
+      return root.copy.bannerPlaylist + root.service.statusReason + ")" + Model.SEP + root.copy.bannerCached + (root.service.lastUpdated !== "" ? " from " + root.service.lastUpdated : "") + Model.SEP + root.copy.bannerRetry
     }
-    if (root.bannerKind === "epgError") return "Guide data unavailable (" + root.service.epgReason + ")" + Model.SEP + "channels still work" + Model.SEP + "r retry"
-    if (root.bannerKind === "epgPending") return "Guide data loading" + Model.ELLIPSIS
+    if (root.bannerKind === "epgError") return root.copy.bannerEpg + root.service.epgReason + ")" + Model.SEP + root.copy.bannerEpgStill + Model.SEP + root.copy.bannerRetry
+    if (root.bannerKind === "epgPending") return root.copy.bannerEpgPending
     return ""
   }
 
@@ -392,7 +435,7 @@ Item {
     var channel = root.rowAt(index)
     if (!channel || !root.serviceReady) return
     var added = root.service.toggleFavorite(Model.channelId(channel))
-    root.showTransient(added ? "Added to Favorites" : "Removed from Favorites")
+    root.showTransient(added ? root.copy.transientFavAdded : root.copy.transientFavRemoved)
     root.rebuildDisplay()
   }
 
@@ -402,7 +445,7 @@ Item {
     if (!channel || !root.serviceReady) return
     if (root.effectiveScope === Model.SCOPE_RECENT) {
       root.service.removeRecent(Model.channelId(channel))
-      root.showTransient("Removed from Recent")
+      root.showTransient(root.copy.transientRecentRemoved)
       root.rebuildDisplay()
     } else if (root.effectiveScope === Model.SCOPE_FAVORITES) {
       root.toggleFavoriteAt(index)
@@ -412,19 +455,19 @@ Item {
   function stopPlayback() {
     if (!root.serviceReady) return
     root.service.stop()
-    root.showTransient("Stopped")
+    root.showTransient(root.copy.transientStopped)
     root.rebuildDisplay()
   }
 
   function refresh() {
     if (!root.serviceReady) return
     root.service.refresh()
-    root.showTransient("Refreshing" + Model.ELLIPSIS)
+    root.showTransient(root.copy.transientRefreshing)
   }
 
   function copyCommand(text) {
     Quickshell.execDetached(["wl-copy", String(text)])
-    root.showTransient("Copied")
+    root.showTransient(root.copy.transientCopied)
   }
 
   function handleEscape() {
@@ -549,7 +592,7 @@ Item {
       borderSpec: root.borderSpec
       padding: root.contentMargin
       Accessible.role: Accessible.Dialog
-      Accessible.name: "IPTV guide"
+      Accessible.name: root.copy.accessibleCard
 
       MouseArea { anchors.fill: parent; onClicked: {} }
 
@@ -615,14 +658,14 @@ Item {
             anchors.right: scopeLabel.left
             anchors.rightMargin: Style.spacing.md
             anchors.verticalCenter: parent.verticalCenter
-            text: root.query !== "" ? root.query : "Search channels" + Model.ELLIPSIS
+            text: root.query !== "" ? root.query : root.copy.searchPlaceholder
             color: root.foreground
             opacity: root.query !== "" ? 1 : 0.58
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
             Accessible.role: Accessible.EditableText
-            Accessible.name: "Search channels"
+            Accessible.name: root.copy.accessibleSearch
             Accessible.description: root.query
           }
 
@@ -710,7 +753,7 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 cacheBuffer: root.groupEntryHeight * 4
                 Accessible.role: Accessible.List
-                Accessible.name: "Groups"
+                Accessible.name: root.copy.accessibleGroups
 
                 delegate: Item {
                   id: groupRow
@@ -820,7 +863,7 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 cacheBuffer: root.rowHeight * 4
                 Accessible.role: Accessible.List
-                Accessible.name: "Channels in " + Model.scopeName(root.effectiveScope)
+                Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
 
                 delegate: BorderSurface {
                   id: row
@@ -1033,28 +1076,29 @@ Item {
               if (root.emptyKind === "error" || root.emptyKind === "service") return Model.GLYPHS.tvOff
               return Model.GLYPHS.tv
             }
+            readonly property bool emptyPlaylist: root.emptyKind === "error" && root.service.statusReason === root.copy.emptyPlaylistTitle
             readonly property string title: {
-              if (root.emptyKind === "service") return "Service not loaded"
-              if (root.emptyKind === "unconfigured") return "No playlist configured"
-              if (root.emptyKind === "loading") return "Loading playlist" + Model.ELLIPSIS
-              if (root.emptyKind === "error") return root.service.statusReason === "Playlist has no channels" ? "Playlist has no channels" : "Playlist failed to load"
-              if (root.emptyKind === "noFavorites") return "No favorites yet"
+              if (root.emptyKind === "service") return root.copy.serviceTitle
+              if (root.emptyKind === "unconfigured") return root.copy.unconfiguredTitle
+              if (root.emptyKind === "loading") return root.copy.loadingTitle
+              if (root.emptyKind === "error") return emptyState.emptyPlaylist ? root.copy.emptyPlaylistTitle : root.copy.errorTitle
+              if (root.emptyKind === "noFavorites") return root.copy.noFavoritesTitle
               if (root.emptyKind === "noMatches") return Model.noMatchesTitle(root.query, root.scopeId)
-              return "No channels in " + Model.scopeName(root.effectiveScope)
+              return root.copy.emptyScopeTitle + Model.scopeName(root.effectiveScope)
             }
             readonly property string prose: {
-              if (root.emptyKind === "service") return "Run omarchy restart shell"
-              if (root.emptyKind === "unconfigured") return "Set your M3U URL or path, then press r to load it:"
-              if (root.emptyKind === "loading") return root.service.sourceHost !== "" ? "Fetching from " + root.service.sourceHost : "Fetching playlist"
+              if (root.emptyKind === "service") return root.copy.serviceProse
+              if (root.emptyKind === "unconfigured") return root.copy.unconfiguredProse
+              if (root.emptyKind === "loading") return root.service.sourceHost !== "" ? root.copy.loadingFrom + root.service.sourceHost : root.copy.loadingProse
               if (root.emptyKind === "error") {
-                if (root.service.statusReason === "Playlist has no channels") return "Parsed 0 channels from " + root.service.statusHost + Model.SEP + "check the URL points at an M3U"
-                return root.service.statusReason + " from " + root.service.statusHost + Model.SEP + "check playlistUrl"
+                if (emptyState.emptyPlaylist) return root.copy.emptyPlaylistProse + root.service.statusHost + Model.SEP + root.copy.emptyPlaylistCheck
+                return root.service.statusReason + " from " + root.service.statusHost + Model.SEP + root.copy.errorCheck
               }
-              if (root.emptyKind === "noFavorites") return "Press f on any channel to pin it here"
-              if (root.emptyKind === "noMatches") return root.scopeIsGroup ? "h/l other groups" + Model.SEP + "Home for All" : "Esc clears the search"
+              if (root.emptyKind === "noFavorites") return root.copy.noFavoritesProse
+              if (root.emptyKind === "noMatches") return root.scopeIsGroup ? root.copy.noMatchesGroup : root.copy.noMatchesAll
               return ""
             }
-            readonly property string command: "omarchy bar set " + root.pluginId + " playlistUrl <url>"
+            readonly property string command: root.copy.unconfiguredCommand
 
             Text {
               width: parent.width
@@ -1124,7 +1168,7 @@ Item {
               visible: root.emptyKind === "unconfigured"
               width: parent.width
               textFormat: Text.PlainText
-              text: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>"
+              text: root.copy.unconfiguredEpg
               color: root.foreground
               opacity: 0.7
               font.family: root.fontFamily
@@ -1137,7 +1181,7 @@ Item {
               visible: root.emptyKind === "unconfigured"
               width: parent.width
               textFormat: Text.PlainText
-              text: "Settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")"
+              text: root.copy.unconfiguredWhere
               color: root.foreground
               opacity: 0.7
               font.family: root.fontFamily
