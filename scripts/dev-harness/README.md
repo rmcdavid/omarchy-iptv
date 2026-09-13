@@ -8,7 +8,13 @@ smoke-tested without installing it into `~/.config/omarchy/plugins`.
 Running it opens real windows (a thin fake bar strip at the top of the
 screen and, on `--open`, the guide overlay) on the current Wayland session.
 Keep runs short; `run.sh` kills Quickshell after `--timeout` seconds
-(default 15) and reaps any mpv it launched.
+(default 15). An `EXIT` trap reaps everything it started (the fixture HTTP
+server, Quickshell and any harness mpv) on a normal exit, the timeout,
+Ctrl-C or SIGTERM; a SIGKILL of `run.sh` cannot be trapped, so the next
+start also reaps a stale fixture server. The playlist/EPG source is echoed
+as `scheme://host` only and `updateEntryInline` logs the entry's keys, never
+its values: a real provider URL would carry credentials into the terminal
+scrollback.
 
 ## How `qs.Commons` / `qs.Ui` resolve (Quickshell 0.3.1)
 
