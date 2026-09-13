@@ -150,7 +150,7 @@ class PlaylistCommandTest(unittest.TestCase):
 
 
 class CliContractTest(unittest.TestCase):
-    SUBCOMMANDS = ("playlist", "epg", "play", "stop", "status", "state")
+    SUBCOMMANDS = ("playlist", "epg", "play", "stop", "status", "state", "cache")
 
     def test_every_subcommand_is_implemented(self):
         # Exit 3 (not implemented) must never appear; failures are structured errors.
@@ -173,9 +173,14 @@ class CliContractTest(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["kind"], "state")
+            code, payload, _ = run("cache", "--cache-dir", tmp, "remove", "--key", "not-a-key")
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["kind"], "cache")
+            self.assertEqual(payload["error"]["code"], "bad_key")
 
     def test_usage_errors_exit_2_without_json(self):
-        for args in (["playlist"], ["play"], ["play", "--id", "a", "--url", "b"], ["state"], ["state", "favorite", "add"], ["bogus"]):
+        for args in (["playlist"], ["play"], ["play", "--id", "a", "--url", "b"], ["state"], ["state", "favorite", "add"],
+                     ["state", "source"], ["state", "source", "add"], ["cache"], ["cache", "remove"], ["bogus"]):
             code, payload, _ = run(*args)
             self.assertEqual(code, 2, args)
             self.assertIsNone(payload, args)
