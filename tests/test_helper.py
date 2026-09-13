@@ -227,6 +227,80 @@ class CliContractTest(unittest.TestCase):
             self.assertIn("h.test", completed.stdout)
 
 
+class RedirectTest(unittest.TestCase):
+    """S-06: a redirect to another origin drops the Basic credentials derived
+    from a user:pw@ source URL; redirects to non-http(s) schemes are refused.
+    Two loopback servers on different ports stand in for two hosts."""
+
+    def setUp(self):
+        self.other = LocalHttp()
+        self.addCleanup(self.other.close)
+
+        def redirect(to):
+            def route(handler):
+                handler.send_response(302)
+                handler.send_header("Location", to)
+                handler.send_header("Content-Length", "0")
+                handler.end_headers()
+            return route
+
+        self.first = LocalHttp({
+            "/cross": redirect(self.other.url("/playlist")),
+            "/same": redirect("/playlist"),
+            "/ftp": redirect("ftp://127.0.0.1:9/secret/list.m3u"),
+            "/file": redirect("file:///etc/passwd"),
+            "/data": redirect("data:text/plain,%23EXTM3U"),
+            "/loop": redirect("/loop"),
+        })
+        self.addCleanup(self.first.close)
+
+    def fetch(self, path):
+        with tempfile.TemporaryDirectory() as tmp:
+            return run("playlist", "--url", self.first.url(path, "user:pw"), "--cache-dir", tmp, "--timeout", "5")
+
+    def test_cross_origin_redirect_drops_authorization(self):
+        code, status, stderr = self.fetch("/cross")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(status["channelCount"], 1)
+        self.assertEqual(self.first.seen["/cross"]["Authorization"], "Basic dXNlcjpwdw==")
+        self.assertNotIn("Authorization", self.other.seen["/playlist"])
+        self.assertNotIn("Cookie", self.other.seen["/playlist"])
+        self.assertEqual(self.other.seen["/playlist"]["User-Agent"], helper.USER_AGENT)
+
+    def test_same_origin_redirect_keeps_authorization(self):
+        code, status, stderr = self.fetch("/same")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(status["channelCount"], 1)
+        self.assertEqual(self.first.seen["/playlist"]["Authorization"], "Basic dXNlcjpwdw==")
+
+    def test_redirects_to_other_schemes_are_refused(self):
+        for path in ("/ftp", "/file", "/data"):
+            code, status, stderr = self.fetch(path)
+            self.assertEqual(code, 1, path)
+            self.assertEqual(status["error"]["code"], "unsafe_redirect", path)
+            self.assertEqual(status["sourceHost"], "127.0.0.1")
+            for secret in ("user:pw", "passwd", "secret", "list.m3u", "EXTM3U", "127.0.0.1:9"):
+                self.assertNotIn(secret, json.dumps(status) + stderr, path)
+            if path == "/ftp":
+                # ftp passes urllib's own check and is refused by our handler.
+                self.assertEqual(status["error"]["message"], "playlist from 127.0.0.1 redirected to an unsupported scheme 'ftp'")
+            else:
+                # file:/data: are refused by urllib itself (3xx HTTPError).
+                self.assertEqual(status["error"]["message"], "playlist redirect from 127.0.0.1 not followed")
+
+    def test_redirect_loop_is_an_error_not_a_hang(self):
+        started = time.monotonic()
+        code, status, _ = self.fetch("/loop")
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertEqual(code, 1)
+        self.assertEqual(status["error"]["code"], "unsafe_redirect")
+
+    def test_request_origin(self):
+        self.assertEqual(helper.request_origin("HTTPS://User:pw@Host.Test:8443/x?y"), ("https", "host.test", 8443))
+        self.assertEqual(helper.request_origin("http://h.test/x"), ("http", "h.test", None))
+        self.assertNotEqual(helper.request_origin("https://h.test/"), helper.request_origin("http://h.test/"))
+
+
 class HardeningTest(unittest.TestCase):
     """Size caps, unsafe paths, timeouts and status bookkeeping (docs/QA.md test inventory)."""
 

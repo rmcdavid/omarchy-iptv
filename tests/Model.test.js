@@ -265,6 +265,7 @@ check("statusReason network flavours", [
 check("statusReason table", [Model.statusReason({ ok: false, error: { code: "not_found" } }), Model.statusReason({ ok: false, error: { code: "empty_playlist" } }), Model.statusReason({ ok: false, error: { code: "not_implemented" } })], ["File not found", "Playlist has no channels", "Helper command not implemented"])
 // S-05: helper deadline and service watchdog codes never echo the message (which could carry a host).
 check("statusReason timeout codes", [Model.statusReason({ ok: false, error: { code: "timeout", message: "playlist download from h.test exceeded 60 s" } }), Model.statusReason({ ok: false, error: { code: "helper_timeout", message: "helper timed out" } })], ["Timed out", "Helper timed out"])
+check("statusReason unsafe redirect (S-06)", Model.statusReason({ ok: false, error: { code: "unsafe_redirect", message: "playlist from h.test redirected to an unsupported scheme 'ftp'" } }), "Unsafe redirect")
 check("statusReason unknown code redacts URLs from the message", Model.statusReason({ ok: false, error: { code: "odd", message: "bad http://u:p@h.test/x?y" } }), "bad h.test")
 check("statusReason ok", Model.statusReason({ ok: true }), "")
 check("statusHost", [Model.statusHost({ sourceHost: "h.test" }), Model.statusHost(null)], ["h.test", ""])

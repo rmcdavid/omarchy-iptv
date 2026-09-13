@@ -848,6 +848,7 @@ function statusReason(status) {
     unsupported_scheme: "Unsupported URL",
     timeout: "Timed out",
     helper_timeout: "Helper timed out",
+    unsafe_redirect: "Unsafe redirect",
     too_large: "Source too large",
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",

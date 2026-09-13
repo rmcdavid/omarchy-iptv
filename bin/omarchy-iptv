@@ -593,6 +593,42 @@ def split_userinfo(url: str) -> tuple[str, str]:
     return urllib.parse.urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment)), auth
 
 
+def request_origin(url: str) -> tuple[str, str, int | None]:
+    """(scheme, host, port): the scope a credential belongs to."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return "", "", None
+
+
+def make_opener(label: str, host: str) -> Any:
+    """urlopen replacement whose redirect handler (S-06) refuses non-http(s)
+    targets (urllib's default happily follows a 302 to ftp://) and drops
+    Authorization / Cookie when the origin (scheme, host, port) changes, so
+    a provider that bounces to a third party never receives the user's
+    credentials. urllib itself refuses file:/data: targets and loops with a
+    3xx HTTPError, which read_http_source maps to the same error code."""
+    import urllib.request
+
+    class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+            scheme = stream_scheme(newurl)
+            if scheme not in ("http", "https"):
+                try:
+                    fp.close()
+                except OSError:
+                    pass
+                raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme '%s'" % (label, host, scheme or "none"))
+            new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None and request_origin(newurl) != request_origin(req.full_url):
+                for name in ("Authorization", "Cookie"):
+                    new.remove_header(name)
+            return new
+
+    return urllib.request.build_opener(SafeRedirectHandler())
+
+
 def http_deadline(timeout: float) -> float:
     """Wall-clock budget in seconds for one download (see HTTP_DEADLINE_MIN)."""
     override = os.environ.get(HTTP_DEADLINE_ENV, "")
@@ -615,12 +651,13 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
     if auth:
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
     request = urllib.request.Request(target, headers=headers)
+    opener = make_opener(label, host)
     budget = http_deadline(timeout)
     deadline = time.monotonic() + budget
     chunks: list[bytes] = []
     total = 0
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             # read1: at most one socket read per call, so a trickling server
             # cannot park us inside read() past the deadline check.
             while total <= MAX_SOURCE_BYTES:
@@ -634,6 +671,10 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
     except HelperError:
         raise
     except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            # urllib refused the redirect itself (file:, data:, a loop); its
+            # message carries the target URL, so it is not repeated here.
+            raise HelperError("unsafe_redirect", "%s redirect from %s not followed" % (label, host))
         raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
     except urllib.error.URLError as error:
         reason = getattr(error, "reason", error)
