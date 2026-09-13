@@ -972,7 +972,7 @@ function statusReason(status) {
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
     not_a_playlist: "Not an M3U playlist",
-    not_m3u: "Not an M3U file",
+    not_m3u: "Not an M3U playlist",
     not_xmltv: "Not an XMLTV file",
     no_source: "No playlist configured",
     not_implemented: "Helper command not implemented",
@@ -1535,7 +1535,23 @@ function capLength(text, limit) {
 // trimmed, then capped at `limit` UTF-16 units. Applied to every paste, on
 // submit, and again inside the validators.
 function sanitizeInput(text, limit) {
-  return capLength(str(text).replace(CONTROL_RE, "").replace(EDGE_SPACE_RE, ""), limit)
+  // SR15: a leading byte-order mark (a common paste artefact) is dropped.
+  return capLength(str(text).replace(/^\ufeff/, "").replace(CONTROL_RE, "").replace(EDGE_SPACE_RE, ""), limit)
+}
+
+// Unicode code points, not UTF-16 units (SR22: the label cap counts code
+// points in both languages).
+function codePoints(text) {
+  return Array.from(str(text))
+}
+
+function codePointLength(text) {
+  return codePoints(text).length
+}
+
+function capCodePoints(text, limit) {
+  var cps = codePoints(text)
+  return cps.length > limit ? cps.slice(0, limit).join("") : str(text)
 }
 
 // While typing (UX-SOURCES 2.3): controls removed and capped, edges kept so
@@ -1568,7 +1584,7 @@ function sourceErrorMessage(code, opts) {
     invalid: invalidText,
     bad_url: invalidText,
     relative_path: "Use an absolute path (starts with /, not ~)",
-    unsafe_path: "Path not allowed (/proc, /sys and /dev)",
+    unsafe_path: "Path not allowed",
     too_long: "Too long" + SEP + "max " + formatCount(MAX_SOURCE_URL) + " characters",
     duplicate: str(o.label) !== "" ? "Already in Sources as " + quoted : "Already in Sources",
     label_too_long: "Label too long" + SEP + "max " + formatCount(MAX_LABEL) + " characters",
@@ -1577,17 +1593,18 @@ function sourceErrorMessage(code, opts) {
     server_scheme: serverText,
     bad_server: serverText,
     server_path: "Server is just http://host:port" + SEP + "no path",
-    server_too_long: "Server URL too long" + SEP + "max " + formatCount(MAX_XTREAM_SERVER) + " characters",
+    server_userinfo: "Server must not contain a username or password" + SEP + "enter them below",
+    server_too_long: "Server too long" + SEP + "max " + formatCount(MAX_XTREAM_SERVER) + " characters",
     user_empty: "Enter the username",
     pass_empty: "Enter the password",
     bad_credentials: "Enter the username and password",
     user_too_long: "Username too long" + SEP + "max " + formatCount(MAX_XTREAM_FIELD) + " characters",
     pass_too_long: "Password too long" + SEP + "max " + formatCount(MAX_XTREAM_FIELD) + " characters",
-    too_many: "Source limit reached" + SEP + "max " + formatCount(MAX_SOURCES) + " sources",
+    too_many: "Sources is full (" + formatCount(MAX_SOURCES) + ")" + SEP + "remove one first",
     busy: "Busy" + SEP + "wait for the current fetch to finish",
     unknown_source: "Source not found",
     not_ready: "Not ready yet" + SEP + "try again in a moment",
-    persist_failed: "Could not save settings" + SEP + "run omarchy bar set",
+    persist_failed: "Could not save settings" + SEP + "try omarchy bar set",
     cancelled: "Cancelled"
   }
   var text = table[c] || ""
@@ -1605,15 +1622,29 @@ function sourceReason(code) {
 //
 // Accepted: absolute paths, `file://` URLs (normalized to the path) and
 // `http(s)://` URLs with a host. The normalized `url` is the source's
-// identity: scheme and host lowercased, default port dropped, empty path
-// `/`, query verbatim (provider tokens are case-sensitive), fragment
-// dropped, userinfo kept. `~`, `./` and `../` paths are refused
-// (`relative_path`, UX 5.4); `/proc`, `/sys`, `/dev` are refused
-// (`unsafe_path`, section 6.2). `opts.kind === "epg"` makes an empty value
-// ok (the EPG is optional) and prefixes the messages with `EPG:`.
+// identity: scheme and host lowercased, numeric port normalized (leading
+// zeros stripped, the scheme default dropped), empty path `/`, query
+// verbatim (provider tokens are case-sensitive), fragment dropped, userinfo
+// kept. `./` and `../` paths are refused (`relative_path`, UX 5.4); `~`
+// paths are refused from the forms and accepted verbatim from the CLI
+// (`opts.origin === "cli"`, SR11); `/proc`, `/sys`, `/dev` are refused
+// (`unsafe_path`, SR13). Text without a scheme is `scheme` when it looks
+// like a host and `relative_path` otherwise (SR12). The authority refuses
+// backslashes, zero-width characters, ports above 65535 and bracket
+// literals that are not IPv6 (SR15). `opts.kind === "epg"` makes an empty
+// value ok (the EPG is optional) and prefixes the messages with `EPG:`.
+var ZERO_WIDTH_RE = /[\u200b-\u200d\u2060\ufeff]/
+var IPV6_LITERAL_RE = /^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~-]+)?\]$/
+
+// SR12: a "." or ":" before the first "/" reads as a host.
+function looksLikeHost(text) {
+  return /[.:]/.test(str(text).split("/")[0])
+}
+
 function validateSourceUrl(text, opts) {
   var o = opts || {}
   var field = o.kind === "epg" ? "epg" : "playlist"
+  var cli = o.origin === "cli"
   function fail(code) {
     return { ok: false, code: code, message: sourceErrorMessage(code, { field: field }), field: field, kind: "", url: "", host: "" }
   }
@@ -1627,10 +1658,12 @@ function validateSourceUrl(text, opts) {
   var s = sanitizeInput(text, MAX_SOURCE_URL + 1)
   if (s === "") return field === "epg" ? pass("", "", "") : fail("empty")
   if (s.length > MAX_SOURCE_URL) return fail("too_long")
+  if (s.indexOf("//") === 0) return fail("scheme")
   if (s.charAt(0) === "/") return filePath(s)
-  if (s.charAt(0) === "~" || s === "." || s === ".." || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
+  if (s.charAt(0) === "~") return cli ? pass("file", s, "") : fail("relative_path")
+  if (s === "." || s === ".." || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
   var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/)
-  if (!m) return fail("scheme")
+  if (!m) return fail(looksLikeHost(s) ? "scheme" : "relative_path")
   var scheme = m[1].toLowerCase()
   var rest = m[2]
   if (scheme === "file") {
@@ -1650,6 +1683,7 @@ function validateSourceUrl(text, opts) {
   var cut = body.search(/[\/?#]/)
   var authority = cut === -1 ? body : body.substring(0, cut)
   var tail = cut === -1 ? "" : body.substring(cut)
+  if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return fail("invalid")
   var userinfo = ""
   var hostport = authority
   var at = authority.lastIndexOf("@")
@@ -1663,6 +1697,7 @@ function validateSourceUrl(text, opts) {
     var close = hostport.indexOf("]")
     if (close === -1) return fail("invalid")
     host = hostport.substring(0, close + 1)
+    if (!IPV6_LITERAL_RE.test(host)) return fail("invalid")
     var afterHost = hostport.substring(close + 1)
     if (afterHost !== "") {
       if (afterHost.charAt(0) !== ":") return fail("invalid")
@@ -1676,7 +1711,11 @@ function validateSourceUrl(text, opts) {
   }
   if (host === "") return fail("invalid")
   host = host.toLowerCase()
-  if (port !== "" && !/^[0-9]+$/.test(port)) return fail("invalid")
+  if (port !== "") {
+    if (!/^[0-9]+$/.test(port)) return fail("invalid")
+    port = port.replace(/^0+(?=[0-9])/, "")
+    if (Number(port) > 65535) return fail("invalid")
+  }
   if ((scheme === "http" && port === "80") || (scheme === "https" && port === "443")) port = ""
   var hash = tail.indexOf("#")
   if (hash !== -1) tail = tail.substring(0, hash)
@@ -1755,19 +1794,19 @@ function hostPortOf(url) {
 function deriveLabel(url, kind) {
   var text = str(url)
   var k = str(kind)
-  var v = validateSourceUrl(text)
+  var v = validateSourceUrl(text, { origin: "cli" })
   if (k === "file" || v.kind === "file") {
     var path = v.ok ? v.url : text
     var name = path.replace(/\/+$/, "").split("/").pop()
-    return sanitizeInput(name, MAX_LABEL) || "local file"
+    return capCodePoints(sanitizeInput(name), MAX_LABEL) || "local file"
   }
   var hostport = hostPortOf(v.ok ? v.url : text)
-  if (hostport === "") return sanitizeInput(text, MAX_LABEL)
-  return sanitizeInput(hostport.replace(/^www\./, ""), MAX_LABEL)
+  if (hostport === "") return capCodePoints(sanitizeInput(text), MAX_LABEL)
+  return capCodePoints(sanitizeInput(hostport.replace(/^www\./, "")), MAX_LABEL)
 }
 
 function labelKey(text) {
-  return sanitizeInput(text, MAX_LABEL + 1).toLowerCase()
+  return sanitizeInput(text).toLowerCase()
 }
 
 // `existing` is a list of labels or of records / views ({ label, id | key }).
@@ -1797,12 +1836,12 @@ function labelTaken(label, existing, selfId) {
 // Appends ` 2`, ` 3`, ... while the label is taken (case-insensitive);
 // derived labels only, a typed label is rejected with `label_taken` instead.
 function uniqueLabel(label, existing, selfId) {
-  var base = sanitizeInput(label, MAX_LABEL)
+  var base = capCodePoints(sanitizeInput(label), MAX_LABEL)
   if (base === "") base = "source"
   if (!labelTaken(base, existing, selfId)) return base
   for (var n = 2; n < 1000; n++) {
     var suffix = " " + n
-    var candidate = capLength(base, MAX_LABEL - suffix.length) + suffix
+    var candidate = capCodePoints(base, MAX_LABEL - suffix.length) + suffix
     if (!labelTaken(candidate, existing, selfId)) return candidate
   }
   return base
@@ -1813,9 +1852,10 @@ function defaultSourceLabel(url, kind, existingLabels) {
   return uniqueLabel(deriveLabel(url, kind), existingLabels)
 }
 
+// SR22: the cap counts code points; over-cap labels are refused, never cut.
 function validateLabel(label, existing, selfId) {
-  var text = sanitizeInput(label, MAX_LABEL + 1)
-  if (text.length > MAX_LABEL) return { ok: false, code: "label_too_long", field: "label", message: sourceErrorMessage("label_too_long"), label: text }
+  var text = sanitizeInput(label)
+  if (codePointLength(text) > MAX_LABEL) return { ok: false, code: "label_too_long", field: "label", message: sourceErrorMessage("label_too_long"), label: text }
   if (labelTaken(text, existing, selfId)) return { ok: false, code: "label_taken", field: "label", message: sourceErrorMessage("label_taken", { label: text }), label: text }
   return { ok: true, code: "ok", field: "", message: "", label: text }
 }
@@ -1879,7 +1919,12 @@ function xtreamUrls(server, username, password) {
   if (!v.ok) return fail(v.code === "scheme" ? "server_scheme" : "invalid", "server")
   if (v.kind !== "http") return fail("server_scheme", "server")
   var m = v.url.match(/^(https?:\/\/[^\/?#@]+)\/?$/)
-  if (!m) return fail(v.url.indexOf("@") !== -1 && v.url.indexOf("@") < v.url.indexOf("/", 8) ? "invalid" : "server_path", "server")
+  if (!m) {
+    // SR17: credentials belong in the fields below, never in the server URL.
+    var authorityEnd = v.url.indexOf("/", 8)
+    var hasUserinfo = v.url.indexOf("@") !== -1 && (authorityEnd === -1 || v.url.indexOf("@") < authorityEnd)
+    return fail(hasUserinfo ? "server_userinfo" : "server_path", "server")
+  }
   var base = m[1]
   var user = sanitizeInput(o.username, MAX_XTREAM_FIELD + 1)
   if (user === "") return fail("user_empty", "username")
@@ -1984,10 +2029,15 @@ function sourceViews(state, activeKey, nowSec, errors) {
     view.addedAt = Math.floor(Number(list[i].addedAt) || 0)
     out.push(view)
   }
+  // SR32: active first, then last used (newest first), then the never-used
+  // records in the order they were added.
   out.sort(function(a, b) {
     if (a.active !== b.active) return a.active ? -1 : 1
-    if (a.lastUsedAt !== b.lastUsedAt) return b.lastUsedAt - a.lastUsedAt
-    if (a.addedAt !== b.addedAt) return b.addedAt - a.addedAt
+    var au = a.lastUsedAt > 0
+    var bu = b.lastUsedAt > 0
+    if (au !== bu) return au ? -1 : 1
+    if (au && a.lastUsedAt !== b.lastUsedAt) return b.lastUsedAt - a.lastUsedAt
+    if (a.addedAt !== b.addedAt) return au ? b.addedAt - a.addedAt : a.addedAt - b.addedAt
     return a.label < b.label ? -1 : (a.label > b.label ? 1 : 0)
   })
   for (var j = 0; j < out.length; j++) delete out[j].addedAt
@@ -2000,8 +2050,9 @@ function sourceRows(state, activeKey, nowSec, errors) {
 }
 
 // Row detail (UX-SOURCES 5.2): `active` (active source only), `used ...` on
-// narrow cards, host, `Xtream`, counts or `not loaded yet` (a probe failure
-// replaces it with the redacted reason), `EPG`.
+// narrow cards, host, `Xtream`, counts or `not loaded yet`, `EPG`. Rows
+// never carry error text (SR26); a failed retry's reason goes to the
+// form's result line.
 function sourceDetail(view, narrow) {
   var v = view || {}
   var parts = []
@@ -2009,8 +2060,7 @@ function sourceDetail(view, narrow) {
   if (narrow) parts.push(str(v.lastUsedText) || formatLastUsed(v.lastUsedAt))
   parts.push(str(v.host))
   if (v.kind === "xtream") parts.push("Xtream")
-  if (Number(v.channelCount) >= 0) parts.push(countsLine(v.channelCount, v.groupCount))
-  else parts.push(str(v.errorReason) !== "" ? str(v.errorReason) : "not loaded yet")
+  parts.push(Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
   if (v.hasEpg) parts.push("EPG")
   return joinParts(parts)
 }
@@ -2083,7 +2133,7 @@ function normalizeSourceRecord(raw) {
   if (epg.length > MAX_SOURCE_URL) epg = ""
   var origin = str(raw.origin)
   if (SOURCE_ORIGINS.indexOf(origin) === -1) origin = "guide"
-  var label = sanitizeInput(raw.label, MAX_LABEL)
+  var label = capCodePoints(sanitizeInput(raw.label), MAX_LABEL)
   if (label === "") label = deriveLabel(url, kind)
   return {
     key: key,
@@ -2360,8 +2410,18 @@ function isFormField(form, id) {
   return formFields(form).indexOf(str(id)) !== -1
 }
 
+// The validation cap of a field (LIMITS, SR5).
 function formLimit(field) {
   return FORM_LIMITS[str(field)] || MAX_SOURCE_URL
+}
+
+// What a field may hold: the cap plus slack, so an over-cap paste is kept
+// long enough to be refused with `too_long` / `label_too_long` /
+// `user_too_long` instead of being cut silently (SR18, SR22).
+var FORM_SLACK = 64
+
+function formCapacity(field) {
+  return formLimit(field) + FORM_SLACK
 }
 
 function emptyValues(kind) {
@@ -2524,7 +2584,7 @@ function withFormValue(st, field, value, opts) {
   var o = opts || {}
   var id = str(field)
   var f = cur.form
-  f.values[id] = capLength(str(value), formLimit(id))
+  f.values[id] = capLength(str(value), formCapacity(id))
   if (isUrlField(id)) f.revealed[id] = o.typed === true && f.values[id] !== ""
   if (f.error && f.error.field === id) f.error = null
   return cur
@@ -2614,7 +2674,7 @@ function withFormProbing(st, probing, opts) {
 function formSubmitValues(form) {
   var f = copyForm(form)
   var out = {}
-  for (var k in f.values) out[k] = sanitizeInput(f.values[k], formLimit(k))
+  for (var k in f.values) out[k] = sanitizeInput(f.values[k], formCapacity(k))
   return out
 }
 
@@ -2863,6 +2923,10 @@ if (typeof module !== "undefined") {
     GUIDE_MODES: GUIDE_MODES,
     sanitizeInput: sanitizeInput,
     sanitizeTyping: sanitizeTyping,
+    codePointLength: codePointLength,
+    capCodePoints: capCodePoints,
+    looksLikeHost: looksLikeHost,
+    formCapacity: formCapacity,
     sourceErrorMessage: sourceErrorMessage,
     sourceReason: sourceReason,
     validateSourceUrl: validateSourceUrl,

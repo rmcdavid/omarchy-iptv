@@ -892,7 +892,16 @@ Item {
     root.refocus()
   }
 
+  // SR24: at the cap the add entry points show the `too_many` message
+  // instead of opening a form.
+  function sourcesFull() {
+    if (root.sourceCount < Model.LIMITS.sources) return false
+    root.showTransient(Model.sourceErrorMessage("too_many"))
+    return true
+  }
+
   function openAddForm() {
+    if (root.sourcesFull()) return
     root.setGuide(Model.openAddForm(root.guide))
     root.refocus()
   }
@@ -909,8 +918,17 @@ Item {
   }
 
   function openXtreamForm() {
+    if (root.sourcesFull()) return
     root.setGuide(Model.openXtreamForm(root.guide, root.form ? root.form.origin : "sources"))
     root.refocus()
+  }
+
+  // SR25: a persist failure lands on the result line while a form is open,
+  // in the footer otherwise.
+  function showPersistFailed() {
+    if (!root.opened) return
+    if (root.formActive) root.failForm({ code: "persist_failed", field: "", message: Model.sourceErrorMessage("persist_failed") })
+    else root.showTransient(Model.sourceErrorMessage("persist_failed"))
   }
 
   function cancelForm() {
@@ -1164,7 +1182,7 @@ Item {
     if (!root.formActive || root.fieldMasked(id)) return
     var value = String(text)
     if (value === root.formValue(id)) return
-    var limit = Model.formLimit(id)
+    var limit = Model.formCapacity(id)
     var typed = true
     var clean
     if (root.pasteArmed) {
@@ -1178,7 +1196,7 @@ Item {
   }
 
   function setFieldValue(id, value, typed) {
-    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeTyping(value, Model.formLimit(id)), { typed: typed })
+    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeTyping(value, Model.formCapacity(id)), { typed: typed })
   }
 
   function toggleRevealField(id) {
@@ -1207,7 +1225,7 @@ Item {
   // before the next frame (UX-SOURCES 2.3, 6.6).
   function pasteReplace(id) {
     if (root.pasteViaProcess) { root.pasteInto(id); return }
-    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeInput(root.clipboardText(), Model.formLimit(id)))
+    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeInput(root.clipboardText(), Model.formCapacity(id)))
   }
 
   // wl-paste fallback path (D9): asks the service, which answers through a
@@ -1218,7 +1236,7 @@ Item {
 
   function pasteFromProcess(text) {
     if (!root.formActive || !Model.isFormField(root.form, root.formFocus)) return
-    root.guide = Model.withFormValue(root.guide, root.formFocus, Model.sanitizeInput(text, Model.formLimit(root.formFocus)))
+    root.guide = Model.withFormValue(root.guide, root.formFocus, Model.sanitizeInput(text, Model.formCapacity(root.formFocus)))
   }
 
   // Form keys seen before the focused TextField / Button (Keys.forwardTo):
@@ -1303,7 +1321,7 @@ Item {
     function onSourceProbeFinished(result) { root.onProbeFinished(result) }
     function onSourcesChanged() { root.syncSourceCursor() }
     function onSourceSwitched(id) { root.showSwitched(id) }
-    function onSourcesPersistFailed(reason) { if (root.opened) root.showTransient(Model.sourceErrorMessage("persist_failed")) }
+    function onSourcesPersistFailed(reason) { root.showPersistFailed() }
     function onConfiguredChanged() { root.onConfiguredFlip() }
     function onClipboardText(text) { root.pasteFromProcess(text) }
   }
@@ -2416,7 +2434,9 @@ Item {
                   // are always readable (UX-SOURCES 4.4); no caret scrolling.
                   autoScroll: !fieldRow.masked
                   password: fieldRow.fieldId === "password"
-                  maximumLength: Model.formLimit(fieldRow.fieldId)
+                  // Cap plus slack: an over-cap paste is refused with its
+                  // error, never cut silently (SR18, SR22).
+                  maximumLength: Model.formCapacity(fieldRow.fieldId)
                   placeholderText: root.fieldPlaceholder(fieldRow.fieldId)
                   enabled: !root.formProbing
                   foreground: root.foreground

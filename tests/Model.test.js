@@ -508,8 +508,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source
 check("fixture has every UX 5.4 URL code plus unsafe_path", [...new Set(fixture.filter(c => !c.ok).map(c => c.code))].sort(), ["empty", "invalid", "relative_path", "scheme", "too_long", "unsafe_path"])
 check("fixture covers files, IDN, IPv6, userinfo, fragments, control characters and the cap", fixture.length >= 75, true)
 for (const c of fixture) {
-  const r = Model.validateSourceUrl(c.input)
-  const name = "fixture " + JSON.stringify(c.input.length > 48 ? c.input.slice(0, 45) + "..." : c.input) + (c.note ? " (" + c.note + ")" : "")
+  const r = Model.validateSourceUrl(c.input, c.origin ? { origin: c.origin } : undefined)
+  const name = "fixture " + JSON.stringify(c.input.length > 48 ? c.input.slice(0, 45) + "..." : c.input) + (c.origin ? " [" + c.origin + "]" : "") + (c.note ? " (" + c.note + ")" : "")
   if (c.ok) check(name, [r.ok, r.kind, r.url, r.host, Model.sourceKey(r.url)], [true, c.kind, c.url, c.host, c.key])
   else check(name, [r.ok, r.code], [false, c.code])
 }
@@ -520,6 +520,13 @@ for (const c of fixture) {
 check("validateSourceUrl file URL query and fragment dropped", Model.validateSourceUrl("file:///srv/tv/list.m3u?x=1#f").url, "/srv/tv/list.m3u")
 check("validateSourceUrl two ports are invalid", Model.validateSourceUrl("http://h.test:80:1/").code, "invalid")
 check("validateSourceUrl bare dot is a relative path", Model.validateSourceUrl(".").code, "relative_path")
+check("validateSourceUrl origin cli accepts ~ verbatim, forms refuse it (SR11)", [Model.validateSourceUrl("~/tv/list.m3u", { origin: "cli" }).url, Model.validateSourceUrl("~/tv/list.m3u", { origin: "cli" }).kind, Model.validateSourceUrl("~/tv/list.m3u").code, Model.validateSourceUrl("~/tv/list.m3u", { origin: "form" }).code], ["~/tv/list.m3u", "file", "relative_path", "relative_path"])
+check("looksLikeHost heuristic (SR12)", ["list.m3u", "localhost:8080/x", "provider.test/list.m3u", "playlist", "Videos/list.m3u", ""].map(Model.looksLikeHost), [true, true, true, false, false, false])
+check("validateSourceUrl port normalization and bounds (SR15)", [Model.validateSourceUrl("http://h.test:0080/x").url, Model.validateSourceUrl("http://h.test:0/x").url, Model.validateSourceUrl("http://h.test:65536/x").code, Model.validateSourceUrl("http://[::1]:00443/x").url], ["http://h.test/x", "http://h.test:0/x", "invalid", "http://[::1]:443/x"])
+check("sanitizeInput strips a leading BOM only (SR15)", [Model.sanitizeInput("\ufeffhttp://h.test/x"), Model.sanitizeInput("a\ufeffb")], ["http://h.test/x", "a\ufeffb"])
+check("statusReason: one spelling for a non-M3U source (SR28)", [Model.statusReason({ ok: false, error: { code: "not_m3u", message: "" } }), Model.statusReason({ ok: false, error: { code: "not_a_playlist", message: "" } })], ["Not an M3U playlist", "Not an M3U playlist"])
+check("codePointLength / capCodePoints count code points, not UTF-16 units (SR22)", [Model.codePointLength("a\ud83d\udce1b"), Model.capCodePoints("a\ud83d\udce1b", 2), Model.validateLabel("\ud83d\udce1".repeat(64), [], "").ok, Model.validateLabel("\ud83d\udce1".repeat(65), [], "").code, Model.uniqueLabel("\ud83d\udce1".repeat(70), []).length], [3, "a\ud83d\udce1", true, "label_too_long", 128])
+check("formCapacity is the cap plus slack so over-cap input is refused, not cut (SR18)", [Model.formCapacity("playlist") > Model.formLimit("playlist"), Model.withFormValue(Model.openFirstRun(Model.guideState("all")), "playlist", "http://h.test/" + "a".repeat(2100)).form.values.playlist.length > 2048, Model.validateUrlForm({ label: "", playlist: "http://h.test/" + "a".repeat(2100), epg: "" }, [], "").error.code], [true, true, "too_long"])
 check("validateSourceUrl result shape", Object.keys(Model.validateSourceUrl("http://h.test/x")).sort(), ["code", "field", "host", "kind", "message", "ok", "url"])
 check("validateSourceUrl message is the UX copy", Model.validateSourceUrl("provider.test/x").message, "Start with http://, https://, or / for a local file")
 check("validateSourceUrl too_long quotes LIMITS.url", Model.validateSourceUrl("/" + "x".repeat(2100)).message, "Too long" + SEP + "max 2,048 characters")
@@ -536,13 +543,13 @@ check("sourceErrorMessage playlist codes", ["empty", "scheme", "invalid", "relat
   "Invalid URL" + SEP + "check the host",
   "Use an absolute path (starts with /, not ~)",
   "Too long" + SEP + "max 2,048 characters",
-  "Path not allowed (/proc, /sys and /dev)"
+  "Path not allowed"
 ])
 check("sourceErrorMessage label and duplicate codes quote the label", [Model.sourceErrorMessage("duplicate", { label: "Provider" }), Model.sourceErrorMessage("duplicate"), Model.sourceErrorMessage("label_taken", { label: "Provider" }), Model.sourceErrorMessage("label_too_long")], ["Already in Sources as " + Q("Provider"), "Already in Sources", "A source named " + Q("Provider") + " already exists", "Label too long" + SEP + "max 64 characters"])
-check("sourceErrorMessage Xtream codes", ["server_empty", "server_scheme", "server_path", "user_empty", "pass_empty", "user_too_long", "pass_too_long"].map(Model.sourceErrorMessage), [
-  "Enter the server URL", "Server must start with http:// or https://", "Server is just http://host:port" + SEP + "no path", "Enter the username", "Enter the password", "Username too long" + SEP + "max 256 characters", "Password too long" + SEP + "max 256 characters"
+check("sourceErrorMessage Xtream codes", ["server_empty", "server_scheme", "server_path", "user_empty", "pass_empty", "user_too_long", "pass_too_long", "server_too_long"].map(Model.sourceErrorMessage), [
+  "Enter the server URL", "Server must start with http:// or https://", "Server is just http://host:port" + SEP + "no path", "Enter the username", "Enter the password", "Username too long" + SEP + "max 256 characters", "Password too long" + SEP + "max 256 characters", "Server too long" + SEP + "max 512 characters"
 ])
-check("sourceErrorMessage service codes", ["too_many", "busy", "unknown_source", "not_ready", "persist_failed"].map(c => Model.sourceErrorMessage(c) !== ""), [true, true, true, true, true])
+check("sourceErrorMessage service codes (SR24, SR25)", [Model.sourceErrorMessage("too_many"), Model.sourceErrorMessage("persist_failed"), Model.sourceErrorMessage("busy") !== "", Model.sourceErrorMessage("unknown_source") !== "", Model.sourceErrorMessage("not_ready") !== ""], ["Sources is full (50)" + SEP + "remove one first", "Could not save settings" + SEP + "try omarchy bar set", true, true, true])
 check("sourceErrorMessage architecture names map onto the UX sentences", [Model.sourceErrorMessage("bad_url"), Model.sourceErrorMessage("unsupported_scheme"), Model.sourceErrorMessage("bad_server")], [Model.sourceErrorMessage("invalid"), Model.sourceErrorMessage("scheme"), Model.sourceErrorMessage("server_scheme")])
 check("sourceErrorMessage unknown / ok / empty", [Model.sourceErrorMessage("weird"), Model.sourceErrorMessage("ok"), Model.sourceErrorMessage("")], ["Could not save the source (weird)", "", ""])
 check("sourceReason is the same table", Model.sourceReason("too_many"), Model.sourceErrorMessage("too_many"))
@@ -590,7 +597,7 @@ check("xtreamUrls percent-encodes the credentials", Model.xtreamUrls("https://h.
 check("xtreamUrls accepts one object (service call shape)", Model.xtreamUrls({ server: "https://h.test", username: "u", password: "p" }).epgUrl, "https://h.test/xmltv.php?username=u&password=p")
 check("xtreamUrls default ports are dropped so the key is stable", Model.xtreamUrls("http://H.test:80", "u", "p").base, "http://h.test")
 check("xtreamUrls server_empty / server_scheme (no guessing) / server_path (UX 8 #9, #10)", [Model.xtreamUrls("", "u", "p").code, Model.xtreamUrls("h.test:8080", "u", "p").code, Model.xtreamUrls("ftp://h.test", "u", "p").code, Model.xtreamUrls("/srv/x", "u", "p").code, Model.xtreamUrls("http://h.test/get.php?username=x", "u", "p").code, Model.xtreamUrls("http://h.test/c", "u", "p").code, Model.xtreamUrls("http://h.test/?x=1", "u", "p").code], ["server_empty", "server_scheme", "server_scheme", "server_scheme", "server_path", "server_path", "server_path"])
-check("xtreamUrls invalid host / userinfo", [Model.xtreamUrls("http://h .test", "u", "p").code, Model.xtreamUrls("http://u:p@h.test", "u", "p").code, Model.xtreamUrls("http://", "u", "p").code], ["invalid", "invalid", "invalid"])
+check("xtreamUrls invalid host / server_userinfo (SR17)", [Model.xtreamUrls("http://h .test", "u", "p").code, Model.xtreamUrls("http://u:p@h.test", "u", "p").code, Model.xtreamUrls("http://u@h.test:8080/", "u", "p").message, Model.xtreamUrls("http://", "u", "p").code], ["invalid", "server_userinfo", "Server must not contain a username or password" + SEP + "enter them below", "invalid"])
 check("xtreamUrls credential codes", [Model.xtreamUrls("http://h.test", "", "p").code, Model.xtreamUrls("http://h.test", "u", "  ").code, Model.xtreamUrls("http://h.test", "u".repeat(257), "p").code, Model.xtreamUrls("http://h.test", "u", "p".repeat(257)).code, Model.xtreamUrls("http://" + "h".repeat(520), "u", "p").code], ["user_empty", "pass_empty", "user_too_long", "pass_too_long", "server_too_long"])
 check("xtreamUrls failure names the field and carries the copy", Model.xtreamUrls("http://h.test", "u", "").field + "|" + Model.xtreamUrls("http://h.test", "u", "").message, "password|Enter the password")
 check("xtreamUrls failure carries no URL fields", (() => { const r = Model.xtreamUrls("http://h.test/x", "u", "p"); return [r.playlistUrl, r.epgUrl, r.base, r.host] })(), ["", "", "", ""])
@@ -643,10 +650,10 @@ check("sourceDetail wide", [Model.sourceDetail(views4[0], false), Model.sourceDe
   "active" + SEP + "tv.example.net:8080" + SEP + "Xtream" + SEP + "1,475 channels in 28 groups" + SEP + "EPG",
   "nas.local:9981" + SEP + "84 channels in 6 groups" + SEP + "EPG",
   "local file" + SEP + "12 channels in 1 group",
-  "iptv-org.github.io" + SEP + "Connection refused"
+  "iptv-org.github.io" + SEP + "not loaded yet"
 ])
-check("sourceDetail narrow moves 'used' right after 'active'", [Model.sourceDetail(views4[0], true), Model.sourceDetail(views4[3], true)], ["active" + SEP + "used 21:30" + SEP + "tv.example.net:8080" + SEP + "Xtream" + SEP + "1,475 channels in 28 groups" + SEP + "EPG", "never used" + SEP + "iptv-org.github.io" + SEP + "Connection refused"])
-check("sourceDetail not loaded yet without an error", Model.sourceDetail(Model.sourceView(recCli, "", nowSep), false), "iptv-org.github.io" + SEP + "not loaded yet")
+check("sourceDetail narrow moves 'used' right after 'active'", [Model.sourceDetail(views4[0], true), Model.sourceDetail(views4[3], true)], ["active" + SEP + "used 21:30" + SEP + "tv.example.net:8080" + SEP + "Xtream" + SEP + "1,475 channels in 28 groups" + SEP + "EPG", "never used" + SEP + "iptv-org.github.io" + SEP + "not loaded yet"])
+check("sourceDetail never carries error text (SR26): errorReason stays on the view for the result line", [Model.sourceDetail(Model.sourceView(recCli, "", nowSep), false), views4[3].errorReason], ["iptv-org.github.io" + SEP + "not loaded yet", "Connection refused"])
 check("sourceAccessibleName", [Model.sourceAccessibleName(views4[0]), Model.sourceAccessibleName(Model.sourceView(recCli, "", nowSep))], ["Provider, tv.example.net:8080, 1,475 channels in 28 groups, active, EPG, last used 21:30", "iptv-org, iptv-org.github.io, not loaded yet, never used"])
 
 // ---- state v2 and reducers (ARCHITECTURE-SOURCES 2.1, 2.2, 3.5) ----
@@ -733,7 +740,7 @@ const typed = Model.withFormValue(fr, "playlist", "http://h.test/x?token=1", { t
 check("withFormValue typed: value set, field revealed while typing (never masked mid-typing)", [typed.form.values.playlist, typed.form.revealed.playlist, Model.fieldMaskable(typed.form, "playlist"), Model.fieldMasked(typed.form, "playlist")], ["http://h.test/x?token=1", true, false === Model.fieldMasked(typed.form, "playlist") ? true : true, false])
 const pasted = Model.withFormValue(fr, "playlist", "http://h.test/x?token=1")
 check("withFormValue paste: masked immediately", [Model.fieldMasked(pasted.form, "playlist"), pasted.form.revealed.playlist], [true, false])
-check("withFormValue caps at the field limit and ignores unknown fields", [Model.withFormValue(fr, "playlist", "x".repeat(3000)).form.values.playlist.length, Model.withFormValue(fr, "label", "x").form.values.label, Model.withFormValue(fr, "nope", "x").form.values], [2048, "", { label: "", playlist: "", epg: "" }])
+check("withFormValue caps at the field capacity (cap + slack) and ignores unknown fields", [Model.withFormValue(fr, "playlist", "x".repeat(3000)).form.values.playlist.length, Model.withFormValue(fr, "label", "x").form.values.label, Model.withFormValue(fr, "nope", "x").form.values], [Model.formCapacity("playlist"), "", { label: "", playlist: "", epg: "" }])
 check("withFormValue clears an error on that field only", (() => { const e = Model.withFormError(pasted, { code: "invalid", field: "playlist", message: "m" }); return [Model.withFormValue(e, "playlist", "y").form.error, Model.withFormValue(e, "epg", "y").form.error.code] })(), [null, "invalid"])
 check("fieldMaskable / fieldRevealed on a plain value", [Model.fieldMaskable(Model.withFormValue(fr, "playlist", "http://h.test/x").form, "playlist"), Model.fieldRevealed(fr.form, "playlist"), Model.fieldMasked(null, "playlist")], [false, false, false])
 check("toggleReveal: reveal, hide, no-op when nothing to mask", [Model.toggleReveal(pasted, "playlist").form.revealed.playlist, Model.toggleReveal(Model.toggleReveal(pasted, "playlist"), "playlist").form.revealed.playlist, Model.toggleReveal(Model.withFormValue(fr, "playlist", "http://h.test/x"), "playlist").form.revealed.playlist, Model.toggleReveal(fr, "label").form.revealed], [true, false, false, { playlist: false, epg: false }])
