@@ -66,10 +66,10 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 | M1.1-02 | Theme-switch check | QA | blocked | needs the plugin installed in the live shell (omarchy theme set); commands in QA-RESULTS.md section 7 |
 | M1.1-03 | Performance check (10k playlist, large EPG) | QA | done | all within budget: playlist 11k parse 530 ms, overlay open ~64 ms net on 11k cache, filter <= 6.7 ms, EPG 41 MB gz 2.9 s, --now-only 37 ms |
 | M1.1-04 | Security review (G4) | ARCH | done | docs/SECURITY-REVIEW.md: pass with findings (S-01 P2, 7 P3); all eight fixed and merged 134fbe1 (256 node, 144 python) |
-| M1.1-05 | Fix round 1 (P1/P2) | FE | doing | security round merged 134fbe1; QA-defect round (D-LIVE-01..15 except 04, 13) started 2026-09-13 in a worktree |
+| M1.1-05 | Fix round 1 (P1/P2) | FE | done | security round merged 134fbe1; QA-defect round merged 2ce0b52; all 23 items verified by M1.1-06 |
 | M1.1-06 | Regression re-test | QA | done (harness) | docs/QA-RESULTS.md "Regression on 2ce0b52": 23/23 fixes verified, 137 cases re-run with 0 regressions, gates green (271 node, 144 python, 18 qml, validate 0); new P3s D-LIVE-16/17/18; live-shell block (12 cases) unchanged |
-| M1.1-07 | Docs polish + known limitations | FE+UX | doing | PO: README limits/disable/third-party bar/runtime dir (D-LIVE-13), UX 6.3 wording (D-LIVE-11), ARCHITECTURE 12.1 |
-| M1.1-08 | Dead-stream hardening | FE | todo | Deps: M1.1-01 |
+| M1.1-07 | Docs polish + known limitations | FE+UX | done | README (limits, disable note, third-party bar, behavior notes, D-LIVE-18), UX 6.3/6.4 wording, ARCHITECTURE 12.1, CHANGELOG.md |
+| M1.1-08 | Dead-stream hardening | FE | todo | carries D-LIVE-16 (column scroll on reopen), D-LIVE-17 (SIGKILL escalation for an mpv that never answers IPC) |
 
 ### Release
 
@@ -167,16 +167,10 @@ Regression re-test on 2ce0b52 (QA, 2026-09-13, `docs/QA-RESULTS.md` section "Reg
 
 ## Next up
 
-First three tasks for the FE dev once M0 is complete (M0-06 and M0-07 `done`):
-
-1. M1-01 Helper skeleton (S): argparse subcommands, XDG paths, atomic JSON writes,
-   `status.json` with a readable error field, redacted logging. Unlocks all of Lane A.
-2. M1-07 Model.js + Model.test.js (M): search, grouping with Favorites/Recent pinned,
-   group filter, bounded display window, prev/next in group. Pure logic; unlocks Lane B.
-3. M1-02 M3U parser + tests (M): `#EXTINF` attributes, `#EXTGRP`, `#EXTVLCOPT`,
-   `#KODIPROP`, stable ids; must parse the 10k fixture from M0-08 in under 1 s.
-
-Then M1-08 (overlay shell, verifies keyboard focus early, risk R2) and M1-03 (fetch/cache).
+1. Live-shell verification on the reference machine (12 blocked cases): install by git clone into ~/.config/omarchy/plugins, rescan, enable, `omarchy bar set` playlistUrl, keybinding and menu row from contrib/, theme switch, restart shell; commands in docs/QA-RESULTS.md section 7. Needs the user's go-ahead.
+2. Tag v0.1.0 once the live-shell cases pass (v0.1.0-rc1 is tagged on the harness-verified build).
+3. M1.1-08: D-LIVE-16 column scroll on reopen, D-LIVE-17 SIGKILL escalation, and rendering playlist warnings in the guide (D-LIVE-18).
+4. M2 backlog per docs/PLAN.md section 10 (detached/idle mpv first: removes S-03 and the restart-shell limitation).
 
 ## Handoff notes
 

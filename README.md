@@ -128,8 +128,10 @@ omarchy-shell io.github.rmcdavid.iptv status              # JSON
 ## Limits
 
 - Playlists are capped at 50,000 channels and 2,000 groups; extra channels
-  are skipped and extra groups fold into Ungrouped, with a warning in the
-  guide.
+  are skipped and extra groups fold into Ungrouped. The warning is recorded
+  in `~/.cache/omarchy-iptv/playlist-status.json` and in the output of
+  `omarchy-shell io.github.rmcdavid.iptv status`; the guide does not show
+  it yet.
 - Downloads (playlist and EPG) must finish within 60 seconds; redirects to
   anything but http(s) are refused and credentials are dropped when a
   redirect changes host.
