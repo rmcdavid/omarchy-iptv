@@ -194,6 +194,11 @@ check("fallbackScope never lands on the header", Model.fallbackScope(Model.scope
 check("fallbackScope no entries keeps the id", [Model.fallbackScope([], "g:UK"), Model.fallbackScope(null, "")], ["g:UK", "all"])
 check("favoriteSet from ids or a state", [Model.favoriteSet(["a", "b"]).b, Model.favoriteSet({ favorites: ["c"] }).c, Model.favoriteSet(null).x], [true, true, undefined])
 check("scopeIndex", [Model.scopeIndex(entries, "all"), Model.scopeIndex(entries, "g:UK"), Model.scopeIndex(entries, "zz")], [2, 4, -1])
+// D-LIVE-16: pinned entries show the column from the top, a group is brought into view.
+check("columnAnchor pinned scopes scroll to the top", [Model.columnAnchor(entries, "recent"), Model.columnAnchor(entries, "favorites"), Model.columnAnchor(entries, "all")], [{ index: 0, top: true }, { index: 1, top: true }, { index: 2, top: true }])
+check("columnAnchor All is still top without Recent", Model.columnAnchor(Model.scopeEntries(channels, null), "all"), { index: 1, top: true })
+check("columnAnchor group is contained, not topped", [Model.columnAnchor(entries, "g:UK"), Model.columnAnchor(entries, "g:One World")], [{ index: 4, top: false }, { index: 8, top: false }])
+check("columnAnchor unknown scope or no column", [Model.columnAnchor(entries, "g:Gone"), Model.columnAnchor(entries, ""), Model.columnAnchor([], "all"), Model.columnAnchor(null, "all")], [{ index: -1, top: false }, { index: -1, top: false }, { index: -1, top: false }, { index: -1, top: false }])
 check("initialScope favorites when present", Model.initialScope(channels, state), "favorites")
 check("initialScope all when no favorites", Model.initialScope(channels, null), "all")
 check("cursorFor playing row", Model.cursorFor(channels, "4"), 3)
@@ -428,6 +433,51 @@ check("footerHints search", Model.footerHints({ mode: "search", query: "" }).map
 check("footerHints search with query says clear/narrow", Model.footerHints({ mode: "search", query: "x" }).slice(2), [["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]])
 check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s r /")
 check("footerHints empty states", [Model.footerHints({ empty: "error" }), Model.footerHints({ empty: "loading" })], [[["r", "reload"], ["Esc", "close"]], [["Esc", "close"]]])
+
+// ---- player shutdown ladder (D-LIVE-17) ----
+check("shutdown timing constants", [Model.STOP_QUIT_GRACE_MS, Model.STOP_KILL_GRACE_MS, Model.HEALTH_SKIPS_BEFORE_RESTART], [2000, 2000, 3])
+check("stopEscalation: idle -> quit over IPC, then wait the quit grace", Model.stopEscalation(""), { action: "quit", signal: 0, waitMs: 2000 })
+check("stopEscalation: quit ignored -> SIGTERM, then wait the kill grace", Model.stopEscalation("quit"), { action: "term", signal: 15, waitMs: 2000 })
+check("stopEscalation: SIGTERM ignored -> SIGKILL, nothing left to arm", Model.stopEscalation("term"), { action: "kill", signal: 9, waitMs: 0 })
+check("stopEscalation: after SIGKILL only the exit is awaited", Model.stopEscalation("kill"), { action: "kill", signal: 0, waitMs: 0 })
+check("stopEscalation: null and unknown stages", [Model.stopEscalation(null), Model.stopEscalation("bogus")], [{ action: "quit", signal: 0, waitMs: 2000 }, { action: "kill", signal: 0, waitMs: 0 }])
+check("stopEscalation: the full ladder ends in SIGKILL within two grace periods", (function() {
+  var stage = "", waited = 0, sent = []
+  for (var i = 0; i < 5; i++) {
+    var step = Model.stopEscalation(stage)
+    if (step.signal) sent.push(step.signal)
+    stage = step.action
+    if (step.waitMs === 0) break
+    waited += step.waitMs
+  }
+  return { stage: stage, waited: waited, sent: sent }
+})(), { stage: "kill", waited: 4000, sent: [15, 9] })
+check("healthTick: a free tick probes and resets the skip run", [Model.healthTick(0, false), Model.healthTick(2, false)], [{ check: true, restart: false, skips: 0 }, { check: true, restart: false, skips: 0 }])
+check("healthTick: busy ticks are skipped and counted", [Model.healthTick(0, true), Model.healthTick(1, true)], [{ check: false, restart: false, skips: 1 }, { check: false, restart: false, skips: 2 }])
+check("healthTick: the third busy tick in a row restarts the player", Model.healthTick(2, true), { check: false, restart: true, skips: 0 })
+check("healthTick: null / negative skips", [Model.healthTick(null, true), Model.healthTick(-5, true), Model.healthTick("x", false)], [{ check: false, restart: false, skips: 1 }, { check: false, restart: false, skips: 1 }, { check: true, restart: false, skips: 0 }])
+
+// ---- playlist warnings (D-LIVE-18) ----
+const capWarnings = ["truncated to 50000 channels (500 entries skipped)", "group count capped at 2000; 2091 channels listed under Ungrouped"]
+check("statusWarnings from a successful run", Model.statusWarnings({ ok: true, warnings: capWarnings }), capWarnings)
+check("statusWarnings from helper JSON", Model.statusWarnings(Model.parseHelperStatus('{"ok": true, "kind": "playlist", "warnings": ["3 URL lines without #EXTINF skipped"]}', "playlist")), ["3 URL lines without #EXTINF skipped"])
+check("statusWarnings never carries a URL", Model.statusWarnings({ ok: true, warnings: ["dropped header with unsafe name for http://u:p@h.test/x?y=1"] }), ["dropped header with unsafe name for h.test"])
+check("statusWarnings drops blanks, keeps the rest as text", Model.statusWarnings({ ok: true, warnings: ["", "  ", null, 42, " trimmed "] }), ["42", "trimmed"])
+check("statusWarnings is empty for a failed run (the previous load's warnings stay)", [Model.statusWarnings({ ok: false, warnings: ["x"] }), Model.statusWarnings({ ok: true }), Model.statusWarnings(null)], [[], [], []])
+check("warningLine single", Model.warningLine([capWarnings[0]]), "Playlist warning: truncated to 50000 channels (500 entries skipped)")
+check("warningLine counts the rest", [Model.warningLine(capWarnings), Model.warningLine(["a", "b", "c"])], ["Playlist warning: truncated to 50000 channels (500 entries skipped) (+1 more)", "Playlist warning: a (+2 more)"])
+check("warningLine empty", [Model.warningLine([]), Model.warningLine(null), Model.warningLine([""])], ["", "", ""])
+check("warningLine never carries a URL", Model.warningLine(["see http://user:pw@h.test/list.m3u?token=1 for details"]), "Playlist warning: see h.test for details")
+check("footerStatus warning replaces the counts line", Model.footerStatus({ configured: true, count: 50000, lastUpdated: "01:53", warning: "Playlist warning: x" }), "Playlist warning: x")
+check("footerStatus warning yields to transient, search cap, playing, refreshing and EPG pending", [
+  Model.footerStatus({ count: 5, warning: "W", transient: "Stopped" }),
+  Model.footerStatus({ count: 5, warning: "W", truncated: true, resultTotal: 300, cap: 200 }),
+  Model.footerStatus({ count: 5, warning: "W", playingName: "Arte" }),
+  Model.footerStatus({ count: 5, warning: "W", refreshing: true }),
+  Model.footerStatus({ count: 5, warning: "W", epgPending: true })
+], ["Stopped", "First 200 of 300" + SEP + "keep typing", "\udb81\udc0a Arte" + SEP + "s stop", "Refreshing\u2026", "Guide data loading\u2026"])
+check("footerStatus warning needs a loaded playlist", [Model.footerStatus({ configured: false, count: 0, warning: "W" }), Model.footerStatus({ configured: true, count: 0, warning: "W" })], ["", ""])
+check("footerStatus no warning keeps the counts line", Model.footerStatus({ count: 5, lastUpdated: "12:40", warning: "" }), "5 channels" + SEP + "updated 12:40")
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

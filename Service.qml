@@ -40,7 +40,8 @@ Item {
   readonly property int epgRecomputeMs: 5 * 60 * 1000
   readonly property int epgTickMs: 30 * 1000
   readonly property int healthCheckMs: 10 * 1000
-  readonly property int stopFallbackMs: 2000
+  // The shutdown ladder's grace periods live with its reducer in Model.js
+  // (STOP_QUIT_GRACE_MS, STOP_KILL_GRACE_MS, HEALTH_SKIPS_BEFORE_RESTART).
   readonly property int focusRetryMs: 500
   readonly property int focusRetries: 6
   readonly property int healthFailuresBeforeRestart: 2
@@ -136,6 +137,19 @@ Item {
   readonly property int relaunchDelayMs: 200
   readonly property int playRetryBaseMs: 300
   readonly property int playRetryMax: 3        // 300 + 600 + 900 ms = 1.8 s
+  // D-LIVE-17: rung of the shutdown ladder already taken ("" idle, "quit",
+  // "term", "kill"; Model.stopEscalation), a play() that arrived while the
+  // old player was on its way out (started from handleMpvExit, never over
+  // the dying socket) and the health ticks skipped in a row behind an
+  // in-flight helper call (Model.healthTick).
+  property string stopStage: ""
+  readonly property bool stopping: stopStage !== ""
+  property bool playAfterExit: false
+  property int healthSkips: 0
+  // Warnings of the last successful playlist load (D-LIVE-18), URL-free;
+  // the guide shows them until the next successful load without warnings.
+  // A failed refresh keeps them: the cache in use is still that load's.
+  property var playlistWarnings: []
 
   // Emitted after a successful playlist helper run; the guide shows
   // `Refreshed - N channels` for a manual refresh (UX 6.1, D-LIVE-05).
@@ -177,7 +191,6 @@ Item {
     root.userStopped = false
     root.relaunchPending = false
     root.relaunched = false
-    root.stopPending = false
     root.playRetries = 0
     relaunchTimer.stop()
     playRetryTimer.stop()
@@ -196,6 +209,13 @@ Item {
     root.saveState()
     root.wantFocus = !keepOpen
     if (mpvProc.running) {
+      if (root.stopping) {
+        // The player is on its way out (stop or health restart): the new
+        // channel starts from handleMpvExit once the exit is observed and
+        // never over the dying socket (D-LIVE-17).
+        root.playAfterExit = true
+        return true
+      }
       if (controlProc.running) {
         // A zap burst: remember only the last target, applied when the
         // current helper call returns.
@@ -210,8 +230,10 @@ Item {
     return true
   }
 
-  // Ask mpv to quit over IPC; SIGTERM after stopFallbackMs if it ignores us.
-  // A user stop never notifies.
+  // Ask mpv to quit over IPC, then SIGTERM, then SIGKILL, each after its
+  // grace period (Model.stopEscalation, D-LIVE-17). nowPlaying clears at
+  // once so the bar and the guide drop the channel; the process itself is
+  // gone within the ladder's bound. A user stop never notifies.
   function stop() {
     root.pendingPlayId = ""
     root.wantFocus = false
@@ -220,16 +242,57 @@ Item {
     relaunchTimer.stop()
     playRetryTimer.stop()
     root.relaunchPending = false
+    root.playAfterExit = false
     root.playRetries = 0
+    root.nowPlaying = null
     if (!mpvProc.running) {
       root.stopPending = false
-      root.nowPlaying = null
+      root.stopStage = ""
+      stopTimer.stop()
       return
     }
     root.userStopped = true
-    if (controlProc.running) root.stopPending = true
-    else root.runControl("stop", ["stop", "--socket", root.socketPath])
-    stopFallbackTimer.restart()
+    // A stop while the ladder already runs only cancelled the queued play.
+    if (!root.stopping) root.escalateStop()
+  }
+
+  // One rung of the shutdown ladder; stopTimer re-arms for the next one
+  // until handleMpvExit observes the exit (D-LIVE-17).
+  function escalateStop() {
+    if (!mpvProc.running) {
+      stopTimer.stop()
+      root.stopStage = ""
+      return
+    }
+    var step = Model.stopEscalation(root.stopStage)
+    if (step.action === "quit") {
+      if (controlProc.running) root.stopPending = true
+      else root.runControl("stop", ["stop", "--socket", root.socketPath])
+    } else if (step.signal > 0) {
+      if (step.signal === 9) console.warn("omarchy-iptv: mpv ignored SIGTERM, sending SIGKILL")
+      mpvProc.signal(step.signal)
+    }
+    root.stopStage = step.action
+    if (step.waitMs > 0) {
+      stopTimer.interval = step.waitMs
+      stopTimer.restart()
+    } else {
+      stopTimer.stop()
+    }
+  }
+
+  // Health verdict: the player is unresponsive. It already failed to answer
+  // over IPC, so the ladder starts at SIGTERM (SIGKILL after the grace
+  // period); one automatic relaunch of nowPlaying follows the exit, never
+  // racing the dying instance (D-LIVE-15, D-LIVE-17).
+  function restartPlayer() {
+    if (!mpvProc.running || root.stopping) return
+    console.warn("omarchy-iptv: mpv unresponsive, restarting player")
+    root.healthFailures = 0
+    root.healthSkips = 0
+    root.relaunchPending = !root.relaunched && root.nowPlaying !== null
+    root.stopStage = "quit"
+    root.escalateStop()
   }
 
   function toggleFavorite(id) {
@@ -310,6 +373,7 @@ Item {
       recents: root.userState.recents.length,
       epg: { configured: root.epgConfigured, loaded: root.epgLoaded, pending: root.epgPending, reason: root.epgReason },
       playlistReason: root.statusReason,
+      warnings: root.playlistWarnings,
       lastError: root.lastError
     }
   }
@@ -338,7 +402,8 @@ Item {
 
   function applyPlaylistStatus(text) {
     root.playlistStatus = Model.parseHelperStatus(text, "playlist")
-    if (root.playlistStatus.ok !== true) root.lastError = root.statusReason
+    if (root.playlistStatus.ok === true) root.playlistWarnings = Model.statusWarnings(root.playlistStatus)
+    else root.lastError = root.statusReason
   }
 
   function applyEpgStatus(text) {
@@ -414,15 +479,14 @@ Item {
         if (root.healthFailures === 0) console.warn("omarchy-iptv: status check unavailable:", Model.statusReason(status))
       } else {
         root.healthFailures += 1
-        if (root.healthFailures >= root.healthFailuresBeforeRestart && mpvProc.running) {
-          console.warn("omarchy-iptv: mpv unresponsive, restarting player")
-          root.healthFailures = 0
-          root.relaunchPending = !root.relaunched && root.nowPlaying !== null
-          mpvProc.signal(15)
-        }
+        if (root.healthFailures >= root.healthFailuresBeforeRestart) root.restartPlayer()
       }
     } else if (kind === "play") {
-      if (status.ok !== true && status.error) {
+      if (root.stopping) {
+        // An answer from a player on its way out: nothing to retry or
+        // restore, handleMpvExit starts nowPlaying afresh (D-LIVE-17).
+        root.playRetries = 0
+      } else if (status.ok !== true && status.error) {
         var reason = Model.statusReason(status)
         var code = String(status.error.code)
         if (code === "not_running" && root.nowPlaying && !mpvProc.running) {
@@ -475,6 +539,9 @@ Item {
     var extra = Model.splitMpvArgs(root.mpvArgs)
     if (extra.rejected.length > 0) console.warn("omarchy-iptv: ignoring mpvArgs tokens:", extra.rejected.join(" "))
     root.mpvStderrTail = []
+    root.stopStage = ""
+    root.healthSkips = 0
+    stopTimer.stop()
     // Known exposure (S-03, documented in the README): the FIRST channel's
     // stream URL and header values sit in mpv's argv for the life of the
     // process, readable by other local accounts through /proc/<pid>/cmdline
@@ -506,22 +573,28 @@ Item {
   }
 
   function handleMpvExit(exitCode, exitStatus) {
-    stopFallbackTimer.stop()
+    stopTimer.stop()
     focusTimer.stop()
     playRetryTimer.stop()
     var current = root.nowPlaying
     var stopped = root.userStopped
-    var relaunch = root.relaunchPending
+    var userPlay = root.playAfterExit
+    var relaunch = root.relaunchPending || userPlay
     root.userStopped = false
     root.relaunchPending = false
+    root.playAfterExit = false
     root.stopPending = false
+    root.stopStage = ""
     root.pendingPlayId = ""
     root.playRetries = 0
+    root.healthSkips = 0
     if (relaunch && current && !stopped) {
       var channel = root.channelIndex[current.id]
       if (channel) {
-        root.relaunched = true
-        root.wantFocus = false
+        // The health check gets one automatic relaunch per player; a play()
+        // the user issued during the shutdown starts a fresh one (D-LIVE-17).
+        root.relaunched = !userPlay
+        if (!userPlay) root.wantFocus = false
         // Deferred, not from inside the exit handler: the old socket file
         // is gone and an in-flight helper call has returned by then, and a
         // stop() in the meantime cancels it (D-LIVE-15).
@@ -599,6 +672,7 @@ Item {
     // A new source starts clean: the previous source's reason and host must
     // not stay on screen while its first fetch runs (UX 4.5, D-LIVE-10).
     root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
+    root.playlistWarnings = []
     root.lastError = ""
     root.refreshPlaylist(true)
   }
@@ -741,14 +815,18 @@ Item {
 
   Timer {
     // Health check while mpv runs: helper `status` over the socket; two
-    // consecutive failures -> SIGTERM -> one automatic relaunch.
+    // consecutive failures, or three ticks in a row behind an in-flight
+    // helper call, -> SIGTERM, SIGKILL -> one automatic relaunch (D-LIVE-17).
     id: healthTimer
     interval: root.healthCheckMs
     repeat: true
     running: mpvProc.running
     onTriggered: {
-      if (controlProc.running || root.userStopped) return
-      root.runControl("status", ["status", "--socket", root.socketPath])
+      if (root.userStopped || root.stopping) return
+      var tick = Model.healthTick(root.healthSkips, controlProc.running)
+      root.healthSkips = tick.skips
+      if (tick.restart) root.restartPlayer()
+      else if (tick.check) root.runControl("status", ["status", "--socket", root.socketPath])
     }
   }
 
@@ -780,17 +858,19 @@ Item {
   }
 
   Timer {
-    // If mpv ignores `quit` (hung), terminate it.
-    id: stopFallbackTimer
-    interval: root.stopFallbackMs
+    // Drives the shutdown ladder (D-LIVE-17): each rung re-arms it for the
+    // next grace period; handleMpvExit stops it.
+    id: stopTimer
+    interval: Model.STOP_QUIT_GRACE_MS
     repeat: false
-    onTriggered: if (mpvProc.running) mpvProc.signal(15)
+    onTriggered: root.escalateStop()
   }
 
   Timer {
     // One automatic relaunch after the health check reaped a hung player,
-    // a moment after its exit (D-LIVE-15). Skipped once the user stopped or
-    // a play() already started a new player.
+    // or the channel a play() asked for during a shutdown (D-LIVE-17), a
+    // moment after the exit (D-LIVE-15). Skipped once the user stopped or a
+    // play() already started a new player.
     id: relaunchTimer
     interval: root.relaunchDelayMs
     repeat: false
@@ -810,7 +890,7 @@ Item {
     interval: root.playRetryBaseMs
     repeat: false
     onTriggered: {
-      if (!mpvProc.running || root.userStopped || !root.nowPlaying) return
+      if (!mpvProc.running || root.userStopped || root.stopping || !root.nowPlaying) return
       var id = String(root.nowPlaying.id)
       if (controlProc.running) root.pendingPlayId = id
       else root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.cacheDir])

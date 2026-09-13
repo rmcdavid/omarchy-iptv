@@ -23,6 +23,17 @@ var MAX_ROWS_DEFAULT = 200
 // Helper-side cap on channels.json (bin/omarchy-iptv MAX_CHANNELS, S-07);
 // prepareChannels re-applies it so a hand-edited cache stays bounded too.
 var MAX_CHANNELS = 50000
+// Player shutdown ladder (D-LIVE-17): `quit` over IPC, SIGTERM once
+// STOP_QUIT_GRACE_MS pass without an exit, SIGKILL after another
+// STOP_KILL_GRACE_MS. An mpv that never answers IPC and ignores SIGTERM
+// (wedged, or SIGSTOPped) is gone within about 4 s of a stop and its
+// Process exit is always observed, so nowPlaying and the bar never go stale.
+var STOP_QUIT_GRACE_MS = 2000
+var STOP_KILL_GRACE_MS = 2000
+// Health ticks that find a helper call in flight are skipped; this many in
+// a row count as a failed check, so a player whose every call runs to its
+// deadline cannot starve the check forever (D-LIVE-17).
+var HEALTH_SKIPS_BEFORE_RESTART = 3
 var FAVORITES_GROUP = "Favorites"
 var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
@@ -516,6 +527,15 @@ function scopeIndex(entries, scopeId) {
   return -1
 }
 
+// Where the group column sits for the selected scope (UX 2.2 / 2.3,
+// D-LIVE-16): a pinned entry (Recent, Favorites, All) shows the column from
+// the top so every pinned entry is visible; a group is brought into view
+// (ListView.Contain). index is -1 when the scope is not in the column.
+function columnAnchor(entries, scopeId) {
+  var index = scopeIndex(entries, scopeId)
+  return { index: index, top: index >= 0 && isPinnedScope(scopeId) }
+}
+
 // A scope that is no longer in the column (the last Recent entry removed, a
 // group gone after a refresh) must not keep the cursor on a hidden entry:
 // fall back to Favorites when it has channels, else All (UX 2.2, D-LIVE-07).
@@ -901,6 +921,51 @@ function statusHealthy(status) {
   return !!(status && status.ok === true && status.running !== false)
 }
 
+// Warnings of a successful helper run (D-LIVE-18): strings only, every URL
+// reduced to its host (R12), empty for a failed run so the caller keeps the
+// warnings of the load whose cache is still in use.
+function statusWarnings(status) {
+  if (!status || status.ok !== true) return []
+  var list = asList(status.warnings)
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var text = redactUrls(str(list[i])).replace(/^\s+|\s+$/g, "")
+    if (text !== "") out.push(text)
+  }
+  return out
+}
+
+// Footer line for playlist warnings (UX 6 tone, D-LIVE-18): the first
+// warning and, when there are several, how many more; "" without warnings.
+function warningLine(warnings) {
+  var list = statusWarnings({ ok: true, warnings: warnings })
+  if (list.length === 0) return ""
+  return "Playlist warning: " + list[0] + (list.length > 1 ? " (+" + (list.length - 1) + " more)" : "")
+}
+
+// ------------------------------------------------------------ player shutdown
+
+// Next rung of the shutdown ladder (D-LIVE-17). `stage` is the rung already
+// taken: "" -> `quit` over IPC, "quit" -> SIGTERM, "term" -> SIGKILL, after
+// which only the exit is awaited (nothing to send, no wait to arm).
+function stopEscalation(stage) {
+  var s = str(stage)
+  if (s === "") return { action: "quit", signal: 0, waitMs: STOP_QUIT_GRACE_MS }
+  if (s === "quit") return { action: "term", signal: 15, waitMs: STOP_KILL_GRACE_MS }
+  if (s === "term") return { action: "kill", signal: 9, waitMs: 0 }
+  return { action: "kill", signal: 0, waitMs: 0 }
+}
+
+// One health-timer tick (D-LIVE-17). `skips` counts the ticks skipped in a
+// row because a helper call was in flight, `busy` says whether one is in
+// flight now: check = run the status probe, restart = treat the player as
+// unresponsive without probing (HEALTH_SKIPS_BEFORE_RESTART busy ticks).
+function healthTick(skips, busy) {
+  var n = busy ? Math.max(0, Math.floor(Number(skips) || 0)) + 1 : 0
+  var restart = !!busy && n >= HEALTH_SKIPS_BEFORE_RESTART
+  return { check: !busy, restart: restart, skips: restart ? 0 : n }
+}
+
 // ------------------------------------------------------------ settings
 
 // Our inline settings live on the bar layout entry (shell.json bar.layout.*).
@@ -1261,7 +1326,8 @@ function barAccessibleName(opts) {
 // ------------------------------------------------------------ footer
 
 // Footer status (UX 6.1). Priority: transient > bounded search > playing >
-// EPG pending > counts. The empty states (not configured, loading, error
+// refreshing > EPG pending > playlist warning (D-LIVE-18, until the next
+// clean load) > counts. The empty states (not configured, loading, error
 // without a cache; UX 4.4 - 4.6) carry their message in the body and leave
 // the status slot blank, so `0 channels` or `Refreshing...` never shows
 // there (D-LIVE-09); only a transient may.
@@ -1273,6 +1339,7 @@ function footerStatus(opts) {
   if (str(o.playingName) !== "") return GLYPHS.play + " " + str(o.playingName) + SEP + "s stop"
   if (o.refreshing) return "Refreshing" + ELLIPSIS
   if (o.epgPending) return "Guide data loading" + ELLIPSIS
+  if (str(o.warning) !== "") return str(o.warning)
   var out = pluralChannels(o.count)
   if (str(o.lastUpdated) !== "") out += SEP + (o.stale ? "cached " + str(o.lastUpdated) + SEP + "offline" : "updated " + str(o.lastUpdated))
   else if (o.stale) out += SEP + "cached" + SEP + "offline"
@@ -1298,6 +1365,9 @@ if (typeof module !== "undefined") {
   module.exports = {
     MAX_ROWS_DEFAULT: MAX_ROWS_DEFAULT,
     MAX_CHANNELS: MAX_CHANNELS,
+    STOP_QUIT_GRACE_MS: STOP_QUIT_GRACE_MS,
+    STOP_KILL_GRACE_MS: STOP_KILL_GRACE_MS,
+    HEALTH_SKIPS_BEFORE_RESTART: HEALTH_SKIPS_BEFORE_RESTART,
     FAVORITES_GROUP: FAVORITES_GROUP,
     RECENT_GROUP: RECENT_GROUP,
     UNGROUPED: UNGROUPED,
@@ -1337,6 +1407,7 @@ if (typeof module !== "undefined") {
     effectiveScope: effectiveScope,
     moveScope: moveScope,
     scopeIndex: scopeIndex,
+    columnAnchor: columnAnchor,
     fallbackScope: fallbackScope,
     initialScope: initialScope,
     cursorFor: cursorFor,
@@ -1370,6 +1441,10 @@ if (typeof module !== "undefined") {
     statusReason: statusReason,
     statusHost: statusHost,
     statusHealthy: statusHealthy,
+    statusWarnings: statusWarnings,
+    warningLine: warningLine,
+    stopEscalation: stopEscalation,
+    healthTick: healthTick,
     findBarEntry: findBarEntry,
     settingOf: settingOf,
     clampInt: clampInt,

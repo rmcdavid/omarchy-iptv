@@ -176,6 +176,48 @@ TestCase {
     compare(Model.hostOf("/home/x/list.m3u"), "local file")
   }
 
+  function test_columnAnchor() {
+    // D-LIVE-16: pinned entries show the column from the top; groups are contained.
+    var entries = Model.scopeEntries(channels, userState)
+    var all = Model.columnAnchor(entries, "all")
+    compare(all.index, 2)
+    compare(all.top, true)
+    var group = Model.columnAnchor(entries, "g:UK")
+    compare(group.index, 4)
+    compare(group.top, false)
+    compare(Model.columnAnchor(entries, "g:Gone").index, -1)
+    compare(Model.columnAnchor(null, "all").index, -1)
+  }
+
+  function test_stopLadder() {
+    // D-LIVE-17: quit -> SIGTERM -> SIGKILL, each after its grace period.
+    compare(Model.STOP_QUIT_GRACE_MS, 2000)
+    compare(Model.STOP_KILL_GRACE_MS, 2000)
+    var step = Model.stopEscalation("")
+    compare(step.action, "quit")
+    compare(step.waitMs, 2000)
+    step = Model.stopEscalation(step.action)
+    compare(step.signal, 15)
+    step = Model.stopEscalation(step.action)
+    compare(step.signal, 9)
+    compare(step.waitMs, 0)
+    compare(Model.stopEscalation("kill").signal, 0)
+    compare(Model.healthTick(0, true).skips, 1)
+    compare(Model.healthTick(2, true).restart, true)
+    compare(Model.healthTick(2, false).check, true)
+  }
+
+  function test_playlistWarnings() {
+    // D-LIVE-18: one footer line, URL-free, empty without warnings.
+    var status = Model.parseHelperStatus('{"ok": true, "kind": "playlist", "warnings": ["truncated to 50000 channels (500 entries skipped)", "see http://u:p@h.test/x"]}', "playlist")
+    compare(Model.statusWarnings(status), ["truncated to 50000 channels (500 entries skipped)", "see h.test"])
+    compare(Model.warningLine(Model.statusWarnings(status)), "Playlist warning: truncated to 50000 channels (500 entries skipped) (+1 more)")
+    compare(Model.warningLine([]), "")
+    compare(Model.statusWarnings({ ok: false, warnings: ["x"] }), [])
+    compare(Model.footerStatus({ count: 50000, lastUpdated: "01:53", warning: "Playlist warning: x" }), "Playlist warning: x")
+    compare(Model.footerStatus({ count: 5, playingName: "Arte", warning: "Playlist warning: x" }), Model.GLYPHS.play + " Arte" + Model.SEP + "s stop")
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)
