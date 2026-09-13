@@ -919,7 +919,7 @@ active source's refresh / EPG problems.
 
 ```
   value:   http://user:pw@tv.example.net:8080/get.php?username=tomasz&password=s3cret&type=m3u_plus&output=ts#x
-  masked:  http://****@tv.example.net:8080/get.php?username=****&password=****&type=****&output=****#****
+  masked:  http://****@tv.example.net:8080/get.php?username=****&password=****&type=m3u_plus&output=ts#****
            ^scheme  ^userinfo ^host:port         ^path    ^every query value  ^key stays       ^fragment
 
   value:   https://iptv-org.github.io/iptv/index.m3u
@@ -1043,6 +1043,9 @@ no "please".
 | label | the source label |
 | right meta | `used 21:30` (today), `used yesterday`, `used 3 Sep` (this year), `used 3 Sep 2025` (older), `never used` |
 | detail | segments joined with ` - `: `active` (active source only), `<host>` (`local file` for paths), `Xtream` (`kind === "xtream"` only), `1,475 channels in 28 groups` / `1 channel in 1 group` / `not loaded yet` (no cache), `EPG` (when `epgUrl` is set) |
+
+List order (SR32): the active source first, then by `lastUsedAt` descending,
+then never-used sources in the order they were added.
 | detail, narrow | `active` (if any), `used ...` / `never used`, then the segments above |
 
 ### 5.3 Footer
@@ -1094,7 +1097,7 @@ No `https://` auto-prefix and no Xtream URL auto-parse (8).
 | fetching, URL | `Fetching from tv.example.net...` |
 | fetching, path | `Reading the file...` |
 | failed, URL | `<reason> from <host>` with `<reason>` from the shipped `Model.statusReason`: `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 503 Service Unavailable`, `Could not resolve host`, `Connection refused`, `Timed out`, `TLS error`, `Network error`, `Not an M3U playlist`, `Playlist has no channels`, `Source too large`, `Unsafe redirect` |
-| failed, path | `<reason>` alone: `File not found`, `Path not allowed`, `Not an M3U file`, `Playlist has no channels` |
+| failed, path | `<reason>` alone: `File not found`, `Path not allowed`, `Not an M3U playlist`, `Playlist has no channels` |
 | cancelled | no line; the form thaws |
 | success | never shown on the form (it closes); the footer transient carries `1,475 channels in 28 groups` |
 
