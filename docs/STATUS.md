@@ -38,23 +38,23 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M1-07 | Model.js + Model.test.js | FE | todo | Deps: M0-07 |
-| M1-08 | Overlay shell (window, focus, open/close) | FE | todo | Deps: M0-06, M0-07 |
-| M1-09 | Overlay guide (search, groups, list, states) | FE | todo | Deps: M1-07, M1-08, M0-08 |
-| M1-10 | Overlay EPG rows + favorites/recents | FE | todo | Deps: M1-09, M1-06 |
-| M1-11 | Bar widget (glyph, label, clicks, scroll) | FE | todo | Deps: M0-06, M0-07 |
-| M1-12 | Settings propagation | FE | todo | Deps: M0-06 |
+| M1-07 | Model.js + Model.test.js | FE | review | merged 514acef (lane B): 244 node checks; awaiting QA |
+| M1-08 | Overlay shell (window, focus, open/close) | FE | review | merged 514acef; harness verified focus and Esc semantics |
+| M1-09 | Overlay guide (search, groups, list, states) | FE | review | merged 514acef; two-mode keys, group column, all states in harness |
+| M1-10 | Overlay EPG rows + favorites/recents | FE | review | merged 514acef; fake-EPG rows verified in harness |
+| M1-11 | Bar widget (glyph, label, clicks, scroll) | FE | review | merged 514acef; wheel zap not exercised live yet |
+| M1-12 | Settings propagation | FE | review | merged 514acef; shell.barConfig path, needs live check |
 
 ### M1 MVP - Join
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M1-13 | Refresh scheduler + cached hint | FE | todo | Deps: M1-03, M1-09, M1-11 |
-| M1-14 | Notifications | FE | todo | Deps: M1-05, M1-03 |
-| M1-15 | Playback wiring end to end | FE | todo | Deps: M1-05, M1-09, M1-11 |
-| M1-16 | IpcHandler commands | FE | todo | Deps: M1-15 |
-| M1-17 | QML unit tests (spec.qml) | FE | todo | Deps: M1-11, M1-09 |
-| M1-18 | README | FE (UX review) | todo | Deps: M1-12, M1-15 |
+| M1-13 | Refresh scheduler + cached hint | FE | review | merged 514acef (Service.qml timers, cached banner) |
+| M1-14 | Notifications | FE | review | merged 514acef; URL-redacted per D-QA-01 |
+| M1-15 | Playback wiring end to end | FE | review | QML side merged 514acef; needs lane A play/stop/status |
+| M1-16 | IpcHandler commands | FE | review | merged 514acef: toggle play stop next previous refresh status |
+| M1-17 | QML unit tests (spec.qml) | FE | review | Model.spec.qml 16 passed; Guide/BarWidget specs not possible under qmltestrunner (PanelWindow), harness covers them |
+| M1-18 | README | FE (UX review) | review | PO rewrote README e03f2f8 + contrib/ snippets |
 | M1-19 | scripts/check.sh green | FE | todo | Deps: M1-17, M1-18 |
 | M1-20 | FE smoke on live shell (US1-US8 once) | FE | todo | Deps: M1-13..M1-19 |
 
