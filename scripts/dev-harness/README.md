@@ -86,6 +86,14 @@ $H shot search            # grim screenshot -> shots/search.png
 compositor, so both keyboard modes can be verified end to end
 (`wtype -k Escape`, `wtype -k Return`, `wtype bbc`).
 
+Pitfalls seen in the QA and fix passes: `wtype space` types the letters
+s-p-a-c-e (use `wtype -k space`); `wtype -d 0` is rejected (`-d 1` works);
+chords are `wtype -M ctrl u -m ctrl` (there is no `-k ctrl+u`); and a
+`pkill -f`/`pgrep -f` whose pattern also appears in your own shell's
+command line matches (and kills) that shell, so bracket one character of
+the pattern (`quickshell -p .../roo[t]`). The AF_UNIX socket path is limited
+to ~108 bytes: keep `OMARCHY_IPTV_HARNESS_DIR` short.
+
 ## What the fixture contains
 
 `fixtures/harness.m3u.in` has 20 channels in 9 groups (multi-group
