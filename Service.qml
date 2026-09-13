@@ -67,6 +67,51 @@ Item {
   readonly property string sourceLabel: Model.sourceLabel(playlistUrl)
   readonly property string sourceHost: Model.hostOf(playlistUrl)
 
+  // ---- sources (M2-01, ARCHITECTURE-SOURCES.md section 4, rulings SR1-SR9).
+  // The active source is still `playlistUrl` / `epgUrl` on the bar entry
+  // (D1); the history lives in userState.sources (state.json v2, D2); each
+  // source has its own cache directory under cacheDir/sources/<key>/ (D5).
+  // The guide binds `sources` (view objects, SR1) and `activeSourceId`; it
+  // never sees a state record or a URL outside sourceForEdit().
+  property var limits: ({ url: 2048, label: 64, server: 512, field: 256, sources: 50 })   // TODO(lane1): replace with Model.LIMITS
+  readonly property bool debugTiming: Quickshell.env("OMARCHY_IPTV_DEBUG") === "1"
+  readonly property int epgMaxAgeSec: 86400            // inactive sources' EPG files are aged by `cache prune`
+  readonly property int switchTimeoutMs: 5 * 1000      // `switching` is released by the first cache load; this is the backstop
+  property bool stateLoaded: false                     // stateFile applied once (v2 parsed, reconciled)
+  property bool cacheReady: false                      // `cache migrate` done (or not needed) for this state file
+  property bool cacheMigrating: false
+  property bool pruned: false
+  property bool pendingFreshness: false                // a cache swap is in flight: decide on a refresh from playlist-status.json
+  property bool switching: false                       // between a committed switch and the new cache's first load / failure
+  property string probingKey: ""                       // record a probe concerns ("" when idle); for a URL edit the record being edited
+  property string probeDirKey: ""                      // key whose cache directory the probe writes into
+  property string probeMode: ""                        // add | edit | switch | retry
+  property bool probeCommit: false
+  property bool probeCancelled: false
+  property bool probeTimedOut: false
+  property var probeEdit: null                         // pending replacement record of a URL edit (applied only on success)
+  property var sourceErrors: ({})                      // session-only { key: reason }, URL-free (Model.statusReason)
+  property var settingsInvalid: null                   // validation result when playlistUrl is set but invalid (D16, SR8)
+  property var cacheQueue: []                          // FIFO of { args, onDone } for cacheProc (section 4.7)
+  property var cacheJob: null
+  property var recentSaves: []                         // texts this service wrote to state.json (own-write reloads are skipped)
+  property double switchStartedAt: 0
+  readonly property bool probing: sourceProbeProc.running
+  readonly property string probingId: probingKey
+  readonly property string activeSourceKey: root.activeSourceKeyFor(root.userState, root.playlistUrl)
+  readonly property string activeSourceId: activeSourceKey
+  readonly property string activeSourceLabel: {
+    var rec = root.findSource(root.userState.sources, root.activeSourceKey)
+    return rec ? rec.label : root.sourceLabel
+  }
+  readonly property string activeCacheDir: (root.stateLoaded && root.cacheReady && root.activeSourceKey !== "")
+    ? root.sourceCacheDir(root.cacheDir, root.activeSourceKey) : ""
+  readonly property int sourceCount: root.userState.sources.length
+  readonly property bool canAddSource: root.sourceCount < root.limits.sources && !root.probing
+  // View objects for the guide (SR1); `sourcesChanged` is this property's
+  // change signal (SR3) and fires on every state, settings or error change.
+  readonly property var sources: root.sourceViews(root.userState, root.activeSourceKey, root.sourceErrors)
+
   // ---- data (read by Guide.qml / BarWidget.qml; never mutated by them)
   property var channels: []                 // Model.prepareChannels output
   property var channelIndex: ({})
@@ -155,6 +200,19 @@ Item {
   // `Refreshed - N channels` for a manual refresh (UX 6.1, D-LIVE-05).
   signal playlistRefreshed(int channelCount, bool manual)
 
+  // ---- sources signals (SR3). Payloads are URL-free: `reason` comes from
+  // Model.statusReason, `host` from the validator.
+  //   sourceProbeFinished({ ok, id, channelCount, groupCount, reason, host,
+  //                         cancelled, replacedId }) after an add / URL edit /
+  //     never-fetched switch / retry probe; on ok the switch is committed.
+  //   sourceSwitched(id) once the new source's cache (or its absence) is in
+  //     `channels`. sourceRemoved(id). sourcesPersistFailed(reason) when
+  //     updateEntryInline refused a change ("persist_failed").
+  signal sourceProbeFinished(var result)
+  signal sourceSwitched(string id)
+  signal sourceRemoved(string id)
+  signal sourcesPersistFailed(string reason)
+
   // ------------------------------------------------------------ public API (R9)
 
   // Start (or switch to) a channel by id. `keepOpen` true = preview from the
@@ -205,7 +263,7 @@ Item {
       launchedFrom: String(launchedFrom || "") || Model.groupScopeId(Model.primaryGroup(channel)),
       since: nowSec
     }
-    root.userState = Model.recordPlayed(root.userState, channel, root.maxRecents, nowSec)
+    root.userState = root.carrySources(Model.recordPlayed(root.userState, channel, root.maxRecents, nowSec))
     root.saveState()
     root.wantFocus = !keepOpen
     if (mpvProc.running) {
@@ -221,7 +279,7 @@ Item {
         // current helper call returns.
         root.pendingPlayId = key
       } else {
-        root.runControl("play", ["play", "--id", key, "--socket", root.socketPath, "--cache-dir", root.cacheDir])
+        root.runControl("play", ["play", "--id", key, "--socket", root.socketPath, "--cache-dir", root.activeCacheDir])
       }
       if (root.wantFocus) root.focusPlayer()
     } else {
@@ -296,13 +354,13 @@ Item {
   }
 
   function toggleFavorite(id) {
-    root.userState = Model.withFavorites(root.userState, Model.toggleFavorite(root.userState.favorites, id))
+    root.userState = root.carrySources(Model.withFavorites(root.userState, Model.toggleFavorite(root.userState.favorites, id)))
     root.saveState()
     return Model.isFavorite(root.userState, id)
   }
 
   function removeRecent(id) {
-    root.userState = Model.removeRecent(root.userState, id)
+    root.userState = root.carrySources(Model.removeRecent(root.userState, id))
     root.saveState()
   }
 
@@ -374,8 +432,250 @@ Item {
       epg: { configured: root.epgConfigured, loaded: root.epgLoaded, pending: root.epgPending, reason: root.epgReason },
       playlistReason: root.statusReason,
       warnings: root.playlistWarnings,
-      lastError: root.lastError
+      lastError: root.lastError,
+      activeSource: root.activeSourceSummary(),
+      sources: root.sourcesSummary(root.userState, root.activeSourceKey)
     }
+  }
+
+  // ------------------------------------------------------------ sources API (SR2)
+  // Every action returns { ok, code, message, id } synchronously (`id` = the
+  // record concerned, "" when none; `field` names the offending form field
+  // on a validation failure). Codes: ok, empty, scheme, invalid,
+  // relative_path, unsafe_path, too_long, duplicate (id = the existing
+  // record), too_many, label_taken, label_too_long, server_empty,
+  // server_scheme, server_path, user_empty, pass_empty, user_too_long,
+  // pass_too_long, busy, unknown_source, not_ready, persist_failed.
+  // Asynchronous outcomes arrive through sourceProbeFinished.
+
+  function sourceResult(ok, code, message, id, field) {
+    var out = { ok: ok, code: code, message: message || "", id: id || "" }
+    if (field) out.field = field
+    return out
+  }
+
+  function sourcesReady() {
+    if (!root.stateLoaded || !root.cacheReady) return root.sourceResult(false, "not_ready", "Sources are still loading", "")
+    if (root.probing || root.switching) return root.sourceResult(false, "busy", root.probing ? "A fetch is already running" : "A switch is in progress", root.probingKey)
+    return null
+  }
+
+  // Add a source (S1, S2): sanitize, validate both URLs, refuse duplicates
+  // of a fetched record (an unfetched duplicate is re-probed instead, so a
+  // failed first-run add can be resubmitted as-is), cap at 50, record with
+  // fetchedAt 0, then probe into its own cache directory; the settings are
+  // committed only when the probe succeeds (D8, SR7). `kind: "xtream"`
+  // marks a record built by buildXtreamSource (view kind, UX 8.1).
+  function addSource(fields) {
+    var f = fields || {}
+    var gate = root.sourcesReady()
+    if (gate) return gate
+    var playlist = root.validateSourceUrl(f.playlistUrl)
+    if (!playlist.ok) return root.sourceResult(false, playlist.code, playlist.message, "", "playlistUrl")
+    var epg = root.validateEpgField(f.epgUrl)
+    if (!epg.ok) return root.sourceResult(false, epg.code, epg.message, "", "epgUrl")
+    var st = root.userState
+    var origin = f.kind === "xtream" ? "xtream" : (String(f.origin || "") || "guide")
+    var existing = root.findSourceByUrl(st.sources, playlist.url)
+    var label = root.labelInput(f.label)
+    if (existing) {
+      if (existing.fetchedAt > 0) return root.sourceResult(false, "duplicate", "Already in Sources as " + root.quoted(existing.label), existing.key)
+      // Never fetched (a failed add, or a CLI record): adopt the form's
+      // values and probe again.
+      var patch = { epgUrl: epg.url }
+      if (label.given) {
+        var takenBy = root.labelTaken(st.sources, label.text, existing.key)
+        if (label.tooLong) return root.sourceResult(false, "label_too_long", "Label too long - max " + root.limits.label + " characters", existing.key, "label")
+        if (takenBy) return root.sourceResult(false, "label_taken", "A source named " + root.quoted(label.text) + " already exists", existing.key, "label")
+        patch.label = label.text
+        patch.labelCustom = true
+      }
+      root.userState = root.patchSource(st, existing.key, patch)
+      root.saveState()
+      return root.startProbe(existing.key, existing.key, "retry", true)
+    }
+    if (st.sources.length >= root.limits.sources) return root.sourceResult(false, "too_many", "Sources is full - remove one first (max " + root.limits.sources + ")", "")
+    var finalLabel, custom
+    if (label.given) {
+      if (label.tooLong) return root.sourceResult(false, "label_too_long", "Label too long - max " + root.limits.label + " characters", "", "label")
+      if (root.labelTaken(st.sources, label.text, "")) return root.sourceResult(false, "label_taken", "A source named " + root.quoted(label.text) + " already exists", "", "label")
+      finalLabel = label.text
+      custom = true
+    } else {
+      finalLabel = root.uniqueLabel(root.deriveLabel(playlist.url, playlist.kind), root.labelsOf(st.sources))
+      custom = false
+    }
+    var added = root.addSourceRecord(st, {
+      url: playlist.url, epgUrl: epg.url, kind: playlist.kind, label: finalLabel, labelCustom: custom, origin: origin
+    }, Math.floor(Date.now() / 1000))
+    root.userState = added.state
+    root.saveState()
+    return root.startProbe(added.key, added.key, "add", true)
+  }
+
+  // Edit a source (S4, S6). Label and EPG changes commit at once (an EPG
+  // change of the active source is persisted and refreshed in the
+  // background). A changed playlist URL probes into the new key's
+  // directory first; the record moves to the new key, the old directory is
+  // deleted and the settings follow only when the probe succeeds (SR7).
+  function updateSource(id, fields) {
+    var f = fields || {}
+    var key = String(id || "")
+    var gate = root.sourcesReady()
+    if (gate) return gate
+    var st = root.userState
+    var rec = root.findSource(st.sources, key)
+    if (!rec) return root.sourceResult(false, "unknown_source", "That source no longer exists", key)
+    var patch = {}
+    var label = root.labelInput(f.label)
+    var epgUrl = rec.epgUrl
+    if (f.epgUrl !== undefined) {
+      var epg = root.validateEpgField(f.epgUrl)
+      if (!epg.ok) return root.sourceResult(false, epg.code, epg.message, key, "epgUrl")
+      epgUrl = epg.url
+    }
+    var urlChanged = false
+    var playlist = null
+    if (f.playlistUrl !== undefined) {
+      playlist = root.validateSourceUrl(f.playlistUrl)
+      if (!playlist.ok) return root.sourceResult(false, playlist.code, playlist.message, key, "playlistUrl")
+      if (playlist.url !== rec.url) {
+        var other = root.findSourceByUrl(st.sources, playlist.url)
+        if (other) return root.sourceResult(false, "duplicate", "Already in Sources as " + root.quoted(other.label), other.key, "playlistUrl")
+        urlChanged = true
+      }
+    }
+    if (f.label !== undefined) {
+      if (label.tooLong) return root.sourceResult(false, "label_too_long", "Label too long - max " + root.limits.label + " characters", key, "label")
+      if (label.given) {
+        if (root.labelTaken(st.sources, label.text, key)) return root.sourceResult(false, "label_taken", "A source named " + root.quoted(label.text) + " already exists", key, "label")
+        patch.label = label.text
+        patch.labelCustom = true
+      } else {
+        // Empty label: back to the derived default (UX 5.6).
+        var derivedFrom = urlChanged ? playlist : { url: rec.url, kind: rec.kind }
+        patch.label = root.uniqueLabel(root.deriveLabel(derivedFrom.url, derivedFrom.kind), root.labelsOf(st.sources, key))
+        patch.labelCustom = false
+      }
+    }
+    patch.epgUrl = epgUrl
+    if (!urlChanged) {
+      root.userState = root.patchSource(st, key, patch)
+      root.saveState()
+      if (key === root.activeSourceKey && epgUrl !== root.epgUrl) {
+        if (!root.persistActive(rec.url, epgUrl)) return root.sourceResult(false, "persist_failed", "Could not save the settings", key)
+      }
+      return root.sourceResult(true, "ok", "", key)
+    }
+    // URL change: build the replacement in memory; nothing in the history
+    // moves until the probe succeeds.
+    var replacement = {}
+    for (var k in rec) replacement[k] = rec[k]
+    for (var p in patch) replacement[p] = patch[p]
+    replacement.url = playlist.url
+    replacement.kind = playlist.kind
+    replacement.key = root.allocateSourceKey(root.sourcesWithout(st.sources, key), playlist.url)
+    replacement.fetchedAt = 0
+    replacement.channelCount = 0
+    replacement.groupCount = 0
+    if (!replacement.labelCustom && f.label === undefined) {
+      replacement.label = root.uniqueLabel(root.deriveLabel(playlist.url, playlist.kind), root.labelsOf(st.sources, key))
+    }
+    root.probeEdit = replacement
+    return root.startProbe(key, replacement.key, "edit", key === root.activeSourceKey)
+  }
+
+  // Remove a source (S7): drops the record, deletes its cache directory
+  // through the helper and, when it was active, clears the settings so the
+  // guide returns to the first-run state (playback, if any, continues).
+  function removeSource(id) {
+    var key = String(id || "")
+    if (!root.stateLoaded || !root.cacheReady) return root.sourceResult(false, "not_ready", "Sources are still loading", key)
+    if (root.probing && (root.probingKey === key || root.probeDirKey === key)) return root.sourceResult(false, "busy", "That source is being fetched", key)
+    if (root.switching) return root.sourceResult(false, "busy", "A switch is in progress", key)
+    var removed = root.removeSourceRecord(root.userState, key)
+    if (!removed.removed) return root.sourceResult(false, "unknown_source", "That source no longer exists", key)
+    var wasActive = key === root.activeSourceKey
+    root.userState = removed.state
+    root.saveState()
+    root.sourceErrors = root.withoutKey(root.sourceErrors, key)
+    root.queueCacheJob(["remove", "--key", key], null)
+    if (wasActive) {
+      if (!root.persistActive("", "")) {
+        root.sourceRemoved(key)
+        return root.sourceResult(false, "persist_failed", "Removed, but the settings could not be cleared", key)
+      }
+    }
+    root.sourceRemoved(key)
+    return root.sourceResult(true, "ok", "", key)
+  }
+
+  // Switch (S3, D7): a source with a cache commits at once (settings
+  // write -> cache FileViews rebind -> redraw from its channels.json ->
+  // background refresh when stale); a never-fetched source probes first.
+  function switchSource(id) {
+    var key = String(id || "")
+    var gate = root.sourcesReady()
+    if (gate) return gate
+    var rec = root.findSource(root.userState.sources, key)
+    if (!rec) return root.sourceResult(false, "unknown_source", "That source no longer exists", key)
+    if (key === root.activeSourceKey) return root.sourceResult(true, "ok", "", key)
+    if (!(rec.fetchedAt > 0)) return root.startProbe(key, key, "switch", true)
+    root.userState = root.touchSource(root.userState, key, Math.floor(Date.now() / 1000))
+    root.saveState()
+    root.beginSwitch()
+    if (!root.persistActive(rec.url, rec.epgUrl)) {
+      root.abortSwitch()
+      return root.sourceResult(false, "persist_failed", "Could not save the settings", key)
+    }
+    return root.sourceResult(true, "ok", "", key)
+  }
+
+  // Xtream form (S6, D10): builds the get.php / xmltv.php URLs and adds
+  // them as an ordinary source. The password lives only inside the URLs
+  // from here on; it is never stored or logged on its own.
+  function buildXtreamSource(fields) {
+    var f = fields || {}
+    var built = root.xtreamUrls({ server: f.server, username: f.username, password: f.password })
+    if (!built.ok) return root.sourceResult(false, built.code, built.message, "", built.field)
+    return root.addSource({ playlistUrl: built.playlistUrl, epgUrl: built.epgUrl, label: f.label, kind: "xtream" })
+  }
+
+  // The only call that hands a URL to the guide: the edit form binds
+  // `playlistMasked` / `epgMasked` and reveals the raw value on Ctrl+R.
+  function sourceForEdit(id) {
+    var rec = root.findSource(root.userState.sources, String(id || ""))
+    if (!rec) return null
+    return {
+      id: rec.key, key: rec.key, label: rec.label, labelCustom: rec.labelCustom, kind: rec.kind, origin: rec.origin,
+      host: root.hostForRecord(rec),
+      playlistUrl: rec.url, epgUrl: rec.epgUrl,
+      playlistMasked: root.maskUrl(rec.url), epgMasked: root.maskUrl(rec.epgUrl)
+    }
+  }
+
+  // Probe again a record that failed to fetch (S8); a fetched record is
+  // simply switched to.
+  function retrySource(id) {
+    var key = String(id || "")
+    var gate = root.sourcesReady()
+    if (gate) return gate
+    var rec = root.findSource(root.userState.sources, key)
+    if (!rec) return root.sourceResult(false, "unknown_source", "That source no longer exists", key)
+    if (rec.fetchedAt > 0 && key !== root.activeSourceKey) return root.switchSource(key)
+    return root.startProbe(key, key, "retry", true)
+  }
+
+  // Abort the running probe (UX 1.2 step 8): the helper is terminated, the
+  // probe's cache directory is discarded, a record added by this probe is
+  // dropped again and sourceProbeFinished carries `cancelled: true`.
+  function cancelProbe() {
+    if (!root.probing) return root.sourceResult(true, "ok", "", "")
+    var key = root.probingKey
+    root.probeCancelled = true
+    probeWatchdog.stop()
+    sourceProbeProc.signal(15)
+    return root.sourceResult(true, "ok", "", key)
   }
 
   // ------------------------------------------------------------ internals
@@ -387,8 +687,17 @@ Item {
     root.channelsMeta = parsed.meta
   }
 
+  // state.json -> userState (v1 files migrate in memory, section 2.2), then
+  // the startup sequence of section 4.4: reconcile the settings into the
+  // history and run the one-time cache migration. A reload caused by one
+  // of this service's own writes is skipped: the in-memory state is newer
+  // than what an earlier atomic write may still be delivering (R10).
   function applyUserState(text) {
-    root.userState = Model.trimRecents(Model.parseState(text), root.maxRecents)
+    if (root.stateLoaded && root.recentSaves.indexOf(text) !== -1) return
+    root.userState = root.carrySources(Model.trimRecents(root.parseStateV2(text), root.maxRecents))
+    root.stateLoaded = true
+    root.reconcile()
+    root.startCacheLayout()
   }
 
   function saveState() {
@@ -397,7 +706,12 @@ Item {
       return
     }
     root.stateSavePending = false
-    stateFile.setText(JSON.stringify(root.userState, null, 2) + "\n")
+    var text = JSON.stringify(root.userState, null, 2) + "\n"
+    var saves = root.recentSaves.slice()
+    saves.push(text)
+    while (saves.length > 8) saves.shift()
+    root.recentSaves = saves
+    stateFile.setText(text)
   }
 
   function applyPlaylistStatus(text) {
@@ -429,11 +743,14 @@ Item {
     })
   }
 
+  // Runs against the active source's own cache directory; nothing runs
+  // while it is unknown ("" before startup finished, or unconfigured) or
+  // while the configured URL is invalid (D16: the status is synthesized).
   function runPlaylistHelper() {
-    if (root.playlistUrl === "" || playlistProc.running) return
+    if (root.playlistUrl === "" || root.activeCacheDir === "" || root.settingsInvalid || playlistProc.running) return
     root.playlistAttempted = true
     root.playlistTimedOut = false
-    playlistProc.command = ["python3", root.helperPath, "playlist", "--url", root.playlistUrl, "--cache-dir", root.cacheDir]
+    playlistProc.command = ["python3", root.helperPath, "playlist", "--url", root.playlistUrl, "--cache-dir", root.activeCacheDir]
     playlistProc.running = true
     playlistWatchdog.restart()
   }
@@ -441,16 +758,16 @@ Item {
   // `epg --url` fetches (the helper honours its own TTL, decision 5);
   // `epg --now-only` recomputes now/next from the cached window.
   function runEpgHelper(nowOnly) {
-    if (epgProc.running) return
+    if (epgProc.running || root.activeCacheDir === "") return
     if (nowOnly) {
       if (!root.epgLoaded) return
       epgProc.nowOnly = true
-      epgProc.command = ["python3", root.helperPath, "epg", "--now-only", "--cache-dir", root.cacheDir]
+      epgProc.command = ["python3", root.helperPath, "epg", "--now-only", "--cache-dir", root.activeCacheDir]
     } else {
       if (root.epgUrl === "") return
       root.epgAttempted = true
       epgProc.nowOnly = false
-      epgProc.command = ["python3", root.helperPath, "epg", "--url", root.epgUrl, "--cache-dir", root.cacheDir]
+      epgProc.command = ["python3", root.helperPath, "epg", "--url", root.epgUrl, "--cache-dir", root.activeCacheDir]
     }
     root.epgTimedOut = false
     epgProc.running = true
@@ -529,7 +846,7 @@ Item {
     if (root.pendingPlayId !== "" && mpvProc.running) {
       var id = root.pendingPlayId
       root.pendingPlayId = ""
-      root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.cacheDir])
+      root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.activeCacheDir])
     } else {
       root.pendingPlayId = ""
     }
@@ -634,6 +951,11 @@ Item {
     root.manualRefresh = false
     var status = root.playlistStatus
     if (status.ok === true) {
+      // The history row shows counts without opening N status files.
+      if (root.activeSourceKey !== "") {
+        root.userState = root.withSourceStats(root.userState, root.activeSourceKey, status)
+        root.saveState()
+      }
       if (manual) root.notify("playlistRefreshed", { channelCount: status.channelCount, groupCount: status.groupCount })
       root.playlistRefreshed(Number(status.channelCount) || 0, manual)
       // US6: the EPG follows the playlist (the helper restricts programmes
@@ -668,13 +990,783 @@ Item {
     }
   }
 
+  // ------------------------------------------------------------ sources internals
+
+  // Write the active source through the host (D1): the full entry is passed
+  // because updateEntryInline replaces it wholesale (entryWith keeps the
+  // keys we do not own). A no-op when the settings already match; `false`
+  // (nothing changed / bare-string entry / no host) while a change was
+  // needed emits sourcesPersistFailed (R2).
+  function persistActive(playlistUrl, epgUrl) {
+    if (root.playlistUrl === playlistUrl && root.epgUrl === epgUrl) return true
+    if (!root.shell || typeof root.shell.updateEntryInline !== "function") {
+      root.sourcesPersistFailed("persist_failed")
+      return false
+    }
+    var entry = root.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), { playlistUrl: playlistUrl, epgUrl: epgUrl })
+    if (root.shell.updateEntryInline(root.pluginId, entry) !== true) {
+      console.warn("omarchy-iptv: updateEntryInline refused the settings change")
+      root.sourcesPersistFailed("persist_failed")
+      return false
+    }
+    return true
+  }
+
+  function beginSwitch() {
+    root.switchStartedAt = Date.now()
+    root.switching = true
+    switchTimeout.restart()
+  }
+
+  function abortSwitch() {
+    switchTimeout.stop()
+    root.switching = false
+  }
+
+  // The new source's channels.json (or its absence) has been applied.
+  function finishSwitch() {
+    if (!root.switching) return
+    switchTimeout.stop()
+    root.switching = false
+    if (root.debugTiming) console.info("omarchy-iptv switch " + Math.round(Date.now() - root.switchStartedAt) + " ms (" + root.channels.length + " channels)")
+    root.sourceSwitched(root.activeSourceKey)
+  }
+
+  // One probe at a time (section 4.6): `playlist` into the source's own
+  // directory. `key` is the record concerned, `dirKey` the directory
+  // written (they differ for a URL edit), `mode` add | edit | switch |
+  // retry, `commit` whether success writes the settings.
+  function startProbe(key, dirKey, mode, commit) {
+    var rec = mode === "edit" ? root.probeEdit : root.findSource(root.userState.sources, key)
+    if (!rec) return root.sourceResult(false, "unknown_source", "That source no longer exists", key)
+    if (sourceProbeProc.running) return root.sourceResult(false, "busy", "A fetch is already running", root.probingKey)
+    root.probingKey = key
+    root.probeDirKey = dirKey
+    root.probeMode = mode
+    root.probeCommit = commit
+    root.probeCancelled = false
+    root.probeTimedOut = false
+    root.sourceErrors = root.withoutKey(root.sourceErrors, key)
+    sourceProbeProc.command = ["python3", root.helperPath, "playlist", "--url", rec.url, "--cache-dir", root.sourceCacheDir(root.cacheDir, dirKey)]
+    sourceProbeProc.running = true
+    probeWatchdog.restart()
+    return root.sourceResult(true, "ok", "", key)
+  }
+
+  function handleProbeExit(text) {
+    probeWatchdog.stop()
+    var key = root.probingKey
+    var dirKey = root.probeDirKey
+    var mode = root.probeMode
+    var commit = root.probeCommit
+    var cancelled = root.probeCancelled
+    var timedOut = root.probeTimedOut
+    var edit = root.probeEdit
+    root.probingKey = ""
+    root.probeDirKey = ""
+    root.probeMode = ""
+    root.probeCancelled = false
+    root.probeTimedOut = false
+    root.probeEdit = null
+    var st = root.userState
+    var rec = mode === "edit" ? edit : root.findSource(st.sources, key)
+    var host = rec ? root.hostForRecord(rec) : ""
+    var nowSec = Math.floor(Date.now() / 1000)
+    if (cancelled) {
+      // Discard the directory the probe was writing; an add's record goes
+      // with it (the form keeps the typed values, UX 5.5).
+      root.queueCacheJob(["remove", "--key", dirKey], null)
+      if (mode === "add") {
+        root.userState = root.removeSourceRecord(st, key).state
+        root.saveState()
+      }
+      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: "", host: host, cancelled: true, replacedId: "" })
+      return
+    }
+    var status = Model.parseHelperStatus(timedOut ? root.helperTimeoutStatus("playlist", false) : text, "playlist")
+    if (!rec) {
+      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: "That source no longer exists", host: "", cancelled: false, replacedId: "" })
+      return
+    }
+    if (status.ok === true) {
+      var newKey = key
+      if (mode === "edit") {
+        // The replacement takes the old record's place; the old directory goes.
+        newKey = rec.key
+        st = root.replaceSourceRecord(st, key, rec)
+        root.queueCacheJob(["remove", "--key", key], null)
+        root.sourceErrors = root.withoutKey(root.sourceErrors, key)
+      }
+      st = root.withSourceStats(st, newKey, status)
+      st = root.touchSource(st, newKey, nowSec)
+      root.userState = st
+      root.saveState()
+      if (commit) {
+        if (newKey === root.activeSourceKey) {
+          // Already the active directory (a retry of the active source):
+          // the FileViews watch it, but reload deterministically.
+          channelsFile.reload()
+          playlistStatusFile.reload()
+        } else {
+          root.beginSwitch()
+          if (!root.persistActive(rec.url, rec.epgUrl)) root.abortSwitch()
+        }
+      }
+      root.sourceProbeFinished({
+        ok: true, id: newKey, channelCount: Number(status.channelCount) || 0, groupCount: Number(status.groupCount) || 0,
+        reason: "", host: host, cancelled: false, replacedId: mode === "edit" ? key : ""
+      })
+      return
+    }
+    // Failure (S8): the previous active source is untouched; the record
+    // keeps fetchedAt 0 (an edit's replacement is dropped, the original
+    // stays intact) and carries a session-only reason.
+    var reason = Model.statusReason(status)
+    if (mode === "edit") root.queueCacheJob(["remove", "--key", dirKey], null)
+    root.sourceErrors = root.withKey(root.sourceErrors, key, reason)
+    root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, host: host, cancelled: false, replacedId: "" })
+  }
+
+  // D3 / SR8: the settings are the source of truth for the active source;
+  // the history follows them. Runs on state load and on every playlistUrl /
+  // epgUrl change (a CLI `omarchy bar set` included). Idempotent.
+  function reconcile() {
+    if (!root.stateLoaded) return
+    var out = root.reconcileSources(root.userState, root.playlistUrl, root.epgUrl, root.activeSourceKey, Math.floor(Date.now() / 1000))
+    root.settingsInvalid = out.invalid
+    if (out.changed) {
+      root.userState = out.state
+      root.saveState()
+    }
+    for (var i = 0; i < out.evicted.length; i++) {
+      console.warn("omarchy-iptv: source history full, evicting", out.evicted[i])
+      root.queueCacheJob(["remove", "--key", out.evicted[i]], null)
+    }
+    if (out.invalid) {
+      // D16: never run the helper for garbage; the guide's error empty
+      // state shows the validation reason instead.
+      root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, sourceHost: "", error: { code: out.invalid.code, message: root.invalidReason(out.invalid.code) } })
+      root.lastError = root.statusReason
+    }
+  }
+
+  // Section 4.4 step 4: once per state file, move the 0.1 single cache
+  // into the active source's directory. Needs the settings (shell) to know
+  // the key; without a configured source the legacy files are deleted.
+  function startCacheLayout() {
+    if (root.cacheReady || root.cacheMigrating || !root.stateLoaded || !root.shell) return
+    if (root.userState.cacheLayout === 2) {
+      root.cacheReady = true
+      root.schedulePrune()
+      return
+    }
+    root.cacheMigrating = true
+    var args = ["migrate"]
+    if (root.activeSourceKey !== "") args = args.concat(["--key", root.activeSourceKey])
+    root.queueCacheJob(args, function(status) {
+      root.cacheMigrating = false
+      if (status.ok === true) {
+        root.userState = root.withCacheLayout(root.userState, 2)
+        root.saveState()
+      }
+      root.cacheReady = true
+      root.schedulePrune()
+    })
+  }
+
+  // Section 4.4 step 7: once per start, drop orphan directories and age the
+  // EPG files of inactive sources.
+  function schedulePrune() {
+    if (root.pruned) return
+    root.pruned = true
+    var args = ["prune", "--keep"]
+    var sources = root.userState.sources
+    for (var i = 0; i < sources.length; i++) args.push(sources[i].key)
+    if (root.activeSourceKey !== "") args = args.concat(["--active", root.activeSourceKey])
+    args = args.concat(["--epg-max-age", String(root.epgMaxAgeSec)])
+    root.queueCacheJob(args, null)
+  }
+
+  // Section 4.7: one cacheProc, a FIFO of { args, onDone }; failures are
+  // logged with the action and code only.
+  function queueCacheJob(args, onDone) {
+    var queue = root.cacheQueue.slice()
+    queue.push({ args: args, onDone: onDone })
+    root.cacheQueue = queue
+    root.runNextCacheJob()
+  }
+
+  function runNextCacheJob() {
+    if (cacheProc.running || root.cacheQueue.length === 0 || !root.dirsReady) return
+    var job = root.cacheQueue[0]
+    root.cacheQueue = root.cacheQueue.slice(1)
+    root.cacheJob = job
+    cacheProc.command = ["python3", root.helperPath, "cache", "--cache-dir", root.cacheDir].concat(job.args)
+    cacheProc.running = true
+  }
+
+  function handleCacheExit(text) {
+    var job = root.cacheJob
+    root.cacheJob = null
+    var status = Model.parseHelperStatus(text, "cache")
+    if (status.ok !== true) console.warn("omarchy-iptv: cache " + (job ? job.args[0] : "?") + " failed:", status.error ? status.error.code : "error")
+    if (job && typeof job.onDone === "function") job.onDone(status)
+    root.runNextCacheJob()
+  }
+
+  // Section 4.4 step 6: after a cache swap, playlist-status.json decides
+  // whether the source is refreshed in the background (older than
+  // refreshMinutes, never fetched, or last run failed).
+  function applyFreshness() {
+    if (!root.pendingFreshness) return
+    root.pendingFreshness = false
+    if (root.activeCacheDir === "") return
+    var nowSec = Math.floor(Date.now() / 1000)
+    if (root.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)) root.refreshPlaylist(true)
+    if (root.epgUrl !== "" && !epgProc.running) root.refreshEpg(true)
+  }
+
+  // Reset the per-source data to "nothing known yet" so no reason, count
+  // or programme of the previous source survives a swap (D-LIVE-10).
+  function clearSourceData() {
+    root.channels = []
+    root.channelIndex = ({})
+    root.channelsMeta = ({})
+    root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
+    root.playlistWarnings = []
+    root.playlistAttempted = false
+    root.epgNow = ({})
+    root.epgMeta = ({})
+    root.epgLoaded = false
+    root.epgAttempted = false
+    root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
+    root.lastError = ""
+  }
+
+  function activeSourceSummary() {
+    var rec = root.findSource(root.userState.sources, root.activeSourceKey)
+    return rec ? { id: rec.key, label: rec.label, host: root.hostForRecord(rec) } : null
+  }
+
+  // ------------------------------------------------------------ Model shims
+  // TODO(lane1): every function in this section mirrors a Model.js function
+  // of ARCHITECTURE-SOURCES.md section 3 with the same signature. Once Lane
+  // 1's `feat(model): source logic` merges, replace each body with
+  // `return Model.<name>(...)` (or sed `root.<name>(` -> `Model.<name>(`)
+  // and delete the shim. Pure, ES5, null-safe, no URL ever logged.
+
+  // TODO(lane1): replace with Model.sanitizeInput
+  function sanitizeInput(text, max) {
+    var s = String(text === undefined || text === null ? "" : text).replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    s = s.replace(/^[ \u00a0]+|[ \u00a0]+$/g, "")
+    return s.length > max ? s.substring(0, max) : s
+  }
+
+  // UX-SOURCES.md 5.4 copy for the synchronous codes.
+  // TODO(lane1): replace with Model.sourceReason
+  function invalidReason(code) {
+    var table = {
+      empty: "Enter a playlist URL or path",
+      scheme: "Start with http://, https://, or / for a local file",
+      invalid: "Invalid URL - check the host",
+      relative_path: "Use an absolute path (starts with /, not ~)",
+      unsafe_path: "Path not allowed",
+      too_long: "Too long - max 2,048 characters"
+    }
+    return table[String(code || "")] || "Invalid URL"
+  }
+
+  // TODO(lane1): replace with Model.validateSourceUrl
+  function validateSourceUrl(text) {
+    function fail(code) { return { ok: false, code: code, message: root.invalidReason(code), kind: "", url: "", host: "" } }
+    function checkPath(path) {
+      var unsafe = ["/proc", "/sys", "/dev"]
+      for (var u = 0; u < unsafe.length; u++) if (path === unsafe[u] || path.indexOf(unsafe[u] + "/") === 0) return fail("unsafe_path")
+      return { ok: true, code: "ok", message: "", kind: "file", url: path, host: "" }
+    }
+    var s = root.sanitizeInput(text, root.limits.url + 1)
+    if (s === "") return fail("empty")
+    if (s.length > root.limits.url) return fail("too_long")
+    if (s.charAt(0) === "/") return checkPath(s)
+    if (s.charAt(0) === "~" || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
+    var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):([\s\S]*)$/)
+    if (!m) return fail("scheme")
+    var scheme = m[1].toLowerCase()
+    var rest = m[2]
+    if (scheme === "file") {
+      if (rest.indexOf("//") !== 0) return fail("invalid")
+      var fileRest = rest.substring(2)
+      var slash = fileRest.indexOf("/")
+      if (slash === -1) return fail("invalid")
+      var filePath = fileRest.substring(slash)
+      try { filePath = decodeURIComponent(filePath) } catch (e) { return fail("invalid") }
+      return checkPath(filePath)
+    }
+    if (scheme !== "http" && scheme !== "https") return fail("scheme")
+    if (rest.indexOf("//") !== 0) return fail("invalid")
+    var after = rest.substring(2)
+    if (/\s/.test(after)) return fail("invalid")
+    var end = after.length
+    var stops = ["/", "?", "#"]
+    for (var i = 0; i < stops.length; i++) {
+      var at = after.indexOf(stops[i])
+      if (at !== -1 && at < end) end = at
+    }
+    var authority = after.substring(0, end)
+    var tail = after.substring(end)
+    var atSign = authority.lastIndexOf("@")
+    var userinfo = atSign === -1 ? "" : authority.substring(0, atSign)
+    var hostport = atSign === -1 ? authority : authority.substring(atSign + 1)
+    var host, port
+    if (hostport.charAt(0) === "[") {
+      var close = hostport.indexOf("]")
+      if (close === -1) return fail("invalid")
+      host = hostport.substring(0, close + 1)
+      var portPart = hostport.substring(close + 1)
+      if (portPart !== "" && portPart.charAt(0) !== ":") return fail("invalid")
+      port = portPart.substring(1)
+    } else {
+      var colon = hostport.lastIndexOf(":")
+      host = colon === -1 ? hostport : hostport.substring(0, colon)
+      port = colon === -1 ? "" : hostport.substring(colon + 1)
+    }
+    host = host.toLowerCase()
+    if (host === "") return fail("invalid")
+    if (port !== "" && !/^\d+$/.test(port)) return fail("invalid")
+    if (port === (scheme === "http" ? "80" : "443")) port = ""
+    var hashAt = tail.indexOf("#")
+    if (hashAt !== -1) tail = tail.substring(0, hashAt)
+    var queryAt = tail.indexOf("?")
+    var path = queryAt === -1 ? tail : tail.substring(0, queryAt)
+    var query = queryAt === -1 ? "" : tail.substring(queryAt + 1)
+    if (path === "") path = "/"
+    var url = scheme + "://" + (userinfo !== "" ? userinfo + "@" : "") + host + (port !== "" ? ":" + port : "") + path + (query !== "" ? "?" + query : "")
+    return { ok: true, code: "ok", message: "", kind: "http", url: url, host: host }
+  }
+
+  // EPG is optional: "" is fine, anything else must validate.
+  function validateEpgField(text) {
+    var s = root.sanitizeInput(text, root.limits.url + 1)
+    if (s === "") return { ok: true, code: "ok", message: "", url: "" }
+    var v = root.validateSourceUrl(s)
+    if (!v.ok) return { ok: false, code: v.code, message: "EPG: " + v.message.charAt(0).toLowerCase() + v.message.substring(1), url: "" }
+    return { ok: true, code: "ok", message: "", url: v.url }
+  }
+
+  // TODO(lane1): replace with Model.sourceKey
+  function sourceKey(url) { return Model.fnv1a32(url) }
+
+  // TODO(lane1): replace with Model.allocateSourceKey
+  function allocateSourceKey(sources, url) {
+    var existing = root.findSourceByUrl(sources, url)
+    if (existing) return existing.key
+    var base = root.sourceKey(url)
+    var key = base
+    var n = 2
+    while (root.findSource(sources, key)) key = base + "-" + (n++)
+    return key
+  }
+
+  // TODO(lane1): replace with Model.findSource
+  function findSource(sources, key) {
+    var list = Model.asList(sources)
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].key === key) return list[i]
+    return null
+  }
+
+  // TODO(lane1): replace with Model.findSourceByUrl
+  function findSourceByUrl(sources, url) {
+    var list = Model.asList(sources)
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].url === url) return list[i]
+    return null
+  }
+
+  function sourcesWithout(sources, key) {
+    var out = []
+    var list = Model.asList(sources)
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].key !== key) out.push(list[i])
+    return out
+  }
+
+  function labelsOf(sources, exceptKey) {
+    var out = []
+    var list = Model.asList(sources)
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].key !== exceptKey) out.push(list[i].label)
+    return out
+  }
+
+  // { given, text, tooLong } for a label field: control characters
+  // stripped and trimmed before the length check so a pasted newline
+  // never counts.
+  function labelInput(text) {
+    var cleaned = String(text === undefined || text === null ? "" : text).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").replace(/^[ \u00a0]+|[ \u00a0]+$/g, "")
+    return { given: cleaned !== "", text: root.sanitizeInput(cleaned, root.limits.label), tooLong: cleaned.length > root.limits.label }
+  }
+
+  // TODO(lane1): replace with Model.validateLabel (case-insensitive, self excluded)
+  function labelTaken(sources, label, selfKey) {
+    var wanted = String(label || "").toLowerCase()
+    var list = Model.asList(sources)
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].key !== selfKey && String(list[i].label).toLowerCase() === wanted) return list[i].key
+    }
+    return ""
+  }
+
+  function quoted(text) { return Model.QUOTE_OPEN + String(text || "") + Model.QUOTE_CLOSE }
+
+  // UX-SOURCES.md 5.6. TODO(lane1): replace with Model.deriveLabel
+  function deriveLabel(url, kind) {
+    var label
+    if (kind === "file") {
+      var parts = String(url || "").replace(/\/+$/, "").split("/")
+      label = parts[parts.length - 1] || "local file"
+    } else {
+      var after = String(url || "")
+      var sep = after.indexOf("://")
+      if (sep !== -1) after = after.substring(sep + 3)
+      var end = after.length
+      var stops = ["/", "?", "#"]
+      for (var i = 0; i < stops.length; i++) {
+        var at = after.indexOf(stops[i])
+        if (at !== -1 && at < end) end = at
+      }
+      var hostport = after.substring(0, end)
+      var atSign = hostport.lastIndexOf("@")
+      if (atSign !== -1) hostport = hostport.substring(atSign + 1)
+      if (hostport.indexOf("www.") === 0) hostport = hostport.substring(4)
+      label = hostport || "source"
+    }
+    return label.length > root.limits.label ? label.substring(0, root.limits.label) : label
+  }
+
+  // TODO(lane1): replace with Model.uniqueLabel
+  function uniqueLabel(label, existing) {
+    var taken = {}
+    var list = Model.asList(existing)
+    for (var i = 0; i < list.length; i++) taken[String(list[i]).toLowerCase()] = true
+    var base = root.sanitizeInput(label, root.limits.label)
+    if (!taken[base.toLowerCase()]) return base
+    for (var n = 2; ; n++) {
+      var tail = " " + n
+      var candidate = base.substring(0, root.limits.label - tail.length).replace(/ +$/, "") + tail
+      if (!taken[candidate.toLowerCase()]) return candidate
+    }
+  }
+
+  // SR4: userinfo, every query value except type / output, and the
+  // fragment become "****"; paths are never masked.
+  // TODO(lane1): replace with Model.maskUrl
+  function maskUrl(url) {
+    var s = String(url || "")
+    var m = s.match(/^(https?:\/\/)(?:([^\/?#]*)@)?([^\/?#]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/i)
+    if (!m) return s
+    var out = m[1].toLowerCase() + (m[2] !== undefined ? "****@" : "") + m[3] + m[4]
+    if (m[5] !== undefined) {
+      var parts = m[5].split("&")
+      for (var i = 0; i < parts.length; i++) {
+        var eq = parts[i].indexOf("=")
+        if (eq === -1) continue
+        var name = parts[i].substring(0, eq)
+        parts[i] = name + "=" + (name === "type" || name === "output" ? parts[i].substring(eq + 1) : "****")
+      }
+      out += "?" + parts.join("&")
+    }
+    if (m[6] !== undefined) out += "#****"
+    return out
+  }
+
+  // UX-SOURCES.md 5.4 / 1.8: server must be http(s)://host[:port] with
+  // no path, credentials percent-encoded with the RFC 3986 unreserved set.
+  // TODO(lane1): replace with Model.xtreamUrls
+  function xtreamUrls(fields) {
+    var f = fields || {}
+    function fail(code, message, field) { return { ok: false, code: code, message: message, field: field, playlistUrl: "", epgUrl: "", host: "" } }
+    function enc(v) {
+      return encodeURIComponent(v).replace(/[!'()*]/g, function(c) { return "%" + c.charCodeAt(0).toString(16).toUpperCase() })
+    }
+    var server = root.sanitizeInput(f.server, root.limits.server)
+    if (server === "") return fail("server_empty", "Enter the server URL", "server")
+    if (!/^https?:\/\//i.test(server)) return fail("server_scheme", "Server must start with http:// or https://", "server")
+    var v = root.validateSourceUrl(server)
+    if (!v.ok) return fail("invalid", "Invalid URL - check the host", "server")
+    var m = v.url.match(/^(https?:\/\/)(?:([^\/?#]*)@)?([^\/?#]*)(.*)$/)
+    if (!m || m[2] !== undefined || (m[4] !== "/" && m[4] !== "")) return fail("server_path", "Server is just http://host:port - no path", "server")
+    var base = m[1] + m[3]
+    var userRaw = String(f.username === undefined || f.username === null ? "" : f.username).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").replace(/^[ \u00a0]+|[ \u00a0]+$/g, "")
+    var passRaw = String(f.password === undefined || f.password === null ? "" : f.password).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").replace(/^[ \u00a0]+|[ \u00a0]+$/g, "")
+    if (userRaw === "") return fail("user_empty", "Enter the username", "username")
+    if (userRaw.length > root.limits.field) return fail("user_too_long", "Username too long - max " + root.limits.field + " characters", "username")
+    if (passRaw === "") return fail("pass_empty", "Enter the password", "password")
+    if (passRaw.length > root.limits.field) return fail("pass_too_long", "Password too long - max " + root.limits.field + " characters", "password")
+    var credentials = "username=" + enc(userRaw) + "&password=" + enc(passRaw)
+    return {
+      ok: true, code: "ok", message: "", field: "",
+      playlistUrl: base + "/get.php?" + credentials + "&type=m3u_plus&output=ts",
+      epgUrl: base + "/xmltv.php?" + credentials,
+      host: v.host
+    }
+  }
+
+  function hostForRecord(rec) {
+    if (!rec) return ""
+    if (rec.kind === "file") return "local file"
+    return root.validateSourceUrl(rec.url).host
+  }
+
+  // SR1 view object. TODO(lane1): replace with Model.sourceView
+  function sourceView(rec, activeKey, errors) {
+    var fetched = rec.fetchedAt > 0
+    return {
+      id: rec.key, key: rec.key, label: rec.label,
+      kind: rec.origin === "xtream" ? "xtream" : (rec.kind === "file" ? "file" : "url"),
+      host: root.hostForRecord(rec), hasEpg: rec.epgUrl !== "",
+      channelCount: fetched ? rec.channelCount : -1, groupCount: fetched ? rec.groupCount : 0,
+      cachedAt: rec.fetchedAt, lastUsedAt: rec.lastUsed, active: rec.key === activeKey,
+      origin: rec.origin, labelCustom: rec.labelCustom,
+      errorReason: errors && errors[rec.key] ? String(errors[rec.key]) : ""
+    }
+  }
+
+  function sourceViews(st, activeKey, errors) {
+    var out = []
+    var list = st && st.sources ? st.sources : []
+    for (var i = 0; i < list.length; i++) out.push(root.sourceView(list[i], activeKey, errors))
+    return out
+  }
+
+  // TODO(lane1): replace with Model.sourcesSummary
+  function sourcesSummary(st, activeKey) {
+    var out = []
+    var list = st && st.sources ? st.sources : []
+    for (var i = 0; i < list.length; i++) {
+      var rec = list[i]
+      out.push({ id: rec.key, label: rec.label, host: root.hostForRecord(rec), active: rec.key === activeKey, channelCount: rec.channelCount, lastUsed: rec.lastUsed })
+    }
+    return out
+  }
+
+  // TODO(lane1): replace with Model.sourceCacheDir
+  function sourceCacheDir(cacheDir, key) {
+    if (!cacheDir || !/^[0-9a-f]{8}(-[0-9]{1,3})?$/.test(String(key || ""))) return ""
+    return cacheDir + "/sources/" + key
+  }
+
+  // TODO(lane1): replace with Model.activeSourceKey
+  function activeSourceKeyFor(st, playlistUrl) {
+    if (!playlistUrl) return ""
+    var v = root.validateSourceUrl(playlistUrl)
+    if (!v.ok) return ""
+    var rec = root.findSourceByUrl(st ? st.sources : [], v.url)
+    return rec ? rec.key : ""
+  }
+
+  // Section 2.1 field rules for one record; null drops it.
+  function parseSourceRecord(raw) {
+    if (!raw || typeof raw !== "object") return null
+    var key = String(raw.key || "")
+    if (!/^[0-9a-f]{8}(-[0-9]{1,3})?$/.test(key)) return null
+    if (typeof raw.url !== "string") return null
+    var playlist = root.validateSourceUrl(raw.url)
+    if (!playlist.ok) return null
+    var epg = typeof raw.epgUrl === "string" && raw.epgUrl !== "" ? root.validateSourceUrl(raw.epgUrl) : null
+    var origins = ["guide", "xtream", "cli", "migrated"]
+    function count(v) { var n = Math.floor(Number(v) || 0); return n > 0 ? n : 0 }
+    return {
+      key: key, url: playlist.url, epgUrl: epg && epg.ok ? epg.url : "", kind: playlist.kind,
+      label: root.sanitizeInput(raw.label, root.limits.label) || root.deriveLabel(playlist.url, playlist.kind),
+      labelCustom: raw.labelCustom === true,
+      origin: origins.indexOf(raw.origin) !== -1 ? raw.origin : "guide",
+      addedAt: count(raw.addedAt), lastUsed: count(raw.lastUsed), fetchedAt: count(raw.fetchedAt),
+      channelCount: count(raw.channelCount), groupCount: count(raw.groupCount)
+    }
+  }
+
+  // v1 or v2 text -> v2 object. TODO(lane1): replace with Model.parseState
+  function parseStateV2(text) {
+    var st = Model.parseState(text)
+    var parsed = Model.parseJsonObject(text)
+    var sources = []
+    var list = parsed ? Model.asList(parsed.sources) : []
+    for (var i = 0; i < list.length && sources.length < root.limits.sources; i++) {
+      var rec = root.parseSourceRecord(list[i])
+      if (!rec || root.findSource(sources, rec.key) || root.findSourceByUrl(sources, rec.url)) continue
+      sources.push(rec)
+    }
+    return root.cloneState(st, { sources: sources, cacheLayout: parsed && parsed.cacheLayout === 2 ? 2 : 0 })
+  }
+
+  // TODO(lane1): replace with Model.cloneState
+  function cloneState(st, patch) {
+    var base = st || Model.emptyState()
+    var out = {
+      version: 2,
+      cacheLayout: base.cacheLayout === 2 ? 2 : 0,
+      favorites: Model.asList(base.favorites).slice(),
+      recents: Model.asList(base.recents).slice(),
+      lastPlayed: base.lastPlayed || null,
+      sources: Model.asList(base.sources).slice()
+    }
+    for (var k in patch) out[k] = patch[k]
+    return out
+  }
+
+  // The shipped reducers (recordPlayed, withFavorites, removeRecent,
+  // trimRecents) rebuild {version, favorites, recents, lastPlayed} and drop
+  // the v2 keys; carry them from the state in memory.
+  // TODO(lane1): remove once every Model reducer goes through cloneState
+  function carrySources(next) {
+    var prev = root.userState
+    return root.cloneState(next, {
+      sources: next && next.sources !== undefined ? next.sources : Model.asList(prev.sources).slice(),
+      cacheLayout: next && next.cacheLayout !== undefined ? next.cacheLayout : (prev.cacheLayout === 2 ? 2 : 0)
+    })
+  }
+
+  // TODO(lane1): replace with Model.withCacheLayout
+  function withCacheLayout(st, n) { return root.cloneState(st, { cacheLayout: n }) }
+
+  // TODO(lane1): replace with Model.addSource (validation happens in addSource above)
+  function addSourceRecord(st, fields, nowSec) {
+    var key = root.allocateSourceKey(st.sources, fields.url)
+    var sources = Model.asList(st.sources).slice()
+    sources.push({
+      key: key, url: fields.url, epgUrl: fields.epgUrl || "", kind: fields.kind, label: fields.label, labelCustom: fields.labelCustom === true,
+      origin: fields.origin || "guide", addedAt: nowSec, lastUsed: nowSec, fetchedAt: 0, channelCount: 0, groupCount: 0
+    })
+    return { state: root.cloneState(st, { sources: sources }), key: key }
+  }
+
+  function patchSource(st, key, patch) {
+    var sources = []
+    var list = Model.asList(st.sources)
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].key !== key) { sources.push(list[i]); continue }
+      var next = {}
+      for (var k in list[i]) next[k] = list[i][k]
+      for (var p in patch) next[p] = patch[p]
+      sources.push(next)
+    }
+    return root.cloneState(st, { sources: sources })
+  }
+
+  function replaceSourceRecord(st, key, record) {
+    var sources = []
+    var list = Model.asList(st.sources)
+    for (var i = 0; i < list.length; i++) sources.push(list[i].key === key ? record : list[i])
+    return root.cloneState(st, { sources: sources })
+  }
+
+  // TODO(lane1): replace with Model.removeSource
+  function removeSourceRecord(st, key) {
+    var removed = root.findSource(st.sources, key)
+    return { state: root.cloneState(st, { sources: root.sourcesWithout(st.sources, key) }), removed: removed || null }
+  }
+
+  // TODO(lane1): replace with Model.touchSource
+  function touchSource(st, key, nowSec) { return root.patchSource(st, key, { lastUsed: nowSec }) }
+
+  // TODO(lane1): replace with Model.withSourceStats
+  function withSourceStats(st, key, status) {
+    if (!status || status.ok !== true) return st
+    return root.patchSource(st, key, {
+      fetchedAt: Number(status.fetchedAt) || Math.floor(Date.now() / 1000),
+      channelCount: Number(status.channelCount) || 0,
+      groupCount: Number(status.groupCount) || 0
+    })
+  }
+
+  // TODO(lane1): replace with Model.reconcileSources
+  function reconcileSources(st, playlistUrl, epgUrl, previousActiveKey, nowSec) {
+    var out = { state: st, changed: false, activeKey: "", added: "", evicted: [], invalid: null }
+    if (!playlistUrl) return out
+    var playlist = root.validateSourceUrl(playlistUrl)
+    if (!playlist.ok) {
+      out.invalid = playlist
+      return out
+    }
+    var epg = root.validateEpgField(epgUrl)
+    var epgNorm = epg.ok ? epg.url : ""
+    var rec = root.findSourceByUrl(st.sources, playlist.url)
+    if (rec) {
+      out.activeKey = rec.key
+      var patch = {}
+      if (rec.key !== previousActiveKey) patch.lastUsed = nowSec
+      if (rec.epgUrl !== epgNorm) patch.epgUrl = epgNorm
+      for (var k in patch) {
+        out.state = root.patchSource(st, rec.key, patch)
+        out.changed = true
+        break
+      }
+      return out
+    }
+    // Unknown URL (S5): add it with a derived label; the very first v2 run
+    // attributes the pre-existing setting to the migration.
+    var sources = Model.asList(st.sources).slice()
+    var evicted = []
+    while (sources.length >= root.limits.sources) {
+      var oldest = -1
+      for (var i = 0; i < sources.length; i++) {
+        if (oldest === -1 || sources[i].lastUsed < sources[oldest].lastUsed) oldest = i
+      }
+      evicted.push(sources[oldest].key)
+      sources.splice(oldest, 1)
+    }
+    var origin = st.cacheLayout !== 2 && sources.length === 0 ? "migrated" : "cli"
+    var added = root.addSourceRecord(root.cloneState(st, { sources: sources }), {
+      url: playlist.url, epgUrl: epgNorm, kind: playlist.kind,
+      label: root.uniqueLabel(root.deriveLabel(playlist.url, playlist.kind), root.labelsOf(sources, "")),
+      labelCustom: false, origin: origin
+    }, nowSec)
+    out.state = added.state
+    out.changed = true
+    out.added = added.key
+    out.activeKey = added.key
+    out.evicted = evicted
+    return out
+  }
+
+  // TODO(lane1): replace with Model.entryWith
+  function entryWith(entry, patch) {
+    var out = {}
+    if (entry && typeof entry === "object") for (var k in entry) out[k] = entry[k]
+    for (var p in patch) out[p] = patch[p]
+    out.id = root.pluginId
+    return out
+  }
+
+  // TODO(lane1): replace with Model.cacheStale
+  function cacheStale(status, refreshMinutes, nowSec) {
+    if (!status || status.ok !== true) return true
+    var fetchedAt = Number(status.fetchedAt) || 0
+    if (fetchedAt <= 0) return true
+    return nowSec - fetchedAt >= (Number(refreshMinutes) || 0) * 60
+  }
+
+  function withKey(obj, key, value) {
+    var out = {}
+    for (var k in obj) out[k] = obj[k]
+    out[key] = value
+    return out
+  }
+
+  function withoutKey(obj, key) {
+    var out = {}
+    for (var k in obj) if (k !== key) out[k] = obj[k]
+    return out
+  }
+
+  // ------------------------------------------------------------ signal handlers
+
   onPlaylistUrlChanged: {
     // A new source starts clean: the previous source's reason and host must
     // not stay on screen while its first fetch runs (UX 4.5, D-LIVE-10).
+    // The fetch itself is driven by the new cache's freshness once its
+    // directory is bound (section 4.4 step 6), never directly from here.
     root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
     root.playlistWarnings = []
     root.lastError = ""
-    root.refreshPlaylist(true)
+    root.reconcile()
   }
   onEpgUrlChanged: {
     // Same rule as refreshEpg: read the setting itself. With the derived
@@ -687,14 +1779,29 @@ Item {
       root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
       return
     }
-    root.refreshEpg(true)
+    // A cache swap in flight fetches the EPG from its freshness check.
+    if (!root.pendingFreshness) root.refreshEpg(true)
   }
   onMaxRecentsChanged: {
     var trimmed = Model.trimRecents(root.userState, root.maxRecents)
     if (trimmed !== root.userState) {
-      root.userState = trimmed
+      root.userState = root.carrySources(trimmed)
       root.saveState()
     }
+  }
+  onShellChanged: {
+    // The host injects `shell` after creation; the settings may only be
+    // readable now (the migration needs the active key).
+    root.reconcile()
+    root.startCacheLayout()
+  }
+  onActiveCacheDirChanged: {
+    // The four cache FileViews rebind their paths (R1): an empty path fires
+    // nothing, so clear in memory; otherwise reset so nothing of the previous
+    // source survives and let playlist-status.json decide on a refresh.
+    root.clearSourceData()
+    root.pendingFreshness = root.activeCacheDir !== ""
+    if (root.activeCacheDir === "") root.finishSwitch()
   }
 
   Component.onCompleted: {
@@ -707,28 +1814,44 @@ Item {
 
   // ------------------------------------------------------------ files
 
+  // The four cache views follow the active source's directory (D5). Content
+  // is only ever applied from onLoaded / onLoadFailed (R1: after a path
+  // change the view still reports the previous file until then).
   FileView {
     id: channelsFile
-    path: root.cacheDir + "/channels.json"
+    path: root.activeCacheDir === "" ? "" : root.activeCacheDir + "/channels.json"
     watchChanges: true
     printErrors: false
-    onLoaded: root.applyChannels(text())
-    onLoadFailed: root.applyChannels("")
+    onLoaded: {
+      root.applyChannels(text())
+      root.finishSwitch()
+    }
+    onLoadFailed: {
+      root.applyChannels("")
+      root.finishSwitch()
+    }
     onFileChanged: reload()
   }
 
   FileView {
     id: playlistStatusFile
-    path: root.cacheDir + "/playlist-status.json"
+    path: root.activeCacheDir === "" ? "" : root.activeCacheDir + "/playlist-status.json"
     watchChanges: true
     printErrors: false
-    onLoaded: root.applyPlaylistStatus(text())
+    onLoaded: {
+      root.applyPlaylistStatus(text())
+      root.applyFreshness()
+    }
+    onLoadFailed: {
+      // Never fetched: no status yet, so the freshness check fetches.
+      root.applyFreshness()
+    }
     onFileChanged: reload()
   }
 
   FileView {
     id: epgFile
-    path: root.cacheDir + "/epg-now.json"
+    path: root.activeCacheDir === "" ? "" : root.activeCacheDir + "/epg-now.json"
     watchChanges: true
     printErrors: false
     onLoaded: root.applyEpgNow(text())
@@ -738,7 +1861,7 @@ Item {
 
   FileView {
     id: epgStatusFile
-    path: root.cacheDir + "/epg-status.json"
+    path: root.activeCacheDir === "" ? "" : root.activeCacheDir + "/epg-status.json"
     watchChanges: true
     printErrors: false
     onLoaded: {
@@ -782,11 +1905,14 @@ Item {
   }
 
   Timer {
+    // The first fetch is driven by the cache's freshness (section 4.4 step
+    // 6), not by service start: a fresh cache after `omarchy restart shell`
+    // is no longer re-downloaded (R9). Timer semantics otherwise unchanged.
     id: refreshTimer
     interval: root.refreshMinutes * 60 * 1000
     repeat: true
     running: root.configured
-    triggeredOnStart: true
+    triggeredOnStart: false
     onTriggered: {
       root.refreshPlaylist(false)
       root.refreshEpg(false)
@@ -858,6 +1984,33 @@ Item {
   }
 
   Timer {
+    // Same bound for a source probe (section 4.6).
+    id: probeWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!sourceProbeProc.running) return
+      console.warn("omarchy-iptv: source probe exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      root.probeTimedOut = true
+      sourceProbeProc.signal(15)
+    }
+  }
+
+  Timer {
+    // Backstop for `switching` (risk R1): released by the new cache's first
+    // load or failure; if neither arrives (a host that applied the settings
+    // asynchronously, or not at all) the guide is unblocked here.
+    id: switchTimeout
+    interval: root.switchTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!root.switching) return
+      console.warn("omarchy-iptv: switch did not observe a cache load within " + root.switchTimeoutMs + " ms")
+      root.finishSwitch()
+    }
+  }
+
+  Timer {
     // Drives the shutdown ladder (D-LIVE-17): each rung re-arms it for the
     // next grace period; handleMpvExit stops it.
     id: stopTimer
@@ -893,7 +2046,7 @@ Item {
       if (!mpvProc.running || root.userStopped || root.stopping || !root.nowPlaying) return
       var id = String(root.nowPlaying.id)
       if (controlProc.running) root.pendingPlayId = id
-      else root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.cacheDir])
+      else root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.activeCacheDir])
     }
   }
 
@@ -923,7 +2076,7 @@ Item {
   // behave identically at runtime (D-LIVE-14).
   Process {
     id: mkdirProc
-    command: ["mkdir", "-p", "-m", "700", root.cacheDir, root.stateDir, root.runtimeDir]
+    command: ["mkdir", "-p", "-m", "700", root.cacheDir, root.cacheDir + "/sources", root.stateDir, root.runtimeDir]
   }
   Connections {
     target: mkdirProc
@@ -949,6 +2102,7 @@ Item {
     function onExited(exitCode, exitStatus) {
       root.dirsReady = true
       if (root.stateSavePending) root.saveState()
+      root.runNextCacheJob()
     }
   }
 
@@ -999,6 +2153,37 @@ Item {
   Connections {
     target: controlProc
     function onExited(exitCode, exitStatus) { root.handleControlResult(controlStdout.text) }
+  }
+
+  Process {
+    // Source probe (section 4.6): `playlist` into a candidate source's own
+    // directory, independent of the active source's refresh.
+    id: sourceProbeProc
+    stdout: StdioCollector { id: probeStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      id: probeStderr
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv probe:", Model.redactUrls(text.trim()))
+    }
+  }
+  Connections {
+    target: sourceProbeProc
+    function onExited(exitCode, exitStatus) { root.handleProbeExit(probeStdout.text) }
+  }
+
+  Process {
+    // Cache directory jobs (section 4.7): migrate / remove / prune, keys only.
+    id: cacheProc
+    stdout: StdioCollector { id: cacheStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      id: cacheStderr
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv cache:", Model.redactUrls(text.trim()))
+    }
+  }
+  Connections {
+    target: cacheProc
+    function onExited(exitCode, exitStatus) { root.handleCacheExit(cacheStdout.text) }
   }
 
   Process {
