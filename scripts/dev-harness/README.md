@@ -86,6 +86,50 @@ $H shot search            # grim screenshot -> shots/search.png
 compositor, so both keyboard modes can be verified end to end
 (`wtype -k Escape`, `wtype -k Return`, `wtype bbc`).
 
+### Sources (M2-01)
+
+The fake `updateEntryInline` applies the entry to the fake `barConfig`
+exactly like the host does (full-entry replace, `id` forced, `false` when
+nothing changed), so `switchSource` / `addSource` round-trip through the
+same settings binding the service uses in the real shell. The log line
+still names the entry's keys only. Source signals
+(`sourceProbeFinished`, `sourceSwitched`, `sourceRemoved`,
+`sourcesPersistFailed`) are logged as `[harness] ...` lines; their payloads
+are URL-free by contract.
+
+Service actions over IPC (arguments may carry a URL or path; results never
+do; pass `""` for an argument you do not need):
+
+```bash
+$H ipc addSource /path/or/url "" ""        # -> {"ok":true,"code":"ok","message":"","id":"<key>"}
+$H ipc addSource http://h/x.m3u http://h/e.xml "My label"
+$H ipc updateSource <key> '{"label":"NAS"}'            # label / epgUrl commit at once
+$H ipc updateSource <key> '{"playlistUrl":"/new.m3u"}' # probes first, re-keys on success
+$H ipc switchSource <key>      $H ipc retrySource <key>     $H ipc removeSource <key>
+$H ipc cancelProbe             # while probing: discards the probe's cache dir
+$H ipc xtream http://127.0.0.1:8765 user 'pa ss'       # -> addSource of the built URLs
+$H ipc sources                 # JSON of service.sources (id/label/host/kind/counts, no URL)
+$H ipc sourceEdit <key>        # the edit-form view with playlistMasked / epgMasked only
+$H ipc activeCache             # cache/omarchy-iptv/sources/<key> of the active source
+$H ipc set playlistUrl /path   # CLI parity: reconciles into the history (origin cli)
+$H ipc state                   # + activeSourceKey, cacheReady, probing, switching, sourceErrors, settingsInvalid
+```
+
+`run.sh --source2 SRC` seeds the history with a second, never-fetched
+record before start (helper `state source add`), so `switchSource` takes
+the probe path. `OMARCHY_IPTV_DEBUG=1` makes the service log
+`omarchy-iptv switch <ms>` per switch (measured from `switchSource` to the
+new `channels.json` being applied).
+
+`run.sh scenario` runs `sources-scenario.sh`: a scripted pass over H1
+(migration from a v0.1 cache + v1 state), H5 (add failure keeps the active
+source), H2 (add, probe, switch), H6/H8 (five switches each way against a
+generated 10k list, median must stay under 150 ms), probe cancel (a silent
+loopback server), H9 (CLI parity through `set playlistUrl`), H11
+(duplicate), H7 (remove the active source) and privacy greps over the log
+and IPC output. It prints one PASS/FAIL line per check and a summary; the
+harness log is `$SCRATCH/scenario.log`.
+
 Pitfalls seen in the QA and fix passes: `wtype space` types the letters
 s-p-a-c-e (use `wtype -k space`); `wtype -d 0` is rejected (`-d 1` works);
 chords are `wtype -M ctrl u -m ctrl` (there is no `-k ctrl+u`); and a

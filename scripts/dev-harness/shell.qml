@@ -83,13 +83,33 @@ ShellRoot {
     }
     function toggle(id, payloadJson) { return isPluginOpen(id) ? hide(id) : summon(id, payloadJson) }
     function isPluginOpen(id) { return guideLoader.item ? guideLoader.item.opened === true : false }
-    // Keys only: the entry carries playlistUrl / epgUrl, which may embed
-    // credentials and must not reach the terminal (S-08).
+    // Applies the entry to the fake barConfig the way the host does
+    // (shell.qml updateEntryInline: full-entry replace, `id` forced, false
+    // when nothing changed), so the service observes its own writes.
+    // Keys only in the log: the entry carries playlistUrl / epgUrl, which
+    // may embed credentials and must not reach the terminal (S-08).
     function updateEntryInline(id, entry) {
       var e = entry || {}
       harness.log("updateEntryInline", id, "keys:", Object.keys(e).join(","), "playlist", e.playlistUrl ? "(set)" : "(none)", "epg", e.epgUrl ? "(set)" : "(none)")
+      if (String(id) !== harness.pluginId || typeof e !== "object") return false
+      var next = { id: harness.pluginId }
+      for (var k in e) if (k !== "id") next[k] = e[k]
+      if (JSON.stringify(next) === JSON.stringify(harness.barEntry)) return false
+      harness.barEntry = next
+      fakeShell.barConfig = { layout: { left: [], center: [], right: [harness.barEntry] } }
+      if (barLoader.item) barLoader.item.settings = harness.barEntry
       return true
     }
+  }
+
+  // Source signals (URL-free payloads by contract) go to the log so a
+  // scripted scenario can follow them in the [qs] output.
+  Connections {
+    target: serviceLoader.item
+    function onSourceProbeFinished(result) { harness.log("sourceProbeFinished", JSON.stringify(result)) }
+    function onSourceSwitched(id) { harness.log("sourceSwitched", id, "channels", serviceLoader.item ? serviceLoader.item.channels.length : -1) }
+    function onSourceRemoved(id) { harness.log("sourceRemoved", id) }
+    function onSourcesPersistFailed(reason) { harness.log("sourcesPersistFailed", reason) }
   }
 
   // ---- fake PluginBarApi (Ui/PluginBarApi.qml surface)
@@ -202,6 +222,37 @@ ShellRoot {
       return "ok"
     }
     function tooltip(): string { return harness.lastTooltip }
+    // ---- sources (M2-01): the service actions, results as JSON. Arguments
+    // may carry a URL; results, `sources()` and `state()` never do. Pass ""
+    // for an argument you do not need (qs ipc passes strings positionally).
+    function addSource(playlistUrl: string, epgUrl: string, label: string): string {
+      var s = serviceLoader.item
+      return s ? JSON.stringify(s.addSource({ playlistUrl: playlistUrl, epgUrl: epgUrl, label: label })) : "{}"
+    }
+    function updateSource(key: string, json: string): string {
+      var s = serviceLoader.item
+      var fields = {}
+      try { fields = JSON.parse(json || "{}") } catch (e) { return JSON.stringify({ ok: false, code: "bad_json" }) }
+      return s ? JSON.stringify(s.updateSource(key, fields)) : "{}"
+    }
+    function removeSource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.removeSource(key)) : "{}" }
+    function switchSource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.switchSource(key)) : "{}" }
+    function retrySource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.retrySource(key)) : "{}" }
+    function cancelProbe(): string { var s = serviceLoader.item; return s ? JSON.stringify(s.cancelProbe()) : "{}" }
+    function xtream(server: string, username: string, password: string): string {
+      var s = serviceLoader.item
+      return s ? JSON.stringify(s.buildXtreamSource({ server: server, username: username, password: password })) : "{}"
+    }
+    function sources(): string { var s = serviceLoader.item; return s ? JSON.stringify(s.sources) : "[]" }
+    function activeCache(): string { var s = serviceLoader.item; return s ? s.activeCacheDir : "" }
+    // The edit form's view of a record with the URLs masked (the raw
+    // playlistUrl / epgUrl fields are dropped so nothing leaks into the terminal).
+    function sourceEdit(key: string): string {
+      var s = serviceLoader.item
+      var e = s ? s.sourceForEdit(key) : null
+      if (!e) return "null"
+      return JSON.stringify({ id: e.id, label: e.label, labelCustom: e.labelCustom, kind: e.kind, origin: e.origin, host: e.host, playlistMasked: e.playlistMasked, epgMasked: e.epgMasked })
+    }
     function widget(): string {
       var w = barLoader.item
       if (!w) return "{}"
@@ -226,6 +277,16 @@ ShellRoot {
         out.service.failedAt = s.failedAt
         out.service.stopStage = s.stopStage
         out.service.healthSkips = s.healthSkips
+        out.service.activeSourceKey = s.activeSourceKey
+        out.service.stateLoaded = s.stateLoaded
+        out.service.cacheReady = s.cacheReady
+        out.service.probing = s.probing
+        out.service.probingKey = s.probingKey
+        out.service.switching = s.switching
+        out.service.sourceErrors = s.sourceErrors
+        out.service.settingsInvalid = s.settingsInvalid ? { code: s.settingsInvalid.code } : null
+        out.service.cacheLayout = s.userState.cacheLayout
+        out.service.sourceCount = s.sourceCount
       }
       return JSON.stringify(out)
     }
