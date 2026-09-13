@@ -316,7 +316,7 @@ check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focus
 
 // ---- notifications ----
 const tvOff = "\udb81\udd03", alert = "\udb80\udc26", refreshGlyph = "\udb81\udc50"
-const Q = (s) => "“" + s + "”"
+const Q = (s) => String.fromCharCode(0x201c) + s + String.fromCharCode(0x201d)   // typographic quotes, file stays ASCII
 check("notifyArgv streamFailed", Model.notifyArgv("streamFailed", { name: "Sky Sports", reason: "HTTP 403" }),
   ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", Q("Sky Sports") + " did not play" + SEP + "HTTP 403"])
 check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), [Q("X") + " did not play"])
