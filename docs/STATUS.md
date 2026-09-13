@@ -62,13 +62,13 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M1.1-01 | Live-shell functional QA (docs/QA.md matrix) | QA | doing | started 2026-09-12 on main f03fef2 |
-| M1.1-02 | Theme-switch check | QA | doing | part of the live pass |
-| M1.1-03 | Performance check (10k playlist, large EPG) | QA | doing | part of the live pass |
-| M1.1-04 | Security review (G4) | ARCH | doing | started 2026-09-12 on main f03fef2, report in docs/SECURITY-REVIEW.md |
-| M1.1-05 | Fix round 1 (P1/P2) | FE | todo | Deps: M1.1-01..04 |
+| M1.1-01 | Live-shell functional QA (docs/QA.md matrix) | QA | done (harness) | docs/QA-RESULTS.md on f03fef2: 140 pass / 7 fail / 12 blocked (live shell) / 15 not run; 0 P1, 2 P2, 13 P3; live-shell cases pending user permission |
+| M1.1-02 | Theme-switch check | QA | blocked | needs the plugin installed in the live shell (omarchy theme set); commands in QA-RESULTS.md section 7 |
+| M1.1-03 | Performance check (10k playlist, large EPG) | QA | done | all within budget: playlist 11k parse 530 ms, overlay open ~64 ms net on 11k cache, filter <= 6.7 ms, EPG 41 MB gz 2.9 s, --now-only 37 ms |
+| M1.1-04 | Security review (G4) | ARCH | done | docs/SECURITY-REVIEW.md: pass with findings (S-01 P2, 7 P3); all eight fixed and merged 134fbe1 (256 node, 144 python) |
+| M1.1-05 | Fix round 1 (P1/P2) | FE | doing | security round merged 134fbe1; QA-defect round (D-LIVE-01..15 except 04, 13) started 2026-09-13 in a worktree |
 | M1.1-06 | Regression re-test | QA | todo | Deps: M1.1-05 |
-| M1.1-07 | Docs polish + known limitations | FE+UX | todo | Deps: M1.1-06 |
+| M1.1-07 | Docs polish + known limitations | FE+UX | doing | PO: README limits/disable/third-party bar/runtime dir (D-LIVE-13), UX 6.3 wording (D-LIVE-11), ARCHITECTURE 12.1 |
 | M1.1-08 | Dead-stream hardening | FE | todo | Deps: M1.1-01 |
 
 ### Release
@@ -147,8 +147,14 @@ Found by QA in the dev-harness pass on f03fef2 (2026-09-12/13); full steps, expe
 | 2026-09-12 | Privacy rulings from QA defects: a channel name never falls back to a URL (title, tvg-name, tvg-id, then Channel <n>); every notification, status line, tooltip, console line and IPC status output is URL-redacted to the host (Model.redactUrls); IPC status carries no stream URL | PO |
 | 2026-09-12 | Helper epg gets a --now <epoch> clock seam for deterministic tests; HTML bodies are not_a_playlist; local-path errors show the basename only | PO |
 | 2026-09-12 | Live QA pass on this machine: plugin installed by git clone into ~/.config/omarchy/plugins, keybinding and menu row added with backups and restored afterwards unless the pass succeeds (then left in place as the delivered state), theme check retropc -> tokyo-night -> retropc, EPG-matched checks use the generator pair (file://) plus the Pluto XMLTV for real gzip | PO |
+| 2026-09-13 | D-LIVE-01 ruling: the 200-row cap applies to search results only; browsing with an empty query must reach every channel in the scope while keeping the 150 ms open budget (virtualized or windowed list) | PO |
+| 2026-09-13 | D-LIVE-02 ruling: any epgUrl change, including from empty, triggers the EPG helper; also at service start and after a playlist load when epg-now.json is missing or stale | PO |
+| 2026-09-13 | Wording: timeout reason is `Timed out` (no seconds), README states the 60 s download deadline; `not_a_playlist` renders as `Not an M3U playlist`; `Ungrouped` is always last | PO |
+| 2026-09-13 | S-01: raw-title prefix applied to mpv `title` only (force-media-title is not property-expanded by mpv, verified live) | FE, accepted by PO |
 
 ## Blockers
+
+- Live-shell verification (12 blocked cases: install, enable, keybinding, menu row, theme switch, bar placement, multi-monitor) requires changes to the user's Omarchy config; the permission classifier declined to delegate them. Needs the user's go-ahead or the commands in docs/QA-RESULTS.md section 7 run by hand.
 
 | Since | Task | Blocker | Owner | Unblock action |
 |---|---|---|---|---|

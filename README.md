@@ -153,15 +153,28 @@ Nothing inside the plugin directory is written at runtime.
 ```bash
 omarchy plugin remove io.github.rmcdavid.iptv
 rm -rf ~/.cache/omarchy-iptv ~/.local/state/omarchy-iptv   # optional
+rm -rf "$XDG_RUNTIME_DIR/omarchy-iptv"                     # optional, cleared at logout anyway
 ```
 
-Removal leaves only those two directories behind, plus the keybinding, menu,
+Removal leaves only those directories behind, plus the keybinding, menu,
 and window-rule lines you added by hand.
+
+Note on disabling: `omarchy plugin disable io.github.rmcdavid.iptv` removes
+the widget entry from the bar, and the settings stored on that entry go with
+it. After re-enabling, run the `omarchy bar set` lines again. Favorites and
+recents live in the state directory and survive.
+
+Third-party replacement bars: Omarchy hands widgets on a replacement bar a
+service-less facade, so there the widget shows the TV glyph only; clicking
+it still opens the guide and playback works from the guide.
 
 ## Development
 
 ```bash
 scripts/check.sh                       # validate + qmllint + node + python + qml spec
+#   qmllint baseline: only missing-property / unqualified access on host-injected
+#   objects and Style/Color children, uncreatable-type for PanelWindow, and
+#   signal-handler-parameters on Process.onExited are accepted; anything else fails review
 node tests/Model.test.js
 python3 -m unittest discover -s tests
 /usr/lib/qt6/bin/qmltestrunner -input tests/Model.spec.qml
