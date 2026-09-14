@@ -759,8 +759,14 @@ function isNumberEntryKey(text) {
 // `scopeId`, `query` and `cursorIndex` are the snapshot taken when the
 // buffer went from empty to one character; they are what Esc restores, and
 // what Backspace on the last character restores (2.6).
+//
+// `cursorId` is the same snapshot's cursor as an ID rather than a row number.
+// It is what the duplicate cycle of CN9 has to be derived from: every
+// intermediate digit MOVES the cursor during the live preview, so by the time
+// the last digit lands the live cursor is on whatever the prefix resolved to,
+// never on the previous match (D-CHNO-1).
 function numberEntry() {
-  return { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }
+  return { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" }
 }
 
 function normalizeNumberEntry(entry) {
@@ -771,7 +777,8 @@ function normalizeNumberEntry(entry) {
     buffer: str(e.buffer),
     scopeId: str(e.scopeId),
     query: str(e.query),
-    cursorIndex: isFinite(at) && at > 0 ? at : 0
+    cursorIndex: isFinite(at) && at > 0 ? at : 0,
+    cursorId: str(e.cursorId)
   }
 }
 
@@ -791,7 +798,7 @@ function pushNumberKey(entry, text, ctx) {
   } else {
     buffer += t
   }
-  if (cur.active) return { entry: { active: true, buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }, changed: true }
+  if (cur.active) return { entry: { active: true, buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId }, changed: true }
   var c = ctx && typeof ctx === "object" ? ctx : {}
   var at = Math.floor(Number(c.cursorIndex))
   return {
@@ -800,7 +807,8 @@ function pushNumberKey(entry, text, ctx) {
       buffer: buffer,
       scopeId: str(c.scopeId),
       query: str(c.query),
-      cursorIndex: isFinite(at) && at > 0 ? at : 0
+      cursorIndex: isFinite(at) && at > 0 ? at : 0,
+      cursorId: str(c.cursorId)
     },
     changed: true
   }
@@ -811,13 +819,102 @@ function pushNumberKey(entry, text, ctx) {
 // restore scope, query and cursor from it.
 function popNumberKey(entry) {
   var cur = normalizeNumberEntry(entry)
-  if (!cur.active || cur.buffer === "") return { active: false, buffer: "", scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }
+  if (!cur.active || cur.buffer === "") return { active: false, buffer: "", scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId }
   var buffer = cur.buffer.substring(0, cur.buffer.length - 1)
-  return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }
+  return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId }
 }
 
 function cancelNumberEntry(entry) {
   return numberEntry()
+}
+
+// What the entry becomes when a commit closes it. `reason` is one of "auto"
+// (the unambiguous-match commit, which the user did not ask for), "timeout",
+// "enter" (Enter or Space), "key" (any key the buffer does not own) or
+// "cancel" (Esc, Backspace to empty).
+function closeNumberEntry(entry, reason) {
+  return numberEntry()
+}
+
+// M2-03 2.5 / 2.9. ONE keystroke, every decision it makes, in order. This
+// lives here rather than in Guide.qml because the ORDER is the thing both
+// D-CHNO-1 and D-CHNO-2 are about, and an order stranded in a QML component
+// is an order no test can reach (CLAUDE.md rule 12). The guide keeps exactly
+// what only it can do: move the cursor, run the timer, draw the transient.
+//
+// `ctx` is the live guide state a NEW entry snapshots: cursorId, cursorIndex,
+// scopeId, query. Returns:
+//   changed     false when the key was refused (the cap, a second separator);
+//               the caller must not restart the timer for a key that did
+//               nothing
+//   entry       the entry after this key, including after an auto-commit
+//   resolution  what the buffer resolves to, for the live preview
+//   commit      null, or the commit this key fired by itself -- the decision
+//               only (restore / play / keepOpen / kind / label / matches /
+//               ordinal), because the status line needs the name of the row
+//               the caller is about to land on, which only the caller knows
+//   timer       "restart" or "stop"
+function numberKeyStep(entry, index, text, ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  var result = pushNumberKey(entry, text, c)
+  var idle = resolveChno(null, "", -1)
+  if (!result.changed) return { changed: false, entry: result.entry, resolution: idle, snapshot: result.entry, commit: null, timer: "none" }
+  var next = result.entry
+  var hit = resolveChno(index, next.buffer, str(c.cursorId))
+  if (!chnoUnambiguous(index, next.buffer)) return { changed: true, entry: next, resolution: hit, snapshot: next, commit: null, timer: "restart" }
+  var plan = chnoCommitPlan(hit.kind, chnoCommitLabel(next, hit), "", hit.matches, hit.ordinal, { play: false })
+  return {
+    changed: true,
+    entry: closeNumberEntry(next, "auto"),
+    resolution: hit,
+    // What a restoring commit restores from: the entry this key closed, snapshot and all.
+    snapshot: next,
+    commit: {
+      reason: "auto",
+      restore: plan.restore,
+      play: plan.play,
+      keepOpen: plan.keepOpen,
+      kind: str(hit.kind),
+      label: chnoCommitLabel(next, hit),
+      matches: hit.matches,
+      ordinal: hit.ordinal
+    },
+    timer: "stop"
+  }
+}
+
+// Backspace, and what it resolves against. Returns `cancelled` when the
+// buffer emptied: that is the same cancel as Esc, and `snapshot` is what the
+// caller restores scope, query and cursor from (2.6).
+function numberPopStep(entry, index, ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  var next = popNumberKey(entry)
+  if (!next.active) return { entry: numberEntry(), resolution: resolveChno(null, "", -1), cancelled: true, snapshot: next, timer: "stop" }
+  return { entry: next, resolution: resolveChno(index, next.buffer, str(c.cursorId)), cancelled: false, snapshot: next, timer: "restart" }
+}
+
+// The label a commit reports: the resolved one, or the raw buffer when
+// nothing resolved -- which is what puts the number the user actually typed
+// into "No channel 20509".
+function chnoCommitLabel(entry, resolution) {
+  var kind = str((resolution || {}).kind)
+  if (kind === "none" || kind === "") return normalizeNumberEntry(entry).buffer
+  return str((resolution || {}).label)
+}
+
+// M2-03 2.5. A commit the caller asked for: the timeout, Enter or Space, or
+// any key the buffer does not own. `name` is the row the preview landed on,
+// so the status can name it. Returns the plan (including the status line),
+// the entry afterwards, and the snapshot a restoring plan restores from.
+function numberCommitStep(entry, resolution, name, opts) {
+  var o = opts && typeof opts === "object" ? opts : {}
+  var cur = normalizeNumberEntry(entry)
+  var hit = resolution && typeof resolution === "object" ? resolution : { kind: "none", label: "", matches: 0, ordinal: 0 }
+  return {
+    plan: chnoCommitPlan(hit.kind, chnoCommitLabel(cur, hit), name, hit.matches, hit.ordinal, o),
+    entry: closeNumberEntry(cur, str(o.reason) === "" ? "key" : str(o.reason)),
+    snapshot: cur
+  }
 }
 
 // M2-03 4.2. Style.space units for the row's number column, derived from the
@@ -4608,6 +4705,11 @@ if (typeof module !== "undefined") {
     numberEntry: numberEntry,
     pushNumberKey: pushNumberKey,
     popNumberKey: popNumberKey,
+    closeNumberEntry: closeNumberEntry,
+    numberKeyStep: numberKeyStep,
+    numberPopStep: numberPopStep,
+    numberCommitStep: numberCommitStep,
+    chnoCommitLabel: chnoCommitLabel,
     cancelNumberEntry: cancelNumberEntry,
     chnoColumnUnits: chnoColumnUnits,
     chnoStatus: chnoStatus,

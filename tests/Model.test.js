@@ -2087,8 +2087,8 @@ check("CN2.6: popNumberKey to empty deactivates but KEEPS the snapshot to restor
   return [[back.active, back.buffer], [gone.active, gone.buffer, gone.scopeId, gone.query, gone.cursorIndex]]
 })(), [[true, "1"], [false, "", "g:UK", "sky", 12]])
 check("CN2.6: popNumberKey on an inactive entry is harmless", (() => { const r = Model.popNumberKey(Model.numberEntry()); const n = Model.popNumberKey(null); return [r.active, r.buffer, n.active, n.buffer] })(), [false, "", false, ""])
-check("CN2.6: cancelNumberEntry is idempotent and forgets the snapshot", [Model.cancelNumberEntry(Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 4 }).entry), Model.cancelNumberEntry(Model.cancelNumberEntry(null))], [{ active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }, { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }])
-check("CN2.3: numberEntry() is the documented zero value", Model.numberEntry(), { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 })
+check("CN2.6: cancelNumberEntry is idempotent and forgets the snapshot", [Model.cancelNumberEntry(Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 4 }).entry), Model.cancelNumberEntry(Model.cancelNumberEntry(null))], [{ active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" }, { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" }])
+check("CN2.3: numberEntry() is the documented zero value", Model.numberEntry(), { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" })
 
 check("CN5.2: orderChannels is identity for playlist order, and for an unnumbered playlist", [Model.orderChannels(plan, "playlist", planIdx) === plan, Model.orderChannels(plan, "number", Model.buildChnoIndex([])) === plan, Model.orderChannels(plan, "", planIdx) === plan], [true, true, true])
 check("CN5.2: number order gathers by chnoSort, unnumbered channels last in playlist order", Model.orderChannels(plan, "number", planIdx).map(c => c.chnoLabel + "/" + c.id), ["7/b", "7.1/d", "7.2/c", "8/e", "10/a", "12/h", "12/i", "130/g", "139/f", "/j", "/k"])
