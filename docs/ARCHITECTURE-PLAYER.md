@@ -1259,3 +1259,20 @@ the ordering, measure how often it loses, and fix it only if it reproduces.
 This project has now spent nine corrections on details that were reasoned
 rather than run, and guessing at a fix for a race nobody has observed would be
 the tenth.
+
+## 16. Rulings on the quality-pass defects (product owner, 2026-09-14)
+
+| # | Ruling |
+|---|---|
+| PO-8, on D-PLY-2 | Accept that removing the plugin can strand a running player, and stop trying to win the race. Removal already uses the same signal disabling does, and the stop is genuinely attempted: the orphan check executes about 414 ms in. It fails because the directory deletion lands about 20 ms earlier and the helper is gone before it can run. Nothing the plugin owns can beat another program's `rm -rf`, and the one mechanism that would, staging a copy of the helper elsewhere, buys a rare case by permanently violating requirement 10 and adding an executable outside the plugin directory. Not worth it. Disabling reaps the player in about seven seconds and is the supported way to stop cleanly. For the stranded case the README documents a command that needs nothing installed. |
+| PO-9, on the stranded-player command | Document `pkill -f -- '^mpv .*--wayland-app-id=omarchy-iptv'`, and document the leading anchor as load-bearing, because the lane proved that without it the pattern matches and kills the shell the user pasted it into. A command that can kill the terminal it is typed in must never appear in documentation without that warning. Show a `pgrep` first so the user sees what will be killed before killing it. |
+| PO-10, on D-PLY-5 | Implement the cheap catch. The lane offered roughly ten lines plus its mirror to detect the handful of options that hand a stream address to another program, and surface it through the warning line that already exists. Take it. A warning the user sees when they actually use the option beats a paragraph in a README they read once, and the documentation stays either way. |
+| PO-11, on D-PLY-7 | Fix it. The player inherits the shell's working directory, which is the user's home, and its own key bindings are live, so one keystroke on the player window writes a durable image of what was being watched into the home directory at mode 0644, outside every list of files this plugin claims to write. Spawn the player with an explicit working directory rather than an inherited one, point its screenshot output somewhere sensible and documented, and say plainly in the README that the player's own keys work and where anything it saves goes. The plugin does not get to be quiet about a file it causes to exist. |
+
+Two observations for the record. First, the P1 in this pass came from the same
+family as every other hard defect here: an event arriving in a window nobody
+modelled, in this case the old player's socket closing while the call that
+replaced it was still running. Second, the startup race is the clearest
+argument yet for measuring rather than reasoning. I wrote in section 15 that
+its window looked small and its consequence bounded. It dropped the play in 29
+of 30 trials.
