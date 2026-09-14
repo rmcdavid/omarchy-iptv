@@ -61,7 +61,7 @@ beyond their host name.
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
 | `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
-| `numberEntryMs` | integer 400-5000 | `1500` | how long to wait between digits before jumping |
+| `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin

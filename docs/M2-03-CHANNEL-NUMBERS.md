@@ -54,7 +54,7 @@ The shipped code this design extends (read before implementing):
 | Duplicates | Within a playlist: the lowest playlist index wins; re-typing the same number while sitting on a match steps to the next one. Across sources: impossible -- only the active source is ever in memory. |
 | No numbers at all | `chnoIndex.hasNumbers === false`: no number column, no `0-9 channel` hint, digits answer with one transient (`No channel numbers in this playlist`). Nothing else changes. |
 | Entry key set | `0`-`9` start and extend the buffer; `.` (and `,`, the numpad decimal on non-English layouts) adds the subchannel separator; `Backspace` removes one character; `Esc` cancels; `Enter` / `Space` commit and play / preview; any other key commits silently and then does its own job. All in **list mode only**. |
-| Commit | A `numberEntryMs` timer (default 1500 ms, restarted on every key) or an unambiguous exact match commits; `Enter`/`Space` commit early **and play**. A commit never plays on its own. |
+| Commit | A `numberEntryMs` timer (default 2000 ms, restarted on every key) or an unambiguous exact match commits; `Enter`/`Space` commit early **and play**. A commit never plays on its own. |
 | Selection semantics | Digits *select*: the cursor follows the buffer live (exact match, else the lowest number with that prefix). This is what makes `101` + `Enter` a one-gesture zap without giving digits a new play meaning. |
 | Scope | Lookup is source-global. If the target is outside the current list, the scope moves to `All` (and an active query is cleared) exactly as a search jumps the column to All. `Esc` restores scope, query and cursor. |
 | Unknown number | The cursor returns to where entry started and the footer says `No channel 205`. Nothing plays, no notification. |
@@ -413,7 +413,7 @@ Four ways, one result:
 
 | Trigger | Behaviour |
 |---|---|
-| `numberEntryMs` elapses since the last key (default 1500 ms, restarted on every accepted key) | commit, do not play |
+| `numberEntryMs` elapses since the last key (default 2000 ms, restarted on every accepted key) | commit, do not play |
 | the buffer is an exact match **and** no other label has it as a proper prefix | commit immediately, do not play; this is what makes a 3-digit plan feel instant (`199` in a 1..200 list commits on the last digit) |
 | `Enter` | commit, then `activate(false)`: play, close, focus mpv |
 | `Space` | commit, then `activate(true)`: play, guide stays open |
@@ -1514,7 +1514,7 @@ without a real compositor, a real font and a real keyboard:
 2. That the dialpad glyph U+F061C renders as a dialpad rather than a tofu box
    at `Style.font.icon` in the guide's font stack. The cmap says the glyph
    exists; only a screenshot says it *looks* right.
-3. That 1500 ms is the right default. It is a judgement calibrated against
+3. That 2000 ms is the right default. It is a judgement calibrated against
    television convention and the fact that a commit is harmless here; only a
    person typing 3- and 4-digit numbers on this keyboard can confirm it.
 4. That digit keys survive the real `PanelKeyCatcher` -> `keyHost` chain on a
@@ -1543,7 +1543,7 @@ this file as `CN1`, `CN2`, ... the way SR1-SR32 were.
 | # | Question | Recommendation |
 |---|---|---|
 | 1 | Does a committed number also **play**, or only select? The PO gate says "digits select, a timeout commits"; this spec reads that as select-only, with `Enter`/`Space` playing. | **Select only.** It keeps `Enter` and `Space` meaning exactly what UX.md 3.1 says, makes a mistyped number free, and still gives one-gesture zap (`101` + `Enter`). If the PO wants TV tuning, add `numberJumpPlays` (boolean, default false) later rather than changing the default. |
-| 2 | Is `numberEntryMs` a setting or a named constant? | **A setting** (400-5000, default 1500). The timeout is the one number that decides whether a slow typist gets channel 101 or channels 1, 0 and 1, and that is an accessibility concern, not a style constant. |
+| 2 | Is `numberEntryMs` a setting or a named constant? | **A setting** (400-5000, default 2000). The timeout is the one number that decides whether a slow typist gets channel 101 or channels 1, 0 and 1, and that is an accessibility concern, not a style constant. |
 | 3 | `channelOrder` as a string, or a boolean `sortByNumber`? | **String.** The schema has no enum type, `omarchy bar set` writes strings, and a string leaves room for `"name"` without another key. |
 | 4 | Should **Favorites** follow number order when `channelOrder: number`? | **No.** R5 and UX.md 2.5 make Favorites a hand-built list; a provider-numbering setting must not rewrite the user's own order. Manual reordering is still the backlog item. |
 | 5 | The all-digit search-mode ranking tier (2.8) -- keep or cut? | **Keep.** The guide opens in search mode; without it the feature is invisible from the default mode. It is a head insertion, not a new tier, so R4 is untouched. |
@@ -1571,7 +1571,7 @@ hunting for them.
 | A3 | `positionViewAtIndex` is O(1) on this `ListView` because row heights are uniform. Read from the delegate's `height: root.rowHeight` binding; not profiled. | N23, live item 6 |
 | A4 | The chip at `Style.space(34)` tall with `Style.font.heading` digits is legible over the list without a border. Token arithmetic, not a screenshot. | N1 screenshot, live item 2 |
 | A5 | `8 * n + 8` design units is the right number-column width for JetBrains Mono digits at `Style.font.body`. Arithmetic on a monospace assumption. | live item 1 |
-| A6 | 1500 ms is a comfortable inter-digit timeout. Judgement against television convention plus the fact that a commit here is harmless. | live item 3 |
+| A6 | 2000 ms is a comfortable inter-digit timeout. Judgement against television convention plus the fact that a commit here is harmless. | live item 3 |
 | A7 | No real playlist in the project's asset list is numbered, so the live pass needs a supplied or generated one. Verified against `docs/QA-ASSETS.md` and every fixture (only two bare `tvg-chno=12` lines exist in the whole tree), but not against the PO's own provider. | OQ 13 |
 
 ## 13. Product owner rulings (2026-09-14)
@@ -1583,7 +1583,7 @@ Where I differ from the recommendation I say why.
 | # | Ruling |
 |---|---|
 | CN1 | Select only, as recommended, with one addition that completes the picture. Inside the guide, digits move the cursor and `Enter` or `Space` keep exactly the meanings `UX.md` section 3.1 gives them, so a mistyped number costs nothing and `101` then `Enter` is still one gesture. True television tuning lives outside the guide: the IPC verb of CN10 PLAYS immediately, because a user who bound a key to it is not browsing, they are changing the channel. That split is the whole answer to "does a number play", and it must be stated in the README that way. |
-| CN2 | `numberEntryMs` is a setting, range 400 to 5000, default 1500. Agreed, and for the reason given: the gap between a slow typist getting channel 101 and getting channels 1, 0 and 1 is an accessibility matter, not a house style. |
+| CN2 | `numberEntryMs` is a setting, range 400 to 5000, default 2000. Agreed, and for the reason given: the gap between a slow typist getting channel 101 and getting channels 1, 0 and 1 is an accessibility matter, not a house style. |
 | CN3 | `channelOrder` is a string. Agreed. |
 | CN4 | Favorites never follow number order. Agreed, emphatically. Favorites is a list the user built by hand; a provider's numbering scheme does not get to rewrite it. |
 | CN5 | Keep the all-digit search ranking tier. Agreed. The guide opens in search mode, so without it the feature is invisible from the default mode, which would be a feature nobody discovers. |
@@ -1660,3 +1660,22 @@ and these corrections win.
 | CN22 | The digit timeout default moves from 1500 to 2000 milliseconds, on the evidence rather than taste. 93 percent of numbers commit instantly anyway, so the wait is reached by a small minority, and the two failure directions are not symmetric: too long costs a stale hint on a target already visible and confirmable with Enter, while too short silently tunes you somewhere you did not ask for. When one error is recoverable and the other is invisible, bias toward the recoverable one. It also matches television convention. |
 | CN23 | The four harness verbs the plan specified were never built, so twenty test cases have no runner and have never executed. That is the same finding this project keeps making: a test that has never run is not coverage. Build them or strike the cases and say they are unverified; do not leave them listed as if they pass. |
 | CN24 | The single-group findings are a design question, not defects, and they are deferred to their own item rather than patched during a release. A real provider putting every channel in one group makes the group column dead weight, duplicates a control, repeats the same label on every row, and leaves the user with no sense of position in a list of thousands. Every one of those behaves exactly as designed. The design simply never imagined this shape. |
+
+## 18. Corrections after the defect fixes (product owner, 2026-09-14)
+
+- Section 2.5's auto-commit is now PROVISIONAL. Finishing a number early is
+  allowed only because it can be taken back: the entry closes for display and
+  stays armed for the remainder of the same digit window, so the digits of a
+  number that does not exist stay one number and report an honest miss. The
+  instant path is unchanged at 93 percent, and silent mistunes went from 2,271
+  in 9,484 to none.
+- Sections 2.3 and 2.7: cycling through channels that share a number resolves
+  against the cursor as it stood before entry began, not the live cursor that
+  the digits have already moved.
+- Section 10.6: the four entry verbs are built and twelve previously unrunnable
+  cases now execute on every commit. Four are STRUCK with reasons: real keypad
+  hardware events, window resizing with a screenshot, one that duplicates an
+  existing scenario, and one that is purely visual. Four more have a runner but
+  no result, because their live half needs a display; they are listed as
+  unverified rather than as passing.
+- The digit wait is 2000 milliseconds everywhere, per ruling CN22.
