@@ -75,6 +75,34 @@ ShellRoot {
     harness.log(name, JSON.stringify(payload))
   }
 
+  // The detached player's state, read defensively. A pre-M2-02 Service has
+  // none of these properties, and the scenario has to run against it to show
+  // its checks failing there first; an undefined read must therefore never
+  // throw and never invent a value. `socketAttached` is the observer's real
+  // state, `playerUp` what the UI binds - they differ exactly during the
+  // birth edge, which is the interesting window.
+  function addPlayerState(out, s) {
+    out.playerUp = s.playerUp === undefined ? null : s.playerUp
+    out.playerPending = s.playerPending === undefined ? null : s.playerPending
+    out.playerWanted = s.playerWanted === undefined ? null : s.playerWanted
+    var sock = s.playerSocket
+    out.socketAttached = sock === undefined ? null : (sock !== null && sock.connected === true)
+    out.stopping = s.stopping === undefined ? null : s.stopping
+    out.playSeq = s.playSeq === undefined ? null : s.playSeq
+    out.currentEntryId = s.currentEntryId === undefined ? null : s.currentEntryId
+    out.entryOwners = s.entryOwners === undefined || s.entryOwners === null ? null : Object.keys(s.entryOwners).length
+    var end = s.lastEndFile
+    out.lastEndFile = end === undefined || end === null ? null : { reason: end.reason, entryId: end.entryId }
+    out.reconcilePending = s.reconcilePending === undefined ? null : s.reconcilePending
+    out.notifiedFailureId = s.notifiedFailureId === undefined ? null : s.notifiedFailureId
+    // Redacted at the source (rememberStderr -> Model.redactUrls), so a
+    // scenario can assert on it without a credential reaching the log.
+    out.playerStderr = s.mpvStderrTail === undefined ? [] : s.mpvStderrTail
+    // Pre-change only: the attached ladder's rung. Reported so the old tree
+    // stays inspectable from the same driver.
+    if (s.stopStage !== undefined) out.stopStage = s.stopStage
+  }
+
   // The guide form as `state()` reports it: URL fields and the server pass
   // through Model.maskUrl, credentials become the mask token, and every
   // field carries its length, so a scenario can verify a paste without the
@@ -349,6 +377,13 @@ ShellRoot {
     function activate(keepOpen: bool): string { if (guideLoader.item) guideLoader.item.activate(keepOpen); return "ok" }
     function favorite(): string { if (guideLoader.item) guideLoader.item.toggleFavoriteAt(guideLoader.item.cursorIndex); return "ok" }
     function remove(): string { if (guideLoader.item) guideLoader.item.removeAt(guideLoader.item.cursorIndex); return "ok" }
+    // Play a channel by id without going through the guide, so a player
+    // scenario needs no window focus and no keystrokes. keepOpen is true:
+    // the service does the playback half and leaves focus alone.
+    function play(id: string): string {
+      var s = serviceLoader.item
+      return s && s.play(String(id), true, "") ? "ok" : "no"
+    }
     function stop(): string { if (serviceLoader.item) serviceLoader.item.stop(); return "ok" }
     function refresh(): string { if (serviceLoader.item) serviceLoader.item.refresh(); return "ok" }
     function zap(delta: int): string { return serviceLoader.item && serviceLoader.item.zap(delta) ? "ok" : "no" }
@@ -456,7 +491,10 @@ ShellRoot {
       if (s) {
         out.service = s.statusSummary()
         out.service.failedAt = s.failedAt
-        out.service.stopStage = s.stopStage
+        // ---- detached player (M2-02), every field optional so the SAME
+        // harness drives a pre-change checkout: that comparison is what
+        // makes a scenario evidence rather than a claim (CLAUDE.md rule 10).
+        harness.addPlayerState(out.service, s)
         out.service.healthSkips = s.healthSkips
         out.service.activeSourceKey = s.activeSourceKey
         out.service.stateLoaded = s.stateLoaded

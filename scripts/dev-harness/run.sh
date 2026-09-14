@@ -7,6 +7,12 @@
 #   run.sh key <wtype args...>       send keys to the focused surface (wtype)
 #   run.sh clean                     wipe the scratch dirs (cache, state, runtime)
 #   run.sh scenario                  scripted Sources verification (sources-scenario.sh)
+#   run.sh player-scenario           scripted detached-player verification (player-scenario.sh)
+#   run.sh restart-shell             kill the detached harness shell and start a new one with
+#                                    the same environment, leaving the player alone (M2-02)
+#   run.sh shell-stop                SIGTERM the detached harness shell and wait for it
+#   run.sh reap                      kill the detached shell, the fixture server and the
+#                                    harness player (what the foreground EXIT trap does)
 #
 # Options for start:
 #   --open              open the guide right after load
@@ -22,6 +28,15 @@
 #   --no-name           showChannelName=false
 #   --label-max N       barLabelMaxWidth
 #   --keep              keep the scratch cache/state between runs (default wipes cache+state)
+#   --detach            start in the background and return (no EXIT trap): the shell survives
+#                       this invocation, which is what `restart-shell` needs. Reap with `reap`.
+#   --instance NAME     a second config root (root<NAME>) sharing the same cache / state /
+#                       runtime dirs: two services, one runtime directory, one player
+#
+# Environment: OMARCHY_IPTV_PLUGIN_ROOT overrides which checkout the harness
+# loads Service.qml / Guide.qml / BarWidget.qml / bin/omarchy-iptv from
+# (default: this repo). That is how a scenario is run against pre-change code
+# to prove it fails there before it counts as evidence (CLAUDE.md rule 10).
 #
 # Everything lives under $OMARCHY_IPTV_HARNESS_DIR (default $XDG_RUNTIME_DIR/omarchy-iptv-harness):
 #   root/     scratch Quickshell config root: shell.qml + Commons/ Ui/ symlinks (the `qs` prefix)
@@ -39,12 +54,18 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
+# Which checkout the plugin QML and the helper come from. Defaults to this
+# repo; a scenario points it at an exported pre-change tree to show a check
+# failing there first.
+PLUGIN_ROOT=$(cd "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}" && pwd)
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
 SHELL_DIR=${OMARCHY_PATH:-/usr/share/omarchy}/shell
 SERVE_PORT=8765
 SERVER_PID=""
 QS_PID=""
+INSTANCE=${OMARCHY_IPTV_HARNESS_INSTANCE:-}
+KEEP_PLAYER=0
 
 # scheme://host of a source URL, "local file" for a path, "(none)" when unset.
 source_label() {
@@ -63,25 +84,68 @@ fixture_server_pattern() {
   echo "http.server $SERVE_PORT --bind 127.0.0.1 --directory $SCRATCH/fixtures"
 }
 
+# The config root of this instance ("" = the default one) and its pid file.
+qs_root()    { echo "$SCRATCH/root$INSTANCE"; }
+qs_pidfile() { echo "$SCRATCH/qs$INSTANCE.pid"; }
+
+# The player is a setsid'd grandchild of the helper now (M2-02), so it is not
+# in any process group this script owns: it is reaped by its command line,
+# which names THIS scratch socket and can never match the live session's.
+player_pattern() { echo "input-ipc-server=$SCRATCH/runtime/omarchy-iptv/mpv.sock"; }
+
+reap_player() { pkill -f "$(player_pattern)" 2>/dev/null; return 0; }
+
 cleanup() {
   [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null
   [[ -n $QS_PID ]] && kill "$QS_PID" 2>/dev/null
   # Belt and braces: only processes bound to THIS scratch dir are matched.
   pkill -f "quickshell -p $SCRATCH/root" 2>/dev/null
   pkill -f "$(fixture_server_pattern)" 2>/dev/null
-  pkill -f "input-ipc-server=$SCRATCH/runtime/omarchy-iptv/mpv.sock" 2>/dev/null
+  # --keep-player is for the restart scenario, which must outlive the shell
+  # exactly the way the real player does.
+  (( KEEP_PLAYER )) || reap_player
   return 0
 }
 
 prepare_root() {
-  mkdir -p "$SCRATCH/root" "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime" "$SCRATCH/fixtures"
-  ln -sfn "$SHELL_DIR/Commons" "$SCRATCH/root/Commons"
-  ln -sfn "$SHELL_DIR/Ui" "$SCRATCH/root/Ui"
-  cp "$HERE/shell.qml" "$SCRATCH/root/shell.qml"
+  local root; root=$(qs_root)
+  mkdir -p "$root" "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime" "$SCRATCH/fixtures"
+  ln -sfn "$SHELL_DIR/Commons" "$root/Commons"
+  ln -sfn "$SHELL_DIR/Ui" "$root/Ui"
+  cp "$HERE/shell.qml" "$root/shell.qml"
   # The harness masks form values with the plugin's own Model.js (state()).
-  cp "$ROOT/Model.js" "$SCRATCH/root/Model.js"
+  cp "$PLUGIN_ROOT/Model.js" "$root/Model.js"
   # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
   [[ -d $REAL_RUNTIME/hypr ]] && ln -sfn "$REAL_RUNTIME/hypr" "$SCRATCH/runtime/hypr"
+}
+
+# Start quickshell in its own session so it survives this invocation, and
+# record the pid. Used by --detach and by restart-shell; the environment is
+# whatever the caller exported (start writes it to last-start.env).
+start_detached_shell() {
+  local root; root=$(qs_root)
+  setsid quickshell -p "$root" >>"$SCRATCH/harness$INSTANCE.log" 2>&1 &
+  QS_PID=$!
+  echo "$QS_PID" >"$(qs_pidfile)"
+  echo "[run.sh] detached shell pid $QS_PID (log $SCRATCH/harness$INSTANCE.log)"
+}
+
+# SIGTERM the detached shell and wait for it to go. This is what
+# `omarchy restart shell` does to the real one: `quickshell kill` asks it to
+# exit, and nothing is sent to the player.
+stop_detached_shell() {
+  local pidfile pid i; pidfile=$(qs_pidfile)
+  pid=$(cat "$pidfile" 2>/dev/null)
+  [[ -n $pid ]] || pid=$(pgrep -f "quickshell -p $(qs_root)$" | head -1)
+  [[ -n $pid ]] || return 0
+  kill -TERM "$pid" 2>/dev/null
+  for ((i = 0; i < 50; i++)); do
+    kill -0 "$pid" 2>/dev/null || { rm -f "$pidfile"; return 0; }
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null
+  rm -f "$pidfile"
+  return 0
 }
 
 harness_env() {
@@ -140,7 +204,7 @@ case $cmd in
   ipc)
     shift
     harness_env
-    exec qs ipc -p "$SCRATCH/root" call harness "$@"
+    exec qs ipc -p "$(qs_root)" call harness "$@"
     ;;
   shot)
     name=${2:-guide}
@@ -160,9 +224,39 @@ case $cmd in
     shift
     exec "$HERE/sources-scenario.sh" "$@"
     ;;
+  player-scenario)
+    shift
+    exec "$HERE/player-scenario.sh" "$@"
+    ;;
+  shell-stop)
+    stop_detached_shell
+    echo "[run.sh] shell$INSTANCE stopped"
+    ;;
+  restart-shell)
+    # The M2-02 acceptance shape: the shell goes away and comes back with the
+    # same environment, and NOTHING touches the player. A detached start
+    # (--detach) must have written last-start.env.
+    if [[ ! -f $SCRATCH/last-start.env ]]; then
+      echo "[run.sh] no detached start recorded; use --detach first" >&2
+      exit 2
+    fi
+    stop_detached_shell
+    harness_env
+    # shellcheck source=/dev/null
+    . "$SCRATCH/last-start.env"
+    prepare_root
+    start_detached_shell
+    ;;
+  reap)
+    stop_detached_shell
+    pkill -f "quickshell -p $SCRATCH/root" 2>/dev/null
+    pkill -f "$(fixture_server_pattern)" 2>/dev/null
+    reap_player
+    echo "[run.sh] reaped shell, fixture server and player for $SCRATCH"
+    ;;
   start|--*)
     [[ $cmd == start ]] && shift
-    OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0
+    OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
@@ -176,6 +270,9 @@ case $cmd in
         --no-name) SHOW_NAME=false ;;
         --label-max) LABEL_MAX=$2; shift ;;
         --keep) KEEP=1 ;;
+        --keep-player) KEEP_PLAYER=1 ;;
+        --detach) DETACH=1; KEEP_PLAYER=1 ;;
+        --instance) INSTANCE=$2; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
       esac
       shift
@@ -183,9 +280,14 @@ case $cmd in
     prepare_root
     if (( ! KEEP )); then rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv"; mkdir -p "$SCRATCH/cache" "$SCRATCH/state"; fi
     # Always reap what we start: normal exit, --timeout, Ctrl-C, SIGTERM.
-    trap cleanup EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
+    # --detach deliberately installs no trap: the shell and the player must
+    # outlive this invocation (that is the state `restart-shell` acts on),
+    # and `run.sh reap` is then the teardown.
+    if (( ! DETACH )); then
+      trap cleanup EXIT
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
+    fi
     live="http://127.0.0.1:9/dead/live.m3u8"
     if (( SERVE )); then start_server; live="http://127.0.0.1:$SERVE_PORT/test.ts"; fi
     write_fixture "$live"
@@ -194,10 +296,10 @@ case $cmd in
     if [[ -n $SOURCE2 ]]; then
       # A second history record, never fetched (fetchedAt 0): the switch
       # path through a probe. Output is the helper's, hosts only.
-      seeded=$(python3 "$ROOT/bin/omarchy-iptv" state --state-dir "$SCRATCH/state/omarchy-iptv" source add --url "$SOURCE2" --origin cli)
+      seeded=$(python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$SCRATCH/state/omarchy-iptv" source add --url "$SOURCE2" --origin cli)
       echo "[run.sh] source2=$(source_label "$SOURCE2") key=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("key", "?"))' "$seeded")"
     fi
-    export OMARCHY_IPTV_ROOT="$ROOT"
+    export OMARCHY_IPTV_ROOT="$PLUGIN_ROOT"
     if [[ $PLAYLIST == none ]]; then export OMARCHY_IPTV_PLAYLIST=""
     else export OMARCHY_IPTV_PLAYLIST="${PLAYLIST:-$SCRATCH/fixtures/harness.m3u}"; fi
     export OMARCHY_IPTV_EPG="$EPG"
@@ -207,11 +309,28 @@ case $cmd in
     export OMARCHY_IPTV_LABEL_MAX="$LABEL_MAX"
     # scheme://host only: the URL may carry provider credentials (S-08).
     echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
+    if (( DETACH )); then
+      # Record the environment so `restart-shell` can bring the same shell
+      # back without re-deriving anything (the fixture server, the cache and
+      # the state stay exactly as they are).
+      {
+        echo "export OMARCHY_IPTV_ROOT=\"$OMARCHY_IPTV_ROOT\""
+        echo "export OMARCHY_IPTV_PLAYLIST=\"$OMARCHY_IPTV_PLAYLIST\""
+        echo "export OMARCHY_IPTV_EPG=\"$OMARCHY_IPTV_EPG\""
+        echo "export OMARCHY_IPTV_OPEN=\"0\""
+        echo "export OMARCHY_IPTV_VERTICAL=\"$OMARCHY_IPTV_VERTICAL\""
+        echo "export OMARCHY_IPTV_SHOW_NAME=\"$OMARCHY_IPTV_SHOW_NAME\""
+        echo "export OMARCHY_IPTV_LABEL_MAX=\"$OMARCHY_IPTV_LABEL_MAX\""
+        echo "export OMARCHY_IPTV_MPV_ARGS=\"${OMARCHY_IPTV_MPV_ARGS:-}\""
+      } >"$SCRATCH/last-start.env"
+      start_detached_shell
+      exit 0
+    fi
     # Background + wait (instead of a pipeline) so the PID is known to cleanup.
     if (( TIMEOUT > 0 )); then
-      timeout --signal=TERM --kill-after=3 "$TIMEOUT" quickshell -p "$SCRATCH/root" > >(sed -u 's/^/[qs] /') 2>&1 &
+      timeout --signal=TERM --kill-after=3 "$TIMEOUT" quickshell -p "$(qs_root)" > >(sed -u 's/^/[qs] /') 2>&1 &
     else
-      quickshell -p "$SCRATCH/root" > >(sed -u 's/^/[qs] /') 2>&1 &
+      quickshell -p "$(qs_root)" > >(sed -u 's/^/[qs] /') 2>&1 &
     fi
     QS_PID=$!
     wait "$QS_PID"
@@ -220,7 +339,7 @@ case $cmd in
     echo "[run.sh] quickshell exited with $status (124 = timeout, expected)"
     ;;
   *)
-    sed -n '2,30p' "$0"
+    sed -n '2,45p' "$0"
     exit 2
     ;;
 esac
