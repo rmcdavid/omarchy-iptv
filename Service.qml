@@ -1,3 +1,9 @@
+// The socket observer builds its Socket from a Component (spike caveat C1),
+// and that nested component reaches the ids of this file (root, the retry
+// timer). Bound is the semantics we want and the semantics we already have:
+// there is exactly one creation context here.
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -10,13 +16,20 @@ import "Model.js" as Model
 //   - the channels / EPG caches  (FileView over ~/.cache/omarchy-iptv)
 //   - favorites / recents / lastPlayed (FileView over ~/.local/state/omarchy-iptv)
 //   - every helper run            (python3 bin/omarchy-iptv <subcommand>)
-//   - the single mpv Process and the now-playing state (decisions 1, 2, 12)
+//   - the DETACHED player and the now-playing state (ARCHITECTURE-PLAYER.md)
 //   - the plugin IPC target       (omarchy-shell io.github.rmcdavid.iptv <fn>)
 // Guide.qml receives this object as `service` (shell.qml injects it on load);
 // BarWidget.qml resolves it through bar.shell.serviceFor(moduleName).
 //
 // Privacy (R12): nothing here ever logs, notifies or exposes a playlist,
 // EPG or stream URL beyond scheme + host. Argv arrays only (section 8).
+//
+// M2-02: mpv is no longer our child. It is spawned by the helper as a
+// setsid'd grandchild (`player start`), so it survives `omarchy restart
+// shell`; this service observes it over its own 0600 JSON IPC socket and
+// reattaches on start (`player probe`). Nothing here may ever exec mpv:
+// `player start` is the only spawn path, and its /proc scan plus flock are
+// what keep a second window impossible (requirement 1).
 //
 // keepLoaded: edits to THIS file only apply after `omarchy restart shell`.
 Item {
@@ -41,7 +54,14 @@ Item {
   readonly property int epgTickMs: 30 * 1000
   readonly property int healthCheckMs: 10 * 1000
   // The shutdown ladder's grace periods live with its reducer in Model.js
-  // (STOP_QUIT_GRACE_MS, STOP_KILL_GRACE_MS, HEALTH_SKIPS_BEFORE_RESTART).
+  // (STOP_QUIT_GRACE_MS, STOP_KILL_GRACE_MS, HEALTH_SKIPS_BEFORE_RESTART);
+  // the ladder itself now runs inside one detached helper (4.9).
+  // ---- detached player timings (ARCHITECTURE-PLAYER.md 4.4, 4.7, spike C6)
+  readonly property int playerSocketRetryMs: 250   // reattach tick
+  readonly property int playerSocketTries: 12      // burst cap: 12 x 250 ms = 3 s (C6)
+  readonly property int playerTimeoutMs: 12 * 1000 // watchdog for one player verb
+  readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
+  readonly property int stopSettleMs: 5 * 1000     // backstop that clears `stopping` (4.10)
   readonly property int focusRetryMs: 500
   readonly property int focusRetries: 6
   readonly property int healthFailuresBeforeRestart: 2
@@ -193,8 +213,20 @@ Item {
   property int nowSec: Math.floor(Date.now() / 1000)
 
   // ---- playback
+  //
+  // Liveness (4.7, spike caveat C3). `playerPending` is the synchronous
+  // birth edge `mpvProc.running` used to give: startPlayer() sets it in the
+  // same turn as the keystroke, so the bar lights up on the same frame as
+  // it did when mpv was our child. The death edge is socket EOF, 2-3 ms
+  // after mpv dies, instead of a 10 s poll. `playerSocket` is null between
+  // attempts (a Socket object is never reused after a failed connect), so
+  // every read of it is null-guarded.
   property var nowPlaying: null             // { id, name, group, launchedFrom, since }
-  readonly property bool playing: mpvProc.running && nowPlaying !== null
+  property var playerSocket: null           // the live Socket object, or null (C1)
+  property bool playerWanted: false         // arms playerSocketTimer
+  property bool playerPending: false        // a start we issued is not observable yet
+  readonly property bool playerUp: (root.playerSocket !== null && root.playerSocket.connected) || root.playerPending
+  readonly property bool playing: playerUp && nowPlaying !== null
   property var failedAt: ({})               // session-only { id: "HH:MM" } (R11)
   property bool userStopped: false
   property bool relaunchPending: false
@@ -216,23 +248,47 @@ Item {
   property bool epgTimedOut: false
   property bool dirsReady: false
   property bool stateSavePending: false
-  // D-LIVE-15: a `stop` that arrives while a helper call is in flight is
-  // sent as soon as that call returns; a `play` over IPC that finds no
-  // socket (player just relaunched) or no answer is retried with backoff.
-  property bool stopPending: false
+  // D-LIVE-15: a `play` over IPC that finds no socket (player just
+  // relaunched) or no answer is retried with backoff.
   property int playRetries: 0
   readonly property int relaunchDelayMs: 200
   readonly property int playRetryBaseMs: 300
   readonly property int playRetryMax: 3        // 300 + 600 + 900 ms = 1.8 s
-  // D-LIVE-17: rung of the shutdown ladder already taken ("" idle, "quit",
-  // "term", "kill"; Model.stopEscalation), a play() that arrived while the
-  // old player was on its way out (started from handleMpvExit, never over
-  // the dying socket) and the health ticks skipped in a row behind an
-  // in-flight helper call (Model.healthTick).
-  property string stopStage: ""
-  readonly property bool stopping: stopStage !== ""
-  property bool playAfterExit: false
+  // 4.10: the intent sequence number. Service.qml is its only issuer; the
+  // helper only compares and records it, so a `stop` and a `play` that reach
+  // two detached helpers out of order still execute in the order the user
+  // issued them. It survives a restart through `player probe`'s reply.
+  property int playSeq: 0
+  // `stopping` keeps its name and its four read sites; what changed is its
+  // source. It is true from the keystroke until socket EOF confirms the
+  // death (or the 5 s backstop), and while it is true a play() always
+  // starts a fresh player instead of zapping a dying socket (4.10).
+  property real stopAt: 0
+  readonly property bool stopping: stopAt > 0
   property int healthSkips: 0
+  // The event router's state (4.8). `entryOwners` maps mpv's own
+  // playlist_entry_id to the channel that load was for, so a failure that
+  // arrives after the user has zapped away still names the right channel;
+  // the gate FAILS OPEN, so an unknown id degrades the name and never
+  // suppresses the notification.
+  property int currentEntryId: 0
+  property var entryOwners: ({})
+  property var lastEndFile: null            // { entryId, reason, fileError }
+  property bool playerIdle: false           // observed idle-active, informational
+  property string playerKind: ""            // which player verb is in flight
+  property bool probeRetried: false         // the one ambiguous-probe re-read (4.5)
+  property bool reconcilePending: false     // resolve nowPlaying once the cache lands
+  property string playerSourceKey: ""       // the source the recovered stash belongs to
+  property int playerSocketError: 0         // last QLocalSocket::LocalSocketError, diagnostics only
+  // A stop whose EOF never came, so the ladder did not end the player. The
+  // stop is detached and its reply is by design unobservable, so this is
+  // the only way to notice one that was refused (4.9, 4.10).
+  property bool stopConfirmPending: false
+  // Whose failure has already been toasted for this play. `player start`'s
+  // own first-load window and socket EOF are two independent detectors of
+  // the same dead stream (4.8 signals 1 and 3) and either can win the race;
+  // this keeps the user's toast count at one.
+  property string notifiedFailureId: ""
   // Warnings of the last successful playlist load (D-LIVE-18), URL-free;
   // the guide shows them until the next successful load without warnings.
   // A failed refresh keeps them: the cache in use is still that load's.
@@ -279,7 +335,9 @@ Item {
     }
     var key = Model.channelId(channel)
     // Enter on the row already playing: no reload, just focus (UX 8 #4).
-    if (mpvProc.running && root.nowPlaying && root.nowPlaying.id === key) {
+    // A false negative here only costs one redundant `player start`, which
+    // adopts the live player and re-zaps it (4.7).
+    if (root.playerUp && root.nowPlaying && root.nowPlaying.id === key) {
       // Re-selected from another list: the zap ring follows the list the
       // user is in (UX 3.4, D-LIVE-12). A new object so bindings notice.
       var from = String(launchedFrom || "")
@@ -305,7 +363,12 @@ Item {
     root.healthFailures = 0
     root.lastError = ""
     root.failedAt = Model.withoutFailed(root.failedAt, key)
-    root.previousPlaying = mpvProc.running ? root.nowPlaying : null
+    root.notifiedFailureId = ""
+    // A play cancels a pending stop-confirmation: the player that is coming
+    // up is wanted, whatever the one before it did.
+    root.stopConfirmPending = false
+    root.playSeq += 1                       // every play is a new intent (4.10)
+    root.previousPlaying = root.playerUp ? root.nowPlaying : null
     root.nowPlaying = {
       id: key,
       name: String(channel.name || ""),
@@ -316,32 +379,51 @@ Item {
     root.userState = Model.recordPlayed(root.userState, channel, root.maxRecents, nowSec)
     root.saveState()
     root.wantFocus = !keepOpen
-    if (mpvProc.running) {
-      if (root.stopping) {
-        // The player is on its way out (stop or health restart): the new
-        // channel starts from handleMpvExit once the exit is observed and
-        // never over the dying socket (D-LIVE-17).
-        root.playAfterExit = true
-        return true
-      }
+    // The fork is never a correctness gate (F2): `player start` is
+    // idempotent - it adopts a live player and zaps it - so the worst a
+    // wrong answer costs is one extra 130 ms helper run. While `stopping`
+    // is true we always take the start branch, so a zap can never be
+    // written to a socket that is being torn down (4.10).
+    if (root.playerUp && !root.stopping) {
       if (controlProc.running) {
         // A zap burst: remember only the last target, applied when the
         // current helper call returns.
         root.pendingPlayId = key
       } else {
-        root.runControl("play", ["play", "--id", key, "--socket", root.socketPath, "--cache-dir", root.activeCacheDir])
+        root.runControl("play", root.playArgs(key))
       }
       if (root.wantFocus) root.focusPlayer()
     } else {
-      root.launchMpv(channel)
+      root.startPlayer(channel)
     }
     return true
   }
 
-  // Ask mpv to quit over IPC, then SIGTERM, then SIGKILL, each after its
-  // grace period (Model.stopEscalation, D-LIVE-17). nowPlaying clears at
-  // once so the bar and the guide drop the channel; the process itself is
-  // gone within the ladder's bound. A user stop never notifies.
+  // `play --id ... --scope ... --since ...`: the additive session flags make
+  // a zap refresh the now-playing stash inside mpv, which is what lets a
+  // shell restart recover the channel the user last switched TO rather than
+  // the one the player was started with (4.6, requirement 11).
+  function playArgs(key) {
+    var np = root.nowPlaying
+    var args = ["play", "--id", String(key), "--socket", root.socketPath, "--cache-dir", root.activeCacheDir]
+    if (np && np.id === key) {
+      var scope = String(np.launchedFrom || "")
+      if (scope !== "") args = args.concat(["--scope", scope])
+      var since = Math.floor(Number(np.since) || 0)
+      if (since > 0) args = args.concat(["--since", String(since)])
+    }
+    return args
+  }
+
+  // The UI contract is unchanged: nowPlaying and the timers clear
+  // synchronously, so the bar and the guide drop the channel on the
+  // keystroke. The ladder itself - quit, SIGTERM at 2 s, SIGKILL at 4 s -
+  // now runs inside ONE detached helper (4.9), which is strictly stronger
+  // than the QML version: no rung can be starved behind a busy control
+  // channel, the pid comes from /proc so a wedged mpv is reachable, and the
+  // ladder completes even if this shell is killed one millisecond from now.
+  // A user stop never notifies. Issued unconditionally: `player stop`
+  // against nothing is a cheap no-op that also tidies a stale socket.
   function stop() {
     root.pendingPlayId = ""
     root.wantFocus = false
@@ -349,58 +431,53 @@ Item {
     // Nothing queued may resurrect the player after a stop (D-LIVE-15).
     relaunchTimer.stop()
     playRetryTimer.stop()
+    playerSocketTimer.stop()
     root.relaunchPending = false
-    root.playAfterExit = false
     root.playRetries = 0
     root.nowPlaying = null
-    if (!mpvProc.running) {
-      root.stopPending = false
-      root.stopStage = ""
-      stopTimer.stop()
-      return
-    }
     root.userStopped = true
-    // A stop while the ladder already runs only cancelled the queued play.
-    if (!root.stopping) root.escalateStop()
+    root.playerPending = false
+    // Stop hunting for a socket, but keep an attached one: its EOF is how
+    // we learn the ladder finished (and is what clears `stopping`).
+    root.playerWanted = false
+    root.playSeq += 1
+    root.stopAt = Date.now()
+    stopSettleTimer.restart()
+    Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
   }
 
-  // One rung of the shutdown ladder; stopTimer re-arms for the next one
-  // until handleMpvExit observes the exit (D-LIVE-17).
-  function escalateStop() {
-    if (!mpvProc.running) {
-      stopTimer.stop()
-      root.stopStage = ""
+  // Health verdict: the player is unresponsive. `player restart --from term`
+  // runs the ladder and the spawn under ONE lock acquisition, which removes
+  // the stop-then-start race two independent detached calls would have; IPC
+  // is by definition not answering here, so rung 1 is skipped. The
+  // bookkeeping is unchanged: one automatic relaunch per player.
+  function restartPlayer() {
+    if (!root.playerUp || root.stopping) return
+    if (!root.nowPlaying) return
+    var channel = root.channelIndex[root.nowPlaying.id]
+    if (!channel) return
+    if (root.relaunched) {
+      // The one automatic relaunch for this player is spent: ladder it down
+      // and show idle, which is what the QML ladder did with
+      // relaunchPending false (a quit exits 0, i.e. silently).
+      console.warn("omarchy-iptv: mpv unresponsive again, stopping the player")
+      root.stop()
       return
     }
-    var step = Model.stopEscalation(root.stopStage)
-    if (step.action === "quit") {
-      if (controlProc.running) root.stopPending = true
-      else root.runControl("stop", ["stop", "--socket", root.socketPath])
-    } else if (step.signal > 0) {
-      if (step.signal === 9) console.warn("omarchy-iptv: mpv ignored SIGTERM, sending SIGKILL")
-      mpvProc.signal(step.signal)
+    if (playerProc.running) {
+      // The one player slot is busy (a start or a probe): try again in a
+      // moment rather than dropping the verdict.
+      root.relaunchPending = true
+      relaunchTimer.restart()
+      return
     }
-    root.stopStage = step.action
-    if (step.waitMs > 0) {
-      stopTimer.interval = step.waitMs
-      stopTimer.restart()
-    } else {
-      stopTimer.stop()
-    }
-  }
-
-  // Health verdict: the player is unresponsive. It already failed to answer
-  // over IPC, so the ladder starts at SIGTERM (SIGKILL after the grace
-  // period); one automatic relaunch of nowPlaying follows the exit, never
-  // racing the dying instance (D-LIVE-15, D-LIVE-17).
-  function restartPlayer() {
-    if (!mpvProc.running || root.stopping) return
     console.warn("omarchy-iptv: mpv unresponsive, restarting player")
     root.healthFailures = 0
     root.healthSkips = 0
     root.relaunchPending = !root.relaunched && root.nowPlaying !== null
-    root.stopStage = "quit"
-    root.escalateStop()
+    root.relaunched = true
+    root.playSeq += 1
+    root.issuePlayerSession("restart", channel, "term")
   }
 
   function toggleFavorite(id) {
@@ -477,6 +554,21 @@ Item {
       lastUpdated: root.lastUpdated,
       playing: root.playing,
       nowPlaying: root.nowPlaying,
+      // Additive, and URL-free by construction: channel ids, a clock time
+      // and booleans. The detached player can only be verified from outside
+      // the shell now, so the acceptance gates need the observer's own view
+      // (`playing` alone cannot distinguish a birth edge from an attached
+      // socket), and the session failure marks the guide paints red.
+      failedAt: root.failedAt,
+      player: {
+        up: root.playerUp,
+        pending: root.playerPending,
+        attached: root.socketAttached(),
+        wanted: root.playerWanted,
+        stopping: root.stopping,
+        seq: root.playSeq,
+        entryId: root.currentEntryId
+      },
       favorites: root.userState.favorites.length,
       recents: root.userState.recents.length,
       epg: { configured: root.epgConfigured, loaded: root.epgLoaded, pending: root.epgPending, reason: root.epgReason, warnings: root.epgWarnings },
@@ -678,6 +770,9 @@ Item {
     root.channelsMeta = prepared.channelsMeta
     root.switchParseMs = t1 - t0
     root.switchAssignMs = Date.now() - t1
+    // A now-playing recovered from the player's stash resolves against the
+    // cache the moment it lands (4.5); until then it is name-only.
+    root.reconcileNowPlaying()
   }
 
   // state.json -> userState (v1 files migrate in memory, section 2.2), then
@@ -820,19 +915,21 @@ Item {
     } else if (kind === "play") {
       if (root.stopping) {
         // An answer from a player on its way out: nothing to retry or
-        // restore, handleMpvExit starts nowPlaying afresh (D-LIVE-17).
+        // restore, the next play() starts a fresh one (4.10).
         root.playRetries = 0
       } else if (status.ok !== true && status.error) {
         var reason = Model.statusReason(status)
         var code = String(status.error.code)
-        if (code === "not_running" && root.nowPlaying && !mpvProc.running) {
-          // mpv vanished between two zaps: start a fresh player.
+        if (code === "not_running" && root.nowPlaying) {
+          // The player vanished between two zaps. The `not_running` /
+          // `still there` disambiguation collapses (4.7): `player start`
+          // adopts a live player and spawns a dead one, so the same call is
+          // right either way.
           root.lastError = reason
           var channel = root.channelIndex[root.nowPlaying.id]
-          if (channel) root.launchMpv(channel)
-        } else if ((code === "not_running" || code === "ipc_error") && mpvProc.running && root.nowPlaying
+          if (channel) root.startPlayer(channel)
+        } else if (code === "ipc_error" && root.playerUp && root.nowPlaying
                    && !root.userStopped && root.playRetries < root.playRetryMax) {
-          // The socket of a player that just (re)started is not up yet, or
           // mpv did not answer in time: retry with backoff instead of
           // losing the zap (D-LIVE-15).
           root.playRetries += 1
@@ -842,61 +939,437 @@ Item {
           root.lastError = reason
           console.warn("omarchy-iptv: play failed:", reason)
           // The switch did not happen; mpv still plays the previous channel.
-          if (mpvProc.running && root.previousPlaying) root.nowPlaying = root.previousPlaying
+          if (root.playerUp && root.previousPlaying) root.nowPlaying = root.previousPlaying
         }
       } else if (status.ok === true) {
         root.playRetries = 0
         root.previousPlaying = null
+        // The zap's own entry id, so a failure that arrives after the next
+        // zap still names this channel (4.8).
+        root.rememberEntry(status.entryId, root.nowPlaying)
       }
-    } else if (kind === "stop") {
-      if (status.ok !== true && status.error && String(status.error.code) === "not_running" && !mpvProc.running) {
-        root.nowPlaying = null
-      }
-    }
-    // A stop requested while this call was in flight goes out now and
-    // cancels any queued zap.
-    if (root.stopPending) {
-      root.stopPending = false
-      root.pendingPlayId = ""
-      if (mpvProc.running) root.runControl("stop", ["stop", "--socket", root.socketPath])
-      return
     }
     // Apply the last queued zap of a burst.
-    if (root.pendingPlayId !== "" && mpvProc.running) {
-      var id = root.pendingPlayId
-      root.pendingPlayId = ""
-      root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.activeCacheDir])
-    } else {
-      root.pendingPlayId = ""
-    }
+    root.drainPendingPlay()
   }
 
-  function launchMpv(channel) {
-    var extra = Model.splitMpvArgs(root.mpvArgs)
-    if (extra.rejected.length > 0) console.warn("omarchy-iptv: ignoring mpvArgs tokens:", extra.rejected.join(" "))
+  // The last target of a zap burst, applied once the channel is free. It
+  // goes over IPC when the player is up and starts one when it is not; both
+  // are the same user intent, so neither may be dropped.
+  function drainPendingPlay() {
+    var id = root.pendingPlayId
+    root.pendingPlayId = ""
+    if (id === "" || root.stopping || root.userStopped || !root.nowPlaying) return
+    if (root.playerUp) {
+      if (!controlProc.running) root.runControl("play", root.playArgs(id))
+      else root.pendingPlayId = id
+      return
+    }
+    var channel = root.channelIndex[id]
+    if (channel) root.startPlayer(channel)
+  }
+
+  // ------------------------------------------------------------ the detached player
+  //
+  // ARCHITECTURE-PLAYER.md sections 4.4 to 4.10, with the shape corrections
+  // of section 13 (the socket observer is a Component, one fresh object per
+  // attempt). Nothing in this block ever execs mpv: `player start` is
+  // idempotent - it adopts a live player or spawns one under a lock - so
+  // every call here is safe to repeat and none of them is a spawn gate.
+
+  // Cold start, and the recovery path for every "the player is not there"
+  // answer. `playerPending` is set synchronously so the bar lights up on
+  // this frame; the socket observer is armed in the same turn, so it is
+  // already retrying when mpv binds ~150 ms later (4.4 step 13).
+  function startPlayer(channel) {
+    if (!channel) return
     root.mpvStderrTail = []
-    root.stopStage = ""
+    root.lastEndFile = null
+    root.currentEntryId = 0
     root.healthSkips = 0
-    stopTimer.stop()
-    // Known exposure (S-03, documented in the README): the FIRST channel's
-    // stream URL and header values sit in mpv's argv for the life of the
-    // process, readable by other local accounts through /proc/<pid>/cmdline
-    // (`ps aux`), even after zapping to other channels over IPC. Later
-    // channels only ever travel over the 0600 socket. Removing it means
-    // starting mpv idle and loading the first channel over IPC too, which
-    // is the M2 detached-mpv rework (R10); not changed in M1.
-    mpvProc.command = Model.buildMpvArgv({
-      socketPath: root.socketPath,
-      name: channel.name,
-      url: channel.url,
-      headers: channel.headers || {},
-      extraArgs: extra.args
-    })
-    mpvProc.running = true
+    root.healthFailures = 0
+    if (playerProc.running) {
+      // The one player slot is busy: keep the intent and apply it when the
+      // call in flight returns, the way a zap burst coalesces.
+      root.playerPending = true
+      root.playerWanted = true
+      root.armPlayerSocket()
+      root.pendingPlayId = Model.channelId(channel)
+      return
+    }
+    root.issuePlayerSession("start", channel, "")
     if (root.wantFocus) {
       root.focusAttempts = 0
       focusTimer.restart()
     }
+  }
+
+  // `player start` / `player restart`: one helper call carrying the channel
+  // id (never the URL), the intent seq, the zap-ring scope for the stash and
+  // this shell's pid as the owner claim (4.14).
+  function issuePlayerSession(verb, channel, fromRung) {
+    var extra = Model.splitMpvArgs(root.mpvArgs)
+    if (extra.rejected.length > 0) console.warn("omarchy-iptv: ignoring mpvArgs tokens:", extra.rejected.join(" "))
+    var np = root.nowPlaying
+    var key = np ? String(np.id) : Model.channelId(channel)
+    var scope = np ? String(np.launchedFrom || "") : ""
+    var since = np ? Math.floor(Number(np.since) || 0) : 0
+    var argv = verb === "restart"
+      ? Model.playerRestartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, fromRung, Quickshell.processId)
+      : Model.playerStartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, Quickshell.processId)
+    root.playerPending = true
+    root.playerWanted = true
+    root.armPlayerSocket()
+    return root.runPlayer(verb, argv)
+  }
+
+  // The player slot: its own Process with its own watchdog, so a cold start
+  // can never starve a `play` or a `status` on controlProc (F1).
+  function runPlayer(kind, args) {
+    if (playerProc.running) return false
+    root.playerKind = kind
+    playerProc.command = Model.helperArgv(root.helperPath, args)
+    playerProc.running = true
+    playerWatchdog.restart()
+    return true
+  }
+
+  // Reattach (4.5): lock-free, side-effect-free except for one stale-socket
+  // unlink, and it claims the player for this shell.
+  function runPlayerProbe() {
+    if (playerProc.running) return false
+    return root.runPlayer("probe", Model.playerProbeArgv(root.socketPath, Quickshell.processId))
+  }
+
+  function handlePlayerResult(text) {
+    playerWatchdog.stop()
+    var kind = root.playerKind
+    root.playerKind = ""
+    if (kind === "probe") {
+      root.applyProbe(text)
+      root.drainPendingPlay()
+      return
+    }
+    var status = Model.parseHelperStatus(text, "player." + kind)
+    if (status.ok === true) {
+      var warnings = Model.statusWarnings(status)
+      if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
+      root.relaunchPending = false
+      root.playRetries = 0
+      root.rememberEntry(status.entryId, root.nowPlaying)
+      if (root.socketAttached()) {
+        root.playerPending = false
+      } else if (root.stopping || root.userStopped || root.nowPlaying === null) {
+        // A stop overtook this start. The two legitimately interleave: the
+        // helper releases the lock before its first-load window precisely
+        // so a stop ladder can get in. Do not go hunting for a socket that
+        // is being torn down - that would be twelve journal lines for a
+        // player nobody wants any more.
+        root.playerPending = false
+      } else {
+        // The player is up but the observer has not attached yet: keep the
+        // birth edge rather than blinking the bar to idle, bounded by the
+        // watchdog, and keep hunting for the socket.
+        root.playerWanted = true
+        root.armPlayerSocket()
+        playerWatchdog.restart()
+      }
+      var first = status.firstLoad && typeof status.firstLoad === "object" ? status.firstLoad : null
+      if (first && String(first.state) === "failed") root.playerFirstLoadFailed(String(first.reason || ""))
+      root.drainPendingPlay()
+      return
+    }
+    root.playerPending = false
+    var code = status.error ? String(status.error.code) : ""
+    var reason = Model.statusReason(status)
+    if (code === "superseded") {
+      // A later intent already won under the lock; this one never happened.
+      root.drainPendingPlay()
+      return
+    }
+    if (code === "mpv_missing") {
+      root.mpvAvailable = false
+      whichProc.running = true
+      root.playerWanted = false
+      playerSocketTimer.stop()
+      root.nowPlaying = null
+      root.notify("mpvMissing", {})
+      return
+    }
+    if ((code === "busy" || code === "no_socket") && root.nowPlaying && !root.userStopped
+        && !root.stopping && root.playRetries < root.playRetryMax) {
+      // Another launcher holds the lock, or the spawn did not bind in time:
+      // the existing backoff, not a second spawn (4.4 step 12).
+      root.playRetries += 1
+      playRetryTimer.interval = root.playRetryBaseMs * root.playRetries
+      playRetryTimer.restart()
+      return
+    }
+    root.lastError = reason
+    console.warn("omarchy-iptv: player " + kind + " failed:", reason)
+    root.playerWanted = false
+    playerSocketTimer.stop()
+    var target = root.nowPlaying
+    root.nowPlaying = null
+    root.playRetries = 0
+    // The player never started: the same class of event the non-zero exit
+    // of an attached mpv used to report (requirement 6).
+    if (!root.userStopped && !root.stopping) root.raiseStreamFailure(target, reason)
+  }
+
+  // `player start` observed the first load fail on its own connection (F3,
+  // signal 1 of 4). Under --idle=once mpv exits on that failure, so socket
+  // EOF is about to say the same thing; whichever wins, the user sees one
+  // toast.
+  function playerFirstLoadFailed(reason) {
+    var target = root.nowPlaying
+    if (reason !== "") root.rememberStderr(reason)
+    root.raiseStreamFailure(target, reason !== "" ? reason : Model.PLAYER_GENERIC_FAILURE)
+    if (!root.socketAttached()) {
+      root.playerPending = false
+      root.playerWanted = false
+      playerSocketTimer.stop()
+      root.nowPlaying = null
+    }
+  }
+
+  function applyProbe(text) {
+    var probe = Model.parsePlayerProbe(text)
+    if (!probe.valid) {
+      // Garbage, a truncated line or an error reply is not evidence of a
+      // player; the 10 s poll and the next play() both recover.
+      root.playerPending = false
+      return
+    }
+    // Ordering survives the restart: the next intent is one past whatever
+    // the lock file recorded (4.10). This is also the repair for a sequence
+    // that some other launcher pushed ahead of ours.
+    root.playSeq = Math.max(root.playSeq, probe.seq + 1)
+    if (root.stopConfirmPending) {
+      root.stopConfirmPending = false
+      if (probe.running) {
+        // The stop was refused and the player is still there. Now that the
+        // sequence is resynced, the ladder cannot be superseded again.
+        console.warn("omarchy-iptv: stopping a player that survived a superseded stop")
+        root.stopForeignPlayer()
+      } else {
+        root.playerWanted = false
+        playerSocketTimer.stop()
+        root.playerPending = false
+      }
+      return
+    }
+    if (!probe.running) {
+      root.playerWanted = false
+      playerSocketTimer.stop()
+      root.playerPending = false
+      root.nowPlaying = null
+      return
+    }
+    if (!probe.responsive) {
+      console.warn("omarchy-iptv: the player is not answering, stopping it")
+      root.stopForeignPlayer()
+      return
+    }
+    var stash = probe.stash
+    if (stash === null || stash.playing !== true || probe.idle === true) {
+      // Under --idle=once an idle player exists only between spawn and the
+      // first loadfile, so this is either a racing start or a foreign /
+      // pre-M2-02 player. Re-read once before deciding (4.5).
+      if (!root.probeRetried) {
+        root.probeRetried = true
+        probeRetryTimer.restart()
+        return
+      }
+      root.probeRetried = false
+      console.warn("omarchy-iptv: found a player this shell cannot identify, stopping it")
+      root.stopForeignPlayer()
+      return
+    }
+    root.probeRetried = false
+    // Restored from the stash inside the surviving process, BEFORE the
+    // channel cache exists: the bar and the guide are correct immediately
+    // and the zap ring is fixed by reconcileNowPlaying() when the cache
+    // lands (4.5, 4.6, requirement 11).
+    root.userStopped = false
+    root.stopAt = 0
+    stopSettleTimer.stop()
+    root.playerSourceKey = String(stash.sourceKey || "")
+    root.nowPlaying = {
+      id: String(stash.id),
+      name: String(stash.name || ""),
+      group: String(stash.group || ""),
+      launchedFrom: String(stash.launchedFrom || ""),
+      since: Math.floor(Number(stash.since) || 0)
+    }
+    if (stash.entryId) root.rememberEntry(stash.entryId, root.nowPlaying)
+    root.reconcilePending = true
+    root.playerPending = true
+    root.playerWanted = true
+    root.armPlayerSocket()
+    playerWatchdog.restart()
+    root.reconcileNowPlaying()
+  }
+
+  // A player that exists but is not ours to show: wedged, foreign, or from
+  // a version that did not stash its identity (migration, section 8).
+  function stopForeignPlayer() {
+    root.playSeq += 1
+    root.playerWanted = false
+    playerSocketTimer.stop()
+    root.playerPending = false
+    root.nowPlaying = null
+    Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
+  }
+
+  // The second half of the reattach: the stash named the channel, the cache
+  // resolves it. A playlist that changed while the shell was down degrades
+  // to name-only rather than resolving to the wrong row, and a stash from
+  // another source is never resolved against this one.
+  function reconcileNowPlaying() {
+    if (!root.reconcilePending || !root.nowPlaying || !root.cacheLoaded) return
+    if (root.playerSourceKey !== "" && root.activeSourceKey !== "" && root.playerSourceKey !== root.activeSourceKey) {
+      root.reconcilePending = false
+      return
+    }
+    root.reconcilePending = false
+    var np = root.nowPlaying
+    var channel = root.channelIndex[String(np.id)]
+    if (!channel) return
+    var group = Model.primaryGroup(channel)
+    root.nowPlaying = {
+      id: np.id,
+      name: String(channel.name || np.name),
+      group: group,
+      launchedFrom: String(np.launchedFrom || "") || Model.groupScopeId(group),
+      since: np.since
+    }
+  }
+
+  // ---- the socket observer (spike caveats C1 to C10)
+  //
+  // A Quickshell Socket whose connect attempt fails is bricked permanently,
+  // and re-arming one that is already connected arms a hidden zero-delay
+  // auto-reconnect that bricks it the moment mpv dies. So: one fresh object
+  // per attempt, never reused, never re-armed.
+
+  function socketAttached() {
+    return root.playerSocket !== null && root.playerSocket.connected === true
+  }
+
+  function releasePlayerSocket() {
+    if (root.playerSocket === null) return
+    var s = root.playerSocket
+    root.playerSocket = null      // drop the reference first
+    s.destroy()                   // deferred by QML, safe from inside a handler (C10)
+  }
+
+  // Returns true iff attached. Synchronous: a failed connect emits `error`
+  // and never a state change, so `connected` on the next line is the only
+  // authoritative answer (C5).
+  function attachPlayerSocket() {
+    if (root.socketPath === "") return false          // C8: arming with "" is a silent no-op
+    root.releasePlayerSocket()
+    var s = playerSocketComponent.createObject(root)
+    if (s === null) {
+      console.warn("omarchy-iptv: could not create the player socket observer")
+      return false
+    }
+    root.playerSocket = s
+    // createObject() is typed QObject, so the linter cannot see Socket's
+    // own properties here; the type is guaranteed by the Component below.
+    // qmllint disable missing-property
+    s.connected = true
+    if (s.connected) return true
+    // qmllint enable missing-property
+    root.playerSocket = null
+    s.destroy()                   // a failed connect bricks it: discard (C1)
+    return false
+  }
+
+  function armPlayerSocket() {
+    if (root.socketAttached()) return      // C2: never re-arm a live socket
+    playerSocketTimer.tries = 0
+    if (root.attachPlayerSocket()) return
+    playerSocketTimer.restart()
+  }
+
+  function socketWrite(sock, command, requestId) {
+    if (!sock || sock.connected !== true) return false   // C7: a write to a dead socket vanishes
+    sock.write(JSON.stringify({ command: command, request_id: requestId }) + "\n")
+    return true
+  }
+
+  // Called from inside the Socket's own onConnectionStateChanged, so it
+  // reads the object it is handed and never root.playerSocket (C4).
+  function onPlayerAttached(sock) {
+    root.playerPending = false
+    root.playerWanted = true
+    root.probeRetried = false
+    // Observed properties are dropped when a connection closes, so a new
+    // shell subscribes for itself rather than inheriting (4.4 step 13).
+    root.socketWrite(sock, ["request_log_messages", "error"], 1)
+    root.socketWrite(sock, ["observe_property", 1, "idle-active"], 2)
+    if (sock.flush) sock.flush()
+  }
+
+  // Quickshell logs one WARN per failed attempt itself, so this stays quiet
+  // by default; the burst cap is what keeps that bounded (C6).
+  function onSocketError(err) {
+    root.playerSocketError = Number(err)
+    if (root.debugTiming) console.warn("omarchy-iptv: player socket error", String(err))
+  }
+
+  // Event router (4.8). Every line is one JSON object from mpv's own socket;
+  // Model.parsePlayerEvent classifies it and re-redacts the log text.
+  function handlePlayerLine(line) {
+    var event = Model.parsePlayerEvent(line)
+    if (event.kind === "start-file") {
+      if (event.entryId) root.currentEntryId = event.entryId
+      // A new load supersedes the previous end: this is what makes a zap
+      // (end-file{stop} then start-file) silent.
+      root.lastEndFile = null
+    } else if (event.kind === "end-file") {
+      root.lastEndFile = event
+    } else if (event.kind === "log-message") {
+      if (event.level === "error" || event.level === "fatal") {
+        root.rememberStderr((event.prefix !== "" ? "[" + event.prefix + "] " : "") + event.text)
+      }
+    } else if (event.kind === "property-change") {
+      root.playerIdle = event.value === true
+    }
+  }
+
+  // Which channel a load belonged to. At most four entries; the gate fails
+  // open, so an unknown id degrades the name and never suppresses a toast.
+  function rememberEntry(entryId, target) {
+    var id = Math.floor(Number(entryId))
+    if (!isFinite(id) || id <= 0 || !target) return
+    var owners = {}
+    var keys = Object.keys(root.entryOwners)
+    for (var i = Math.max(0, keys.length - 3); i < keys.length; i++) owners[keys[i]] = root.entryOwners[keys[i]]
+    owners[String(id)] = { id: String(target.id || ""), name: String(target.name || "") }
+    root.entryOwners = owners
+    root.currentEntryId = id
+  }
+
+  function channelForEnd(end, current) {
+    if (end && end.entryId) {
+      var owner = root.entryOwners[String(end.entryId)]
+      if (owner) return owner
+    }
+    return current ? { id: String(current.id), name: String(current.name || "") } : null
+  }
+
+  // One toast per failed play, whichever detector saw it first (R11, S-04).
+  function raiseStreamFailure(target, reason) {
+    if (!target) return
+    var id = String(target.id || "")
+    if (id !== "" && root.notifiedFailureId === id) return
+    root.notifiedFailureId = id
+    root.lastError = reason
+    if (id !== "") root.failedAt = Model.withFailed(root.failedAt, id, Model.formatClock(Math.floor(Date.now() / 1000)))
+    root.notify("streamFailed", { name: String(target.name || ""), reason: reason })
   }
 
   function rememberStderr(line) {
@@ -908,47 +1381,56 @@ Item {
     root.mpvStderrTail = tail
   }
 
-  function handleMpvExit(exitCode, exitStatus) {
-    stopTimer.stop()
+  // Socket EOF: the one-for-one replacement for mpvProc.onExited, and the
+  // only death signal that covers quit, SIGTERM, SIGKILL and a segfault
+  // alike - 2 to 3 ms after the fact instead of a 10 s poll (4.8 signal 3).
+  // The exit code is replaced by Model.endedVerdict over the last end-file,
+  // which is what separates our own stop from a dead stream and ignores the
+  // .m3u8 redirect that IPTV masters emit on every load.
+  function handlePlayerGone() {
     focusTimer.stop()
     playRetryTimer.stop()
+    playerSocketTimer.stop()
     var current = root.nowPlaying
+    var end = root.lastEndFile
     var stopped = root.userStopped
-    var userPlay = root.playAfterExit
-    var relaunch = root.relaunchPending || userPlay
+    var verdict = Model.endedVerdict(end, stopped, root.stopping)
+    var relaunch = root.relaunchPending && current !== null && !stopped
+    root.lastEndFile = null
+    root.currentEntryId = 0
+    root.playerIdle = false
+    root.playerPending = false
+    root.playerWanted = false
     root.userStopped = false
     root.relaunchPending = false
-    root.playAfterExit = false
-    root.stopPending = false
-    root.stopStage = ""
+    root.stopConfirmPending = false     // the EOF is the confirmation
     root.pendingPlayId = ""
     root.playRetries = 0
     root.healthSkips = 0
-    if (relaunch && current && !stopped) {
-      var channel = root.channelIndex[current.id]
-      if (channel) {
-        // The health check gets one automatic relaunch per player; a play()
-        // the user issued during the shutdown starts a fresh one (D-LIVE-17).
-        root.relaunched = !userPlay
-        if (!userPlay) root.wantFocus = false
-        // Deferred, not from inside the exit handler: the old socket file
-        // is gone and an in-flight helper call has returned by then, and a
-        // stop() in the meantime cancels it (D-LIVE-15).
-        relaunchTimer.restart()
-        return
-      }
+    root.healthFailures = 0
+    // The death IS the end of the stop (4.10); the 5 s backstop is only for
+    // a stop that never had a player to observe.
+    root.stopAt = 0
+    stopSettleTimer.stop()
+    if (relaunch && root.channelIndex[String(current.id)]) {
+      // The health verdict's one automatic relaunch, a moment after the
+      // exit: the old socket file is gone by then and a stop() in the
+      // meantime cancels it (D-LIVE-15, D-LIVE-17).
+      root.wantFocus = false
+      relaunchTimer.restart()
+      return
     }
     root.nowPlaying = null
-    if (stopped || exitCode === 0) return
-    // Non-zero exit without a user stop: stream failure (decision 12, R11).
+    var target = root.channelForEnd(end, current)
+    root.entryOwners = ({})
+    if (!verdict.notify) return
+    // The log-message tail says what actually went wrong ("Failed to open
+    // scheme://host"); mpv's own file_error is a generic "loading failed".
+    // Both are redacted, the tail twice (in python and in rememberStderr).
     var reason = root.mpvStderrTail.length > 0
       ? root.mpvStderrTail[root.mpvStderrTail.length - 1]
-      : ("mpv exited with code " + exitCode)
-    root.lastError = reason
-    if (current) {
-      root.failedAt = Model.withFailed(root.failedAt, current.id, Model.formatClock(Math.floor(Date.now() / 1000)))
-      root.notify("streamFailed", { name: current.name, reason: reason })
-    }
+      : String(verdict.reason || "")
+    root.raiseStreamFailure(target, reason)
   }
 
   function handlePlaylistExit(text) {
@@ -1479,6 +1961,25 @@ Item {
     // state.json itself with mode 0600 (stateInitProc, S-02).
     mkdirProc.running = true
     whichProc.running = true
+    // Reattach (4.5). Until the probe answers - about 130 ms - the UI shows
+    // idle rather than guessing. `--owner-pid` claims a surviving player for
+    // this shell, which is what tells the previous shell's orphan-check to
+    // do nothing.
+    root.runPlayerProbe()
+  }
+
+  // PO-2: the service object is destroyed both by a shell restart and by the
+  // plugin being disabled or removed, and Quickshell 0.3.1 gives no way to
+  // tell them apart at this point - so we must NOT stop the player here.
+  // That would kill playback on the very restart this milestone exists to
+  // survive. The discriminator is the owner claim, read 6 s later by a
+  // detached helper: a successor shell has re-claimed the player well
+  // inside the grace (omarchy-restart-shell pings every 100 ms for 2 s), so
+  // only "the claim still names a pid that is still alive" means the plugin
+  // was disabled or removed (4.14).
+  Component.onDestruction: {
+    Quickshell.execDetached(Model.helperArgv(root.helperPath,
+      Model.playerOrphanCheckArgv(root.socketPath, Quickshell.processId, Model.PLAYER_ORPHAN_GRACE_SEC)))
   }
 
   // ------------------------------------------------------------ files
@@ -1609,13 +2110,17 @@ Item {
   }
 
   Timer {
-    // Health check while mpv runs: helper `status` over the socket; two
-    // consecutive failures, or three ticks in a row behind an in-flight
-    // helper call, -> SIGTERM, SIGKILL -> one automatic relaunch (D-LIVE-17).
+    // Health check while the player runs: helper `status` over the socket;
+    // two consecutive failures, or three ticks in a row behind an in-flight
+    // helper call, -> `player restart --from term` -> one automatic
+    // relaunch (D-LIVE-17, 4.13). It is the only detector of a
+    // wedged-but-connected mpv, and the degraded-mode detector if the
+    // socket observer is ever unusable, so it must NOT be gated on
+    // `playerUp` alone: a stale false would switch off its own reconciler.
     id: healthTimer
     interval: root.healthCheckMs
     repeat: true
-    running: mpvProc.running
+    running: root.playerUp || root.nowPlaying !== null
     onTriggered: {
       if (root.userStopped || root.stopping) return
       var tick = Model.healthTick(root.healthSkips, controlProc.running)
@@ -1680,53 +2185,144 @@ Item {
   }
 
   Timer {
-    // Drives the shutdown ladder (D-LIVE-17): each rung re-arms it for the
-    // next grace period; handleMpvExit stops it.
-    id: stopTimer
-    interval: Model.STOP_QUIT_GRACE_MS
-    repeat: false
-    onTriggered: root.escalateStop()
-  }
-
-  Timer {
-    // One automatic relaunch after the health check reaped a hung player,
-    // or the channel a play() asked for during a shutdown (D-LIVE-17), a
-    // moment after the exit (D-LIVE-15). Skipped once the user stopped or a
-    // play() already started a new player.
-    id: relaunchTimer
-    interval: root.relaunchDelayMs
-    repeat: false
+    // The reattach loop (spike section 6). Each tick builds a FRESH Socket:
+    // an object that has once failed to connect is dead forever, and the
+    // thing we are retrying against is exactly the peer that just died, so
+    // reusing one is guaranteed to fail silently. The burst is capped at
+    // 12 tries = 3 s (C6): every failed attempt writes one WARN line to the
+    // journal, and a free-running 250 ms loop is ~14k lines an hour. When
+    // the burst is spent, one `player probe` decides whether there is
+    // anything to attach to at all.
+    id: playerSocketTimer
+    interval: root.playerSocketRetryMs
+    repeat: true
+    running: false
+    property int tries: 0
     onTriggered: {
-      if (mpvProc.running || root.userStopped || !root.nowPlaying) return
-      var channel = root.channelIndex[root.nowPlaying.id]
-      if (channel) root.launchMpv(channel)
-      else root.nowPlaying = null
+      if (!root.playerWanted || root.socketAttached()) {
+        playerSocketTimer.stop()
+        return
+      }
+      playerSocketTimer.tries += 1
+      if (root.attachPlayerSocket()) {
+        playerSocketTimer.tries = 0
+        playerSocketTimer.stop()
+      } else if (playerSocketTimer.tries >= root.playerSocketTries) {
+        playerSocketTimer.tries = 0
+        playerSocketTimer.stop()
+        root.runPlayerProbe()
+      }
     }
   }
 
   Timer {
-    // Retry of a `play` over IPC that found no socket or no answer
-    // (D-LIVE-15). If another helper call is in flight the retry is queued
-    // as the burst target and applied when that call returns.
+    // One bound for the player slot (F1): a helper verb that hangs is
+    // terminated, and a `playerPending` that no socket ever confirmed is
+    // released, so the birth edge can never latch the UI into "playing".
+    id: playerWatchdog
+    interval: root.playerTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (playerProc.running) {
+        console.warn("omarchy-iptv: player helper exceeded " + Math.floor(root.playerTimeoutMs / 1000) + " s, terminating it")
+        playerProc.signal(15)
+        return
+      }
+      if (root.playerPending) {
+        console.warn("omarchy-iptv: the player did not become observable")
+        root.playerPending = false
+      }
+    }
+  }
+
+  Timer {
+    // Backstop for `stopping` (4.10): normally cleared by the socket EOF
+    // that confirms the death. A stop issued with no player attached has no
+    // EOF coming, so this releases it.
+    //
+    // It is also where a stop that did NOT take is caught. `player stop` is
+    // detached, so its reply is unobservable by construction, and it aborts
+    // as `superseded` whenever the lock record holds a higher `--seq` than
+    // ours - which a terminal `omarchy-iptv player stop` (the documented
+    // uninstall escape hatch) or any other launcher leaves behind. Found
+    // live: the UI went idle while the player kept playing. One probe
+    // re-reads the record, and applyProbe() then stops it with a sequence
+    // that is past whatever is recorded.
+    id: stopSettleTimer
+    interval: root.stopSettleMs
+    repeat: false
+    onTriggered: {
+      root.stopAt = 0
+      root.userStopped = false
+      if (root.nowPlaying !== null || root.stopConfirmPending) return
+      if (!root.socketAttached() && !root.playerUp) return
+      console.warn("omarchy-iptv: the player outlived a stop, re-reading its sequence")
+      root.stopConfirmPending = true
+      root.runPlayerProbe()
+    }
+  }
+
+  Timer {
+    // The single re-read of an ambiguous probe (4.5): an idle or stashless
+    // player is either a racing start or a foreign one, and 500 ms tells
+    // them apart without a second guess.
+    id: probeRetryTimer
+    interval: root.playerProbeRetryMs
+    repeat: false
+    onTriggered: root.runPlayerProbe()
+  }
+
+  Timer {
+    // The health verdict's automatic relaunch, or a verdict that could not
+    // be issued because the player slot was busy. Skipped once the user
+    // stopped or a play() already started a new player (D-LIVE-15).
+    id: relaunchTimer
+    interval: root.relaunchDelayMs
+    repeat: false
+    onTriggered: {
+      if (root.userStopped || root.stopping || !root.nowPlaying) return
+      if (playerProc.running) { relaunchTimer.restart(); return }
+      var channel = root.channelIndex[String(root.nowPlaying.id)]
+      if (!channel) { root.nowPlaying = null; return }
+      if (root.playerUp) {
+        // Still there and still not answering: the verdict stands.
+        root.playSeq += 1
+        root.issuePlayerSession("restart", channel, "term")
+      } else {
+        root.startPlayer(channel)
+      }
+    }
+  }
+
+  Timer {
+    // Retry of a play that could not land: a zap the player did not answer,
+    // or a start that lost the lock (`busy`) or did not bind in time
+    // (`no_socket`). The same backoff as v0.2.0, 300 * n, three tries.
     id: playRetryTimer
     interval: root.playRetryBaseMs
     repeat: false
     onTriggered: {
-      if (!mpvProc.running || root.userStopped || root.stopping || !root.nowPlaying) return
+      if (root.userStopped || root.stopping || !root.nowPlaying) return
       var id = String(root.nowPlaying.id)
-      if (controlProc.running) root.pendingPlayId = id
-      else root.runControl("play", ["play", "--id", id, "--socket", root.socketPath, "--cache-dir", root.activeCacheDir])
+      if (root.playerUp) {
+        if (controlProc.running) root.pendingPlayId = id
+        else root.runControl("play", root.playArgs(id))
+        return
+      }
+      var channel = root.channelIndex[id]
+      if (channel) root.startPlayer(channel)
     }
   }
 
   Timer {
     // The mpv window maps a moment after launch; retry the focus dispatch a
-    // few times so Enter lands on the player (UX 7.5).
+    // few times so Enter lands on the player (UX 7.5). `playerPending`
+    // keeps the budget alive across a cold start (4.7).
     id: focusTimer
     interval: root.focusRetryMs
     repeat: true
     onTriggered: {
-      if (!root.wantFocus || !mpvProc.running || root.focusAttempts >= root.focusRetries) {
+      if (!root.wantFocus || !root.playerUp || root.focusAttempts >= root.focusRetries) {
         focusTimer.stop()
         root.wantFocus = false
         return
@@ -1871,21 +2467,61 @@ Item {
   }
 
   Process {
-    // The one and only mpv instance (decision 2). Destroying this object
-    // kills mpv, which is why the service is keepLoaded.
-    id: mpvProc
-    // mpv prints its messages ("Failed to open ...") on stdout; keep stderr
-    // too for loader/driver errors.
-    stdout: SplitParser {
-      onRead: function(line) { root.rememberStderr(line) }
-    }
-    stderr: SplitParser {
-      onRead: function(line) { root.rememberStderr(line) }
+    // The player slot (F1): `player start` / `restart` / `probe`. Separate
+    // from controlProc so a cold start - which can take seconds, since the
+    // helper watches the first load - can never starve a zap, a status poll
+    // or a stop. mpv itself is NOT a child of this process: the helper
+    // double-forks it away, which is the whole point of the milestone.
+    id: playerProc
+    stdout: StdioCollector { id: playerStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      id: playerStderr
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv player:", Model.redactUrls(text.trim()))
     }
   }
   Connections {
-    target: mpvProc
-    function onExited(exitCode, exitStatus) { root.handleMpvExit(exitCode, exitStatus) }
+    target: playerProc
+    function onExited(exitCode, exitStatus) { root.handlePlayerResult(playerStdout.text) }
+  }
+
+  // The socket observer, one fresh object per attempt (spike C1, and the
+  // binding amendment in ARCHITECTURE-PLAYER.md section 13). A Socket that
+  // has once failed to connect ignores every later instruction in silence,
+  // so the declarative single-object form the design first prescribed is
+  // the one shape that cannot reattach.
+  Component {
+    id: playerSocketComponent
+
+    Socket {
+      path: root.socketPath
+
+      onConnectionStateChanged: {
+        // NB: this fires SYNCHRONOUSLY inside `connected = true`, before
+        // the playerUp binding re-evaluates. Read `this`, never
+        // root.playerUp or root.playerSocket (C4).
+        if (this.connected) {
+          playerSocketTimer.stop()
+          root.onPlayerAttached(this)
+          return
+        }
+        if (root.playerSocket !== this) return    // already replaced
+        root.releasePlayerSocket()                // peer gone; never re-arm this one
+        root.handlePlayerGone()
+      }
+
+      // A failed connect emits THIS and nothing else - no state change (C5).
+      // QLocalSocket::LocalSocketError is not resolvable from the qmltypes,
+      // the same lint case as Process.onExited (D-LIVE-14).
+      // qmllint disable signal-handler-parameters
+      onError: function (err) { root.onSocketError(err) }
+      // qmllint enable signal-handler-parameters
+
+      parser: SplitParser {
+        splitMarker: "\n"
+        onRead: function (line) { root.handlePlayerLine(String(line)) }
+      }
+    }
   }
 
   // omarchy-shell io.github.rmcdavid.iptv toggle | play <id-or-url> | stop |
