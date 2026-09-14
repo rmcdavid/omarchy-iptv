@@ -469,3 +469,23 @@ testing anything. That is not a tidy-up, it is the same failure that shipped a
 broken release here already: a suite reported green while the assertion that
 mattered had died. Rank them, fix them, and treat any check that has never been
 seen failing as unproven until it has.
+
+## 10. Rulings after wave two (product owner, 2026-09-14)
+
+Wave two settled the question the round existed to answer, and corrected two
+things I had ruled on.
+
+| # | Ruling |
+|---|---|
+| CL9 | The divergence has an established cause and wave three fixes it. Ten user-visible divergences in twenty cold concurrent bursts, none in ten warm bursts, none in six cold serial runs. The mechanism was observed rather than inferred: a channel change reaches the socket first and the start re-applies its own channel afterwards. The adopting-start family never fired, and the earlier one-in-eight rate was an artefact of not guaranteeing a cold start. This is now a fifty percent reproduction under known conditions, which is enough to tell a fix from luck. |
+| CL10 | My ruling CL3 was half right and I am correcting it. I asked for a log line as the witness. It exists, and it cannot do the job, because it exists only in the fixed tree: an older tree has nothing to match, so the comparison is not a pass against a fail, it is a pass against nothing. A witness that only the fixed code emits can never discriminate between trees. Assert instead on something BOTH trees produce and produce differently: wave two measured the sequence delta, one in the fixed tree where a broken one must read two. Keep the log line for humans reading a journal, and move the assertion to the sequence. |
+| CL11 | Severity stays P3 on reachability, not on rate. Fifty percent is alarming, but every reproduction needed genuinely simultaneous requests, and the guide is single threaded and cannot produce them. The exposed command surface can, so a script or a doubled keybinding reaches it, which is why it is worth fixing rather than documenting. Do not re-rate it upward on the rate alone. |
+| CL12 | Teardown proportionality is not a fact and must not be recorded as one. Two lanes measured it and disagreed, and the windowed measurement misses the headless scaling series by roughly tenfold. What IS established: a killed player clears its command line in well under a millisecond, and its socket stays bound for fifteen to thirty-seven milliseconds on a real windowed player. The fix does not depend on the disputed part, which is precisely why it works. |
+| CL13 | The interface-clear budget has no instrument fine enough to assert on. Record the bound and stop claiming a verdict. A budget that cannot be measured is not a budget, and pretending otherwise is the same failure as a check that cannot fail. |
+
+The round's own lesson, for the record. This defect was filed at one in eight,
+with a cause that turned out to be wrong, and a plan that would have had us fix
+it anyway. Refuting the cause cost one agent. Making it reproduce on demand
+cost one lane. It is now a fifty percent, observed, single-mechanism defect
+with a known trigger. Every step of that was cheaper than shipping a fix for
+the wrong cause and believing the problem was solved.
