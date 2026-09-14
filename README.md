@@ -56,9 +56,19 @@ beyond their host name.
 | `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
 | `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe` |
+
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
+
+One warning about `mpvArgs`. Options are filtered, and the ones the plugin
+needs for itself are refused, but a few legitimate options change where your
+stream address ends up. In particular `--ytdl=yes`, the documented way to play
+links that are not direct streams, hands the full address to a separate
+program, and that program puts it on its own command line where other local
+accounts can read it for as long as it runs. The plugin keeps the option
+available because it is the only way some sources work. Use it knowing the
+cost, and prefer a direct stream address when you have one.
 
 ## Using it
 
