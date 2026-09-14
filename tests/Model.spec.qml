@@ -237,6 +237,83 @@ TestCase {
     compare(Model.stateSession(null), null)
   }
 
+  // Service.qml noteSessionOutcome() line for line: call, take the deferred
+  // PO-3 flag from the verdict, write only when the state changed. That is
+  // the whole of what the component does with the record, so the cases below
+  // break when the rule in Model.js does, not when this file is edited
+  // (CLAUDE.md 12 - the router cases learned that the hard way).
+  function noteOutcome(svc, outcome) {
+    var v = Model.sessionAfterOutcome(svc.userState, outcome, svc.deadSessionPending)
+    svc.deadSessionPending = v.pending
+    if (v.write) { svc.userState = v.state; svc.writes += 1 }
+    return svc
+  }
+
+  function freshSession(played) {
+    return { userState: played, deadSessionPending: false, writes: 0 }
+  }
+
+  // PO-3's other half. deadSessionVerdict() above only ever fires on a record
+  // it FINDS, so which endings leave one behind is the whole of whether a
+  // reattach marks a channel red for a failure the user was already shown and
+  // already dealt with. The rule is about the witness, not the failure: the
+  // record must not outlive the shell that saw how the play ended, and
+  // survives exactly one thing - a player still running or still on its way.
+  // The defect this closes: a failed `player start`, a missing mpv and an
+  // abandoned relaunch each kept it.
+  function test_sessionOutcomeRetiresTheRecord() {
+    var played = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
+    compare(Model.PLAYER_OUTCOMES.length, 10)
+    var endings = ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned"]
+    for (var i = 0; i < endings.length; i++) {
+      var svc = freshSession(played)
+      noteOutcome(svc, endings[i])
+      compare(svc.userState.session, null)
+      compare(svc.writes, 1)
+      compare(svc.userState.lastPlayed, played.session)      // Recents survives every ending
+      // The reattach after this shell is gone has nothing left to mark.
+      compare(Model.deadSessionVerdict(svc.userState, true, ({}), "21:30").mark, false)
+    }
+    var alive = ["superseded", "retrying", "relaunching", "attached"]
+    for (var j = 0; j < alive.length; j++) {
+      var live = freshSession(played)
+      noteOutcome(live, alive[j])
+      compare(live.userState.session, played.session)
+      compare(live.writes, 0)
+      // Kill the shell here and nothing witnessed the outcome: PO-3 marks.
+      compare(Model.deadSessionVerdict(live.userState, true, ({}), "21:30").failed, { "t:bbc1.uk": "21:30" })
+    }
+    // A first load that failed with a live socket hands the record to the EOF
+    // rather than racing it, and the EOF retires it.
+    var handoff = freshSession(played)
+    noteOutcome(handoff, "attached")
+    compare(handoff.userState.session, played.session)
+    noteOutcome(handoff, "ended")
+    compare(handoff.userState.session, null)
+    compare(handoff.writes, 1)
+    // Idempotent: a second ending has nothing to clear and writes nothing.
+    noteOutcome(handoff, "stopped")
+    compare(handoff.writes, 1)
+    // A word the rule does not name is inert: a misspelled call site costs a
+    // stale mark at worst, never a dropped one.
+    compare(Model.sessionAfterOutcome(played, "mpv_missing").known, false)
+    compare(Model.sessionAfterOutcome(played, "mpv_missing").terminal, false)
+    compare(Model.sessionAfterOutcome(played, "mpv_missing").state.session, played.session)
+    // The deferred half of PO-3 rides on the same verdict. A probe that found
+    // no player before state.json landed owes a mark; an ending settles that
+    // event, a player still on its way must leave it owed.
+    var owed = { userState: Model.emptyState(), deadSessionPending: true, writes: 0 }
+    noteOutcome(owed, "retrying")
+    compare(owed.deadSessionPending, true)
+    owed.userState = played                             // the FileView lands
+    compare(Model.deadSessionVerdict(owed.userState, true, ({}), "21:30").mark, true)
+    var settled = freshSession(played)
+    settled.deadSessionPending = true
+    noteOutcome(settled, "mpvMissing")
+    compare(settled.deadSessionPending, false)
+    compare(settled.userState.session, null)
+  }
+
   function test_settingsClamps() {
     var s = Model.settingsFrom({ refreshMinutes: "5", barLabelMaxWidth: 9999, maxRecents: 0, playlistUrl: " http://x " })
     compare(s.refreshMinutes, 15)

@@ -1007,6 +1007,164 @@ check("PO-3: a half-written record still marks the row it names, and nothing her
 })(), ["t:x", "", { "t:x": "21:30" }, null, -1])
 check("PO-3 does not mutate the state it was given", (() => { Model.deadSessionVerdict(sessionState, true, {}, "21:30"); return sessionState.session.id })(), "t:bbc1.uk")
 
+// ---- the record's lifetime: PO-3's other half (M2-02-06 PR-5) ----
+// deadSessionVerdict() above only ever fires on a record it FINDS, so which
+// endings leave one behind is the whole of whether a reattach marks a channel
+// red for an event the user has already seen. The rule is about the witness,
+// not the failure: a record must not outlive the shell that saw how the play
+// ended - toast, red row, "mpv not found", a clean end or the user's own stop
+// alike - and survives exactly one thing, a player still running or still on
+// its way. The defect this closes: a failed `player start`, a missing mpv and
+// an abandoned relaunch each kept the record, so the next reattach spent the
+// same failure a second time.
+//
+// This drives it exactly as Service.qml noteSessionOutcome() does: call, take
+// the deferred-mark flag from the verdict, write only when the state changed.
+const noteOutcome = (svc, outcome) => {
+  const v = Model.sessionAfterOutcome(svc.userState, outcome, svc.deadSessionPending)
+  svc.deadSessionPending = v.pending
+  if (v.write) { svc.userState = v.state; svc.writes += 1 }
+  return svc
+}
+// The reattach after the shell this service was is gone: a fresh process runs
+// the probe, finds no player, and asks PO-3 what to do with whatever is left.
+const reattachMarks = (svc) => Model.deadSessionVerdict(svc.userState, true, {}, "21:30").failed
+const playingService = () => ({ userState: sessionState, deadSessionPending: false, writes: 0 })
+
+check("the outcome vocabulary is exactly the ten answers Service.qml can get", Model.PLAYER_OUTCOMES.slice().sort(), ["abandoned", "attached", "ended", "failed", "foreign", "mpvMissing", "relaunching", "retrying", "stopped", "superseded"])
+check("a player that is still there or still coming keeps the record; every ending retires it", Model.PLAYER_OUTCOMES.map(o => Model.sessionAfterOutcome(sessionState, o).terminal), [false, false, false, false, true, true, true, true, true, true])
+
+// The six endings, each on its own. Before this change three of them - a
+// failed start, a missing mpv, an abandoned relaunch - left the record.
+for (const ending of ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned"]) {
+  check("ending '" + ending + "' retires the record, so the next reattach marks nothing", (() => {
+    const svc = noteOutcome(playingService(), ending)
+    return [svc.userState.session, svc.writes, reattachMarks(svc)]
+  })(), [null, 1, {}])
+}
+// ...and the four non-endings keep it, which is what makes the mark possible
+// at all: kill the shell in any of these and nothing witnessed the outcome.
+for (const alive of ["superseded", "retrying", "relaunching", "attached"]) {
+  check("'" + alive + "' leaves the record for a reattach to find", (() => {
+    const svc = noteOutcome(playingService(), alive)
+    return [svc.userState.session, svc.writes, reattachMarks(svc)]
+  })(), [sessionState.session, 0, { "t:bbc1.uk": "21:30" }])
+}
+
+check("the reported defect: mpv is missing, the user gets the critical toast, and no red row waits for them next login", (() => {
+  const svc = noteOutcome(playingService(), "mpvMissing")
+  return [svc.userState.session, reattachMarks(svc), Object.keys(reattachMarks(svc)).length]
+})(), [null, {}, 0])
+check("a start that failed for good is the same event as the toast it raised, not a second one", (() => {
+  const svc = noteOutcome(playingService(), "failed")
+  return [svc.userState.session, reattachMarks(svc)]
+})(), [null, {}])
+check("a first load that failed with a live socket defers to the EOF, which then retires it", (() => {
+  const svc = noteOutcome(playingService(), "attached")
+  const held = [svc.userState.session, svc.writes]
+  noteOutcome(svc, "ended")
+  return [held, svc.userState.session, svc.writes, reattachMarks(svc)]
+})(), [[sessionState.session, 0], null, 1, {}])
+check("a relaunch that is queued keeps the record; the channel vanishing from the playlist ends it", (() => {
+  const svc = noteOutcome(playingService(), "relaunching")
+  const queued = [svc.userState.session, reattachMarks(svc)]
+  noteOutcome(svc, "abandoned")
+  return [queued, svc.userState.session, svc.writes, reattachMarks(svc)]
+})(), [[sessionState.session, { "t:bbc1.uk": "21:30" }], null, 1, {}])
+check("a backoff keeps the record, and the play that finally lands and then ends retires it", (() => {
+  const svc = noteOutcome(noteOutcome(playingService(), "retrying"), "retrying")
+  const backoff = [svc.userState.session, svc.writes]
+  noteOutcome(svc, "ended")
+  return [backoff, svc.userState.session, svc.writes]
+})(), [[sessionState.session, 0], null, 1])
+
+check("an ending is idempotent: the second one writes nothing (clearSession hands back the same object)", (() => {
+  const svc = noteOutcome(noteOutcome(playingService(), "failed"), "ended")
+  const v = Model.sessionAfterOutcome(svc.userState, "stopped")
+  return [svc.writes, v.terminal, v.write, v.state === svc.userState]
+})(), [1, true, false, true])
+check("an ending with no record at all never writes", (() => {
+  const svc = noteOutcome({ userState: Model.emptyState(), deadSessionPending: false, writes: 0 }, "mpvMissing")
+  return [svc.writes, svc.userState.session, Model.sessionAfterOutcome(null, "ended").write]
+})(), [0, null, false])
+check("an outcome the rule does not name is inert - a misspelled call site loses no mark", [
+  Model.sessionAfterOutcome(sessionState, "mpv_missing", false),
+  Model.sessionAfterOutcome(sessionState, "", false),
+  Model.sessionAfterOutcome(sessionState, "hasOwnProperty").terminal,
+  Model.sessionAfterOutcome(sessionState, "toString").known
+], [
+  { outcome: "mpv_missing", known: false, terminal: false, pending: false, state: sessionState, write: false },
+  { outcome: "", known: false, terminal: false, pending: false, state: sessionState, write: false },
+  false, false
+])
+// The deferred half of PO-3 rides on the same verdict: the startup probe can
+// find no player before state.json has landed, and owes a mark once it does
+// (deadSessionVerdict `pending`). An ending settles that event - the user has
+// now seen how this play finished - but a `busy` retry racing the probe must
+// not, or a genuine unattended death silently loses its red row.
+check("an ending drops a deferred PO-3 mark; a player still coming leaves it owed", [
+  Model.sessionAfterOutcome(sessionState, "mpvMissing", true).pending,
+  Model.sessionAfterOutcome(sessionState, "ended", true).pending,
+  Model.sessionAfterOutcome(Model.emptyState(), "stopped", true).pending,
+  Model.sessionAfterOutcome(sessionState, "retrying", true).pending,
+  Model.sessionAfterOutcome(sessionState, "superseded", true).pending,
+  Model.sessionAfterOutcome(sessionState, "relaunching", true).pending,
+  Model.sessionAfterOutcome(sessionState, "attached", true).pending,
+  Model.sessionAfterOutcome(sessionState, "mpv_missing", true).pending,
+  Model.sessionAfterOutcome(sessionState, "retrying", false).pending
+], [false, false, false, true, true, true, true, true, false])
+check("a backoff racing the startup probe still lets the deferred mark land", (() => {
+  // The probe answered before the FileView: no player, nothing to decide on.
+  const svc = { userState: Model.emptyState(), deadSessionPending: true, writes: 0 }
+  noteOutcome(svc, "retrying")                       // a `busy` reply lands first
+  const owed = svc.deadSessionPending
+  svc.userState = sessionState                       // state.json finally loads
+  const v = Model.deadSessionVerdict(svc.userState, true, {}, "21:30")
+  return [owed, v.mark, v.failed]
+})(), [true, true, { "t:bbc1.uk": "21:30" }])
+check("the verdict does not mutate its input and carries no URL", (() => {
+  Model.sessionAfterOutcome(sessionState, "ended")
+  const v = Model.sessionAfterOutcome(sessionState, "ended")
+  return [sessionState.session.id, v.state.lastPlayed.id, v.state.recents.length, JSON.stringify(v).indexOf("://")]
+})(), ["t:bbc1.uk", "t:bbc1.uk", 1, -1])
+check("retiring the record leaves Recents, favorites and sources alone", (() => {
+  const rich = Model.withFavorites(Model.recordPlayed(state4, { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123), ["t:f"])
+  const out = Model.sessionAfterOutcome(rich, "stopped").state
+  return [out.session, out.favorites, out.lastPlayed.id, out.recents.length, out.sources.length]
+})(), [null, ["t:f"], "t:bbc1.uk", 1, 4])
+
+// Service.qml is the only caller, and this pins that it stays the only route:
+// a word the rule does not know, or a branch that reaches past the decision
+// into the state, is exactly how the defect got in.
+const serviceSource = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
+const notedOutcomes = []
+serviceSource.replace(/root\.noteSessionOutcome\("([^"]*)"\)/g, (m, word) => { notedOutcomes.push(word); return m })
+check("Service.qml spells every outcome in the vocabulary", [notedOutcomes.length > 0, notedOutcomes.filter(o => Model.PLAYER_OUTCOMES.indexOf(o) === -1)], [true, []])
+check("Service.qml routes all six endings, not three of them", [...new Set(notedOutcomes)].filter(o => Model.sessionAfterOutcome(sessionState, o).terminal).sort(), ["abandoned", "ended", "failed", "foreign", "mpvMissing", "stopped"])
+check("Service.qml reaches the session record through the one decision and nowhere else", [
+  serviceSource.indexOf("Model.clearSession("),
+  serviceSource.indexOf(".session ="),
+  (serviceSource.match(/function noteSessionOutcome\(/g) || []).length
+], [-1, -1, 1])
+// Every branch that drops the channel is a branch the record's fate hangs on,
+// so pair them by position: the very next thing after each `root.nowPlaying =
+// null` is the decision, in one of its two forms - noteSessionOutcome() for an
+// outcome this shell watched, markDeadSession() for the reattach that found
+// the player already gone. Nothing else may come between, so deleting a
+// routing call turns its slot into NOTHING and adding a terminal branch
+// without one shows up as a word that belongs to the branch after it. Three
+// of these eight - "mpvMissing", "failed" and "abandoned" - read as NOTHING
+// before this change: those are the branches that left the record behind.
+const serviceTokens = []
+serviceSource.replace(/root\.nowPlaying\s*=\s*null|root\.noteSessionOutcome\("([^"]*)"\)|root\.markDeadSession\(\)/g, (m, word) => {
+  serviceTokens.push(m.indexOf("nowPlaying") !== -1 ? "drop" : (word !== undefined ? word : "markDeadSession"))
+  return m
+})
+check("every Service.qml branch that drops the channel hands the record to the decision", serviceTokens
+  .map((t, i) => t === "drop" ? (serviceTokens[i + 1] === undefined || serviceTokens[i + 1] === "drop" ? "NOTHING" : serviceTokens[i + 1]) : null)
+  .filter(x => x !== null),
+  ["stopped", "mpvMissing", "failed", "failed", "markDeadSession", "foreign", "ended", "abandoned"])
+
 check("every reducer carries the session through (cloneState)", [
   Model.withFavorites(sessionState, ["a"]).session,
   Model.removeRecent(sessionState, "t:bbc1.uk").session,
