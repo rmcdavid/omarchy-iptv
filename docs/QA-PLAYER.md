@@ -1649,13 +1649,27 @@ found by running the plan; each is edited in place above and marked
    socket is unlinked only after the final connect is refused" is true of the
    responsive stop (5/5) and **false** of the wedged one: the player is reaped
    at ~4.25 s and `mpv.sock` survives, still present at t+66 s with the shell
-   idle; only the next `probe`/`status` removes it. `connect()` does return
-   `ECONNREFUSED`, so `settle_socket()`'s guard should fire - most likely
-   `find_player()` still sees the just-SIGKILLed process when the settle rung
-   runs. QA's A/B on an identical rig leaves it behind at **both** `8f9447e`
-   and `b16b479`, so the pass at `8f9447e` recorded this row as pass without
-   asserting the clause. Filed as **D-PLY-8**; harmless, because the residue is
-   `600` inside a `700` directory and the next play succeeds through it.
+   idle; only the next `probe`/`status` removes it. QA's A/B on an identical
+   rig leaves it behind at **both** `8f9447e` and `b16b479`, so the pass at
+   `8f9447e` recorded this row as pass without asserting the clause. Filed as
+   **D-PLY-8**; harmless, because the residue is `600` inside a `700`
+   directory and the next play succeeds through it.
+
+   **[corrected, cleanup round]** The cause recorded here was wrong, and it
+   was a trap: "most likely `find_player()` still sees the just-SIGKILLed
+   process when the settle rung runs" is **measurably false**. A SIGKILLed
+   process runs `exit_mm()` first, so its command line is already empty at the
+   first post-SIGKILL sample (8/8 runs, 0.16-0.33 ms, in state **R**, not Z) -
+   `find_player` goes blind EARLIER than everything else, not later. The
+   blocking guard is `socket_is_dead()`: on SIGKILL the IPC listener is still
+   bound for 2.71-5.75 ms after the command line empties, and that window is
+   teardown-proportional (0.35 ms at ~10 MB, 113 ms at 1500 MB), while the
+   settle's connect lands 4.2-8.3 ms after the kill. A future lane reading the
+   old sentence would "fix" the finder with `os.kill(pid,0)` or bare
+   `/proc/<pid>` existence, which makes the ladder report `running:true` after
+   a successful SIGKILL and blocks the settle indefinitely. **Do not.** The
+   same wrong cause is recorded at `docs/STATUS.md:143` and
+   `docs/QA-RESULTS.md:2539-2541` and needs the same correction there.
 
 2. **PLY-SEC-07's "complete list" grew by two directories.** The D-PLY-7 fix
    added `$XDG_RUNTIME_DIR/omarchy-iptv/watch-later/` and
@@ -1685,6 +1699,46 @@ found by running the plan; each is edited in place above and marked
    `scripts/dev-harness/player-scenario.sh:149`, where it silently kills the
    "exactly ONE relaunch" check (**D-PLY-9**). Use
    `pgrep -c ... 2>/dev/null | head -1 || true`, or `| wc -l`.
+
+   **[fixed, cleanup round]** `log_count` goes through `qa_count` in
+   `scripts/qa-lib.sh` now, and the scenario asserts how many assertions it
+   executed (`EXPECTED_CHECKS`), so a check that stops running turns the run
+   red instead of shortening the summary. Bash offers no way to turn a failed
+   expansion into a failed test, so that floor is the only thing that closes
+   the class. Expect **82** assertions and, on the `--baseline 396a69a` run,
+   the same 82 with more of them failing.
+
+   **The repaired check cannot tell the two trees apart, and that is the
+   important part.** The string it counts,
+   `omarchy-iptv: mpv unresponsive, restarting player`, exists at exactly one
+   place - `Service.qml:510`, inside `restartPlayer()`. The second relaunch
+   the D-PLY-1 fix prevents is issued by `relaunchTimer.onTriggered`'s
+   `playerUp` branch, which logs nothing, and a second entry into
+   `restartPlayer()` logs the *different* "mpv unresponsive again, stopping the
+   player" line. So the restored assertion PASSES on both trees. If it goes
+   red on the baseline, that is new information about `Service.qml`, not a
+   confirmed expectation.
+
+   **The same blind spot is in the manual procedure.** `docs/STATUS.md:136`,
+   `docs/STATUS.md:164` and `docs/QA-RESULTS.md:2407` record that QA counted
+   that same journal string by hand ("delta exactly 1, never 2"). That count
+   measures the same non-discriminating string. **"Exactly one relaunch, never
+   a second at the healthy player" - half of the P1 this project shipped - has
+   no machine-checkable witness anywhere.** Ruling CL3: add the witness at
+   `Service.qml:2486` and correct those three rows in the same change. That
+   log line is owned by the shell lane; this round only records that the
+   procedure written down here was never evidence.
+
+8. **Every count this section cites is now asserted by the gate that prints
+   it.** `scripts/check.sh` used to interpolate
+   `$(grep -c '^PASS' /tmp/omarchy-iptv-qmltest.log)` into a message and
+   assert nothing, so a `qmltestrunner` that exited 0 having executed zero
+   test functions printed `ok   qml spec (0 passed)` and the gate stayed
+   green - while the tables in section 12 cite "42 passed" and "47 passed" as
+   evidence. The node runner and `unittest` have the same shape (`0 checks`,
+   `Ran 0 tests ... OK`). All three now carry floors, as does the number of
+   files qmllint examined, and `scripts/dev-harness/shell.qml` - the fake
+   every scenario in this repo runs against - is linted for the first time.
 
 6. **Two tools in section 0 are not invokable as written on this machine.**
    `qmltestrunner` is not on `PATH`; the runnable form is
