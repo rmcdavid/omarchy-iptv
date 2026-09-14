@@ -1,12 +1,17 @@
 # Omarchy IPTV - QA test plan for the detached player (M2-02)
 
-Owner: QA. Status: v0.2 (2026-09-14), **executed** against `main` at
-`8f9447e`. Written at `363ce9c` (lane PA `M2-02-01`, lane PB `M2-02-02` and
+Owner: QA. Status: v0.3 (2026-09-14), **executed twice**: against `main` at
+`8f9447e` (the pass that filed D-PLY-1..7) and again against `main` at
+`b16b479` (the fix verification, which discharged all seven and filed
+D-PLY-8..11). Corrections from the first run are indexed in section 14 and
+marked `[corrected 8f9447e]`; corrections from the second are in **section 15**
+and marked `[corrected b16b479]`. Written at `363ce9c` (lane PA `M2-02-01`, lane PB `M2-02-02` and
 the PO-3 follow-up all merged); the fix lane merged as `c458ebf` and section
 1.8 records it. Everything the pass found to be wrong in this plan is
 corrected in place and marked `[corrected 8f9447e]`, and section 14 lists the
 corrections in one place with the evidence. Results are in
-`docs/QA-RESULTS.md`, section "M2-02 player pass on 8f9447e".
+`docs/QA-RESULTS.md`, sections "M2-02 player pass on 8f9447e" and
+"M2-02 fix verification on b16b479".
 Extends `docs/QA.md` (v0.2: ids, methods, harness techniques, severities) and
 `docs/QA-SOURCES.md` (v0.3: the `A`/`H`/`L` method codes, the snapshot and
 restore shape); everything in both still applies and the re-run subset is
@@ -116,7 +121,7 @@ Depth for this area is in section 2; the rows below are the contract.
 | PLY-RST-08 | `XDG_RUNTIME_DIR` cleared while playing | H PLY-H14 | `rm -rf $XDG_RUNTIME_DIR/omarchy-iptv` (harness scratch only; never the live dir) while playing: the `/proc` scan still finds the player by the `--input-ipc-server=<abspath>` token, `connect()` gives ENOENT so `responsive:false`, it is laddered down by pid and respawned into a freshly created **0700** directory with a **0600** socket and a **0600** `player.lock`; `playSeq` resets on both sides together (`status.player.seq` and the new lock record agree); the inode re-check catches the recreate and no `busy` storm follows |
 | PLY-RST-09 | suspend and resume | L 9.9 step 1 | `systemctl suspend`, wake, then within 10 s: the same mpv pid is alive, the QML socket is still attached (`player.attached` true) or reattaches within one 250 ms tick, `status` reports the same `nowPlaying`. A stalled stream after resume is **not** detected and `status` reports healthy - that is ARCH-P 7 row "Suspend / resume" as designed, unchanged from v0.2.0, and is recorded, not filed. See section 10 item 5: run or record `not run` |
 | PLY-RST-10 | logout is the one thing that reaps the player | L 9.9 step 2 (last act of the pass) | with a channel playing, log out and log back in: `pgrep -f 'omarchy-iptv/mpv.sock'` is empty on the next login, `/run/user/1000/omarchy-iptv` is gone or empty. Static half, runnable any time: `systemctl --user show wayland-wm@hyprland.desktop.service -p ExitType -p KillMode -p TimeoutStopUSec` reports `main` / `control-group` / `10s`, `loginctl show-user 1000 -p Linger` reports `Linger=no`, and `cat /proc/<mpv pid>/cgroup` equals the shell's cgroup |
-| PLY-RST-11 | a player started by hand with the same window identity | L 9.5 step 6 | `mpv --wayland-app-id=omarchy-iptv --input-ipc-server=/tmp/qa-player-foreign.sock --idle=yes --force-window=immediate` (a **different** socket): our `/proc` scan matches on the exact `--input-ipc-server=<our abspath>` token plus uid, so the foreign player is **never adopted, never signalled and never counted** - `player probe` reports only ours, a `player stop` leaves the foreign pid alive, and our own start still spawns exactly one. Documented consequences to record, not file: `hyprctl dispatch focuswindow class:omarchy-iptv` may focus theirs, and `pgrep -af -- '--wayland-app-id=omarchy-iptv' \| wc -l` reads 2. **[corrected 8f9447e]** do **not** add `--vo=null --ao=null` to the foreign player as 9.5 step 6 did: with no video output it maps no window, `hyprctl clients` shows one client and the focus consequence cannot be reproduced. Run it windowed, or record the focus half as `not run` |
+| PLY-RST-11 | a player started by hand with the same window identity | L 9.5 step 6 | `mpv --wayland-app-id=omarchy-iptv --input-ipc-server=/tmp/qa-player-foreign.sock --idle=yes --force-window=immediate` (a **different** socket): our `/proc` scan matches on the exact `--input-ipc-server=<our abspath>` token plus uid, so the foreign player is **never adopted, never signalled and never counted** - `player probe` reports only ours, a `player stop` leaves the foreign pid alive, and our own start still spawns exactly one. Documented consequences to record, not file: `hyprctl dispatch focuswindow class:omarchy-iptv` may focus theirs, and `pgrep -af -- '--wayland-app-id=omarchy-iptv' \| wc -l` reads 2. **[corrected 8f9447e]** do **not** add `--vo=null --ao=null` to the foreign player as 9.5 step 6 did: with no video output it maps no window, `hyprctl clients` shows one client and the focus consequence cannot be reproduced. Run it windowed, or record the focus half as `not run`. **[corrected b16b479]** run windowed, the consequence **reproduces and is now recorded rather than skipped**: `hyprctl clients` reads **2** `omarchy-iptv` clients and `pgrep` reads **2**, while `player probe` reports only ours, our `stop` leaves the foreign pid alive and our next start spawns exactly one. Section 14 item 7 is closed |
 | PLY-RST-12 | two players on the **same** socket | H PLY-H03 | a second `player start` run by hand against the same socket path while one is live: the scan finds both, the one that answers is kept, the others are laddered down, one redacted warning is logged once, and `hyprctl clients -j \| jq '[.[]\|select(.class=="omarchy-iptv")]\|length'` returns to exactly 1 |
 | PLY-RST-13 | restart with nothing playing | L 9.4 step 0 | `player probe` reports `running:false`; `playerWanted` goes false so the 250 ms retry timer stops (no journal noise, see PLY-PERF-04); the bar shows idle; `status` has `nowPlaying null`, `player.up false`, `player.wanted false`; **no** spurious `failedAt` entry when `state.json.session` is null |
 | PLY-RST-14 | restart during a cold start, before the socket binds | H PLY-H15 | kill the shell between the `player start` issue and the socket bind (designed bind latency 0.114-0.151 s): either the helper completes the spawn as a reparented grandchild and the next shell adopts it, or the helper dies with it and the spawn it created is reaped by its own 5 s `--spawn-timeout` path. Both outcomes are pass; **a windowed player that nothing can reach is a P1 fail**. Ten runs, `hyprctl clients` sampled at 100 ms throughout, max 1 |
@@ -152,7 +157,7 @@ Depth for this area is in section 2; the rows below are the contract.
 |---|---|---|---|
 | PLY-STOP-01 | stop clears the interface on the keystroke | H PLY-H07; L 9.6 step 2 | `s` in list mode, right click on the bar, and `omarchy-shell io.github.rmcdavid.iptv stop` all clear `nowPlaying`, `pendingPlayId`, `wantFocus` and the timers **synchronously**: the next `status` (one IPC round trip) already reads `nowPlaying null`, `playing false`; footer `Stopped` for 3 s then the count; bar back to the idle glyph U+F0502; no notification |
 | PLY-STOP-02 | the `quit` rung ends a responsive player | H PLY-H07 | `request(["quit"], allow_close=True)` on rung 1; the process is gone well inside `STOP_QUIT_GRACE_MS` = 2000; reply `rung:"quit"`, `running:false`; **no** SIGTERM and **no** SIGKILL line in the console |
-| PLY-STOP-03 | the ladder reaches a wedged player | H PLY-H05; L 9.6 step 3 | `kill -STOP` then stop: `quit` at 0 (ignored), `SIGTERM` at 2.0 s, `SIGKILL` at 4.0 s, settle at 4.5 s; the window is gone and `hyprctl clients -j \| jq '[.[]\|select(.class=="omarchy-iptv")]\|length'` is 0; the socket is unlinked only after the final connect is refused; this is the D-LIVE-17 case, now reachable because the pid comes from `/proc` and not from `get_property pid` |
+| PLY-STOP-03 | the ladder reaches a wedged player | H PLY-H05; L 9.6 step 3 | `kill -STOP` then stop: `quit` at 0 (ignored), `SIGTERM` at 2.0 s, `SIGKILL` at 4.0 s, settle at 4.5 s; the window is gone and `hyprctl clients -j \| jq '[.[]\|select(.class=="omarchy-iptv")]\|length'` is 0; the socket is unlinked only after the final connect is refused. **[corrected b16b479]** on the **wedged** path it is **not** unlinked at all: the player is reaped at ~4.25 s and `mpv.sock` survives, measured still present at t+66 s with the shell idle, and only the next helper call (`probe`/`status`) removes it. Present at `8f9447e` too, so this row's clause has never held on this path - see D-PLY-8. The responsive path unlinks correctly (5/5). This is the D-LIVE-17 case, now reachable because the pid comes from `/proc` and not from `get_property pid` |
 | PLY-STOP-04 | the ladder completes if the shell dies mid-ladder | L 9.6 step 4 | issue a stop against a SIGSTOPped player, then `pkill -KILL` the shell 200 ms later: the detached helper still SIGTERMs at 2 s and SIGKILLs at 4 s and the player is gone by 4.5 s, with no shell running. This is the property `escalateStop()` in QML could never have |
 | PLY-STOP-05 | the socket is unlinked only when it is truly dead | A `test_nothing_running_is_a_clean_stop_that_unlinks_a_stale_socket`, `test_stop_after_a_start_leaves_nothing_behind` | settle unlinks only when `find_player()` is empty **and** `connect()` returns ENOENT/ECONNREFUSED, S_ISSOCK-guarded; a racing start's fresh socket is never deleted |
 | PLY-STOP-06 | a recycled pid is never signalled | A `test_a_recycled_pid_is_never_signalled` | pid + `/proc/<pid>/stat` field 22 start time + the `--input-ipc-server` cmdline token are re-verified immediately before **each** signal; a pid whose start time no longer matches gets no signal at all |
@@ -228,14 +233,14 @@ unless stated.
 | PLY-SEC-04 | no header value on any command line | L 9.3 step 4; A `headerArgs` tests | the sentinel `#EXTVLCOPT:http-user-agent=qa-ua-SENTINEL` and `#EXTVLCOPT:http-referrer=http://qa-ref-SENTINEL.test/` reach mpv **only** over the socket; `qa-ua-SENTINEL` and `qa-ref-SENTINEL` appear 0 times in the whole cmdline sweep. TC-PLAY-08 is inverted by this row |
 | PLY-SEC-05 | the disclosed residual: what a command line DOES say | L 9.3 step 5 | Record, do not file. `--id t:<tvg-id>` on the helper's argv is a per-zap record of *what* is being watched, readable through `/proc/<pid>/cmdline` (0444, `/proc` mounted without `hidepid`), for the ~130 ms the helper lives. Separately, `Model.notifyArgv` puts the **channel name** on `omarchy-notification-send`'s argv on every failure. **[corrected 8f9447e]** README `Playback notes` bullet 5 no longer claims "`ps` shows nothing about what you are watching"; it now names **exactly these two** and says neither exposes credentials. So this row became a **verification of a narrowed claim**, not a contradiction: prove the two named exposures are the only ones, and that no address, credential or header value joins them. Measure: how many sweep samples catch an `--id`, how many catch the notifier, and whether the window title (which names the channel for the whole play, not for milliseconds) is the larger exposure. **The sweep must exclude the QA driver's own shell processes**, whose argv carries the needles in the grep patterns themselves |
 | PLY-SEC-06 | the sweep holds with a hand-started player present | L 9.5 step 6 then 9.3 step 4 | with the foreign `--wayland-app-id=omarchy-iptv` player of PLY-RST-11 running, our sweep is unchanged; the foreign player's own argv is the user's business and is excluded from the count by socket path, not by app-id |
-| PLY-SEC-07 | every new artifact on disk: mode and content | L 9.3 step 6 | complete list, nothing else may appear. `$XDG_RUNTIME_DIR/omarchy-iptv/` `700`; `mpv.sock` `600` (srw-------, created 0600 by mpv itself under `umask 0022`); `player.lock` `600`, contents exactly one line `{"schema": 1, "seq": N, "verb": "start\|stop\|restart", "at": <epoch>}` with no URL (**[corrected 8f9447e]** the helper's `json.dumps` default puts a space after each `:` and `,`; compare the fields, not the byte spelling); `~/.local/state/omarchy-iptv/state.json` `600` with `session` = `{id,name,at}` and no URL. Command: `find "$XDG_RUNTIME_DIR/omarchy-iptv" ~/.local/state/omarchy-iptv -exec stat -c '%a %n' {} + \| grep -vE '^(700\|600) '` returns nothing, and `grep -rlE '://\|qa-secret\|qa-token-XYZ' "$XDG_RUNTIME_DIR/omarchy-iptv"` returns nothing. **No `player.json`, no log file, no watch-later file, no systemd unit, no drop-in** |
+| PLY-SEC-07 | every new artifact on disk: mode and content | L 9.3 step 6 | complete list, nothing else may appear. `$XDG_RUNTIME_DIR/omarchy-iptv/` `700`; `mpv.sock` `600` (srw-------, created 0600 by mpv itself under `umask 0022`); `player.lock` `600`, contents exactly one line `{"schema": 1, "seq": N, "verb": "start\|stop\|restart", "at": <epoch>}` with no URL (**[corrected 8f9447e]** the helper's `json.dumps` default puts a space after each `:` and `,`; compare the fields, not the byte spelling); `~/.local/state/omarchy-iptv/state.json` `600` with `session` = `{id,name,at}` and no URL. Command: `find "$XDG_RUNTIME_DIR/omarchy-iptv" ~/.local/state/omarchy-iptv -exec stat -c '%a %n' {} + \| grep -vE '^(700\|600) '` returns nothing, and `grep -rlE '://\|qa-secret\|qa-token-XYZ' "$XDG_RUNTIME_DIR/omarchy-iptv"` returns nothing. **[corrected b16b479]** the list grew by two documented directories when D-PLY-7 was fixed: `$XDG_RUNTIME_DIR/omarchy-iptv/watch-later/` `700` holding resume files at `600` (the name is an MD5, the content carries no address), and `~/.local/state/omarchy-iptv/screenshots/` `700` holding screenshots at `600`. Both verified. **No `player.json`, no log file outside those, no systemd unit, no drop-in.** A `mpv.sock` left behind by a wedged stop is D-PLY-8, and is still `600`, so this row's `find` check passes either way. One artifact the player creates is **outside** this list entirely: `~/.cache/mpv/shader_*` (`600`, content-free) - D-PLY-10 |
 | PLY-SEC-08 | `player.lock` is documented | A read of `README.md` `Files it writes` | the section lists `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` but **not** `player.lock` at `363ce9c` (section 11 item 5). P3 documentation |
 | PLY-SEC-09 | the journal | L 9.3 step 7 | `journalctl --user -t omarchy-shell --since "$(cat $E/started-at)" \| grep omarchy-iptv \| grep -cE '://\|password=\|username=\|qa-secret\|qa-token-XYZ\|qa-ua-SENTINEL'` is `0`. This matters here because `omarchy-launch-shell` runs `systemd-cat -t omarchy-shell -- quickshell`, making the shell's stdout and stderr a persistent, group-readable stream. mpv's own stdio is `/dev/null` from before `execvp`, so **nothing of mpv's reaches the journal at all** - prove it with `journalctl --user --since ... \| grep -c 'mpv\['` = 0 |
 | PLY-SEC-10 | the shell console | L 9.3 step 7 | `qs log -p /usr/share/omarchy/shell --tail 800 \| grep -cE '://\|qa-secret\|qa-token-XYZ'` on `omarchy-iptv` lines is `0`; helper stderr reaches the console only through `console.warn(Model.redactUrls(...))` |
 | PLY-SEC-11 | the IPC `status` output | L 9.3 step 7 | `omarchy-shell io.github.rmcdavid.iptv status \| grep -cE '://\|password=\|username='` is `0`. `statusSummary()` is URL-free by construction; the additive `player:{up,pending,attached,wanted,stopping,seq,entryId}` block is booleans and ints; `failedAt` is ids and `HH:MM` |
 | PLY-SEC-12 | notifications | L 9.3 step 7; L 9.8 | `omarchy-shell notifications showHistory \| grep -cE '://\|qa-secret\|qa-token-XYZ'` is `0`; the failure body reads `"<name>" did not play - http://127.0.0.1` at most; S-04 rules hold (leading dashes stripped, typographic quotes, body never starts with `-`) |
 | PLY-SEC-13 | `MPV_RESERVED` gained the ten durable-exposure options | A `tests/Model.test.js` `MPV_RESERVED` block; A `test_mpv_reserved_matches_model_js` | `--log-file`, `--dump-stats`, `--stream-record`, `--save-position-on-quit`, `--watch-later-dir`, `--osd-msg1`, `--osd-msg2`, `--osd-msg3`, `--term-status-msg`, `--screenshot-template` and their `--no-` forms are all rejected with one console warning naming them; the nine existing entries and the D-QA-11 lowercase-only rule are unchanged; the python mirror is pinned equal by the parity test |
-| PLY-SEC-14 | PO-5: `--ytdl` stays unreserved and its cost is written down | A `splitMpvArgs` tests; L 9.3 step 8 | `--ytdl=yes` survives `splitMpvArgs` and still sorts after the built-in `--ytdl=no`. The cost, confirmed real by SPIKE Q3 **and reproduced live at `8f9447e`**: mpv's `ytdl_hook` fires on a failed HTTP open and spawns `yt-dlp ... -- <full URL>` on **another** process's argv. Live check with the default settings: `pgrep -c -x yt-dlp` stays `0` across a deliberately dead channel (use `pgrep -x`, not `ps aux | grep -c '[y]t-dlp'` - the latter matches the QA driver's own argv). **PO-5 requires one README sentence naming the cost - verify it is present.** At `8f9447e` it is **absent**: `ytdl`, `yt-dlp` and `youtube` appear 0 times in `README.md` and 0 times in `CHANGELOG.md`. See D-PLY-1 |
+| PLY-SEC-14 | PO-5: `--ytdl` stays unreserved and its cost is written down | A `splitMpvArgs` tests; L 9.3 step 8 | `--ytdl=yes` survives `splitMpvArgs` and still sorts after the built-in `--ytdl=no`. The cost, confirmed real by SPIKE Q3 **and reproduced live at `8f9447e`**: mpv's `ytdl_hook` fires on a failed HTTP open and spawns `yt-dlp ... -- <full URL>` on **another** process's argv. Live check with the default settings: `pgrep -c -x yt-dlp` stays `0` across a deliberately dead channel (use `pgrep -x`, not `ps aux | grep -c '[y]t-dlp'` - the latter matches the QA driver's own argv). **PO-5 requires one README sentence naming the cost - verify it is present.** At `8f9447e` it was **absent** (D-PLY-5). **[corrected b16b479]** it is present: `README.md` carries it beside the `mpvArgs` row and `CHANGELOG.md` 0.3.0 names it under Security, and the product now also raises `Player warning: mpvArg --ytdl hands the stream address to another program` on the guide's single warning line **without refusing the option** (`--ytdl=yes` is last on mpv's argv; mpv's `ytdl` property reads `true`). The cross-reference to "D-PLY-1" in the original row was a typo for D-PLY-5 |
 | PLY-SEC-15 | argv only, no shell, no sudo, no writes in the plugin dir | A `grep -rn "sudo\|shell=True\|bash -c\|eval(" .` outside tests/docs; A the SEC-01 grep extended to the new call sites; L 9.3 step 9 | nothing. Four hops, four argv vectors: QML -> helper is `["python3", helperPath, ...]`; helper -> mpv is `os.execvp("mpv", argv)` with a **literal** argv[0], so `player start` is not an arbitrary-exec verb; `Quickshell.execDetached(list)` everywhere; no `systemd-run`, no `uwsm-app` (rejected for its `eval "$CMDLINE"`), no `hyprctl exec_cmd`. `find <plugindir> -newer <plugindir>/manifest.json -not -path '*/.git/*'` empty after the pass |
 | PLY-SEC-16 | the environment does not reach a command line | A code review of `spawn_detached`; L 9.3 step 5 | `spawn_detached` passes the inherited environment unchanged - no `--setenv`, so nothing moves from the `0400 /proc/<pid>/environ` onto the `0444` cmdline. `grep -c setenv` on the mpv launch argv is 0 |
 | PLY-SEC-17 | new stdlib imports only | A `grep -nE '^import \|^from ' bin/omarchy-iptv` | `fcntl`, `signal`, `errno` added; `socket`, `stat`, `os`, `time`, `json` already present; no third-party import (CLAUDE.md rule 3) |
@@ -246,7 +251,7 @@ unless stated.
 | ID | Budget | Procedure | Record |
 |---|---|---|---|
 | PLY-PERF-01 | recovery after a restart: `player probe` answers <= 400 ms after the shell answers IPC (designed ~130 ms); `status.nowPlaying` non-null <= **2000 ms** (PLAN-M2 DoD and ARCH-P 7's acceptance bar); `player.attached` true <= 3000 ms (12 x 250 ms burst cap) | section 9.4, five runs | three medians and maxima, and the mpv pid before/after |
-| PLY-PERF-02 | stop: interface clear <= 150 ms (live IPC round trip is 67 ms median); responsive player gone <= 500 ms (recorded 219-263 ms in v0.2.0); wedged player gone <= 4500 ms (quit 0, TERM 2.0, KILL 4.0, settle 4.5) | section 9.6, five runs each | median and max for all three; whether any SIGKILL line appeared in the responsive case (it must not) |
+| PLY-PERF-02 | stop: interface clear <= 150 ms (live IPC round trip is 67 ms median); responsive player gone <= 500 ms (recorded 219-263 ms in v0.2.0); wedged player gone <= 4500 ms (quit 0, TERM 2.0, KILL 4.0, settle 4.5) - **met at `b16b479`: 4236-4263 ms over five runs**, after D-PLY-6 stopped the quit rung spending the full `--ipc-timeout` against a player the probe already called unresponsive | section 9.6, five runs each | median and max for all three; whether any SIGKILL line appeared in the responsive case (it must not) |
 | PLY-PERF-03 | channel change: zap on a live player to first frame < **2000 ms** (PRODUCT, PERF-06; recorded window map 378-457 ms warm, 803 ms cold); the IPC `play` reply <= 300 ms | section 9.10 step 1, three channels x three runs | ms per zap, warm and cold separated |
 | PLY-PERF-04 | the retry loop cannot flood the journal: <= **12** `quickshell.io.socket` WARN lines per player death (C6's cap), and <= **60** over a 30-minute session with nothing playing | section 9.10 step 2 | count from `journalctl --user -t omarchy-shell --since ... \| grep -c 'quickshell.io.socket'` and from `/run/user/1000/quickshell/by-id/*/log.qslog`. **The spike measured one WARN per failed attempt with no deduplication: a free-running 250 ms retry is 4 lines/second, ~14,000/hour. Anything approaching that is a P2** |
 | PLY-PERF-05 | one helper verb costs <= 300 ms (designed ~125-130 ms; recorded analog 120-126 ms including spawn) | `for i in 1 2 3 4 5; do t0=$(date +%s%N); python3 <plugindir>/bin/omarchy-iptv player probe --socket "$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock" >/dev/null; t1=$(date +%s%N); echo $(( (t1-t0)/1000000 )); done` | median and max for `probe`, `status`, `stop` |
@@ -1631,3 +1636,84 @@ index, so a later reader can see what the plan got wrong and why.
 12. **The evidence root for this pass is
     `/tmp/claude-1000/omarchy-iptv-qa7/`**, not the `omarchy-iptv-qa5` path
     the section 9 snippets carry from the planning draft.
+
+## 15. Corrections from the fix verification on `b16b479` (QA, 2026-09-14)
+
+Second execution of this plan, against `main` at `b16b479`, re-verifying the
+seven `D-PLY-*` defects. Results in `docs/QA-RESULTS.md`, section
+"M2-02 fix verification on `b16b479`". As in section 14, everything below was
+found by running the plan; each is edited in place above and marked
+`[corrected b16b479]`, and this section is the index.
+
+1. **PLY-STOP-03's socket clause has never held on the wedged path.** "The
+   socket is unlinked only after the final connect is refused" is true of the
+   responsive stop (5/5) and **false** of the wedged one: the player is reaped
+   at ~4.25 s and `mpv.sock` survives, still present at t+66 s with the shell
+   idle; only the next `probe`/`status` removes it. `connect()` does return
+   `ECONNREFUSED`, so `settle_socket()`'s guard should fire - most likely
+   `find_player()` still sees the just-SIGKILLed process when the settle rung
+   runs. QA's A/B on an identical rig leaves it behind at **both** `8f9447e`
+   and `b16b479`, so the pass at `8f9447e` recorded this row as pass without
+   asserting the clause. Filed as **D-PLY-8**; harmless, because the residue is
+   `600` inside a `700` directory and the next play succeeds through it.
+
+2. **PLY-SEC-07's "complete list" grew by two directories.** The D-PLY-7 fix
+   added `$XDG_RUNTIME_DIR/omarchy-iptv/watch-later/` and
+   `~/.local/state/omarchy-iptv/screenshots/`, both `700` holding `600` files.
+   Any pass that treats the old list as exhaustive will read the fix as a
+   defect. Separately, one artifact the player creates is outside the list
+   altogether - `~/.cache/mpv/shader_*`, mpv's own content-free shader cache,
+   inherited via `HOME` (**D-PLY-10**).
+
+3. **PLY-RST-11's focus consequence is runnable and is now run.** Section 14
+   item 7 recorded it as `not run`. Run **windowed**, as section 14 item 7
+   itself prescribes, the foreign player maps a real window and the documented
+   consequence reproduces: `hyprctl clients` reads 2 and `pgrep` reads 2, while
+   our probe, stop and start all stay correctly scoped to ours. Item 7 is
+   closed.
+
+4. **PLY-SEC-14's cross-reference was a typo.** The row ends "See D-PLY-1"; the
+   defect it means is **D-PLY-5**. Corrected in place. The row's own
+   expectation is now satisfied at `b16b479`.
+
+5. **`pgrep -c` has the same two-line trap as `grep -c`.** Section 14 item 2
+   warns that `pgrep -f` self-matches; this is a different bug in the same
+   family. `pgrep -c <pat> || echo 0` prints `0` **and** exits 1 when nothing
+   matches, so the substitution yields `"0\n0"`, every `[ "$(count)" = 0 ]`
+   guard is false forever and every `$(( count - x ))` dies. It cost this pass
+   two wasted runs, and it is live in the shipped harness at
+   `scripts/dev-harness/player-scenario.sh:149`, where it silently kills the
+   "exactly ONE relaunch" check (**D-PLY-9**). Use
+   `pgrep -c ... 2>/dev/null | head -1 || true`, or `| wc -l`.
+
+6. **Two tools in section 0 are not invokable as written on this machine.**
+   `qmltestrunner` is not on `PATH`; the runnable form is
+   `/usr/lib/qt6/bin/qmltestrunner`. `python3 -m unittest tests.test_player`
+   fails at import (`helper_loader` is not on `sys.path`); the runnable form is
+   `python3 -m unittest discover -s tests -p 'test_player.py'`. Neither is a
+   product defect.
+
+7. **"Zap to first frame" needs a signal that is not `time-pos`.** A
+   `loadfile replace` reuses the player, so the **old** `time-pos` is still
+   readable immediately after the zap and "wait for non-null `time-pos`" times
+   the IPC round trip (67-81 ms), not the frame. The honest signal is
+   `media-title` reaching the new channel **and** `time-pos` back under 2 s,
+   which gives 277-338 ms warm and 711-781 ms cold. Both are inside the 2 s
+   budget, so no verdict changes; the method does.
+
+8. **The fd/RSS leak row cannot be read across a shell restart.** `omarchy
+   restart shell` replaces the process, so comparing the old shell's fd count
+   with the new one's measures nothing about leaking. Only mpv's own figures
+   survive the restart and are comparable, and mpv's RSS climbs with playback
+   time, not with restarts. Re-word the row to assert what actually holds: the
+   **same mpv pid, one window and full identity through ten consecutive
+   restarts**, which is measured and passes.
+
+9. **TC-PLAY-10 needs a severity boundary.** Eight *serial* rapid zaps - all
+   the single-threaded guide can produce - agree with the player 4/4. Eight
+   *truly concurrent* `play` calls diverged once in eight
+   (**D-PLY-11**). The row should say which of the two it is asserting; only
+   the serial case is a user-reachable contract.
+
+10. **The evidence root for this pass is
+    `/tmp/claude-1000/omarchy-iptv-qa8/`.**
