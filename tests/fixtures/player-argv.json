@@ -1,6 +1,7 @@
 {
   "_comment": [
-    "Shared vectors for the detached player (docs/ARCHITECTURE-PLAYER.md 4.6, 4.9, 4.12, 6, 8).",
+    "Shared vectors for the detached player (docs/ARCHITECTURE-PLAYER.md 4.6, 4.9, 4.12, 6, 8,",
+    "plus rulings PO-10 and PO-11 in section 16).",
     "Read by BOTH tests/Model.test.js (Model.buildMpvArgv / stopEscalation /",
     "endedVerdict / parseState) and tests/test_player.py + tests/test_state.py",
     "(mpv_launch_argv / stop_escalation / ended_verdict / normalize_state).",
@@ -9,10 +10,44 @@
     "ASCII only: scripts/check.sh greps tests/fixtures/* for non-ASCII bytes."
   ],
   "genericFailure": "Playback stopped unexpectedly",
+  "playerDirs": {
+    "_comment": [
+      "PO-11 / D-PLY-7: where the player may write. mpv's own key bindings are",
+      "live on its window - `s` screenshots, `Q` writes a resume record - and",
+      "both used to land wherever the shell happened to be, in $HOME, at 0644.",
+      "cwd is the runtime directory so an unanticipated relative write is",
+      "private and gone at logout; screenshots are DURABLE because the user",
+      "asked for that file; watch-later is a resume position for a live stream",
+      "and is never worth keeping. Run by Model.playerDirs and player_dirs()."
+    ],
+    "cases": [
+      {
+        "name": "the live paths",
+        "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+        "stateDir": "/home/u/.local/state/omarchy-iptv",
+        "dirs": {
+          "cwd": "/run/user/1000/omarchy-iptv",
+          "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
+          "watchLater": "/run/user/1000/omarchy-iptv/watch-later"
+        }
+      },
+      {
+        "name": "a socket somewhere else takes the runtime pair with it",
+        "socketPath": "/tmp/s.sock",
+        "stateDir": "/home/u/.local/state/omarchy-iptv",
+        "dirs": {
+          "cwd": "/tmp",
+          "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
+          "watchLater": "/tmp/watch-later"
+        }
+      }
+    ]
+  },
   "mpvArgv": [
     {
       "name": "cold launch carries no channel: no URL, no headers, no title, no trailing --",
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [],
       "argv": [
         "mpv",
@@ -24,13 +59,16 @@
         "--title=$>IPTV",
         "--force-media-title=IPTV",
         "--msg-level=all=error",
-        "--ytdl=no"
+        "--ytdl=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later"
       ]
     },
     {
-      "name": "user mpvArgs land after the fixed options so --ytdl=yes still wins",
+      "name": "user mpvArgs land after the fixed options so --ytdl=yes and --screenshot-dir still win",
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
-      "mpvArgs": ["--profile=low-latency", "--ytdl=yes"],
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
+      "mpvArgs": ["--profile=low-latency", "--ytdl=yes", "--screenshot-dir=/home/u/Pictures"],
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -42,13 +80,17 @@
         "--force-media-title=IPTV",
         "--msg-level=all=error",
         "--ytdl=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--profile=low-latency",
-        "--ytdl=yes"
+        "--ytdl=yes",
+        "--screenshot-dir=/home/u/Pictures"
       ]
     },
     {
       "name": "reserved and malformed tokens are dropped by both filters",
       "socketPath": "/tmp/s.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [
         "--log-file=/tmp/mpv.log",
         "--no-log-file",
@@ -81,6 +123,8 @@
         "--force-media-title=IPTV",
         "--msg-level=all=error",
         "--ytdl=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/tmp/watch-later",
         "--hwdec=auto-safe"
       ]
     }

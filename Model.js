@@ -1589,6 +1589,42 @@ function mpvWindowTitle(name) {
   return MPV_RAW_PREFIX + str(name)
 }
 
+// Where the player is allowed to write (PO-11, D-PLY-7). mpv's own key
+// bindings are live on its window and two of them write a durable file: `s`
+// takes a screenshot and `Q` (quit-watch-later) writes a resume record.
+// Before this they landed wherever the shell happened to be - the user's
+// home for the screenshot, mpv's own ~/.local/state/mpv tree for the resume
+// record - at mode 0644, outside every list of files this plugin says it
+// writes.
+//
+//  - `cwd` is the runtime directory (0700, already there for the socket), so
+//    anything still written relative to the process is private and gone at
+//    logout rather than accumulating in $HOME.
+//  - `screenshots` is durable on purpose: the user asked for that file, so
+//    the runtime directory would be data loss at logout. It sits under the
+//    state directory this plugin already owns and documents.
+//  - `watchLater` is a resume position for a live stream, never worth
+//    keeping: private and ephemeral.
+//
+// Mirrored by `player_dirs()` in bin/omarchy-iptv.
+function playerDirs(socketPath, stateDir) {
+  var runtime = dirnameOf(socketPath)
+  return {
+    cwd: runtime,
+    screenshots: str(stateDir) + "/screenshots",
+    watchLater: runtime + "/watch-later"
+  }
+}
+
+// os.path.dirname for the paths this plugin deals in.
+function dirnameOf(path) {
+  var text = str(path)
+  var cut = text.lastIndexOf("/")
+  if (cut < 0) return ""
+  if (cut === 0) return "/"
+  return text.substring(0, cut)
+}
+
 // Full argv for the mpv launch (ARCHITECTURE-PLAYER.md section 6). Nothing
 // channel-specific is here any more: no URL, no trailing "--", no header
 // options and no per-channel title, because all of them travel over the 0600
@@ -1602,6 +1638,7 @@ function mpvWindowTitle(name) {
 // vectors in tests/fixtures/player-argv.json.
 function buildMpvArgv(params) {
   var p = params || {}
+  var dirs = p.dirs || playerDirs(p.socketPath, p.stateDir)
   var argv = [
     "mpv",
     "--input-ipc-server=" + str(p.socketPath),
@@ -1615,7 +1652,15 @@ function buildMpvArgv(params) {
     // Live streams never need yt-dlp; without this mpv shells out to it on
     // every dead URL (seconds of delay and noise per failed zap). User
     // mpvArgs come later, so `--ytdl=yes` can re-enable it (PO-5).
-    "--ytdl=no"
+    "--ytdl=no",
+    // PO-11: the two directories mpv's own key bindings write into, named
+    // rather than inherited. `--screenshot-dir` is deliberately NOT reserved
+    // - user tokens land after these, so anyone who wants their screenshots
+    // in ~/Pictures can still say so - while `--watch-later-dir` IS
+    // reserved, because a resume record naming a stream path has no business
+    // being pointed back at $HOME.
+    "--screenshot-dir=" + str(dirs.screenshots),
+    "--watch-later-dir=" + str(dirs.watchLater)
   ]
   return argv.concat(asList(p.extraArgs))
 }
@@ -3831,6 +3876,8 @@ if (typeof module !== "undefined") {
     headerArgs: headerArgs,
     MPV_RAW_PREFIX: MPV_RAW_PREFIX,
     mpvWindowTitle: mpvWindowTitle,
+    dirnameOf: dirnameOf,
+    playerDirs: playerDirs,
     buildMpvArgv: buildMpvArgv,
     MPV_RESERVED: MPV_RESERVED,
     // ---- detached player (M2-02)
