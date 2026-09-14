@@ -426,7 +426,7 @@ check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpv
 check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 check("buildMpvArgv user args come last", argv[argv.length - 1], "--profile=low-latency")
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache"])
 
 // ---- PO-11 / D-PLY-7: the player writes where it is told, not where it ----
 // mpv's own keys are live on its window: `s` writes a screenshot and `Q` a
@@ -451,6 +451,27 @@ checkCall("a user who wants their screenshots elsewhere still wins (last token w
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
 }, true)
 check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
+
+// ---- D-PLY-10 / CL2: mpv's own caches contained, ephemeral, unreserved ----
+// Without these mpv compiles its shaders into $XDG_CACHE_HOME/mpv/, two
+// files at 0600 per containment cycle, outside every list of files this
+// plugin says it writes. The cache is content-free and regenerable, so it
+// goes in the runtime directory and dies at logout: no durable path, nothing
+// to clean up at uninstall.
+checkCall("the shader cache is inside the runtime directory, never the user's cache", () => {
+  const d = Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR)
+  return [d.shaderCache, d.shaderCache.indexOf("/run/user/1000/omarchy-iptv/") === 0, d.shaderCache.indexOf(STATE_DIR) === 0]
+}, ["/run/user/1000/omarchy-iptv/shader-cache", true, false])
+checkCall("the launch argv aims both of mpv's caches at it", () => {
+  const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR })
+  return [a.indexOf("--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache") !== -1, a.indexOf("--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache") !== -1]
+}, [true, true])
+checkCall("neither cache option is reserved (CL2: the list is a privacy instrument) and a user token still wins", () => {
+  const r = Model.splitMpvArgs("--gpu-shader-cache-dir=/home/u/.cache/shaders --icc-cache-dir=/home/u/.cache/icc")
+  const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
+  return [r.rejected, a.indexOf("--gpu-shader-cache-dir=/shader-cache") < a.lastIndexOf("--gpu-shader-cache-dir=/home/u/.cache/shaders")]
+}, [[], true])
+
 
 // ---- MPV_RESERVED, ten additions (ARCHITECTURE-PLAYER.md 4.12) ----
 const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit", "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3", "--term-status-msg", "--screenshot-template"]

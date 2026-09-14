@@ -18,7 +18,11 @@
       "cwd is the runtime directory so an unanticipated relative write is",
       "private and gone at logout; screenshots are DURABLE because the user",
       "asked for that file; watch-later is a resume position for a live stream",
-      "and is never worth keeping. Run by Model.playerDirs and player_dirs()."
+      "and is never worth keeping. D-PLY-10 / CL2 adds shader-cache: mpv's own",
+      "shader and ICC caches default into $XDG_CACHE_HOME/mpv/, outside this",
+      "plugin's tree; both are content-free and regenerable, so they are",
+      "contained in the runtime directory and are ephemeral on purpose.",
+      "Run by Model.playerDirs and player_dirs()."
     ],
     "cases": [
       {
@@ -28,17 +32,19 @@
         "dirs": {
           "cwd": "/run/user/1000/omarchy-iptv",
           "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
-          "watchLater": "/run/user/1000/omarchy-iptv/watch-later"
+          "watchLater": "/run/user/1000/omarchy-iptv/watch-later",
+          "shaderCache": "/run/user/1000/omarchy-iptv/shader-cache"
         }
       },
       {
-        "name": "a socket somewhere else takes the runtime pair with it",
+        "name": "a socket somewhere else takes the runtime trio with it",
         "socketPath": "/tmp/s.sock",
         "stateDir": "/home/u/.local/state/omarchy-iptv",
         "dirs": {
           "cwd": "/tmp",
           "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
-          "watchLater": "/tmp/watch-later"
+          "watchLater": "/tmp/watch-later",
+          "shaderCache": "/tmp/shader-cache"
         }
       }
     ]
@@ -61,14 +67,16 @@
         "--msg-level=all=error",
         "--ytdl=no",
         "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
-        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later"
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache"
       ]
     },
     {
-      "name": "user mpvArgs land after the fixed options so --ytdl=yes and --screenshot-dir still win",
+      "name": "user mpvArgs land after the fixed options so --ytdl=yes, --screenshot-dir and the caches still win",
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
       "stateDir": "/home/u/.local/state/omarchy-iptv",
-      "mpvArgs": ["--profile=low-latency", "--ytdl=yes", "--screenshot-dir=/home/u/Pictures"],
+      "mpvArgs": ["--profile=low-latency", "--ytdl=yes", "--screenshot-dir=/home/u/Pictures", "--gpu-shader-cache-dir=/home/u/.cache/shaders"],
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -82,9 +90,12 @@
         "--ytdl=no",
         "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--profile=low-latency",
         "--ytdl=yes",
-        "--screenshot-dir=/home/u/Pictures"
+        "--screenshot-dir=/home/u/Pictures",
+        "--gpu-shader-cache-dir=/home/u/.cache/shaders"
       ]
     },
     {
@@ -125,6 +136,8 @@
         "--ytdl=no",
         "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
         "--watch-later-dir=/tmp/watch-later",
+        "--gpu-shader-cache-dir=/tmp/shader-cache",
+        "--icc-cache-dir=/tmp/shader-cache",
         "--hwdec=auto-safe"
       ]
     }

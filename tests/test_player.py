@@ -444,6 +444,7 @@ class WorkingDirectoryTest(PlayerTestCase):
         self.env(XDG_STATE_HOME=self.state)
         self.shots = os.path.join(self.state, "omarchy-iptv", "screenshots")
         self.later = os.path.join(self.runtime, "watch-later")
+        self.shaders = os.path.join(self.runtime, "shader-cache")
 
     def test_the_player_is_given_a_directory_instead_of_inheriting_one(self):
         # The whole defect in one assertion: whatever the caller's directory
@@ -472,6 +473,54 @@ class WorkingDirectoryTest(PlayerTestCase):
             self.assertTrue(os.path.isdir(path), path)
             self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o700, path)
         self.assertEqual(payload["warnings"], [])
+
+    def test_the_shader_cache_is_contained_in_the_runtime_directory(self):
+        """D-PLY-10 / CL2. mpv compiles its shaders into $XDG_CACHE_HOME/mpv/
+        otherwise - two files at 0600 per containment cycle, outside every
+        list of files this plugin says it writes. The cache is content-free
+        and regenerable, so it goes in the runtime directory: 0700 already,
+        documented already, gone at logout, and it adds no durable path and
+        nothing to clean up at uninstall.
+
+        What this proves is that the argv is built and the directory exists
+        at the right mode. That mpv actually honours the option instead of
+        writing to ~/.cache/mpv needs a GPU video output, which needs a
+        window, which belongs to the display lane.
+        """
+        cache_home = os.path.join(self.dir, "xdg-cache")
+        self.env(XDG_CACHE_HOME=cache_home)
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        argv = self.spawned_argv()[0]
+        self.assertIn("--gpu-shader-cache-dir=%s" % self.shaders, argv)
+        self.assertIn("--icc-cache-dir=%s" % self.shaders, argv)
+        self.assertTrue(os.path.isdir(self.shaders))
+        self.assertEqual(stat.S_IMODE(os.stat(self.shaders).st_mode), 0o700)
+        self.assertEqual(payload["warnings"], [])
+        # Ephemeral by ruling: under the runtime directory, never under the
+        # state directory the plugin has to clean up, and never in the
+        # user's cache.
+        self.assertTrue(self.shaders.startswith(self.runtime + os.sep))
+        self.assertFalse(self.shaders.startswith(self.state))
+        self.assertFalse(os.path.exists(os.path.join(cache_home, "mpv")))
+
+    def test_neither_cache_option_is_reserved_so_a_user_token_still_wins(self):
+        # CL2: MPV_RESERVED is a privacy instrument - --watch-later-dir is on
+        # it because a resume record names a stream path. A content-free
+        # shader cache is not that, so containment here is a default, not a
+        # guarantee, and the user's own token lands after ours.
+        mine = os.path.join(self.dir, "my-shaders")
+        code, payload, _, stderr = self.player_start("--mpv-arg=--gpu-shader-cache-dir=%s" % mine,
+                                                     "--mpv-arg=--icc-cache-dir=%s" % mine)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["warnings"], [])
+        argv = self.spawned_argv()[0]
+        self.assertLess(argv.index("--gpu-shader-cache-dir=%s" % self.shaders),
+                        argv.index("--gpu-shader-cache-dir=%s" % mine))
+        self.assertLess(argv.index("--icc-cache-dir=%s" % self.shaders),
+                        argv.index("--icc-cache-dir=%s" % mine))
+        self.assertNotIn("--gpu-shader-cache-dir", helper.MPV_RESERVED)
+        self.assertNotIn("--icc-cache-dir", helper.MPV_RESERVED)
 
     def test_a_screenshot_lands_in_the_documented_directory_at_0600(self):
         self.env(STUB_MPV_SHOT="1")

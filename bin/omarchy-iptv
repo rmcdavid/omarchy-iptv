@@ -2034,12 +2034,22 @@ def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, 
       lives under the state directory this plugin already owns and documents.
     - `watchLater` is a resume position for a live stream, which is never
       worth keeping: ephemeral, private, gone at logout.
+    - `shaderCache` is D-PLY-10, ruling CL2: mpv compiles its shaders into
+      $XDG_CACHE_HOME/mpv/ otherwise, which is outside every list of files
+      this plugin says it writes. A shader cache is content-free and
+      regenerable - it is not keyed to anything that was watched - so the
+      runtime directory is the right home: already 0700, already documented,
+      gone at logout, and it adds NO durable path and nothing to clean up at
+      uninstall. Containment here is a sensible default, not a guarantee:
+      neither option is reserved, because MPV_RESERVED is a privacy
+      instrument and a content-free cache does not belong on it (CL2).
     """
     runtime = os.path.dirname(sock_path)
     return {
         "cwd": runtime,
         "screenshots": os.path.join(state_dir(state_override), "screenshots"),
         "watchLater": os.path.join(runtime, "watch-later"),
+        "shaderCache": os.path.join(runtime, "shader-cache"),
     }
 
 
@@ -2057,6 +2067,11 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     reserved and user tokens land after these. `--watch-later-dir` IS
     reserved, because a resume record naming a stream path has no business
     being redirected back into $HOME.
+
+    The two cache directories are D-PLY-10 / CL2, in the same shape and for
+    the same reason: mpv's shader and ICC caches default into
+    $XDG_CACHE_HOME/mpv/, outside this plugin's tree. Neither is reserved -
+    both are content-free - so a user token can still point them elsewhere.
     """
     where = dirs or player_dirs(sock_path)
     return [
@@ -2072,6 +2087,8 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
         "--ytdl=no",
         "--screenshot-dir=%s" % where["screenshots"],
         "--watch-later-dir=%s" % where["watchLater"],
+        "--gpu-shader-cache-dir=%s" % where["shaderCache"],
+        "--icc-cache-dir=%s" % where["shaderCache"],
     ] + list(mpv_args or [])
 
 
@@ -2731,9 +2748,10 @@ def ensure_player_dirs(dirs: dict[str, str], warnings: list[str]) -> None:
     closed. Creating it here first settles the mode. A failure is not worth
     refusing a play over: the option still goes on argv, mpv reports its own
     error into the launch window, and the user is told which directory the
-    plugin could not make.
+    plugin could not make. `shaderCache` (D-PLY-10) joins them for the same
+    reason: mpv would otherwise create it itself, at its own mode.
     """
-    for key in ("screenshots", "watchLater"):
+    for key in ("screenshots", "watchLater", "shaderCache"):
         try:
             ensure_private_dir(dirs[key])
         except OSError as error:
