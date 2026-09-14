@@ -1605,6 +1605,11 @@ function mpvWindowTitle(name) {
 //    state directory this plugin already owns and documents.
 //  - `watchLater` is a resume position for a live stream, never worth
 //    keeping: private and ephemeral.
+//  - `shaderCache` is D-PLY-10, ruling CL2: without it mpv compiles its
+//    shaders into $XDG_CACHE_HOME/mpv/, outside every list of files this
+//    plugin says it writes. The cache is content-free and regenerable, so it
+//    belongs in the runtime directory - already 0700, already documented,
+//    gone at logout - and adds no durable path and nothing to clean up.
 //
 // Mirrored by `player_dirs()` in bin/omarchy-iptv.
 function playerDirs(socketPath, stateDir) {
@@ -1612,7 +1617,8 @@ function playerDirs(socketPath, stateDir) {
   return {
     cwd: runtime,
     screenshots: str(stateDir) + "/screenshots",
-    watchLater: runtime + "/watch-later"
+    watchLater: runtime + "/watch-later",
+    shaderCache: runtime + "/shader-cache"
   }
 }
 
@@ -1660,7 +1666,13 @@ function buildMpvArgv(params) {
     // reserved, because a resume record naming a stream path has no business
     // being pointed back at $HOME.
     "--screenshot-dir=" + str(dirs.screenshots),
-    "--watch-later-dir=" + str(dirs.watchLater)
+    "--watch-later-dir=" + str(dirs.watchLater),
+    // D-PLY-10 / CL2: mpv's shader and ICC caches default into
+    // $XDG_CACHE_HOME/mpv/, outside this plugin's tree. Contained in the
+    // runtime directory, ephemeral. Neither option is reserved - both caches
+    // are content-free - so user tokens after these can still move them.
+    "--gpu-shader-cache-dir=" + str(dirs.shaderCache),
+    "--icc-cache-dir=" + str(dirs.shaderCache)
   ]
   return argv.concat(asList(p.extraArgs))
 }
@@ -1742,6 +1754,46 @@ function playerProbeArgv(socket, ownerPid) {
   var pid = Math.floor(Number(ownerPid))
   if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)])
   return argv
+}
+
+// ---- D-PLY-11 step one: the play fork, WRITTEN DOWN, not yet wired ----
+//
+// CHARACTERISATION ONLY. This is what the shell decides today when a channel
+// is asked for, lifted here so it can be stated in vectors instead of living
+// where no test can reach it (CLAUDE.md 12). Nothing calls it yet: wiring it,
+// and changing what it answers, is a later lane's work and needs the display
+// lane's evidence first.
+//
+// It is written from the described behaviour of the shell's play(), its
+// `playerUp` definition and its one-helper-at-a-time control slot, NOT from
+// reading Service.qml - this lane may not open that file. Whoever wires it
+// must check it against the shipping fork first; if they disagree, the
+// shipping fork is right and this is the bug.
+//
+//   start  spawn or adopt a player and play there (`player start`)
+//   zap    a running player, switch it over the socket (`play`)
+//   queue  a zap is already in flight; remember the intent instead
+//
+// The row that matters for D-PLY-11 is `playerPending && !socketAttached`:
+// the player is starting and has not bound its socket, `playerUp` is already
+// true because pending counts, and the fork therefore answers "zap" - a zap
+// aimed at a socket nothing is listening on yet. `playForkBlind` names
+// exactly that state so the question "did this burst take it?" has a
+// machine-checkable answer. It is a hypothesis with a rate that fits the
+// evidence, not a traced cause, and it is deliberately not fixed here.
+function playFork(state) {
+  var s = state || {}
+  var playerUp = !!s.socketAttached || !!s.playerPending
+  if (!playerUp || s.stopping) return "start"
+  if (s.controlBusy) return "queue"
+  return "zap"
+}
+
+// True when the fork above sends a zap at a player that has not bound its
+// socket yet. Reporting only - it changes nothing.
+function playForkBlind(state) {
+  var s = state || {}
+  return playFork(s) === "zap" && !s.socketAttached
 }
 
 function playerOrphanCheckArgv(socket, ownerPid, graceSec) {
@@ -3890,6 +3942,8 @@ if (typeof module !== "undefined") {
     playerRestartArgv: playerRestartArgv,
     playerProbeArgv: playerProbeArgv,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
+    playFork: playFork,
+    playForkBlind: playForkBlind,
     playerStash: playerStash,
     parsePlayerProbe: parsePlayerProbe,
     parsePlayerEvent: parsePlayerEvent,

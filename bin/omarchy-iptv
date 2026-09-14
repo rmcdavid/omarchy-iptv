@@ -1922,6 +1922,10 @@ DEFAULT_FIRST_LOAD_TIMEOUT = 3.0
 DEFAULT_ORPHAN_GRACE = 6.0
 LOCK_POLL_S = 0.05
 LOCK_RETRIES = 5
+# X1/X2: the two settle call sites that hold no lock of their own take one
+# briefly. Short on purpose - a probe that cannot have it simply does not
+# unlink, which is the safe half of the decision.
+SETTLE_LOCK_TIMEOUT = 0.5
 SPAWN_POLL_S = 0.02
 STOP_POLL_S = 0.05
 LAUNCH_STDERR_MAX = 4096          # PO-6: the launch window's stderr, memory only
@@ -2034,12 +2038,22 @@ def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, 
       lives under the state directory this plugin already owns and documents.
     - `watchLater` is a resume position for a live stream, which is never
       worth keeping: ephemeral, private, gone at logout.
+    - `shaderCache` is D-PLY-10, ruling CL2: mpv compiles its shaders into
+      $XDG_CACHE_HOME/mpv/ otherwise, which is outside every list of files
+      this plugin says it writes. A shader cache is content-free and
+      regenerable - it is not keyed to anything that was watched - so the
+      runtime directory is the right home: already 0700, already documented,
+      gone at logout, and it adds NO durable path and nothing to clean up at
+      uninstall. Containment here is a sensible default, not a guarantee:
+      neither option is reserved, because MPV_RESERVED is a privacy
+      instrument and a content-free cache does not belong on it (CL2).
     """
     runtime = os.path.dirname(sock_path)
     return {
         "cwd": runtime,
         "screenshots": os.path.join(state_dir(state_override), "screenshots"),
         "watchLater": os.path.join(runtime, "watch-later"),
+        "shaderCache": os.path.join(runtime, "shader-cache"),
     }
 
 
@@ -2057,6 +2071,11 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     reserved and user tokens land after these. `--watch-later-dir` IS
     reserved, because a resume record naming a stream path has no business
     being redirected back into $HOME.
+
+    The two cache directories are D-PLY-10 / CL2, in the same shape and for
+    the same reason: mpv's shader and ICC caches default into
+    $XDG_CACHE_HOME/mpv/, outside this plugin's tree. Neither is reserved -
+    both are content-free - so a user token can still point them elsewhere.
     """
     where = dirs or player_dirs(sock_path)
     return [
@@ -2072,6 +2091,8 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
         "--ytdl=no",
         "--screenshot-dir=%s" % where["screenshots"],
         "--watch-later-dir=%s" % where["watchLater"],
+        "--gpu-shader-cache-dir=%s" % where["shaderCache"],
+        "--icc-cache-dir=%s" % where["shaderCache"],
     ] + list(mpv_args or [])
 
 
@@ -2514,15 +2535,70 @@ def socket_is_dead(sock_path: str) -> bool:
     return False
 
 
-def settle_socket(sock_path: str) -> bool:
+def settle_socket(sock_path: str, deadline: float | None = None) -> bool:
     """Unlink the socket only once nothing is listening and nothing of ours
     is running (S_ISSOCK-guarded), so a racing start's fresh socket is never
-    deleted. mpv never unlinks its own socket on any exit path."""
-    if find_player(sock_path):
+    deleted. mpv never unlinks its own socket on any exit path.
+
+    D-PLY-8: after a SIGKILL those two facts do not become true at the same
+    instant. A killed process runs exit_mm first, so its command line is
+    already empty at the first sample - 0.13-0.31 ms, 8/8 on real headless
+    mpv 0.41 here - while its listening socket stays bound for another
+    2.7-4.9 ms (and far longer for a windowed player, which tears down a GPU
+    context, a Wayland connection and decoder buffers as well). The stop path
+    asks both questions 4.5-7.5 ms after the kill: one /proc scan (3.7-4.9 ms
+    for 225 pids on this box) after wait_for_exit wins on its first check.
+    Ask once and the answer can be "not yet", after which nothing asks again
+    and the socket file is left on disk until the next helper call.
+
+    So with a `deadline` both guards are re-checked until they agree or the
+    time is up. This NEVER widens the conditions - a racing spawn seen by
+    find_player, a successful connect (a wedged player answering through its
+    backlog) and a timed-out connect all still block the unlink, every
+    iteration - it only stops giving up after one look.
+
+    With `deadline=None` the behaviour is byte-identical to before: one check
+    of each guard, no sleep. That is what every call site outside the stop
+    ladder gets.
+
+    The deadline is absolute and comes from the rung that is already waiting
+    (4.9), so the settle spends time the ladder had reserved and never adds
+    any. Worst case it overruns by one refused-connect timeout, the 0.2 s
+    inside socket_is_dead, which is bounded and cannot repeat.
+    """
+    while True:
+        if find_player(sock_path):
+            return False
+        if socket_is_dead(sock_path):
+            return unlink_stale_socket(sock_path)
+        if deadline is None or _monotonic() >= deadline:
+            return False
+        _sleep(min(STOP_POLL_S, max(0.0, deadline - _monotonic())))
+
+
+def settle_under_lock(sock_path: str, deadline: float | None = None,
+                      lock_timeout: float = SETTLE_LOCK_TIMEOUT) -> bool:
+    """The settle for the two call sites that hold no lock of their own
+    (X1/X2, ruling CL8).
+
+    The unlink is only safe with the player lock held across the check AND
+    the unlink: a `player start` that binds a fresh socket between this
+    settle's refused connect and its os.unlink would have the NEW socket
+    deleted. player_stop has always been safe that way (it settles inside its
+    own lock); player_probe and player_orphan_check were not.
+
+    A call site that cannot take the lock does not unlink. Another verb owns
+    the socket at this instant and will settle it itself, and neither of
+    these two verbs is worth failing over a leftover file.
+    """
+    try:
+        lock_fd = acquire_lock(player_lock_path(sock_path), lock_timeout)
+    except (HelperError, OSError):
         return False
-    if not socket_is_dead(sock_path):
-        return False
-    return unlink_stale_socket(sock_path)
+    try:
+        return settle_socket(sock_path, deadline)
+    finally:
+        release_lock(lock_fd)
 
 
 def wait_for_exit(targets: list[dict[str, Any]], sock_path: str, wait_ms: int) -> bool:
@@ -2561,8 +2637,17 @@ def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = 
     from /proc rather than from `get_property pid`, so a wedged mpv (the case
     the ladder exists for, where IPC is by definition dead) is reachable.
     `stop_escalation()` drives the rungs so the shared vectors really govern.
+
+    `deadline` in the reply is the absolute monotonic instant the rung that
+    actually ran would have kept waiting until. The kill rung reserves 500 ms
+    (`stop_escalation("term")` gives waitMs 0, so `grace` falls back to
+    STOP_SETTLE_MS) and spends about 0.3 ms of it, because wait_for_exit
+    checks before it sleeps and a killed process is gone at once. Handing
+    that instant to the settle (D-PLY-8) spends time the ladder had already
+    reserved rather than adding any, so the stop cannot run longer than the
+    published timeline whatever the teardown does.
     """
-    result: dict[str, Any] = {"rung": "", "running": True}
+    result: dict[str, Any] = {"rung": "", "running": True, "deadline": None}
     stage = STOP_STAGE_BEFORE.get(from_rung or "", "")
     for _ in range(3):
         step = stop_escalation(stage)
@@ -2578,6 +2663,12 @@ def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = 
         # with the full grace still ahead of it) and keeps the guarantee
         # that it is asked politely first.
         rung_started = _monotonic()
+        grace = int(step["waitMs"]) or STOP_SETTLE_MS
+        # Recorded before the rung acts, so every exit below reports the
+        # window this rung owned - including the one where there was nothing
+        # left to signal, which is precisely when a socket can still be bound
+        # by a process the finder can no longer see.
+        result["deadline"] = rung_started + grace / 1000.0
         if action == "quit":
             quit_over_ipc(sock_path, ipc_timeout)
             result["rung"] = "quit"
@@ -2588,12 +2679,12 @@ def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = 
             result["rung"] = action
         else:
             break
-        grace = int(step["waitMs"]) or STOP_SETTLE_MS
         spent = int((_monotonic() - rung_started) * 1000.0)
         if wait_for_exit(targets, sock_path, max(0, grace - spent)):
             result["running"] = False
             return result
         stage = action
+    result["deadline"] = _monotonic() + STOP_SETTLE_MS / 1000.0
     result["running"] = not wait_for_exit(targets, sock_path, STOP_SETTLE_MS)
     return result
 
@@ -2731,9 +2822,10 @@ def ensure_player_dirs(dirs: dict[str, str], warnings: list[str]) -> None:
     closed. Creating it here first settles the mode. A failure is not worth
     refusing a play over: the option still goes on argv, mpv reports its own
     error into the launch window, and the user is told which directory the
-    plugin could not make.
+    plugin could not make. `shaderCache` (D-PLY-10) joins them for the same
+    reason: mpv would otherwise create it itself, at its own mode.
     """
-    for key in ("screenshots", "watchLater"):
+    for key in ("screenshots", "watchLater", "shaderCache"):
         try:
             ensure_private_dir(dirs[key])
         except OSError as error:
@@ -2861,7 +2953,11 @@ def player_stop(args: argparse.Namespace) -> int:
             emit({"ok": True, "kind": "player.stop", "running": False, "rung": "", "pid": None})
             return EXIT_OK
         result = stop_ladder(sock, found, args.from_rung, args.ipc_timeout)
-        settle_socket(sock)
+        # D-PLY-8. The only settle in the file that gets a deadline, and the
+        # only one already inside the player lock - which is what makes an
+        # unlink safe across the wait. The deadline is the ladder's own,
+        # nearly all of it unspent.
+        settle_socket(sock, result.get("deadline"))
         emit({"ok": True, "kind": "player.stop", "running": bool(result["running"]),
               "rung": result["rung"], "pid": int(found[0]["pid"])})
         return EXIT_OK
@@ -2889,7 +2985,12 @@ def player_probe(args: argparse.Namespace) -> int:
         client = probe_client(sock, args.ipc_timeout) if found else None
         if client is None:
             if not found:
-                settle_socket(sock)
+                # X2 / CL8: under the lock, because check-then-unlink without
+                # it can delete a racing start's FRESH socket. Never with a
+                # deadline - the probe is a read, and a waiting unlink at an
+                # unlocked-by-nature call site would lengthen the very
+                # exposure being closed.
+                settle_under_lock(sock)
             emit(payload)
             return EXIT_OK
         try:
@@ -2954,7 +3055,11 @@ def player_orphan_check(args: argparse.Namespace) -> int:
             emit({"ok": True, "kind": "player.orphan-check", "stopped": False, "reason": "owner_dead"})
             return EXIT_OK
         result = stop_ladder(sock, found, "", args.ipc_timeout)
-        settle_socket(sock)
+        # X1 / CL8: same reasoning as the probe. This one runs the ladder
+        # first, so the socket it is about to unlink belonged to a player it
+        # just reaped - and a start racing it is exactly the case the lock
+        # exists for. No deadline here either.
+        settle_under_lock(sock)
         emit({"ok": True, "kind": "player.orphan-check", "stopped": not result["running"],
               "reason": "owner_alive", "rung": result["rung"]})
         return EXIT_OK

@@ -10,10 +10,37 @@ const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join
 let failures = 0
 let checks = 0
 
+// How a value is rendered for comparison. NOT JSON.stringify on its own
+// (audit F8): `JSON.stringify(undefined)` is the value `undefined`, so
+// `check(name, Model.gone(), undefined)` compared undefined with undefined
+// and passed whatever `gone()` did - including not existing. stringify also
+// DROPS undefined object properties and renders NaN and Infinity as null, so
+// `{a: undefined}` read equal to `{}` and `[undefined]` equal to `[null]`.
+// Each of those is the difference between a check and a decoration, which is
+// the whole class this round is closing. The tokens are spelled with angle
+// brackets so they cannot be produced by JSON of a number, and a literal
+// string that spells one is the one (documented) way to fool this.
+function show(value) {
+  if (value === undefined) return "<undefined>"
+  return JSON.stringify(value, function (key, held) {
+    if (held === undefined) return "<undefined>"
+    if (typeof held === "number" && !isFinite(held)) return "<" + String(held) + ">"
+    return held
+  })
+}
+
 function check(name, actual, expected) {
   checks++
-  const a = JSON.stringify(actual)
-  const e = JSON.stringify(expected)
+  // An undefined expectation is never an assertion: it is what you get from
+  // a typo'd property, a renamed export or a helper that returns nothing.
+  if (expected === undefined) {
+    failures++
+    console.log("FAIL " + name + "\n     the expectation is undefined - assert an explicit value"
+      + "\n     got:  " + show(actual))
+    return
+  }
+  const a = show(actual)
+  const e = show(expected)
   if (a === e) {
     console.log("ok   " + name)
   } else {
@@ -35,6 +62,31 @@ function checkCall(name, produce, expected) {
   }
   check(name, actual, expected)
 }
+
+// ---- the runner's own comparison (audit F8) ----
+// Every one of these passed against the JSON.stringify comparison this file
+// shipped with, which is why they are here: a runner that cannot tell
+// "absent" from "equal" makes every check below it worth less than it looks.
+check("runner: undefined is not null and is rendered, not swallowed", [show(undefined) === show(null), show(undefined)], [false, "<undefined>"])
+check("runner: an undefined property is not an absent one", show({ a: undefined }) === show({}), false)
+check("runner: a hole in an array is not a null", show([undefined]) === show([null]), false)
+check("runner: NaN and Infinity are not null", [show(NaN) === show(null), show(Infinity) === show(null)], [false, false])
+check("runner: equal values still compare equal", [show({ a: 1, b: [null, "x"] }) === show({ a: 1, b: [null, "x"] }), show(0) === show(-0)], [true, true])
+;(function () {
+  // The guard itself: an undefined *expectation* must fail. Run one check
+  // with its output swallowed, then put the counters back - that deliberate
+  // failure is not a real one, and the swallowed check is not a real check.
+  const wasFailures = failures
+  const wasChecks = checks
+  const log = console.log
+  console.log = function () {}
+  check("(swallowed)", undefined, undefined)
+  console.log = log
+  const verdict = failures - wasFailures
+  failures = wasFailures
+  checks = wasChecks
+  check("runner: an undefined expectation is a failure, never a pass", verdict, 1)
+})()
 
 const SEP = " \u00b7 "
 
@@ -374,7 +426,7 @@ check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpv
 check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 check("buildMpvArgv user args come last", argv[argv.length - 1], "--profile=low-latency")
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache"])
 
 // ---- PO-11 / D-PLY-7: the player writes where it is told, not where it ----
 // mpv's own keys are live on its window: `s` writes a screenshot and `Q` a
@@ -399,6 +451,43 @@ checkCall("a user who wants their screenshots elsewhere still wins (last token w
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
 }, true)
 check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
+
+// ---- D-PLY-11 step one: the play fork as it is TODAY (characterisation) ----
+// These record the decision, they do not prescribe it. The third row is the
+// one D-PLY-11 turns on: with a start in flight and no socket bound yet, the
+// fork still answers "zap" - a channel change aimed at a socket nothing is
+// listening on. Whether that is what actually went wrong in the field is the
+// display lane's question; nothing here is wired to anything, and the fix is
+// not this round's.
+checkCall("play fork: nothing running is a start", () => Model.playFork({ playerPending: false, socketAttached: false, stopping: false, controlBusy: false }), "start")
+checkCall("play fork: an attached player is a zap", () => Model.playFork({ playerPending: false, socketAttached: true, stopping: false, controlBusy: false }), "zap")
+checkCall("play fork: a start in flight with no socket yet is STILL a zap today, and that is the hazard", () => [Model.playFork({ playerPending: true, socketAttached: false, stopping: false, controlBusy: false }), Model.playForkBlind({ playerPending: true, socketAttached: false })], ["zap", true])
+checkCall("play fork: a zap at an attached player is not blind", () => Model.playForkBlind({ playerPending: true, socketAttached: true }), false)
+checkCall("play fork: stopping always goes back through a start", () => [Model.playFork({ playerPending: true, socketAttached: true, stopping: true }), Model.playFork({ playerPending: false, socketAttached: true, stopping: true })], ["start", "start"])
+checkCall("play fork: one control helper at a time, so a second intent queues", () => [Model.playFork({ socketAttached: true, controlBusy: true }), Model.playForkBlind({ playerPending: true, controlBusy: true })], ["queue", false])
+checkCall("play fork: no state at all is a start, never a zap into nothing", () => [Model.playFork(null), Model.playFork({}), Model.playForkBlind(null)], ["start", "start", false])
+
+
+// ---- D-PLY-10 / CL2: mpv's own caches contained, ephemeral, unreserved ----
+// Without these mpv compiles its shaders into $XDG_CACHE_HOME/mpv/, two
+// files at 0600 per containment cycle, outside every list of files this
+// plugin says it writes. The cache is content-free and regenerable, so it
+// goes in the runtime directory and dies at logout: no durable path, nothing
+// to clean up at uninstall.
+checkCall("the shader cache is inside the runtime directory, never the user's cache", () => {
+  const d = Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR)
+  return [d.shaderCache, d.shaderCache.indexOf("/run/user/1000/omarchy-iptv/") === 0, d.shaderCache.indexOf(STATE_DIR) === 0]
+}, ["/run/user/1000/omarchy-iptv/shader-cache", true, false])
+checkCall("the launch argv aims both of mpv's caches at it", () => {
+  const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR })
+  return [a.indexOf("--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache") !== -1, a.indexOf("--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache") !== -1]
+}, [true, true])
+checkCall("neither cache option is reserved (CL2: the list is a privacy instrument) and a user token still wins", () => {
+  const r = Model.splitMpvArgs("--gpu-shader-cache-dir=/home/u/.cache/shaders --icc-cache-dir=/home/u/.cache/icc")
+  const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
+  return [r.rejected, a.indexOf("--gpu-shader-cache-dir=/shader-cache") < a.lastIndexOf("--gpu-shader-cache-dir=/home/u/.cache/shaders")]
+}, [[], true])
+
 
 // ---- MPV_RESERVED, ten additions (ARCHITECTURE-PLAYER.md 4.12) ----
 const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit", "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3", "--term-status-msg", "--screenshot-template"]
