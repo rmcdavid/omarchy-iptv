@@ -16,6 +16,14 @@ M2-02, the detached player. Playback no longer belongs to the shell.
 - No stream address, credential or header value reaches any command line, on
   any channel including the first. The player starts empty and receives
   everything over a private socket. This closes finding S-03.
+- The player no longer inherits your home directory. A screenshot taken with
+  its own `s` key used to land in your home folder readable by anyone on the
+  machine; it now goes to the plugin's own state directory, readable only by
+  you. A resume position saved with `Shift+Q` was doing the same thing and is
+  now contained as well.
+- Options that hand a stream address to another program, such as enabling the
+  download helper, now raise a warning in the guide when you use them. The
+  options still work; ruling PO-5 keeps them available deliberately.
 
 ### Fixed
 - A stop that lost a sequence race used to be a silent no-op, leaving the

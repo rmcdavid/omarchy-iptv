@@ -185,6 +185,13 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   you open it.
 - Channel names are shown verbatim except that leading dashes are stripped
   and mpv property expansion is disabled for the window title.
+- The player's own keys work. mpv's normal key bindings are live on the
+  player window, and two of them write files. `s` saves a screenshot to
+  `~/.local/state/omarchy-iptv/screenshots/`, and `Shift+Q` saves a resume
+  position under `$XDG_RUNTIME_DIR/omarchy-iptv/watch-later/`, which is
+  cleared when you log out. Both are readable only by you. Screenshots used
+  to land in your home directory readable by anyone on the machine; to put
+  them somewhere else, add `--screenshot-dir=/path` to `mpvArgs`.
 
 ## Limits
 
@@ -205,6 +212,8 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
   played, and the Sources history including their URLs (mode 0600)
+- `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
+  player's own `s` key (mode 0600)
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is
   running, and a small lock file used to guarantee only one player exists
 
