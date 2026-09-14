@@ -1777,7 +1777,7 @@ Item {
           onTextKey: function(text) {
             if (root.inSources) { root.handleSourcesLetter(text); return }
             // Backspace and Delete both have a one-character event.text
-            // ("\b", "") and reach this handler, so without the
+            // ("\b", "\u007f") and reach this handler, so without the
             // control guard they would commit the buffer before
             // handleSharedKey could see them (2.9).
             if (text.charCodeAt(0) < 32 || text.charCodeAt(0) === 127) return

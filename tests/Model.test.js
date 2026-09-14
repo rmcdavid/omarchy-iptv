@@ -995,7 +995,7 @@ check("sanitizeInput caps at the limit in UTF-16 units", Model.sanitizeInput("ab
 check("sanitizeInput null / number", [Model.sanitizeInput(null, 5), Model.sanitizeInput(42, 5)], ["", "42"])
 check("sanitizeInput default cap is the URL cap", Model.sanitizeInput("x".repeat(3000)).length, 2048)
 check("sanitizeTyping keeps edges (a label can be typed with spaces)", Model.sanitizeTyping(" NAS \n", 10), " NAS ")
-check("sanitizeTyping still caps and strips controls", Model.sanitizeTyping("a bcdefgh", 4), "abcd")
+check("sanitizeTyping still caps and strips controls", Model.sanitizeTyping("a\u0000bcdefgh", 4), "abcd")
 
 // ---- validateSourceUrl: every case of the shared fixture (SR6) ----
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-urls.json"), "utf8"))
@@ -2099,7 +2099,7 @@ check("CN5.2: an index built from a different array cannot index out of range", 
 check("CN3: channelOrderOf is total, and unreadable input means the safe default", [Model.channelOrderOf("number"), Model.channelOrderOf("Number"), Model.channelOrderOf(" number "), Model.channelOrderOf("playlist"), Model.channelOrderOf(""), Model.channelOrderOf("alpha"), Model.channelOrderOf(null), Model.channelOrderOf(7), Model.channelOrderOf(undefined)], ["number", "number", "number", "playlist", "playlist", "playlist", "playlist", "playlist", "playlist"])
 
 check("CN5: isNumericQuery truth table", ["101", "7.1", "7,1", "99999", "0", " 101 ", "123456", "7.1234", "7.", "10a", "sky", "", null].map(Model.isNumericQuery), [true, true, true, true, true, true, false, false, false, false, false, false, false])
-check("CN2.9: isNumberEntryKey truth table", ["0", "5", "9", ".", ",", "-", "a", "", "12", "\b", "", null, undefined].map(Model.isNumberEntryKey), [true, true, true, true, true, false, false, false, false, false, false, false, false])
+check("CN2.9: isNumberEntryKey truth table", ["0", "5", "9", ".", ",", "-", "a", "", "12", "\b", "\u007f", null, undefined].map(Model.isNumberEntryKey), [true, true, true, true, true, false, false, false, false, false, false, false, false])
 
 // ---- gate A1: the key routing rule, lifted out of Guide.qml so a test can
 // reach it (CLAUDE.md 12). These are the Qt::KeyboardModifier bits a real
