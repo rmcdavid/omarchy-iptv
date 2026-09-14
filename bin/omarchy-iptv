@@ -2806,9 +2806,66 @@ def applied_by_another_client(client: MpvIpc) -> dict[str, Any] | None:
         "id": str((stash or {}).get("id") or ""),
         "name": str((stash or {}).get("name") or ""),
         "entryId": entry if isinstance(entry, int) and not isinstance(entry, bool) and entry > 0 else None,
-        "seq": record_seq(stash or {}),
+        # No `seq` here on purpose (D-CL-1). The number on that stash is this
+        # start's own, read back out of the lock record the zap borrowed it
+        # from, so it can only ever equal ours - a field that looks like
+        # evidence of ordering and is not. The spawn is what orders these two.
+        #
+        # Which slot wrote that stash. Unlike a seq this really does vary
+        # between the two sides of a stand-down (D-CL-1): the record on the
+        # player reads "play", the one this verb was about to write reads
+        # "start" - and a stash with no verb at all is an older schema or
+        # something that is not ours, which is itself worth seeing.
+        "verb": str((stash or {}).get("verb") or ""),
         "loaded": loaded,
     }
+
+
+def stand_down_note(seq: int, target: dict[str, Any], newer: dict[str, Any]) -> str:
+    """The journal line a start writes when it stands down (D-CL-1).
+
+    It used to end `(intent %d over %d)`, and those two numbers are EQUAL by
+    construction on the only path that reaches this line. The start holds the
+    player lock across its whole spawn and stamps the lock record with its own
+    seq before taking it; ruling CL4 withholds `--seq` from `play`, so the zap
+    that beats it here stamps the stash with `record_seq(read_lock_file())` -
+    which, inside that window, can only be the start's own number read back.
+    Five live stand-downs printed `(intent 662 over 662)`, `(654 over 654)`
+    and so on, 5/5. There is no second intent number to print, and a
+    diagnostic that cannot vary is an assertion that cannot fail.
+
+    What a person reading a journal after a user complains actually needs is
+    the pair that DOES vary: the channel this start gave up on and the channel
+    the user is left watching, plus who put it there. Those two are the
+    complaint ("I pressed one thing and got another") in the two fields the
+    shell's own repair compares. The one intent number is kept, named once, as
+    the handle that ties the line to the shell's `player.seq`.
+    """
+    mine = str(target.get("id") or "") or "an unnamed stream"
+    theirs = str(newer.get("id") or "")
+    entry = newer.get("entryId")
+    entry = entry if isinstance(entry, int) and not isinstance(entry, bool) and entry > 0 else None
+    writer = str(newer.get("verb") or "")
+    if theirs and theirs == mine:
+        where = "the player is on that same channel"
+    elif theirs:
+        where = "the player is on %s" % theirs
+    elif writer:
+        where = "the player is on an unnamed stream"
+    else:
+        # Loaded, but nothing wrote a stash: not one of ours, or one that
+        # died between the loadfile and the stash. Say which it is rather
+        # than printing an id and a writer that are only empty strings.
+        where = "the player is on a load this helper did not label"
+    if writer and entry is not None:
+        where += ", written by %s as entry %d" % (writer, entry)
+    elif writer:
+        where += ", written by %s" % writer
+    elif entry is not None:
+        where += ", entry %d" % entry
+    intent = "intent %d would have applied %s" % (seq, mine) if seq > 0 else "it would have applied %s" % mine
+    return ("a newer channel change reached the player first (%s; %s); left it playing"
+            % (intent, where))
 
 
 def owner_claim(owner_pid: int) -> dict[str, Any] | None:
@@ -3003,8 +3060,7 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
                 # The claim is about which shell owns the player, not about
                 # which channel is on it, so it is still ours to write.
                 client.try_command("set_property", USER_DATA_OWNER, claim)
-            log("player %s: a newer channel change reached the player first (intent %d over %d); left it playing"
-                % (verb, newer["seq"], seq))
+            log("player %s: %s" % (verb, stand_down_note(seq, target, newer)))
             warnings.append("a newer channel change reached the player first")
     except HelperError as error:
         if lock_fd >= 0:
