@@ -1651,3 +1651,12 @@ and these corrections win.
 - Test case N17 assumes tuning from 101 lands on 102. That is false for any
   real provider numbering, which has gaps, and is now false for our own
   generator. Rewrite it against gaps.
+
+## 17. Rulings after the live pass (product owner, 2026-09-14)
+
+| # | Ruling |
+|---|---|
+| CN21 | Both P2 defects are fixed before this feature is advertised. D-CHNO-2 is the one that matters: typing a number that does not exist can silently tune you to an unrelated channel, measured at 28 percent of absent five-digit numbers. Landing somewhere wrong with no error is worse than doing nothing, because the user has no way to know they were not heard. A number that does not exist must say so. |
+| CN22 | The digit timeout default moves from 1500 to 2000 milliseconds, on the evidence rather than taste. 93 percent of numbers commit instantly anyway, so the wait is reached by a small minority, and the two failure directions are not symmetric: too long costs a stale hint on a target already visible and confirmable with Enter, while too short silently tunes you somewhere you did not ask for. When one error is recoverable and the other is invisible, bias toward the recoverable one. It also matches television convention. |
+| CN23 | The four harness verbs the plan specified were never built, so twenty test cases have no runner and have never executed. That is the same finding this project keeps making: a test that has never run is not coverage. Build them or strike the cases and say they are unverified; do not leave them listed as if they pass. |
+| CN24 | The single-group findings are a design question, not defects, and they are deferred to their own item rather than patched during a release. A real provider putting every channel in one group makes the group column dead weight, duplicates a control, repeats the same label on every row, and leaves the user with no sense of position in a list of thousands. Every one of those behaves exactly as designed. The design simply never imagined this shape. |
