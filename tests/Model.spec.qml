@@ -162,13 +162,39 @@ TestCase {
   }
 
   function test_mpvArgv() {
-    var argv = Model.buildMpvArgv({ socketPath: "/tmp/s", name: "N", url: "http://u", extraArgs: [] })
+    // M2-02: the launch argv carries no channel at all - no URL, no "--",
+    // no header options, no per-channel title (S-03). The channel arrives
+    // over the 0600 socket, so `--idle=once` is what makes this possible.
+    var argv = Model.buildMpvArgv({ socketPath: "/tmp/s", name: "N", url: "http://u", headers: { "User-Agent": "VLC" }, extraArgs: [] })
     compare(argv[0], "mpv")
-    compare(argv[argv.length - 2], "--")
-    compare(argv[argv.length - 1], "http://u")
-    compare(argv.indexOf("--title=$>N") !== -1, true)   // S-01: raw marker, never property-expanded
-    compare(argv.indexOf("--force-media-title=N") !== -1, true)
+    compare(argv.indexOf("--") !== -1, false)
+    compare(argv.indexOf("http://u") !== -1, false)
+    compare(argv.filter(function(t) { return t.indexOf("://") !== -1 }).length, 0)
+    compare(argv.filter(function(t) { return t.indexOf("--user-agent") === 0 }).length, 0)
+    compare(argv.indexOf("--idle=once") !== -1, true)
+    compare(argv.indexOf("--title=$>IPTV") !== -1, true)   // S-01: raw marker, never property-expanded
+    compare(argv.indexOf("--force-media-title=IPTV") !== -1, true)
     compare(Model.splitMpvArgs("--Profile=x --no-idle --cache=yes").args, ["--cache=yes"])
+    compare(Model.splitMpvArgs("--log-file=/tmp/x --osd-msg1=${path} --cache=yes").args, ["--cache=yes"])
+  }
+
+  function test_playerArgv() {
+    // The frozen lane interface (ARCHITECTURE-PLAYER.md section 9): every
+    // value its own argv member, user tokens attached to --mpv-arg=, and no
+    // player argv ever carrying a URL.
+    var start = Model.playerStartArgv("/tmp/s", "/tmp/c", "t:bbc1.uk", 41, "g:uk", 1758000123, ["--cache=yes"])
+    compare(start.slice(0, 4), ["player", "start", "--socket", "/tmp/s"])
+    compare(start.indexOf("--seq") !== -1 && start[start.indexOf("--seq") + 1], "41")
+    compare(start[start.length - 1], "--mpv-arg=--cache=yes")
+    compare(Model.playerStopArgv("/tmp/s", 42, "term"), ["player", "stop", "--socket", "/tmp/s", "--seq", "42", "--from", "term"])
+    compare(Model.playerProbeArgv("/tmp/s", 301706), ["player", "probe", "--socket", "/tmp/s", "--owner-pid", "301706"])
+    compare(Model.helperArgv("/p/bin/omarchy-iptv", ["player", "stop"]), ["python3", "/p/bin/omarchy-iptv", "player", "stop"])
+    var probe = Model.parsePlayerProbe('{"ok":true,"kind":"player.probe","running":true,"responsive":true,"pid":7,"idle":false,"seq":41,"stash":{"schema":1,"id":"t:bbc1.uk","name":"BBC One HD","launchedFrom":"g:uk"},"owner":null}')
+    compare([probe.valid, probe.running, probe.pid, probe.stash.launchedFrom], [true, true, 7, "g:uk"])
+    compare(Model.parsePlayerProbe("not json").valid, false)
+    compare(Model.parsePlayerEvent('{"event":"end-file","reason":"error","playlist_entry_id":2,"file_error":"loading failed"}').kind, "end-file")
+    compare(Model.endedVerdict({ reason: "error", file_error: "loading failed" }, false, false).notify, true)
+    compare(Model.endedVerdict({ reason: "eof" }, false, false).kind, "silent")
   }
 
   function test_privacy() {

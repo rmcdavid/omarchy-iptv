@@ -34,6 +34,13 @@ var STOP_KILL_GRACE_MS = 2000
 // a row count as a failed check, so a player whose every call runs to its
 // deadline cannot starve the check forever (D-LIVE-17).
 var HEALTH_SKIPS_BEFORE_RESTART = 3
+// Detached player (ARCHITECTURE-PLAYER.md 4.6, 4.14): the schema of both
+// `user-data` nodes mpv carries for us, the orphan-check grace, and the
+// reason shown when the player died without telling us why (a crash, a
+// SIGKILL, or no `end-file` at all).
+var PLAYER_STASH_SCHEMA = 1
+var PLAYER_ORPHAN_GRACE_SEC = 6
+var PLAYER_GENERIC_FAILURE = "Playback stopped unexpectedly"
 var FAVORITES_GROUP = "Favorites"
 var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
@@ -84,6 +91,11 @@ var SETTING_RANGES = {
 
 // mpv options the user may not override through the mpvArgs setting because
 // the service depends on them (socket, window identity, exit semantics).
+// The ten additions below (ARCHITECTURE-PLAYER.md 4.12) are not invariants of
+// the service: each one writes the credentialed stream URL somewhere durable
+// or on screen, which is the very exposure M2-02 closes (S-03). `--ytdl` is
+// deliberately NOT reserved (PO-5): re-enabling yt-dlp is the documented
+// escape hatch for non-direct URLs.
 var MPV_RESERVED = {
   "--input-ipc-server": true,
   "--wayland-app-id": true,
@@ -93,7 +105,17 @@ var MPV_RESERVED = {
   "--input-ipc-client": true,
   "--script": true,
   "--scripts": true,
-  "--config-dir": true
+  "--config-dir": true,
+  "--log-file": true,             // 0644, forced -v -v, writes the URL per failed load
+  "--dump-stats": true,           // on-disk file carrying the command line
+  "--stream-record": true,        // writes the stream itself to disk
+  "--save-position-on-quit": true, // watch-later file whose header is the stream path
+  "--watch-later-dir": true,
+  "--osd-msg1": true,             // property-expanding: ${path} on screen and in screenshots
+  "--osd-msg2": true,
+  "--osd-msg3": true,
+  "--term-status-msg": true,      // property-expanding into a terminal
+  "--screenshot-template": true   // property-expanding into file names
 }
 
 // Stable notification replace-ids so a repeated failure replaces its toast
@@ -1249,34 +1271,221 @@ function mpvWindowTitle(name) {
   return MPV_RAW_PREFIX + str(name)
 }
 
-// Full argv for the first launch (ARCHITECTURE.md section 3). The URL always
-// follows "--" so a playlist entry can never be parsed as an mpv option.
-// The URL (and header values) stay visible in the mpv process's argv
-// (`ps`, /proc/<pid>/cmdline) until mpv exits: S-03, README "Playback
-// notes"; the M2 idle-start rework removes it.
+// Full argv for the mpv launch (ARCHITECTURE-PLAYER.md section 6). Nothing
+// channel-specific is here any more: no URL, no trailing "--", no header
+// options and no per-channel title, because all of them travel over the 0600
+// socket instead (S-03 closed). `--idle=once` is PO-1: mpv idles at startup
+// so the first channel arrives by `loadfile` like every later one, and still
+// exits when the playlist ends, which keeps today's "the window vanishes on
+// a failure" behaviour and the degraded 10 s status-poll fallback.
+// The neutral `--title=$>IPTV` / `--force-media-title=IPTV` keep mpv from
+// flashing its own "No file - mpv"; the channel title follows over IPC.
+// Mirrored by `mpv_launch_argv()` in bin/omarchy-iptv, pinned by the shared
+// vectors in tests/fixtures/player-argv.json.
 function buildMpvArgv(params) {
   var p = params || {}
-  var name = str(p.name) || "IPTV"
   var argv = [
     "mpv",
     "--input-ipc-server=" + str(p.socketPath),
     "--wayland-app-id=omarchy-iptv",
     "--force-window=immediate",
-    "--idle=no",
+    "--idle=once",
     "--keep-open=no",
-    "--title=" + mpvWindowTitle(name),
-    "--force-media-title=" + name,
+    "--title=" + mpvWindowTitle("IPTV"),
+    "--force-media-title=IPTV",
     "--msg-level=all=error",
     // Live streams never need yt-dlp; without this mpv shells out to it on
     // every dead URL (seconds of delay and noise per failed zap). User
-    // mpvArgs come later, so `--ytdl=yes` can re-enable it.
+    // mpvArgs come later, so `--ytdl=yes` can re-enable it (PO-5).
     "--ytdl=no"
   ]
-  argv = argv.concat(headerArgs(p.headers))
-  argv = argv.concat(asList(p.extraArgs))
-  argv.push("--")
-  argv.push(str(p.url))
+  return argv.concat(asList(p.extraArgs))
+}
+
+// ------------------------------------------------------------ player verbs
+//
+// argv for the helper's `player` verb group (ARCHITECTURE-PLAYER.md 4.3).
+// These are the helper's own arguments; the caller prefixes the interpreter
+// and the helper path, which `helperArgv()` does. Every value is a separate
+// argv member: no joining, no quoting, no shell (hard requirement 9). User
+// mpv tokens travel as repeated `--mpv-arg TOKEN` so argparse can never
+// swallow an option-looking token and no token is ever split or merged.
+
+function helperArgv(helperPath, args) {
+  return ["python3", str(helperPath)].concat(asList(args))
+}
+
+function seqArg(seq) {
+  var n = Math.floor(Number(seq))
+  return String(isFinite(n) && n > 0 ? n : 0)
+}
+
+// One `--mpv-arg=<token>` member per user token. The attached form is not
+// cosmetic: argparse refuses an option-looking VALUE, so the separated form
+// `--mpv-arg --profile=low-latency` dies with "expected one argument" - which
+// is every realistic token, since mpv options all start with "--" (verified
+// against python 3.14's argparse). Attached, each token is still exactly one
+// argv member, never joined with another and never split.
+function mpvArgArgv(mpvArgs) {
+  var list = asList(mpvArgs)
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var token = str(list[i])
+    if (token === "") continue
+    out.push("--mpv-arg=" + token)
+  }
+  return out
+}
+
+function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid) {
+  var argv = ["--socket", str(socket), "--cache-dir", str(cacheDir), "--id", str(id), "--seq", seqArg(seq)]
+  if (str(scope) !== "") argv = argv.concat(["--scope", str(scope)])
+  var when = Math.floor(Number(since))
+  if (isFinite(when) && when > 0) argv = argv.concat(["--since", String(when)])
+  var pid = Math.floor(Number(ownerPid))
+  if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)])
+  return argv.concat(mpvArgArgv(mpvArgs))
+}
+
+// `ownerPid` is optional and additive: passing Quickshell.processId here
+// claims the player for this shell at the same moment it starts playing, so
+// the plugin-removal case (PO-2 / PLAYER-LIVE-04) has a claim to check even
+// when the service never ran a probe that found anything.
+function playerStartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid) {
+  return ["player", "start"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid))
+}
+
+// `from` picks the first rung: "" or "quit" starts at `quit` over IPC,
+// "term" skips straight to SIGTERM (the health verdict, where IPC is by
+// definition not answering), "kill" to SIGKILL.
+function playerStopArgv(socket, seq, from) {
+  var argv = ["player", "stop", "--socket", str(socket), "--seq", seqArg(seq)]
+  var rung = str(from)
+  if (rung === "quit" || rung === "term" || rung === "kill") argv = argv.concat(["--from", rung])
   return argv
+}
+
+function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, from, ownerPid) {
+  var argv = ["player", "restart"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid))
+  var rung = str(from)
+  if (rung === "quit" || rung === "term" || rung === "kill") argv = argv.concat(["--from", rung])
+  return argv
+}
+
+// `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
+// probe is read-only.
+function playerProbeArgv(socket, ownerPid) {
+  var argv = ["player", "probe", "--socket", str(socket)]
+  var pid = Math.floor(Number(ownerPid))
+  if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)])
+  return argv
+}
+
+function playerOrphanCheckArgv(socket, ownerPid, graceSec) {
+  var pid = Math.floor(Number(ownerPid))
+  var grace = Number(graceSec)
+  if (!isFinite(grace) || grace <= 0) grace = PLAYER_ORPHAN_GRACE_SEC
+  return ["player", "orphan-check", "--socket", str(socket),
+          "--owner-pid", String(isFinite(pid) && pid > 0 ? pid : 0),
+          "--grace", String(grace)]
+}
+
+// The now-playing record that lives inside the mpv process, never on disk
+// (4.6). `launchedFrom` is the zap-ring scope: pure UI intent that no mpv
+// property could report, which is why the shell's own value is stashed and
+// echoed back on reattach. Written by the helper, read back by
+// `parsePlayerProbe`; this function is the shape of record for both sides.
+function playerStash(params) {
+  var p = params || {}
+  var id = str(p.id)
+  if (id === "") return null
+  var entry = Math.floor(Number(p.entryId))
+  var since = Math.floor(Number(p.since))
+  return {
+    schema: PLAYER_STASH_SCHEMA,
+    playing: p.playing !== false,
+    id: id,
+    name: str(p.name),
+    group: str(p.group),
+    launchedFrom: str(p.launchedFrom),
+    sourceKey: str(p.sourceKey),
+    since: isFinite(since) && since > 0 ? since : 0,
+    entryId: isFinite(entry) && entry > 0 ? entry : null,
+    seq: Math.max(0, Math.floor(Number(p.seq)) || 0)
+  }
+}
+
+function playerOwner(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var pid = Math.floor(Number(raw.pid))
+  if (!isFinite(pid) || pid <= 0) return null
+  return { schema: PLAYER_STASH_SCHEMA, pid: pid, startTime: str(raw.startTime), at: Math.max(0, Math.floor(Number(raw.at)) || 0) }
+}
+
+// `player probe` stdout -> a shape the service can bind. Garbage, a truncated
+// line, a foreign JSON document or an error reply all return valid:false
+// rather than throwing, so a probe can never break the reattach path.
+function parsePlayerProbe(text) {
+  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0 }
+  var doc = parseJsonObject(text)
+  if (!doc || doc.ok !== true || str(doc.kind) !== "player.probe") return empty
+  var pid = Math.floor(Number(doc.pid))
+  return {
+    valid: true,
+    running: doc.running === true,
+    responsive: doc.responsive === true,
+    pid: isFinite(pid) && pid > 0 ? pid : null,
+    idle: doc.idle === null || doc.idle === undefined ? null : doc.idle === true,
+    stash: playerStash(doc.stash),
+    owner: playerOwner(doc.owner),
+    seq: Math.max(0, Math.floor(Number(doc.seq)) || 0)
+  }
+}
+
+// One newline-delimited line from mpv's own JSON IPC socket (4.8). Only the
+// four event kinds the service acts on are recognised; a command reply, an
+// unknown event, junk and a truncated line are all `{kind:"ignored"}`.
+// `log-message` text is redacted a second time here: the helper redacts it
+// on its own path, but this line comes straight off the socket.
+function parsePlayerEvent(line) {
+  var ignored = { kind: "ignored" }
+  var doc = parseJsonObject(line)
+  if (!doc) return ignored
+  var event = str(doc.event)
+  if (event === "start-file") {
+    return { kind: "start-file", entryId: playerEntryId(doc.playlist_entry_id) }
+  }
+  if (event === "end-file") {
+    return { kind: "end-file", entryId: playerEntryId(doc.playlist_entry_id), reason: str(doc.reason), fileError: str(doc.file_error) }
+  }
+  if (event === "log-message") {
+    return { kind: "log-message", level: str(doc.level), prefix: str(doc.prefix), text: redactUrls(str(doc.text)).replace(/\s+$/, "") }
+  }
+  if (event === "property-change" && str(doc.name) === "idle-active") {
+    return { kind: "property-change", name: "idle-active", value: doc.data === true }
+  }
+  return ignored
+}
+
+function playerEntryId(value) {
+  var n = Math.floor(Number(value))
+  return isFinite(n) && n > 0 ? n : null
+}
+
+// Why the player ended (4.8), replacing the exit code `mpvProc.onExited` gave.
+// The entry gate FAILS OPEN (F4): the entry id decides which channel the
+// toast names, never whether there is a toast, so a `playlist_entry_id` that
+// is missing or unknown can never suppress a failure the user can see.
+function endedVerdict(lastEndFile, userStopped, stopping) {
+  if (userStopped === true || stopping === true) return { notify: false, reason: "", kind: "silent" }
+  var end = lastEndFile && typeof lastEndFile === "object" ? lastEndFile : null
+  if (!end) return { notify: true, reason: PLAYER_GENERIC_FAILURE, kind: "failed" }
+  var reason = str(end.reason)
+  // An intermediate .m3u8 master resolution: never terminal, never a verdict.
+  if (reason === "redirect") return { notify: false, reason: "", kind: "ignored" }
+  if (reason === "quit" || reason === "eof") return { notify: false, reason: "", kind: "silent" }
+  var detail = redactUrls(str(end.fileError || end.file_error)).replace(/^\s+|\s+$/g, "")
+  return { notify: true, reason: detail !== "" ? detail : PLAYER_GENERIC_FAILURE, kind: "failed" }
 }
 
 // argv for `hyprctl dispatch focuswindow class:omarchy-iptv` (R9).
@@ -3123,6 +3332,21 @@ if (typeof module !== "undefined") {
     MPV_RAW_PREFIX: MPV_RAW_PREFIX,
     mpvWindowTitle: mpvWindowTitle,
     buildMpvArgv: buildMpvArgv,
+    MPV_RESERVED: MPV_RESERVED,
+    // ---- detached player (M2-02)
+    PLAYER_STASH_SCHEMA: PLAYER_STASH_SCHEMA,
+    PLAYER_ORPHAN_GRACE_SEC: PLAYER_ORPHAN_GRACE_SEC,
+    PLAYER_GENERIC_FAILURE: PLAYER_GENERIC_FAILURE,
+    helperArgv: helperArgv,
+    playerStartArgv: playerStartArgv,
+    playerStopArgv: playerStopArgv,
+    playerRestartArgv: playerRestartArgv,
+    playerProbeArgv: playerProbeArgv,
+    playerOrphanCheckArgv: playerOrphanCheckArgv,
+    playerStash: playerStash,
+    parsePlayerProbe: parsePlayerProbe,
+    parsePlayerEvent: parsePlayerEvent,
+    endedVerdict: endedVerdict,
     focusPlayerArgv: focusPlayerArgv,
     notifyArgv: notifyArgv,
     sourceLabel: sourceLabel,

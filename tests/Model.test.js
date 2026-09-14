@@ -324,23 +324,112 @@ check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=
 check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
-const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", name: "BBC One", url: "--not-an-option", headers: {}, extraArgs: ["--profile=low-latency"] })
+// ---- the detached launch argv (M2-02, ARCHITECTURE-PLAYER.md 6 / S-03) ----
+// The channel no longer appears on any command line: no URL, no trailing
+// "--", no header options, no per-channel title. Everything channel-specific
+// travels over the 0600 socket instead. The vectors are shared with the
+// Python mirror in tests/fixtures/player-argv.json.
+const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", extraArgs: ["--profile=low-latency"] })
 check("buildMpvArgv starts with mpv and ipc socket", argv.slice(0, 2), ["mpv", "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock"])
-check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=no", "--keep-open=no", "--title=$>BBC One", "--force-media-title=BBC One", "--msg-level=all=error", "--ytdl=no"])
-// S-01: mpv expands ${property} in --title; the "$>" raw marker keeps a
-// playlist-controlled name literal. force-media-title is not expanded by mpv.
-check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpvWindowTitle("BBC One"), Model.mpvWindowTitle(null)], ["$>", "$>BBC One", "$>"])
-check("buildMpvArgv title is never property-expanded (S-01)", (() => {
+check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no"])
+check("buildMpvArgv idles at startup so the first channel arrives over IPC (PO-1)", [argv.indexOf("--idle=once") !== -1, argv.indexOf("--idle=no") !== -1, argv.indexOf("--idle=yes") !== -1], [true, false, false])
+// S-03: no stream URL and no header value on any command line, on any
+// channel including the first. These four are the structural replacement for
+// the retired "buildMpvArgv url after --" invariant.
+check("buildMpvArgv carries no URL, on any channel (S-03)", (() => {
+  const a = Model.buildMpvArgv({ socketPath: "/s", name: "BBC One", url: "http://u:p@h.test/live/token/1.m3u8", headers: { "User-Agent": "VLC" }, extraArgs: [] })
+  return [a.filter(t => /:\/\//.test(t)).length, a.indexOf("--") !== -1, a.join(" ").indexOf("u:p@") !== -1]
+})(), [0, false, false])
+check("buildMpvArgv sends no header options even for a channel with headers (S-03)", (() => {
+  const a = Model.buildMpvArgv({ socketPath: "/s", headers: { "User-Agent": "VLC", Referer: "http://ref.test/", "X-Token": "secret" } })
+  return a.filter(t => /^--(user-agent|referrer|http-header-fields)/.test(t))
+})(), [])
+check("buildMpvArgv carries no per-channel title, so a hostile name never reaches argv (S-01/S-03)", (() => {
   const a = Model.buildMpvArgv({ socketPath: "/s", name: "${path} ${options/input-ipc-server}", url: "http://u:p@h.test/x" })
-  return [a.indexOf("--title=$>${path} ${options/input-ipc-server}") !== -1, a.indexOf("--force-media-title=${path} ${options/input-ipc-server}") !== -1, a.filter(t => t.indexOf("--title=") === 0).length]
-})(), [true, true, 1])
-check("buildMpvArgv default name is prefixed too", Model.buildMpvArgv({ socketPath: "/s", url: "u" }).indexOf("--title=$>IPTV") !== -1, true)
-check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", name: "N", url: "u", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
-check("buildMpvArgv url after --", argv.slice(-2), ["--", "--not-an-option"])
-check("buildMpvArgv extra args before --", argv.indexOf("--profile=low-latency") < argv.indexOf("--"), true)
-check("buildMpvArgv headers before user args", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", name: "N", url: "u", headers: { "User-Agent": "X" }, extraArgs: ["--cache=yes"] }); return a.indexOf("--user-agent=X") < a.indexOf("--cache=yes") })(), true)
-check("buildMpvArgv null params", Model.buildMpvArgv(null).slice(-2), ["--", ""])
+  return [a.indexOf("--title=$>IPTV") !== -1, a.join(" ").indexOf("${path}") !== -1, a.filter(t => t.indexOf("--title=") === 0).length]
+})(), [true, false, 1])
+check("buildMpvArgv: every token after argv[0] is an option", argv.slice(1).every(t => t.indexOf("--") === 0), true)
+// S-01 still holds on the IPC path: the raw marker is what the helper sends
+// with `set_property title`, and it is still what the neutral launch title
+// carries. force-media-title is not expanded by mpv, so it stays plain.
+check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpvWindowTitle("BBC One"), Model.mpvWindowTitle(null)], ["$>", "$>BBC One", "$>"])
+check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
+check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
+check("buildMpvArgv user args come last", argv[argv.length - 1], "--profile=low-latency")
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no"])
 check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
+
+// ---- MPV_RESERVED, ten additions (ARCHITECTURE-PLAYER.md 4.12) ----
+const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit", "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3", "--term-status-msg", "--screenshot-template"]
+check("MPV_RESERVED gained exactly ten entries", Object.keys(Model.MPV_RESERVED).length, 19)
+check("splitMpvArgs rejects every addition and its --no- form", (() => {
+  const tokens = RESERVED_ADDED.map(n => n + "=/tmp/x").concat(RESERVED_ADDED.map(n => "--no-" + n.slice(2)))
+  const r = Model.splitMpvArgs(tokens.join(" "))
+  return [r.args, r.rejected.length]
+})(), [[], 20])
+check("--ytdl stays unreserved (PO-5) and still sorts after the built-in --ytdl=no", (() => {
+  const r = Model.splitMpvArgs("--ytdl=yes")
+  const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
+  return [r.args, a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes")]
+})(), [["--ytdl=yes"], true])
+
+// ---- helper `player` verb argv (ARCHITECTURE-PLAYER.md 4.3) ----
+check("playerStartArgv: every value its own argv member, user tokens repeated",
+  Model.playerStartArgv("/run/user/1000/omarchy-iptv/mpv.sock", "/c/sources/a1b2c3d4", "t:bbc1.uk", 41, "g:uk", 1758000123, ["--profile=low-latency", "--cache=yes"]),
+  ["player", "start", "--socket", "/run/user/1000/omarchy-iptv/mpv.sock", "--cache-dir", "/c/sources/a1b2c3d4", "--id", "t:bbc1.uk", "--seq", "41", "--scope", "g:uk", "--since", "1758000123", "--mpv-arg=--profile=low-latency", "--mpv-arg=--cache=yes"])
+check("playerStartArgv: optional scope and since are omitted, --seq is always present",
+  Model.playerStartArgv("/s", "/c", "t:x", 0, "", 0, null),
+  ["player", "start", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "0"])
+check("playerStartArgv: an option-looking user token stays one member and is attached, not separated", (() => {
+  const a = Model.playerStartArgv("/s", "/c", "t:x", 1, "", 0, ["--vf=lavfi=[scale=2]", "--cache=yes", "--log-file=/tmp/x"])
+  return [a.filter(t => t.indexOf("--mpv-arg=") === 0).length, a.indexOf("--mpv-arg") !== -1, a.slice(-3)]
+})(), [3, false, ["--mpv-arg=--vf=lavfi=[scale=2]", "--mpv-arg=--cache=yes", "--mpv-arg=--log-file=/tmp/x"]])
+check("playerStartArgv: the optional owner claim rides the same call", Model.playerStartArgv("/s", "/c", "t:x", 5, "", 0, [], 301706),
+  ["player", "start", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "5", "--owner-pid", "301706"])
+check("playerStopArgv", Model.playerStopArgv("/s", 42), ["player", "stop", "--socket", "/s", "--seq", "42"])
+check("playerStopArgv --from picks the first rung", [Model.playerStopArgv("/s", 42, "term"), Model.playerStopArgv("/s", 42, "bogus")], [["player", "stop", "--socket", "/s", "--seq", "42", "--from", "term"], ["player", "stop", "--socket", "/s", "--seq", "42"]])
+check("playerRestartArgv is start plus the rung, under one lock", Model.playerRestartArgv("/s", "/c", "t:x", 7, "g:uk", 0, ["--cache=yes"], "term"),
+  ["player", "restart", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "7", "--scope", "g:uk", "--mpv-arg=--cache=yes", "--from", "term"])
+check("playerProbeArgv with and without an owner claim", [Model.playerProbeArgv("/s", 301706), Model.playerProbeArgv("/s", 0)], [["player", "probe", "--socket", "/s", "--owner-pid", "301706"], ["player", "probe", "--socket", "/s"]])
+check("playerOrphanCheckArgv", [Model.playerOrphanCheckArgv("/s", 301706, 6), Model.playerOrphanCheckArgv("/s", 301706, null)], [["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"], ["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"]])
+check("helperArgv prefixes the interpreter and the helper path", Model.helperArgv("/p/bin/omarchy-iptv", Model.playerStopArgv("/s", 3)), ["python3", "/p/bin/omarchy-iptv", "player", "stop", "--socket", "/s", "--seq", "3"])
+check("no player argv ever carries a URL or a header value", (() => {
+  const all = [].concat(
+    Model.playerStartArgv("/s", "/c", "t:x", 1, "g:uk", 12, ["--cache=yes"]),
+    Model.playerStopArgv("/s", 2), Model.playerRestartArgv("/s", "/c", "t:x", 3, "", 0, [], "term"),
+    Model.playerProbeArgv("/s", 9), Model.playerOrphanCheckArgv("/s", 9, 6))
+  return all.filter(t => /:\/\//.test(t))
+})(), [])
+
+// ---- the now-playing stash and the probe reply (4.5, 4.6) ----
+check("playerStash normalizes the record mpv carries for us", Model.playerStash({ id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 }),
+  { schema: 1, playing: true, id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 })
+check("playerStash without an id is not a record", [Model.playerStash(null), Model.playerStash({ name: "x" })], [null, null])
+check("playerStash defaults are empty, never undefined", Model.playerStash({ id: "t:x" }), { schema: 1, playing: true, id: "t:x", name: "", group: "", launchedFrom: "", sourceKey: "", since: 0, entryId: null, seq: 0 })
+const probeBody = JSON.stringify({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 301706, idle: false, seq: 41, claimed: true, mpvVersion: "mpv 0.41.0", stash: { schema: 1, playing: true, id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 }, owner: { schema: 1, pid: 301706, startTime: "9912345", at: 1758000100 } })
+check("parsePlayerProbe: a live player", (() => { const p = Model.parsePlayerProbe(probeBody); return [p.valid, p.running, p.responsive, p.pid, p.idle, p.seq, p.stash.launchedFrom, p.stash.entryId, p.owner.pid] })(), [true, true, true, 301706, false, 41, "g:uk", 2, 301706])
+check("parsePlayerProbe: nothing running", (() => { const p = Model.parsePlayerProbe(JSON.stringify({ ok: true, kind: "player.probe", running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 3 })); return [p.valid, p.running, p.pid, p.idle, p.stash, p.seq] })(), [true, false, null, null, null, 3])
+check("parsePlayerProbe never throws: garbage, truncated, wrong kind, error reply, empty", [
+  Model.parsePlayerProbe("not json at all").valid,
+  Model.parsePlayerProbe('{"ok":true,"kind":"player.probe","pid":').valid,
+  Model.parsePlayerProbe('{"ok":true,"kind":"status","running":true}').valid,
+  Model.parsePlayerProbe('{"ok":false,"kind":"player.probe","error":{"code":"ipc_error","message":"x"}}').valid,
+  Model.parsePlayerProbe("").valid, Model.parsePlayerProbe(null).valid
+], [false, false, false, false, false, false])
+check("parsePlayerProbe: a foreign or pre-M2-02 player has no stash", (() => { const p = Model.parsePlayerProbe(JSON.stringify({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 7, idle: true, stash: { schema: 1 }, owner: null, seq: 0 })); return [p.valid, p.running, p.idle, p.stash, p.owner] })(), [true, true, true, null, null])
+
+// ---- the event router (4.8) ----
+check("parsePlayerEvent: start-file", Model.parsePlayerEvent('{"event":"start-file","playlist_entry_id":2}'), { kind: "start-file", entryId: 2 })
+check("parsePlayerEvent: end-file carries the reason and the file error", Model.parsePlayerEvent('{"event":"end-file","reason":"error","playlist_entry_id":2,"file_error":"loading failed"}'), { kind: "end-file", entryId: 2, reason: "error", fileError: "loading failed" })
+check("parsePlayerEvent: log-message text is redacted to its host (S-01/D-QA-01)", Model.parsePlayerEvent('{"event":"log-message","prefix":"stream","level":"error","text":"Failed to open http://u:p@provider.test/live/tok/1.m3u8.\\n"}'), { kind: "log-message", level: "error", prefix: "stream", text: "Failed to open provider.test" })
+check("parsePlayerEvent: idle-active property change", Model.parsePlayerEvent('{"event":"property-change","id":1,"name":"idle-active","data":true}'), { kind: "property-change", name: "idle-active", value: true })
+check("parsePlayerEvent ignores replies, other events, other properties, junk and null", [
+  Model.parsePlayerEvent('{"error":"success","data":{"playlist_entry_id":2},"request_id":3}').kind,
+  Model.parsePlayerEvent('{"event":"audio-reconfig"}').kind,
+  Model.parsePlayerEvent('{"event":"property-change","name":"pause","data":true}').kind,
+  Model.parsePlayerEvent("not json").kind, Model.parsePlayerEvent("").kind, Model.parsePlayerEvent(null).kind
+], ["ignored", "ignored", "ignored", "ignored", "ignored", "ignored"])
+check("parsePlayerEvent: a missing entry id is null, never 0 (the gate fails open on it)", [Model.parsePlayerEvent('{"event":"start-file"}').entryId, Model.parsePlayerEvent('{"event":"end-file","reason":"eof","playlist_entry_id":0}').entryId], [null, null])
 
 // ---- notifications ----
 const tvOff = "\udb81\udd03", alert = "\udb80\udc26", refreshGlyph = "\udb81\udc50"
@@ -456,6 +545,38 @@ check("healthTick: a free tick probes and resets the skip run", [Model.healthTic
 check("healthTick: busy ticks are skipped and counted", [Model.healthTick(0, true), Model.healthTick(1, true)], [{ check: false, restart: false, skips: 1 }, { check: false, restart: false, skips: 2 }])
 check("healthTick: the third busy tick in a row restarts the player", Model.healthTick(2, true), { check: false, restart: true, skips: 0 })
 check("healthTick: null / negative skips", [Model.healthTick(null, true), Model.healthTick(-5, true), Model.healthTick("x", false)], [{ check: false, restart: false, skips: 1 }, { check: false, restart: false, skips: 1 }, { check: true, restart: false, skips: 0 }])
+
+// ---- why the player ended (ARCHITECTURE-PLAYER.md 4.8) ----
+// The exit code is gone with the attached Process; the verdict now comes from
+// mpv's own `end-file` reason. Vectors shared with the Python mirror.
+check("endedVerdict: a dead stream notifies with mpv's file_error", Model.endedVerdict({ reason: "error", file_error: "loading failed", playlist_entry_id: 1 }, false, false), { notify: true, reason: "loading failed", kind: "failed" })
+check("endedVerdict: parsePlayerEvent's own shape round-trips (fileError, not file_error)", Model.endedVerdict(Model.parsePlayerEvent('{"event":"end-file","reason":"error","playlist_entry_id":2,"file_error":"loading failed"}'), false, false), { notify: true, reason: "loading failed", kind: "failed" })
+check("endedVerdict: we caused it, so it is silent whatever mpv says", [Model.endedVerdict({ reason: "error", file_error: "x" }, true, false).notify, Model.endedVerdict({ reason: "error", file_error: "x" }, false, true).notify], [false, false])
+check("endedVerdict: a clean end and an mpv-side quit stay silent (PO-4)", [Model.endedVerdict({ reason: "eof" }, false, false).kind, Model.endedVerdict({ reason: "quit" }, false, false).kind], ["silent", "silent"])
+check("endedVerdict: redirect is never terminal", Model.endedVerdict({ reason: "redirect" }, false, false), { notify: false, reason: "", kind: "ignored" })
+check("endedVerdict: no end-file at all is a failure with a generic reason", Model.endedVerdict(null, false, false), { notify: true, reason: Model.PLAYER_GENERIC_FAILURE, kind: "failed" })
+check("endedVerdict: the entry gate fails open (F4) - a null or unknown entry id never suppresses", [
+  Model.endedVerdict({ reason: "error", file_error: "loading failed" }, false, false).notify,
+  Model.endedVerdict({ reason: "error", file_error: "loading failed", playlist_entry_id: null }, false, false).notify,
+  Model.endedVerdict({ reason: "error", file_error: "loading failed", playlist_entry_id: 4242 }, false, false).notify
+], [true, true, true])
+check("endedVerdict: a file_error carrying a URL is redacted", Model.endedVerdict({ reason: "error", file_error: "Failed to open http://u:p@provider.test/live/tok/1.m3u8" }, false, false).reason, "Failed to open provider.test")
+
+// ---- shared vectors with the Python mirror (tests/fixtures/player-argv.json) ----
+const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
+check("player fixture has all three tables", [playerFixture.mpvArgv.length > 0, playerFixture.stopLadder.length, playerFixture.endedVerdict.length > 0, playerFixture.genericFailure], [true, 5, true, Model.PLAYER_GENERIC_FAILURE])
+check("player fixture pins the whole reserved set", playerFixture.mpvReserved.slice().sort(), Object.keys(Model.MPV_RESERVED).sort())
+for (const v of playerFixture.mpvArgv) {
+  const filtered = Model.splitMpvArgs((v.mpvArgs || []).join(" "))
+  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, extraArgs: filtered.args }), v.argv)
+  if (v.rejected) check("fixture mpvArgv rejects: " + v.name, filtered.rejected, v.rejected)
+}
+for (const v of playerFixture.stopLadder) {
+  check("fixture stopLadder: " + v.name, Model.stopEscalation(v.stage), { action: v.action, signal: v.signal, waitMs: v.waitMs })
+}
+for (const v of playerFixture.endedVerdict) {
+  check("fixture endedVerdict: " + v.name, Model.endedVerdict(v.endFile, v.userStopped, v.stopping), v.verdict)
+}
 
 // ---- playlist warnings (D-LIVE-18) ----
 const capWarnings = ["truncated to 50000 channels (500 entries skipped)", "group count capped at 2000; 2091 channels listed under Ungrouped"]

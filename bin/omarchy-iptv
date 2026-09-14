@@ -35,11 +35,15 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import errno
+import fcntl
 import gzip
 import io
 import json
 import os
 import re
+import select
+import signal
 import stat
 import sys
 import time
@@ -1593,7 +1597,14 @@ def cmd_epg(args: argparse.Namespace) -> int:
 
 class MpvIpc:
     """Minimal client for mpv's JSON IPC: one request at a time, replies
-    correlated by request_id, unsolicited events skipped."""
+    correlated by request_id, unsolicited events KEPT.
+
+    Events used to be dropped where a reply was expected. `player start`
+    subscribes with `request_log_messages` before the first `loadfile` and
+    then has to see that load's `start-file` / `end-file` / `log-message`
+    (F3), so an event a request steps over is appended to `self.events` and
+    read back by `drain_events()` instead of being thrown away.
+    """
 
     def __init__(self, path: str, timeout: float) -> None:
         self.path = path
@@ -1602,6 +1613,8 @@ class MpvIpc:
         self.buffer = b""
         self.next_id = 1
         self.refused = False
+        self.events: list[dict[str, Any]] = []
+        self.closed = False
 
     def connect(self) -> None:
         import socket
@@ -1683,8 +1696,37 @@ class MpvIpc:
                 message = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(message, dict) and message.get("request_id") == request_id:
+            if not isinstance(message, dict):
+                continue
+            if message.get("request_id") == request_id:
                 return message
+            if "request_id" not in message:
+                self.events.append(message)
+
+    def drain_events(self, deadline: float) -> list[dict[str, Any]] | None:
+        """Event lines mpv sent unasked, waiting until `deadline` (an absolute
+        time.monotonic value) for one. `[]` means nothing arrived in time,
+        `None` means mpv closed the connection - which under `--idle=once` is
+        itself the death signal."""
+        if self.events:
+            drained, self.events = self.events, []
+            return drained
+        if self.sock is None or self.closed:
+            return None
+        try:
+            line = self.read_line(deadline)
+        except HelperError:
+            return []
+        if line is None:
+            self.closed = True
+            return None
+        try:
+            message = json.loads(line)
+        except ValueError:
+            return []
+        if isinstance(message, dict) and "request_id" not in message:
+            return [message]
+        return []
 
     def command(self, *args: Any) -> Any:
         """Run a command; an mpv-side error becomes HelperError(ipc_error)."""
@@ -1745,28 +1787,34 @@ def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str
 
 
 def cmd_play(args: argparse.Namespace) -> int:
+    """Zap an already-running player. The wire sequence and the reply shape
+    are unchanged (requirement 2); the body is `apply_channel()`, shared
+    verbatim with `player start`, so first play and every later zap are one
+    implementation instead of two.
+
+    `--scope` / `--since` are additive: with either of them the zap also
+    refreshes the now-playing stash inside mpv and the reply carries the new
+    `entryId`, which is what makes a reattach after a shell restart name the
+    channel the user actually switched to.
+    """
     client = MpvIpc(socket_path(args.socket), args.ipc_timeout)
+    scope = getattr(args, "scope", "") or ""
+    since = int(getattr(args, "since", 0) or 0)
+    session = bool(scope or since)
     try:
-        if args.id:
-            channel = find_channel(load_channels(cache_dir(args.cache_dir)), args.id)
-            url = str(channel.get("url") or "")
-            name = str(channel.get("name") or "") or url_host(url) or "channel"
-            headers = channel.get("headers") if isinstance(channel.get("headers"), dict) else {}
-        else:
-            url = (args.url or "").strip()
-            name = url_host(url) or "stream"
-            headers = {}
-        if not is_stream_url(url):
-            raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+        target = player_target(args.id, args.url, args.cache_dir)
         client.connect()
-        for prop, value in (("title", MPV_RAW_PREFIX + name), ("force-media-title", name)):
-            ok, _ = client.try_command("set_property", prop, value)
-            if not ok:
-                log("play: mpv refused to set %s" % prop)
-        for prop, value in header_properties(headers, client):
-            client.command("set_property", prop, value)
-        client.command("loadfile", url, "replace")
-        emit({"ok": True, "kind": "play", "id": args.id or None, "name": name})
+        stash = None
+        if session:
+            stash = player_stash(target["id"], target["name"], target["group"], scope,
+                                 source_key_of(cache_dir(args.cache_dir)), since or int(time.time()), 0)
+        entry_id = apply_channel(client, target, stash=stash, label="play")
+        payload: dict[str, Any] = {"ok": True, "kind": "play", "id": args.id or None, "name": target["name"]}
+        if session:
+            # Additive, and tied to the additive flags: without --scope /
+            # --since the reply is byte-identical to v0.2.1's.
+            payload["entryId"] = entry_id
+        emit(payload)
         return EXIT_OK
     except HelperError as error:
         log("play: %s" % error.message)
@@ -1830,11 +1878,964 @@ def cmd_status(args: argparse.Namespace) -> int:
         })
         return EXIT_OK
     except HelperError as error:
+        # `running` keeps its socket-answered meaning (Model.statusHealthy and
+        # the 23 tests/test_mpv.py cases depend on it). `process` is additive
+        # and says whether the player is gone or merely wedged, so the health
+        # verdict does not need a second call (4.13).
+        found = find_player(path)
         log("status: %s" % error.message)
-        emit(error_payload("status", error, running=False))
+        emit(error_payload("status", error, running=False,
+                           process={"found": bool(found), "pid": int(found[0]["pid"]) if found else None}))
         return EXIT_ERROR
     finally:
         client.close()
+
+
+# --------------------------------------------------------------- player
+# The detached player (docs/ARCHITECTURE-PLAYER.md). mpv runs as a setsid'd
+# grandchild of this helper, reparented to the session subreaper, so it
+# outlives every shell restart and is still reaped at logout by the
+# compositor's own cgroup. The shell observes it over mpv's JSON IPC socket.
+#
+# Nothing channel-specific is ever on mpv's command line: the URL, the headers
+# and the title travel over the 0600 socket instead (S-03, requirement 9).
+# Every verb is idempotent, serialised by one flock with an inode re-check,
+# and ordered by the caller's --seq intent number rather than by the order the
+# kernel happens to grant the lock in.
+
+PLAYER_LOCK_FILE = "player.lock"
+PLAYER_STASH_SCHEMA = 1
+# Two sibling top-level user-data nodes (4.6), probe-verified on mpv 0.41: a
+# second client reads back the identical object, the top level is not
+# writable, and there is no delete. The record dies with the process it
+# describes, which is exactly why it is not a file on disk.
+USER_DATA_STASH = "user-data/omarchy-iptv"
+USER_DATA_OWNER = "user-data/omarchy-iptv-owner"
+PLAYER_GENERIC_FAILURE = "Playback stopped unexpectedly"   # mirrors Model.PLAYER_GENERIC_FAILURE
+# The D-LIVE-17 ladder, unchanged: quit at 0, SIGTERM at 2 s, SIGKILL at 4 s.
+STOP_QUIT_GRACE_MS = 2000
+STOP_KILL_GRACE_MS = 2000
+STOP_SETTLE_MS = 500
+DEFAULT_LOCK_TIMEOUT = 6.0
+DEFAULT_SPAWN_TIMEOUT = 5.0
+DEFAULT_FIRST_LOAD_TIMEOUT = 3.0
+DEFAULT_ORPHAN_GRACE = 6.0
+LOCK_POLL_S = 0.05
+LOCK_RETRIES = 5
+SPAWN_POLL_S = 0.02
+STOP_POLL_S = 0.05
+LAUNCH_STDERR_MAX = 4096          # PO-6: the launch window's stderr, memory only
+# Mirror of Model.splitMpvArgs (4.12). The helper re-validates every
+# --mpv-arg because bin/omarchy-iptv is a public CLI, and a parity test pins
+# the two reserved sets equal.
+MPV_ARG_RE = re.compile(r"^--[a-z0-9][a-z0-9-]*(=.*)?$")
+MPV_RESERVED = frozenset((
+    "--input-ipc-server", "--wayland-app-id", "--title", "--force-media-title",
+    "--idle", "--input-ipc-client", "--script", "--scripts", "--config-dir",
+    "--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit",
+    "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
+    "--term-status-msg", "--screenshot-template",
+))
+PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check")
+
+
+def _monotonic() -> float:
+    """Indirection so tests can drive the stop ladder with a fake clock."""
+    return time.monotonic()
+
+
+def _sleep(seconds: float) -> None:
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
+    """Mirror of Model.splitMpvArgs on already-split tokens."""
+    args: list[str] = []
+    rejected: list[str] = []
+    for token in tokens or []:
+        text = str(token)
+        name = text.split("=", 1)[0]
+        no_form = name.startswith("--no-") and ("--" + name[5:]) in MPV_RESERVED
+        if not MPV_ARG_RE.match(text) or name in MPV_RESERVED or no_form:
+            rejected.append(text)
+        else:
+            args.append(text)
+    return args, rejected
+
+
+def mpv_launch_argv(sock_path: str, mpv_args: list[str]) -> list[str]:
+    """Mirror of Model.buildMpvArgv, pinned by tests/fixtures/player-argv.json.
+
+    No URL, no "--", no header options, no per-channel title: the first
+    channel arrives over IPC like every later one (S-03). `--idle=once` (PO-1)
+    idles at startup and still exits when the playlist finishes, which keeps
+    today's UX and the degraded status-poll fallback.
+    """
+    return [
+        "mpv",
+        "--input-ipc-server=%s" % sock_path,
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=%sIPTV" % MPV_RAW_PREFIX,
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+    ] + list(mpv_args or [])
+
+
+def stop_escalation(stage: str) -> dict[str, Any]:
+    """Mirror of Model.stopEscalation (the reducer of record)."""
+    text = stage or ""
+    if text == "":
+        return {"action": "quit", "signal": 0, "waitMs": STOP_QUIT_GRACE_MS}
+    if text == "quit":
+        return {"action": "term", "signal": 15, "waitMs": STOP_KILL_GRACE_MS}
+    if text == "term":
+        return {"action": "kill", "signal": 9, "waitMs": 0}
+    return {"action": "kill", "signal": 0, "waitMs": 0}
+
+
+def ended_verdict(end_file: dict[str, Any] | None, user_stopped: bool = False,
+                  stopping: bool = False) -> dict[str, Any]:
+    """Mirror of Model.endedVerdict (4.8): why the player ended.
+
+    The entry id is deliberately not consulted - it decides which channel the
+    message names, never whether there is one (F4, the gate fails open).
+    """
+    if user_stopped or stopping:
+        return {"notify": False, "reason": "", "kind": "silent"}
+    if not isinstance(end_file, dict):
+        return {"notify": True, "reason": PLAYER_GENERIC_FAILURE, "kind": "failed"}
+    reason = str(end_file.get("reason") or "")
+    if reason == "redirect":
+        # The .m3u8 master resolution IPTV uses most: never terminal.
+        return {"notify": False, "reason": "", "kind": "ignored"}
+    if reason in ("quit", "eof"):
+        return {"notify": False, "reason": "", "kind": "silent"}
+    detail = redact_urls(end_file.get("fileError") or end_file.get("file_error") or "").strip()
+    return {"notify": True, "reason": detail or PLAYER_GENERIC_FAILURE, "kind": "failed"}
+
+
+def player_stash(channel_id: str, name: str, group: str, scope: str, source_key: str,
+                 since: int, seq: int, entry_id: int | None = None,
+                 playing: bool = True) -> dict[str, Any]:
+    """Mirror of Model.playerStash: the now-playing record mpv carries for us.
+
+    `launchedFrom` is the zap-ring scope - pure UI intent no mpv property
+    could ever report, which is why the shell's own value is stashed here and
+    echoed back on reattach.
+    """
+    return {
+        "schema": PLAYER_STASH_SCHEMA,
+        "playing": bool(playing),
+        "id": str(channel_id or ""),
+        "name": str(name or ""),
+        "group": str(group or ""),
+        "launchedFrom": str(scope or ""),
+        "sourceKey": str(source_key or ""),
+        "since": int(since or 0),
+        "entryId": entry_id if isinstance(entry_id, int) and entry_id > 0 else None,
+        "seq": int(seq or 0),
+    }
+
+
+def source_key_of(directory: str) -> str:
+    """The source key a per-source cache directory belongs to, so the stash
+    can say which playlist the channel id resolves against without the URL
+    or the key crossing a command line of its own."""
+    parent, base = os.path.split(os.path.normpath(directory or ""))
+    if os.path.basename(parent) == SOURCES_DIR and SOURCE_KEY_RE.match(base or ""):
+        return base
+    return ""
+
+
+# ------------------------------------------------------- process discovery
+# `connect()` only ever answers "responsive": it succeeds through the listen
+# backlog against a wedged mpv. The authoritative existence check is a /proc
+# scan for our exact --input-ipc-server token plus our uid, which is also the
+# only way to obtain a pid for an mpv whose IPC is dead - the very case the
+# stop ladder exists for.
+
+def proc_cmdline(pid: int) -> list[str]:
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return []
+    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+
+
+def proc_start_time(pid: int) -> str:
+    """Field 22 of /proc/<pid>/stat, read after the last ')' so a comm
+    containing spaces or parentheses cannot shift the fields."""
+    try:
+        with open("/proc/%d/stat" % pid, "rb") as handle:
+            data = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    close = data.rfind(")")
+    if close == -1:
+        return ""
+    fields = data[close + 1:].split()
+    return fields[19] if len(fields) > 19 else ""
+
+
+def proc_is_ours(pid: int) -> bool:
+    try:
+        return os.stat("/proc/%d" % pid).st_uid == os.getuid()
+    except OSError:
+        return False
+
+
+def find_player(sock_path: str) -> list[dict[str, Any]]:
+    """Every live process of ours whose argv carries our exact socket token."""
+    token = "--input-ipc-server=%s" % sock_path
+    found: list[dict[str, Any]] = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return found
+    mine = os.getpid()
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == mine:
+            continue
+        if token not in proc_cmdline(pid) or not proc_is_ours(pid):
+            continue
+        found.append({"pid": pid, "startTime": proc_start_time(pid)})
+    found.sort(key=lambda record: record["pid"])
+    return found
+
+
+def still_the_player(record: dict[str, Any], sock_path: str) -> bool:
+    """Re-verified immediately before every signal: pid alive, same start
+    time, same socket token, same uid - so a recycled pid is never signalled."""
+    pid = int(record.get("pid") or 0)
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    if not proc_is_ours(pid):
+        return False
+    recorded = str(record.get("startTime") or "")
+    if recorded and proc_start_time(pid) != recorded:
+        return False
+    return ("--input-ipc-server=%s" % sock_path) in proc_cmdline(pid)
+
+
+# ------------------------------------------------------------------ lock
+
+def player_lock_path(sock_path: str) -> str:
+    return os.path.join(os.path.dirname(sock_path), PLAYER_LOCK_FILE)
+
+
+def acquire_lock(path: str, timeout: float) -> int:
+    """flock with an inode re-check.
+
+    A plain flock is defeated by unlinking the lock file and recreating it:
+    the winner then holds a lock on an orphaned inode while a second launcher
+    locks the new one. After every grant we compare fstat(fd) with stat(path)
+    and start over when they differ. The kernel releases the lock on any
+    death including SIGKILL, so it can never go stale.
+    """
+    deadline = _monotonic() + max(0.0, float(timeout))
+    for _ in range(LOCK_RETRIES):
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+        granted = False
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                granted = True
+                break
+            except OSError as error:
+                if error.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+                    os.close(fd)
+                    raise HelperError("busy", "could not lock the player: %s" % (error.strerror or error))
+                if _monotonic() >= deadline:
+                    break
+                _sleep(LOCK_POLL_S)
+        if not granted:
+            os.close(fd)
+            raise HelperError("busy", "another player command holds the lock")
+        try:
+            same_inode = os.fstat(fd).st_ino == os.stat(path).st_ino
+        except OSError:
+            same_inode = False
+        if same_inode:
+            return fd
+        os.close(fd)
+        if _monotonic() >= deadline:
+            break
+    raise HelperError("busy", "the player lock file kept being replaced")
+
+
+def release_lock(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def read_lock_record(fd: int) -> dict[str, Any]:
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        raw = os.read(fd, 4096)
+    except OSError:
+        return {}
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+def read_lock_file(sock_path: str) -> dict[str, Any]:
+    """The record without taking the lock (probe is lock-free)."""
+    try:
+        with open(player_lock_path(sock_path), "rb") as handle:
+            document = json.loads(handle.read().decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+def record_seq(record: dict[str, Any]) -> int:
+    value = record.get("seq")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
+def write_lock_record(fd: int, seq: int, verb: str) -> None:
+    payload = json.dumps({"schema": 1, "seq": int(seq), "verb": verb, "at": int(time.time())})
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.truncate(fd, 0)
+        os.write(fd, payload.encode("utf-8"))
+    except OSError:
+        pass
+
+
+def check_seq(record: dict[str, Any], seq: int, verb: str) -> None:
+    """Ordering by issue time, not by lock-grant order (4.10): a verb whose
+    intent number is older than the recorded one does nothing at all."""
+    if seq > 0 and record_seq(record) > seq:
+        raise HelperError("superseded", "intent %d is older than the recorded %d" % (seq, record_seq(record)))
+
+
+# ----------------------------------------------------------------- spawn
+
+def _read_pipe(fd: int, timeout: float) -> bytes:
+    chunks: list[bytes] = []
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            ready, _, _ = select.select([fd], [], [], remaining)
+        except OSError:
+            break
+        if not ready:
+            break
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def spawn_detached(argv: list[str]) -> dict[str, Any]:
+    """setsid + double fork, and the fd hygiene that makes it survivable.
+
+    The grandchild reports its own pid over a pipe (so a spawn that never
+    binds a socket is still reapable by the helper that created it), reports
+    an exec failure over a CLOEXEC pipe (restoring the error
+    Quickshell.execDetached throws away - it returns void), keeps its stderr
+    on a pipe for the launch window only (PO-6), puts /dev/null on stdin and
+    stdout and closes every other inherited descriptor before execvp - which
+    is what guarantees mpv never holds a Quickshell StdioCollector pipe for
+    hours and dies of BrokenPipeError at the restart it exists to survive.
+
+    argv[0] is the literal "mpv", never caller-supplied, so `player start` is
+    not an arbitrary-exec verb.
+    """
+    pid_r, pid_w = os.pipe()
+    err_r, err_w = os.pipe2(os.O_CLOEXEC)
+    log_r, log_w = os.pipe()
+    child = os.fork()
+    if child == 0:                                        # pragma: no cover
+        try:
+            os.setsid()
+            if os.fork() > 0:
+                os._exit(0)
+            os.write(pid_w, str(os.getpid()).encode("ascii"))
+            os.close(pid_w)
+            devnull = os.open(os.devnull, os.O_RDWR)
+            os.dup2(devnull, 0)
+            os.dup2(devnull, 1)
+            os.dup2(log_w, 2)
+            # Once this helper exits nobody reads that pipe; an ignored
+            # SIGPIPE (inherited through execve) keeps a failed diagnostic
+            # write from ever killing the player.
+            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+            try:
+                limit = int(os.sysconf("SC_OPEN_MAX"))
+            except (ValueError, OSError):
+                limit = 4096
+            for fd in range(3, min(limit, 4096)):
+                if fd == err_w:
+                    continue
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            os.execvp("mpv", argv)
+        except BaseException as error:                    # noqa: BLE001 - reported over the pipe
+            number = getattr(error, "errno", 0) or 0
+            try:
+                os.write(err_w, str(int(number)).encode("ascii"))
+            except OSError:
+                pass
+        os._exit(127)
+    os.close(pid_w)
+    os.close(err_w)
+    os.close(log_w)
+    try:
+        os.waitpid(child, 0)                              # the intermediate child, never a zombie
+    except OSError:
+        pass
+    pid_text = _read_pipe(pid_r, 2.0).decode("ascii", "replace").strip()
+    os.close(pid_r)
+    failure = _read_pipe(err_r, DEFAULT_SPAWN_TIMEOUT).decode("ascii", "replace").strip()
+    os.close(err_r)
+    pid = int(pid_text) if pid_text.isdigit() else 0
+    if failure:
+        os.close(log_r)
+        number = int(failure) if failure.isdigit() else 0
+        if number == errno.ENOENT:
+            raise HelperError("mpv_missing", "mpv is not installed")
+        raise HelperError("spawn_failed", "could not start mpv: %s" % (os.strerror(number) if number else "exec failed"))
+    if pid <= 0:
+        os.close(log_r)
+        raise HelperError("spawn_failed", "the player did not report a pid")
+    os.set_blocking(log_r, False)
+    return {"pid": pid, "stderrFd": log_r}
+
+
+def drain_launch_stderr(fd: int, buffer: list[str]) -> None:
+    """PO-6: whatever mpv said while starting, redacted, memory only, capped.
+    Kept drained so a chatty mpv can never block on a full pipe."""
+    while True:
+        try:
+            chunk = os.read(fd, 4096)
+        except (BlockingIOError, OSError):
+            return
+        if not chunk:
+            return
+        text = redact_urls(chunk.decode("utf-8", "replace"))
+        room = LAUNCH_STDERR_MAX - sum(len(part) for part in buffer)
+        if room > 0:
+            buffer.append(text[:room])
+
+
+def launch_reason(buffer: list[str]) -> str:
+    lines = [line.strip() for line in "".join(buffer).splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+# ------------------------------------------------------------ connection
+
+def probe_client(sock_path: str, ipc_timeout: float) -> MpvIpc | None:
+    """A connected client that actually answered, or None."""
+    client = MpvIpc(sock_path, ipc_timeout)
+    try:
+        client.connect()
+        ok, _ = client.try_command("get_property", "mpv-version")
+        if ok:
+            return client
+    except HelperError:
+        pass
+    client.close()
+    return None
+
+
+def wait_for_socket(sock_path: str, timeout: float, ipc_timeout: float,
+                    stderr_fd: int = -1, stderr_buffer: list[str] | None = None) -> MpvIpc | None:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if stderr_fd >= 0 and stderr_buffer is not None:
+            drain_launch_stderr(stderr_fd, stderr_buffer)
+        client = probe_client(sock_path, ipc_timeout)
+        if client is not None:
+            return client
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(SPAWN_POLL_S)
+
+
+def quit_over_ipc(sock_path: str, ipc_timeout: float) -> bool:
+    client = MpvIpc(sock_path, ipc_timeout)
+    try:
+        client.connect()
+        client.request(["quit"], allow_close=True)
+        return True
+    except HelperError:
+        return False
+    finally:
+        client.close()
+
+
+def socket_is_dead(sock_path: str) -> bool:
+    client = MpvIpc(sock_path, 0.2)
+    try:
+        client.connect()
+    except HelperError:
+        return client.refused or not os.path.exists(sock_path)
+    finally:
+        client.close()
+    return False
+
+
+def settle_socket(sock_path: str) -> bool:
+    """Unlink the socket only once nothing is listening and nothing of ours
+    is running (S_ISSOCK-guarded), so a racing start's fresh socket is never
+    deleted. mpv never unlinks its own socket on any exit path."""
+    if find_player(sock_path):
+        return False
+    if not socket_is_dead(sock_path):
+        return False
+    return unlink_stale_socket(sock_path)
+
+
+def wait_for_exit(targets: list[dict[str, Any]], sock_path: str, wait_ms: int) -> bool:
+    deadline = _monotonic() + max(0, int(wait_ms)) / 1000.0
+    while True:
+        if not any(still_the_player(record, sock_path) for record in targets):
+            return True
+        if _monotonic() >= deadline:
+            return False
+        _sleep(STOP_POLL_S)
+
+
+def signal_targets(targets: list[dict[str, Any]], sock_path: str, number: int) -> bool:
+    sent = False
+    for record in targets:
+        if not still_the_player(record, sock_path):
+            continue
+        try:
+            os.kill(int(record["pid"]), number)
+            sent = True
+        except OSError:
+            continue
+    return sent
+
+
+STOP_STAGE_BEFORE = {"": "", "quit": "", "term": "quit", "kill": "term"}
+
+
+def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = "",
+                ipc_timeout: float = DEFAULT_IPC_TIMEOUT) -> dict[str, Any]:
+    """The whole D-LIVE-17 ladder inside one process (4.9).
+
+    quit at 0, SIGTERM at 2 s, SIGKILL at 4 s - the same timeline as today,
+    but no rung can be starved by a busy control channel, the ladder finishes
+    even if the shell dies one millisecond after issuing it, and the pid comes
+    from /proc rather than from `get_property pid`, so a wedged mpv (the case
+    the ladder exists for, where IPC is by definition dead) is reachable.
+    `stop_escalation()` drives the rungs so the shared vectors really govern.
+    """
+    result: dict[str, Any] = {"rung": "", "running": True}
+    stage = STOP_STAGE_BEFORE.get(from_rung or "", "")
+    for _ in range(3):
+        step = stop_escalation(stage)
+        action = str(step["action"])
+        if action == "quit":
+            quit_over_ipc(sock_path, ipc_timeout)
+            result["rung"] = "quit"
+        elif step["signal"]:
+            if not signal_targets(targets, sock_path, int(step["signal"])):
+                result["running"] = False
+                return result
+            result["rung"] = action
+        else:
+            break
+        if wait_for_exit(targets, sock_path, int(step["waitMs"]) or STOP_SETTLE_MS):
+            result["running"] = False
+            return result
+        stage = action
+    result["running"] = not wait_for_exit(targets, sock_path, STOP_SETTLE_MS)
+    return result
+
+
+# ------------------------------------------------------------- the channel
+
+def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, Any]:
+    """Resolve the channel the helper will play. The URL is read from the
+    0600 cache by the helper itself and never crosses a process boundary."""
+    if channel_id:
+        channel = find_channel(load_channels(cache_dir(directory)), channel_id)
+        url = str(channel.get("url") or "")
+        name = str(channel.get("name") or "") or url_host(url) or "channel"
+        headers = channel.get("headers") if isinstance(channel.get("headers"), dict) else {}
+        group = str(channel.get("group") or "")
+    else:
+        url = (raw_url or "").strip()
+        name = url_host(url) or "stream"
+        headers = {}
+        group = ""
+    if not is_stream_url(url):
+        raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+    return {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group}
+
+
+def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
+                  owner: dict[str, Any] | None = None, label: str = "play") -> int | None:
+    """The wire sequence of a zap, shared verbatim by `play` and
+    `player start` so first play and every later zap are one implementation.
+
+    title -> force-media-title -> the three header properties (always all
+    three, so a channel without headers actively resets the previous one's,
+    which is requirement 7's clearing mechanism) -> the stash -> loadfile ->
+    the stash again with the entry id -> the owner claim.
+    """
+    for prop, value in (("title", MPV_RAW_PREFIX + target["name"]), ("force-media-title", target["name"])):
+        ok, _ = client.try_command("set_property", prop, value)
+        if not ok:
+            log("%s: mpv refused to set %s" % (label, prop))
+    for prop, value in header_properties(target["headers"], client):
+        client.command("set_property", prop, value)
+    if stash is not None:
+        client.try_command("set_property", USER_DATA_STASH, dict(stash, entryId=None))
+    data = client.command("loadfile", target["url"], "replace")
+    entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
+    if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id <= 0:
+        entry_id = None
+    # Everything after the loadfile is bookkeeping, and under `--idle=once` a
+    # channel that fails instantly can take the process (and the connection)
+    # down before these land. A dead connection here means the load failed,
+    # which is the first-load window's verdict to report - not an error that
+    # should sink the whole verb.
+    for prop, value in ((USER_DATA_STASH, dict(stash, entryId=entry_id) if stash is not None else None),
+                        (USER_DATA_OWNER, owner)):
+        if value is None:
+            continue
+        try:
+            client.try_command("set_property", prop, value)
+        except HelperError:
+            log("%s: the player closed while recording %s" % (label, prop))
+            break
+    return entry_id
+
+
+def owner_claim(owner_pid: int) -> dict[str, Any] | None:
+    """The claim that tells a successor shell the player is already adopted
+    (4.14). Keyed by pid AND start time so a recycled pid cannot inherit it."""
+    if not owner_pid or owner_pid <= 0:
+        return None
+    return {"schema": PLAYER_STASH_SCHEMA, "pid": int(owner_pid),
+            "startTime": proc_start_time(int(owner_pid)), "at": int(time.time())}
+
+
+def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
+                       launch_errors: list[str] | None = None) -> dict[str, Any]:
+    """F3: `player start` watches its own first load on the connection it
+    already holds, so a first channel that dies before any QML subscriber
+    could exist - an expired subscription, the commonest real failure - is
+    never silent. Log text is redacted here, inside python, before it can
+    cross into QML.
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    state = "unknown"
+    reason = ""
+    last_error = launch_reason(launch_errors or [])
+    while time.monotonic() < deadline:
+        events = client.drain_events(deadline)
+        if events is None:                       # mpv closed the connection
+            state = "failed"
+            break
+        for message in events:
+            event = str(message.get("event") or "")
+            mine = entry_id is None or message.get("playlist_entry_id") == entry_id
+            if event == "log-message" and str(message.get("level") or "") in ("error", "fatal"):
+                last_error = redact_urls(str(message.get("text") or "")).strip() or last_error
+            elif event == "file-loaded":
+                return {"state": "playing", "reason": ""}
+            elif event == "end-file" and mine:
+                verdict = ended_verdict(message)
+                if verdict["kind"] == "failed":
+                    # The log line says what actually went wrong; mpv's own
+                    # file_error is a generic "loading failed". Both are
+                    # already redacted, here, inside python (section 6).
+                    return {"state": "failed", "reason": last_error or verdict["reason"]}
+                return {"state": "unknown", "reason": ""}
+    if state == "failed" and not reason:
+        reason = last_error or PLAYER_GENERIC_FAILURE
+    return {"state": state, "reason": reason}
+
+
+# -------------------------------------------------------------- the verbs
+
+def player_runtime(sock_path: str) -> str:
+    directory = os.path.dirname(sock_path)
+    ensure_private_dir(directory)
+    return directory
+
+
+def check_socket_path(sock_path: str) -> None:
+    """A regular file at the socket path is never unlinked and never spawned
+    over (it is the user's, or a sign something else owns the path)."""
+    try:
+        mode = os.lstat(sock_path).st_mode
+    except OSError:
+        return
+    if not stat.S_ISSOCK(mode):
+        raise HelperError("socket_path_blocked", "the socket path is not a socket")
+
+
+def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
+                   ipc_timeout: float, warnings: list[str]) -> dict[str, Any]:
+    """Requirement 1, all three layers: the /proc scan is the existence check,
+    a live answering player is adopted rather than duplicated, several
+    matches collapse to the one that answers, and a spawn whose socket never
+    binds is reaped by the helper that created it - so an uncontrollable
+    window can neither exist nor multiply.
+    """
+    found = find_player(sock_path)
+    if found:
+        client = probe_client(sock_path, ipc_timeout)
+        if client is not None:
+            keep = _connected_pid(client, found)
+            others = [record for record in found if record["pid"] != keep]
+            if others:
+                # Never rung 1 here: `quit` travels over the shared socket and
+                # would hit the player we are keeping. Signal the rest by pid.
+                warnings.append("stopped %d other player process(es) on this socket" % len(others))
+                stop_ladder(sock_path, others, "term", ipc_timeout)
+            return {"spawned": False, "client": client, "pid": keep}
+        # Matches found, none answers: wedged. Ladder them down and respawn.
+        warnings.append("stopped an unresponsive player")
+        stop_ladder(sock_path, found, "", ipc_timeout)
+    settle_socket(sock_path)
+    launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args))
+    errors: list[str] = []
+    client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
+    if client is None:
+        drain_launch_stderr(launched["stderrFd"], errors)
+        os.close(launched["stderrFd"])
+        stop_ladder(sock_path, [{"pid": launched["pid"], "startTime": proc_start_time(launched["pid"])}], "term", ipc_timeout)
+        settle_socket(sock_path)
+        detail = launch_reason(errors)
+        raise HelperError("no_socket", "the player did not open its socket" + (": %s" % detail if detail else ""))
+    drain_launch_stderr(launched["stderrFd"], errors)
+    os.close(launched["stderrFd"])
+    return {"spawned": True, "client": client, "pid": launched["pid"], "launchErrors": errors}
+
+
+def _connected_pid(client: MpvIpc, found: list[dict[str, Any]]) -> int:
+    """Which of the scanned processes is the one answering the socket. With a
+    single match that is settled; with several, mpv's own `pid` property
+    decides, and the scan is still the authority on existence."""
+    if len(found) == 1:
+        return int(found[0]["pid"])
+    ok, data = client.try_command("get_property", "pid")
+    if ok and isinstance(data, int) and any(record["pid"] == data for record in found):
+        return int(data)
+    return int(found[0]["pid"]) if found else 0
+
+
+def player_start(args: argparse.Namespace, verb: str = "start") -> int:
+    kind = "player.%s" % verb
+    sock = socket_path(args.socket)
+    seq = max(0, int(args.seq or 0))
+    warnings: list[str] = []
+    mpv_args, rejected = filter_mpv_args(list(args.mpv_arg or []))
+    for token in rejected:
+        warnings.append("dropped mpvArg %s" % token.split("=", 1)[0])
+    lock_fd = -1
+    client = None
+    try:
+        target = player_target(args.id, "", args.cache_dir)
+        player_runtime(sock)
+        check_socket_path(sock)
+        lock_fd = acquire_lock(player_lock_path(sock), args.lock_timeout)
+        check_seq(read_lock_record(lock_fd), seq, verb)
+        write_lock_record(lock_fd, seq, verb)
+        if verb == "restart":
+            stop_ladder(sock, find_player(sock), args.__dict__.get("from_rung") or "term", args.ipc_timeout)
+            settle_socket(sock)
+        outcome = adopt_or_spawn(sock, mpv_args, args.spawn_timeout, args.ipc_timeout, warnings)
+        client = outcome["client"]
+        # Subscribe BEFORE any load, so the first channel's failure text is
+        # captured on the connection we already hold (F3).
+        client.try_command("request_log_messages", "error")
+        stash = player_stash(target["id"], target["name"], target["group"], args.scope,
+                             source_key_of(cache_dir(args.cache_dir)), args.since or int(time.time()), seq)
+        entry_id = apply_channel(client, target, stash=stash, owner=owner_claim(args.owner_pid), label="player %s" % verb)
+    except HelperError as error:
+        if lock_fd >= 0:
+            release_lock(lock_fd)
+        if client is not None:
+            client.close()
+        log("player %s: %s" % (verb, error.message))
+        emit(error_payload(kind, error, id=args.id or None, seq=seq))
+        return EXIT_ERROR
+    # The lock is deliberately not held across the first-load window, so a
+    # `player stop` can interleave (4.4 step 10).
+    release_lock(lock_fd)
+    try:
+        first_load = observe_first_load(client, entry_id, args.first_load_timeout, outcome.get("launchErrors"))
+    finally:
+        client.close()
+    emit({"ok": True, "kind": kind, "spawned": bool(outcome["spawned"]), "pid": int(outcome["pid"]),
+          "id": target["id"] or None, "name": target["name"], "entryId": entry_id, "seq": seq,
+          "firstLoad": first_load, "warnings": warnings})
+    return EXIT_OK
+
+
+def player_stop(args: argparse.Namespace) -> int:
+    sock = socket_path(args.socket)
+    seq = max(0, int(args.seq or 0))
+    lock_fd = -1
+    try:
+        player_runtime(sock)
+        lock_fd = acquire_lock(player_lock_path(sock), args.lock_timeout)
+        check_seq(read_lock_record(lock_fd), seq, "stop")
+        write_lock_record(lock_fd, seq, "stop")
+        found = find_player(sock)
+        if not found:
+            settle_socket(sock)
+            emit({"ok": True, "kind": "player.stop", "running": False, "rung": "", "pid": None})
+            return EXIT_OK
+        result = stop_ladder(sock, found, args.from_rung, args.ipc_timeout)
+        settle_socket(sock)
+        emit({"ok": True, "kind": "player.stop", "running": bool(result["running"]),
+              "rung": result["rung"], "pid": int(found[0]["pid"])})
+        return EXIT_OK
+    except HelperError as error:
+        log("player stop: %s" % error.message)
+        emit(error_payload("player.stop", error, seq=seq))
+        return EXIT_ERROR
+    finally:
+        if lock_fd >= 0:
+            release_lock(lock_fd)
+
+
+def player_probe(args: argparse.Namespace) -> int:
+    """Lock-free and side-effect-free but for one stale-socket unlink and the
+    owner claim. `path` and `media-title` are never read into the shell: one
+    is a credentialed URL, the other is verified stale after playback ends."""
+    sock = socket_path(args.socket)
+    try:
+        found = find_player(sock)
+        payload: dict[str, Any] = {
+            "ok": True, "kind": "player.probe", "running": bool(found), "responsive": False,
+            "pid": int(found[0]["pid"]) if found else None, "idle": None, "mpvVersion": None,
+            "stash": None, "owner": None, "seq": record_seq(read_lock_file(sock)), "claimed": False,
+        }
+        client = probe_client(sock, args.ipc_timeout) if found else None
+        if client is None:
+            if not found:
+                settle_socket(sock)
+            emit(payload)
+            return EXIT_OK
+        try:
+            payload["responsive"] = True
+            payload["pid"] = _connected_pid(client, found)
+            ok, idle = client.try_command("get_property", "idle-active")
+            payload["idle"] = bool(idle) if ok and idle is not None else None
+            ok, version = client.try_command("get_property", "mpv-version")
+            payload["mpvVersion"] = version if ok and isinstance(version, str) else None
+            ok, stash = client.try_command("get_property", USER_DATA_STASH)
+            payload["stash"] = stash if ok and isinstance(stash, dict) and stash.get("id") else None
+            ok, owner = client.try_command("get_property", USER_DATA_OWNER)
+            payload["owner"] = owner if ok and isinstance(owner, dict) else None
+            claim = owner_claim(args.owner_pid)
+            if claim is not None:
+                written, _ = client.try_command("set_property", USER_DATA_OWNER, claim)
+                payload["claimed"] = bool(written)
+                if written:
+                    payload["owner"] = claim
+        finally:
+            client.close()
+        emit(payload)
+        return EXIT_OK
+    except HelperError as error:
+        log("player probe: %s" % error.message)
+        emit(error_payload("player.probe", error, running=False))
+        return EXIT_ERROR
+
+
+def player_orphan_check(args: argparse.Namespace) -> int:
+    """PO-2: the service object being destroyed cannot tell a shell restart
+    from a plugin removal, so the claim decides, not the destruction event.
+    A successor shell overwrites the claim well inside the grace."""
+    sock = socket_path(args.socket)
+    owner_pid = int(args.owner_pid or 0)
+    _sleep(max(0.0, float(args.grace)))
+    try:
+        found = find_player(sock)
+        if not found:
+            emit({"ok": True, "kind": "player.orphan-check", "stopped": False, "reason": "no_player"})
+            return EXIT_OK
+        client = probe_client(sock, args.ipc_timeout)
+        claim = None
+        if client is not None:
+            try:
+                ok, data = client.try_command("get_property", USER_DATA_OWNER)
+                claim = data if ok and isinstance(data, dict) else None
+            finally:
+                client.close()
+        if not isinstance(claim, dict) or int(claim.get("pid") or 0) != owner_pid or owner_pid <= 0:
+            emit({"ok": True, "kind": "player.orphan-check", "stopped": False, "reason": "reassigned"})
+            return EXIT_OK
+        alive = False
+        try:
+            os.kill(owner_pid, 0)
+            alive = proc_is_ours(owner_pid) and (not claim.get("startTime") or proc_start_time(owner_pid) == str(claim.get("startTime")))
+        except OSError:
+            alive = False
+        if not alive:
+            # The shell exited and nothing claimed the player: a slow restart
+            # must not kill playback.
+            emit({"ok": True, "kind": "player.orphan-check", "stopped": False, "reason": "owner_dead"})
+            return EXIT_OK
+        result = stop_ladder(sock, found, "", args.ipc_timeout)
+        settle_socket(sock)
+        emit({"ok": True, "kind": "player.orphan-check", "stopped": not result["running"],
+              "reason": "owner_alive", "rung": result["rung"]})
+        return EXIT_OK
+    except HelperError as error:
+        log("player orphan-check: %s" % error.message)
+        emit(error_payload("player.orphan-check", error, stopped=False))
+        return EXIT_ERROR
+
+
+def cmd_player(args: argparse.Namespace) -> int:
+    action = args.action
+    if action == "start":
+        return player_start(args, "start")
+    if action == "restart":
+        return player_start(args, "restart")
+    if action == "stop":
+        return player_stop(args)
+    if action == "probe":
+        return player_probe(args)
+    return player_orphan_check(args)
 
 
 # --------------------------------------------------------------- cache
@@ -2339,6 +3340,8 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
     play.add_argument("--socket", default=None, help="default: $XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock")
     play.add_argument("--ipc-timeout", type=float, default=DEFAULT_IPC_TIMEOUT, help="seconds to wait for mpv (default %.0f)" % DEFAULT_IPC_TIMEOUT)
+    play.add_argument("--scope", default="", help="zap-ring scope to stash inside mpv (the list the channel was launched from)")
+    play.add_argument("--since", type=int, default=0, help="epoch seconds the channel started playing; with --scope it refreshes the stash")
     play.set_defaults(func=cmd_play)
 
     stop = sub.add_parser("stop", help="ask the running mpv to quit over IPC")
@@ -2350,6 +3353,40 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--socket", default=None, help="default: $XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock")
     status.add_argument("--ipc-timeout", type=float, default=DEFAULT_IPC_TIMEOUT, help="seconds to wait for mpv (default %.0f)" % DEFAULT_IPC_TIMEOUT)
     status.set_defaults(func=cmd_status)
+
+    # The detached player (docs/ARCHITECTURE-PLAYER.md 4.3). User mpv tokens
+    # travel as repeated --mpv-arg so argparse can never swallow an
+    # option-looking token and no token is ever joined or split.
+    player = sub.add_parser("player", help="start, stop, restart, probe or orphan-check the detached player")
+    player_actions = player.add_subparsers(dest="action", required=True)
+    player_socket = argparse.ArgumentParser(add_help=False)
+    player_socket.add_argument("--socket", default=None, help="default: $XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock")
+    player_socket.add_argument("--ipc-timeout", type=float, default=DEFAULT_IPC_TIMEOUT, help="seconds to wait for mpv (default %.0f)" % DEFAULT_IPC_TIMEOUT)
+    player_session = argparse.ArgumentParser(add_help=False)
+    player_session.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
+    player_session.add_argument("--id", required=True, help="channel id from channels.json; the URL is read from the 0600 cache, never passed in")
+    player_session.add_argument("--seq", type=int, default=0, help="the service's intent sequence number; an older intent is superseded")
+    player_session.add_argument("--scope", default="", help="zap-ring scope stashed inside mpv (UI intent no mpv property could report)")
+    player_session.add_argument("--since", type=int, default=0, help="epoch seconds the channel started playing")
+    player_session.add_argument("--owner-pid", type=int, default=0, help="claim the player for this shell pid (see orphan-check)")
+    player_session.add_argument("--mpv-arg", action="append", default=[], help="one user mpv token; repeat for more (never joined)")
+    player_session.add_argument("--lock-timeout", type=float, default=DEFAULT_LOCK_TIMEOUT, help="seconds to wait for the player lock (default %.1f)" % DEFAULT_LOCK_TIMEOUT)
+    player_session.add_argument("--spawn-timeout", type=float, default=DEFAULT_SPAWN_TIMEOUT, help="seconds to wait for mpv to bind its socket (default %.1f)" % DEFAULT_SPAWN_TIMEOUT)
+    player_session.add_argument("--first-load-timeout", type=float, default=DEFAULT_FIRST_LOAD_TIMEOUT, help="seconds to watch the first load (default %.1f)" % DEFAULT_FIRST_LOAD_TIMEOUT)
+    start = player_actions.add_parser("start", parents=[player_socket, player_session], help="adopt or spawn the player and play a channel (idempotent)")
+    start.add_argument("--from", dest="from_rung", default="", choices=["", "quit", "term", "kill"], help=argparse.SUPPRESS)
+    restart = player_actions.add_parser("restart", parents=[player_socket, player_session], help="stop ladder and spawn under one lock (the health verdict)")
+    restart.add_argument("--from", dest="from_rung", default="term", choices=["", "quit", "term", "kill"], help="first rung of the ladder (default term: IPC is not answering)")
+    stop_player = player_actions.add_parser("stop", parents=[player_socket], help="run the whole quit / SIGTERM / SIGKILL ladder in this process")
+    stop_player.add_argument("--seq", type=int, default=0, help="the service's intent sequence number")
+    stop_player.add_argument("--from", dest="from_rung", default="", choices=["", "quit", "term", "kill"], help="first rung (default quit over IPC)")
+    stop_player.add_argument("--lock-timeout", type=float, default=DEFAULT_LOCK_TIMEOUT, help="seconds to wait for the player lock (default %.1f)" % DEFAULT_LOCK_TIMEOUT)
+    probe = player_actions.add_parser("probe", parents=[player_socket], help="report the player without touching it (the reattach read)")
+    probe.add_argument("--owner-pid", type=int, default=0, help="claim the player for this shell pid")
+    orphan = player_actions.add_parser("orphan-check", parents=[player_socket], help="stop the player only if its claiming shell is still alive")
+    orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")
+    orphan.add_argument("--grace", type=float, default=DEFAULT_ORPHAN_GRACE, help="seconds to let a successor shell claim the player (default %.1f)" % DEFAULT_ORPHAN_GRACE)
+    player.set_defaults(func=cmd_player)
 
     state = sub.add_parser("state", help="inspect or edit state.json")
     state.add_argument("--state-dir", default=None, help="default: $XDG_STATE_HOME/omarchy-iptv")

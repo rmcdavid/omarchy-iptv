@@ -1,0 +1,197 @@
+{
+  "_comment": [
+    "Shared vectors for the detached player (docs/ARCHITECTURE-PLAYER.md 4.9, 4.12, 6).",
+    "Read by BOTH tests/Model.test.js (Model.buildMpvArgv / stopEscalation /",
+    "endedVerdict) and tests/test_player.py (mpv_launch_argv / stop_escalation /",
+    "ended_verdict). A rule written twice gets one fixture (CLAUDE.md); this file is",
+    "the one that pins the JavaScript and the Python mirrors to each other.",
+    "ASCII only: scripts/check.sh greps tests/fixtures/* for non-ASCII bytes."
+  ],
+  "genericFailure": "Playback stopped unexpectedly",
+  "mpvArgv": [
+    {
+      "name": "cold launch carries no channel: no URL, no headers, no title, no trailing --",
+      "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "mpvArgs": [],
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no"
+      ]
+    },
+    {
+      "name": "user mpvArgs land after the fixed options so --ytdl=yes still wins",
+      "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "mpvArgs": ["--profile=low-latency", "--ytdl=yes"],
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+        "--profile=low-latency",
+        "--ytdl=yes"
+      ]
+    },
+    {
+      "name": "reserved and malformed tokens are dropped by both filters",
+      "socketPath": "/tmp/s.sock",
+      "mpvArgs": [
+        "--log-file=/tmp/mpv.log",
+        "--no-log-file",
+        "--osd-msg1=${path}",
+        "--screenshot-template=${path}",
+        "--input-ipc-server=/tmp/evil.sock",
+        "--Profile=fast",
+        "--script=/tmp/evil.lua",
+        "rm",
+        "--hwdec=auto-safe"
+      ],
+      "rejected": [
+        "--log-file=/tmp/mpv.log",
+        "--no-log-file",
+        "--osd-msg1=${path}",
+        "--screenshot-template=${path}",
+        "--input-ipc-server=/tmp/evil.sock",
+        "--Profile=fast",
+        "--script=/tmp/evil.lua",
+        "rm"
+      ],
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/tmp/s.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+        "--hwdec=auto-safe"
+      ]
+    }
+  ],
+  "mpvReserved": [
+    "--input-ipc-server",
+    "--wayland-app-id",
+    "--title",
+    "--force-media-title",
+    "--idle",
+    "--input-ipc-client",
+    "--script",
+    "--scripts",
+    "--config-dir",
+    "--log-file",
+    "--dump-stats",
+    "--stream-record",
+    "--save-position-on-quit",
+    "--watch-later-dir",
+    "--osd-msg1",
+    "--osd-msg2",
+    "--osd-msg3",
+    "--term-status-msg",
+    "--screenshot-template"
+  ],
+  "stopLadder": [
+    { "name": "idle -> quit over IPC, then the quit grace", "stage": "", "action": "quit", "signal": 0, "waitMs": 2000 },
+    { "name": "quit ignored -> SIGTERM, then the kill grace", "stage": "quit", "action": "term", "signal": 15, "waitMs": 2000 },
+    { "name": "SIGTERM ignored -> SIGKILL, nothing left to arm", "stage": "term", "action": "kill", "signal": 9, "waitMs": 0 },
+    { "name": "after SIGKILL only the exit is awaited", "stage": "kill", "action": "kill", "signal": 0, "waitMs": 0 },
+    { "name": "an unknown stage never re-signals", "stage": "bogus", "action": "kill", "signal": 0, "waitMs": 0 }
+  ],
+  "endedVerdict": [
+    {
+      "name": "the user stopped it: silent, whatever mpv reported",
+      "endFile": { "reason": "error", "file_error": "loading failed", "playlist_entry_id": 2 },
+      "userStopped": true, "stopping": false,
+      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+    },
+    {
+      "name": "a stop ladder is running: silent",
+      "endFile": { "reason": "stop", "playlist_entry_id": 2 },
+      "userStopped": false, "stopping": true,
+      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+    },
+    {
+      "name": "the user pressed q in mpv: silent, as exit 0 is today",
+      "endFile": { "reason": "quit", "playlist_entry_id": 1 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+    },
+    {
+      "name": "clean end of stream: silent stop (PO-4, zero behaviour change)",
+      "endFile": { "reason": "eof", "playlist_entry_id": 1 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+    },
+    {
+      "name": "dead stream: notify with the file_error",
+      "endFile": { "reason": "error", "file_error": "loading failed", "playlist_entry_id": 1 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "loading failed", "kind": "failed" }
+    },
+    {
+      "name": "error with no file_error falls back to the generic reason",
+      "endFile": { "reason": "error", "playlist_entry_id": 1 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+    },
+    {
+      "name": "reason stop with no user stop: a load we issued was replaced, then it died",
+      "endFile": { "reason": "stop", "playlist_entry_id": 3 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+    },
+    {
+      "name": "redirect is never terminal (the .m3u8 masters IPTV uses most)",
+      "endFile": { "reason": "redirect", "playlist_entry_id": 4 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": false, "reason": "", "kind": "ignored" }
+    },
+    {
+      "name": "no end-file at all (crash, SIGKILL): notify with the generic reason",
+      "endFile": null,
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+    },
+    {
+      "name": "fail open: a missing entry id never suppresses the failure",
+      "endFile": { "reason": "error", "file_error": "loading failed" },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "loading failed", "kind": "failed" }
+    },
+    {
+      "name": "fail open: an unknown entry id never suppresses the failure",
+      "endFile": { "reason": "error", "file_error": "loading failed", "playlist_entry_id": 99 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "loading failed", "kind": "failed" }
+    },
+    {
+      "name": "an unknown reason is treated as a failure, never swallowed",
+      "endFile": { "reason": "something-new", "playlist_entry_id": 1 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+    },
+    {
+      "name": "a file_error carrying a URL is redacted to its host",
+      "_comment": "The two redactors differ in shape on purpose and have since v0.1: redact_urls() in python keeps scheme://host (it is also the helper's stdout/stderr filter), Model.redactUrls reduces to the host alone. Both drop the userinfo, the port, the path and the query, and QML redacts a second time, so the two converge at the sink. verdictPython pins the python shape rather than pretending they are identical.",
+      "endFile": { "reason": "error", "file_error": "Failed to open http://user:pw@provider.test/live/token/1.m3u8", "playlist_entry_id": 1 },
+      "userStopped": false, "stopping": false,
+      "verdict": { "notify": true, "reason": "Failed to open provider.test", "kind": "failed" },
+      "verdictPython": { "notify": true, "reason": "Failed to open http://provider.test", "kind": "failed" }
+    }
+  ]
+}
