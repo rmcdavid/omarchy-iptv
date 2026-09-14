@@ -955,6 +955,79 @@ function deadSessionVerdict(state, stateLoaded, failed, clock) {
   }
 }
 
+// ------------------------------------------- the session record's lifetime
+//
+// The other half of PO-3, and the half that decides whether the mark above is
+// ever raised twice for the same event.
+//
+// recordPlayed() writes the record on the play command; deadSessionVerdict()
+// is its ONLY reader, and it reads a SURVIVING record as proof that the
+// channel died with no shell attached to notice. So the rule is about the
+// witness, not about the failure: a record must never outlive the shell that
+// saw how the play ended. Whether the user got a toast and a red row, "mpv
+// not found", a clean end that PO-4 keeps silent, or their own stop makes no
+// difference - they have had whatever they were going to get, and a mark on
+// the next reattach would be a second verdict on an event they already dealt
+// with. A record therefore survives exactly one thing: a player that is still
+// running or still on its way.
+//
+// This lives here rather than as a condition per branch in Service.qml
+// because that is how the reported defect happened: three of the terminal
+// branches wrote the clear and three did not, and nothing outside a running
+// shell could call the rule to find out (CLAUDE.md 11, 12).
+
+// Every answer Service.qml can get about the player it asked for, and whether
+// the player survives it. `false` is "gone, and nothing is bringing it back".
+var PLAYER_OUTCOME_SURVIVES = {
+  superseded: true,     // a later intent won the lock; that intent owns the record
+  retrying: true,       // busy / no_socket / ipc_error, the backoff is armed
+  relaunching: true,    // the health verdict's one automatic relaunch (4.8)
+  attached: true,       // the first load failed but the socket is live: its EOF is next
+  stopped: false,       // the user stopped it, or a detached stop was confirmed (4.9)
+  ended: false,         // socket EOF with no relaunch coming (4.8 signal 3)
+  foreign: false,       // a player this shell could not identify, laddered down (4.5)
+  failed: false,        // `player start` / `restart` / the first load failed for good
+  mpvMissing: false,    // the player program is not installed
+  abandoned: false      // the channel left the playlist before the relaunch could run
+}
+
+// The vocabulary, so a test can pin the set instead of trusting a call site's
+// spelling: an outcome this does not name is inert (see sessionAfterOutcome).
+var PLAYER_OUTCOMES = Object.keys(PLAYER_OUTCOME_SURVIVES)
+
+// The session record after one player outcome. Returns the SAME state object
+// whenever nothing changed, so a caller can skip the write - the contract
+// clearSession() and deadSessionVerdict() already keep.
+//
+// `deadPending` is the caller's deferred-PO-3 flag (deadSessionVerdict's
+// `pending`: a probe found no player before state.json had landed, so the
+// mark is owed once it does). A terminal outcome drops it, because the user
+// has now seen the end of this play and the deferred mark would be the
+// second word on the same event; a NON-terminal one must leave it alone, or
+// a `busy` retry racing the startup probe silently eats a red row that a
+// genuine unattended death had earned. It is answered here rather than in
+// the component so that something can call the rule.
+//
+// An outcome this does not know is inert rather than clearing: a misspelled
+// call site then costs at worst one stale mark on the next reattach, never a
+// silently dropped one, and the vocabulary check in the tests catches it
+// before either happens.
+function sessionAfterOutcome(state, outcome, deadPending) {
+  var st = state || emptyState()
+  var key = str(outcome)
+  var known = PLAYER_OUTCOME_SURVIVES.hasOwnProperty(key)
+  var terminal = known && PLAYER_OUTCOME_SURVIVES[key] !== true
+  var next = terminal ? clearSession(st) : st
+  return {
+    outcome: key,
+    known: known,
+    terminal: terminal,
+    pending: terminal ? false : deadPending === true,
+    state: next,
+    write: next !== st
+  }
+}
+
 function withFavorites(state, favorites) {
   return cloneState(state, { favorites: asList(favorites).slice() })
 }
@@ -3490,6 +3563,8 @@ if (typeof module !== "undefined") {
     clearSession: clearSession,
     stateSession: stateSession,
     deadSessionVerdict: deadSessionVerdict,
+    sessionAfterOutcome: sessionAfterOutcome,
+    PLAYER_OUTCOMES: PLAYER_OUTCOMES,
     withFavorites: withFavorites,
     removeRecent: removeRecent,
     trimRecents: trimRecents,
