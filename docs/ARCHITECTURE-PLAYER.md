@@ -1172,3 +1172,39 @@ Two additions of my own, neither optional:
   simulate. Every acceptance gate for M2-02 is a live-shell gate, and any
   harness scenario added for it must be shown to fail against the pre-fix code
   before it counts as evidence.
+
+## 13. Amendment after gate PB-0 (product owner, 2026-09-14)
+
+Gate PB-0 ran before lane PB touched anything. The verdict is in
+`docs/SPIKE-QUICKSHELL-SOCKET.md`: the socket observer is viable, the
+degraded-mode fallback is not needed, and three assumptions in section 4 were
+confirmed against real mpv. But the spike disproved the implementation shape
+this document prescribed, so two corrections are binding on lane PB.
+
+1. Section 9, lane PB, the bullet reading "Add `Socket { id: playerSocket }`
+   plus `SplitParser` plus `Connections`" is WITHDRAWN. A Quickshell `Socket`
+   whose connect attempt fails is dead permanently: no property write revives
+   it, and re-arming one that is already connected silently arms a hidden
+   zero-delay auto-reconnect that bricks the object the moment the peer dies.
+   The prescribed single declarative object is therefore the one shape that
+   cannot reattach, which is the entire point of the feature. Build it as a
+   `Component` with a fresh object constructed per attempt, driven by the
+   retry timer, exactly as caveat C1 and the reference snippet in section 6 of
+   the spike specify.
+2. Section 4.7's `playerUp` definition gains the null guard of caveat C3,
+   because the socket handle is now null between attempts.
+
+Lane PB must read the spike document in full before writing any socket code
+and honor all ten caveats, in particular capping the retry burst: an
+unbounded loop writes roughly fourteen thousand warnings an hour to the
+journal.
+
+No ruling PO-1 through PO-7 changes. PO-1 is incidentally strengthened, since
+real mpv under `--idle=once` exited one millisecond after an error end-file,
+which satisfies half of gate PA-0 in passing. The other half, whether a
+replace-load during playback avoids exiting, remains lane PA's to prove.
+
+This is the second time in this milestone that a probe overturned a confident
+design detail, after the settings-echo defect. The standing rule holds: for
+this feature, an assumption about host behavior is not evidence until
+something has run.
