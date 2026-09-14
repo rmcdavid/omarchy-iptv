@@ -87,15 +87,50 @@ var GLYPHS = {
   plus: "\udb81\udc15",      // U+F0415 nf-md-plus              Add source row
   key: "\udb80\udf06",       // U+F0306 nf-md-key               Add Xtream login row
   pencil: "\udb80\udfeb",    // U+F03EB nf-md-pencil            edit action button
-  closeCircle: "\udb80\udd59" // U+F0159 nf-md-close_circle     remove action button
+  closeCircle: "\udb80\udd59", // U+F0159 nf-md-close_circle    remove action button
+  // Channel numbers (M2-03 4.6)
+  dialpad: "\udb81\ude1c"    // U+F061C nf-md-dialpad           number entry chip
 }
 
 // Settings clamps (R2). `showChannelName` is `!== false`; strings are trimmed.
 var SETTING_RANGES = {
   refreshMinutes: { def: 360, min: 15, max: 1440 },
   maxRecents: { def: 10, min: 1, max: 50 },
-  barLabelMaxWidth: { def: 180, min: 60, max: 600 }
+  barLabelMaxWidth: { def: 180, min: 60, max: 600 },
+  // M2-03 CN2: the inter-digit window is a setting, not a constant, because
+  // the gap between a slow typist getting channel 101 and getting channels
+  // 1, 0 and 1 is an accessibility matter.
+  numberEntryMs: { def: 1500, min: 400, max: 5000 }
 }
+
+// Channel numbers (M2-03 1.2 / 9.1). A number is at most 5 major digits and
+// an optional 1-to-3 digit subchannel. MAX_CHNO_LABEL is the hard bound the
+// row column's width formula is derived from (4.2) and the entry buffer's
+// cap (2.4).
+//
+// It is 9, not the 7 of design 1.2 step 9. That step calls a 7-character
+// label "unreachable given 4 and 6", which is wrong: the grammar it states
+// two steps earlier admits "99999.999", which is nine. At 7 the parser would
+// have had to reject a number its own grammar allows, and the buffer cap
+// would have made a displayed channel untypable -- the exact failure CN6
+// rejects for non-numeric values. The grammar is authoritative; the derived
+// bound follows it. See the lane A report, request 2.
+var MAX_CHNO_MAJOR = 99999
+var MAX_CHNO_MINOR = 999
+var MAX_CHNO_LABEL = 9
+// CN8: providers write both "7.1" and "8-1", so both are accepted on PARSE;
+// only "." is ever produced, and it is what the user types (plus ",", which
+// is what the numpad decimal key emits on several layouts -- see the Gate A1
+// evidence in the M2-03 lane A report).
+var CHNO_SEPARATORS = ".-"
+var CHNO_ENTRY_SEP = "."
+var CHANNEL_ORDERS = ["playlist", "number"]
+// CN11: the product owner's amendment to OQ 11. `tvg-chno` is what every
+// asset uses, but a playlist that silently has no numbers is the worst
+// failure this feature can have, so the aliases are read too. The helper's
+// record whitelist decides which of these can actually arrive (see the lane
+// A report, request 1); the model reads whichever is present.
+var CHNO_FIELDS = ["chno", "tvgChno", "channelNumber", "tvg-chno", "tvg-channel-number", "channel-number"]
 
 // mpv options the user may not override through the mpvArgs setting because
 // the service depends on them (socket, window identity, exit semantics).
@@ -357,8 +392,429 @@ function prepareChannels(channels) {
     } else {
       row.nameKey = normalizeText(row.name)
     }
+    // M2-03 1.3: three derived fields per row, inside the pass that is
+    // already running. A row with no usable number short-circuits before
+    // the scanner runs, so an unnumbered 10k playlist pays one property
+    // read per channel. The raw `chno` string stays untouched; nothing
+    // renders it (CN6/CN7: what the user sees is what the user types).
+    var rawChno = chnoRawOf(src)
+    if (rawChno === "") {
+      row.chnoKey = ""
+      row.chnoLabel = ""
+      row.chnoSort = -1
+    } else {
+      var chno = parseChno(rawChno)
+      row.chnoKey = chno.key
+      row.chnoLabel = chno.label
+      row.chnoSort = chno.sort
+    }
     out.push(row)
   }
+  return out
+}
+
+// ------------------------------------------------------------ channel numbers (M2-03)
+//
+// Rulings CN1-CN14 (docs/M2-03-CHANNEL-NUMBERS.md section 13) and the
+// technical contract in section 9.1. Everything here is pure: the guide owns
+// the timer, the cursor and the chip, and owns no number logic at all.
+
+// The single "this channel has no number" answer, so every failure path
+// returns the same shape and no caller has to test for a partial one.
+var CHNO_NONE = { ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 }
+var CHNO_NO_MATCH = { kind: "none", channelIndex: -1, key: "", label: "", matches: 0, ordinal: 0 }
+var CHNO_NO_NUMBERS_TEXT = "No channel numbers in this playlist"
+
+function chnoFail() {
+  return { ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 }
+}
+
+// CN11. The first alias that carries anything wins; the order is the
+// product owner's preference order, `tvg-chno` first.
+function chnoRawOf(channel) {
+  if (!channel || typeof channel !== "object") return ""
+  for (var i = 0; i < CHNO_FIELDS.length; i++) {
+    var value = channel[CHNO_FIELDS[i]]
+    if (value === undefined || value === null) continue
+    var text = str(value)
+    if (text !== "") return text
+  }
+  return ""
+}
+
+function isAsciiDigit(code) {
+  return code >= 0x30 && code <= 0x39
+}
+
+// M2-03 1.2. A character scanner rather than a regular expression: this runs
+// once per numbered channel at load time and the grammar is trivial.
+//
+// ASCII digits only. Arabic-Indic (U+0660..U+0669) and full-width
+// (U+FF10..U+FF19) decimals are rejected on purpose: the user cannot type
+// them on the keys this feature binds, and a channel that claims a number
+// nobody can reach is worse than a channel with no number at all (CN6).
+//
+// Leading zeros are dropped in both `key` and `label` (CN7): "007" is 7,
+// because the number you see must be the number you type.
+function parseChno(raw) {
+  var text = str(raw)
+  var from = 0
+  var to = text.length
+  while (from < to && isChnoSpace(text.charCodeAt(from))) from++
+  while (to > from && isChnoSpace(text.charCodeAt(to - 1))) to--
+  // A few providers write "#12".
+  if (from < to && text.charCodeAt(from) === 0x23) from++
+  if (from >= to) return chnoFail()
+
+  var major = 0
+  var digits = 0
+  var i = from
+  for (; i < to && isAsciiDigit(text.charCodeAt(i)); i++) {
+    major = major * 10 + (text.charCodeAt(i) - 0x30)
+    digits++
+  }
+  if (digits === 0 || digits > 5 || major > MAX_CHNO_MAJOR) return chnoFail()
+
+  var minor = -1
+  if (i < to) {
+    if (CHNO_SEPARATORS.indexOf(text.charAt(i)) === -1) return chnoFail()
+    i++
+    minor = 0
+    var minorDigits = 0
+    for (; i < to && isAsciiDigit(text.charCodeAt(i)); i++) {
+      minor = minor * 10 + (text.charCodeAt(i) - 0x30)
+      minorDigits++
+    }
+    if (minorDigits === 0 || minorDigits > 3 || minor > MAX_CHNO_MINOR) return chnoFail()
+    if (i !== to) return chnoFail()
+  }
+
+  var label = minor < 0 ? String(major) : String(major) + CHNO_ENTRY_SEP + String(minor)
+  if (label.length > MAX_CHNO_LABEL) return chnoFail()
+  return {
+    ok: true,
+    key: label,
+    label: label,
+    // A bare "7" and "7.0" collide here; the tie is broken by playlist
+    // index, which is deterministic (1.2 step 8).
+    sort: major * 1000 + (minor < 0 ? 0 : minor),
+    major: major,
+    minor: minor
+  }
+}
+
+// The whitespace sanitizeInput strips, plus tab: a value lifted out of an
+// #EXTINF attribute can carry any of them.
+function isChnoSpace(code) {
+  return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d || code === 0xa0 || code === 0xfeff
+}
+
+// A prepared row's number, trusting the fields prepareChannels wrote and
+// falling back to a parse for any array that never went through it (a
+// hand-edited cache, a test fixture, a caller that skipped preparation).
+function chnoOf(channel) {
+  if (!channel || typeof channel !== "object") return CHNO_NONE
+  if (typeof channel.chnoKey === "string") {
+    if (channel.chnoKey === "") return CHNO_NONE
+    var sort = Number(channel.chnoSort)
+    if (isFinite(sort) && sort >= 0) {
+      var label = typeof channel.chnoLabel === "string" && channel.chnoLabel !== "" ? channel.chnoLabel : channel.chnoKey
+      return { ok: true, key: channel.chnoKey, label: label, sort: Math.floor(sort), major: -1, minor: -1 }
+    }
+  }
+  var parsed = parseChno(chnoRawOf(channel))
+  return parsed.ok ? parsed : CHNO_NONE
+}
+
+// M2-03 1.4. The first persistent non-id index in the project, modelled on
+// indexById. `byKey` values are arrays of PLAYLIST indices in ascending
+// order, which is what makes duplicate cycling (CN9) and the "(1 of 2)" copy
+// need no second structure. `order` is every numbered channel sorted by
+// (chnoSort, playlist index) and `labels` is parallel to it, so the prefix
+// scan walks numeric order whatever the display order is.
+//
+// Empty input, null and non-arrays all return the same shape with
+// hasNumbers false; every consumer must tolerate it.
+function buildChnoIndex(channels) {
+  var list = asList(channels)
+  var byKey = {}
+  var numbered = []
+  var maxLabelLen = 0
+  for (var i = 0; i < list.length; i++) {
+    var chno = chnoOf(list[i])
+    if (!chno.ok) continue
+    // hasOwnProperty, not `=== undefined`: a hand-edited cache row could
+    // carry chnoKey "constructor", and `byKey.constructor` is a function.
+    if (!Object.prototype.hasOwnProperty.call(byKey, chno.key)) byKey[chno.key] = []
+    byKey[chno.key].push(i)
+    numbered.push({ at: i, sort: chno.sort, label: chno.label })
+    if (chno.label.length > maxLabelLen) maxLabelLen = chno.label.length
+  }
+  // An explicit playlist-index fallback rather than relying on the engine's
+  // sort being stable: V4 and node must agree exactly.
+  numbered.sort(function (a, b) {
+    if (a.sort !== b.sort) return a.sort - b.sort
+    return a.at - b.at
+  })
+  var order = []
+  var labels = []
+  for (var j = 0; j < numbered.length; j++) {
+    order.push(numbered[j].at)
+    labels.push(numbered[j].label)
+  }
+  var duplicates = 0
+  for (var key in byKey) {
+    if (!Object.prototype.hasOwnProperty.call(byKey, key)) continue
+    if (byKey[key].length > 1) duplicates += byKey[key].length
+  }
+  return {
+    byKey: byKey,
+    order: order,
+    labels: labels,
+    count: order.length,
+    duplicates: duplicates,
+    maxLabelLen: order.length > 0 ? maxLabelLen : 0,
+    hasNumbers: order.length > 0
+  }
+}
+
+// What the user has typed, canonicalized far enough to look up: "," folded
+// to "." (CN8) and leading zeros dropped from the major part (CN7, 2.4 --
+// "0" then "7" is channel 7). The minor part is left exactly as typed,
+// because mid-entry "7.0" may still become "7.05" and stripping there would
+// guess at a number the user has not finished writing.
+function chnoEntryKey(buffer) {
+  var text = str(buffer).replace(/,/g, CHNO_ENTRY_SEP)
+  var cut = text.indexOf(CHNO_ENTRY_SEP)
+  var major = cut === -1 ? text : text.substring(0, cut)
+  var rest = cut === -1 ? "" : text.substring(cut)
+  var at = 0
+  while (at < major.length - 1 && major.charAt(at) === "0") at++
+  return major.substring(at) + rest
+}
+
+// M2-03 2.3. The buffer resolves to a channel on every keystroke, so the
+// cursor can follow it live -- which is what turns three keystrokes into a
+// verified selection rather than a leap.
+//
+// 1. exact: the normalized buffer is a key. With more than one channel on
+//    that key and the cursor already on one of them, the NEXT one, wrapping
+//    (CN9). Stateless: the cycle is derived from where the cursor already
+//    is, so nothing has to remember a previous press and nothing expires.
+// 2. prefix: the first label in numeric order that starts with the buffer.
+// 3. none: nothing moves; the caller shows the miss and the user can
+//    Backspace out of it without committing (CN1 -- a mistyped number costs
+//    nothing).
+function resolveChno(index, buffer, currentChannelIndex) {
+  var idx = index || {}
+  var byKey = idx.byKey && typeof idx.byKey === "object" ? idx.byKey : {}
+  var typed = str(buffer)
+  if (typed === "" || idx.hasNumbers !== true) return { kind: "none", channelIndex: -1, key: "", label: "", matches: 0, ordinal: 0 }
+
+  var entry = chnoEntryKey(typed)
+  // A complete number normalizes through the parser ("07.01" is "7.1");
+  // a half-typed one ("7.") only ever reaches the prefix scan below.
+  var parsed = parseChno(entry)
+  var key = parsed.ok ? parsed.key : entry
+  if (Object.prototype.hasOwnProperty.call(byKey, key)) {
+    var bucket = asList(byKey[key])
+    if (bucket.length > 0) {
+      var pick = 0
+      var current = Math.floor(Number(currentChannelIndex))
+      if (bucket.length > 1 && isFinite(current)) {
+        for (var b = 0; b < bucket.length; b++) {
+          if (bucket[b] === current) { pick = (b + 1) % bucket.length; break }
+        }
+      }
+      return { kind: "exact", channelIndex: bucket[pick], key: key, label: key, matches: bucket.length, ordinal: pick + 1 }
+    }
+  }
+
+  var labels = asList(idx.labels)
+  var order = asList(idx.order)
+  for (var i = 0; i < labels.length; i++) {
+    if (str(labels[i]).indexOf(entry) !== 0) continue
+    var label = str(labels[i])
+    var hits = Object.prototype.hasOwnProperty.call(byKey, label) ? asList(byKey[label]) : []
+    var at = order[i]
+    var ordinal = 1
+    for (var h = 0; h < hits.length; h++) if (hits[h] === at) { ordinal = h + 1; break }
+    return { kind: "prefix", channelIndex: at, key: label, label: label, matches: hits.length > 0 ? hits.length : 1, ordinal: ordinal }
+  }
+  return { kind: "none", channelIndex: -1, key: "", label: "", matches: 0, ordinal: 0 }
+}
+
+// M2-03 2.5, second commit trigger: an exact match that no longer label
+// extends commits on the last digit, which is what makes a 3-digit plan feel
+// instant ("199" in a 1..200 list). Not in the section 9.1 table; see the
+// lane A report, request 3.
+function chnoUnambiguous(index, buffer) {
+  var hit = resolveChno(index, buffer, -1)
+  if (hit.kind !== "exact") return false
+  var labels = asList((index || {}).labels)
+  for (var i = 0; i < labels.length; i++) {
+    var label = str(labels[i])
+    if (label.length > hit.key.length && label.indexOf(hit.key) === 0) return false
+  }
+  return true
+}
+
+// M2-03 3.2, for the IPC verb. resolveChno with no cycling: a script asking
+// for 12 must get the same channel every time. `channels` must be the array
+// the index was built from, because byKey holds playlist indices.
+function channelByNumber(channels, index, text) {
+  var parsed = parseChno(text)
+  if (!parsed.ok) return null
+  var hit = resolveChno(index, parsed.key, -1)
+  if (hit.kind === "none") return null
+  var list = asList(channels)
+  if (hit.channelIndex < 0 || hit.channelIndex >= list.length) return null
+  return list[hit.channelIndex] || null
+}
+
+// M2-03 7.1 / CN3. Never an error and never a warning: an unreadable value
+// silently means the safe default, because this setting reorders the whole
+// guide and a typo must not be able to do that.
+function channelOrderOf(value) {
+  return str(value).replace(/^\s+|\s+$/g, "").toLowerCase() === "number" ? "number" : "playlist"
+}
+
+// M2-03 5.2. An O(n) gather, never a second sort: chnoIndex.order is already
+// the numbered channels in (chnoSort, playlist index) order. Unnumbered
+// channels always come last, never interleaved and never treated as 0.
+// Identity (the same array, no copy) for the default, so the shipped path
+// costs nothing.
+function orderChannels(channels, order, index) {
+  if (channelOrderOf(order) !== "number") return channels
+  var idx = index || {}
+  if (idx.hasNumbers !== true) return channels
+  var list = asList(channels)
+  var seq = asList(idx.order)
+  var out = []
+  var taken = {}
+  for (var i = 0; i < seq.length; i++) {
+    var at = Math.floor(Number(seq[i]))
+    if (!(at >= 0 && at < list.length) || taken[at] === true) continue
+    taken[at] = true
+    out.push(list[at])
+  }
+  for (var j = 0; j < list.length; j++) if (taken[j] !== true) out.push(list[j])
+  return out
+}
+
+// M2-03 2.8 / CN5. The guide opens in search mode, so without the all-digit
+// tier the feature is invisible from the default mode.
+var NUMERIC_QUERY_RE = /^[0-9]{1,5}([.,][0-9]{1,3})?$/
+
+function isNumericQuery(text) {
+  return NUMERIC_QUERY_RE.test(str(text).replace(/^\s+|\s+$/g, ""))
+}
+
+// M2-03 2.9: which keys the entry buffer owns, so the guide's textKey
+// handler can return early and let handleSharedKey extend the buffer
+// instead of committing it.
+function isNumberEntryKey(text) {
+  var t = str(text)
+  if (t.length !== 1) return false
+  if (t === CHNO_ENTRY_SEP || t === ",") return true
+  return isAsciiDigit(t.charCodeAt(0))
+}
+
+// ---- the entry buffer (M2-03 2.3 / 2.4), a plain reducer trio
+//
+// `scopeId`, `query` and `cursorIndex` are the snapshot taken when the
+// buffer went from empty to one character; they are what Esc restores, and
+// what Backspace on the last character restores (2.6).
+function numberEntry() {
+  return { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }
+}
+
+function normalizeNumberEntry(entry) {
+  var e = entry && typeof entry === "object" ? entry : {}
+  var at = Math.floor(Number(e.cursorIndex))
+  return {
+    active: e.active === true,
+    buffer: str(e.buffer),
+    scopeId: str(e.scopeId),
+    query: str(e.query),
+    cursorIndex: isFinite(at) && at > 0 ? at : 0
+  }
+}
+
+// `changed` is false when the key was refused, and the caller must NOT
+// restart the commit timer then: a buffer already at the cap is as long as
+// any channel number can be, so restarting would hold entry open for a key
+// that did nothing.
+function pushNumberKey(entry, text, ctx) {
+  var cur = normalizeNumberEntry(entry)
+  var t = str(text)
+  if (!isNumberEntryKey(t)) return { entry: cur, changed: false }
+  if (cur.buffer.length >= MAX_CHNO_LABEL) return { entry: cur, changed: false }
+  var buffer = cur.buffer
+  if (t === CHNO_ENTRY_SEP || t === ",") {
+    if (buffer === "" || buffer.indexOf(CHNO_ENTRY_SEP) !== -1) return { entry: cur, changed: false }
+    buffer += CHNO_ENTRY_SEP
+  } else {
+    buffer += t
+  }
+  if (cur.active) return { entry: { active: true, buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }, changed: true }
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  var at = Math.floor(Number(c.cursorIndex))
+  return {
+    entry: {
+      active: true,
+      buffer: buffer,
+      scopeId: str(c.scopeId),
+      query: str(c.query),
+      cursorIndex: isFinite(at) && at > 0 ? at : 0
+    },
+    changed: true
+  }
+}
+
+// Backspace. Emptying the buffer deactivates entry but KEEPS the snapshot,
+// because that is the same cancel as Esc (2.6) and the caller still has to
+// restore scope, query and cursor from it.
+function popNumberKey(entry) {
+  var cur = normalizeNumberEntry(entry)
+  if (!cur.active || cur.buffer === "") return { active: false, buffer: "", scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }
+  var buffer = cur.buffer.substring(0, cur.buffer.length - 1)
+  return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }
+}
+
+function cancelNumberEntry(entry) {
+  return numberEntry()
+}
+
+// M2-03 4.2. Style.space units for the row's number column, derived from the
+// WHOLE source's widest label so the column does not jump when the scope
+// changes. 24 for 1-2 characters, then 8 per character, capped at 56 -- the
+// name column loses at most Style.space(56) of a Style.space(960) card.
+function chnoColumnUnits(maxLabelLen) {
+  var n = Math.floor(Number(maxLabelLen))
+  if (!isFinite(n) || n < 1) n = 1
+  if (n > MAX_CHNO_LABEL) n = MAX_CHNO_LABEL
+  return Math.max(24, Math.min(56, 8 * n + 8))
+}
+
+// M2-03 6.2, the footer's number strings. `label` is the resolved label, or
+// the raw buffer when nothing resolved -- that is what puts the number the
+// user actually typed into "No channel 205".
+//
+// `committed` is the sixth argument rather than a separate function because
+// live and committed differ in exactly one decision: a live single match
+// shows the number alone (the row under the cursor is already the answer),
+// a committed one names the channel it landed on.
+function chnoStatus(kind, label, name, matches, ordinal, committed) {
+  var k = str(kind)
+  if (k === "noNumbers") return CHNO_NO_NUMBERS_TEXT
+  var text = str(label)
+  if (k === "none" || k === "") return committed === true ? "No channel " + text : "Channel " + text + SEP + "no match"
+  var m = Math.floor(Number(matches))
+  if (!isFinite(m) || m < 1) m = 1
+  var out = "Channel " + text
+  if ((committed === true || m > 1) && str(name) !== "") out += SEP + str(name)
+  if (m > 1) out += " (" + Math.floor(Number(ordinal) || 1) + " of " + m + ")"
   return out
 }
 
@@ -400,7 +856,12 @@ function favoriteSet(favorites) {
 // channel of the scope is returned (the same array, never a copy) so the
 // guide can browse all of them; its ListView instantiates visible rows only
 // (D-LIVE-01). Callers must not mutate the returned rows.
-function filterChannels(channels, query, limit, favorites) {
+//
+// M2-03 2.8 / CN5: with `chnoIndex` supplied and an all-digit query, the
+// exact number match is floated to the head of `rows`. This is a head
+// insertion AFTER the buckets are joined, not a fifth tier: the four ranking
+// tiers of R4, the bucket arithmetic, `total` and `truncated` are untouched.
+function filterChannels(channels, query, limit, favorites, chnoIndex) {
   var list = asList(channels)
   var max = limit > 0 ? Math.floor(limit) : MAX_ROWS_DEFAULT
   var tokens = tokenize(query)
@@ -426,7 +887,38 @@ function filterChannels(channels, query, limit, favorites) {
   for (var s = 0; s < buckets.length && rows.length < max; s++) {
     for (var r = 0; r < buckets[s].length && rows.length < max; r++) rows.push(buckets[s][r])
   }
+  rows = floatChnoMatch(rows, list, query, chnoIndex, max)
   return { rows: rows, total: total, truncated: total > max }
+}
+
+// The head insertion of 2.8, kept out of filterChannels' loop so the shipped
+// 4-argument call runs byte-identical code. The channel is de-duplicated
+// when the name ranker already produced it, and the R3 cap still holds: a
+// channel the ranker did NOT produce displaces the last row rather than
+// making the list one longer than the cap says it is.
+//
+// The match is found by scanning the SCOPE array, not through
+// `chnoIndex.byKey`: byKey holds playlist indices and `channels` here is
+// whatever channelsForScope returned, which for a group or for Favorites is
+// a different array with different indices. Searching inside `UK | SPORTS`
+// must float that group's channel 101, not the playlist's 101st row.
+// `chnoIndex` still gates the feature, so a 4-argument call is unchanged.
+function floatChnoMatch(rows, channels, query, chnoIndex, max) {
+  if (!chnoIndex || chnoIndex.hasNumbers !== true || !isNumericQuery(query)) return rows
+  var key = chnoEntryKey(str(query).replace(/^\s+|\s+$/g, ""))
+  var parsed = parseChno(key)
+  if (parsed.ok) key = parsed.key
+  if (key === "") return rows
+  var channel = null
+  for (var i = 0; i < channels.length; i++) {
+    if (channels[i] && chnoOf(channels[i]).key === key) { channel = channels[i]; break }
+  }
+  if (channel === null) return rows
+  var out = [channel]
+  for (var r = 0; r < rows.length && out.length < Math.max(1, max); r++) {
+    if (rows[r] !== channel) out.push(rows[r])
+  }
+  return out
 }
 
 // ------------------------------------------------------------ groups / scopes
@@ -1396,7 +1888,11 @@ function settingsFrom(entry) {
     mpvArgs: str(settingOf(entry, "mpvArgs", "")),
     showChannelName: settingOf(entry, "showChannelName", true) !== false && str(settingOf(entry, "showChannelName", true)) !== "false",
     maxRecents: clampSetting("maxRecents", settingOf(entry, "maxRecents", SETTING_RANGES.maxRecents.def)),
-    barLabelMaxWidth: clampSetting("barLabelMaxWidth", settingOf(entry, "barLabelMaxWidth", SETTING_RANGES.barLabelMaxWidth.def))
+    barLabelMaxWidth: clampSetting("barLabelMaxWidth", settingOf(entry, "barLabelMaxWidth", SETTING_RANGES.barLabelMaxWidth.def)),
+    // ---- channel numbers (M2-03 7.1)
+    channelOrder: channelOrderOf(settingOf(entry, "channelOrder", "playlist")),
+    numberEntryMs: clampSetting("numberEntryMs", settingOf(entry, "numberEntryMs", SETTING_RANGES.numberEntryMs.def)),
+    barShowChannelNumber: settingOf(entry, "barShowChannelNumber", true) !== false && str(settingOf(entry, "barShowChannelNumber", true)) !== "false"
   }
 }
 
@@ -2364,10 +2860,13 @@ function rowDetail(opts) {
   return joinParts(parts)
 }
 
-// Accessible name for a channel row (UX 7.1).
+// Accessible name for a channel row (UX 7.1, M2-03 8.1). An unnumbered row
+// in a numbered playlist announces nothing extra: the empty slot is not read
+// out, because the absence IS the information (CN6).
 function rowAccessibleName(opts) {
   var o = opts || {}
   var out = str(o.name)
+  if (str(o.chno) !== "") out = "Channel " + str(o.chno) + ", " + out
   if (o.favorite) out += ", favorite"
   if (o.playing) out += ", playing"
   if (str(o.nowTitle) !== "") out += ", now " + str(o.nowTitle) + (str(o.until) !== "" ? " until " + str(o.until) : "")
@@ -2401,7 +2900,9 @@ function barGlyph(opts) {
 function barTooltip(opts) {
   var o = opts || {}
   if (o.serviceMissing) return "IPTV" + SEP + "service not loaded, run omarchy restart shell"
-  if (o.playing && str(o.name) !== "") return "Playing " + str(o.name)
+  // M2-03 6.4: the number joins the tooltip whenever the playing channel has
+  // one, including on a vertical bar where the label itself is glyph-only.
+  if (o.playing && str(o.name) !== "") return "Playing " + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
   if (o.refreshing) return "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
   if (!o.configured) return "IPTV" + SEP + "no playlist configured"
   if (o.error) return "IPTV" + SEP + "playlist error, open the guide"
@@ -2410,7 +2911,7 @@ function barTooltip(opts) {
 
 function barAccessibleName(opts) {
   var o = opts || {}
-  if (o.playing && str(o.name) !== "") return "IPTV, playing " + str(o.name)
+  if (o.playing && str(o.name) !== "") return "IPTV, playing " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
   if (o.error) return "IPTV, playlist error"
   return "IPTV, idle"
 }
@@ -2504,6 +3005,15 @@ function footerDegraded(o) {
 // only a transient may.
 function footerStatus(opts) {
   var o = opts || {}
+  // M2-03 6.2: a live number buffer sits at the TOP of the ladder, above the
+  // transient. While the user is typing digits the footer is the running
+  // report of what those digits resolve to, and a three-second transient
+  // from an earlier action must not cover it.
+  var entry = o.numberEntry
+  if (entry && entry.active === true) {
+    return chnoStatus(str(entry.kind), str(entry.kind) === "none" || str(entry.kind) === "" ? str(entry.buffer) : str(entry.label),
+      str(entry.name), entry.matches, entry.ordinal, false)
+  }
   if (str(o.transient) !== "") return str(o.transient)
   if (o.configured === false || !(Number(o.count) > 0)) return ""
   if (o.truncated) return "First " + formatCount(o.cap || MAX_ROWS_DEFAULT) + " of " + formatCount(o.resultTotal) + SEP + "keep typing"
@@ -2539,7 +3049,18 @@ function footerHints(opts) {
     return pairs
   }
   if (mode === "list") {
-    return [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"], [SOURCE_KEYS.open, "sources"]]
+    // M2-03 6.3: while a number is being typed the hint line is the entry
+    // line and nothing else. It is short on purpose, so the elide-left
+    // footer keeps `Esc cancel` visible on the narrowest card.
+    if (o.numberEntry && o.numberEntry.active === true) {
+      return [["0-9", "digits"], [CHNO_ENTRY_SEP, "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]]
+    }
+    var list = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"]]
+    // Gated on the playlist actually having numbers, so an unnumbered source
+    // gains no clutter and never advertises a key that does nothing.
+    if (o.hasNumbers === true) list.push(["0-9", "channel"])
+    list.push([SOURCE_KEYS.open, "sources"])
+    return list
   }
   if (str(o.query) !== "") {
     return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]]
@@ -3965,6 +4486,32 @@ if (typeof module !== "undefined") {
     findByUrl: findByUrl,
     primaryGroup: primaryGroup,
     prepareChannels: prepareChannels,
+    // ---- channel numbers (M2-03)
+    MAX_CHNO_MAJOR: MAX_CHNO_MAJOR,
+    MAX_CHNO_MINOR: MAX_CHNO_MINOR,
+    MAX_CHNO_LABEL: MAX_CHNO_LABEL,
+    CHNO_SEPARATORS: CHNO_SEPARATORS,
+    CHNO_ENTRY_SEP: CHNO_ENTRY_SEP,
+    CHANNEL_ORDERS: CHANNEL_ORDERS,
+    CHNO_FIELDS: CHNO_FIELDS,
+    chnoRawOf: chnoRawOf,
+    parseChno: parseChno,
+    chnoOf: chnoOf,
+    buildChnoIndex: buildChnoIndex,
+    chnoEntryKey: chnoEntryKey,
+    resolveChno: resolveChno,
+    chnoUnambiguous: chnoUnambiguous,
+    channelByNumber: channelByNumber,
+    channelOrderOf: channelOrderOf,
+    orderChannels: orderChannels,
+    isNumericQuery: isNumericQuery,
+    isNumberEntryKey: isNumberEntryKey,
+    numberEntry: numberEntry,
+    pushNumberKey: pushNumberKey,
+    popNumberKey: popNumberKey,
+    cancelNumberEntry: cancelNumberEntry,
+    chnoColumnUnits: chnoColumnUnits,
+    chnoStatus: chnoStatus,
     matchRank: matchRank,
     favoriteSet: favoriteSet,
     filterChannels: filterChannels,

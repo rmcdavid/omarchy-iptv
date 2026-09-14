@@ -376,9 +376,11 @@ check("findBarEntry missing", Model.findBarEntry(barConfig, "nope"), {})
 check("findBarEntry null config", Model.findBarEntry(null, "x"), {})
 check("settingOf fallback", Model.settingOf({ a: null }, "a", 3), 3)
 check("clampInt parses and clamps", [Model.clampInt("15", 60, 5, 1440), Model.clampInt("x", 60, 5, 1440), Model.clampInt(2, 60, 5, 1440)], [15, 60, 5])
+// The whole settings object, pinned: a new key is only ever added here on
+// purpose. M2-03 7.1 adds the last three.
 check("settingsFrom applies R2 clamps and trims", Model.settingsFrom(Model.findBarEntry(barConfig, "io.github.rmcdavid.iptv")),
-  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600 })
-check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180 })
+  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 1500, barShowChannelNumber: true })
+check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 1500, barShowChannelNumber: true })
 check("settingsFrom null", Model.settingsFrom(null).refreshMinutes, 360)
 check("clampSetting refreshMinutes range", [Model.clampSetting("refreshMinutes", 5), Model.clampSetting("refreshMinutes", 99999), Model.clampSetting("refreshMinutes", "abc")], [15, 1440, 360])
 check("clampSetting barLabelMaxWidth range", [Model.clampSetting("barLabelMaxWidth", 10), Model.clampSetting("barLabelMaxWidth", 601)], [60, 600])
@@ -1967,6 +1969,201 @@ check("persist: an object entry with our id is writable", Model.barEntryWritable
 check("persist: a bare-string entry is NOT writable (updateEntryInline cannot rewrite it)", [Model.barEntryWritable(layoutOf("io.github.rmcdavid.iptv"), "io.github.rmcdavid.iptv"), Model.findBarEntry(layoutOf("io.github.rmcdavid.iptv"), "io.github.rmcdavid.iptv")], [false, { id: "io.github.rmcdavid.iptv" }])
 check("persist: an absent entry, an absent layout and rubbish are not writable", [Model.barEntryWritable(layoutOf({ id: "vm.netspeed" }), "io.github.rmcdavid.iptv"), Model.barEntryWritable({}, "io.github.rmcdavid.iptv"), Model.barEntryWritable(null, "io.github.rmcdavid.iptv"), Model.barEntryWritable({ layout: { right: "nope" } }, "io.github.rmcdavid.iptv")], [false, false, false, false])
 check("persist: the entry may sit in any section", [Model.barEntryWritable({ layout: { left: [{ id: "io.github.rmcdavid.iptv" }], center: [], right: [] } }, "io.github.rmcdavid.iptv"), Model.barEntryWritable({ layout: { left: [], center: [{ id: "io.github.rmcdavid.iptv" }], right: [] } }, "io.github.rmcdavid.iptv")], [true, true])
+
+// ---------------------------------------------------------------- channel
+// numbers and numeric zap (M2-03, rulings CN1-CN14 in section 13 of
+// docs/M2-03-CHANNEL-NUMBERS.md). Lane A owns every decision below as a pure
+// function, so these cases exercise the shipping path rather than a copy of
+// it (CLAUDE.md 12).
+
+// The shared vectors, one file (CLAUDE.md: a rule written twice gets one
+// fixture). tests/Model.spec.qml imports the same file as a QML script
+// library, so both engines run these vectors and neither owns a copy.
+const chnoCases = require("./fixtures/chno-cases.js")
+
+// A fixture that silently lost its cases would make every loop below pass by
+// running zero times.
+check("CN1.2: the shared fixture carries both verdicts", [chnoCases.length >= 30, chnoCases.some(c => c.ok === true), chnoCases.some(c => c.ok === false)], [true, true, true])
+
+for (const c of chnoCases) {
+  const got = Model.parseChno(c.input)
+  const want = c.ok
+    ? { ok: true, key: c.key, label: c.label, sort: c.sort }
+    : { ok: false, key: "", label: "", sort: -1 }
+  check("CN1.2: parseChno(" + JSON.stringify(c.input) + ") " + c.why,
+    { ok: got.ok, key: got.key, label: got.label, sort: got.sort }, want)
+}
+
+check("CN1.2: parseChno never throws on a non-string", [Model.parseChno(null).ok, Model.parseChno(undefined).ok, Model.parseChno(12).key, Model.parseChno({}).ok, Model.parseChno([]).ok, Model.parseChno(true).ok], [false, false, "12", false, false, false])
+check("CN1.2: every failure returns the same shape", Model.parseChno("HD"), { ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 })
+check("CN1.2: major and minor are reported separately", [Model.parseChno("7.1").major, Model.parseChno("7.1").minor, Model.parseChno("7").minor], [7, 1, -1])
+
+// CN11: the product owner's amendment. A playlist whose numbers live under an
+// alias must not silently look unnumbered.
+check("CN11: the alias attributes are read, tvg-chno first", [Model.chnoRawOf({ chno: "1", "tvg-channel-number": "2" }), Model.chnoRawOf({ "tvg-channel-number": "2" }), Model.chnoRawOf({ "channel-number": "3" }), Model.chnoRawOf({ tvgChno: "4" }), Model.chnoRawOf({}), Model.chnoRawOf(null)], ["1", "2", "3", "4", "", ""])
+check("CN11: an empty alias falls through to the next one", Model.chnoRawOf({ chno: "", "channel-number": "9" }), "9")
+
+const chan = (id, chno) => {
+  const row = { id: id, name: "Ch " + id, group: "G", url: "http://h.test/" + id, searchKey: "ch " + id + " g" }
+  if (chno !== null) row.chno = chno
+  return row
+}
+// 7, 7.1, 7.2, 8, 10, a duplicate pair on 12, 130, 139, one junk value and
+// one channel with no chno key at all -- deliberately NOT in number order.
+const planRaw = [chan("a", "10"), chan("b", "7"), chan("c", "7.2"), chan("d", "7.1"), chan("e", "8"),
+  chan("f", "139"), chan("g", "130"), chan("h", "12"), chan("i", "12"), chan("j", "HD"), chan("k", null)]
+const plan = Model.prepareChannels(planRaw)
+const planIdx = Model.buildChnoIndex(plan)
+
+check("CN1.3: prepareChannels writes the three derived fields", [plan[1].chnoKey, plan[1].chnoLabel, plan[1].chnoSort], ["7", "7", 7000])
+check("CN1.3: a hyphen separator is canonicalized on the row", (() => { const r = Model.prepareChannels([chan("x", "8-1")])[0]; return [r.chnoKey, r.chnoLabel, r.chnoSort] })(), ["8.1", "8.1", 8001])
+check("CN6: a non-numeric chno renders as nothing, and the raw value survives", [plan[9].chnoKey, plan[9].chnoLabel, plan[9].chnoSort, plan[9].chno], ["", "", -1, "HD"])
+check("CN1.3: a row with no chno key at all", [plan[10].chnoKey, plan[10].chnoLabel, plan[10].chnoSort, plan[10].chno], ["", "", -1, undefined])
+check("CN1.3: the shipped prepareChannels fields are unchanged", [plan[0].id, plan[0].name, plan[0].group, plan[0].primaryGroup, plan[0].searchKey, plan[0].nameKey], ["a", "Ch a", "G", "G", "ch a g", "ch a"])
+check("CN1.3: prepareChannels does not mutate its input rows", [planRaw[1].chnoKey, planRaw[1].chnoSort, planRaw[1].chno], [undefined, undefined, "7"])
+
+check("CN1.4: byKey holds playlist indices in ascending order", [planIdx.byKey["7"], planIdx.byKey["12"], planIdx.byKey["130"]], [[1], [7, 8], [6]])
+check("CN1.4: order is (chnoSort, playlist index), subchannels between their major and the next", planIdx.order, [1, 3, 2, 4, 0, 7, 8, 6, 5])
+check("CN1.4: labels are parallel to order", planIdx.labels, ["7", "7.1", "7.2", "8", "10", "12", "12", "130", "139"])
+check("CN1.4: counts", [planIdx.count, planIdx.duplicates, planIdx.maxLabelLen, planIdx.hasNumbers], [9, 2, 3, true])
+check("CN1.4: empty, null and rubbish all return the same tolerable shape", [Model.buildChnoIndex([]), Model.buildChnoIndex(null), Model.buildChnoIndex(undefined), Model.buildChnoIndex(42)].map(i => [i.count, i.duplicates, i.maxLabelLen, i.hasNumbers, i.order.length, i.labels.length]), [[0, 0, 0, false, 0, 0], [0, 0, 0, false, 0, 0], [0, 0, 0, false, 0, 0], [0, 0, 0, false, 0, 0]])
+check("CN1.4: hasNumbers is false when every value is junk", (() => { const i = Model.buildChnoIndex(Model.prepareChannels([chan("x", "HD"), chan("y", "N/A"), chan("z", null)])); return [i.hasNumbers, i.count, i.maxLabelLen] })(), [false, 0, 0])
+check("CN1.4: a dense 1..20 plan indexes in playlist order", (() => { const rows = []; for (let i = 1; i <= 20; i++) rows.push(chan("d" + i, String(i))); const i2 = Model.buildChnoIndex(Model.prepareChannels(rows)); return [i2.count, i2.duplicates, i2.maxLabelLen, i2.order.slice(0, 4), i2.labels.slice(0, 4)] })(), [20, 0, 2, [0, 1, 2, 3], ["1", "2", "3", "4"]])
+check("CN1.4: the index works on rows that never went through prepareChannels", (() => { const i3 = Model.buildChnoIndex([{ chno: "007" }, { chno: "3" }]); return [i3.labels, i3.order, i3.byKey["7"]] })(), [["3", "7"], [1, 0], [0]])
+check("CN1.4: a hand-edited cache row cannot reach Object.prototype through byKey", (() => { const i4 = Model.buildChnoIndex([{ chnoKey: "constructor", chnoSort: 5, chnoLabel: "constructor" }, { chno: "4" }]); return [i4.count, i4.labels] })(), [2, ["constructor", "4"]])
+
+check("CN2.3: an exact key resolves", (() => { const r = Model.resolveChno(planIdx, "7", -1); return [r.kind, r.channelIndex, r.label, r.matches, r.ordinal] })(), ["exact", 1, "7", 1, 1])
+check("CN7/2.4: a leading zero is dropped before the lookup, so 07 is channel 7", (() => { const r = Model.resolveChno(planIdx, "07", -1); return [r.kind, r.channelIndex, r.label] })(), ["exact", 1, "7"])
+check("CN8: a comma is folded to a dot on lookup", (() => { const r = Model.resolveChno(planIdx, "7,1", -1); return [r.kind, r.channelIndex, r.label] })(), ["exact", 3, "7.1"])
+check("CN9: duplicates land on the first, then cycle, then wrap", [Model.resolveChno(planIdx, "12", -1), Model.resolveChno(planIdx, "12", 7), Model.resolveChno(planIdx, "12", 8)].map(r => [r.channelIndex, r.matches, r.ordinal]), [[7, 2, 1], [8, 2, 2], [7, 2, 1]])
+check("CN9: a cursor outside the duplicate set starts at the first", (() => { const r = Model.resolveChno(planIdx, "12", 3); return [r.channelIndex, r.ordinal] })(), [7, 1])
+check("CN2.3: a prefix picks the LOWEST number, not the first in the playlist", (() => { const r = Model.resolveChno(planIdx, "13", -1); return [r.kind, r.channelIndex, r.label] })(), ["prefix", 6, "130"])
+check("CN2.3: a one-digit prefix picks the lowest too", (() => { const r = Model.resolveChno(planIdx, "1", -1); return [r.kind, r.channelIndex, r.label] })(), ["prefix", 0, "10"])
+check("CN2.3: a half-typed subchannel prefixes to its first child", (() => { const r = Model.resolveChno(planIdx, "7.", -1); return [r.kind, r.channelIndex, r.label] })(), ["prefix", 3, "7.1"])
+check("CN2.3: a prefix onto a duplicated key reports the whole set", (() => { const r = Model.resolveChno(planIdx, "12", -1); return [r.matches, r.ordinal] })(), [2, 1])
+check("CN2.3: no match, an empty buffer and an unnumbered playlist all resolve to none", [Model.resolveChno(planIdx, "205", -1), Model.resolveChno(planIdx, "", -1), Model.resolveChno(Model.buildChnoIndex([]), "1", -1), Model.resolveChno(null, "1", -1)].map(r => [r.kind, r.channelIndex, r.label, r.matches]), [["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0]])
+
+const plan200 = Model.buildChnoIndex(Model.prepareChannels((() => { const rows = []; for (let i = 1; i <= 200; i++) rows.push(chan("p" + i, String(i))); return rows })()))
+check("CN2.5: 199 in a 1..200 plan commits on the last digit; 1 does not", [Model.chnoUnambiguous(plan200, "199"), Model.chnoUnambiguous(plan200, "1"), Model.chnoUnambiguous(plan200, "20")], [true, false, false])
+check("CN2.5: an exact major is ambiguous while a subchannel extends it", [Model.chnoUnambiguous(planIdx, "7"), Model.chnoUnambiguous(planIdx, "130"), Model.chnoUnambiguous(planIdx, "205")], [false, true, false])
+
+check("CN2.4: pushNumberKey takes the snapshot exactly once, on the first key", (() => {
+  let e = Model.numberEntry()
+  let r = Model.pushNumberKey(e, "1", { scopeId: "g:UK", query: "sky", cursorIndex: 12 })
+  const first = [r.entry.active, r.entry.buffer, r.entry.scopeId, r.entry.query, r.entry.cursorIndex, r.changed]
+  r = Model.pushNumberKey(r.entry, "0", { scopeId: "all", query: "", cursorIndex: 999 })
+  return [first, [r.entry.buffer, r.entry.scopeId, r.entry.query, r.entry.cursorIndex]]
+})(), [[true, "1", "g:UK", "sky", 12, true], ["10", "g:UK", "sky", 12]])
+check("CN2.4: the buffer is capped, and a refused key does NOT restart the timer", (() => {
+  let e = Model.numberEntry()
+  for (const t of "123456789") e = Model.pushNumberKey(e, t, {}).entry
+  const r = Model.pushNumberKey(e, "0", {})
+  return [e.buffer, r.entry.buffer, r.changed]
+})(), ["123456789", "123456789", false])
+check("CN8: the separator is rejected when the buffer is empty or already has one", (() => {
+  const empty = Model.pushNumberKey(Model.numberEntry(), ".", {})
+  const seven = Model.pushNumberKey(Model.numberEntry(), "7", {}).entry
+  const dot = Model.pushNumberKey(seven, ".", {})
+  const twice = Model.pushNumberKey(dot.entry, ".", {})
+  const comma = Model.pushNumberKey(seven, ",", {})
+  return [[empty.changed, empty.entry.buffer], [dot.changed, dot.entry.buffer], [twice.changed, twice.entry.buffer], [comma.changed, comma.entry.buffer]]
+})(), [[false, ""], [true, "7."], [false, "7."], [true, "7."]])
+check("CN2.4: a key this feature does not own changes nothing", (() => { const r = Model.pushNumberKey(Model.numberEntry(), "a", {}); const b = Model.pushNumberKey(Model.numberEntry(), "-", {}); return [r.changed, r.entry.active, b.changed] })(), [false, false, false])
+check("CN2.4: a digit that resolves to nothing is still accepted, so a typo is visible", (() => { const r = Model.pushNumberKey(Model.pushNumberKey(Model.numberEntry(), "9", {}).entry, "9", {}); return [r.changed, r.entry.buffer] })(), [true, "99"])
+check("CN2.6: popNumberKey to empty deactivates but KEEPS the snapshot to restore from", (() => {
+  const one = Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", query: "sky", cursorIndex: 12 }).entry
+  const two = Model.pushNumberKey(one, "0", {}).entry
+  const back = Model.popNumberKey(two)
+  const gone = Model.popNumberKey(back)
+  return [[back.active, back.buffer], [gone.active, gone.buffer, gone.scopeId, gone.query, gone.cursorIndex]]
+})(), [[true, "1"], [false, "", "g:UK", "sky", 12]])
+check("CN2.6: popNumberKey on an inactive entry is harmless", (() => { const r = Model.popNumberKey(Model.numberEntry()); const n = Model.popNumberKey(null); return [r.active, r.buffer, n.active, n.buffer] })(), [false, "", false, ""])
+check("CN2.6: cancelNumberEntry is idempotent and forgets the snapshot", [Model.cancelNumberEntry(Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 4 }).entry), Model.cancelNumberEntry(Model.cancelNumberEntry(null))], [{ active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }, { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }])
+check("CN2.3: numberEntry() is the documented zero value", Model.numberEntry(), { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 })
+
+check("CN5.2: orderChannels is identity for playlist order, and for an unnumbered playlist", [Model.orderChannels(plan, "playlist", planIdx) === plan, Model.orderChannels(plan, "number", Model.buildChnoIndex([])) === plan, Model.orderChannels(plan, "", planIdx) === plan], [true, true, true])
+check("CN5.2: number order gathers by chnoSort, unnumbered channels last in playlist order", Model.orderChannels(plan, "number", planIdx).map(c => c.chnoLabel + "/" + c.id), ["7/b", "7.1/d", "7.2/c", "8/e", "10/a", "12/h", "12/i", "130/g", "139/f", "/j", "/k"])
+check("CN5.2: a duplicate pair keeps playlist order between its members", Model.orderChannels(plan, "number", planIdx).map(c => c.id).join("").indexOf("hi") >= 0, true)
+check("CN5.2: the input array is never mutated", plan.map(c => c.id).join(","), "a,b,c,d,e,f,g,h,i,j,k")
+check("CN5.2: an index built from a different array cannot index out of range", Model.orderChannels([chan("only", "1")], "number", planIdx).length, 1)
+
+check("CN3: channelOrderOf is total, and unreadable input means the safe default", [Model.channelOrderOf("number"), Model.channelOrderOf("Number"), Model.channelOrderOf(" number "), Model.channelOrderOf("playlist"), Model.channelOrderOf(""), Model.channelOrderOf("alpha"), Model.channelOrderOf(null), Model.channelOrderOf(7), Model.channelOrderOf(undefined)], ["number", "number", "number", "playlist", "playlist", "playlist", "playlist", "playlist", "playlist"])
+
+check("CN5: isNumericQuery truth table", ["101", "7.1", "7,1", "99999", "0", " 101 ", "123456", "7.1234", "7.", "10a", "sky", "", null].map(Model.isNumericQuery), [true, true, true, true, true, true, false, false, false, false, false, false, false])
+check("CN2.9: isNumberEntryKey truth table", ["0", "5", "9", ".", ",", "-", "a", "", "12", "\b", "", null, undefined].map(Model.isNumberEntryKey), [true, true, true, true, true, false, false, false, false, false, false, false, false])
+
+check("CN4.2: chnoColumnUnits clamps at both ends", [0, 1, 2, 3, 4, 5, 6, 7, 9, 99, null, undefined, -4].map(Model.chnoColumnUnits), [24, 24, 24, 32, 40, 48, 56, 56, 56, 56, 24, 24, 24])
+
+check("CN3.2: channelByNumber tunes on exact and on prefix, and never cycles", [Model.channelByNumber(plan, planIdx, "007").id, Model.channelByNumber(plan, planIdx, "  12  ").id, Model.channelByNumber(plan, planIdx, "12").id, Model.channelByNumber(plan, planIdx, "7-1").id, Model.channelByNumber(plan, planIdx, "13").id], ["b", "h", "h", "d", "g"])
+check("CN3.2: an unknown or unparsable number is null, never a wrong channel", [Model.channelByNumber(plan, planIdx, "205"), Model.channelByNumber(plan, planIdx, "HD"), Model.channelByNumber(plan, planIdx, ""), Model.channelByNumber(plan, null, "7"), Model.channelByNumber(null, planIdx, "7")], [null, null, null, null, null])
+// CN9 does NOT apply to IPC (3.2): a script asking for 12 must get the same
+// channel every time. The duplicate pair sits at playlist indices 0 and 1 on
+// purpose, so a cursor leaking into the call -- the realistic regression,
+// and 0 is where a cursor most often is -- changes the answer and is caught.
+check("CN3.2: the IPC lookup never cycles, however often it is called", (() => {
+  const dup = Model.prepareChannels([chan("first", "5"), chan("second", "5"), chan("third", "9")])
+  const dupIdx = Model.buildChnoIndex(dup)
+  return [dupIdx.byKey["5"], Model.channelByNumber(dup, dupIdx, "5").id, Model.channelByNumber(dup, dupIdx, "5").id, Model.channelByNumber(dup, dupIdx, "05").id]
+})(), [[0, 1], "first", "first", "first"])
+
+const searchRows = Model.prepareChannels([
+  { id: "s1", name: "101 Barz", group: "Music", chno: "55" },
+  { id: "s2", name: "Channel 101 News", group: "News", chno: "9" },
+  { id: "s3", name: "Sky Sports Main Event", group: "Sports", chno: "101" },
+  { id: "s4", name: "77 Rock", group: "Music", chno: "77" }
+])
+const searchIdx = Model.buildChnoIndex(searchRows)
+check("CN5/2.8: the shipped 4-argument call is unchanged", (() => { const r = Model.filterChannels(searchRows, "101", 200, []); return [r.rows.map(c => c.id), r.total, r.truncated] })(), [["s1", "s2"], 2, false])
+check("CN5/2.8: an all-digit query floats the exact number match to the head", (() => { const r = Model.filterChannels(searchRows, "101", 200, [], searchIdx); return [r.rows.map(c => c.id), r.total, r.truncated] })(), [["s3", "s1", "s2"], 2, false])
+check("CN5/2.8: no duplicate row when the ranker already produced it", (() => { const r = Model.filterChannels(searchRows, "77", 200, [], searchIdx); return r.rows.map(c => c.id) })(), ["s4"])
+check("CN5/2.8: a non-numeric query is untouched", (() => { const a = Model.filterChannels(searchRows, "sky", 200, [], searchIdx); const b = Model.filterChannels(searchRows, "sky", 200, []); return [a.rows.map(c => c.id), b.rows.map(c => c.id)] })(), [["s3"], ["s3"]])
+check("CN5/2.8: an unnumbered playlist floats nothing", (() => { const r = Model.filterChannels(searchRows, "101", 200, [], Model.buildChnoIndex([])); return r.rows.map(c => c.id) })(), ["s1", "s2"])
+check("CN5/2.8: leading zeros and a comma reach the same channel", [Model.filterChannels(searchRows, "0101", 200, [], searchIdx).rows[0].id, Model.filterChannels(searchRows, "077", 200, [], searchIdx).rows[0].id], ["s3", "s4"])
+check("CN5/2.8: R3's cap still holds - the floated row displaces the last one", (() => {
+  const rows = Model.prepareChannels([
+    { id: "n1", name: "12 A", group: "G" }, { id: "n2", name: "12 B", group: "G" },
+    { id: "n3", name: "12 C", group: "G" }, { id: "n4", name: "12 D", group: "G" },
+    { id: "n5", name: "12 E", group: "G" }, { id: "espn", name: "ESPN", group: "Sports", chno: "12" }
+  ])
+  const idx = Model.buildChnoIndex(rows)
+  const bare = Model.filterChannels(rows, "12", 3, [])
+  const with5 = Model.filterChannels(rows, "12", 3, [], idx)
+  return [bare.rows.map(c => c.id), with5.rows.map(c => c.id), with5.total, with5.truncated]
+})(), [["n1", "n2", "n3"], ["espn", "n1", "n2"], 5, true])
+check("CN5/2.8: the float is scope-relative, not a playlist index (a group search)", (() => {
+  // byKey holds playlist indices; this scope array has different ones.
+  const scope = [searchRows[3], searchRows[2]]
+  const r = Model.filterChannels(scope, "101", 200, [], searchIdx)
+  return r.rows.map(c => c.id)
+})(), ["s3"])
+
+const liveEntry = { active: true, buffer: "10", kind: "prefix", label: "10", name: "BBC Four HD", matches: 1, ordinal: 1 }
+const dupEntry = { active: true, buffer: "12", kind: "exact", label: "12", name: "ESPN HD", matches: 2, ordinal: 1 }
+const missEntry = { active: true, buffer: "205", kind: "none", label: "", name: "", matches: 0, ordinal: 0 }
+const footBase = { configured: true, count: 1204, lastUpdated: "12:40" }
+check("CN6.2: a live buffer outranks a transient at the top of the ladder", Model.footerStatus(Object.assign({}, footBase, { transient: "Refreshed" + Model.ELLIPSIS, numberEntry: liveEntry })), "Channel 10")
+check("CN6.2: a live single match shows the number alone", Model.footerStatus(Object.assign({}, footBase, { numberEntry: liveEntry })), "Channel 10")
+check("CN6.2: duplicates name the channel and count it, live", Model.footerStatus(Object.assign({}, footBase, { numberEntry: dupEntry })), "Channel 12" + Model.SEP + "ESPN HD (1 of 2)")
+check("CN6.2: a live miss says so with the digits the user typed", Model.footerStatus(Object.assign({}, footBase, { numberEntry: missEntry })), "Channel 205" + Model.SEP + "no match")
+check("CN6.2: an inactive entry leaves the shipped ladder alone", [Model.footerStatus(Object.assign({}, footBase, { numberEntry: Model.numberEntry(), transient: "Stopped" })), Model.footerStatus(Object.assign({}, footBase, { numberEntry: null }))], ["Stopped", "1,204 channels" + Model.SEP + "updated 12:40"])
+check("CN6.2: the committed strings", [Model.chnoStatus("exact", "101", "Sky Sports Main Event", 1, 1, true), Model.chnoStatus("exact", "12", "ESPN SD", 2, 2, true), Model.chnoStatus("none", "205", "", 0, 0, true), Model.chnoStatus("noNumbers", "", "", 0, 0, true)], ["Channel 101" + Model.SEP + "Sky Sports Main Event", "Channel 12" + Model.SEP + "ESPN SD (2 of 2)", "No channel 205", "No channel numbers in this playlist"])
+check("CN6.2: the (n of m) suffix appears only when m > 1", [Model.chnoStatus("exact", "101", "Sky", 1, 1, true), Model.chnoStatus("exact", "101", "Sky", 0, 0, true)], ["Channel 101" + Model.SEP + "Sky", "Channel 101" + Model.SEP + "Sky"])
+check("CN6.2: a commit with no name still reads as a channel", Model.chnoStatus("prefix", "10", "", 1, 1, true), "Channel 10")
+
+const hintsBase = { mode: "list", query: "" }
+const shippedList = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"], ["o", "sources"]]
+check("CN6.3: an unnumbered playlist gains no hint at all", Model.footerHints(hintsBase), shippedList)
+check("CN6.3: hasNumbers inserts 0-9 channel between / search and o sources", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true })), [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"], ["0-9", "channel"], ["o", "sources"]])
+check("CN6.3: while typing, the hint line is the entry line and nothing else", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true, numberEntry: liveEntry })), [["0-9", "digits"], [".", "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]])
+check("CN6.3: search mode, sources and the empty states are untouched", [Model.footerHints({ mode: "search", query: "", hasNumbers: true }), Model.footerHints({ mode: "search", query: "sky", hasNumbers: true }), Model.footerHints({ mode: "list", empty: "loading", hasNumbers: true })], [[["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "group"], ["Tab", "keys"], ["Esc", "close"]], [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]], [["Esc", "close"]]])
+
+check("CN8.1: a numbered row announces its number first", [Model.rowAccessibleName({ name: "Sky Sports Main Event", chno: "101", favorite: true, playing: true }), Model.rowAccessibleName({ name: "Al Jazeera English", chno: "" }), Model.rowAccessibleName({ name: "Al Jazeera English" })], ["Channel 101, Sky Sports Main Event, favorite, playing", "Al Jazeera English", "Al Jazeera English"])
+check("CN6.4: the bar tooltip and accessible name carry the number when there is one", [Model.barTooltip({ playing: true, name: "Sky Sports Main Event", chno: "101" }), Model.barTooltip({ playing: true, name: "Sky Sports Main Event" }), Model.barAccessibleName({ playing: true, name: "Sky Sports Main Event", chno: "101" }), Model.barAccessibleName({ playing: true, name: "Sky Sports Main Event" })], ["Playing 101" + Model.SEP + "Sky Sports Main Event", "Playing Sky Sports Main Event", "IPTV, playing channel 101, Sky Sports Main Event", "IPTV, playing Sky Sports Main Event"])
+
+check("CN7.1: the three new settings default as documented", (() => { const s = Model.settingsFrom({ id: "x" }); return [s.channelOrder, s.numberEntryMs, s.barShowChannelNumber] })(), ["playlist", 1500, true])
+check("CN2/7.1: numberEntryMs clamps at both ends and survives garbage", [Model.settingsFrom({ numberEntryMs: 100 }).numberEntryMs, Model.settingsFrom({ numberEntryMs: 99999 }).numberEntryMs, Model.settingsFrom({ numberEntryMs: "2000" }).numberEntryMs, Model.settingsFrom({ numberEntryMs: "soon" }).numberEntryMs, Model.settingsFrom({ numberEntryMs: null }).numberEntryMs], [400, 5000, 2000, 1500, 1500])
+check("CN7.1: channelOrder and barShowChannelNumber read the same way the shipped keys do", [Model.settingsFrom({ channelOrder: "number" }).channelOrder, Model.settingsFrom({ channelOrder: "NUMBER" }).channelOrder, Model.settingsFrom({ channelOrder: "nonsense" }).channelOrder, Model.settingsFrom({ barShowChannelNumber: false }).barShowChannelNumber, Model.settingsFrom({ barShowChannelNumber: "false" }).barShowChannelNumber, Model.settingsFrom({ barShowChannelNumber: "true" }).barShowChannelNumber], ["number", "number", "playlist", false, false, true])
+check("CN7.1: the seven shipped settings are unchanged by the three additions", (() => { const s = Model.settingsFrom({ playlistUrl: " http://h.test/a.m3u ", epgUrl: "", refreshMinutes: 45, mpvArgs: "--mute", showChannelName: false, maxRecents: 3, barLabelMaxWidth: 200 }); return [s.playlistUrl, s.epgUrl, s.refreshMinutes, s.mpvArgs, s.showChannelName, s.maxRecents, s.barLabelMaxWidth] })(), ["http://h.test/a.m3u", "", 45, "--mute", false, 3, 200])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
