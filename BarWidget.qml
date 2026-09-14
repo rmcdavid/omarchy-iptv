@@ -33,27 +33,76 @@ BarWidget {
   // same values for the guide (decision 7).
   readonly property bool showChannelName: setting("showChannelName", true) !== false && String(setting("showChannelName", true)) !== "false"
   readonly property int labelMaxWidth: Style.space(Model.clampSetting("barLabelMaxWidth", setting("barLabelMaxWidth", 180)))
+  // M2-03 4.5: independent of showChannelName on purpose. `[ 󰕧 101 ]` on a
+  // crowded bar is the useful case, and it is only reachable if the two
+  // settings are separate.
+  readonly property bool showChannelNumber: setting("barShowChannelNumber", true) !== false && String(setting("barShowChannelNumber", true)) !== "false"
 
   readonly property bool serviceReady: service !== null
   readonly property bool playing: serviceReady && service.playing === true
   readonly property string nowPlayingName: playing && service.nowPlaying ? String(service.nowPlaying.name || "") : ""
+  // The service derives this from the loaded cache. Guarded for `undefined`
+  // because the harness runs this widget against a pre-change service too,
+  // and an undefined read must never invent a value (CLAUDE.md rule 10).
+  readonly property string nowPlayingChno: playing && service.nowPlayingChno !== undefined ? String(service.nowPlayingChno) : ""
   readonly property bool configured: serviceReady && service.configured === true
   readonly property bool refreshing: serviceReady && service.refreshing === true
   readonly property bool hasError: serviceReady && service.status === "error"
   readonly property string glyph: Model.barGlyph({ playing: root.playing, error: root.hasError })
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""
+  // Vertical bars stay glyph-only (UX 8 #12); the number is in the tooltip.
+  readonly property bool showNumber: !root.vertical && root.showChannelNumber && root.nowPlayingChno !== ""
   readonly property color barFg: bar ? bar.barForeground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   // Idle dims like tailscale's inactive icon; playing and error are full.
   property color glyphColor: root.playing || root.hasError ? root.barFg : Qt.darker(root.barFg, 1.55)
-  readonly property string tooltip: Model.barTooltip({
+  readonly property string tooltip: chnoStandIn.barTooltip({
     serviceMissing: !root.serviceReady,
     configured: root.configured,
     playing: root.playing,
     name: root.nowPlayingName,
+    chno: root.nowPlayingChno,
     error: root.hasError,
     refreshing: root.refreshing
   })
+
+  // ==================================================================
+  // TEMPORARY STAND-IN BLOCK -- M2-03 Lane A owns Model.js and is adding
+  // `opts.chno` to these two shipped functions now (design 6.4 and 8.1), so
+  // this lane may not open that file. Both members carry the name and the
+  // signature the design freezes; integration deletes this QtObject and
+  // rewrites `chnoStandIn.` as `Model.` (2 call sites in this file).
+  // Leaving it behind is forbidden; the integration step greps for
+  // `chnoStandIn` and for `STAND-IN`.
+  QtObject {
+    id: chnoStandIn
+
+    // Model.barTooltip(opts) with opts.chno: `Playing 101 <SEP> Sky Sports`.
+    // The number is prepended to the name so the shipped ladder - service
+    // missing, not configured, error, refreshing, idle - stays untouched and
+    // no copy of its strings lives here.
+    function barTooltip(opts) {
+      var chno = opts && opts.chno ? String(opts.chno) : ""
+      if (chno === "" || !opts.playing) return Model.barTooltip(opts)
+      return Model.barTooltip(chnoStandIn.withName(opts, chno + Model.SEP + String(opts.name || "")))
+    }
+
+    // Model.barAccessibleName(opts) with opts.chno (8.1): the number is
+    // spoken as `channel 101`, never as a bare digit string.
+    function barAccessibleName(opts) {
+      var chno = opts && opts.chno ? String(opts.chno) : ""
+      if (chno === "" || !opts.playing) return Model.barAccessibleName(opts)
+      return Model.barAccessibleName(chnoStandIn.withName(opts, "channel " + chno + ", " + String(opts.name || "")))
+    }
+
+    function withName(opts, name) {
+      var out = ({})
+      for (var k in opts) out[k] = opts[k]
+      out.name = name
+      return out
+    }
+  }
+  // ================================================ end of the stand-in block
 
   Behavior on glyphColor {
     enabled: !root.bar || root.bar.foregroundAnimationEnabled
@@ -97,11 +146,12 @@ BarWidget {
     for (var i = 0; i < count; i++) root.service.zap(direction)
   }
 
-  implicitWidth: root.vertical ? root.barSize : icon.implicitWidth + labelHolder.width
+  implicitWidth: root.vertical ? root.barSize : icon.implicitWidth + numberHolder.width + labelHolder.width
   implicitHeight: root.vertical ? icon.implicitHeight : root.barSize
 
   Accessible.role: Accessible.Button
-  Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName, error: root.hasError })
+  Accessible.name: chnoStandIn.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
+                                                   chno: root.nowPlayingChno, error: root.hasError })
 
   // Mirrors WidgetButton: registered click targets keep receiving clicks
   // while a bar popup (KeyboardPanel) is open.
@@ -156,9 +206,37 @@ BarWidget {
     pressable: false
   }
 
+  // The channel number, between the glyph and the name (M2-03 4.5). It sits
+  // OUTSIDE the name's Style.space(barLabelMaxWidth) budget and never elides:
+  // half a channel number is worse than none, and the name is the part that
+  // can lose characters and stay useful.
+  Item {
+    id: numberHolder
+    anchors.left: icon.right
+    anchors.verticalCenter: parent.verticalCenter
+    height: root.barSize
+    width: root.showNumber ? number.implicitWidth + Style.spaceReal(8.5) : 0
+    clip: true
+    Behavior on width { NumberAnimation { duration: root.labelAnimMs; easing.type: Easing.OutCubic } }
+
+    Text {
+      id: number
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: root.nowPlayingChno
+      visible: root.showNumber
+      color: root.barFg
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+      renderType: Text.NativeRendering
+      verticalAlignment: Text.AlignVCenter
+    }
+  }
+
   Item {
     id: labelHolder
-    anchors.left: icon.right
+    anchors.left: numberHolder.right
     anchors.verticalCenter: parent.verticalCenter
     height: root.barSize
     width: root.showLabel ? Math.min(label.implicitWidth, root.labelMaxWidth) + Style.spaceReal(8.5) : 0
