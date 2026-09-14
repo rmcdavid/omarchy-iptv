@@ -13,9 +13,15 @@ import unittest
 from helper_loader import load_helper
 
 helper = load_helper()
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+# The session vectors are shared with tests/Model.test.js (CLAUDE.md: a rule
+# written twice gets one fixture).
+FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
 # state.json version 2 (ARCHITECTURE-SOURCES.md 2.1): the 0.1 keys plus the
-# cache layout marker and the source history.
-EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "sources": []}
+# cache layout marker and the source history, plus the optional nullable
+# `session` of the detached player (ARCHITECTURE-PLAYER.md section 8), which
+# is additive and does NOT bump the version.
+EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": []}
 
 
 def v2(**patch):
@@ -99,20 +105,23 @@ class StateCommandTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["state"]["favorites"], ["t:b"])
 
-    def test_clear_recents_keeps_favorites_and_last_played(self):
+    def test_clear_recents_keeps_favorites_last_played_and_the_session(self):
         self.path.parent.mkdir(parents=True)
         self.path.write_text(json.dumps({
             "version": 1,
             "favorites": ["t:bbc1.uk"],
             "recents": [{"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1757700000}],
             "lastPlayed": {"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1757700000},
+            "session": {"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1757700000},
         }), encoding="utf-8")
         code, payload, _ = self.state("clear-recents")
         self.assertEqual(code, 0)
-        # A v1 file is written back as v2 (section 2.2): favorites and lastPlayed kept.
+        # A v1 file is written back as v2 (section 2.2): favorites, lastPlayed
+        # and the player's session record all kept.
         self.assertEqual(payload["state"], v2(
             favorites=["t:bbc1.uk"],
             lastPlayed={"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1757700000},
+            session={"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1757700000},
         ))
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), payload["state"])
 
@@ -160,6 +169,88 @@ class StateCommandTest(unittest.TestCase):
                 del os.environ["XDG_STATE_HOME"]
             else:
                 os.environ["XDG_STATE_HOME"] = original
+
+
+class SessionKeyTest(unittest.TestCase):
+    """state.json `session` (ARCHITECTURE-PLAYER.md 4.6, section 8, PO-3).
+
+    The service owns the key, but every `state` action rewrites the whole
+    document, so the helper has to read it, keep it and write it back: a
+    reader that dropped it would erase a playing channel's record on the next
+    `favorite add`, and the reattach would have nothing to mark failed."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.vectors = json.loads(FIXTURE.read_text(encoding="utf-8"))["session"]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        self.path = pathlib.Path(self.dir) / "state.json"
+
+    def state(self, *args):
+        return run("state", "--state-dir", self.dir, *args)
+
+    def write(self, document):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Indented, the way Service.qml's JSON.stringify(state, null, 2) writes it.
+        self.path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+    def test_every_shared_vector_reads_the_same_record_as_model_js(self):
+        for vector in self.vectors:
+            self.assertEqual(helper.normalize_state(vector["state"])["session"], vector["record"], vector["name"])
+
+    def test_a_file_without_the_key_reads_as_none_and_the_version_does_not_move(self):
+        self.write({"version": 1, "favorites": ["t:bbc1.uk"], "recents": [], "lastPlayed": None})
+        code, payload, _ = self.state("show")
+        self.assertEqual(code, 0)
+        self.assertIsNone(payload["state"]["session"])
+        self.assertEqual(payload["state"]["version"], 2)
+        self.assertEqual(helper.STATE_VERSION, 2)
+
+    def test_a_cli_write_carries_the_session_of_a_playing_channel_through(self):
+        session = {"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000123}
+        self.write({"version": 2, "favorites": [], "recents": [], "lastPlayed": None, "session": session})
+        code, payload, _ = self.state("favorite", "add", "t:other")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["state"]["session"], session)
+        written = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(written["session"], session)
+        # clear-recents and a source edit rewrite the document too.
+        code, payload, _ = self.state("clear-recents")
+        self.assertEqual(payload["state"]["session"], session)
+        code, payload, _ = self.state("source", "add", "--url", "http://h.test/a.m3u")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["session"], session)
+
+    def test_the_write_keeps_the_file_private_and_atomic_and_url_free(self):
+        session = {"id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000123}
+        self.write({"version": 2, "favorites": [], "recents": [], "lastPlayed": None, "session": session})
+        os.chmod(self.path, 0o600)
+        self.state("favorite", "add", "t:x")
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
+        self.assertEqual(sorted(os.listdir(self.dir)), ["state.json"])   # no .tmp left behind
+        self.assertNotIn("://", self.path.read_text(encoding="utf-8"))
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["session"], session)
+
+    def test_init_creates_the_file_with_a_null_session(self):
+        code, payload, _ = self.state("init")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
+        self.assertIn("session", json.loads(self.path.read_text(encoding="utf-8")))
+
+    def test_a_junk_session_is_dropped_rather_than_carried(self):
+        self.write({"version": 2, "session": {"name": "no id"}, "favorites": []})
+        code, payload, _ = self.state("favorite", "add", "t:x")
+        self.assertIsNone(payload["state"]["session"])
+        self.assertIsNone(json.loads(self.path.read_text(encoding="utf-8"))["session"])
+
+    def test_the_key_order_matches_the_document_the_service_writes(self):
+        # Both sides emit version, cacheLayout, favorites, recents, lastPlayed,
+        # session, sources - so a diff of two state files stays readable.
+        self.assertEqual(list(helper.default_state()), ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session", "sources"])
 
 
 if __name__ == "__main__":

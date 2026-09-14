@@ -3007,11 +3007,18 @@ def cmd_cache(args: argparse.Namespace) -> int:
 # state.json version 2 (ARCHITECTURE-SOURCES.md section 2): the 0.1 keys
 # unchanged plus `cacheLayout` and the `sources` history. A version-1 file
 # reads as version 2 with an empty history; the first write upgrades it.
+# v0.3.0 adds one optional nullable key, `session`, with NO version bump
+# (ARCHITECTURE-PLAYER.md section 8), handled exactly the way the version-1
+# keys are: normalize_state whitelists what it knows, so a file that predates
+# the key reads it as None and an older build simply drops it. The key is the
+# service's, but every `state` action rewrites the whole document, so the CLI
+# has to carry it through or a `favorite add` would silently erase the record
+# a running player depends on (ruling PO-3).
 # Every `state` action prints the state through public_state(), which
 # replaces `url` / `epgUrl` by their hosts: stdout must never carry a URL.
 
 def default_state() -> dict[str, Any]:
-    return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "sources": []}
+    return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": []}
 
 
 def normalize_played(entry: Any) -> dict[str, Any] | None:
@@ -3081,8 +3088,9 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
 def normalize_state(raw: Any) -> dict[str, Any]:
     """Tolerant reader mirroring Model.parseState: unknown shapes fall back
     to an empty state, entries are de-duplicated and coerced. A version-1
-    file (0.1.0) yields `sources: []`, `cacheLayout: 0`; records that fail
-    the field rules are dropped, a repeated url or key keeps the first."""
+    file (0.1.0) yields `sources: []`, `cacheLayout: 0`; a file from before
+    the detached player yields `session: None`; records that fail the field
+    rules are dropped, a repeated url or key keeps the first."""
     state = default_state()
     if not isinstance(raw, dict):
         return state
@@ -3099,6 +3107,13 @@ def normalize_state(raw: Any) -> dict[str, Any]:
             if entry is not None:
                 state["recents"].append(entry)
     state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
+    # What the player was last asked to play (4.6, section 8). Same record as
+    # lastPlayed, different lifetime: the service clears it when the player
+    # stops or ends cleanly, so one left behind means the player died with no
+    # shell attached and the channel is marked failed in the guide on reattach
+    # instead of raising a toast minutes late. Never URL-bearing: a channel id
+    # and a display name, which is never a URL.
+    state["session"] = normalize_played(raw.get("session"))
     state["cacheLayout"] = CACHE_LAYOUT if raw.get("cacheLayout") == CACHE_LAYOUT else 0
     sources = raw.get("sources")
     if isinstance(sources, list):
