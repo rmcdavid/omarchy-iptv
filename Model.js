@@ -538,11 +538,13 @@ function chnoOf(channel) {
 function buildChnoIndex(channels) {
   var list = asList(channels)
   var byKey = {}
+  var ids = {}
   var numbered = []
   var maxLabelLen = 0
   for (var i = 0; i < list.length; i++) {
     var chno = chnoOf(list[i])
     if (!chno.ok) continue
+    ids[i] = channelId(list[i])
     // hasOwnProperty, not `=== undefined`: a hand-edited cache row could
     // carry chnoKey "constructor", and `byKey.constructor` is a function.
     if (!Object.prototype.hasOwnProperty.call(byKey, chno.key)) byKey[chno.key] = []
@@ -571,11 +573,29 @@ function buildChnoIndex(channels) {
     byKey: byKey,
     order: order,
     labels: labels,
+    // Channel id per numbered playlist index. Addition to the section 1.4
+    // shape, and the thing that makes every consumer order-independent:
+    // byKey holds PLAYLIST indices, but `channelOrder: number` hands the
+    // guide and the service a reordered array (5.2), so an index alone
+    // cannot name a row. 5.2 says to map "through the channel's id"; this
+    // is what makes that possible without a second array. Numbered channels
+    // only, so an unnumbered playlist pays nothing. See the lane A report,
+    // request 5.
+    ids: ids,
     count: order.length,
     duplicates: duplicates,
     maxLabelLen: order.length > 0 ? maxLabelLen : 0,
     hasNumbers: order.length > 0
   }
+}
+
+// The channel id at a playlist index, or "" when that index is not numbered.
+function chnoIdAt(index, channelIndex) {
+  var idx = index || {}
+  var ids = idx.ids && typeof idx.ids === "object" ? idx.ids : {}
+  var at = Math.floor(Number(channelIndex))
+  if (!isFinite(at) || at < 0) return ""
+  return Object.prototype.hasOwnProperty.call(ids, at) ? str(ids[at]) : ""
 }
 
 // What the user has typed, canonicalized far enough to look up: "," folded
@@ -619,11 +639,17 @@ function resolveChno(index, buffer, currentChannelIndex) {
   if (Object.prototype.hasOwnProperty.call(byKey, key)) {
     var bucket = asList(byKey[key])
     if (bucket.length > 0) {
+      // `currentChannelIndex` is a playlist index, or a channel id: under
+      // `channelOrder: number` the caller's array is reordered and an index
+      // no longer names the cursor's row, so the id form is the one the
+      // guide uses (1.4 `ids`).
       var pick = 0
-      var current = Math.floor(Number(currentChannelIndex))
-      if (bucket.length > 1 && isFinite(current)) {
+      var byId = typeof currentChannelIndex === "string" && currentChannelIndex !== ""
+      var current = byId ? -1 : Math.floor(Number(currentChannelIndex))
+      if (bucket.length > 1 && (byId || isFinite(current))) {
         for (var b = 0; b < bucket.length; b++) {
-          if (bucket[b] === current) { pick = (b + 1) % bucket.length; break }
+          var same = byId ? chnoIdAt(idx, bucket[b]) === currentChannelIndex : bucket[b] === current
+          if (same) { pick = (b + 1) % bucket.length; break }
         }
       }
       return { kind: "exact", channelIndex: bucket[pick], key: key, label: key, matches: bucket.length, ordinal: pick + 1 }
@@ -668,6 +694,14 @@ function channelByNumber(channels, index, text) {
   var hit = resolveChno(index, parsed.key, -1)
   if (hit.kind === "none") return null
   var list = asList(channels)
+  // By id first, so the answer is the same whether the caller holds the
+  // playlist-order array or the number-ordered one (5.2). The positional
+  // fallback keeps an index built without ids working.
+  var id = chnoIdAt(index, hit.channelIndex)
+  if (id !== "") {
+    for (var i = 0; i < list.length; i++) if (list[i] && channelId(list[i]) === id) return list[i]
+    return null
+  }
   if (hit.channelIndex < 0 || hit.channelIndex >= list.length) return null
   return list[hit.channelIndex] || null
 }
@@ -795,6 +829,57 @@ function chnoColumnUnits(maxLabelLen) {
   if (!isFinite(n) || n < 1) n = 1
   if (n > MAX_CHNO_LABEL) n = MAX_CHNO_LABEL
   return Math.max(24, Math.min(56, 8 * n + 8))
+}
+
+// Qt keyboard modifier bits, as plain integers so this file stays free of
+// QML imports (Qt::KeyboardModifier, stable across Qt 5 and 6).
+var QT_SHIFT_MODIFIER = 0x02000000
+var QT_CONTROL_MODIFIER = 0x04000000
+var QT_ALT_MODIFIER = 0x08000000
+var QT_META_MODIFIER = 0x10000000
+var QT_KEYPAD_MODIFIER = 0x20000000
+// M2-03 2.2 and gate A1. The mask deliberately contains Ctrl, Alt and Meta
+// and NOT Shift or Keypad, and that omission is the whole gate:
+//
+//   - on AZERTY (fr) and bepo the top-row digits sit at shift level 2, so a
+//     digit arrives with ShiftModifier SET. Rejecting Shift would break
+//     numeric zap on every French layout, and no amount of testing on a US
+//     keyboard would reveal it.
+//   - the numeric keypad sends KP_0..KP_9, whose text is "0".."9", together
+//     with KeypadModifier. Rejecting Keypad would break every numpad.
+//
+// Both were verified against libxkbcommon with real compiled keymaps rather
+// than reasoned about; the evidence is in the M2-03 lane A report. Ctrl,
+// Alt and Meta stay rejected because those are chords, not digits.
+var CHNO_CHORD_MASK = QT_CONTROL_MODIFIER | QT_ALT_MODIFIER | QT_META_MODIFIER
+
+// What a key event should do to the number buffer (2.9). Returns one of
+// "backspace", "digit", "noNumbers" or "pass"; "pass" means the guide has
+// not handled it and the shipped binding runs.
+function numberKeyAction(opts) {
+  var o = opts || {}
+  var modifiers = Math.floor(Number(o.modifiers))
+  if (isFinite(modifiers) && (modifiers & CHNO_CHORD_MASK) !== 0) return "pass"
+  if (o.backspace === true) return o.active === true ? "backspace" : "pass"
+  if (!isNumberEntryKey(o.text)) return "pass"
+  // 1.5: an unnumbered playlist answers with one transient rather than
+  // silence, because UX 3.1 advertises these keys.
+  if (o.hasNumbers !== true) return "noNumbers"
+  return "digit"
+}
+
+// M2-03 2.5, what a commit does. The "never play a number that resolved to
+// nothing" rule is the one genuinely destructive outcome this feature could
+// have, so it is a decision with a name and a test, not a line of QML.
+function chnoCommitPlan(kind, label, name, matches, ordinal, opts) {
+  var o = opts || {}
+  var none = str(kind) === "none" || str(kind) === ""
+  return {
+    restore: none,
+    play: o.play === true && !none,
+    keepOpen: o.keepOpen === true,
+    status: chnoStatus(kind, label, name, matches, ordinal, true)
+  }
 }
 
 // M2-03 6.2, the footer's number strings. `label` is the resolved label, or
@@ -4498,6 +4583,7 @@ if (typeof module !== "undefined") {
     parseChno: parseChno,
     chnoOf: chnoOf,
     buildChnoIndex: buildChnoIndex,
+    chnoIdAt: chnoIdAt,
     chnoEntryKey: chnoEntryKey,
     resolveChno: resolveChno,
     chnoUnambiguous: chnoUnambiguous,
@@ -4512,6 +4598,9 @@ if (typeof module !== "undefined") {
     cancelNumberEntry: cancelNumberEntry,
     chnoColumnUnits: chnoColumnUnits,
     chnoStatus: chnoStatus,
+    CHNO_CHORD_MASK: CHNO_CHORD_MASK,
+    numberKeyAction: numberKeyAction,
+    chnoCommitPlan: chnoCommitPlan,
     matchRank: matchRank,
     favoriteSet: favoriteSet,
     filterChannels: filterChannels,

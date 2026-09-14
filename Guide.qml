@@ -81,6 +81,37 @@ Item {
   property int columnWheel: 0
   readonly property int maxRows: Model.MAX_ROWS_DEFAULT
 
+  // ---- channel numbers (M2-03). Root-local, like cursorIndex and
+  // transientText, and NOT inside root.guide: Model.onEscape is unchanged,
+  // handleEscape checks the buffer here and returns before delegating (2.6).
+  //
+  // scopeId / query / cursorIndex inside the entry are the snapshot taken
+  // when the buffer went from empty to one character. Esc and Backspace on
+  // the last character both restore it.
+  property var numberEntry: Model.numberEntry()
+  property var numberResolution: Model.resolveChno(null, "", -1)
+  // The name of the row the preview landed on, for the "(1 of 2)" footer.
+  property string numberTargetName: ""
+  readonly property bool numberEntryActive: root.numberEntry !== null && root.numberEntry.active === true
+  readonly property string numberBuffer: root.numberEntry !== null ? String(root.numberEntry.buffer) : ""
+  // Guarded exactly as the Sources API is: Lane B adds service.chnoIndex,
+  // and until it lands (and in the harness) the guide builds its own from
+  // the channels it can see, once per channel-set change, never per key.
+  readonly property bool chnoApi: root.serviceReady && root.service.chnoIndex !== undefined && root.service.chnoIndex !== null
+  property var fallbackChnoIndex: Model.buildChnoIndex(null)
+  readonly property var chnoIndex: root.chnoApi ? root.service.chnoIndex : root.fallbackChnoIndex
+  readonly property bool hasNumbers: root.chnoIndex !== null && root.chnoIndex.hasNumbers === true
+  readonly property int numberWidth: root.hasNumbers ? Style.space(Model.chnoColumnUnits(root.chnoIndex.maxLabelLen)) : 0
+  // CN2: a setting, not a constant, because the timeout is an accessibility
+  // matter. The fallback matches the manifest default.
+  readonly property int numberEntryMs: root.serviceReady && root.service.numberEntryMs !== undefined && root.service.numberEntryMs !== null
+    ? Model.clampSetting("numberEntryMs", root.service.numberEntryMs)
+    : Model.SETTING_RANGES.numberEntryMs.def
+  readonly property string cursorChannelId: {
+    var row = root.rowAt(root.cursorIndex)
+    return row ? Model.channelId(row) : ""
+  }
+
   // ---- microcopy, in one place (UX.md 5.9, section 6). Strings shared with
   // the bar and notifications live in Model.js (footerStatus, footerHints,
   // barTooltip, notifyArgv, rowDetail, scopeLabel, noMatchesTitle).
@@ -397,7 +428,19 @@ Item {
     lastUpdated: root.serviceReady ? root.service.lastUpdated : "",
     stale: root.serviceStatus === "cached",
     activeLabel: root.activeSourceLabel,
-    sourceCount: root.sourceCount
+    sourceCount: root.sourceCount,
+    // M2-03 6.2: the live buffer sits at the top of the ladder, above the
+    // transient, so a three-second toast cannot cover what the digits are
+    // doing right now.
+    numberEntry: root.numberEntryActive ? {
+      active: true,
+      buffer: root.numberBuffer,
+      kind: root.numberResolution.kind,
+      label: root.numberResolution.label,
+      name: root.numberTargetName,
+      matches: root.numberResolution.matches,
+      ordinal: root.numberResolution.ordinal
+    } : null
   })
 
   readonly property string keyColor: Util.alpha(root.foreground, 0.7).toString()
@@ -406,7 +449,8 @@ Item {
     var empty = ""
     if (root.emptyKind === "loading") empty = "loading"
     else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service") empty = "error"
-    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form })
+    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form,
+      hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null })
     var out = []
     for (var i = 0; i < pairs.length; i++) {
       out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
@@ -452,6 +496,14 @@ Item {
   function close() {
     root.opened = false
     transientTimer.stop()
+    // M2-03 2.6: closing drops the buffer and stops its timer, as this
+    // already does for transientTimer. No snapshot is restored -- the guide
+    // is going away, and a commit on the way out would fire a transient
+    // nobody sees.
+    numberTimer.stop()
+    root.numberEntry = Model.numberEntry()
+    root.numberResolution = Model.resolveChno(null, "", -1)
+    root.numberTargetName = ""
     // The form state (the only place a URL lives in this file) is dropped
     // with the overlay (UX-SOURCES 6.9).
     if (root.form !== null || !root.guideMode) root.guide = Model.guideState(root.scopeId)
@@ -495,6 +547,10 @@ Item {
     }
     if (!root.groupsDirty && root.scopeList.length > 0) return
     root.groupsDirty = false
+    // M2-03 1.4: only until Lane B's service.chnoIndex lands. This runs on a
+    // channel-set change, never on a keystroke, so digit entry stays on the
+    // per-key budget either way.
+    if (!root.chnoApi) root.fallbackChnoIndex = Model.buildChnoIndex(root.service.channels)
     var entries = Model.scopeEntries(root.service.channels, root.service.userState)
     var parts = []
     for (var i = 0; i < entries.length; i++) parts.push(entries[i].id + "=" + entries[i].count)
@@ -521,7 +577,10 @@ Item {
     var fallback = Model.fallbackScope(root.scopeList, root.scopeId)
     if (fallback !== root.scopeId) root.guide = Model.withScope(root.guide, fallback)
     var favorites = root.serviceReady ? root.service.userState.favorites : []
-    var result = Model.filterChannels(root.candidates(), root.query, root.maxRows, favorites)
+    // CN5 / 2.8: an all-digit query floats the exact number match to the top
+    // of the results, so the feature is reachable from the mode the guide
+    // opens in. A head insertion, not a fifth ranking tier.
+    var result = Model.filterChannels(root.candidates(), root.query, root.maxRows, favorites, root.chnoIndex)
     root.resultTotal = result.total
     root.truncated = result.truncated
     root.currentRows = result.rows
@@ -687,10 +746,169 @@ Item {
     root.showTransient(root.copy.transientCopied)
   }
 
+  // ------------------------------------------------------------ channel numbers (M2-03)
+  //
+  // The guide owns the timer, the cursor and the chip. Every decision below
+  // is a Model.js call; there is no number logic in this file.
+
+  function rowIndexOfId(id) {
+    var key = String(id || "")
+    if (key === "") return -1
+    for (var i = 0; i < root.currentRows.length; i++) {
+      if (Model.channelId(root.currentRows[i]) === key) return i
+    }
+    return -1
+  }
+
+  // M2-03 2.3. Resolve once per buffer change and keep the answer: a live
+  // binding over cursorIndex would re-enter the duplicate cycle the moment
+  // the preview moved the cursor, and the footer would report an ordinal the
+  // cursor is not on. The cycle is derived from where the cursor was when
+  // the key was pressed, which is exactly what makes it stateless (2.7).
+  function applyNumberEntry(next) {
+    var hit = Model.resolveChno(root.chnoIndex, next.buffer, root.cursorChannelId)
+    root.numberEntry = next
+    root.numberResolution = hit
+    if (hit.kind === "none") {
+      // The cursor does not move: the user can Backspace out of a typo
+      // without ever having left the row they were on (CN1).
+      root.numberTargetName = ""
+      return
+    }
+    var id = Model.chnoIdAt(root.chnoIndex, hit.channelIndex)
+    var at = root.rowIndexOfId(id)
+    if (at < 0) {
+      // Outside the current list: the scope moves to All, clearing a query
+      // that is in the way, exactly as a search from Favorites jumps the
+      // column (UX 2.7). In All the target's numeric neighbours are the
+      // adjacent rows, so j/k right after a jump are channel up and down.
+      if (root.hasQuery) root.guide = Model.withQuery(root.guide, "")
+      root.setScope(Model.SCOPE_ALL)
+      at = root.rowIndexOfId(id)
+    }
+    if (at >= 0) root.selectAbsolute(at)
+    var row = root.rowAt(at >= 0 ? at : root.cursorIndex)
+    root.numberTargetName = row ? String(row.name || "") : ""
+  }
+
+  function pushNumberEntry(text) {
+    var result = Model.pushNumberKey(root.numberEntry, text,
+      { scopeId: root.scopeId, query: root.query, cursorIndex: root.cursorIndex })
+    // A refused key (the cap, a second separator) must NOT restart the
+    // timer: the buffer is already as long as any number can be.
+    if (!result.changed) return
+    root.applyNumberEntry(result.entry)
+    numberTimer.restart()
+    // 2.5: an exact match no label extends commits on the last digit, which
+    // is what makes a three-digit plan feel instant.
+    if (Model.chnoUnambiguous(root.chnoIndex, result.entry.buffer)) root.commitNumberEntry({ play: false })
+  }
+
+  function popNumberEntry() {
+    var next = Model.popNumberKey(root.numberEntry)
+    if (!next.active) {
+      // 2.6: Backspace on the last character is the same cancel as Esc, and
+      // `next` still carries the snapshot to restore from.
+      numberTimer.stop()
+      root.numberEntry = Model.cancelNumberEntry(root.numberEntry)
+      root.numberResolution = Model.resolveChno(null, "", -1)
+      root.numberTargetName = ""
+      root.restoreNumberSnapshot(next)
+      return
+    }
+    root.applyNumberEntry(next)
+    numberTimer.restart()
+  }
+
+  function restoreNumberSnapshot(entry) {
+    if (!entry) return
+    var next = root.guide
+    if (String(entry.query) !== root.query) next = Model.withQuery(next, entry.query)
+    if (String(entry.scopeId) !== "" && String(entry.scopeId) !== root.scopeId) next = Model.withScope(next, entry.scopeId)
+    if (next !== root.guide) {
+      root.guide = next
+      root.rebuildDisplay()
+    }
+    root.selectAbsolute(entry.cursorIndex)
+  }
+
+  // M2-03 2.5. Four triggers, one result. A commit NEVER plays by itself:
+  // Enter and Space keep exactly the meanings UX 3.1 gives them (CN1), and
+  // `play` is set only by the two of them.
+  function commitNumberEntry(opts) {
+    if (!root.numberEntryActive) return false
+    var o = opts || {}
+    numberTimer.stop()
+    var hit = root.numberResolution
+    var entry = root.numberEntry
+    // Playing whatever happened to be under the cursor after a mistyped
+    // number is the one genuinely destructive outcome this feature could
+    // have, so the decision has a name and a test of its own.
+    var plan = Model.chnoCommitPlan(hit.kind,
+      hit.kind === "none" ? root.numberBuffer : hit.label,
+      root.numberTargetName, hit.matches, hit.ordinal, o)
+    root.numberEntry = Model.cancelNumberEntry(entry)
+    root.numberResolution = Model.resolveChno(null, "", -1)
+    root.numberTargetName = ""
+    if (plan.restore) root.restoreNumberSnapshot(entry)
+    root.showTransient(plan.status)
+    if (plan.play) root.activate(plan.keepOpen)
+    return !plan.restore
+  }
+
+  function cancelNumberEntry() {
+    if (!root.numberEntryActive) return false
+    numberTimer.stop()
+    var entry = root.numberEntry
+    root.numberEntry = Model.cancelNumberEntry(entry)
+    root.numberResolution = Model.resolveChno(null, "", -1)
+    root.numberTargetName = ""
+    root.restoreNumberSnapshot(entry)
+    return true
+  }
+
+  // Any key this feature does not own ends entry first, then does its job.
+  function endNumberEntry(commit) {
+    if (!root.numberEntryActive) return
+    if (commit) root.commitNumberEntry({ play: false })
+    else root.cancelNumberEntry()
+  }
+
+  // M2-03 2.9 / gate A1. Match on event.text, NEVER on Qt.Key_0..Qt.Key_9.
+  // Proven against libxkbcommon with real keymaps (the evidence is in the
+  // lane A report): the numeric keypad sends KP_1, whose text is "1", and on
+  // AZERTY and bepo the top-row digits sit at shift level 2, so the digit
+  // arrives WITH ShiftModifier set. Rejecting Shift would break numeric zap
+  // on every French layout, so Shift is deliberately not in the reject mask;
+  // Ctrl, Alt and Meta are, because those are chords, not digits. Keypad
+  // digits also carry Qt::KeypadModifier, which is likewise not rejected.
+  function handleNumberKey(event) {
+    var action = Model.numberKeyAction({
+      text: event.text,
+      modifiers: event.modifiers,
+      backspace: event.key === Qt.Key_Backspace,
+      active: root.numberEntryActive,
+      hasNumbers: root.hasNumbers
+    })
+    if (action === "pass") return false
+    if (action === "backspace") { root.popNumberEntry(); return true }
+    if (action === "noNumbers") {
+      root.showTransient(Model.chnoStatus("noNumbers", "", "", 0, 0, true))
+      return true
+    }
+    root.pushNumberEntry(event.text)
+    return true
+  }
+
   // `configured` rides along so Esc in Sources lands in the first-run form
   // when the guide behind it is unconfigured (UX 1.7: the active source
   // was removed while Sources stayed open).
+  //
+  // M2-03 2.6: a live number buffer is one step in front of the shipped
+  // chain -- cancel it, and do not fall through to clearing the query or
+  // closing the guide. Model.onEscape is untouched.
   function handleEscape() {
+    if (root.listMode && root.cancelNumberEntry()) return
     root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
   }
 
@@ -720,6 +938,12 @@ Item {
       if (event.key === Qt.Key_Delete) { root.startRemove(); return true }
       return false
     }
+    // M2-03 2.9. The listMode guard is what keeps digits literal in search
+    // mode (UX 8 #17): handleSharedKey is also called from handleSearchKey,
+    // and the shipped `Qt.Key_Delete && root.listMode` branch below is the
+    // precedent. Anything the buffer does not own commits it first.
+    if (root.listMode && root.handleNumberKey(event)) return true
+    if (root.listMode && root.numberEntryActive) root.endNumberEntry(true)
     if (event.key === Qt.Key_PageUp) { root.moveCursorBy(-root.pageSize(), false); return true }
     if (event.key === Qt.Key_PageDown) { root.moveCursorBy(root.pageSize(), false); return true }
     if (event.key === Qt.Key_Home) {
@@ -763,7 +987,9 @@ Item {
       root.swallowKey = true
       root.switchMode()
     }
-    // digits and everything else: ignored (M2 channel numbers)
+    // Digits, "." and "," never reach here: onTextKey returns early for
+    // them and handleSharedKey extends the number buffer instead (M2-03
+    // 2.9). Everything else is still ignored.
   }
 
   // Sources-mode letters (UX-SOURCES 2.2); x / X arrive as deleteRequested.
@@ -1398,6 +1624,15 @@ Item {
     onTriggered: root.transientText = ""
   }
 
+  // M2-03 2.5, the first commit trigger: numberEntryMs since the last
+  // accepted key. A commit does not play (CN1).
+  Timer {
+    id: numberTimer
+    interval: root.numberEntryMs
+    repeat: false
+    onTriggered: root.commitNumberEntry({ play: false })
+  }
+
   // Only the row SET depends on these; decorations (playing, failed, EPG,
   // favorite star) are delegate bindings over the service's maps.
   Connections {
@@ -1497,11 +1732,15 @@ Item {
           id: keyCatcher
           anchors.fill: parent
           blocked: !root.catcherLive
+          // M2-03 2.9: the five handlers below end the number buffer before
+          // doing their own job, so j/k, Tab and x never act on a half-typed
+          // number and never leave one live behind them.
           onMoveRequested: function(dx, dy) {
             if (root.inSources) {
               if (dy !== 0) root.moveSourceCursorBy(dy, true)
               return
             }
+            root.endNumberEntry(true)
             if (dy !== 0) root.moveCursorBy(dy, true)
             else if (dx !== 0) root.moveScopeBy(dx)
           }
@@ -1509,18 +1748,41 @@ Item {
           onActivateRequested: {
             var enter = root.enterPending
             root.enterPending = false
-            if (root.inSources) root.activateSourceRow(root.sourceCursor, !enter)
-            else root.activate(!enter)
+            if (root.inSources) { root.activateSourceRow(root.sourceCursor, !enter); return }
+            // CN1: Enter and Space keep exactly the meanings UX 3.1 gives
+            // them. The buffer commits first and then they play what the
+            // preview selected -- unless the number resolved to nothing, in
+            // which case the commit refuses to play and says so.
+            if (root.numberEntryActive) {
+              root.commitNumberEntry({ play: true, keepOpen: !enter })
+              return
+            }
+            root.activate(!enter)
           }
           onCloseRequested: root.handleEscape()
           onDeleteRequested: {
-            if (root.inSources) root.startRemove()
-            else root.removeAt(root.cursorIndex)
+            if (root.inSources) { root.startRemove(); return }
+            root.endNumberEntry(true)
+            root.removeAt(root.cursorIndex)
           }
-          onTabRequested: function(direction) { if (!root.inSources) root.switchMode() }
+          onTabRequested: function(direction) {
+            if (root.inSources) return
+            root.endNumberEntry(true)
+            root.switchMode()
+          }
           onTextKey: function(text) {
-            if (root.inSources) root.handleSourcesLetter(text)
-            else root.handleListLetter(text)
+            if (root.inSources) { root.handleSourcesLetter(text); return }
+            // Backspace and Delete both have a one-character event.text
+            // ("\b", "") and reach this handler, so without the
+            // control guard they would commit the buffer before
+            // handleSharedKey could see them (2.9).
+            if (text.charCodeAt(0) < 32 || text.charCodeAt(0) === 127) return
+            // Digits, "." and "," are extended in handleSharedKey; the same
+            // event reaches it because PanelKeyCatcher's printable fallback
+            // does not accept the event.
+            if (Model.isNumberEntryKey(text)) return
+            root.endNumberEntry(true)
+            root.handleListLetter(text)
           }
         }
 
@@ -1902,6 +2164,11 @@ Item {
                   readonly property int nowStop: row.epg.nowStop
                   readonly property string until: row.epg.until
 
+                  // M2-03 4.2 / CN6: the label prepareChannels derived, and
+                  // an empty string for a channel with no usable number --
+                  // not "-", not a dimmed 0. A placeholder in a numeric
+                  // column reads as a value; the absence is the information.
+                  readonly property string chno: row.channel && typeof row.channel.chnoLabel === "string" ? row.channel.chnoLabel : ""
                   readonly property bool hasCursor: index === root.cursorIndex
                   readonly property string detail: Model.rowDetail({ showGroup: showGroup, group: group, failedAt: failedAt, nowTitle: nowTitle, nextTitle: nextTitle })
                   readonly property bool showProgress: nowTitle !== "" && nowStop > nowStart && failedAt === ""
@@ -1914,7 +2181,7 @@ Item {
                   color: hasCursor ? root.selectedBackground : "transparent"
                   borderSpec: hasCursor ? root.selectedBorderSpec : root.noBorderSpec
                   Accessible.role: Accessible.ListItem
-                  Accessible.name: Model.rowAccessibleName({ name: name, favorite: favorite, playing: playing, nowTitle: nowTitle, until: until, failedAt: failedAt })
+                  Accessible.name: Model.rowAccessibleName({ name: name, chno: chno, favorite: favorite, playing: playing, nowTitle: nowTitle, until: until, failedAt: failedAt })
                   Accessible.focused: hasCursor
 
                   Item {
@@ -1925,11 +2192,38 @@ Item {
                     anchors.topMargin: Style.space(8)
                     anchors.bottomMargin: Style.space(8)
 
+                    // number slot (M2-03 4.2): right-aligned, at the left
+                    // edge, BEFORE the favorite slot -- the television and
+                    // EPG-grid convention, and it puts the digits flush
+                    // against the card's left content margin so the column
+                    // scans as a column. Zero width on an unnumbered
+                    // playlist, so those rows are drawn exactly as v0.2.0
+                    // drew them. Never bold, not even on the playing row:
+                    // the name already carries Font.Bold and two bold
+                    // elements in one row is noise.
+                    Text {
+                      id: numberText
+                      visible: root.numberWidth > 0
+                      width: root.numberWidth
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      height: lead.height
+                      textFormat: Text.PlainText
+                      text: row.chno
+                      color: row.hasCursor ? root.selectedText : root.foreground
+                      opacity: row.hasCursor ? 0.8 : 0.52
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      horizontalAlignment: Text.AlignRight
+                      verticalAlignment: Text.AlignVCenter
+                    }
+
                     // lead slot: favorite star
                     Text {
                       id: lead
                       width: root.leadWidth
-                      anchors.left: parent.left
+                      anchors.left: numberText.visible ? numberText.right : parent.left
+                      anchors.leftMargin: numberText.visible ? Style.spacing.labelGap : 0
                       anchors.top: parent.top
                       height: Style.font.title + Style.space(2)
                       textFormat: Text.PlainText
@@ -2042,14 +2336,78 @@ Item {
                     onClicked: root.activateIndex(row.index, false)
                   }
 
-                  // Lead-slot hit target (UX 7.3): toggles favorite without playing.
+                  // Lead-slot hit target (UX 7.3): toggles favorite without
+                  // playing. M2-03 4.2: anchored to `lead`, not to the row's
+                  // left edge, or a click on the number column would toggle
+                  // the favorite. UX 7.3's Style.space(28) minimum stands.
                   MouseArea {
-                    anchors.left: parent.left
+                    anchors.left: lead.left
+                    anchors.leftMargin: -Style.space(12)
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: Math.max(Style.space(28), Style.space(12) + root.leadWidth)
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.toggleFavoriteAt(row.index)
+                  }
+                }
+              }
+
+              // Number entry chip (M2-03 4.3). Top right is where a
+              // television puts it and the bottom right is the footer's. It
+              // sits over the first row's `until HH:MM` by design; the guide
+              // gets that back the instant entry ends. The fill is the
+              // neutral banner fill of UX 5.7, not Color.urgent: typing a
+              // number is not an error state.
+              Rectangle {
+                id: numberChip
+                visible: root.numberEntryActive
+                z: 5
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: Style.spacing.md
+                anchors.rightMargin: Style.spacing.md
+                width: chipRow.width + Style.spacing.controlPaddingX * 2
+                height: Math.max(Style.space(34), Style.font.heading + Style.spacing.controlPaddingY * 2)
+                radius: root.cornerRadius
+                color: Style.normalFillFor(root.foreground, root.accent)
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: "Entering channel number " + root.numberBuffer
+                  + (root.numberResolution.kind === "none" ? ", no match" : "")
+
+                Row {
+                  id: chipRow
+                  anchors.centerIn: parent
+                  spacing: Style.spacing.labelGap
+
+                  Text {
+                    text: Model.GLYPHS.dialpad
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.icon
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  Text {
+                    text: root.numberBuffer
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.heading
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  // No colour carries meaning on its own (UX 7.2): the miss
+                  // is the word, not a tint.
+                  Text {
+                    visible: root.numberResolution.kind === "none"
+                    text: Model.SEP + "no match"
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.52
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    anchors.verticalCenter: parent.verticalCenter
                   }
                 }
               }

@@ -1255,6 +1255,12 @@ TestCase {
     // A prefix picks the lowest number, not the first row.
     compare(Model.resolveChno(idx, "1", -1).label, "12")
     compare(Model.resolveChno(idx, "1", -1).kind, "prefix")
+    // 5.2: the guide cycles off a channel id, because channelOrder "number"
+    // hands it a reordered array in which a playlist index names nothing.
+    compare(Model.chnoIdAt(idx, 2), "3")
+    compare(Model.chnoIdAt(idx, 5), "")
+    compare(Model.resolveChno(idx, "12", "3").channelIndex, 3)
+    compare(Model.resolveChno(idx, "12", "4").channelIndex, 2)
     compare(Model.resolveChno(idx, "205", -1).kind, "none")
     compare(Model.resolveChno(idx, "", -1).kind, "none")
     compare(Model.resolveChno(Model.buildChnoIndex([]), "1", -1).kind, "none")
@@ -1314,6 +1320,41 @@ TestCase {
     compare(Model.footerHints({ mode: "list", hasNumbers: true, numberEntry: { active: true } }).length, 5)
     compare(Model.rowAccessibleName({ name: "BBC One HD", chno: "101" }), "Channel 101, BBC One HD")
     compare(Model.rowAccessibleName({ name: "The One Show", chno: "" }), "The One Show")
+  }
+
+  // Gate A1 in the engine that actually runs the guide: the modifier bits
+  // here are the real Qt enum values, so this also pins that Model.js's
+  // integer copies of them match Qt's.
+  function test_numberKeyRouting() {
+    var base = { hasNumbers: true, active: false, modifiers: 0 }
+    function act(patch) {
+      var o = { text: base.text, hasNumbers: base.hasNumbers, active: base.active, modifiers: base.modifiers, backspace: false }
+      for (var k in patch) o[k] = patch[k]
+      return Model.numberKeyAction(o)
+    }
+    compare(act({ text: "1" }), "digit")
+    // The two that must not be rejected.
+    compare(act({ text: "1", modifiers: Qt.ShiftModifier }), "digit")
+    compare(act({ text: "1", modifiers: Qt.KeypadModifier }), "digit")
+    compare(act({ text: ",", modifiers: Qt.KeypadModifier }), "digit")
+    // The three that must be.
+    compare(act({ text: "1", modifiers: Qt.ControlModifier }), "pass")
+    compare(act({ text: "1", modifiers: Qt.AltModifier }), "pass")
+    compare(act({ text: "1", modifiers: Qt.MetaModifier }), "pass")
+    // Model.js carries its own integer copies of the Qt bits; they must be
+    // the same integers Qt uses, or the mask would silently mean nothing.
+    compare(Model.CHNO_CHORD_MASK & Qt.ControlModifier, Qt.ControlModifier)
+    compare(Model.CHNO_CHORD_MASK & Qt.AltModifier, Qt.AltModifier)
+    compare(Model.CHNO_CHORD_MASK & Qt.MetaModifier, Qt.MetaModifier)
+    compare(Model.CHNO_CHORD_MASK & Qt.ShiftModifier, 0)
+    compare(Model.CHNO_CHORD_MASK & Qt.KeypadModifier, 0)
+    compare(act({ backspace: true, active: true }), "backspace")
+    compare(act({ backspace: true, active: false }), "pass")
+    compare(act({ text: "5", hasNumbers: false }), "noNumbers")
+    // CN1: the destructive outcome this feature could have, refused.
+    compare(Model.chnoCommitPlan("none", "205", "", 0, 0, { play: true }).play, false)
+    compare(Model.chnoCommitPlan("none", "205", "", 0, 0, { play: true }).restore, true)
+    compare(Model.chnoCommitPlan("exact", "101", "Sky", 1, 1, { play: true }).play, true)
   }
 
   function test_chnoSearchAndSettings() {

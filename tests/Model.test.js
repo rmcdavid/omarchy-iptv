@@ -2041,6 +2041,15 @@ check("CN2.3: a prefix picks the LOWEST number, not the first in the playlist", 
 check("CN2.3: a one-digit prefix picks the lowest too", (() => { const r = Model.resolveChno(planIdx, "1", -1); return [r.kind, r.channelIndex, r.label] })(), ["prefix", 0, "10"])
 check("CN2.3: a half-typed subchannel prefixes to its first child", (() => { const r = Model.resolveChno(planIdx, "7.", -1); return [r.kind, r.channelIndex, r.label] })(), ["prefix", 3, "7.1"])
 check("CN2.3: a prefix onto a duplicated key reports the whole set", (() => { const r = Model.resolveChno(planIdx, "12", -1); return [r.matches, r.ordinal] })(), [2, 1])
+// 1.4 `ids` / 5.2: byKey holds playlist indices, but under channelOrder
+// "number" the guide and the service hold a REORDERED array, so an index no
+// longer names a row. Everything the guide needs must work off the id.
+check("CN5.2: the index carries a channel id per numbered playlist index", [Model.chnoIdAt(planIdx, 1), Model.chnoIdAt(planIdx, 7), Model.chnoIdAt(planIdx, 9), Model.chnoIdAt(planIdx, 99), Model.chnoIdAt(planIdx, -1), Model.chnoIdAt(null, 1)], ["b", "h", "", "", "", ""])
+check("CN9: the cycle works off a channel id, not only a playlist index", [Model.resolveChno(planIdx, "12", "h").channelIndex, Model.resolveChno(planIdx, "12", "i").channelIndex, Model.resolveChno(planIdx, "12", "b").channelIndex, Model.resolveChno(planIdx, "12", "").channelIndex], [8, 7, 7, 7])
+check("CN5.2: the IPC lookup finds the same channel in a reordered array", (() => {
+  const reordered = Model.orderChannels(plan, "number", planIdx)
+  return [Model.channelByNumber(reordered, planIdx, "12").id, Model.channelByNumber(reordered, planIdx, "139").id, Model.channelByNumber(plan, planIdx, "139").id]
+})(), ["h", "f", "f"])
 check("CN2.3: no match, an empty buffer and an unnumbered playlist all resolve to none", [Model.resolveChno(planIdx, "205", -1), Model.resolveChno(planIdx, "", -1), Model.resolveChno(Model.buildChnoIndex([]), "1", -1), Model.resolveChno(null, "1", -1)].map(r => [r.kind, r.channelIndex, r.label, r.matches]), [["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0]])
 
 const plan200 = Model.buildChnoIndex(Model.prepareChannels((() => { const rows = []; for (let i = 1; i <= 200; i++) rows.push(chan("p" + i, String(i))); return rows })()))
@@ -2091,6 +2100,30 @@ check("CN3: channelOrderOf is total, and unreadable input means the safe default
 
 check("CN5: isNumericQuery truth table", ["101", "7.1", "7,1", "99999", "0", " 101 ", "123456", "7.1234", "7.", "10a", "sky", "", null].map(Model.isNumericQuery), [true, true, true, true, true, true, false, false, false, false, false, false, false])
 check("CN2.9: isNumberEntryKey truth table", ["0", "5", "9", ".", ",", "-", "a", "", "12", "\b", "", null, undefined].map(Model.isNumberEntryKey), [true, true, true, true, true, false, false, false, false, false, false, false, false])
+
+// ---- gate A1: the key routing rule, lifted out of Guide.qml so a test can
+// reach it (CLAUDE.md 12). These are the Qt::KeyboardModifier bits a real
+// key event carries. The two that must NOT be rejected are Shift (AZERTY
+// and bepo put the top-row digits at shift level 2) and Keypad (KP_0..KP_9
+// carry it), both verified against libxkbcommon with real compiled keymaps.
+const SHIFT = 0x02000000, CTRL = 0x04000000, ALT = 0x08000000, META = 0x10000000, KEYPAD = 0x20000000, ALTGR = 0x40000000
+const numKey = (o) => Model.numberKeyAction(Object.assign({ hasNumbers: true, active: false, modifiers: 0 }, o))
+check("A1: a plain digit starts entry", numKey({ text: "1" }), "digit")
+check("A1: a SHIFTED digit is still a digit - AZERTY and bepo put 1 at shift level 2", numKey({ text: "1", modifiers: SHIFT }), "digit")
+check("A1: a KEYPAD digit is still a digit - KP_1 has text \"1\" and carries KeypadModifier", numKey({ text: "1", modifiers: KEYPAD }), "digit")
+check("A1: a keypad digit that is also shifted is still a digit", numKey({ text: "7", modifiers: SHIFT | KEYPAD }), "digit")
+check("A1: AltGr (GroupSwitchModifier, Mod5) is not Alt and is not rejected", numKey({ text: "1", modifiers: ALTGR }), "digit")
+check("A1: Ctrl, Alt and Meta are chords, not digits", [numKey({ text: "1", modifiers: CTRL }), numKey({ text: "1", modifiers: ALT }), numKey({ text: "1", modifiers: META }), numKey({ text: "1", modifiers: CTRL | SHIFT })], ["pass", "pass", "pass", "pass"])
+check("CN8: both separators are entry keys, the parse-only hyphen is not", [numKey({ text: "." }), numKey({ text: "," }), numKey({ text: "-" }), numKey({ text: "j" })], ["digit", "digit", "pass", "pass"])
+check("A1: the chord mask contains Ctrl, Alt and Meta and NOT Shift or Keypad", [(Model.CHNO_CHORD_MASK & CTRL) !== 0, (Model.CHNO_CHORD_MASK & ALT) !== 0, (Model.CHNO_CHORD_MASK & META) !== 0, (Model.CHNO_CHORD_MASK & SHIFT) !== 0, (Model.CHNO_CHORD_MASK & KEYPAD) !== 0], [true, true, true, false, false])
+check("CN2.9: Backspace is the buffer's only while the buffer is live", [numKey({ backspace: true, active: true }), numKey({ backspace: true, active: false }), numKey({ backspace: true, active: true, modifiers: CTRL })], ["backspace", "pass", "pass"])
+check("CN1.5: an unnumbered playlist answers once rather than staying silent", [numKey({ text: "5", hasNumbers: false }), numKey({ text: "j", hasNumbers: false }), numKey({ backspace: true, active: true, hasNumbers: false })], ["noNumbers", "pass", "backspace"])
+check("CN2.9: a garbage event is passed through, never swallowed", [numKey({ text: "" }), numKey({ text: null }), numKey({ text: "12" }), Model.numberKeyAction(null), Model.numberKeyAction({})], ["pass", "pass", "pass", "pass", "pass"])
+
+// CN1 / 2.5 step 4: a commit never plays a number that resolved to nothing.
+check("CN1: a resolved commit plays only when Enter or Space asked it to", [Model.chnoCommitPlan("exact", "101", "Sky", 1, 1, {}), Model.chnoCommitPlan("exact", "101", "Sky", 1, 1, { play: true }), Model.chnoCommitPlan("exact", "101", "Sky", 1, 1, { play: true, keepOpen: true })].map(p => [p.restore, p.play, p.keepOpen]), [[false, false, false], [false, true, false], [false, true, true]])
+check("CN1: Enter on an unknown number restores the snapshot and refuses to play", Model.chnoCommitPlan("none", "205", "", 0, 0, { play: true }), { restore: true, play: false, keepOpen: false, status: "No channel 205" })
+check("CN1: a prefix commit is a real commit", Model.chnoCommitPlan("prefix", "130", "Some Channel", 1, 1, { play: true }), { restore: false, play: true, keepOpen: false, status: "Channel 130" + Model.SEP + "Some Channel" })
 
 check("CN4.2: chnoColumnUnits clamps at both ends", [0, 1, 2, 3, 4, 5, 6, 7, 9, 99, null, undefined, -4].map(Model.chnoColumnUnits), [24, 24, 24, 32, 40, 48, 56, 56, 56, 56, 24, 24, 24])
 
