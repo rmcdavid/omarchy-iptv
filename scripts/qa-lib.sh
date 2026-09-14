@@ -56,14 +56,35 @@ QA_NO_STATE=NOSTATE      # the IPC did not answer, or answered unparseable JSON
 QA_NO_FIELD=NOFIELD      # it answered, and the field is absent or null
 QA_NO_FILE=NOFILE        # the file is missing or unparseable
 QA_NO_SESSION=NOSESSION  # the file parsed, and it holds no session record
+QA_NO_DELTA=NODELTA      # one side of a before/after pair was not a number
 
 # qa_value <answer>: true only for a real answer - not empty, not a sentinel.
 # Use this wherever a check used to say [[ -n "$x" ]].
 qa_value() {
   case ${1-} in
-    "" | "$QA_NO_STATE" | "$QA_NO_FIELD" | "$QA_NO_FILE" | "$QA_NO_SESSION") return 1 ;;
+    "" | "$QA_NO_STATE" | "$QA_NO_FIELD" | "$QA_NO_FILE" | "$QA_NO_SESSION" | "$QA_NO_DELTA") return 1 ;;
   esac
   return 0
+}
+
+# qa_delta <before> <after>: the difference between two counter readings.
+#   0  both sides were integers; the difference is on stdout
+#   2  VACUOUS - a side was empty, a sentinel or anything else non-numeric;
+#      QA_NO_DELTA is on stdout, which no expected value will ever match
+# ALWAYS prints exactly one line and ALWAYS succeeds as a substitution, which
+# is the whole point: `$(( $(counter) - before ))` dies as an arithmetic
+# EXPANSION the moment the counter answers NOFIELD or "", and a failed
+# expansion stops bash from running the `is` whose word it was - no pass, no
+# fail, exit 0. That is D-PLY-9 exactly, and a counter read over IPC has far
+# more ways to answer non-numerically than a grep does.
+qa_delta() {
+  local before=${1-} after=${2-}
+  if [[ $before =~ ^-?[0-9]+$ && $after =~ ^-?[0-9]+$ ]]; then
+    printf '%s\n' "$(( after - before ))"
+    return 0
+  fi
+  printf '%s\n' "$QA_NO_DELTA"
+  return 2
 }
 
 # qa_field <python-expr over d> <json>: the service half of the harness state.
