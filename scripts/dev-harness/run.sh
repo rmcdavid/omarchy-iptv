@@ -54,10 +54,18 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
+die() { echo "[run.sh] $*" >&2; exit 2; }
 # Which checkout the plugin QML and the helper come from. Defaults to this
 # repo; a scenario points it at an exported pre-change tree to show a check
 # failing there first.
-PLUGIN_ROOT=$(cd "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}" && pwd)
+# C3: this file has no `set -e`, so a failed `cd` left PLUGIN_ROOT EMPTY and
+# every later "$PLUGIN_ROOT/bin/omarchy-iptv" and "$PLUGIN_ROOT/Model.js"
+# silently became a path at /. Nothing checked it.
+PLUGIN_ROOT=$(cd "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}" 2>/dev/null && pwd)
+[[ -n $PLUGIN_ROOT ]] || die "OMARCHY_IPTV_PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT} is not a directory I can enter"
+[[ -f $PLUGIN_ROOT/Model.js ]] || die "$PLUGIN_ROOT holds no Model.js; that is not a plugin tree"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
 SHELL_DIR=${OMARCHY_PATH:-/usr/share/omarchy}/shell
@@ -107,16 +115,28 @@ cleanup() {
   return 0
 }
 
+# C1. Every status here used to be discarded. A failed `cp Model.js` left the
+# PREVIOUS run's Model.js in the scratch root while OMARCHY_IPTV_ROOT still
+# pointed Service.qml and Guide.qml at the new tree - a silently MIXED tree,
+# and on the --baseline path that is rule-11 "evidence" nobody can trust.
+# Nothing anywhere verified the copy matched the tree under test.
 prepare_root() {
   local root; root=$(qs_root)
-  mkdir -p "$root" "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime" "$SCRATCH/fixtures"
-  ln -sfn "$SHELL_DIR/Commons" "$root/Commons"
-  ln -sfn "$SHELL_DIR/Ui" "$root/Ui"
-  cp "$HERE/shell.qml" "$root/shell.qml"
+  mkdir -p "$root" "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime" "$SCRATCH/fixtures" \
+    || die "could not create the scratch tree under $SCRATCH"
+  ln -sfn "$SHELL_DIR/Commons" "$root/Commons" || die "could not link $SHELL_DIR/Commons"
+  ln -sfn "$SHELL_DIR/Ui" "$root/Ui"           || die "could not link $SHELL_DIR/Ui"
+  [[ -e $root/Commons && -e $root/Ui ]]        || die "the qs.Commons / qs.Ui links do not resolve"
+  cp "$HERE/shell.qml" "$root/shell.qml"       || die "could not copy shell.qml into $root"
   # The harness masks form values with the plugin's own Model.js (state()).
-  cp "$PLUGIN_ROOT/Model.js" "$root/Model.js"
+  cp "$PLUGIN_ROOT/Model.js" "$root/Model.js"  || die "could not copy Model.js from $PLUGIN_ROOT"
+  qa_same_file "$HERE/shell.qml" "$root/shell.qml" \
+    || die "$root/shell.qml does not match the harness shell.qml"
+  qa_same_file "$PLUGIN_ROOT/Model.js" "$root/Model.js" \
+    || die "$root/Model.js does not match $PLUGIN_ROOT/Model.js: the tree under test is MIXED"
   # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
   [[ -d $REAL_RUNTIME/hypr ]] && ln -sfn "$REAL_RUNTIME/hypr" "$SCRATCH/runtime/hypr"
+  return 0
 }
 
 # Start quickshell in its own session so it survives this invocation, and
@@ -244,6 +264,15 @@ case $cmd in
     harness_env
     # shellcheck source=/dev/null
     . "$SCRATCH/last-start.env"
+    # C2 (iii): come back to the tree --detach recorded, not to whatever this
+    # terminal happens to export. Then assert the two agree, because a
+    # disagreement is the mixed tree C1 guards the other half of.
+    if [[ -n ${OMARCHY_IPTV_PLUGIN_ROOT:-} ]]; then
+      PLUGIN_ROOT=$(cd "$OMARCHY_IPTV_PLUGIN_ROOT" 2>/dev/null && pwd) \
+        || die "the recorded plugin tree $OMARCHY_IPTV_PLUGIN_ROOT is gone"
+    fi
+    [[ "$PLUGIN_ROOT" == "${OMARCHY_IPTV_ROOT:-$PLUGIN_ROOT}" ]] \
+      || die "restart-shell would mix trees: Model.js from $PLUGIN_ROOT, QML from $OMARCHY_IPTV_ROOT"
     prepare_root
     start_detached_shell
     ;;
@@ -313,15 +342,25 @@ case $cmd in
       # Record the environment so `restart-shell` can bring the same shell
       # back without re-deriving anything (the fixture server, the cache and
       # the state stay exactly as they are).
+      # C2 (i): these were hand-quoted with \"$VALUE\", so a path carrying a
+      # $, a backquote, a backslash or a double quote was re-expanded - or
+      # EXECUTED - when restart-shell sourced the file. printf %q round-trips.
+      # (ii) OMARCHY_IPTV_PLUGIN_ROOT was NOT recorded, while restart-shell
+      # sources this file and then calls prepare_root, which copies Model.js
+      # from $PLUGIN_ROOT computed from the CALLER's environment. A
+      # `run.sh restart-shell` from a plain terminal after a baseline
+      # --detach therefore copied the CURRENT repo's Model.js over the
+      # baseline's while Service.qml stayed at the baseline.
       {
-        echo "export OMARCHY_IPTV_ROOT=\"$OMARCHY_IPTV_ROOT\""
-        echo "export OMARCHY_IPTV_PLAYLIST=\"$OMARCHY_IPTV_PLAYLIST\""
-        echo "export OMARCHY_IPTV_EPG=\"$OMARCHY_IPTV_EPG\""
-        echo "export OMARCHY_IPTV_OPEN=\"0\""
-        echo "export OMARCHY_IPTV_VERTICAL=\"$OMARCHY_IPTV_VERTICAL\""
-        echo "export OMARCHY_IPTV_SHOW_NAME=\"$OMARCHY_IPTV_SHOW_NAME\""
-        echo "export OMARCHY_IPTV_LABEL_MAX=\"$OMARCHY_IPTV_LABEL_MAX\""
-        echo "export OMARCHY_IPTV_MPV_ARGS=\"${OMARCHY_IPTV_MPV_ARGS:-}\""
+        qa_env_line OMARCHY_IPTV_PLUGIN_ROOT "$PLUGIN_ROOT"
+        qa_env_line OMARCHY_IPTV_ROOT        "$OMARCHY_IPTV_ROOT"
+        qa_env_line OMARCHY_IPTV_PLAYLIST    "$OMARCHY_IPTV_PLAYLIST"
+        qa_env_line OMARCHY_IPTV_EPG         "$OMARCHY_IPTV_EPG"
+        qa_env_line OMARCHY_IPTV_OPEN        "0"
+        qa_env_line OMARCHY_IPTV_VERTICAL    "$OMARCHY_IPTV_VERTICAL"
+        qa_env_line OMARCHY_IPTV_SHOW_NAME   "$OMARCHY_IPTV_SHOW_NAME"
+        qa_env_line OMARCHY_IPTV_LABEL_MAX   "$OMARCHY_IPTV_LABEL_MAX"
+        qa_env_line OMARCHY_IPTV_MPV_ARGS    "${OMARCHY_IPTV_MPV_ARGS:-}"
       } >"$SCRATCH/last-start.env"
       start_detached_shell
       exit 0

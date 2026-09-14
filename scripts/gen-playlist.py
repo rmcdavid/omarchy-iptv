@@ -34,6 +34,7 @@ import argparse
 import gzip
 import hashlib
 import io
+import os
 import random
 import sys
 import time
@@ -226,8 +227,23 @@ def write_out(path: str, text: str) -> int:
         with gzip.GzipFile(filename="", mode="wb", fileobj=buf, mtime=0, compresslevel=6) as gz:
             gz.write(data)
         data = buf.getvalue()
-    with open(path, "wb") as handle:
-        handle.write(data)
+    # C5: a plain `open(path, "wb")` leaves a TRUNCATED file behind when the
+    # generation is interrupted, and the scenario that consumes it regenerates
+    # only when the file is ABSENT - so every later run reused the truncation.
+    # Write beside it and rename: a reader sees the old file or the new one.
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return len(data)
 
 
