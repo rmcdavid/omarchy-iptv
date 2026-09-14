@@ -3,10 +3,11 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: M1 (MVP) in development. `docs/PRODUCT.md` holds the product vision,
-`docs/ARCHITECTURE.md` the design and standards (section 12 has the final
-rulings), `docs/UX.md` the interaction and visual spec, `docs/STATUS.md` the
-build status.
+Status: v0.2.0. The MVP and the Sources feature have shipped; `CHANGELOG.md`
+has the release notes. `docs/PRODUCT.md` holds the product vision and the
+roadmap, `docs/ARCHITECTURE.md` the design and standards, `docs/UX.md` the
+interaction and visual spec, and `docs/STATUS.md` the live build status.
+Contributors should start with `CLAUDE.md`.
 
 The plugin ships no content. Bring a playlist you are entitled to use.
 
