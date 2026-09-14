@@ -90,7 +90,9 @@ Item {
   // the last one there is, so its echo never comes. `settings` therefore
   // lays our own successful write over the host's value until the host
   // catches up or somebody else writes (Model.settingsWithOwnWrite).
-  readonly property var hostSettings: Model.settingsFrom(Model.findBarEntry(shell ? shell.barConfig : null, pluginId))
+  // chnoStandIn.settingsFrom is Model.settingsFrom plus the three M2-03 keys
+  // until Lane A lands them (see the stand-in block at the end of this file).
+  readonly property var hostSettings: chnoStandIn.settingsFrom(Model.findBarEntry(shell ? shell.barConfig : null, pluginId))
   property var ownWrite: null                          // { base, value }: our write, applied locally
   readonly property var settings: Model.settingsWithOwnWrite(hostSettings, ownWrite)
   readonly property string playlistUrl: settings.playlistUrl
@@ -100,6 +102,12 @@ Item {
   readonly property int maxRecents: settings.maxRecents
   readonly property int barLabelMaxWidth: settings.barLabelMaxWidth
   readonly property bool showChannelName: settings.showChannelName
+  // ---- channel numbers (M2-03 section 7, rulings CN2 and CN3). Read by
+  // Guide.qml (numberEntryMs) and BarWidget.qml (barShowChannelNumber);
+  // channelOrder re-derives root.channels through applyOrder().
+  readonly property string channelOrder: settings.channelOrder
+  readonly property int numberEntryMs: settings.numberEntryMs
+  readonly property bool barShowChannelNumber: settings.barShowChannelNumber
   readonly property bool configured: playlistUrl !== ""
   // The EPG URL in force for the active source: the active record's own
   // epgUrl once the history knows the source (an EPG URL belongs to the
@@ -181,8 +189,17 @@ Item {
   readonly property var sources: Model.sourceViews(root.userState, root.activeSourceKey, root.nowSec, root.sourceErrors)
 
   // ---- data (read by Guide.qml / BarWidget.qml; never mutated by them)
-  property var channels: []                 // Model.prepareChannels output
+  property var channels: []                 // Model.prepareChannels output, in the ACTIVE order
   property var channelIndex: ({})
+  // Channel numbers (M2-03 1.4). Keyed by number, never by position, so it
+  // survives a channelOrder flip untouched; its `byKey` / `order` entries are
+  // indices into the PLAYLIST-order array, which is why channelByNumber()
+  // resolves against preparedActive.channels and not root.channels.
+  property var chnoIndex: chnoStandIn.buildChnoIndex(null)
+  // The prepared LRU entry root.channels was derived from, so flipping
+  // channelOrder re-derives without re-parsing the cache (5.2). Not the LRU
+  // head: an empty or failed load is never stored there.
+  property var preparedActive: null
   property var channelsMeta: ({})
   property var epgNow: ({})                 // tvg-id -> { now, next }
   property var epgMeta: ({})
@@ -229,6 +246,16 @@ Item {
   // attempts (a Socket object is never reused after a failed connect), so
   // every read of it is null-guarded.
   property var nowPlaying: null             // { id, name, group, launchedFrom, since }
+  // The playing channel's number label, "" when it has none or when it is not
+  // in the active source's cache (3.3). Derived, not stored on `nowPlaying`:
+  // four paths build that literal (a play, a re-scope, the player-stash
+  // recovery, reconcileNowPlaying) and a number that is stale in one of them
+  // is worse than no number at all. The loaded cache is the only authority.
+  readonly property string nowPlayingChno: {
+    if (!root.nowPlaying) return ""
+    var channel = root.channelIndex[String(root.nowPlaying.id || "")]
+    return channel ? chnoStandIn.labelOf(channel) : ""
+  }
   property var playerSocket: null           // the live Socket object, or null (C1)
   property bool playerWanted: false         // arms playerSocketTimer
   property bool playerPending: false        // a start we issued is not observable yet
@@ -574,6 +601,46 @@ Item {
     return root.play(Model.channelId(next), true, root.nowPlaying.launchedFrom)
   }
 
+  // The channel a typed number resolves to, or null (M2-03 3.2). Exact match
+  // first, else the lowest number that starts with it; NO duplicate cycling,
+  // because a script asking for 12 must get the same channel every time.
+  //
+  // Resolved against the playlist-order array the index was built from, never
+  // against root.channels: with channelOrder "number" those two disagree on
+  // every position (5.2).
+  function channelByNumber(text) {
+    var base = root.preparedActive ? root.preparedActive.channels : root.channels
+    return chnoStandIn.channelByNumber(base, root.chnoIndex, text)
+  }
+
+  // The `channel` IPC verb's answer, as an object so the harness drives the
+  // same path the CLI does instead of a copy of it (CLAUDE.md rule 12).
+  //
+  // Rulings CN1 and CN10: inside the guide digits only move the cursor, but
+  // out here there is no cursor and no one browsing - somebody bound a key to
+  // this, so it TUNES. It is play(id, true, "") exactly as the `play` verb
+  // calls it, so the zap ring falls back to the channel's own group.
+  // URL-free by construction: an id, a number, a name and a code.
+  function tuneByNumber(text) {
+    var asked = Model.sanitizeInput(String(text === undefined || text === null ? "" : text), chnoStandIn.maxLabel)
+    var found = root.channelByNumber(text)
+    if (!found) {
+      return { ok: false, kind: "channel",
+               error: { code: "unknown_chno", message: "no channel " + asked } }
+    }
+    var id = Model.channelId(found)
+    var label = chnoStandIn.labelOf(found)
+    var name = String(found.name || "")
+    // play() refuses when mpv is missing or the entry has no URL. Reporting
+    // that as ok:true would be a lie about the one thing this verb exists to
+    // do; the success shape is unchanged for the case it describes.
+    if (!root.play(id, true, "")) {
+      return { ok: false, kind: "channel", id: id, chno: label, name: name,
+               error: { code: "play_failed", message: "could not start channel " + asked } }
+    }
+    return { ok: true, kind: "channel", id: id, chno: label, name: name }
+  }
+
   function focusPlayer() {
     Quickshell.execDetached(Model.focusPlayerArgv())
   }
@@ -607,6 +674,15 @@ Item {
     if (argv) Quickshell.execDetached(argv)
   }
 
+  // `nowPlaying` as the IPC reports it: the shipped literal plus the playing
+  // channel's number (3.3). Null when nothing plays, exactly like the property.
+  function nowPlayingSummary() {
+    var np = root.nowPlaying
+    if (!np) return null
+    return { id: np.id, name: np.name, group: np.group, chno: root.nowPlayingChno,
+             launchedFrom: np.launchedFrom, since: np.since }
+  }
+
   // JSON summary for the IPC `status` verb; URL-free by construction.
   function statusSummary() {
     return {
@@ -615,9 +691,13 @@ Item {
       status: root.status,
       channels: root.channels.length,
       groups: Model.groupChannels(root.channels).length,
+      // So a script can tell "this playlist is not numbered" from "you asked
+      // for a number that does not exist" (3.3).
+      hasNumbers: root.chnoIndex.hasNumbers === true,
+      channelOrder: root.channelOrder,
       lastUpdated: root.lastUpdated,
       playing: root.playing,
-      nowPlaying: root.nowPlaying,
+      nowPlaying: root.nowPlayingSummary(),
       // Additive, and URL-free by construction: channel ids, a clock time
       // and booleans. The detached player can only be verified from outside
       // the shell now, so the acceptance gates need the observer's own view
@@ -821,7 +901,8 @@ Item {
     if (!prepared) {
       var parsed = Model.parseChannels(text)
       var channels = parsed.ok ? Model.prepareChannels(parsed.channels) : []
-      prepared = { text: text, channels: channels, channelIndex: Model.indexById(channels), channelsMeta: parsed.meta }
+      prepared = { text: text, channels: channels, channelIndex: Model.indexById(channels),
+                   chnoIndex: chnoStandIn.buildChnoIndex(channels), channelsMeta: parsed.meta }
     }
     if (text !== "" && prepared.channels.length > 0) {
       var next = [prepared]
@@ -829,8 +910,13 @@ Item {
       root.preparedLru = next
     }
     var t1 = Date.now()
-    root.channels = prepared.channels
+    // The LRU entry always holds PLAYLIST order; the display order is derived
+    // from it here and again whenever channelOrder changes (5.2), so a flip
+    // costs one O(n) gather and no helper run.
+    root.preparedActive = prepared
+    root.channels = chnoStandIn.orderChannels(prepared.channels, root.channelOrder, prepared.chnoIndex)
     root.channelIndex = prepared.channelIndex
+    root.chnoIndex = prepared.chnoIndex
     root.channelsMeta = prepared.channelsMeta
     root.switchParseMs = t1 - t0
     root.switchAssignMs = Date.now() - t1
@@ -838,6 +924,17 @@ Item {
     // cache the moment it lands (4.5); until then it is name-only.
     root.reconcileNowPlaying()
   }
+
+  // Re-derive root.channels from the prepared (playlist-order) array when
+  // channelOrder changes at runtime (5.2). Favorites and Recents keep their
+  // own orders: they are lists the user built, not the provider (CN4).
+  function applyOrder() {
+    if (!root.preparedActive) return
+    root.channels = chnoStandIn.orderChannels(root.preparedActive.channels, root.channelOrder,
+                                              root.preparedActive.chnoIndex)
+  }
+
+  onChannelOrderChanged: root.applyOrder()
 
   // state.json -> userState (v1 files migrate in memory, section 2.2), then
   // the startup sequence of section 4.4: reconcile the settings into the
@@ -2114,6 +2211,11 @@ Item {
   function clearSourceData() {
     root.channels = []
     root.channelIndex = ({})
+    // No stale numbers across a swap: the number space belongs to one source
+    // (1.5), and a guide showing the previous playlist's numbers would let a
+    // digit tune to a channel that is no longer loaded.
+    root.chnoIndex = chnoStandIn.buildChnoIndex(null)
+    root.preparedActive = null
     root.channelsMeta = ({})
     root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
     root.playlistLoadWarnings = []
@@ -2844,8 +2946,201 @@ Item {
     }
   }
 
-  // omarchy-shell io.github.rmcdavid.iptv toggle | play <id-or-url> | stop |
-  // next | previous | refresh | status   (R9)
+  // ==================================================================
+  // TEMPORARY STAND-IN BLOCK -- M2-03 Lane A owns Model.js and is writing
+  // these functions now, so this lane may not open that file. Every member
+  // below carries the NAME and the SIGNATURE section 9.1 of
+  // docs/M2-03-CHANNEL-NUMBERS.md freezes, so integration is mechanical:
+  //
+  //   1. delete this whole QtObject;
+  //   2. rewrite `chnoStandIn.` as `Model.` (7 call sites in this file);
+  //   3. `chnoStandIn.labelOf(c)` becomes `c.chnoLabel`  (2 of those), which
+  //      Model.prepareChannels writes once per row at load time (1.3);
+  //   4. `chnoStandIn.maxLabel` becomes `Model.MAX_CHNO_LABEL` (1 site).
+  //
+  // Leaving one of these behind is forbidden (CLAUDE.md, working in
+  // parallel, rule 4). The integration step greps for `chnoStandIn` and for
+  // `STAND-IN`; both must return nothing before M2-03 is called done.
+  //
+  // It is a stand-in, not a second implementation: no test here calls it,
+  // Lane A's node and QML suites are what prove the rules of 1.2 and 1.4,
+  // and this block dies the day they land.
+  QtObject {
+    id: chnoStandIn
+
+    readonly property int maxMajor: 99999    // -> Model.MAX_CHNO_MAJOR
+    readonly property int maxMinor: 999      // -> Model.MAX_CHNO_MINOR
+    readonly property int maxLabel: 7        // -> Model.MAX_CHNO_LABEL
+    readonly property int entryMsDefault: 1500
+    readonly property int entryMsMin: 400
+    readonly property int entryMsMax: 5000
+
+    // Model.parseChno(raw) (1.2). ASCII digits only: a channel the user
+    // cannot type must not claim a number. Never throws, never allocates on
+    // the failure path beyond the one shared shape.
+    function parseChno(raw) {
+      var fail = { ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 }
+      if (raw === undefined || raw === null) return fail
+      var s = String(raw)
+      var start = 0
+      var end = s.length
+      while (start < end && chnoStandIn.isChnoSpace(s.charCodeAt(start))) start++
+      while (end > start && chnoStandIn.isChnoSpace(s.charCodeAt(end - 1))) end--
+      if (start < end && s.charCodeAt(start) === 0x23) start++      // one leading '#'
+      if (start >= end) return fail
+      var i = start
+      var major = 0
+      var digits = 0
+      var c = 0
+      while (i < end) {
+        c = s.charCodeAt(i)
+        if (c < 0x30 || c > 0x39) break
+        major = major * 10 + (c - 0x30)
+        digits++
+        i++
+      }
+      if (digits === 0 || digits > 5 || major > chnoStandIn.maxMajor) return fail
+      var minor = -1
+      if (i < end) {
+        c = s.charCodeAt(i)
+        if (c !== 0x2e && c !== 0x2d) return fail                   // '.' or '-'
+        i++
+        var sub = 0
+        minor = 0
+        while (i < end) {
+          c = s.charCodeAt(i)
+          if (c < 0x30 || c > 0x39) break
+          minor = minor * 10 + (c - 0x30)
+          sub++
+          i++
+        }
+        if (sub === 0 || sub > 3 || i !== end || minor > chnoStandIn.maxMinor) return fail
+      }
+      // Leading zeros are dropped on both sides: the number you see must be
+      // the number you type (CN7). 007 -> 7, 07.01 -> 7.1.
+      var label = minor < 0 ? String(major) : String(major) + "." + String(minor)
+      if (label.length > chnoStandIn.maxLabel) return fail
+      return { ok: true, key: label, label: label,
+               sort: major * 1000 + (minor < 0 ? 0 : minor), major: major, minor: minor }
+    }
+
+    function isChnoSpace(code) {
+      return code === 0x20 || code === 0x09 || code === 0xa0 || code === 0xfeff
+    }
+
+    // Model.buildChnoIndex(channels) (1.4). Tolerates null, an empty array
+    // and a non-array: every consumer reads .hasNumbers first.
+    function buildChnoIndex(channels) {
+      var index = { byKey: ({}), order: [], labels: [], count: 0,
+                    duplicates: 0, maxLabelLen: 0, hasNumbers: false }
+      if (!channels || typeof channels.length !== "number") return index
+      var numbered = []
+      var i = 0
+      for (i = 0; i < channels.length; i++) {
+        var row = channels[i]
+        if (!row) continue
+        var key = ""
+        var sort = -1
+        if (row.chnoKey !== undefined) {           // Lane A's prepareChannels has landed
+          key = String(row.chnoKey)
+          sort = Number(row.chnoSort)
+        } else {                                   // read it off the raw helper value
+          var parsed = chnoStandIn.parseChno(row.chno)
+          key = parsed.key
+          sort = parsed.sort
+        }
+        if (key === "" || !(sort >= 0)) continue
+        if (index.byKey[key] === undefined) index.byKey[key] = [i]
+        else index.byKey[key].push(i)
+        if (key.length > index.maxLabelLen) index.maxLabelLen = key.length
+        numbered.push({ at: i, sort: sort, label: key })
+      }
+      // Playlist index breaks the tie, so the order does not depend on the
+      // engine's sort being stable.
+      numbered.sort(function (a, b) { return a.sort === b.sort ? a.at - b.at : a.sort - b.sort })
+      for (i = 0; i < numbered.length; i++) {
+        index.order.push(numbered[i].at)
+        index.labels.push(numbered[i].label)
+      }
+      for (var k in index.byKey) if (index.byKey[k].length > 1) index.duplicates += index.byKey[k].length
+      index.count = numbered.length
+      index.hasNumbers = index.count > 0
+      return index
+    }
+
+    // Model.channelByNumber(channels, index, text) (3.2): resolveChno with
+    // currentChannelIndex -1, i.e. no duplicate cycling. Exact match first,
+    // else the lowest number starting with it (labels is in ascending
+    // numeric order, so the first hit IS the lowest).
+    function channelByNumber(channels, index, text) {
+      if (!channels || !index || !index.byKey) return null
+      var parsed = chnoStandIn.parseChno(text)
+      if (!parsed.ok) return null
+      var at = -1
+      var exact = index.byKey[parsed.key]
+      if (exact !== undefined && exact.length > 0) at = exact[0]
+      else {
+        for (var i = 0; i < index.labels.length; i++) {
+          if (String(index.labels[i]).indexOf(parsed.key) === 0) { at = index.order[i]; break }
+        }
+      }
+      if (at < 0 || at >= channels.length) return null
+      return channels[at] || null
+    }
+
+    // Model.orderChannels(channels, order, index) (5.2). An O(n) gather over
+    // the index, never a second sort, and the identity (no copy) on the
+    // default path. Unnumbered channels always come LAST, in playlist order:
+    // never interleaved, never treated as 0.
+    function orderChannels(channels, order, index) {
+      if (!channels || typeof channels.length !== "number") return channels
+      if (chnoStandIn.channelOrderOf(order) !== "number") return channels
+      if (!index || index.hasNumbers !== true) return channels
+      var out = []
+      var seen = ({})
+      var i = 0
+      for (i = 0; i < index.order.length; i++) {
+        var at = index.order[i]
+        if (at >= 0 && at < channels.length) { out.push(channels[at]); seen[at] = true }
+      }
+      for (i = 0; i < channels.length; i++) if (seen[i] !== true) out.push(channels[i])
+      return out
+    }
+
+    // Model.channelOrderOf(value) (7.1). Never an error and never a warning:
+    // an unreadable value silently means the safe default.
+    function channelOrderOf(value) {
+      if (typeof value !== "string") return "playlist"
+      return value.replace(/^\s+|\s+$/g, "").toLowerCase() === "number" ? "number" : "playlist"
+    }
+
+    // Model.settingsFrom(entry) (7.1/7.2) plus this feature's three keys, in
+    // the shipped idioms: clampInt against the ruled range for the integer,
+    // and showChannelName's exact boolean reading for the boolean.
+    function settingsFrom(entry) {
+      var out = Model.settingsFrom(entry)
+      out.channelOrder = chnoStandIn.channelOrderOf(Model.settingOf(entry, "channelOrder", "playlist"))
+      out.numberEntryMs = Model.clampInt(Model.settingOf(entry, "numberEntryMs", chnoStandIn.entryMsDefault),
+                                         chnoStandIn.entryMsDefault, chnoStandIn.entryMsMin, chnoStandIn.entryMsMax)
+      var shown = Model.settingOf(entry, "barShowChannelNumber", true)
+      out.barShowChannelNumber = shown !== false && String(shown) !== "false"
+      return out
+    }
+
+    // NOT a Model.js function. Model.prepareChannels will write chnoLabel on
+    // every row (1.3); until it does, the number is read off the raw `chno`
+    // string the helper stored. Integration replaces each call with the
+    // row's own `chnoLabel`.
+    function labelOf(channel) {
+      if (!channel) return ""
+      if (channel.chnoLabel !== undefined) return String(channel.chnoLabel)
+      return chnoStandIn.parseChno(channel.chno).label
+    }
+  }
+  // ================================================ end of the stand-in block
+
+  // omarchy-shell io.github.rmcdavid.iptv toggle | play <id-or-url> |
+  // channel <n> | stop | next | previous | refresh | status   (R9)
   IpcHandler {
     target: root.pluginId
 
@@ -2863,6 +3158,17 @@ Item {
       }
       return key !== "" && root.play(key, true, "") ? "ok" : "unknown"
     }
+    // Tune by channel number (M2-03 3.2, rulings CN1 and CN10). A string
+    // argument like every other verb, so `007`, `7-1` and `  12  ` all work
+    // from a shell; it is run through the same parse the guide uses.
+    //
+    // Its own verb rather than a third fallback inside `play`: play already
+    // resolves an id and then a URL, and `play 101` becomes ambiguous the day
+    // a provider ships tvg-id="101".
+    //
+    // A mistyped keybinding must not raise a desktop popup, so a failure is
+    // this JSON and nothing else - no notification, no toast (6.5).
+    function channel(n: string): string { return JSON.stringify(root.tuneByNumber(n)) }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }
