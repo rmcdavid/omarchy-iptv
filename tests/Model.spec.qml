@@ -8,6 +8,7 @@ import "../Model.js" as Model
 // scope transitions, the zap ring, settings clamps and mpv argv.
 // Run: QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/Model.spec.qml
 TestCase {
+  id: spec
   name: "IptvModel"
 
   readonly property var channels: Model.prepareChannels([
@@ -489,6 +490,65 @@ TestCase {
     compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "", scopeId: "g:UK" }).empty, "emptyScope")
     compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showColumn, false)
     compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showList, true)
+  }
+
+  // D-LIVE-20 / D-LIVE-21. The host publishes `barConfig` to a plugin from
+  // its `shellConfig` change handler (shell.qml:66) and reads it out of a
+  // binding declared further down (shell.qml:109). This proves the QML fact
+  // that makes that lag inevitable -- a change handler runs BEFORE the
+  // bindings that depend on the same property are re-evaluated, whichever
+  // order they are declared in -- so a plugin can never rely on the echo of
+  // its own write and must apply it itself.
+  QtObject {
+    id: handlerFirst
+    property var cfg: ({ bar: { v: "old" } })
+    onCfgChanged: spec.seenFirst.push(handlerFirst.derived ? String(handlerFirst.derived.v) : "(null)")
+    readonly property var derived: handlerFirst.cfg && handlerFirst.cfg.bar ? handlerFirst.cfg.bar : ({ v: "none" })
+  }
+
+  QtObject {
+    id: bindingFirst
+    property var cfg: ({ bar: { v: "old" } })
+    readonly property var derived: bindingFirst.cfg && bindingFirst.cfg.bar ? bindingFirst.cfg.bar : ({ v: "none" })
+    onCfgChanged: spec.seenSecond.push(bindingFirst.derived ? String(bindingFirst.derived.v) : "(null)")
+  }
+
+  property var seenFirst: []
+  property var seenSecond: []
+
+  function test_hostEchoLagsByOneWrite() {
+    seenFirst = []
+    seenSecond = []
+    handlerFirst.cfg = { bar: { v: "new" } }
+    bindingFirst.cfg = { bar: { v: "new" } }
+    // The handler saw the PREVIOUS value of the derived binding either way.
+    compare(seenFirst, ["old"])
+    compare(seenSecond, ["old"])
+    // It catches up only after the handler has returned, so the value a
+    // handler published is always one write behind.
+    compare(String(handlerFirst.derived.v), "new")
+    compare(String(bindingFirst.derived.v), "new")
+  }
+
+  function test_ownSettingsWriteAppliesLocally() {
+    var hostA = Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/a.m3u", epgUrl: "", refreshMinutes: 45 })
+    var hostB = Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/b.m3u", epgUrl: "", refreshMinutes: 45 })
+    var write = Model.ownWriteFor(hostA, "http://h.test/b.m3u", "")
+    // Applied at once, against the host value we wrote on.
+    compare(Model.ownWriteInForce(hostA, write), true)
+    compare(Model.settingsWithOwnWrite(hostA, write).playlistUrl, "http://h.test/b.m3u")
+    compare(Model.settingsWithOwnWrite(hostA, write).refreshMinutes, 45)
+    // The late echo of our own value lapses it and changes nothing.
+    compare(Model.ownWriteInForce(hostB, write), false)
+    compare(Model.settingsWithOwnWrite(hostB, write).playlistUrl, "http://h.test/b.m3u")
+    // A foreign write wins.
+    var hostC = Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/c.m3u" })
+    compare(Model.settingsWithOwnWrite(hostC, write).playlistUrl, "http://h.test/c.m3u")
+    // Clearing the active source is the same mechanism (D-LIVE-21).
+    compare(Model.settingsWithOwnWrite(hostB, Model.ownWriteFor(hostB, "", "")).playlistUrl, "")
+    // Only an entry updateEntryInline can rewrite counts as writable.
+    compare(Model.barEntryWritable({ layout: { right: [{ id: "p", playlistUrl: "x" }] } }, "p"), true)
+    compare(Model.barEntryWritable({ layout: { right: ["p"] } }, "p"), false)
   }
 
   function test_formatting() {

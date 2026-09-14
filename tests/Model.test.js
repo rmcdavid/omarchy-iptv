@@ -915,6 +915,35 @@ check("EPG warnings: the footer precedence is untouched - transient, bounded sea
 check("EPG warnings: the line replaces the counts, and the empty states keep the slot blank (D-LIVE-09)", [Model.footerStatus({ configured: true, count: 8, lastUpdated: "01:53", warning: epgWarnLine }), Model.footerStatus({ configured: false, count: 0, warning: epgWarnLine }), Model.footerStatus({ configured: true, count: 0, warning: epgWarnLine })], [epgWarnLine, "", ""])
 check("EPG warnings: a playlist warning still outranks an EPG one in the same footer slot", Model.footerStatus({ configured: true, count: 8, lastUpdated: "01:53", warning: Model.footerWarning(["truncated to 50,000 channels"], epgWarn) }), "Playlist warning: truncated to 50,000 channels")
 
+// ---- D-LIVE-20 / D-LIVE-21: a plugin's own settings write, applied locally ----
+// The host hands a plugin `barConfig` from a `shellConfig` change handler
+// (shell.qml:66) that runs before the `barConfig` binding it reads
+// (shell.qml:109), so what a plugin sees is one shell.json write behind: a
+// plugin's own write, being the last one, never comes back at all. The
+// plugin lays its own successful write over the host's value until the host
+// reports something else, so its UI is right at once and the echo, when it
+// does arrive, changes nothing.
+const hostA = Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/a.m3u", epgUrl: "" })
+const hostB = Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/b.m3u", epgUrl: "http://h.test/b.xml" })
+const writeB = Model.ownWriteFor(hostA, "http://h.test/b.m3u", "http://h.test/b.xml")
+check("own write: recorded against the host value it was made on", writeB, { base: { playlistUrl: "http://h.test/a.m3u", epgUrl: "" }, value: { playlistUrl: "http://h.test/b.m3u", epgUrl: "http://h.test/b.xml" } })
+check("own write: in force while the host still reports the base", [Model.ownWriteInForce(hostA, writeB), Model.settingsWithOwnWrite(hostA, writeB).playlistUrl, Model.settingsWithOwnWrite(hostA, writeB).epgUrl], [true, "http://h.test/b.m3u", "http://h.test/b.xml"])
+check("own write: every other setting still comes from the host", [Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/a.m3u", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).refreshMinutes, Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/a.m3u", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).mpvArgs], [45, "--mute"])
+check("own write: the host echoing our own value back lapses it, and the result is unchanged (idempotent)", [Model.ownWriteInForce(hostB, writeB), Model.settingsWithOwnWrite(hostB, writeB).playlistUrl, Model.settingsWithOwnWrite(hostB, writeB).epgUrl], [false, "http://h.test/b.m3u", "http://h.test/b.xml"])
+check("own write: a foreign change (omarchy bar set) lapses it and wins", (() => { const hostC = Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/c.m3u", epgUrl: "" }); return [Model.ownWriteInForce(hostC, writeB), Model.settingsWithOwnWrite(hostC, writeB).playlistUrl] })(), [false, "http://h.test/c.m3u"])
+check("own write: clearing the active source is an ordinary write (D-LIVE-21)", (() => { const cleared = Model.ownWriteFor(hostB, "", ""); return [Model.settingsWithOwnWrite(hostB, cleared).playlistUrl, Model.settingsWithOwnWrite(hostB, cleared).epgUrl, Model.ownWriteInForce(hostB, cleared)] })(), ["", "", true])
+check("own write: no record, or a malformed one, leaves the host untouched", [Model.settingsWithOwnWrite(hostA, null).playlistUrl, Model.settingsWithOwnWrite(hostA, {}).playlistUrl, Model.settingsWithOwnWrite(hostA, { base: null, value: { playlistUrl: "x" } }).playlistUrl, Model.ownWriteInForce(hostA, undefined)], ["http://h.test/a.m3u", "http://h.test/a.m3u", "http://h.test/a.m3u", false])
+check("own write: reconcile treats the echo of our own value as no change at all", (() => { const st = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/b.m3u", "", "", 10); const again = Model.reconcileSources(st.state, "http://h.test/b.m3u", "", st.activeKey, 20); return [again.changed, again.activeKey === st.activeKey, again.added] })(), [false, true, ""])
+
+// A `false` return from updateEntryInline is only a failure when the entry
+// cannot be rewritten at all; with a writable entry it is the host's
+// `!dirty` branch (shell.qml:1114), i.e. the value is already stored.
+const layoutOf = (entry) => ({ layout: { left: [], center: [], right: [{ id: "omarchy.clock" }, entry] } })
+check("persist: an object entry with our id is writable", Model.barEntryWritable(layoutOf({ id: "io.github.rmcdavid.iptv", playlistUrl: "http://h.test/a.m3u" }), "io.github.rmcdavid.iptv"), true)
+check("persist: a bare-string entry is NOT writable (updateEntryInline cannot rewrite it)", [Model.barEntryWritable(layoutOf("io.github.rmcdavid.iptv"), "io.github.rmcdavid.iptv"), Model.findBarEntry(layoutOf("io.github.rmcdavid.iptv"), "io.github.rmcdavid.iptv")], [false, { id: "io.github.rmcdavid.iptv" }])
+check("persist: an absent entry, an absent layout and rubbish are not writable", [Model.barEntryWritable(layoutOf({ id: "vm.netspeed" }), "io.github.rmcdavid.iptv"), Model.barEntryWritable({}, "io.github.rmcdavid.iptv"), Model.barEntryWritable(null, "io.github.rmcdavid.iptv"), Model.barEntryWritable({ layout: { right: "nope" } }, "io.github.rmcdavid.iptv")], [false, false, false, false])
+check("persist: the entry may sit in any section", [Model.barEntryWritable({ layout: { left: [{ id: "io.github.rmcdavid.iptv" }], center: [], right: [] } }, "io.github.rmcdavid.iptv"), Model.barEntryWritable({ layout: { left: [], center: [{ id: "io.github.rmcdavid.iptv" }], right: [] } }, "io.github.rmcdavid.iptv")], [true, true])
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")
