@@ -53,7 +53,19 @@ Item {
   // ---- settings (decision 7, R2). shell.barConfig is refreshed by the host on
   // every shell.json change (shell.qml syncPluginApis), so these re-evaluate
   // after `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
-  readonly property var settings: Model.settingsFrom(Model.findBarEntry(shell ? shell.barConfig : null, pluginId))
+  //
+  // D-LIVE-20 / D-LIVE-21: that refresh is one shellConfig write behind. The
+  // host publishes barConfig from `onShellConfigChanged` (shell.qml:66),
+  // which runs before the `barConfig` binding it reads (shell.qml:109) has
+  // re-evaluated, so every plugin gets the previous bar. An external write
+  // is flushed by the write after it (the user config FileView re-reads the
+  // foreign change and assigns shellConfig again); the plugin's own write is
+  // the last one there is, so its echo never comes. `settings` therefore
+  // lays our own successful write over the host's value until the host
+  // catches up or somebody else writes (Model.settingsWithOwnWrite).
+  readonly property var hostSettings: Model.settingsFrom(Model.findBarEntry(shell ? shell.barConfig : null, pluginId))
+  property var ownWrite: null                          // { base, value }: our write, applied locally
+  readonly property var settings: Model.settingsWithOwnWrite(hostSettings, ownWrite)
   readonly property string playlistUrl: settings.playlistUrl
   readonly property string epgUrl: settings.epgUrl
   readonly property int refreshMinutes: settings.refreshMinutes
@@ -997,22 +1009,35 @@ Item {
 
   // Write the active source through the host (D1): the full entry is passed
   // because updateEntryInline replaces it wholesale (entryWith keeps the
-  // keys we do not own). A no-op when the settings already match; `false`
-  // (nothing changed / bare-string entry / no host) while a change was
-  // needed emits sourcesPersistFailed (R2).
+  // keys we do not own).
+  //
+  // The write is applied LOCALLY on success and the guide redraws from that;
+  // the plugin never waits for the host to echo its own settings back
+  // (D-LIVE-20 / D-LIVE-21, see `settings` above). A persist failure is only
+  // a missing host or an entry updateEntryInline cannot rewrite: `false`
+  // from a writable entry is its `!dirty` branch (shell.qml:1114), i.e. the
+  // host already stores exactly what we asked for, which is success.
   function persistActive(playlistUrl, epgUrl) {
     if (root.playlistUrl === playlistUrl && root.epgUrl === epgUrl) return true
-    if (!root.shell || typeof root.shell.updateEntryInline !== "function") {
+    if (!root.shell || typeof root.shell.updateEntryInline !== "function"
+        || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
+      console.warn("omarchy-iptv: no writable bar entry for the settings change")
       root.sourcesPersistFailed("persist_failed")
       return false
     }
     var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), { playlistUrl: playlistUrl, epgUrl: epgUrl, id: root.pluginId })
-    if (root.shell.updateEntryInline(root.pluginId, entry) !== true) {
-      console.warn("omarchy-iptv: updateEntryInline refused the settings change")
-      root.sourcesPersistFailed("persist_failed")
-      return false
-    }
+    root.shell.updateEntryInline(root.pluginId, entry)
+    root.applyOwnWrite(playlistUrl, epgUrl)
     return true
+  }
+
+  // Apply our own write to `settings` at once. Assigning `ownWrite` makes
+  // the `settings` binding re-evaluate, which runs the ordinary
+  // onSettingsChanged -> reconcile() path: exactly what the echo would have
+  // done, in the same event loop turn. The override lapses by itself as soon
+  // as the host reports anything other than the value it had when we wrote.
+  function applyOwnWrite(playlistUrl, epgUrl) {
+    root.ownWrite = Model.ownWriteFor(root.hostSettings, playlistUrl, epgUrl)
   }
 
   function beginSwitch() {
@@ -1391,6 +1416,16 @@ Item {
   // playlist changed (the derived playlistUrl / epgUrl bindings may still
   // hold the previous values inside this handler).
   onSettingsChanged: root.reconcile()
+  // Our own write stands in for the host's value only until the host
+  // reports something else -- its (late) echo of our own value, or a
+  // foreign change such as `omarchy bar set`. Both make the host
+  // authoritative again, so the override is dropped here rather than left
+  // to lapse on its own: a host value that later returns to what it was
+  // when we wrote must not resurrect a spent override. Dropping it before
+  // `settings` re-evaluates is what a QML change handler does by
+  // construction (it runs before the bindings that depend on the same
+  // property), which is also the host behaviour this works around.
+  onHostSettingsChanged: if (root.ownWrite && !Model.ownWriteInForce(root.hostSettings, root.ownWrite)) root.ownWrite = null
   // D-LIVE-19: `omarchy bar set io.github.rmcdavid.iptv playlistUrl ""` at
   // runtime. The active source's in-memory data goes with the setting, so
   // the channel list, the group column and the counts are gone by the time

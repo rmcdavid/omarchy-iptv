@@ -1128,6 +1128,78 @@ function settingsFrom(entry) {
   }
 }
 
+// ---- our own settings write, applied locally (D-LIVE-20 / D-LIVE-21)
+//
+// The host publishes `barConfig` to a plugin from a `shellConfig` change
+// handler (shell.qml:66 -> pluginsChanged -> syncPluginApis -> publicBarConfig),
+// and a QML change handler runs before the bindings that depend on the same
+// property are re-evaluated. So `shell.barConfig` reaches a plugin one
+// shellConfig write late: an external write is flushed by the next one (the
+// FileView re-reads the foreign change), but a plugin's own write is the
+// last one there is and never comes back. A plugin must therefore apply its
+// own successful write itself and never wait for the echo.
+//
+// `ownWrite` = { base, value }: `base` is the host settings the write was
+// made against, `value` the playlist / EPG URLs written. The override is in
+// force only while the host still reports `base`; the moment the host
+// reports anything else -- our echo, or somebody else's write -- it lapses
+// and the host wins again. That makes the echo idempotent (our own value
+// arrives identical to what is already applied, so nothing changes and
+// nothing is applied twice) and keeps an external change authoritative.
+
+// Does a plugin's own write still stand in for the host's value?
+function ownWriteInForce(hostSettings, ownWrite) {
+  if (!ownWrite || typeof ownWrite !== "object") return false
+  var base = ownWrite.base
+  var value = ownWrite.value
+  if (!base || typeof base !== "object" || !value || typeof value !== "object") return false
+  var host = hostSettings || {}
+  return str(host.playlistUrl) === str(base.playlistUrl) && str(host.epgUrl) === str(base.epgUrl)
+}
+
+// The settings the plugin acts on: the host's, with our own pending write
+// laid over the two URL keys while it is still in force. Every other key
+// always comes from the host (only the URLs are ours to write).
+function settingsWithOwnWrite(hostSettings, ownWrite) {
+  var host = hostSettings || {}
+  if (!ownWriteInForce(host, ownWrite)) return host
+  var out = {}
+  for (var k in host) out[k] = host[k]
+  out.playlistUrl = str(ownWrite.value.playlistUrl)
+  out.epgUrl = str(ownWrite.value.epgUrl)
+  return out
+}
+
+// The record of a write just made against `hostSettings`.
+function ownWriteFor(hostSettings, playlistUrl, epgUrl) {
+  var host = hostSettings || {}
+  return {
+    base: { playlistUrl: str(host.playlistUrl), epgUrl: str(host.epgUrl) },
+    value: { playlistUrl: str(playlistUrl), epgUrl: str(epgUrl) }
+  }
+}
+
+// Can `updateEntryInline` carry our settings at all? It rewrites a layout
+// entry in place, so it needs an object entry with our id: a bare-string
+// entry (`"io.github.rmcdavid.iptv"`) and an absent entry both make it
+// return false without persisting, and that is a real persist failure. A
+// false return with a writable entry means "nothing to change" instead,
+// which is success (the host already stores what we asked for).
+function barEntryWritable(barConfig, pluginId) {
+  var id = str(pluginId)
+  if (!barConfig || typeof barConfig !== "object" || !barConfig.layout || typeof barConfig.layout !== "object") return false
+  var sections = ["left", "center", "right"]
+  for (var s = 0; s < sections.length; s++) {
+    var entries = barConfig.layout[sections[s]]
+    if (!Array.isArray(entries)) continue
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i]
+      if (entry && typeof entry === "object" && str(entry.id) === id) return true
+    }
+  }
+  return false
+}
+
 // ------------------------------------------------------------ mpv
 
 // mpvArgs is one string of whitespace-separated `--key[=value]` tokens.
@@ -3015,6 +3087,10 @@ if (typeof module !== "undefined") {
     clampInt: clampInt,
     clampSetting: clampSetting,
     settingsFrom: settingsFrom,
+    ownWriteInForce: ownWriteInForce,
+    settingsWithOwnWrite: settingsWithOwnWrite,
+    ownWriteFor: ownWriteFor,
+    barEntryWritable: barEntryWritable,
     splitMpvArgs: splitMpvArgs,
     headerArgs: headerArgs,
     MPV_RAW_PREFIX: MPV_RAW_PREFIX,

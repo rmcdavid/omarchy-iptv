@@ -9,6 +9,8 @@
 #   H5  add failure    a dead URL keeps the active source; the record carries the reason
 #   H2  add + probe    a fixture path is added, probed and becomes active
 #   H6/H8 switch       two fetched sources; 5 switches each way with a 10k list, timing
+#   D-LIVE-20          the plugin applies its own write; the host's echo lags or never
+#                      comes, an external write still wins, the echo is idempotent
 #   cancel             a probe against a silent server is cancelled; its dir is discarded
 #   H9  CLI parity     `set playlistUrl` (omarchy bar set) reconciles into the history
 #   H11 duplicate      the active URL again -> duplicate with the existing id
@@ -168,6 +170,55 @@ check "median 10k switch under 150 ms ($stats)" '[[ -n "$median" && "$median" -l
 check "no playlist helper run during warm switches" '! grep -q "omarchy-iptv playlist:" "$LOG"'
 check "active is K2 with $CHANNELS_10K channels after the last switch" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(svc "['\''channels'\'']")" == "$CHANNELS_10K" ]]'
 
+echo "== D-LIVE-20 the plugin applies its own write, it never waits for the echo"
+# The host publishes barConfig from its shellConfig change handler
+# (shell.qml:66), which runs before the barConfig binding it reads
+# (shell.qml:109), so what a plugin is handed is one write behind. An
+# external write is flushed by the assignment after it; a plugin's OWN write
+# is the last assignment there is, so its echo never arrives. A switch must
+# therefore take effect from the plugin's own apply.
+ipc switchSource "$K1" >/dev/null
+sleep 0.5                       # a tenth of switchTimeoutMs: no backstop can have fired
+he=$(ipc hostEntry)
+check "the switch took effect at once, with no echo from the host" \
+  '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''channels'\'']")" == 20 && "$(svc "['\''switching'\'']")" == false ]]'
+check "and while the host has published only the PREVIOUS bar (the defect shape)" \
+  '[[ "$(py "d['\''stored'\'']" "$he")" == "$K1" && "$(py "d['\''published'\'']" "$he")" != "$(py "d['\''stored'\'']" "$he")" ]]'
+check "sourceSwitched fired, no switch backstop warning" \
+  '[[ "$(last_log sourceSwitched)" == *"\"id\":\"$K1\""* ]] && ! grep -q "did not observe a cache load" "$LOG"'
+check "switching to the source that is already active is ok, not busy" \
+  '[[ "$(py "d['\''ok'\'']" "$(ipc switchSource "$K1")")" == true ]]'
+# The retry that used to answer `Could not save settings`: the host already
+# stores the value (updateEntryInline takes its `!dirty` branch and returns
+# false) while the plugin has not been handed it yet. False from a writable
+# entry means "already saved", which is success.
+ipc setStored playlistUrl "$FIX/harness.m3u" >/dev/null
+sleep 0.3
+res=$(ipc switchSource "$K2")
+check "a switch the host already stores is not reported as a persist failure" \
+  '[[ "$(py "d['\''ok'\'']" "$res")" == true && "$(py "d['\''code'\'']" "$res")" == ok ]]'
+res=$(ipc switchSource "$K1")
+check "switching back after that is still ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
+check "no sourcesPersistFailed anywhere in the switch sequence" '! grep -q "sourcesPersistFailed" "$LOG"'
+wait_for 20 10 svc "['channels']" || bad "the guide did not settle on K1 after the retry sequence"
+
+echo "== external writes still reconcile, and the echo of our own write is a no-op"
+ipc set playlistUrl "$FIX/gen-10k.m3u" >/dev/null
+wait_for "$K2" 10 svc "['activeSourceKey']" || bad "an external set playlistUrl did not reconcile"
+check "omarchy bar set still wins over a spent own-write override" \
+  '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(svc "['\''channels'\'']")" == "$CHANNELS_10K" ]]'
+ipc switchSource "$K1" >/dev/null
+sleep 0.5
+before=$(svc "['channels']")
+ipc set playlistUrl "$FIX/harness.m3u" >/dev/null   # the host catching up with our own value
+sleep 0.7
+check "the host echoing our own value back changes nothing (idempotent)" \
+  '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''channels'\'']")" == "$before" && "$(svc "['\''switching'\'']")" == false ]]'
+# leave K2 active again for the sections below
+ipc switchSource "$K2" >/dev/null
+wait_for "$K2" 10 svc "['activeSourceKey']" || bad "could not restore K2 as the active source"
+wait_for "$CHANNELS_10K" 10 svc "['channels']" || bad "K2 did not reload after the D-LIVE-20 block"
+
 echo "== cancel probe discards the temp dir"
 res=$(ipc addSource "http://127.0.0.1:$SILENT_PORT/slow.m3u" "" "")
 KSLOW=$(py "d['id']" "$res")
@@ -210,6 +261,11 @@ check "empty label restores the derived one" '[[ "$(py "d['\''ok'\'']" "$(ipc up
 echo "== H7 remove active"
 res=$(ipc removeSource "$K3")
 check "removeSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
+# D-LIVE-21: removing the active source must return the guide to the setup
+# surface from the plugin's own write, not from an echo that never comes.
+sleep 0.5
+check "the guide left the loading state at once (D-LIVE-21)" \
+  '[[ "$(svc "['\''configured'\'']")" == false && "$(svc "['\''channels'\'']")" == 0 ]]'
 wait_for false 10 svc "['configured']" || bad "settings were not cleared"
 sleep 0.5
 check "first-run state: unconfigured, 0 channels, activeCache empty" '[[ "$(svc "['\''configured'\'']")" == false && "$(svc "['\''channels'\'']")" == 0 && "$(ipc activeCache)" == "" ]]'

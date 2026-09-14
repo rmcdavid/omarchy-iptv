@@ -32,10 +32,15 @@ ShellRoot {
   property string lastTooltip: ""
   // The last 20 source signal payloads (URL-free by contract), for `signals()`.
   property var signalLog: []
-  // `failPersist true` makes the fake updateEntryInline refuse every change
-  // (SR25: the service only signals sourcesPersistFailed, no argv fallback).
+  // `failPersist true` takes `updateEntryInline` off the fake shell api, the
+  // way a host that cannot rewrite our bar entry leaves it (SR25: the
+  // service only signals sourcesPersistFailed, no argv fallback). It no
+  // longer merely returns `false`: a `false` return from a writable entry is
+  // the host's `!dirty` branch, which means "already stored", i.e. success.
   property bool persistFails: false
-  property var barEntry: ({
+  // The entry shell.json starts with. The live value lives in
+  // fakeHost.shellConfig from here on; `barEntry` below reads it back.
+  readonly property var seedBarEntry: ({
     id: harness.pluginId,
     playlistUrl: Quickshell.env("OMARCHY_IPTV_PLAYLIST") || "",
     epgUrl: Quickshell.env("OMARCHY_IPTV_EPG") || "",
@@ -45,6 +50,9 @@ ShellRoot {
     maxRecents: 10,
     barLabelMaxWidth: parseInt(Quickshell.env("OMARCHY_IPTV_LABEL_MAX") || "180", 10)
   })
+  // What the host has actually stored (the shell.json truth), as opposed to
+  // what it has published to the plugin, which can lag it by one write.
+  readonly property var barEntry: Model.findBarEntry(fakeHost.barConfig, harness.pluginId)
   readonly property var manifest: ({
     id: harness.pluginId,
     name: "IPTV",
@@ -95,21 +103,93 @@ ShellRoot {
     }
   }
 
-  // Change a setting at runtime the way `omarchy bar set` would: the host
-  // replaces barConfig wholesale, which is what the service binds to.
+  // ---- fake host config plumbing, in the real host's SHAPE AND ORDER
+  //
+  // /usr/share/omarchy/shell/shell.qml declares, in this order:
+  //   59  property var shellConfig
+  //   66  onShellConfigChanged: ... pluginRegistry.pluginsChanged()
+  //       -> Connections (1052) -> syncPluginApis() (861)
+  //       -> shellApi.barConfig = publicBarConfig() (326 -> shell.barConfig)
+  //   109 readonly property var barConfig: shellConfig.bar
+  // A QML change handler runs BEFORE the bindings that depend on the same
+  // property are re-evaluated, so `publicBarConfig()` publishes the bar of
+  // the PREVIOUS shellConfig: a plugin sees shell.json one write late. An
+  // external write is flushed by the assignment after it (the user config
+  // FileView re-reads the foreign change); the plugin's own write is the
+  // last assignment there is, so its echo never arrives -- D-LIVE-20 and
+  // D-LIVE-21. Reproduced here literally so the harness cannot mask it
+  // again; the plugin must apply its own writes itself.
+  QtObject {
+    id: fakeHost
+    property var shellConfig: ({ version: 1, bar: { layout: { left: [], center: [], right: [harness.seedBarEntry] } } })
+    onShellConfigChanged: harness.syncPluginApis()
+    readonly property var barConfig: fakeHost.shellConfig && fakeHost.shellConfig.bar
+      ? fakeHost.shellConfig.bar : ({ layout: { left: [], center: [], right: [] } })
+  }
+
+  // shell.qml persistShellConfig (109-114): a deep copy becomes shellConfig.
+  function persistShellConfig(nextConfig) {
+    fakeHost.shellConfig = JSON.parse(JSON.stringify(nextConfig))
+  }
+
+  // shell.qml syncPluginApis (861-881): every plugin api is handed a fresh
+  // deep copy of whatever `shell.barConfig` currently reads as.
+  function syncPluginApis() {
+    fakeShell.barConfig = JSON.parse(JSON.stringify(fakeHost.barConfig))
+    if (barLoader.item) barLoader.item.settings = Model.findBarEntry(fakeShell.barConfig, harness.pluginId)
+  }
+
+  // The active source of a bar config as its 8-hex key (or "" when unset):
+  // comparable across the stored / published sides without printing a URL.
+  function entryKey(barConfig) {
+    var url = Model.settingsFrom(Model.findBarEntry(barConfig, harness.pluginId)).playlistUrl
+    var normalized = Model.normalizeSourceUrl(url, { origin: "cli" })
+    return normalized === "" ? "" : Model.sourceKey(normalized)
+  }
+
+  // shell.qml applyShellConfig (76-89) driven by the user config FileView:
+  // a FOREIGN change to shell.json is re-read and assigned a second time.
+  // The host's own FileView.setText does not re-trigger its watcher, which
+  // is why only external writes get this second assignment.
+  function applyShellConfig() {
+    fakeHost.shellConfig = JSON.parse(JSON.stringify(fakeHost.shellConfig))
+  }
+
+  Timer {
+    // The user config FileView's asynchronous reaction to a foreign write.
+    id: hostReloadTimer
+    interval: 0
+    repeat: false
+    onTriggered: harness.applyShellConfig()
+  }
+
+  // Store a setting without the user config re-read: only the mutator half
+  // of an external write. This is the real window a plugin sees between
+  // `omarchy bar set` persisting and the FileView noticing the file, and it
+  // is the state in which the host already stores a value the plugin has
+  // not seen -- where updateEntryInline answers `!dirty` / false for a
+  // change that is in fact already saved.
+  function storeSetting(key, value) {
+    var copy = JSON.parse(JSON.stringify(fakeHost.shellConfig))
+    var arr = copy.bar.layout.right
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i] && typeof arr[i] === "object" && String(arr[i].id) === harness.pluginId) arr[i][key] = value
+    }
+    harness.persistShellConfig(copy)
+  }
+
+  // Change a setting at runtime the way `omarchy bar set` would: the IPC
+  // mutator persists it (assignment 1), then the FileView notices the
+  // changed file and applies it again (assignment 2).
   function setSetting(key, value) {
-    var next = {}
-    for (var k in harness.barEntry) next[k] = harness.barEntry[k]
-    next[key] = value
-    harness.barEntry = next
-    fakeShell.barConfig = { layout: { left: [], center: [], right: [harness.barEntry] } }
-    if (barLoader.item) barLoader.item.settings = harness.barEntry
+    harness.storeSetting(key, value)
+    hostReloadTimer.restart()
   }
 
   // ---- fake PluginShellApi (services/PluginShellApi.qml surface)
   QtObject {
     id: fakeShell
-    property var barConfig: ({ layout: { left: [], center: [], right: [harness.barEntry] } })
+    property var barConfig: ({ layout: { left: [], center: [], right: [harness.seedBarEntry] } })
     property var bar: fakeBar
     function serviceFor(id) { return String(id) === harness.pluginId ? serviceLoader.item : null }
     function summon(id, payloadJson) {
@@ -125,24 +205,37 @@ ShellRoot {
     }
     function toggle(id, payloadJson) { return isPluginOpen(id) ? hide(id) : summon(id, payloadJson) }
     function isPluginOpen(id) { return guideLoader.item ? guideLoader.item.opened === true : false }
-    // Applies the entry to the fake barConfig the way the host does
-    // (shell.qml updateEntryInline: full-entry replace, `id` forced, false
-    // when nothing changed), so the service observes its own writes.
+    // shell.qml updateEntryInline (1078-1116) exactly: rewrite the layout
+    // entry in a clone, compare with JSON.stringify, return false WITHOUT
+    // persisting when nothing changed (1114), otherwise persistShellConfig
+    // and return true. The echo back to the plugin is whatever
+    // persistShellConfig's assignment produces -- which, by the ordering
+    // reproduced in fakeHost, is the PREVIOUS bar. Nothing here hands the
+    // plugin its own write; the plugin applies that itself.
     // Keys only in the log: the entry carries playlistUrl / epgUrl, which
     // may embed credentials and must not reach the terminal (S-08).
-    function updateEntryInline(id, entry) {
+    property var updateEntryInline: harness.persistFails ? undefined : (function updateEntryInline(id, entry) {
       var e = entry || {}
       harness.log("updateEntryInline", id, "keys:", Object.keys(e).join(","), "playlist", e.playlistUrl ? "(set)" : "(none)", "epg", e.epgUrl ? "(set)" : "(none)")
-      if (harness.persistFails) { harness.log("updateEntryInline refused (failPersist)"); return false }
       if (String(id) !== harness.pluginId || typeof e !== "object") return false
-      var next = { id: harness.pluginId }
-      for (var k in e) if (k !== "id") next[k] = e[k]
-      if (JSON.stringify(next) === JSON.stringify(harness.barEntry)) return false
-      harness.barEntry = next
-      fakeShell.barConfig = { layout: { left: [], center: [], right: [harness.barEntry] } }
-      if (barLoader.item) barLoader.item.settings = harness.barEntry
+      var copy = JSON.parse(JSON.stringify(fakeHost.shellConfig))
+      var sections = ["left", "center", "right"]
+      var dirty = false
+      for (var s = 0; s < sections.length; s++) {
+        var arr = copy.bar.layout[sections[s]] || []
+        for (var i = 0; i < arr.length; i++) {
+          if (!arr[i] || typeof arr[i] !== "object" || String(arr[i].id) !== harness.pluginId) continue
+          var next = { id: harness.pluginId }
+          for (var k in e) if (k !== "id") next[k] = e[k]
+          if (JSON.stringify(arr[i]) !== JSON.stringify(next)) { arr[i] = next; dirty = true }
+        }
+      }
+      if (!dirty) { harness.log("updateEntryInline: nothing changed (already stored)"); return false }
+      // persistShellConfig republishes fakeShell.barConfig through
+      // syncPluginApis -- one write behind, exactly like the real host.
+      harness.persistShellConfig(copy)
       return true
-    }
+    })
   }
 
   // Source signals (URL-free payloads by contract) go to the log and to the
@@ -234,7 +327,7 @@ ShellRoot {
       source: "file://" + harness.repoRoot + "/BarWidget.qml"
       onLoaded: {
         item.bar = fakeBar
-        item.settings = harness.barEntry
+        item.settings = Model.findBarEntry(fakeShell.barConfig, harness.pluginId)
         harness.log("bar widget loaded")
       }
       onStatusChanged: if (status === Loader.Error) console.warn("[harness] BarWidget.qml failed to load")
@@ -265,6 +358,16 @@ ShellRoot {
       else if (value === "false") v = false
       else if (/^-?\d+$/.test(value)) v = parseInt(value, 10)
       harness.setSetting(key, v)
+      return "ok"
+    }
+    // `set` without the user config re-read: the host stores the value but
+    // has not published it yet, so the plugin still sees the previous one.
+    function setStored(key: string, value: string): string {
+      var v = value
+      if (value === "true") v = true
+      else if (value === "false") v = false
+      else if (/^-?\d+$/.test(value)) v = parseInt(value, 10)
+      harness.storeSetting(key, v)
       return "ok"
     }
     function tooltip(): string { return harness.lastTooltip }
@@ -303,10 +406,21 @@ ShellRoot {
     function editMasked(key: string): string { return sourceEdit(key) }
     // The last 20 source signal payloads, oldest first.
     function signals(): string { return JSON.stringify(harness.signalLog) }
-    // "true" (or no argument) makes every updateEntryInline refuse; "false" restores it.
+    // "true" (or no argument) takes updateEntryInline off the shell api, the
+    // way a host that cannot write our entry leaves it; "false" restores it.
+    // (A `false` RETURN is no longer a failure: with a writable entry it is
+    // the host's `!dirty` branch, i.e. the value is already stored.)
     function failPersist(on: string): string {
       harness.persistFails = !(String(on) === "false" || String(on) === "0")
       return harness.persistFails ? "persist fails" : "persist ok"
+    }
+    // What the host has STORED for our entry (shell.json) versus what it has
+    // PUBLISHED to the plugin (shell.barConfig). They differ by one write
+    // after a plugin's own updateEntryInline: the regression D-LIVE-20 is
+    // exactly a plugin that waits for `published` to catch up with `stored`.
+    // Both sides are reported as source keys, never URLs (S-08).
+    function hostEntry(): string {
+      return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig) })
     }
     function widget(): string {
       var w = barLoader.item
