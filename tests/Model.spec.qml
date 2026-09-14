@@ -311,6 +311,15 @@ TestCase {
     compare(died.toasts.length, 1)
     compare(died.toasts[0].name, "Channel B")
     compare(died.toasts[0].reason, Model.PLAYER_GENERIC_FAILURE)
+    // The silence is the start-file's doing, not a free pass for "stop": the
+    // same end-file with no load after it is a failure the user must see (a
+    // load we issued was replaced and then the process died).
+    var orphanStop = routePlayer({ lines: [
+      '{"event":"start-file","playlist_entry_id":1}',
+      '{"event":"end-file","reason":"stop","playlist_entry_id":1}',
+      "EOF"
+    ], owners: owners, nowPlaying: { id: "t:a", name: "Channel A" } })
+    compare(orphanStop.toasts, [{ name: "Channel A", reason: Model.PLAYER_GENERIC_FAILURE }])
     // A .m3u8 master resolves through redirect on nearly every load: never terminal.
     var master = routePlayer({ lines: [
       '{"event":"start-file","playlist_entry_id":1}',
