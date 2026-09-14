@@ -1059,6 +1059,13 @@ Item {
       root.rememberEntry(status.entryId, root.nowPlaying)
       if (root.socketAttached()) {
         root.playerPending = false
+      } else if (root.stopping || root.userStopped || root.nowPlaying === null) {
+        // A stop overtook this start. The two legitimately interleave: the
+        // helper releases the lock before its first-load window precisely
+        // so a stop ladder can get in. Do not go hunting for a socket that
+        // is being torn down - that would be twelve journal lines for a
+        // player nobody wants any more.
+        root.playerPending = false
       } else {
         // The player is up but the observer has not attached yet: keep the
         // birth edge rather than blinking the bar to idle, bounded by the
