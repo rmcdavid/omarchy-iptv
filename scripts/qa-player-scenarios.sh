@@ -1,14 +1,16 @@
 #!/bin/bash
-# scripts/qa-player-scenarios.sh -- the six NEW detached-player harness
-# scenarios of docs/QA-PLAYER.md section 8.1 (PLY-H11..H16), printed or, with
-# --apply, executed against the dev harness (scripts/dev-harness/run.sh) in a
-# scratch directory. PLY-H01..H10 are shipped and live in
+# scripts/qa-player-scenarios.sh -- the NEW detached-player harness scenarios
+# of docs/QA-PLAYER.md section 8.1 (PLY-H11..H18), printed or, with --apply,
+# executed against the dev harness (scripts/dev-harness/run.sh) in a scratch
+# directory. PLY-H01..H10 are shipped and live in
 # scripts/dev-harness/player-scenario.sh; this script does not repeat them.
 #
 #   qa-player-scenarios.sh list                        scenario ids, titles, what each needs
 #   qa-player-scenarios.sh print <PLY-Hnn>             print the exact commands and EXPECT lines
 #   qa-player-scenarios.sh run <PLY-Hnn> --apply       execute the deterministic steps (same output)
 #   qa-player-scenarios.sh run all --apply             every scenario in order
+#   qa-player-scenarios.sh run cold --apply            only PLY-H17/H18 phase A: no display, no shell
+#   qa-player-scenarios.sh run PLY-H18 --apply --with-display   phase B as well (display lane only)
 #   qa-player-scenarios.sh baseline <PLY-Hnn> <ref>    CLAUDE.md rule 11: the same checks against <ref>
 #   qa-player-scenarios.sh check-harness               which harness / helper verbs are present
 #   qa-player-scenarios.sh fixtures [--apply]          make the media tests/fixtures/qa-player needs
@@ -37,21 +39,42 @@
 #   PLY-H14  rm -rf the scratch runtime dir while playing     PLY-RST-08
 #   PLY-H15  a stub mpv that never binds; a missing mpv       PLY-LIFE-06, 07, PLY-RST-14
 #   PLY-H16  the channel id disappears between shells         PLY-RST-16
+#   PLY-H17  a cold start that is no longer the newest        PLY-LIFE-16
+#            intent stands down (D-PLY-11's fix)
+#   PLY-H18  a divergence is visible to the health tick and   PLY-LIFE-17
+#            the label converges within one tick (CL6)
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 RUN="$ROOT/scripts/dev-harness/run.sh"
-HELPER="$ROOT/bin/omarchy-iptv"
+# The TREE UNDER TEST. `baseline` exports a ref and re-runs this same script
+# with OMARCHY_IPTV_PLUGIN_ROOT pointing at the export, and run.sh already
+# honours it - but HELPER was pinned to $ROOT, so every step that calls the
+# helper directly (PLY-H15's three, and now PLY-H17/H18's) ran TODAY'S helper
+# under `baseline` and could not have failed there whatever the ref said.
+# Same family as D-PLY-9: a comparison with only one side.
+PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}
+HELPER="$PLUGIN_ROOT/bin/omarchy-iptv"
+# QA TOOLING, never the tree under test: the stub mpv is this lane's
+# instrument and always comes from the current checkout, the way the scenario
+# text itself does.
+STUB="$ROOT/scripts/qa-stub-mpv.py"
 FIX="$ROOT/tests/fixtures/qa-player"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-qa-player}
 SOCK="$SCRATCH/runtime/omarchy-iptv/mpv.sock"
+# PLY-H17/H18 run with no shell and no display at all, so they keep their own
+# runtime tree beside the harness one and never share its socket.
+COLD="$SCRATCH/cold"
+COLD_SOCK="$COLD/runtime/omarchy-iptv/mpv.sock"
 PLAYLIST="http://127.0.0.1:8765/qa-player.m3u"
 APPLY=0
+WITH_DISPLAY=0
 BASELINE=""
 pass=0
 fail=0
+checks=0
 
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
@@ -60,8 +83,16 @@ usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; }
 die()   { echo "qa-player: $*" >&2; exit 1; }
 ok()    { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
 bad()   { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
-is()    { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
-ck()    { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+is()    { checks=$((checks + 1)); if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
+ck()    { checks=$((checks + 1)); if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+# The D-PLY-9 floor, per scenario. Bash gives no way to turn a failed
+# expansion into a failed test, so a check that stops executing merely
+# shortens the summary. Only the asserting scenarios carry one.
+floor() {   # floor <label> <expected assertions>
+  local label=$1 want=$2
+  if [[ "$checks" == "$want" ]]; then ok "$label ran every check it has ($want)"
+  else bad "$label ran $checks assertions, expected $want (one stopped executing)"; fi
+}
 
 # ---------------------------------------------------------------- guards
 
@@ -444,6 +475,231 @@ PY"
   sh_step "reap" "'$RUN' reap"
 }
 
+# ------------------------------------------- the cold interleave, in a box
+#
+# PLY-H17 and PLY-H18 both turn on an ORDERING inside a cold start: a channel
+# change has to reach the player between the spawn and `player start`'s own
+# apply_channel. Wave two measured that window on the real thing - roughly
+# twenty milliseconds, hit 10 times in 20 cold bursts - which is a coin flip,
+# and a coin flip cannot be shown failing on another tree on demand.
+#
+# So the ordering is decided by a gate instead of by luck, at a point that
+# already exists in the helper: `probe_client` will not return until mpv
+# answers `mpv-version`, while `cmd_play` demands no handshake at all. The
+# stub mpv (scripts/qa-stub-mpv.py) withholds the reply on the FIRST client
+# connection while a gate file exists, so the start is parked exactly where
+# the field race puts it, the zap lands, and then the start is released. 1/1.
+#
+# NO DISPLAY AND NO SHELL. The stub opens no window, quickshell is never
+# started, and everything lives under $COLD. This is the only half of these
+# two scenarios that can be run by a lane which does not hold the display -
+# and it is the half CLAUDE.md rule 11 needs, because it is the half that can
+# be pointed at another tree.
+cold_reset() {
+  rm -rf "$COLD"
+  mkdir -p "$COLD/bin" "$COLD/runtime/omarchy-iptv" "$COLD/cache"
+  chmod 700 "$COLD/runtime" "$COLD/runtime/omarchy-iptv"
+  cp -f "$STUB" "$COLD/bin/mpv"
+  chmod +x "$COLD/bin/mpv"
+  python3 "$HELPER" playlist --url "$FIX/qa-player.m3u" --cache-dir "$COLD/cache" >/dev/null 2>&1
+}
+
+# cold_interleave <start-id> <zap-id>
+# Leaves in $COLD: start.json, play.json, status.json, stub.log, and the three
+# properties read back off the player afterwards.
+cold_interleave() {
+  local start_id=$1 zap_id=$2 i
+  cold_reset
+  : >"$COLD/gate"
+  export PATH="$COLD/bin:$PATH"
+  export STUB_LOG="$COLD/stub.log"
+  export STUB_GATE="$COLD/gate"
+  export STUB_LIFE=45
+
+  timeout 45 python3 "$HELPER" player start --socket "$COLD_SOCK" \
+    --cache-dir "$COLD/cache" --id "$start_id" --seq 1 --scope g:QA \
+    >"$COLD/start.json" 2>"$COLD/start.err" &
+  local startpid=$!
+  for ((i = 0; i < 400; i++)); do [[ -S $COLD_SOCK ]] && break; sleep 0.05; done
+  # ... and parked at the gate: its first request is logged before the stub
+  # withholds the reply, so this is the instant the field race happens in.
+  for ((i = 0; i < 400; i++)); do grep -q '^REQ' "$COLD/stub.log" 2>/dev/null && break; sleep 0.05; done
+
+  STUB_GATE= timeout 20 python3 "$HELPER" play --socket "$COLD_SOCK" \
+    --cache-dir "$COLD/cache" --id "$zap_id" --scope g:QA --since 3000 \
+    >"$COLD/play.json" 2>"$COLD/play.err"
+  rm -f "$COLD/gate"
+  wait "$startpid"
+
+  cold_prop 'user-data/omarchy-iptv' >"$COLD/stash.json"
+  cold_prop 'force-media-title'      >"$COLD/title.json"
+  cold_prop 'playlist-count'         >"$COLD/loads.json"
+  timeout 20 python3 "$HELPER" status --socket "$COLD_SOCK" >"$COLD/status.json" 2>/dev/null
+  printf '{"command":["quit"],"request_id":99}\n' | socat -t2 - "UNIX-CONNECT:$COLD_SOCK" >/dev/null 2>&1
+  unset STUB_LOG STUB_GATE STUB_LIFE
+  return 0
+}
+
+cold_prop() {   # read one property straight off the player
+  printf '{"command":["get_property","%s"],"request_id":90}\n' "$1" \
+    | socat -t2 - "UNIX-CONNECT:$COLD_SOCK" 2>/dev/null | head -1
+}
+# A field out of one of those files, through the sentinels: a missing file and
+# a helper that printed nothing are different answers and neither is "".
+cold_field() {   # cold_field <file> <python expr over d>
+  python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("NOFILE"); raise SystemExit(0)
+try:
+    v = eval(sys.argv[2])
+except Exception:
+    v = None
+print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))' "$1" "$2" 2>/dev/null \
+    || printf '%s\n' "$QA_NO_FILE"
+}
+cold_guard() {
+  # AF_UNIX is 108 bytes and the bind is the whole scenario. Say so rather
+  # than reporting "the player did not open its socket".
+  if (( ${#COLD_SOCK} > 100 )); then
+    bad "SETUP FAILED: $COLD_SOCK is ${#COLD_SOCK} bytes, past the AF_UNIX limit; set OMARCHY_IPTV_HARNESS_DIR shorter"
+    return 1
+  fi
+  command -v socat >/dev/null || { bad "SETUP FAILED: socat is not installed"; return 1; }
+  [[ -f $STUB ]] || { bad "SETUP FAILED: $STUB is missing"; return 1; }
+  return 0
+}
+
+# --------------------------------------------------------------- PLY-H17
+
+h17() {
+  checks=0    # the floor below is this scenario's own, not the run's
+  head1 "PLY-H17  a cold start that is no longer the newest intent stands down  (PLY-LIFE-16)"
+  note "D-PLY-11's cause, measured by wave two: 10 user-visible divergences in 20"
+  note "cold concurrent bursts, 0 in 10 warm and 0 in 6 cold-serial. In every one"
+  note "a channel change reached the socket the instant mpv bound it while the"
+  note "single player start was still inside its handshake, and the start then"
+  note "applied ITS channel over the top. The fix: a player this helper just"
+  note "SPAWNED was born idle with playlist-count 0 and no user-data node of"
+  note "ours, so a channel on it now came from a client that connected after the"
+  note "spawn - a strictly later intent - and the start stands down."
+  note "NO DISPLAY: stub mpv, no shell, no window. Deterministic, 1/1."
+  cold_guard || return 1
+  step "spawn a cold start, hold it at its handshake, land a channel change, release it" \
+    cold_interleave t:qa.plain t:qa.live
+  expect "the start completes ok, having left the newer channel playing"
+  (( APPLY )) || { note "dry run: the assertions below execute with --apply"; return 0; }
+
+  # Positive controls first. Without them every assertion below is satisfied
+  # by a run in which nothing happened at all.
+  is "PLY-H17 the cold start completed (positive control)" \
+     "$(cold_field "$COLD/start.json" "d['ok']")" "true"
+  is "PLY-H17 it really did spawn the player, rather than adopt one" \
+     "$(cold_field "$COLD/start.json" "d['spawned']")" "true"
+  is "PLY-H17 the channel change landed while it was parked (positive control)" \
+     "$(cold_field "$COLD/play.json" "d['ok']")" "true"
+  is "PLY-H17 the start carried the FIRST intent, which is the losing one" \
+     "$(cold_field "$COLD/start.json" "d['id']")" "t:qa.plain"
+
+  # The three that discriminate. Every one of them is produced by BOTH trees
+  # and read differently: measured here at HEAD and at a939fd7, 1/1 each.
+  is "PLY-H17 the player took exactly ONE load, not two (a939fd7: 2)" \
+     "$(cold_field "$COLD/loads.json" "d['data']")" "1"
+  is "PLY-H17 the channel left playing is the NEWER intent (a939fd7: t:qa.plain)" \
+     "$(cold_field "$COLD/stash.json" "d['data']['id']")" "t:qa.live"
+  is "PLY-H17 and the title the user reads names it too (a939fd7: QA Plain No Headers)" \
+     "$(cold_field "$COLD/title.json" "d['data']")" "QA Live Stream"
+
+  # Forward regression guards, NOT the evidence: these fields exist only on a
+  # tree that already has the fix, so they can never tell two trees apart.
+  # Labelled, the way CL10 asks the journal line to be.
+  is "PLY-H17 (forward guard only) the reply says it did not apply its channel" \
+     "$(cold_field "$COLD/start.json" "d['applied']")" "false"
+  is "PLY-H17 (forward guard only) and names what it left playing, so the shell can re-apply" \
+     "$(cold_field "$COLD/start.json" "d['playing']['id']")" "t:qa.live"
+  ck "PLY-H17 (forward guard only) the journal line names the stand-down" \
+     'grep -q "newer channel change reached the player first" "$COLD/start.err"'
+  ck "PLY-H17 no URL reached the reply or the journal line" \
+     '! grep -qE "://" "$COLD/start.json" "$COLD/start.err" "$COLD/play.json"'
+  floor "PLY-H17" 11
+}
+
+# --------------------------------------------------------------- PLY-H18
+
+h18() {
+  checks=0    # the floor below is this scenario's own, not the run's
+  head1 "PLY-H18  a divergence is visible to the health tick, and the label converges  (CL6)"
+  note "Ruling CL6: the invariant is that the interface's label and the player's"
+  note "channel agree WITHIN ONE HEALTH TICK, not that the last of several"
+  note "simultaneous intents wins. Wave two's divergences were all still there"
+  note "at t+20 s and t+40 s, past two ticks, because nothing ever looked: the"
+  note "health tick had no reading of the player's own channel to compare."
+  note "Phase A below is the reading, and runs with NO DISPLAY. Phase B is the"
+  note "convergence itself and needs the harness: run it with --with-display"
+  note "from the lane that holds the display."
+  cold_guard || return 1
+  head1 "PLY-H18 phase A  the health tick's input (no display)"
+  step "make the same divergence PLY-H17 makes, and ask the helper what is playing" \
+    cold_interleave t:qa.plain t:qa.live
+  expect "status carries the player's own now-playing record, naming t:qa.live"
+  if (( APPLY )); then
+    is "PLY-H18 status answered at all (positive control)" \
+       "$(cold_field "$COLD/status.json" "d['ok']")" "true"
+    is "PLY-H18 and the player really is running (positive control)" \
+       "$(cold_field "$COLD/status.json" "d['running']")" "true"
+    # The discriminator. On a939fd7 `status` carries no such field at all, so
+    # this reads NOFIELD against a player that is demonstrably on t:qa.live -
+    # which is the whole reason the divergence was silent.
+    is "PLY-H18 status carries the player's own record (a939fd7: NOFIELD)" \
+       "$(cold_field "$COLD/status.json" "d['stash']['id']")" "t:qa.live"
+    is "PLY-H18 and it agrees with what the player itself reports" \
+       "$(cold_field "$COLD/status.json" "d['stash']['id']")" \
+       "$(cold_field "$COLD/stash.json" "d['data']['id']")"
+    is "PLY-H18 the record names which side wrote it, so the two can be compared" \
+       "$(cold_field "$COLD/status.json" "d['stash']['verb']")" "play"
+    ck "PLY-H18 and carries a real intent number, not the hardcoded 0" \
+       'qa_value "$(cold_field "$COLD/status.json" "d[\"stash\"][\"seq\"]")" && \
+        [[ "$(cold_field "$COLD/status.json" "d[\"stash\"][\"seq\"]")" != "0" ]]'
+    ck "PLY-H18 the status reply carries no URL, only a host" \
+       '! grep -qE "://" "$COLD/status.json"'
+  else
+    note "dry run: phase A's assertions execute with --apply"
+  fi
+
+  head1 "PLY-H18 phase B  the convergence itself (NEEDS THE DISPLAY)"
+  note "Requires --with-display. Only the lane holding the display may run it."
+  if (( WITH_DISPLAY == 0 )); then
+    note "skipped: phase B not requested. Phase A above is the part a lane"
+    note "without the display can run, and it is the part that fails on a939fd7."
+    (( APPLY )) && floor "PLY-H18 phase A" 7
+    return 0
+  fi
+  start_harness || return 1
+  sh_step "play a channel and wait for the observer to attach" \
+    "'$RUN' ipc play t:qa.live >/dev/null; sleep 5; '$RUN' ipc state | jq -r '.service.socketAttached'"
+  expect "true"
+  sh_step "move the PLAYER behind the shell's back, so the label and the player disagree" \
+    "printf '%s\\n' '{\"command\":[\"loadfile\",\"http://127.0.0.1:$HPORT/test.ts\",\"replace\"],\"request_id\":1}' \\
+       | socat -t2 - 'UNIX-CONNECT:$SOCK' >/dev/null; \\
+     printf '%s\\n' '{\"command\":[\"set_property\",\"user-data/omarchy-iptv\",{\"schema\":1,\"playing\":true,\"id\":\"t:qa.plain\",\"name\":\"QA Plain No Headers\",\"seq\":0,\"verb\":\"play\"}],\"request_id\":2}' \\
+       | socat -t2 - 'UNIX-CONNECT:$SOCK' >/dev/null; echo diverged"
+  expect "the shell still says t:qa.live; the player says t:qa.plain"
+  sh_step "wait ONE health tick (10 s timer, 2 s probe deadline) and look again" "sleep 14"
+  if (( APPLY )); then
+    is "PLY-H18 the shell never relabelled itself from the player (CL5)" \
+       "$(svc "d['nowPlaying']['id'] if d.get('nowPlaying') else None")" "t:qa.live"
+    is "PLY-H18 the player is back on the channel the user chose (CL6)" \
+       "$(mpvq '{"command":["get_property","user-data/omarchy-iptv"],"request_id":7}' \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)" \
+       "t:qa.live"
+    is "PLY-H18 and the interface is not idle after the repair" "$(svc "d['playing']")" "true"
+    floor "PLY-H18 A+B" 10
+  fi
+  sh_step "reap" "'$RUN' reap"
+}
+
 # ---------------------------------------------------------------- driver
 
 cmd_list() {
@@ -455,6 +711,10 @@ PLY-H14  rm -rf the scratch runtime dir while playing      PLY-RST-08   needs: n
 PLY-H15  stub mpv that never binds; missing mpv; killed    PLY-LIFE-06, PLY-LIFE-07, PLY-RST-14
          mid-cold-start
 PLY-H16  the channel id disappears between shells          PLY-RST-16   needs: --detach, shell-stop
+PLY-H17  a cold start no longer the newest intent stands   PLY-LIFE-16  needs: socat. NO DISPLAY: stub mpv, no shell
+         down                                                           asserts 11 checks; fails against a939fd7
+PLY-H18  a divergence is visible to the health tick and    PLY-LIFE-17  phase A needs: socat, NO DISPLAY (7 checks)
+         the label converges within one tick (CL6)                      phase B needs the harness: --with-display
 
 Rule 11 (CLAUDE.md 11, and the PO's double force in ARCH-P section 12): every
 scenario above must be shown to FAIL against pre-M2-02 code before it counts
@@ -481,6 +741,7 @@ cmd_baseline() {
   # anyone to copy and paste at their live session.
   local flag=()
   (( APPLY )) && flag=(--apply)
+  (( WITH_DISPLAY )) && flag+=(--with-display)
   step "run" env OMARCHY_IPTV_PLUGIN_ROOT="$exp" "$0" run "$id" "${flag[@]}"
 }
 
@@ -490,6 +751,7 @@ main() {
   while (($# > 0)); do
     case $1 in
       --apply) APPLY=1 ;;
+      --with-display) WITH_DISPLAY=1 ;;
       --baseline) BASELINE=$2; shift ;;
       -h|--help) usage; exit 0 ;;
       *) args+=("$1") ;;
@@ -513,7 +775,12 @@ main() {
         PLY-H14|H14) h14 ;;
         PLY-H15|H15) h15 ;;
         PLY-H16|H16) h16 ;;
-        all)         h11; h12; h13; h14; h15; h16 ;;
+        PLY-H17|H17) h17 ;;
+        PLY-H18|H18) h18 ;;
+        all)         h11; h12; h13; h14; h15; h16; h17; h18 ;;
+        # The two scenarios a lane WITHOUT the display can run end to end,
+        # and the two that can be pointed at another tree and seen failing.
+        cold)        h17; h18 ;;
         *) die "unknown scenario: ${args[0]} (try: list)" ;;
       esac
       # B1. `main` used to end on `((APPLY)) || printf ...`, which is TRUE
