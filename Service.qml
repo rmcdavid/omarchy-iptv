@@ -1376,6 +1376,16 @@ Item {
   // playlist changed (the derived playlistUrl / epgUrl bindings may still
   // hold the previous values inside this handler).
   onSettingsChanged: root.reconcile()
+  // D-LIVE-19: `omarchy bar set io.github.rmcdavid.iptv playlistUrl ""` at
+  // runtime. The active source's in-memory data goes with the setting, so
+  // the channel list, the group column and the counts are gone by the time
+  // the guide draws its setup surface; without this the cleared state was
+  // only reached through the cache directory unbinding, and any path that
+  // leaves the directory bound left the previous source's rows behind the
+  // `No playlist configured` body. The history record and the cache on disk
+  // survive (the setup surface offers `Saved sources (n)`, and setting a URL
+  // again rebinds the directory and reloads it).
+  onConfiguredChanged: if (!root.configured) root.clearSourceData()
   onActiveEpgUrlChanged: {
     // Read the property itself, not a derived flag: with `epgConfigured`
     // (stale false on an empty -> value change) this handler took the

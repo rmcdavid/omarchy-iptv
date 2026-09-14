@@ -211,14 +211,18 @@ Item {
   // ---- derived from the service
   readonly property bool serviceReady: service !== null
   readonly property bool configured: serviceReady && service.configured === true
-  readonly property bool hasChannels: serviceReady && service.channels.length > 0
+  // D-LIVE-19: never `service.channels.length` directly. The body renders
+  // one surface at a time and Model.guideSurface decides which; an
+  // unconfigured guide has no channels, no column and no counts even if the
+  // service is still holding the previous source's list for a frame.
+  readonly property bool hasChannels: surface.hasChannels
   readonly property bool epgConfigured: serviceReady && service.epgConfigured === true
   readonly property bool epgLoaded: serviceReady && service.epgLoaded === true
   readonly property string serviceStatus: serviceReady ? String(service.status) : "ready"
   readonly property string playingId: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.id) : ""
   readonly property string playingName: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.name) : ""
   readonly property int nowSec: serviceReady ? service.nowSec : Math.floor(Date.now() / 1000)
-  readonly property bool showColumn: hasChannels && !narrow
+  readonly property bool showColumn: surface.showColumn
   readonly property bool scopeIsGroup: Model.isGroupScope(effectiveScope)
 
   // ---- Sources (M2-01). Every access is guarded: the service may lack the
@@ -326,19 +330,24 @@ Item {
     return false
   }
 
+  // The whole body decision in one object (Model.guideSurface, D-LIVE-19):
+  // which empty state, whether rows and the group column exist, and the
+  // channel count the footer may show. `sources` rides along so the setup
+  // surface knows a cleared playlist still has a history behind it.
+  readonly property var surface: Model.guideSurface({
+    serviceReady: root.serviceReady,
+    configured: root.configured,
+    channelCount: root.serviceReady ? root.service.channels.length : 0,
+    status: root.serviceStatus,
+    rowCount: root.rowCount,
+    query: root.query,
+    scopeId: root.scopeId,
+    narrow: root.narrow,
+    sources: root.sourceCount
+  })
+
   // Empty-state kind: "" while rows exist.
-  readonly property string emptyKind: {
-    if (!root.serviceReady) return "service"
-    if (!root.configured) return "unconfigured"
-    if (!root.hasChannels) {
-      if (root.serviceStatus === "error") return "error"
-      return "loading"
-    }
-    if (root.rowCount > 0) return ""
-    if (root.hasQuery) return "noMatches"
-    if (root.effectiveScope === Model.SCOPE_FAVORITES) return "noFavorites"
-    return "emptyScope"
-  }
+  readonly property string emptyKind: surface.empty
 
   // Banner kind (R8): none | playlistError | epgError | epgPending. An EPG
   // fetch failure shows the banner even while an earlier window is still
@@ -376,7 +385,7 @@ Item {
     refreshing: root.serviceReady && root.service.refreshing,
     epgPending: root.serviceReady && root.service.epgPending,
     warning: root.warningText,
-    count: root.serviceReady ? root.service.channels.length : 0,
+    count: root.surface.channelCount,
     lastUpdated: root.serviceReady ? root.service.lastUpdated : "",
     stale: root.serviceStatus === "cached",
     activeLabel: root.activeSourceLabel,

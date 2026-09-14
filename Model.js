@@ -1417,6 +1417,52 @@ function barAccessibleName(opts) {
   return "IPTV, idle"
 }
 
+// ------------------------------------------------------------ guide body
+
+// Which single surface the guide body renders (UX 4.4 - 4.6 / 6.3 and
+// UX-SOURCES 1.2) and, with it, whether rows, the group column and the
+// footer counts exist at all. One decision instead of three independent
+// bindings, so an empty state can never be drawn on top of a channel list
+// (D-LIVE-19: `omarchy bar set ... playlistUrl ""` at runtime flipped the
+// body to `No playlist configured` while the service still held the
+// previous source's channels, and the title, prose and command box were
+// painted over 10 live rows and an 11-entry group column).
+//
+// The unconfigured rule is the fix: a guide without a configured playlist
+// has no channels, no groups and no counts whatever the service still holds
+// in memory, so the setup surface stands alone. `savedSources` carries the
+// history size into that surface, because since v0.2.0 the source record
+// outlives the cleared setting and the first-run screen must offer the
+// `Saved sources (n)` path rather than pretend nothing was ever configured.
+//
+// opts: serviceReady, configured, channelCount (what the service holds),
+// status (R8 vocabulary), rowCount (rows left after query and scope),
+// query, scopeId, narrow, sources (records in the history).
+function guideSurface(opts) {
+  var o = opts || {}
+  var ready = o.serviceReady !== false
+  var configured = ready && o.configured === true
+  var count = configured ? Math.max(0, Math.floor(Number(o.channelCount) || 0)) : 0
+  var has = count > 0
+  var empty = ""
+  if (!ready) empty = "service"
+  else if (!configured) empty = "unconfigured"
+  else if (!has) empty = str(o.status) === "error" ? "error" : "loading"
+  else if (Math.floor(Number(o.rowCount) || 0) > 0) empty = ""
+  else if (tokenize(o.query).length > 0) empty = "noMatches"
+  else if (effectiveScope(o.scopeId, o.query) === SCOPE_FAVORITES) empty = "noFavorites"
+  else empty = "emptyScope"
+  return {
+    empty: empty,
+    channelCount: count,
+    hasChannels: has,
+    showList: has,
+    showColumn: has && o.narrow !== true,
+    setup: empty === "unconfigured",
+    savedSources: empty === "unconfigured" ? Math.max(0, Math.floor(Number(o.sources) || 0)) : 0
+  }
+}
+
 // ------------------------------------------------------------ footer
 
 // Footer status (UX 6.1). Priority: transient > bounded search > playing >
@@ -2979,6 +3025,7 @@ if (typeof module !== "undefined") {
     barGlyph: barGlyph,
     barTooltip: barTooltip,
     barAccessibleName: barAccessibleName,
+    guideSurface: guideSurface,
     footerStatus: footerStatus,
     footerHints: footerHints,
     formHints: formHints,

@@ -430,6 +430,43 @@ TestCase {
     compare(Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS", sourceCount: 2 }), "NAS · 84 channels · updated 09:12")
   }
 
+  // D-LIVE-19: one body surface at a time. Clearing playlistUrl at runtime
+  // takes the rows, the group column and the counts with it, so the setup
+  // surface is never drawn over a still-rendered channel list.
+  function test_guideSurfaceClearedPlaylist() {
+    var loaded = Model.guideSurface({ serviceReady: true, configured: true, channelCount: 10, status: "ready", rowCount: 10, query: "", scopeId: "all", narrow: false, sources: 3 })
+    compare(loaded.empty, "")
+    compare(loaded.showList, true)
+    compare(loaded.showColumn, true)
+    compare(loaded.channelCount, 10)
+    var cleared = Model.guideSurface({ serviceReady: true, configured: false, channelCount: 10, status: "ready", rowCount: 10, query: "", scopeId: "all", narrow: false, sources: 3 })
+    compare(cleared.empty, "unconfigured")
+    compare(cleared.hasChannels, false)
+    compare(cleared.showList, false)
+    compare(cleared.showColumn, false)
+    compare(cleared.channelCount, 0)
+    compare(cleared.setup, true)
+    // The record outlives the cleared setting, so the first-run screen shows
+    // `Saved sources (3)` instead of pretending nothing was configured.
+    compare(cleared.savedSources, 3)
+    compare(Model.footerStatus({ configured: false, count: cleared.channelCount, lastUpdated: "15:13" }), "")
+    var first = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/a.m3u", "", "", 1)
+    var after = Model.reconcileSources(first.state, "", "", first.added, 2)
+    compare(after.state.sources.length, 1)
+    compare(after.activeKey, "")
+    compare(after.invalid, null)
+    compare(Model.activeSourceKey(after.state, ""), "")
+    // The rest of the state machine is as shipped.
+    compare(Model.guideSurface({ serviceReady: false }).empty, "service")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "loading" }).empty, "loading")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "error" }).empty, "error")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "sky", scopeId: "all" }).empty, "noMatches")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "", scopeId: "favorites" }).empty, "noFavorites")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "", scopeId: "g:UK" }).empty, "emptyScope")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showColumn, false)
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showList, true)
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)
