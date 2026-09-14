@@ -37,58 +37,52 @@ TestCase {
 
   // ---- the lane-PB event router (design section 10) ----
   //
-  // Service.qml's handlePlayerLine() / handlePlayerGone() are methods on a live
-  // Service with a socket, a notification path and a dozen properties, so
-  // nothing outside a running shell can call them. What can be pinned is the
-  // decision they make, which is what section 10 asks for: this replays a
-  // recorded mpv transcript through the same Model calls in the same order.
-  // It mirrors Service.qml handlePlayerLine (a start-file supersedes the last
-  // end-file, an end-file is remembered, an error or fatal log-message joins
-  // the five-line tail), channelForEnd (entryOwners, failing open) and
-  // handlePlayerGone (endedVerdict, and the tail outranking mpv's generic
-  // file_error). "EOF" stands for the socket closing, which is the only moment
-  // a toast can be raised. A change on either side must land in both.
+  // These cases used to replay a transcript through a COPY of Service.qml's
+  // rules written here, because the rules were QML methods on a live Service
+  // and nothing outside a running shell could call them. A copy is worth very
+  // little: with the superseding rule deleted from the shipping
+  // handlePlayerLine - every zap raising a false "did not play" - all four
+  // cases still passed. So the rules moved into Model.js (M2-02-06 PR-4) and
+  // this driver now calls them.
+  //
+  // What is left here is only what Service.qml itself is: the loop, the
+  // property writes, and the notify call. Model.routePlayerEvent() per line
+  // exactly as handlePlayerLine() does it, Model.endedReport() at EOF exactly
+  // as handlePlayerGone() does it (which also clears the last end-file and
+  // the entry id), Model.rememberEntryOwner() for the ring. "EOF" stands for
+  // the socket closing, the only moment a toast can be raised. Break a rule
+  // in Model.js and these cases go red without anyone editing them.
   function routePlayer(transcript) {
     var lines = transcript.lines || []
     var owners = transcript.owners || ({})
     var current = transcript.nowPlaying || null
-    var lastEndFile = null
-    var entryId = 0
-    var idle = false
-    var tail = []
+    var state = Model.playerRouterState(null)
     var toasts = []
     for (var i = 0; i < lines.length; i++) {
       if (lines[i] === "EOF") {
-        var verdict = Model.endedVerdict(lastEndFile, transcript.userStopped === true, transcript.stopping === true)
-        if (verdict.notify) {
-          var owner = lastEndFile && lastEndFile.entryId ? owners[String(lastEndFile.entryId)] : null
-          var target = owner || current
-          toasts.push({ name: target ? String(target.name) : "",
-                        reason: tail.length > 0 ? tail[tail.length - 1] : String(verdict.reason || "") })
-        }
-        lastEndFile = null
-        entryId = 0
+        var report = Model.endedReport({
+          lastEndFile: state.lastEndFile,
+          owners: owners,
+          nowPlaying: current,
+          userStopped: transcript.userStopped === true,
+          stopping: transcript.stopping === true,
+          tail: state.tail
+        })
+        if (report.notify) toasts.push({ name: report.target ? String(report.target.name) : "", reason: report.reason })
+        state = { entryId: 0, lastEndFile: null, idle: state.idle, tail: state.tail }
         continue
       }
-      var event = Model.parsePlayerEvent(lines[i])
-      if (event.kind === "start-file") {
-        if (event.entryId) entryId = event.entryId
-        lastEndFile = null
-      } else if (event.kind === "end-file") {
-        lastEndFile = event
-      } else if (event.kind === "log-message") {
-        if (event.level === "error" || event.level === "fatal") {
-          var clean = Model.redactUrls((event.prefix !== "" ? "[" + event.prefix + "] " : "") + event.text)
-          if (clean !== "") {
-            tail.push(clean)
-            while (tail.length > 5) tail.shift()
-          }
-        }
-      } else if (event.kind === "property-change") {
-        idle = event.value === true
-      }
+      state = Model.routePlayerEvent(state, lines[i])
     }
-    return { lastEndFile: lastEndFile, entryId: entryId, idle: idle, tail: tail, toasts: toasts }
+    return { lastEndFile: state.lastEndFile, entryId: state.entryId, idle: state.idle, tail: state.tail, toasts: toasts }
+  }
+
+  // The entry-ownership ring as Service.qml rememberEntry() fills it: one
+  // entry per `player start` / `play` reply, newest last.
+  function ownersFor(pairs) {
+    var owners = ({})
+    for (var i = 0; i < pairs.length; i++) owners = Model.rememberEntryOwner(owners, pairs[i][0], pairs[i][1])
+    return owners
   }
 
   function ids(rows) {
@@ -294,7 +288,7 @@ TestCase {
     // start-file for the new entry, and "stop" with no user stop is a FAILURE
     // verdict - so the only thing standing between a zap and a false "BBC One
     // did not play" toast is the start-file superseding the end-file.
-    var owners = { "1": { id: "t:a", name: "Channel A" }, "2": { id: "t:b", name: "Channel B" } }
+    var owners = ownersFor([[1, { id: "t:a", name: "Channel A" }], [2, { id: "t:b", name: "Channel B" }]])
     var zap = [
       '{"event":"start-file","playlist_entry_id":1}',
       '{"event":"end-file","reason":"stop","playlist_entry_id":1}',
@@ -335,7 +329,7 @@ TestCase {
     // entryOwners, not from nowPlaying. The gate FAILS OPEN: an unknown or
     // missing entry id degrades which channel is named and never suppresses
     // the toast.
-    var owners = { "1": { id: "t:a", name: "Channel A" }, "2": { id: "t:b", name: "Channel B" } }
+    var owners = ownersFor([[1, { id: "t:a", name: "Channel A" }], [2, { id: "t:b", name: "Channel B" }]])
     var now = { id: "t:b", name: "Channel B" }
     function burst(endLine, extra) {
       return routePlayer({ lines: [
@@ -362,6 +356,36 @@ TestCase {
     compare(burst('{"event":"end-file","reason":"quit","playlist_entry_id":1}').toasts, [])
   }
 
+  function test_playerEntryOwnersRing() {
+    // The ring Service.qml rememberEntry() keeps (4.8): mpv's own
+    // playlist_entry_id -> the channel that load was for, four deep. Four is
+    // what a zap burst can outrun, and when it does the gate fails open -
+    // the toast degrades to the channel now playing rather than vanishing.
+    var pairs = []
+    for (var i = 1; i <= 5; i++) pairs.push([i, { id: "t:" + i, name: "Channel " + i }])
+    var owners = ownersFor(pairs)
+    compare(Object.keys(owners), ["2", "3", "4", "5"])
+    compare(owners["5"], { id: "t:5", name: "Channel 5" })
+    // Entry 4 is still in the ring: its death names Channel 4, not what is
+    // playing now.
+    var known = routePlayer({ lines: [
+      '{"event":"start-file","playlist_entry_id":5}',
+      '{"event":"end-file","reason":"error","playlist_entry_id":4,"file_error":"loading failed"}',
+      "EOF"
+    ], owners: owners, nowPlaying: { id: "t:5", name: "Channel 5" } })
+    compare(known.toasts, [{ name: "Channel 4", reason: "loading failed" }])
+    // Entry 1 fell off the back. The user still gets the toast.
+    var forgotten = routePlayer({ lines: [
+      '{"event":"start-file","playlist_entry_id":5}',
+      '{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}',
+      "EOF"
+    ], owners: owners, nowPlaying: { id: "t:5", name: "Channel 5" } })
+    compare(forgotten.toasts, [{ name: "Channel 5", reason: "loading failed" }])
+    // A reply with no entry id, and a start whose target is not known yet,
+    // record nothing rather than poisoning the ring with a blank row.
+    compare(ownersFor([[0, { id: "t:x", name: "X" }], ["junk", { id: "t:y", name: "Y" }], [3, null]]), ({}))
+  }
+
   function test_playerRouterLogTailKeepsOnlyTheHost() {
     // S-01 / D-QA-01: the failure text comes from request_log_messages "error",
     // redacted in python before it crosses into QML and again here, and it is
@@ -373,7 +397,7 @@ TestCase {
       '{"event":"log-message","level":"error","prefix":"stream","text":"Failed to open ' + credentialed + '\\n"}',
       '{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}',
       "EOF"
-    ], owners: { "1": { id: "t:a", name: "Channel A" } }, nowPlaying: { id: "t:a", name: "Channel A" } })
+    ], owners: ownersFor([[1, { id: "t:a", name: "Channel A" }]]), nowPlaying: { id: "t:a", name: "Channel A" } })
     compare(run.tail, ["[stream] Failed to open provider.test"])          // the info line is not kept
     compare(run.toasts, [{ name: "Channel A", reason: "[stream] Failed to open provider.test" }])
     var blob = JSON.stringify(run)
