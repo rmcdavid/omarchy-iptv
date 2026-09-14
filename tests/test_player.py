@@ -88,6 +88,28 @@ server.listen(8)
 state = {"entry": 0, "url": "", "user_data": {}}
 
 
+def orderly_exit(code):
+    """Real mpv lets go of its IPC listener BEFORE the process goes away.
+
+    Measured on mpv 0.41 on this machine, headless, 6/6: after a `quit` the
+    connect is REFUSED 2.0-2.7 ms BEFORE /proc/<pid>/cmdline empties. After a
+    SIGKILL it is the other way round - refused 2.7-4.9 ms AFTER the cmdline
+    has already emptied (8/8), which is the D-PLY-8 window.
+
+    This stub used to `os._exit()` with the listener still bound, which gave
+    its quit path the kill path's asymmetry and only its tiny size kept that
+    from showing. A double must never be more forgiving than the real thing
+    (CLAUDE.md 10, audit F3). The linger makes the ordering observable
+    instead of a race; real mpv's own is ~2 ms.
+    """
+    try:
+        server.close()
+    except OSError:
+        pass
+    time.sleep(float(os.environ.get("STUB_MPV_QUIT_LINGER", "0.01")))
+    os._exit(code)
+
+
 def handle(conn):
     buffer = b""
     while True:
@@ -110,7 +132,7 @@ def handle(conn):
             name = command[0]
             events = []
             if name == "quit":
-                os._exit(0)
+                orderly_exit(0)
             if name == "get_property":
                 prop = command[1]
                 if prop == "mpv-version":
@@ -145,7 +167,7 @@ def handle(conn):
                 conn.sendall((json.dumps(event) + "\\n").encode("utf-8"))
             if load == "fail" and name == "loadfile":
                 time.sleep(0.05)
-                os._exit(2)          # --idle=once exits when the playlist ends
+                orderly_exit(2)      # --idle=once exits when the playlist ends
 
 
 while True:
@@ -184,6 +206,68 @@ def sleeper(token, ignore_term=False):
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline and not ignores_term(process.pid):
             time.sleep(0.01)
+    return process
+
+
+# A double that owns BOTH identities the player is keyed on - the
+# --input-ipc-server token on its own command line and the bound listening
+# socket - and that can be held in the one state the shipping guards disagree
+# about: blind to `find_player`, still answering `connect`.
+#
+# That state is what a SIGKILLed mpv leaves behind for a few milliseconds. The
+# kernel's own version of it is measured, not modelled: on this machine, real
+# headless mpv 0.41 empties its command line 0.13-0.31 ms after the SIGKILL
+# and its socket is refused 2.7-4.9 ms later (8/8), while the shipping code
+# asks both questions once, 4.5-7.5 ms in. A windowed player tears down
+# slower still, which is why it reproduces in the field and not here.
+#
+# Reproducing the *duration* with a stand-in does not work on this box: with
+# transparent huge pages on, a killed python process's window is 0.1-0.4 ms
+# whatever its footprint (16 MB to 1024 MB), thread count (0 to 256) or
+# descriptor count (0 to 65536) - measured, all flat. So the double sheds the
+# /proc identity deliberately instead of waiting for the kernel: same pid,
+# same bound socket, `exec` to a command line that no longer carries the
+# token. The state is real and it lasts exactly as long as the test says.
+SHED_DOUBLE = '''#!/usr/bin/env python3
+import os, socket, sys, time
+
+path = ""
+for arg in sys.argv[1:]:
+    if arg.startswith("--input-ipc-server="):
+        path = arg.split("=", 1)[1]
+server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+server.bind(path)
+os.chmod(path, 0o600)
+server.listen(8)
+with open(os.environ["SHED_READY"], "w", encoding="utf-8") as handle:
+    handle.write("1")
+# Keep the descriptor across the exec: the socket stays bound to this same
+# pid while the command line the /proc scan keys on goes away.
+os.set_inheritable(server.fileno(), True)
+os.execv(sys.executable, [sys.executable, "-c",
+                          "import os,sys,time; time.sleep(float(sys.argv[1])); os._exit(0)",
+                          os.environ["SHED_HOLD"], "omarchy-iptv-test-socket-holder"])
+'''
+
+
+def shed_double(token, hold_s, ready_path):
+    """Start the double above and return once it has bound and shed."""
+    process = subprocess.Popen(["python3", "-c", SHED_DOUBLE, token],
+                               env=dict(os.environ, SHED_READY=ready_path, SHED_HOLD=str(hold_s)),
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline and not os.path.exists(ready_path):
+        time.sleep(0.005)
+    # The exec is the last thing it does; wait for the command line to stop
+    # carrying the token rather than for a guessed delay.
+    while time.monotonic() < deadline:
+        try:
+            with open("/proc/%d/cmdline" % process.pid, "rb") as handle:
+                if token.encode() not in handle.read().split(b"\0"):
+                    break
+        except OSError:
+            break
+        time.sleep(0.002)
     return process
 
 
@@ -263,6 +347,16 @@ class PlayerTestCase(unittest.TestCase):
 
     def sleeper(self, ignore_term=False):
         process = sleeper("--input-ipc-server=%s" % self.sock, ignore_term=ignore_term)
+        self.addCleanup(self.reap_process, process)
+        return process
+
+    def shed_double(self, hold=0.4):
+        """A process holding our socket bound with our token already gone
+        from its command line - the state a just-SIGKILLed player leaves
+        behind - for `hold` seconds."""
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        process = shed_double("--input-ipc-server=%s" % self.sock, hold,
+                              os.path.join(self.dir, "shed.ready"))
         self.addCleanup(self.reap_process, process)
         return process
 
@@ -691,6 +785,88 @@ class SpawnFailureTest(PlayerTestCase):
         code, payload, _, _ = self.player_start("--spawn-timeout", "0.5")
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"]["code"], "mpv_missing")
+
+
+def token_gone(pid, token):
+    """What find_player's predicate reduces to for one known pid, without the
+    4-5 ms /proc scan - so a sampling loop can resolve tenths of a
+    millisecond instead of tens."""
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            return token.encode() not in handle.read().split(b"\0")
+    except OSError:
+        return True
+
+
+def watch_teardown(pid, token, sock_path, budget=5.0):
+    """When did each of the two guards change its mind? Returns the offsets
+    in seconds from now, first for the /proc side and then for the socket."""
+    start = time.monotonic()
+    blind = unbound = None
+    while time.monotonic() - start < budget and (blind is None or unbound is None):
+        if blind is None and token_gone(pid, token):
+            blind = time.monotonic() - start
+        if unbound is None and helper.socket_is_dead(sock_path):
+            unbound = time.monotonic() - start
+    return blind, unbound
+
+
+class DoubleTest(PlayerTestCase):
+    """The doubles themselves (CLAUDE.md 10, audit F3).
+
+    These do not test the product. They test that the stand-ins this file
+    drives the product against are not more forgiving than mpv, because two
+    of this round's items turn on exactly when a dying player stops being
+    visible and when it stops being reachable.
+    """
+
+    def test_the_quit_path_lets_go_of_the_socket_before_the_command_line_empties(self):
+        # Real mpv 0.41, headless, this machine: on `quit` the connect is
+        # refused 2.0-2.7 ms BEFORE the cmdline empties, 6/6. On SIGKILL it
+        # is refused 2.7-4.9 ms AFTER, 8/8. The stub used to _exit with its
+        # listener still bound, giving its quit path the kill path's
+        # ordering - the one asymmetry D-PLY-8 is about.
+        self.env(STUB_MPV_QUIT_LINGER="0.25")
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        pid = helper.find_player(self.sock)[0]["pid"]
+        token = "--input-ipc-server=%s" % self.sock
+        # Sent raw, not through quit_over_ipc: that one waits for the
+        # connection to close, which is the very event being timed.
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(2.0)
+        client.connect(self.sock)
+        self.addCleanup(client.close)
+        client.sendall(b'{"command":["quit"],"request_id":1}\n')
+        blind, unbound = watch_teardown(pid, token, self.sock)
+        self.assertIsNotNone(blind, "the double never went away")
+        self.assertIsNotNone(unbound, "the double never let go of the socket")
+        self.assertLess(unbound, blind,
+                        "an orderly quit must drop the listener first: real mpv does")
+        self.assertTrue(wait_gone(pid))
+        # And mpv never unlinks its own socket on any exit path, so the file
+        # is still there for the settle to deal with.
+        self.assertTrue(os.path.exists(self.sock))
+
+    def test_a_double_can_hold_the_state_a_killed_player_leaves_behind(self):
+        # Blind to the /proc scan, still answering connect(), one pid, both
+        # identities. Held for as long as the test needs instead of for as
+        # long as the kernel happens to take - the duration is not
+        # reproducible with a stand-in on this box (a killed python process's
+        # window is 0.1-0.4 ms at 16 MB and at 1024 MB alike, transparent
+        # huge pages being on), but the state is exactly the real one.
+        process = self.shed_double(hold=0.35)
+        self.assertEqual(helper.find_player(self.sock), [],
+                         "the /proc scan must be blind to it")
+        self.assertFalse(helper.socket_is_dead(self.sock),
+                         "and its socket must still be bound")
+        self.assertTrue(os.path.exists(self.sock))
+        self.assertTrue(wait_gone(process, timeout=5.0))
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not helper.socket_is_dead(self.sock):
+            time.sleep(0.005)
+        self.assertTrue(helper.socket_is_dead(self.sock), "and then it lets go")
+        self.assertTrue(os.path.exists(self.sock), "without unlinking the file")
 
 
 class LadderTest(PlayerTestCase):
