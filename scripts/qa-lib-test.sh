@@ -317,12 +317,98 @@ qa_env_line NASTY "$hostile" >"$TMP/new.env"
 ( NASTY=""; . "$TMP/new.env"; printf '%s\n' "$NASTY" ) >"$TMP/new.out"
 is "qa_env_line round-trips it byte for byte" "$(cat "$TMP/new.out")" "$hostile"
 
+# ============================== the assertion-count floor (B4, D-PLY-9 (b))
+
+section "the floor / B4: a check that stops executing must turn the run red"
+
+PS="$ROOT/scripts/dev-harness/player-scenario.sh"
+FRAME="$TMP/frame.sh"
+# The shipped counters, extracted verbatim - not a copy of them.
+sed -n '/^ok()  { printf/,/^ck()  { checks=/p' "$PS" >"$FRAME"
+is "the counting frame was extracted from the real scenario" \
+   "$(qa_count '^(is|ck)\(\)' "$FRAME")" "2"
+
+# Drive the P11 assertion, in its real shape, under BOTH helpers.
+# The counters are reported from an EXIT trap, because the whole point is that
+# the statement AFTER the dead expansion may not run either.
+: >"$TMP/p11.log"; rm -f "$TMP/p11.count"
+(
+  pass=0; fail=0; checks=0
+  trap 'printf "%s %s %s\n" "$checks" "$pass" "$fail" >"$TMP/p11.count"' EXIT
+  # shellcheck source=/dev/null
+  . "$FRAME"
+  old_lc() { grep -acE "$1" "$TMP/p11.log" 2>/dev/null || echo 0; }
+  before=$(old_lc 'mpv unresponsive')
+  printf 'omarchy-iptv: mpv unresponsive, restarting player\n' >>"$TMP/p11.log"
+  is "P11 exactly ONE relaunch" "$(( $(old_lc 'mpv unresponsive') - before ))" "1"
+) >/dev/null 2>&1
+is "with the shipped helper the P11 assertion moved no counter at all" \
+   "$(cat "$TMP/p11.count" 2>/dev/null)" "0 0 0"
+
+: >"$TMP/p11.log"
+ran_new=$(
+  pass=0; fail=0; checks=0
+  # shellcheck source=/dev/null
+  . "$FRAME"
+  SCRATCH=$TMP
+  new_lc() { qa_count "$1" "$TMP/p11.log"; }
+  before=$(new_lc 'mpv unresponsive')
+  printf 'omarchy-iptv: mpv unresponsive, restarting player\n' >>"$TMP/p11.log"
+  is "P11 exactly ONE relaunch" "$(( $(new_lc 'mpv unresponsive') - before ))" "1" >/dev/null
+  printf '%s %s\n' "$checks" "$pass"
+)
+is "with qa_count it executes, and passes on one relaunch" "$ran_new" "1 1"
+: >"$TMP/p11.log"
+ran_two=$(
+  pass=0; fail=0; checks=0
+  # shellcheck source=/dev/null
+  . "$FRAME"
+  new_lc() { qa_count "$1" "$TMP/p11.log"; }
+  before=$(new_lc 'mpv unresponsive')
+  printf 'omarchy-iptv: mpv unresponsive, restarting player\n' >>"$TMP/p11.log"
+  printf 'omarchy-iptv: mpv unresponsive, restarting player\n' >>"$TMP/p11.log"
+  is "P11 exactly ONE relaunch" "$(( $(new_lc 'mpv unresponsive') - before ))" "1" >/dev/null
+  printf '%s %s\n' "$checks" "$fail"
+)
+is "and FAILS on a second relaunch at the healthy player" "$ran_two" "1 1"
+
+# The floor itself: the arithmetic at the end of the scenario, in isolation.
+floor_verdict=$(
+  pass=0; fail=0; checks=0
+  # shellcheck source=/dev/null
+  . "$FRAME"
+  checks=81                     # one assertion silently skipped, as D-PLY-9 did
+  ran=$checks
+  is "the harness ran every check it has" "$ran" "82" >/dev/null
+  printf '%s\n' "$fail"
+)
+is "the floor turns the run RED when one check does not execute" "$floor_verdict" "1"
+floor_ok=$(
+  pass=0; fail=0; checks=0
+  # shellcheck source=/dev/null
+  . "$FRAME"
+  checks=82
+  ran=$checks
+  is "the harness ran every check it has" "$ran" "82" >/dev/null
+  printf '%s\n' "$fail"
+)
+is "and stays green when they all do" "$floor_ok" "0"
+
+# And keep the floor honest: it must equal the assertions the file has. One
+# grep here means a forgotten bump turns check.sh red on THIS machine rather
+# than the display lane's, weeks later.
+declared=$(grep -oE '^EXPECTED_CHECKS=[0-9]+' "$PS" | head -1 | cut -d= -f2)
+top=$(qa_count '^(is|ck) ' "$PS")            # includes the floor's own line
+inloop=$(qa_count '^[[:space:]]+(is|ck) ' "$PS")   # P14's `for again in 1 2`
+is "the declared floor matches the assertions the scenario actually has" \
+   "$declared" "$(( top - 1 + 2 * inloop ))"
+
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=88
+EXPECTED=95
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
