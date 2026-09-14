@@ -820,10 +820,13 @@ class ParityTest(unittest.TestCase):
             self.assertEqual(helper.ended_verdict(vector["endFile"], vector["userStopped"], vector["stopping"]),
                              expected, vector["name"])
 
-    def test_the_three_tables_are_all_present_and_non_trivial(self):
+    def test_the_four_tables_are_all_present_and_non_trivial(self):
         self.assertGreaterEqual(len(self.fixture["mpvArgv"]), 3)
         self.assertEqual(len(self.fixture["stopLadder"]), 5)
         self.assertGreaterEqual(len(self.fixture["endedVerdict"]), 12)
+        # The session table is run by tests/test_state.py (normalize_state) and
+        # by tests/Model.test.js (Model.parseState); this only guards the file.
+        self.assertGreaterEqual(len(self.fixture["session"]), 10)
 
 
 class IpcEventTest(unittest.TestCase):
