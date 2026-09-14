@@ -79,6 +79,16 @@ wait_log() {   # wait_log <regex> <secs>: the harness log gains a matching line
   return 1
 }
 last_log() { grep -E "$1" "$LOG" | tail -1; }
+# NOT IN THE AUDIT, found by sweeping for the shape rather than by reading the
+# list: four `! grep -q ... "$LOG"` assertions below are the A4 shape without
+# A4's labels. "No playlist helper ran", "no sourcesPersistFailed", "no
+# omarchy bar fallback" are all TRUE of a log that is empty, missing or
+# truncated. `wait_log 'service loaded'` at the top makes that unlikely rather
+# than impossible, and "unlikely" is what this whole round is about. Every
+# negative log assertion goes through here, and a log with none of our lines
+# in it is vacuous, which `check` treats as a failure. Output is swallowed:
+# a match may be a credentialed URL and the transcript is an artifact (S-08).
+log_lacks() { qa_leak_scan 'service loaded' "$1" "$LOG" >/dev/null 2>&1; }
 wait_gone() {  # wait_gone <path> <secs>: a queued `cache remove` has run
   local p=$1 secs=$2 i
   for ((i = 0; i < secs * 10; i++)); do
@@ -156,7 +166,7 @@ wait_for 20 10 svc "['channels']" || true
 check "guide data loaded from the migrated cache (20 channels)" '[[ "$(svc "['\''channels'\'']")" == 20 ]]'
 check "state.json mode 600" '[[ "$(stat -c %a "$STATE")" == 600 ]]'
 check "activeCache() is the per-source dir" '[[ "$(ipc activeCache)" == "$CACHE/sources/$K1" ]]'
-check "no playlist helper run for a fresh cache (freshness)" '! grep -q "omarchy-iptv playlist:" "$LOG"'
+check "no playlist helper run for a fresh cache (freshness)" 'log_lacks "omarchy-iptv playlist:"'
 
 echo "== H5 add failure keeps the active source and saves nothing (SR23)"
 res=$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")
@@ -196,7 +206,7 @@ stats=$(printf '%s\n' "${times[@]}" | grep -E "\($CHANNELS_10K channels" | grep 
 echo "     10k-side switch: $stats"
 median=$(echo "$stats" | grep -oE 'median [0-9]+' | grep -oE '[0-9]+')
 check "median 10k switch under 150 ms ($stats)" '[[ -n "$median" && "$median" -lt 150 ]]'
-check "no playlist helper run during warm switches" '! grep -q "omarchy-iptv playlist:" "$LOG"'
+check "no playlist helper run during warm switches" 'log_lacks "omarchy-iptv playlist:"'
 check "active is K2 with $CHANNELS_10K channels after the last switch" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(svc "['\''channels'\'']")" == "$CHANNELS_10K" ]]'
 
 echo "== D-LIVE-20 the plugin applies its own write, it never waits for the echo"
@@ -228,7 +238,7 @@ check "a switch the host already stores is not reported as a persist failure" \
   '[[ "$(py "d['\''ok'\'']" "$res")" == true && "$(py "d['\''code'\'']" "$res")" == ok ]]'
 res=$(ipc switchSource "$K1")
 check "switching back after that is still ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
-check "no sourcesPersistFailed anywhere in the switch sequence" '! grep -q "sourcesPersistFailed" "$LOG"'
+check "no sourcesPersistFailed anywhere in the switch sequence" 'log_lacks "sourcesPersistFailed"'
 wait_for 20 10 svc "['channels']" || bad "the guide did not settle on K1 after the retry sequence"
 
 echo "== external writes still reconcile, and the echo of our own write is a no-op"
@@ -311,7 +321,7 @@ check "switchSource with a refusing host -> persist_failed with the SR25 copy" \
   '[[ "$(py "d['\''code'\'']" "$res")" == persist_failed && "$(py "d['\''message'\'']" "$res")" == "Could not save settings"*"try omarchy bar set" ]]'
 check "sourcesPersistFailed signalled, active unchanged, switching released" \
   'wait_log "sourcesPersistFailed" 3 && [[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''switching'\'']")" == false ]]'
-check "no omarchy bar argv fallback in the log" '! grep -q "omarchy bar" "$LOG"'
+check "no omarchy bar argv fallback in the log" 'log_lacks "omarchy bar"'
 ipc failPersist false >/dev/null
 res=$(ipc switchSource "$K2"); wait_log "sourceSwitched .*\"id\":\"$K2\"" 10 || bad "switch after failPersist false did not complete"
 check "switch works again once the host accepts" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" ]]'
@@ -338,7 +348,7 @@ esac
 # The residue A4 names and the plan's fix does not close: a leak on a line
 # that carries none of the three labels. Separate check, so that a red here is
 # diagnosable rather than conflated with the labelled sweep above.
-check "no credentialed URL anywhere in the harness log" '! grep -qaE "://[^ ]*[@?]" "$LOG"'
+check "no credentialed URL anywhere in the harness log" 'log_lacks "://[^ ]*[@?]"'
 # :292 and :144 passed outright when the IPC was dead, because ipc() swallows
 # stderr and an empty answer contains no "://". An empty answer is vacuous.
 state_answer=$(ipc state)

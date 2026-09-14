@@ -136,13 +136,10 @@ note()    { printf 'NOTE: %s\n' "$*"; }
 head1()   { printf '\n===== %s =====\n' "$*"; }
 
 ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
-svc()  { python3 -c '
-import json, sys
-try: d = json.loads(sys.argv[2])["service"]
-except Exception: print(""); raise SystemExit(0)
-try: v = eval(sys.argv[1])
-except Exception: v = None
-print(json.dumps(v) if isinstance(v, bool) else ("" if v is None else v))' "$1" "$(ipc state)" 2>/dev/null; }
+# F1's shape, in the helpers CL7's conversion will wire up next round: this
+# printed "" for a dead IPC, for an absent field and for a healthy "unset"
+# alike. Fixed here so the conversion does not inherit it.
+svc()  { qa_field "$1" "$(ipc state)"; }
 wins() { hyprctl clients -j 2>/dev/null | jq '[.[]|select(.class=="omarchy-iptv")]|length' 2>/dev/null || echo 0; }
 mpvq() { printf '%s\n' "$1" | socat -t2 - "UNIX-CONNECT:$SOCK" 2>/dev/null | head -1; }
 
