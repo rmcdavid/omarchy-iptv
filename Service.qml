@@ -554,6 +554,21 @@ Item {
       lastUpdated: root.lastUpdated,
       playing: root.playing,
       nowPlaying: root.nowPlaying,
+      // Additive, and URL-free by construction: channel ids, a clock time
+      // and booleans. The detached player can only be verified from outside
+      // the shell now, so the acceptance gates need the observer's own view
+      // (`playing` alone cannot distinguish a birth edge from an attached
+      // socket), and the session failure marks the guide paints red.
+      failedAt: root.failedAt,
+      player: {
+        up: root.playerUp,
+        pending: root.playerPending,
+        attached: root.socketAttached(),
+        wanted: root.playerWanted,
+        stopping: root.stopping,
+        seq: root.playSeq,
+        entryId: root.currentEntryId
+      },
       favorites: root.userState.favorites.length,
       recents: root.userState.recents.length,
       epg: { configured: root.epgConfigured, loaded: root.epgLoaded, pending: root.epgPending, reason: root.epgReason, warnings: root.epgWarnings },
