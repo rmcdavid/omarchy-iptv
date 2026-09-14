@@ -582,6 +582,14 @@ def unique_label(label: str, existing: list[str]) -> str:
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')
 _ATTR_BARE = re.compile(r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)')
 
+# Channel-number attributes, in precedence order (M2-03 1.1, ruling CN11).
+# `tvg-chno` is what every asset in this repo uses; the two aliases are read
+# because a playlist that HAS numbers and silently shows none is the worst
+# failure this feature can have, and there is no error for the user to search
+# for. Keys arrive lower-cased from parse_attrs, so the match is
+# case-insensitive, and both the quoted and the bare form are already handled.
+CHNO_ATTRS = ("tvg-chno", "tvg-channel-number", "channel-number")
+
 
 def parse_attrs(text: str) -> tuple[dict[str, str], str]:
     """Parse `key="value" key2=value ...` from the start of `text`.
@@ -651,6 +659,25 @@ def split_groups(value: str) -> list[str]:
     return groups
 
 
+def channel_number(attrs: dict[str, str]) -> str:
+    """The first non-empty channel-number attribute, whitespace-trimmed.
+
+    Normalization stops here, deliberately (M2-03 1.1-1.2): which ATTRIBUTE
+    carries the number and what an empty one means is the helper's business,
+    what the number MEANS is Model.parseChno's. So the value is stored
+    verbatim after `.strip()` - leading zeros, `.` / `-` subchannel
+    separators, `N/A` and everything else reach channels.json as written,
+    and one implementation decides that 007 is channel 7 (rule: one rule,
+    one place). Returns "" when no attribute carries one, and the caller
+    omits the key entirely so a reader can tell "no number" from "empty".
+    """
+    for key in CHNO_ATTRS:
+        value = attrs.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
 def clean_name(value: str) -> str:
     """Display-name candidate: never starts with "-" (S-04). The name is an
     argv item for omarchy-notification-send, where "--urgency=x did not play"
@@ -685,7 +712,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     logo = attrs.get("tvg-logo", "").strip()
     if logo and stream_scheme(logo) in ("http", "https"):
         channel["logo"] = logo
-    chno = attrs.get("tvg-chno", "").strip()
+    chno = channel_number(attrs)
     if chno:
         channel["chno"] = chno
 

@@ -382,6 +382,78 @@ def run_main(*args):
     return code, json.loads(out.getvalue().strip().splitlines()[-1])
 
 
+class ChannelNumberTest(unittest.TestCase):
+    """M2-03 (channel numbers), section 1.1 and ruling CN11: which attribute
+    carries the number, and what reaches channels.json.
+
+    The helper decides the ATTRIBUTE and nothing else. Normalization (leading
+    zeros, `.` / `-` subchannel separators, ranges, non-numeric junk) belongs
+    to Model.parseChno, so every assertion below is about a value arriving
+    VERBATIM after .strip(), never about what it means."""
+
+    def parse(self, name):
+        return helper.parse_m3u((FIXTURES / name).read_bytes().decode("utf-8"))
+
+    def numbers(self, name):
+        """name -> chno, with the key's absence preserved as None."""
+        return {c["name"]: c.get("chno") for c in self.parse(name)["channels"]}
+
+    def test_channel_number_reads_the_main_attribute_first(self):
+        self.assertEqual(helper.channel_number({"tvg-chno": "12"}), "12")
+        self.assertEqual(helper.channel_number(
+            {"tvg-chno": "12", "tvg-channel-number": "99", "channel-number": "88"}), "12")
+
+    def test_channel_number_falls_through_to_the_aliases_in_order(self):
+        # CN11: the failure this prevents is a playlist that HAS numbers and
+        # silently shows none, with no error for the user to search for.
+        self.assertEqual(helper.channel_number({"tvg-channel-number": "101"}), "101")
+        self.assertEqual(helper.channel_number({"channel-number": "102"}), "102")
+        self.assertEqual(helper.channel_number(
+            {"tvg-channel-number": "101", "channel-number": "102"}), "101")
+
+    def test_channel_number_treats_empty_and_blank_as_absent(self):
+        self.assertEqual(helper.channel_number({}), "")
+        self.assertEqual(helper.channel_number({"tvg-chno": ""}), "")
+        self.assertEqual(helper.channel_number({"tvg-chno": "   "}), "")
+        # An empty main attribute must not mask a real alias.
+        self.assertEqual(helper.channel_number({"tvg-chno": "", "channel-number": "203"}), "203")
+
+    def test_channel_number_strips_but_never_normalizes(self):
+        self.assertEqual(helper.channel_number({"tvg-chno": "  007  "}), "007")
+        self.assertEqual(helper.channel_number({"tvg-chno": "8-1"}), "8-1")
+        self.assertEqual(helper.channel_number({"tvg-chno": "N/A"}), "N/A")
+
+    def test_aliases_reach_channels_json(self):
+        numbers = self.numbers("qa-chno.m3u")
+        self.assertEqual(numbers["Alias Tvg Channel Number"], "101")
+        self.assertEqual(numbers["Alias Channel Number"], "102")
+        self.assertEqual(numbers["Main Wins Over Alias"], "201")
+        self.assertEqual(numbers["First Alias Wins"], "202")
+        self.assertEqual(numbers["Empty Main Falls Through"], "203")
+
+    def test_every_written_form_arrives_verbatim(self):
+        numbers = self.numbers("qa-chno.m3u")
+        self.assertEqual(numbers["Bare Twelve"], "12")            # bare attribute
+        self.assertEqual(numbers["Quoted Thirteen"], "13")        # quoted attribute
+        self.assertEqual(numbers["Upper Case Attribute"], "14")   # TVG-CHNO=
+        self.assertEqual(numbers["Padded Fifteen"], "15")         # stripped
+        self.assertEqual(numbers["Leading Zeros"], "007")         # NOT normalized here
+        self.assertEqual(numbers["Dot Subchannel"], "7.1")
+        self.assertEqual(numbers["Dash Subchannel"], "8-1")       # NOT canonicalized here
+        self.assertEqual(numbers["Duplicate Twelve"], "12")       # duplicates are legal
+        self.assertEqual(numbers["Not A Number"], "N/A")          # CN6 judges it, not the helper
+
+    def test_no_number_means_no_key_at_all(self):
+        # "empty" and "absent" must be indistinguishable to a reader, so that
+        # `"chno" in channel` is a usable test on the QML side.
+        result = self.parse("qa-chno.m3u")
+        by_name = {c["name"]: c for c in result["channels"]}
+        for name in ("Empty Number", "Whitespace Number", "No Number Attribute"):
+            self.assertNotIn("chno", by_name[name], name)
+        self.assertEqual(result["warnings"], [])
+        self.assertEqual(len(result["channels"]), 17)
+
+
 class PerformanceTest(unittest.TestCase):
     def test_10k_entries_parse_and_write_under_one_second(self):
         with tempfile.TemporaryDirectory() as tmp:

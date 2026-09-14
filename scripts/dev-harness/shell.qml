@@ -22,6 +22,9 @@ import "Model.js" as Model
 //   OMARCHY_IPTV_VERTICAL   "1" fakes a vertical bar
 //   OMARCHY_IPTV_SHOW_NAME  "false" hides the bar label
 //   OMARCHY_IPTV_LABEL_MAX  barLabelMaxWidth setting
+//   OMARCHY_IPTV_ORDER      channelOrder setting ("playlist" | "number")
+//   OMARCHY_IPTV_ENTRY_MS   numberEntryMs setting
+//   OMARCHY_IPTV_BAR_NUMBER "false" hides the channel number in the bar
 //
 // Drive it with `run.sh ipc <fn> [args]` (IpcHandler target "harness").
 ShellRoot {
@@ -48,7 +51,14 @@ ShellRoot {
     mpvArgs: Quickshell.env("OMARCHY_IPTV_MPV_ARGS") || "",
     showChannelName: Quickshell.env("OMARCHY_IPTV_SHOW_NAME") !== "false",
     maxRecents: 10,
-    barLabelMaxWidth: parseInt(Quickshell.env("OMARCHY_IPTV_LABEL_MAX") || "180", 10)
+    barLabelMaxWidth: parseInt(Quickshell.env("OMARCHY_IPTV_LABEL_MAX") || "180", 10),
+    // M2-03. Seeded like every other key so `set`/`setStored` drive the same
+    // path at runtime; the defaults match manifest.json exactly, because a
+    // harness that is more generous than the real entry is the fake this
+    // project has been bitten by (CLAUDE.md rule 10).
+    channelOrder: Quickshell.env("OMARCHY_IPTV_ORDER") || "playlist",
+    numberEntryMs: parseInt(Quickshell.env("OMARCHY_IPTV_ENTRY_MS") || "1500", 10),
+    barShowChannelNumber: Quickshell.env("OMARCHY_IPTV_BAR_NUMBER") !== "false"
   })
   // What the host has actually stored (the shell.json truth), as opposed to
   // what it has published to the plugin, which can lag it by one write.
@@ -384,6 +394,27 @@ ShellRoot {
       var s = serviceLoader.item
       return s && s.play(String(id), true, "") ? "ok" : "no"
     }
+    // ---- channel numbers (M2-03). `channel` is a PASSTHROUGH to the service
+    // function the plugin's own IPC verb calls, not a second implementation
+    // of it: a scenario that drove a copy would prove nothing about the verb
+    // a user runs (CLAUDE.md rule 12). A pre-change service has no
+    // tuneByNumber, and the scenario has to run against one to show its
+    // checks failing there first, so the absence answers rather than throws.
+    function channel(n: string): string {
+      var s = serviceLoader.item
+      if (!s || typeof s.tuneByNumber !== "function") return JSON.stringify({ ok: false, kind: "channel", error: { code: "no_verb" } })
+      return JSON.stringify(s.tuneByNumber(String(n)))
+    }
+    // The channel-number index, counts only: no names, no ids, no URLs.
+    function chnoIndex(): string {
+      var s = serviceLoader.item
+      var ix = s ? s.chnoIndex : null
+      if (!ix) return JSON.stringify({ hasNumbers: null, count: null, duplicates: null, maxLabelLen: null })
+      return JSON.stringify({ hasNumbers: ix.hasNumbers === undefined ? null : ix.hasNumbers,
+                              count: ix.count === undefined ? null : ix.count,
+                              duplicates: ix.duplicates === undefined ? null : ix.duplicates,
+                              maxLabelLen: ix.maxLabelLen === undefined ? null : ix.maxLabelLen })
+    }
     function stop(): string { if (serviceLoader.item) serviceLoader.item.stop(); return "ok" }
     function refresh(): string { if (serviceLoader.item) serviceLoader.item.refresh(); return "ok" }
     function zap(delta: int): string { return serviceLoader.item && serviceLoader.item.zap(delta) ? "ok" : "no" }
@@ -460,7 +491,12 @@ ShellRoot {
     function widget(): string {
       var w = barLoader.item
       if (!w) return "{}"
-      return JSON.stringify({ service: w.service !== null, glyph: w.glyph, label: w.showLabel ? w.nowPlayingName : "", tooltip: w.tooltip, width: w.implicitWidth })
+      // `number` is what the bar actually DRAWS (so barShowChannelNumber
+      // false and a vertical bar both report ""), `chno` what it knows.
+      return JSON.stringify({ service: w.service !== null, glyph: w.glyph, label: w.showLabel ? w.nowPlayingName : "",
+                              number: w.showNumber === true ? String(w.nowPlayingChno) : "",
+                              chno: w.nowPlayingChno === undefined ? null : String(w.nowPlayingChno),
+                              tooltip: w.tooltip, width: w.implicitWidth })
     }
     function state(): string {
       var g = guideLoader.item
@@ -507,6 +543,12 @@ ShellRoot {
         out.service.cacheLayout = s.userState.cacheLayout
         out.service.sourceCount = s.sourceCount
         out.service.canAddSource = s.canAddSource
+        // M2-03. statusSummary() already carries hasNumbers and channelOrder
+        // on a current service; these are the settings as the SERVICE read
+        // them, which is what a `set channelOrder number` scenario watches.
+        out.service.numberEntryMs = s.numberEntryMs === undefined ? null : s.numberEntryMs
+        out.service.barShowChannelNumber = s.barShowChannelNumber === undefined ? null : s.barShowChannelNumber
+        out.service.nowPlayingChno = s.nowPlayingChno === undefined ? null : s.nowPlayingChno
         out.service.persistFails = harness.persistFails
       }
       return JSON.stringify(out)
