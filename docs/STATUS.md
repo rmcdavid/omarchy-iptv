@@ -86,7 +86,7 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
 | M2-01 | Sources screen: in-guide playlist entry, source history, per-source cache, Xtream form (docs/M2-SOURCES.md) | PO+UX+ARCH -> FE -> QA | done | fix round merged d50e364 (QA regression 10/10, 190/196 pass); released as v0.2.0; the live-shell runbook on ec4f702 found two P1s (D-LIVE-20/21), fixed at 845d445 and both verified fixed on the live shell with their original repros (QA-RESULTS "P1 fix verification on 845d445"). 0 open P1/P2; awaiting the v0.2.1 tag |
-| M2-02 | Detached player: survives `omarchy restart shell`, no stream URL on any command line (docs/ARCHITECTURE-PLAYER.md) | ARCH -> FE -> QA | todo | design accepted 2026-09-14 with rulings PO-1..PO-7; every acceptance gate is a live-shell gate |
+| M2-02 | Detached player: survives `omarchy restart shell`, no stream URL on any command line (docs/ARCHITECTURE-PLAYER.md) | ARCH -> FE -> QA | doing | design accepted with PO-1..PO-7; gate PA-0 passed on real mpv and gate PB-0 (docs/SPIKE-QUICKSHELL-SOCKET.md) withdrew the prescribed socket shape, amended in section 13; lane PA merged 5fc9927 (URL, headers and title off argv, S-03 closed in the argv builder); lane PB in flight; every acceptance gate is live-shell |
 | M2-02x | Multiple playlists | - | superseded by M2-01 (PO-7) | the source history is the multi-playlist model; the M2-02 id now means the detached player |
 | M2-03 | Channel numbers + numeric zap | - | todo | |
 | M2-04 | Channel logos | - | todo | |
