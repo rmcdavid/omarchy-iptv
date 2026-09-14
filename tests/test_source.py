@@ -149,6 +149,16 @@ class ValidateSourceUrlTest(unittest.TestCase):
                            ("..", "relative_path"), ("./list.m3u", "relative_path"), ("../tv/list.m3u", "relative_path")):
             self.assertEqual(helper.validate_source_url(text)["code"], code, text)
 
+    def test_line_separator_inside_a_url_is_invalid_not_scheme(self):
+        # D-SRC-06: U+2028 / U+2029 after `http://` are whitespace for the
+        # validator (parity with Model.js [\s\S]* + the \s rule), so the
+        # message is `invalid`, never "Start with http://...".
+        for sep in (" ", " "):
+            result = helper.validate_source_url("http://h.test/a%sb" % sep)
+            self.assertEqual(result["code"], "invalid", repr(sep))
+            self.assertEqual(helper.validate_source_url("http://h.test/a%sb" % sep, origin="cli")["code"], "invalid", repr(sep))
+        self.assertEqual(helper.validate_source_url("http://h.test/a b")["url"], "")
+
     def test_authority_parity_rules(self):
         # SR15: the checks QA listed, mirrored from Model.validateSourceUrl.
         for text in ("http://h.test:65536/x", "http://[1.2.3.4]/x", "http://[zz::1]/x", "http://[::1]x/", "http://[::1/x",
@@ -398,6 +408,35 @@ class StateV2Test(unittest.TestCase):
         sources = [dict(SOURCE, key="%08x" % n, url="http://h%d.test/" % n) for n in range(60)]
         state = helper.normalize_state({"version": 2, "sources": sources})
         self.assertEqual(len(state["sources"]), helper.MAX_SOURCES)
+
+    def test_control_characters_in_urls_drop_or_clear_with_a_redacted_log_line(self):
+        # D-SRC-09 (SRC-SEC-21): a NUL inside `url` drops the record (the
+        # validator would strip it and keep a record whose key no longer
+        # matches), one inside `epgUrl` clears that field; stderr names the
+        # key only, never the URL.
+        self.write({"version": 2, "cacheLayout": 2, "favorites": [], "recents": [], "lastPlayed": None, "sources": [
+            dict(SOURCE, key="deadbeef", url="http://127.0.0.1:9/c\x00d.m3u"),
+            dict(SOURCE, key="deadbee1", url="/srv/tv/a\rb.m3u"),
+            dict(SOURCE, key="deadbee2", url="http://h.test/ok.m3u", epgUrl="http://e.test/\x00x.xml"),
+            SOURCE,
+        ]})
+        code, payload, stderr = self.state("show")
+        self.assertEqual(code, 0)
+        self.assertEqual([s["key"] for s in payload["state"]["sources"]], ["deadbee2", "d5977d8a"])
+        self.assertEqual(payload["state"]["sources"][0]["epgHost"], "")
+        self.assertIn("dropped source deadbeef (control characters in url)", stderr)
+        self.assertIn("dropped source deadbee1 (control characters in url)", stderr)
+        self.assertIn("cleared the epgUrl of source deadbee2", stderr)
+        for needle in ("127.0.0.1:9", "d.m3u", "e.test", "/srv/tv", "\x00"):
+            self.assertNotIn(needle, stderr)
+        self.assertNotIn("\x00", json.dumps(payload))
+        # Pure function, same verdict without the CLI (its log line captured).
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            state = helper.normalize_state({"version": 2, "sources": [dict(SOURCE, key="deadbeef", url="http://h.test/a\x00b")]})
+        self.assertEqual(state["sources"], [])
+        self.assertIn("dropped source deadbeef", err.getvalue())
+        self.assertNotIn("h.test", err.getvalue())
 
 
 class StateSourceCommandTest(unittest.TestCase):

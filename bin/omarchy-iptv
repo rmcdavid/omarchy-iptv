@@ -150,8 +150,10 @@ _CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
 # Mirrors Model.sanitizeInput: C0 controls, DEL and C1 controls are dropped.
 _CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.S)
-# Model.validateSourceUrl's scheme match: JS `.` stops at CR, LF, U+2028 and U+2029.
-_SOURCE_SCHEME_RE = re.compile("^([A-Za-z][A-Za-z0-9+.\\-]*):([^\\n\\r\u2028\u2029]*)$")
+# Model.validateSourceUrl's scheme match ([\s\S]* there): a line separator
+# after the scheme is caught by the whitespace rule (`invalid`, D-SRC-06),
+# never read as a missing scheme.
+_SOURCE_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.S)
 _AUTHORITY_END = re.compile(r"[/?#]")
 _BARE_HOST_CHARS = re.compile(r"[:\[\]]")
 _ASCII_DIGITS = re.compile(r"^[0-9]+$")
@@ -1940,11 +1942,13 @@ def cache_remove(directory: str, key: str) -> dict[str, Any]:
 
 def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age: float) -> dict[str, Any]:
     """Delete every sources/<key> not in `keep`; age the EPG files of kept,
-    non-active keys older than `epg_max_age` seconds. Names that are not
-    keys (and symlinks) are skipped, never touched."""
+    non-active keys older than `epg_max_age` seconds. The `active` key is
+    implicitly kept (D-SRC-07): the active source's directory is never
+    removed, listed under `keep` or not. Names that are not keys (and
+    symlinks) are skipped, never touched."""
     keep_set = {check_source_key(item) for item in keep}
     if active:
-        check_source_key(active)
+        keep_set.add(check_source_key(active))
     root = sources_root(directory)
     ensure_private_dir(root)
     removed: list[str] = []
@@ -2028,7 +2032,12 @@ def non_negative_int(value: Any) -> int:
 
 
 def normalize_source(raw: Any) -> dict[str, Any] | None:
-    """One history record per the section 2.1 field rules; None drops it."""
+    """One history record per the section 2.1 field rules; None drops it.
+    A `url` with a control character (NUL, CR, ...) drops the record with a
+    log line naming the key only (D-SRC-09, mirrors Model.parseState); the
+    validator would otherwise strip the character and keep a record whose
+    key no longer matches its URL. The same character in `epgUrl` clears
+    that field only."""
     if not isinstance(raw, dict):
         return None
     key = raw.get("key")
@@ -2037,10 +2046,18 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
     url = raw.get("url")
     if not isinstance(url, str):
         return None
+    if _CONTROL_CHARS.search(url):
+        log("state: dropped source %s (control characters in url)" % key)
+        return None
     playlist = validate_source_url(url, origin="cli")
     if not playlist["ok"]:
+        log("state: dropped source %s (invalid url: %s)" % (key, playlist["code"]))
         return None
-    epg = validate_source_url(raw.get("epgUrl"), origin="cli") if isinstance(raw.get("epgUrl"), str) else None
+    raw_epg = raw.get("epgUrl")
+    if isinstance(raw_epg, str) and _CONTROL_CHARS.search(raw_epg):
+        log("state: cleared the epgUrl of source %s (control characters)" % key)
+        raw_epg = ""
+    epg = validate_source_url(raw_epg, origin="cli") if isinstance(raw_epg, str) else None
     # SR22: the helper truncates an over-cap label on read, never errors.
     label = cap_code_points(sanitize_input(raw.get("label"), MAX_SOURCE_URL), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
     origin = raw.get("origin")
