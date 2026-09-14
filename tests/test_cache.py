@@ -238,6 +238,25 @@ class PruneTest(CacheTestCase):
             self.assertEqual(payload["error"]["code"], "bad_key", args)
         self.assertEqual(self.names(self.sources / KEY), sorted(FILES))
 
+    def test_active_key_is_kept_even_when_not_listed(self):
+        # D-SRC-07 (SRC-HELP-07): `--active` is implicitly kept; its EPG
+        # files are still never aged.
+        active = self.seed(self.sources / "11111111", age=2 * 86400)
+        self.seed(self.sources / "22222222", age=2 * 86400)
+        self.seed(self.sources / "33333333")
+        self.seed(self.sources / "44444444")
+        code, payload, _ = self.cache_cmd("prune", "--keep", "22222222", "33333333", "--active", "11111111", "--epg-max-age", "86400")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["removed"], ["44444444"])
+        self.assertEqual(payload["agedEpg"], ["22222222"])
+        self.assertEqual(self.names(self.sources), ["11111111", "22222222", "33333333"])
+        self.assertEqual(self.names(active), sorted(FILES))
+        # `--active` alone (no --keep) keeps just that key.
+        code, payload, _ = self.cache_cmd("prune", "--active", "11111111")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["removed"], ["22222222", "33333333"])
+        self.assertEqual(self.names(self.sources), ["11111111"])
+
     def test_symlinked_key_dirs_are_skipped(self):
         victim = pathlib.Path(self.tmp.name) / "victim"
         self.seed(victim)

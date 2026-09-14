@@ -248,6 +248,26 @@ Item {
   property string pendingProbeId: ""
   property string pendingCursorId: ""
   property string switchPendingId: ""
+  // D-SRC-04: Enter / Space on a never-fetched source probes first (SR7).
+  // `switchPendingLeave` remembers that Enter leaves Sources once the switch
+  // happened; while the probe runs the footer's status slot reads
+  // `Fetching from <host>...` (derived, so an IPC-started probe shows too)
+  // and a failure lands in `sourcesNotice`, the Sources result line, until
+  // the next Sources event (SR26).
+  property bool switchPendingLeave: false
+  property string sourcesNotice: ""
+  readonly property string sourcesProbeText: {
+    if (!root.inSources || !root.probing || root.formActive) return ""
+    var id = root.serviceReady && root.service.probingId !== undefined ? String(root.service.probingId || "") : ""
+    var view = root.findSourceView(id)
+    return view ? Model.fetchingLine(view.host, view.kind) : ""
+  }
+  // D-SRC-06: a configured URL the validator refused (CLI, SR8) renders the
+  // UX 5.4 sentence alone, no host and no `r` hint (nothing to retry).
+  readonly property string invalidSettingsText: {
+    if (!root.serviceReady || root.service.settingsInvalid === undefined || !root.service.settingsInvalid) return ""
+    return Model.sourceErrorMessage(String(root.service.settingsInvalid.code || "invalid"))
+  }
   // D9: Qt's clipboard through the TextField is the paste path. Flip to
   // true only if harness scenario H4 finds the layer-shell surface pastes
   // empty; the service's wl-paste verb (requestClipboard / clipboardText)
@@ -274,6 +294,9 @@ Item {
     return view ? Model.confirmRemoveMessage(view.label, view.active) : ""
   }
 
+  // The Sources result line lives with the list (Esc, `o`, a form or the
+  // confirm dialog all leave it behind).
+  onInSourcesChanged: if (!root.inSources) root.sourcesNotice = ""
   onFormFocusChanged: if (root.formActive) Qt.callLater(root.focusFormItem)
   onFormActiveChanged: if (root.opened) root.refocus()
   onFormProbingChanged: if (root.opened && root.formActive) root.refocus()
@@ -344,7 +367,7 @@ Item {
   readonly property string warningText: root.serviceReady ? Model.warningLine(root.service.playlistWarnings) : ""
 
   readonly property string footerStatusText: Model.footerStatus({
-    transient: root.transientText,
+    transient: root.transientText !== "" ? root.transientText : (root.sourcesProbeText !== "" ? root.sourcesProbeText : root.sourcesNotice),
     configured: root.configured,
     truncated: root.truncated,
     resultTotal: root.resultTotal,
@@ -366,7 +389,7 @@ Item {
     var empty = ""
     if (root.emptyKind === "loading") empty = "loading"
     else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service") empty = "error"
-    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, cursorKind: root.sourceCursorKind, form: root.form })
+    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form })
     var out = []
     for (var i = 0; i < pairs.length; i++) {
       out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
@@ -399,6 +422,8 @@ Item {
     root.pendingProbeId = ""
     root.pendingCursorId = ""
     root.switchPendingId = ""
+    root.switchPendingLeave = false
+    root.sourcesNotice = ""
     root.opened = true
     root.disarmPointer()
     root.rebuildDisplay()
@@ -564,6 +589,8 @@ Item {
   }
 
   function showTransient(text) {
+    // A new event supersedes the Sources result line (D-SRC-04).
+    root.sourcesNotice = ""
     root.transientText = text
     transientTimer.restart()
   }
@@ -778,6 +805,7 @@ Item {
   }
 
   function leaveSources() {
+    root.sourcesNotice = ""
     root.setGuide(Model.closeSources(root.guide, { configured: root.configured }))
     if (root.guideMode) root.rebuildDisplay()
     root.refocus()
@@ -849,6 +877,18 @@ Item {
       return
     }
     root.switchPendingId = String(view.id)
+    root.sourcesNotice = ""
+    if (Number(view.channelCount) < 0) {
+      // Never fetched: the service probes first and commits the switch only
+      // on success (SR7). The footer reads `Fetching from <host>...` meanwhile
+      // (sourcesProbeText); showSwitched shows the transient and leaves
+      // Sources once the switch happened, onSwitchProbeFinished reports a
+      // failure on the result line with the previous source still active
+      // (D-SRC-04).
+      root.switchPendingLeave = !stay
+      return
+    }
+    root.switchPendingLeave = false
     root.showTransient(Model.sourceTransient("switched", { label: view.label, channelCount: view.channelCount }))
     if (stay) {
       // The check glyph moves at once; the list re-sorts, the cursor follows.
@@ -875,9 +915,17 @@ Item {
   function showSwitched(id) {
     if (root.switchPendingId === "" || String(id) !== root.switchPendingId) return
     root.switchPendingId = ""
+    var leave = root.switchPendingLeave
+    root.switchPendingLeave = false
     var view = root.findSourceView(id)
     var count = root.serviceReady ? root.service.channels.length : -1
     root.showTransient(Model.sourceTransient("switched", { label: view ? view.label : root.activeSourceLabel, channelCount: count }))
+    // A switch that probed first (D-SRC-04) finishes here: Enter leaves
+    // Sources now, Space keeps the cursor on the row the re-sort moved.
+    if (!root.inSources) return
+    if (leave) { root.leaveToGuide(); return }
+    root.pendingCursorId = String(id)
+    root.syncSourceCursor()
   }
 
   // The service's `configured` flipped while the guide is open: the CLI
@@ -1028,9 +1076,10 @@ Item {
   // sourceProbeFinished({ ok, id, channelCount, groupCount, reason, host }) (SR3).
   function onProbeFinished(result) {
     var r = result || {}
-    if (!root.opened || !root.formActive || !root.formProbing) return
+    if (!root.opened) return
     var id = String(r.id !== undefined && r.id !== null ? r.id : (r.sourceId !== undefined ? r.sourceId : ""))
-    if (root.pendingProbeId !== "" && id !== "" && id !== root.pendingProbeId) return
+    var formProbe = root.formActive && root.formProbing && !(root.pendingProbeId !== "" && id !== "" && id !== root.pendingProbeId)
+    if (!formProbe) { root.onSwitchProbeFinished(r, id); return }
     if (r.cancelled === true) {
       // UX-SOURCES 5.5: no line, the form thaws with its values.
       root.pendingProbeId = ""
@@ -1045,6 +1094,22 @@ Item {
     }
     var field = root.form.kind === "xtream" ? "server" : "playlist"
     root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind) })
+  }
+
+  // A probe outside a form: Enter / Space on a never-fetched source, or an
+  // IPC switch / retry (D-SRC-04). Success continues in showSwitched once
+  // the service committed the switch; a failure becomes the Sources result
+  // line (`<reason> from <host>`, UX 5.5) while the previous source stays
+  // active (SR7, SR26). A cancelled probe leaves no line.
+  function onSwitchProbeFinished(r, id) {
+    if (r.ok === true) return
+    if (root.switchPendingId !== "" && id === root.switchPendingId) {
+      root.switchPendingId = ""
+      root.switchPendingLeave = false
+    }
+    if (r.cancelled === true || !root.inSources) return
+    var view = root.findSourceView(id)
+    root.sourcesNotice = Model.probeFailureLine(r.reason, String(r.host || ""), view ? String(view.kind) : "url")
   }
 
   // Leave the form after a successful save: first run lands in the guide
@@ -2035,6 +2100,9 @@ Item {
               if (root.emptyKind === "unconfigured") return root.copy.unconfiguredProse
               if (root.emptyKind === "loading") return root.service.sourceHost !== "" ? root.copy.loadingFrom + root.service.sourceHost : root.copy.loadingProse
               if (root.emptyKind === "error") {
+                // D-SRC-06: an invalid configured URL shows the UX 5.4
+                // sentence alone (no host: nothing was contacted).
+                if (root.invalidSettingsText !== "") return root.invalidSettingsText
                 if (emptyState.emptyPlaylist) return root.copy.emptyPlaylistProse + root.service.statusHost + Model.SEP + root.copy.emptyPlaylistCheck
                 return root.service.statusReason + " from " + root.service.statusHost + Model.SEP + root.copy.errorCheck
               }
