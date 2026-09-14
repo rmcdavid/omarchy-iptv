@@ -60,6 +60,13 @@ Item {
   readonly property int playerSocketRetryMs: 250   // reattach tick
   readonly property int playerSocketTries: 12      // burst cap: 12 x 250 ms = 3 s (C6)
   readonly property int playerTimeoutMs: 12 * 1000 // watchdog for one player verb
+  // Watchdog for one `play` or `status` helper run. `controlProc` was the
+  // only one of the four Processes without one, and it is the one that holds
+  // the single control slot: a helper that never exits blocks every later
+  // zap and every health check for the rest of the session. Generous next to
+  // a ~130 ms run and next to the helper's own --ipc-timeout, because this
+  // is the belt and braces, not the deadline.
+  readonly property int controlTimeoutMs: 8 * 1000
   readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
   readonly property int stopSettleMs: 5 * 1000     // backstop that clears `stopping` (4.10)
   readonly property int focusRetryMs: 500
@@ -264,6 +271,14 @@ Item {
   readonly property int relaunchDelayMs: 200
   readonly property int playRetryBaseMs: 300
   readonly property int playRetryMax: 3        // 300 + 600 + 900 ms = 1.8 s
+  // D-PLY-11. The health tick can finally see which channel the player is
+  // on, so a label that has diverged from it is repaired by re-applying the
+  // user's intent (ruling CL5). Bounded, and reset by every play(): a player
+  // that will not take the channel must not be re-zapped once a tick for the
+  // rest of the session - two attempts and then the divergence is reported
+  // and left alone, which is still strictly better than never noticing.
+  property int channelRepairs: 0
+  readonly property int channelRepairMax: 2
   // 4.10: the intent sequence number. Service.qml is its only issuer; the
   // helper only compares and records it, so a `stop` and a `play` that reach
   // two detached helpers out of order still execute in the order the user
@@ -362,8 +377,13 @@ Item {
     }
     var key = Model.channelId(channel)
     // Enter on the row already playing: no reload, just focus (UX 8 #4).
-    // A false negative here only costs one redundant `player start`, which
-    // adopts the live player and re-zaps it (4.7).
+    // A false negative here costs one redundant `player start`, which adopts
+    // the live player and re-zaps it (4.7). It is cheap, not free: an
+    // adopting start re-applies its own channel over anything that landed
+    // while it was adopting, and nothing orders the two (D-PLY-11 T-A, and
+    // ruling CL4 withholds the instrument that would). That ordering has
+    // never been observed to fire - 0 in 30 live bursts - but "only costs"
+    // overstated what is known and it is corrected here.
     if (root.playerUp && root.nowPlaying && root.nowPlaying.id === key) {
       // Re-selected from another list: the zap ring follows the list the
       // user is in (UX 3.4, D-LIVE-12). A new object so bindings notice.
@@ -411,11 +431,24 @@ Item {
     root.deadSessionPending = false
     root.saveState()
     root.wantFocus = !keepOpen
-    // The fork is never a correctness gate (F2): `player start` is
-    // idempotent - it adopts a live player and zaps it - so the worst a
-    // wrong answer costs is one extra 130 ms helper run. While `stopping`
-    // is true we always take the start branch, so a zap can never be
-    // written to a socket that is being torn down (4.10).
+    root.channelRepairs = 0             // a new intent, a fresh repair budget
+    // The fork (Model.playFork). `player start` is idempotent - it adopts a
+    // live player and zaps it - so a wrong answer costs one extra ~130 ms
+    // helper run. It was recorded here that the fork is "never a correctness
+    // gate"; that was asserted, never measured, and it is now known to be
+    // too strong. `playerPending` makes `playerUp` true synchronously, so
+    // every call after the first in a COLD burst takes the zap branch and
+    // aims at a socket mpv has not bound yet; wave two measured what happens
+    // when one of those lands and the cold start then applies its own
+    // channel over it - ten user-visible divergences in twenty cold bursts.
+    // The fork stays as it is (a zap aimed at a socket that is about to
+    // exist is how a burst stays responsive, and ruling CL4 withholds the
+    // instrument that would order the two slots); what was fixed is the far
+    // end, where the start now stands down instead of overwriting, and this
+    // shell re-applies its intent when the two disagree.
+    //
+    // While `stopping` is true we always take the start branch, so a zap can
+    // never be written to a socket that is being torn down (4.10).
     if (root.playerUp && !root.stopping) {
       if (controlProc.running) {
         // A zap burst: remember only the last target, applied when the
@@ -434,17 +467,11 @@ Item {
   // `play --id ... --scope ... --since ...`: the additive session flags make
   // a zap refresh the now-playing stash inside mpv, which is what lets a
   // shell restart recover the channel the user last switched TO rather than
-  // the one the player was started with (4.6, requirement 11).
+  // the one the player was started with (4.6, requirement 11). The rule is
+  // Model.zapArgs (CLAUDE.md 12) - it was the one argv builder still spelled
+  // here, and the decision it makes reaches all the way into the helper.
   function playArgs(key) {
-    var np = root.nowPlaying
-    var args = ["play", "--id", String(key), "--socket", root.socketPath, "--cache-dir", root.activeCacheDir]
-    if (np && np.id === key) {
-      var scope = String(np.launchedFrom || "")
-      if (scope !== "") args = args.concat(["--scope", scope])
-      var since = Math.floor(Number(np.since) || 0)
-      if (since > 0) args = args.concat(["--since", String(since)])
-    }
-    return args
+    return Model.zapArgs(root.socketPath, root.activeCacheDir, key, root.nowPlaying)
   }
 
   // The UI contract is unchanged: nowPlaying and the timers clear
@@ -466,6 +493,7 @@ Item {
     playerSocketTimer.stop()
     root.relaunchPending = false
     root.playRetries = 0
+    root.channelRepairs = 0
     root.nowPlaying = null
     root.userStopped = true
     root.playerPending = false
@@ -951,10 +979,12 @@ Item {
     root.controlKind = kind
     controlProc.command = ["python3", root.helperPath].concat(args)
     controlProc.running = true
+    controlWatchdog.restart()
     return true
   }
 
   function handleControlResult(text) {
+    controlWatchdog.stop()
     var kind = root.controlKind
     root.controlKind = ""
     var status = Model.parseHelperStatus(text, kind)
@@ -962,6 +992,7 @@ Item {
       var code = status.error ? String(status.error.code) : ""
       if (Model.statusHealthy(status)) {
         root.healthFailures = 0
+        root.checkPlayerChannel(status)
       } else if (code === "not_implemented" || code === "no_output") {
         // The helper cannot tell (stub or crash): neither healthy nor a
         // strike, so a missing subcommand never reaps a working player.
@@ -977,8 +1008,13 @@ Item {
         root.playRetries = 0
       } else if (status.ok !== true && status.error) {
         var reason = Model.statusReason(status)
-        var code = String(status.error.code)
-        if (code === "not_running" && root.nowPlaying) {
+        var verdict = Model.playFailureVerdict(status.error.code, {
+          playerUp: root.playerUp,
+          nowPlaying: root.nowPlaying !== null,
+          userStopped: root.userStopped,
+          retriesLeft: root.playRetries < root.playRetryMax
+        })
+        if (verdict === "start") {
           // The player vanished between two zaps. The `not_running` /
           // `still there` disambiguation collapses (4.7): `player start`
           // adopts a live player and spawns a dead one, so the same call is
@@ -986,13 +1022,20 @@ Item {
           root.lastError = reason
           var channel = root.channelIndex[root.nowPlaying.id]
           if (channel) root.startPlayer(channel)
-        } else if (code === "ipc_error" && root.playerUp && root.nowPlaying
-                   && !root.userStopped && root.playRetries < root.playRetryMax) {
-          // mpv did not answer in time: retry with backoff instead of
-          // losing the zap (D-LIVE-15).
+        } else if (verdict === "retry") {
+          // mpv did not answer in time, or something held the lock: retry
+          // with backoff instead of losing the zap (D-LIVE-15).
           root.playRetries += 1
           playRetryTimer.interval = root.playRetryBaseMs * root.playRetries
           playRetryTimer.restart()
+        } else if (verdict === "unknown") {
+          // A reply we could not read, or one that never reached the player
+          // at all. The status branch above has had this guard from the
+          // start; the play branch fell into the rollback instead, which
+          // WRITES nowPlaying with no load to match it - and then drains the
+          // burst's last intent unconditionally two lines later.
+          root.lastError = reason
+          console.warn("omarchy-iptv: could not tell whether the channel changed:", reason)
         } else {
           root.lastError = reason
           console.warn("omarchy-iptv: play failed:", reason)
@@ -1002,9 +1045,13 @@ Item {
       } else if (status.ok === true) {
         root.playRetries = 0
         root.previousPlaying = null
-        // The zap's own entry id, so a failure that arrives after the next
-        // zap still names this channel (4.8).
-        root.rememberEntry(status.entryId, root.nowPlaying)
+        // The zap's own entry id AND the zap's own channel, so a failure
+        // that arrives after the next zap still names this one (4.8). Taking
+        // the owner from nowPlaying recorded whichever intent happened to be
+        // current when the REPLY landed - exactly the case the ring exists
+        // for, and why the "Stream failed" toast could name a channel that
+        // never failed.
+        root.rememberEntry(status.entryId, Model.replyTarget(status, root.nowPlaying))
       }
     }
     // Apply the last queued zap of a burst.
@@ -1025,6 +1072,41 @@ Item {
     }
     var channel = root.channelIndex[id]
     if (channel) root.startPlayer(channel)
+  }
+
+  // Ruling CL5's repair, and the only one allowed: the shell holds the
+  // user's intent, so when the player is on a different channel the fix is
+  // to send the intent again. Relabelling nowPlaying from the player would
+  // turn a visible reporting bug into a silent wrong channel - the user
+  // watching something they did not choose, with the interface agreeing.
+  function reapplyIntent(id) {
+    var key = String(id || "")
+    if (key === "" || root.stopping || root.userStopped) return false
+    if (!root.nowPlaying || String(root.nowPlaying.id) !== key) return false
+    if (!root.playerUp) return false
+    if (controlProc.running) {
+      root.pendingPlayId = key
+      return true
+    }
+    return root.runControl("play", root.playArgs(key))
+  }
+
+  // D-PLY-11's detection half. `status` now carries the player's own
+  // now-playing record (4.6), so the health tick asks the one question it
+  // never asked: which channel. Every divergence wave two produced was still
+  // there two health ticks later, because nothing looked and nothing
+  // corrected it. Under ruling CL6 the contract is that the label and the
+  // player agree WITHIN ONE HEALTH TICK, which is exactly this.
+  function checkPlayerChannel(status) {
+    if (root.stopping || root.userStopped || !root.nowPlaying) return "unknown"
+    var verdict = Model.reconcileVerdict(status.stash, root.nowPlaying, root.activeSourceKey)
+    if (verdict.state === "agree") root.channelRepairs = 0
+    if (verdict.state !== "diverged") return verdict.state
+    if (root.channelRepairs >= root.channelRepairMax) return "diverged"
+    root.channelRepairs += 1
+    console.warn("omarchy-iptv: the player is not on the channel the guide names; re-applying it")
+    root.reapplyIntent(verdict.repair)
+    return "diverged"
   }
 
   // ------------------------------------------------------------ the detached player
@@ -1121,7 +1203,21 @@ Item {
       // branch reads a healthy new player as "still not answering").
       relaunchTimer.stop()
       root.playRetries = 0
-      root.rememberEntry(status.entryId, root.nowPlaying)
+      // The reply's own channel, not whatever is current now: a start that
+      // stood down left a DIFFERENT channel on the player, and that entry id
+      // belongs to that channel.
+      root.rememberEntry(status.entryId, Model.replyTarget(status, root.nowPlaying))
+      // D-PLY-11, ruling CL5. The helper says which channel it left on the
+      // player. During a cold burst that can be the burst's FIRST intent
+      // while the shell is holding the eighth - measured 10 times in 20 - or
+      // a newer one this start stood down for. Either way the shell is
+      // authoritative: if the player is not on the channel the user asked
+      // for, send the intent again rather than relabel the interface.
+      var repair = Model.sessionIntentRepair(status, root.nowPlaying)
+      if (repair !== "") {
+        console.log("omarchy-iptv: the player start settled on another channel; re-applying the intent")
+        root.reapplyIntent(repair)
+      }
       // The helper has just reported a live player of this shell's making,
       // so the observer belongs on it. Doing nothing here is the second
       // half of the reported P1: `wanted` false leaves the 250 ms retry
@@ -2342,6 +2438,27 @@ Item {
       console.warn("omarchy-iptv: epg helper exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
       root.epgTimedOut = true
       epgProc.signal(15)
+    }
+  }
+
+  Timer {
+    // The control slot's watchdog. `playlistProc`, `epgProc` and
+    // `playerProc` all had one; `controlProc` did not, and it is the slot
+    // that serialises every zap and every health check - one helper stuck
+    // there is the end of channel switching until the shell restarts.
+    //
+    // A terminated helper produces no stdout, which parses to `no_output`,
+    // and `no_output` is a "cannot tell" on both branches now: it is never
+    // a health strike and never a failed switch. Killing the slot must not
+    // be able to report that the user's channel change failed.
+    id: controlWatchdog
+    interval: root.controlTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!controlProc.running) return
+      console.warn("omarchy-iptv: " + (root.controlKind || "control") + " helper exceeded "
+                   + Math.floor(root.controlTimeoutMs / 1000) + " s, terminating it")
+      controlProc.signal(15)
     }
   }
 

@@ -146,6 +146,15 @@ def handle(conn):
                     reply = {"error": "success", "data": "mpv 0.41.0-stub", "request_id": rid}
                 elif prop == "idle-active":
                     reply = {"error": "success", "data": state["entry"] == 0, "request_id": rid}
+                elif prop == "playlist-count":
+                    # Real mpv 0.41, headless, confirmed: a newborn idle
+                    # player answers 0, and `loadfile ... replace` leaves
+                    # exactly one entry however many loads it has taken.
+                    # `playlist/current/id` is NOT a property on this mpv
+                    # (it answers "property not found"), so the stub does not
+                    # grow one either - a double that answers what the real
+                    # thing refuses is the forgiving kind CLAUDE.md 10 bans.
+                    reply = {"error": "success", "data": 1 if state["entry"] else 0, "request_id": rid}
                 elif prop == "pid":
                     reply = {"error": "success", "data": os.getpid(), "request_id": rid}
                 elif prop == "path":
@@ -1484,27 +1493,33 @@ class OrphanCheckTest(PlayerTestCase):
 
 
 class OrderingTest(PlayerTestCase):
-    """D-PLY-11, step one: CHARACTERISATION. No fix, and none implied.
+    """D-PLY-11. Written as characterisation, kept as the repair's evidence.
 
-    The now-playing divergence had its proposed cause refuted, and the
-    replacement is a hypothesis with a plausible rate, not a traced fact.
-    What these two cases do is pin the two candidate mechanisms at the
-    helper layer, deterministically, so the display lane can tell which
-    family fired instead of guessing:
+    The cause is no longer a hypothesis. Wave two measured it on a real shell
+    (docs/QA-RESULTS.md D1, ruling CL9): ten user-visible divergences in
+    twenty COLD concurrent bursts, none in ten warm bursts, none in six cold
+    serial runs, and in every cold run exactly one `player start` carrying
+    the burst's FIRST intent while a later change reached the socket ahead of
+    it. Two orderings were on the table and they are no longer equal:
 
       T-A  an adopting `player start` re-applies its own channel over a zap
-           that already landed. It has no way to learn a newer intent
-           arrived - `play` carries no --seq and takes no lock, and those
-           three calls appear together only in player_start and player_stop.
-      T-B  a `play` can reach the socket and win it before the `player start`
-           that spawned the player has finished its own handshake, and the
-           start then overwrites it.
+           that already landed. Did not fire in 30 bursts, and CANNOT fire in
+           the warm case, which issues no `player start` at all. It stays
+           UNFIXED and characterised: an adopted player's stash is evidence
+           of nothing - it may be the user's last choice or minutes old - and
+           ordering it would need the sequence number on `play` that ruling
+           CL4 withholds until refusals are routed.
+      T-B  a `play` reaches the socket and wins it before the `player start`
+           that SPAWNED the player has finished its own handshake. This is
+           the one that fires, 10 in 20. It is FIXED here: the spawn is what
+           orders the two without a sequence number, because a player this
+           helper just created was born idle and empty, so anything on it now
+           arrived after the spawn and is therefore newer.
 
-    Both assert what the code does TODAY. When the repair lands - which is
-    not this round, and not this lane - these expectations flip, and that
-    flip is the point of writing them down now. Neither authorises a fix on
-    its own, and neither reproduces the field defect: both are deterministic
-    precisely because they gate the race instead of racing.
+    Both are deterministic because they gate the race rather than racing it -
+    the stub withholds the `mpv-version` reply `player start` waits for while
+    `play` demands no handshake at all - and that is the only honest way to
+    drive two client slots in a unit test.
     """
 
     def read(self, prop):
@@ -1541,18 +1556,21 @@ class OrderingTest(PlayerTestCase):
         # number anywhere, so the lock record still reads the start's.
         self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 1)
 
-    def test_a_zap_can_land_inside_a_cold_starts_handshake_and_be_overwritten(self):
-        # The cold-burst shape, made deterministic at the one point the two
-        # client slots can be ordered: the stub binds its socket and then
-        # withholds the mpv-version reply that `player start` waits for,
-        # while `play` demands no handshake at all.
+    def test_a_zap_that_lands_inside_a_cold_starts_handshake_is_left_playing(self):
+        # THE DEFECT, driven directly. The cold-burst shape made deterministic
+        # at the one point the two client slots can be ordered: the stub binds
+        # its socket and then withholds the mpv-version reply that
+        # `player start` waits for, while `play` demands no handshake at all.
+        # Before the fix this case ended with the start's own channel applied
+        # over the zap's, 1/1 - the field divergence with the race removed.
         gate = os.path.join(self.dir, "release-the-handshake")
         self.env(STUB_MPV_GATE=gate)
         os.makedirs(self.runtime, 0o700, exist_ok=True)
         start = subprocess.Popen(["python3", str(ROOT / "bin" / "omarchy-iptv"), "player", "start",
                                   "--socket", self.sock, "--cache-dir", self.cache, "--id", "t:bbc1.uk",
                                   "--seq", "1", "--ipc-timeout", "5", "--lock-timeout", "5",
-                                  "--spawn-timeout", "8", "--first-load-timeout", "1"],
+                                  "--spawn-timeout", "8", "--first-load-timeout", "1",
+                                  "--owner-pid", str(os.getpid())],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(self.reap_process, start)
         deadline = time.monotonic() + 10.0
@@ -1571,12 +1589,91 @@ class OrderingTest(PlayerTestCase):
         payload = json.loads(out.decode("utf-8").strip().splitlines()[-1])
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["spawned"])
-        # The start finishes its handshake and applies its own channel last,
-        # over a zap that had already been accepted and answered.
+        # The start finishes its handshake, finds a channel on the player it
+        # only just created, and stands down. Title, force-media-title, the
+        # stash and the loaded stream all still name the newer intent.
+        self.assertEqual(self.read("force-media-title"), "ESPN")
+        self.assertEqual(self.read("title"), helper.MPV_RAW_PREFIX + "ESPN")
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["id"], "t:espn.us")
+        self.assertIn("espn", self.read("path"))
+        self.assertNotIn("bbc1", self.read("path"))
+        # Exactly one load reached the player, where the defect took two.
+        self.assertEqual(self.read("playlist-count"), 1)
+        self.assertEqual(len(self.spawned_argv()), 1, "and still exactly one player")
+        # And it SAYS so, which is what lets the shell re-apply its own
+        # intent when the channel left playing is not the one it wants.
+        self.assertFalse(payload["applied"])
+        self.assertEqual(payload["playing"], {"id": "t:espn.us", "name": "ESPN"})
+        self.assertEqual(payload["id"], "t:bbc1.uk")
+        self.assertIn("a newer channel change reached the player first", payload["warnings"])
+        # The owner claim is about which shell owns the player, not which
+        # channel is on it, so standing down must not drop it.
+        self.assertEqual(self.read(helper.USER_DATA_OWNER)["pid"], os.getpid())
+
+    def test_a_start_that_stands_down_still_reports_a_player_and_an_entry(self):
+        # The stand-down must not look like a failure to the shell: an ok
+        # reply with a pid, the entry id of the load that IS on the player,
+        # and a first-load verdict of "unknown" rather than a three second
+        # wait for an event that already happened.
+        gate = os.path.join(self.dir, "release-the-handshake")
+        self.env(STUB_MPV_GATE=gate)
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        start = subprocess.Popen(["python3", str(ROOT / "bin" / "omarchy-iptv"), "player", "start",
+                                  "--socket", self.sock, "--cache-dir", self.cache, "--id", "t:bbc1.uk",
+                                  "--seq", "4", "--ipc-timeout", "5", "--lock-timeout", "5",
+                                  "--spawn-timeout", "8", "--first-load-timeout", "30"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(self.reap_process, start)
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and not os.path.exists(self.sock):
+            time.sleep(0.005)
+        code, _, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock,
+                                 "--cache-dir", self.cache, "--scope", "g:QA",
+                                 "--since", "3000", "--ipc-timeout", "2")
+        self.assertEqual(code, 0, stderr)
+        pathlib.Path(gate).write_text("go", encoding="utf-8")
+        began = time.monotonic()
+        out, err = start.communicate(timeout=20)
+        self.assertEqual(start.returncode, 0, err.decode("utf-8", "replace"))
+        payload = json.loads(out.decode("utf-8").strip().splitlines()[-1])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["seq"], 4)
+        self.assertGreater(payload["pid"], 0)
+        self.assertEqual(payload["entryId"], 1)
+        self.assertEqual(payload["firstLoad"], {"state": "unknown", "reason": ""})
+        # A 30 s first-load window it never enters.
+        self.assertLess(time.monotonic() - began, 10.0)
+
+    def test_a_start_that_spawns_an_untouched_player_still_applies_its_channel(self):
+        # The other side of the same decision, and the one that must not
+        # regress: nothing else reached the player, so the start is still the
+        # newest intent and applies its channel exactly as it always did.
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["spawned"])
+        self.assertTrue(payload["applied"])
+        self.assertIsNone(payload["playing"])
         self.assertEqual(self.read("force-media-title"), "BBC One HD")
         self.assertEqual(self.read(helper.USER_DATA_STASH)["id"], "t:bbc1.uk")
-        self.assertIn("bbc1", self.read("path"))
-        self.assertEqual(len(self.spawned_argv()), 1, "and still exactly one player")
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["verb"], "start")
+
+    def test_a_zap_stamps_the_lock_records_seq_into_the_stash_not_a_zero(self):
+        # The plan's step 2. The stash's seq was hardcoded 0, so the two sides
+        # could be seen to differ and never compared. `play` still has no
+        # --seq of its own (ruling CL4), so the number comes from the lock
+        # record - a plain file read that cannot block and cannot say `busy`.
+        code, _, _, stderr = self.player_start("--seq", "6")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["seq"], 6)
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["verb"], "start")
+        code, _, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock,
+                                 "--cache-dir", self.cache, "--scope", "g:QA",
+                                 "--since", "3000", "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        stash = self.read(helper.USER_DATA_STASH)
+        self.assertEqual(stash["id"], "t:espn.us")
+        self.assertEqual(stash["seq"], 6)
+        self.assertEqual(stash["verb"], "play")
 
 
 class PrivacyTest(PlayerTestCase):

@@ -1756,19 +1756,12 @@ function playerProbeArgv(socket, ownerPid) {
   return argv
 }
 
-// ---- D-PLY-11 step one: the play fork, WRITTEN DOWN, not yet wired ----
+// ---- D-PLY-11: the play fork ----
 //
-// CHARACTERISATION ONLY. This is what the shell decides today when a channel
-// is asked for, lifted here so it can be stated in vectors instead of living
-// where no test can reach it (CLAUDE.md 12). Nothing calls it yet: wiring it,
-// and changing what it answers, is a later lane's work and needs the display
-// lane's evidence first.
-//
-// It is written from the described behaviour of the shell's play(), its
-// `playerUp` definition and its one-helper-at-a-time control slot, NOT from
-// reading Service.qml - this lane may not open that file. Whoever wires it
-// must check it against the shipping fork first; if they disagree, the
-// shipping fork is right and this is the bug.
+// What the shell decides when a channel is asked for, lifted here so it can
+// be stated in vectors instead of living where no test can reach it
+// (CLAUDE.md 12). Checked against Service.qml's play() by the lane that
+// wired it; if the two ever disagree, the shipping fork is right.
 //
 //   start  spawn or adopt a player and play there (`player start`)
 //   zap    a running player, switch it over the socket (`play`)
@@ -1777,10 +1770,20 @@ function playerProbeArgv(socket, ownerPid) {
 // The row that matters for D-PLY-11 is `playerPending && !socketAttached`:
 // the player is starting and has not bound its socket, `playerUp` is already
 // true because pending counts, and the fork therefore answers "zap" - a zap
-// aimed at a socket nothing is listening on yet. `playForkBlind` names
-// exactly that state so the question "did this burst take it?" has a
-// machine-checkable answer. It is a hypothesis with a rate that fits the
-// evidence, not a traced cause, and it is deliberately not fixed here.
+// aimed at a socket nothing is listening on yet. That state is no longer a
+// hypothesis: wave two measured it on a real shell (ruling CL9,
+// docs/QA-RESULTS.md D1) at TEN user-visible divergences in twenty cold
+// concurrent bursts, none in ten warm and none in six cold serial, with the
+// mechanism observed rather than inferred - a change wins the socket and the
+// cold start's own `apply_channel` lands after it.
+//
+// The fork itself is NOT the defect and is deliberately left as it is. A zap
+// aimed at a socket that is about to exist is how a burst stays responsive,
+// and CL4 forbids the instrument that would order the two slots. What was
+// wrong is what happened at the far end: the start applied its channel
+// unconditionally. That is fixed in the helper (`player start` stands down
+// when it finds a newer channel on a player it just spawned) and repaired
+// here by `sessionIntentRepair` and `reconcileVerdict` below.
 function playFork(state) {
   var s = state || {}
   var playerUp = !!s.socketAttached || !!s.playerPending
@@ -1794,6 +1797,115 @@ function playFork(state) {
 function playForkBlind(state) {
   var s = state || {}
   return playFork(s) === "zap" && !s.socketAttached
+}
+
+// `play --id ... --socket ... --cache-dir ...`, plus the additive session
+// flags. Lifted out of Service.qml.playArgs (CLAUDE.md 12): the decision
+// that SKIPS `--scope`/`--since` is the decision that skips the stash write
+// at the far end (`cmd_play` computes `session = bool(scope or since)`), and
+// it was the one argv builder in the file with no vectors anywhere.
+//
+// The flags go on only when the record being zapped is the one the shell
+// currently wants. A drained burst can issue an id that is no longer
+// `nowPlaying`, and stamping that record's scope and start time onto a
+// different channel would be worse than leaving the stash alone.
+function zapArgs(socket, cacheDir, key, nowPlaying) {
+  var id = str(key)
+  var argv = ["play", "--id", id, "--socket", str(socket), "--cache-dir", str(cacheDir)]
+  var np = nowPlaying || null
+  if (!np || str(np.id) !== id) return argv
+  var scope = str(np.launchedFrom)
+  if (scope !== "") argv = argv.concat(["--scope", scope])
+  var since = Math.floor(Number(np.since))
+  if (isFinite(since) && since > 0) argv = argv.concat(["--since", String(since)])
+  return argv
+}
+
+// A reply the shell could not READ, as distinct from one that says the
+// switch failed. The status branch has had this guard since the beginning -
+// "neither healthy nor a strike, so a missing subcommand never reaps a
+// working player" - and the play branch never grew it, so an empty stdout or
+// a python traceback (both parse to `no_output`) took the rollback.
+var PLAY_UNREADABLE = ["no_output", "not_implemented", "unknown_channel", "no_cache"]
+// A refusal, not a verdict. `busy` cannot reach a zap today - `cmd_play`
+// takes no lock - and routing it is the first half of ruling CL4's order:
+// refusals first, THEN a sequence number and the lock. Without this it falls
+// to the rollback, which is why CL4 says giving `play` the lock now would
+// manufacture the failure it is meant to remove.
+var PLAY_RETRYABLE = ["ipc_error", "busy"]
+
+// What a failed `play` reply means for the shell.
+//
+//   start    the player is gone; `player start` adopts or spawns, so the
+//            same call is right either way
+//   retry    the player did not answer, or something else held the lock:
+//            back off and re-issue rather than losing the zap
+//   unknown  cannot tell. Record it, tell nobody, change nothing
+//   failed   the switch really did not happen; the player still plays the
+//            channel before it, so the label goes back with it
+function playFailureVerdict(code, context) {
+  var ctx = context || {}
+  var word = str(code)
+  if (word === "not_running" && ctx.nowPlaying === true) return "start"
+  if (PLAY_RETRYABLE.indexOf(word) !== -1) {
+    if (ctx.playerUp === true && ctx.nowPlaying === true && ctx.userStopped !== true
+        && ctx.retriesLeft === true) return "retry"
+    // Out of retries: a timeout really is a failed switch, a refusal never
+    // was one.
+    return word === "ipc_error" ? "failed" : "unknown"
+  }
+  if (PLAY_UNREADABLE.indexOf(word) !== -1) return "unknown"
+  return "failed"
+}
+
+// Who a reply is about. Both `rememberEntry` call sites passed the shell's
+// `nowPlaying`, which in a burst is the intent current when the REPLY
+// landed, not the one the reply is for - which is precisely the case the
+// entry-owner ring was built for (4.8). The consequence was a "Stream
+// failed" toast naming a channel that never failed.
+//
+// `playing` is the `player start` stand-down's own field: when the helper
+// leaves a newer channel alone, the entry on the player belongs to THAT
+// channel, not to the one this verb was asked for.
+function replyTarget(status, nowPlaying) {
+  var doc = status && typeof status === "object" ? status : {}
+  var left = doc.playing && typeof doc.playing === "object" ? doc.playing : null
+  if (left && str(left.id) !== "") return { id: str(left.id), name: str(left.name) }
+  if (str(doc.id) !== "") return { id: str(doc.id), name: str(doc.name) }
+  if (nowPlaying && str(nowPlaying.id) !== "") return { id: str(nowPlaying.id), name: str(nowPlaying.name) }
+  return null
+}
+
+// The shell's label against the player's own record, once a health tick can
+// finally ask for it (`status` carries `stash`). Ruling CL5: the shell is
+// authoritative and the repair is to RE-APPLY the user's intent, never to
+// relabel from the player - relabelling would leave the user watching a
+// channel they did not choose while the interface agreed with the mistake.
+//
+//   agree     the player's record names what the shell wants
+//   unknown   nothing to compare: no record, no intent, or a record from a
+//             different playlist whose ids mean something else. Never a
+//             verdict, so an old helper or a foreign player raises nothing
+//   diverged  they name different channels. `repair` is the id to re-apply
+function reconcileVerdict(stash, nowPlaying, sourceKey) {
+  var np = nowPlaying && str(nowPlaying.id) !== "" ? nowPlaying : null
+  var record = playerStash(stash)
+  var unknown = { state: "unknown", repair: "", wanted: np ? str(np.id) : "", playing: record ? record.id : "" }
+  if (!np || !record || record.playing === false) return unknown
+  var active = str(sourceKey)
+  if (active !== "" && record.sourceKey !== "" && record.sourceKey !== active) return unknown
+  if (record.id === str(np.id)) return { state: "agree", repair: "", wanted: str(np.id), playing: record.id }
+  return { state: "diverged", repair: str(np.id), wanted: str(np.id), playing: record.id }
+}
+
+// The same question asked of a `player start` / `player restart` reply,
+// which answers it directly: the helper says which channel it left on the
+// player. "" means nothing to do; anything else is the id to re-apply.
+function sessionIntentRepair(status, nowPlaying) {
+  var left = replyTarget(status, null)
+  var np = nowPlaying && str(nowPlaying.id) !== "" ? str(nowPlaying.id) : ""
+  if (np === "" || !left || left.id === "") return ""
+  return left.id === np ? "" : np
 }
 
 function playerOrphanCheckArgv(socket, ownerPid, graceSec) {
@@ -1826,7 +1938,13 @@ function playerStash(params) {
     sourceKey: str(p.sourceKey),
     since: isFinite(since) && since > 0 ? since : 0,
     entryId: isFinite(entry) && entry > 0 ? entry : null,
-    seq: Math.max(0, Math.floor(Number(p.seq)) || 0)
+    seq: Math.max(0, Math.floor(Number(p.seq)) || 0),
+    // Which slot wrote the record last. It exists because `seq` stopped
+    // being able to say so: the zap used to hardcode 0, and "not zero"
+    // therefore meant "a player verb wrote this". Both sides now carry a
+    // real intent number, which is what makes them comparable, so the
+    // writer is named instead of inferred.
+    verb: str(p.verb)
   }
 }
 
@@ -3943,6 +4061,11 @@ if (typeof module !== "undefined") {
     playerProbeArgv: playerProbeArgv,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
     playFork: playFork,
+    zapArgs: zapArgs,
+    playFailureVerdict: playFailureVerdict,
+    replyTarget: replyTarget,
+    reconcileVerdict: reconcileVerdict,
+    sessionIntentRepair: sessionIntentRepair,
     playForkBlind: playForkBlind,
     playerStash: playerStash,
     parsePlayerProbe: parsePlayerProbe,

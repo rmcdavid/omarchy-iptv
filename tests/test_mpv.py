@@ -399,10 +399,34 @@ class StatusTest(MpvTestCase):
         self.assertEqual(payload, {
             "ok": True, "kind": "status", "running": True, "mediaTitle": "BBC One HD",
             "pathHost": "provider.example.test", "paused": False, "idle": False, "mpvVersion": "mpv 0.41.0",
+            # D-PLY-11: the health tick's reconciliation input. A player that
+            # carries no record of ours answers null rather than dropping the
+            # key, so the shell can tell "nothing to compare" from "the
+            # helper is too old to be asked".
+            "stash": None,
         })
         self.assertNotIn("path\"", stdout.replace("pathHost", ""))
         for secret in ("user:pw", "/live/", "1.m3u8"):
             self.assertNotIn(secret, stdout + stderr)
+
+    def test_status_carries_the_players_own_now_playing_record(self):
+        # D-PLY-11, the plan's step 2. Without this the health tick asks the
+        # player five questions and never the one that matters - which
+        # channel - so a shell whose label has diverged from the player has
+        # no way to find out, which is why every divergence wave two produced
+        # was still there two health ticks later.
+        stash = helper.player_stash("t:espn.us", "ESPN", "Sport", "g:QA", "a1b2c3d4", 3000, 7,
+                                    entry_id=2, verb="play")
+        self.start(props=STATUS_PROPS, user_data={"omarchy-iptv": stash})
+        code, payload, stdout, stderr = run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["stash"], stash)
+        self.assertEqual(payload["stash"]["id"], "t:espn.us")
+        self.assertEqual(payload["stash"]["seq"], 7)
+        self.assertEqual(payload["stash"]["verb"], "play")
+        # Rule 5: the record has never carried a URL and this new sink does
+        # not become the first one.
+        self.assertNotIn("://", stdout + stderr)
 
     def test_missing_properties_become_null(self):
         self.start(props={"mpv-version": "mpv 0.41.0", "pause": True})
