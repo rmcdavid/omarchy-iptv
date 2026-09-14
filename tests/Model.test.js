@@ -452,13 +452,13 @@ checkCall("a user who wants their screenshots elsewhere still wins (last token w
 }, true)
 check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
 
-// ---- D-PLY-11 step one: the play fork as it is TODAY (characterisation) ----
-// These record the decision, they do not prescribe it. The third row is the
-// one D-PLY-11 turns on: with a start in flight and no socket bound yet, the
-// fork still answers "zap" - a channel change aimed at a socket nothing is
-// listening on. Whether that is what actually went wrong in the field is the
-// display lane's question; nothing here is wired to anything, and the fix is
-// not this round's.
+// ---- D-PLY-11: the play fork, and the repair the evidence asked for ----
+// The fork rows record the decision Service.qml.play() makes. The third row
+// is the one D-PLY-11 turns on: with a start in flight and no socket bound
+// yet, the fork answers "zap" - a channel change aimed at a socket nothing is
+// listening on. Wave two measured what happens next (ruling CL9): ten
+// user-visible divergences in twenty cold concurrent bursts. The fork itself
+// is unchanged and stays that way; what changed is the far end.
 checkCall("play fork: nothing running is a start", () => Model.playFork({ playerPending: false, socketAttached: false, stopping: false, controlBusy: false }), "start")
 checkCall("play fork: an attached player is a zap", () => Model.playFork({ playerPending: false, socketAttached: true, stopping: false, controlBusy: false }), "zap")
 checkCall("play fork: a start in flight with no socket yet is STILL a zap today, and that is the hazard", () => [Model.playFork({ playerPending: true, socketAttached: false, stopping: false, controlBusy: false }), Model.playForkBlind({ playerPending: true, socketAttached: false })], ["zap", true])
@@ -466,6 +466,84 @@ checkCall("play fork: a zap at an attached player is not blind", () => Model.pla
 checkCall("play fork: stopping always goes back through a start", () => [Model.playFork({ playerPending: true, socketAttached: true, stopping: true }), Model.playFork({ playerPending: false, socketAttached: true, stopping: true })], ["start", "start"])
 checkCall("play fork: one control helper at a time, so a second intent queues", () => [Model.playFork({ socketAttached: true, controlBusy: true }), Model.playForkBlind({ playerPending: true, controlBusy: true })], ["queue", false])
 checkCall("play fork: no state at all is a start, never a zap into nothing", () => [Model.playFork(null), Model.playFork({}), Model.playForkBlind(null)], ["start", "start", false])
+
+// zapArgs: Service.qml.playArgs, lifted. The additive flags decide whether
+// the far end refreshes the player's own now-playing record at all
+// (`cmd_play` computes `session = bool(scope or since)`), and this was the
+// one argv builder in the file with no vectors anywhere (CLAUDE.md 12).
+const np11 = { id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", since: 1758000123 }
+checkCall("zapArgs: the intent being zapped carries its scope and start time",
+  () => Model.zapArgs("/run/x/mpv.sock", "/cache/s/a1b2c3d4", "t:bbc1.uk", np11),
+  ["play", "--id", "t:bbc1.uk", "--socket", "/run/x/mpv.sock", "--cache-dir", "/cache/s/a1b2c3d4", "--scope", "g:uk", "--since", "1758000123"])
+checkCall("zapArgs: a drained burst issuing an id that is no longer nowPlaying writes no stash",
+  () => Model.zapArgs("/run/x/mpv.sock", "/cache/s/a1b2c3d4", "t:espn.us", np11),
+  ["play", "--id", "t:espn.us", "--socket", "/run/x/mpv.sock", "--cache-dir", "/cache/s/a1b2c3d4"])
+checkCall("zapArgs: no record, no scope and no since - and never the word undefined in an argv",
+  () => [Model.zapArgs("/s", "/c", "t:x", null), Model.zapArgs("/s", "/c", "t:x", { id: "t:x" }), Model.zapArgs("/s", "/c", "t:x", { id: "t:x", launchedFrom: "g:uk", since: 0 })],
+  [["play", "--id", "t:x", "--socket", "/s", "--cache-dir", "/c"],
+   ["play", "--id", "t:x", "--socket", "/s", "--cache-dir", "/c"],
+   ["play", "--id", "t:x", "--socket", "/s", "--cache-dir", "/c", "--scope", "g:uk"]])
+
+// playFailureVerdict: the four answers a failed `play` reply can have. The
+// rollback at the end of that branch WRITES nowPlaying with no load to match
+// it, so every code that reaches it and should not is a mislabel.
+const failed = (code, over) => Model.playFailureVerdict(code, Object.assign({ playerUp: true, nowPlaying: true, userStopped: false, retriesLeft: true }, over))
+checkCall("play failure: the player is gone - one `player start` is right whether it is there or not", () => failed("not_running"), "start")
+checkCall("play failure: `not_running` with nothing playing has no channel to start", () => failed("not_running", { nowPlaying: false }), "failed")
+checkCall("play failure: mpv did not answer in time - back off, do not lose the zap", () => failed("ipc_error"), "retry")
+checkCall("play failure: out of retries, a timeout really is a failed switch", () => failed("ipc_error", { retriesLeft: false }), "failed")
+checkCall("play failure: a reply we could not READ is not evidence the switch failed", () => [failed("no_output"), failed("not_implemented")], ["unknown", "unknown"])
+checkCall("play failure: a lookup that never reached the player is not a failed switch either", () => [failed("unknown_channel"), failed("no_cache")], ["unknown", "unknown"])
+checkCall("play failure: `busy` routes to the backoff, which is CL4's precondition for ever giving `play` the lock", () => failed("busy"), "retry")
+checkCall("play failure: a refusal out of retries is still a refusal, never a failed switch", () => failed("busy", { retriesLeft: false }), "unknown")
+checkCall("play failure: a user stop stops the retrying", () => failed("ipc_error", { userStopped: true }), "failed")
+checkCall("play failure: anything the table does not name is a failed switch, and the label goes back", () => [failed("unsupported_scheme"), failed(""), failed(null)], ["failed", "failed", "failed"])
+
+// replyTarget: who the reply is ABOUT. Both rememberEntry call sites passed
+// the shell's nowPlaying, which in a burst is the intent current when the
+// REPLY landed - the exact case the entry ring exists for.
+checkCall("replyTarget: a play reply names its own channel, not whatever is current now",
+  () => Model.replyTarget({ ok: true, kind: "play", id: "t:qa.live", name: "QA Live Stream", entryId: 2 }, { id: "t:qa.plain", name: "QA Plain" }),
+  { id: "t:qa.live", name: "QA Live Stream" })
+checkCall("replyTarget: a start that STOOD DOWN names the channel it left playing, not the one it was asked for",
+  () => Model.replyTarget({ ok: true, kind: "player.start", id: "t:bbc1.uk", name: "BBC One HD", applied: false, playing: { id: "t:espn.us", name: "ESPN" } }, { id: "t:espn.us", name: "ESPN" }),
+  { id: "t:espn.us", name: "ESPN" })
+checkCall("replyTarget: a reply with no channel of its own falls back to the shell's, never to nothing",
+  () => [Model.replyTarget({ ok: true, kind: "play" }, { id: "t:x", name: "X" }), Model.replyTarget(null, { id: "t:x", name: "X" }), Model.replyTarget({ ok: true }, null)],
+  [{ id: "t:x", name: "X" }, { id: "t:x", name: "X" }, null])
+
+// reconcileVerdict: the health tick's new question, and ruling CL5's answer.
+const stash11 = { schema: 1, playing: true, id: "t:espn.us", name: "ESPN", group: "Sport", launchedFrom: "g:QA", sourceKey: "a1b2c3d4", since: 3000, entryId: 2, seq: 7, verb: "play" }
+checkCall("reconcile: the player is on the channel the guide names", () => Model.reconcileVerdict(stash11, { id: "t:espn.us" }, "a1b2c3d4").state, "agree")
+checkCall("reconcile: they disagree, and the repair is the SHELL's id - never the player's (CL5)",
+  () => Model.reconcileVerdict(stash11, { id: "t:bbc1.uk" }, "a1b2c3d4"),
+  { state: "diverged", repair: "t:bbc1.uk", wanted: "t:bbc1.uk", playing: "t:espn.us" })
+checkCall("reconcile: no record to compare is never a verdict - an old helper raises nothing",
+  () => [Model.reconcileVerdict(null, { id: "t:bbc1.uk" }, "a1b2c3d4").state, Model.reconcileVerdict(undefined, { id: "t:bbc1.uk" }, "a1b2c3d4").state, Model.reconcileVerdict({}, { id: "t:bbc1.uk" }, "a1b2c3d4").state],
+  ["unknown", "unknown", "unknown"])
+checkCall("reconcile: nothing playing has no intent to compare against", () => Model.reconcileVerdict(stash11, null, "a1b2c3d4").state, "unknown")
+checkCall("reconcile: a record from another playlist means something else by the same id",
+  () => [Model.reconcileVerdict(stash11, { id: "t:bbc1.uk" }, "99999999").state, Model.reconcileVerdict(Object.assign({}, stash11, { sourceKey: "" }), { id: "t:bbc1.uk" }, "99999999").state],
+  ["unknown", "diverged"])
+checkCall("reconcile: a record the helper marked not playing is not a channel claim", () => Model.reconcileVerdict(Object.assign({}, stash11, { playing: false }), { id: "t:bbc1.uk" }, "a1b2c3d4").state, "unknown")
+
+// sessionIntentRepair: the same question asked of a start/restart reply,
+// which is where the measured divergence actually arrives.
+checkCall("session repair: the cold burst - the start applied intent one, the shell holds intent eight",
+  () => Model.sessionIntentRepair({ ok: true, kind: "player.start", id: "t:bbc1.uk", name: "BBC One HD", applied: true }, { id: "t:qa.eight" }),
+  "t:qa.eight")
+checkCall("session repair: the start stood down and left the shell's own intent playing - nothing to do",
+  () => Model.sessionIntentRepair({ ok: true, kind: "player.start", id: "t:bbc1.uk", applied: false, playing: { id: "t:espn.us", name: "ESPN" } }, { id: "t:espn.us" }),
+  "")
+checkCall("session repair: the ordinary start, which is every start that is not in a burst",
+  () => Model.sessionIntentRepair({ ok: true, kind: "player.start", id: "t:bbc1.uk", applied: true }, { id: "t:bbc1.uk" }),
+  "")
+checkCall("session repair: a stand-down for a channel the shell no longer wants is still repaired",
+  () => Model.sessionIntentRepair({ ok: true, kind: "player.start", id: "t:bbc1.uk", applied: false, playing: { id: "t:espn.us", name: "ESPN" } }, { id: "t:qa.eight" }),
+  "t:qa.eight")
+checkCall("session repair: nothing playing, or a reply naming nothing, repairs nothing",
+  () => [Model.sessionIntentRepair({ ok: true, id: "t:bbc1.uk" }, null), Model.sessionIntentRepair({ ok: true }, { id: "t:x" }), Model.sessionIntentRepair(null, { id: "t:x" })],
+  ["", "", ""])
 
 
 // ---- D-PLY-10 / CL2: mpv's own caches contained, ephemeral, unreserved ----

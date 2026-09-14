@@ -654,6 +654,82 @@ TestCase {
     compare(liveness.playing, false)
   }
 
+  // D-PLY-11, ruling CL5. Service.qml's checkPlayerChannel() and the repair
+  // in handlePlayerResult(), line for line: ask the decision, count the
+  // repair, re-apply the SHELL's id. The service half is the counter and the
+  // one runControl call; break a rule in Model.js and this goes red without
+  // anyone editing this file (CLAUDE.md 12).
+  function repairDriver(svc) {
+    return {
+      // the health tick, once `status` carries the player's own record
+      tick: function (stash) {
+        var v = Model.reconcileVerdict(stash, svc.nowPlaying, svc.sourceKey)
+        if (v.state === "agree") svc.repairs = 0
+        if (v.state !== "diverged") return v.state
+        if (svc.repairs >= 2) return v.state
+        svc.repairs += 1
+        svc.zapped.push(v.repair)
+        return v.state
+      },
+      // a `player start` / `player restart` that answered ok
+      session: function (status) {
+        svc.owners = Model.rememberEntryOwner(svc.owners, status.entryId, Model.replyTarget(status, svc.nowPlaying))
+        var repair = Model.sessionIntentRepair(status, svc.nowPlaying)
+        if (repair !== "") svc.zapped.push(repair)
+        return repair
+      }
+    }
+  }
+
+  function test_playerChannelIsRepairedByReapplyingTheIntent() {
+    var svc = { nowPlaying: { id: "t:qa.eight", name: "Eight" }, sourceKey: "a1b2c3d4", repairs: 0, zapped: [], owners: ({}) }
+    var drive = repairDriver(svc)
+    // The measured cold burst: one `player start` carrying the burst's FIRST
+    // intent answers ok, long after the shell moved on to the eighth.
+    var reply = { ok: true, kind: "player.start", id: "t:qa.first", name: "First", entryId: 2, applied: true, playing: null }
+    compare(drive.session(reply), "t:qa.eight")
+    compare(svc.zapped, ["t:qa.eight"])
+    // The interface is NEVER relabelled from the player. That is the whole
+    // of CL5: the alternative leaves the user watching a channel they did
+    // not choose with the interface agreeing.
+    compare(svc.nowPlaying.id, "t:qa.eight")
+    // The entry the reply carries belongs to the channel that reply is
+    // about, not to whatever is current now.
+    compare(svc.owners["2"], { id: "t:qa.first", name: "First" })
+    // A start that stood down and left the shell's own intent playing asks
+    // for nothing.
+    var down = { ok: true, kind: "player.start", id: "t:qa.first", entryId: 1, applied: false, playing: { id: "t:qa.eight", name: "Eight" } }
+    compare(drive.session(down), "")
+    compare(svc.zapped.length, 1)
+    compare(svc.owners["1"], { id: "t:qa.eight", name: "Eight" })
+  }
+
+  function test_theHealthTickSeesTheDivergenceAndBoundsItsRepairs() {
+    var svc = { nowPlaying: { id: "t:qa.eight", name: "Eight" }, sourceKey: "a1b2c3d4", repairs: 0, zapped: [], owners: ({}) }
+    var drive = repairDriver(svc)
+    var agreed = Model.playerStash({ id: "t:qa.eight", name: "Eight", sourceKey: "a1b2c3d4", seq: 7, verb: "play" })
+    var wrong = Model.playerStash({ id: "t:qa.first", name: "First", sourceKey: "a1b2c3d4", seq: 1, verb: "start" })
+    compare(drive.tick(agreed), "agree")
+    compare(svc.zapped, [])
+    // A player that never answered this question before now answers it every
+    // health tick - which is the CL6 contract, "within one health tick".
+    compare(drive.tick(wrong), "diverged")
+    compare(svc.zapped, ["t:qa.eight"])
+    // Bounded: a player that will not take the channel is reported, not
+    // re-zapped once every tick for the rest of the session.
+    compare(drive.tick(wrong), "diverged")
+    compare(drive.tick(wrong), "diverged")
+    compare(drive.tick(wrong), "diverged")
+    compare(svc.zapped, ["t:qa.eight", "t:qa.eight"])
+    // Agreement returns the budget, so the next divergence is repaired too.
+    compare(drive.tick(agreed), "agree")
+    compare(drive.tick(wrong), "diverged")
+    compare(svc.zapped.length, 3)
+    // A helper too old to carry the record raises nothing at all.
+    compare(drive.tick(null), "unknown")
+    compare(svc.zapped.length, 3)
+  }
+
   function test_privacy() {
     compare(Model.redactUrls("Failed to open http://u:p@h.test/x?y."), "Failed to open h.test")
     compare(Model.sourceLabel("http://u:p@tv.example.net:8080/get.php?u=1"), "http://tv.example.net")
