@@ -811,7 +811,7 @@ TestCase {
     compare(Model.validateSourceUrl("file://host/srv/tv/a%20b.m3u").url, "/srv/tv/a b.m3u")
     compare(Model.validateSourceUrl("FILE:///srv/tv/local.m3u").kind, "file")
     compare(Model.validateSourceUrl("/srv/tv/local.m3u\n").url, "/srv/tv/local.m3u")
-    compare(Model.validateSourceUrl("http://h.test/a b").url, "http://h.test/ab")
+    compare(Model.validateSourceUrl("http://h.test/a\u0000b").url, "http://h.test/ab")
     compare(Model.validateSourceUrl("").code, "empty")
     compare(Model.validateSourceUrl("provider.test/list.m3u").code, "scheme")
     compare(Model.validateSourceUrl("javascript:alert(1)").code, "scheme")

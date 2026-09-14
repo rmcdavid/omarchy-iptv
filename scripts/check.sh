@@ -34,9 +34,15 @@ fail=0
 
 # Recorded expected counts. These are floors, not decoration: each runner
 # below is capable of exiting 0 having run nothing at all.
-QML_SPEC_MIN=${QML_SPEC_MIN:-47}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-954}
-PY_TESTS_MIN=${PY_TESTS_MIN:-260}
+#
+# All three of the suite floors had fallen behind what the suites actually run
+# -- python 260, node 954, the qml spec 47, against the numbers below -- so
+# between a fifth and a half of each suite could have stopped executing with
+# the gate still green. Raised to what M2-03 leaves behind. Raise a floor when
+# you add tests; never lower one to make a run green.
+QML_SPEC_MIN=${QML_SPEC_MIN:-56}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1150}
+PY_TESTS_MIN=${PY_TESTS_MIN:-318}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 
 step() { printf '\n== %s\n' "$*"; }
@@ -210,6 +216,42 @@ elif (( ascii_bad )); then
   bad "ascii check ($ascii_scanned files scanned)"
 else
   ok "ascii check ($ascii_scanned files scanned)"
+fi
+
+step "control-byte check (source files, .qml included)"
+# M2-03 integration. A raw NUL in tests/Model.test.js and tests/Model.spec.qml
+# made grep treat both as BINARY and skip them silently: `grep -c chno
+# tests/Model.test.js` answered 0 for a file with 34 of them. The whole
+# integration criterion for this milestone is "a grep for the stand-in markers
+# returns nothing", and that proof was unsound while a tracked source file was
+# invisible to grep. Escapes carry the same bytes into the string and stay
+# greppable.
+#
+# This is NOT the ASCII check and does not overlap it: it covers .qml too
+# (where rule 8 deliberately allows non-ASCII glyphs) and it looks only for C0
+# controls other than tab/newline/CR, plus DEL.
+ctrl_bad=0
+ctrl_scanned=0
+while IFS= read -r -d '' rel; do
+  case $rel in
+    *.gz|*.png|*.jpg) continue ;;                               # binary by definition
+  esac
+  file="$ROOT/$rel"
+  [[ -f $file ]] || continue
+  ctrl_scanned=$(( ctrl_scanned + 1 ))
+  # -a is load-bearing: without it grep SKIPS the file the moment it holds a
+  # NUL, which is exactly the file this check exists to find.
+  if LC_ALL=C grep -a -q -P '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' "$file" 2>/dev/null; then
+    printf 'raw control bytes in %s (write them as \\uXXXX escapes)\n' "$rel"
+    ctrl_bad=1
+  fi
+done < <(git -C "$ROOT" ls-files -z -- '*.js' '*.py' '*.qml' '*.json' '*.sh' 'bin/*' 'scripts/dev-harness/*')
+if (( ctrl_scanned == 0 )); then
+  bad "control-byte check scanned no files at all"
+elif (( ctrl_bad )); then
+  bad "control-byte check ($ctrl_scanned files scanned)"
+else
+  ok "control-byte check ($ctrl_scanned files scanned)"
 fi
 
 printf '\n'

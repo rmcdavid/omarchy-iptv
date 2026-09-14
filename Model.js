@@ -1950,6 +1950,19 @@ function settingOf(entry, key, fallback) {
   return value === undefined || value === null ? fallback : value
 }
 
+// How a boolean setting is READ (R2), in one place. The host can hand back a
+// real boolean, or the string "false" from a hand-edited shell.json, or a
+// value that is simply absent -- and the rule has always been "anything but
+// false and the string false means on".
+//
+// It was written out four times: twice here (showChannelName,
+// barShowChannelNumber) and twice in BarWidget.qml, which reads its own
+// injected entry rather than going through settingsFrom. The four agreed;
+// nothing held them there, and M2-03 added the fourth by copying the third.
+function boolSetting(value) {
+  return value !== false && str(value) !== "false"
+}
+
 function clampInt(value, fallback, min, max) {
   var n = parseInt(String(value), 10)
   if (!isFinite(n)) n = fallback
@@ -1971,13 +1984,13 @@ function settingsFrom(entry) {
     epgUrl: str(settingOf(entry, "epgUrl", "")).replace(/^\s+|\s+$/g, ""),
     refreshMinutes: clampSetting("refreshMinutes", settingOf(entry, "refreshMinutes", SETTING_RANGES.refreshMinutes.def)),
     mpvArgs: str(settingOf(entry, "mpvArgs", "")),
-    showChannelName: settingOf(entry, "showChannelName", true) !== false && str(settingOf(entry, "showChannelName", true)) !== "false",
+    showChannelName: boolSetting(settingOf(entry, "showChannelName", true)),
     maxRecents: clampSetting("maxRecents", settingOf(entry, "maxRecents", SETTING_RANGES.maxRecents.def)),
     barLabelMaxWidth: clampSetting("barLabelMaxWidth", settingOf(entry, "barLabelMaxWidth", SETTING_RANGES.barLabelMaxWidth.def)),
     // ---- channel numbers (M2-03 7.1)
     channelOrder: channelOrderOf(settingOf(entry, "channelOrder", "playlist")),
     numberEntryMs: clampSetting("numberEntryMs", settingOf(entry, "numberEntryMs", SETTING_RANGES.numberEntryMs.def)),
-    barShowChannelNumber: settingOf(entry, "barShowChannelNumber", true) !== false && str(settingOf(entry, "barShowChannelNumber", true)) !== "false"
+    barShowChannelNumber: boolSetting(settingOf(entry, "barShowChannelNumber", true))
   }
 }
 
@@ -4667,6 +4680,7 @@ if (typeof module !== "undefined") {
     healthTick: healthTick,
     findBarEntry: findBarEntry,
     settingOf: settingOf,
+    boolSetting: boolSetting,
     clampInt: clampInt,
     clampSetting: clampSetting,
     settingsFrom: settingsFrom,

@@ -482,12 +482,46 @@ sdeclared=$(grep -oE '^EXPECTED_CHECKS=[0-9]+' "$SS" | head -1 | cut -d= -f2)
 is "the sources floor matches the assertions that scenario actually has" \
    "$sdeclared" "$(( $(qa_count '^check ' "$SS") + $(qa_count '^checks=[$][(][(]checks' "$SS") - 1 ))"
 
+# M2-03's scenario, the third suite, and the first with TWO floors: it runs
+# either the preflight alone (no display, no quickshell) or the preflight plus
+# the live half, and a single number could not cover both. Same rule as the
+# other two: one grep here means a forgotten bump turns check.sh red on this
+# machine rather than on the display lane's, weeks later.
+CS="$ROOT/scripts/dev-harness/chno-scenario.sh"
+# Non-vacuity first. Both `is` lines below compare two computed strings, and
+# two EMPTY strings are equal - so a renamed variable or a moved file would
+# "pass" both. Assert the declarations exist before comparing them.
+is "the chno scenario declares exactly two floors" \
+   "$(qa_count '^ *EXPECTED_CHECKS=[0-9]+$' "$CS")" "2"
+cdeclared_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CS" | sed -n 1p | cut -d= -f2)
+cdeclared_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CS" | sed -n 2p | cut -d= -f2)
+# The preflight is seam lines only; the live half adds every `check` line plus
+# the privacy block's two hand-written bumps (the `checks=$((checks + 1))`
+# inside seam() and the floor's own bump land outside this count). The two
+# recount recipes are written in the scenario's own footer; these are them.
+is "the chno check-tree floor matches the preflight it actually has" \
+   "$cdeclared_tree" "$(qa_count '^ *seam ' "$CS")"
+is "the chno live floor matches the assertions that scenario actually has" \
+   "$cdeclared_live" "$(( $(qa_count '^ *(check|seam) ' "$CS") + 2 ))"
+# A floor is only worth having if the runner it guards can be seen going red.
+# The scenario's verdict is the same arithmetic the player's is, so drive it
+# here with the chno numbers rather than trusting that it reads the same.
+chno_floor_verdict=$(
+  pass=0; fail=0; checks=0
+  # shellcheck source=/dev/null
+  . "$FRAME"
+  ran=$(( cdeclared_live - 1 ))          # one live check silently skipped
+  is "the scenario ran every check it has" "$ran" "$cdeclared_live" >/dev/null
+  printf '%s\n' "$fail"
+)
+is "one skipped chno check turns that run RED" "$chno_floor_verdict" "1"
+
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=117
+EXPECTED=121
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

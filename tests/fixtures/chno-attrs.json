@@ -1,0 +1,39 @@
+{
+  "why": [
+    "M2-03 ruling CN11: which attribute carries a channel number, and in what",
+    "precedence order. The rule is stated twice, in two files two different",
+    "lanes own -- CHNO_ATTRS in bin/omarchy-iptv (the helper decides which",
+    "ATTRIBUTE) and CHNO_FIELDS in Model.js (the model decides what the value",
+    "MEANS). Nothing held the two statements together, so this file does:",
+    "tests/test_playlist.py and tests/Model.test.js both read it and drive",
+    "their own implementation against it (CLAUDE.md: a rule written twice gets",
+    "one shared fixture).",
+    "JSON rather than the .js of chno-cases: no QML engine reads this one, and",
+    "python cannot read a .js (ruling CN19 is about the parse vectors only)."
+  ],
+
+  "m3uAttributes": ["tvg-chno", "tvg-channel-number", "channel-number"],
+
+  "cacheFields": ["chno", "tvgChno", "channelNumber"],
+
+  "notRead": ["tvg-num", "lcn", "channel_number", "tvgchannelnumber", "number"],
+
+  "maxMajor": 99999,
+
+  "notes": [
+    "m3uAttributes is the helper's precedence order, highest first. The helper",
+    "lower-cases attribute keys before matching, so TVG-CHNO= is the same key.",
+    "cacheFields are the channels.json spellings the model reads BEFORE any",
+    "m3u attribute: `chno` is what the helper writes, the other two are what a",
+    "cache written by something else might carry. So the model's full order is",
+    "cacheFields followed by m3uAttributes.",
+    "notRead is the other half of the contract: an attribute nobody agreed to",
+    "read must stay unread in BOTH implementations, or a playlist gains numbers",
+    "on one side of the cache and not the other.",
+    "maxMajor is the grammar's largest major (M2-03 1.2), stated in Model.js as",
+    "MAX_CHNO_MAJOR and in scripts/gen-playlist.py, which must never emit a",
+    "number the model will refuse: such a channel is displayed blank and cannot",
+    "be reached by digits, and a live pass would measure the wrong playlist with",
+    "nothing going red."
+  ]
+}
