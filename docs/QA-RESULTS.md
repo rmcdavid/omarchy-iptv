@@ -3408,3 +3408,341 @@ The two new findings (D-CL-1, F2) are both diagnostics rather than behaviour -
 a journal line that cannot say what it was written to say, and a check that
 needs a label - and neither gates a release. F3 asks for a recorded range to be
 widened, not for a conclusion to change.
+
+## M2-03 channel numbers live pass, and a real-provider exploratory pass on 0ef73ed (QA, 2026-09-14, 17:04 - 17:34)
+
+Owner: QA. Live pass on the machine of record against the **installed** plugin, not
+the harness. Two halves: the M2-03 live items of `docs/M2-03-CHANNEL-NUMBERS.md`
+section 10.7 that only a real compositor, font and keyboard can settle, and an
+exploratory pass against the product owner's own IPTV provider lists.
+
+### C1. Header
+
+| Item | Value |
+|---|---|
+| Code under test | `0ef73ed` (docs: document channel numbers in the README). The installed clone at `~/.config/omarchy/plugins/io.github.rmcdavid.iptv` was moved from `main` at `5d1a27e` (v0.3.1) to a **detached HEAD at `0ef73ed`**, fetched from the local repository into `FETCH_HEAD`. `origin/main` was never moved. `diff -r --exclude=.git` between the installed clone and the working tree was empty apart from untracked build artefacts |
+| Gates at start | `omarchy plugin validate .` exit 0. `scripts/check.sh` **all green**: 1150 node checks, 318 python tests, 56 qml cases, 121 harness predicate checks, ascii ok (61 files), control-byte ok (44 files) |
+| Mode | live Omarchy shell (`quickshell -n -p /usr/share/omarchy/shell`), driven with `wtype` for keys, `grim` for evidence and `omarchy-shell <id> <verb>` for IPC. `pgrep -x hyprlock` was checked before every keystroke batch and was 0 throughout. No logout |
+| Machine | Omarchy, Hyprland, one monitor `eDP-1` 1366x768 scale 1, theme **Retropc**, JetBrains Mono, mpv present, node 26.8.1, Python 3.14.7 |
+| Evidence | `/tmp/claude-1000/omarchy-iptv-qa11/`: `before/` (pre-pass snapshot of `shell.json`, the whole state directory, the whole cache directory, the whole installed plugin clone, plugin HEAD and mode manifest), `shots/` (60+ `grim` captures and ImageMagick crops), `check.out`, `CHANGED.txt` (the running list of every machine change and its undo), `status.before.json` / `status.after.json` |
+| Numbered fixtures | `gen-playlist.py --profile realistic --numbering blocks --channels 3000 --groups 120 --seed 7 --epg-ids 0.6`, sha256 `de376228478d76d7...f7ca2`, generator line: `numbering=blocks numbered=3000 block=100 gaps=408 subchannels=88 duplicates=58 highest=12029`. Plus a hand-built 17-row `edge-labels.m3u` covering every label width 1 to 9 and every non-numeric form, and a 3-row `bar-num.m3u` served over `127.0.0.1:8799` so the bar could be tested with a stream that actually plays |
+| Ruling CN13, recorded as asked | The product owner's real provider lists **carry no channel numbers at all: 0 of 5,221 channels across all four lists** (`USChannels.m3u` 3,335, `SportsPPVAll.m3u` 1,833, `Kids.m3u` 48, `Default.m3u` 5); no `tvg-chno`, no `tvg-channel-number`, no `channel-number`. The only attributes present are `tvg-id`, `tvg-name`, `tvg-logo`, `group-title`. So every numbering result below rests on the generator, exactly as CN13 anticipated, and `docs/QA-ASSETS.md` still has no numbered row |
+
+**Credential handling.** The provider lists embed account credentials as two
+path segments in every stream URL. Everything in this pass was driven from the
+**local 0600 copies by file path**; the credentialed playlist URL was never
+configured, never typed, never screenshotted and never written to any file.
+The real URL is **not recorded anywhere in the scratch copy**, so the
+"configure the real URL once to prove the fetch path" check was **skipped and
+is reported as skipped** - the fetch path over https remains covered by the
+user's own iptv-org source, which is fetched on every shell start. One real
+channel was played from the real list (section C9), which contacts the
+provider with the credentials in the URL as it must; the redaction result is
+recorded there. The credential sweep is section C11.
+
+### C2. What only a live pass can prove - section 10.7, item by item
+
+| # | 10.7 item | Result | Evidence |
+|---|---|---|---|
+| 1 | Number column optically aligned at real JetBrains Mono metrics | **pass** | `shots/07-col-zoom.png`, `28-zoom.png`, `29-zoom.png`. Right-aligned on a single edge at every width. Verified across labels of 1, 2, 3, 4, 5, 7, 8 and 9 characters in one list (`edge-labels.m3u`): `1`, `7`, `7.1`, `8.1`, `12`, `42`, `123`, `1234`, `12345`, `99999`, `99999.9`, `99999.99`, `99999.999` all share one right edge and every name starts at the same x. Dimmer than the name (secondary token), never bold |
+| 1a | ...and truncates sanely | **pass, with a cosmetic note** | Nothing truncates. `chnoColumnUnits` clamps to 56 units, so the 9-character maximum label overflows **leftward** out of its box rather than eliding - which is the right choice, because a truncated channel number is an unusable channel number. At 9 characters the label sits flush against the group-column divider with roughly 20 px of clearance left; at the 3-to-5 characters a real provider uses there is ample inset. Recorded as cosmetic, not a defect |
+| 2 | U+F061C renders as a dialpad, not tofu | **pass** | `shots/09-chip-zoom.png` at 700%: a 3x3 grid of dots with a single dot below - a keypad, correctly shaped, at `Style.font.icon` in the live guide's font stack. No tofu box |
+| 3 | 1500 ms is the right default | **pass as shipped; a change is recommended** | See C4 |
+| 4 | Digit keys survive the real `PanelKeyCatcher` chain on a layer-shell surface with exclusive keyboard focus, numpad included | **pass** | Top-row digits: `shots/09-entry-101.png`. **Numpad**: `wtype -k KP_1 KP_2 KP_3` produced buffer `12` then an auto-commit on `123` (`shots/11-crop.png`, `12-crop.png`) - the keypad path works through the live key chain. A real AZERTY layout switch was **not** performed, so ruling CN16's shifted-digit case remains proven by the gate A1 demonstration rather than by this pass |
+| 5 | The chip covering the first row's `until HH:MM` is acceptable in practice | **not proven** | No EPG was configured on the numbered fixtures, so the chip covered empty space. The chip is top-right anchored over the first row and is opaque; with an EPG loaded it would sit on that row's time. Still open |
+| 6 | `positionViewAtIndex` per digit does not stutter at scale | **pass** | Per-digit re-positioning over a 3,000-row list was visually instant in every capture; see also C8 for 3,335 rows at 25 ms per paged move |
+| 7 | A real numbered provider exists | **fails, as predicted** | 0 of 5,221 channels numbered. Recorded under CN13 above |
+| 8 | The bar's number does not fight `barLabelMaxWidth` on a crowded real bar | **pass** | `shots/34-bar-long-zoom.png`. On the user's real bar (tray, iptv, netspeed, agents, bluetooth, network, audio, monitor, dell-power) the widget rendered `12345 A Very Long Channel Name...`: the **number is never elided, the name is**, which is the correct precedence since the number is the addressable part |
+
+### C3. Scenario results driven on the live surface
+
+Scenarios N1-N16 and N21-N24 have no runner. `docs/M2-03-CHANNEL-NUMBERS.md`
+section 10.6 specifies harness verbs `number`, `numberState`, `commitNumber`
+and `cancelNumber` on `IpcHandler { target: "harness" }`; **none of the four was
+ever implemented**, and `state()` was not extended with `numberEntry` /
+`hasNumbers` on the guide side. That gap is F-CHNO-3 below. Everything here was
+therefore driven with real keystrokes and read off the footer and the chip.
+
+| # | Scenario | Result | Evidence |
+|---|---|---|---|
+| N1 | Live preview per digit | pass | `1`, `10`, `101`: chip tracks the buffer, cursor moves to the lowest match each time (`shots/08-*`, `09-entry-101.png`) |
+| N2 | Timeout commit | pass | after 1.5 s: chip gone, cursor still on 101, footer `Channel 101 - Delta Food [Not 24/7]` (`shots/10-after-timeout.png`) |
+| N5 | Backspace | pass | `10` then Backspace leaves buffer `1` (`shots/16b-chip.png`) |
+| N6 | Backspace to empty cancels and restores | pass | parked on 900, typed `10`, two Backspaces: entry off, cursor **restored to 800 Quantum Cinema**, footer restored (`shots/21b-bs-empty-f.png`) |
+| N7 | Esc cancels, guide stays open | pass | parked on 900, typed `10`, Esc: entry off, **guide still open**, cursor exactly back on 900, list-mode hints back (`shots/20c-esc-f.png`) |
+| N8 | Unknown number | **partial - see D-CHNO-2** | `10003` (whose every prefix stays ambiguous) gives live `Channel 10003 - no match` in the chip and footer, then committed `No channel 10003` (`shots/24b`, `24c-f.png`). But a number whose prefix is an unambiguous channel never reaches that message |
+| N10 | Scope hop | pass | scoped to `Series`, typed `123`: scope became `All`, cursor on 123 in `UK \| Shop` (`shots/25a-full.png`, `25b-full.png`) |
+| N11 | Subchannel, both separators | pass | `100` `.` `1` committed to `Channel 100.1 - Frost Comedy`; `100` `,` `2` committed to `Channel 100.2 - Metro Cinema`. The comma folds to `.` on a live surface, as CN8/CN17 require (`shots/14-crop.png`, `15-footer.png`) |
+| N12 | Duplicate cycling | **fail - D-CHNO-1** | three consecutive commits of `301` all report `(1 of 2)` and all land on Metro Cinema (`shots/22a/22b/22c`) |
+| N13 | Unambiguous auto-commit | pass | `123` committed at roughly 450 ms, well before the 1.5 s timer (`shots/12-crop.png`) |
+| N14 | No numbers | pass | proven on the **user's real list**, section C5 |
+| N15 | Keypad digits | pass | see 10.7 item 4 |
+| N17 | Sort by number | pass | `100, 100.1, 100.2, 101, 102, 103, 104, 104.1, 106` - subchannels sort between their major and the next major, gaps visible (`shots/26-full.png`) |
+| N18 | Sort flip at runtime | pass | `omarchy bar set ... channelOrder number` re-ordered the live list with **no helper run**: `channels.json` mtime unchanged at 17:10:45 |
+| N19 | IPC verb | pass | `channel 123` -> `{"ok":true,...,"chno":"123","name":"Dusk Action [Not 24/7]"}`; `channel 0123` -> the same id; `channel 20509` -> `{"ok":false,...,"code":"unknown_chno","message":"no channel 20509"}`. `status \| grep -c '://'` -> **0** |
+| N20 | Bar | pass | `501 Bar Number One` with the setting on; the name alone with `barShowChannelNumber false`; both applied live with no restart (`shots/33b-bar2.png`, `35-zoom.png`) |
+| CN20 | The verb must never cycle | pass | `channel 301` three times returned the **same** id `u:c10dfe30` every time |
+| - | `numberEntryMs` clamp | pass | set to `99` (below the 400 minimum): a 300 ms inter-digit gap still held one buffer, so the value was clamped up rather than taken literally (`shots/38-chip.png`) |
+| - | Non-numeric / empty / absent `tvg-chno` | pass | `N/A` and `HD` render as **nothing**, the slot stays blank and the name stays aligned (CN6). `00042` displays as `42` (CN7), `8-1` as `8.1` (CN8) (`shots/29-zoom.png`) |
+
+### C4. The digit timeout, and what I would change it to
+
+The timer was measured on the live surface, not read off the setting. At the
+1500 ms default an inter-digit gap of **1.20 s holds one buffer** (chip `50`)
+and a gap of **1.80 s splits it** (the `5` commits alone, the `0` opens a new
+entry reading `0 - no match`): `shots/36a-chip.png`, `36b-chip.png`. Raising
+the setting to 2000 ms made the 1.80 s gap hold (`shots/37-chip.png`), so the
+setting is live and effective across its range.
+
+The decisive measurement is how often the wait applies at all. Against the
+3,000-channel provider-shaped plan, **2,739 of 2,942 distinct numbers (93.1%)
+auto-commit the instant the final digit lands**, because no longer number
+extends them. Only 203 numbers (6.9%) wait out the timer - 97 three-digit, 90
+four-digit, 16 five-digit - and those are exactly the numbers that are a strict
+prefix of a longer one (`101` while `1010`-`1019` exist). Even then nothing is
+blocked: the cursor has **already** moved to the target during the live
+preview, and Enter or Space commits immediately. The timeout gates only the
+chip disappearing and the footer gaining the channel name.
+
+**Judgement: 1500 ms is not too slow and not too fast; it is defensible as
+shipped and nothing here blocks a release. I would still change the default to
+2000 ms.** The two failure modes are not symmetric. Too long costs a stale chip
+in 7% of tunes, on a target the user can already see and can commit instantly.
+Too short splits a number and silently tunes the user to a wrong channel, which
+is a hard failure and the exact accessibility concern ruling CN2 names. 2000 ms
+is also the television convention the design cites, and it buys a slow or
+motor-impaired typist real headroom on four- and five-digit numbers at no
+perceptible cost. **Recommended default: `numberEntryMs` 2000**, range
+unchanged at 400-5000.
+
+### C5. The no-numbers message, confirmed on the real list
+
+With the user's own `USChannels.m3u` active (3,335 channels, `hasNumbers false`),
+pressing a digit in list mode shows, in the footer's left slot:
+
+`No channel numbers in this playlist`
+
+and the hint line correctly **omits** `0-9 channel`, reading
+`j/k move - h/l group - Enter play - Space preview - f favorite - s stop - r refresh - / search - o sources`.
+No number column is drawn and the row lead slot collapses so names stay
+aligned. `shots/42-f.png`, `41-full.png`. This is what the product owner will
+actually see on their own provider, and it is correct and quiet.
+
+### C6. Exploratory pass - a 3,335-channel list in ONE group
+
+`USChannels.m3u`: 3,335 channels, **one** `group-title`, `United States`, for all
+of them. Helper parse 186 ms, 0 warnings, 0 duplicate ids, names containing
+commas parsed correctly (12 of them, e.g. `US CBS (KYES) Anchorage, Alaska (A)`),
+no attribute bleed into any name. Nothing about the parse is wrong. What breaks
+is the browsing model.
+
+**Defect**
+
+| id | Severity | Finding |
+|---|---|---|
+| D-SG-1 | P3 | **On a single-group list the group name pollutes every search.** `searchKey` is `name + " " + group`, so for this list every key ends `... united states`. Any query that is a substring of `united states` therefore matches **all 3,335 channels**: `st`, `sta`, `stat`, `ni`, `es`, `tes`, `ited`, `unit` each report `total=3335`. The ranking tiers save the user - typing `st` still puts `USA STARZ ENCORE WESTERNS`, `USA STARZ`, `USA STARZ ENCORE ACTION` at the top - so this is not a correctness failure. What fails is the reporting: the header says `in All - 3,335 matches` and the footer says `First 200 of 3,335 - keep typing` when only 19 channels genuinely match `starz`. The count and the hint actively mislead, and 3,316 irrelevant rows sit one arrow-key below the real answers |
+
+**Usability findings - things that work correctly and are still bad at this size**
+
+1. **The group column is dead weight.** It shows `Favorites 0`, `All 3,335`, a
+   `GROUPS` heading and a single entry `United States 3,335`, then roughly 340 px
+   of blank column down to the pinned `Sources` row. That column is about 200 px
+   of a 960 px card - **21% of the guide's width doing nothing** - on the one
+   list shape where horizontal room for long provider names matters most.
+2. **`All` and the only group are the same list, offered as two controls.**
+   Identical contents, identical counts (`3,335` twice, stacked six rows apart),
+   and selecting either changes nothing. The hint still advertises `h/l group`
+   when there is nowhere to go.
+3. **Every row's second line reads `United States`.** 3,335 identical group
+   labels, zero information, consuming the second line of every row. Rows are
+   about 56 px; without that line they would be about 36 px and the viewport
+   would hold roughly 14 channels instead of 9 - **a ~50% density loss** paid
+   for a word the user already knows.
+4. **There is no position indicator.** No scrollbar, no `row N of 3,335`, no
+   letter rail. After 40 paged moves into the list (`shots/58-full.png`) the
+   header still says `All - 3,335 channels`, the column still says
+   `United States 3,335`, and every row still says `United States`. The user
+   has no way to know where they are or how far is left. With dozens of groups
+   the group column is the landmark; with one group there is none.
+5. **A number jump lands the target flush on the bottom edge** of the viewport
+   every time (`shots/09`, `12`, `18b`, `25b`). The scroll is minimal-effort
+   `Contain` behaviour, which is correct in the small but means the eye must
+   hunt at the very edge after every jump. Centring the target, or leaving one
+   row of margin, would read far better.
+6. **The footer status elides early.** `USChannels.m3u - 3,335 channels - updated 17:...`
+   and `Added edge-labels.m3u - 17 channels in 1 gr...`: the left slot loses its
+   tail to the hint line at this card width.
+
+**What held up well at this size, and is worth recording**
+
+- **Guide open time: median 69 ms against a 59 ms `shell ping` baseline, so
+  about 10 ms of real open cost** over six open/close pairs - an order of
+  magnitude inside the 150 ms budget, with 3,335 channels in one scope.
+- **Search stays responsive.** Worst measured `filterChannels` was **3.8 ms**
+  (`es`, 3,335 matches); `espn` 0.4 ms / 8 matches, `pluto` 0.9 ms / 2,227,
+  `usa` 0.5 ms / 902. `prepareChannels` 6.7 ms for the whole list.
+- **Ranking quality against prefixed, repetitive provider names is good.** The
+  list is dominated by `(PLUTO ...)` (2,217 channels) and `USA  ` (484) prefixes
+  and 3,324 of 3,335 names are unique. `espn` returns 8 rows in a sensible
+  order - `USA ESPN`, `ESPN 2`, `ESPN NEWS`, `ESPN U`, `ESPN DEPORTES`, then the
+  odd-prefix variants. The shared prefixes do **not** dominate the ranking.
+- **The 200-row cap is handled honestly**: `First 200 of 2,227 - keep typing`,
+  with the true total in the header. In list mode with no query the full 3,335
+  rows scroll uncapped, at 25 ms per paged move with no stutter and no blank rows.
+- **Favourites and recents work.** Three channels favourited (`f`), star drawn
+  in the row lead slot, `Favorites 3` in the column, footer `Added to Favorites`,
+  and the `Favorites - 3 channels` scope lists exactly those three
+  (`shots/59-full.png`, `60-full.png`). After one play a `Recent 1` scope
+  appeared - recents are correctly filtered to the active source, so the seven
+  recents belonging to the user's iptv-org source stayed hidden
+  (`shots/62-full.png`).
+- **Playback from the real provider works end to end.** `USA  FOX NEWS` played,
+  video rendered, `playing true`, `lastError` empty (section C9).
+
+### C7. New defects (rows for docs/STATUS.md)
+
+| id | Severity | Title and detail |
+|---|---|---|
+| D-CHNO-1 | **P2** | **Duplicate cycling never advances from the guide, so an HD twin is unreachable by number.** Ruling CN9 and scenario N12 are not met. Three consecutive commits of `301` all report `Channel 301 - Metro Cinema (1 of 2)`. `Model.resolveChno` is **correct**: given the first match's index it returns the second - `resolveChno(idx,"301",34)` -> `{ci:35, ord:2, matches:2}`, and from 35 it returns 34. The fault is which index the guide hands it. Each intermediate digit resolves and **moves the cursor**: buffer `3` -> channel 300 at index 2, `30` -> index 2, so when the final `301` resolves the live cursor is on index 2, not on the previous match, and the cycle restarts at ordinal 1. Because every prefix of a duplicate number resolves to some *lower* number, this can essentially never work for a multi-digit plan. Finding, not a diff: resolve the committed buffer against the entry's **pre-entry snapshot** `cursorIndex` (which `pushNumberKey` already captures) rather than the live cursor |
+| D-CHNO-2 | **P2** | **A number that does not exist can silently tune to a different channel instead of saying so.** Typing `20509` on the 3k fixture landed the cursor on **channel 900**, with the footer reading `Channel 900 - Terra Comedy [Not 24/7]` and no error anywhere. Mechanism: `chnoUnambiguous` fires the auto-commit on the proper prefix `205` (a real channel that no longer number extends), the entry closes, and the remaining `09` opens a **new** entry which resolves to 900. The design is self-consistent - auto-commit can only fire when no existing longer number is being typed - but the user asked for 20509, was moved twice, and never saw `No channel 20509`. Measured incidence on this fixture: **2,690 of 9,484 absent five-digit numbers in 10000-19999, 28.4%**, auto-commit early. Note the IPC verb is **not** affected: `channel 20509` correctly returns `unknown_chno`. Candidate fix for the owner to rule on: suppress the unambiguous auto-commit while the buffer is still shorter than the index's `maxLabelLen`, or restart the timer instead of committing when a digit arrives immediately after an auto-commit |
+| D-SG-1 | P3 | Single-group search pollution and misleading counts. Detail in C6 |
+| F-CHNO-3 | P3 | **The four harness verbs specified for M2-03 were never implemented.** `docs/M2-03-CHANNEL-NUMBERS.md` section 10.6 specifies `number`, `numberState`, `commitNumber` and `cancelNumber` on `IpcHandler { target: "harness" }`, and an extension of `state()` with `numberEntry` / `hasNumbers` on the guide side. None exists in `scripts/dev-harness/shell.qml`. Consequence: **scenarios N1-N16 and N21-N24 have no automated runner at all** and can only be driven by hand with `wtype`, as this pass did. Not a product defect; it is a hole in the regression net for the most intricate interaction M2 has shipped |
+| F-CHNO-4 | P3 | `docs/STATUS.md:91` still records `M2-03 | Channel numbers + numeric zap | - | todo |` with no owner and no evidence, although M2-03 merged at `cc1d73e`. The board is stale |
+
+Not defects, recorded as observations: a `git checkout` inside the installed
+plugin directory makes the host emit about twenty
+`Local plugin changed, reloading` DEBUG lines as files land one by one - host
+file-watcher behaviour, harmless; and the helper **refuses `file://` stream
+URLs** as unplayable (`empty_playlist`), which is a deliberate scheme filter
+and was worked around here with a local HTTP server.
+
+### C8. Performance
+
+| Measure | Result | Budget |
+|---|---|---|
+| Guide open, 3,335 channels in one group | median **69 ms** vs `shell ping` median 59 ms -> about **10 ms** of open cost; 6 pairs, open range 67-72 ms | < 150 ms |
+| Helper parse, 3,335-channel real list | **186 ms** (`durationMs`), 706,343 byte `channels.json` | < 1 s for 10,000 |
+| `prepareChannels`, 3,335 rows | 6.7 ms median of 7 | - |
+| `filterChannels`, worst case | 3.8 ms (`es`, 3,335 matches) | typing stays responsive |
+| Paged scroll, 3,335 rows | 25 ms per `Page_Down`, 40 presses, no stutter | - |
+| `buildChnoIndex`, 3,000 numbered | `hasNumbers true, count 3000, duplicates 116, maxLabelLen 7` | - |
+
+### C9. Privacy at the sinks, with a real credentialed stream
+
+One channel (`USA  FOX NEWS`) was played from the user's real provider, which
+necessarily sends the credentialed URL to the provider. Every sink was then
+checked:
+
+- mpv window: class `omarchy-iptv`, **title `USA  FOX NEWS`** - the channel name
+  only, no URL, no credentials.
+- `omarchy-shell io.github.rmcdavid.iptv status | grep -c '://'` -> **0**, both
+  while playing and after.
+- `nowPlaying` carried `id`, `name`, `group`, `chno`, `launchedFrom`, `since` -
+  no URL field.
+- The one error surfaced during the pass was redacted to scheme and host:
+  `Failed to open https://streams.example.test.` (a dead fixture host), which is
+  the `Model.redactUrls` shape constraint 5 requires.
+- The evidence screenshot of the playing window was reduced to a 12% thumbnail,
+  inspected only to confirm a picture was rendering, and then **deleted**; no
+  broadcast frame was retained.
+
+### C10. Restore, proved
+
+Changes made and undone are listed in `CHANGED.txt`: the installed clone moved
+to `0ef73ed`; four temporary sources added through the guide's own Sources form
+(`gen-num.m3u`, `edge-labels.m3u`, `bar-num.m3u`, `USChannels.m3u`); and
+`omarchy bar set` writes of `channelOrder`, `numberEntryMs` and
+`barShowChannelNumber`.
+
+- `shell.json` **diffs empty** against the pre-pass snapshot; mode still `600`.
+- The whole state directory **diffs empty**, mode manifest identical, mode `700`.
+  State had to be written back a second time: the outgoing shell re-persisted
+  its active source after the first restore, so the snapshot was re-applied as
+  the **final on-disk act** and then **held for 25 s with the shell running**.
+- The whole cache directory **diffs empty** and every file checksum matches;
+  only `sources/d5977d8a` remains, the four temporary source caches are gone.
+- The installed clone is back on **`main` at `5d1a27e`, tracking `origin/main`**,
+  0 modified and 0 untracked; `diff -r --exclude=.git` against the pre-pass
+  clone is **empty** and the mode/size manifest is identical. **`origin/main`
+  was never moved**; `0ef73ed` was fetched from the local repository into
+  `FETCH_HEAD` only.
+- `status` matches the pre-pass snapshot: **1,474 channels, 28 groups**, source
+  `iptv-org.github.io`, **7 recents, 0 favorites**, `nowPlaying` null, `playing`
+  false, `lastUpdated 13:24`. The source was **not** refetched (its cache was
+  still inside the 6 hour TTL), so not even a timestamp moved. `hasNumbers` and
+  `channelOrder` are absent from `status` again, which is itself proof the
+  installed code is back on the pre-M2-03 release.
+- `$XDG_RUNTIME_DIR/omarchy-iptv` is back to `700` holding `player.lock` and an
+  empty `watch-later`; the `shader-cache` directory mpv created during this pass
+  was removed.
+- Theme **Retropc**, unchanged. `$HOME` has no new top-level entry.
+- Nothing left running: **0** mpv, **0** hyprlock, **1** quickshell (the user's
+  own, restarted healthy on `/usr/share/omarchy/shell`), and the local fixture
+  server on port 8799 was stopped **by pid** - 0 listeners.
+- The working repository is clean at `0ef73ed`. **Nothing was committed.**
+- One cosmetic side effect, disclosed: two stray keystrokes landed in the host
+  application after the guide closed under me, opening its own navigation
+  popup. Nothing was activated and no state was changed; there is no pointer
+  automation on this machine to dismiss it, and it clears on the user's next
+  click.
+
+### C11. Credential sweep
+
+Method: the two account path segments (10 characters each) were extracted from
+the local playlist copy into shell variables inside a single command, never
+printed, never written to disk, and passed to `grep -rIF -e` directly. The
+provider host was swept for separately.
+
+| Target | Account fragments | Provider host |
+|---|---|---|
+| `docs/QA-RESULTS.md` (the file this pass wrote) | **0** | **0** |
+| Whole repo working tree, excluding `.git` | **0** | **0 files** |
+| Evidence dir `/tmp/claude-1000/omarchy-iptv-qa11` | **0** | **0 files** |
+| Session scratch dir `qa11` (fixtures, caches) | **0** | **0 files** |
+| Restored user state dir | **0** | - |
+| Restored user cache dir | **0** | - |
+| `~/.config/omarchy/shell.json` | **0** | - |
+| `$XDG_RUNTIME_DIR/omarchy-iptv` | **0** | - |
+| **Filenames** of all 329 files created, 142 of them screenshots | **0** | **0** |
+| **Raw bytes of every screenshot** | **0** | - |
+
+**Zero hits everywhere.** Two further precautions: the only scratch artefact
+that legitimately held the credentialed URLs - the `channels.json` produced by
+parsing the user's list with the helper - was **deleted** at the end of the
+pass; and the provider host is deliberately **not named** anywhere in this
+document even though naming it would have been permitted. The credentialed
+playlist URL was never configured in the plugin, never typed into any form,
+never opened through the source edit form's reveal control, and never printed
+to a terminal that a screenshot could capture. The one-time "configure the real
+URL to prove the fetch path" check was **skipped**, because the URL is not
+recorded in the scratch copy; this is recorded as skipped rather than passed.
+
+### C12. Release recommendation for channel numbers
+
+**Go, with two P2 defects filed against the numbering feature and neither of
+them a release blocker.**
+
+Everything the feature rests on was proven on real hardware: the column aligns
+at real font metrics across every label width the grammar allows, the dialpad
+glyph renders as a dialpad, digits and the numpad survive the live key chain,
+both decimal separators work, Backspace and Esc restore the pre-entry state
+exactly, scope hop works, number ordering places subchannels correctly, the
+settings apply live and clamp, the IPC verb tunes and refuses correctly and
+never cycles, the bar shows the number and never elides it, and the no-numbers
+message is exactly right on the product owner's own list.
+
+The two P2s are real and both are worth fixing before the feature is
+advertised, but neither corrupts data, crashes, or blocks the primary gesture
+of "type a number, land on it", which works. **D-CHNO-1** makes one documented
+ruling (CN9, reach an HD twin by number) inert, and the model is already
+correct so the fix is small. **D-CHNO-2** means a mistyped long number can move
+you somewhere unexpected without an error; the same request through the IPC
+verb reports the miss correctly, so the gap is in the guide's commit timing
+rather than in the resolver.
+
+The single-group exploratory half produced **no blocker at all** - one P3
+search-reporting defect and six usability findings. The feature set is correct
+at that shape; it is the browsing affordances that stop paying rent when a
+provider ships 3,335 channels under one heading. That is a design conversation
+for the product owner, not a release gate, and it is worth having because this
+is the shape of the owner's own list.
