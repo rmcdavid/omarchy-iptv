@@ -22,6 +22,75 @@ TestCase {
   ])
   readonly property var userState: ({ version: 1, favorites: ["5", "1"], recents: [{ id: "4", name: "Sky News", at: 1 }], lastPlayed: null })
 
+  // The two bindings of ARCHITECTURE-PLAYER.md 4.7 as Service.qml declares
+  // them, including the null guard of spike caveat C3: the observer handle is
+  // null between attempts, because a Quickshell Socket whose connect failed is
+  // bricked for good and has to be replaced rather than re-armed.
+  QtObject {
+    id: liveness
+    property var socket: null
+    property bool playerPending: false
+    property var nowPlaying: null
+    readonly property bool playerUp: (liveness.socket !== null && liveness.socket.connected) || liveness.playerPending
+    readonly property bool playing: liveness.playerUp && liveness.nowPlaying !== null
+  }
+
+  // ---- the lane-PB event router (design section 10) ----
+  //
+  // Service.qml's handlePlayerLine() / handlePlayerGone() are methods on a live
+  // Service with a socket, a notification path and a dozen properties, so
+  // nothing outside a running shell can call them. What can be pinned is the
+  // decision they make, which is what section 10 asks for: this replays a
+  // recorded mpv transcript through the same Model calls in the same order.
+  // It mirrors Service.qml handlePlayerLine (a start-file supersedes the last
+  // end-file, an end-file is remembered, an error or fatal log-message joins
+  // the five-line tail), channelForEnd (entryOwners, failing open) and
+  // handlePlayerGone (endedVerdict, and the tail outranking mpv's generic
+  // file_error). "EOF" stands for the socket closing, which is the only moment
+  // a toast can be raised. A change on either side must land in both.
+  function routePlayer(transcript) {
+    var lines = transcript.lines || []
+    var owners = transcript.owners || ({})
+    var current = transcript.nowPlaying || null
+    var lastEndFile = null
+    var entryId = 0
+    var idle = false
+    var tail = []
+    var toasts = []
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i] === "EOF") {
+        var verdict = Model.endedVerdict(lastEndFile, transcript.userStopped === true, transcript.stopping === true)
+        if (verdict.notify) {
+          var owner = lastEndFile && lastEndFile.entryId ? owners[String(lastEndFile.entryId)] : null
+          var target = owner || current
+          toasts.push({ name: target ? String(target.name) : "",
+                        reason: tail.length > 0 ? tail[tail.length - 1] : String(verdict.reason || "") })
+        }
+        lastEndFile = null
+        entryId = 0
+        continue
+      }
+      var event = Model.parsePlayerEvent(lines[i])
+      if (event.kind === "start-file") {
+        if (event.entryId) entryId = event.entryId
+        lastEndFile = null
+      } else if (event.kind === "end-file") {
+        lastEndFile = event
+      } else if (event.kind === "log-message") {
+        if (event.level === "error" || event.level === "fatal") {
+          var clean = Model.redactUrls((event.prefix !== "" ? "[" + event.prefix + "] " : "") + event.text)
+          if (clean !== "") {
+            tail.push(clean)
+            while (tail.length > 5) tail.shift()
+          }
+        }
+      } else if (event.kind === "property-change") {
+        idle = event.value === true
+      }
+    }
+    return { lastEndFile: lastEndFile, entryId: entryId, idle: idle, tail: tail, toasts: toasts }
+  }
+
   function ids(rows) {
     var out = []
     for (var i = 0; i < rows.length; i++) out.push(rows[i].id)
@@ -218,6 +287,140 @@ TestCase {
     compare(Model.parsePlayerEvent('{"event":"end-file","reason":"error","playlist_entry_id":2,"file_error":"loading failed"}').kind, "end-file")
     compare(Model.endedVerdict({ reason: "error", file_error: "loading failed" }, false, false).notify, true)
     compare(Model.endedVerdict({ reason: "eof" }, false, false).kind, "silent")
+  }
+
+  function test_playerRouterZapStaysSilent() {
+    // 4.8, verified on mpv 0.41: a zap emits end-file{reason:"stop"} and then
+    // start-file for the new entry, and "stop" with no user stop is a FAILURE
+    // verdict - so the only thing standing between a zap and a false "BBC One
+    // did not play" toast is the start-file superseding the end-file.
+    var owners = { "1": { id: "t:a", name: "Channel A" }, "2": { id: "t:b", name: "Channel B" } }
+    var zap = [
+      '{"event":"start-file","playlist_entry_id":1}',
+      '{"event":"end-file","reason":"stop","playlist_entry_id":1}',
+      '{"event":"start-file","playlist_entry_id":2}'
+    ]
+    var live = routePlayer({ lines: zap, owners: owners, nowPlaying: { id: "t:b", name: "Channel B" } })
+    compare(live.toasts, [])
+    compare(live.lastEndFile, null)      // nothing terminal is pending
+    compare(live.entryId, 2)
+    // And the superseded end-file cannot come back later: if the player dies
+    // after the zap that is a crash naming the channel now playing, with the
+    // generic reason - never entry 1 and never the zap's own "stop".
+    var died = routePlayer({ lines: zap.concat(["EOF"]), owners: owners, nowPlaying: { id: "t:b", name: "Channel B" } })
+    compare(died.toasts.length, 1)
+    compare(died.toasts[0].name, "Channel B")
+    compare(died.toasts[0].reason, Model.PLAYER_GENERIC_FAILURE)
+    // A .m3u8 master resolves through redirect on nearly every load: never terminal.
+    var master = routePlayer({ lines: [
+      '{"event":"start-file","playlist_entry_id":1}',
+      '{"event":"end-file","reason":"redirect","playlist_entry_id":1}',
+      "EOF"
+    ], owners: owners, nowPlaying: { id: "t:a", name: "Channel A" } })
+    compare(master.toasts, [])
+  }
+
+  function test_playerRouterNamesTheChannelThatDied() {
+    // F4 / 4.8: end-file{error} for entry 1 can arrive after the user has
+    // already zapped to entry 2, so the toast and the red guide row come from
+    // entryOwners, not from nowPlaying. The gate FAILS OPEN: an unknown or
+    // missing entry id degrades which channel is named and never suppresses
+    // the toast.
+    var owners = { "1": { id: "t:a", name: "Channel A" }, "2": { id: "t:b", name: "Channel B" } }
+    var now = { id: "t:b", name: "Channel B" }
+    function burst(endLine, extra) {
+      return routePlayer({ lines: [
+        '{"event":"start-file","playlist_entry_id":1}',
+        '{"event":"start-file","playlist_entry_id":2}',
+        endLine, "EOF"
+      ], owners: owners, nowPlaying: now, userStopped: extra === "userStopped", stopping: extra === "stopping" })
+    }
+    var slow = burst('{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}')
+    compare(slow.toasts.length, 1)
+    compare(slow.toasts[0].name, "Channel A")
+    compare(slow.toasts[0].reason, "loading failed")
+    // Fail open, three ways.
+    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":99,"file_error":"loading failed"}').toasts,
+            [{ name: "Channel B", reason: "loading failed" }])
+    compare(burst('{"event":"end-file","reason":"error","file_error":"loading failed"}').toasts,
+            [{ name: "Channel B", reason: "loading failed" }])
+    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":"junk","file_error":"loading failed"}').toasts,
+            [{ name: "Channel B", reason: "loading failed" }])
+    // What we caused is silent, whatever mpv reported (PO-4 for a clean end).
+    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}', "userStopped").toasts, [])
+    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}', "stopping").toasts, [])
+    compare(burst('{"event":"end-file","reason":"eof","playlist_entry_id":1}').toasts, [])
+    compare(burst('{"event":"end-file","reason":"quit","playlist_entry_id":1}').toasts, [])
+  }
+
+  function test_playerRouterLogTailKeepsOnlyTheHost() {
+    // S-01 / D-QA-01: the failure text comes from request_log_messages "error",
+    // redacted in python before it crosses into QML and again here, and it is
+    // the tail - not mpv's generic "loading failed" - that the toast quotes.
+    // Only error and fatal are kept, and only the last five lines.
+    var credentialed = "http://user:pw@provider.test:8080/live/secret-token/1.m3u8"
+    var run = routePlayer({ lines: [
+      '{"event":"log-message","level":"info","prefix":"cplayer","text":"Playing: ' + credentialed + '"}',
+      '{"event":"log-message","level":"error","prefix":"stream","text":"Failed to open ' + credentialed + '\\n"}',
+      '{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}',
+      "EOF"
+    ], owners: { "1": { id: "t:a", name: "Channel A" } }, nowPlaying: { id: "t:a", name: "Channel A" } })
+    compare(run.tail, ["[stream] Failed to open provider.test"])          // the info line is not kept
+    compare(run.toasts, [{ name: "Channel A", reason: "[stream] Failed to open provider.test" }])
+    var blob = JSON.stringify(run)
+    compare(blob.indexOf("pw@"), -1)
+    compare(blob.indexOf("secret-token"), -1)
+    compare(blob.indexOf("://"), -1)
+    compare(blob.indexOf("8080"), -1)
+    // Six error lines, five kept, oldest dropped - the same bound Service.qml
+    // rememberStderr() has always had, and it is memory only.
+    var lines = []
+    for (var i = 1; i <= 6; i++) lines.push('{"event":"log-message","level":"error","prefix":"ffmpeg","text":"line ' + i + '"}')
+    var tail = routePlayer({ lines: lines }).tail
+    compare(tail.length, 5)
+    compare(tail[0], "[ffmpeg] line 2")
+    compare(tail[4], "[ffmpeg] line 6")
+    // A fatal is kept too; a reply, an unknown event and junk are ignored.
+    var mixed = routePlayer({ lines: [
+      '{"event":"log-message","level":"fatal","prefix":"","text":"could not open ' + credentialed + '   "}',
+      '{"request_id":1,"error":"success","data":"mpv 0.41.0"}',
+      '{"event":"seek"}',
+      "not json at all"
+    ] })
+    compare(mixed.tail, ["could not open provider.test"])
+  }
+
+  function test_playerUpTruthTable() {
+    // 4.7: playerUp replaces mpvProc.running at some twenty read sites, so it
+    // has to keep the SYNCHRONOUS birth edge the process gave (playerPending,
+    // set inside startPlayer()) while gaining a sub-second death edge from
+    // socket EOF. With caveat C3: between attempts there is no socket object
+    // at all, and reading .connected off null would throw inside the binding.
+    var table = [
+      { socket: null, pending: false, up: false },                    // at rest
+      { socket: null, pending: true, up: true },                      // the birth edge: no socket yet
+      { socket: { connected: false }, pending: false, up: false },    // a fresh object, not yet connected
+      { socket: { connected: false }, pending: true, up: true },      // connecting, start in flight
+      { socket: { connected: true }, pending: false, up: true },      // attached: the steady state
+      { socket: { connected: true }, pending: true, up: true }        // attached before the reply landed
+    ]
+    for (var i = 0; i < table.length; i++) {
+      liveness.nowPlaying = null
+      liveness.socket = table[i].socket
+      liveness.playerPending = table[i].pending
+      compare(liveness.playerUp, table[i].up, "playerUp row " + i)
+      compare(liveness.playing, false, "no channel is never playing, row " + i)
+      liveness.nowPlaying = { id: "t:a", name: "Channel A" }
+      compare(liveness.playing, table[i].up, "playing = playerUp && nowPlaying, row " + i)
+    }
+    // The death edge: the object is dropped, not re-armed, and the binding
+    // has to survive that without a channel of its own.
+    liveness.socket = { connected: true }
+    liveness.playerPending = false
+    compare(liveness.playerUp, true)
+    liveness.socket = null
+    compare(liveness.playerUp, false)
+    compare(liveness.playing, false)
   }
 
   function test_privacy() {
