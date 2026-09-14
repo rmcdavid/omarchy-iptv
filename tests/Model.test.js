@@ -431,6 +431,64 @@ check("parsePlayerEvent ignores replies, other events, other properties, junk an
 ], ["ignored", "ignored", "ignored", "ignored", "ignored", "ignored"])
 check("parsePlayerEvent: a missing entry id is null, never 0 (the gate fails open on it)", [Model.parsePlayerEvent('{"event":"start-file"}').entryId, Model.parsePlayerEvent('{"event":"end-file","reason":"eof","playlist_entry_id":0}').entryId], [null, null])
 
+// The router state machine itself, lifted out of Service.qml so the spec can
+// call the shipping function instead of a copy of it (M2-02-06 PR-4).
+const routerStart = Model.playerRouterState(null)
+check("playerRouterState: the rest position, and a hand-made one is normalized", [routerStart, Model.playerRouterState({ entryId: "3", lastEndFile: { reason: "eof" }, idle: 1, tail: "junk" })], [{ entryId: 0, lastEndFile: null, idle: false, tail: [] }, { entryId: 3, lastEndFile: { reason: "eof" }, idle: false, tail: [] }])
+check("routePlayerEvent: start-file records the entry and supersedes the last end-file (this is what makes a zap silent)", (() => {
+  const ended = Model.routePlayerEvent(routerStart, '{"event":"end-file","reason":"stop","playlist_entry_id":1}')
+  const loaded = Model.routePlayerEvent(ended, '{"event":"start-file","playlist_entry_id":2}')
+  return [ended.lastEndFile.reason, loaded.lastEndFile, loaded.entryId]
+})(), ["stop", null, 2])
+check("routePlayerEvent: a start-file with no usable id keeps the entry it had", Model.routePlayerEvent({ entryId: 7, lastEndFile: null, idle: false, tail: [] }, '{"event":"start-file"}').entryId, 7)
+check("routePlayerEvent: only error and fatal join the tail, redacted and trimmed", (() => {
+  const info = Model.routePlayerEvent(routerStart, '{"event":"log-message","level":"info","prefix":"cplayer","text":"Playing: http://u:p@h.test/x"}')
+  const err = Model.routePlayerEvent(info, '{"event":"log-message","level":"error","prefix":"stream","text":"Failed to open http://u:p@h.test/tok/1.m3u8\\n"}')
+  const fatal = Model.routePlayerEvent(err, '{"event":"log-message","level":"fatal","prefix":"","text":"out of memory  "}')
+  return [info.tail, err.tail, fatal.tail]
+})(), [[], ["[stream] Failed to open h.test"], ["[stream] Failed to open h.test", "out of memory"]])
+check("routePlayerEvent: the tail is five deep, oldest dropped", (() => {
+  let st = routerStart
+  for (let i = 1; i <= 6; i++) st = Model.routePlayerEvent(st, '{"event":"log-message","level":"error","prefix":"ffmpeg","text":"line ' + i + '"}')
+  return [st.tail.length, st.tail[0], st.tail[4], Model.PLAYER_LOG_TAIL]
+})(), [5, "[ffmpeg] line 2", "[ffmpeg] line 6", 5])
+check("routePlayerEvent: idle-active is carried; junk, replies and an info line change nothing", (() => {
+  const idle = Model.routePlayerEvent(routerStart, '{"event":"property-change","name":"idle-active","data":true}')
+  const seeded = { entryId: 2, lastEndFile: { entryId: 2, reason: "error" }, idle: true, tail: ["x"] }
+  const same = (line) => { const n = Model.routePlayerEvent(seeded, line); return n.entryId === seeded.entryId && n.lastEndFile === seeded.lastEndFile && n.idle === seeded.idle && n.tail === seeded.tail }
+  return [idle.idle, same("not json"), same('{"error":"success","request_id":1}'), same('{"event":"log-message","level":"info","text":"hello"}'), same('{"event":"audio-reconfig"}')]
+})(), [true, true, true, true, true])
+check("routePlayerEvent: an untouched tail and end-file keep their reference, so the caller writes nothing", (() => {
+  const seeded = { entryId: 1, lastEndFile: { entryId: 1, reason: "error" }, idle: false, tail: ["a"] }
+  const next = Model.routePlayerEvent(seeded, '{"event":"property-change","name":"idle-active","data":true}')
+  return [next.tail === seeded.tail, next.lastEndFile === seeded.lastEndFile]
+})(), [true, true])
+check("rememberEntryOwner: four deep, oldest dropped, and the ring never mutates its input", (() => {
+  let owners = {}
+  for (let i = 1; i <= 5; i++) owners = Model.rememberEntryOwner(owners, i, { id: "t:" + i, name: "Channel " + i })
+  return [Object.keys(owners), owners["5"], Model.PLAYER_ENTRY_OWNERS]
+})(), [["2", "3", "4", "5"], { id: "t:5", name: "Channel 5" }, 4])
+check("rememberEntryOwner: an unusable id or no target records nothing (the same map back)", (() => {
+  const owners = Model.rememberEntryOwner({}, 1, { id: "t:a", name: "A" })
+  return [Model.rememberEntryOwner(owners, 0, { id: "t:b" }) === owners, Model.rememberEntryOwner(owners, "junk", { id: "t:b" }) === owners, Model.rememberEntryOwner(owners, 2, null) === owners, Model.rememberEntryOwner(null, 2, { id: "t:b", name: "B" })["2"]]
+})(), [true, true, true, { id: "t:b", name: "B" }])
+check("channelForEnd: the owner of the entry that ended, not what is playing now", Model.channelForEnd({ "1": { id: "t:a", name: "A" }, "2": { id: "t:b", name: "B" } }, { entryId: 1, reason: "error" }, { id: "t:b", name: "B" }), { id: "t:a", name: "A" })
+check("channelForEnd fails open: unknown, missing and no end at all degrade to now-playing, never to nothing", [
+  Model.channelForEnd({ "1": { id: "t:a", name: "A" } }, { entryId: 99, reason: "error" }, { id: "t:b", name: "B" }),
+  Model.channelForEnd({ "1": { id: "t:a", name: "A" } }, { reason: "error" }, { id: "t:b", name: "B" }),
+  Model.channelForEnd(null, null, { id: "t:b", name: "B" }),
+  Model.channelForEnd(null, null, null)
+], [{ id: "t:b", name: "B" }, { id: "t:b", name: "B" }, { id: "t:b", name: "B" }, null])
+check("endedReport: the log tail outranks mpv's generic file_error and names the entry's owner", Model.endedReport({ lastEndFile: { entryId: 1, reason: "error", fileError: "loading failed" }, owners: { "1": { id: "t:a", name: "A" } }, nowPlaying: { id: "t:b", name: "B" }, tail: ["[stream] Failed to open h.test"] }), { notify: true, kind: "failed", target: { id: "t:a", name: "A" }, reason: "[stream] Failed to open h.test" })
+check("endedReport: with no tail it quotes the verdict; a stop, a clean eof and a redirect say nothing", [
+  Model.endedReport({ lastEndFile: { entryId: 1, reason: "error", fileError: "loading failed" }, nowPlaying: { id: "t:a", name: "A" }, tail: [] }).reason,
+  Model.endedReport({ lastEndFile: null, nowPlaying: { id: "t:a", name: "A" } }).reason,
+  Model.endedReport({ lastEndFile: { reason: "error" }, nowPlaying: { id: "t:a", name: "A" }, userStopped: true }).notify,
+  Model.endedReport({ lastEndFile: { reason: "error" }, nowPlaying: { id: "t:a", name: "A" }, stopping: true }).notify,
+  Model.endedReport({ lastEndFile: { reason: "eof" }, nowPlaying: { id: "t:a", name: "A" } }).notify,
+  Model.endedReport({ lastEndFile: { reason: "redirect" }, nowPlaying: { id: "t:a", name: "A" } }).kind
+], ["loading failed", Model.PLAYER_GENERIC_FAILURE, false, false, false, "ignored"])
+
 // ---- notifications ----
 const tvOff = "\udb81\udd03", alert = "\udb80\udc26", refreshGlyph = "\udb81\udc50"
 const Q = (s) => String.fromCharCode(0x201c) + s + String.fromCharCode(0x201d)   // typographic quotes, file stays ASCII
@@ -896,6 +954,59 @@ check("a zap moves the session on, a channel with no id at all leaves both recor
   return [zapped.session.id, nameless.session, nameless.lastPlayed.id]
 })(), ["t:bbc2.uk", sessionState.session, "t:bbc1.uk"])
 check("stateSession normalizes on the way out and never throws", [Model.stateSession(sessionState), Model.stateSession({ session: { id: "t:z", at: "9" } }), Model.stateSession({ session: { name: "no id" } }), Model.stateSession(Model.emptyState()), Model.stateSession(null)], [{ id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }, { id: "t:z", name: "", at: 9 }, null, null, null])
+// Ruling PO-3 itself. A `player probe` that found nothing running, plus a
+// session record still in the file, is the evidence that the channel died
+// with no shell attached: mark it failed in the guide, silently, clear the
+// record. The catch is the order of arrival - the probe fires from
+// Component.onCompleted and answers in about 130 ms, state.json lands
+// whenever its FileView loads - so the verdict is gated on the state being
+// loaded, and an unloaded state yields `pending` and NEVER a write, because
+// writing there would put the empty default over the user's file.
+// This drives it exactly as Service.qml markDeadSession() does: call, store
+// the pending flag, apply the marks, write only when the state changed.
+const probeFoundNoPlayer = (svc) => {
+  const v = Model.deadSessionVerdict(svc.userState, svc.stateLoaded, svc.failedAt, "21:30")
+  svc.pending = v.pending
+  if (v.mark) svc.failedAt = v.failed
+  if (v.write) { svc.userState = v.state; svc.writes += 1 }
+  return svc
+}
+const freshService = (state, loaded) => ({ userState: state, stateLoaded: loaded, failedAt: {}, pending: false, writes: 0 })
+check("PO-3, state first then the probe: the row goes red, the record is cleared, one write", (() => {
+  const svc = probeFoundNoPlayer(freshService(sessionState, true))
+  return [svc.failedAt, svc.userState.session, svc.userState.lastPlayed.id, svc.writes, svc.pending]
+})(), [{ "t:bbc1.uk": "21:30" }, null, "t:bbc1.uk", 1, false])
+check("PO-3, probe first then the state: the probe defers, writes nothing, and the state handler drains it", (() => {
+  const svc = probeFoundNoPlayer(freshService(Model.emptyState(), false))
+  const deferred = [svc.pending, svc.failedAt, svc.writes, svc.userState.session]
+  svc.userState = sessionState        // the FileView finally loads
+  svc.stateLoaded = true
+  if (svc.pending) probeFoundNoPlayer(svc)
+  return [deferred, svc.pending, svc.failedAt, svc.userState.session, svc.writes]
+})(), [[true, {}, 0, null], false, { "t:bbc1.uk": "21:30" }, null, 1])
+check("PO-3: an unloaded state is handed back untouched - the empty default can never be written over the file", (() => {
+  const empty = Model.emptyState()
+  const v = Model.deadSessionVerdict(empty, false, {}, "21:30")
+  const missing = Model.deadSessionVerdict(null, false, null, "21:30")
+  return [v.state === empty, v.write, v.mark, missing.state, missing.write, missing.failed]
+})(), [true, false, false, null, false, {}])
+check("PO-3: a loaded state with no record marks nothing (a clean stop cleared it, PR-2)", (() => {
+  const svc = probeFoundNoPlayer(freshService(Model.clearSession(sessionState), true))
+  return [svc.failedAt, svc.writes, svc.pending]
+})(), [{}, 0, false])
+check("PO-3: marking is idempotent - the second probe of the same startup finds nothing left to clear", (() => {
+  const svc = probeFoundNoPlayer(freshService(sessionState, true))
+  probeFoundNoPlayer(svc)
+  return [svc.writes, Object.keys(svc.failedAt).length]
+})(), [1, 1])
+check("PO-3: existing red rows survive, the record's clock is the one passed in", Model.deadSessionVerdict(sessionState, true, { "t:other": "09:05" }, "21:30").failed, { "t:other": "09:05", "t:bbc1.uk": "21:30" })
+check("PO-3: a half-written record still marks the row it names, and nothing here carries a URL", (() => {
+  const half = Model.parseState('{"version":2,"session":{"id":"t:x"}}')
+  const v = Model.deadSessionVerdict(half, true, {}, "21:30")
+  return [v.id, v.name, v.failed, v.state.session, JSON.stringify(v).indexOf("://")]
+})(), ["t:x", "", { "t:x": "21:30" }, null, -1])
+check("PO-3 does not mutate the state it was given", (() => { Model.deadSessionVerdict(sessionState, true, {}, "21:30"); return sessionState.session.id })(), "t:bbc1.uk")
+
 check("every reducer carries the session through (cloneState)", [
   Model.withFavorites(sessionState, ["a"]).session,
   Model.removeRecent(sessionState, "t:bbc1.uk").session,
