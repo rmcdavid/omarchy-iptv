@@ -47,6 +47,17 @@ requests and raise the batch.
    under a second.
 8. ASCII only in `.js` and `.py` sources. Nerd Font glyphs belong in QML, by
    codepoint, verified present in the installed font.
+9. Never wait for the host to echo your own write back before updating your
+   own UI. The Omarchy shell publishes a plugin's `barConfig` one write
+   behind, so a plugin never receives the echo of its own settings write, and
+   `updateEntryInline` returning `false` means "already stored", not
+   "failed". Apply your own write locally in the same turn, drop that
+   override as soon as the host reports any other value so external changes
+   win, and keep the echo path idempotent. See the last section of
+   `docs/OMARCHY-PLUGIN-CONTRACT.md`.
+10. A test double must never be more forgiving than the real thing. When you
+   change a fake to match reality, prove it with counts: the suite must fail
+   against the code that shipped the bug and pass against the fix.
 
 ## Never touch
 
