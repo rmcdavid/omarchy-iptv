@@ -62,7 +62,18 @@ Item {
   readonly property int barLabelMaxWidth: settings.barLabelMaxWidth
   readonly property bool showChannelName: settings.showChannelName
   readonly property bool configured: playlistUrl !== ""
-  readonly property bool epgConfigured: epgUrl !== ""
+  // The EPG URL in force for the active source: the active record's own
+  // epgUrl once the history knows the source (an EPG URL belongs to the
+  // source it was set for, D-SRC-10; the settings follow it through
+  // reconcile), the raw setting while no record exists or the setting does
+  // not validate (the helper then reports it, as in 0.1.0).
+  readonly property string activeEpgUrl: {
+    var rec = Model.findSource(root.userState.sources, root.activeSourceKey)
+    if (!rec) return root.epgUrl
+    if (root.epgUrl !== "" && Model.normalizeSourceUrl(root.epgUrl, { kind: "epg", origin: "cli" }) === "") return root.epgUrl
+    return String(rec.epgUrl || "")
+  }
+  readonly property bool epgConfigured: activeEpgUrl !== ""
   // scheme + host only; safe to render anywhere
   readonly property string sourceLabel: Model.sourceLabel(playlistUrl)
   readonly property string sourceHost: Model.hostOf(playlistUrl)
@@ -92,6 +103,14 @@ Item {
   property var probeEdit: null                         // pending replacement record of a URL edit (applied only when its probe succeeds, SR7)
   property var sourceErrors: ({})                      // session-only { key: reason }, URL-free (Model.statusReason)
   property var settingsInvalid: null                   // validation result when playlistUrl is set but invalid (D16, SR8)
+  // Snapshot of the settings the last reconcile() saw (D-SRC-02 / D-SRC-10):
+  // which of playlistUrl / epgUrl changed in one settings write decides
+  // whether the epgUrl is adopted; the active key it resolved is the
+  // `previousActiveKey` of the next run (never a binding read mid-update).
+  property bool reconciled: false
+  property string reconciledPlaylistUrl: ""
+  property string reconciledEpgUrl: ""
+  property string reconciledActiveKey: ""
   property var cacheQueue: []                          // FIFO of { args, onDone } for cacheProc (section 4.7)
   property var cacheJob: null
   property var recentSaves: []                         // texts this service wrote to state.json (own-write reloads are skipped)
@@ -417,7 +436,7 @@ Item {
   }
 
   function refreshEpg(force) {
-    if (root.epgUrl === "") return
+    if (root.activeEpgUrl === "") return
     if (epgProc.running) {
       if (force) root.epgRerun = true
       return
@@ -653,7 +672,7 @@ Item {
     if (root.stateLoaded && root.recentSaves.indexOf(text) !== -1) return
     root.userState = Model.trimRecents(Model.parseState(text), root.maxRecents)
     root.stateLoaded = true
-    root.reconcile()
+    root.reconcile(true)
     root.startCacheLayout()
   }
 
@@ -673,8 +692,25 @@ Item {
 
   function applyPlaylistStatus(text) {
     root.playlistStatus = Model.parseHelperStatus(text, "playlist")
-    if (root.playlistStatus.ok === true) root.playlistWarnings = Model.statusWarnings(root.playlistStatus)
-    else root.lastError = root.statusReason
+    if (root.playlistStatus.ok === true) {
+      root.playlistWarnings = Model.statusWarnings(root.playlistStatus)
+      root.adoptSourceStats(root.playlistStatus)
+    } else {
+      root.lastError = root.statusReason
+    }
+  }
+
+  // The history row shows counts without opening N status files: a
+  // successful status of the active source (a helper run, or its
+  // playlist-status.json loading after a cache swap: the migrated cache, a
+  // CLI record fetched by the startup refresh, D-SRC-01) lands on the record
+  // when it carries something the record does not have yet.
+  function adoptSourceStats(status) {
+    var key = root.activeSourceKey
+    if (key === "" || !root.stateLoaded) return
+    if (!Model.sourceStatsDiffer(Model.findSource(root.userState.sources, key), status)) return
+    root.userState = Model.withSourceStats(root.userState, key, status, Math.floor(Date.now() / 1000))
+    root.saveState()
   }
 
   function applyEpgStatus(text) {
@@ -695,7 +731,7 @@ Item {
       ok: false,
       kind: kind,
       stale: stale,
-      sourceHost: kind === "epg" ? Model.hostOf(root.epgUrl) : root.sourceHost,
+      sourceHost: kind === "epg" ? Model.hostOf(root.activeEpgUrl) : root.sourceHost,
       error: { code: "helper_timeout", message: "helper timed out" }
     })
   }
@@ -721,10 +757,10 @@ Item {
       epgProc.nowOnly = true
       epgProc.command = ["python3", root.helperPath, "epg", "--now-only", "--cache-dir", root.activeCacheDir]
     } else {
-      if (root.epgUrl === "") return
+      if (root.activeEpgUrl === "") return
       root.epgAttempted = true
       epgProc.nowOnly = false
-      epgProc.command = ["python3", root.helperPath, "epg", "--url", root.epgUrl, "--cache-dir", root.activeCacheDir]
+      epgProc.command = ["python3", root.helperPath, "epg", "--url", root.activeEpgUrl, "--cache-dir", root.activeCacheDir]
     }
     root.epgTimedOut = false
     epgProc.running = true
@@ -908,17 +944,13 @@ Item {
     root.manualRefresh = false
     var status = root.playlistStatus
     if (status.ok === true) {
-      // The history row shows counts without opening N status files.
-      if (root.activeSourceKey !== "") {
-        root.userState = Model.withSourceStats(root.userState, root.activeSourceKey, status, Math.floor(Date.now() / 1000))
-        root.saveState()
-      }
+      // The counts landed on the history record in applyPlaylistStatus.
       if (manual) root.notify("playlistRefreshed", { channelCount: status.channelCount, groupCount: status.groupCount })
       root.playlistRefreshed(Number(status.channelCount) || 0, manual)
       // US6: the EPG follows the playlist (the helper restricts programmes
       // to the playlist's ids). Fetch it when none is loaded or its now/next
       // window has expired; a run already in flight is repeated (D-LIVE-02).
-      if (root.epgUrl !== "" && (!root.epgLoaded || Model.epgNowStale(root.epgMeta, Math.floor(Date.now() / 1000)))) root.refreshEpg(true)
+      if (root.activeEpgUrl !== "" && (!root.epgLoaded || Model.epgNowStale(root.epgMeta, Math.floor(Date.now() / 1000)))) root.refreshEpg(true)
     } else {
       root.notify("playlistError", { reason: root.statusReason, cachedAt: status.stale === true ? root.lastUpdated : "" })
     }
@@ -1113,11 +1145,41 @@ Item {
   }
 
   // D3 / SR8: the settings are the source of truth for the active source;
-  // the history follows them. Runs on state load and on every playlistUrl /
-  // epgUrl change (a CLI `omarchy bar set` included). Idempotent.
-  function reconcile() {
+  // the history follows them. Runs on state load (`force`: the file was
+  // re-read, reconcile whatever the settings are) and on every settings
+  // change, both keys (a CLI `omarchy bar set` included, D-SRC-02). It
+  // reads `settings` as one object: from inside onSettingsChanged the
+  // derived playlistUrl / epgUrl bindings may not have re-evaluated yet.
+  // Idempotent: an unrelated settings write is a no-op.
+  function reconcile(force) {
     if (!root.stateLoaded) return
-    var out = Model.reconcileSources(root.userState, root.playlistUrl, root.epgUrl, root.activeSourceKey, Math.floor(Date.now() / 1000))
+    var s = root.settings
+    var playlist = String(s.playlistUrl || "")
+    var epg = String(s.epgUrl || "")
+    var first = !root.reconciled
+    var playlistChanged = first || playlist !== root.reconciledPlaylistUrl
+    var epgChanged = first || epg !== root.reconciledEpgUrl
+    if (!force && !playlistChanged && !epgChanged) return
+    // D-SRC-10: an epgUrl that did not change in the settings write that
+    // changed the playlist was written for the previous source (a switch
+    // wrote it); it is not adopted. A state load takes the settings as
+    // they are (both keys were the user's or a switch's, D3).
+    var adoptEpg = first || force === true || epgChanged
+    var previousKey = first || force === true ? Model.activeSourceKey(root.userState, playlist) : root.reconciledActiveKey
+    var out = Model.reconcileSources(root.userState, playlist, epg, previousKey, Math.floor(Date.now() / 1000), "", { adoptEpg: adoptEpg })
+    root.reconciled = true
+    root.reconciledPlaylistUrl = playlist
+    root.reconciledEpgUrl = epg
+    root.reconciledActiveKey = out.invalid ? "" : String(out.activeKey || "")
+    if (playlistChanged) {
+      // A new source starts clean: the previous source's reason and host
+      // must not stay on screen while its first fetch runs (UX 4.5,
+      // D-LIVE-10). The fetch itself is driven by the new cache's freshness
+      // once its directory is bound (section 4.4 step 6), never from here.
+      root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
+      root.playlistWarnings = []
+      root.lastError = ""
+    }
     root.settingsInvalid = out.invalid
     if (out.changed) {
       root.userState = out.state
@@ -1129,10 +1191,38 @@ Item {
     }
     if (out.invalid) {
       // D16: never run the helper for garbage; the guide's error empty
-      // state shows the validation reason instead.
-      root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, sourceHost: "", error: { code: out.invalid.code, message: Model.sourceErrorMessage(out.invalid.code) } })
-      root.lastError = root.statusReason
+      // state shows the validation reason instead (re-applied by
+      // clearSourceData when the cache directory unbinds, D-SRC-03).
+      root.applyInvalidStatus()
+      return
     }
+    if (!adoptEpg && out.activeKey !== "") {
+      // D-SRC-10: the record did not take the carried-over epgUrl, so the
+      // settings follow the record (its own EPG, or none). Deferred: never
+      // write the settings from inside their own change notification.
+      var rec = Model.findSource(root.userState.sources, out.activeKey)
+      var recEpg = rec ? String(rec.epgUrl || "") : ""
+      if (rec && Model.normalizeSourceUrl(epg, { kind: "epg", origin: "cli" }) !== recEpg) {
+        Qt.callLater(function() { root.syncSettingsEpg(playlist, recEpg) })
+      }
+    }
+  }
+
+  // The synthesized status for an invalid configured URL (D16, SR8): the
+  // UX 5.4 sentence, no host, no helper run.
+  function applyInvalidStatus() {
+    if (!root.settingsInvalid) return
+    var code = String(root.settingsInvalid.code || "invalid")
+    root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, sourceHost: "", error: { code: code, message: Model.sourceErrorMessage(code) } })
+    root.lastError = root.statusReason
+  }
+
+  // D-SRC-10 follow-up of reconcile(): the settings' epgUrl is the previous
+  // source's; write the active record's own value unless the settings moved
+  // on meanwhile. A refused write is reported like any other persist failure.
+  function syncSettingsEpg(playlistUrl, epgUrl) {
+    if (String(root.settings.playlistUrl || "") !== playlistUrl) return
+    if (!root.persistActive(playlistUrl, epgUrl)) console.warn("omarchy-iptv: could not clear the previous source's epgUrl from the settings")
   }
 
   // Section 4.4 step 4: once per state file, move the 0.1 single cache
@@ -1208,11 +1298,14 @@ Item {
     if (root.activeCacheDir === "") return
     var nowSec = Math.floor(Date.now() / 1000)
     if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)) root.refreshPlaylist(true)
-    if (root.epgUrl !== "" && !epgProc.running) root.refreshEpg(true)
+    if (root.activeEpgUrl !== "" && !epgProc.running) root.refreshEpg(true)
   }
 
   // Reset the per-source data to "nothing known yet" so no reason, count
-  // or programme of the previous source survives a swap (D-LIVE-10).
+  // or programme of the previous source survives a swap (D-LIVE-10). An
+  // invalid configured URL keeps its synthesized status: the directory
+  // unbinds after reconcile() set it, and the guide must not fall back to
+  // `Loading playlist...` for good (D-SRC-03).
   function clearSourceData() {
     root.channels = []
     root.channelIndex = ({})
@@ -1226,6 +1319,7 @@ Item {
     root.epgAttempted = false
     root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
     root.lastError = ""
+    root.applyInvalidStatus()
   }
 
   function activeSourceSummary() {
@@ -1277,21 +1371,16 @@ Item {
 
   // ------------------------------------------------------------ signal handlers
 
-  onPlaylistUrlChanged: {
-    // A new source starts clean: the previous source's reason and host must
-    // not stay on screen while its first fetch runs (UX 4.5, D-LIVE-10).
-    // The fetch itself is driven by the new cache's freshness once its
-    // directory is bound (section 4.4 step 6), never directly from here.
-    root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
-    root.playlistWarnings = []
-    root.lastError = ""
-    root.reconcile()
-  }
-  onEpgUrlChanged: {
-    // Same rule as refreshEpg: read the setting itself. With the derived
-    // `epgConfigured` (stale false on an empty -> value change) this handler
-    // took the "cleared" branch and the first EPG never loaded (D-LIVE-02).
-    if (root.epgUrl === "") {
+  // One handler for both URL settings (D-SRC-02): reconcile() reads the new
+  // `settings` object itself and resets the per-source status when the
+  // playlist changed (the derived playlistUrl / epgUrl bindings may still
+  // hold the previous values inside this handler).
+  onSettingsChanged: root.reconcile()
+  onActiveEpgUrlChanged: {
+    // Read the property itself, not a derived flag: with `epgConfigured`
+    // (stale false on an empty -> value change) this handler took the
+    // "cleared" branch and the first EPG never loaded (D-LIVE-02).
+    if (root.activeEpgUrl === "") {
       root.epgLoaded = false
       root.epgAttempted = false
       root.epgNow = ({})

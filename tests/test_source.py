@@ -153,11 +153,11 @@ class ValidateSourceUrlTest(unittest.TestCase):
         # D-SRC-06: U+2028 / U+2029 after `http://` are whitespace for the
         # validator (parity with Model.js [\s\S]* + the \s rule), so the
         # message is `invalid`, never "Start with http://...".
-        for sep in (" ", " "):
+        for sep in ("\u2028", "\u2029"):
             result = helper.validate_source_url("http://h.test/a%sb" % sep)
             self.assertEqual(result["code"], "invalid", repr(sep))
             self.assertEqual(helper.validate_source_url("http://h.test/a%sb" % sep, origin="cli")["code"], "invalid", repr(sep))
-        self.assertEqual(helper.validate_source_url("http://h.test/a b")["url"], "")
+        self.assertEqual(helper.validate_source_url("http://h.test/a\u2028b")["url"], "")
 
     def test_authority_parity_rules(self):
         # SR15: the checks QA listed, mirrored from Model.validateSourceUrl.

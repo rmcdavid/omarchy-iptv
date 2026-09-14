@@ -330,6 +330,12 @@ ShellRoot {
           returnMode: g.guide ? String(g.guide.returnMode || "") : "",
           sourceCursor: g.sourceCursor, sourceCursorKind: g.sourceCursorKind, sourceCount: g.sourceCount,
           formFocus: g.formFocus, formActive: g.formActive, formProbing: g.formProbing,
+          // D-SRC-04: the Sources result line (a failed switch probe) and the
+          // derived `Fetching from <host>...` text; both URL-free.
+          sourcesNotice: g.sourcesNotice !== undefined ? g.sourcesNotice : "",
+          sourcesProbeText: g.sourcesProbeText !== undefined ? g.sourcesProbeText : "",
+          invalidSettingsText: g.invalidSettingsText !== undefined ? g.invalidSettingsText : "",
+          footerHint: g.footerHintText !== undefined ? String(g.footerHintText).replace(/<[^>]*>/g, "") : "",
           form: harness.formSnapshot(g)
         }
       }

@@ -117,8 +117,11 @@ $H ipc activeCache             # cache/omarchy-iptv/sources/<key> of the active 
 $H ipc set playlistUrl /path   # CLI parity: reconciles into the history (origin cli)
 $H ipc state                   # + activeSourceKey, cacheReady, probing, switching, sourceErrors, settingsInvalid,
                                #   canAddSource; guide: returnMode, sourceCursor(Kind), formFocus, formActive,
-                               #   formProbing and `form` (kind, origin, sourceId, focus, error, values as
-                               #   { value: masked, length, masked, revealed } per field; credentials are ****)
+                               #   formProbing, sourcesNotice (the Sources result line: a failed switch probe),
+                               #   sourcesProbeText (`Fetching from <host>...` while a switch probes),
+                               #   invalidSettingsText (UX 5.4 sentence for a CLI-invalid playlistUrl),
+                               #   footerHint (tags stripped) and `form` (kind, origin, sourceId, focus, error,
+                               #   values as { value: masked, length, masked, revealed } per field; credentials are ****)
 ```
 
 `state().guide.form` masks with the plugin's own `Model.js`, which `run.sh`
