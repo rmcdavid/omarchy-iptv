@@ -2537,8 +2537,14 @@ but `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` survives, measured still present at
 **t+66 s** with the shell idle and untouched. PLY-STOP-03 says "the socket is
 unlinked only after the final connect is refused", and `connect()` **does**
 return `ECONNREFUSED`, so `settle_socket()`'s guard should fire; it does not,
-most likely because `find_player()` still sees the just-SIGKILLed process when
-the settle rung runs. The responsive stop path unlinks correctly (5/5).
+it does not. CORRECTED 2026-09-14 by measurement, and this paragraph's
+original guess was wrong: the blocking guard is `socket_is_dead()`, not
+`find_player()`. A killed player clears its command line in about 0.2 ms, so
+`find_player()` goes blind FIRST, while its listening socket stays bound for
+another 2.7 to 4.9 ms; the shipping guards ask at 4.5 to 7.5 ms and the
+single-shot check simply looked too early. On the `quit` path the order
+reverses, the socket is refused about 2 ms BEFORE the command line empties,
+which is exactly why the responsive stop path unlinks correctly (5/5).
 
 **Not a regression**: QA's A/B on an identical rig left the socket behind at
 **both** `8f9447e` and `b16b479`, so it predates these fixes and the prior pass
