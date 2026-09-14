@@ -2374,32 +2374,40 @@ Item {
                 Accessible.name: "Entering channel number " + root.numberBuffer
                   + (root.numberResolution.kind === "none" ? ", no match" : "")
 
+                // Each child carries its own height and centres its text in
+                // it. No vertical anchor to the Row: the Row's height is
+                // derived from its children, so anchoring a child to it
+                // would be circular.
                 Row {
                   id: chipRow
                   anchors.centerIn: parent
                   spacing: Style.spacing.labelGap
+                  readonly property int lineHeight: numberChip.height - Style.spacing.controlPaddingY * 2
 
                   Text {
+                    height: chipRow.lineHeight
                     text: Model.GLYPHS.dialpad
                     textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.icon
-                    anchors.verticalCenter: parent.verticalCenter
+                    verticalAlignment: Text.AlignVCenter
                   }
 
                   Text {
+                    height: chipRow.lineHeight
                     text: root.numberBuffer
                     textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.heading
-                    anchors.verticalCenter: parent.verticalCenter
+                    verticalAlignment: Text.AlignVCenter
                   }
 
                   // No colour carries meaning on its own (UX 7.2): the miss
                   // is the word, not a tint.
                   Text {
+                    height: chipRow.lineHeight
                     visible: root.numberResolution.kind === "none"
                     text: Model.SEP + "no match"
                     textFormat: Text.PlainText
@@ -2407,7 +2415,7 @@ Item {
                     opacity: 0.52
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
-                    anchors.verticalCenter: parent.verticalCenter
+                    verticalAlignment: Text.AlignVCenter
                   }
                 }
               }
