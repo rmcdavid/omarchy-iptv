@@ -1576,6 +1576,106 @@ check("D-PLY-1: a successful start or restart re-arms the observer and cancels t
   /root\.nowPlaying === null\) \{\n\s+\/\/ A stop overtook/.test(serviceSource)
 ], [true, true, true, false])
 
+// ---- CL10: "exactly ONE relaunch, never a second one at the healthy player"
+//
+// This property is half of the P1 this project shipped, and until now the
+// only thing asserting it counted a journal line. The line the fix added
+// exists ONLY in the fixed tree, so an older tree has nothing to match and
+// the comparison is a pass against nothing - which is the ruling, in the
+// product owner's own words. The line stays, for a human reading a journal;
+// the ASSERTION moves here, onto the intent counter, which both trees
+// produce and produce differently. Wave two measured the fixed tree live
+// three times: `status.player.seq` delta 1, `player.lock` seq delta 1
+// (docs/QA-RESULTS.md D4).
+//
+// It is driven through each tree's OWN Service.qml, because that is the only
+// artefact of the shell a unit gate can reach: the two decision sites are
+// extracted as JavaScript and executed against fakes, so the numbers come
+// from the shipping source rather than from a copy of it living here
+// (CLAUDE.md 12). Point IPTV_SERVICE_QML at another tree's Service.qml to
+// run the same assertion against it - which is how the discrimination was
+// proved, `396a69a` reading 2 where this tree reads 1.
+
+// The brace-matched block after `anchor`, ignoring braces inside strings and
+// line comments.
+function qmlBlockAfter(text, anchor) {
+  const at = text.indexOf(anchor)
+  if (at === -1) return ""
+  let i = text.indexOf("{", at + anchor.length - 1)
+  if (i === -1) return ""
+  const start = i + 1
+  let depth = 0
+  for (; i < text.length; i++) {
+    const c = text[i]
+    if (c === "/" && text[i + 1] === "/") { i = text.indexOf("\n", i); if (i === -1) break; continue }
+    if (c === '"' || c === "'" || c === "`") {
+      const quote = c
+      for (i++; i < text.length; i++) {
+        if (text[i] === "\\") { i++; continue }
+        if (text[i] === quote) break
+      }
+      continue
+    }
+    if (c === "{") depth++
+    else if (c === "}") { depth--; if (depth === 0) return text.slice(start, i) }
+  }
+  return ""
+}
+
+// One wedge-and-respawn. The health verdict has already spent intent 1 on
+// `player restart` and the dying player's EOF has armed the queued relaunch;
+// both trees do all of that identically and it is not what is under test.
+// What IS under test is what happens when that restart answers ok: a tree
+// that leaves the queue armed fires a SECOND restart at the player it has
+// just respawned, one tick later, because the timer's `playerUp` branch
+// reads a healthy new player as "still not answering".
+function wedgeAndRespawn(serviceText) {
+  const handler = serviceText.slice(serviceText.indexOf("function handlePlayerResult("))
+  const okBranch = qmlBlockAfter(handler, "if (status.ok === true) {")
+  const timerBody = qmlBlockAfter(serviceText.slice(serviceText.indexOf("id: relaunchTimer")), "onTriggered: {")
+  if (okBranch === "" || timerBody === "") return { intents: "<the source did not parse>", seqDelta: "<the source did not parse>" }
+  const names = ["root", "relaunchTimer", "playerProc", "playerWatchdog", "console", "Model", "status"]
+  const runOk = new Function(...names, okBranch)
+  const runTick = new Function(...names, timerBody)
+  const issued = []
+  let armed = true                                   // the old player's EOF
+  const relaunchTimer = { restart() { armed = true }, stop() { armed = false } }
+  const playerProc = { running: false }              // the helper has answered
+  const playerWatchdog = { restart() {}, stop() {} }
+  const quiet = { log() {}, warn() {}, error() {} }
+  const root = {
+    playSeq: 1, relaunchPending: true, relaunched: true, playRetries: 0,
+    playerUp: true, playerPending: true, playerWanted: true,
+    stopping: false, userStopped: false, healthFailures: 0, healthSkips: 0, lastError: "",
+    nowPlaying: { id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", since: 3000 },
+    channelIndex: { "t:bbc1.uk": { id: "t:bbc1.uk", name: "BBC One HD", url: "http://provider.test/x.m3u8" } },
+    entryOwners: {},
+    socketAttached() { return false },
+    armPlayerSocket() {}, runPlayerProbe() {}, drainPendingPlay() {}, rememberEntry() {},
+    reapplyIntent() {}, playerFirstLoadFailed() {}, noteSessionOutcome() {}, startPlayer() {},
+    issuePlayerSession(verb) { issued.push(verb); playerProc.running = true }
+  }
+  const reply = {
+    ok: true, kind: "player.restart", spawned: true, pid: 4242, id: "t:bbc1.uk", name: "BBC One HD",
+    entryId: 1, seq: 1, firstLoad: { state: "playing", reason: "" }, warnings: [], applied: true, playing: null
+  }
+  runOk(root, relaunchTimer, playerProc, playerWatchdog, quiet, Model, reply)
+  if (armed) runTick(root, relaunchTimer, playerProc, playerWatchdog, quiet, Model, reply)
+  // The verdict's own restart counts as one; `issued` holds any that follow.
+  return { intents: 1 + issued.length, seqDelta: root.playSeq }
+}
+
+const relaunchTree = process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml")
+check("CL10: one wedge, ONE relaunch and ONE intent - a second one at the healthy player reads 2 here",
+  wedgeAndRespawn(fs.readFileSync(relaunchTree, "utf8")), { intents: 1, seqDelta: 1 })
+// The witness stays for a human reading a journal. It is a forward
+// regression guard for trees that already carry it and it can never be
+// rule-11 evidence against the tree the defect was filed on - which is
+// exactly what CL10 says, and it is written down here so the next person
+// does not mistake it for the assertion again.
+check("CL10: the journal witness is kept, and is NOT what proves the property",
+  /console\.log\("omarchy-iptv: relaunching the unresponsive player, seq /.test(serviceSource), true)
+
 // Every branch that drops the channel is a branch the record's fate hangs on,
 // so pair them by position: the very next thing after each `root.nowPlaying =
 // null` is the decision, in one of its two forms - noteSessionOutcome() for an
