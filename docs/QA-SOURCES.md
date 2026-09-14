@@ -695,6 +695,36 @@ EXPECT lines; it refuses to run when the scratch directory resolves into a
 real plugin location and it never calls `omarchy plugin|bar|theme`,
 `hyprctl dispatch|reload|keyword` or sudo.
 
+**[corrected, cleanup round] What a green run of this script used to mean.**
+Three things in it could not fail, so a transcript full of EXPECT lines was
+not evidence:
+
+- `harness_start` has returned 1 after 30 s since it was written, and all 19
+  call sites invoked it bare in a file with no `set -e`. All sixteen SRC-H*
+  scenarios then executed every remaining step against a **dead harness**,
+  printing empty output under each EXPECT line exactly as a good run prints
+  its answers. Fixed: every call site is guarded, a `SETUP FAILED` banner is
+  printed, and the scenario exits non-zero instead of being reported.
+- `check-harness) cmd_check_harness; exit 0` - the capability gate printed
+  `MISSING` lines and exited green. It counts now and exits 1.
+- Two of its gates were satisfied by a **comment**: a bare grep for
+  `validateSourceUrl|sourceView|xtreamUrls` in `Model.js` and for
+  `switchSource|activeCacheDir` in `Service.qml`. The Model.js gate loads the
+  module in node and requires the three to be callable; the Service.qml gate
+  anchors on the definition. (`have_verb` was never comment-satisfiable and is
+  unchanged.)
+
+The same round fixed the privacy sweep at the end of
+`scripts/dev-harness/sources-scenario.sh`, which is the machine half of the
+SRC-H13 / SRC-PRIV evidence. `! grep -E <labels> "$LOG" | grep -qE "://"`
+passed on an **empty log** and on a log leaking a credentialed URL on a line
+carrying none of the three labels; its sibling, "IPC status carries no URL",
+passed outright when the IPC was dead, because an empty answer contains no
+`://`. Both are three-way now (clean / leak / **vacuous**, and vacuous is a
+failure), the harness is asserted alive before the sweep runs, and its
+`--timeout` was raised from 120 s - less than the scenario's own waits sum to,
+which is exactly how the sweep came to run against a killed harness.
+
 Common seed (every scenario starts here unless it says otherwise):
 
 ```

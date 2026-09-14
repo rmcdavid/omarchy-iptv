@@ -25,6 +25,12 @@
 # and the evidence directory. It never edits bindings.lua or the menu extension.
 set -uo pipefail
 
+HERE=$(cd "$(dirname "$0")" && pwd)
+# The predicates below. scripts/qa-lib-test.sh drives every one of them both
+# ways, because this file's phases cannot be run without a live session.
+# shellcheck source=scripts/qa-lib.sh
+. "$HERE/qa-lib.sh"
+
 ID="io.github.rmcdavid.iptv"
 # QA_PLUGINS_DIR exists only so the --force guard can be exercised against a
 # scratch directory; leave it unset for a real run.
@@ -47,16 +53,33 @@ usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
 fail() { echo "qa-live: $*" >&2; exit 1; }
 note() { printf '\n## %s\n' "$*"; }
 
+# A phase can now FAIL. Before this, every phase printed and returned 0, so a
+# redaction failure, a containment breach or an unrestored shell.json left the
+# script exiting green - and these are the S-08 / constraint-4 / "snapshot and
+# restore" evidence for the live pass.
+verdicts=0
+verdict_bad=0
+ok_()   { printf '    ok      %s\n' "$*"; verdicts=$((verdicts + 1)); }
+bad_()  { printf '    FAIL    %s\n' "$*"; verdicts=$((verdicts + 1)); verdict_bad=$((verdict_bad + 1)); }
+# VACUOUS is a failure, not a shrug: it means the evidence was never gathered.
+void_() { printf '    VACUOUS %s\n' "$*"; verdicts=$((verdicts + 1)); verdict_bad=$((verdict_bad + 1)); }
+
 # Print the command; execute it only with --apply.
 run() {
   printf '$ %s\n' "$*"
   if (( APPLY )); then "$@"; fi
 }
 
-# Read-only command: always executed, output shown.
+# Read-only command: always executed, output shown. F7: the status of the
+# command has to be captured separately from the filter's, or "no output" and
+# "the tool is not installed" print identically.
 show() {
   printf '$ %s\n' "$*"
-  "$@" 2>&1 | sed 's/^/    /'
+  local out st
+  out=$("$@" 2>&1); st=$?
+  printf '%s\n' "$out" | sed 's/^/    /'
+  (( st == 0 )) || printf '    (exit %d: this command FAILED; its output above is not evidence)\n' "$st"
+  return $st
 }
 
 while (( $# > 0 )); do
@@ -91,12 +114,19 @@ phase_preflight() {
   show omarchy theme current
   show hyprctl monitors -j
   printf '$ omarchy menu keybindings --print | grep -E "SUPER (SHIFT|CTRL) \\+ T( |$)"\n'
-  if omarchy menu keybindings --print 2>/dev/null | grep -E 'SUPER SHIFT \+ T( |$)' | sed 's/^/    TAKEN: /'; then
-    echo "    SUPER SHIFT + T is already bound; pick another key for the runbook"
+  # F7: a missing or failing `omarchy` yields the same non-zero pipeline as a
+  # no-match, so "SUPER SHIFT + T is free" was printed both when it was free
+  # and when nothing had been asked.
+  local binds bind_st
+  binds=$(omarchy menu keybindings --print 2>/dev/null); bind_st=$?
+  if (( bind_st != 0 )) || [[ -z $binds ]]; then
+    void_ "could not read the keybindings (omarchy exit $bind_st): nothing is known about SUPER SHIFT + T"
+  elif grep -E 'SUPER SHIFT \+ T( |$)' <<<"$binds" | sed 's/^/    TAKEN: /'; then
+    bad_ "SUPER SHIFT + T is already bound; pick another key for the runbook"
   else
-    echo "    SUPER SHIFT + T is free"
+    ok_ "SUPER SHIFT + T is free"
   fi
-  omarchy menu keybindings --print 2>/dev/null | grep -E 'SUPER CTRL \+ T( |$)' | sed 's/^/    (expected, Activity) /'
+  [[ -n $binds ]] && grep -E 'SUPER CTRL \+ T( |$)' <<<"$binds" | sed 's/^/    (expected, Activity) /'
   printf '$ grep -n iptv ~/.config/hypr/bindings.lua ~/.config/omarchy/extensions/omarchy-menu.jsonc\n'
   grep -n -i iptv "$HOME/.config/hypr/bindings.lua" "$HOME/.config/omarchy/extensions/omarchy-menu.jsonc" 2>/dev/null | sed 's/^/    /' || echo "    (no iptv lines yet; add them per README when the runbook says so)"
   printf '$ ls -d %s %s %s %s\n' "$PLUGIN_DIR" "$CACHE_DIR" "$STATE_DIR" "$RUNTIME_DIR"
@@ -157,10 +187,28 @@ phase_verify() {
     printf '$ stat -c "%%a %%n" %s %s/*\n' "$d" "$d"
     stat -c '%a %n' "$d" "$d"/* 2>/dev/null | sed 's/^/    /' || echo "    absent: $d"
   done
+  # A2. Both finds discard stderr, so a PLUGIN_DIR that does not exist printed
+  # nothing and "no writes inside the plugin directory" (CLAUDE.md constraint
+  # 4) read as proven by a directory nobody looked at. Count what the find
+  # actually examined before believing what it did not find.
   printf '$ find %s -newer %s/manifest.json -not -path "*/.git/*" (expect nothing)\n' "$PLUGIN_DIR" "$PLUGIN_DIR"
-  find "$PLUGIN_DIR" -newer "$PLUGIN_DIR/manifest.json" -not -path '*/.git/*' 2>/dev/null | sed 's/^/    WROTE: /'
-  printf '$ ls -la %s (no symlinks expected)\n' "$PLUGIN_DIR"
-  find "$PLUGIN_DIR" -name .git -prune -o -type l -print 2>/dev/null | sed 's/^/    SYMLINK: /'
+  local examined wrote links
+  examined=$(qa_tree_count "$PLUGIN_DIR" -not -path '*/.git/*')
+  if [[ -z $examined ]] || (( examined == 0 )); then
+    void_ "the plugin directory $PLUGIN_DIR was never examined (absent or empty): this phase proves nothing about writes"
+  elif [[ ! -f $PLUGIN_DIR/manifest.json ]]; then
+    void_ "no manifest.json to compare mtimes against; the -newer test is vacuous"
+  else
+    wrote=$(find "$PLUGIN_DIR" -newer "$PLUGIN_DIR/manifest.json" -not -path '*/.git/*' 2>/dev/null)
+    [[ -z $wrote ]] || printf '%s\n' "$wrote" | sed 's/^/    WROTE: /'
+    if [[ -n $wrote ]]; then bad_ "files newer than manifest.json inside the plugin directory"
+    else ok_ "no writes inside the plugin directory ($examined paths examined)"; fi
+    printf '$ find %s -type l (no symlinks expected)\n' "$PLUGIN_DIR"
+    links=$(find "$PLUGIN_DIR" -name .git -prune -o -type l -print 2>/dev/null)
+    [[ -z $links ]] || printf '%s\n' "$links" | sed 's/^/    SYMLINK: /'
+    if [[ -n $links ]]; then bad_ "symlinks inside the plugin directory"
+    else ok_ "no symlinks inside the plugin directory"; fi
+  fi
 }
 
 phase_evidence() {
@@ -183,9 +231,22 @@ phase_evidence() {
   if (( APPLY )); then hyprctl clients -j > "$dir/clients.json" 2>&1; omarchy theme current > "$dir/theme.txt" 2>&1; fi
   printf '$ grep -nE "(https?|rtsp|rtmp)://[^ ]*[@?]|password=|username=" %s/journal.txt %s/qs-log.txt (redaction check, expect no output)\n' "$dir" "$dir"
   if (( APPLY )); then
-    grep -nE '(https?|rtsp|rtmp)://[^ ]*[@?]|password=|username=' "$dir/journal.txt" "$dir/qs-log.txt" 2>/dev/null && echo "    REDACTION FAILURE above" || echo "    redaction ok"
-    printf '$ grep -c "omarchy-iptv" %s/journal.txt (our console lines)\n' "$dir"
-    grep -c 'omarchy-iptv' "$dir/journal.txt" | sed 's/^/    /'
+    # A1. The old form was `grep ... && echo FAILURE || echo "redaction ok"`,
+    # which printed "redaction ok" for two empty files, for a journalctl that
+    # failed and wrote only its error, and for a capture window that caught
+    # nothing. Its only positive control - grep -c 'omarchy-iptv' - was
+    # printed AFTER the verdict and never asserted. This is the S-08 evidence
+    # for the live pass; a leak in a run whose capture failed read as clean.
+    local ours leaks st
+    ours=$(qa_count_multi 'omarchy-iptv' "$dir/journal.txt" "$dir/qs-log.txt")
+    printf '    our lines in the capture: %s\n' "$ours"
+    leaks=$(qa_leak_scan 'omarchy-iptv' '(https?|rtsp|rtmp)://[^ ]*[@?]|password=|username=' \
+              "$dir/journal.txt" "$dir/qs-log.txt"); st=$?
+    case $st in
+      0) ok_ "redaction ok ($ours of our lines swept)" ;;
+      1) printf '%s\n' "$leaks" | sed 's/^/    /'; bad_ "REDACTION FAILURE above" ;;
+      *) void_ "the capture is empty or holds none of our lines: this run is NOT redaction evidence" ;;
+    esac
     echo "evidence written to $dir"
   fi
 }
@@ -203,8 +264,23 @@ phase_uninstall() {
   run omarchy plugin remove "$ID" --yes
   run rm -rf "$CACHE_DIR" "$STATE_DIR" "$RUNTIME_DIR"
   printf '$ diff <(jq -S . %s/shell.json.before) <(jq -S . %s) (expect no output: the bar entry is gone again)\n' "$EVIDENCE_DIR" "$SHELL_JSON"
-  if (( APPLY )) && [[ -f $EVIDENCE_DIR/shell.json.before ]]; then
-    diff <(jq -S . "$EVIDENCE_DIR/shell.json.before") <(jq -S . "$SHELL_JSON") && echo "    shell.json restored"
+  if (( APPLY )); then
+    # A3. When jq failed on BOTH sides - a missing snapshot, a malformed file,
+    # no jq at all - the two process substitutions were empty, diff exited 0
+    # and the phase reported the user's real config restored. Reproduced in
+    # scripts/qa-lib-test.sh. Normalize each side and insist both produced
+    # something before comparing them.
+    local snap now
+    if ! snap=$(qa_json_normalized "$EVIDENCE_DIR/shell.json.before"); then
+      void_ "no usable shell.json snapshot at $EVIDENCE_DIR/shell.json.before: the restore is unverified"
+    elif ! now=$(qa_json_normalized "$SHELL_JSON"); then
+      void_ "$SHELL_JSON is missing or unreadable as JSON: the restore is unverified"
+    elif [[ $snap == "$now" ]]; then
+      ok_ "shell.json restored (both snapshots parsed and compared)"
+    else
+      diff <(printf '%s\n' "$snap") <(printf '%s\n' "$now") | sed 's/^/    /'
+      bad_ "shell.json differs from the snapshot taken before install"
+    fi
   fi
   printf '$ find ~ -path "*omarchy-iptv*" -not -path "*/omarchy-iptv-qa/*" 2>/dev/null (expect nothing)\n'
   if (( APPLY )); then find "$HOME" -path '*omarchy-iptv*' -not -path '*/omarchy-iptv-qa/*' 2>/dev/null | sed 's/^/    LEFT: /'; fi
@@ -221,3 +297,10 @@ case "$PHASE" in
   uninstall) phase_uninstall ;;
   all) phase_preflight; phase_install; phase_configure; phase_verify ;;
 esac
+
+# A phase that reached a verdict must be able to fail. Phases that assert
+# nothing (install, configure) still exit 0 - they only print commands.
+if (( verdicts )); then
+  printf '\nqa-live: %d verdict(s), %d not clean\n' "$verdicts" "$verdict_bad"
+  (( verdict_bad == 0 )) || exit 1
+fi

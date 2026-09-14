@@ -57,6 +57,16 @@ EXPORT_DIR=""
 RACE_TRIALS=5
 pass=0
 fail=0
+# `pass`/`fail` count OUTCOMES; `checks` counts ASSERTIONS. A `|| bad` guard
+# moves fail without being an assertion, so only `checks` is comparable
+# between a green run and a red one - which is what the floor at the end
+# needs. See EXPECTED_CHECKS below.
+checks=0
+
+# The predicates this file asserts on, so that they can be tested without a
+# display: scripts/qa-lib-test.sh drives every one of them both ways.
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
 
 # The secrets that must never reach a command line or a log (S-03, R12).
 SECRET_USER="harnessuser"
@@ -76,23 +86,20 @@ done
 ok()  { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
 bad() { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
 # is <label> <actual> <expected>
-is()  { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
+is()  { checks=$((checks + 1)); if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
 # ck <label> '<bash test>': `[[ ]]` is a keyword, so the test is evaluated,
 # not executed. Single-quote the expression and let it read the variables.
-ck()  { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+ck()  { checks=$((checks + 1)); if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
 ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
 ipc2() { OMARCHY_IPTV_HARNESS_INSTANCE=2 "$RUN" ipc "$@" 2>/dev/null; }
 # Field of the service half of state(), by python expression over `d`.
-field() { python3 -c '
-import json, sys
-try: d = json.loads(sys.argv[2])["service"]
-except Exception: print(""); raise SystemExit(0)
-try: v = eval(sys.argv[1])
-except Exception: v = None
-print(json.dumps(v) if isinstance(v, bool) else ("" if v is None else v))' "$1" "$2" 2>/dev/null; }
-svc()  { field "$1" "$(ipc state)"; }
-svc2() { field "$1" "$(ipc2 state)"; }
+# qa_field speaks sentinels: NOSTATE when the IPC did not answer, NOFIELD when
+# it answered and the field is absent. The old helper printed "" for both, and
+# for a healthy "nothing here" as well - so three P14 assertions were asserting
+# a value that every failure mode of the tooling also produced.
+svc()  { qa_field "$1" "$(ipc state)"; }
+svc2() { qa_field "$1" "$(ipc2 state)"; }
 np()   { svc "d['nowPlaying']['$1'] if d.get('nowPlaying') else None"; }
 np2()  { svc2 "d['nowPlaying']['$1'] if d.get('nowPlaying') else None"; }
 
@@ -101,7 +108,11 @@ np2()  { svc2 "d['nowPlaying']['$1'] if d.get('nowPlaying') else None"; }
 player_pids()  { pgrep -f "input-ipc-server=$SOCK" 2>/dev/null; }
 player_count() { player_pids | wc -l | tr -d ' '; }
 player_pid()   { player_pids | head -1; }
-cmdline_of()   { tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null; }
+# qa_cmdline refuses an empty pid. `tr '\0' ' ' </proc/$1/cmdline` with an
+# empty $1 reads /proc//cmdline, which the kernel resolves to /proc/cmdline:
+# the six S-03 "no secret on mpv's argv" sweeps then compared the secrets
+# against the KERNEL command line and passed.
+cmdline_of()   { qa_cmdline "$1"; }
 ppid_of()      { ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '; }
 window_of() {
   hyprctl clients -j 2>/dev/null | python3 -c '
@@ -129,11 +140,12 @@ until_eq() {
   done
   return 1
 }
-until_set() {   # until_set <secs> <cmd...>: wait for a non-empty answer
+until_set() {   # until_set <secs> <cmd...>: wait for a REAL answer
+  # qa_value, not [[ -n ]]: a sentinel is non-empty and must not end the wait.
   local secs=$1; shift
   local i
   for ((i = 0; i < secs * 10; i++)); do
-    [[ -n "$("$@")" ]] && return 0
+    qa_value "$("$@")" && return 0
     sleep 0.1
   done
   return 1
@@ -146,7 +158,13 @@ wait_log() {
   done
   return 1
 }
-log_count() { grep -acE "$1" "$SCRATCH"/harness.log 2>/dev/null || echo 0; }
+# D-PLY-9. The shipped form was
+#   log_count() { grep -acE "$1" "$SCRATCH"/harness.log 2>/dev/null || echo 0; }
+# and `grep -c` prints its own 0 AND exits 1 on a no-match, so both sides of
+# the || ran and the value was $'0\n0'. The $(( )) at P11 then died as an
+# EXPANSION error, which means bash never ran the `is` whose word it was:
+# no pass, no fail, exit 0, on every run of both trees.
+log_count() { qa_count "$1" "$SCRATCH/harness.log"; }
 # until_changed <secs> <old> <cmd...>: wait for a different, non-empty answer
 until_changed() {
   local secs=$1 old=$2; shift 2
@@ -160,17 +178,25 @@ until_changed() {
 }
 STATE_JSON="$SCRATCH/state/omarchy-iptv/state.json"
 # The session record on DISK, which is what a later shell start reads.
-session_id() {
-  python3 -c '
-import json, sys
-try: d = json.load(open(sys.argv[1]))
-except Exception: print(""); raise SystemExit(0)
-s = d.get("session")
-print(s.get("id", "") if isinstance(s, dict) else "")' "$STATE_JSON" 2>/dev/null
-}
+# NOFILE (no state file, or unparseable) and NOSESSION (parsed, no record) are
+# different answers and neither of them is "". P14 asserted "" three times.
+session_id() { qa_session_id "$STATE_JSON"; }
 # until_session <want> <secs>: saveState() is gated on dirsReady, so the write
 # can legitimately land a moment after the play.
 until_session() { until_eq "$1" "$2" session_id; }
+# Waiting for "no record" must accept either shape - a state file with the
+# record retired (NOSESSION) or no state file yet (NOFILE, e.g. straight after
+# `run.sh clean`). The ASSERTIONS stay strict: a vanished state file is a
+# different failure from a retired record and must not read as one.
+until_no_session() {
+  local secs=$1 i now
+  for ((i = 0; i < secs * 10; i++)); do
+    now=$(session_id)
+    [[ $now == "$QA_NO_SESSION" || $now == "$QA_NO_FILE" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
 shell_pid() { cat "$SCRATCH/qs.pid" 2>/dev/null; }
 # The play the successor accepts first: qs ipc fails until the IpcHandler
 # exists, which is exactly the window ARCHITECTURE-PLAYER.md section 15
@@ -250,29 +276,42 @@ is "P1 exactly one omarchy-iptv window" "$(windows_named)" "1"
 
 echo "== P2 S-03: nothing channel-specific on the player command line"
 cmd=$(cmdline_of "$PID1")
+# The positive control. Without it every sweep below is a statement about a
+# string nobody has established is the player's argv (A5).
+ck "P2 the player command line was actually read" '[[ -n "$cmd" && "$cmd" == *"input-ipc-server=$SOCK"* ]]'
 ck "P2 no URL on the command line"           '[[ "$cmd" != *"://"* ]]'
 ck "P2 no credential on the command line"    '[[ "$cmd" != *"$SECRET_PW"* && "$cmd" != *"$SECRET_USER"* ]]'
 ck "P2 no token on the command line"         '[[ "$cmd" != *"$SECRET_TOKEN"* ]]'
 ck "P2 no header value on the command line"  '[[ "$cmd" != *"$SECRET_UA"* && "$cmd" != *"--user-agent="* && "$cmd" != *"--referrer="* && "$cmd" != *"--http-header-fields"* ]]'
 ck "P2 no channel name on the command line"  '[[ "$cmd" != *"Harness Live One"* ]]'
 ck "P2 the neutral launch options are there" '[[ "$cmd" == *"--idle=once"* && "$cmd" == *"--wayland-app-id=omarchy-iptv"* && "$cmd" == *"--ytdl=no"* ]]'
+# F2: a bare negated pgrep cannot tell "nothing is running" from "pgrep is not
+# installed" or "the pattern stopped matching". Establish that pgrep answers.
+ck "P2 pgrep answers on this box (positive control)" 'pgrep -f "input-ipc-server=$SOCK" >/dev/null 2>&1'
 ck "P2 no yt-dlp process"                    '! pgrep -x yt-dlp >/dev/null 2>&1'
 
 echo "== P3 the player is not a child of the shell"
 QS_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null)
 ck "P3 the shell is up"                                '[[ -n "$QS_PID" ]] && kill -0 "$QS_PID" 2>/dev/null'
 ck "P3 the player's parent is not the shell"           '[[ "$(ppid_of "$PID1")" != "$QS_PID" ]]'
-ck "P3 the player is not a child of the shell"         '! pgrep -P "${QS_PID:-0}" -f "input-ipc-server=$SOCK" >/dev/null 2>&1'
+# -P "${QS_PID:-0}" would quietly become "-P 0" - a question about a pid that
+# is not the shell - so the shell's pid has to be real before this means
+# anything. `ck "P3 the shell is up"` above establishes it; assert it here too
+# rather than relying on a check four lines away staying put.
+ck "P3 the player is not a child of the shell"         '[[ -n "$QS_PID" ]] && ! pgrep -P "$QS_PID" -f "input-ipc-server=$SOCK" >/dev/null 2>&1'
 
 echo "== P4 restart the shell while playing (the headline case)"
-"$RUN" restart-shell >>"$LOG" 2>&1
+# C4: run.sh exits 2 when last-start.env is missing. An unchecked restart
+# leaves the old shell dead and no new one, and P4/P13/P14 then measure
+# nothing while their wait_log guards blame the wrong thing.
+"$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P4 restart-shell failed (see $LOG)"; exit 1; }
 is "P4 the player survived the shell going away" "$(player_count)" "1"
 is "P4 the same player pid" "$(player_pid)" "$PID1"
 wait_log 'service loaded' 20 || bad "P4 the new shell did not start"
 until_eq true 4 svc "d['playing']" || true      # the 2 s acceptance bar, doubled
 is "P4 the new shell recovered now-playing" "$(svc "d['playing']")" "true"
 is "P4 it recovered the right channel" "$(np id)" "t:live1"
-ck "P4 it recovered the zap ring (launchedFrom, which no mpv property knows)" '[[ -n "$(np launchedFrom)" ]]'
+ck "P4 it recovered the zap ring (launchedFrom, which no mpv property knows)" 'qa_value "$(np launchedFrom)"'
 is "P4 still exactly one player" "$(player_count)" "1"
 is "P4 still the same pid" "$(player_pid)" "$PID1"
 is "P4 still exactly one window" "$(windows_named)" "1"
@@ -288,6 +327,9 @@ is "P5 the same pid" "$(player_pid)" "$PID1"
 until_eq "omarchy-iptv|Harness Live Two" 10 window_of "$PID1" || true
 is "P5 the window title followed the zap" "$(window_of "$PID1")" "omarchy-iptv|Harness Live Two"
 cmd=$(cmdline_of "$PID1")
+# A5: this is the unguarded half. P2's sweep has the "--idle=once" positive
+# control four lines down; P5's has nothing between it and an empty $cmd.
+ck "P5 the player command line was actually read" '[[ -n "$cmd" && "$cmd" == *"input-ipc-server=$SOCK"* ]]'
 ck "P5 still nothing channel-specific on the command line" '[[ "$cmd" != *"://"* && "$cmd" != *"Harness Live Two"* ]]'
 
 echo "== P8 a second service on the same runtime dir adopts the player"
@@ -335,12 +377,12 @@ echo "== P7 a dead stream is detected, named and marked"
 ipc play "t:dead1" >/dev/null
 until_set 20 svc "d['failedAt'].get('t:dead1')" || true
 failed_at=$(svc "d['failedAt'].get('t:dead1')")
-ck "P7 the channel is marked failed for the session" '[[ -n "$failed_at" ]]'
+ck "P7 the channel is marked failed for the session" 'qa_value "$failed_at"'
 until_eq false 10 svc "d['playing']" || true
 is "P7 playback did not stay up" "$(svc "d['playing']")" "false"
 err=$(svc "d['lastError']")
-ck "P7 a reason was recorded" '[[ -n "$err" ]]'
-ck "P7 the reason carries no credential and no token" '[[ "$err" != *"$SECRET_PW"* && "$err" != *"$SECRET_TOKEN"* && "$err" != *"$SECRET_USER"* ]]'
+ck "P7 a reason was recorded" 'qa_value "$err"'
+ck "P7 the reason carries no credential and no token" 'qa_value "$err" && [[ "$err" != *"$SECRET_PW"* && "$err" != *"$SECRET_TOKEN"* && "$err" != *"$SECRET_USER"* ]]'
 until_eq 0 8 player_count || true
 is "P7 no player left behind by the failure" "$(player_count)" "0"
 
@@ -412,8 +454,8 @@ landed=""
 for ((trial = 1; trial <= RACE_TRIALS; trial++)); do
   ipc stop >/dev/null
   until_eq 0 10 player_count || true
-  until_session "" 6 || true
-  "$RUN" restart-shell >>"$LOG" 2>&1
+  until_no_session 6 || true
+  "$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P13 trial $trial: restart-shell failed (see $LOG)"; exit 1; }
   attempt=$(play_asap "t:live1")
   landed="$landed $attempt"
   until_eq true 15 svc "d['playing']" || true
@@ -446,28 +488,59 @@ sleep 0.5
 for pid in $(player_pids); do kill -KILL "$pid" 2>/dev/null; done
 until_eq 0 8 player_count || true
 : >"$SCRATCH/harness.log"
-"$RUN" restart-shell >>"$LOG" 2>&1
+"$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P14 restart-shell failed (see $LOG)"; exit 1; }
 wait_log 'service loaded' 20 || bad "P14 the shell did not come back"
 until_set 15 svc "d['failedAt'].get('t:live1')" || true
 mark14=$(svc "d['failedAt'].get('t:live1')")
-ck "P14 the channel that died unattended is marked in the guide" '[[ -n "$mark14" ]]' 
-until_session "" 10 || true
-is "P14 the record is retired once it has been consumed" "$(session_id)" ""
+ck "P14 the channel that died unattended is marked in the guide" 'qa_value "$mark14"'
+until_no_session 10 || true
+is "P14 the record is retired once it has been consumed" "$(session_id)" "$QA_NO_SESSION"
 for again in 1 2; do
-  "$RUN" restart-shell >>"$LOG" 2>&1
+  "$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P14 restart $again failed (see $LOG)"; exit 1; }
   wait_log 'service loaded' 20 || bad "P14 restart $again did not come back"
   sleep 3
-  is "P14 start $again raises no second mark for the same event" "$(svc "d['failedAt'].get('t:live1')")" ""
-  is "P14 start $again still finds no record" "$(session_id)" ""
+  # F1's positive control. Without it, the two assertions below are satisfied
+  # by a shell that never came up: the old helpers answered a dead IPC with
+  # exactly the "" they demanded. NOFIELD/NOSESSION are answers from a service
+  # that is alive; this line proves it is.
+  is "P14 start $again the service is reachable (the fixture's 3 channels)" "$(svc "d['channels']")" "3"
+  is "P14 start $again raises no second mark for the same event" "$(svc "d['failedAt'].get('t:live1')")" "$QA_NO_FIELD"
+  is "P14 start $again still finds no record" "$(session_id)" "$QA_NO_SESSION"
 done
 
 echo "== P9 the harness reaps a detached grandchild"
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P9 no player to reap"
+# F2. `! pgrep -f "quickshell -p $SCRATCH/root"` is the SAME pattern run.sh's
+# own `pkill -f` uses to reap. If the launcher's argv ever stops matching it,
+# reap stops reaping AND this check reports PASS - one point of failure shared
+# between the teardown and its only verifier. So prove the pattern matches
+# while the shell is up, before trusting it to say the shell is gone.
+ck "P9 the reap pattern matches the running shell (positive control)" 'pgrep -f "quickshell -p $SCRATCH/root" >/dev/null'
 "$RUN" reap >>"$LOG" 2>&1
 until_eq 0 8 player_count || true
 is "P9 reap killed the detached player" "$(player_count)" "0"
 ck "P9 reap stopped the shell" '! pgrep -f "quickshell -p $SCRATCH/root" >/dev/null'
 
-printf '\n== summary: %d passed, %d failed\n' "$pass" "$fail"
+# The floor. D-PLY-9 was not that one assertion was wrong - it was that bash
+# offers NO way to turn a failed expansion into a failed test, so the check
+# vanished and the summary printed one line less than anybody expected and
+# nobody counted. This is the only thing that closes that class: assert how
+# many assertions ran, unguarded, so a check that stops executing turns the
+# run red instead of shortening the summary.
+#
+# It counts `checks` (is/ck) rather than pass+fail, because the twelve
+# `|| bad` guards move `fail` without being assertions - on the --baseline
+# run, where five of them fire, a pass+fail floor would go red for a reason
+# that has nothing to do with a missing check.
+#
+# Recount after adding or removing one:
+#   grep -c '^\(is\|ck\) ' scripts/dev-harness/player-scenario.sh   -> top level
+#   plus the three inside P14's `for again in 1 2` loop, twice.
+# Never lower it to make a run green.
+EXPECTED_CHECKS=82
+ran=$checks
+is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
+
+printf '\n== summary: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"
 (( fail == 0 )) || exit 1
