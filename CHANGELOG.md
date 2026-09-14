@@ -3,6 +3,47 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.4.0 (2026-09-14)
+
+Channel numbers and numeric tuning.
+
+### Added
+- Type a channel number in the guide to jump to it. Digits select the channel
+  and Enter plays it, so a mistyped number costs nothing. Subchannels like
+  `7.1` work, and both the period and comma keys act as the separator because
+  the numpad decimal differs by keyboard layout.
+- A new command tunes straight to a number without opening the guide:
+  `omarchy-shell io.github.rmcdavid.iptv channel 101`. Bind it to a key to
+  change channel the way a television does.
+- Channel numbers are read from the three attribute names providers use, and
+  shown in the guide and the bar. A new setting sorts the list by number
+  instead of the provider's order.
+- If your playlist carries no channel numbers, typing a digit says so rather
+  than ignoring you.
+
+### Known limitations
+- Re-typing the same number within the digit window reads as one longer
+  number and reports a miss. It is visible and recoverable with one keypress,
+  and it is the cost of never tuning you somewhere you did not ask for.
+
+## 0.3.1 (2026-09-14)
+
+### Fixed
+- Changing channel immediately after the player starts no longer leaves the
+  guide naming one channel while a different one plays. The starting player
+  stands down when it finds a newer choice already applied, and the guide
+  re-applies what you asked for rather than relabelling itself to match.
+- Stopping a player that has stopped responding no longer leaves its socket
+  file behind.
+- The player's shader cache is kept inside the plugin's own directory instead
+  of the cache directory shared with your other use of mpv.
+
+### Internal
+- A test-harness check that had never executed was repaired, and an audit
+  found sixteen more checks in this project's own tooling that could report
+  success without testing anything. All are fixed, each proven by reproducing
+  the false all-clear and then showing it refused.
+
 ## 0.3.0 (2026-09-14)
 
 M2-02, the detached player. Playback no longer belongs to the shell.
