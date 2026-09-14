@@ -834,3 +834,463 @@ At the end of the pass: no harness Quickshell, no mpv, no fixture HTTP server (8
 ### RR10. Release recommendation
 
 All three M1.1-08 fixes verified with their original repros, a 120-case regression sample with no regression, PERF-01..07 within budget and level with the previous pass, gates green (299 node, 144 python, 21 qml, validate 0), 0 open P1/P2. The one new finding, D-LIVE-19, is a pre-existing P3 in an unusual runtime transition (clearing `playlistUrl` while a list is loaded), recoverable with a new URL or a restart, and can ship as a known limitation or be fixed in M1.2. Combined with the live-shell block already verified on this machine (section above), QA verdict: go for tagging v0.1.0 (on 73b700d or later).
+
+## M2-01 Sources pass on 7e13053 (QA, 2026-09-13, 18:44 - 19:32)
+
+Plan of record: `docs/QA-SOURCES.md` v0.2 (196 `SRC-` cases; the `[v0.2]` expectation corrections were made during this pass against the round-2 rulings SR11-SR32). Same conventions as the sections above: ` - ` stands for U+00B7 and `...` for U+2026 in quoted microcopy, `"x"` for U+201C/U+201D; the UI renders the real codepoints (checked in the screenshots). Evidence root `E=/tmp/claude-1000/omarchy-iptv-qa4/` (`shots/` 52 grim screenshots, `logs/` one harness console per run `h<nn>.log` plus the per-scenario transcripts `h<nn>.txt`, `logs/sweep/` the privacy sinks, `gen/` the generated playlists, `cli-cache/`, `help10/`, `mig07/`, `perf-cache/`).
+
+### S1. Header
+
+| Item | Value |
+|---|---|
+| Code under test | `7e13053` (merge: M2-01 follow-ups). HEAD did not move during the pass; `git status` shows only `docs/QA-SOURCES.md` (this pass's expectation update) |
+| Gates | `omarchy plugin validate .` exit 0, no output; `scripts/check.sh` all green: manifest ok, qmllint 0 errors (BarWidget 14 / Guide 197 / Service 0 warnings), `node tests/Model.test.js` 635 checks 0 failures, python 196 tests (`test_cache` 18, `test_mpv` 23, `test_playlist` 55, `test_helper` 23, `test_epg` 32, `test_state` 11, `test_source` 34) OK, `qmltestrunner tests/Model.spec.qml` 29 passed, ascii ok |
+| Mode | dev harness only (`scripts/dev-harness/run.sh` under `OMARCHY_IPTV_HARNESS_DIR=$E/harness`, wrapper `h.sh`, `start.sh`/`stop.sh` by PID, notification shim `$E/bin/omarchy-notification-send` first on PATH, `OMARCHY_IPTV_DEBUG=1` for the switch timings). The installed v0.1.0 plugin, `~/.config/omarchy/shell.json`, `~/.local/state/omarchy-iptv` and `~/.cache/omarchy-iptv` were not touched (`find ... -newermt '2026-09-13 18:40'` is empty at the end); no `omarchy plugin/bar/theme` state command, no `hyprctl dispatch/reload/keyword`, no sudo. `pgrep -x hyprlock` checked before every wtype batch (never locked). Everything started was reaped: 0 harness quickshell / fixture server / helper / mpv processes at the end |
+| Machine | unchanged: Omarchy 4.0.3, Quickshell 0.3.1, Hyprland 0.56.2, mpv 0.41.0, Python 3.14.7, node 26.8.1, one output eDP-1 1366x768, theme retropc |
+| Sources | `tests/fixtures/qa-sources/` served from `127.0.0.1:8765` (`qa-src-a.m3u` key `584a58e5`, `qa-src-b.m3u` `733cf68c`, `qa-src-userinfo.m3u` as `http://qa-user:qa-secret@127.0.0.1:8765/...` `25b70358` and as a path, `xtream/get.php` + `xmltv.php` with `user` / `pa ss` -> `6e90a03e`, `qa-src-a.xml`, `state-v1.json` + `legacy-cache/`), `qa-empty.m3u`, `qa-not-m3u.html`, `qa-attrs.m3u` (hostile names), the harness `harness.m3u` with `--serve` (one live MPEG-TS channel), generated `gen-10k.m3u` (10,000 channels, sha256 `3d360c15...`) and `gen-real.m3u` (1,500), a silent loopback server on `127.0.0.1:8799` (accepts, never answers) for cancel and deadline cases, 50-record generated `state.json` files (typical and 2,048-character URLs) |
+| Not executed | the live-shell runbook (QA-SOURCES.md section 9: install/update in place, mouse, narrow card, theme switch, SRC-MIG-10) - marked `blocked: needs live shell` |
+
+### S2. Summary (196 cases)
+
+| Category | Cases | pass | fail | blocked | not run |
+|---|---|---|---|---|---|
+| FR First run | 12 | 11 | 1 | 0 | 0 |
+| LST Sources list | 12 | 11 | 0 | 1 | 0 |
+| SW Switching | 10 | 9 | 1 | 0 | 0 |
+| LBL Labels and editing | 9 | 9 | 0 | 0 | 0 |
+| CLI parity | 8 | 5 | 3 | 0 | 0 |
+| XT Xtream | 10 | 9 | 1 | 0 | 0 |
+| RM Removal | 9 | 9 | 0 | 0 | 0 |
+| ERR Errors | 9 | 9 | 0 | 0 | 0 |
+| KEY Keyboard and mouse | 12 | 11 | 0 | 1 | 0 |
+| UI States, microcopy, tokens | 20 | 17 | 1 | 1 | 1 |
+| A11Y | 6 | 6 | 0 | 0 | 0 |
+| PRIV Privacy rules | 9 | 9 | 0 | 0 | 0 |
+| SEC Security | 24 | 23 | 1 | 0 | 0 |
+| MIG Migration | 10 | 8 | 1 | 1 | 0 |
+| PERF | 7 | 7 | 0 | 0 | 0 |
+| MODEL Model.js | 11 | 11 | 0 | 0 | 0 |
+| HELP Helper | 10 | 9 | 1 | 0 | 0 |
+| SVC Service contract | 8 | 8 | 0 | 0 | 0 |
+| **Total** | **196** | **181** | **10** | **4** | **1** |
+
+Failures map to defects (section S7): SRC-FR-11 and SRC-CLI-03 -> D-SRC-03 (P2) and D-SRC-06 (P3); SRC-SW-06 -> D-SRC-04 (P2); SRC-CLI-02 and SRC-CLI-08 -> D-SRC-02 (P2); SRC-XT-02 -> D-SRC-08 (P3); SRC-UI-14 -> D-SRC-06 (P3); SRC-SEC-21 -> D-SRC-09 (P3); SRC-MIG-01 -> D-SRC-01 (P3); SRC-HELP-07 -> D-SRC-07 (P3). D-SRC-05 and D-SRC-10 (P3) were found through passing cases. Blocked: SRC-LST-09 (narrow card), SRC-KEY-11 (mouse), SRC-UI-19 (theme switch), SRC-MIG-10 (live upgrade). Not run: SRC-UI-16 (animation timings are not measurable through the harness).
+
+### S3. Results by category
+
+Runs: `h01` migration (+ `h01-keep`, `h01-t0`, `h01-none`, `h01-garbage`), `h02a/b/c` first run, `h03` invalid input, `h04` paste, `h05` add failure, `h06` switch + list + remove (H06/H07), `h08` timing, `h09` + `h09b` CLI parity, `h10` + `h10b` Xtream, `h11` + `h11b` duplicates/cap, `h12` edit, `h13` privacy sweep, `h14` + `h14b/c/d` cancel/busy/persist/deadline, `h16` + `h16w` + `h16t` state hygiene, `h20` + `h21` M1 regression. Node/python vector outputs: `logs/model-*.txt`, `logs/help-01.txt`, `logs/static-greps.txt`.
+
+#### FR - First run
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-FR-01 | pass | `shots/sources-first-run.png`: glyph U+F0502, `No playlist configured`, prose, `Playlist` focused with a caret, `EPG`, `Use Xtream login instead`, `Load`, terminal caption, footer `Enter load - Tab next field - Ctrl+V paste - Esc close`, header dimmed `Search channels...`; typing `o r f x s` inserted text only (`h02a`: value `o r f x s`, no refresh, mode `sourceEdit`) |
+| SRC-FR-02 | pass | `h02b`: served URL + EPG -> search mode, `rows 8`, footer `8 channels in 3 groups`, `updateEntryInline` once with keys `id,playlistUrl,epgUrl,refreshMinutes,mpvArgs,showChannelName,maxRecents,barLabelMaxWidth playlist (set) epg (set)`, record `584a58e5` `channelCount 8 groupCount 3`; the fetch is too fast (< 250 ms) to catch the `Fetching from 127.0.0.1...` line, seen instead on `h05` / `h14` (`probeHost 127.0.0.1`, `shots/sources-fetching.png`) |
+| SRC-FR-03 | pass | `h02a`: typed path -> record `kind file`, label `qa-src-a.m3u`, host `local file`, `activeCache .../sources/ca124de2`, `shots/sources-first-run-done.png` (pinned `Sources 1`) |
+| SRC-FR-04 | pass | `h02c` Tab x6: `epg, xtream, load, playlist, epg, xtream`; Shift+Tab / Down / Up as expected; Enter on the focused `Load` submits (empty -> `Enter a playlist URL or path`, focus `playlist`); Enter in `EPG` submitted in `h02b` |
+| SRC-FR-05 | pass | `h05`: `addSource http://127.0.0.1:9/x.m3u` -> `sourceProbeFinished {ok:false, reason:"Connection refused", host:"127.0.0.1"}`, `activeSourceKey 584a58e5`, `rows 8`, `updateEntryInline` count unchanged (0), no record, `sources/` unchanged (SR23); form path: `HTTP 404 Not Found from 127.0.0.1`, focus `playlist`, value kept (33 chars), `shots/sources-add-failed.png` |
+| SRC-FR-06 | pass | `h02c`: text in Playlist + Esc -> cleared (guide open); text in EPG + Esc -> cleared, Esc again with everything empty -> closes; Playlist text + focus on empty EPG + Esc -> focus moves to Playlist, Esc clears it, Esc closes |
+| SRC-FR-07 | pass | `h14`: Esc while fetching from the silent server -> `formProbing false`, values kept (27 chars), no result line, 0 helper processes, no new `sources/<key>`, `find -name '.tmp-*'` empty |
+| SRC-FR-08 | pass | `h06`/H07: `Saved sources (1)` after the active source was removed (`shots/sources-none-active.png`), Tab x2 -> focus `savedSources`, Return -> `sources` with `returnMode sourceEdit`, Esc -> back to the form |
+| SRC-FR-09 | pass | `h10b`: Tab x2 + Return -> `sourceXtream` origin `firstRun`; Esc with empty fields -> first-run form (focus on the link); `h14d`: filled and submitted -> search mode, `4 channels in 2 groups`, active `6e90a03e`, 0 password needles in the console |
+| SRC-FR-10 | pass | `h02b`: `epg-now.json`, `epg-status.json`, `epg-window.txt` under `sources/584a58e5/` and nothing at the top level; `shots/sources-epg-rows.png` shows `Now: Alpha Evergreen` on the two news rows |
+| SRC-FR-11 | fail | D-SRC-03, D-SRC-06: `ipc set playlistUrl ftp://x` -> `settingsInvalid {code:"scheme"}` but `emptyKind loading`, `Loading playlist... / Fetching from x` for good (`h09b`, `shots/sources-cli-ftp.png`; same for `ftp://example.test/x.m3u` in `h21`, `shots/m1-ftp-cli.png`); `javascript:` -> error `Unsupported URL from unknown source`, `/proc/self/environ` -> `Path not allowed` host `local file`, 3,000 chars -> `URL too long from h.test` (`shots/sources-cli-invalid.png`): M1 wording with a host, not the UX 5.4 messages. No helper ran, no record (pass parts); `set playlistUrl ''` -> first-run form, history untouched (3 records), 0 rows behind the form (D-LIVE-19 regression ok) |
+| SRC-FR-12 | pass | `h04`: Ctrl+V and Shift+Insert both paste (34 chars); the userinfo URL is masked at once `http://****@127.0.0.1:8765/qa-src-userinfo.m3u` with the eye (`shots/sources-first-run-masked.png`); typed text is never masked (`revealed:true` while typing) |
+
+#### LST - Sources list
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-LST-01 | pass | `h06`: list mode + `o` -> `mode sources`, `returnMode list`, cursor 0 on the active row, header `Sources` / `3 sources` (`shots/sources-list.png`); from search mode `o` types (`h06`, `h08` redo: query `oj`, `ojo`) |
+| SRC-LST-02 | pass | `shots/sources-first-run-done.png`, `sources-switched.png`, `m1-nomatch-group.png`: separator, glyph U+F0411, `Sources`, count 1/3/4 at reduced opacity under the group column; `h`/`l` in `sources` never land on it (`h06` ignored keys); grep of the tokens under SRC-UI-12; click and hover are live-shell (SRC-KEY-11) |
+| SRC-LST-03 | pass | `shots/sources-list.png`: check U+F012C + bold `127.0.0.1:8765` + `active - 127.0.0.1:8765 - 8 channels in 3 groups`, `used 19:07`; `Charlie` `local file - 3 channels in 1 group`; `shots/sources-sweep-list.png`: `active - 127.0.0.1:8765 - Xtream - 4 channels in 2 groups - EPG`; `not loaded yet` / `used yesterday` rows in `shots/sources-full.png`; `never used` / `used 3 Sep 2025` through `Model.formatLastUsed` (MODEL-11) |
+| SRC-LST-04 | pass | `shots/sources-list.png`: separator then `+ Add source` (U+F0415) and U+F0306 `Add Xtream login`, single-row height; `h06`: End -> cursor 4 kind `xtream`; footer on them in `shots/sources-full.png` is the cap message (SR24) - the plain `j/k move - Enter open - Esc back` variant was seen in `h05` state dumps only through `sourceCursorKind` |
+| SRC-LST-05 | pass | `shots/sources-list.png`, `sources-confirm.png`: pencil U+F03EB and close-circle U+F0159 only on the cursor row, right meta shifted left; hover/tooltips are live-shell |
+| SRC-LST-06 | pass | `h06`: Esc from `sources` -> `returnMode` (`list` with query `alpha` kept, `h08` redo); `o` again -> back; no helper (3 s watch), no `updateEntryInline` |
+| SRC-LST-07 | pass | `1 source` (`h05` `sourceCount 1`), `3 sources` (`shots/sources-list.png`), `50 sources` (`shots/sources-full.png`); `No sources` is unreachable: removing the last source closes Sources (SRC-RM-04), so wireframe 3.2.3 never renders (observation O5) |
+| SRC-LST-08 | pass | `h06` `ipc sources`: `584a58e5` (active), `Charlie` (`lastUsedAt` 1789344468), `733cf68c` (1789344466) = active first then `lastUsedAt` desc (SR32); `shots/sources-confirm.png` shows the re-sorted order after B was used; never-used CLI records in added order in `shots/sources-full.png` |
+| SRC-LST-09 | blocked: needs live shell | narrow card needs `hyprctl keyword monitor` (section 9.5) |
+| SRC-LST-10 | pass | `h06`: `h l r s f / 4`, Tab, Left, Right in `sources` -> cursor 0, `refreshing null`, query empty, `helper-sightings=0`, `updateEntryInline` unchanged |
+| SRC-LST-11 | pass | `logs/sweep/sources.json`: keys `id,label,kind,host,hasEpg,channelCount,groupCount,cachedAt,lastUsedAt,lastUsedText,active,origin,errorReason` (three extra non-URL keys, `errorReason` per SR26), 0 `://`, `channelCount -1` when never fetched (`shots/sources-full.png` rows, `h09` CLI row) |
+| SRC-LST-12 | pass | `h06`: one source -> `8 channels - updated 18:51`; two or more -> `127.0.0.1:8765 - 8 channels - updated 19:07`, `Charlie - 3 channels - updated 19:07`, `127.0.0.1:8765 2 - 5 channels - updated 09:07` (cached form) |
+
+#### SW - Switching
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-SW-01 | pass | `h06`: Enter on Charlie -> `updateEntryInline` +1 (keys only, `playlist (set)`), `activeCache .../sources/023a756e`, `activeSourceKey 023a756e`, rows 3 -> `Switched to Charlie - 3 channels` (`shots/sources-switched.png`), search mode, empty query, scope `all`; `entryWith` keeps foreign keys (MODEL-11 `refreshMinutes, mpvArgs, foreign`) |
+| SRC-SW-02 | pass | `h06`: Enter on the active row -> `returnMode` (`list`), `helper-sightings=0`, `updateEntryInline delta 0` |
+| SRC-SW-03 | pass | `h06`: Space -> stays in `sources`, active moves (`ipc sources` `active` flags), transient `Switched to 127.0.0.1:8765 - 8 channels` (`shots/sources-space.png`); second Space -> back to Charlie |
+| SRC-SW-04 | pass | `h06`: `fetchedAt` set 10 h back on both caches, switch -> footer `127.0.0.1:8765 2 - 5 channels - updated 09:07` -> `Refreshing...` -> `... updated 19:08`, no banner, no notification |
+| SRC-SW-05 | pass | `h08` redo: fresh stamps, switch to Real and back -> `helper-sightings=0` twice, 0 `playlist:` lines; `h01-keep`: restart with `--keep` over a fresh migrated cache -> no refresh |
+| SRC-SW-06 | fail | D-SRC-04: `h09b` (c): Enter on the never-fetched CLI source -> footer `Switched to 127.0.0.1:9` while `probing true`, then `sourceErrors {"0a737469":"Connection refused"}` with no banner, no result line, transient unchanged; `activeSourceKey` stays `584a58e5` (correct, SR7) but nothing tells the user (`shots/sources-never-switch-failed.png`); the CLI path itself shows the shipped error state with `r reload - o sources - Esc close` (`shots/sources-never-fetched.png`) |
+| SRC-SW-07 | pass | `h06`: favorites 3 under A; after the switch to Charlie `Favorites - 0 channels` and `state.json` still holds the three ids; Recent filtered the same way; 3 again under A (SR9) |
+| SRC-SW-08 | pass | `h06`: `Harness Live` playing (mpv pid 72573, widget `Playing Harness Live`), switch to A -> same pid, `nowPlaying` kept, widget kept, `zap 1` -> `no` |
+| SRC-SW-09 | pass | `h08` redo: two `switchSource` calls back to back -> second `{"ok":false,"code":"busy","message":"Busy - wait for the current fetch to finish"}`; the first completed |
+| SRC-SW-10 | pass | `h08` redo: list mode with query `alpha` -> `o` -> switch -> search mode, query `` ; `o` then Esc -> `list` with query `alpha` |
+
+#### LBL - Labels and editing
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-LBL-01 | pass | `logs/model-04.txt` 28/30 derive+validate ok (`V08` `/srv/tv/` -> `tv` instead of the ARCH `local file` fallback - a directory path is not a valid playlist anyway, observation O6; `T17` per SR22); harness: `127.0.0.1:8765` for URLs and the Xtream server, `qa-src-a.m3u` for a path, `local file` host |
+| SRC-LBL-02 | pass | `h11`: second source on the host -> `127.0.0.1:8765 2`, third `... 3` (`shots/sources-sweep-list.png`); `label_taken` case-insensitive (`h11` upper-case variant) |
+| SRC-LBL-03 | pass | `shots/sources-edit.png` / `h12`: `Edit source`, `Label` focused, Playlist masked, EPG masked, no Xtream link row, `Cancel` / `Save`, footer `Enter save - Tab next field - Ctrl+R reveal - Ctrl+V replace - Esc cancel` (masked variant) |
+| SRC-LBL-04 | pass | `h12`: `updateSource {"label":"Bravo"}` -> `labelCustom true`, no helper, `updateEntryInline delta 0`, `state.json` 600; from the guide `Saved` transient; `h09`: `Custom A` survives `set playlistUrl B` then `A` |
+| SRC-LBL-05 | pass | `h11`: `A source named "127.0.0.1:8765" already exists`; `h12`: typed `Bravo` in the edit form -> `label_taken`, focus `label`; keeping the own label -> `Saved` |
+| SRC-LBL-06 | pass | `h11`: 65 -> `Label too long - max 64 characters`, 64 accepted (`map(.label|length)` `[64,16,14]`); SR22 code points (MODEL-04 T17: 33 emoji accepted) |
+| SRC-LBL-07 | pass | `h12`: `{"label":"   "}` -> `127.0.0.1:8765 2`, `labelCustom false` |
+| SRC-LBL-08 | pass | `shots/sources-add-failed.png` (`127.0.0.1:8765` placeholder from the typed URL), `shots/sources-xtream-filled.png` (from the server) |
+| SRC-LBL-09 | pass | `h11`: `-u critical`, `--urgency=critical ${path}`, backticks / `$(id)` / pipe, `<b>bold</b>` stored as typed (`jq`), rendered literally (`shots/sources-hostile-label.png`), notifications log unchanged |
+
+#### CLI - CLI parity
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-CLI-01 | pass | `h09`: `set playlistUrl B` with Sources open -> row appears at once (`n 2`, `origin cli`, label `127.0.0.1:8765 2`, active, `not loaded yet` then `5 channels in 2 groups`, `shots/sources-cli-added.png`), no `updateEntryInline` (the CLI path never writes back) |
+| SRC-CLI-02 | fail | D-SRC-02: known URL -> no new record, `lastUsedAt` bumped, custom label kept (pass parts); a changed `epgUrl` is NOT adopted into the record (`h09b`: record `epgUrl` length 0, `hasEpg false` after `set epgUrl`) |
+| SRC-CLI-03 | fail | D-SRC-03 / D-SRC-06 (as SRC-FR-11): `settingsInvalid` set, no helper (`helper-sightings=0`), no record, `activeCacheDir` empty for all four values (pass parts); `ftp://x` never reaches the error state; the error copy is M1's with a host |
+| SRC-CLI-04 | pass | `h09`: `set playlistUrl ''` -> `sourceEdit` first-run, `emptyKind unconfigured`, `rows 0`, 3 records kept, no `cache remove` (`ls sources` unchanged), `shots/sources-cli-empty.png` |
+| SRC-CLI-05 | pass | `h11b`: 49 generated + A = 50, `set playlistUrl B` -> `n 50`, `ls sources` diff = `+733cf68c` only, A still present, console `omarchy-iptv: source history full, evicting b48d8a1d` (key only), `state.json` 600 / 16,749 B |
+| SRC-CLI-06 | pass | `h09`: `state().service` has `activeSource {id,label,host}` and `sources[] {id,key,label,host,active,channelCount,lastUsed}`, `grep -c '://'` 0; harness `show` unchanged (M1 verbs only, harness `IpcHandler`) |
+| SRC-CLI-07 | pass | `logs/sweep/state-show.json`: `state.sources[]` with `host` / `epgHost`, no `url` / `epgUrl`, 0 `://`; `h16`: `state show | grep -cE 'url|://'` 0; `state init` created the v2 file 0600 on every fresh start |
+| SRC-CLI-08 | fail | D-SRC-02: `set epgUrl` while A is active runs the EPG helper into `sources/584a58e5/` (`epg-now.json` after 572 ms incl. the IPC round trip; D-LIVE-02 regression ok) but the record keeps `epgUrl ""`; a switch to B and back writes `updateEntryInline ... epg (none)` and `service.epg.configured` turns false (`h09b`) |
+
+#### XT - Xtream
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-XT-01 | pass | `h10`: `c` -> `sourceXtream`, focus `server`, values `label, server, username, password`; `shots/sources-xtream-filled.png`: title `Add Xtream login`, placeholders, prose verbatim, echo-masked password, `Cancel` / `Save`, footer `Enter save - Tab next field - Esc cancel` |
+| SRC-XT-02 | fail | D-SRC-08 (P3): `logs/model-03.txt`: 22/28 vectors as the fixture; V03/V04/V06/V07/V08 return `server_path` for any path (UX 5.4 / UX 8 decision 10; the ARCH 3.4 strip rule is not implemented - expectation adjusted `[v0.2]`); E05 `http://h.test/#frag` is accepted (fragment dropped) where ARCH 3.4 says `bad_server`; percent-encoding vector `a b!*'()~-._/@:+` -> `a%20b%21%2A%27%28%29~-._%2F%40%3A%2B` ok; key `6e90a03e` ok |
+| SRC-XT-03 | pass | `h10` ipc: `server_empty`, `server_scheme` (`ftp://`, schemeless `h.test` SR16), `server_path`, `server_userinfo` (SR17), `user_empty`, `pass_empty`, `server_too_long` / `user_too_long` / `pass_too_long` (SR18), messages verbatim |
+| SRC-XT-04 | pass | `h10`: `4 channels in 2 groups`, record `origin xtream`, view `kind xtream`, `hasEpg true`, `sources/6e90a03e/` holds `epg-*`, rows `Xtream Live One` (`shots/sources-xtream-rows.png`), list detail `active - 127.0.0.1:8765 - Xtream - 4 channels in 2 groups - EPG` |
+| SRC-XT-05 | pass | `editMasked 6e90a03e` -> `http://127.0.0.1:8765/get.php?username=****&password=****&type=m3u_plus&output=ts` and `.../xmltv.php?username=****&password=****`; Ctrl+R reveals the raw URL (`shots/sources-edit-revealed.png`); the edit form has no Password row |
+| SRC-XT-06 | pass | section S5: 0 hits for `pa ss`, `pa%20ss`, `username=user` in every sink; `password=****` only in the masked strings; the helper `playlist --url` argv carries the URL for the probe only (`h14` `ps -o args=`, expected) |
+| SRC-XT-07 | pass | `h10`: after the duplicate result the password field is empty (`p 0`); reopening `c` -> `s 0 u 0 p 0`; `state()` masks credentials as `****` |
+| SRC-XT-08 | pass | `h14d` (see SRC-FR-09) |
+| SRC-XT-09 | pass | `h10` form: `Already in Sources as "127.0.0.1:8765 2"` (`shots/sources-xtream-duplicate.png`); `h14b` ipc: `http://127.0.0.1:8765/` -> `duplicate` id `6e90a03e` |
+| SRC-XT-10 | pass | `h10`: server `http://127.0.0.1:9` -> `Connection refused from 127.0.0.1`, focus `server`, server (18) and username (2) kept, password dropped, nothing saved |
+
+#### RM - Removal
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-RM-01 | pass | `shots/sources-confirm.png`: `Remove "127.0.0.1:8765 2"? Its cache is deleted too.` (curly quotes), `Cancel` / `Remove` with `Remove` preselected in the urgent fill, footer `Left/Right choose - Enter confirm - Esc cancel`; `x`, Delete-key path via `startRemove` (grep); Left/Right toggled then Return confirmed (`h06`) |
+| SRC-RM-02 | pass | `h06`: `Removed 127.0.0.1:8765 2`, `sources/733cf68c` gone, others intact, record gone, cursor stays 1, `sourceRemoved {"id":"733cf68c"}` |
+| SRC-RM-03 | pass | `h06`: message variant confirmed by the mode (`confirmRemove`) and the outcome: `updateEntryInline ... playlist (none) epg (none)`, `configured false`, `Removed 127.0.0.1:8765 - no active source`, Sources stays open, Esc -> first-run form with `Saved sources (1)` (`shots/sources-none-active.png`); playback continued in the RM-09 run |
+| SRC-RM-04 | pass | `h06`: last removal from the screen -> `sourceEdit` origin `firstRun`, focus `playlist`, `n 0`, `sources/` empty |
+| SRC-RM-05 | pass | `h06`: Esc cancels, `j` moves at once; `y` / `n` do nothing; Cancel button / scrim are live-shell |
+| SRC-RM-06 | pass | `h14`: `removeSource <probing id>` -> `busy` with the id; removing another source during a probe is allowed (observation O2) |
+| SRC-RM-07 | pass | H15 (`cli-cache`): `removed: ["channels.json","playlist-status.json"], kept: ["foo.bin"]` with the dir left; after `rm foo.bin` the dir goes; missing dir -> `ok, removed: []`; one JSON line per call |
+| SRC-RM-08 | pass | `h06`: `x` and `e` on the `Add Xtream login` row -> mode stays `sources` |
+| SRC-RM-09 | pass | `h06`: removing the playing `Harness` source -> mpv pid 72573 unchanged, widget `Playing Harness Live`, no notification |
+
+#### ERR - Errors
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-ERR-01 | pass | `h03` (23 vectors): `scheme` for `ftp:`, `javascript:`, `data:`, `vbscript:`, `rtsp:`, `mailto:`, `about:`, `provider.test/list`, `list.m3u`, `//h.test/x`; `relative_path` for `./list.m3u`, `~/tv/list.m3u`; `unsafe_path` `Path not allowed` for `/proc`, `/sys`, `/dev`; `invalid` for `http://h .test/`, `http://`, `[not-an-ip]`, port 65536 (SR15); `too_long`; `empty`; EPG variants `EPG: start with ...`, `EPG: use an absolute path ...`, `EPG: invalid URL - check the host`; focus on the field; the error clears on the next edit (`ftp://xa` -> `err null`) |
+| SRC-ERR-02 | pass | `h05`: `Connection refused`, `HTTP 404 Not Found`, `Not an M3U playlist` (SR28), `Playlist has no channels`, `Could not resolve host` (host `no-such-host.invalid`), all `from 127.0.0.1` on the result line; paths: `Not an M3U playlist` alone for `file:///etc/passwd`; `Timed out` (`h14`); `File not found` (`h09` `~` path) |
+| SRC-ERR-03 | pass | `h05`: nine failed adds, `activeSourceKey 584a58e5` throughout, rows 8 behind the form, `updateEntryInline` 0, one `sourceProbeFinished` per probe with a redacted reason and host, `sources/` unchanged, no `.tmp-*` |
+| SRC-ERR-04 | pass | `h03`: `helper-sightings=0` over the vector loop, `sources/` untouched (only the two `file:`/traversal probes ran, by design) |
+| SRC-ERR-05 | pass | `h11b`: `too_many` `Sources is full (50) - remove one first`, `canAddSource false`, `a` / `c` / Enter on the action rows show the message (`shots/sources-full.png`), `e` still edits |
+| SRC-ERR-06 | pass | `h14`: `busy` for `addSource`, `switchSource`, `xtream`, `removeSource(probing)`; `not_ready` for `addSource` right after start; neither code appears as raw text in the guide (`Busy - wait for the current fetch to finish`, `Not ready yet - try again in a moment` are the messages) |
+| SRC-ERR-07 | pass | `h14b`: `failPersist true` + switch -> `{"ok":false,"code":"persist_failed","message":"Could not save settings - try omarchy bar set"}`, signal `sourcesPersistFailed {"reason":"persist_failed"}`, footer transient and the add form's result line carry the copy (`shots/sources-persist-failed-form.png`), active unchanged, 0 `omarchy bar` argv lines (SR25) |
+| SRC-ERR-08 | pass | `h05`: Return again -> second `sourceProbeFinished` for the same id `458f2bac`, 1 record, no duplicate; `retrySource` verb exists (harness) |
+| SRC-ERR-09 | pass | `h14`: silent server probe ends after 20,725 ms with `Timed out` from `127.0.0.1` (helper `--timeout` 20 s, D-LIVE-11) |
+
+#### KEY - Keyboard and mouse
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-KEY-01 | pass | `h06`: list mode `o` opens; search mode `o` types (`oj`); list-mode hint ends with ` - o sources` (`Model.footerHints` `[["r","reload"],["o","sources"],["Esc","close"]]` for the error state and the `o sources` pair in `shots/sources-cli-invalid.png`) |
+| SRC-KEY-02 | pass | `h06`, H07: `j`/`k`, Home/End over source and action rows, Enter/Space semantics, `a`, `c`, `e`, `x`/Delete, `o`/Esc; `x`/`e` no-op on action rows |
+| SRC-KEY-03 | pass | `h04`/`h02`: printable inserts, Backspace, Ctrl+U clears, Ctrl+V / Shift+Insert paste then sanitize, Tab/Down/Shift+Tab/Up order and wrap, Enter submits or activates the focused `Load`; Ctrl+Backspace and Ctrl+A select-all on plain fields not exercised individually |
+| SRC-KEY-04 | pass | `h04`, `h12`: on a masked value Right and Ctrl+A are no-ops, Backspace and Ctrl+U clear the whole value, typed `x` replaces it (field now plain), paste replaces and re-masks, Ctrl+R reveals (footer `Ctrl+R hide`, `shots/sources-first-run-revealed.png`) and re-masks; Tab away re-masks |
+| SRC-KEY-05 | pass | `h12`: Esc in an edit form from Sources -> `sources`, nothing kept; first run: clear-first rules (SRC-FR-06); while fetching Esc cancels in both origins (`h14`, `h14b`) |
+| SRC-KEY-06 | pass | `h06`: Left/Right toggle, Return confirms, Esc cancels, `y` / `n` ignored |
+| SRC-KEY-07 | pass | `h02`: `o r f x s`, `4 r s f` become text in the field; `h06`: letters in `confirmRemove` do nothing |
+| SRC-KEY-08 | pass | `h06`: Ctrl+R in the guide and in `sources` -> `refreshing null`, mode unchanged |
+| SRC-KEY-09 | pass | `Guide.qml:2459` `activeFocusOnTab: false` on the eye button, tooltips `Show query - Ctrl+R` / `Hide query - Ctrl+R` (`copy.tooltipShow/Hide`); click is live-shell |
+| SRC-KEY-10 | pass | `j` moves right after Esc from the dialog (`h06`), `o` works right after Esc from a form (`h12`); the first-run `Playlist` field is focused when the form appears (`h02`, `h06` after the active removal) |
+| SRC-KEY-11 | blocked: needs live shell | mouse table (section 9.4) |
+| SRC-KEY-12 | pass | `logs/static-greps.txt`: one `SOURCE_KEYS` table at `Model.js:1517` next to `footerHints`; Guide.qml spells no key name (grep of `"Ctrl+R"` etc. empty) |
+
+#### UI - States, microcopy, visual tokens
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-UI-01 | pass | `shots/sources-first-run.png` |
+| SRC-UI-02 | pass | `shots/sources-first-run-masked.png`: masked on arrival, eye U+F0208, no caret, footer `Enter load - Tab next field - Ctrl+R reveal - Ctrl+V replace - Esc clear`, scheme and host readable |
+| SRC-UI-03 | pass | `shots/sources-invalid.png`: U+F0026 + `Start with http://, https://, or / for a local file` in the urgent fill aligned with the fields, footer `Esc clear`; the line's space is reserved (fields do not move between `sources-first-run.png` and `sources-invalid.png`) |
+| SRC-UI-04 | pass | `shots/sources-fetching.png` (U+F01D8 `Fetching from 127.0.0.1...`, controls dimmed, hint `Esc cancel`), `shots/sources-add-failed.png` (`HTTP 404 Not Found from 127.0.0.1` urgent) |
+| SRC-UI-05 | pass | `shots/sources-first-run-done.png` |
+| SRC-UI-06 | pass | `shots/sources-none-active.png`: `Saved sources (1)` before `Use Xtream login instead`, footer `Esc close` |
+| SRC-UI-07 | pass | `shots/sources-list.png` (three), `sources-cli-added.png` (CLI source loaded), `sources-full.png` (`not loaded yet` / `used yesterday`), `sources-sweep-list.png` (Xtream + EPG segments); `1 source` and the label-free footer in `h05`; `No sources` unreachable (O5) |
+| SRC-UI-08 | pass | `shots/sources-edit.png`, `sources-sweep-edit-playlist.png` (masked, eye), `sources-edit-revealed.png` (raw scrolled to the caret, eye-off U+F0209, footer `Enter save - Tab next field - Ctrl+R hide - Esc cancel`, EPG still masked) |
+| SRC-UI-09 | pass | `shots/sources-xtream.png`, `sources-xtream-filled.png` (echo dots), `sources-xtream-fetching.png` |
+| SRC-UI-10 | pass | `shots/sources-confirm.png` |
+| SRC-UI-11 | pass | `h06`: `Switched to Charlie - 3 channels` -> `Charlie - 3 channels - updated 19:07`; stale: `... updated 09:07` -> `Refreshing...` -> `... updated 19:08` |
+| SRC-UI-12 | pass | `logs/static-greps.txt` Guide.qml 1705-1774: `Style.normalBorderWidth`, `Util.alpha(..., 0.28)` separator, `groupEntryHeight`, `Style.font.iconSmall`, `Style.spacing.labelGap`, opacity 0.45 count, `Style.hoverFillFor`, `Qt.PointingHandCursor`, `Behavior on color { duration: 60 }` |
+| SRC-UI-13 | pass | `logs/static-greps.txt` UI-13 block: every UX 5.1 string present in `Guide.qml` `copy` / `Model.js` (titles, placeholders, link rows, prose, action rows, tooltips, `Sources`); rendered strings checked in the screenshots above |
+| SRC-UI-14 | fail | D-SRC-06 (P3): the error-state hint reads `r reload - o sources - Esc close` (`shots/sources-cli-invalid.png`, `sources-never-fetched.png`) where UX 5.3 says `r retry`; every other footer variant verified verbatim: `sources`, action-row (cap message), form plain / masked / revealed, Xtream, first run `Esc clear` / `Esc close`, fetching `Esc cancel`, confirm, transients `8 channels in 3 groups`, `Added ...` (Model), `Saved`, `Switched to Charlie - 3 channels`, `Removed 127.0.0.1:8765 2`, `Removed 127.0.0.1:8765 - no active source`, `Sources is full (50) - remove one first`, `Could not save settings - try omarchy bar set` |
+| SRC-UI-15 | pass | no hex colors / `Qt.rgba` in any qml; `****`, `2048`, `get.php` in Guide.qml only inside the Xtream prose; `Style.space(640)`, `space(96)`, `space(22) + controlGap`, `space(960)` / `space(620)` present; `Model.LIMITS {url:2048,label:64,server:512,user:256,pass:256,sources:50}` |
+| SRC-UI-16 | not run | mode flips are instant in every screenshot pair, but the `bannerFadeMs` / `transientMs` / 60 ms values cannot be timed through the harness |
+| SRC-UI-17 | pass | `logs/model-vectors.txt`: `used 21:30`, `used yesterday`, `used 3 Sep`, `used 3 Sep 2025`, `never used` |
+| SRC-UI-18 | pass | `1 group` / `28 groups`, `5 channels in 2 groups`, `not loaded yet` for -1, `1 source` / `3 sources` / `No sources` (`Model.sourcesHeaderCount`) |
+| SRC-UI-19 | blocked: needs live shell | theme switch |
+| SRC-UI-20 | pass | grep: card `space(960)` / `space(620)` unchanged, form column `Math.min(body.width, Style.space(640))` (two places), `labelWidth Style.space(96)`, `eyeSlot Style.space(22) + Style.spacing.controlGap`, narrow branch `fieldLabel` above the field (`Guide.qml:2424-2440`) |
+
+#### A11Y
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-A11Y-01 | pass | `logs/static-greps.txt` A11Y-01: Heading, Button `sourcesRowAccessibleName`, List `accessibleSources`, ListItem `sourceAccessibleName` with `focused` / `selected`, Buttons `Edit <label>` / `Remove <label>`, Dialog `formAccessibleName` / `Set up a playlist`, EditableText `fieldAccessibleName`, eye Button `Show query` / `Hide query` with `checked`, link Buttons `Saved sources, n` / `Use Xtream login instead`, `Load` / `Save` / `Cancel`, AlertMessage result line, confirm Dialog |
+| SRC-A11Y-02 | pass | screenshots: active = glyph + bold + `active`; error = glyph + words; fetching = glyph + words + dimmed controls; revealed vs masked = text + eye/eye-off; destructive = urgent fill + `Remove` |
+| SRC-A11Y-03 | pass | first run `playlist -> epg -> (savedSources) -> xtream -> load -> wrap` (`h02c`, `h06`); edit `label -> playlist -> epg -> save -> cancel -> label` (`h12`); Xtream `server -> username -> password -> save -> cancel -> label -> server` (`h10`); the eye is never a stop |
+| SRC-A11Y-04 | pass | rows `detailRowHeight` / `singleRowHeight` (`Guide.qml:2178,2202`), pinned row `groupEntryHeight`; button size by tokens (grep); click targets are live-shell |
+| SRC-A11Y-05 | pass | `Guide.qml:2464` `Accessible.description: fieldRow.maskable ? Model.maskUrl(...) : ""`, `:2465` `Accessible.passwordEdit: fieldRow.fieldId === "password"` |
+| SRC-A11Y-06 | pass | `Bravo, 127.0.0.1:8765, 5 channels in 2 groups, active, last used 15:16`; `x.m3u, local file, not loaded yet, never used`; no URL |
+
+#### PRIV - Privacy rules
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-PRIV-01 | pass | `shots/sources-sweep-list.png`, `logs/sweep/sources.json` (0 `://`) |
+| SRC-PRIV-02 | pass | masked until Ctrl+R; re-masked on Tab (`h04`, `h12`), on Esc (`h12` `editMasked` after Esc still masked), on paste (`h04`), on Save (`h12`) |
+| SRC-PRIV-03 | pass | `logs/model-vectors.txt` MODEL-06: 9/9 mask vectors incl. the SR4 exception and `maskUrl(path) === path` |
+| SRC-PRIV-04 | pass | every transient of S3 checked; `notifications.log` gained no line from any Sources operation across all runs - the only lines are M1's `Playlist error` (a CLI-set active source failing with no cache, `h09`/`h09b`), `Stream failed`, `Playlist refreshed`, `Guide data error` from the M1 regression runs |
+| SRC-PRIV-05 | pass | `password: true` echo (screenshot), field emptied after the URLs are built, edit form masked only |
+| SRC-PRIV-06 | pass | `h04`: sanitized on arrival (multi-line, RTL, 100 KB), never executed, console has 0 lines with the pasted text (`grep -c aaaa...` 0, `qa-user` 0); paste over a masked field re-masks before the next dump |
+| SRC-PRIV-07 | pass | SRC-A11Y-05 |
+| SRC-PRIV-08 | pass | `logs/sweep/console.log` plugin lines: keys, labels, hosts, codes, modes only; `grep -cE '://|password=|username=|@'` on plugin lines = 0 in every run log (`h05` count 0, `h08`/`h09` 0, `h13` 0) |
+| SRC-PRIV-09 | pass | `grep -n 'playlistUrl' Guide.qml`: the copy strings, `openEditForm` pre-fill and the two service calls only; keys and the CLI go through `service.switchSource` / `removeSource` / reconcile (harness signals identical for both paths) |
+
+#### SEC - Security of the input surface
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-SEC-01 | pass | `h04`: multi-line paste -> one value with CR/LF/TAB removed and the edges trimmed (`...qa-src-a.m3usecond line must vanish`, 57 chars) per ARCH 3.1, refused by the validator, nothing runs, console clean (expectation adjusted `[v0.2]`) |
+| SRC-SEC-02 | pass | `h04`: field holds 2,112 characters (`Model.formCapacity` = cap + 64 so `too_long` fires, SR18), screenshot 575 ms after the chord (`shots/sources-paste-100k.png`), Enter -> `Too long - max 2,048 characters`, `helper-sightings=0`, `state()` 3,484 B, 0 log lines with the string |
+| SRC-SEC-03 | pass | `h04`: U+202E/U+202C/U+200B kept, trailing U+FEFF kept (SR15 strips a leading BOM only), NBSP and newline trimmed (51 chars); the field draws the bidi segment reversed but `127.0.0.1:8765` stays readable (`shots/sources-paste-rtl.png`); Enter -> `Invalid URL - check the host`, no crash; MODEL-02 vectors 027/033/093/110 as ruled |
+| SRC-SEC-04 | pass | `h03`: `javascript:`, `data:`, `vbscript:`, `ftp:`, `rtsp:`, `mailto:`, `about:` -> `scheme` inline, no process; `file:///etc/passwd` accepted and fails at fetch with `Not an M3U playlist` |
+| SRC-SEC-05 | pass | `h03`: `/srv/tv/../../etc/passwd` passes the synchronous check and the helper reads the user's own `/etc/passwd` -> `Not an M3U playlist` (allowed by ARCH 3.1; the `/proc`, `/sys`, `/dev` prefixes are refused inline); `~` refused in the form, accepted by the CLI (`h09`: `kind file`, `File not found`); symlink cases not exercised (helper unchanged since M1 SEC-10/11) |
+| SRC-SEC-06 | pass | SRC-LBL-09; `state show` prints the label inside JSON only; no notification path takes a label |
+| SRC-SEC-07 | pass | section S5 |
+| SRC-SEC-08 | pass | H15 (`cli-cache`): `../x`, `../../x`, `abc`, `d5977d8a/..`, `d5977d8a/../../x`, `%2e%2e`, ``, `D5977D8A`, `d5977d8a-1000` -> `bad_key` exit 1; `deadbeef` symlink to the canary -> `bad_key` `cache key escapes the sources directory`; canary intact; `--keep ../x` / `--active ../x` -> `bad_key`; `d5977d8a-0` is a valid key (`[v0.2]`); no path in any message |
+| SRC-SEC-09 | pass | `h01`: `state.json` 600 in a 700 dir after migration; `h16`: 600 after label edit, add, switch, remove, favorite; `h12`: 600 after every save; every `sources/<key>` 700 and every file 600 (`find ... | grep -vE '^(700|600) '` = 0 in `h13`, `h12`); `state init` runs before the FileView (`Service.qml:1612`) |
+| SRC-SEC-10 | pass | `h11b`: 51st add -> `too_many`; CLI 51st -> LRU non-active evicted, active kept; `state.json` 11,387 B (50 typical) / 217,637 B (worst) - section S4; the prune argv is built from the state keys only (`Service.qml:1167-1172`) |
+| SRC-SEC-11 | pass | `h14`: `cancelProbe` -> helper gone in 30 ms, `find -name '.tmp-*'` empty, no `sources/<key>` for the cancelled add, record dropped (`["584a58e5"]`), `sourceProbeFinished {cancelled:true}`; `h14b`: an edit's original record and dir intact after cancel |
+| SRC-SEC-12 | pass | `logs/static-greps.txt`: the shell/eval grep is empty; every `Process` `command:` is an argv array (`mkdir`, `state init`, `which mpv`, `wl-paste --no-newline --type text`) |
+| SRC-SEC-13 | pass | one `Text.StyledText` (`Guide.qml:2694`, own hint strings), 31 `PlainText` |
+| SRC-SEC-14 | pass | SRC-CLI-07 |
+| SRC-SEC-15 | pass | `h05` console: `omarchy-iptv probe: omarchy-iptv: playlist: HTTP 404 from 127.0.0.1`, `could not reach 127.0.0.1: [Errno 111] Connection refused`, `... not an M3U playlist ...`, `no playable channels ...`, `could not reach no-such-host.invalid` - hosts and codes only, 0 lines with `://` or the path |
+| SRC-SEC-16 | pass | `h10` / `h14d`: 0 `pa ss` / `pa%20ss` / `password=` hits in `state()` and the consoles; the built URL appears in the helper `playlist --url` argv for the probe only (`h14` `ps -o args=`) |
+| SRC-SEC-17 | pass | harness `IpcHandler`: no new verb takes a URL in the plugin's own IPC (`status` shape URL-free, SRC-CLI-06); the live `qs ipc show` is section 9.3 |
+| SRC-SEC-18 | pass | `h06`: `qa-attrs.m3u` as a source -> 22 channels, `hasEpg false`, no `epg-*` file, 0 `url-tvg` lines (`shots/sources-list-4.png` shows the literal group names as counts only) |
+| SRC-SEC-19 | pass | `state.json` holds the URLs (600/700); removal deletes record + dir; the entry is cleared when the active source is removed (`playlist (none) epg (none)`); README lines 46-48, 147 |
+| SRC-SEC-20 | pass | `h14`: one probe (`busy`), `h14` PERF-06: one probe + one refresh at once (2 helpers), `h09` queue: 5 removals in a row all completed, `h14` deadline 20.7 s; at most 50 sources; removal of a non-probing source during a probe is allowed (O2) |
+| SRC-SEC-21 | fail | D-SRC-09 (P3): `logs/model-vectors.txt` + `h16t`: `../x` and `abc` keys dropped, 3,000-char URL dropped, 500-char label truncated to 64, `channelCount "x"` -> 0, `cacheLayout "x"` -> 0/2, non-objects dropped, first duplicate wins, `garbage{{{` / `[]` / `null` -> empty state, no crash, no directory from a bad key; but a record whose URL carries U+0000 is kept unchanged (`deadbeef`, url length 26) |
+| SRC-SEC-22 | pass | `h01`: second start with `--keep` leaves `state.json` mtime unchanged (1789343503) and the layout untouched; `cacheLayout 2` |
+| SRC-SEC-23 | pass | H15 prune: `skipped: ["..x","deadbeef","evil"]`, none deleted or followed |
+| SRC-SEC-24 | pass | `run.sh` echoes `source2=scheme://host`; `shell.qml:135` logs keys and `(set)`/`(none)` only |
+
+#### MIG - Migration
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-MIG-01 | fail | D-SRC-01 (P3): `h01` `--fresh`: `version 2`, `cacheLayout 2`, favorites `["t:qa.a.news1","t:qa.shared","u:502142db"]`, 3 recents with their `at`, `lastPlayed` intact, `sources[0]` `key 584a58e5`, `url` A, `kind http`, label `127.0.0.1:8765`, `labelCustom false`, `origin migrated`, `addedAt`/`lastUsed` set (pass parts); `fetchedAt 0`, `channelCount 0`, `groupCount 0` instead of the legacy status counts, so the Sources row reads `not loaded yet` until the first refresh |
+| SRC-MIG-02 | pass | `h01`: top-level files gone, `sources/584a58e5/channels.json` (1,512 B) + `playlist-status.json` (167 B) = the seeded (stamped) files moved by rename, no `.tmp-*`, 700/600; `cache migrate` output on the CLI: `{"ok":true,"kind":"cache","action":"migrate","key":"584a58e5","moved":["channels.json","playlist-status.json"],"removed":[".tmp-abc"]}` (H15) |
+| SRC-MIG-03 | pass | `h01`: `rows 8` / `Favorites - 3 channels` / Recent 3 within the 3 s poll; `--fresh` -> no helper; `h01-t0` -> background refresh, `updated 18:52`, counts 8/3 |
+| SRC-MIG-04 | pass | `h01` second start: nothing moved, `state.json` unchanged |
+| SRC-MIG-05 | pass | `h01-none`: legacy files deleted, `sources: []`, favorites/recents kept, first-run form |
+| SRC-MIG-06 | pass | the legacy status says `sourceHost: "local file"`, the files were attributed to the settings URL's key `584a58e5` (`h01`) |
+| SRC-MIG-07 | pass | `mig07/`: v0.1.0 `parseState` -> `version 1`, favorites 3, recents 2, `lastPlayed` kept, unknown keys ignored; v0.1.0 `normalize_state` the same (a downgrade rewrite would drop `sources`, documented) |
+| SRC-MIG-08 | pass | `h01-garbage`: empty v2 state (favorites 0), `cacheLayout 2`, legacy files migrated into `sources/584a58e5`, 8 channels, 600, one WARN line (the Qt portal one) |
+| SRC-MIG-09 | pass | H15: moves the two files, deletes leftover `.tmp-abc`, idempotent (`moved: []`), without `--key` deletes fresh legacy copies (`removed: [...]`), creates `sources/<key>` 700 |
+| SRC-MIG-10 | blocked: needs live shell | section 9.2 |
+
+#### PERF
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-PERF-01 | pass | section S4: 10k switch median 17 ms (warm), 1.5k 10 ms; the first switch to a 10k source in a process is 352 ms (`prepare 335 ms`, observation O4) |
+| SRC-PERF-02 | pass | `h08`: `o` on the 10k source -> `mode sources` in 143 ms incl. wtype + the IPC poll, `helper-sightings=0`; `h16`: 50 rows -> 97 ms incl. wtype + poll; the pure guide time is below the IPC resolution |
+| SRC-PERF-03 | pass | 50 typical records: 11,387 B generated / 16,736 B after the service rewrite; worst case (2,048-char playlist + EPG URLs, 64-char labels): 217,637 B / 218,797 B; `parseState` on the worst file 0.97 ms (node, 20 runs); saves land within the next 1 s stat tick |
+| SRC-PERF-04 | pass | `h08`: open on the 10k cache with 3 sources: IPC round trip median 169 ms with a `state` poll inside the loop; `h20` M1 method (open only) median 71 ms / max 82 (M1: 65-69 ms) |
+| SRC-PERF-05 | pass | `h01`: the console does not log the cache jobs; migration + prune had completed within the 3 s poll and the guide answered IPC 605-860 ms after start with 8 rows |
+| SRC-PERF-06 | pass | `h14`: a 10k probe while the active 10k source refreshes: 2 helpers in flight, both finished (`Ten-k B - 10,000 channels`), one `sourceProbeFinished`, no new notification, typing afterwards registers |
+| SRC-PERF-07 | pass | H15: `touch -d '2 days ago' 22222222/epg-*` -> `agedEpg: ["22222222"]`, its `channels.json` kept, the active key's files untouched; disk per source: 8-channel 1.5 KB + 0.5 KB EPG, 10k 2.6 MB |
+
+#### MODEL - Model.js
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-MODEL-01 | pass | 635 node checks, 29 QML spec cases cover the ARCH 8.3 list (grep of `tests/Model.test.js` for each function name) |
+| SRC-MODEL-02 | pass | `logs/model-02.txt`: 104 records, 9 `decision` records now settled (017/018/025/033/093 SR15, 052/053 SR11, 055/090 SR12); 043 `//proc/self/environ` -> `scheme` per SR12 (fixture obsolete); 143 (uppercase path = new source) passes with the reducer; 111 `http://h.test/a<U+2028>b` -> `scheme` with the "Start with http://..." message although the text starts with `http://` (wording nit, folded into D-SRC-06) |
+| SRC-MODEL-03 | pass | `logs/model-03.txt`: 22/28 as the fixture, 5 path vectors per the UX rule, E05 -> D-SRC-08; D01/D02/D05 per SR16/17/18 |
+| SRC-MODEL-04 | pass | `logs/model-04.txt`: 28/30 (V08 O6, T17 SR22) |
+| SRC-MODEL-05 | pass | 7/7 keys incl. `c209be1f` for the trailing space |
+| SRC-MODEL-06 | pass | 9/9 |
+| SRC-MODEL-07 | pass | v1 -> v2 keeps favorites/recents/lastPlayed, `sources []`, `cacheLayout 0`; tampered shapes as SRC-SEC-21 |
+| SRC-MODEL-08 | pass | `logs/model-reducers.txt`: known URL -> no add, `lastUsed` bumped only on key change, `epgUrl` adopted (Model level), custom label kept; unknown -> `origin cli`, derived label; `ftp://x` -> `scheme`, `/proc/self/environ` -> `unsafe_path`, `~/tv/list.m3u` accepted with `origin cli` (SR11); 51st -> `evicted` = the LRU that is not the new active key (observation O3) |
+| SRC-MODEL-09 | pass | SRC-LST-11 |
+| SRC-MODEL-10 | pass | `qmltestrunner tests/Model.spec.qml` 29 passed (check.sh) |
+| SRC-MODEL-11 | pass | `logs/model-vectors.txt`: formatters, `sourceDetail` (wide and narrow), `sourceAccessibleName`, `footerHints` for `sources` / `sourceEdit` / `sourceXtream` / `confirmRemove`, `SOURCE_KEYS` |
+
+#### HELP - Helper
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-HELP-01 | pass | `logs/help-01.txt`: 99 vectors, node and python verdicts identical (0 differences), decisions as SRC-MODEL-02 |
+| SRC-HELP-02 | pass | `tests/test_source.py` (34 tests, check.sh); `h03` 3,000-char vector never echoed |
+| SRC-HELP-03 | pass | `help10/`: `playlist --cache-dir .../sources/584a58e5` creates the dir 700 and `channels.json` / `playlist-status.json` 600; `epg` the same for `epg-*` |
+| SRC-HELP-04 | pass | `state init` on every fresh start (600); `favorite` on the v2 file kept `sources` and `cacheLayout` (`h16`: 49 sources + `["t:qa.a.news1"]`); `public_state()` redaction (SRC-CLI-07) |
+| SRC-HELP-05 | pass | SRC-MIG-09 |
+| SRC-HELP-06 | pass | SRC-RM-07, SRC-SEC-08 |
+| SRC-HELP-07 | fail | D-SRC-07 (P3): `prune --keep 22222222 33333333 --active 11111111` removed `11111111` (the active key is not implicitly kept; Service.qml always lists every key under `--keep`, so no user-visible effect); the rest as expected: keeps listed keys, removes other valid-key dirs, `agedEpg`, `skipped` for non-key names, `bad_key` for a bad `--keep` / `--active` |
+| SRC-HELP-08 | pass | `--help` lists `cache`; `cache --help` shows `{migrate,remove,prune}`; every call printed exactly one JSON line on stdout, usage errors on stderr |
+| SRC-HELP-09 | pass | `h16t`: the helper read the tampered file and `state show` printed the surviving records only |
+| SRC-HELP-10 | pass | `help10/`: `--now 1789244100` -> `qa.shared` now `Shared Now` / next `Shared Next`, `qa.a.news1` now `Alpha Evergreen`, warning `1 programmes for channels not in the playlist dropped`; without `--now` the evergreen rows only |
+
+#### SVC - Service contract
+
+| ID | Result | Evidence |
+|---|---|---|
+| SRC-SVC-01 | pass | `h09` `state().service | keys`: `activeSource, activeSourceKey, cacheLayout, cacheReady, canAddSource, channels, configured, epg, ..., persistFails, probing, probingKey, settingsInvalid, sourceCount, sourceErrors, switching, ...`; `activeCacheDir` `null`/`""` until ready and after the active removal |
+| SRC-SVC-02 | pass | every verb answered `{ok, code, message, id}` synchronously: `ok`, `duplicate`, `too_many`, `busy`, `unknown_source`, `not_ready`, `persist_failed`, `label_taken`, `label_too_long`, `server_*`, `user_*`, `pass_*` |
+| SRC-SVC-03 | pass | `signals`: `sourceProbeFinished {ok,id,channelCount,groupCount,reason,host,cancelled,replacedId}`, `sourceSwitched {id,channels}`, `sourceRemoved {id}`, `sourcesPersistFailed {reason}`, `configuredChanged`; reasons already redacted (host only) |
+| SRC-SVC-04 | pass | the console does not print the startup steps, but the observable order held in every start: dirs + `state init` -> state loaded (`stateLoaded true` before any action succeeds, `not_ready` before) -> reconcile (CLI record present) -> migrate -> `cacheReady true` -> rows -> optional refresh -> prune (H15 semantics) |
+| SRC-SVC-05 | pass | `h06`: after the active removal `emptyKind unconfigured`, `activeSourceKey ""`, rows 0, no stale reason; `h06` switch after a failed CLI source: `emptyKind ""`, `reason ""` (D-LIVE-10 regression ok) |
+| SRC-SVC-06 | pass | `h14` PERF-06: probe and refresh ran side by side; both deadlines are the helper's 20 s + the 180 s watchdog (not exercised) |
+| SRC-SVC-07 | pass | `h09`: five `removeSource` calls back to back -> all five directories gone, 0 cache warnings |
+| SRC-SVC-08 | pass | `h06`: Enter on the active row -> `updateEntryInline delta 0`; `h12`: `e` + Return with the same values -> `Saved`, delta 0 |
+
+### S4. Performance table
+
+| Item | Number | Method |
+|---|---|---|
+| Switch redraw, 10k warm (5 switches) | median 17 ms, max 352 ms (the first switch to that source: `read 17 ms, prepare 335 ms`; then `read 11 ms, prepare 4 ms`) | `OMARCHY_IPTV_DEBUG=1` lines `omarchy-iptv switch <ms>` (`logs/h08-10k.txt`) |
+| Switch redraw, 10k -> 8 channels | median 10 ms, max 19 ms | same |
+| Switch redraw, 1.5k | median 10 ms, max 59 ms (first) | `logs/h08-real.txt` |
+| Switch wall clock, IPC `switchSource` -> rows updated (10k) | 238 / 250 / 243 ms including two IPC round trips (~50 ms each) | `date +%s%N` around `h.sh ipc` |
+| Sources open (`o`) with the 10k source / with 50 records | 143 ms / 97 ms including wtype and the IPC poll; 0 helper processes | `h08`, `h16` |
+| Guide open on the 10k cache, 3 sources | IPC round trip median 71 ms, max 82 (M1 on 502f4b3: 65 ms) | `h20` PERF-02 method |
+| Helper `playlist` 10k | 482 / 467 ms (wall 0.62 / 0.60 s), maxrss 38 MB, `channels.json` 2,612,025 B (M1: 488/473 ms, 2,610,946 B) | python `resource` wrapper |
+| `state.json`, 50 sources | typical 11,387 B (16,736 B after the service rewrite); worst 217,637 B (218,797 B); `parseState` 0.97 ms | `h16` |
+| Quickshell RSS | 332 MB before, 382 MB after 10 switches (two 10k lists loaded), 394 MB after 30, 389 MB at the end of the M1 regression run | `ps -o rss=` |
+| Probe deadline (silent server) | 20.7 s -> `Timed out` | `h14` |
+| Cancel | helper gone 30 ms after `cancelProbe` | `h14` |
+| Keystrokes on the 10k list | 20 keys with no delay all registered in order, 610 ms incl. wtype; typing during a 10k refresh intact | `h20`, `h21` |
+| EPG helper after a CLI `epgUrl` change | `epg-now.json` 572 ms after the IPC call | `h09` |
+
+### S5. Privacy verdict
+
+Sinks swept in `h13` with sources A, the userinfo URL C (`qa-user:qa-secret@`), the Xtream login (`user` / `pa ss`) and a failed add of `http://qa-user:qa-secret@127.0.0.1:9/x.m3u`: `ipc sources`, `ipc state`, `ipc widget`, `ipc tooltip`, `ipc signals`, `editMasked` for C and the Xtream source, `state show`, the harness console, `notifications.log`, and three screenshots (list, edit form, edit form with the playlist field focused). Needles `qa-user`, `qa-secret`, `pa ss`, `pa%20ss`, `username=user`, `password=`, `cu:cs`, `/live/`: the only matches are `password=****` inside the masked strings returned by `editMasked` (by design, SR4 keeps the query keys); `://` appears only in those masked strings. Expected hits confirmed where they belong: `state.json` (600 in a 700 dir: `qa-user`, `qa-secret`, `pa%20ss` x3, `password=` x3), one `channels.json`, and the helper `playlist --url` argv for the lifetime of the probe. Every run log of the pass (`h01`..`h21`) has 0 plugin lines with `://`, `password=` or `username=`. The revealed-field screenshots (`sources-first-run-revealed.png`, `sources-edit-revealed.png`) carry the raw URL by design (the user opened them). No notification was raised by any Sources operation. Verdict: **clean** (no credential reached a third party, a world-readable file, a notification or the console).
+
+### S6. M1 regression sample
+
+50 M1 cases re-run with the M1 methods (harness IPC + wtype + grim, helper CLI, node) on the harness fixture playlist (`--serve`, one live channel), the qa-sources fixtures and `gen-10k.m3u` (`h20`, `h21`). No regression except the one noted under CFG-04 semantics (D-SRC-03, CLI `ftp://` now lands in the loading state instead of `Unsupported URL`).
+
+| Category | Re-run | Result | Notes |
+|---|---|---|---|
+| BRW | 05, 06, 07, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 22 | pass | opens in search mode on All (`All - 20 channels`); `tele quebec` finds `Tele-Quebec` (1 match), `sky sports` 2; cap `First 200 of 8,199 - keep typing`, End 199; Down/Up wrap, PgDn 8, Home/End; Left/Right wrap over the column incl. the last group; Esc clears then closes; Tab list mode ignores `q w e 4`, `F` favorites, `/` back; group-scoped zero results `No matches for "zzzzq" in Group 091 Business` / `h/l other groups - Home for All` (`shots/m1-nomatch-group.png`; Home-for-All is the list-mode rule, verified in M1); `Ungrouped` last; `Animation;Kids;Religious` under Animation, found by `religious` |
+| PLAY | 01, 04, 05, 06, 10 | pass | mpv window 457 ms after Enter, class `omarchy-iptv`, title `Harness Live`, argv `--wayland-app-id=omarchy-iptv ... --ytdl=no`, widget `Playing Harness Live`; Space keeps the guide open; dead channel -> `Stream failed` / `"BBC One HD" did not play - Failed to open 127.0.0.1`; zap burst ends on the third channel with one mpv at most; `s` -> `Stopped`, bar idle. PLAY-02 not run (one live fixture channel) |
+| FAV | 01, 02, 03, 04, 05, 06, 07 | pass | `Added to Favorites` / `Removed from Favorites`, `No favorites yet` (`shots/m1-fav-empty.png`), order = order added, `f` inside Favorites clamps the cursor, `x` unfavorites, recents newest first, the dead channel is in Recent |
+| EPG | 01, 02, 03, 04 | pass | guide usable before the EPG (rows first, `Now:` detail after), `until 18:00` meta on `shots/sources-epg-rows.png`, rows without ids show the group only; server down -> `epg.reason Connection refused`, notification `Guide data error` / `Could not fetch the EPG (Connection refused). Channels still work.`, channels intact (the playlist banner has precedence on screen) |
+| RFR | 01, 03, 07, 08, 09, 10 | pass | `Refreshing...` -> `Refreshed - 8 channels` -> `8 channels - updated 19:30`, notification `Playlist refreshed` / `8 channels in 3 groups` low; server down + `r` -> banner `Playlist refresh failed (Connection refused) - showing cached copy from 19:30 - r retry` (`shots/m1-offline-banner.png`), footer `8 channels - cached 19:30 - offline`; list change while open 8 -> 5 rows, cursor 7 -> 4; served not-M3U / empty via the CLI with no cache -> `Not an M3U playlist` (SR28 spelling) / `Playlist has no channels` from `127.0.0.1` (`shots/m1-not-m3u.png`). RFR-04 not run (successful helper runs leave no console line to count) |
+| UI | 01, 02, 03, 06, 09, 10, 12, 13 | pass | unconfigured = the new first-run form; loading `Fetching from 10.255.255.1` (`shots/m1-loading.png`); error with cache = banner, without = empty error state; no hex colors; hints and scope labels verbatim; copy centralised in `Guide.qml` `copy` + `Model.js`; console carries only the portal WARN and the intentional helper relays |
+| PERF | 01, 02, 03, 05, 07 | pass | section S4 |
+
+Not re-run: the remaining M1 cases keep their 502f4b3 result (helper, BarWidget and the M1 paths of Service.qml are unchanged apart from the sources plumbing; `bin/omarchy-iptv` grew the `cache` and `state` verbs only).
+
+### S7. Defects found in this pass (rows in docs/STATUS.md)
+
+### D-SRC-01 (SRC-MIG-01)  P3  found 2026-09-13 at 7e13053 - migration / Service.qml migrate path
+Steps: 1. seed `state-v1.json` + `legacy-cache/` with fresh stamps (`qa-sources-scenarios.sh run SRC-H01 --apply --fresh`) 2. start with `--playlist A` 3. `jq .sources[0] state.json`; `ipc sources`; open Sources.
+Expected (ARCH 2.2, QA-SOURCES SRC-MIG-01): the migrated record carries `fetchedAt` and `channelCount`/`groupCount` from the migrated `playlist-status.json` (1789244100 / 8 / 3), the row reads `8 channels in 3 groups`.
+Actual: `fetchedAt 0, channelCount 0, groupCount 0`; `ipc sources` `channelCount -1`; the active row reads `active - 127.0.0.1:8765 - not loaded yet` while the guide shows the 8 migrated channels (`h01-keep`). With stale stamps the background refresh fills the counts (`h01-t0`). On the live machine the row would read `not loaded yet` until the first timer refresh.
+Evidence: `logs/h01.txt`, `logs/h01-variants.txt` section (0).
+Notes: Lane 2; `withSourceStats` is not applied from the status file the migration moved (nor, in `h11b`, for the CLI-reconciled source at the cap - `shots/sources-full.png` - although `h14c` shows the normal startup fetch does fill the counts).
+
+### D-SRC-02 (SRC-CLI-02, SRC-CLI-08)  P2  found 2026-09-13 at 7e13053 - CLI parity / Service.qml `onEpgUrlChanged` vs the history record
+Steps: 1. sources A (active) and B 2. `ipc set epgUrl http://127.0.0.1:8765/qa-src-a.xml` (= `omarchy bar set ... epgUrl`) 3. `jq '.sources[]|{key,epgUrl}' state.json`; `ipc sources` 4. `ipc switchSource <B>`; `ipc switchSource <A>` 5. `ipc state | jq .service.epg`.
+Expected (ARCH D3, SR8, QA-SOURCES SRC-CLI-02/08): the EPG helper runs into `sources/<A>/` AND the changed `epgUrl` is adopted into A's record (`hasEpg true`), so a later switch writes it back into the settings.
+Actual: the helper runs (`epg-now.json` after 572 ms, rows show `Now:`), but the record keeps `epgUrl ""` and `hasEpg false`; after the switch away and back `updateEntryInline ... epg (none)` writes an empty `epgUrl` and `service.epg.configured` is false: the EPG the user set from the terminal is silently dropped by the next switch. The same edit through the guide (`updateSource {epgUrl}`) is adopted and survives.
+Evidence: `logs/h09b.txt` section (a), `logs/h09.txt` CLI-08 block, `shots/sources-epg-after-switch.png`.
+Notes: Lane 2; `reconcileSources` (Model) adopts the EPG URL when it is called with a playlistUrl, but the service does not reconcile on an `epgUrl`-only change. Related: D-SRC-10 (the reverse carry-over).
+
+### D-SRC-03 (SRC-FR-11, SRC-CLI-03; regression of TC-CFG-04)  P2  found 2026-09-13 at 7e13053 - CLI parity / Service.qml synthesized status for `scheme`
+Steps: 1. any configured state 2. `ipc set playlistUrl ftp://x` (or `ftp://example.test/x.m3u`) 3. watch `state` for 3 s; screenshot.
+Expected (SR8, UX 5.4, M1 TC-CFG-04): the empty error state with the `scheme` reason (`Start with http://, https://, or / for a local file`), no host, no helper.
+Actual: `settingsInvalid {code:"scheme"}` and no helper (correct), but `emptyKind loading`, `playlistReason ""`, `sourceHost "x"` / `"example.test"`: the guide shows `Loading playlist... / Fetching from x` indefinitely (`shots/sources-cli-ftp.png`, `shots/m1-ftp-cli.png`). `javascript:alert(1)`, `/proc/self/environ` and a 3,000-character value do reach the error state (with the M1 wording, D-SRC-06). On 502f4b3 `ftp://example.test/x.m3u` rendered `Unsupported URL` (RR3 CFG-04).
+Evidence: `logs/h09b.txt` section (b), `logs/h21.txt`.
+Notes: Lane 2; the synthesized status for the `scheme` code apparently carries no reason, so the guide's `emptyKind` resolves to `loading`.
+
+### D-SRC-04 (SRC-SW-06)  P2  found 2026-09-13 at 7e13053 - switching / Guide.qml switch transient + no error path for a failed never-fetched switch
+Steps: 1. `ipc set playlistUrl http://127.0.0.1:9/never.m3u` then `ipc set playlistUrl A` (a never-fetched record exists) 2. Tab, `o`, cursor on the `127.0.0.1:9` row, Enter 3. poll `state` every 200 ms.
+Expected (UX 1.4 uncached row, SR7, SR26, QA-SOURCES SRC-SW-06): Enter probes; on failure the reason is shown (error state whose hint reads `r retry - o sources - Esc close`, or a result line) and the previous source stays active.
+Actual: the footer shows `Switched to 127.0.0.1:9` at once (while `probing true`); the probe fails (`sourceErrors {"0a737469":"Connection refused"}`, `sourceProbeFinished ok:false`); no banner, no result line, no error state; the transient stays until it times out and the guide keeps showing A's channels. The user cannot tell the switch failed. The same through `ipc switchSource` (no transient, no visible error either).
+Evidence: `logs/h09b.txt` section (c), `shots/sources-never-switch-failed.png`.
+Notes: Lane 1 (transient fired before the probe result; no consumer of `sourceErrors` in the list/guide) with Lane 2 for the signal timing.
+
+### D-SRC-05 (found through SRC-RM-03)  P3  found 2026-09-13 at 7e13053 - first run / Guide.qml header when the guide returns to setup
+Steps: 1. search for `Harness Live` (query set), play or not 2. Tab, `o`, `x` on the active source, Return 3. Esc.
+Expected (UX 1.7, 3.1.1): the first-run form with the dimmed `Search channels...` header.
+Actual: the stale query `Harness Live` stays as the header text above the first-run form (`shots/sources-none-active.png`); the query is not cleared when the guide falls back to setup.
+Evidence: `logs/h06.txt` H07 block.
+Notes: Lane 1.
+
+### D-SRC-06 (SRC-FR-11, SRC-CLI-03, SRC-UI-14, SRC-MODEL-02 vector 111)  P3  found 2026-09-13 at 7e13053 - copy / Model.js + Guide.qml
+Steps: `ipc set playlistUrl javascript:alert(1)` / `/proc/self/environ` / a 3,000-character URL; screenshot the empty error state; also type `http://h.test/a<U+2028>b` in the form.
+Expected (UX 5.4, 5.3, QA-SOURCES SRC-FR-11): the UX 5.4 message for the code, no host; the error-state hint `r retry - o sources - Esc close`; a URL that starts with `http://` never gets the `scheme` message.
+Actual: `Unsupported URL from unknown source - check playlistUrl`, `Path not allowed` from `local file`, `URL too long from h.test - check playlistUrl` (M1 `statusReason` strings plus a host); the hint reads `r reload - o sources - Esc close`; U+2028 inside a URL yields `scheme` / `Start with http://, https://, or / for a local file` in both validators (parity holds, wording misleads).
+Evidence: `shots/sources-cli-invalid.png`, `shots/sources-never-fetched.png`, `logs/h09.txt`, `logs/model-02.txt`.
+Notes: Lane 1 + Lane 2 (the synthesized status uses the M1 code -> reason table).
+
+### D-SRC-07 (SRC-HELP-07, SRC-SEC-20)  P3  found 2026-09-13 at 7e13053 - helper / `bin/omarchy-iptv` `cache prune`
+Steps: three key directories; `cache prune --cache-dir $C --keep 22222222 33333333 --active 11111111`.
+Expected (ARCH 2.4, QA-SOURCES SRC-HELP-07): the active source's directory is never removed.
+Actual: `removed: ["11111111"]` - `--active` only protects the EPG ageing; a key that is not in `--keep` is deleted even when it is the active one. No user-visible effect today because `Service.qml:1167-1172` passes every state key under `--keep`, but the helper contract is the safety net for a future caller.
+Evidence: H15 transcript in this pass's shell output (`cli-cache/`).
+Notes: Lane 2; hardening: treat `--active` as implicitly kept.
+
+### D-SRC-08 (SRC-XT-02, xtream-expect.json E05)  P3  found 2026-09-13 at 7e13053 - Xtream / Model.js `xtreamUrls`
+Steps: `ipc xtream 'http://h.test/#frag' u p` or `node -e` with the E05 vector.
+Expected (ARCH 3.4: a query or fragment on the server -> `bad_server`; UX 5.4: anything after `host[:port]` -> `server_path`): refused.
+Actual: `{"ok":true,...}` - the fragment is dropped by `validateSourceUrl` normalization before the `server_path` check, so `http://h.test/#frag` builds `http://h.test/get.php?...` silently.
+Evidence: `logs/model-03.txt`, `logs/h10.txt` validation block.
+Notes: Lane 1.
+
+### D-SRC-09 (SRC-SEC-21)  P3  found 2026-09-13 at 7e13053 - state / Model.js `normalizeSourceRecord` + helper `normalize_state`
+Steps: write a v2 `state.json` whose record `deadbeef` has a `url` with a NUL (U+0000) between `c` and `d.m3u`; start; `ipc sources`.
+Expected (QA-SOURCES SRC-SEC-21, ARCH 3.1 sanitize rule): a URL with control characters is dropped or coerced.
+Actual: the record is kept with the NUL inside its URL (url length 26, listed as `127.0.0.1:9 - not loaded yet`); a switch to it would hand the NUL to the helper argv.
+Evidence: `logs/model-vectors.txt` MODEL-07, `logs/h14.txt` H16 tampered block.
+Notes: Lane 1 / Lane 2; run `sanitizeInput` (or the validator) over `url` / `epgUrl` on read.
+
+### D-SRC-10 (found through SRC-H13)  P3  found 2026-09-13 at 7e13053 - CLI parity / Service.qml reconcile on `playlistUrl`
+Steps: 1. Xtream source active (its `xmltv.php?username=...&password=...` URL is in the settings `epgUrl`) 2. `ipc set playlistUrl <another provider's URL>` 3. `editMasked <new id>`.
+Expected (SR8, ARCH D3): the CLI-added record carries the settings' `playlistUrl`; an EPG URL belongs to the source it was set for.
+Actual: the new record adopts the settings' current `epgUrl` - the previous active source's Xtream EPG URL, credentials included - as its own (`logs/sweep/editMasked-C.json`: `epgMasked: http://127.0.0.1:8765/xmltv.php?username=****&password=****` on the userinfo source; the row shows `EPG`). Not a leak to a third party (same file, 0600) but the wrong provider's credentials are attached to a record and would be sent to that record's EPG host on its refresh.
+Evidence: `logs/sweep/`, `shots/sources-sweep-list.png`.
+Notes: Lane 2; on a `playlistUrl`-only CLI change, reconcile should not carry an `epgUrl` that a switch wrote for a different source (or should clear the settings `epgUrl` when the playlist changes from the CLI). The mirror image of D-SRC-02.
+
+### S8. Observations that are not defects
+
+- O2 `removeSource` of a source that is not the one being probed succeeds during a probe (`h14`: `removeSource 733cf68c` -> ok while `4f7c56cf` probed); ARCH 4.7 only serializes the cache jobs, so this is consistent; recorded.
+- O3 `reconcileSources` at the cap evicts the least-recently-used record that is not the NEW active key; when the CLI sets a 51st URL the previously active record is eligible if it is the LRU (`logs/model-reducers.txt`). "Never the active" holds for the key that is active after the change.
+- O4 the first switch to a 10k source in a process costs 352 ms (`prepare 335 ms`, the search index); later switches to the same source 16 ms (prepared-LRU present). Budget 150 ms is met on the warm path only.
+- O5 wireframe 3.2.3 (`No sources`, cursor on `Add source`) is unreachable: removing the last source closes Sources (SRC-RM-04); only `1 source` / `N sources` render.
+- O6 `Model.deriveLabel("/srv/tv/", "file")` gives `tv` (last non-empty segment), the fixture expected the ARCH `local file` fallback; directories are not playlists, cosmetic.
+- O7 after a source is removed through IPC while the first-run form shows `Saved sources (1)`, the form focus stays on the now-hidden link (`focus savedSources`, `n 0`); Tab moves on. Only reachable through the CLI/IPC path.
+- O8 `--fake-epg` of the dev harness still drops `epg-now.json` at the legacy top level, so it no longer feeds the v2 layout (harness hygiene, not plugin code; the real EPG pair was used instead).
+- O9 the migrated files keep the modes they had; the fixture copy in the H15 CLI run was 644 before `cache migrate` and stayed 644 after the rename (the harness seed chmods 600 first, the real v0.1.0 files are 600). A `chmod 600` inside `cache migrate` would be cheap hardening.
+
+### S9. Live-shell cases (blocked, for the lead)
+
+SRC-LST-09, SRC-KEY-11, SRC-UI-19, SRC-MIG-10 and the live steps of SRC-LST-02/05, SRC-RM-01/05, SRC-KEY-09, SRC-A11Y-04, SRC-CLI-01/06, SRC-SEC-07/17/19: QA-SOURCES.md section 9, after the update in place (SR30 re-points the clone's origin at the release).
+
+### S10. Release recommendation
+
+**No-go for v0.2.0 as of 7e13053**: three open P2 defects (D-SRC-02 CLI `epgUrl` lost on the next switch, D-SRC-03 `ftp://` via the CLI leaves the guide loading forever - a TC-CFG-04 regression, D-SRC-04 a failed never-fetched switch shows `Switched to ...` and no error). No P1: no credential reached any sink, `state.json` and every cache file are 0600/0700, the bad-key set is refused, a failed add never displaces the active source, cancel leaves no temp directory, the 50-cap and eviction hold, migration keeps favorites/recents/lastPlayed and moves the cache once. 181/196 pass, 10 fail (3 P2, 7 P3), 4 blocked (live shell), 1 not run; the 50-case M1 regression sample passes apart from the D-SRC-03 regression. After the three P2 fixes: re-run SRC-H09 + `h09b`, SRC-SW-06, TC-CFG-04, then the live runbook (section 9) on the reference machine.
