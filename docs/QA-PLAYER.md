@@ -147,9 +147,12 @@ Depth for this area is in section 2; the rows below are the contract.
 | PLY-LIFE-09 | the lock serialises launchers | A `test_a_second_concurrent_start_reports_busy_and_never_spawns` | a second concurrent `player start` reports `busy` inside `--lock-timeout` 6.0 s and never spawns; the service retries with the existing backoff and the user sees one window, one channel |
 | PLY-LIFE-10 | an older intent is superseded | A `test_an_older_intent_is_superseded_and_touches_nothing` | a verb whose `--seq` is lower than the lock record aborts as `superseded` and does nothing - no spawn, no signal, no socket write, no lock record rewrite; the service does nothing on `superseded`. **Read with ARCH-P section 14: a detached `stop` cannot observe this, which is PLY-STOP-07** |
 | PLY-LIFE-11 | the lock file replaced mid-wait | A `test_the_lock_file_being_replaced_mid_wait_is_detected_and_retried` | `os.fstat(fd)` vs `os.stat(path)` mismatch or ENOENT is detected, the lock released, reopened and retried up to 5 times inside the same deadline; exhaustion is `busy`, never a second spawn |
-| PLY-LIFE-12 | the health check's two-strike verdict | H PLY-H05; L 9.6 step 3 | `kill -STOP` the player: `status` reports `ok:false` with `process.found:true`; after two consecutive failures (10 s timer, 2 s probe deadline, so ~21 s) the console logs the unresponsive line and `player restart --from term` runs the ladder and the spawn under **one** lock acquisition; the SIGKILL lands; exactly **one** relaunch per player |
+| PLY-LIFE-12 | the health check's two-strike verdict | H PLY-H05; L 9.6 step 3 | `kill -STOP` the player: `status` reports `ok:false` with `process.found:true`; after two consecutive failures (10 s timer, 2 s probe deadline, so ~21 s) the console logs the unresponsive line and `player restart --from term` runs the ladder and the spawn under **one** lock acquisition; the SIGKILL lands; exactly **one** relaunch per player. **[corrected, cleanup round]** the one-relaunch half is asserted on the **intent counter** and never on the journal line (ruling **CL10**): `status.player.seq` and the `player.lock` record each advance by **exactly 1** across the wedge and respawn, where a tree that leaves the delivered relaunch queued advances both by **2**. Both readings exist on every M2-02 tree, which is what lets them tell two trees apart; the line `mpv unresponsive, restarting player` sits at one place in the shell, is emitted once by both trees, and is printed as an observation only. Measured 1/1/1 live at `a939fd7`, and read back from `396a69a`'s own source as `{"intents":2,"seqDelta":2}` |
 | PLY-LIFE-13 | the health timer can never be gated off by a stale flag | A `tests/Model.test.js` `healthTick` block; H PLY-H05 | `healthTimer.running` is `playerUp \|\| nowPlaying !== null`, so a false `playerUp` during a reconnect window does not switch off its own reconciler; `healthSkips` respects `HEALTH_SKIPS_BEFORE_RESTART = 3` and an in-flight control call can no longer starve it indefinitely (D-LIVE-17's second half) |
 | PLY-LIFE-14 | the player is not a child of the shell | H PLY-H03; L 9.4 step 2 | `ps -o ppid= -p <mpv pid>` is `1` or the `systemd --user` pid, never the quickshell pid; `cat /proc/<mpv>/cgroup` equals the shell's cgroup (same `wayland-wm@hyprland.desktop.service`). **[corrected 8f9447e]** fd 0 and fd 1 point at `/dev/null`; **fd 2 is a pipe, by design** - PO-6's launch-window stderr pipe. The helper exits after the window, so the read end is closed and the pipe is orphaned; mpv sets SIGPIPE to ignored (`SigIgn` bit 13), so writes return EPIPE and it carries on. The property the row is really asserting still holds: no Quickshell `StdioCollector` is attached, the shell holds no end of it, and **nothing of mpv's reaches the journal** (PLY-SEC-09 measured `grep -c 'mpv\['` = 0) |
+
+| PLY-LIFE-16 | a cold start that is no longer the newest intent stands down | H PLY-H17 (no display); A `tests/test_player.py` T-B family | a `player start` whose own spawn is still inside its handshake when a channel change reaches the socket **leaves the newer channel playing**: the player takes **one** `loadfile` and not two, `user-data/omarchy-iptv` and `force-media-title` both name the **zap's** channel, and the reply carries `applied:false` with `playing:{id,name}` naming what it left up so the shell can re-apply its own intent. The ordering comes from the **spawn**, not from a sequence number - a player this helper just spawned was born idle with `playlist-count` 0 and no `user-data` node of ours - which is what keeps it inside **CL4**: `play` gains no `--seq`, takes no lock, and no channel change during a cold start is ever delayed or refused. An **adopted** player is never asked, because there a stash orders nothing. Deterministic 1/1 through the stub's handshake gate; against `a939fd7` the same checks read 2 loads and the start's own channel |
+| PLY-LIFE-17 | a divergence is visible to the health tick, and the label converges within one tick | H PLY-H18 phase A (no display) + phase B (display); A `Model.reconcileVerdict`, `Model.sessionIntentRepair` | **CL6**, written out. Phase A: `status` carries the player's own now-playing record (`stash`) naming the channel actually loaded, with `verb` saying which side wrote it and a **real** intent number rather than the hardcoded `0`, so the two sides can be **compared** and not merely differed. Phase B: with a divergence forced on a live player, within **one health tick** (10 s timer, 2 s probe deadline) the player is back on the channel the user chose and `nowPlaying` is **unchanged** - the shell re-applies its intent and never relabels itself from the player (**CL5**), because relabelling would leave the user watching something they did not choose with the interface agreeing. Repairs are bounded per intent, so a player that will not take the channel is reported rather than re-zapped forever. Phase A fails against `a939fd7`, where `status` carries no such field and the divergence is undetectable |
 
 #### Stop ladder (ARCH-P 4.9, 4.10, 5 requirement 4, 14; README `Playback notes` bullet 4)
 
@@ -157,7 +160,7 @@ Depth for this area is in section 2; the rows below are the contract.
 |---|---|---|---|
 | PLY-STOP-01 | stop clears the interface on the keystroke | H PLY-H07; L 9.6 step 2 | `s` in list mode, right click on the bar, and `omarchy-shell io.github.rmcdavid.iptv stop` all clear `nowPlaying`, `pendingPlayId`, `wantFocus` and the timers **synchronously**: the next `status` (one IPC round trip) already reads `nowPlaying null`, `playing false`; footer `Stopped` for 3 s then the count; bar back to the idle glyph U+F0502; no notification |
 | PLY-STOP-02 | the `quit` rung ends a responsive player | H PLY-H07 | `request(["quit"], allow_close=True)` on rung 1; the process is gone well inside `STOP_QUIT_GRACE_MS` = 2000; reply `rung:"quit"`, `running:false`; **no** SIGTERM and **no** SIGKILL line in the console |
-| PLY-STOP-03 | the ladder reaches a wedged player | H PLY-H05; L 9.6 step 3 | `kill -STOP` then stop: `quit` at 0 (ignored), `SIGTERM` at 2.0 s, `SIGKILL` at 4.0 s, settle at 4.5 s; the window is gone and `hyprctl clients -j \| jq '[.[]\|select(.class=="omarchy-iptv")]\|length'` is 0; the socket is unlinked only after the final connect is refused. **[corrected b16b479]** on the **wedged** path it is **not** unlinked at all: the player is reaped at ~4.25 s and `mpv.sock` survives, measured still present at t+66 s with the shell idle, and only the next helper call (`probe`/`status`) removes it. Present at `8f9447e` too, so this row's clause has never held on this path - see D-PLY-8. The responsive path unlinks correctly (5/5). This is the D-LIVE-17 case, now reachable because the pid comes from `/proc` and not from `get_property pid` |
+| PLY-STOP-03 | the ladder reaches a wedged player | H PLY-H05; L 9.6 step 3 | `kill -STOP` then stop: `quit` at 0 (ignored), `SIGTERM` at 2.0 s, `SIGKILL` at 4.0 s, settle at 4.5 s; the window is gone and `hyprctl clients -j \| jq '[.[]\|select(.class=="omarchy-iptv")]\|length'` is 0; the socket is unlinked only after the final connect is refused. **[corrected b16b479]** on the **wedged** path it is **not** unlinked at all: the player is reaped at ~4.25 s and `mpv.sock` survives, measured still present at t+66 s with the shell idle, and only the next helper call (`probe`/`status`) removes it. Present at `8f9447e` too, so this row's clause has never held on this path - see D-PLY-8. The responsive path unlinks correctly (5/5). This is the D-LIVE-17 case, now reachable because the pid comes from `/proc` and not from `get_property pid` **[corrected, cleanup round]** the row now ASSERTS the file is gone, with a deadline and a control: `ls $XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` **fails at t+0.5 s** after the stop returns and still fails at t+1 s, t+5 s and t+30 s, on the **wedged** path as well as the responsive one, **with no `probe`/`status`/`play` of the tester's own in between** - that last clause is the whole case, because any helper call unlinks it and a run that made one proves nothing. The journal carries no `the player outlived a stop` backstop line. Measured 10/10 at `a939fd7` (5 wedged, 5 responsive, QA-RESULTS D2) where it failed 5/5 at `8f9447e` and `b16b479`. The old wording - "unlinked only after the final connect is refused" - described a mechanism and asserted nothing a tester could read; a residue is only harmless while nothing else depends on the file being absent |
 | PLY-STOP-04 | the ladder completes if the shell dies mid-ladder | L 9.6 step 4 | issue a stop against a SIGSTOPped player, then `pkill -KILL` the shell 200 ms later: the detached helper still SIGTERMs at 2 s and SIGKILLs at 4 s and the player is gone by 4.5 s, with no shell running. This is the property `escalateStop()` in QML could never have |
 | PLY-STOP-05 | the socket is unlinked only when it is truly dead | A `test_nothing_running_is_a_clean_stop_that_unlinks_a_stale_socket`, `test_stop_after_a_start_leaves_nothing_behind` | settle unlinks only when `find_player()` is empty **and** `connect()` returns ENOENT/ECONNREFUSED, S_ISSOCK-guarded; a racing start's fresh socket is never deleted |
 | PLY-STOP-06 | a recycled pid is never signalled | A `test_a_recycled_pid_is_never_signalled` | pid + `/proc/<pid>/stat` field 22 start time + the `--input-ipc-server` cmdline token are re-verified immediately before **each** signal; a pid whose start time no longer matches gets no signal at all |
@@ -950,8 +953,12 @@ reaps the detached grandchild by cmdline pattern.
 
 ### 8.1 Scenario map
 
-`PLY-H01..H10` are the shipped `player-scenario.sh` scenarios; `PLY-H11..H16`
+`PLY-H01..H10` are the shipped `player-scenario.sh` scenarios; `PLY-H11..H18`
 are new and must be added with the rule-11 evidence before the pass.
+`PLY-H17` and `PLY-H18` phase A are the only two that need **no display and
+no shell** - a stub mpv, the helper, and a gate at the handshake - so they are
+the two a lane that does not hold the display can run and can point at another
+tree itself: `qa-player-scenarios.sh run cold --apply`.
 
 | # | Scenario | Maps to | Cases |
 |---|---|---|---|
@@ -971,6 +978,8 @@ are new and must be added with the rule-11 evidence before the pass.
 | PLY-H14 | **new.** `rm -rf` the scratch runtime dir while playing; prove respawn into a fresh 0700 dir and the `playSeq` reset | to add | PLY-RST-08 |
 | PLY-H15 | **new.** a stub mpv that never binds, and a PATH-shadowed missing mpv; plus a shell killed mid-cold-start | to add | PLY-LIFE-06, 07, PLY-RST-14 |
 | PLY-H16 | **new.** the channel id disappears from `channels.json` between shells | to add | PLY-RST-16 |
+| PLY-H17 | **new, written and run.** a cold start that is no longer the newest intent stands down. No display: a stub mpv holds the start at the handshake `probe_client` already waits on, the channel change lands, the start is released. **11 assertions, 11/11 here, 6 fail against `a939fd7`** | in `scripts/qa-player-scenarios.sh` | PLY-LIFE-16 |
+| PLY-H18 | **new, written and run.** phase A (no display): `status` carries the player's own record, so the health tick has something to compare. Phase B (`--with-display`): the divergence converges within one health tick and `nowPlaying` is never relabelled. **Phase A 7 assertions, 7/7 here, 4 fail against `a939fd7`**; phase B is the display lane's | in `scripts/qa-player-scenarios.sh` | PLY-LIFE-17 |
 
 ### 8.2 Common invocation
 
@@ -1201,10 +1210,25 @@ Repeat steps 4-5 five times for PLY-PERF-01's medians.
    in the console.
 3. **Wedged (PLY-STOP-03, PLY-LIFE-12, PLY-RST-07).** `kill -STOP $MPV`.
    First let the health check run (expect the unresponsive line at ~21 s and
-   `player restart --from term`). Then, on a fresh SIGSTOPped player, press
-   stop and time the rungs: TERM at ~2.0 s, KILL at ~4.0 s, window gone by
-   4.5 s, `hyprctl` count 0, socket unlinked. Then, on a third SIGSTOPped
-   player, `omarchy restart shell` and assert the probe's wedged branch.
+   `player restart --from term`). Read the **intent counter** either side of
+   it - `$H ipc status | jq '.player.seq'` before the wedge and after the
+   respawn - and assert the delta is **exactly 1**. Do **not** count the
+   journal string: it reads 1 on a fixed tree and 1 on a broken one alike
+   (**CL10**, and section 14 item 5). Then, on a fresh SIGSTOPped player,
+   press stop and time the rungs: TERM at ~2.0 s, KILL at ~4.0 s, window gone
+   by 4.5 s, `hyprctl` count 0. **Assert the socket file is gone**, and assert
+   it as a file rather than as a mechanism:
+
+   ```
+   sleep 0.5; ls "$S" ; echo "exit=$?"     # expect exit 2: No such file or directory
+   sleep 30;  ls "$S" ; echo "exit=$?"     # expect exit 2 again
+   ```
+
+   Make **no** `probe`, `status` or `play` call of your own in between - any
+   helper call unlinks it, and a run that made one proves nothing. Five wedged
+   and five responsive; 10/10 at `a939fd7`, where it was 5/5 the other way at
+   `8f9447e` and `b16b479` (**D-PLY-8**). Then, on a third SIGSTOPped player,
+   `omarchy restart shell` and assert the probe's wedged branch.
 4. **Shell dies mid-ladder (PLY-STOP-04).** Stop a SIGSTOPped player, then
    `pkill -KILL` the shell 200 ms later. Assert the player is gone by 4.5 s
    with no shell running.
@@ -1705,8 +1729,10 @@ found by running the plan; each is edited in place above and marked
    executed (`EXPECTED_CHECKS`), so a check that stops running turns the run
    red instead of shortening the summary. Bash offers no way to turn a failed
    expansion into a failed test, so that floor is the only thing that closes
-   the class. Expect **82** assertions and, on the `--baseline 396a69a` run,
-   the same 82 with more of them failing.
+   the class. Expect **84** assertions and, on the `--baseline 396a69a` run,
+   the same 84 with more of them failing. (The floor read 82 until the
+   repointing below added a positive control and a second reading; wave two
+   ran it at 83 on the tree it measured.)
 
    **The repaired check cannot tell the two trees apart, and that is the
    important part.** The string it counts,
@@ -1719,6 +1745,26 @@ found by running the plan; each is edited in place above and marked
    red on the baseline, that is new information about `Service.qml`, not a
    confirmed expectation.
 
+   **[confirmed live, then fixed, cleanup round]** Wave two ran the whole
+   scenario both ways on a display and `PASS P11 exactly ONE relaunch` appears
+   in **both** summaries (`docs/QA-RESULTS.md` D4) - the paragraph above was
+   right, and a witness that only the fixed tree emits can never discriminate
+   (**CL10**). The assertion at `player-scenario.sh:402`/`:416` now reads the
+   **intent counter** on both sides of the lock instead: `svc d['playSeq']`
+   and the `player.lock` record, each of which one logical relaunch advances
+   by exactly **1** and a queued second relaunch by **2**. Both exist on every
+   M2-02 tree, which is the property that makes a comparison possible at all.
+   The numbers are not assumed: the node gate extracts each tree's own
+   decision sites and reads `{"intents":1,"seqDelta":1}` here against
+   `{"intents":2,"seqDelta":2}` for `396a69a`'s `Service.qml`, and the
+   assertion itself - lifted verbatim out of the scenario - passes on 1 and
+   fails on 2 in `scripts/qa-lib-test.sh`. It also **fails rather than
+   vanishing** when the shell answers `NOFIELD`, which is what `qa_delta`
+   exists for: `$(( $(counter) - before ))` dies as an arithmetic expansion on
+   any non-numeric reading, and a counter read over IPC has far more ways to
+   answer non-numerically than a grep has. The journal line is kept and
+   **printed, never asserted**, and the output says so.
+
    **The same blind spot is in the manual procedure.** `docs/STATUS.md:136`,
    `docs/STATUS.md:164` and `docs/QA-RESULTS.md:2407` record that QA counted
    that same journal string by hand ("delta exactly 1, never 2"). That count
@@ -1728,6 +1774,12 @@ found by running the plan; each is edited in place above and marked
    `Service.qml:2486` and correct those three rows in the same change. That
    log line is owned by the shell lane; this round only records that the
    procedure written down here was never evidence.
+
+   **[closed, cleanup round]** It has one now, and it is not the log line.
+   The manual procedure in section 9.6 step 3 should read the intent counter
+   the same way the harness does - `ipc status` before the wedge and after the
+   respawn, delta exactly 1 - and should stop counting the journal string,
+   which reads 1 on a fixed tree and 1 on a broken one alike.
 
 8. **Every count this section cites is now asserted by the gate that prints
    it.** `scripts/check.sh` used to interpolate
@@ -1769,5 +1821,70 @@ found by running the plan; each is edited in place above and marked
    (**D-PLY-11**). The row should say which of the two it is asserting; only
    the serial case is a user-reachable contract.
 
+   **[corrected, cleanup round]** The rate written here was an artefact of the
+   arrangement, not a property of the code, and the mechanism behind it was a
+   guess. Wave two guaranteed a cold player before each burst and measured
+   **10 user-visible divergences in 20 cold concurrent bursts** (plus 3
+   stash-only), **0 in 10 warm** and **0 in 6 cold-serial**
+   (`docs/QA-RESULTS.md` D1). Fifty per cent, not one in eight.
+
+   The mechanism was **observed**, not inferred: only one `player start` ever
+   ran, carrying the burst's FIRST intent, while the player's current playlist
+   entry id read 2 or 3 - so a zap reached the socket the instant mpv bound it
+   and the start's own `apply_channel` landed after it. `play failed:` appears
+   0 times in all 30 bursts, so the rollback ordering (O1) is excluded, and
+   the adopting-start family never fired. Nothing self-corrected: every
+   divergence still read the same at t+20 s and t+40 s, past two health ticks.
+
+   Severity is unchanged, and on purpose (**CL11**): it is bounded by
+   reachability, not by rate. The guide is single threaded and cannot produce
+   the concurrency; the open command surface can. Do not re-rate it upward on
+   the rate alone. The invariant the plan tests for is **CL6** - the label and
+   the player agree within one health tick - not that the last of several
+   simultaneous intents wins. Covered by **PLY-H17** and **PLY-H18**.
+
 10. **The evidence root for this pass is
     `/tmp/claude-1000/omarchy-iptv-qa8/`.**
+
+---
+
+## 16. Corrections from the cleanup round's last wave (QA, 2026-09-14)
+
+Third pass over this plan, after wave two's live evidence (`docs/QA-RESULTS.md`
+sections D1-D7) and wave three's fix. Everything below is edited in place
+above and marked `[corrected, cleanup round]` or `[closed, cleanup round]`;
+this section is the index. This lane held no display, so every number it
+quotes is either wave two's or was produced here with no shell and no window.
+
+| # | Row or item | What changed |
+|---|---|---|
+| 1 | **PLY-LIFE-12** (section 1.1) and section 14 item 5 | The one-relaunch half is asserted on the **intent counter**, never on the journal line (**CL10**). `status.player.seq` and the `player.lock` record each advance by exactly 1 here and by 2 on a tree that leaves the delivered relaunch queued. Both readings exist on every M2-02 tree - which is the only reason a comparison is possible. |
+| 2 | **PLY-STOP-03** (section 1.1) and runbook 9.6 step 3 | The socket clause is now an **assertion with a deadline and a control**: `ls "$S"` fails at t+0.5 s and still fails at t+30 s, on the wedged path as well as the responsive one, with no `probe`/`status`/`play` of the tester's own in between. 10/10 at `a939fd7`, 5/5 the other way at `8f9447e` and `b16b479`. The old wording described a mechanism and asserted nothing. |
+| 3 | Section 14 item 9 (**TC-PLAY-10** / D-PLY-11) | **10 divergences in 20 cold concurrent bursts**, 0 in 10 warm, 0 in 6 cold-serial - not 1 in 8 - and the mechanism is **observed** rather than guessed. Severity is unchanged on purpose (**CL11**): bounded by reachability, not by rate. |
+| 4 | **PLY-LIFE-16**, **PLY-LIFE-17** (new, section 1.1) | The two behaviours wave three's fix introduced: the cold start that stands down, and the CL6 convergence. They existed only as a live pass and two unit gates, so the suite could not have caught their loss. |
+| 5 | **PLY-H17**, **PLY-H18** (new, section 8.1) | The scenarios that cover them, in `scripts/qa-player-scenarios.sh`. Both run with **no display and no shell** for the half that matters, and both were run against `a939fd7`: PLY-H17 6 of 11 fail there, PLY-H18 phase A 4 of 7. |
+| 6 | Section 14 item 5's floor | `EXPECTED_CHECKS` 82 -> **84**. Two of those are new assertions, not new behaviour. |
+
+Two harness defects were found on the way, both the same family as D-PLY-9 -
+a comparison with only one side:
+
+1. **`qa-player-scenarios.sh` pinned `HELPER` to the repository root**, so
+   every step that calls the helper directly ran **today's** helper under
+   `baseline` whatever ref was named. PLY-H15's three helper steps were
+   subject to it, and PLY-H17/H18 would have been. It follows
+   `OMARCHY_IPTV_PLUGIN_ROOT` now, which is what makes a baseline run of a
+   helper-level scenario mean anything at all.
+2. **Those scenarios had no assertion floor.** A check that stopped executing
+   merely shortened the summary, which is exactly D-PLY-9's shape. The two
+   asserting scenarios carry one, per scenario rather than per run.
+
+**Still owed by the lane that holds the display**, and not claimable without
+one:
+
+- `player-scenario.sh` at HEAD and at `--baseline 396a69a`, both halves, with
+  the repointed P11 lines. Expect **84** assertions on both trees, the two
+  intent-counter checks **passing** at HEAD and **failing** on the baseline,
+  and the printed journal delta reading **1** on both. That last number is
+  the point: it is what the old assertion measured.
+- **PLY-H18 phase B** (`run PLY-H18 --apply --with-display`), the CL6
+  convergence itself, and the same against `a939fd7`.
