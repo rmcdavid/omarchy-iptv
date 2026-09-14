@@ -586,6 +586,52 @@ class LadderTest(PlayerTestCase):
         self.assertFalse(os.path.exists(self.sock))
 
 
+class RestartTest(PlayerTestCase):
+    def test_restart_ladders_the_old_player_down_and_spawns_under_one_lock(self):
+        # The health verdict (two failed status polls). One lock acquisition,
+        # ladder then spawn, so the stop/start race two detached calls would
+        # have cannot happen.
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        old = helper.find_player(self.sock)[0]["pid"]
+        code, payload, _, stderr = run("player", "restart", "--socket", self.sock, "--cache-dir", self.cache,
+                                       "--id", "t:espn.us", "--seq", "9", "--from", "term", "--ipc-timeout", "1",
+                                       "--spawn-timeout", "4", "--first-load-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["kind"], "player.restart")
+        self.assertTrue(payload["spawned"])
+        self.assertEqual(payload["name"], "ESPN")
+        self.assertEqual(payload["firstLoad"]["state"], "playing")
+        self.assertTrue(wait_gone(old))
+        found = helper.find_player(self.sock)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["pid"], payload["pid"])
+        self.assertEqual(len(self.spawned_argv()), 2)
+
+    def test_restart_sends_the_channel_headers_so_nothing_leaks_between_channels(self):
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        server = self.start(props={"mpv-version": "mpv 0.41.0"})
+        code, _, _, stderr = run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
+                                 "--id", "t:espn.us", "--seq", "1", "--ipc-timeout", "1", "--first-load-timeout", "0.2")
+        self.assertEqual(code, 0, stderr)
+        sent = [command for command in server.commands if command[0] == "set_property"]
+        self.assertIn(["set_property", "user-agent", "VLC/3.0.20"], sent)
+        self.assertIn(["set_property", "referrer", "http://ref.test/"], sent)
+        server.commands.clear()
+        # A channel without headers actively resets the previous channel's:
+        # requirement 7's clearing mechanism, now applied to the FIRST channel
+        # too because it no longer gets its headers from argv.
+        code, _, _, stderr = run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
+                                 "--id", "t:bbc1.uk", "--seq", "2", "--ipc-timeout", "1", "--first-load-timeout", "0.2")
+        self.assertEqual(code, 0, stderr)
+        sent = [command for command in server.commands if command[0] == "set_property"]
+        self.assertIn(["set_property", "user-agent", helper.MPV_DEFAULT_USER_AGENT], sent)
+        self.assertIn(["set_property", "referrer", ""], sent)
+        self.assertIn(["set_property", "http-header-fields", []], sent)
+        self.assertIsNone(idle.poll())
+
+
 class WedgedTest(PlayerTestCase):
     def test_a_socket_that_accepts_and_never_answers_is_not_responsive(self):
         os.makedirs(self.runtime, 0o700)
