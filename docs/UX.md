@@ -417,6 +417,12 @@ Same row after a failed play this session:
 
 ### 4.4 Empty state: no playlist configured
 
+Triggers: no playlist has ever been configured, or the active playlist URL
+was cleared at runtime, for example `omarchy bar set io.github.rmcdavid.iptv
+playlistUrl ""`. Clearing the URL clears the channel list and the group column
+with it, so this surface is never drawn over a stale list. Since v0.2.0 this
+state is the Sources first-run form, see `UX-SOURCES.md` 1.2.
+
 ```
 +------------------------------------------------------------------------------------------------+
 |                                                                                                |
@@ -759,12 +765,16 @@ Only the key names render at the higher opacity (0.7); the verbs stay at
 | Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) |
 | Fetch failed, cache present (banner) | -- | `ó°¦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
 | EPG failed (banner, low emphasis) | -- | `Guide data unavailable (<reason>) - channels still work - r retry` |
+| Playlist loaded with warnings (footer line) | -- | `Playlist warning: <first warning> (+N more)` when more than one. Shown after a load that produced warnings, such as the 50,000 channel or 2,000 group caps, and cleared by the next clean load. It never displaces a playing, refreshing or error state; see the precedence note below |
+| Guide data loaded with warnings (footer line) | -- | `Guide data warning: <first warning> (+N more)`. Same rules as the playlist warning, and the playlist warning wins when both are present |
 | Playlist parsed but empty | `Playlist has no channels` | `Parsed 0 channels from <host> - check the URL points at an M3U` |
 | No favorites yet (Favorites list empty) | `No favorites yet` | `Press f on any channel to pin it here` |
 | Recent empty | (entry hidden) | -- |
 | No search matches, scope All | `No matches for "sky"` | `Esc clears the search` |
 | No search matches, scope a group | `No matches for "sky" in UK | SPORTS` | `h/l other groups - Home for All` (Home = the column's All entry; implement as: Home in list mode with a query active jumps the column to All) |
 | Group column, narrow screen | -- | header scope label only |
+
+Footer precedence, highest first: a transient such as `Refreshed - N channels`, then playing, then refreshing, then an error, then a pending guide-data load, then a playlist warning, then a guide-data warning, then the plain channel count. Warnings are informational and must never hide a failure. Every warning string is passed through URL redaction before it is drawn.
 
 Bar tooltips (`bar.showTooltip`):
 

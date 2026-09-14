@@ -61,7 +61,11 @@ Guide overlay (card, scrim, header, banner, footer unchanged)
 ### 1.2 First run (S1)
 
 Trigger: the guide opens while `service.configured` is false
-(`emptyKind === "unconfigured"`), or the active source was removed.
+(`emptyKind === "unconfigured"`), the active source was removed, or the
+active playlist URL was cleared at runtime, for example by
+`omarchy bar set io.github.rmcdavid.iptv playlistUrl ""`. In the cleared
+case the source record and its cache survive, so this surface shows the
+`Saved sources (n)` link and setting a URL again reloads from cache.
 
 1. The guide opens straight into `sourceEdit` with `origin: "firstRun"`.
    The empty-state column keeps its glyph and title (`No playlist
