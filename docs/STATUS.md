@@ -85,7 +85,7 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 
 | Task ID | Title | Owner | State | Evidence / Notes |
 |---|---|---|---|---|
-| M2-01 | Sources screen: in-guide playlist entry, source history, per-source cache, Xtream form (docs/M2-SOURCES.md) | PO+UX+ARCH -> FE -> QA | doing | all lanes + integration merged cc40ee1 (0 shims, 97-vector parity, 51/51 harness, check green); 4 follow-ups in a fix lane; QA pass next |
+| M2-01 | Sources screen: in-guide playlist entry, source history, per-source cache, Xtream form (docs/M2-SOURCES.md) | PO+UX+ARCH -> FE -> QA | done (harness) | fix round merged d50e364; QA regression 10/10 verified, 190/196 pass, 0 regressions; released as v0.2.0; live-shell runbook (QA-SOURCES section 9) pending on the installed copy |
 | M2-02 | Multiple playlists | - | merged into M2-01 | the source history is the multi-playlist model |
 | M2-03 | Channel numbers + numeric zap | - | todo | |
 | M2-04 | Channel logos | - | todo | |
@@ -187,11 +187,10 @@ M2-01 regression on d50e364 (QA, 2026-09-13, `docs/QA-RESULTS.md` section "M2-01
 
 ## Next up
 
-1. Push the repository and the v0.1.0 tag to a remote of the user's choice (none configured; `gh auth login` first if GitHub).
-2. M2 lane 1: Sources screen in the guide (enter/paste a playlist and EPG URL, history of sources with per-source cache, Xtream URL helper), per the PO assessment of 2026-09-13.
-3. M2 lane 2: detached/idle mpv so playback survives `omarchy restart shell` and no URL appears on the mpv command line (removes S-03).
-4. M1.2 cosmetic: D-LIVE-19 (clearing playlistUrl at runtime leaves the old list drawn under the empty state); EPG helper warnings not rendered.
-5. Remaining M2 backlog per docs/PLAN.md section 10.
+1. Update the installed copy to v0.2.0 (backup state/cache, pull, restart shell), re-point its origin to GitHub, and run the live-shell runbook in docs/QA-SOURCES.md section 9 (update in place, D-SRC-04 result line, D-SRC-10 write-back, narrow card, mouse, theme).
+2. M2 lane 2: detached/idle mpv (survives `omarchy restart shell`, no URL on the command line).
+3. M1.2 cosmetics: D-LIVE-19; UX.md `r reload` wording (O11); render EPG helper warnings.
+4. Remaining M2 backlog per docs/PLAN.md section 10.
 
 ## Handoff notes
 

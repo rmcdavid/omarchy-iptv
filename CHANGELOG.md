@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-09-13)
 
 M2-01 Sources: configure and switch playlists from inside the guide.
 
