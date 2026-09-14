@@ -452,6 +452,22 @@ checkCall("a user who wants their screenshots elsewhere still wins (last token w
 }, true)
 check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
 
+// ---- D-PLY-11 step one: the play fork as it is TODAY (characterisation) ----
+// These record the decision, they do not prescribe it. The third row is the
+// one D-PLY-11 turns on: with a start in flight and no socket bound yet, the
+// fork still answers "zap" - a channel change aimed at a socket nothing is
+// listening on. Whether that is what actually went wrong in the field is the
+// display lane's question; nothing here is wired to anything, and the fix is
+// not this round's.
+checkCall("play fork: nothing running is a start", () => Model.playFork({ playerPending: false, socketAttached: false, stopping: false, controlBusy: false }), "start")
+checkCall("play fork: an attached player is a zap", () => Model.playFork({ playerPending: false, socketAttached: true, stopping: false, controlBusy: false }), "zap")
+checkCall("play fork: a start in flight with no socket yet is STILL a zap today, and that is the hazard", () => [Model.playFork({ playerPending: true, socketAttached: false, stopping: false, controlBusy: false }), Model.playForkBlind({ playerPending: true, socketAttached: false })], ["zap", true])
+checkCall("play fork: a zap at an attached player is not blind", () => Model.playForkBlind({ playerPending: true, socketAttached: true }), false)
+checkCall("play fork: stopping always goes back through a start", () => [Model.playFork({ playerPending: true, socketAttached: true, stopping: true }), Model.playFork({ playerPending: false, socketAttached: true, stopping: true })], ["start", "start"])
+checkCall("play fork: one control helper at a time, so a second intent queues", () => [Model.playFork({ socketAttached: true, controlBusy: true }), Model.playForkBlind({ playerPending: true, controlBusy: true })], ["queue", false])
+checkCall("play fork: no state at all is a start, never a zap into nothing", () => [Model.playFork(null), Model.playFork({}), Model.playForkBlind(null)], ["start", "start", false])
+
+
 // ---- D-PLY-10 / CL2: mpv's own caches contained, ephemeral, unreserved ----
 // Without these mpv compiles its shaders into $XDG_CACHE_HOME/mpv/, two
 // files at 0600 per containment cycle, outside every list of files this

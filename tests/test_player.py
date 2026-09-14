@@ -85,7 +85,7 @@ server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 server.bind(path)
 os.chmod(path, 0o600)
 server.listen(8)
-state = {"entry": 0, "url": "", "user_data": {}}
+state = {"entry": 0, "url": "", "user_data": {}, "props": {}}
 
 
 def orderly_exit(code):
@@ -136,17 +136,33 @@ def handle(conn):
             if name == "get_property":
                 prop = command[1]
                 if prop == "mpv-version":
+                    # STUB_MPV_GATE withholds the handshake `player start`
+                    # waits for, without withholding the socket - which is
+                    # the one point where the two client slots really can be
+                    # ordered against each other (D-PLY-11 T-B).
+                    gate = os.environ.get("STUB_MPV_GATE", "")
+                    while gate and not os.path.exists(gate):
+                        time.sleep(0.005)
                     reply = {"error": "success", "data": "mpv 0.41.0-stub", "request_id": rid}
                 elif prop == "idle-active":
                     reply = {"error": "success", "data": state["entry"] == 0, "request_id": rid}
                 elif prop == "pid":
                     reply = {"error": "success", "data": os.getpid(), "request_id": rid}
+                elif prop == "path":
+                    reply = {"error": "success", "data": state["url"], "request_id": rid}
                 elif prop.startswith("user-data/") and prop.split("/", 1)[1] in state["user_data"]:
                     reply = {"error": "success", "data": state["user_data"][prop.split("/", 1)[1]], "request_id": rid}
+                elif prop in state["props"]:
+                    reply = {"error": "success", "data": state["props"][prop], "request_id": rid}
                 else:
                     reply = {"error": "property not found", "request_id": rid}
             elif name == "set_property" and command[1].startswith("user-data/"):
                 state["user_data"][command[1].split("/", 1)[1]] = command[2]
+                reply = {"error": "success", "request_id": rid}
+            elif name == "set_property":
+                # Real mpv remembers what it was told; a double that forgets
+                # cannot show which of two writers landed last.
+                state["props"][command[1]] = command[2]
                 reply = {"error": "success", "request_id": rid}
             elif name == "loadfile":
                 state["entry"] += 1
@@ -1465,6 +1481,102 @@ class OrphanCheckTest(PlayerTestCase):
         self.assertFalse(payload["stopped"])
         self.assertEqual(payload["reason"], "owner_dead")
         self.assertIsNone(idle.poll())
+
+
+class OrderingTest(PlayerTestCase):
+    """D-PLY-11, step one: CHARACTERISATION. No fix, and none implied.
+
+    The now-playing divergence had its proposed cause refuted, and the
+    replacement is a hypothesis with a plausible rate, not a traced fact.
+    What these two cases do is pin the two candidate mechanisms at the
+    helper layer, deterministically, so the display lane can tell which
+    family fired instead of guessing:
+
+      T-A  an adopting `player start` re-applies its own channel over a zap
+           that already landed. It has no way to learn a newer intent
+           arrived - `play` carries no --seq and takes no lock, and those
+           three calls appear together only in player_start and player_stop.
+      T-B  a `play` can reach the socket and win it before the `player start`
+           that spawned the player has finished its own handshake, and the
+           start then overwrites it.
+
+    Both assert what the code does TODAY. When the repair lands - which is
+    not this round, and not this lane - these expectations flip, and that
+    flip is the point of writing them down now. Neither authorises a fix on
+    its own, and neither reproduces the field defect: both are deterministic
+    precisely because they gate the race instead of racing.
+    """
+
+    def read(self, prop):
+        client = helper.MpvIpc(self.sock, 2)
+        client.connect()
+        try:
+            ok, data = client.try_command("get_property", prop)
+            return data if ok else None
+        finally:
+            client.close()
+
+    def test_an_older_player_start_re_applies_its_channel_over_a_newer_zap(self):
+        # bbc1 is playing; the user zaps to espn; a `player start` for bbc1
+        # arrives afterwards and adopts the running player.
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        code, payload, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock,
+                                       "--cache-dir", self.cache, "--scope", "g:uk",
+                                       "--since", "3000", "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.read("force-media-title"), "ESPN")
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["id"], "t:espn.us")
+        # The start adopts rather than spawning a second player, which is
+        # requirement 1 working exactly as designed...
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertFalse(payload["spawned"])
+        self.assertEqual(len(self.spawned_argv()), 1)
+        # ...and then it applies ITS channel, which is the older intent.
+        self.assertEqual(self.read("force-media-title"), "BBC One HD")
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["id"], "t:bbc1.uk")
+        self.assertIn("bbc1", self.read("path"))
+        # Nothing in the verb could have known: `play` leaves no sequence
+        # number anywhere, so the lock record still reads the start's.
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 1)
+
+    def test_a_zap_can_land_inside_a_cold_starts_handshake_and_be_overwritten(self):
+        # The cold-burst shape, made deterministic at the one point the two
+        # client slots can be ordered: the stub binds its socket and then
+        # withholds the mpv-version reply that `player start` waits for,
+        # while `play` demands no handshake at all.
+        gate = os.path.join(self.dir, "release-the-handshake")
+        self.env(STUB_MPV_GATE=gate)
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        start = subprocess.Popen(["python3", str(ROOT / "bin" / "omarchy-iptv"), "player", "start",
+                                  "--socket", self.sock, "--cache-dir", self.cache, "--id", "t:bbc1.uk",
+                                  "--seq", "1", "--ipc-timeout", "5", "--lock-timeout", "5",
+                                  "--spawn-timeout", "8", "--first-load-timeout", "1"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(self.reap_process, start)
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and not os.path.exists(self.sock):
+            time.sleep(0.005)
+        self.assertTrue(os.path.exists(self.sock), "the player bound its socket")
+        # The zap gets there first and completes, start to finish.
+        code, _, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock,
+                                 "--cache-dir", self.cache, "--scope", "g:QA",
+                                 "--since", "3000", "--ipc-timeout", "2")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.read("force-media-title"), "ESPN")
+        pathlib.Path(gate).write_text("go", encoding="utf-8")
+        out, err = start.communicate(timeout=20)
+        self.assertEqual(start.returncode, 0, err.decode("utf-8", "replace"))
+        payload = json.loads(out.decode("utf-8").strip().splitlines()[-1])
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["spawned"])
+        # The start finishes its handshake and applies its own channel last,
+        # over a zap that had already been accepted and answered.
+        self.assertEqual(self.read("force-media-title"), "BBC One HD")
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["id"], "t:bbc1.uk")
+        self.assertIn("bbc1", self.read("path"))
+        self.assertEqual(len(self.spawned_argv()), 1, "and still exactly one player")
 
 
 class PrivacyTest(PlayerTestCase):
