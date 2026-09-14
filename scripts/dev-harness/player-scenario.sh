@@ -59,8 +59,9 @@ ok()  { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
 bad() { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
 # is <label> <actual> <expected>
 is()  { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
-# yes <label> <cmd...>: the command's exit status is the verdict
-yes() { local label=$1; shift; if "$@"; then ok "$label"; else bad "$label"; fi; }
+# ck <label> '<bash test>': `[[ ]]` is a keyword, so the test is evaluated,
+# not executed. Single-quote the expression and let it read the variables.
+ck()  { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
 ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
 ipc2() { OMARCHY_IPTV_HARNESS_INSTANCE=2 "$RUN" ipc "$@" 2>/dev/null; }
@@ -192,19 +193,19 @@ is "P1 exactly one omarchy-iptv window" "$(windows_named)" "1"
 
 echo "== P2 S-03: nothing channel-specific on the player command line"
 cmd=$(cmdline_of "$PID1")
-yes "P2 no URL on the command line"        [[ "$cmd" != *"://"* ]]
-yes "P2 no credential on the command line" [[ "$cmd" != *"$SECRET_PW"* && "$cmd" != *"$SECRET_USER"* ]]
-yes "P2 no token on the command line"      [[ "$cmd" != *"$SECRET_TOKEN"* ]]
-yes "P2 no header value on the command line" [[ "$cmd" != *"$SECRET_UA"* && "$cmd" != *"--user-agent="* && "$cmd" != *"--referrer="* && "$cmd" != *"--http-header-fields"* ]]
-yes "P2 no channel name on the command line" [[ "$cmd" != *"Harness Live One"* ]]
-yes "P2 the neutral launch options are there" [[ "$cmd" == *"--idle=once"* && "$cmd" == *"--wayland-app-id=omarchy-iptv"* && "$cmd" == *"--ytdl=no"* ]]
-is  "P2 no yt-dlp process" "$(pgrep -c yt-dlp 2>/dev/null || echo 0)" "0"
+ck "P2 no URL on the command line"           '[[ "$cmd" != *"://"* ]]'
+ck "P2 no credential on the command line"    '[[ "$cmd" != *"$SECRET_PW"* && "$cmd" != *"$SECRET_USER"* ]]'
+ck "P2 no token on the command line"         '[[ "$cmd" != *"$SECRET_TOKEN"* ]]'
+ck "P2 no header value on the command line"  '[[ "$cmd" != *"$SECRET_UA"* && "$cmd" != *"--user-agent="* && "$cmd" != *"--referrer="* && "$cmd" != *"--http-header-fields"* ]]'
+ck "P2 no channel name on the command line"  '[[ "$cmd" != *"Harness Live One"* ]]'
+ck "P2 the neutral launch options are there" '[[ "$cmd" == *"--idle=once"* && "$cmd" == *"--wayland-app-id=omarchy-iptv"* && "$cmd" == *"--ytdl=no"* ]]'
+ck "P2 no yt-dlp process"                    '! pgrep -x yt-dlp >/dev/null 2>&1'
 
 echo "== P3 the player is not a child of the shell"
 QS_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null)
-yes "P3 the shell is up" kill -0 "${QS_PID:-0}"
-yes "P3 the player's parent is not the shell" [[ "$(ppid_of "$PID1")" != "$QS_PID" ]]
-yes "P3 the player is not a direct child of the shell" ! pgrep -P "${QS_PID:-0}" -f "input-ipc-server=$SOCK" >/dev/null 2>&1
+ck "P3 the shell is up"                                '[[ -n "$QS_PID" ]] && kill -0 "$QS_PID" 2>/dev/null'
+ck "P3 the player's parent is not the shell"           '[[ "$(ppid_of "$PID1")" != "$QS_PID" ]]'
+ck "P3 the player is not a child of the shell"         '! pgrep -P "${QS_PID:-0}" -f "input-ipc-server=$SOCK" >/dev/null 2>&1'
 
 echo "== P4 restart the shell while playing (the headline case)"
 "$RUN" restart-shell >>"$LOG" 2>&1
@@ -214,7 +215,7 @@ wait_log 'service loaded' 20 || bad "P4 the new shell did not start"
 until_eq true 4 svc "d['playing']" || true      # the 2 s acceptance bar, doubled
 is "P4 the new shell recovered now-playing" "$(svc "d['playing']")" "true"
 is "P4 it recovered the right channel" "$(np id)" "t:live1"
-yes "P4 it recovered the zap ring (launchedFrom, which no mpv property knows)" [[ -n "$(np launchedFrom)" ]]
+ck "P4 it recovered the zap ring (launchedFrom, which no mpv property knows)" '[[ -n "$(np launchedFrom)" ]]'
 is "P4 still exactly one player" "$(player_count)" "1"
 is "P4 still the same pid" "$(player_pid)" "$PID1"
 is "P4 still exactly one window" "$(windows_named)" "1"
@@ -230,7 +231,7 @@ is "P5 the same pid" "$(player_pid)" "$PID1"
 until_eq "omarchy-iptv|Harness Live Two" 10 window_of "$PID1" || true
 is "P5 the window title followed the zap" "$(window_of "$PID1")" "omarchy-iptv|Harness Live Two"
 cmd=$(cmdline_of "$PID1")
-yes "P5 still nothing channel-specific on the command line" [[ "$cmd" != *"://"* && "$cmd" != *"Harness Live Two"* ]]
+ck "P5 still nothing channel-specific on the command line" '[[ "$cmd" != *"://"* && "$cmd" != *"Harness Live Two"* ]]'
 
 echo "== P8 a second service on the same runtime dir adopts the player"
 OMARCHY_IPTV_HARNESS_INSTANCE=2 "$RUN" --detach --keep --timeout 0 --instance 2 --playlist "$FIX/player.m3u" >>"$LOG" 2>&1
@@ -249,17 +250,18 @@ until_eq 0 8 player_count || true
 is "P6 no player process survives the ladder" "$(player_count)" "0"
 until_eq 0 4 windows_named || true
 is "P6 no omarchy-iptv window survives" "$(windows_named)" "0"
-yes "P6 the socket file was unlinked" [[ ! -e "$SOCK" ]]
+ck "P6 the socket file was unlinked" '[[ ! -e "$SOCK" ]]'
 
 echo "== P7 a dead stream is detected, named and marked"
 ipc play "t:dead1" >/dev/null
 until_set 20 svc "d['failedAt'].get('t:dead1')" || true
-yes "P7 the channel is marked failed for the session" [[ -n "$(svc "d['failedAt'].get('t:dead1')")" ]]
+failed_at=$(svc "d['failedAt'].get('t:dead1')")
+ck "P7 the channel is marked failed for the session" '[[ -n "$failed_at" ]]'
 until_eq false 10 svc "d['playing']" || true
 is "P7 playback did not stay up" "$(svc "d['playing']")" "false"
 err=$(svc "d['lastError']")
-yes "P7 a reason was recorded" [[ -n "$err" ]]
-yes "P7 the reason carries no credential and no token" [[ "$err" != *"$SECRET_PW"* && "$err" != *"$SECRET_TOKEN"* && "$err" != *"$SECRET_USER"* ]]
+ck "P7 a reason was recorded" '[[ -n "$err" ]]'
+ck "P7 the reason carries no credential and no token" '[[ "$err" != *"$SECRET_PW"* && "$err" != *"$SECRET_TOKEN"* && "$err" != *"$SECRET_USER"* ]]'
 until_eq 0 8 player_count || true
 is "P7 no player left behind by the failure" "$(player_count)" "0"
 
@@ -269,7 +271,7 @@ until_eq 1 15 player_count || bad "P9 no player to reap"
 "$RUN" reap >>"$LOG" 2>&1
 until_eq 0 8 player_count || true
 is "P9 reap killed the detached player" "$(player_count)" "0"
-yes "P9 reap stopped the shell" ! pgrep -f "quickshell -p $SCRATCH/root" >/dev/null
+ck "P9 reap stopped the shell" '! pgrep -f "quickshell -p $SCRATCH/root" >/dev/null'
 
 printf '\n== summary: %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 )) || exit 1
