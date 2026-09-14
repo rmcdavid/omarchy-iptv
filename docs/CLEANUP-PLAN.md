@@ -489,3 +489,20 @@ it anyway. Refuting the cause cost one agent. Making it reproduce on demand
 cost one lane. It is now a fifty percent, observed, single-mechanism defect
 with a known trigger. Every step of that was cheaper than shipping a fix for
 the wrong cause and believing the problem was solved.
+
+## 11. Rulings after the follow-up lane (product owner, 2026-09-14)
+
+| # | Ruling |
+|---|---|
+| CL14 | The scenario runner pinned the helper to the working tree, so every helper step of a baseline comparison ran TODAY's helper against yesterday's expectations. That is fixed. It also means any earlier claim of the form "this suite fails against the pre-fix code" that went through that path was partly measuring the current tree, and is downgraded from proof to indication until re-run. Claims proven by other means, the node and python suites run against an older file, and the predicate library that lifts an assertion verbatim, are unaffected. Do not quietly keep the old numbers; re-run what matters and say which is which. |
+| CL15 | Add a baseline verb to the sources scenario runner. No scenario in that suite has ever been run against another tree, which means none of them has ever been shown capable of failing. That is the same finding this whole round started from, in the one suite nobody looked at. It is not urgent, because those scenarios were written alongside working code rather than to catch a known defect, but it is the difference between a suite we trust and a suite we hope about. Next round. |
+
+The round's arithmetic, for the record. It began with four small defects. It
+produced: one refuted root cause, one measured mechanism replacing a guessed
+one, one rate corrected from one-in-eight to ten-in-twenty, seventeen checks in
+this project's own tooling that could report success without testing anything,
+a baseline mechanism that was comparing a tree against itself, one ruling of
+mine that was wrong in a way that could never have shown up as a failure, and
+a disputed measurement now recorded as disputed rather than as fact. None of
+that was visible from the defect titles. All of it was found by running things
+and by having a second agent try to break the first one's answer.
