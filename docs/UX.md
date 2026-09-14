@@ -774,7 +774,7 @@ Only the key names render at the higher opacity (0.7); the verbs stay at
 | No search matches, scope a group | `No matches for "sky" in UK | SPORTS` | `h/l other groups - Home for All` (Home = the column's All entry; implement as: Home in list mode with a query active jumps the column to All) |
 | Group column, narrow screen | -- | header scope label only |
 
-Footer precedence, highest first: a transient such as `Refreshed - N channels`, then playing, then refreshing, then an error, then a pending guide-data load, then a playlist warning, then a guide-data warning, then the plain channel count. Warnings are informational and must never hide a failure. Every warning string is passed through URL redaction before it is drawn.
+Footer precedence, highest first: a transient such as `Refreshed - N channels`, then a bounded search result, then playing, then refreshing, then a degraded state, then a pending guide-data load, then a playlist warning, then a guide-data warning, then the plain channel count. A degraded state means an error or a cached and offline copy, and it renders as the `N channels - cached HH:MM - offline` counts line. A failure with no cache at all leaves this slot blank, because the body carries the message instead. Warnings are informational and must never hide a failure or a degraded state. Every warning string is passed through URL redaction before it is drawn.
 
 Bar tooltips (`bar.showTooltip`):
 
