@@ -418,6 +418,65 @@ inloop=$(qa_count '^[[:space:]]+(is|ck) ' "$PS")   # P14's `for again in 1 2`
 is "the player floor matches the assertions that scenario actually has" \
    "$declared" "$(( top - 1 + 2 * inloop ))"
 
+# ================== qa_delta, and the P11 assertion CL10 repointed (D-PLY-9)
+
+section "qa_delta / CL10: the one-relaunch property, on a counter both trees have"
+
+# The counter comes back over IPC, so it has many more ways to answer
+# non-numerically than a grep has. Every one of them used to be the D-PLY-9
+# shape all over again.
+is "qa_delta on two readings is the difference" "$(qa_delta 7 8)" "1"
+is "qa_delta counts a second relaunch as 2" "$(qa_delta 7 9)" "2"
+is "qa_delta is one line" "$(qa_delta 7 9 | wc -l)" "1"
+is "a NOFIELD reading is NODELTA, not an arithmetic death" "$(qa_delta NOFIELD 9)" "NODELTA"
+is "an empty reading is NODELTA too" "$(qa_delta "" 9)" "NODELTA"
+is "and NODELTA is not a value" "$(qa_value NODELTA && echo yes || echo no)" "no"
+st "qa_delta reports VACUOUS on a non-numeric side" 2 qa_delta NOFIELD 9
+# The kill, again: the naked arithmetic stops bash from running the command
+# the substitution belongs to, so neither counter moves. qa_delta cannot.
+ran=$( { printf 'yes:%s\n' "$(( 9 - $(printf 'NOFIELD\n') ))"; } 2>/dev/null )
+is "the naked arithmetic on a NOFIELD reading skips its command entirely" "${ran:-no}" "no"
+ran=$( { printf 'yes:%s\n' "$(qa_delta "$(printf 'NOFIELD\n')" 9)"; } 2>/dev/null )
+is "with qa_delta the command runs and carries the sentinel" "$ran" "yes:NODELTA"
+
+# Now the assertion itself, taken VERBATIM out of the shipped scenario rather
+# than retyped here, and driven against the counter readings each tree
+# produces. Wave two measured the fixed tree live three times
+# (docs/QA-RESULTS.md D4): status.player.seq delta 1, player.lock seq delta 1.
+# A tree that leaves the delivered relaunch queued fires a second
+# `player restart` at the player it has just respawned, so both read 2.
+P11SEQ="$TMP/p11-seq.sh"
+grep -E '^(before11=|beforelock11=|is "P11 exactly ONE relaunch|is "P11 and the player lock)' "$PS" >"$P11SEQ"
+is "the P11 seq assertion was extracted from the real scenario, all four lines" \
+   "$(qa_count '.' "$P11SEQ")" "4"
+is "and it reads the counter, not the journal" \
+   "$(qa_count 'log_count' "$P11SEQ")" "0"
+
+# <series file> holds the successive readings one per line; the stub pops one
+# per call, which is exactly how the scenario reads it (before, then after).
+p11_run() {
+  local seqs=$1 locks=$2
+  (
+    pass=0; fail=0; checks=0
+    # shellcheck source=/dev/null
+    . "$FRAME"
+    printf '%s\n' "$seqs" >"$TMP/seq.cursor"
+    printf '%s\n' "$locks" >"$TMP/lock.cursor"
+    pop() { local f=$1 v; v=$(head -1 "$f"); sed -i 1d "$f"; printf '%s\n' "$v"; }
+    player_seq() { pop "$TMP/seq.cursor"; }
+    lock_seq()   { pop "$TMP/lock.cursor"; }
+    # shellcheck source=/dev/null
+    . "$P11SEQ" >/dev/null
+    printf '%s %s %s\n' "$checks" "$pass" "$fail"
+  )
+}
+is "at this tree the counter reads one relaunch and the check PASSES" \
+   "$(p11_run "$(printf '4\n5')" "$(printf '4\n5')")" "2 2 0"
+is "at the older tree it reads two and the SAME check FAILS" \
+   "$(p11_run "$(printf '4\n6')" "$(printf '4\n6')")" "2 0 2"
+is "a shell that answers NOFIELD fails the check instead of skipping it" \
+   "$(p11_run "$(printf 'NOFIELD\nNOFIELD')" "$(printf 'NOFILE\nNOFILE')")" "2 0 2"
+
 SS="$ROOT/scripts/dev-harness/sources-scenario.sh"
 sdeclared=$(grep -oE '^EXPECTED_CHECKS=[0-9]+' "$SS" | head -1 | cut -d= -f2)
 is "the sources floor matches the assertions that scenario actually has" \
@@ -428,7 +487,7 @@ is "the sources floor matches the assertions that scenario actually has" \
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=103
+EXPECTED=117
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

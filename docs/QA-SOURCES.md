@@ -714,6 +714,27 @@ not evidence:
   anchors on the definition. (`have_verb` was never comment-satisfiable and is
   unchanged.)
 
+**[corrected, cleanup round's last wave] No SRC-H scenario has ever been run
+against another tree, and this script cannot do it.** `qa-sources-scenarios.sh`
+has no `baseline` verb - its player sibling does - and its `HELPER` is pinned
+to the repository root, so even if one were added every helper step would keep
+running today's helper. CLAUDE.md rule 11 evidence for this plan therefore
+rests **entirely** on `tests/` and on the mutations recorded there; the SRC-H
+transcripts are procedure, not before/after. Say so when quoting them. The
+player script's `HELPER` was unpinned this wave (`OMARCHY_IPTV_PLUGIN_ROOT`)
+and the same one-line change is what this one needs first.
+
+**The shared predicate library gained one more three-way answer.**
+`scripts/qa-lib.sh` now carries `qa_delta <before> <after>`, with the sentinel
+`NODELTA`, for every check shaped as "this counter moved by exactly N".
+`$(( $(counter) - before ))` dies as an arithmetic **expansion** the moment
+the counter answers `NOFIELD`, `NOSTATE` or `""`, and a failed expansion stops
+bash from running the assertion the substitution belonged to - no pass, no
+fail, exit 0. That is D-PLY-9's shape, and anything read over the IPC has far
+more ways to answer non-numerically than a grep has. Use it for any
+before/after pair in a sources scenario, and treat `NODELTA` the way
+`qa_value` already treats the others: never a pass.
+
 The same round fixed the privacy sweep at the end of
 `scripts/dev-harness/sources-scenario.sh`, which is the machine half of the
 SRC-H13 / SRC-PRIV evidence. `! grep -E <labels> "$LOG" | grep -qE "://"`

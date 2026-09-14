@@ -19,7 +19,10 @@
 #                         turn every later stop into a silent no-op
 #   P11 health respawn    D-PLY-1 trigger A: after the two-strike verdict's
 #                         `player restart --from term` the shell reattaches to the
-#                         new player, ONE relaunch, and never goes idle
+#                         new player, ONE relaunch, and never goes idle. The
+#                         one-relaunch half is asserted on the INTENT COUNTER
+#                         (ruling CL10), which reads 1 here and must read 2 on
+#                         `396a69a`; the journal line is printed, not asserted.
 #   P12 socket respawn    D-PLY-1 trigger B: the same after a socket unlink that
 #                         makes `player start` ladder the old player down
 #   P13 startup race      D-PLY-4: a play issued from the earliest instant the
@@ -165,6 +168,25 @@ wait_log() {
 # EXPANSION error, which means bash never ran the `is` whose word it was:
 # no pass, no fail, exit 0, on every run of both trees.
 log_count() { qa_count "$1" "$SCRATCH/harness.log"; }
+# The INTENT COUNTER, from both sides of the lock (ruling CL10). The shell
+# hands every player verb a sequence number and the helper writes the one it
+# acted on into the lock record, so one logical relaunch moves both by exactly
+# one. Wave two measured that live on the fixed tree three times over
+# (docs/QA-RESULTS.md section D4) and both readings exist unchanged on
+# `396a69a`, which is what makes them able to tell the trees apart at all.
+# `playSeq` is the harness fake's defensive read (null on a tree that has no
+# such property), so this never throws and never invents a number.
+player_seq() { svc "d['playSeq']"; }
+lock_seq() {
+  python3 -c '
+import json, sys
+try:
+    v = json.load(open(sys.argv[1])).get("seq")
+except Exception:
+    print("NOFILE"); raise SystemExit(0)
+print("NOFIELD" if v is None else v)' "$SCRATCH/runtime/omarchy-iptv/player.lock" 2>/dev/null \
+    || printf '%s\n' "$QA_NO_FILE"
+}
 # until_changed <secs> <old> <cmd...>: wait for a different, non-empty answer
 until_changed() {
   local secs=$1 old=$2; shift 2
@@ -362,10 +384,7 @@ until_eq 1 15 player_count || bad "P10 no player to stop"
 cache=$(ipc activeCache)
 python3 "$PLUGIN_ROOT/bin/omarchy-iptv" player start --socket "$SOCK" --cache-dir "$cache" \
   --id "t:live1" --seq 9999 >>"$LOG" 2>&1
-lock_seq=$(python3 -c 'import json,sys
-try: print(json.load(open(sys.argv[1])).get("seq"))
-except Exception: print("")' "$SCRATCH/runtime/omarchy-iptv/player.lock")
-is "P10 another launcher pushed the lock sequence ahead" "$lock_seq" "9999"
+is "P10 another launcher pushed the lock sequence ahead" "$(lock_seq)" "9999"
 is "P10 it adopted rather than spawning" "$(player_count)" "1"
 ipc stop >/dev/null
 is "P10 the UI drops the channel at once" "$(svc "d['playing']")" "false"
@@ -399,7 +418,23 @@ until_eq true 10 svc "d['playing']" || true
 # health check and not the start.
 for i in $(seq 1 250); do pgrep -f "bin/omarchy-iptv player start" >/dev/null 2>&1 || break; sleep 0.1; done
 sleep 2
-before11=$(log_count 'mpv unresponsive, restarting player')
+# Ruling CL10. This used to read `before11=$(log_count 'mpv unresponsive,
+# restarting player')` and the assertion below was that delta. It could never
+# discriminate: the string sits at ONE place in the shell, both trees emit it
+# exactly once, and the SECOND relaunch the fix cancels is issued by the retry
+# timer's `playerUp` branch, which logs nothing at all. Wave two ran the whole
+# scenario both ways on a real display and the line
+# `PASS P11 exactly ONE relaunch` appeared in BOTH summaries
+# (docs/QA-RESULTS.md section D4). A pass against nothing.
+#
+# So the property moves onto the intent counter, which both trees produce and
+# produce differently: one logical relaunch advances it by 1, and a tree that
+# leaves the delivered relaunch queued fires a second `player restart` at the
+# player it has just respawned and advances it by 2. Measured 1/1/1 live on
+# the fixed tree, and 2 is what the baseline must read.
+before11=$(player_seq)
+beforelock11=$(lock_seq)
+beforelog11=$(log_count 'mpv unresponsive, restarting player')
 kill -STOP "$PID11" 2>/dev/null
 ck "P11 the player is wedged" '[[ -n "$PID11" ]]'
 until_changed 45 "$PID11" player_pid || bad "P11 the health check never respawned the player"
@@ -413,7 +448,14 @@ is "P11 the interface is NOT idle while the player plays" "$(svc "d['playing']")
 is "P11 it still names the right channel" "$(np id)" "t:live1"
 is "P11 the zap ring survived the respawn" "$(np launchedFrom)" "g:Harness"
 is "P11 still exactly one window" "$(windows_named)" "1"
-is "P11 exactly ONE relaunch, not a second one at the healthy player" "$(( $(log_count 'mpv unresponsive, restarting player') - before11 ))" "1"
+ck "P11 the intent counter answered before the wedge (positive control)" 'qa_value "$before11" && qa_value "$beforelock11"'
+is "P11 exactly ONE relaunch, not a second one at the healthy player" "$(qa_delta "$before11" "$(player_seq)")" "1"
+is "P11 and the player lock recorded exactly one intent for it" "$(qa_delta "$beforelock11" "$(lock_seq)")" "1"
+# NOT the evidence, and labelled so nobody mistakes it for the assertion a
+# second time (CL10: "keep the log line for humans reading a journal"). The
+# delta is printed, never asserted: it reads 1 on both trees.
+printf '   P11 journal observation only: "mpv unresponsive, restarting player" delta %s\n' \
+  "$(qa_delta "$beforelog11" "$(log_count 'mpv unresponsive, restarting player')")"
 
 echo "== P12 D-PLY-1 trigger B: the socket-unlink recovery"
 # The same end state from a second, independent trigger (2/2 live): remove
@@ -538,7 +580,7 @@ ck "P9 reap stopped the shell" '! pgrep -f "quickshell -p $SCRATCH/root" >/dev/n
 #   grep -c '^\(is\|ck\) ' scripts/dev-harness/player-scenario.sh   -> top level
 #   plus the three inside P14's `for again in 1 2` loop, twice.
 # Never lower it to make a run green.
-EXPECTED_CHECKS=82
+EXPECTED_CHECKS=84
 ran=$checks
 is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
 
