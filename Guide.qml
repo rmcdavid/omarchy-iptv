@@ -370,10 +370,14 @@ Item {
 
   readonly property string scopeLabelText: root.hasChannels ? Model.scopeLabel(root.scopeId, root.query, root.resultTotal) : ""
 
-  // Playlist warnings of the last load (D-LIVE-18): one low-key line in the
-  // footer status slot, URL-free (Model.statusWarnings), kept until a clean
-  // load replaces it. Text only, so the list never moves when it appears.
-  readonly property string warningText: root.serviceReady ? Model.warningLine(root.service.playlistWarnings) : ""
+  // Helper warnings of the last load (D-LIVE-18 and its EPG twin): one
+  // low-key line in the footer status slot, URL-free (Model.statusWarnings),
+  // kept until that helper's next clean load replaces it. Text only, so the
+  // list never moves when it appears. The playlist's warnings win; the EPG's
+  // read `Guide data warning: ...`. A service without `epgWarnings` (the
+  // harness before this lane) simply shows the playlist line as before.
+  readonly property var epgWarningList: root.serviceReady && root.service.epgWarnings !== undefined ? Model.asList(root.service.epgWarnings) : []
+  readonly property string warningText: root.serviceReady ? Model.footerWarning(root.service.playlistWarnings, root.epgWarningList) : ""
 
   readonly property string footerStatusText: Model.footerStatus({
     transient: root.transientText !== "" ? root.transientText : (root.sourcesProbeText !== "" ? root.sourcesProbeText : root.sourcesNotice),

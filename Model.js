@@ -1029,12 +1029,28 @@ function statusWarnings(status) {
   return out
 }
 
-// Footer line for playlist warnings (UX 6 tone, D-LIVE-18): the first
-// warning and, when there are several, how many more; "" without warnings.
-function warningLine(warnings) {
+// Wording per helper kind; both warning paths share one shape so they can
+// never drift apart (UX 6.3 calls the EPG "Guide data", as the banner does).
+var WARNING_PREFIX = { playlist: "Playlist warning: ", epg: "Guide data warning: " }
+
+// Footer line for the warnings of one helper (UX 6 tone, D-LIVE-18): the
+// first warning and, when there are several, how many more; "" without
+// warnings. `kind` is "playlist" (default) or "epg".
+function warningLine(warnings, kind) {
   var list = statusWarnings({ ok: true, warnings: warnings })
   if (list.length === 0) return ""
-  return "Playlist warning: " + list[0] + (list.length > 1 ? " (+" + (list.length - 1) + " more)" : "")
+  var prefix = WARNING_PREFIX[str(kind)] || WARNING_PREFIX.playlist
+  return prefix + list[0] + (list.length > 1 ? " (+" + (list.length - 1) + " more)" : "")
+}
+
+// The one warning line the footer's status slot can hold. The playlist's
+// warnings describe the channel list itself and win; the EPG's follow with
+// their own wording. Each is cleared by the next clean load of its own
+// helper, so an EPG warning can outlive a playlist refresh and vice versa.
+function footerWarning(playlistWarnings, epgWarnings) {
+  var line = warningLine(playlistWarnings, "playlist")
+  if (line !== "") return line
+  return warningLine(epgWarnings, "epg")
 }
 
 // ------------------------------------------------------------ player shutdown
@@ -1466,8 +1482,9 @@ function guideSurface(opts) {
 // ------------------------------------------------------------ footer
 
 // Footer status (UX 6.1). Priority: transient > bounded search > playing >
-// refreshing > EPG pending > playlist warning (D-LIVE-18, until the next
-// clean load) > counts. The empty states (not configured, loading, error
+// refreshing > EPG pending > helper warning (`o.warning`, from
+// footerWarning: playlist first, then EPG; D-LIVE-18, until that helper's
+// next clean load) > counts. The empty states (not configured, loading, error
 // without a cache; UX 4.4 - 4.6) carry their message in the body and leave
 // the status slot blank, so `0 channels` or `Refreshing...` never shows
 // there (D-LIVE-09); only a transient may.
@@ -2988,7 +3005,9 @@ if (typeof module !== "undefined") {
     statusHost: statusHost,
     statusHealthy: statusHealthy,
     statusWarnings: statusWarnings,
+    WARNING_PREFIX: WARNING_PREFIX,
     warningLine: warningLine,
+    footerWarning: footerWarning,
     stopEscalation: stopEscalation,
     healthTick: healthTick,
     findBarEntry: findBarEntry,

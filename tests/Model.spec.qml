@@ -430,6 +430,30 @@ TestCase {
     compare(Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS", sourceCount: 2 }), "NAS · 84 channels · updated 09:12")
   }
 
+  // The EPG helper's warnings[] (epg-status.json) get the same treatment
+  // with their own wording; the playlist's win when both have something.
+  function test_epgWarnings() {
+    var status = Model.parseHelperStatus('{"ok": true, "kind": "epg", "warnings": ["no EPG channel id matches a playlist tvg-id", "see http://u:p@e.test/xmltv.php?x=1"]}', "epg")
+    compare(Model.statusWarnings(status), ["no EPG channel id matches a playlist tvg-id", "see e.test"])
+    var line = Model.warningLine(Model.statusWarnings(status), "epg")
+    compare(line, "Guide data warning: no EPG channel id matches a playlist tvg-id (+1 more)")
+    compare(Model.warningLine(["a"], "epg"), "Guide data warning: a")
+    compare(Model.warningLine(["a"]), "Playlist warning: a")
+    compare(Model.statusWarnings({ ok: false, kind: "epg", warnings: ["x"] }), [])
+    compare(Model.footerWarning(["p"], ["e"]), "Playlist warning: p")
+    compare(Model.footerWarning([], ["e"]), "Guide data warning: e")
+    compare(Model.footerWarning([], []), "")
+    compare(Model.footerWarning([], Model.statusWarnings(status)), line)
+    // Precedence (UX 6.1) is unchanged: a warning never displaces a playing,
+    // refreshing or pending state, and the empty states keep the slot blank.
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "01:53", warning: line }), line)
+    compare(Model.footerStatus({ configured: true, count: 8, refreshing: true, warning: line }), "Refreshing" + Model.ELLIPSIS)
+    compare(Model.footerStatus({ configured: true, count: 8, epgPending: true, warning: line }), "Guide data loading" + Model.ELLIPSIS)
+    compare(Model.footerStatus({ configured: true, count: 8, playingName: "Arte", warning: line }), Model.GLYPHS.play + " Arte" + Model.SEP + "s stop")
+    compare(Model.footerStatus({ configured: true, count: 8, transient: "Saved", warning: line }), "Saved")
+    compare(Model.footerStatus({ configured: false, count: 0, warning: line }), "")
+  }
+
   // D-LIVE-19: one body surface at a time. Clearing playlistUrl at runtime
   // takes the rows, the group column and the counts with it, so the setup
   // surface is never drawn over a still-rendered channel list.

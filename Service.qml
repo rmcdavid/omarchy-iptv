@@ -225,6 +225,11 @@ Item {
   // the guide shows them until the next successful load without warnings.
   // A failed refresh keeps them: the cache in use is still that load's.
   property var playlistWarnings: []
+  // The same for the EPG helper's `warnings[]` (epg-status.json carries the
+  // window's warnings on every successful run, `--now-only` included), shown
+  // by the guide as `Guide data warning: ...` and cleared by the next clean
+  // EPG load, by a cleared epgUrl and by a source swap.
+  property var epgWarnings: []
 
   // Emitted after a successful playlist helper run; the guide shows
   // `Refreshed - N channels` for a manual refresh (UX 6.1, D-LIVE-05).
@@ -462,7 +467,7 @@ Item {
       nowPlaying: root.nowPlaying,
       favorites: root.userState.favorites.length,
       recents: root.userState.recents.length,
-      epg: { configured: root.epgConfigured, loaded: root.epgLoaded, pending: root.epgPending, reason: root.epgReason },
+      epg: { configured: root.epgConfigured, loaded: root.epgLoaded, pending: root.epgPending, reason: root.epgReason, warnings: root.epgWarnings },
       playlistReason: root.statusReason,
       warnings: root.playlistWarnings,
       lastError: root.lastError,
@@ -714,7 +719,16 @@ Item {
   }
 
   function applyEpgStatus(text) {
-    root.epgStatus = Model.parseHelperStatus(text, "epg")
+    root.setEpgStatus(Model.parseHelperStatus(text, "epg"))
+  }
+
+  // The one place epg-status.json becomes state, so the file reload and the
+  // helper exit cannot diverge. Warnings follow applyPlaylistStatus exactly
+  // (D-LIVE-18): adopted from a successful run only, kept across a failed
+  // one because the window still in use is that successful run's.
+  function setEpgStatus(status) {
+    root.epgStatus = status
+    if (status && status.ok === true) root.epgWarnings = Model.statusWarnings(status)
   }
 
   function applyEpgNow(text) {
@@ -966,7 +980,7 @@ Item {
     root.epgTimedOut = false
     var status = Model.parseHelperStatus(timedOut ? root.helperTimeoutStatus("epg", root.epgLoaded) : text, "epg")
     if (!nowOnly) {
-      root.epgStatus = status
+      root.setEpgStatus(status)
       root.manualEpgRefresh = false
       if (status.ok !== true) root.notify("epgError", { reason: Model.statusReason(status) })
     } else if (timedOut) {
@@ -1318,6 +1332,7 @@ Item {
     root.epgLoaded = false
     root.epgAttempted = false
     root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
+    root.epgWarnings = []
     root.lastError = ""
     root.applyInvalidStatus()
   }
@@ -1395,6 +1410,7 @@ Item {
       root.epgAttempted = false
       root.epgNow = ({})
       root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
+      root.epgWarnings = []
       return
     }
     // A cache swap in flight fetches the EPG from its freshness check.
