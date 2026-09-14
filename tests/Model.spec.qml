@@ -551,6 +551,33 @@ TestCase {
     compare(Model.barEntryWritable({ layout: { right: ["p"] } }, "p"), false)
   }
 
+  // UX 6.3 footer precedence, proved in the Qt engine as well as in node
+  // (D-LIVE-22). A cached copy is a degraded state, so
+  // `N channels - cached HH:MM - offline` outranks the pending guide-data
+  // line and both warning kinds; only a transient, the bounded-search line,
+  // playing or a refresh may cover it. This is where the ladder meets the
+  // service state machine: Guide.qml raises the rung from the R8 status
+  // vocabulary (`stale: serviceStatus === "cached"`), which the service sets
+  // for a failed refresh and for a stale cache alike.
+  function test_footerPrecedenceCachedOverWarnings() {
+    var epgWarn = Model.footerWarning([], ["1 programmes for channels not in the playlist dropped"])
+    var bothWarn = Model.footerWarning(["truncated to 50,000 channels"], ["1 programmes for channels not in the playlist dropped"])
+    var cached = "8 channels" + Model.SEP + "cached 22:49" + Model.SEP + "offline"
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: epgWarn }), cached)
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: bothWarn }), cached)
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, epgPending: true, warning: bothWarn }), cached)
+    compare(Model.footerStatus({ configured: true, count: 8, stale: true, warning: epgWarn }), "8 channels" + Model.SEP + "cached" + Model.SEP + "offline")
+    // The rungs above it are unchanged, cached or not.
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, refreshing: true, warning: epgWarn }), "Refreshing" + Model.ELLIPSIS)
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, playingName: "Arte", warning: epgWarn }), Model.GLYPHS.play + " Arte" + Model.SEP + "s stop")
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, transient: "Refreshed", warning: epgWarn }), "Refreshed")
+    // A fresh copy leaves both warnings on their own rungs, playlist first.
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: bothWarn }), "Playlist warning: truncated to 50,000 channels")
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: epgWarn }), "Guide data warning: 1 programmes for channels not in the playlist dropped")
+    // An error with no cache still speaks in the body, not the footer (D-LIVE-09).
+    compare(Model.footerStatus({ configured: true, count: 0, stale: true, warning: bothWarn }), "")
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)

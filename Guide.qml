@@ -376,6 +376,10 @@ Item {
   // list never moves when it appears. The playlist's warnings win; the EPG's
   // read `Guide data warning: ...`. A service without `epgWarnings` (the
   // harness before this lane) simply shows the playlist line as before.
+  // Either line is informational and sits near the bottom of the UX 6.3
+  // ladder: `stale` below is the R8 `cached` status, and that degraded counts
+  // line outranks both warnings, so a warning can never take the footer's
+  // only `cached HH:MM - offline` cue away (D-LIVE-22).
   readonly property var epgWarningList: root.serviceReady && root.service.epgWarnings !== undefined ? Model.asList(root.service.epgWarnings) : []
   readonly property string warningText: root.serviceReady ? Model.footerWarning(root.service.playlistWarnings, root.epgWarningList) : ""
 

@@ -1553,22 +1553,12 @@ function guideSurface(opts) {
 
 // ------------------------------------------------------------ footer
 
-// Footer status (UX 6.1). Priority: transient > bounded search > playing >
-// refreshing > EPG pending > helper warning (`o.warning`, from
-// footerWarning: playlist first, then EPG; D-LIVE-18, until that helper's
-// next clean load) > counts. The empty states (not configured, loading, error
-// without a cache; UX 4.4 - 4.6) carry their message in the body and leave
-// the status slot blank, so `0 channels` or `Refreshing...` never shows
-// there (D-LIVE-09); only a transient may.
-function footerStatus(opts) {
-  var o = opts || {}
-  if (str(o.transient) !== "") return str(o.transient)
-  if (o.configured === false || !(Number(o.count) > 0)) return ""
-  if (o.truncated) return "First " + formatCount(o.cap || MAX_ROWS_DEFAULT) + " of " + formatCount(o.resultTotal) + SEP + "keep typing"
-  if (str(o.playingName) !== "") return GLYPHS.play + " " + str(o.playingName) + SEP + "s stop"
-  if (o.refreshing) return "Refreshing" + ELLIPSIS
-  if (o.epgPending) return "Guide data loading" + ELLIPSIS
-  if (str(o.warning) !== "") return str(o.warning)
+// The counts line of the footer (UX 6.1): how many channels are listed and
+// how fresh the copy in use is. When the copy is stale it reads
+// `cached HH:MM - offline`, which is the footer's only cue that a refresh
+// failed and the guide is serving a cache (D-LIVE-22), so this line carries
+// a state, not only a number.
+function footerCounts(o) {
   var out = pluralChannels(o.count)
   if (str(o.lastUpdated) !== "") out += SEP + (o.stale ? "cached " + str(o.lastUpdated) + SEP + "offline" : "updated " + str(o.lastUpdated))
   else if (o.stale) out += SEP + "cached" + SEP + "offline"
@@ -1576,6 +1566,43 @@ function footerStatus(opts) {
   // the active source's label so a switch is visible at a glance.
   if (str(o.activeLabel) !== "" && Number(o.sourceCount) > 1) out = str(o.activeLabel) + SEP + out
   return out
+}
+
+// Is the guide serving a degraded copy? Today that is exactly the stale
+// cache behind a failed or skipped refresh (Service `status === "cached"`);
+// the name is the concept so a future degraded state joins this rung rather
+// than sinking below the warnings.
+function footerDegraded(o) {
+  return !!(o && o.stale)
+}
+
+// Footer status (UX 6.1, precedence note in UX 6.3). Priority, highest
+// first: transient > bounded search > playing > refreshing > degraded (the
+// `cached HH:MM - offline` counts line) > EPG pending > helper warning
+// (`o.warning`, from footerWarning: playlist first, then EPG; D-LIVE-18,
+// until that helper's next clean load) > the plain counts line.
+//
+// D-LIVE-22: warnings are informational and must never hide a failure, and a
+// stale cache is the failure side of that rule, not decoration. UX 6.3 ranks
+// an error above both warning kinds; an error with no cache has no footer
+// line at all (it speaks in the body), so the rung the degraded counts line
+// takes here is that error rung - above EPG pending and above both warnings.
+//
+// The empty states (not configured, loading, error without a cache;
+// UX 4.4 - 4.6) carry their message in the body and leave the status slot
+// blank, so `0 channels` or `Refreshing...` never shows there (D-LIVE-09);
+// only a transient may.
+function footerStatus(opts) {
+  var o = opts || {}
+  if (str(o.transient) !== "") return str(o.transient)
+  if (o.configured === false || !(Number(o.count) > 0)) return ""
+  if (o.truncated) return "First " + formatCount(o.cap || MAX_ROWS_DEFAULT) + " of " + formatCount(o.resultTotal) + SEP + "keep typing"
+  if (str(o.playingName) !== "") return GLYPHS.play + " " + str(o.playingName) + SEP + "s stop"
+  if (o.refreshing) return "Refreshing" + ELLIPSIS
+  if (footerDegraded(o)) return footerCounts(o)
+  if (o.epgPending) return "Guide data loading" + ELLIPSIS
+  if (str(o.warning) !== "") return str(o.warning)
+  return footerCounts(o)
 }
 
 // Footer hint pairs [key, verb] (UX 6.2, UX-SOURCES 5.3); the guide styles
