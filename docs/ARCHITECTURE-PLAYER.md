@@ -1243,3 +1243,19 @@ Counting the four corrections lane PA found by building and the one lane PB
 found live, this design has now been corrected in eleven places since it was
 accepted, on top of the shape that gate PB-0 withdrew before anyone wrote code.
 Every one came from running something. None came from re-reading the document.
+
+## 15. Known issue carried into the quality pass (product owner, 2026-09-14)
+
+One pre-existing race is knowingly unresolved and must be tested rather than
+assumed harmless. At service start, the state file is read asynchronously while
+a play can be issued immediately. If a play beats the file, the handler that
+applies the loaded state can overwrite the in-memory session record that play
+just wrote. The window is small and the consequence is bounded, namely a
+failure that happened during that window would not be marked on a later
+reattach, but nothing proves the window is as small as it looks.
+
+It is deliberately not being fixed blind. Gate it in the quality pass: provoke
+the ordering, measure how often it loses, and fix it only if it reproduces.
+This project has now spent nine corrections on details that were reasoned
+rather than run, and guessing at a fix for a race nobody has observed would be
+the tenth.
