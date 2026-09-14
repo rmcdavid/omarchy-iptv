@@ -1668,3 +1668,337 @@ sweep. After the fix, re-run cases D, E and I here, plus SRC-PERF-02/03 which
 this pass could not measure; J and M need a pointer-injection tool and a
 second display mode respectively and should be dropped from the live runbook
 or moved to a machine that has them.
+
+## P1 fix verification on 845d445 (QA, 2026-09-13, 22:39 - 23:06)
+
+Verification of the D-LIVE-20 / D-LIVE-21 fix round (`9525890` Service/Model,
+`1c29a4c` harness, merged as `845d445`) before the v0.2.1 hotfix. Both defects
+were re-tested with their **original repros** on the user's real machine, the
+harness-fidelity claim of the fix lane was measured independently, and the
+regression sample was re-run through the dev harness. Same conventions as the
+sections above (` - ` stands for U+00B7, `...` for U+2026, `"x"` for the curly
+quotes; the UI renders the real code points, checked in the screenshots).
+Evidence root `E=/tmp/claude-1000/omarchy-iptv-qa6/` (`snapshot/` the
+pre-pass machine state plus `status.before.json`, `restore-proof.json`,
+`shots/` 66 grim screenshots (54 from the live pass), the decisive ones
+inspected individually, `logs/` the harness consoles and
+transcripts, `logs/sweep/` the privacy sinks, `live/` the fixtures and
+`UNDO.txt`, `prefix-tree/` the scratch pre-fix checkout, the scripts
+`k.sh`, `g.sh`, `sw.sh`, `h20.sh`, `h21.sh`, `h15.sh`, `static.sh`,
+`play2.sh`, `dead.sh`, `d19.sh`).
+
+### P1. Header
+
+| Item | Value |
+|---|---|
+| Code under test | `845d445` (merge: fix D-LIVE-20/21). `origin/main` on GitHub had already moved to `210cfa3` when the installed clone fetched; `git diff --stat 845d445 origin/main` is `CHANGELOG.md`, `CLAUDE.md`, `docs/ARCHITECTURE-SOURCES.md`, `docs/OMARCHY-PLUGIN-CONTRACT.md` only, so the code under test is the same either way |
+| Scope beyond the P1 fix | `main` gained a **cosmetics lane** since the last QA pass (`3550693`: `c75dce2` D-LIVE-19, `cf22c3f` EPG helper warnings in the footer) and `48dd054` (UX.md `r reload` -> `r retry`, observation O11). Those are re-tested here as well; the P1 fix itself is confined to `Service.qml` (`hostSettings` / `ownWrite` / `settings`, `persistActive`, `applyOwnWrite`, `onHostSettingsChanged`) and four new `Model.js` functions |
+| Live machine | Hyprland, eDP-1 1366x768 @ scale 1, quickshell `/usr/share/omarchy/shell`, plugin `~/.config/omarchy/plugins/io.github.rmcdavid.iptv`, theme Retropc. Baseline: one source `iptv-org.github.io` (`d5977d8a`), active, 1,474 channels in 28 groups, 5 recents, 0 favorites, state schema v2 / cacheLayout 2 |
+| Keystroke safety | every `wtype` call went through `E/k.sh`, which refuses unless `pgrep -x hyprlock` is empty **and** `hyprctl layers` shows an `omarchy-iptv` layer; the guide was opened with `omarchy-shell shell toggle io.github.rmcdavid.iptv` (the string the keybinding runs) |
+| Switch timings | measurable live for the first time: the shell was relaunched once through `hyprctl dispatch exec_cmd("env OMARCHY_IPTV_DEBUG=1 omarchy-launch-shell")`, which only gates a `console.info` with millisecond counts and channel counts (`Service.qml:99`, `:1059`) and changes no behaviour and no file. The closing `omarchy restart shell` put the canonical launch back |
+| Gates | `./scripts/check.sh` all green, `omarchy plugin validate .` exit 0 (P8) |
+
+### P2. D-LIVE-20, original repro
+
+Repro as filed: two or more sources configured, A active; Sources, cursor on
+B, `Enter`; poll `omarchy-shell io.github.rmcdavid.iptv status` and `jq` the
+bar entry in `~/.config/omarchy/shell.json`.
+
+| Step | Was (ec4f702) | Now (845d445) | Evidence |
+|---|---|---|---|
+| Add a source | commits and caches, **never becomes active**; the guide keeps the previous channels | **active in 723 ms** (`qa-src-a.m3u`, 8 channels in 3 groups); a second add active in 516 ms; the row renders `active - local file - 8 channels in 3 groups` with the check glyph and the transient `Added qa-src-a.m3u - 8 channels in 3 groups` | `shots/L1c-add-done.png`, `shots/L2-three-sources.png` |
+| Switch, both ways | `shell.json` correct, the running plugin serves the old source for 20+ s, footer and content disagree | **4 switches A <-> B all arrived**, wall clock 145 / 158 / 147 / 161 ms (keystroke to `status`, including one 48 ms IPC round trip); the guide redraws to the new source's channels, groups and counts, and the footer transient names the same source the list shows | `shots/L3a..L3d`, `shots/L3d-switch-to-B2.png` (content `Bravo Movies 2` / `Bravo Docs 3`, footer `Switched to qa-src-b.m3u - 5 channels`) |
+| Switch to the 1,474-channel source and back | not reachable | arrived in 240 ms / 168 ms; **no refetch**: `sources/d5977d8a/channels.json` sha and `fetchedAt` unchanged across the round trip, `pgrep omarchy-iptv playlist` 0 | `shots/L4a`, `L4b` |
+| The retry that said `Could not save settings` | second `Enter` on the same row reported `Could not save settings - try omarchy bar set` although the value was already persisted | **no error at any repetition.** `Enter` on a non-active row switches; reopening Sources and pressing `Enter` on that row (now active, row 1) returns to the channel list with the plain count footer, twice in a row; `lastError` stays `""` and `qs log` carries no `persist`, `refused`, `writable` or `Could not save` line | `shots/L6b-retry-before-2nd.png` (cursor on the active row), `L6c`, `L6d` |
+
+`switchSource` on the source that is already active answers `ok` rather than
+`busy` (harness `D-LIVE-20` block), and `Model.barEntryWritable` keeps a real
+persist failure real: with `updateEntryInline` off the shell api the harness
+still gets `persist_failed` and the SR25 copy (P6).
+
+**D-LIVE-20: verified fixed.**
+
+### P3. D-LIVE-21, original repro
+
+Repro as filed: two or more sources, A active; Sources, `x` on A, confirm
+`Remove`; `Esc` back to the guide.
+
+| | Was (ec4f702) | Now (845d445) |
+|---|---|---|
+| after confirming | `Removed <label> - no active source`, then `Loading playlist... / Fetching from <the removed source's host>` for 18+ s with `configured true` and `status loading` | `configured` **false after 821 ms**, `status ready`, `channels 0`, `activeSource null`; the removed source's cache dir is gone and the other two are intact |
+| `Esc` behind the screen | never left the loading state | the **first-run setup surface**: `No playlist configured`, the `Playlist` / `EPG` fields, the `Saved sources (1)` link, `Use Xtream login instead`, `Load`, the `omarchy bar set ...` hint, footer transient `Removed qa-src-a.m3u - no active source` and hints `Enter load - Tab next field - Ctrl+V paste - Esc close` |
+
+Evidence `shots/L8a-before-remove-active.png`, `L8b-confirm-active.png`
+(dialog `Remove "qa-src-a.m3u"? It is the active source...`),
+`L8c-after-confirm.png`, `L8d-setup-surface.png`. The header shows the
+`Search channels...` placeholder, not a stale query (D-SRC-05 still fixed).
+
+Removal of a **non-active** source (SRC-RM-01) also passes: dialog
+`Remove "qa-src-b.m3u"? Its cache is deleted too.` with
+`Left/Right choose - Enter confirm - Esc cancel`, `Enter` removes the row and
+its cache dir `3574b78e`, the active source and the other two records are
+untouched. Method note: `Remove` is the dialog's default choice, so one
+`Right` from it selects `Cancel`; the previous pass's `Left`, `Right`,
+`Return` sequence happens to land back on `Remove`, a bare `Right`, `Return`
+cancels (`shots/L7b-confirm-dialog.png`).
+
+**D-LIVE-21: verified fixed.**
+
+### P4. Echo idempotence and external writes (the fix's own risk surface)
+
+The fix lays the plugin's own write over the host's value until the host
+reports anything else. The three ways that can go wrong were driven live.
+
+| Case | Method | Result |
+|---|---|---|
+| External write reconciles with the guide open | Sources open, `omarchy bar set io.github.rmcdavid.iptv playlistUrl <local fixture>` from a terminal | reconciled in **636 ms**; the history gained a record with `origin: "cli"`, label derived `qa-src-a.m3u`, 8 channels; `epgUrl` stayed `""` (D-SRC-10 still fixed); `shell.json` stayed `0600` |
+| A plugin-side switch still wins afterwards | `Enter` on the `iptv-org` row right after that CLI write | switched in **224 ms**, `shell.json` rewritten to the US URL |
+| Override dropped too late | external write 50 ms / 300 ms / ~0 ms after a plugin-side switch keystroke | in all three the **external value wins** and the guide settles on it; `qs log` shows the plugin's own switch really happened first (the 8-channel `switch` lines 12, 13, 14), so the override is dropped by the foreign publish rather than outliving it. No stuck state, no error, `shell.json` consistent each time |
+| Override dropped too early / double apply | `omarchy bar set` of **the identical value the plugin had just written** (the host catching up with our own write) | **0** extra `switch` events, **0** helper runs, no state change, no duplicate history record: the echo is a no-op |
+
+`shots/L9a-cli-reconciled.png`, `L9b`, `L10a..L10d`.
+
+### P5. Regression sample on 845d445
+
+All through the dev harness with the qa5 methods re-pointed at this root
+(`h20`, `h21`, `h15`, `static`, plus the scripted `run.sh scenario`), and a
+live sample on the real shell.
+
+| Block | Cases | Result |
+|---|---|---|
+| `run.sh scenario` (Sources end to end) | 61 checks: H1 migration, H5 add failure, H2 add + probe, H6/H8 switch + 10k timing, the D-LIVE-20 block, external writes, probe cancel, H9 CLI parity, H11 duplicate, H12 label/EPG edits, H7 remove active + D-LIVE-21, SR25 `failPersist`, privacy greps | **61 pass / 0 fail** |
+| `h20` M1 sample | BRW 05, 06, 07, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 22; FAV 01-07; EPG 01-03; PLAY 01, 02, 04, 05, 06, 10; RFR 01, 03, 04, 07, 08, 09; UI 01, 02, 03, 09, 10, 13 + TC-CFG-04; PERF 01, 02, 03, 07 | pass. `diff` against the d50e364 transcript is timestamps and PIDs only, except the two items below |
+| `h21` clean re-run | EPG 01-04, RFR 01, 03, 04, 07, 08, 09, 10, BRW-17, PERF-07 | pass; the only content difference from d50e364 is the new EPG warning footer (O18) |
+| `h15` helper key safety | SRC-SEC-08, SRC-SEC-23, SRC-RM-07, SRC-MIG-09, SRC-HELP-05..08, SRC-PERF-07 | identical to the d50e364 transcript apart from paths and stamps |
+| `static` greps | SRC-UI-12/13/14/15, SRC-KEY-12, SRC-SEC-12/13, SRC-A11Y-01/05, SRC-PRIV-09 | identical apart from line-number shifts; **O11 is closed** (UX.md now says `r retry`) |
+| live sample | guide open/close, search `bloomberg` -> `in All - 5 matches`, `Esc` clears, `Tab` list mode, group column, `f` / `f` favourite and unfavourite (`state.json` `[]` again), `r` refresh (`lastUpdated` 21:41 -> 23:03, 1,474 channels), theme `tokyo-night` and back with Sources open (SRC-UI-19), restart with a non-default source active | pass, `shots/L13*`, `L14*`, `L15a` |
+
+Two `h20` lines needed a follow-up rather than reading as regressions:
+
+- **PLAY-02 window reuse** printed `same: no` because the step activates a
+  channel whose stream URL is the fixture's dead `127.0.0.1:9`, and mpv had
+  already exited by the 2.5 s check (on d50e364 the same sample caught it
+  still alive). Re-run in isolation against the served channel
+  (`play2.sh`): the second activate **reuses the same mpv pid**, PLAY-02
+  passes. The dead-stream path itself is correct - `lastError` `Failed to
+  open 127.0.0.1`, mpv reaped, `playing false`, and the notification
+  `Stream failed` / `"BBC One HD" did not play - Failed to open 127.0.0.1`
+  fires (it landed in the qa5 log until the shim's hardcoded path was
+  fixed mid-pass).
+- **`epg.warnings` and the `Guide data warning:` footer** are new since
+  d50e364 (`cf22c3f`), not a regression: see O18.
+
+**D-LIVE-19 verified fixed** as a by-product (`d19.sh`): `omarchy bar set
+... playlistUrl ""` at runtime now clears the list with the setting (`rows 0`,
+`showColumn false`, `mode sourceEdit`, `emptyKind unconfigured`,
+`form.origin firstRun`), survives close/reopen, and setting the URL again
+reloads from cache with the same `updated` stamp (no refetch).
+
+Counts: **61 / 61** scenario checks and **69** re-run SRC and M1 cases across
+browse, play, favorites, EPG, refresh, UI, security and the Sources flows
+(`h20` 48, `h21` 2 more, `h15` 9, `static` 10), plus the live blocks of P2, P3,
+P4, P7 and P9 - add, six switches, the retry path, both removals, four
+external-write cases, the privacy sweep, the theme re-skin, a restart and the
+live browse / favourites / refresh sample. **0 regressions**, 0 reopened
+defects, 1 new P3-class observation (O18, from the cosmetics lane, not from
+the P1 fix).
+
+### P6. Harness fidelity, measured independently
+
+The fix lane claims the corrected fake host catches the defect. Measured by
+checking the **pre-fix** `Service.qml` (`d153fe9`) into a scratch copy of
+`845d445` (`E/prefix-tree/`, everything else - `Model.js`, `Guide.qml`,
+`shell.qml`, `sources-scenario.sh` - identical to `845d445`) and running the
+same scenario in both trees. `main` was not touched.
+
+| Tree | `Service.qml` | Result |
+|---|---|---|
+| `/home/ricky/Projects/omarchy-iptv` | `845d445` (fixed) | **61 passed, 0 failed** |
+| `E/prefix-tree` | `d153fe9` (pre-fix), corrected harness | **44 passed, 23 failed** |
+
+The 23 failures are 17 named `check` lines and 6 `bad` lines from timed-out waits;
+they cluster exactly where the live defects were: H2 (`new source active,
+channels loaded`, `activeCache() switched`), H6/H8 (`median 10k switch under
+150 ms (no samples)`), the whole `D-LIVE-20` block including
+`the host has published only the PREVIOUS bar (the defect shape)`,
+`no sourcesPersistFailed anywhere in the switch sequence` and
+`the host echoing our own value back changes nothing (idempotent)`, H7
+(`the guide left the loading state at once (D-LIVE-21)`,
+`settings were not cleared`) and the SR25 block. One line in that list,
+`the switch took effect at once, with no echo from the host`, passes in the
+pre-fix run only because the earlier failures had left that source active
+already - a scenario artefact, not a pre-fix success.
+
+The claim holds: the corrected fake reproduces the host's one-write-behind
+plumbing and fails against the code that was broken in the field.
+
+### P7. Performance
+
+Harness numbers with the qa5 method; live numbers from the `omarchy-iptv
+switch <ms>` lines in `qs log` (first time these are measurable on a real
+shell - the previous pass had no completed switch to time).
+
+| Item | d50e364 (harness) | ec4f702 (live) | 845d445 | Method |
+|---|---|---|---|---|
+| Switch redraw, 10k warm (5 switches) | median 19 ms, max 329 | -- | **median 10 ms, max 14** (harness) | scenario `omarchy-iptv switch` lines |
+| Switch redraw, 10k -> 20 channels | median 14, max 16 | -- | **median 4, max 7** (harness) | same |
+| Switch redraw, live, 5-8 channel source | -- | **not measurable** (no switch completed) | **median 59 ms, max 87** (n=11) | `qs log`, `OMARCHY_IPTV_DEBUG=1` |
+| Switch redraw, live, 1,474 channels | -- | not measurable | **73 / 116 / 147 ms** (read 65-94, prepare 51-52) | same |
+| Switch wall clock, live (keystroke -> `status`) | -- | never arrived (20+ s, no error) | **145-168 ms** small, **224-240 ms** at 1,474 | `date +%s%N` around the `wtype` Return, 48 ms IPC round trip included |
+| Add -> the new source is active (live) | -- | never | **723 / 516 ms** | same |
+| Remove the active source -> `configured false` (live) | -- | 18+ s, never | **821 ms** | same |
+| External `omarchy bar set` -> reconciled (live) | -- | the only recovery path | **636 ms** | same |
+| Guide open, live, 1,474 channels | -- | not recorded (grim round trip dominated) | **toggle 52-59 ms** against a 48 ms `shell ping` baseline; **layer visible 69-75 ms** | `omarchy-shell shell toggle` wall time; `hyprctl layers` busy-poll |
+| Guide open, harness 10k cache (PERF-02) | median 73, max 77 | -- | **median 67, max 79** (`state` baseline 75 / 91) | `h20` |
+| Helper `playlist` 10k | 483 / 482 ms, wall 0.62 s, maxrss 38 MB, `channels.json` 2,612,025 B | -- | **457-468 ms, wall 0.58-0.60 s, 38 MB, 2,612,025 B** | python `resource` wrapper (`/usr/bin/time` is absent on this machine) |
+| Helper `playlist`, live 1,474-channel URL | -- | -- | **312 / 356 ms, wall 0.45 / 0.53 s**, 437,554 B | same, shipped helper from the installed clone |
+| 20 keystrokes on the 10k list (PERF-03) | 681 ms | -- | **671 ms**, all registered | `h20` |
+| Quickshell RSS after the `h20` run | 397 MB | -- | **396 MB** | `ps -o rss=` |
+
+Every budget of QA-SOURCES.md section 5 holds, on the harness and now on the
+live shell: the 150 ms switch budget is met at 1,474 channels (147 ms worst
+case, median 116) and the guide open budget with room to spare. No measurable
+cost from the fix: the `ownWrite` override is one object comparison per
+settings change.
+
+### P8. Gate tails
+
+```
+== python3 -m unittest discover -s tests
+Ran 199 tests in 22.768s
+OK
+ok   python tests
+== qmltestrunner tests/Model.spec.qml
+ok   qml spec (33 passed)
+== ascii check (code files)
+ok   ascii check
+check.sh: all green
+```
+`node tests/Model.test.js`: `681 checks, 0 failure(s)` / `All Model.js tests
+passed.` (653 on d50e364; the 28 new ones are the `ownWrite` / `barEntryWritable`
+vectors, including `a bare-string entry is NOT writable` and
+`an object entry with our id is writable`). `omarchy plugin validate .` exit 0
+with no output, and `omarchy plugin validate` on the **installed** clone at
+`845d445` also exit 0.
+
+### P9. Privacy verdict
+
+`h13` repeated on the live machine with a credentialed source
+(`http://qa-user:qa-secret@127.0.0.1:8791/qa-src-b.m3u`, served from a
+loopback `python3 -m http.server` started and killed by recorded PID), made
+active, switched away from and back to through the Sources screen (so the
+credential goes through the new `persistActive` / `ownWrite` path), plus a
+failed add of `http://qa-user:qa-secret@127.0.0.1:9/x.m3u` and an edit-form
+reveal.
+
+| Sink | `qa-user` / `qa-secret` / `cu:cs` hits | `://` |
+|---|---|---|
+| `omarchy-shell io.github.rmcdavid.iptv status` | 0 | 0 |
+| `qs log -p /usr/share/omarchy/shell --tail 800` | 0 | 0 on any `omarchy-iptv` line |
+| `journalctl --user` over the whole pass | 0 | 0 on any `omarchy-iptv` line |
+| `omarchy-shell notifications showHistory` | 0 | -- |
+| helper `bin/omarchy-iptv state show` | 0 | 0 |
+| `omarchy bar get io.github.rmcdavid.iptv` | 0 | -- |
+| Sources row, detail, footer transient, label | 0 (all render `127.0.0.1:8791`) | -- |
+| the screenshots taken while the credentialed source was configured | 1, and only `shots/L12e-edit-revealed.png`, the deliberate `Ctrl+R` reveal | -- |
+
+Expected hits only where the design stores them: `state.json` (1) and
+`shell.json` (1), both `0600`; no `channels.json` hit at all for this
+fixture. The add form masks at paste time
+(`http://****@127.0.0.1:8791/qa-src-b.m3u` with the eye button,
+`shots/L11a-cred-masked.png`) and `Ctrl+R` flips the hints to `Ctrl+R hide`.
+All cache dirs `700`, all cache files `600`, across adds, switches, removals
+and two restarts. The new `ownWrite` record holds raw URLs in memory only and
+reaches no sink. Verdict: **clean**.
+
+### P10. Observations
+
+- **O18 (new, P3, from the cosmetics lane not the P1 fix).** When the EPG
+  helper reports a warning and the playlist is also serving a stale cached
+  copy after a failed refresh, the footer shows
+  `Guide data warning: 1 programmes for channels not in the playlist dropped`
+  **instead of** `8 channels - cached 22:49 - offline`:
+  `Model.footerStatus` ranks `warning` above the count line, and the
+  `cached HH:MM - offline` marker lives in that count line. UX.md's new
+  precedence note says warnings "must never hide a failure"; the failure is
+  still visible - the banner reads `Playlist refresh failed (Connection
+  refused) - showing cached copy from 22:49 - r retry` and `bannerKind` is
+  `playlistError` - so this is a footer-detail loss, not a hidden failure.
+  Reproduced in `h21` and `d19.sh` (`logs/d19.txt`), pre-dates the P1 fix.
+- **O19.** A bar entry the host cannot rewrite (a bare string
+  `"io.github.rmcdavid.iptv"` in the layout) leaves the plugin with no
+  settings at all, so it renders the first-run surface and the Sources switch
+  path is not reachable from there. That is pre-existing M1 behaviour
+  (settings come from the entry) and needs a hand-edited `shell.json`; the
+  plugin wrote nothing and left `shell.json` untouched. The persist-failure
+  signalling itself (`Could not save settings - try omarchy bar set`, SR25)
+  is covered by the harness `failPersist` block, which passes.
+- **O16 does not recur this pass**: no refetch of the upstream list was
+  forced, `channelCount` stayed 1,474 and the cache is byte-identical to the
+  snapshot.
+- **O10** (mpv ignoring SIGTERM) did not appear: `h20` logged no
+  `mpv ignored SIGTERM, sending SIGKILL` line this run (d50e364 logged one),
+  and every live stop reaped mpv.
+- **O11 is closed** by `48dd054`: `docs/UX.md` now says `r retry - o sources
+  - Esc close`.
+- O2..O9 and O12..O15 were not re-checked except through the transcripts
+  above, which reproduce them unchanged.
+- One mpv process unrelated to this plugin
+  (`mpv --no-config --idle=yes ... --input-ipc-server=/tmp/pk-missing-306717/nodir/mpv.sock`,
+  pid 306721, started 22:38:34, parent `systemd --user`) was **already
+  running at snapshot time** and is recorded in
+  `snapshot/status.before.json` under `preexistingMpv`. It is not the
+  plugin's (the plugin's socket is `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock`),
+  nothing in this repo spawns that path, and this pass left it alone.
+
+### P11. Still blocked on this machine
+
+Unchanged from the ec4f702 pass and not re-attempted: SRC-KEY-11 (mouse - no
+pointer-injection tool, `sudo` forbidden), SRC-LST-09 / SRC-UI-20 (the card
+cannot go under the 720 px threshold at 1366x768 @ 1 and `hyprctl keyword` is
+refused by the Lua config parser), SRC-A11Y-04 (single display), and the
+`SUPER + SHIFT + T` keybinding itself (`wtype` cannot fire Hyprland global
+binds; the bind is registered and its command works).
+
+### P12. Restore
+
+The machine was returned to its exact pre-pass state and proved
+(`E/restore-proof.json` against `E/snapshot/status.before.json`):
+
+- `~/.config/omarchy/shell.json` - **identical bytes** (sha
+  `9a704ac6...68e6`), mode `600`;
+- `~/.local/state/omarchy-iptv/state.json` - **identical bytes** (sha
+  `a0f2506c...ff5`), mode `600`, and still identical 10 s after the restart
+  (the service re-stamped `lastUsed` once on start; the snapshot file was
+  written back and stayed);
+- `~/.cache/omarchy-iptv/` - `diff -r` against the snapshot is empty; dirs
+  `700`, files `600`;
+- `omarchy-shell io.github.rmcdavid.iptv status` **diffs clean** against
+  `status.before.json`: one source `d5977d8a` active, 1,474 channels in 28
+  groups, `lastUpdated 21:41`, 5 recents, 0 favorites;
+- installed clone back on `main` at `ec4f702` tracking `origin/main`, clean
+  tree, `git status -sb` -> `## main...origin/main` with no ahead/behind
+  (the sanctioned `git fetch origin` had advanced the remote-tracking ref to
+  `210cfa3`; it was set back to `ec4f702` with `git update-ref`, which is what
+  the snapshot held);
+- shell relaunched through `omarchy restart shell`, so
+  `OMARCHY_IPTV_DEBUG` is gone from its environment;
+- guide closed (0 `omarchy-iptv` layers), no plugin mpv, port 8791 closed,
+  clipboard restored, theme `Retropc`, harness scratch dirs wiped.
+
+Everything this pass changed is listed in `E/live/UNDO.txt`.
+
+### P13. Release recommendation
+
+**Go for v0.2.1 at 845d445.** D-LIVE-20 and D-LIVE-21 are both verified fixed
+on the live shell with their original repros; the fix's own risk surface
+(echo idempotence, an external write racing a plugin-side switch, a real
+persist failure) behaves correctly in all four variants driven; 0 open P1/P2;
+0 regressions over 61 scenario checks, 69 re-run SRC and M1 cases and the live
+blocks above; D-LIVE-19 closes as a by-product; performance is within every budget
+and the switch path is measurably fast on a real shell for the first time;
+the privacy sweep is clean with a credentialed source; gates green. The
+corrected harness is now load-bearing - it fails 23 checks against the
+pre-fix service that the old fake passed. One new P3-class observation (O18,
+a footer-precedence detail from the cosmetics lane) does not block the
+hotfix and belongs in the M1.2 cosmetics queue with D-LIVE-19's neighbours.

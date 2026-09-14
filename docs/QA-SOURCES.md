@@ -573,7 +573,7 @@ Record median/max of 5 switches each way (budget 150 ms), the open time with
 50 records, the state file sizes (typical and worst case), the prune argv
 length, and the RSS before/after 20 switches (informational).
 
-## 6. Harness verbs and the fake `updateEntryInline` (Lane 2, precondition)
+## 6. Harness verbs and the fake host (Lane 2, precondition)
 
 The scenarios need the verbs ARCH 8.4 assigns to Lane 2 on the harness
 `IpcHandler` (target `harness`): `addSource(playlistUrl, epgUrl, label)`,
@@ -585,16 +585,58 @@ focused field and the form values in masked form with their lengths; plus
 `run.sh --source2 SRC` printing `scheme://host` only. QA additionally asks for
 (section 10, SRC-DEC-21): `cancelProbe()`, `editMasked(id)` (returns
 `sourceForEdit(id)` with both URLs already passed through `maskUrl`, never the
-raw strings), `signals()` (the last 20 signal payloads), and an optional
-`failPersist(bool)` that makes the fake `updateEntryInline` return `false`.
+raw strings), `signals()` (the last 20 signal payloads), and
+`failPersist(bool)`. **[v0.5]** `failPersist true` no longer makes
+`updateEntryInline` return `false`; it takes the function **off the fake shell
+api** entirely, the way a host that cannot rewrite our bar entry leaves it,
+because a `false` return from a writable entry is the host's `!dirty` branch
+and means "already stored", i.e. success. Two verbs were added with the
+D-LIVE-20 fix: `setStored(key, value)` stores a setting without the user-config
+re-read (the window in which the host holds a value the plugin has not been
+handed), and `hostEntry()` returns `{"stored": "<key>", "published": "<key>"}`
+- what the host has stored for our entry versus what it has published to the
+plugin, as 8-hex source keys, never URLs (S-08).
 
-The fake `updateEntryInline` in `scripts/dev-harness/shell.qml` must APPLY the
-entry to `fakeShell.barConfig` (and `barLoader.item.settings`) instead of only
-logging it, keeping the keys-only log line (S-08): without that, every switch
-would log but the service's `settings` binding would never see the new
-`playlistUrl`, `activeSourceKey` would not move, and SRC-SW-01, SRC-FR-02,
-SRC-RM-03 and SRC-CLI-* cannot pass. `scripts/qa-sources-scenarios.sh check-harness`
-greps for both (verbs and the apply) and reports what is missing.
+**[v0.5] The fake host must NOT feed a plugin's own write back to the plugin.**
+The instruction that used to stand here - that the fake `updateEntryInline`
+apply the entry to `fakeShell.barConfig` and `barLoader.item.settings` so the
+service observes its own writes - is what masked D-LIVE-20 and D-LIVE-21
+through two full QA passes. The real host does not do that. Corrected at
+`1c29a4c`; `scripts/dev-harness/shell.qml` now reproduces
+`/usr/share/omarchy/shell/shell.qml` in its **shape and its declaration
+order**:
+
+```
+  shellConfig                      (a QtObject property, host truth)
+  onShellConfigChanged             -> syncPluginApis() -> fakeShell.barConfig
+  readonly property barConfig      : shellConfig.bar          (read by the above)
+```
+
+A QML change handler runs **before** the bindings that depend on the same
+property re-evaluate, so `syncPluginApis()` publishes the bar of the
+*previous* `shellConfig`: a plugin is handed `shell.json` one write late. An
+external write is flushed by the assignment after it (the user-config
+`FileView` re-reads the foreign change, modelled by `hostReloadTimer` ->
+`applyShellConfig()`); a plugin's **own** write is the last assignment there
+is, so its echo never arrives at all. The fake `updateEntryInline` therefore
+rewrites the entry in a clone, compares with `JSON.stringify`, returns
+`false` **without persisting** when nothing changed (the host's `!dirty`
+branch) and otherwise calls `persistShellConfig` - and nothing anywhere hands
+the plugin its own write. The keys-only log line (S-08) stays.
+
+A plugin must consequently apply its own successful write itself and never
+wait for the echo (`Service.qml` `ownWrite` / `Model.settingsWithOwnWrite`).
+Any case that asserts on the effect of a plugin-initiated settings write is
+only meaningful against this ordering - keep it intact. `ipc hostEntry` shows
+the two sides, and the scenario's `== D-LIVE-20` block asserts that a switch
+takes effect **while** the published bar still names the previous source.
+Measured by QA on 2026-09-13 by checking the pre-fix `Service.qml`
+(`d153fe9`) into a scratch copy of `845d445`: `run.sh scenario` is 61 pass /
+0 fail against the fixed service and **44 pass / 23 fail** against the
+pre-fix one (H2, H6/H8, the whole `D-LIVE-20` block, H7 / D-LIVE-21 and the
+SR25 block), where the old fake passed everything.
+`scripts/qa-sources-scenarios.sh check-harness` greps for the verbs; the
+apply it used to demand is gone.
 
 The notification shim of the M1 pass (a PATH directory with an executable
 `omarchy-notification-send` that appends its argv as a JSON line to
@@ -740,15 +782,14 @@ groups`, header `1 source`; footer without a label prefix.
 
 ### 9.3 Add, switch, edit, remove from the existing source; CLI parity
 
-**[v0.4] Every `Enter`/`Space` switch and the "the new source is active"
-expectation below currently fail on a real shell (D-LIVE-20), and the `x` on
-the active source leaves the guide loading instead of returning to setup
-(D-LIVE-21).** Until both are fixed, treat the switch and add-activation
-steps as the repro for those defects rather than as expectations, and use
-`omarchy bar set ... playlistUrl <url>` (an external write, which the plugin
-does observe) whenever a step needs a given source to actually become active.
-The `e` edit, masking, `Ctrl+R`, removal of a non-active source and the CLI
-parity lines all behave as written.
+**[v0.5] D-LIVE-20 and D-LIVE-21 are fixed at `845d445` and both were
+re-verified live with their original repros** (QA-RESULTS "P1 fix
+verification on 845d445"), so every step below is an expectation again. The
+[v0.4] warning that switching and add-activation fail on a real shell is
+withdrawn. Keep the timings in mind when you script it: add makes the new
+source active in ~0.5-0.8 s, an `Enter` switch lands in ~150 ms on a small
+list and ~240 ms at 1,474 channels, and removing the active source reaches
+`configured false` in ~0.8 s - poll `status` rather than sleeping.
 
 ```
 wl-copy -- https://iptv-org.github.io/iptv/countries/ca.m3u        # QA-ASSETS style second list (HEAD 200 on 2026-09-13; key f0441ae2)
@@ -834,12 +875,16 @@ Recorded after executing section 9 end to end on the reference machine
    sections 6 and 8 exist only in the dev harness. Every live Sources
    interaction must be driven through real keyboard or mouse input, or
    through `omarchy bar set` / `omarchy-shell io.github.rmcdavid.iptv status`.
-2. **The harness's fake `updateEntryInline` hides a whole defect class.**
-   The real host writes `shell.json` and updates its own `shellConfig` but
-   never re-emits the plugin's `settings`, so a plugin write is invisible to
-   the plugin (D-LIVE-20, D-LIVE-21). Any future case that asserts on the
-   effect of a plugin-initiated settings write has to be run live, or the
-   fake has to stop feeding the value back.
+2. **The harness's fake `updateEntryInline` hid a whole defect class.**
+   The real host writes `shell.json` and updates its own `shellConfig`, but
+   publishes `barConfig` from a change handler that runs before the binding
+   it reads, so a plugin is handed the bar one write late and its own write
+   never echoes at all (D-LIVE-20, D-LIVE-21). **[v0.5] Resolved**: the fake
+   stopped feeding the value back at `1c29a4c` (section 6), and QA measured
+   that the corrected scenario fails 23 of its checks against the pre-fix
+   service while passing all 61 against the fixed one. A case that asserts on
+   the effect of a plugin-initiated settings write is now meaningful in the
+   harness - but confirm it live once per release all the same.
 3. **`wtype` cannot exercise Hyprland global binds.** Modifier+key reaches
    the focused surface fine (`Ctrl+R`, `Ctrl+A`, `Tab` all worked inside the
    guide) but three spellings of `SUPER + SHIFT + T` left the bind unfired,
