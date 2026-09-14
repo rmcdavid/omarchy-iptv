@@ -855,6 +855,55 @@ function parseState(text) {
   return state
 }
 
+// pushRecent()'s `{id, name, at}` form, for replaying a play that was
+// recorded before state.json landed (stateOnLoad).
+function pushPlayedRecord(recents, played, max) {
+  var rec = playedRecord(played)
+  var cap = max > 0 ? Math.floor(max) : 10
+  var out = []
+  if (rec) out.push(rec)
+  var list = asList(recents)
+  for (var i = 0; i < list.length && out.length < cap; i++) {
+    if (list[i] && (!rec || list[i].id !== rec.id)) out.push(list[i])
+  }
+  return out
+}
+
+// ARCHITECTURE-PLAYER.md section 15's startup race, measured at 14 losses in
+// 30 trials, and the other half of the consumption rule above.
+//
+// state.json is read asynchronously while a play can be issued immediately,
+// so the text that arrives is a snapshot of the file from BEFORE anything
+// this shell did. Applying it wholesale is the whole race: the session
+// record the play had just written is gone, and with it the only evidence
+// PO-3 has that the channel died unattended.
+//
+// The file is the base - it carries favorites, sources and the recents of
+// every previous login, none of which this shell can reconstruct. What is
+// replayed on top is exactly one thing, the play this shell recorded while
+// the read was in flight, because before the first load `userState` IS the
+// empty default plus that write, so a `session` there can only be ours.
+// `savePending` extends the same reasoning past the first load: a save this
+// shell has queued but not yet been allowed to make (saveState()'s dirsReady
+// gate) means the file on disk is again older than memory.
+//
+// Whether a replayed record then SURVIVES is not decided here: it goes to
+// sessionAfterOutcome() like every other answer about the record, so there
+// stays exactly one place that retires one.
+function stateOnLoad(loaded, current, context) {
+  var base = loaded || emptyState()
+  var ctx = context || {}
+  var newer = ctx.loadedBefore !== true || ctx.savePending === true
+  var mine = newer ? playedRecord(current && current.session) : null
+  if (!mine) return { state: base, replayed: false, write: false }
+  var next = cloneState(base, {
+    recents: pushPlayedRecord(base.recents, mine, ctx.maxRecents),
+    lastPlayed: mine,
+    session: mine
+  })
+  return { state: next, replayed: true, write: next !== base }
+}
+
 function isFavorite(state, id) {
   return !!(state && asList(state.favorites).indexOf(str(id)) !== -1)
 }
@@ -984,11 +1033,13 @@ var PLAYER_OUTCOME_SURVIVES = {
   relaunching: true,    // the health verdict's one automatic relaunch (4.8)
   respawning: true,     // the helper is mid ladder-and-respawn for this very intent (4.9)
   attached: true,       // the first load failed but the socket is live: its EOF is next
+  loaded: true,         // not a player answer: state.json arriving (see `consumed` below)
   stopped: false,       // the user stopped it, or a detached stop was confirmed (4.9)
   ended: false,         // socket EOF with no relaunch coming (4.8 signal 3)
   foreign: false,       // a player this shell could not identify, laddered down (4.5)
   failed: false,        // `player start` / `restart` / the first load failed for good
   mpvMissing: false,    // the player program is not installed
+  marked: false,        // PO-3's red row has been raised on this record: it is spent
   abandoned: false      // the channel left the playlist before the relaunch could run
 }
 
@@ -1013,16 +1064,29 @@ var PLAYER_OUTCOMES = Object.keys(PLAYER_OUTCOME_SURVIVES)
 // call site then costs at worst one stale mark on the next reattach, never a
 // silently dropped one, and the vocabulary check in the tests catches it
 // before either happens.
-function sessionAfterOutcome(state, outcome, deadPending) {
+function sessionAfterOutcome(state, outcome, deadPending, consumed) {
   var st = state || emptyState()
   var key = str(outcome)
   var known = PLAYER_OUTCOME_SURVIVES.hasOwnProperty(key)
   var terminal = known && PLAYER_OUTCOME_SURVIVES[key] !== true
-  var next = terminal ? clearSession(st) : st
+  // Consumption is one-way, and it is the half the twelve routed branches
+  // left open. They retire the record in MEMORY; whether that reaches disk
+  // depends on `dirsReady` and on which of state.json's own loads wins the
+  // race. When the write loses, the file still carries the record, the next
+  // load puts it straight back into memory, and the following shell start
+  // marks the same channel red a second time for a failure the user has
+  // already been shown - the reported defect, 2 runs in 3. So the answer is
+  // not "clear it once" but "a consumed record never comes back": every
+  // later call over the same in-memory state, `loaded` included, clears it
+  // again until a write finally lands. Only a new play (recordPlayed) opens
+  // a fresh record, and the caller drops the flag there.
+  var spent = consumed === true || terminal
+  var next = spent ? clearSession(st) : st
   return {
     outcome: key,
     known: known,
     terminal: terminal,
+    consumed: spent,
     pending: terminal ? false : deadPending === true,
     state: next,
     write: next !== st
@@ -3602,6 +3666,8 @@ if (typeof module !== "undefined") {
     isFavorite: isFavorite,
     toggleFavorite: toggleFavorite,
     pushRecent: pushRecent,
+    pushPlayedRecord: pushPlayedRecord,
+    stateOnLoad: stateOnLoad,
     recordPlayed: recordPlayed,
     clearSession: clearSession,
     stateSession: stateSession,

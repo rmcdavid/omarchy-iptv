@@ -1031,8 +1031,8 @@ const noteOutcome = (svc, outcome) => {
 const reattachMarks = (svc) => Model.deadSessionVerdict(svc.userState, true, {}, "21:30").failed
 const playingService = () => ({ userState: sessionState, deadSessionPending: false, writes: 0 })
 
-check("the outcome vocabulary is exactly the eleven answers Service.qml can get", Model.PLAYER_OUTCOMES.slice().sort(), ["abandoned", "attached", "ended", "failed", "foreign", "mpvMissing", "relaunching", "respawning", "retrying", "stopped", "superseded"])
-check("a player that is still there or still coming keeps the record; every ending retires it", Model.PLAYER_OUTCOMES.map(o => Model.sessionAfterOutcome(sessionState, o).terminal), [false, false, false, false, false, true, true, true, true, true, true])
+check("the outcome vocabulary is exactly the thirteen answers Service.qml can get", Model.PLAYER_OUTCOMES.slice().sort(), ["abandoned", "attached", "ended", "failed", "foreign", "loaded", "marked", "mpvMissing", "relaunching", "respawning", "retrying", "stopped", "superseded"])
+check("a player that is still there or still coming keeps the record; every ending retires it", Model.PLAYER_OUTCOMES.map(o => Model.sessionAfterOutcome(sessionState, o).terminal), [false, false, false, false, false, false, true, true, true, true, true, true, true])
 
 // The six endings, each on its own. Before this change three of them - a
 // failed start, a missing mpv, an abandoned relaunch - left the record.
@@ -1093,8 +1093,8 @@ check("an outcome the rule does not name is inert - a misspelled call site loses
   Model.sessionAfterOutcome(sessionState, "hasOwnProperty").terminal,
   Model.sessionAfterOutcome(sessionState, "toString").known
 ], [
-  { outcome: "mpv_missing", known: false, terminal: false, pending: false, state: sessionState, write: false },
-  { outcome: "", known: false, terminal: false, pending: false, state: sessionState, write: false },
+  { outcome: "mpv_missing", known: false, terminal: false, consumed: false, pending: false, state: sessionState, write: false },
+  { outcome: "", known: false, terminal: false, consumed: false, pending: false, state: sessionState, write: false },
   false, false
 ])
 // The deferred half of PO-3 rides on the same verdict: the startup probe can
@@ -1133,6 +1133,115 @@ check("retiring the record leaves Recents, favorites and sources alone", (() => 
   return [out.session, out.favorites, out.lastPlayed.id, out.recents.length, out.sources.length]
 })(), [null, ["t:f"], "t:bbc1.uk", 1, 4])
 
+// ---- D-PLY-3: a consumed record never comes back ----
+// The rule above retires the record in MEMORY. Whether that reaches disk
+// depends on saveState()'s dirsReady gate and on which of state.json's own
+// loads wins the race, and when the write loses, the next load puts the
+// record straight back - so the following shell start marked the same
+// channel red a second time, with the same HH:MM. Found live, 2 runs in 3.
+// The fix is not a condition at the load site but one more thing the same
+// decision answers: `consumed` is one-way until a new play opens a record.
+const markedService = () => {
+  // The PO-3 mark has just been raised, exactly as markDeadSession() does it.
+  const svc = { userState: sessionState, deadSessionPending: false, consumed: false, writes: 0 }
+  const v = Model.sessionAfterOutcome(svc.userState, "marked", svc.deadSessionPending, svc.consumed)
+  svc.deadSessionPending = v.pending; svc.consumed = v.consumed
+  if (v.write) { svc.userState = v.state; svc.writes += 1 }
+  return svc
+}
+const stateFileLoads = (svc, text) => {
+  const adopted = Model.stateOnLoad(Model.parseState(text), svc.userState,
+                                    { loadedBefore: true, savePending: false, maxRecents: 10 })
+  svc.userState = adopted.state
+  const v = Model.sessionAfterOutcome(svc.userState, "loaded", svc.deadSessionPending, svc.consumed)
+  svc.deadSessionPending = v.pending; svc.consumed = v.consumed
+  if (v.write) { svc.userState = v.state; svc.writes += 1 }
+  return svc
+}
+// The bytes still on disk after a clear that has not been written yet.
+const unclearedFile = JSON.stringify({ version: 2, recents: [{ id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }], lastPlayed: { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }, session: { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 } })
+check("D-PLY-3: the mark retires the record and marks it consumed", (() => {
+  const svc = markedService()
+  return [svc.userState.session, svc.consumed, svc.writes]
+})(), [null, true, 1])
+check("D-PLY-3: the state file that our clear had not reached yet does NOT bring the record back", (() => {
+  const svc = stateFileLoads(markedService(), unclearedFile)
+  return [svc.userState.session, svc.writes, reattachMarks(svc)]
+})(), [null, 2, {}])
+check("D-PLY-3: it stays cleared however many times that file arrives, and stops writing once it agrees", (() => {
+  const svc = stateFileLoads(stateFileLoads(markedService(), unclearedFile), unclearedFile)
+  const writesAfterTwo = svc.writes
+  stateFileLoads(svc, JSON.stringify({ version: 2, session: null }))
+  return [svc.userState.session, writesAfterTwo, svc.writes]
+})(), [null, 3, 3])
+check("D-PLY-3: an ordinary load of a record this shell has NOT consumed keeps it - that is the whole of PO-3", (() => {
+  const svc = { userState: Model.emptyState(), deadSessionPending: false, consumed: false, writes: 0 }
+  stateFileLoads(svc, unclearedFile)
+  return [(svc.userState.session || {}).id, svc.writes, reattachMarks(svc)]
+})(), ["t:bbc1.uk", 0, { "t:bbc1.uk": "21:30" }])
+check("D-PLY-3: every ending consumes, every non-ending leaves the record open to a later load", [
+  Model.sessionAfterOutcome(sessionState, "marked").consumed,
+  Model.sessionAfterOutcome(sessionState, "ended").consumed,
+  Model.sessionAfterOutcome(sessionState, "stopped").consumed,
+  Model.sessionAfterOutcome(sessionState, "respawning").consumed,
+  Model.sessionAfterOutcome(sessionState, "relaunching").consumed,
+  Model.sessionAfterOutcome(sessionState, "loaded").consumed,
+  Model.sessionAfterOutcome(sessionState, "loaded", false, true).consumed
+], [true, true, true, false, false, false, true])
+check("D-PLY-3: consuming touches nothing but the record", (() => {
+  const rich = Model.withFavorites(Model.recordPlayed(state4, { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123), ["t:f"])
+  const out = Model.sessionAfterOutcome(rich, "loaded", false, true).state
+  return [out.session, out.favorites, out.lastPlayed.id, out.recents.length, out.sources.length]
+})(), [null, ["t:f"], "t:bbc1.uk", 1, 4])
+
+// ---- D-PLY-4: ARCHITECTURE-PLAYER.md section 15's startup race ----
+// Measured, not assumed: 14 losses in 30 trials. state.json is read
+// asynchronously while a play can be issued immediately, so the text that
+// arrives is the file from BEFORE the play - and applying it wholesale threw
+// away the session record the play had just written, which is the only
+// evidence PO-3 has that a channel died unattended.
+const fileFromBefore = JSON.stringify({
+  version: 2, favorites: ["t:fav"],
+  recents: [{ id: "t:old", name: "Old", at: 100 }],
+  lastPlayed: { id: "t:old", name: "Old", at: 100 },
+  sources: [{ key: "aaaaaaaa", url: "http://h.test/a.m3u", epgUrl: "", label: "A", addedAt: 1, origin: "form" }]
+})
+// What the service holds when a play beats the file: the empty default plus
+// exactly that play.
+const playedBeforeLoad = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
+const raced = Model.stateOnLoad(Model.parseState(fileFromBefore), playedBeforeLoad, { loadedBefore: false, savePending: false, maxRecents: 10 })
+check("D-PLY-4: the record the play wrote survives the file that was read before it", [raced.state.session, raced.replayed, raced.write], [{ id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }, true, true])
+check("D-PLY-4: and the file still supplies everything only it knows", [raced.state.favorites, raced.state.sources.length, raced.state.recents.map(r => r.id)], [["t:fav"], 1, ["t:bbc1.uk", "t:old"]])
+check("D-PLY-4: the lost race, end to end - a reattach now marks the channel that died unattended", Model.deadSessionVerdict(raced.state, true, {}, "21:30").failed, { "t:bbc1.uk": "21:30" })
+check("D-PLY-4: with no play in flight the file is adopted untouched, same object, no write", (() => {
+  const base = Model.parseState(fileFromBefore)
+  const out = Model.stateOnLoad(base, Model.emptyState(), { loadedBefore: false, maxRecents: 10 })
+  return [out.state === base, out.replayed, out.write, out.state.session]
+})(), [true, false, false, null])
+check("D-PLY-4: a later reload is an external edit and wins - this is not a licence to ignore the file", (() => {
+  const out = Model.stateOnLoad(Model.parseState('{"version":2,"favorites":["t:new"]}'), playedBeforeLoad, { loadedBefore: true, savePending: false, maxRecents: 10 })
+  return [out.state.favorites, out.state.session, out.replayed]
+})(), [["t:new"], null, false])
+check("D-PLY-4: unless a save of ours is still queued behind dirsReady, when the file on disk is again the older one", (() => {
+  const out = Model.stateOnLoad(Model.parseState('{"version":2,"favorites":["t:new"]}'), playedBeforeLoad, { loadedBefore: true, savePending: true, maxRecents: 10 })
+  return [out.state.favorites, (out.state.session || {}).id, out.replayed]
+})(), [["t:new"], "t:bbc1.uk", true])
+check("D-PLY-4: the replayed play is deduplicated in Recents and respects the cap", (() => {
+  const file = JSON.stringify({ version: 2, recents: [{ id: "t:bbc1.uk", name: "Stale name", at: 1 }, { id: "t:b", name: "B", at: 2 }, { id: "t:c", name: "C", at: 3 }] })
+  const out = Model.stateOnLoad(Model.parseState(file), playedBeforeLoad, { loadedBefore: false, maxRecents: 2 })
+  return [out.state.recents.map(r => r.id), (out.state.recents[0] || {}).name]
+})(), [["t:bbc1.uk", "t:b"], "BBC One HD"])
+check("D-PLY-4: nothing here mutates its inputs and nothing carries a URL", (() => {
+  const base = Model.parseState(fileFromBefore)
+  const out = Model.stateOnLoad(base, playedBeforeLoad, { loadedBefore: false, maxRecents: 10 })
+  return [base.session, playedBeforeLoad.favorites.length, JSON.stringify({ s: out.state.session, r: out.state.recents }).indexOf("://")]
+})(), [null, 0, -1])
+check("D-PLY-4: a garbage or absent file is still a base, and a half-written record is dropped rather than replayed", [
+  Model.stateOnLoad(null, null, {}).state.version,
+  Model.stateOnLoad(Model.parseState("not json"), { session: { name: "no id" } }, { loadedBefore: false }).state.session,
+  Model.stateOnLoad(Model.parseState("{}"), { session: { id: "t:x" } }, { loadedBefore: false }).state.session
+], [2, null, { id: "t:x", name: "", at: 0 }])
+
 // ---- D-PLY-1: a death inside our own respawn is not an ending ----
 // The P1. `player start` and `player restart` ladder a player DOWN and spawn
 // its replacement inside one helper call, so the death of the player they
@@ -1167,7 +1276,7 @@ const serviceSource = fs.readFileSync(path.join(__dirname, "../Service.qml"), "u
 const notedOutcomes = []
 serviceSource.replace(/root\.noteSessionOutcome\("([^"]*)"\)/g, (m, word) => { notedOutcomes.push(word); return m })
 check("Service.qml spells every outcome in the vocabulary", [notedOutcomes.length > 0, notedOutcomes.filter(o => Model.PLAYER_OUTCOMES.indexOf(o) === -1)], [true, []])
-check("Service.qml routes all six endings, not three of them", [...new Set(notedOutcomes)].filter(o => Model.sessionAfterOutcome(sessionState, o).terminal).sort(), ["abandoned", "ended", "failed", "foreign", "mpvMissing", "stopped"])
+check("Service.qml routes all seven endings, not three of them", [...new Set(notedOutcomes)].filter(o => Model.sessionAfterOutcome(sessionState, o).terminal).sort(), ["abandoned", "ended", "failed", "foreign", "marked", "mpvMissing", "stopped"])
 check("Service.qml reaches the session record through the one decision and nowhere else", [
   serviceSource.indexOf("Model.clearSession("),
   serviceSource.indexOf(".session ="),

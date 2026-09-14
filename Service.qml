@@ -233,6 +233,11 @@ Item {
   // verdict has to be re-run from applyUserState() once there is a file to
   // decide on.
   property bool deadSessionPending: false
+  // PO-3's record has been spent by this shell (marked, or the play's own
+  // ending seen). One-way until the next play opens a new one: it is what
+  // stops a state.json load - our own clear having not reached disk yet -
+  // from putting a consumed record back and marking the same channel twice.
+  property bool sessionConsumed: false
   property bool userStopped: false
   property bool relaunchPending: false
   property bool relaunched: false
@@ -382,6 +387,7 @@ Item {
       since: nowSec
     }
     root.userState = Model.recordPlayed(root.userState, channel, root.maxRecents, nowSec)
+    root.sessionConsumed = false        // a new record, not the spent one
     root.saveState()
     root.wantFocus = !keepOpen
     // The fork is never a correctness gate (F2): `player start` is
@@ -791,8 +797,26 @@ Item {
   // than what an earlier atomic write may still be delivering (R10).
   function applyUserState(text) {
     if (root.stateLoaded && root.recentSaves.indexOf(text) !== -1) return
-    root.userState = Model.trimRecents(Model.parseState(text), root.maxRecents)
+    // Section 15's race: what arrives is a snapshot of the file from before
+    // this shell wrote anything, so it is a base to merge onto, not a
+    // replacement. Model.stateOnLoad() replays the play this shell recorded
+    // while the read was in flight and refuses to resurrect a record already
+    // consumed; both answers are the one rule, so neither is decided here.
+    var adopted = Model.stateOnLoad(Model.trimRecents(Model.parseState(text), root.maxRecents),
+                                    root.userState,
+                                    { loadedBefore: root.stateLoaded, savePending: root.stateSavePending,
+                                      maxRecents: root.maxRecents })
+    root.userState = adopted.state
     root.stateLoaded = true
+    var merged = root.userState
+    // The file can carry a record this shell has already spent, because our
+    // own clear may not have reached disk yet. That answer belongs to the
+    // same decision as every other ending, not to a condition here.
+    root.noteSessionOutcome("loaded")
+    // The merged state exists only in memory until it is written; a shell
+    // that dies before that is exactly the case PO-3 needs the record for.
+    // noteSessionOutcome() has already written if it changed anything.
+    if (adopted.write && root.userState === merged) root.saveState()
     root.reconcile(true)
     root.startCacheLayout()
     // The reattach probe beat the file here (it usually does: ~130 ms from
@@ -1288,9 +1312,11 @@ Item {
     root.deadSessionPending = verdict.pending
     if (!verdict.mark) return
     root.failedAt = verdict.failed
-    if (!verdict.write) return
-    root.userState = verdict.state
-    root.saveState()
+    // The mark is raised, so the record is spent. Retiring it goes through
+    // the same decision as every other ending rather than being written
+    // here: that is what makes the clear stick when the write loses its
+    // race with state.json's own load.
+    root.noteSessionOutcome("marked")
   }
 
   // The player is gone for good and nobody needs marking: an explicit stop,
@@ -1310,8 +1336,10 @@ Item {
   // and hands back the same state object when there is nothing to clear, so
   // this writes only when it actually changed something.
   function noteSessionOutcome(outcome) {
-    var verdict = Model.sessionAfterOutcome(root.userState, outcome, root.deadSessionPending)
+    var verdict = Model.sessionAfterOutcome(root.userState, outcome, root.deadSessionPending,
+                                            root.sessionConsumed)
     root.deadSessionPending = verdict.pending
+    root.sessionConsumed = verdict.consumed
     if (!verdict.write) return
     root.userState = verdict.state
     root.saveState()
