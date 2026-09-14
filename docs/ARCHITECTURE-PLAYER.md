@@ -207,6 +207,7 @@ mpv running - the exact state section 7 row "stale socket" covers.
 | `$XDG_RUNTIME_DIR/omarchy-iptv/` | 0700 | `mkdirProc` (`mkdir -p -m 700`) **and** `ensure_private_dir()` in every `player` verb | - |
 | `mpv.sock` | 0600 | mpv itself, explicitly (verified created 0600 under `umask 0022`) | JSON IPC |
 | `player.lock` | 0600 | `os.open(O_CREAT\|O_RDWR, 0o600)` in the `player` verbs | one line: `{"schema":1,"seq":N,"verb":"start\|stop\|restart","at":<epoch>}` |
+| `watch-later/`, `shader-cache/` | 0700, 0600 files | `ensure_player_dirs()` before the spawn | mpv's own resume records (PO-11) and its shader/ICC caches (D-PLY-10, CL2). Both ephemeral: named here so they do not land in `$HOME` and `$XDG_CACHE_HOME/mpv/` |
 
 The helper re-asserts the directory itself rather than trusting `mkdirProc`,
 because **mpv fails completely silently when the parent directory is missing**:
@@ -522,7 +523,7 @@ Inside the detached helper, synchronously, under the lock:
 | 0 | `quit` | connect, `request(["quit"], allow_close=True)` (today's `cmd_stop` body). Poll `os.kill(pid,0)` every 50 ms for `STOP_QUIT_GRACE_MS` = 2000 |
 | 2.0 s | `term` | re-verify pid + start time + the `--input-ipc-server` token, then `os.kill(pid, SIGTERM)`. Poll 2000 ms |
 | 4.0 s | `kill` | re-verify, `os.kill(pid, SIGKILL)`. Poll 500 ms |
-| 4.5 s | settle | `find_player()` empty **and** `connect()` returns ENOENT/ECONNREFUSED -> `unlink_stale_socket()` (S_ISSOCK-guarded). Never unlink on a successful connect |
+| 4.0-4.5 s | settle | `find_player()` empty **and** `connect()` returns ENOENT/ECONNREFUSED -> `unlink_stale_socket()` (S_ISSOCK-guarded). Never unlink on a successful connect, and never on a timed-out one. Both guards are re-checked at `STOP_POLL_S` until they agree or the kill rung's own 500 ms is up - see 4.9.1 |
 
 The timeline is byte-for-byte `README.md:145-157` and
 `Model.stopEscalation`'s ladder (quit@0, SIGTERM@2 s, SIGKILL@4 s), and it is
@@ -546,6 +547,70 @@ which runs the ladder and the spawn under **one** lock acquisition. That removes
 the stop-then-start race that two independent detached calls would have. Its
 bookkeeping (`relaunched`, `relaunchPending`, one automatic relaunch per player)
 is unchanged.
+
+#### 4.9.1 The settle, and why one look was not enough (D-PLY-8)
+
+A wedged stop used to reap the player and leave `mpv.sock` on disk, and the
+cause on record - that `find_player()` still saw the just-SIGKILLed process -
+is **measurably false**. It is corrected here because a wrong cause recorded
+confidently is worse than an open question: the "fix" it invites is to make
+the finder see dying or zombie processes, and a double-forked grandchild can
+sit as a zombie until the subreaper waits on it, so the ladder would then
+report `running:true` after a successful SIGKILL and block the settle for
+good.
+
+What actually happens, measured on this machine against real mpv 0.41, killed
+by pid, no window:
+
+| After a... | `/proc/<pid>/cmdline` empties | the socket stops accepting | order |
+|---|---|---|---|
+| SIGKILL | 0.13-0.31 ms, 8/8 | 2.70-4.85 ms later | the finder goes **blind first** |
+| `quit` | 3.7-5.7 ms | 2.0-2.7 ms **before** that, 6/6 | the listener goes first |
+
+A killed process runs `exit_mm()` before it closes its descriptors, so its
+command line is empty almost at once while its listening socket is still
+bound. What a kill leaves behind that a quit does not is a **live listener
+owned by a process the finder can no longer see** - and the blocking guard is
+therefore `socket_is_dead()`, never `find_player()`.
+
+The stop path asks each guard once, 4.5-7.5 ms after the signal: `wait_for_exit`
+wins on its first check (it tests before it sleeps) and then one `/proc` scan
+costs 3.7-4.9 ms for 225 pids here. A headless player's window is just under
+that bar, which is why it settles cleanly in a test and why only a real
+windowed player - a GPU context, a Wayland connection, decoder buffers and a
+demuxer cache to tear down - reproduces the defect.
+
+So `settle_socket(sock_path, deadline)` re-checks **both** guards at
+`STOP_POLL_S` until they agree or the deadline passes. It never widens them:
+a racing spawn seen by `find_player`, a **successful** connect (a wedged
+player answering through its listen backlog) and a **timed-out** connect all
+still block the unlink, on every iteration, and `unlink_stale_socket` still
+re-checks `S_ISSOCK` at the moment it unlinks. Called without a deadline it is
+byte-identical to one look and no sleep, which is what every call site outside
+the stop ladder gets.
+
+The deadline is the **kill rung's own**, not a new budget: `stop_ladder()`
+reports the instant the rung that ran would have waited until, the kill rung
+reserves 500 ms (`stop_escalation("term")` returns `waitMs: 0`, so the grace
+falls back to `STOP_SETTLE_MS`) and spends about 0.3 ms of it. Only the
+post-ladder settle in `player_stop` receives it, and that is the one call site
+already inside the player lock - which is what makes an unlink safe across a
+wait, because the lock is what stops a fresh socket appearing between the
+check and the `os.unlink`.
+
+**The budget measures the player, not the command (ruling CL1).** PLY-PERF-02's
+4500 ms is the time until the player process is gone, not until `player stop`
+returns. That is what the user experiences: `stop` is fired and forgotten, the
+interface clears on the keystroke, and the command's return tells them nothing.
+The settle runs after the process is already gone, so it cannot spend that
+budget at all; the README says the same.
+
+`player_probe` and `player_orphan_check` settled outside any lock, so a start
+binding a fresh socket between their refused connect and their unlink would
+have had the **new** socket deleted. Both now go through `settle_under_lock()`,
+which takes the lock briefly and simply does not unlink when it cannot get it
+(ruling CL8). Neither gets a deadline: a waiting unlink at a call site that
+holds no lock of its own would lengthen the very exposure being closed.
 
 ### 4.10 Ordering: the intent sequence number
 
@@ -714,7 +779,7 @@ section as the manual escape hatch.
 | 7 | Per-channel `#EXTVLCOPT`/`#KODIPROP` headers applied and CLEARED between channels | **kept (strengthened)** | `header_properties()` unchanged - it always sets all three properties, so a header-less channel actively resets the previous one's. The only change is that the **first** channel now goes through it too, removing the one channel today whose argv-supplied headers nothing ever clears. `loadfile`'s per-file options were evaluated and rejected: values must be strings and `http-header-fields` then serialises comma-separated, so a playlist-supplied value containing a comma would split into two wrong headers - the hazard `Model.js:1223` already documents |
 | 8 | User `mpvArgs` still apply, reserved-option filter intact | **kept (strengthened)** | `splitMpvArgs` and the nine existing `MPV_RESERVED` entries are unchanged, including the `--no-` rule and D-QA-11 case-sensitivity; ordering preserved so `--ytdl=yes` still wins. Ten additions (4.12), each a durable URL-on-disk or URL-on-screen path reachable from the settings panel today. Tokens travel as repeated `--mpv-arg`, never joined, and are re-validated by a python mirror pinned equal by a parity test |
 | 9 | argv-only launching. No shell interpolation, no sudo, no third-party runtime dependency. Helper stays stdlib-only python3 | **kept** | Four hops, four argv vectors: QML -> helper is the existing `["python3", helperPath, ...]` `Process` command list and `Quickshell.execDetached(list)`; helper -> mpv is `os.execvp("mpv", argv)` with a literal argv[0]; helper -> notification is never used. No `bash -lc`, no `eval`, no `systemd-run`, no `uwsm-app` (rejected explicitly for its `eval "$CMDLINE"`), no `hyprctl exec_cmd`. New stdlib imports only: `fcntl`, `signal`, `errno` (`socket`, `stat`, `os`, `time`, `json` already imported) |
-| 10 | Socket under `$XDG_RUNTIME_DIR/omarchy-iptv/` with 0700/0600 modes | **kept** | Paths unchanged. The directory is 0700 from `mkdirProc` **and** from `ensure_private_dir()` inside every `player` verb, because mpv fails completely silently with no parent directory. mpv sets the socket 0600 itself (verified under `umask 0022`). The one new file, `player.lock`, is `O_CREAT\|O_RDWR` 0600 in the same directory and contains only a sequence number. No log file, no `player.json`, nothing else added |
+| 10 | Socket under `$XDG_RUNTIME_DIR/omarchy-iptv/` with 0700/0600 modes | **kept** | Paths unchanged. The directory is 0700 from `mkdirProc` **and** from `ensure_private_dir()` inside every `player` verb, because mpv fails completely silently with no parent directory. mpv sets the socket 0600 itself (verified under `umask 0022`). The one new file, `player.lock`, is `O_CREAT\|O_RDWR` 0600 in the same directory and contains only a sequence number. No log file, no `player.json`, nothing else added. **Amended by PO-11 and by D-PLY-10 / CL2:** the player's own key bindings and its own caches now write into named 0700 directories instead of inheriting `$HOME` and `$XDG_CACHE_HOME` - `watch-later/` and `shader-cache/` under the runtime directory, ephemeral, and `screenshots/` under the state directory, durable because the user asked for that file. `ensure_player_dirs()` creates all three, because mpv would otherwise create them itself at 0755 |
 | 11 | Bar widget and guide keep accurate now-playing state, RECOVERABLE after a shell restart | **kept** | `BarWidget.qml:38-39`, `Guide.qml` and `statusSummary()` are untouched; only `playing`'s definition changes, and `playerPending` preserves its synchronous birth edge so the bar lights up on the same frame as today. Recovery reads `user-data/omarchy-iptv` out of the surviving process - verified readable by a client that connects after the original closed - including `launchedFrom` and `sourceKey`, which mpv could never derive. `nowPlaying` is restored before `channelIndex` exists and reconciled on `channelsLoaded`, so the bar is right immediately and the zap ring is right once the cache lands. `media-title` is never used for identity (verified stale after playback ends) and `path` is never read into the shell at all |
 
 ## 6. Security and privacy
@@ -764,11 +829,18 @@ credential; it is noted in SECURITY-REVIEW.md rather than left implied.
 | Path | Mode | Contents | URL-bearing |
 |---|---|---|---|
 | `$XDG_RUNTIME_DIR/omarchy-iptv/player.lock` | 0600 | `{"schema":1,"seq":N,"verb":"start","at":1758000100}` | no |
+| `$XDG_RUNTIME_DIR/omarchy-iptv/watch-later/` | 0700 dir, 0600 files | mpv's own resume record, written by its `Q` key (PO-11). Ephemeral: a resume position for a live stream is never worth keeping | the header line names the stream, which is why `--watch-later-dir` is reserved and the directory is private and ephemeral |
+| `$XDG_RUNTIME_DIR/omarchy-iptv/shader-cache/` | 0700 dir, 0600 files | mpv's compiled shader cache and ICC cache, redirected out of `$XDG_CACHE_HOME/mpv/` (D-PLY-10, ruling CL2). Ephemeral, content-free, regenerable | no - it is keyed to the GPU and the shader source, not to anything that was watched |
+| `$XDG_STATE_HOME/omarchy-iptv/screenshots/` | 0700 dir, 0600 files | mpv's own `s` key (PO-11). DURABLE on purpose: the user asked for that file | no |
 | `$XDG_STATE_HOME/omarchy-iptv/state.json` key `session` | 0600 (existing file, existing mode, `O_EXCL`-created by `state init`) | `{"id":"t:bbc1.uk","name":"BBC One HD","at":1758000123}` | no |
 
-Nothing else. No `player.json`, no log file, no watch-later file, no systemd
-unit, no drop-in. `--log-file` and `StandardError=append:` are rejected in
-section 3 precisely because they would write credentials to disk.
+Nothing else. No `player.json`, no log file, no systemd unit, no drop-in.
+`--log-file` and `StandardError=append:` are rejected in section 3 precisely
+because they would write credentials to disk. The three directories above are
+the player's own key bindings and its own caches, named rather than
+inherited: without that they land in `$HOME` and `$XDG_CACHE_HOME/mpv/`,
+outside every list this plugin publishes, which is exactly what D-PLY-7 and
+D-PLY-10 were.
 
 **Unit names and environment.** There is no unit. `spawn_detached` passes the
 inherited environment unchanged - no `--setenv`, so nothing moves from the
@@ -1276,3 +1348,54 @@ replaced it was still running. Second, the startup race is the clearest
 argument yet for measuring rather than reasoning. I wrote in section 15 that
 its window looked small and its consequence bounded. It dropped the play in 29
 of 30 trials.
+
+## 17. Amendments after the cleanup round (product owner, 2026-09-14)
+
+Rulings CL1 to CL8 are in `docs/CLEANUP-PLAN.md` section 9. Four of them
+change this document.
+
+**CL1 - what the stop budget measures.** PLY-PERF-02's 4500 ms measures the
+time until the **player process is gone**, not until the `player stop` command
+returns. `stop` is issued with `execDetached` and nothing reads its reply, the
+interface clears on the keystroke, and the command's return therefore tells
+the user nothing. Section 4.9.1 and the README are worded that way. A settle
+that keeps looking after the process has died cannot spend that budget at all.
+
+**The D-PLY-8 cause on record was wrong, and is corrected in 4.9.1.** It was
+recorded in three documents as "most likely `find_player()` still sees the
+just-SIGKILLed process". A SIGKILLed process runs `exit_mm()` before it closes
+its descriptors, so the finder goes blind **first** - 0.13-0.31 ms, 8/8 on
+real mpv 0.41 here - while the listening socket stays bound for another
+2.7-4.9 ms. The blocking guard is `socket_is_dead()`. The false version is an
+active trap, because it invites making the finder see dying or zombie
+processes, which would make the ladder report `running:true` after a
+successful SIGKILL. The other two records are in `docs/STATUS.md` (the D-PLY-8
+row) and `docs/QA-RESULTS.md` (section V9), with the same sentence repeated in
+`docs/QA-PLAYER.md`'s corrections index; correcting those belongs to whoever
+owns them.
+
+**CL2 - mpv's caches are contained, ephemeral, and not reserved.**
+`--gpu-shader-cache-dir` and `--icc-cache-dir` point into
+`$XDG_RUNTIME_DIR/omarchy-iptv/shader-cache`, created 0700 with the other
+player directories. The cache is content-free and regenerable, so the runtime
+directory is right: nothing durable to document, nothing to clean up at
+uninstall. Neither option joins `MPV_RESERVED` - that list is a privacy
+instrument, which is why `--watch-later-dir` is on it and `--screenshot-dir`
+deliberately is not - so containment here is a sensible default and a user
+token still wins. What no headless test can show is that mpv honours the
+option: `--vo=null` compiles no shaders, so the display lane confirms it by
+watching `~/.cache/mpv` stay empty across a containment cycle.
+
+**CL8 - the two unlocked settle call sites are locked.** See the end of 4.9.1.
+
+**D-PLY-11 is still open, and section 4.10 is not the answer to it.** The
+proposed cause was refuted and its replacement is a hypothesis, so this round
+characterised the two candidate mechanisms rather than fixing either:
+`tests/test_player.py::OrderingTest` pins that an adopting `player start`
+re-applies its own channel over a zap that already landed, and that a `play`
+can win the socket inside a cold start's handshake and be overwritten.
+`Model.playFork` / `Model.playForkBlind` state the shell's fork where a test
+can reach it and are **wired to nothing**; whoever wires them checks them
+against the shipping fork first. Ruling CL4 still stands: `play` does not get
+a sequence number and the lock until refusals are routed, and that needs an
+amendment to 4.3 rather than a workaround.
