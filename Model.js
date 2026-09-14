@@ -41,6 +41,11 @@ var HEALTH_SKIPS_BEFORE_RESTART = 3
 var PLAYER_STASH_SCHEMA = 1
 var PLAYER_ORPHAN_GRACE_SEC = 6
 var PLAYER_GENERIC_FAILURE = "Playback stopped unexpectedly"
+// The event router's two bounds (4.8): how many mpv log lines are kept for
+// the failure text, and how deep the playlist_entry_id -> channel ring goes.
+// Both are memory only and both are what Service.qml has always used.
+var PLAYER_LOG_TAIL = 5
+var PLAYER_ENTRY_OWNERS = 4
 var FAVORITES_GROUP = "Favorites"
 var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
@@ -916,6 +921,40 @@ function stateSession(state) {
   return state ? playedRecord(state.session) : null
 }
 
+// Ruling PO-3, the whole decision. A `player probe` that found nothing
+// running, paired with a session record still in state.json, is the evidence
+// that the channel the record names died with no shell attached to notice:
+// mark it failed in the guide, silently, and clear the record. A toast for
+// something that stopped minutes ago, possibly on another login, is noise.
+//
+// The answer depends on whether the state file has landed yet, because the
+// two arrive in either order: the probe fires from Component.onCompleted and
+// answers in about 130 ms, while state.json arrives whenever its FileView
+// loads. Deciding on a state that has not loaded would read the empty
+// default - losing the mark, and, if the caller wrote that result back,
+// putting an empty state over the user's file. So an unloaded state yields
+// `pending`, which the caller re-runs from its state handler, and never a
+// write.
+//
+// `state` is returned unchanged (the same object) whenever there is nothing
+// to clear, so `write` is also "the state actually changed".
+function deadSessionVerdict(state, stateLoaded, failed, clock) {
+  var marks = failed && typeof failed === "object" ? failed : {}
+  if (stateLoaded !== true) return { pending: true, mark: false, id: "", name: "", failed: marks, state: state, write: false }
+  var session = stateSession(state)
+  if (!session) return { pending: false, mark: false, id: "", name: "", failed: marks, state: state, write: false }
+  var cleared = clearSession(state)
+  return {
+    pending: false,
+    mark: true,
+    id: session.id,
+    name: session.name,
+    failed: withFailed(marks, session.id, clock),
+    state: cleared,
+    write: cleared !== state
+  }
+}
+
 function withFavorites(state, favorites) {
   return cloneState(state, { favorites: asList(favorites).slice() })
 }
@@ -1528,6 +1567,112 @@ function endedVerdict(lastEndFile, userStopped, stopping) {
   if (reason === "quit" || reason === "eof") return { notify: false, reason: "", kind: "silent" }
   var detail = redactUrls(str(end.fileError || end.file_error)).replace(/^\s+|\s+$/g, "")
   return { notify: true, reason: detail !== "" ? detail : PLAYER_GENERIC_FAILURE, kind: "failed" }
+}
+
+// ---------------------------------------------------------------------
+// The event router as pure logic (4.8).
+//
+// Service.qml owns the socket, the timers, the properties and the toast.
+// What it must not own is the DECISION, because a decision that lives in a
+// QML method can only be pinned by a copy of itself in the spec file, and a
+// copy passes just as happily when the shipping path is broken - the same
+// trap as a test double more forgiving than the real thing (CLAUDE.md 10).
+// So handlePlayerLine(), rememberEntry(), channelForEnd() and the terminal
+// half of handlePlayerGone() are these four functions plus assignments.
+
+// The router's state between lines: which entry is loading, the last
+// terminal end-file (null once a new load supersedes it), observed
+// idle-active, and the five-line log tail.
+function playerRouterState(state) {
+  var st = state && typeof state === "object" ? state : {}
+  return {
+    entryId: playerEntryId(st.entryId) || 0,
+    lastEndFile: st.lastEndFile || null,
+    idle: st.idle === true,
+    tail: asList(st.tail)
+  }
+}
+
+// The log / stderr tail: error and fatal only, redacted (again - the helper
+// redacts its own path, this line came straight off the socket), trailing
+// whitespace stripped, five lines deep, memory only. Returns the SAME array
+// when the line adds nothing, so a caller can skip the property write.
+function pushPlayerLog(tail, line) {
+  var rows = asList(tail)
+  var clean = redactUrls(str(line).replace(/\s+$/, ""))
+  if (clean === "") return rows
+  var out = rows.slice()
+  out.push(clean)
+  while (out.length > PLAYER_LOG_TAIL) out.shift()
+  return out
+}
+
+// One newline-delimited line from mpv's socket applied to the router state.
+// Always returns a full state object; unchanged fields keep their exact
+// references (`tail`, `lastEndFile`), so the caller writes only what moved.
+function routePlayerEvent(state, line) {
+  var st = playerRouterState(state)
+  var event = parsePlayerEvent(line)
+  if (event.kind === "start-file") {
+    // A new load supersedes the previous end: this is what makes a zap
+    // (end-file{stop} then start-file) silent.
+    return { entryId: event.entryId ? event.entryId : st.entryId, lastEndFile: null, idle: st.idle, tail: st.tail }
+  }
+  if (event.kind === "end-file") {
+    return { entryId: st.entryId, lastEndFile: event, idle: st.idle, tail: st.tail }
+  }
+  if (event.kind === "log-message") {
+    if (event.level !== "error" && event.level !== "fatal") return st
+    var text = (event.prefix !== "" ? "[" + event.prefix + "] " : "") + event.text
+    return { entryId: st.entryId, lastEndFile: st.lastEndFile, idle: st.idle, tail: pushPlayerLog(st.tail, text) }
+  }
+  if (event.kind === "property-change") {
+    return { entryId: st.entryId, lastEndFile: st.lastEndFile, idle: event.value === true, tail: st.tail }
+  }
+  return st
+}
+
+// The entry-ownership ring: mpv's own playlist_entry_id -> the channel that
+// load was for, so a failure that arrives after the user has zapped away
+// still names the right row. At most four entries, oldest dropped. Returns
+// the SAME map when there is nothing to record.
+function rememberEntryOwner(owners, entryId, target) {
+  var map = owners && typeof owners === "object" ? owners : {}
+  var id = playerEntryId(entryId)
+  if (id === null || !target) return map
+  var out = {}
+  var keys = Object.keys(map)
+  for (var i = Math.max(0, keys.length - (PLAYER_ENTRY_OWNERS - 1)); i < keys.length; i++) out[keys[i]] = map[keys[i]]
+  out[String(id)] = { id: str(target.id), name: str(target.name) }
+  return out
+}
+
+// Which channel a load belonged to. The gate FAILS OPEN (F4): an unknown,
+// missing or non-numeric entry id degrades to whatever is playing now and
+// can never suppress a failure the user must see.
+function channelForEnd(owners, end, current) {
+  var map = owners && typeof owners === "object" ? owners : {}
+  if (end && end.entryId) {
+    var owner = map[String(end.entryId)]
+    if (owner) return owner
+  }
+  return current ? { id: str(current.id), name: str(current.name) } : null
+}
+
+// The terminal decision at socket EOF (4.8 signal 3): whether the user hears
+// about this death, which channel it names, and with what text. The log tail
+// outranks mpv's own generic `file_error` ("loading failed" says nothing;
+// "[stream] Failed to open provider.test" says what happened).
+function endedReport(context) {
+  var ctx = context && typeof context === "object" ? context : {}
+  var verdict = endedVerdict(ctx.lastEndFile, ctx.userStopped === true, ctx.stopping === true)
+  var tail = asList(ctx.tail)
+  return {
+    notify: verdict.notify === true,
+    kind: verdict.kind,
+    target: channelForEnd(ctx.owners, ctx.lastEndFile, ctx.nowPlaying),
+    reason: tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
+  }
 }
 
 // argv for `hyprctl dispatch focuswindow class:omarchy-iptv` (R9).
@@ -3344,6 +3489,7 @@ if (typeof module !== "undefined") {
     recordPlayed: recordPlayed,
     clearSession: clearSession,
     stateSession: stateSession,
+    deadSessionVerdict: deadSessionVerdict,
     withFavorites: withFavorites,
     removeRecent: removeRecent,
     trimRecents: trimRecents,
@@ -3391,6 +3537,14 @@ if (typeof module !== "undefined") {
     parsePlayerProbe: parsePlayerProbe,
     parsePlayerEvent: parsePlayerEvent,
     endedVerdict: endedVerdict,
+    PLAYER_LOG_TAIL: PLAYER_LOG_TAIL,
+    PLAYER_ENTRY_OWNERS: PLAYER_ENTRY_OWNERS,
+    playerRouterState: playerRouterState,
+    pushPlayerLog: pushPlayerLog,
+    routePlayerEvent: routePlayerEvent,
+    rememberEntryOwner: rememberEntryOwner,
+    channelForEnd: channelForEnd,
+    endedReport: endedReport,
     focusPlayerArgv: focusPlayerArgv,
     notifyArgv: notifyArgv,
     sourceLabel: sourceLabel,

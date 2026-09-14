@@ -228,6 +228,11 @@ Item {
   readonly property bool playerUp: (root.playerSocket !== null && root.playerSocket.connected) || root.playerPending
   readonly property bool playing: playerUp && nowPlaying !== null
   property var failedAt: ({})               // session-only { id: "HH:MM" } (R11)
+  // PO-3 lost a race and is waiting for state.json (see markDeadSession()):
+  // the probe answered "no player" before the state FileView loaded, so the
+  // verdict has to be re-run from applyUserState() once there is a file to
+  // decide on.
+  property bool deadSessionPending: false
   property bool userStopped: false
   property bool relaunchPending: false
   property bool relaunched: false
@@ -443,6 +448,10 @@ Item {
     root.playSeq += 1
     root.stopAt = Date.now()
     stopSettleTimer.restart()
+    // The user asked for it, so nothing died unattended: the session record
+    // has done its job and a reattach must not find it (PO-3 would then mark
+    // a perfectly good channel red).
+    root.clearSessionRecord()
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
   }
 
@@ -786,6 +795,10 @@ Item {
     root.stateLoaded = true
     root.reconcile(true)
     root.startCacheLayout()
+    // The reattach probe beat the file here (it usually does: ~130 ms from
+    // Component.onCompleted against however long a FileView takes). Now
+    // there is a state to decide on, so PO-3's verdict runs (4.6).
+    if (root.deadSessionPending) root.markDeadSession()
   }
 
   function saveState() {
@@ -1164,6 +1177,9 @@ Item {
       playerSocketTimer.stop()
       root.playerPending = false
       root.nowPlaying = null
+      // Nothing is playing and nothing claimed to have stopped it: if a
+      // session record survived, that channel died unattended (PO-3).
+      root.markDeadSession()
       return
     }
     if (!probe.responsive) {
@@ -1211,14 +1227,54 @@ Item {
     root.reconcileNowPlaying()
   }
 
+  // Ruling PO-3. The probe says nothing is running; if state.json still
+  // holds a session record, the channel it names died with no shell attached
+  // to notice - so the guide gets a red row, silently, and the record is
+  // cleared. A toast for something that stopped minutes ago, possibly on
+  // another login, is noise that arrives without context.
+  //
+  // The race: this runs from the probe reply, about 130 ms after
+  // Component.onCompleted, while stateFile loads whenever it loads - either
+  // can win. Model.deadSessionVerdict() refuses to decide on a state that
+  // has not landed (it would read the empty default, drop the mark, and
+  // write that empty default over the user's file) and asks to be called
+  // again; applyUserState() drains that.
+  function markDeadSession() {
+    var verdict = Model.deadSessionVerdict(root.userState, root.stateLoaded, root.failedAt,
+                                           Model.formatClock(Math.floor(Date.now() / 1000)))
+    root.deadSessionPending = verdict.pending
+    if (!verdict.mark) return
+    root.failedAt = verdict.failed
+    if (!verdict.write) return
+    root.userState = verdict.state
+    root.saveState()
+  }
+
+  // The player is gone for good and nobody needs marking: an explicit stop,
+  // a player that ended with no relaunch coming, or one this shell stopped
+  // because it could not identify it. Without this the record outlives every
+  // clean stop and the next reattach marks a channel red that simply ended
+  // (PO-4: a clean end stays silent). clearSession() hands back the same
+  // object when there is nothing to clear, so this writes only when it
+  // actually changed something.
+  function clearSessionRecord() {
+    root.deadSessionPending = false
+    var cleared = Model.clearSession(root.userState)
+    if (cleared === root.userState) return
+    root.userState = cleared
+    root.saveState()
+  }
+
   // A player that exists but is not ours to show: wedged, foreign, or from
-  // a version that did not stash its identity (migration, section 8).
+  // a version that did not stash its identity (migration, section 8). It
+  // ends in nothing playing, so the session record goes with it.
   function stopForeignPlayer() {
     root.playSeq += 1
     root.playerWanted = false
     playerSocketTimer.stop()
     root.playerPending = false
     root.nowPlaying = null
+    root.clearSessionRecord()
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
   }
 
@@ -1320,45 +1376,30 @@ Item {
     if (root.debugTiming) console.warn("omarchy-iptv: player socket error", String(err))
   }
 
-  // Event router (4.8). Every line is one JSON object from mpv's own socket;
-  // Model.parsePlayerEvent classifies it and re-redacts the log text.
+  // Event router (4.8). Every line is one JSON object from mpv's own socket.
+  // The routing DECISION is Model.routePlayerEvent(): which entry is
+  // loading, whether the last end-file still stands, idle-active, and the
+  // log tail. This method is the four property writes that decision implies,
+  // and nothing else - a rule that lived here could only ever be pinned by a
+  // copy of itself in the spec file (CLAUDE.md 10).
   function handlePlayerLine(line) {
-    var event = Model.parsePlayerEvent(line)
-    if (event.kind === "start-file") {
-      if (event.entryId) root.currentEntryId = event.entryId
-      // A new load supersedes the previous end: this is what makes a zap
-      // (end-file{stop} then start-file) silent.
-      root.lastEndFile = null
-    } else if (event.kind === "end-file") {
-      root.lastEndFile = event
-    } else if (event.kind === "log-message") {
-      if (event.level === "error" || event.level === "fatal") {
-        root.rememberStderr((event.prefix !== "" ? "[" + event.prefix + "] " : "") + event.text)
-      }
-    } else if (event.kind === "property-change") {
-      root.playerIdle = event.value === true
-    }
+    var before = { entryId: root.currentEntryId, lastEndFile: root.lastEndFile, idle: root.playerIdle, tail: root.mpvStderrTail }
+    var next = Model.routePlayerEvent(before, line)
+    // Unchanged fields come back by reference, so this writes only what moved.
+    if (next.entryId !== before.entryId) root.currentEntryId = next.entryId
+    if (next.lastEndFile !== before.lastEndFile) root.lastEndFile = next.lastEndFile
+    if (next.idle !== before.idle) root.playerIdle = next.idle
+    if (next.tail !== before.tail) root.mpvStderrTail = next.tail
   }
 
-  // Which channel a load belonged to. At most four entries; the gate fails
-  // open, so an unknown id degrades the name and never suppresses a toast.
+  // Which channel a load belonged to (Model.rememberEntryOwner): at most
+  // four entries, and the gate fails open, so an unknown id degrades the
+  // name and never suppresses a toast.
   function rememberEntry(entryId, target) {
-    var id = Math.floor(Number(entryId))
-    if (!isFinite(id) || id <= 0 || !target) return
-    var owners = {}
-    var keys = Object.keys(root.entryOwners)
-    for (var i = Math.max(0, keys.length - 3); i < keys.length; i++) owners[keys[i]] = root.entryOwners[keys[i]]
-    owners[String(id)] = { id: String(target.id || ""), name: String(target.name || "") }
+    var owners = Model.rememberEntryOwner(root.entryOwners, entryId, target)
+    if (owners === root.entryOwners) return
     root.entryOwners = owners
-    root.currentEntryId = id
-  }
-
-  function channelForEnd(end, current) {
-    if (end && end.entryId) {
-      var owner = root.entryOwners[String(end.entryId)]
-      if (owner) return owner
-    }
-    return current ? { id: String(current.id), name: String(current.name || "") } : null
+    root.currentEntryId = Math.floor(Number(entryId))
   }
 
   // One toast per failed play, whichever detector saw it first (R11, S-04).
@@ -1373,20 +1414,19 @@ Item {
   }
 
   function rememberStderr(line) {
-    var clean = Model.redactUrls(String(line || "").replace(/\s+$/, ""))
-    if (clean === "") return
-    var tail = root.mpvStderrTail.slice()
-    tail.push(clean)
-    while (tail.length > 5) tail.shift()
+    var tail = Model.pushPlayerLog(root.mpvStderrTail, line)
+    if (tail === root.mpvStderrTail) return
     root.mpvStderrTail = tail
   }
 
   // Socket EOF: the one-for-one replacement for mpvProc.onExited, and the
   // only death signal that covers quit, SIGTERM, SIGKILL and a segfault
   // alike - 2 to 3 ms after the fact instead of a 10 s poll (4.8 signal 3).
-  // The exit code is replaced by Model.endedVerdict over the last end-file,
-  // which is what separates our own stop from a dead stream and ignores the
-  // .m3u8 redirect that IPTV masters emit on every load.
+  // The exit code is replaced by Model.endedReport() over the last end-file:
+  // whether the user hears about this death (our own stop and the .m3u8
+  // redirect IPTV masters emit on every load say nothing), which channel it
+  // names, and with what text. Read before any of the state below is
+  // cleared, which is also what keeps the decision out of this method.
   function handlePlayerGone() {
     focusTimer.stop()
     playRetryTimer.stop()
@@ -1394,7 +1434,14 @@ Item {
     var current = root.nowPlaying
     var end = root.lastEndFile
     var stopped = root.userStopped
-    var verdict = Model.endedVerdict(end, stopped, root.stopping)
+    var report = Model.endedReport({
+      lastEndFile: end,
+      owners: root.entryOwners,
+      nowPlaying: current,
+      userStopped: stopped,
+      stopping: root.stopping,
+      tail: root.mpvStderrTail
+    })
     var relaunch = root.relaunchPending && current !== null && !stopped
     root.lastEndFile = null
     root.currentEntryId = 0
@@ -1421,16 +1468,19 @@ Item {
       return
     }
     root.nowPlaying = null
-    var target = root.channelForEnd(end, current)
+    // Terminal: the player is gone and nothing is bringing it back, whatever
+    // the verdict says. This is where a clean end, a crash we have just
+    // toasted and a stop we did not issue all leave the session record
+    // behind if nobody clears it, and the next reattach would read that as a
+    // channel that died unattended (PO-3).
+    root.clearSessionRecord()
     root.entryOwners = ({})
-    if (!verdict.notify) return
-    // The log-message tail says what actually went wrong ("Failed to open
-    // scheme://host"); mpv's own file_error is a generic "loading failed".
-    // Both are redacted, the tail twice (in python and in rememberStderr).
-    var reason = root.mpvStderrTail.length > 0
-      ? root.mpvStderrTail[root.mpvStderrTail.length - 1]
-      : String(verdict.reason || "")
-    root.raiseStreamFailure(target, reason)
+    if (!report.notify) return
+    // report.reason is the log-message tail when there is one ("Failed to
+    // open scheme://host" says what actually went wrong), else mpv's own
+    // generic file_error. Both are redacted, the tail twice (in python and
+    // again in Model.pushPlayerLog).
+    root.raiseStreamFailure(report.target, report.reason)
   }
 
   function handlePlaylistExit(text) {
