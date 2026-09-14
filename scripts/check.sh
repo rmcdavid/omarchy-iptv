@@ -182,8 +182,17 @@ step "ascii check (code files)"
 ascii_bad=0
 ascii_scanned=0
 while IFS= read -r -d '' rel; do
+  # Product owner ruling, 2026-09-14. The gate exists so that SOURCE stays
+  # ASCII: escapes stay escapes and no tool silently rewrites a byte. A data
+  # fixture that carries non-ASCII is the opposite case - carrying it IS what
+  # it tests, because channel names are Cyrillic, Japanese and accented Latin
+  # in the real world. So fixtures are exempt, but only BY NAME, one line per
+  # file with the reason. A directory-wide glob would let the next file in
+  # slip past unnoticed, which is how this gate was quietly green before.
   case $rel in
-    */nonascii/*|tests/fixtures/qa-nonascii/*) continue ;;   # deliberately non-ASCII, by name
+    */nonascii/*|tests/fixtures/qa-nonascii/*) continue ;;       # a whole tree, named for the purpose
+    tests/fixtures/qa-player/qa-player.m3u) continue ;;          # channel names in German, Japanese and a check mark
+    scripts/dev-harness/fixtures/harness.m3u.in) continue ;;     # channel names in French and Russian
   esac
   file="$ROOT/$rel"
   [[ -f $file ]] || continue
