@@ -150,19 +150,26 @@ list as well; the two stay in sync. Up to 50 sources are kept.
 - Playback survives `omarchy restart shell`. The player runs on its own and
   the guide reattaches to it, so a restart, a theme change or installing
   another plugin all leave what you are watching alone.
-- A stream that fails or ends shows a desktop notification naming the
-  channel; the guide marks the row until the channel plays again.
+- A stream that fails shows a desktop notification naming the channel, and
+  the guide marks it until the channel plays again. A channel that simply
+  ends is silent: the window closes and nothing is reported, because nothing
+  went wrong.
 - Stop clears the bar and guide immediately. If mpv ignores the quit request
   it is terminated, and if it ignores that too it is killed, within about
   four seconds. Playing a channel while the old player is still shutting
   down starts a fresh player once it has exited.
-- No stream URL ever reaches the player's command line. It starts empty and
-  every channel, header and title travels over a private socket that only you
-  can read, so `ps` shows nothing about what you are watching.
+- No stream address, credential or header value ever reaches any command
+  line. The player starts empty and receives all of it over a private socket
+  only you can read. Two smaller things are briefly visible to other local
+  accounts in `ps`: the channel's internal identifier while a change is being
+  issued, and the channel's name while a failure notification is being sent.
+  Neither exposes your provider credentials.
 - Two consequences of the player being independent, both deliberate. If you
   remove or disable the plugin while something is playing, the player is no
-  longer guaranteed to stop with it; run `omarchy-iptv player stop`, or log
-  out, if one is left behind. And a stream that fails while the shell is down
+  longer guaranteed to stop with it. The helper lives inside the plugin
+  directory and is not on your PATH, so stop a stray player with
+  `~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv player stop`,
+  or simply log out. And a stream that fails while the shell is down
   cannot raise a notification, because the notification service is the shell
   itself; the channel is marked as failed in the guide instead, the next time
   you open it.
@@ -188,7 +195,8 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
   played, and the Sources history including their URLs (mode 0600)
-- `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` : mpv IPC socket while playing
+- `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is
+  running, and a small lock file used to guarantee only one player exists
 
 Nothing inside the plugin directory is written at runtime.
 

@@ -1112,7 +1112,7 @@ sequenced after they land.
    on reattach, using `state.json.session` for the name, no toast; (b) raise a
    deferred toast for an event that may be minutes old. **Recommendation: (a)** -
    a stale toast for something the user has already seen stop is noise, and the
-   red guide row carries the information.
+   guide's own failed marking carries the information.
 4. **Clean EOF.** Today a clean end exits 0 and is silent
    (`ARCHITECTURE.md` decision 12, `Service.qml:948`). Under the new router
    `end-file{reason:"eof"}` maps to the same silence. A provider rotating a
@@ -1155,7 +1155,7 @@ deviate raises a numbered decision request rather than deciding locally.
 |---|---|
 | PO-1 | `--idle=once`. It is what the security review prescribed, it preserves today's behavior exactly, it deletes the idle-timer apparatus, and it leaves a working degraded mode if the socket observer proves unusable. Gate it on probe PA-0(a) as proposed. If a `loadfile ... replace` does trigger the exit, stop and raise the fallback as a decision request rather than switching to `--idle=yes` unilaterally. |
 | PO-2 | Accept best-effort teardown. Do NOT stop the player when the service object is destroyed: that path cannot distinguish a shell restart from a plugin removal, and stopping there would defeat the entire feature. The owner-claim orphan check at service start, plus a documented `omarchy-iptv player stop` in the README's uninstall section, is the contract. PLAYER-LIVE-04 is the acceptance gate. |
-| PO-3 | Option (a): mark the channel failed silently on reattach and show it in the guide. A toast for something that stopped minutes ago, possibly on another login, is noise and would arrive without context. The red row carries the information, and the guide is where the user goes next anyway. |
+| PO-3 | Option (a): mark the channel failed silently on reattach and show it in the guide. A toast for something that stopped minutes ago, possibly on another login, is noise and would arrive without context. The guide's failed marking carries the information, and the guide is where the user goes next anyway. |
 | PO-4 | Keep a clean end silent. Zero behavior change. I am not adding a toast for a channel that played successfully and ended; if usage shows people are confused by a window vanishing, that is a separate request with its own copy, because "did not play" is wrong for a channel that played for an hour. |
 | PO-5 | Keep `--ytdl` unreserved and add the README sentence naming the cost. It is an opt-in escape hatch the user has to type deliberately, it is the documented way to play non-direct URLs, and reserving it would break a legitimate use to prevent a self-inflicted exposure. The ten reserved-list additions in 4.12 land regardless. |
 | PO-6 | Implement the stderr pipe for the launch window. It is about twenty lines, writes nothing to disk, and reuses the existing redaction. The alternative is that a bad user option produces a generic "player did not start" with no text anywhere, which is the worst kind of support problem. If lane PA runs long, this is the last thing to cut, not the first. |

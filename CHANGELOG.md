@@ -3,6 +3,36 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.3.0 (unreleased)
+
+M2-02, the detached player. Playback no longer belongs to the shell.
+
+### Added
+- Playback survives `omarchy restart shell`. The player runs independently
+  and the guide reattaches to it, recovering what is playing from the player
+  itself. A theme change or installing another plugin also leave it alone.
+
+### Security
+- No stream address, credential or header value reaches any command line, on
+  any channel including the first. The player starts empty and receives
+  everything over a private socket. This closes finding S-03.
+
+### Fixed
+- A stop that lost a sequence race used to be a silent no-op, leaving the
+  interface idle while the player kept playing.
+- A failure the user already saw is no longer reported a second time when the
+  guide later reattaches.
+
+### Known limitations
+- Removing or disabling the plugin while something is playing no longer
+  guarantees the player stops with it. The README gives the command to stop a
+  stray one, and logging out always reaps it.
+- A stream that fails while the shell is down cannot raise a notification,
+  because the notification service is the shell itself. The channel is marked
+  as failed in the guide instead, the next time you open it.
+- The channel's internal identifier and, on a failure, the channel's name are
+  briefly visible to other local accounts in `ps`. No credentials are.
+
 ## 0.2.1 (2026-09-14)
 
 Hotfix for two defects that made the Sources feature ineffective on a real
