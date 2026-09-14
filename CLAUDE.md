@@ -61,6 +61,16 @@ requests and raise the batch.
 10. A test double must never be more forgiving than the real thing. When you
    change a fake to match reality, prove it with counts: the suite must fail
    against the code that shipped the bug and pass against the fix.
+11. Prove every new test catches something. Run it against the code as it was
+   before your change and report both counts. When the code is new and there
+   is no "before", mutate the shipping function instead: break one decision
+   deliberately and show the test goes red. A test written after the code,
+   never seen failing, is decoration. This found a real gap here: a router
+   case that survived every mutation until a missing transcript was added.
+12. A test that mirrors logic instead of calling it can pass while the
+   shipping path is broken. If pure logic is stranded somewhere a test cannot
+   reach, such as inside a QML component, lift it into `Model.js` and call it
+   for real rather than reimplementing it in the test.
 
 ## Never touch
 

@@ -141,6 +141,14 @@ screenshot; prefer cheap items that become cheap only after a dependency lands.
 v0.3.0 is ranks 1 to 3. Ranks 4 and 5 ship in v0.4.0 unless a lane finishes
 early. Ranks 6 stay in the backlog with no date.
 
+Amended 2026-09-14, after rank 1 was built. v0.3.0 is now rank 1 alone, the
+detached player, and channel numbers and picture in picture move to v0.4.0.
+The reason is that rank 1 is finished, verified and independently valuable: it
+removes the limitation users hit most and closes a security finding. Holding it
+back to travel with two unrelated features would delay a real benefit and
+bundle three feature's worth of risk into one release, for no gain. Smaller
+releases, shipped when the work is done, beat planned bundles.
+
 Standing constraints for every M2 lane, unchanged from M1: theme tokens only,
 argv-only process launching, stdlib-only Python helper, no sudo, no writes
 inside the plugin directory, URLs redacted to hosts at every sink, and the
