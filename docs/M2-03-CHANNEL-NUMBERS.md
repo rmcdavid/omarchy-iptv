@@ -1613,3 +1613,16 @@ installed. The lane instead reports a failure with its own code. That is
 correct and it stands: reporting success for something that did not happen is
 a lie the caller cannot detect, and this is a command a user binds to a key,
 so the only signal they get is the reply. Both frozen reply shapes are intact.
+
+## 15. Rulings CN16 to CN20 (product owner, 2026-09-14)
+
+Gate A1 passed by demonstration against real compiled keymaps and found two
+things the design understated. Both are now requirements, not details.
+
+| # | Ruling |
+|---|---|
+| CN16 | On AZERTY and bepo layouts a digit arrives with Shift held. Any handler that rejects a modified key breaks numeric tuning on every French keyboard, and nothing on this machine would have revealed it. Match on the character produced, never on the physical key, and mask only the true chords. |
+| CN17 | The numpad decimal produces a comma on German, Russian and Turkish layouts and a period on US and French. Accepting both separators, ruling CN8, is therefore forced by keyboard layout rather than a courtesy, and may not be simplified away later as redundant. |
+| CN18 | The label cap is nine, not seven. Seven rejects numbers the design's own grammar admits, so a channel could be displayed and be untypable. |
+| CN19 | The shared number fixture stays a JavaScript file rather than JSON. A test case in the interface layer cannot read a local JSON file without a permissive environment flag, and loosening file reading in the test gate to satisfy a file format is a bad trade. Both engines load the one file, which is what the rule requires. |
+| CN20 | Cycling through duplicate numbers is a guide behaviour only and must never apply to the command verb. A command that returns a different channel each time it is called for the same number is not addressable, and a script cannot see the cursor that drives the cycle. |
