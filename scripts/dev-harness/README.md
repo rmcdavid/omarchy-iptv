@@ -188,6 +188,18 @@ discard, connection refused) so mpv fails within a second and exercises the
 failure path; `--serve` swaps the first channel for a generated local video
 so the success path (window, title, health checks, stop) can be watched.
 
+The diacritics and the Cyrillic are the point of two of those rows
+(`Tele-Quebec`, `Pervyj kanal`, spelled in full in the file), and they are
+also why `scripts/check.sh` is currently RED. The ASCII gate used to iterate a
+hand-maintained list that silently skipped every directory, so this file and
+`tests/fixtures/qa-player/qa-player.m3u` had never been scanned; the widened
+gate scans them and reports them. CLAUDE.md rule 8 covers `.js` and `.py`
+sources, not playlist fixtures, so the likely resolution is to name these two
+in the gate's visible exclusion list beside `*/nonascii/*` - but that is one
+ruling covering a file in another lane's tree as well as this one, and
+narrowing a scan on a lane's own initiative is exactly what the cleanup round
+forbids. Left red on purpose, with the decision raised rather than taken.
+
 Note: while Lane A's helper `play` / `stop` / `status` subcommands are stubs
 (`not_implemented`, exit 3) the service treats their answers as "unknown"
 (no health failure counted), zapping while mpv runs logs the stub error,
