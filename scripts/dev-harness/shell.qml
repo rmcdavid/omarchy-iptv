@@ -57,7 +57,7 @@ ShellRoot {
     // harness that is more generous than the real entry is the fake this
     // project has been bitten by (CLAUDE.md rule 10).
     channelOrder: Quickshell.env("OMARCHY_IPTV_ORDER") || "playlist",
-    numberEntryMs: parseInt(Quickshell.env("OMARCHY_IPTV_ENTRY_MS") || "1500", 10),
+    numberEntryMs: parseInt(Quickshell.env("OMARCHY_IPTV_ENTRY_MS") || "2000", 10),
     barShowChannelNumber: Quickshell.env("OMARCHY_IPTV_BAR_NUMBER") !== "false"
   })
   // What the host has actually stored (the shell.json truth), as opposed to

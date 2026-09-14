@@ -100,7 +100,7 @@ var SETTING_RANGES = {
   // M2-03 CN2: the inter-digit window is a setting, not a constant, because
   // the gap between a slow typist getting channel 101 and getting channels
   // 1, 0 and 1 is an accessibility matter.
-  numberEntryMs: { def: 1500, min: 400, max: 5000 }
+  numberEntryMs: { def: 2000, min: 400, max: 5000 }
 }
 
 // Channel numbers (M2-03 1.2 / 9.1). A number is at most 5 major digits and

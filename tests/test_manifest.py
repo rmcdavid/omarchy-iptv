@@ -83,8 +83,8 @@ class ChannelNumberSettingsTest(unittest.TestCase):
         entry = BY_KEY["numberEntryMs"]
         self.assertEqual(entry["type"], "integer")
         self.assertEqual((entry["min"], entry["max"], entry["step"]), (400, 5000, 100))
-        self.assertEqual(entry["defaultValue"], 1500)
-        self.assertEqual(DEFAULTS["numberEntryMs"], 1500)
+        self.assertEqual(entry["defaultValue"], 2000)
+        self.assertEqual(DEFAULTS["numberEntryMs"], 2000)
 
     def test_bar_channel_number_is_a_boolean_defaulting_to_on(self):
         entry = BY_KEY["barShowChannelNumber"]

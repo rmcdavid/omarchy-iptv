@@ -1440,7 +1440,7 @@ TestCase {
     compare(s.channelOrder, "number")
     compare(s.numberEntryMs, 5000)
     compare(s.barShowChannelNumber, false)
-    compare(Model.settingsFrom({}).numberEntryMs, 1500)
+    compare(Model.settingsFrom({}).numberEntryMs, 2000)
     compare(Model.settingsFrom({}).channelOrder, "playlist")
     compare(Model.settingsFrom({}).barShowChannelNumber, true)
     compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "007").id, "2")
