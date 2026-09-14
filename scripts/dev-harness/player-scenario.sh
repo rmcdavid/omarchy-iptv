@@ -376,7 +376,16 @@ is "P11 exactly ONE relaunch, not a second one at the healthy player" "$(( $(log
 echo "== P12 D-PLY-1 trigger B: the socket-unlink recovery"
 # The same end state from a second, independent trigger (2/2 live): remove
 # the socket, play another channel, and `player start` finds the old player
-# unreachable, ladders it down and spawns a replacement.
+# unreachable, ladders it down and spawns a replacement. Start from a
+# player the observer is ATTACHED to, independently of how P11 ended - it is
+# the attached observer's EOF that the defect misreads, so a shell P11 left
+# idle would hide it.
+ipc stop >/dev/null
+until_eq 0 10 player_count || true
+ipc play "t:live1" >/dev/null
+until_eq 1 15 player_count || bad "P12 no player to strand"
+until_eq true 15 svc "d['socketAttached']" || bad "P12 the observer never attached"
+for i in $(seq 1 250); do pgrep -f "bin/omarchy-iptv player start" >/dev/null 2>&1 || break; sleep 0.1; done
 PID12=$(player_pid)
 rm -f "$SOCK"
 ipc play "t:live2" >/dev/null
@@ -398,6 +407,7 @@ echo "== P13 D-PLY-4: the startup state race (ARCHITECTURE-PLAYER.md section 15)
 # file used to replace the session record the play had just written - and
 # PO-3 then had no evidence that the channel died unattended.
 losses=0
+nostarts=0
 landed=""
 for ((trial = 1; trial <= RACE_TRIALS; trial++)); do
   ipc stop >/dev/null
@@ -408,13 +418,17 @@ for ((trial = 1; trial <= RACE_TRIALS; trial++)); do
   landed="$landed $attempt"
   until_eq true 15 svc "d['playing']" || true
   if [[ "$(svc "d['playing']")" != "true" ]]; then
-    bad "P13 trial $trial never started playing"
+    # The worse half of the same race: the probe's stale "nothing is
+    # running" cleared nowPlaying and drainPendingPlay dropped the play.
+    bad "P13 trial $trial: the play was DROPPED, nothing ever started"
+    nostarts=$((nostarts + 1))
     continue
   fi
   until_session "t:live1" 8 || true
   [[ "$(session_id)" == "t:live1" ]] || losses=$((losses + 1))
 done
 echo "   P13 the play landed on attempt(s):$landed"
+is "P13 no play issued at shell start is dropped ($RACE_TRIALS trials)" "$nostarts" "0"
 is "P13 no play issued at shell start loses its session record ($RACE_TRIALS trials)" "$losses" "0"
 is "P13 and the record names the channel that is demonstrably playing" "$(session_id)" "$(np id)"
 
@@ -435,7 +449,8 @@ until_eq 0 8 player_count || true
 "$RUN" restart-shell >>"$LOG" 2>&1
 wait_log 'service loaded' 20 || bad "P14 the shell did not come back"
 until_set 15 svc "d['failedAt'].get('t:live1')" || true
-ck "P14 the channel that died unattended is marked in the guide" '[[ -n "$(svc "d['"'"'failedAt'"'"'].get('"'"'t:live1'"'"'))" ]]'
+mark14=$(svc "d['failedAt'].get('t:live1')")
+ck "P14 the channel that died unattended is marked in the guide" '[[ -n "$mark14" ]]' 
 until_session "" 10 || true
 is "P14 the record is retired once it has been consumed" "$(session_id)" ""
 for again in 1 2; do
