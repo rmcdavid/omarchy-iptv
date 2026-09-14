@@ -1,0 +1,38 @@
+#EXTM3U
+# QA fixture for the M2-02 detached-player pass (docs/QA-PLAYER.md section 8.0).
+# Every URL is 127.0.0.1 or a reserved-by-design dead port. Never a real provider.
+#
+#  qa.sentinel      carries every privacy needle (credentials in userinfo, a token in
+#                   the path, a user-agent and a referrer header). Section 5's sweep
+#                   greps for: qa-user qa-secret qa-token-XYZ qa-ua-SENTINEL qa-ref-SENTINEL
+#  qa.dead          fails immediately: port 9 (discard) refuses, so first-load fails inside 3 s
+#  qa.sentinel-dead the needles AND a fast failure, for PLY-RST-03 and PLY-FAIL-01
+#  qa.plain         no headers at all, so header clearing between channels is observable
+#  qa.live          a locally served MPEG-TS that plays; served by the pass on :8791
+#  qa.eof           a short MPEG-TS that plays and then ends cleanly, for PO-4's eof
+#  qa.raw           named ${path}: mpv property expansion must not happen (S-01)
+#  qa.rawdash       named -u critical ${path}: S-04 leading-dash rule plus S-01
+#  qa.nonascii      a non-ASCII name, for the user-data stash round trip
+#
+#EXTINF:-1 tvg-id="qa.sentinel" group-title="QA",QA Sentinel Channel
+#EXTVLCOPT:http-user-agent=qa-ua-SENTINEL
+#EXTVLCOPT:http-referrer=http://qa-ref-SENTINEL.test/
+http://qa-user:qa-secret@127.0.0.1:8791/live/qa-token-XYZ/stream.ts
+#EXTINF:-1 tvg-id="qa.dead" group-title="QA",QA Dead Channel
+http://127.0.0.1:9/nope.ts
+#EXTINF:-1 tvg-id="qa.sentinel-dead" group-title="QA",QA Sentinel Dead
+#EXTVLCOPT:http-user-agent=qa-ua-SENTINEL
+#EXTVLCOPT:http-referrer=http://qa-ref-SENTINEL.test/
+http://qa-user:qa-secret@127.0.0.1:9/live/qa-token-XYZ/dead.ts
+#EXTINF:-1 tvg-id="qa.plain" group-title="QA",QA Plain No Headers
+http://127.0.0.1:8791/test.ts
+#EXTINF:-1 tvg-id="qa.live" group-title="QA",QA Live Stream
+http://127.0.0.1:8791/test.ts
+#EXTINF:-1 tvg-id="qa.eof" group-title="QA",QA Clean End
+http://127.0.0.1:8791/short.ts
+#EXTINF:-1 tvg-id="qa.raw" group-title="QA",${path}
+http://127.0.0.1:8791/test.ts
+#EXTINF:-1 tvg-id="qa.rawdash" group-title="QA",-u critical ${path}
+http://127.0.0.1:8791/test.ts
+#EXTINF:-1 tvg-id="qa.nonascii" group-title="QA",Kanal Zwölf - Ünïcödé ✓ 日本
+http://127.0.0.1:8791/test.ts
