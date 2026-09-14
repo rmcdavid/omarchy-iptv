@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../Model.js" as Model
+import "fixtures/chno-cases.js" as ChnoCases
 
 // Proves Model.js loads inside the Qt QML engine (no ES module syntax, no
 // node-only globals) and that the QML-side results match the node tests:
@@ -11,15 +12,19 @@ TestCase {
   id: spec
   name: "IptvModel"
 
+  // The chno values (M2-03 10.2) cover a duplicate pair (12 on two rows), a
+  // subchannel (7.1 between 7 and 12), leading zeros (007 is 7), a channel
+  // with no number at all and one whose number is unusable.
   readonly property var channels: Model.prepareChannels([
-    { id: "1", name: "BBC One HD", group: "UK", searchKey: "bbc one hd uk" },
-    { id: "2", name: "CBBC", group: "Kids", searchKey: "cbbc kids" },
-    { id: "3", name: "One America", group: "US", searchKey: "one america us" },
-    { id: "4", name: "Sky News", group: "News", searchKey: "sky news news" },
-    { id: "5", name: "BBC Two", group: "UK", searchKey: "bbc two uk" },
+    { id: "1", name: "BBC One HD", group: "UK", searchKey: "bbc one hd uk", chno: "101" },
+    { id: "2", name: "CBBC", group: "Kids", searchKey: "cbbc kids", chno: "007" },
+    { id: "3", name: "One America", group: "US", searchKey: "one america us", chno: "12" },
+    { id: "4", name: "Sky News", group: "News", searchKey: "sky news news", chno: "12" },
+    { id: "5", name: "BBC Two", group: "UK", searchKey: "bbc two uk", chno: "7.1" },
     { id: "6", name: "The One Show", group: "UK", searchKey: "the one show uk" },
-    { id: "7", name: "Rai Uno", group: "One World", searchKey: "rai uno one world" }
+    { id: "7", name: "Rai Uno", group: "One World", searchKey: "rai uno one world", chno: "HD" }
   ])
+  readonly property var chnoIndex: Model.buildChnoIndex(spec.channels)
   readonly property var userState: ({ version: 1, favorites: ["5", "1"], recents: [{ id: "4", name: "Sky News", at: 1 }], lastPlayed: null })
 
   // The two bindings of ARCHITECTURE-PLAYER.md 4.7 as Service.qml declares
@@ -1170,6 +1175,209 @@ TestCase {
     compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: epgWarn }), "Guide data warning: 1 programmes for channels not in the playlist dropped")
     // An error with no cache still speaks in the body, not the footer (D-LIVE-09).
     compare(Model.footerStatus({ configured: true, count: 0, stale: true, warning: bothWarn }), "")
+  }
+
+  // ---- channel numbers (M2-03) ----
+  //
+  // The point of running these in the Qt engine as well as in node is the
+  // character scanner, the integer comparator and the numeric coercions:
+  // V4 and node must agree exactly, or a number parses one way in the guide
+  // and another way in the unit tests.
+
+  function test_parseChnoSharedVectors() {
+    // The same file tests/Model.test.js requires (one fixture, two engines).
+    var cases = ChnoCases.CASES
+    // A fixture that failed to load would make this test pass by doing nothing.
+    verify(cases.length >= 30)
+    var ok = 0
+    var bad = 0
+    for (var i = 0; i < cases.length; i++) {
+      var c = cases[i]
+      var got = Model.parseChno(c.input)
+      compare(got.ok, c.ok, "parseChno(" + JSON.stringify(c.input) + ") " + c.why)
+      if (c.ok) {
+        ok++
+        compare(got.key, c.key, "key of " + JSON.stringify(c.input))
+        compare(got.label, c.label, "label of " + JSON.stringify(c.input))
+        compare(got.sort, c.sort, "sort of " + JSON.stringify(c.input))
+      } else {
+        bad++
+        compare(got.key, "")
+        compare(got.sort, -1)
+      }
+    }
+    verify(ok > 0)
+    verify(bad > 0)
+    // The V4 engine must not turn the integer sort into a double.
+    compare(Model.parseChno("99999.999").sort, 99999999)
+    compare(Model.parseChno(12).key, "12")
+    compare(Model.parseChno(null).ok, false)
+  }
+
+  function test_buildChnoIndex() {
+    var idx = spec.chnoIndex
+    compare(idx.hasNumbers, true)
+    compare(idx.count, 5)
+    compare(idx.duplicates, 2)
+    compare(idx.maxLabelLen, 3)
+    compare(JSON.stringify(idx.order), "[1,4,2,3,0]")
+    compare(JSON.stringify(idx.labels), '["7","7.1","12","12","101"]')
+    compare(JSON.stringify(idx.byKey["12"]), "[2,3]")
+    compare(JSON.stringify(idx.byKey["7"]), "[1]")
+    // CN6 / 1.5: junk and absent numbers are simply not in the index.
+    compare(spec.channels[5].chnoKey, "")
+    compare(spec.channels[6].chnoKey, "")
+    compare(spec.channels[1].chnoLabel, "7")
+    compare(spec.channels[1].chnoSort, 7000)
+    var empty = Model.buildChnoIndex(null)
+    compare(empty.hasNumbers, false)
+    compare(empty.count, 0)
+    compare(empty.maxLabelLen, 0)
+  }
+
+  function test_resolveChno() {
+    var idx = spec.chnoIndex
+    compare(Model.resolveChno(idx, "101", -1).channelIndex, 0)
+    compare(Model.resolveChno(idx, "101", -1).kind, "exact")
+    // CN7: the number you see is the number you type.
+    compare(Model.resolveChno(idx, "007", -1).channelIndex, 1)
+    compare(Model.resolveChno(idx, "7", -1).channelIndex, 1)
+    // CN9: the duplicate pair cycles off the cursor, statelessly.
+    compare(Model.resolveChno(idx, "12", -1).channelIndex, 2)
+    compare(Model.resolveChno(idx, "12", 2).channelIndex, 3)
+    compare(Model.resolveChno(idx, "12", 2).ordinal, 2)
+    compare(Model.resolveChno(idx, "12", 3).channelIndex, 2)
+    compare(Model.resolveChno(idx, "12", -1).matches, 2)
+    // A half-typed subchannel previews its first child; CN8 folds the comma.
+    compare(Model.resolveChno(idx, "7.", -1).channelIndex, 4)
+    compare(Model.resolveChno(idx, "7,1", -1).channelIndex, 4)
+    compare(Model.resolveChno(idx, "7.1", -1).kind, "exact")
+    // A prefix picks the lowest number, not the first row.
+    compare(Model.resolveChno(idx, "1", -1).label, "12")
+    compare(Model.resolveChno(idx, "1", -1).kind, "prefix")
+    // 5.2: the guide cycles off a channel id, because channelOrder "number"
+    // hands it a reordered array in which a playlist index names nothing.
+    compare(Model.chnoIdAt(idx, 2), "3")
+    compare(Model.chnoIdAt(idx, 5), "")
+    compare(Model.resolveChno(idx, "12", "3").channelIndex, 3)
+    compare(Model.resolveChno(idx, "12", "4").channelIndex, 2)
+    compare(Model.resolveChno(idx, "205", -1).kind, "none")
+    compare(Model.resolveChno(idx, "", -1).kind, "none")
+    compare(Model.resolveChno(Model.buildChnoIndex([]), "1", -1).kind, "none")
+    // CN2.5, the early commit.
+    compare(Model.chnoUnambiguous(idx, "101"), true)
+    compare(Model.chnoUnambiguous(idx, "7"), false)
+    compare(Model.chnoUnambiguous(idx, "1"), false)
+  }
+
+  function test_orderChannelsAndColumn() {
+    // CN5.2: identity for the shipped default, with no copy.
+    compare(Model.orderChannels(spec.channels, "playlist", spec.chnoIndex) === spec.channels, true)
+    compare(Model.orderChannels(spec.channels, "number", Model.buildChnoIndex([])) === spec.channels, true)
+    var ordered = Model.orderChannels(spec.channels, "number", spec.chnoIndex)
+    var ids = []
+    for (var i = 0; i < ordered.length; i++) ids.push(ordered[i].id)
+    // 7, 7.1, 12, 12, 101, then the unnumbered tail in playlist order.
+    compare(ids.join(","), "2,5,3,4,1,6,7")
+    // The input is untouched.
+    compare(spec.channels[0].id, "1")
+    compare(Model.channelOrderOf(" Number "), "number")
+    compare(Model.channelOrderOf("alpha"), "playlist")
+    // CN4.2: the width formula, in Style.space units.
+    compare(Model.chnoColumnUnits(spec.chnoIndex.maxLabelLen), 32)
+    compare(Model.chnoColumnUnits(0), 24)
+    compare(Model.chnoColumnUnits(99), 56)
+  }
+
+  function test_numberEntryAndCopy() {
+    var e = Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", query: "sky", cursorIndex: 4 })
+    compare(e.changed, true)
+    compare(e.entry.buffer, "1")
+    e = Model.pushNumberKey(e.entry, "0", { scopeId: "all", cursorIndex: 99 })
+    compare(e.entry.buffer, "10")
+    // The snapshot is the one taken on the FIRST key.
+    compare(e.entry.scopeId, "g:UK")
+    compare(e.entry.cursorIndex, 4)
+    var back = Model.popNumberKey(e.entry)
+    compare(back.buffer, "1")
+    var gone = Model.popNumberKey(back)
+    compare(gone.active, false)
+    compare(gone.scopeId, "g:UK")
+    compare(Model.cancelNumberEntry(e.entry).scopeId, "")
+    compare(Model.isNumberEntryKey("."), true)
+    compare(Model.isNumberEntryKey("-"), false)
+    compare(Model.isNumericQuery("7,1"), true)
+    compare(Model.isNumericQuery("7.1234"), false)
+    // CN6.2 / 6.3, the strings the guide renders.
+    compare(Model.footerStatus({ configured: true, count: 7, transient: "Stopped",
+      numberEntry: { active: true, buffer: "12", kind: "exact", label: "12", name: "One America", matches: 2, ordinal: 1 } }),
+      "Channel 12" + Model.SEP + "One America (1 of 2)")
+    compare(Model.chnoStatus("none", "205", "", 0, 0, true), "No channel 205")
+    compare(Model.chnoStatus("noNumbers", "", "", 0, 0, false), "No channel numbers in this playlist")
+    compare(Model.footerHints({ mode: "list", hasNumbers: true })[8][0], "0-9")
+    compare(Model.footerHints({ mode: "list" }).length, 9)
+    compare(Model.footerHints({ mode: "list", hasNumbers: true }).length, 10)
+    compare(Model.footerHints({ mode: "list", hasNumbers: true, numberEntry: { active: true } }).length, 5)
+    compare(Model.rowAccessibleName({ name: "BBC One HD", chno: "101" }), "Channel 101, BBC One HD")
+    compare(Model.rowAccessibleName({ name: "The One Show", chno: "" }), "The One Show")
+  }
+
+  // Gate A1 in the engine that actually runs the guide: the modifier bits
+  // here are the real Qt enum values, so this also pins that Model.js's
+  // integer copies of them match Qt's.
+  function test_numberKeyRouting() {
+    var base = { hasNumbers: true, active: false, modifiers: 0 }
+    function act(patch) {
+      var o = { text: base.text, hasNumbers: base.hasNumbers, active: base.active, modifiers: base.modifiers, backspace: false }
+      for (var k in patch) o[k] = patch[k]
+      return Model.numberKeyAction(o)
+    }
+    compare(act({ text: "1" }), "digit")
+    // The two that must not be rejected.
+    compare(act({ text: "1", modifiers: Qt.ShiftModifier }), "digit")
+    compare(act({ text: "1", modifiers: Qt.KeypadModifier }), "digit")
+    compare(act({ text: ",", modifiers: Qt.KeypadModifier }), "digit")
+    // The three that must be.
+    compare(act({ text: "1", modifiers: Qt.ControlModifier }), "pass")
+    compare(act({ text: "1", modifiers: Qt.AltModifier }), "pass")
+    compare(act({ text: "1", modifiers: Qt.MetaModifier }), "pass")
+    // Model.js carries its own integer copies of the Qt bits; they must be
+    // the same integers Qt uses, or the mask would silently mean nothing.
+    compare(Model.CHNO_CHORD_MASK & Qt.ControlModifier, Qt.ControlModifier)
+    compare(Model.CHNO_CHORD_MASK & Qt.AltModifier, Qt.AltModifier)
+    compare(Model.CHNO_CHORD_MASK & Qt.MetaModifier, Qt.MetaModifier)
+    compare(Model.CHNO_CHORD_MASK & Qt.ShiftModifier, 0)
+    compare(Model.CHNO_CHORD_MASK & Qt.KeypadModifier, 0)
+    compare(act({ backspace: true, active: true }), "backspace")
+    compare(act({ backspace: true, active: false }), "pass")
+    compare(act({ text: "5", hasNumbers: false }), "noNumbers")
+    // CN1: the destructive outcome this feature could have, refused.
+    compare(Model.chnoCommitPlan("none", "205", "", 0, 0, { play: true }).play, false)
+    compare(Model.chnoCommitPlan("none", "205", "", 0, 0, { play: true }).restore, true)
+    compare(Model.chnoCommitPlan("exact", "101", "Sky", 1, 1, { play: true }).play, true)
+  }
+
+  function test_chnoSearchAndSettings() {
+    // CN5 / 2.8: the all-digit head insertion, and the shipped 4-argument
+    // call unchanged beside it.
+    var bare = Model.filterChannels(spec.channels, "101", 200, [])
+    compare(bare.rows.length, 0)
+    var floated = Model.filterChannels(spec.channels, "101", 200, [], spec.chnoIndex)
+    compare(floated.rows.length, 1)
+    compare(floated.rows[0].id, "1")
+    compare(floated.total, 0)
+    compare(Model.filterChannels(spec.channels, "one", 200, [], spec.chnoIndex).rows.length,
+            Model.filterChannels(spec.channels, "one", 200, []).rows.length)
+    // CN3 / CN2 / 7.1: the three new settings.
+    var s = Model.settingsFrom({ id: "x", channelOrder: "number", numberEntryMs: 99999, barShowChannelNumber: "false" })
+    compare(s.channelOrder, "number")
+    compare(s.numberEntryMs, 5000)
+    compare(s.barShowChannelNumber, false)
+    compare(Model.settingsFrom({}).numberEntryMs, 1500)
+    compare(Model.settingsFrom({}).channelOrder, "playlist")
+    compare(Model.settingsFrom({}).barShowChannelNumber, true)
+    compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "007").id, "2")
+    compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "205"), null)
   }
 
   function test_formatting() {
