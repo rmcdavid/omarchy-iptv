@@ -243,14 +243,27 @@ TestCase {
   // break when the rule in Model.js does, not when this file is edited
   // (CLAUDE.md 12 - the router cases learned that the hard way).
   function noteOutcome(svc, outcome) {
-    var v = Model.sessionAfterOutcome(svc.userState, outcome, svc.deadSessionPending)
+    var v = Model.sessionAfterOutcome(svc.userState, outcome, svc.deadSessionPending, svc.consumed)
     svc.deadSessionPending = v.pending
+    svc.consumed = v.consumed
     if (v.write) { svc.userState = v.state; svc.writes += 1 }
     return svc
   }
 
   function freshSession(played) {
-    return { userState: played, deadSessionPending: false, writes: 0 }
+    return { userState: played, deadSessionPending: false, consumed: false, writes: 0 }
+  }
+
+  // applyUserState() line for line: merge the arriving file, then route it
+  // through the SAME decision as every player answer.
+  function stateLoads(svc, text, loadedBefore, savePending) {
+    var adopted = Model.stateOnLoad(Model.parseState(text), svc.userState,
+                                    { loadedBefore: loadedBefore, savePending: savePending, maxRecents: 10 })
+    svc.userState = adopted.state
+    var merged = svc.userState
+    noteOutcome(svc, "loaded")
+    if (adopted.write && svc.userState === merged) svc.writes += 1
+    return svc
   }
 
   // PO-3's other half. deadSessionVerdict() above only ever fires on a record
@@ -263,7 +276,7 @@ TestCase {
   // abandoned relaunch each kept it.
   function test_sessionOutcomeRetiresTheRecord() {
     var played = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
-    compare(Model.PLAYER_OUTCOMES.length, 10)
+    compare(Model.PLAYER_OUTCOMES.length, 13)
     var endings = ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned"]
     for (var i = 0; i < endings.length; i++) {
       var svc = freshSession(played)
@@ -312,6 +325,101 @@ TestCase {
     noteOutcome(settled, "mpvMissing")
     compare(settled.deadSessionPending, false)
     compare(settled.userState.session, null)
+  }
+
+  // D-PLY-3. The clear above happens in memory; whether it reaches disk
+  // depends on saveState()'s dirsReady gate and on which of state.json's own
+  // loads wins. When the write lost, the next load put the record straight
+  // back and the following shell start marked the same channel a second
+  // time with the same HH:MM (2 runs in 3, live). Consumption is one-way.
+  function test_consumedRecordNeverComesBack() {
+    var played = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
+    var stale = JSON.stringify(played)          // the bytes our clear has not reached yet
+    var svc = freshSession(played)
+    noteOutcome(svc, "marked")                  // markDeadSession() raised PO-3's red row
+    compare(svc.userState.session, null)
+    compare(svc.consumed, true)
+    stateLoads(svc, stale, true, false)         // the FileView delivers the old file
+    compare(svc.userState.session, null)
+    compare(Model.deadSessionVerdict(svc.userState, true, ({}), "21:30").mark, false)
+    stateLoads(svc, stale, true, false)         // and again
+    compare(svc.userState.session, null)
+    // A record this shell has NOT consumed is exactly what PO-3 needs kept.
+    var fresh = freshSession(Model.emptyState())
+    stateLoads(fresh, stale, true, false)
+    compare(fresh.userState.session, played.session)
+    compare(Model.deadSessionVerdict(fresh.userState, true, ({}), "21:30").mark, true)
+  }
+
+  // D-PLY-4, ARCHITECTURE-PLAYER.md section 15: measured at 14 losses in 30
+  // trials. state.json is read asynchronously while a play can be issued at
+  // once, so the text that arrives is the file from BEFORE the play; taking
+  // it wholesale threw away the record that play had just written.
+  function test_startupRaceKeepsThePlayItRacedWith() {
+    var file = '{"version":2,"favorites":["t:fav"],"recents":[{"id":"t:old","name":"Old","at":100}]}'
+    var svc = freshSession(Model.emptyState())
+    svc.userState = Model.recordPlayed(svc.userState, { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
+    stateLoads(svc, file, false, false)         // the FileView finally lands
+    compare(svc.userState.session, { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 })
+    compare(svc.userState.favorites, ["t:fav"])                 // only the file knows this
+    compare(svc.userState.recents.length, 2)
+    compare(svc.userState.recents[0].id, "t:bbc1.uk")
+    compare(svc.writes > 0, true)                               // and it is persisted
+    // The consequence the race cost: a reattach can mark the channel that
+    // died unattended.
+    compare(Model.deadSessionVerdict(svc.userState, true, ({}), "21:30").failed, { "t:bbc1.uk": "21:30" })
+    // A later load is an external edit and wins; the record is not resurrected.
+    var after = freshSession(Model.emptyState())
+    after.userState = Model.recordPlayed(after.userState, { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
+    stateLoads(after, '{"version":2,"favorites":["t:new"]}', true, false)
+    compare(after.userState.favorites, ["t:new"])
+    compare(after.userState.session, null)
+  }
+
+  // The other half of D-PLY-4: a play issued inside the startup probe's
+  // ~130 ms window was not merely stripped of its record, it was dropped -
+  // the probe's "nothing is running" cleared nowPlaying and drainPendingPlay
+  // needs one. 28 of 30 trials never started playing against 396a69a.
+  function test_probeAnIntentHasOvertakenKeepsOnlyItsResync() {
+    compare(Model.probeVerdict(5, 0, 0), { seq: 6, stale: false })   // the startup probe
+    compare(Model.probeVerdict(5, 0, 3), { seq: 6, stale: true })    // a play went out after it
+    compare(Model.probeVerdict(0, 2, 2), { seq: 2, stale: false })
+    // Measured before the resync, or a lock file that names a higher
+    // sequence than a just-started shell makes every probe look stale - and
+    // PO-3's mark silently stops being raised at all.
+    var v = Model.probeVerdict(7, 0, 0)
+    compare(v.stale, false)
+    compare(v.seq, 8)
+    compare(Model.probeVerdict(1, 9, 9).seq, 9)                      // never backwards
+  }
+
+  // D-PLY-1, the P1: a helper that ladders a player down and spawns its
+  // replacement under one lock delivers the old one's death to the observer
+  // while that call is still running. Read as an ending it cleared
+  // nowPlaying and playerWanted, the success reply then read the cleared
+  // nowPlaying as "a stop overtook this start" and armed nothing, and the
+  // interface sat idle while the new player kept playing.
+  function test_deathInsideOurOwnRespawnIsNotAnEnding() {
+    var live = { sessionInFlight: false, relaunchPending: false, nowPlaying: true, hasChannel: true, userStopped: false, stopping: false }
+    compare(Model.playerDeathKind(live), "ended")
+    live.sessionInFlight = true
+    compare(Model.playerDeathKind(live), "respawn")     // trigger B: `player start`
+    live.relaunchPending = true
+    compare(Model.playerDeathKind(live), "respawn")     // trigger A: the health verdict
+    live.userStopped = true
+    compare(Model.playerDeathKind(live), "ended")       // our own stop outranks it
+    live.userStopped = false
+    live.sessionInFlight = false
+    compare(Model.playerDeathKind(live), "relaunch")
+    live.hasChannel = false
+    compare(Model.playerDeathKind(live), "ended")
+    // And the reply: a live player the helper just reported is always worth
+    // arming for; when we no longer know what it plays, read the stash.
+    compare(Model.playerSessionFollowUp({ attached: true, nowPlaying: true }), "attached")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: true }), "hunt")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: false }), "recover")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: false, stopping: true }), "abandoned")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: true, userStopped: true }), "abandoned")
   }
 
   function test_settingsClamps() {

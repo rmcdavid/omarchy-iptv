@@ -233,6 +233,11 @@ Item {
   // verdict has to be re-run from applyUserState() once there is a file to
   // decide on.
   property bool deadSessionPending: false
+  // PO-3's record has been spent by this shell (marked, or the play's own
+  // ending seen). One-way until the next play opens a new one: it is what
+  // stops a state.json load - our own clear having not reached disk yet -
+  // from putting a consumed record back and marking the same channel twice.
+  property bool sessionConsumed: false
   property bool userStopped: false
   property bool relaunchPending: false
   property bool relaunched: false
@@ -282,6 +287,11 @@ Item {
   property bool playerIdle: false           // observed idle-active, informational
   property string playerKind: ""            // which player verb is in flight
   property bool probeRetried: false         // the one ambiguous-probe re-read (4.5)
+  // `playSeq` as it stood when the probe in flight was ISSUED (4.10). A
+  // probe answers about the world it was sent into; an intent issued after
+  // it - a play from the guide, or over IPC one frame after the shell came
+  // back - is the newer word and must not be overruled by the older answer.
+  property int probeSeq: 0
   property bool reconcilePending: false     // resolve nowPlaying once the cache lands
   property string playerSourceKey: ""       // the source the recovered stash belongs to
   property int playerSocketError: 0         // last QLocalSocket::LocalSocketError, diagnostics only
@@ -382,6 +392,11 @@ Item {
       since: nowSec
     }
     root.userState = Model.recordPlayed(root.userState, channel, root.maxRecents, nowSec)
+    root.sessionConsumed = false        // a new record, not the spent one
+    // A PO-3 mark owed from before this play was about the record this play
+    // has just replaced. Leaving it owed would land it on the channel now
+    // starting, which is the opposite of what PO-3 is for.
+    root.deadSessionPending = false
     root.saveState()
     root.wantFocus = !keepOpen
     // The fork is never a correctness gate (F2): `player start` is
@@ -791,8 +806,26 @@ Item {
   // than what an earlier atomic write may still be delivering (R10).
   function applyUserState(text) {
     if (root.stateLoaded && root.recentSaves.indexOf(text) !== -1) return
-    root.userState = Model.trimRecents(Model.parseState(text), root.maxRecents)
+    // Section 15's race: what arrives is a snapshot of the file from before
+    // this shell wrote anything, so it is a base to merge onto, not a
+    // replacement. Model.stateOnLoad() replays the play this shell recorded
+    // while the read was in flight and refuses to resurrect a record already
+    // consumed; both answers are the one rule, so neither is decided here.
+    var adopted = Model.stateOnLoad(Model.trimRecents(Model.parseState(text), root.maxRecents),
+                                    root.userState,
+                                    { loadedBefore: root.stateLoaded, savePending: root.stateSavePending,
+                                      maxRecents: root.maxRecents })
+    root.userState = adopted.state
     root.stateLoaded = true
+    var merged = root.userState
+    // The file can carry a record this shell has already spent, because our
+    // own clear may not have reached disk yet. That answer belongs to the
+    // same decision as every other ending, not to a condition here.
+    root.noteSessionOutcome("loaded")
+    // The merged state exists only in memory until it is written; a shell
+    // that dies before that is exactly the case PO-3 needs the record for.
+    // noteSessionOutcome() has already written if it changed anything.
+    if (adopted.write && root.userState === merged) root.saveState()
     root.reconcile(true)
     root.startCacheLayout()
     // The reattach probe beat the file here (it usually does: ~130 ms from
@@ -1051,6 +1084,7 @@ Item {
   // unlink, and it claims the player for this shell.
   function runPlayerProbe() {
     if (playerProc.running) return false
+    root.probeSeq = root.playSeq
     return root.runPlayer("probe", Model.playerProbeArgv(root.socketPath, Quickshell.processId))
   }
 
@@ -1068,16 +1102,30 @@ Item {
       var warnings = Model.statusWarnings(status)
       if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
       root.relaunchPending = false
+      // A start or a restart that answered ok IS the relaunch, delivered.
+      // Leaving the queue armed is how the health path fired a SECOND
+      // `player restart --from term` at the player it had just respawned,
+      // one tick after the observer reattached (the timer's `playerUp`
+      // branch reads a healthy new player as "still not answering").
+      relaunchTimer.stop()
       root.playRetries = 0
       root.rememberEntry(status.entryId, root.nowPlaying)
-      if (root.socketAttached()) {
-        root.playerPending = false
-      } else if (root.stopping || root.userStopped || root.nowPlaying === null) {
-        // A stop overtook this start. The two legitimately interleave: the
-        // helper releases the lock before its first-load window precisely
-        // so a stop ladder can get in. Do not go hunting for a socket that
-        // is being torn down - that would be twelve journal lines for a
-        // player nobody wants any more.
+      // The helper has just reported a live player of this shell's making,
+      // so the observer belongs on it. Doing nothing here is the second
+      // half of the reported P1: `wanted` false leaves the 250 ms retry
+      // timer off, and nothing else ever looks again.
+      var follow = Model.playerSessionFollowUp({
+        attached: root.socketAttached(),
+        stopping: root.stopping,
+        userStopped: root.userStopped,
+        nowPlaying: root.nowPlaying !== null
+      })
+      if (follow === "attached" || follow === "abandoned") {
+        // Already observed, or a stop really did overtake this start - the
+        // two legitimately interleave, because the helper releases the lock
+        // before its first-load window precisely so a stop ladder can get
+        // in. Do not hunt for a socket that is being torn down; that would
+        // be twelve journal lines for a player nobody wants any more.
         root.playerPending = false
       } else {
         // The player is up but the observer has not attached yet: keep the
@@ -1086,6 +1134,10 @@ Item {
         root.playerWanted = true
         root.armPlayerSocket()
         playerWatchdog.restart()
+        // `recover`: a live player and no idea what it is playing. Read the
+        // identity back out of its own stash, which is the reattach path of
+        // 4.5 unchanged - the same answer a shell restart gets.
+        if (follow === "recover") root.runPlayerProbe()
       }
       var first = status.firstLoad && typeof status.firstLoad === "object" ? status.firstLoad : null
       if (first && String(first.state) === "failed") root.playerFirstLoadFailed(String(first.reason || ""))
@@ -1172,10 +1224,19 @@ Item {
       root.playerPending = false
       return
     }
-    // Ordering survives the restart: the next intent is one past whatever
-    // the lock file recorded (4.10). This is also the repair for a sequence
-    // that some other launcher pushed ahead of ours.
-    root.playSeq = Math.max(root.playSeq, probe.seq + 1)
+    // Ordering survives the restart, and an intent issued after this probe
+    // went out is the newer word (4.10, section 15). Both answers come from
+    // the one call because the resync moves the counter the other is
+    // measured against.
+    var verdict = Model.probeVerdict(probe.seq, root.probeSeq, root.playSeq)
+    root.playSeq = verdict.seq
+    if (verdict.stale) {
+      // Everything below is about a world the user has since moved on from;
+      // the play they issued owns the outcome, and drainPendingPlay() is
+      // about to deliver it.
+      root.probeRetried = false
+      return
+    }
     if (root.stopConfirmPending) {
       root.stopConfirmPending = false
       if (probe.running) {
@@ -1242,7 +1303,10 @@ Item {
     }
     if (stash.entryId) root.rememberEntry(stash.entryId, root.nowPlaying)
     root.reconcilePending = true
-    root.playerPending = true
+    // Only when the observer is not on it yet: raising the birth edge over a
+    // live socket buys nothing and ends in the watchdog's "did not become
+    // observable" twelve seconds later.
+    root.playerPending = !root.socketAttached()
     root.playerWanted = true
     root.armPlayerSocket()
     playerWatchdog.restart()
@@ -1267,9 +1331,11 @@ Item {
     root.deadSessionPending = verdict.pending
     if (!verdict.mark) return
     root.failedAt = verdict.failed
-    if (!verdict.write) return
-    root.userState = verdict.state
-    root.saveState()
+    // The mark is raised, so the record is spent. Retiring it goes through
+    // the same decision as every other ending rather than being written
+    // here: that is what makes the clear stick when the write loses its
+    // race with state.json's own load.
+    root.noteSessionOutcome("marked")
   }
 
   // The player is gone for good and nobody needs marking: an explicit stop,
@@ -1289,8 +1355,10 @@ Item {
   // and hands back the same state object when there is nothing to clear, so
   // this writes only when it actually changed something.
   function noteSessionOutcome(outcome) {
-    var verdict = Model.sessionAfterOutcome(root.userState, outcome, root.deadSessionPending)
+    var verdict = Model.sessionAfterOutcome(root.userState, outcome, root.deadSessionPending,
+                                            root.sessionConsumed)
     root.deadSessionPending = verdict.pending
+    root.sessionConsumed = verdict.consumed
     if (!verdict.write) return
     root.userState = verdict.state
     root.saveState()
@@ -1473,7 +1541,17 @@ Item {
       stopping: root.stopping,
       tail: root.mpvStderrTail
     })
-    var relaunch = root.relaunchPending && current !== null && !stopped
+    // Model.playerDeathKind() decides what this EOF was, because a helper
+    // that ladders a player down and spawns its replacement under one lock
+    // delivers the old one's death here while that call is still running.
+    var death = Model.playerDeathKind({
+      sessionInFlight: playerProc.running && (root.playerKind === "start" || root.playerKind === "restart"),
+      relaunchPending: root.relaunchPending,
+      nowPlaying: current !== null,
+      hasChannel: current !== null && !!root.channelIndex[String(current.id)],
+      userStopped: stopped,
+      stopping: root.stopping
+    })
     root.lastEndFile = null
     root.currentEntryId = 0
     root.playerIdle = false
@@ -1490,7 +1568,20 @@ Item {
     // a stop that never had a player to observe.
     root.stopAt = 0
     stopSettleTimer.stop()
-    if (relaunch && root.channelIndex[String(current.id)]) {
+    if (death === "respawn") {
+      // A rung of the ladder the helper is running right now, for this very
+      // channel. The intent is unchanged, so the birth edge is held, the
+      // observer keeps hunting - it is already retrying when the new mpv
+      // binds, with no dependence on the helper's reply arriving - and the
+      // user is told nothing, because nothing has ended. The record outlives
+      // this death for the same reason a queued relaunch does.
+      root.playerPending = true
+      root.playerWanted = true
+      root.armPlayerSocket()
+      root.noteSessionOutcome("respawning")
+      return
+    }
+    if (death === "relaunch") {
       // The health verdict's one automatic relaunch, a moment after the
       // exit: the old socket file is gone by then and a stop() in the
       // meantime cancels it (D-LIVE-15, D-LIVE-17).

@@ -855,6 +855,55 @@ function parseState(text) {
   return state
 }
 
+// pushRecent()'s `{id, name, at}` form, for replaying a play that was
+// recorded before state.json landed (stateOnLoad).
+function pushPlayedRecord(recents, played, max) {
+  var rec = playedRecord(played)
+  var cap = max > 0 ? Math.floor(max) : 10
+  var out = []
+  if (rec) out.push(rec)
+  var list = asList(recents)
+  for (var i = 0; i < list.length && out.length < cap; i++) {
+    if (list[i] && (!rec || list[i].id !== rec.id)) out.push(list[i])
+  }
+  return out
+}
+
+// ARCHITECTURE-PLAYER.md section 15's startup race, measured at 14 losses in
+// 30 trials, and the other half of the consumption rule above.
+//
+// state.json is read asynchronously while a play can be issued immediately,
+// so the text that arrives is a snapshot of the file from BEFORE anything
+// this shell did. Applying it wholesale is the whole race: the session
+// record the play had just written is gone, and with it the only evidence
+// PO-3 has that the channel died unattended.
+//
+// The file is the base - it carries favorites, sources and the recents of
+// every previous login, none of which this shell can reconstruct. What is
+// replayed on top is exactly one thing, the play this shell recorded while
+// the read was in flight, because before the first load `userState` IS the
+// empty default plus that write, so a `session` there can only be ours.
+// `savePending` extends the same reasoning past the first load: a save this
+// shell has queued but not yet been allowed to make (saveState()'s dirsReady
+// gate) means the file on disk is again older than memory.
+//
+// Whether a replayed record then SURVIVES is not decided here: it goes to
+// sessionAfterOutcome() like every other answer about the record, so there
+// stays exactly one place that retires one.
+function stateOnLoad(loaded, current, context) {
+  var base = loaded || emptyState()
+  var ctx = context || {}
+  var newer = ctx.loadedBefore !== true || ctx.savePending === true
+  var mine = newer ? playedRecord(current && current.session) : null
+  if (!mine) return { state: base, replayed: false, write: false }
+  var next = cloneState(base, {
+    recents: pushPlayedRecord(base.recents, mine, ctx.maxRecents),
+    lastPlayed: mine,
+    session: mine
+  })
+  return { state: next, replayed: true, write: next !== base }
+}
+
 function isFavorite(state, id) {
   return !!(state && asList(state.favorites).indexOf(str(id)) !== -1)
 }
@@ -982,12 +1031,15 @@ var PLAYER_OUTCOME_SURVIVES = {
   superseded: true,     // a later intent won the lock; that intent owns the record
   retrying: true,       // busy / no_socket / ipc_error, the backoff is armed
   relaunching: true,    // the health verdict's one automatic relaunch (4.8)
+  respawning: true,     // the helper is mid ladder-and-respawn for this very intent (4.9)
   attached: true,       // the first load failed but the socket is live: its EOF is next
+  loaded: true,         // not a player answer: state.json arriving (see `consumed` below)
   stopped: false,       // the user stopped it, or a detached stop was confirmed (4.9)
   ended: false,         // socket EOF with no relaunch coming (4.8 signal 3)
   foreign: false,       // a player this shell could not identify, laddered down (4.5)
   failed: false,        // `player start` / `restart` / the first load failed for good
   mpvMissing: false,    // the player program is not installed
+  marked: false,        // PO-3's red row has been raised on this record: it is spent
   abandoned: false      // the channel left the playlist before the relaunch could run
 }
 
@@ -1012,16 +1064,29 @@ var PLAYER_OUTCOMES = Object.keys(PLAYER_OUTCOME_SURVIVES)
 // call site then costs at worst one stale mark on the next reattach, never a
 // silently dropped one, and the vocabulary check in the tests catches it
 // before either happens.
-function sessionAfterOutcome(state, outcome, deadPending) {
+function sessionAfterOutcome(state, outcome, deadPending, consumed) {
   var st = state || emptyState()
   var key = str(outcome)
   var known = PLAYER_OUTCOME_SURVIVES.hasOwnProperty(key)
   var terminal = known && PLAYER_OUTCOME_SURVIVES[key] !== true
-  var next = terminal ? clearSession(st) : st
+  // Consumption is one-way, and it is the half the twelve routed branches
+  // left open. They retire the record in MEMORY; whether that reaches disk
+  // depends on `dirsReady` and on which of state.json's own loads wins the
+  // race. When the write loses, the file still carries the record, the next
+  // load puts it straight back into memory, and the following shell start
+  // marks the same channel red a second time for a failure the user has
+  // already been shown - the reported defect, 2 runs in 3. So the answer is
+  // not "clear it once" but "a consumed record never comes back": every
+  // later call over the same in-memory state, `loaded` included, clears it
+  // again until a write finally lands. Only a new play (recordPlayed) opens
+  // a fresh record, and the caller drops the flag there.
+  var spent = consumed === true || terminal
+  var next = spent ? clearSession(st) : st
   return {
     outcome: key,
     known: known,
     terminal: terminal,
+    consumed: spent,
     pending: terminal ? false : deadPending === true,
     state: next,
     write: next !== st
@@ -1640,6 +1705,68 @@ function endedVerdict(lastEndFile, userStopped, stopping) {
   if (reason === "quit" || reason === "eof") return { notify: false, reason: "", kind: "silent" }
   var detail = redactUrls(str(end.fileError || end.file_error)).replace(/^\s+|\s+$/g, "")
   return { notify: true, reason: detail !== "" ? detail : PLAYER_GENERIC_FAILURE, kind: "failed" }
+}
+
+// What survives a `player probe` reply (4.10, and section 15's race).
+//
+// A probe answers about the world it was ISSUED into. The startup probe goes
+// out from Component.onCompleted and answers about 130 ms later, and a play
+// can arrive inside that window - from the guide, or over IPC one frame
+// after the shell came back. Its "nothing is running" then cleared
+// nowPlaying and playerWanted, and drainPendingPlay(), which needs a
+// nowPlaying, dropped the queued play on the floor.
+//
+// The sequence resync is the one part of a stale reply that is still true,
+// and it MOVES the counter staleness is measured against - so both answers
+// come from one call rather than from two lines a caller can order wrongly.
+// (They were: reading staleness after the resync makes every startup probe
+// look stale, which silently disables PO-3's mark.)
+function probeVerdict(recordedSeq, issuedAt, currentSeq) {
+  var recorded = Math.floor(Number(recordedSeq)) || 0
+  var current = Math.floor(Number(currentSeq)) || 0
+  return { seq: Math.max(current, recorded + 1), stale: current !== (Math.floor(Number(issuedAt)) || 0) }
+}
+
+// What a socket EOF means, which is not always "the player ended" (4.8
+// signal 3). `player start` and `player restart` ladder a player DOWN and
+// spawn its replacement inside one helper call, so the death of the player
+// they are replacing arrives here while that very call is still in flight -
+// a rung of our own respawn, not an unattended end.
+//
+// Reading it as an end is the reported P1: the shell cleared `nowPlaying`
+// and `playerWanted`, the helper's success reply then read the cleared
+// `nowPlaying` as "a stop overtook this start" and declined to re-arm the
+// observer, and with `wanted` false the 250 ms retry timer was off - so the
+// interface sat idle forever while the freshly spawned player kept playing.
+//
+// Order matters: a stop we issued outranks everything (it is why the player
+// is dying), then our own in-flight respawn, then the health verdict's
+// queued relaunch, then the ending.
+function playerDeathKind(context) {
+  var ctx = context || {}
+  if (ctx.userStopped === true || ctx.stopping === true) return "ended"
+  if (ctx.nowPlaying !== true) return "ended"
+  if (ctx.sessionInFlight === true) return "respawn"
+  if (ctx.relaunchPending === true && ctx.hasChannel === true) return "relaunch"
+  return "ended"
+}
+
+// What to do with the observer when `player start` / `player restart` answers
+// ok. The helper has just reported a live player of this shell's making, so
+// the one answer that is never right is to do nothing - that is the second
+// half of the P1 above.
+//
+//   attached  the observer is already on it; only the birth edge to drop
+//   abandoned a stop really did overtake this start; nothing to hunt
+//   hunt      the player is up, the observer is not on it yet: arm and wait
+//   recover   the same, and we no longer know WHAT is playing, so read it
+//             back out of the player's own stash - the identical path a
+//             shell restart takes (4.5), which is why it needs no new rule
+function playerSessionFollowUp(context) {
+  var ctx = context || {}
+  if (ctx.attached === true) return "attached"
+  if (ctx.stopping === true || ctx.userStopped === true) return "abandoned"
+  return ctx.nowPlaying === true ? "hunt" : "recover"
 }
 
 // ---------------------------------------------------------------------
@@ -3559,6 +3686,8 @@ if (typeof module !== "undefined") {
     isFavorite: isFavorite,
     toggleFavorite: toggleFavorite,
     pushRecent: pushRecent,
+    pushPlayedRecord: pushPlayedRecord,
+    stateOnLoad: stateOnLoad,
     recordPlayed: recordPlayed,
     clearSession: clearSession,
     stateSession: stateSession,
@@ -3612,6 +3741,9 @@ if (typeof module !== "undefined") {
     parsePlayerProbe: parsePlayerProbe,
     parsePlayerEvent: parsePlayerEvent,
     endedVerdict: endedVerdict,
+    probeVerdict: probeVerdict,
+    playerDeathKind: playerDeathKind,
+    playerSessionFollowUp: playerSessionFollowUp,
     PLAYER_LOG_TAIL: PLAYER_LOG_TAIL,
     PLAYER_ENTRY_OWNERS: PLAYER_ENTRY_OWNERS,
     playerRouterState: playerRouterState,

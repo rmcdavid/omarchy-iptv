@@ -2464,6 +2464,17 @@ def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = 
     for _ in range(3):
         step = stop_escalation(stage)
         action = str(step["action"])
+        # Each rung's grace is measured from the rung's OWN start, so the
+        # next one lands where the timeline says it does. The quit rung is
+        # the reason: against an unresponsive player `request(["quit"])`
+        # spends the whole --ipc-timeout before anything is waited for, and
+        # that cost sat OUTSIDE the 2 s grace - so SIGTERM arrived at 4 s,
+        # SIGKILL at 6 s, and a wedged player took ~6.27 s to reap against a
+        # 4.5 s budget. Counting it inside costs a responsive player nothing
+        # (it answers `quit` at once and exits in about a third of a second,
+        # with the full grace still ahead of it) and keeps the guarantee
+        # that it is asked politely first.
+        rung_started = _monotonic()
         if action == "quit":
             quit_over_ipc(sock_path, ipc_timeout)
             result["rung"] = "quit"
@@ -2474,7 +2485,9 @@ def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = 
             result["rung"] = action
         else:
             break
-        if wait_for_exit(targets, sock_path, int(step["waitMs"]) or STOP_SETTLE_MS):
+        grace = int(step["waitMs"]) or STOP_SETTLE_MS
+        spent = int((_monotonic() - rung_started) * 1000.0)
+        if wait_for_exit(targets, sock_path, max(0, grace - spent)):
             result["running"] = False
             return result
         stage = action

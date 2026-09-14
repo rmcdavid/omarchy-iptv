@@ -17,16 +17,28 @@
 #   P8  two services      a second shell on the same runtime dir adopts, never spawns
 #   P10 superseded stop   a lock sequence pushed ahead by another launcher does not
 #                         turn every later stop into a silent no-op
+#   P11 health respawn    D-PLY-1 trigger A: after the two-strike verdict's
+#                         `player restart --from term` the shell reattaches to the
+#                         new player, ONE relaunch, and never goes idle
+#   P12 socket respawn    D-PLY-1 trigger B: the same after a socket unlink that
+#                         makes `player start` ladder the old player down
+#   P13 startup race      D-PLY-4: a play issued from the earliest instant the
+#                         successor's IPC accepts one keeps its session record
+#   P14 marked once       D-PLY-3: PO-3's record is retired when it is consumed,
+#                         so the next start does not raise the same mark again
 #   P9  reap              the harness teardown still finds a detached grandchild
 #
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
 # tree and run the same checks against it. Against the last pre-M2-02 commit
 # P2, P3, P4, P5, P6 and P8 MUST fail; P10 is evidence against the first
-# detached-player commit, which is the code that shipped that bug. The rest
-# are regression guards that must pass on both.
+# detached-player commit, which is the code that shipped that bug; P11, P12,
+# P13 and P14 MUST fail against 396a69a, the tree the M2-02 QA pass filed
+# D-PLY-1, D-PLY-3 and D-PLY-4 against. The rest are regression guards that
+# must pass on both.
 #
 #   ./scripts/dev-harness/player-scenario.sh
 #   ./scripts/dev-harness/player-scenario.sh --baseline <pre-M2-02 ref>
+#   ./scripts/dev-harness/player-scenario.sh --race-trials 30   (D-PLY-4's measurement)
 #
 # Output: one PASS/FAIL line per check and a summary. No URL is ever printed.
 set -uo pipefail
@@ -42,6 +54,7 @@ SOCK="$SCRATCH/runtime/omarchy-iptv/mpv.sock"
 PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}
 BASELINE=""
 EXPORT_DIR=""
+RACE_TRIALS=5
 pass=0
 fail=0
 
@@ -54,6 +67,7 @@ SECRET_UA="HarnessSecretAgent/9.9"
 while (($# > 0)); do
   case $1 in
     --baseline) BASELINE=$2; shift ;;
+    --race-trials) RACE_TRIALS=$2; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -130,6 +144,45 @@ wait_log() {
     grep -qE "$re" "$SCRATCH"/harness.log 2>/dev/null && return 0
     sleep 0.1
   done
+  return 1
+}
+log_count() { grep -acE "$1" "$SCRATCH"/harness.log 2>/dev/null || echo 0; }
+# until_changed <secs> <old> <cmd...>: wait for a different, non-empty answer
+until_changed() {
+  local secs=$1 old=$2; shift 2
+  local i now
+  for ((i = 0; i < secs * 10; i++)); do
+    now=$("$@")
+    [[ -n "$now" && "$now" != "$old" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+STATE_JSON="$SCRATCH/state/omarchy-iptv/state.json"
+# The session record on DISK, which is what a later shell start reads.
+session_id() {
+  python3 -c '
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception: print(""); raise SystemExit(0)
+s = d.get("session")
+print(s.get("id", "") if isinstance(s, dict) else "")' "$STATE_JSON" 2>/dev/null
+}
+# until_session <want> <secs>: saveState() is gated on dirsReady, so the write
+# can legitimately land a moment after the play.
+until_session() { until_eq "$1" "$2" session_id; }
+shell_pid() { cat "$SCRATCH/qs.pid" 2>/dev/null; }
+# The play the successor accepts first: qs ipc fails until the IpcHandler
+# exists, which is exactly the window ARCHITECTURE-PLAYER.md section 15
+# describes. Returns the attempt number that landed.
+play_asap() {
+  local id=$1 i answer
+  for ((i = 1; i <= 200; i++)); do
+    answer=$(ipc play "$id")
+    [[ $answer == ok ]] && { echo "$i"; return 0; }
+    sleep 0.02
+  done
+  echo 0
   return 1
 }
 
@@ -290,6 +343,123 @@ ck "P7 a reason was recorded" '[[ -n "$err" ]]'
 ck "P7 the reason carries no credential and no token" '[[ "$err" != *"$SECRET_PW"* && "$err" != *"$SECRET_TOKEN"* && "$err" != *"$SECRET_USER"* ]]'
 until_eq 0 8 player_count || true
 is "P7 no player left behind by the failure" "$(player_count)" "0"
+
+echo "== P11 D-PLY-1 trigger A: the health verdict's ladder-and-respawn"
+# Found live at 8f9447e, 3/3: after `player restart --from term` the shell
+# reported nothing playing and, because it also dropped playerWanted, the
+# 250 ms retry timer was off, so it never reattached - while the relaunched
+# player kept playing with a mapped window and a correct stash.
+ipc play "t:live1" >/dev/null
+until_eq 1 15 player_count || bad "P11 no player to wedge"
+PID11=$(player_pid)
+until_eq true 10 svc "d['playing']" || true
+# Let `player start`'s own first-load window close, so the wedge provokes the
+# health check and not the start.
+for i in $(seq 1 250); do pgrep -f "bin/omarchy-iptv player start" >/dev/null 2>&1 || break; sleep 0.1; done
+sleep 2
+before11=$(log_count 'mpv unresponsive, restarting player')
+kill -STOP "$PID11" 2>/dev/null
+ck "P11 the player is wedged" '[[ -n "$PID11" ]]'
+until_changed 45 "$PID11" player_pid || bad "P11 the health check never respawned the player"
+PID11B=$(player_pid)
+is "P11 exactly one player after the respawn" "$(player_count)" "1"
+ck "P11 it is a NEW player" '[[ -n "$PID11B" && "$PID11B" != "$PID11" ]]'
+until_eq true 10 svc "d['socketAttached']" || true
+is "P11 the observer reattached to the new player" "$(svc "d['socketAttached']")" "true"
+is "P11 the shell still wants the player (the retry timer stays armed)" "$(svc "d['playerWanted']")" "true"
+is "P11 the interface is NOT idle while the player plays" "$(svc "d['playing']")" "true"
+is "P11 it still names the right channel" "$(np id)" "t:live1"
+is "P11 the zap ring survived the respawn" "$(np launchedFrom)" "g:Harness"
+is "P11 still exactly one window" "$(windows_named)" "1"
+is "P11 exactly ONE relaunch, not a second one at the healthy player" "$(( $(log_count 'mpv unresponsive, restarting player') - before11 ))" "1"
+
+echo "== P12 D-PLY-1 trigger B: the socket-unlink recovery"
+# The same end state from a second, independent trigger (2/2 live): remove
+# the socket, play another channel, and `player start` finds the old player
+# unreachable, ladders it down and spawns a replacement. Start from a
+# player the observer is ATTACHED to, independently of how P11 ended - it is
+# the attached observer's EOF that the defect misreads, so a shell P11 left
+# idle would hide it.
+ipc stop >/dev/null
+until_eq 0 10 player_count || true
+ipc play "t:live1" >/dev/null
+until_eq 1 15 player_count || bad "P12 no player to strand"
+until_eq true 15 svc "d['socketAttached']" || bad "P12 the observer never attached"
+for i in $(seq 1 250); do pgrep -f "bin/omarchy-iptv player start" >/dev/null 2>&1 || break; sleep 0.1; done
+PID12=$(player_pid)
+rm -f "$SOCK"
+ipc play "t:live2" >/dev/null
+until_changed 30 "$PID12" player_pid || bad "P12 the helper never replaced the unreachable player"
+PID12B=$(player_pid)
+is "P12 exactly one player after the respawn" "$(player_count)" "1"
+until_eq true 15 svc "d['socketAttached']" || true
+is "P12 the observer reattached to the new player" "$(svc "d['socketAttached']")" "true"
+is "P12 the shell still wants the player" "$(svc "d['playerWanted']")" "true"
+is "P12 the interface is NOT idle while the player plays" "$(svc "d['playing']")" "true"
+is "P12 it moved to the channel that was asked for" "$(np id)" "t:live2"
+until_eq "omarchy-iptv|Harness Live Two" 10 window_of "$PID12B" || true
+is "P12 the window is the new player's, titled with the channel" "$(window_of "$PID12B")" "omarchy-iptv|Harness Live Two"
+is "P12 still exactly one window" "$(windows_named)" "1"
+
+echo "== P13 D-PLY-4: the startup state race (ARCHITECTURE-PLAYER.md section 15)"
+# Measured by QA at 14 losses in 30 trials. state.json is read
+# asynchronously while a play can be issued immediately, so the arriving
+# file used to replace the session record the play had just written - and
+# PO-3 then had no evidence that the channel died unattended.
+losses=0
+nostarts=0
+landed=""
+for ((trial = 1; trial <= RACE_TRIALS; trial++)); do
+  ipc stop >/dev/null
+  until_eq 0 10 player_count || true
+  until_session "" 6 || true
+  "$RUN" restart-shell >>"$LOG" 2>&1
+  attempt=$(play_asap "t:live1")
+  landed="$landed $attempt"
+  until_eq true 15 svc "d['playing']" || true
+  if [[ "$(svc "d['playing']")" != "true" ]]; then
+    # The worse half of the same race: the probe's stale "nothing is
+    # running" cleared nowPlaying and drainPendingPlay dropped the play.
+    bad "P13 trial $trial: the play was DROPPED, nothing ever started"
+    nostarts=$((nostarts + 1))
+    continue
+  fi
+  until_session "t:live1" 8 || true
+  [[ "$(session_id)" == "t:live1" ]] || losses=$((losses + 1))
+done
+echo "   P13 the play landed on attempt(s):$landed"
+is "P13 no play issued at shell start is dropped ($RACE_TRIALS trials)" "$nostarts" "0"
+is "P13 no play issued at shell start loses its session record ($RACE_TRIALS trials)" "$losses" "0"
+is "P13 and the record names the channel that is demonstrably playing" "$(session_id)" "$(np id)"
+
+echo "== P14 D-PLY-3: PO-3's mark is raised once, not on every later start"
+# The full PO-3 procedure: play, kill the shell and then the player with
+# nobody listening, come back. The mark must land once and the record must be
+# RETIRED - live at 8f9447e it stayed on disk in 2 runs of 3, so the next
+# start consumed it again and re-marked the same channel with the same HH:MM.
+ipc play "t:live1" >/dev/null
+until_eq 1 15 player_count || bad "P14 no player to abandon"
+until_session "t:live1" 10 || true
+is "P14 the play wrote a session record" "$(session_id)" "t:live1"
+kill -KILL "$(shell_pid)" 2>/dev/null
+sleep 0.5
+for pid in $(player_pids); do kill -KILL "$pid" 2>/dev/null; done
+until_eq 0 8 player_count || true
+: >"$SCRATCH/harness.log"
+"$RUN" restart-shell >>"$LOG" 2>&1
+wait_log 'service loaded' 20 || bad "P14 the shell did not come back"
+until_set 15 svc "d['failedAt'].get('t:live1')" || true
+mark14=$(svc "d['failedAt'].get('t:live1')")
+ck "P14 the channel that died unattended is marked in the guide" '[[ -n "$mark14" ]]' 
+until_session "" 10 || true
+is "P14 the record is retired once it has been consumed" "$(session_id)" ""
+for again in 1 2; do
+  "$RUN" restart-shell >>"$LOG" 2>&1
+  wait_log 'service loaded' 20 || bad "P14 restart $again did not come back"
+  sleep 3
+  is "P14 start $again raises no second mark for the same event" "$(svc "d['failedAt'].get('t:live1')")" ""
+  is "P14 start $again still finds no record" "$(session_id)" ""
+done
 
 echo "== P9 the harness reaps a detached grandchild"
 ipc play "t:live1" >/dev/null
