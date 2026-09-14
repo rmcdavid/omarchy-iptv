@@ -23,10 +23,12 @@
 # XDG_RUNTIME_DIR, so nothing here can reach the live player's socket. The
 # script REFUSES to run when that directory resolves into a real plugin
 # location (~/.config, ~/.cache/omarchy-iptv, ~/.local/state/omarchy-iptv,
-# /usr/share/omarchy, $XDG_RUNTIME_DIR/omarchy-iptv) or into the repository,
-# and it refuses outright to signal a process whose --input-ipc-server is not
-# under the scratch tree. It never calls `omarchy plugin|bar|theme`, never
-# restarts the user's shell and never uses sudo.
+# /usr/share/omarchy, $XDG_RUNTIME_DIR/omarchy-iptv) or into the repository.
+# Every signal this script sends to a player goes through
+# signal_scratch_player, which will not signal a process whose
+# --input-ipc-server is outside the scratch tree - see `stop`. It never calls
+# `omarchy plugin|bar|theme`, never restarts the user's shell and never uses
+# sudo.
 #
 # Scenario -> case map (docs/QA-PLAYER.md section 1.1):
 #   PLY-H11  restart at 0/100/300/600 ms after a zap          PLY-RST-02
@@ -51,6 +53,9 @@ BASELINE=""
 pass=0
 fail=0
 
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
+
 usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; }
 die()   { echo "qa-player: $*" >&2; exit 1; }
 ok()    { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
@@ -62,6 +67,12 @@ ck()    { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
 refuse_real_dirs() {
   local real home b
+  # F4. sh_step interpolates $SCRATCH (from OMARCHY_IPTV_HARNESS_DIR) into a
+  # `bash -c` snippet unquoted, which is exactly the shape CLAUDE.md
+  # constraint 2 forbids: a scratch path carrying a quote or $(...) would be
+  # EXECUTED. Until every snippet takes its data as argv, refuse to run
+  # against a path that could be shell text at all.
+  qa_safe_path "$SCRATCH" || die "refusing: OMARCHY_IPTV_HARNESS_DIR carries shell metacharacters: $SCRATCH"
   real=$(realpath -m -- "$SCRATCH")
   home=$(realpath -m -- "$HOME")
   [[ $real == /* ]] || die "scratch dir must be absolute: $SCRATCH"
@@ -93,6 +104,27 @@ signal_scratch_player() {   # signal_scratch_player <signal>
   local sig=$1 p n=0
   for p in $(scratch_player_pids); do kill "-$sig" "$p" 2>/dev/null && n=$((n + 1)); done
   echo "$n"
+}
+
+# A6. Both functions above were defined and never called: the header advertised
+# a safety guarantee implemented entirely by dead code, while the killing that
+# actually happened went through `run.sh reap`. `stop` now reaps and then
+# sweeps through the guarded path, so the guarantee is on the executed route.
+cmd_stop() {
+  refuse_real_dirs
+  step "reap the harness" "$RUN" reap
+  if (( APPLY )); then
+    local left
+    left=$(signal_scratch_player TERM)
+    printf '# sweep: %s scratch player(s) signalled (never a player outside %s)\n' "$left" "$SCRATCH"
+    sleep 0.5
+    left=$(scratch_player_pids | wc -l | tr -d ' ')
+    if [[ "$left" == "0" ]]; then ok "no scratch player survived the reap"
+    else bad "$left scratch player(s) still running after reap"; fi
+  else
+    printf '# then signal_scratch_player TERM, which refuses any pid whose\n'
+    printf '# --input-ipc-server is not %s\n' "$SOCK"
+  fi
 }
 
 # ------------------------------------------------------------- step runner
@@ -131,6 +163,12 @@ prepare_fixture() {
      grep -c '^http' '$SCRATCH/fixtures/qa-player.m3u'"
   expect "9 URLs, all on 127.0.0.1:$HPORT"
 }
+# B1. The setup used to be three printed steps whose exit status nobody read,
+# so a scenario whose harness never came up ran every later step against
+# nothing and printed its EXPECT lines exactly as a good run does. Setting up
+# is not a scenario assertion (those are CL7's next round) - it is the
+# precondition without which none of them mean anything. Returns non-zero so
+# the caller can abandon the scenario.
 start_harness() {
   sh_step "start the harness detached on its own runtime dir" \
     "'$RUN' clean && '$RUN' --detach --serve --playlist '$FIX/qa-player.m3u' --timeout 0"
@@ -138,6 +176,24 @@ start_harness() {
   sh_step "point the service at the rewritten playlist and wait for the channels" \
     "'$RUN' ipc set playlistUrl 'http://127.0.0.1:$HPORT/qa-player.m3u' >/dev/null; sleep 4; '$RUN' ipc state | jq -r '.service.channels|length'"
   expect "9"
+  (( APPLY )) || return 0
+  local answer count i
+  for ((i = 0; i < 20; i++)); do
+    answer=$(ipc state)
+    [[ -n $answer ]] && break
+    sleep 1
+  done
+  if [[ -z $answer ]]; then
+    bad "SETUP FAILED: the harness never answered; every step below would measure nothing"
+    return 1
+  fi
+  count=$(jq -r '.service.channels|length' <<<"$answer" 2>/dev/null)
+  if [[ "$count" != "9" ]]; then
+    bad "SETUP FAILED: the service loaded $count channels, not the fixture's 9"
+    return 1
+  fi
+  ok "setup: the harness answered and loaded the fixture's 9 channels"
+  return 0
 }
 
 # ---------------------------------------------------------------- fixtures
@@ -157,20 +213,32 @@ cmd_check_harness() {
   local v
   head1 "harness and helper verbs this script needs"
   for v in clean ipc restart-shell shell-stop reap; do
-    if grep -qE "^  $v\)" "$RUN"; then ok "run.sh $v"; else bad "run.sh $v MISSING"; fi
+    if qa_case_arm "$RUN" "$v"; then ok "run.sh $v"; else bad "run.sh $v MISSING"; fi
   done
+  # D1. `grep -q -- "$v" "$RUN"` was satisfied by run.sh's own header comment
+  # as readily as by its parser, so deleting `--detach) DETACH=1; ...` left
+  # this gate green. Anchor on the case arm, the way the loop above always
+  # did. Proven both ways in scripts/qa-lib-test.sh.
   for v in --detach --serve --instance --playlist --timeout; do
-    if grep -q -- "$v" "$RUN"; then ok "run.sh $v"; else bad "run.sh $v MISSING"; fi
+    if qa_case_arm "$RUN" "$v"; then ok "run.sh $v"; else bad "run.sh $v MISSING"; fi
   done
-  for v in "player start" "player stop" "player probe" "player restart" "player orphan-check"; do
-    if "$HELPER" ${v#player } --help >/dev/null 2>&1 || "$HELPER" player "${v#player }" --help >/dev/null 2>&1; then
-      ok "helper $v"
-    else bad "helper $v MISSING"; fi
+  # D2. The first branch of `"$HELPER" ${v#player } --help || "$HELPER" player
+  # "${v#player }" --help` succeeded for `player stop` because the helper has
+  # an unrelated top-level `stop` verb (the M1 mpv-IPC one), so this reported
+  # ok even if the `player stop` subparser were gone. Of the five probed verbs
+  # only `stop` collides - which is exactly why the fallback has to go: it
+  # hides the one collision it was masking.
+  for v in start stop probe restart orphan-check; do
+    if "$HELPER" player "$v" --help >/dev/null 2>&1; then ok "helper player $v"
+    else bad "helper player $v MISSING"; fi
   done
   for v in socat jq ffmpeg hyprctl; do
     if command -v "$v" >/dev/null; then ok "tool $v"; else bad "tool $v MISSING"; fi
   done
   printf '\n%s pass, %s fail\n' "$pass" "$fail"
+  # B1. This ended on a printf and returned 0, so a MISSING harness verb -
+  # the whole point of the command - exited green.
+  (( fail == 0 ))
 }
 
 # --------------------------------------------------------------- PLY-H11
@@ -181,7 +249,7 @@ h11() {
   note "BEFORE the loadfile with the new identity and rewritten AFTER with the"
   note "entry id, so the stash is the truth in either outcome. Four offsets"
   note "because the failure this looks for is an ordering one."
-  start_harness
+  start_harness || return 1
   local off
   for off in 0 0.1 0.3 0.6; do
     sh_step "settle on the live channel" \
@@ -210,7 +278,7 @@ h12() {
   note "the new one must not raise a second for the same event. Counted on the"
   note "session bus, because omarchy-shell notifications showHistory returns"
   note "'ok' and opens a panel - it cannot be counted with wc -l."
-  start_harness
+  start_harness || return 1
   sh_step "start a notification counter on the session bus" \
     "dbus-monitor --session \"interface='org.freedesktop.Notifications',member='Notify'\" > $SCRATCH/notify.txt 2>&1 & echo \$! > $SCRATCH/notify.pid; sleep 1"
   sh_step "count before" "grep -c 'member=Notify' $SCRATCH/notify.txt"
@@ -238,7 +306,7 @@ h13() {
   note "Two opposite truths, both from the spike: an ALREADY ATTACHED connection"
   note "survives the unlink (Q4 row 3), while a FUTURE connect gets"
   note "ServerNotFoundError instead of ConnectionRefusedError."
-  start_harness
+  start_harness || return 1
   sh_step "play and confirm the observer is attached" \
     "'$RUN' ipc play t:qa.live >/dev/null; sleep 4; '$RUN' ipc state | jq -r '.service.player.attached'"
   expect "true"
@@ -270,7 +338,7 @@ h14() {
   head1 "PLY-H14  rm -rf the scratch runtime dir while playing  (PLY-RST-08)"
   note "NEVER the live /run/user/<uid>/omarchy-iptv. This scenario refuses to run"
   note "if SOCK does not resolve under the scratch tree (see refuse_real_dirs)."
-  start_harness
+  start_harness || return 1
   sh_step "play and record the pid and seq" \
     "'$RUN' ipc play t:qa.live >/dev/null; sleep 4; pgrep -u \$(id -u) -f -- '--input-ipc-server=$SOCK' | head -1; '$RUN' ipc state | jq -r '.service.player.seq'"
   sh_step "clear the runtime directory under the running player" \
@@ -325,7 +393,7 @@ h15() {
   note "shell adopts it, OR the helper dies with it and its own 5 s"
   note "--spawn-timeout path reaps the spawn it created."
   note "A WINDOWED PLAYER THAT NOTHING CAN REACH IS A P1 FAIL."
-  start_harness
+  start_harness || return 1
   sh_step "ten runs, sampling the window count at 100 ms throughout" \
     "for i in \$(seq 10); do \\
        ( for j in \$(seq 40); do hyprctl clients -j | jq '[.[]|select(.class==\"omarchy-iptv\")]|length'; sleep 0.1; done ) > '$SCRATCH/winct-\$i.txt' & \\
@@ -347,7 +415,7 @@ h16() {
   note "the bar is correct immediately; then reconcileNowPlaying() on"
   note "channelsLoaded must degrade to name-only rather than resolving to a"
   note "DIFFERENT channel. Never a match on the wrong row."
-  start_harness
+  start_harness || return 1
   sh_step "play a channel that is about to vanish" \
     "'$RUN' ipc play t:qa.nonascii >/dev/null; sleep 4; '$RUN' ipc state | jq -c '{id:.service.nowPlaying.id,name:.service.nowPlaying.name}'"
   sh_step "take the shell down, leaving the player alone" "'$RUN' shell-stop; sleep 1"
@@ -400,7 +468,9 @@ EOF
 }
 
 cmd_baseline() {
-  local id=$1 ref=$2 exp
+  local id=${1:-} ref=${2:-} exp
+  [[ -n $id ]]  || die "baseline needs a scenario id and a git ref (see: list)"
+  [[ -n $ref ]] || die "baseline needs a git ref, e.g. baseline PLY-H13 396a69a"
   exp="$SCRATCH/baseline-$ref"
   refuse_real_dirs
   head1 "rule 11 baseline: $id against $ref"
@@ -408,7 +478,13 @@ cmd_baseline() {
   note "now re-run with OMARCHY_IPTV_PLUGIN_ROOT='$exp'; the checks this scenario"
   note "owns must FAIL there. A scenario that passes on both trees is a"
   note "regression guard, not evidence for this milestone - label it as one."
-  step "run" env OMARCHY_IPTV_PLUGIN_ROOT="$exp" "$0" run "$id" ${APPLY:+--apply}
+  # F5. `${APPLY:+--apply}` expands whenever APPLY is SET and non-empty, and
+  # APPLY is always 0 or 1 - so the dry run, whose entire contract is "without
+  # --apply nothing runs", printed a baseline command carrying --apply for
+  # anyone to copy and paste at their live session.
+  local flag=()
+  (( APPLY )) && flag=(--apply)
+  step "run" env OMARCHY_IPTV_PLUGIN_ROOT="$exp" "$0" run "$id" "${flag[@]}"
 }
 
 main() {
@@ -427,8 +503,10 @@ main() {
     list)          cmd_list ;;
     check-harness) cmd_check_harness ;;
     fixtures)      refuse_real_dirs; cmd_fixtures ;;
-    stop)          refuse_real_dirs; step "reap the harness" "$RUN" reap ;;
-    baseline)      cmd_baseline "${args[0]}" "${args[1]}" ;;
+    stop)          cmd_stop ;;
+    # F6: under `set -u` an empty array aborted with bash's own
+    # "args[0]: unbound variable" instead of reaching this script's die().
+    baseline)      cmd_baseline "${args[0]:-}" "${args[1]:-}" ;;
     print|run)
       refuse_real_dirs
       case ${args[0]:-all} in
@@ -441,7 +519,22 @@ main() {
         all)         h11; h12; h13; h14; h15; h16 ;;
         *) die "unknown scenario: ${args[0]} (try: list)" ;;
       esac
-      ((APPLY)) || printf '\n(dry run: nothing above was executed. Add --apply to run it.)\n'
+      # B1. `main` used to end on `((APPLY)) || printf ...`, which is TRUE
+      # when APPLY=1 - so `run all --apply` exited 0 no matter what happened,
+      # including six scenarios whose harness never started. The six EXPECT
+      # blocks still have no machine-checkable verdict; converting them is
+      # next round (ruling CL7). What is fixed here is that the suite can
+      # report a failure at all.
+      if (( APPLY )); then
+        printf '\n===== %s pass, %s fail =====\n' "$pass" "$fail"
+        if (( fail == 0 )) && (( pass == 0 )); then
+          printf 'NOTE: the PLY-H11..H16 bodies still assert nothing; only their\n'
+          printf 'setup is checked. Their EXPECT lines are read by a human (CL7).\n'
+        fi
+        (( fail == 0 )) || exit 1
+      else
+        printf '\n(dry run: nothing above was executed. Add --apply to run it.)\n'
+      fi
       ;;
     ""|-h|--help) usage ;;
     *) die "unknown command: $cmd (try: list)" ;;

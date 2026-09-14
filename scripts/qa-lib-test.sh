@@ -312,6 +312,21 @@ ck "the shipped hand-quoted line did NOT round-trip the value" \
    '[[ "$(cat "$TMP/old.out")" != "$hostile" ]]'
 ck "it executed the command substitution it carried" \
    'grep -q "$(id -u)" "$TMP/old.out"'
+# F4: the same data reaching `bash -c` as text. The snippets bake $SCRATCH in
+# at print time, so the defence this round is to refuse a path that is code.
+printf 'echo INJECTED > %s/pwned\n' "$TMP" >"$TMP/payload"
+evil="$TMP/s\$(sh $TMP/payload)dir"
+rm -f "$TMP/pwned"
+bash -c "ls $evil >/dev/null 2>&1" 2>/dev/null || true
+ck "a scratch path carrying \$(...) IS executed by the shipped sh_step shape" \
+   '[[ -f "$TMP/pwned" ]]'
+st "qa_safe_path refuses it"                    1 qa_safe_path "$evil"
+st "qa_safe_path refuses a quote"               1 qa_safe_path "/tmp/a\"b"
+st "qa_safe_path refuses a backquote"           1 qa_safe_path '/tmp/a`b'
+st "qa_safe_path refuses a semicolon"           1 qa_safe_path "/tmp/a;rm -rf ."
+st "qa_safe_path refuses a relative path"       1 qa_safe_path "scratch"
+st "qa_safe_path accepts an ordinary scratch dir" 0 qa_safe_path "/run/user/1000/omarchy-iptv-qa-player"
+
 qa_env_line NASTY "$hostile" >"$TMP/new.env"
 # shellcheck source=/dev/null
 ( NASTY=""; . "$TMP/new.env"; printf '%s\n' "$NASTY" ) >"$TMP/new.out"
@@ -413,7 +428,7 @@ is "the sources floor matches the assertions that scenario actually has" \
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=96
+EXPECTED=103
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

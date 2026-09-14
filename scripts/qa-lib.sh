@@ -228,6 +228,20 @@ qa_defines_function() {
 
 # ------------------------------------------------------------- shell env
 
+# qa_safe_path <path>: true only for a path that cannot act as shell text.
+# F4/C2: these scripts interpolate an environment-supplied scratch path into
+# `bash -c` snippets and into a sourced env file. Until every snippet takes its
+# data as argv, the defence is to refuse data that could be code: quotes,
+# backquotes, $, \, ;, &, |, <, >, (), {}, *, ?, newline.
+qa_safe_path() {
+  local p=${1-}
+  [[ -n $p ]] || return 1
+  [[ $p == /* ]] || return 1
+  [[ $p != *[\'\"\`\$\\\;\&\|\<\>\(\)\{\}\*\?]* ]] || return 1
+  [[ $p != *$'\n'* ]] || return 1
+  return 0
+}
+
 # qa_env_line <NAME> <value>: one `export NAME=<quoted>` line that a later
 # `.` re-reads as the same bytes. C2 wrote export X="$value" by hand, so a
 # path carrying $, a backquote, a backslash or a double quote was re-expanded

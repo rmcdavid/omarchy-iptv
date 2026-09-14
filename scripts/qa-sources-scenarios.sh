@@ -43,6 +43,9 @@ WORST=0
 COUNT=49
 T0=1789244100
 
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
+
 # Fixture URLs as served by the harness fixture server (run.sh --serve) and their keys.
 A=http://127.0.0.1:8765/qa-src-a.m3u;        KA=584a58e5
 B=http://127.0.0.1:8765/qa-src-b.m3u;        KB=733cf68c
@@ -52,11 +55,17 @@ EPGA=http://127.0.0.1:8765/qa-src-a.xml
 
 usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; }
 fail() { echo "qa-sources: $*" >&2; exit 1; }
+# Set by harness_start when the harness never answered; read by main.
+setup_failed=0
 
 # ---------------------------------------------------------------- guards
 
 refuse_real_dirs() {
   local real home b
+  # F4: sh_step interpolates $SCRATCH into a `bash -c` snippet unquoted, so a
+  # scratch path carrying a quote or $(...) would be EXECUTED - the shape
+  # CLAUDE.md constraint 2 forbids. Refuse a path that could be shell text.
+  qa_safe_path "$SCRATCH" || fail "refusing: OMARCHY_IPTV_HARNESS_DIR carries shell metacharacters: $SCRATCH"
   real=$(realpath -m -- "$SCRATCH")
   home=$(realpath -m -- "$HOME")
   [[ $real == /* ]] || fail "scratch dir must be absolute: $SCRATCH"
@@ -111,6 +120,12 @@ keys() {            # keys <wtype args>: only while the harness guide is open
 
 shot() { step "screenshot $1" "$H" shot "$1"; }
 
+# B3. This returns 1 after 30 s with "harness did not answer" on stderr, and
+# every one of its 19 call sites invoked it bare in a file with no `set -e`.
+# All sixteen SRC-H* scenarios then ran every remaining step against a dead
+# harness, printing empty output under each EXPECT line exactly as a good run
+# prints its answers. Call sites now say `|| return 1`, and a SETUP FAILED
+# banner makes the abandonment visible in the transcript.
 harness_start() {   # harness_start <run.sh args>
   mkdir -p "$SCRATCH/logs"
   printf '# start the harness in the background (log: %s)\n$ %q %s > %q 2>&1 &\n' "$SCRATCH/logs/run.log" "$H" "$(printf '%q ' "$@")" "$SCRATCH/logs/run.log"
@@ -123,6 +138,10 @@ harness_start() {   # harness_start <run.sh args>
     if "$H" ipc state >/dev/null 2>&1; then return 0; fi
   done
   echo "harness did not answer within 30 s; see $SCRATCH/logs/run.log" >&2
+  printf '\n!!!! SETUP FAILED: the harness never came up. Every step below this\n'
+  printf '!!!! point would have run against nothing and printed empty output\n'
+  printf '!!!! under its EXPECT line. This scenario is ABANDONED, not passed.\n\n'
+  setup_failed=1
   harness_stop
   return 1
 }
@@ -287,7 +306,7 @@ banner() { printf '\n==== %s: %s ====\n' "$1" "$(scenario_title "$1")"; printf '
 common_start() {    # common_start <playlist or none> [extra run.sh args]
   local pl=$1; shift
   seed_fixtures
-  harness_start --open --serve --keep --timeout 0 --playlist "$pl" "$@"
+  harness_start --open --serve --keep --timeout 0 --playlist "$pl" "$@" || return 1
 }
 
 scenario_SRC_H01() {
@@ -295,7 +314,7 @@ scenario_SRC_H01() {
   step "wipe cache/state/runtime" "$H" clean
   seed_fixtures
   seed_v1
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   sh_step "state after migration" "jq '{version,cacheLayout,favorites,recents,lastPlayed,sources}' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
   expect "version 2, cacheLayout 2, favorites [t:qa.a.news1, t:qa.shared, u:502142db], 3 recents in order, lastPlayed intact; sources[0] key $KA url $A origin migrated fetchedAt 1789244100 (or now with --fresh) channelCount 8 groupCount 3 (SRC-MIG-01)"
@@ -310,7 +329,7 @@ scenario_SRC_H01() {
   expect "guide rows 8 within ~1.5 s of start, favorites 3, Recent 3 (SRC-MIG-03); service activeSourceKey $KA"
   shot sources-migrated
   harness_stop
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   sh_step "second start: no second migrate" "grep -c 'cache migrate' $(printf '%q' "$SCRATCH/logs/run.log"); stat -c '%Y %a %s' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
   expect "0 migrate lines; state.json untouched (SRC-MIG-04, SRC-SEC-22)"
@@ -321,7 +340,7 @@ scenario_SRC_H01() {
 scenario_SRC_H02() {
   banner SRC-H02; need verbs:sources,activeCache apply:entry
   step "wipe" "$H" clean
-  common_start none
+  common_start none || return 1
   shot sources-first-run
   ipc_step "mode and form" state
   expect "guide.mode sourceEdit (origin firstRun), Playlist focused; footer 'Enter load - Tab next field - Ctrl+V paste - Esc close' (SRC-FR-01, SRC-UI-01)"
@@ -349,7 +368,7 @@ scenario_SRC_H02() {
 scenario_SRC_H03() {
   banner SRC-H03; need verbs:sources
   step "wipe" "$H" clean
-  common_start none
+  common_start none || return 1
   local v
   for v in 'ftp://x' 'javascript:alert(1)' 'data:text/plain,x' 'provider.test/list' './list.m3u' '~/tv/list.m3u' '/proc/self/environ' 'http://h .test/' 'http://'; do
     keys -M ctrl u -m ctrl
@@ -380,7 +399,7 @@ scenario_SRC_H03() {
 scenario_SRC_H04() {
   banner SRC-H04; need verbs:sources
   step "wipe" "$H" clean
-  common_start none
+  common_start none || return 1
   note "wl-copy replaces the user's clipboard for the duration of this scenario"
   step "clipboard = plain URL" wl-copy -- "$A"
   keys -M ctrl v -m ctrl
@@ -426,7 +445,7 @@ scenario_SRC_H04() {
 scenario_SRC_H05() {
   banner SRC-H05; need verbs:addSource,sources,signals apply:entry
   step "wipe" "$H" clean
-  common_start "$A"
+  common_start "$A" || return 1
   pause 3
   sh_step "updateEntryInline count before" "grep -c updateEntryInline $(printf '%q' "$SCRATCH/logs/run.log")"
   ipc_step "add a refused endpoint" addSource http://127.0.0.1:9/x.m3u "" ""
@@ -468,7 +487,7 @@ scenario_SRC_H06() {
   step "wipe" "$H" clean
   seed_fixtures
   FRESH=1 seed_v1
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   ipc_step "add B (probe, becomes active)" addSource "$B" "" ""
   pause 3
@@ -525,7 +544,7 @@ scenario_SRC_H06() {
 scenario_SRC_H07() {
   banner SRC-H07; need verbs:sources,removeSource apply:entry
   note "starts from the SRC-H06 end state (three sources, A active); run SRC-H06 first or seed the same way"
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   ipc_step "open the guide" open '{}'
   keys -k Tab o j
@@ -582,7 +601,7 @@ scenario_SRC_H08() {
   local K10; K10=$(fnv1a32 http://127.0.0.1:8765/gen-10k.m3u)
   note "OMARCHY_IPTV_DEBUG=1 makes switchSource and the guide rebuild log 'omarchy-iptv switch <ms>' (Lane 2)"
   export OMARCHY_IPTV_DEBUG=1
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   ipc_step "add the 10k source (probe ~0.6 s)" addSource http://127.0.0.1:8765/gen-10k.m3u "" ""
   pause 6
@@ -598,7 +617,7 @@ scenario_SRC_H08() {
 scenario_SRC_H09() {
   banner SRC-H09; need verbs:sources apply:entry
   step "wipe" "$H" clean
-  common_start "$A"
+  common_start "$A" || return 1
   pause 3
   ipc_step "open the guide on Sources" open '{}'
   keys -k Tab o
@@ -640,7 +659,7 @@ scenario_SRC_H09() {
 scenario_SRC_H10() {
   banner SRC-H10; need verbs:xtream,editMasked,sources apply:entry
   step "wipe" "$H" clean
-  common_start "$A"
+  common_start "$A" || return 1
   pause 3
   ipc_step "Xtream login through the harness" xtream "$XS" "$XU" "$XP"
   expect "{ok:true, id:$KX} then the probe of the served get.php (SRC-XT-02)"
@@ -698,7 +717,7 @@ scenario_SRC_H10() {
 scenario_SRC_H11() {
   banner SRC-H11; need verbs:addSource,sources
   step "wipe" "$H" clean
-  common_start "$A"
+  common_start "$A" || return 1
   pause 3
   ipc_step "duplicate: case-changed scheme/host" addSource "HTTP://127.0.0.1:8765/qa-src-a.m3u" "" ""
   ipc_step "duplicate: fragment" addSource "$A#x" "" ""
@@ -717,7 +736,7 @@ scenario_SRC_H11() {
   step "wipe" "$H" clean
   seed_fixtures
   write_state_v2 "$COUNT"
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   ipc_step "50th source (the served A counts as one: check the count first)" state
   ipc_step "add up to the cap" addSource http://127.0.0.1:9/cap-50.m3u "" ""
@@ -734,7 +753,7 @@ scenario_SRC_H11() {
 scenario_SRC_H12() {
   banner SRC-H12; need verbs:updateSource,sources,editMasked apply:entry
   step "wipe" "$H" clean
-  common_start "$A"
+  common_start "$A" || return 1
   pause 3
   ipc_step "add B" addSource "$B" "" ""
   pause 3
@@ -789,7 +808,7 @@ scenario_SRC_H12() {
 scenario_SRC_H13() {
   banner SRC-H13; need verbs:sources,addSource,xtream helper:cache
   step "wipe" "$H" clean
-  common_start "$A"
+  common_start "$A" || return 1
   pause 3
   ipc_step "userinfo source" addSource "$C" "" ""
   pause 3
@@ -816,7 +835,7 @@ scenario_SRC_H13() {
 scenario_SRC_H14() {
   banner SRC-H14; need verbs:addSource,cancelProbe,switchSource,removeSource
   step "wipe" "$H" clean
-  common_start "$A"
+  common_start "$A" || return 1
   pause 3
   ipc_step "slow probe (blackhole address, 20 s timeout)" addSource http://10.255.255.1/x.m3u "" ""
   local KS; KS=$(fnv1a32 http://10.255.255.1/x.m3u)
@@ -891,7 +910,7 @@ scenario_SRC_H16() {
   seed_fixtures
   write_state_v2 "$COUNT"
   sh_step "size and mode before start" "stat -c '%a %s %n' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   sh_step "after start (reconcile added the served A)" "stat -c '%a %s' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json"); jq '.sources|length' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
   sh_step "prune argv carries at most 50 keys" "grep -n 'cache prune' $(printf '%q' "$SCRATCH/logs/run.log") | head -2"
@@ -916,7 +935,7 @@ scenario_SRC_H16() {
   step "wipe" "$H" clean
   seed_fixtures
   write_tampered_state
-  harness_start --open --serve --keep --timeout 0 --playlist "$A"
+  harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   sh_step "tampered records dropped, no crash" "jq -c '[.sources[] | .key]' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json"); grep -n 'cache prune' $(printf '%q' "$SCRATCH/logs/run.log") | head -1; grep -ciE 'error|TypeError|undefined' $(printf '%q' "$SCRATCH/logs/run.log") || true"
   expect "valid keys only (584a58e5 and possibly deadbef2), prune argv with valid keys only, no QML errors (SRC-SEC-21, SRC-MODEL-07)"
@@ -994,21 +1013,53 @@ PY"
   sh_step "modes of the scratch caches" "find $(printf '%q' "$out") -exec stat -c '%a %n' {} + | sed 's|$out||'"
 }
 
+# B2. This printed MISSING lines and the caller exited 0 unconditionally, so
+# the Sources capability gate reported a missing verb with a green status.
+# It counts now, and `check-harness` exits 1 when anything is missing.
+gate_missing=0
+gate_ok()      { echo "  ok      $*"; }
+gate_missing() { echo "  MISSING $*"; gate_missing=$((gate_missing + 1)); }
+
 cmd_check_harness() {
   local v
   echo "harness: $ROOT/scripts/dev-harness/shell.qml"
   for v in addSource updateSource removeSource switchSource xtream sources activeCache cancelProbe editMasked signals failPersist; do
-    if have_verb "$v"; then echo "  ok      verb $v"; else echo "  MISSING verb $v"; fi
+    if have_verb "$v"; then gate_ok "verb $v"; else gate_missing "verb $v"; fi
   done
-  if fake_applies_entry; then echo "  ok      fake updateEntryInline applies the entry"; else echo "  MISSING fake updateEntryInline must apply the entry to fakeShell.barConfig (docs/QA-SOURCES.md section 6)"; fi
-  if grep -q -- '--source2' "$H"; then echo "  ok      run.sh --source2"; else echo "  MISSING run.sh --source2 (ARCH 8.4)"; fi
-  if have_cache_verb; then echo "  ok      helper cache subcommand"; else echo "  MISSING helper 'cache' subcommand (Lane 2)"; fi
-  if grep -qE 'validateSourceUrl|sourceView|xtreamUrls' "$ROOT/Model.js"; then echo "  ok      Model.js source functions"; else echo "  MISSING Model.js source functions (Lane 1)"; fi
-  if grep -qE 'switchSource|activeCacheDir' "$ROOT/Service.qml"; then echo "  ok      Service.qml source actions"; else echo "  MISSING Service.qml source actions (Lane 2)"; fi
-  if [[ -f $ROOT/tests/fixtures/source-urls.json ]]; then echo "  ok      tests/fixtures/source-urls.json (reconcile with qa-sources/qa-source-urls.json, SRC-MODEL-02)"; else echo "  MISSING tests/fixtures/source-urls.json (Lane 1)"; fi
-  command -v wtype >/dev/null && echo "  ok      wtype" || echo "  MISSING wtype"
-  command -v grim >/dev/null && echo "  ok      grim" || echo "  MISSING grim"
-  command -v wl-copy >/dev/null && echo "  ok      wl-copy" || echo "  MISSING wl-copy"
+  if fake_applies_entry; then gate_ok "fake updateEntryInline applies the entry"; else gate_missing "fake updateEntryInline must apply the entry to fakeShell.barConfig (docs/QA-SOURCES.md section 6)"; fi
+  # D1's shape again: a bare grep for an option matches run.sh's header
+  # comment as readily as its parser.
+  if qa_case_arm "$H" '--source2'; then gate_ok "run.sh --source2"; else gate_missing "run.sh --source2 (ARCH 8.4)"; fi
+  if have_cache_verb; then gate_ok "helper cache subcommand"; else gate_missing "helper 'cache' subcommand (Lane 2)"; fi
+  # D3. `grep -qE 'validateSourceUrl|sourceView|xtreamUrls' Model.js` was
+  # satisfied by a COMMENT mentioning any one of the three names. Load the
+  # module and call for the functions instead - the gate's whole question is
+  # whether the scenarios can use them. (Correction to the record: have_verb
+  # at :148 anchors on `function <name>(` and was never comment-satisfiable;
+  # it is left alone.)
+  if node -e '
+const M = require(process.argv[1]);
+const want = ["validateSourceUrl", "sourceView", "xtreamUrls"];
+const missing = want.filter(f => typeof M[f] !== "function");
+if (missing.length) { console.error("not callable: " + missing.join(", ")); process.exit(1); }
+' "$ROOT/Model.js" 2>/dev/null; then
+    gate_ok "Model.js source functions (loaded and callable)"
+  else
+    gate_missing "Model.js validateSourceUrl / sourceView / xtreamUrls not callable from node (Lane 1)"
+  fi
+  # Service.qml cannot be invoked from here, so anchor on the definition the
+  # way have_verb does rather than on a bare mention.
+  if qa_defines_function "$ROOT/Service.qml" switchSource; then
+    gate_ok "Service.qml switchSource()"
+  else
+    gate_missing "Service.qml switchSource() (Lane 2)"
+  fi
+  if [[ -f $ROOT/tests/fixtures/source-urls.json ]]; then gate_ok "tests/fixtures/source-urls.json (reconcile with qa-sources/qa-source-urls.json, SRC-MODEL-02)"; else gate_missing "tests/fixtures/source-urls.json (Lane 1)"; fi
+  if command -v wtype >/dev/null; then gate_ok wtype; else gate_missing wtype; fi
+  if command -v grim >/dev/null; then gate_ok grim; else gate_missing grim; fi
+  if command -v wl-copy >/dev/null; then gate_ok wl-copy; else gate_missing wl-copy; fi
+  printf '\n%d missing\n' "$gate_missing"
+  (( gate_missing == 0 ))
 }
 
 # ----------------------------------------------------------------- main
@@ -1034,7 +1085,9 @@ case $CMD in
   -h|--help|help) usage; exit 0 ;;
   key) [[ -n $ARG ]] || fail "key needs a URL or path"; fnv1a32 "$ARG"; exit 0 ;;
   list) refuse_real_dirs; cmd_list; exit 0 ;;
-  check-harness) cmd_check_harness; exit 0 ;;
+  # B2: this was `cmd_check_harness; exit 0`, so the gate printed MISSING
+  # lines and exited green.
+  check-harness) cmd_check_harness; exit $? ;;
 esac
 
 refuse_real_dirs
@@ -1054,6 +1107,9 @@ case $CMD in
       trap 'harness_stop' EXIT
     fi
     "$fn"
+    # B3: a scenario that gave up on its setup must not exit 0. Before this
+    # the file had no non-zero exit path at all.
+    (( setup_failed == 0 )) || { echo "qa-sources: $ARG ABANDONED (setup failed)" >&2; exit 1; }
     ;;
   *) usage; exit 2 ;;
 esac
