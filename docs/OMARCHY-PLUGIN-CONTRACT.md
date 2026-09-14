@@ -186,3 +186,41 @@ mpv 0.41 supports `--input-ipc-server=<path>`, `--force-window=immediate`,
 `--wayland-app-id=<s>` is available (verified; default "mpv"), use it for window rules / focus. JSON IPC over the socket: `{"command":["loadfile",url,"replace"]}`,
 `["stop"]`, `["quit"]`, `["get_property","media-title"]`, `["observe_property",1,"idle-active"]`.
 Drive the socket from the Python helper (stdlib `socket`); socat exists here but is not an omarchy dependency, so do not rely on it.
+
+## Verified host behavior: `barConfig` is published one write behind
+
+Found the hard way in v0.2.0 and confirmed on the live shell (defects
+D-LIVE-20 and D-LIVE-21). Any plugin that writes its own settings must know
+this.
+
+`shell.updateEntryInline(id, settings)` (shell.qml:1078) compares the proposed
+entry with the stored one and returns `false` WITHOUT persisting when nothing
+changed (line 1114). A `false` return therefore means "already stored", not
+"the write failed". Treating it as a failure produces a spurious error.
+
+On a real change it calls `persistShellConfig` (line 109), which assigns
+`shellConfig` and writes the file. `onShellConfigChanged` (line 66) emits
+`pluginsChanged()`, a `Connections` block (line 1052) calls `syncPluginApis()`
+(line 861), and that assigns every plugin's `shellApi.barConfig` from
+`publicBarConfig()` (line 326), which reads the `barConfig` binding declared at
+line 116.
+
+The trap: a QML change handler runs BEFORE bindings on the same property
+re-evaluate, so `publicBarConfig()` hands out the PREVIOUS bar configuration.
+An external change, such as `omarchy bar set` from a terminal, survives this
+because the user-config `FileView` re-reads the file and produces a second
+`shellConfig` assignment that flushes the first. A plugin's own write produces
+no second assignment, because `FileView.setText` does not retrigger its own
+watcher, so the plugin NEVER receives the echo of its own write.
+
+Consequence for plugin authors: never wait for the host to echo your own
+settings back before updating your UI. Apply your own write locally in the
+same turn, and drop that local override as soon as the host reports any value
+other than the one you wrote, so external changes still win. Keep the echo
+path idempotent so a late or duplicate echo is a no-op.
+
+Evidence: with an instrumented service, one `updateEntryInline` call produced
+24 `settingsChanged` notifications, every one carrying the OLD value, and a
+switch never observed a cache load within 40 seconds. The behavior is pinned
+by `tests/Model.spec.qml::test_hostEchoLagsByOneWrite`, which reproduces it in
+both binding declaration orders.
