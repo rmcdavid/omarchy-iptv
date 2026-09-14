@@ -1675,6 +1675,130 @@ class OrderingTest(PlayerTestCase):
         self.assertEqual(stash["seq"], 6)
         self.assertEqual(stash["verb"], "play")
 
+    def stand_down(self, zap_id, seq="9"):
+        """Drive one whole cold-start stand-down and return the reply and the
+        helper's own stderr. Same gate as the defect test above: the stub
+        binds its socket and then withholds the `mpv-version` reply
+        `player start` waits for, so the zap provably reaches the player
+        inside the start's handshake."""
+        gate = os.path.join(self.dir, "release-the-handshake")
+        self.env(STUB_MPV_GATE=gate)
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        start = subprocess.Popen(["python3", str(ROOT / "bin" / "omarchy-iptv"), "player", "start",
+                                  "--socket", self.sock, "--cache-dir", self.cache, "--id", "t:bbc1.uk",
+                                  "--seq", seq, "--ipc-timeout", "5", "--lock-timeout", "5",
+                                  "--spawn-timeout", "8", "--first-load-timeout", "1"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(self.reap_process, start)
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and not os.path.exists(self.sock):
+            time.sleep(0.005)
+        self.assertTrue(os.path.exists(self.sock), "the player bound its socket")
+        code, _, _, stderr = run("play", "--id", zap_id, "--socket", self.sock,
+                                 "--cache-dir", self.cache, "--scope", "g:QA",
+                                 "--since", "3000", "--ipc-timeout", "2")
+        self.assertEqual(code, 0, stderr)
+        pathlib.Path(gate).write_text("go", encoding="utf-8")
+        out, err = start.communicate(timeout=20)
+        err = err.decode("utf-8", "replace")
+        self.assertEqual(start.returncode, 0, err)
+        payload = json.loads(out.decode("utf-8").strip().splitlines()[-1])
+        self.assertFalse(payload["applied"], err)
+        return payload, err
+
+    def test_the_stand_down_line_names_the_channel_given_up_and_the_one_left_playing(self):
+        # D-CL-1. The line used to end `(intent %d over %d)` and those two
+        # numbers are equal by construction, so it could never say what it was
+        # added to say. THIS is the constructed case where the two values it
+        # reports now do differ: the start carries bbc1, the zap that beat it
+        # carries espn, and the line names both.
+        payload, err = self.stand_down("t:espn.us")
+        line = [text for text in err.splitlines()
+                if "a newer channel change reached the player first" in text]
+        self.assertEqual(len(line), 1, err)
+        line = line[0]
+        self.assertIn("intent 9 would have applied t:bbc1.uk", line)
+        self.assertIn("the player is on t:espn.us, written by play as entry 1", line)
+        self.assertIn("left it playing", line)
+        # The half that makes it a diagnostic rather than decoration: the two
+        # channels it reports are different strings, in a line whose predecessor
+        # printed the same number twice.
+        self.assertNotEqual(payload["id"], payload["playing"]["id"])
+        self.assertIn(payload["id"], line)
+        self.assertIn(payload["playing"]["id"], line)
+        # And the number that could not vary is gone rather than relabelled.
+        self.assertNotIn("over", line)
+        self.assertEqual(len(re.findall(r"intent \d+", line)), 1, line)
+        # Why it could not vary, pinned: `play` has no --seq of its own
+        # (ruling CL4), so it stamps the stash with the lock record - which
+        # inside a cold start is this start's own number, read back. If CL4 is
+        # ever lifted and `play` gains an intent of its own, this goes red and
+        # the line deserves revisiting.
+        self.assertEqual(self.read(helper.USER_DATA_STASH)["seq"], payload["seq"])
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), payload["seq"])
+
+    def test_the_stand_down_line_says_so_when_the_newer_change_is_the_same_channel(self):
+        # The other value the same field can take, driven the same way: a zap
+        # to the channel the start was going to apply anyway still stands the
+        # start down, and the line must not print one id twice as though it
+        # were two. A human reading this one knows the user is watching what
+        # they asked for.
+        payload, err = self.stand_down("t:bbc1.uk")
+        line = [text for text in err.splitlines()
+                if "a newer channel change reached the player first" in text][0]
+        self.assertIn("intent 9 would have applied t:bbc1.uk", line)
+        self.assertIn("the player is on that same channel, written by play as entry 1", line)
+        self.assertEqual(payload["id"], payload["playing"]["id"])
+        self.assertEqual(line.count("t:bbc1.uk"), 1, line)
+
+
+class StandDownNoteTest(unittest.TestCase):
+    """D-CL-1, the formatting on its own. The end-to-end cases above prove the
+    line the helper really emits; these pin what it says in the shapes a live
+    player can present that a stubbed cold start cannot easily be driven into.
+    """
+
+    @staticmethod
+    def note(seq=9, mine="t:bbc1.uk", **newer):
+        record = {"id": "", "name": "", "entryId": None, "verb": "", "loaded": True}
+        record.update(newer)
+        return helper.stand_down_note(seq, {"id": mine}, record)
+
+    def test_the_two_channels_are_what_varies(self):
+        first = self.note(id="t:espn.us", entryId=1, verb="play")
+        second = self.note(id="t:news.uk", entryId=1, verb="play")
+        self.assertNotEqual(first, second)
+        self.assertIn("would have applied t:bbc1.uk", first)
+        self.assertIn("the player is on t:espn.us", first)
+        self.assertIn("the player is on t:news.uk", second)
+
+    def test_a_load_with_no_stash_is_reported_as_unlabelled_not_as_an_empty_id(self):
+        line = self.note(loaded=True)
+        self.assertIn("the player is on a load this helper did not label", line)
+        self.assertNotIn("written by", line)
+        self.assertNotIn("entry", line)
+
+    def test_a_stash_with_no_entry_id_still_names_its_writer(self):
+        line = self.note(id="t:espn.us", verb="play")
+        self.assertIn("the player is on t:espn.us, written by play)", line)
+        self.assertNotIn("as entry", line)
+
+    def test_a_stash_from_an_older_schema_reports_the_entry_without_inventing_a_writer(self):
+        line = self.note(id="t:espn.us", entryId=3)
+        self.assertIn("the player is on t:espn.us, entry 3)", line)
+        self.assertNotIn("written by", line)
+
+    def test_a_zap_that_carried_a_url_and_no_channel_id_is_named_as_such(self):
+        line = self.note(entryId=2, verb="play")
+        self.assertIn("the player is on an unnamed stream, written by play as entry 2", line)
+
+    def test_no_intent_number_is_printed_when_the_verb_was_given_none(self):
+        # `player start` without --seq writes 0 to the lock record. Printing
+        # "intent 0" would be the same defect in a smaller font.
+        line = self.note(seq=0, id="t:espn.us", entryId=1, verb="play")
+        self.assertIn("it would have applied t:bbc1.uk", line)
+        self.assertNotIn("intent", line)
+
 
 class PrivacyTest(PlayerTestCase):
     def test_nothing_in_the_runtime_dir_or_any_argv_or_any_line_carries_the_credential(self):
