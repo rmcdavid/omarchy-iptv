@@ -925,6 +925,41 @@ TestCase {
     compare(Model.footerStatus({ configured: false, count: 0, warning: line }), "")
   }
 
+  // PO-10 / D-PLY-5: an mpvArgs option that hands the stream address to
+  // another program is kept (PO-5) and shown on the one warning line the
+  // guide already has. This walks the whole path in the V4 engine, exactly
+  // as Service.qml composes it and Guide.qml renders it - no reimplementation
+  // (CLAUDE.md 12): the strings below are what a user would read.
+  function test_playerOptionWarning() {
+    var handoff = "mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT
+    // Service.qml: playerArgWarnings, derived from the setting itself.
+    compare(Model.splitMpvArgs("--profile=low-latency --ytdl=yes").args, ["--profile=low-latency", "--ytdl=yes"])
+    compare(Model.splitMpvArgs("--profile=low-latency --ytdl=yes").warnings, [handoff])
+    compare(Model.splitMpvArgs("--profile=low-latency").warnings, [])
+    compare(Model.splitMpvArgs("--ytdl=no").warnings, [])
+    var player = Model.labelWarnings(Model.splitMpvArgs("--ytdl=yes").warnings, "player")
+    compare(player, ["Player warning: " + handoff])
+    // Service.qml: playlistWarnings = playerArgWarnings ++ playlistLoadWarnings.
+    // Guide.qml: warningText = footerWarning(service.playlistWarnings, epgWarningList).
+    var alone = Model.footerWarning(player.concat([]), [])
+    compare(alone, "Player warning: mpvArg --ytdl hands the stream address to another program")
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "01:53", warning: alone }), alone)
+    var both = Model.footerWarning(player.concat(["truncated to 50000 channels"]), ["1 programme dropped"])
+    compare(both, alone + " (+1 more)")
+    // Without the option nothing changes for anybody else (D-LIVE-18).
+    compare(Model.footerWarning([].concat(["truncated to 50000 channels"]), []), "Playlist warning: truncated to 50000 channels")
+    compare(Model.footerWarning([], []), "")
+    // The value is never shown: it can carry a credentialed URL of its own.
+    var proxy = Model.labelWarnings(Model.splitMpvArgs("--ytdl-raw-options=proxy=http://u:pw@prox.test:8080").warnings, "player")
+    compare(proxy.length, 1)
+    compare(proxy[0].indexOf("prox.test") === -1, true)
+    compare(proxy[0], "Player warning: mpvArg --ytdl-raw-options" + Model.MPV_HANDOFF_TEXT)
+    // Precedence (UX 6.1 / D-LIVE-22) is untouched: the warning still sits
+    // below playing, refreshing and the transient slot.
+    compare(Model.footerStatus({ configured: true, count: 8, playingName: "Arte", warning: alone }), Model.GLYPHS.play + " Arte" + Model.SEP + "s stop")
+    compare(Model.footerStatus({ configured: true, count: 8, refreshing: true, warning: alone }), "Refreshing" + Model.ELLIPSIS)
+  }
+
   // D-LIVE-19: one body surface at a time. Clearing playlistUrl at runtime
   // takes the rows, the group column and the counts with it, so the setup
   // surface is never drawn over a still-rendered channel list.

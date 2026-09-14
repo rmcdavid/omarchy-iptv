@@ -307,7 +307,19 @@ Item {
   // Warnings of the last successful playlist load (D-LIVE-18), URL-free;
   // the guide shows them until the next successful load without warnings.
   // A failed refresh keeps them: the cache in use is still that load's.
-  property var playlistWarnings: []
+  property var playlistLoadWarnings: []
+  // PO-10 / D-PLY-5: the mpvArgs options that hand the stream address to
+  // another program are kept (PO-5) but never kept quiet. This is not a
+  // helper's warning list - it is derived from the setting itself, so it
+  // appears the moment the option is in force and goes the moment it is
+  // removed, with no play required to notice it.
+  readonly property var playerArgWarnings: Model.labelWarnings(Model.splitMpvArgs(root.mpvArgs).warnings, "player")
+  // What the guide's one warning line reads (Guide.qml warningText). The
+  // player's line comes first: it is about where the user's credentials go,
+  // and a playlist parse warning that outranked it would hide it for good on
+  // any playlist that has one. Labelled entries carry their own wording, so
+  // the guide needs no third list.
+  readonly property var playlistWarnings: root.playerArgWarnings.concat(Model.asList(root.playlistLoadWarnings))
   // The same for the EPG helper's `warnings[]` (epg-status.json carries the
   // window's warnings on every successful run, `--now-only` included), shown
   // by the guide as `Guide data warning: ...` and cleared by the next clean
@@ -851,7 +863,7 @@ Item {
   function applyPlaylistStatus(text) {
     root.playlistStatus = Model.parseHelperStatus(text, "playlist")
     if (root.playlistStatus.ok === true) {
-      root.playlistWarnings = Model.statusWarnings(root.playlistStatus)
+      root.playlistLoadWarnings = Model.statusWarnings(root.playlistStatus)
       root.adoptSourceStats(root.playlistStatus)
     } else {
       root.lastError = root.statusReason
@@ -1874,7 +1886,7 @@ Item {
       // D-LIVE-10). The fetch itself is driven by the new cache's freshness
       // once its directory is bound (section 4.4 step 6), never from here.
       root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
-      root.playlistWarnings = []
+      root.playlistLoadWarnings = []
       root.lastError = ""
     }
     root.settingsInvalid = out.invalid
@@ -2008,7 +2020,7 @@ Item {
     root.channelIndex = ({})
     root.channelsMeta = ({})
     root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
-    root.playlistWarnings = []
+    root.playlistLoadWarnings = []
     root.playlistAttempted = false
     root.epgNow = ({})
     root.epgMeta = ({})
