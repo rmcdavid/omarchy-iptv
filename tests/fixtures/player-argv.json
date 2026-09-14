@@ -187,9 +187,11 @@
     },
     {
       "name": "a file_error carrying a URL is redacted to its host",
+      "_comment": "The two redactors differ in shape on purpose and have since v0.1: redact_urls() in python keeps scheme://host (it is also the helper's stdout/stderr filter), Model.redactUrls reduces to the host alone. Both drop the userinfo, the port, the path and the query, and QML redacts a second time, so the two converge at the sink. verdictPython pins the python shape rather than pretending they are identical.",
       "endFile": { "reason": "error", "file_error": "Failed to open http://user:pw@provider.test/live/token/1.m3u8", "playlist_entry_id": 1 },
       "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "Failed to open provider.test", "kind": "failed" }
+      "verdict": { "notify": true, "reason": "Failed to open provider.test", "kind": "failed" },
+      "verdictPython": { "notify": true, "reason": "Failed to open http://provider.test", "kind": "failed" }
     }
   ]
 }

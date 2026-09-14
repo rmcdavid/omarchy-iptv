@@ -376,18 +376,20 @@ check("--ytdl stays unreserved (PO-5) and still sorts after the built-in --ytdl=
 // ---- helper `player` verb argv (ARCHITECTURE-PLAYER.md 4.3) ----
 check("playerStartArgv: every value its own argv member, user tokens repeated",
   Model.playerStartArgv("/run/user/1000/omarchy-iptv/mpv.sock", "/c/sources/a1b2c3d4", "t:bbc1.uk", 41, "g:uk", 1758000123, ["--profile=low-latency", "--cache=yes"]),
-  ["player", "start", "--socket", "/run/user/1000/omarchy-iptv/mpv.sock", "--cache-dir", "/c/sources/a1b2c3d4", "--id", "t:bbc1.uk", "--seq", "41", "--scope", "g:uk", "--since", "1758000123", "--mpv-arg", "--profile=low-latency", "--mpv-arg", "--cache=yes"])
+  ["player", "start", "--socket", "/run/user/1000/omarchy-iptv/mpv.sock", "--cache-dir", "/c/sources/a1b2c3d4", "--id", "t:bbc1.uk", "--seq", "41", "--scope", "g:uk", "--since", "1758000123", "--mpv-arg=--profile=low-latency", "--mpv-arg=--cache=yes"])
 check("playerStartArgv: optional scope and since are omitted, --seq is always present",
   Model.playerStartArgv("/s", "/c", "t:x", 0, "", 0, null),
   ["player", "start", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "0"])
-check("playerStartArgv: an option-looking user token stays one member and never joins", (() => {
-  const a = Model.playerStartArgv("/s", "/c", "t:x", 1, "", 0, ["--vf=lavfi=[scale=2]", "--cache=yes"])
-  return [a.filter(t => t === "--mpv-arg").length, a[a.length - 3], a[a.length - 1], a.every(t => t.indexOf(" ") === -1 || t === "--vf=lavfi=[scale=2]")]
-})(), [2, "--vf=lavfi=[scale=2]", "--cache=yes", true])
+check("playerStartArgv: an option-looking user token stays one member and is attached, not separated", (() => {
+  const a = Model.playerStartArgv("/s", "/c", "t:x", 1, "", 0, ["--vf=lavfi=[scale=2]", "--cache=yes", "--log-file=/tmp/x"])
+  return [a.filter(t => t.indexOf("--mpv-arg=") === 0).length, a.indexOf("--mpv-arg") !== -1, a.slice(-3)]
+})(), [3, false, ["--mpv-arg=--vf=lavfi=[scale=2]", "--mpv-arg=--cache=yes", "--mpv-arg=--log-file=/tmp/x"]])
+check("playerStartArgv: the optional owner claim rides the same call", Model.playerStartArgv("/s", "/c", "t:x", 5, "", 0, [], 301706),
+  ["player", "start", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "5", "--owner-pid", "301706"])
 check("playerStopArgv", Model.playerStopArgv("/s", 42), ["player", "stop", "--socket", "/s", "--seq", "42"])
 check("playerStopArgv --from picks the first rung", [Model.playerStopArgv("/s", 42, "term"), Model.playerStopArgv("/s", 42, "bogus")], [["player", "stop", "--socket", "/s", "--seq", "42", "--from", "term"], ["player", "stop", "--socket", "/s", "--seq", "42"]])
 check("playerRestartArgv is start plus the rung, under one lock", Model.playerRestartArgv("/s", "/c", "t:x", 7, "g:uk", 0, ["--cache=yes"], "term"),
-  ["player", "restart", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "7", "--scope", "g:uk", "--mpv-arg", "--cache=yes", "--from", "term"])
+  ["player", "restart", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "7", "--scope", "g:uk", "--mpv-arg=--cache=yes", "--from", "term"])
 check("playerProbeArgv with and without an owner claim", [Model.playerProbeArgv("/s", 301706), Model.playerProbeArgv("/s", 0)], [["player", "probe", "--socket", "/s", "--owner-pid", "301706"], ["player", "probe", "--socket", "/s"]])
 check("playerOrphanCheckArgv", [Model.playerOrphanCheckArgv("/s", 301706, 6), Model.playerOrphanCheckArgv("/s", 301706, null)], [["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"], ["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"]])
 check("helperArgv prefixes the interpreter and the helper path", Model.helperArgv("/p/bin/omarchy-iptv", Model.playerStopArgv("/s", 3)), ["python3", "/p/bin/omarchy-iptv", "player", "stop", "--socket", "/s", "--seq", "3"])

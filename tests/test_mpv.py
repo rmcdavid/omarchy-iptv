@@ -49,21 +49,40 @@ def run(*args):
 
 class FakeMpv:
     """Accepts connections on a unix socket, records every command and answers
-    like mpv: {"error": "success", "data": ..., "request_id": N}."""
+    like mpv: {"error": "success", "data": ..., "request_id": N}.
 
-    def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True):
+    Each connection is served by its own thread, because the detached player
+    keeps a persistent subscriber on the socket while control calls come and
+    go: a server that handled one connection at a time would deadlock the
+    second caller (and would be more forgiving than mpv, which names its
+    clients ipc_0 / ipc_1 and correlates by request_id).
+
+    It also mirrors three things real mpv does that the M2-02 paths depend on:
+    `user-data/<node>` sub-paths store and read back per node while the top
+    level is not writable, `loadfile` answers with a playlist_entry_id, and
+    events can arrive unasked at any moment (`inject`).
+    """
+
+    def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True,
+                 entry_ids=True, user_data=None):
         self.path = path
         self.props = props or {}
         self.event_first = event_first
         self.silent = silent
         self.refuse = set(refuse)
         self.close_on_quit = close_on_quit
+        self.entry_ids = entry_ids
+        self.user_data = dict(user_data or {})
         self.commands = []
+        self.log_levels = []
+        self.entry_id = 0
         self.lock = threading.Lock()
+        self.conns = []
+        self.workers = []
         self.running = True
         self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server.bind(path)
-        self.server.listen(4)
+        self.server.listen(8)
         self.server.settimeout(0.05)
         self.thread = threading.Thread(target=self.serve, daemon=True)
         self.thread.start()
@@ -76,7 +95,23 @@ class FakeMpv:
                 continue
             except OSError:
                 break
-            self.handle(conn)
+            worker = threading.Thread(target=self.handle, args=(conn,), daemon=True)
+            with self.lock:
+                self.conns.append(conn)
+                self.workers.append(worker)
+            worker.start()
+
+    def inject(self, event):
+        """Push an unsolicited event line to every live connection, the way
+        mpv emits start-file / end-file / log-message / property-change."""
+        payload = (json.dumps(event) + "\n").encode("utf-8")
+        with self.lock:
+            targets = list(self.conns)
+        for conn in targets:
+            try:
+                conn.sendall(payload)
+            except OSError:
+                continue
 
     def handle(self, conn):
         conn.settimeout(3)
@@ -104,6 +139,9 @@ class FakeMpv:
                         return
                     conn.sendall((json.dumps(reply) + "\n").encode("utf-8"))
         finally:
+            with self.lock:
+                if conn in self.conns:
+                    self.conns.remove(conn)
             try:
                 conn.close()
             except OSError:
@@ -114,17 +152,56 @@ class FakeMpv:
         request_id = message.get("request_id")
         if command[0] == "quit":
             return None if self.close_on_quit else {"error": "success", "request_id": request_id}
+        if command[0] == "request_log_messages":
+            with self.lock:
+                self.log_levels.append(command[1])
+            return {"error": "success", "request_id": request_id}
         if command[0] == "get_property":
-            if command[1] in self.props:
-                return {"error": "success", "data": self.props[command[1]], "request_id": request_id}
+            name = command[1]
+            if name in self.props:
+                return {"error": "success", "data": self.props[name], "request_id": request_id}
+            if name.startswith("user-data/"):
+                node = name.split("/", 1)[1]
+                with self.lock:
+                    if node in self.user_data:
+                        return {"error": "success", "data": self.user_data[node], "request_id": request_id}
+                return {"error": "property not found", "request_id": request_id}
+            if name == "user-data":
+                with self.lock:
+                    return {"error": "success", "data": dict(self.user_data), "request_id": request_id}
             return {"error": "property not found", "request_id": request_id}
-        if command[0] == "set_property" and command[1] in self.refuse:
-            return {"error": "property unavailable", "request_id": request_id}
+        if command[0] == "set_property":
+            name = command[1]
+            if name in self.refuse:
+                return {"error": "property unavailable", "request_id": request_id}
+            if name == "user-data":
+                # Verified on mpv 0.41: the top level is not writable.
+                return {"error": "error accessing property", "request_id": request_id}
+            if name.startswith("user-data/"):
+                with self.lock:
+                    self.user_data[name.split("/", 1)[1]] = command[2]
+                return {"error": "success", "request_id": request_id}
+            return {"error": "success", "data": None, "request_id": request_id}
+        if command[0] == "loadfile" and self.entry_ids:
+            with self.lock:
+                self.entry_id += 1
+                entry = self.entry_id
+            return {"error": "success", "data": {"playlist_entry_id": entry}, "request_id": request_id}
         return {"error": "success", "data": None, "request_id": request_id}
 
     def close(self):
         self.running = False
         self.thread.join(2)
+        with self.lock:
+            targets = list(self.conns)
+            workers = list(self.workers)
+        for conn in targets:
+            try:
+                conn.close()
+            except OSError:
+                pass
+        for worker in workers:
+            worker.join(2)
         self.server.close()
         try:
             os.unlink(self.path)

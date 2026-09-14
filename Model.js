@@ -1320,28 +1320,39 @@ function seqArg(seq) {
   return String(isFinite(n) && n > 0 ? n : 0)
 }
 
+// One `--mpv-arg=<token>` member per user token. The attached form is not
+// cosmetic: argparse refuses an option-looking VALUE, so the separated form
+// `--mpv-arg --profile=low-latency` dies with "expected one argument" - which
+// is every realistic token, since mpv options all start with "--" (verified
+// against python 3.14's argparse). Attached, each token is still exactly one
+// argv member, never joined with another and never split.
 function mpvArgArgv(mpvArgs) {
   var list = asList(mpvArgs)
   var out = []
   for (var i = 0; i < list.length; i++) {
     var token = str(list[i])
     if (token === "") continue
-    out.push("--mpv-arg")
-    out.push(token)
+    out.push("--mpv-arg=" + token)
   }
   return out
 }
 
-function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs) {
+function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid) {
   var argv = ["--socket", str(socket), "--cache-dir", str(cacheDir), "--id", str(id), "--seq", seqArg(seq)]
   if (str(scope) !== "") argv = argv.concat(["--scope", str(scope)])
   var when = Math.floor(Number(since))
   if (isFinite(when) && when > 0) argv = argv.concat(["--since", String(when)])
+  var pid = Math.floor(Number(ownerPid))
+  if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)])
   return argv.concat(mpvArgArgv(mpvArgs))
 }
 
-function playerStartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs) {
-  return ["player", "start"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs))
+// `ownerPid` is optional and additive: passing Quickshell.processId here
+// claims the player for this shell at the same moment it starts playing, so
+// the plugin-removal case (PO-2 / PLAYER-LIVE-04) has a claim to check even
+// when the service never ran a probe that found anything.
+function playerStartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid) {
+  return ["player", "start"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid))
 }
 
 // `from` picks the first rung: "" or "quit" starts at `quit` over IPC,
@@ -1354,8 +1365,8 @@ function playerStopArgv(socket, seq, from) {
   return argv
 }
 
-function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, from) {
-  var argv = ["player", "restart"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs))
+function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, from, ownerPid) {
+  var argv = ["player", "restart"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid))
   var rung = str(from)
   if (rung === "quit" || rung === "term" || rung === "kill") argv = argv.concat(["--from", rung])
   return argv
