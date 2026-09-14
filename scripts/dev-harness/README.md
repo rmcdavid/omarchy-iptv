@@ -112,9 +112,14 @@ $H ipc sources                 # JSON of service.sources (id/label/host/kind/cou
 $H ipc editMasked <key>        # the edit-form view with playlistMasked / epgMasked only (alias: sourceEdit)
 $H ipc signals                 # the last 20 source signal payloads (sourceProbeFinished, sourceSwitched,
                                #   sourceRemoved, sourcesPersistFailed, configuredChanged), oldest first
-$H ipc failPersist true        # the fake updateEntryInline refuses every change until `failPersist false`
+$H ipc failPersist true        # takes updateEntryInline off the shell api (a host that cannot write
+                               #   our entry) until `failPersist false`; a false RETURN is not a failure
 $H ipc activeCache             # cache/omarchy-iptv/sources/<key> of the active source
 $H ipc set playlistUrl /path   # CLI parity: reconciles into the history (origin cli)
+$H ipc setStored playlistUrl /path  # `set` without the user-config re-read: the host stores the value
+                               #   but has not published it, so the plugin still sees the previous one
+$H ipc hostEntry               # {"stored":"<key>","published":"<key>"}: what the host has stored for our
+                               #   entry vs what it has handed the plugin. They differ by one write.
 $H ipc state                   # + activeSourceKey, cacheReady, probing, switching, sourceErrors, settingsInvalid,
                                #   canAddSource; guide: returnMode, sourceCursor(Kind), formFocus, formActive,
                                #   formProbing, sourcesNotice (the Sources result line: a failed switch probe),
@@ -143,6 +148,28 @@ switches each way against a generated 10k list, median must stay under
 H7 (remove the active source), a `failPersist` switch (SR25) and privacy
 greps over the log and IPC output. It prints one PASS/FAIL line per check and a summary; the
 harness log is `$SCRATCH/scenario.log`.
+
+### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
+
+`shell.qml` here reproduces the real host's config plumbing in its shape
+**and its declaration order**: `shellConfig`, then the change handler that
+republishes every plugin api (`/usr/share/omarchy/shell/shell.qml:66` ->
+`pluginsChanged` -> `syncPluginApis` -> `publicBarConfig`), then the
+`barConfig` binding that handler reads (shell.qml:109). A QML change handler
+runs before the bindings that depend on the same property are re-evaluated,
+so what a plugin is handed is the **previous** bar. An external write gets a
+second assignment when the user-config FileView re-reads the changed file
+and so lands promptly; a plugin's own `updateEntryInline` is the last
+assignment there is, and the host's own `FileView.setText` does not
+re-trigger its watcher, so its echo never arrives at all.
+
+The earlier fake fed the plugin's own write straight back into
+`fakeShell.barConfig`, which is exactly what the real host does not do: it
+masked both P1 defects through two QA passes. Keep the ordering above
+intact. `ipc hostEntry` shows the two sides, and the scenario's
+`== D-LIVE-20` block asserts that a switch takes effect **while** the
+published bar still names the previous source. Against a service that waits
+for the echo that block fails, along with H2, H6/H8 and H7.
 
 Pitfalls seen in the QA and fix passes: `wtype space` types the letters
 s-p-a-c-e (use `wtype -k space`); `wtype -d 0` is rejected (`-d 1` works);
