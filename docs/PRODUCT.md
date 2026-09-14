@@ -118,3 +118,30 @@ recording via ffmpeg, first-class layout on vertical bars.
 Product Owner → Project Manager (plan) ‖ Software Architect (ARCHITECTURE.md +
 scaffold) ‖ UI/UX Designer (UX.md) → Front-end Developer builds M1 → QA verifies
 against this document → Product Owner accepts.
+
+## M2 scope decision (product owner, 2026-09-14)
+
+v0.1.0 shipped the MVP and v0.2.0 shipped Sources (M2-01), which absorbed the
+"multiple playlists" and "Xtream helper" backlog items. This section sets the
+order for the rest of M2 so the team does not have to re-litigate it per lane.
+
+Ranking rule: remove a shipped limitation before adding a feature; prefer work
+that a real IPTV viewer feels every session over work that looks good in a
+screenshot; prefer cheap items that become cheap only after a dependency lands.
+
+| Rank | Item | Why now | Gate |
+|---|---|---|---|
+| 1 | M2-02 detached player | Removes the top known limitation (playback dies with `omarchy restart shell`) and closes security finding S-03 (stream URL on the command line). Everything else in the player area is easier afterwards. | Design doc `docs/ARCHITECTURE-PLAYER.md`, then lanes, then a live pass. |
+| 2 | M2-03 channel numbers and numeric zap | The classic television interaction. Providers already ship `tvg-chno`, the helper already parses it into `chno`, and the guide reserves the digit keys. High value for the smallest new surface. | Digits select, a timeout commits, unknown numbers report it. |
+| 3 | M2-05 picture in picture | Cheap once the player is detached: a Hyprland float/pin/resize rule applied over IPC to a window we no longer own as a child. Ships as a keybinding and a guide action. | Works with the detached player; no second window. |
+| 4 | M2-04 channel logos | Real polish, but it is the first feature that fetches third-party images. Needs a disk cache, a size cap, a per-source directory, and a decision about contacting logo hosts at all (a privacy question, since logo URLs sit on the provider's CDN). Ships behind a setting, default on. | Cache under the source's cache dir, capped; no request without a configured playlist; guide stays inside the open budget. |
+| 5 | M2-08 first-class vertical bar layout | Small, self-contained, and the only place the bar widget is knowingly degraded (glyph only). | Renders correctly in all four bar positions. |
+| 6 | M2-06 recording, M2-07 catch-up and timeshift | Deferred out of v0.3.0. Both are large: recording needs storage management, naming, disk-full handling and a library surface; catch-up is provider-specific and cannot be tested without a provider that supports it. Revisit once 1 to 5 have shipped and real usage says which one matters. | Not scheduled. |
+
+v0.3.0 is ranks 1 to 3. Ranks 4 and 5 ship in v0.4.0 unless a lane finishes
+early. Ranks 6 stay in the backlog with no date.
+
+Standing constraints for every M2 lane, unchanged from M1: theme tokens only,
+argv-only process launching, stdlib-only Python helper, no sudo, no writes
+inside the plugin directory, URLs redacted to hosts at every sink, and the
+overlay open budget of 150 ms with a 10,000 channel list.
