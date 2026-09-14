@@ -3003,7 +3003,8 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
                 # The claim is about which shell owns the player, not about
                 # which channel is on it, so it is still ours to write.
                 client.try_command("set_property", USER_DATA_OWNER, claim)
-            log("player %s: a newer channel change reached the player first; left it playing" % verb)
+            log("player %s: a newer channel change reached the player first (intent %d over %d); left it playing"
+                % (verb, newer["seq"], seq))
             warnings.append("a newer channel change reached the player first")
     except HelperError as error:
         if lock_fd >= 0:

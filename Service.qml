@@ -1035,7 +1035,7 @@ Item {
           // WRITES nowPlaying with no load to match it - and then drains the
           // burst's last intent unconditionally two lines later.
           root.lastError = reason
-          if (root.healthFailures === 0) console.warn("omarchy-iptv: play result unreadable:", reason)
+          console.warn("omarchy-iptv: could not tell whether the channel changed:", reason)
         } else {
           root.lastError = reason
           console.warn("omarchy-iptv: play failed:", reason)
