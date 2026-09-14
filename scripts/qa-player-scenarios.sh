@@ -688,7 +688,7 @@ h18() {
   expect "the shell still says t:qa.live; the player says t:qa.plain"
   sh_step "wait ONE health tick (10 s timer, 2 s probe deadline) and look again" "sleep 14"
   if (( APPLY )); then
-    is "PLY-H18 the shell never relabelled itself from the player (CL5)" \
+    is "PLY-H18 the shell never relabelled itself from the player (CL5) (forward guard only)" \
        "$(svc "d['nowPlaying']['id'] if d.get('nowPlaying') else None")" "t:qa.live"
     is "PLY-H18 the player is back on the channel the user chose (CL6)" \
        "$(mpvq '{"command":["get_property","user-data/omarchy-iptv"],"request_id":7}' \
