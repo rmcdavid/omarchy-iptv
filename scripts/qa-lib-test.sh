@@ -400,15 +400,20 @@ is "and stays green when they all do" "$floor_ok" "0"
 declared=$(grep -oE '^EXPECTED_CHECKS=[0-9]+' "$PS" | head -1 | cut -d= -f2)
 top=$(qa_count '^(is|ck) ' "$PS")            # includes the floor's own line
 inloop=$(qa_count '^[[:space:]]+(is|ck) ' "$PS")   # P14's `for again in 1 2`
-is "the declared floor matches the assertions the scenario actually has" \
+is "the player floor matches the assertions that scenario actually has" \
    "$declared" "$(( top - 1 + 2 * inloop ))"
+
+SS="$ROOT/scripts/dev-harness/sources-scenario.sh"
+sdeclared=$(grep -oE '^EXPECTED_CHECKS=[0-9]+' "$SS" | head -1 | cut -d= -f2)
+is "the sources floor matches the assertions that scenario actually has" \
+   "$sdeclared" "$(( $(qa_count '^check ' "$SS") + $(qa_count '^checks=[$][(][(]checks' "$SS") - 1 ))"
 
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=95
+EXPECTED=96
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

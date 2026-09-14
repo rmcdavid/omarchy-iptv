@@ -35,10 +35,17 @@ HARNESS_PID=""
 SILENT_PID=""
 pass=0
 fail=0
+# `checks` counts ASSERTIONS; the bare `|| bad` guards move `fail` without
+# being assertions. Only `checks` is comparable run to run, which is what the
+# floor at the end of the file needs.
+checks=0
+
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
 
 ok()   { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
-check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+check() { checks=$((checks + 1)); if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
 # JSON helper: jq-less field access, `py '<expr over d>' <json>`; booleans
 # print as JSON (true / false), everything else as Python prints it.
@@ -86,9 +93,20 @@ echo "== setup (scratch $SCRATCH)"
 mkdir -p "$FIX" "$CACHE" "$(dirname "$STATE")"
 sed "s|__LIVE__|http://127.0.0.1:9/dead/live.m3u8|g" "$HERE/fixtures/harness.m3u.in" >"$FIX/harness.m3u"
 cp "$ROOT/tests/fixtures/basic.m3u" "$FIX/basic.m3u"
-if [[ ! -f $FIX/gen-10k.m3u ]]; then
-  python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS_10K" --groups 400 --seed 1 --out "$FIX/gen-10k.m3u" >/dev/null
+# C5. `-f` alone trusted whatever was on disk: $FIX survives `run.sh clean`,
+# the generator's exit status was discarded, and gen-playlist.py wrote
+# non-atomically, so an interrupted generation or a run with a different
+# OMARCHY_IPTV_SCENARIO_CHANNELS left a stale or truncated playlist that every
+# later run reused. Validate the CONTENT, not the existence, and regenerate on
+# a mismatch.
+fixture_channels() { qa_count '^#EXTINF' "$FIX/gen-10k.m3u"; }
+if [[ "$(fixture_channels)" != "$CHANNELS_10K" ]]; then
+  echo "   generating the $CHANNELS_10K channel fixture (had $(fixture_channels))"
+  if ! python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS_10K" --groups 400 --seed 1 --out "$FIX/gen-10k.m3u" >/dev/null; then
+    bad "the 10k fixture could not be generated"; exit 1
+  fi
 fi
+check "the 10k fixture really holds $CHANNELS_10K channels" '[[ "$(fixture_channels)" == "$CHANNELS_10K" ]]'
 # H1 seed: the 0.1 layout (five files at the cache root) and a v1 state file.
 python3 "$HELPER" playlist --url "$FIX/harness.m3u" --cache-dir "$CACHE" >/dev/null
 printf '{"version":1,"favorites":["t:bbc1.uk","t:bbc2.uk"],"recents":[{"id":"t:bbc1.uk","name":"BBC One HD","at":1757700000}],"lastPlayed":null}\n' >"$STATE"
@@ -104,11 +122,22 @@ print(s.getsockname()[1]); sys.stdout.flush()
 while True: time.sleep(3600)
 PY
 SILENT_PID=$!
-sleep 0.3
+# C6. A flat `sleep 0.3` then an unchecked read: if the background python had
+# not flushed, SILENT_PORT was empty, the cancel-probe block built
+# http://127.0.0.1:/slow.m3u, and its check went red for a reason nobody would
+# read as a race.
+qa_wait_nonempty "$SCRATCH/silent.port" 10 || { bad "the silent listener never reported a port"; exit 1; }
 SILENT_PORT=$(cat "$SCRATCH/silent.port")
+check "the silent listener reported a usable port" '[[ "$SILENT_PORT" =~ ^[0-9]+$ ]]'
 
 echo "== start harness (OMARCHY_IPTV_DEBUG=1, --keep)"
-OMARCHY_IPTV_DEBUG=1 "$RUN" --keep --timeout 120 --playlist "$FIX/harness.m3u" >>"$LOG" 2>&1 &
+# C7. The scenario's own waits sum well past 120 s (a 30 s wait_log, a 20 s,
+# ten switch loops, several 15 s waits). When quickshell was killed mid-run
+# every later svc returned empty, most checks went red - and the two privacy
+# checks at the end PASSED, because a dead harness cannot leak. That is the
+# concrete path by which the privacy sweep reported clean on nothing at all.
+HARNESS_TIMEOUT=${OMARCHY_IPTV_SCENARIO_TIMEOUT:-600}
+OMARCHY_IPTV_DEBUG=1 "$RUN" --keep --timeout "$HARNESS_TIMEOUT" --playlist "$FIX/harness.m3u" >>"$LOG" 2>&1 &
 HARNESS_PID=$!
 wait_log 'service loaded' 15 || { bad "harness did not start (see $LOG)"; exit 1; }
 wait_for true 15 svc "['cacheReady']" || bad "cacheReady never became true"
@@ -288,9 +317,56 @@ res=$(ipc switchSource "$K2"); wait_log "sourceSwitched .*\"id\":\"$K2\"" 10 || 
 check "switch works again once the host accepts" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" ]]'
 
 echo "== privacy"
-check "harness log carries no fixture path or URL from source operations" '! grep -E "sourceProbeFinished|sourceSwitched|updateEntryInline" "$LOG" | grep -qE "://|$FIX"'
-check "IPC status carries no URL" '! ipc state | grep -q "://"'
+# C7's other half: assert the harness is still alive BEFORE the sweeps, so a
+# scenario that died at minute two cannot sign off on privacy.
+check "the harness is still alive at the privacy sweep" 'kill -0 "$HARNESS_PID" 2>/dev/null'
+# A4. `! grep -E <labels> "$LOG" | grep -qE "://"` passed on an empty log and
+# on a log whose only leak sat on a line carrying none of the three labels.
+# The stated cause on record - pipefail making the pipeline status 1 - is
+# wrong: the expression behaves identically with pipefail on and off, because
+# the second grep already exits 1 on empty input. The real cause is the absent
+# positive control. qa_leak_on_labelled returns 2 when there is nothing
+# labelled to judge, and 2 is not a pass.
+qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|updateEntryInline' "://|$FIX" "$LOG"
+privacy_st=$?
+checks=$((checks + 1))
+case $privacy_st in
+  0) ok "harness log carries no fixture path or URL from source operations" ;;
+  1) bad "harness log LEAKS a fixture path or URL on a source-operation line" ;;
+  *) bad "no sourceProbeFinished/sourceSwitched/updateEntryInline line in the log at all: the privacy sweep swept nothing" ;;
+esac
+# The residue A4 names and the plan's fix does not close: a leak on a line
+# that carries none of the three labels. Separate check, so that a red here is
+# diagnosable rather than conflated with the labelled sweep above.
+check "no credentialed URL anywhere in the harness log" '! grep -qaE "://[^ ]*[@?]" "$LOG"'
+# :292 and :144 passed outright when the IPC was dead, because ipc() swallows
+# stderr and an empty answer contains no "://". An empty answer is vacuous.
+state_answer=$(ipc state)
+qa_answer_lacks '://' "$state_answer"
+state_st=$?
+checks=$((checks + 1))
+case $state_st in
+  0) ok "IPC status carries no URL" ;;
+  1) bad "IPC status carries a URL" ;;
+  *) bad "the IPC did not answer at all: 'status carries no URL' is not evidence" ;;
+esac
+
+# The floor. A check that stops executing must turn the run red rather than
+# shorten the summary - see D-PLY-9 and scripts/qa-lib-test.sh. Recount as
+#   grep -c '^check ' <this file>  plus the standalone `checks=$((checks + 1))`
+#   bumps, minus 1
+# (the three-way `case` blocks bump the counter by hand, and the floor's own
+# bump does not count). scripts/qa-lib-test.sh asserts that arithmetic, so a
+# forgotten bump goes red on check.sh rather than here. Never lower it.
+EXPECTED_CHECKS=65
+ran=$checks
+checks=$((checks + 1))
+if [[ "$ran" == "$EXPECTED_CHECKS" ]]; then
+  ok "the scenario ran every check it has ($ran)"
+else
+  bad "the scenario ran $ran checks, expected $EXPECTED_CHECKS (one stopped executing)"
+fi
 
 echo
-echo "summary: $pass passed, $fail failed (log: $LOG)"
+echo "summary: $pass passed, $fail failed, $checks assertions executed (log: $LOG)"
 (( fail == 0 ))
