@@ -1573,3 +1573,34 @@ hunting for them.
 | A5 | `8 * n + 8` design units is the right number-column width for JetBrains Mono digits at `Style.font.body`. Arithmetic on a monospace assumption. | live item 1 |
 | A6 | 1500 ms is a comfortable inter-digit timeout. Judgement against television convention plus the fact that a commit here is harmless. | live item 3 |
 | A7 | No real playlist in the project's asset list is numbered, so the live pass needs a supplied or generated one. Verified against `docs/QA-ASSETS.md` and every fixture (only two bare `tvg-chno=12` lines exist in the whole tree), but not against the PO's own provider. | OQ 13 |
+
+## 13. Product owner rulings (2026-09-14)
+
+Design accepted. Rulings CN1 to CN14 answer section 11 in order and are
+binding; a lane that wants to deviate raises a numbered decision request.
+Where I differ from the recommendation I say why.
+
+| # | Ruling |
+|---|---|
+| CN1 | Select only, as recommended, with one addition that completes the picture. Inside the guide, digits move the cursor and `Enter` or `Space` keep exactly the meanings `UX.md` section 3.1 gives them, so a mistyped number costs nothing and `101` then `Enter` is still one gesture. True television tuning lives outside the guide: the IPC verb of CN10 PLAYS immediately, because a user who bound a key to it is not browsing, they are changing the channel. That split is the whole answer to "does a number play", and it must be stated in the README that way. |
+| CN2 | `numberEntryMs` is a setting, range 400 to 5000, default 1500. Agreed, and for the reason given: the gap between a slow typist getting channel 101 and getting channels 1, 0 and 1 is an accessibility matter, not a house style. |
+| CN3 | `channelOrder` is a string. Agreed. |
+| CN4 | Favorites never follow number order. Agreed, emphatically. Favorites is a list the user built by hand; a provider's numbering scheme does not get to rewrite it. |
+| CN5 | Keep the all-digit search ranking tier. Agreed. The guide opens in search mode, so without it the feature is invisible from the default mode, which would be a feature nobody discovers. |
+| CN6 | A non-numeric `tvg-chno` renders as nothing. Agreed. A number column that sometimes says `N/A` invites the user to type something unreachable. |
+| CN7 | Display `7`, not `007`. Agreed, and the stated principle is the right one: the number you see must be the number you type. Keep `chnoLabel` so the decision is reversible in one line. |
+| CN8 | Accept both `.` and `,` on input, folded to `.`, and accept both `.` and `-` on parse. Agreed. A user should not need to know which character their numpad emits. |
+| CN9 | Duplicate numbers cycle on re-typing. Agreed. It is stateless and it is the only way to reach an HD twin by number. |
+| CN10 | A new IPC verb rather than overloading `play`. Agreed, and per CN1 that verb plays immediately. The day a provider ships `tvg-id="101"` an overloaded `play` becomes ambiguous, and the existing verb already has two meanings. |
+| CN11 | I differ slightly. Accept `tvg-chno` now AND a parse-time fallback to `tvg-channel-number` and `channel-number`, because the recommendation itself calls that a one-line change and the failure it prevents is the worst kind: a user whose playlist has numbers sees a feature that silently does nothing, with no error to search for. Defer the XMLTV `<lcn>` source, which needs a guide-to-channel join and is a feature of its own. |
+| CN12 | I differ, and this is my correction, not the designer's error. Lane A cannot start immediately: it owns `Model.js`, and so does M2-02 lane PA, which is in flight. I broke that rule once already today and had to patch a lane mid-build. Sequencing is strict: M2-02 PA merges, then M2-02 PB merges, then M2-03 Lane A, then M2-03 Lane B. The three-line rebase the design anticipates is still expected on top. |
+| CN13 | Use the synthetic generator for the live pass, extended to emit realistic numbering rather than a dense one-to-N run: gaps, four-digit blocks per category, and at least one subchannel pair. Record the gap explicitly in the QA results. Before the live pass I will ask whether a real numbered playlist is available, since only a real provider export shows what real numbering looks like; if one appears, it supersedes the synthetic plan. |
+| CN14 | No separate number up and down keys. Agreed. Under number ordering that is already `j` and `k`, and under playlist ordering the user asked for playlist order. |
+
+One addition of my own. Section 12 lists seven assumptions that were reasoned
+rather than measured, including whether matching on the key's text really does
+make numpad and AZERTY digits work. That one is not a detail: if it is wrong,
+the feature is broken for a whole class of keyboards and no amount of testing
+on this machine's layout would reveal it. Treat A1 as a gate, proven on a real
+alternate layout or by a documented Qt behavior with a citation, before Lane A
+writes the key handler.

@@ -598,6 +598,72 @@ check("footerStatus warning yields to transient, search cap, playing, refreshing
 check("footerStatus warning needs a loaded playlist", [Model.footerStatus({ configured: false, count: 0, warning: "W" }), Model.footerStatus({ configured: true, count: 0, warning: "W" })], ["", ""])
 check("footerStatus no warning keeps the counts line", Model.footerStatus({ count: 5, lastUpdated: "12:40", warning: "" }), "5 channels" + SEP + "updated 12:40")
 
+// ---- footer precedence ladder (UX 6.3, D-LIVE-22) ----
+// The whole ladder as a table, highest rung first, so the next edit to
+// footerStatus cannot reorder it silently: the walk below proves every rung
+// beats every rung under it, one pair at a time and all of them at once.
+// Each row is [name, the options that raise the rung, the line it must
+// produce] on top of `ladderBase`. `warning` is one slot shared by both
+// warning kinds, so the playlist row and the guide-data row collide there on
+// purpose: merging lower rungs first leaves the higher rung's value in place,
+// which is exactly what footerWarning does when both helpers warn at once.
+const ladderBase = { configured: true, count: 8, lastUpdated: "22:49" }
+const epgWarnText = "1 programmes for channels not in the playlist dropped"
+const warnBoth = Model.footerWarning(["truncated to 50,000 channels"], [epgWarnText])
+const warnEpgOnly = Model.footerWarning([], [epgWarnText])
+const cachedLine = "8 channels" + SEP + "cached 22:49" + SEP + "offline"
+const ladder = [
+  ["transient", { transient: "Refreshed" + SEP + "8 channels" }, "Refreshed" + SEP + "8 channels"],
+  ["bounded search", { truncated: true, resultTotal: 1240, cap: 200 }, "First 200 of 1,240" + SEP + "keep typing"],
+  ["playing", { playingName: "Arte" }, "\udb81\udc0a Arte" + SEP + "s stop"],
+  ["refreshing", { refreshing: true }, "Refreshing\u2026"],
+  ["degraded (cached, offline)", { stale: true }, cachedLine],
+  ["guide data pending", { epgPending: true }, "Guide data loading\u2026"],
+  ["playlist warning", { warning: warnBoth }, "Playlist warning: truncated to 50,000 channels"],
+  ["guide data warning", { warning: warnEpgOnly }, "Guide data warning: " + epgWarnText],
+  ["channel count", {}, "8 channels" + SEP + "updated 22:49"]
+]
+// Lower rungs applied first, the rung under test last, so a shared slot ends
+// up holding the higher rung's value.
+function ladderOpts(rungs) {
+  const out = Object.assign({}, ladderBase)
+  rungs.slice().sort((a, b) => b - a).forEach(i => Object.assign(out, ladder[i][1]))
+  return out
+}
+for (let i = 0; i < ladder.length; i++) {
+  check("footer ladder: " + ladder[i][0] + " on its own", Model.footerStatus(ladderOpts([i])), ladder[i][2])
+  for (let j = i + 1; j < ladder.length; j++) {
+    check("footer ladder: " + ladder[i][0] + " outranks " + ladder[j][0], Model.footerStatus(ladderOpts([i, j])), ladder[i][2])
+  }
+  const below = []
+  for (let j = i; j < ladder.length; j++) below.push(j)
+  check("footer ladder: " + ladder[i][0] + " outranks every rung below it at once", Model.footerStatus(ladderOpts(below)), ladder[i][2])
+}
+
+// The D-LIVE-22 pair itself, in the shape QA reproduced it (h21 / d19.sh):
+// an EPG warning next to a cached copy after a failed refresh.
+check("D-LIVE-22: a guide-data warning never displaces `cached HH:MM - offline`", Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: warnEpgOnly }), cachedLine)
+check("D-LIVE-22: nor does a playlist warning, nor both kinds at once", [
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: Model.footerWarning(["truncated to 50,000 channels"], []) }),
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: warnBoth })
+], [cachedLine, cachedLine])
+check("D-LIVE-22: a cached copy with no timestamp keeps its offline marker over a warning", Model.footerStatus({ configured: true, count: 8, stale: true, warning: warnEpgOnly }), "8 channels" + SEP + "cached" + SEP + "offline")
+check("D-LIVE-22: the active source label still rides the degraded line (UX-SOURCES 5.3)", Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: warnBoth, activeLabel: "NAS", sourceCount: 2 }), "NAS" + SEP + cachedLine)
+check("D-LIVE-22: a guide-data load pending behind a cached copy still shows the cache", [
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, epgPending: true }),
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, epgPending: true, warning: warnBoth })
+], [cachedLine, cachedLine])
+check("D-LIVE-22: a warning arriving while playing or refreshing still loses, cached or not", [
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", playingName: "Arte", warning: warnBoth }),
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, playingName: "Arte", warning: warnEpgOnly }),
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", refreshing: true, warning: warnBoth }),
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, refreshing: true, warning: warnEpgOnly })
+], ["\udb81\udc0a Arte" + SEP + "s stop", "\udb81\udc0a Arte" + SEP + "s stop", "Refreshing\u2026", "Refreshing\u2026"])
+check("D-LIVE-22: with a fresh copy the warnings keep their rungs above the counts line", [
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: warnBoth }),
+  Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: warnEpgOnly })
+], ["Playlist warning: truncated to 50,000 channels", "Guide data warning: " + epgWarnText])
+
 // ============================================================ sources (M2-01)
 // docs/ARCHITECTURE-SOURCES.md section 3 and docs/UX-SOURCES.md 5.4-5.8 /
 // 8.1 under the rulings SR1-SR10. The shared validation vectors live in
