@@ -2686,3 +2686,315 @@ divergence seen once under a trigger the guide cannot produce.
 Suggested before the tag, none of it gating: fix D-PLY-9 so the relaunch check
 actually runs in CI, add the `~/.cache/mpv` line to `Files it writes`
 (D-PLY-10), and add one clause to the headline privacy bullet (O1).
+
+## M1.2/M2 cleanup round - Lane D live pass on a939fd7 (QA, 2026-09-14, 10:05 - 10:57)
+
+Wave two of the cleanup round: the live half of `docs/CLEANUP-PLAN.md`
+section 6, run against `main` at `a939fd7` with the installed clone moved to
+that commit and back. **This is a measuring lane**: it owns this file and
+nothing else, and every fix it names below is a finding handed to wave three,
+not a diff. Reference machine, display held exclusively by this lane; no other
+lane ran. Evidence root `/tmp/claude-1000/omarchy-iptv-qa9/`. `pgrep -x
+hyprlock` was checked before every keystroke batch and returned empty every
+time. No logout. Rulings CL1 (the stop budget measures "the player process is
+gone") and CL2/CL3 are applied as written.
+
+Setup: the installed plugin at `~/.config/omarchy/plugins/io.github.rmcdavid.iptv`
+was fetched from the local repository into `FETCH_HEAD` and checked out
+detached at `a939fd7` (`origin/main` was never moved); `omarchy plugin validate`
+exit 0; `playlistUrl` pointed at `http://127.0.0.1:8791/qa-player.m3u`
+(`tests/fixtures/qa-player/qa-player.m3u`, served on loopback from the repo
+fixture directory). Baseline captured first: 1,474 channels, one source
+`d5977d8a` (`iptv-org.github.io`), **7** recents (the runbook's "five" is
+stale), 0 favorites, theme `Retropc`, `session` null, runtime directory
+holding `player.lock` and an empty `watch-later`.
+
+### D1. The D-PLY-11 discriminator - TC-PLAY-10 extended, and PLY-LIFE-03
+
+The extended capture the plan asks for was taken at t+6 s, and again at t+20 s
+and t+40 s whenever anything disagreed: `ipc status` (`nowPlaying`,
+`player.seq`, `player.entryId`), the window title, and over `socat` to the live
+player `media-title`, `force-media-title`, `path`, the whole `playlist`
+property (its current entry **id** is the count of `loadfile`s that player has
+ever taken) and `user-data/omarchy-iptv`; plus `player.lock`, the recents ring
+(every `play()` calls `recordPlayed`, so it records the order the shell saw the
+burst) and the shell journal.
+
+**Two facts make the capture decisive.** `apply_channel` writes the stash's
+`seq` from its caller, and `cmd_play` hardcodes `0` (`bin/omarchy-iptv:1808-1810`)
+while `player start` carries a real one - so **`stash.seq != 0` means a
+`player start` was the last thing to write that player, and `0` means a zap
+was**. And the current playlist entry id counts `loadfile`s, so it says how
+many `apply_channel` calls reached the player at all.
+
+| Case | Runs | Result |
+|---|---|---|
+| Cold concurrent burst (8 `play` calls fired simultaneously from nothing playing) | 20 | **10 user-visible divergences** (the shell's channel name differs from `media-title` **and** the window title), 3 further stash-only divergences, 7 clean |
+| Warm concurrent burst (same 8 calls, player already up and attached) | 10 | **0 divergences of any kind** |
+| Cold **serial** hammer (the same 8 intents, one at a time) | 6 | **0 divergences**, `stash.seq` 0 every time |
+| PLY-LIFE-03, cold Enter hammer through the guide, 20 alternating Enters | 3 | **pass 3/3** |
+
+What the 20 cold bursts show, without exception:
+
+- **Every one of them was cold** (`player.up` and `player.attached` both false
+  before the burst) and **every one issued exactly one `player start`**, whose
+  lock record reads `verb:"start"` with `seq == pre.seq + 1` - the **first**
+  intent of the burst - while `status.player.seq` ends at `pre.seq + 8`.
+- **The player took two or more `loadfile`s**: the current playlist entry id is
+  `2` in 18 runs and `3` in 2. Only one `player start` ever ran, so a **zap
+  reached the socket first** and the start's own `apply_channel` came after it.
+- In 8 of the 10 visible divergences `stash.seq` is the start's own seq: the
+  cold `player start` overwrote title, force-media-title and stash with the
+  **first** intent after a later zap had already landed. In the other 2
+  (trials 11 and 19) `stash.seq` is `0` while `force-media-title` names a
+  different channel again - the two `apply_channel` sequences **interleaved**
+  on the one socket, the title from one and the stash from the other.
+- **`omarchy-iptv: play failed:` appears 0 times in all 30 bursts**, and
+  `not_running` 0 times. The rollback at `Service.qml:1000` never executed.
+- **Nothing self-corrected**: all 13 divergences still read the same at t+20 s
+  and t+40 s, past two health ticks.
+- One player and one window at every sample of every run.
+
+The warm control is the other half of the discrimination: a warm burst takes
+the zap branch at `Service.qml:419-425` for all eight calls and **issues no
+`player start` at all** - the lock sequence never advanced in any of the ten -
+so the adopting-start family has no trigger in this case and produced nothing.
+
+> **Verdict: the ordering family that fires is the cold one.** A change wins
+> the socket during a cold start and is then overwritten by, or interleaved
+> with, that start's own `apply_channel`. This is the skeptic's replacement
+> hypothesis and the plan's **T-B**, now reproduced 10 times in 20 on a real
+> shell with the mechanism visible in the stash seq and the entry id. The
+> plan's **T-A** (an adopting start re-applying its own channel) did not fire
+> in 30 bursts and cannot fire in the warm case, because no `player start` is
+> issued there. **O1 is excluded** in every run by the journal.
+>
+> It is also **much more reachable than the `1 of 8` on record**: 10 of 20
+> cold bursts, against 0 of 10 warm and 0 of 6 cold-serial. What made it rare
+> before was not the code but the arrangement - the prior pass did not
+> guarantee a cold player before each burst.
+
+**PLY-LIFE-03** (never re-run since `8f9447e`) passes at `a939fd7`, 3 runs:
+`hyprctl` sampled every 100 ms across the whole hammer yields only `0` and `1`
+(249 / 249 / 250 samples, **0 samples reading 2 or more**); `playSeq` advances
+by exactly 20 in each run, so every Enter landed and none was dropped; the run
+ends on the last channel pressed 3/3; one player and one window at the end;
+and `nowPlaying`, `media-title` and the stash all agree 3/3. Recorded, not
+filed: at the current code the guide's Enter **dismisses the guide**
+(`Guide.qml:634`), so a hammer is necessarily one press per guide reopen
+(~0.9 s) and only the first press or two fall inside the cold start. The
+runbook's "as fast as the guide accepts" predates that and should say so.
+It is also the plainest demonstration of why CL6 is the right severity: the
+guide cannot produce the concurrency D-PLY-11 needs.
+
+### D2. D-PLY-8 - the windowed player's teardown, and the socket residue
+
+**The assumption the plan could not test is now a measurement.** Five SIGKILLs
+on the real windowed player (RSS 140-217 MB, one window mapped, GPU context and
+Wayland connection live), sampling `/proc/<pid>/cmdline` and `connect()` in a
+tight loop from the instant of the kill:
+
+| Run | RSS | cmdline empty | socket refused | blind-to-unbound window |
+|---|---|---|---|---|
+| 1 | 146 MB | 0.417 ms | 37.362 ms | **36.946 ms** |
+| 2 | 143 MB | 0.312 ms | 16.797 ms | **16.484 ms** |
+| 3 | 217 MB | 0.421 ms | 22.578 ms | **22.157 ms** |
+| 4 | 140 MB | 0.340 ms | 24.882 ms | **24.542 ms** |
+| 5 | 146 MB | 0.223 ms | 15.008 ms | **14.785 ms** |
+
+- `find_player()` goes blind first, at **0.22-0.42 ms**, 5/5 - the independent
+  re-measurement holds on a windowed player, and the hypothesis corrected in
+  `X4` stays corrected.
+- The window is **14.8-36.9 ms**, and every one of the five is **above the
+  4-8 ms observation point** the shipping single-shot settle used. **A real
+  windowed mpv does clear the bar**; the inference was right.
+- **The teardown-proportionality claim does not survive on the real thing.**
+  146 MB gave 36.9 ms and 14.8 ms while 217 MB gave 22.2 ms - a 2.5x spread at
+  constant RSS and no ordering by size. Lane A's allocation-scaling series
+  (1.6-3.4 ms at 256 MB) under-predicts a windowed player by an order of
+  magnitude. Neither party's proportionality should be written down as a fact
+  for the windowed case; what is established is the **ordering** and the
+  **magnitude**, and both say the same thing: 500 ms of already-reserved kill-rung
+  deadline is ample and a single shot at 4-8 ms never was.
+
+**PLY-STOP-03, 5 wedged and 5 responsive.** In **10 of 10** the socket is
+already gone at **t+0.2 s** and still gone at t+1 s, t+5 s and t+30 s, with no
+helper call of QA's own in between and with the `stopSettleTimer` backstop line
+(`the player outlived a stop`) absent from the journal in all ten. The
+runtime directory after each stop holds `player.lock`, `watch-later` and
+`shader-cache` and nothing else. **D-PLY-8 does not reproduce at `a939fd7`**,
+where it reproduced 5/5 at both `8f9447e` and `b16b479`.
+
+### D3. D-PLY-10 - the shader cache
+
+- `$XDG_RUNTIME_DIR/omarchy-iptv/shader-cache` exists at **0700** inside a
+  **0700** parent, created by `ensure_player_dirs` rather than by mpv, and
+  holds 26 files **all at 0600**.
+- The player's argv carries `--gpu-shader-cache-dir=` and `--icc-cache-dir=`
+  pointing there, ahead of any user token.
+- `~/.cache/mpv` is **unchanged**: the same 46 file names before and after, and
+  **0 files newer than the start of the pass** after roughly fifty minutes of
+  windowed playback and about 120 player starts. The two names D-PLY-10 filed
+  (`shader_2a337003854863bf`, `shader_94d4454b832de9f8`) are now written into
+  the redirected directory instead.
+- No new top-level entry in `$HOME` across the pass.
+
+**D-PLY-10 is closed by measurement**, and this is the only evidence that could
+close it: a `--vo=null` player compiles no shaders.
+
+### D4. D-PLY-9 - the repaired harness check does NOT discriminate
+
+`scripts/dev-harness/player-scenario.sh`, both halves, on this display:
+
+| Tree | Summary | Exit |
+|---|---|---|
+| `a939fd7` (HEAD) | **83 passed, 0 failed, 83 assertions executed** | 0 |
+| `--baseline 396a69a` | **67 passed, 21 failed, 83 assertions executed** | 1 |
+
+The repair itself works. `log_count` returns one line, the arithmetic no longer
+dies, and the unguarded floor (`the harness ran every check it has`) passes on
+both trees - so the class D-PLY-9 belonged to, a check that stops executing and
+merely shortens the summary, is closed. The 21 baseline failures are P11 (5),
+P12 (4), P13 (7) and P14 (5), which is the rule-11 evidence the four new
+scenarios were written for.
+
+**But the assertion at the centre of it passes on both trees.**
+`PASS P11 exactly ONE relaunch, not a second one at the healthy player` appears
+in **both** summaries. The witness line added under CL3 does not change that,
+for two independent reasons, both confirmed here:
+
+1. **Nothing counts it.** `player-scenario.sh:402` and `:416` still count
+   `mpv unresponsive, restarting player` - the `console.warn` at
+   `Service.qml:510` that both trees emit exactly once. A grep of the whole
+   repository for the new string returns **one** hit, `Service.qml:2491`;
+   there is no reference to it anywhere under `scripts/` or `tests/`.
+2. **Repointing it would not help against `396a69a`.** A `--baseline` run
+   exports the baseline's own `Service.qml`, and that tree's `relaunchTimer`
+   `playerUp` branch is byte-identical apart from the missing line. The count
+   would therefore be **0 on both trees**. The line can only ever be a forward
+   regression guard for trees that already carry it; it cannot be rule-11
+   evidence against the tree the defect was filed on.
+
+Confirmed live at `a939fd7`: a `kill -STOP`ped player produces the two-strike
+verdict and a correct relaunch (new pid, one player, one window,
+`playing`/`attached`/`wanted` all true, right channel - D-PLY-1 trigger A
+re-verified 4/4), and the journal carries `mpv unresponsive, restarting player`
+**1** and `relaunching the unresponsive player` **0**. Zero is the right answer
+for a fixed tree - the branch the line sits in is exactly the second relaunch
+the fix cancels - and it is also what the baseline would print, because the
+line is not in it.
+
+**A witness that does discriminate, measured here so wave three need not guess.**
+The intent counter, which is candidate 1 of the plan's section 2(c):
+
+| Wedge-and-respawn at `a939fd7` | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| `status.player.seq` delta | 1 | 1 | 1 |
+| `player.lock` seq delta | 1 | 1 | 1 |
+
+Both are already reachable from the harness (`svc "d['player']['seq']"` and
+`$SCRATCH/runtime/omarchy-iptv/player.lock`), both exist unchanged on the
+baseline tree, and the broken path increments `playSeq` a second time in the
+`relaunchTimer` branch, so the baseline must read **2**. Candidate 2 (counting
+`player restart` helper processes) is **not** usable: `spawn_detached` double
+forks, and a `/proc` sweep across three single relaunches saw 1, 2 and 2
+distinct pids for one logical restart.
+
+### D5. PLY-PERF-02 re-measured under CL1
+
+CL1: the budget is met when the **player process is gone**, not when the
+command returned. Measured by polling `kill -0` in a tight loop from the
+instant `stop` was issued.
+
+| Path | Runs | Player gone | Budget | Verdict |
+|---|---|---|---|---|
+| Wedged (`kill -STOP` first) | 5 | **4268 / 4269 / 4277 / 4286 / 4299 ms** | 4500 ms | **met 5/5** |
+| Responsive | 5 | **304 / 324 / 335 / 337 / 345 ms** | 500 ms | **met 5/5** |
+
+- The stop command itself returned in **60-81 ms** in all ten; under CL1 that
+  number is not the budget, and it is recorded only to show the two readings
+  are nowhere near each other.
+- No SIGKILL is reachable on the responsive path: the player is gone about
+  1.65 s before the TERM rung is due.
+- `Service.qml:64`'s 5000 ms `stopSettleTimer` backstop **never fired** (0/10).
+- The wedged figures are ~30 ms above `b16b479`'s 4236-4263 ms, which is the
+  settle now spending a little of the kill rung's own reserved 500 ms. Still
+  200 ms inside the budget.
+- **Interface clear is resolution-limited and is recorded as a bound, not a
+  verdict**: 61-167 ms, on a poller whose own cost is **57 ms per sample**
+  (each sample is an `omarchy-shell ... status` process spawn). The floor
+  observations, 61-64 ms, agree with the prior pass's 52-59 ms. The 150 ms
+  budget cannot be decided at this resolution and this is **not** recorded as
+  a regression; a tighter instrument is wave-three work if the budget is to be
+  asserted rather than observed.
+
+### D6. Findings handed to wave three
+
+1. **The D-PLY-11 cause is established and it is the cold one.** Wave three may
+   build the cause-directed successor for that family. The evidence is D1 above:
+   one `player start` carrying the burst's **first** intent, a zap's `loadfile`
+   ahead of it, and the start's `apply_channel` last. Note CL4 still stands -
+   giving `play` the seq and the lock is the wrong instrument here, and the
+   plan says why. What the evidence actually indicts is that `player start`'s
+   `apply_channel` has no way to learn that a newer intent already landed on
+   the player it is adopting or has just spawned; the stash it overwrites
+   already carries the answer.
+2. **The rate is 10 of 20, not 1 of 8.** The `weak repro` wording on
+   `docs/STATUS.md:146` under-states it and should be corrected when D-PLY-11
+   is dispositioned. The severity is still bounded by CL6.
+3. **CL3 is half-landed.** The witness exists; nothing asserts on it, and it
+   cannot discriminate against `396a69a` by construction. Wave three should
+   point `player-scenario.sh:402`/`:416` at the intent counter measured in D4,
+   and correct the sentence in `docs/STATUS.md:144` that implies the repaired
+   check now covers the property.
+4. **Do not write teardown-proportionality down as a fact.** The windowed
+   measurement in D2 contradicts it. The plan's own instruction to trust only
+   the ordering and the magnitude is the right one.
+5. The interface-clear budget in PLY-PERF-02 has no instrument fine enough to
+   assert it. Either measure it from inside the shell or state it as an
+   observation.
+
+Recorded, not filed: four entries appeared in Omarchy's own notification
+history (`~/.local/state/omarchy/notifications/history/*.json`, mode 644),
+naming the channel and a host-only reason; **0 needles** in them
+(`qa-user`, `qa-secret`, `qa-token-XYZ`, `://` all absent). Host behaviour, as
+at `b16b479` (V10 item 2). The rendered name of `t:qa.rawdash` reads
+`u critical ${path}` on both sides of every comparison - that is S-04 stripping
+a leading dash by design, not a divergence.
+
+### D7. Restore
+
+Proved at 10:57.
+
+- `~/.config/omarchy/shell.json` - **byte-identical**, `sha256sum -c` OK.
+- `~/.local/state/omarchy-iptv/` - `diff -r` against the snapshot is **empty**
+  and `sha256sum -c` OK. As at `8f9447e` and `b16b479`, the outgoing shell
+  wrote its in-memory source list back after the first restore, re-adding the
+  QA source record; the snapshot was written back a second time, held for
+  12 s, and held again across a further `omarchy restart shell`.
+- `~/.cache/omarchy-iptv/` - `diff -r` **empty**; the QA source directory is
+  gone.
+- The mode/owner manifest over both trees `diff`s **empty** against the
+  pre-pass manifest.
+- `status` **diffs clean** against `status.before.json` apart from
+  `lastUpdated` and `player.seq`: 1,474 channels, source `d5977d8a` on
+  `iptv-org.github.io`, 7 recents, 0 favorites, `nowPlaying` null.
+  `player.seq` is the live intent counter recovered from the runtime lock
+  record and is not durable state.
+- Installed clone back on **`main` at `d44dc6e`, tracking `origin/main`**,
+  0 modified and 0 untracked, and `diff -r` against the pre-pass backup is
+  **empty**. `origin/main` was never moved; `a939fd7` was fetched from the
+  local repository into `FETCH_HEAD`.
+- Theme `Retropc`, unchanged. `$HOME` has no new top-level entry.
+- `$XDG_RUNTIME_DIR/omarchy-iptv` back to `700` holding `player.lock` and an
+  empty `watch-later`, exactly the shape found at 10:05; the socket and the
+  `shader-cache` directory this pass created were removed.
+- Nothing left running: **0** mpv, **0** `omarchy-iptv` windows, **1**
+  quickshell (the user's, on `/usr/share/omarchy/shell`), the harness scratch
+  tree removed, the fixture server stopped and port 8791 closed, and the two
+  QA poller loops this pass started killed.
+- The working repository at `/home/ricky/Projects/omarchy-iptv` is clean at
+  `a939fd7` with no untracked files. **Nothing was committed.**
+- Not restored, deliberately: the four notification-history files above, which
+  are Omarchy's own and predate no plugin state; and `~/.cache/mpv`, which was
+  never written to.
