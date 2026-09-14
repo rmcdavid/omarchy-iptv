@@ -1448,3 +1448,223 @@ Unchanged from S9: SRC-LST-09, SRC-KEY-11, SRC-UI-19, SRC-MIG-10 and the live st
 ### R11. Release recommendation
 
 **Go for v0.2.0 from the dev harness as of d50e364**: D-SRC-01..10 verified fixed with their original repros, 0 open P1/P2, 0 new defects, 190/196 SRC cases pass with the remaining 6 blocked or not runnable outside the live shell, the 55-case M1 sample shows no regression (TC-CFG-04 back to its 502f4b3 behaviour), performance unchanged within noise, privacy sweep clean, gates green. What remains before the tag is the live-shell runbook (R10) on the reference machine with the updated plugin, then the `docs/STATUS.md` release row.
+
+## Live-shell Sources verification on ec4f702 (QA, 2026-09-13, 21:20 - 21:47)
+
+The section 9 runbook executed on the user's real machine (Hyprland 0.56.2,
+eDP-1 1366x768 @ scale 1, quickshell `/usr/share/omarchy/shell`, plugin
+`~/.config/omarchy/plugins/io.github.rmcdavid.iptv` at `ec4f702` / v0.2.0,
+state already migrated to schema v2). Evidence root
+`E=/tmp/claude-1000/omarchy-iptv-live/` (`shots/` 30 grim screenshots each
+inspected, `logs/`, `shell.json.bak`, `state-omarchy-iptv.bak`,
+`status.before.json`, `status.final.json`). Conventions as the sections above
+(` - ` stands for U+00B7, `...` for U+2026, `"x"` for the curly quotes).
+
+Method notes that bound the results below:
+
+- Keystrokes were injected with `wtype`, guarded by `pgrep -x hyprlock`
+  before every call **and** by a check that the `omarchy-iptv` layer is
+  present, because a closed guide sends keys to the focused window.
+- `wtype` modifier+key combinations reach the *application* (`Ctrl+R`,
+  `Ctrl+A` all worked) but do **not** trigger Hyprland global binds: three
+  spellings of `SUPER + SHIFT + T` were ignored while the same bind is
+  registered (`hyprctl binds` -> `modmask=65 key=T`). L1 below is therefore
+  a method limitation, not a plugin result.
+- The installed plugin's IPC surface is only
+  `toggle / previous / next / refresh / stop / play / status`. There is no
+  `sources`, `switchSource`, `addSource`, `removeSource`, `set` or
+  `editMasked` verb on the shipped build, so every Sources interaction had to
+  be driven through real input; the harness verbs of sections 6 and 8 do not
+  exist here.
+
+### L1. Results by case
+
+| Case | Verdict | Evidence / note |
+|---|---|---|
+| A upgrade + migration (SRC-MIG-10) | **pass** | `state.json` `version 2` / `cacheLayout 2`, favorites `[]`, 5 recents and `lastPlayed` preserved, mode `600`; cache is per-source (`sources/d5977d8a/{channels,playlist-status}.json`, dirs `700`, files `600`), no top-level `channels.json`; the migrated row renders `active - iptv-org.github.io - 1,475 channels in 28 groups`, **not** `not loaded yet` (D-SRC-01 stays fixed live); `omarchy plugin update io.github.rmcdavid.iptv --yes` -> `io.github.rmcdavid.iptv is up to date.` from `https://github.com/rmcdavid/omarchy-iptv.git` (SR30 re-point confirmed, HEAD unchanged at `ec4f702`), `omarchy plugin validate` exit 0 |
+| B guide + bar after the upgrade | **pass (1 sub-step blocked)** | guide opens via `omarchy-shell shell toggle io.github.rmcdavid.iptv` (the exact string the keybinding and the `omarchy menu` row run) and closes on the same call; search `bloomberg` -> `in All - 5 matches`, footer flips to `Esc clear`; group column with 28 groups and the pinned `Sources 1` row; Enter played `Bloomberg Originals (1080p)` with window `class=omarchy-iptv`, `title=Bloomberg Originals (1080p)`; `stop` reaped mpv in under 0.5 s. **SUPER+SHIFT+T itself is blocked** (see the method note) |
+| C Sources screen live | **pass** | `Tab`, `o` from list mode; header `Sources` / `1 source`; row = check glyph + bold label + `used 21:16` + pencil/remove on the cursor row; detail `active - iptv-org.github.io - 1,475 channels in 28 groups`; action rows `+ Add source` / `Add Xtream login`; footer hints exactly `j/k move - Enter switch - a add - c Xtream - e edit - x remove - Esc back`; single-source footer status carries no label prefix, the 2+ source footer does (`qa-src-a.m3u - 8 channels - updated 21:28`). SR32 order (active first, then `lastUsed` desc) held at 2, 3 and 4 sources |
+| D add a source live | **fail - D-LIVE-20** | probe copy is right (`Reading the file...` with footer `Esc cancel`, then `Added qa-src-a.m3u - 8 channels in 3 groups`), the label placeholder live-derives `qa-src-a.m3u`, the cache dir `22636a7e` appears - but **the new source does not become active**, contrary to UX-SOURCES 1.5 ("The new source becomes active"). `activeSource` stayed `iptv-org.github.io` and the guide kept 1,475 channels |
+| E switch back and forth | **fail - D-LIVE-20 (P1)** | Enter on a source row writes `shell.json` correctly but the running plugin never applies it: footer said `Switched to iptv-org.github.io - 1,475 channels` while the guide still rendered qa-src-a's 8 channels / 3 Alpha groups and `status` reported `qa-src-a.m3u` for 20+ s. A second Enter on the same row produced `Could not save settings - try omarchy bar set`. Per-source caches and "no refetch" could not be measured because no switch ever completed |
+| F edit label, mask, reveal | **pass** | `e` on the cursor row -> `Edit source`; label changed to `QA Alpha`, footer transient `Saved`, `labelCustom true`; a userinfo URL added as `127.0.0.1:8791` renders `127.0.0.1:8791 - 5 channels in 2 groups`; the edit form masks it as `http://****@127.0.0.1:8791/qa-src-b.m3u` with the eye button; `Ctrl+R` reveals and flips the hints to `Enter save - Tab next field - Ctrl+R hide - Esc cancel`; `Tab` re-masks |
+| G D-SRC-04 live | **pass** | a failed add shows `Connection refused from 127.0.0.1` on the result line, keeps the form open and never displaces the active source; Enter on a never-fetched `127.0.0.1:9` record shows the reason `Connection refused from 127.0.0.1` on the footer, leaves `iptv-org.github.io` active with its check glyph, and leaves `shell.json` untouched. D-SRC-04 verified fixed on the live shell |
+| H D-SRC-10 live | **pass** | `omarchy bar set io.github.rmcdavid.iptv playlistUrl <abs path>` while another source was active wrote `{"id":"io.github.rmcdavid.iptv","playlistUrl":"<path>","epgUrl":""}` - the new CLI record did **not** inherit any previous `epgUrl`, and `shell.json` stayed consistent and `0600`. D-SRC-10 verified fixed live |
+| I remove sources | **partial - D-LIVE-21 (P1)** | `x` -> `Remove "127.0.0.1:9"? Its cache is deleted too.` with `Left/Right choose - Enter confirm - Esc cancel`; confirm -> transient `Removed 127.0.0.1:9`, the row and its cache dir `4bf03775` both gone. The active-source variant reads `Remove "iptv-org.github.io"? It is the active source; the guide returns to setup.`, confirms to `Removed iptv-org.github.io - no active source`, Sources stays open with no check glyph - **but the guide behind never returns to setup**: it sat on `Loading playlist... / Fetching from iptv-org.github.io` (the source just removed) for 18+ s with `configured true`, `activeSource null` and an empty `playlistUrl` in `shell.json` |
+| J mouse | **blocked** | no pointer-injection tool exists on this machine (`ydotool`, `wlrctl`, `dotool`, `xdotool` all absent, no ydotool socket) and Hyprland exposes no click dispatcher; installing one needs `sudo`, which the pass forbids. Every SRC-KEY-11 sub-step stays unverified |
+| K theme with Sources open | **pass** | `omarchy theme set tokyo-night` re-skinned the open Sources screen live (card, rows, check glyph, footer) with no reopen, no glitch and no content loss; `omarchy theme set retropc` restored it. No new warning in `qs log` |
+| L restart with a non-default source | **pass** | with `QA Alpha` (local file) active, `omarchy restart shell` came back `status ready`, `activeSource QA Alpha`, 8 channels / 3 groups, 5 recents, 3 sources; `qs log -p /usr/share/omarchy/shell --tail 200` contains no `omarchy-iptv` line at all (only the pre-existing `qt.qpa.services` portal warning that is also present at baseline) |
+| M narrow card | **blocked** | the card measures ~959 px at the only reachable scale (1366x768 @ 1), above the `Style.space(720)` threshold. `hyprctl keyword monitor eDP-1,1366x768@60,0x0,2` is refused by this install - `keyword can't work with non-legacy parsers. Use eval.` - and the only other lever is editing `~/.config/hypr/*`, which the pass forbids. SRC-LST-09 / SRC-UI-20 stay blocked |
+
+Counts: **7 pass, 2 fail, 1 partial, 3 blocked** over the 13 cases A-M
+(J, M and the SUPER+SHIFT+T sub-step of B are the blocked items).
+
+### L2. Root cause shared by D-LIVE-20 and D-LIVE-21
+
+`Service.qml:persistActive` writes the active source through
+`shell.updateEntryInline(pluginId, entry)`. On the live host that call
+reaches `shell.qml:1078`, which rewrites the bar entry and calls
+`persistShellConfig` - the file on disk is always correct. What never
+happens is the trip back: the plugin's `settings` property is not re-emitted
+for its own write, so `root.playlistUrl` (a `readonly property` bound to
+`settings.playlistUrl`, with `onSettingsChanged: root.reconcile()`) keeps the
+previous value and `reconcile()` never runs. Proven three ways:
+
+1. after an Enter-switch, `shell.json` held the new URL while `status` served
+   the old source for 20+ s (`shots/E-back-t1.png`);
+2. an **external** write of the *same* value already on disk
+   (`omarchy bar set ... playlistUrl <the URL shell.json already had>`) made
+   the plugin reconcile instantly - the FileView sees a foreign write;
+3. `qs log` carries `omarchy-iptv: switch did not observe a cache load within
+   5000 ms`.
+
+The second-Enter error (`Could not save settings - try omarchy bar set`) is
+downstream of the same staleness: `persistActive`'s guard
+`if (root.playlistUrl === playlistUrl && root.epgUrl === epgUrl) return true`
+compares against the stale in-memory value, so it re-sends values that are
+already on disk; `shell.qml` finds nothing to change, takes its
+`if (!dirty) return false` branch, and the plugin reports a persist failure
+for a write that had in fact already succeeded.
+
+This is why the dev harness never caught it: QA-SOURCES.md section 6 supplies
+a **fake `updateEntryInline`** that feeds the change back into the fake
+settings object, which the real host does not do. Every Sources switch case
+that passed in the 7e13053 and d50e364 passes passed against that fake.
+
+### L3. Performance
+
+Not measurable this pass. The switch redraw budget (SRC-PERF-02/03) needs a
+switch that completes; under D-LIVE-20 none did. Guide open and search
+redraws were subjectively immediate on the 1,475-channel list and no case
+exceeded a visible delay, but no timing is recorded because the grim round
+trip (~130 ms) dominates any measurement this harness can take.
+
+### L4. Privacy verdict on the live machine
+
+**Clean.** With a `http://qa-user:***@127.0.0.1:8791/qa-src-b.m3u` source
+configured, the test credential appears in exactly the two files that store
+it by design, both `0600`: `~/.local/state/omarchy-iptv/state.json` and
+`~/.config/omarchy/shell.json`. It appears in **no** other sink:
+
+| Sink | Credential hits |
+|---|---|
+| `omarchy-shell io.github.rmcdavid.iptv status` | 0 (and 0 occurrences of `://` at all) |
+| `qs log -p /usr/share/omarchy/shell --tail 600` | 0 |
+| `journalctl --user` over the whole pass | 0 |
+| `omarchy-shell notifications` history | 0 |
+| helper `bin/omarchy-iptv state show` | 0 (no `"url"`, no `://`) |
+| Sources list row, detail, footer transient | 0 - label and detail both render `127.0.0.1:8791` |
+| the 30 screenshots | 1, and only `shots/F3-revealed.png`, which is the deliberate `Ctrl+R` reveal |
+
+The `Playlist error` desktop notification for the dead port reads `Could not
+fetch the playlist (Connection refused). Open the guide for details.` with no
+URL and no host userinfo. `shell.json` kept mode `600` across every plugin
+write, and all cache dirs stayed `700` / files `600`. One incidental
+hardening confirmed: mpv is launched with
+`--title=$>` + the channel name, and `$>` is mpv's "stop property expansion"
+escape, so a channel name containing `${...}` cannot be expanded.
+
+### L5. O10
+
+**Did not reproduce.** Two stop paths were exercised: a clean stop of a live
+HLS stream (mpv reaped in under 0.5 s) and a stop after a dead stream (the
+QA fixture's `127.0.0.1:9` URLs, where mpv exited on its own before the stop).
+Neither produced `omarchy-iptv: mpv ignored SIGTERM, sending SIGKILL`, and no
+mpv process outlived its stop. O10 was recorded as intermittent, so this is
+evidence of absence in two runs rather than a refutation.
+
+### L6. New defects (rows in docs/STATUS.md)
+
+### D-LIVE-20 (SRC-SW-01/02/06, SRC-ADD-*, live-only)  P1  found 2026-09-13 at ec4f702 - switching / Service.qml `persistActive` + host settings round trip
+Steps: 1. two or more sources configured, A active 2. Sources, cursor on B, `Enter` 3. poll `omarchy-shell io.github.rmcdavid.iptv status` and `jq` the bar entry in `~/.config/omarchy/shell.json`.
+Expected (UX-SOURCES 1.4, 1.5, SR7): B becomes the active source, the guide redraws with B's channels, the footer transient names B.
+Actual: `shell.json` is updated to B, the footer claims `Switched to B - N channels`, and the running plugin keeps serving A indefinitely (20+ s, no timeout, no error). Adding a source has the same shape: the add commits and caches but the new source never becomes active. A second `Enter` on the same row reports `Could not save settings - try omarchy bar set` although the value is already persisted. Recovery only through an external write (`omarchy bar set ...`, even of the identical value) or `omarchy restart shell`.
+Evidence: `shots/E-back-t1.png` (footer vs content), `shots/D-after-add.png`, `shots/E-after-switch.png`, `qs log`: `switch did not observe a cache load within 5000 ms` + `updateEntryInline refused the settings change`.
+Notes: root cause in L2. Masked by the harness's fake `updateEntryInline`. Fix options: apply the value optimistically in `persistActive` on a `true` return instead of waiting for a settings round trip, and treat `updateEntryInline`'s `false` (`!dirty`, i.e. "already persisted") as success rather than `persist_failed`.
+
+### D-LIVE-21 (SRC-RM-01/03/05, live-only)  P1  found 2026-09-13 at ec4f702 - removal / the guide never leaves the loading state
+Steps: 1. two or more sources, A active 2. Sources, `x` on A, confirm `Remove` 3. `Esc` back to the guide.
+Expected (UX-SOURCES 1.7 and the dialog's own sentence "the guide returns to setup"): the first-run form.
+Actual: `shell.json` `playlistUrl` is cleared and `activeSource` becomes `null`, but the guide shows `Loading playlist... / Fetching from <the removed source's host>` and stays there (18+ s, `status loading`, `configured true`). The removed source's cache dir is correctly deleted, so the fetch it is waiting on can never be served from cache. Only an external write or a shell restart recovers.
+Evidence: `shots/I-return-to-setup.png`, `shots/I-stuck-loading.png`, poll transcript in `logs/`.
+Notes: same root cause as D-LIVE-20 (the cleared `playlistUrl` is the plugin's own write, so `configured` never flips). This is the live recurrence of the D-SRC-03 / TC-CFG-04 "stuck in loading" family, reached through the Sources screen instead of the CLI.
+
+### L7. Observations that are not defects
+
+- O14: `omarchy plugin list --json` reports `version: null` for **all 41**
+  installed plugins, first-party ones included, so the null on
+  `io.github.rmcdavid.iptv` is an Omarchy CLI trait and not a manifest
+  problem (`manifest.json` carries `"version": "0.2.0"`).
+- O15: `Model.hostOf` drops the port (`Connection refused from 127.0.0.1`)
+  while `Model.deriveLabel` keeps it (`127.0.0.1:9`), so the same source is
+  named two ways one line apart. Both match their own spec (UX 5.5 vs 5.6);
+  flagged only because it reads oddly on the error line.
+- O16: the upstream `iptv-org` US list served 1,474 channels on the refetch
+  at 21:41 against 1,475 at 17:52, i.e. the count drifts upstream exactly as
+  QA-SOURCES 9.2 warns. Nothing in the plugin changed.
+- O17: `omarchy theme set retropc` prints `Ignored in
+  /home/ricky/.config/omarchy/themes/retropc: alacritty.toml ghostty.conf
+  neovim.lua` - a pre-existing property of the user's own theme clone, not
+  related to this plugin.
+- O10..O13 of the earlier passes were not re-checked except O10 (L5).
+
+### L8. Restore
+
+The machine was returned to its exact pre-pass state and verified:
+
+- `diff <(jq -S . shell.json.bak) <(jq -S . ~/.config/omarchy/shell.json)` -> **identical**;
+- `state.json` `version`, `cacheLayout`, `favorites`, `recents` and the source
+  records (`key`, `url`, `label`, `origin`) -> **identical** to the backup;
+- one source (`d5977d8a` `iptv-org.github.io`, active), 5 recents, 0
+  favorites, `~/.cache/omarchy-iptv/sources/` holds only `d5977d8a`;
+- modes back to `600` (`shell.json`, `state.json`) and `700` (cache dirs);
+- no mpv, no test HTTP server, port 8791 closed, guide closed, monitor
+  untouched (1366x768 @ 1), theme `retropc`.
+
+One value legitimately differs: the source record's `channelCount` is 1,474
+against the backup's 1,475, because removing and re-adding the active source
+during case I forced a refetch and the upstream list had drifted (O16). The
+backups are left in place at `/tmp/claude-1000/omarchy-iptv-live/`.
+
+### L9. The previously live-blocked cases, resolved
+
+The set carried as `blocked` since S9 and R10, with the verdict this pass
+gives each one:
+
+| Case | Was | Now | Basis |
+|---|---|---|---|
+| SRC-MIG-10 | blocked | **pass** | case A - v2 / cacheLayout 2, favorites + 5 recents + `lastPlayed` preserved, 0600/0700, per-source cache, real counts on the migrated row, `plugin update` up to date from GitHub, `validate` exit 0 |
+| SRC-CLI-01 | blocked | **pass** | case H - the one write-back: the CLI record takes the new `playlistUrl` and does not inherit the previous source's `epgUrl`; `shell.json` stays consistent and 0600 |
+| SRC-CLI-06 | blocked | **pass** | the `status` IPC shape is unchanged live and contains no URL (`grep -c '://'` = 0) across 1, 2, 3 and 4 configured sources |
+| SRC-SEC-07 | blocked | **pass** | case F sink sweep - 0 credential hits in `status`, `qs log`, journal, notifications, helper `state show`, and in every row/footer/notification rendered |
+| SRC-SEC-17 | blocked | **pass** | `shell.json` kept mode 600 across every plugin write; `state.json` 600; cache dirs 700 / files 600 after adds, edits, removals and a restart |
+| SRC-SEC-19 | blocked | **pass** | the `Playlist error` notification carries no URL or userinfo (`Could not fetch the playlist (Connection refused). Open the guide for details.`) |
+| SRC-LST-02 | blocked | **pass** | live row layout, active marker, counts, `used HH:MM` and the `not loaded yet` variant all render per UX 5.2 |
+| SRC-LST-05 | blocked | **pass** | SR32 order (active first, then `lastUsed` desc) held at 2, 3 and 4 sources |
+| SRC-RM-01 | blocked | **pass** | non-active removal: dialog copy, `Removed <label>` transient, row and cache dir both gone |
+| SRC-RM-05 | blocked | **fail - D-LIVE-21** | active-source removal reaches `Removed <label> - no active source` but the guide never returns to setup |
+| SRC-UI-19 | blocked | **pass** | case K - live re-skin of the open Sources screen in both directions |
+| SRC-KEY-09 | blocked | **pass** | `o`, `j`/`k`, `a`, `e`, `x`, `Enter`, `Esc`, `Tab` and `Ctrl+R`/`Ctrl+A` all behave per UX 2.2/2.3 inside the guide |
+| SRC-KEY-11 | blocked | **still blocked** | no pointer-injection tool on the machine (case J) |
+| SRC-LST-09, SRC-UI-20 | blocked | **still blocked** | the card cannot go under the 720 threshold on this display (case M) |
+| SRC-A11Y-04 | blocked | **not run** | single display; the multi-monitor note stays `not run` as in QA.md TC-A11Y-04 |
+
+Net: 11 of the 15 previously-blocked items now pass, 1 fails (SRC-RM-05,
+D-LIVE-21), 3 remain blocked or not run for machine reasons. Two cases that
+were passing in the harness regress on the live shell: the switch cases
+SRC-SW-01/02 (D-LIVE-20).
+
+### L10. Release recommendation
+
+**No-go for v0.2.0 as of ec4f702.** Two open P1 defects, both live-only and
+both invisible to the dev harness because it fakes the one host API involved:
+D-LIVE-20 makes switching and add-activation non-functional on a real shell
+while reporting success, and D-LIVE-21 leaves the guide loading forever after
+the active source is removed. Story S3 (switching) and the recovery half of
+S7 (removing) are blocked, and `docs/PLAN.md` 222 requires zero open P1/P2 to
+release. Everything else on the live shell is sound: migration, the Sources
+screen, add/edit/mask/reveal, the failure paths (D-SRC-04 and D-SRC-10 both
+verified fixed live), theme re-skin, restart persistence, and a clean privacy
+sweep. After the fix, re-run cases D, E and I here, plus SRC-PERF-02/03 which
+this pass could not measure; J and M need a pointer-injection tool and a
+second display mode respectively and should be dropped from the live runbook
+or moved to a machine that has them.

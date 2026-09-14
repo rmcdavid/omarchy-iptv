@@ -740,6 +740,16 @@ groups`, header `1 source`; footer without a label prefix.
 
 ### 9.3 Add, switch, edit, remove from the existing source; CLI parity
 
+**[v0.4] Every `Enter`/`Space` switch and the "the new source is active"
+expectation below currently fail on a real shell (D-LIVE-20), and the `x` on
+the active source leaves the guide loading instead of returning to setup
+(D-LIVE-21).** Until both are fixed, treat the switch and add-activation
+steps as the repro for those defects rather than as expectations, and use
+`omarchy bar set ... playlistUrl <url>` (an external write, which the plugin
+does observe) whenever a step needs a given source to actually become active.
+The `e` edit, masking, `Ctrl+R`, removal of a non-active source and the CLI
+parity lines all behave as written.
+
 ```
 wl-copy -- https://iptv-org.github.io/iptv/countries/ca.m3u        # QA-ASSETS style second list (HEAD 200 on 2026-09-13; key f0441ae2)
 # in Sources: a, Ctrl+V (unmasked: nothing to mask), Enter -> Fetching from iptv-org.github.io... -> Added iptv-org.github.io 2 - N channels in M groups (suffix per SRC-DEC-11); the new source is active
@@ -762,6 +772,14 @@ selection into a field; overlay scrim click discards a form; the dialog scrim
 cancels the dialog only; wheel over the sources list. Record each as
 `SRC-KEY-11` sub-steps.
 
+**[v0.4] Not executable on the reference machine.** It carries no
+pointer-injection tool (`ydotool`, `wlrctl`, `dotool`, `xdotool` are all
+absent and there is no ydotool socket) and Hyprland exposes no click
+dispatcher, so 9.4 cannot be driven from a script; installing a tool needs
+`sudo`, which the live pass forbids. Either provision one of those tools
+before the next live pass or hand 9.4 to a human tester - do not record it as
+`pass` from a keyboard run.
+
 ### 9.5 Narrow and theme (optional)
 
 `hyprctl keyword monitor eDP-1,1366x768@60,0x0,2` then `hyprctl reload` to
@@ -769,6 +787,15 @@ restore (SRC-LST-09, SRC-UI-20, screenshots `sources-narrow`,
 `sources-edit-narrow`); `omarchy theme set nord` with the list, a form and
 the dialog open, then `omarchy theme set retropc` (SRC-UI-19); journal grep
 for new warnings.
+
+**[v0.4] The narrow half does not work on this install**: `hyprctl keyword`
+is refused with `keyword can't work with non-legacy parsers. Use eval.`
+because Omarchy drives Hyprland from a Lua config, and the only other lever
+is editing `~/.config/hypr/*`, which the live pass forbids. At 1366x768 @
+scale 1 the card measures ~959 px, above the `Style.space(720)` threshold, so
+the narrow variant is unreachable and SRC-LST-09 / SRC-UI-20 stay blocked.
+The theme half ran clean (tokyo-night and back to retropc, re-skinning the
+open Sources screen live, no new warning).
 
 ### 9.6 Security and regression on the live shell (ARCH 8.5 items 4-6)
 
@@ -793,6 +820,45 @@ the lead wants v0.1.0 back: `git -C ~/.config/omarchy/plugins/io.github.rmcdavid
 `cp $E/state.json.before ~/.local/state/omarchy-iptv/state.json`, restore the
 legacy cache files from `sources/d5977d8a/` to the top level, `cp $E/shell.json.before ~/.config/omarchy/shell.json`,
 `omarchy restart shell`.
+
+### 9.8 [v0.4] Corrections from the first live run (2026-09-13, ec4f702)
+
+Recorded after executing section 9 end to end on the reference machine
+(`docs/QA-RESULTS.md` section "Live-shell Sources verification on ec4f702").
+
+1. **The shipped plugin has no Sources IPC verbs.** `qs -p
+   /usr/share/omarchy/shell ipc show` lists only `toggle`, `previous`,
+   `next`, `refresh`, `stop`, `play(id)` and `status` for
+   `io.github.rmcdavid.iptv`. The `ipc set`, `ipc sources`, `ipc
+   switchSource`, `ipc removeSource` and `editMasked` verbs used throughout
+   sections 6 and 8 exist only in the dev harness. Every live Sources
+   interaction must be driven through real keyboard or mouse input, or
+   through `omarchy bar set` / `omarchy-shell io.github.rmcdavid.iptv status`.
+2. **The harness's fake `updateEntryInline` hides a whole defect class.**
+   The real host writes `shell.json` and updates its own `shellConfig` but
+   never re-emits the plugin's `settings`, so a plugin write is invisible to
+   the plugin (D-LIVE-20, D-LIVE-21). Any future case that asserts on the
+   effect of a plugin-initiated settings write has to be run live, or the
+   fake has to stop feeding the value back.
+3. **`wtype` cannot exercise Hyprland global binds.** Modifier+key reaches
+   the focused surface fine (`Ctrl+R`, `Ctrl+A`, `Tab` all worked inside the
+   guide) but three spellings of `SUPER + SHIFT + T` left the bind unfired,
+   while `hyprctl binds` shows it registered (`modmask=65 key=T`) and its
+   command (`omarchy-shell shell toggle io.github.rmcdavid.iptv`) works when
+   run directly. Verify the keybinding by hand; script the guide open through
+   that command instead.
+4. **Keystroke safety.** A closed guide sends keys to whatever window is
+   focused. Guard every injection with `pgrep -x hyprlock` *and* a check that
+   the `omarchy-iptv` layer is present
+   (`hyprctl layers -j | jq ... | grep -c omarchy-iptv`); the guide takes
+   exclusive keyboard focus while open, so keys cannot leak to the desktop.
+   Note that `omarchy-shell notifications showHistory` steals focus and
+   resets the Sources cursor - do not interleave it with a keyboard sequence.
+5. **`pkill -f` is unsafe here**: the pattern matches the QA shell's own
+   argv. Kill helper servers by recorded PID.
+6. 9.2's expected line held (`2 2 [('d5977d8a', 'iptv-org.github.io', 1475)]
+   5`), and the upstream count drifts as warned - a refetch during the run
+   returned 1,474.
 
 ## 10. Decisions the lead made before the pass (SRC-DEC -> SR11-SR32)
 
