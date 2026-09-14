@@ -214,6 +214,8 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   played, and the Sources history including their URLs (mode 0600)
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
+- `~/.cache/mpv/` : mpv's own shader cache, written by the player. It holds
+  no information about what you watched and is safe to delete.
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is
   running, and a small lock file used to guarantee only one player exists
 

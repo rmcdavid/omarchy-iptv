@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-09-14)
 
 M2-02, the detached player. Playback no longer belongs to the shell.
 
