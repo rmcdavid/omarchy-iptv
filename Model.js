@@ -908,7 +908,14 @@ function numberKeyStep(entry, index, text, ctx) {
   var idle = resolveChno(null, "", -1)
   if (!result.changed) return { changed: false, entry: result.entry, resolution: idle, snapshot: result.entry, commit: null, timer: "none", resumed: false }
   var next = result.entry
-  var hit = resolveChno(index, next.buffer, str(c.cursorId))
+  // D-CHNO-1 / CN9: the cycle is resolved against the cursor as it was BEFORE
+  // the first digit, never the live one. Every intermediate digit moves the
+  // cursor during the preview -- "3" and "30" both resolve to some lower
+  // number on the way to "301" -- so a live cursor is on the prefix's target
+  // by the time the last digit lands, is never one of the duplicates, and the
+  // cycle restarts at ordinal 1 every time. With a multi-digit plan that
+  // means an HD twin could not be reached by number at all.
+  var hit = resolveChno(index, next.buffer, next.cursorId)
   if (!chnoUnambiguous(index, next.buffer)) return { changed: true, entry: next, resolution: hit, snapshot: next, commit: null, timer: "restart", resumed: result.resumed === true }
   var plan = chnoCommitPlan(hit.kind, chnoCommitLabel(next, hit), "", hit.matches, hit.ordinal, { play: false })
   return {
@@ -937,11 +944,12 @@ function numberKeyStep(entry, index, text, ctx) {
 // Backspace, and what it resolves against. Returns `cancelled` when the
 // buffer emptied: that is the same cancel as Esc, and `snapshot` is what the
 // caller restores scope, query and cursor from (2.6).
-function numberPopStep(entry, index, ctx) {
-  var c = ctx && typeof ctx === "object" ? ctx : {}
+function numberPopStep(entry, index) {
   var next = popNumberKey(entry)
   if (!next.active) return { entry: numberEntry(), resolution: resolveChno(null, "", -1), cancelled: true, snapshot: next, timer: "stop" }
-  return { entry: next, resolution: resolveChno(index, next.buffer, str(c.cursorId)), cancelled: false, snapshot: next, timer: "restart" }
+  // The same snapshot cursor the push path resolves against (D-CHNO-1):
+  // backspacing to "3" must preview what "3" meant when entry began.
+  return { entry: next, resolution: resolveChno(index, next.buffer, next.cursorId), cancelled: false, snapshot: next, timer: "restart" }
 }
 
 // The label a commit reports: the resolved one, or the raw buffer when

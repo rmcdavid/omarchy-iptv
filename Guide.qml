@@ -823,7 +823,7 @@ Item {
   }
 
   function popNumberEntry() {
-    var step = Model.numberPopStep(root.numberEntry, root.chnoIndex, { cursorId: root.cursorChannelId })
+    var step = Model.numberPopStep(root.numberEntry, root.chnoIndex)
     root.numberEntry = step.entry
     root.numberResolution = step.resolution
     root.runNumberTimer(step.timer)

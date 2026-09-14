@@ -1364,6 +1364,31 @@ TestCase {
     compare(quick.resolution.channelIndex, 0)
   }
 
+  // CN9 / D-CHNO-1 in V4. The fixture's 12 is a duplicate pair (ids 3 and 4,
+  // playlist indices 2 and 3). Typing it again has to reach the twin, and it
+  // only can if the cycle is resolved against the cursor as it was before the
+  // first digit: "1" previews 101 on the way, moving the live cursor off both.
+  function test_duplicateCycleFromTheSnapshotCursor() {
+    function typeTwelve(cursorId) {
+      var step = Model.numberKeyStep(Model.numberEntry(), spec.chnoIndex, "1", { cursorId: cursorId, cursorIndex: 0 })
+      compare(step.commit, null)               // 101 still extends "1"
+      return Model.numberKeyStep(step.entry, spec.chnoIndex, "2", {})
+    }
+    var first = typeTwelve("6")                // parked on a channel with no number
+    compare(first.resolution.channelIndex, 2)
+    compare(first.commit.ordinal, 1)
+    compare(first.commit.matches, 2)
+    var second = typeTwelve("3")               // now parked on the first twin
+    compare(second.resolution.channelIndex, 3)
+    compare(second.commit.ordinal, 2)
+    var third = typeTwelve("4")                // and the wrap
+    compare(third.resolution.channelIndex, 2)
+    compare(third.commit.ordinal, 1)
+    // CN20: the verb a script calls must not cycle, whatever the guide does.
+    compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "12").id, "3")
+    compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "12").id, "3")
+  }
+
   // Gate A1 in the engine that actually runs the guide: the modifier bits
   // here are the real Qt enum values, so this also pins that Model.js's
   // integer copies of them match Qt's.

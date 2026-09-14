@@ -2145,6 +2145,34 @@ check("CN21: a resumed buffer can only ever resolve to nothing, which is why say
     return [out.length, out.every(k => k === "none")]
   })(), [44, true])
 
+// ---- CN9 / D-CHNO-1: three commits of the same number reach both twins.
+//
+// resolveChno was never wrong; what reached it was. Every intermediate digit
+// moves the cursor during the preview ("1" previews 10, "12" is the answer),
+// so the live cursor is never on the previous match and the cycle restarted
+// at ordinal 1 forever. The `plan` fixture carries the duplicate pair on 12.
+const typePlan = typer(plan, planIdx)
+const cycle = (() => {
+  const out = []
+  let at = 0                                  // parked on channel 10, not on either twin
+  for (let i = 0; i < 3; i++) { const r = typePlan("12", at); out.push([r.landedOn, plan[r.cursor].id, r.said[0]]); at = r.cursor }
+  return out
+})()
+check("CN9: re-typing a duplicated number walks to the twin and wraps", cycle,
+  [["12", "h", "Channel 12" + Model.SEP + "Ch h (1 of 2)"],
+   ["12", "i", "Channel 12" + Model.SEP + "Ch i (2 of 2)"],
+   ["12", "h", "Channel 12" + Model.SEP + "Ch h (1 of 2)"]])
+check("CN9: the cycle is derived from the cursor as it was BEFORE the first digit",
+  (() => { const s = Model.numberKeyStep(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "h", cursorIndex: 7 }).entry, planIdx, "2", {}); return [s.commit.ordinal, s.resolution.channelIndex, s.entry.buffer] })(),
+  [2, 8, "12"])
+check("CN9: a preview that moved the cursor cannot restart the cycle",
+  (() => { const one = Model.numberKeyStep(Model.numberEntry(), planIdx, "1", { cursorId: "h", cursorIndex: 7 }); return [one.resolution.label, one.entry.cursorId] })(), ["10", "h"])
+check("CN9: Backspace previews against the same snapshot cursor",
+  (() => { const two = Model.pushNumberKey(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "h", cursorIndex: 7 }).entry, "2", {}).entry; const back = Model.numberPopStep(Model.pushNumberKey(two, "9", {}).entry, planIdx); return [back.entry.buffer, back.resolution.channelIndex, back.resolution.ordinal] })(),
+  ["12", 8, 2])
+check("CN20: the command verb still never cycles, whatever the guide's cursor is doing",
+  [Model.channelByNumber(plan, planIdx, "12").id, Model.channelByNumber(plan, planIdx, "12").id, Model.channelByNumber(plan, planIdx, "12").id], ["h", "h", "h"])
+
 // The rate, on a whole sample rather than one number: every absent number in
 // a range, typed at speed, on a 1..200 plan (where 200x is the trap 20509
 // was). The measurement that reports the live-pass fixture is this same
