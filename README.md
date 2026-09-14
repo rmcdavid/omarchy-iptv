@@ -147,19 +147,25 @@ list as well; the two stay in sync. Up to 50 sources are kept.
 
 - One mpv window, class `omarchy-iptv`, titled with the channel name.
   Switching channels reuses it.
-- The player is started by the shell, so `omarchy restart shell` ends
-  playback. Everything else (theme changes, installing other plugins) leaves
-  it running.
+- Playback survives `omarchy restart shell`. The player runs on its own and
+  the guide reattaches to it, so a restart, a theme change or installing
+  another plugin all leave what you are watching alone.
 - A stream that fails or ends shows a desktop notification naming the
   channel; the guide marks the row until the channel plays again.
 - Stop clears the bar and guide immediately. If mpv ignores the quit request
   it is terminated, and if it ignores that too it is killed, within about
   four seconds. Playing a channel while the old player is still shutting
   down starts a fresh player once it has exited.
-- The first channel you play is passed to mpv on its command line, so its
-  stream URL (credentials included) is visible to other local accounts via
-  `ps` until mpv exits; later channels travel only over the private IPC
-  socket. M2 will start mpv idle so no URL is ever on the command line.
+- No stream URL ever reaches the player's command line. It starts empty and
+  every channel, header and title travels over a private socket that only you
+  can read, so `ps` shows nothing about what you are watching.
+- Two consequences of the player being independent, both deliberate. If you
+  remove or disable the plugin while something is playing, the player is no
+  longer guaranteed to stop with it; run `omarchy-iptv player stop`, or log
+  out, if one is left behind. And a stream that fails while the shell is down
+  cannot raise a notification, because the notification service is the shell
+  itself; the channel is marked as failed in the guide instead, the next time
+  you open it.
 - Channel names are shown verbatim except that leading dashes are stripped
   and mpv property expansion is disabled for the window title.
 
