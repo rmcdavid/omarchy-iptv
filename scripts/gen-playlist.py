@@ -20,6 +20,20 @@ Profiles:
              tvg-id="CamelName.cc[@SD]" tvg-logo="https://logos.example.test/channels/<24hex>/colorLogoPNG.png"
              group-title="Category[;Category]" and names with "(720p)" / "[Not 24/7]" suffixes;
              hosts stay under the reserved .test TLD so nothing can be fetched by accident.
+             No tvg-chno anywhere, like every iptv-org list (M2-03 1.5).
+
+Numbering (--numbering, M2-03 ruling CN13):
+  blocks  the default for --profile synthetic. One block per group, in group
+          order, so numbers read like a provider's card: 100s, 200s, 1000s.
+          Inside a block the numbers step by one with GAPS, a deterministic
+          fraction become SUBCHANNELS (7, 7.1, 7.2) and at least one
+          subchannel pair is guaranteed whatever the seed. An HD/SD twin
+          keeps its parent's number, so duplicates are real. This is what the
+          live pass wants: a dense 1..N run resembles no provider, and it
+          never exercises a gap, a block boundary or a subchannel.
+  dense   the pre-CN13 numbering, byte for byte: tvg-chno="<playlist index>".
+  none    no tvg-chno at all (hasNumbers false). The default for --profile
+          realistic.
 
 The XMLTV (--xmltv) covers every channel that has a tvg-id, in contiguous
 30/60/90/120-minute slots from --now minus --hours to --now plus --hours,
@@ -68,6 +82,13 @@ PROGRAMME_WORDS = [
     "Movie", "Match", "Concert", "Journal", "Magazine", "Story", "Files",
 ]
 SLOT_MINUTES = [30, 30, 60, 60, 60, 90, 120]
+# The largest major a channel number may have (M2-03 1.2). Stated in Model.js
+# as MAX_CHNO_MAJOR and here, so tests/fixtures/chno-attrs.json holds the one
+# value and tests/test_playlist.py and tests/Model.test.js both assert against
+# it: a generator that emits 123456 would produce a fixture whose channels are
+# displayed with no number and cannot be reached by digits, and the live pass
+# would be testing the wrong thing without anything going red.
+MAX_CHNO_MAJOR = 99999
 
 
 def hex_id(rng: random.Random, length: int = 24) -> str:
@@ -125,26 +146,156 @@ def generate(args: argparse.Namespace) -> tuple[list[dict[str, str]], list[str]]
             tvg_id = "%s.%s" % (camel(base_name), country) if has_epg else ""
             logo = "https://logos.example.test/channels/%s/colorLogoPNG.png" % hex_id(rng)
             url = "https://streams.example.test/plu-%s.m3u8" % hex_id(rng)
-            chno = ""
             tvg_name = ""
         else:
             name = "%s%s %04d" % (base_name, pick(rng, QUALITY), index)
             tvg_id = "ch%05d.test" % index if has_epg else ""
             logo = "http://logos.example.test/%05d.png" % index if rng.random() < 0.5 else ""
             url = "http://stream.example.test/live/%05d.m3u8" % index
-            chno = str(index)
             tvg_name = base_name
         if dead:
             url = "http://127.0.0.1:9/dead/%05d.ts" % index
+        # `chno` is filled in by assign_numbers() after the whole list exists:
+        # a block plan needs to know how many channels each group ended up
+        # with, and `twin` is how it knows which rows must SHARE a number
+        # rather than take one of their own (M2-03 CN13).
         entry = {"name": name, "tvgId": tvg_id, "tvgName": tvg_name, "logo": logo,
-                 "group": group, "url": url, "chno": chno, "headers": "1" if headers else ""}
+                 "group": group, "url": url, "chno": "", "index": index,
+                 "twin": "", "headers": "1" if headers else ""}
         channels.append(entry)
         if tvg_id and rng.random() < args.dupes and len(channels) < args.channels:
             twin = dict(entry)
             twin["name"] = name + (" SD" if "HD" in name else " HD")
             twin["url"] = url.replace(".m3u8", "-alt.m3u8").replace(".ts", "-alt.ts")
+            twin["twin"] = "1"
             channels.append(twin)
     return channels, groups
+
+
+def block_size(per_group_max: int, group_count: int) -> int:
+    """How far apart two groups' blocks sit.
+
+    Wide enough for the busiest group plus its gaps, and narrow enough that
+    the last block still fits under MAX_CHNO_MAJOR (99999, Model.js). A
+    number the model refuses is worse than a small block: the channel would
+    be displayed with no number and be unreachable by digits.
+    """
+    want = per_group_max * 2 + 10
+    for size in (100, 1000, 10000):
+        if want <= size and size * (group_count + 1) <= MAX_CHNO_MAJOR:
+            return size
+    for size in (10000, 1000, 100, 10):
+        if size * (group_count + 1) <= MAX_CHNO_MAJOR:
+            return size
+    return 0                                    # more groups than the space has room for
+
+
+def assign_numbers(channels: list[dict[str, str]], args: argparse.Namespace) -> dict[str, int]:
+    """Write `chno` on every channel. Returns a stats dict for the summary line.
+
+    M2-03 ruling CN13: the live pass wants numbering that looks like a
+    provider's, not 1..N. Three things a dense run never produces, and each
+    one is a code path in Model.js:
+      - GAPS, so the prefix scan has to walk past a hole (1.5);
+      - BLOCKS per group, so the numbers are four digits and out of playlist
+        order, which is what makes `channelOrder: number` visibly different;
+      - at least one SUBCHANNEL pair, so 7 / 7.1 / 7.2 and the "7 then 7."
+        entry path are exercised (2.7).
+    Twins keep their parent's number, so duplicates are real (CN9).
+    """
+    stats = {"numbered": 0, "gaps": 0, "subchannels": 0, "duplicates": 0, "block": 0, "highest": 0}
+    if args.numbering == "none":
+        return stats
+    if args.numbering == "dense":
+        for channel in channels:
+            channel["chno"] = str(channel["index"])
+            stats["numbered"] += 1
+            stats["duplicates"] += 1 if channel["twin"] else 0
+            stats["highest"] = max(stats["highest"], channel["index"])
+        return stats
+
+    rng = random.Random(args.seed + 7919)       # its own stream: the plan must not
+                                                # depend on how many names were drawn
+    order: list[str] = []
+    members: dict[str, list[dict[str, str]]] = {}
+    for channel in channels:
+        if channel["twin"]:
+            continue
+        key = channel["group"].split(";")[0]
+        if key not in members:
+            members[key] = []
+            order.append(key)
+        members[key].append(channel)
+    size = block_size(max(len(v) for v in members.values()), len(order))
+    if size == 0:                               # no room for blocks: gaps only
+        return assign_dense_with_gaps(channels, rng, args, stats)
+    stats["block"] = size
+    # At least one subchannel pair, whatever the seed and however small the
+    # run: the first group with two channels in it gets one. A generator that
+    # "usually" produces the case under test is not a fixture.
+    forced = next((key for key in order if len(members[key]) >= 2), "")
+    for position, key in enumerate(order):
+        base = size * (position + 1)
+        rows = members[key]
+        # Slots left over after every channel has one: the gap budget. Spending
+        # only what is left is what keeps a block from running into the next.
+        budget = max(0, size - len(rows) - 1)
+        number = base
+        major = base
+        for at, channel in enumerate(rows):
+            sub = (key == forced and at == 1) or (at > 0 and rng.random() < args.subchannels)
+            if sub:
+                minor = 1
+                previous = rows[at - 1]["chno"]
+                if "." in previous:
+                    major, minor = previous.split(".")[0], int(previous.split(".")[1]) + 1
+                    major = int(major)
+                channel["chno"] = "%d.%d" % (major, minor)
+                stats["subchannels"] += 1
+            else:
+                if at > 0:
+                    step = 1
+                    if budget > 0 and rng.random() < args.chno_gap:
+                        step = 1 + min(budget, 1 + rng.randrange(3))
+                        budget -= step - 1
+                        stats["gaps"] += 1
+                    number += step
+                major = number
+                channel["chno"] = str(number)
+            stats["highest"] = max(stats["highest"], major)
+        stats["numbered"] += len(rows)
+    for at, channel in enumerate(channels):
+        if channel["twin"] and at > 0:
+            channel["chno"] = channels[at - 1]["chno"]
+            stats["numbered"] += 1
+            stats["duplicates"] += 1
+    return stats
+
+
+def assign_dense_with_gaps(channels: list[dict[str, str]], rng: random.Random,
+                           args: argparse.Namespace, stats: dict[str, int]) -> dict[str, int]:
+    """The fallback for more groups than the number space has blocks for.
+
+    Still not a dense 1..N run: the gaps stay, because they are the part that
+    costs nothing and catches the prefix scan. Reached only above ~9000
+    groups, which no asset in this project has.
+    """
+    number = 1
+    for at, channel in enumerate(channels):
+        if channel["twin"] and at > 0:
+            channel["chno"] = channels[at - 1]["chno"]
+            stats["duplicates"] += 1
+        else:
+            if number > 1 and rng.random() < args.chno_gap:
+                number += 1 + rng.randrange(3)
+                stats["gaps"] += 1
+            if number > MAX_CHNO_MAJOR:
+                break
+            channel["chno"] = str(number)
+            stats["highest"] = number
+            number += 1
+        stats["numbered"] += 1
+    return stats
 
 
 def write_m3u(handle: IO[str], channels: list[dict[str, str]], args: argparse.Namespace) -> None:
@@ -273,6 +424,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--headers", type=float, default=0.02, help="fraction with #EXTVLCOPT header lines (default 0.02)")
     parser.add_argument("--dupes", type=float, default=0.03, help="fraction of tvg-ids duplicated as HD/SD twins (default 0.03)")
     parser.add_argument("--dead", type=float, default=0.0, help="fraction of URLs pointing at 127.0.0.1:9 (connection refused)")
+    parser.add_argument("--numbering", choices=["blocks", "dense", "none"], default="",
+                        help="tvg-chno plan (default: blocks for --profile synthetic, none for realistic)")
+    parser.add_argument("--chno-gap", type=float, default=0.15,
+                        help="fraction of numbering steps that skip 1-3 numbers (default 0.15)")
+    parser.add_argument("--subchannels", type=float, default=0.04,
+                        help="fraction of numbers that become a subchannel of the one before (default 0.04)")
     parser.add_argument("--crlf", action="store_true", help="CRLF line endings")
     parser.add_argument("--bom", action="store_true", help="prefix a UTF-8 BOM")
     return parser
@@ -283,19 +440,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.channels < 1 or args.groups < 1:
         sys.stderr.write("gen-playlist: --channels and --groups must be positive\n")
         return 2
-    for name in ("epg_ids", "multi_group", "headers", "dupes", "dead"):
+    for name in ("epg_ids", "multi_group", "headers", "dupes", "dead", "chno_gap", "subchannels"):
         value = getattr(args, name)
         if not 0.0 <= value <= 1.0:
             sys.stderr.write("gen-playlist: --%s must be between 0 and 1\n" % name.replace("_", "-"))
             return 2
+    if not args.numbering:
+        args.numbering = "none" if args.profile == "realistic" else "blocks"
     if not args.now:
         args.now = int(time.time()) // 3600 * 3600
     channels, groups = generate(args)
+    stats = assign_numbers(channels, args)
     m3u = io.StringIO()
     write_m3u(m3u, channels, args)
     m3u_bytes = write_out(args.out, m3u.getvalue())
     sys.stderr.write("gen-playlist: m3u %s channels=%d groups=%d bytes=%d sha256=%s\n"
                      % (args.out, len(channels), len(groups), m3u_bytes, sha256_of(args.out)))
+    # CN13 asks for the gap to be recorded explicitly in the QA results, so the
+    # generator states it rather than leaving QA to count it by hand.
+    sys.stderr.write("gen-playlist: numbering=%s numbered=%d block=%d gaps=%d subchannels=%d duplicates=%d highest=%d\n"
+                     % (args.numbering, stats["numbered"], stats["block"], stats["gaps"],
+                        stats["subchannels"], stats["duplicates"], stats["highest"]))
     if args.xmltv:
         xml = io.StringIO()
         programmes = write_xmltv(xml, channels, args)

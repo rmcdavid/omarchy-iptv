@@ -477,6 +477,139 @@ class ChannelNumberTest(unittest.TestCase):
         self.assertEqual(len(result["channels"]), 17)
 
 
+
+class GeneratorNumberingTest(unittest.TestCase):
+    """scripts/gen-playlist.py, ruling CN13.
+
+    Every numbered asset this project has is hand written; the only source big
+    enough for the live pass is generated, and it used to emit a dense 1..N
+    run, which resembles no provider and never exercises a gap, a block
+    boundary or a subchannel. The generator is driven here for real and its
+    output is read back through the helper that will read it on the day, so
+    these assert the fixture the live pass will actually get."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "gen-playlist.py"
+        spec = importlib.util.spec_from_file_location("gen_playlist", path)
+        cls.gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gen)
+
+    def build(self, *flags):
+        """Run the generator for real and parse the result with the helper.
+
+        Returns (channels, stats) where stats is the numbering summary line the
+        generator prints for the QA record."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "gen.m3u")
+            noise = io.StringIO()
+            with contextlib.redirect_stderr(noise):
+                code = self.gen.main(list(flags) + ["--out", out])
+            self.assertEqual(code, 0)
+            summary = [l for l in noise.getvalue().split("\n") if "numbering=" in l]
+            self.assertEqual(len(summary), 1, noise.getvalue())
+            stats = dict(part.split("=", 1) for part in summary[0].split(": ")[1].split(" "))
+            text = pathlib.Path(out).read_text(encoding="utf-8")
+        return helper.parse_m3u(text)["channels"], stats
+
+    def numbers(self, channels):
+        return [c["chno"] for c in channels if "chno" in c]
+
+    def test_realistic_still_carries_no_number_at_all(self):
+        # Scenario N14's precondition: hasNumbers false. It is the default for
+        # this profile and nothing about CN13 may quietly give it numbers.
+        channels, stats = self.build("--profile", "realistic", "--channels", "300", "--groups", "12", "--seed", "7")
+        self.assertEqual(stats["numbering"], "none")
+        self.assertEqual(self.numbers(channels), [])
+
+    def test_dense_is_still_available_and_is_the_playlist_index(self):
+        channels, stats = self.build("--channels", "40", "--groups", "4", "--seed", "1", "--numbering", "dense")
+        self.assertEqual(stats["numbering"], "dense")
+        # Every row numbered, and an HD/SD twin repeats the number before it
+        # rather than taking one of its own.
+        self.assertEqual(len(self.numbers(channels)), len(channels))
+        self.assertEqual(sorted(set(int(n) for n in self.numbers(channels))),
+                         list(range(1, len(set(self.numbers(channels))) + 1)))
+
+    def test_blocks_put_each_group_in_its_own_band(self):
+        channels, stats = self.build("--channels", "600", "--groups", "8", "--seed", "5")
+        self.assertEqual(stats["numbering"], "blocks")
+        block = int(stats["block"])
+        self.assertGreater(block, 0)
+        bands = {}
+        for channel in channels:
+            if "chno" not in channel:
+                continue
+            bands.setdefault(channel["group"].split(";")[0], set()).add(int(channel["chno"].split(".")[0]) // block)
+        # One band per group, and no two groups share one: that is what makes
+        # `channelOrder: number` visibly different from playlist order.
+        self.assertTrue(all(len(b) == 1 for b in bands.values()), bands)
+        flat = [next(iter(b)) for b in bands.values()]
+        self.assertEqual(len(set(flat)), len(flat), bands)
+
+    def test_blocks_leave_gaps_and_make_a_subchannel_pair(self):
+        channels, stats = self.build("--channels", "600", "--groups", "8", "--seed", "5")
+        self.assertGreater(int(stats["gaps"]), 0)
+        self.assertGreater(int(stats["subchannels"]), 0)
+        subs = [n for n in self.numbers(channels) if "." in n]
+        self.assertTrue(subs)
+        # A subchannel is a subchannel OF something: its major must be a
+        # channel in its own right, or the pair is not a pair.
+        majors = set(n for n in self.numbers(channels) if "." not in n)
+        self.assertTrue(any(s.split(".")[0] in majors for s in subs), subs[:5])
+        # The gaps are real holes in the run, not an accounting fiction.
+        plain = sorted(int(n) for n in self.numbers(channels) if "." not in n)
+        self.assertTrue(any(b - a > 1 for a, b in zip(plain, plain[1:])))
+
+    def test_at_least_one_subchannel_pair_whatever_the_seed(self):
+        # "usually produces the case under test" is not a fixture. A tiny run
+        # at several seeds is the cheapest way to say it always does.
+        for seed in ("1", "2", "3", "4", "5"):
+            channels, _ = self.build("--channels", "12", "--groups", "2", "--seed", seed)
+            subs = [n for n in self.numbers(channels) if "." in n]
+            self.assertTrue(subs, "seed %s produced no subchannel" % seed)
+
+    def test_twins_share_a_number_so_duplicates_are_real(self):
+        channels, stats = self.build("--channels", "600", "--groups", "8", "--seed", "5", "--dupes", "0.2")
+        self.assertGreater(int(stats["duplicates"]), 0)
+        seen = {}
+        for channel in channels:
+            if "chno" in channel:
+                seen.setdefault(channel["chno"], []).append(channel["name"])
+        self.assertTrue([v for v in seen.values() if len(v) > 1])
+
+    def test_no_number_exceeds_the_cap_the_model_will_parse(self):
+        # M2-03 1.2: a major over 99999 is not a number, so a channel carrying
+        # one would be displayed blank and be unreachable by digits -- and the
+        # live pass would be measuring the wrong playlist with nothing red.
+        shared = json.loads((FIXTURES / "chno-attrs.json").read_text(encoding="utf-8"))
+        self.assertEqual(self.gen.MAX_CHNO_MAJOR, shared["maxMajor"])
+        for flags in (("--channels", "3000", "--groups", "3", "--seed", "2"),
+                      ("--channels", "3000", "--groups", "900", "--seed", "2"),
+                      ("--channels", "3000", "--groups", "2900", "--seed", "2")):
+            channels, stats = self.build(*flags)
+            majors = [int(n.split(".")[0]) for n in self.numbers(channels)]
+            minors = [int(n.split(".")[1]) for n in self.numbers(channels) if "." in n]
+            self.assertLessEqual(max(majors), shared["maxMajor"], flags)
+            self.assertTrue(all(m <= 999 for m in minors), flags)
+            self.assertEqual(int(stats["highest"]), max(majors), flags)
+
+    def test_the_same_flags_give_the_same_bytes(self):
+        # The whole generator contract. A block plan drawn from the same stream
+        # as the names would have made the numbering depend on how many names
+        # were picked, which is exactly the kind of coupling that makes a
+        # "deterministic" fixture drift.
+        digests = []
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = os.path.join(tmp, "gen.m3u")
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.gen.main(["--channels", "400", "--groups", "9", "--seed", "11", "--out", out])
+                digests.append(pathlib.Path(out).read_bytes())
+        self.assertEqual(digests[0], digests[1])
+
+
 class PerformanceTest(unittest.TestCase):
     def test_10k_entries_parse_and_write_under_one_second(self):
         with tempfile.TemporaryDirectory() as tmp:

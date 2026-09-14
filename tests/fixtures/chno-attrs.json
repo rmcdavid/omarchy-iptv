@@ -18,6 +18,8 @@
 
   "notRead": ["tvg-num", "lcn", "channel_number", "tvgchannelnumber", "number"],
 
+  "maxMajor": 99999,
+
   "notes": [
     "m3uAttributes is the helper's precedence order, highest first. The helper",
     "lower-cases attribute keys before matching, so TVG-CHNO= is the same key.",
@@ -27,6 +29,11 @@
     "cacheFields followed by m3uAttributes.",
     "notRead is the other half of the contract: an attribute nobody agreed to",
     "read must stay unread in BOTH implementations, or a playlist gains numbers",
-    "on one side of the cache and not the other."
+    "on one side of the cache and not the other.",
+    "maxMajor is the grammar's largest major (M2-03 1.2), stated in Model.js as",
+    "MAX_CHNO_MAJOR and in scripts/gen-playlist.py, which must never emit a",
+    "number the model will refuse: such a channel is displayed blank and cannot",
+    "be reached by digits, and a live pass would measure the wrong playlist with",
+    "nothing going red."
   ]
 }

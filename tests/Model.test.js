@@ -2238,6 +2238,14 @@ for (let i = 0; i < chnoOrder.length; i++) {
 check("CN11 parity: an earlier field wins over every later one",
   [chnoPairs.length, chnoPairs.filter(function (v) { return v === "earlier" }).length],
   [chnoOrder.length * (chnoOrder.length - 1) / 2, chnoOrder.length * (chnoOrder.length - 1) / 2])
+// The grammar's ceiling is stated a third time, in scripts/gen-playlist.py:
+// the generator must never emit a number this parser refuses, or the live
+// pass measures a playlist whose channels are displayed blank and cannot be
+// typed. tests/test_playlist.py asserts the generator's copy against the same
+// fixture value.
+check("CN1.2 parity: the fixture's maxMajor is the model's, and one past it is not a number",
+  [Model.MAX_CHNO_MAJOR, Model.parseChno(String(chnoAttrs.maxMajor)).ok, Model.parseChno(String(chnoAttrs.maxMajor + 1)).ok],
+  [chnoAttrs.maxMajor, true, false])
 check("CN11 parity: an attribute nobody agreed to read stays unread",
   chnoAttrs.notRead.map(function (key) { const row = {}; row[key] = "42"; return Model.chnoRawOf(row) }),
   chnoAttrs.notRead.map(function () { return "" }))
