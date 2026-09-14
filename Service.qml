@@ -2482,6 +2482,13 @@ Item {
       }
       if (root.playerUp) {
         // Still there and still not answering: the verdict stands.
+        //
+        // CL3: this line is the only witness for "exactly one relaunch, never
+        // a second one aimed at the healthy new player", which is half of the
+        // D-PLY-1 fix. Without it the harness assertion matches a string both
+        // the fixed and the broken tree emit, so it passes either way and
+        // proves nothing. Do not remove it without replacing the witness.
+        console.log("omarchy-iptv: relaunching the unresponsive player, seq " + (root.playSeq + 1))
         root.playSeq += 1
         root.issuePlayerSession("restart", channel, "term")
       } else {
