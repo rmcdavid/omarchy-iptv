@@ -1604,3 +1604,12 @@ the feature is broken for a whole class of keyboards and no amount of testing
 on this machine's layout would reveal it. Treat A1 as a gate, proven on a real
 alternate layout or by a documented Qt behavior with a citation, before Lane A
 writes the key handler.
+
+## 14. Ruling CN15 (product owner, 2026-09-14)
+
+Lane B raised one decision. The design had the tune-by-number command report
+success even when playback was refused, for instance when the player is not
+installed. The lane instead reports a failure with its own code. That is
+correct and it stands: reporting success for something that did not happen is
+a lie the caller cannot detect, and this is a command a user binds to a key,
+so the only signal they get is the reply. Both frozen reply shapes are intact.
