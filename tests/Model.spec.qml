@@ -430,6 +430,67 @@ TestCase {
     compare(Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS", sourceCount: 2 }), "NAS · 84 channels · updated 09:12")
   }
 
+  // The EPG helper's warnings[] (epg-status.json) get the same treatment
+  // with their own wording; the playlist's win when both have something.
+  function test_epgWarnings() {
+    var status = Model.parseHelperStatus('{"ok": true, "kind": "epg", "warnings": ["no EPG channel id matches a playlist tvg-id", "see http://u:p@e.test/xmltv.php?x=1"]}', "epg")
+    compare(Model.statusWarnings(status), ["no EPG channel id matches a playlist tvg-id", "see e.test"])
+    var line = Model.warningLine(Model.statusWarnings(status), "epg")
+    compare(line, "Guide data warning: no EPG channel id matches a playlist tvg-id (+1 more)")
+    compare(Model.warningLine(["a"], "epg"), "Guide data warning: a")
+    compare(Model.warningLine(["a"]), "Playlist warning: a")
+    compare(Model.statusWarnings({ ok: false, kind: "epg", warnings: ["x"] }), [])
+    compare(Model.footerWarning(["p"], ["e"]), "Playlist warning: p")
+    compare(Model.footerWarning([], ["e"]), "Guide data warning: e")
+    compare(Model.footerWarning([], []), "")
+    compare(Model.footerWarning([], Model.statusWarnings(status)), line)
+    // Precedence (UX 6.1) is unchanged: a warning never displaces a playing,
+    // refreshing or pending state, and the empty states keep the slot blank.
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "01:53", warning: line }), line)
+    compare(Model.footerStatus({ configured: true, count: 8, refreshing: true, warning: line }), "Refreshing" + Model.ELLIPSIS)
+    compare(Model.footerStatus({ configured: true, count: 8, epgPending: true, warning: line }), "Guide data loading" + Model.ELLIPSIS)
+    compare(Model.footerStatus({ configured: true, count: 8, playingName: "Arte", warning: line }), Model.GLYPHS.play + " Arte" + Model.SEP + "s stop")
+    compare(Model.footerStatus({ configured: true, count: 8, transient: "Saved", warning: line }), "Saved")
+    compare(Model.footerStatus({ configured: false, count: 0, warning: line }), "")
+  }
+
+  // D-LIVE-19: one body surface at a time. Clearing playlistUrl at runtime
+  // takes the rows, the group column and the counts with it, so the setup
+  // surface is never drawn over a still-rendered channel list.
+  function test_guideSurfaceClearedPlaylist() {
+    var loaded = Model.guideSurface({ serviceReady: true, configured: true, channelCount: 10, status: "ready", rowCount: 10, query: "", scopeId: "all", narrow: false, sources: 3 })
+    compare(loaded.empty, "")
+    compare(loaded.showList, true)
+    compare(loaded.showColumn, true)
+    compare(loaded.channelCount, 10)
+    var cleared = Model.guideSurface({ serviceReady: true, configured: false, channelCount: 10, status: "ready", rowCount: 10, query: "", scopeId: "all", narrow: false, sources: 3 })
+    compare(cleared.empty, "unconfigured")
+    compare(cleared.hasChannels, false)
+    compare(cleared.showList, false)
+    compare(cleared.showColumn, false)
+    compare(cleared.channelCount, 0)
+    compare(cleared.setup, true)
+    // The record outlives the cleared setting, so the first-run screen shows
+    // `Saved sources (3)` instead of pretending nothing was configured.
+    compare(cleared.savedSources, 3)
+    compare(Model.footerStatus({ configured: false, count: cleared.channelCount, lastUpdated: "15:13" }), "")
+    var first = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/a.m3u", "", "", 1)
+    var after = Model.reconcileSources(first.state, "", "", first.added, 2)
+    compare(after.state.sources.length, 1)
+    compare(after.activeKey, "")
+    compare(after.invalid, null)
+    compare(Model.activeSourceKey(after.state, ""), "")
+    // The rest of the state machine is as shipped.
+    compare(Model.guideSurface({ serviceReady: false }).empty, "service")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "loading" }).empty, "loading")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "error" }).empty, "error")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "sky", scopeId: "all" }).empty, "noMatches")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "", scopeId: "favorites" }).empty, "noFavorites")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "", scopeId: "g:UK" }).empty, "emptyScope")
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showColumn, false)
+    compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showList, true)
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)
