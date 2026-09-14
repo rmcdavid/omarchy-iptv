@@ -62,6 +62,8 @@ scripts/dev-harness/run.sh --open --fake-epg         # + synthetic epg-now.json 
 scripts/dev-harness/run.sh --open --serve --timeout 40   # local test video on 127.0.0.1:8765
 scripts/dev-harness/run.sh --open --playlist /nonexistent.m3u --keep   # error banner over a kept cache
 scripts/dev-harness/run.sh --open --vertical         # glyph-only bar widget
+scripts/dev-harness/run.sh --open --order number      # channelOrder=number (M2-03)
+scripts/dev-harness/run.sh --open --entry-ms 3000 --no-bar-number
 scripts/dev-harness/run.sh clean
 ```
 
@@ -75,7 +77,9 @@ $H ipc setScope favorites $H ipc activate true  # Space semantics (keep open)
 $H ipc favorite           $H ipc remove       $H ipc stop        $H ipc refresh
 $H ipc zap 1              $H ipc set showChannelName false
 $H ipc state              # JSON dump of guide + service state
-$H ipc widget             # JSON dump of the bar widget (glyph, label, tooltip)
+$H ipc widget             # JSON dump of the bar widget (glyph, label, number, tooltip)
+$H ipc channel 101        # M2-03: tune by channel number; the service's own verb
+$H ipc chnoIndex          # M2-03: { hasNumbers, count, duplicates, maxLabelLen }
 $H ipc tooltip            # last tooltip text the widget asked the bar to show
 $H key -k Tab             # real key events via wtype (overlay has exclusive focus)
 $H key j j f              # e.g. list mode: down, down, favorite
@@ -149,6 +153,32 @@ H7 (remove the active source), a `failPersist` switch (SR25) and privacy
 greps over the log and IPC output. It prints one PASS/FAIL line per check and a summary; the
 harness log is `$SCRATCH/scenario.log`.
 
+### Channel numbers (M2-03)
+
+`chno-scenario.sh` covers the service side: the `channel` IPC verb (which
+PLAYS, ruling CN1), the index counts, `channelOrder`, and the bar's number
+slot. Guide digit entry is Lane A's and is not in it.
+
+```bash
+scripts/dev-harness/chno-scenario.sh check-tree   # no display, no quickshell
+scripts/dev-harness/chno-scenario.sh              # preflight, then the live half
+```
+
+`check-tree` asks whether the tree under test (`OMARCHY_IPTV_PLUGIN_ROOT`,
+default this repo) has the seams the live half drives. It exists because a
+harness pointed at a tree without the verb answers `no_verb` or an empty
+string, and half the live checks would then be VACUOUS rather than red. It
+is also how a lane without the display shows the scenario detecting the
+feature's absence: run it against an export of the pre-change tree and it
+fails 12 of its 14 checks. It proves the code is present, never that it
+works.
+
+`fixtures/harness.m3u.in` carries the numbers the scenario asserts on: 15 of
+its 20 rows are numbered, including the duplicate pair 501, the subchannels
+7.1 and 7.2, `8-1` (which normalizes to 8.1), `0042` (to 42), a non-numeric
+`N/A` that is deliberately NOT a number, and one row for each of the two
+alias attributes of ruling CN11.
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape
@@ -181,7 +211,8 @@ to ~108 bytes: keep `OMARCHY_IPTV_HARNESS_DIR` short.
 
 ## What the fixture contains
 
-`fixtures/harness.m3u.in` has 20 channels in 9 groups (multi-group
+`fixtures/harness.m3u.in` has 20 channels in 9 groups, 15 of them
+numbered (M2-03; see the section above) (multi-group
 `Animation;Kids;Religious`, an ungrouped pair, diacritics, Cyrillic, an
 `#EXTVLCOPT` user agent). Every stream URL points at `127.0.0.1:9` (TCP
 discard, connection refused) so mpv fails within a second and exercises the

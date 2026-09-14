@@ -27,6 +27,9 @@
 #   --vertical          fake a vertical bar
 #   --no-name           showChannelName=false
 #   --label-max N       barLabelMaxWidth
+#   --order ORDER       channelOrder: playlist (default) or number (M2-03)
+#   --entry-ms N        numberEntryMs, the channel-number entry timeout
+#   --no-bar-number     barShowChannelNumber=false
 #   --keep              keep the scratch cache/state between runs (default wipes cache+state)
 #   --detach            start in the background and return (no EXIT trap): the shell survives
 #                       this invocation, which is what `restart-shell` needs. Reap with `reap`.
@@ -286,6 +289,7 @@ case $cmd in
   start|--*)
     [[ $cmd == start ]] && shift
     OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0
+    ORDER=playlist ENTRY_MS=1500 BAR_NUMBER=true
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
@@ -298,6 +302,15 @@ case $cmd in
         --vertical) VERTICAL=1 ;;
         --no-name) SHOW_NAME=false ;;
         --label-max) LABEL_MAX=$2; shift ;;
+        # Rejected here rather than in QML: channelOrder is deliberately
+        # forgiving at runtime (an unreadable value means "playlist"), which
+        # would turn a typo in a scenario into a silent pass.
+        --order) ORDER=$2; shift
+                 [[ $ORDER == playlist || $ORDER == number ]] || die "--order takes playlist or number, not '$ORDER'" ;;
+        --entry-ms) ENTRY_MS=$2; shift
+                 [[ $ENTRY_MS =~ ^[0-9]+$ ]] || die "--entry-ms takes an integer, not '$ENTRY_MS'"
+                 (( ENTRY_MS >= 400 && ENTRY_MS <= 5000 )) || die "--entry-ms is 400..5000 (manifest range), got $ENTRY_MS" ;;
+        --no-bar-number) BAR_NUMBER=false ;;
         --keep) KEEP=1 ;;
         --keep-player) KEEP_PLAYER=1 ;;
         --detach) DETACH=1; KEEP_PLAYER=1 ;;
@@ -336,6 +349,9 @@ case $cmd in
     export OMARCHY_IPTV_VERTICAL="$VERTICAL"
     export OMARCHY_IPTV_SHOW_NAME="$SHOW_NAME"
     export OMARCHY_IPTV_LABEL_MAX="$LABEL_MAX"
+    export OMARCHY_IPTV_ORDER="$ORDER"
+    export OMARCHY_IPTV_ENTRY_MS="$ENTRY_MS"
+    export OMARCHY_IPTV_BAR_NUMBER="$BAR_NUMBER"
     # scheme://host only: the URL may carry provider credentials (S-08).
     echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
     if (( DETACH )); then
@@ -360,6 +376,9 @@ case $cmd in
         qa_env_line OMARCHY_IPTV_VERTICAL    "$OMARCHY_IPTV_VERTICAL"
         qa_env_line OMARCHY_IPTV_SHOW_NAME   "$OMARCHY_IPTV_SHOW_NAME"
         qa_env_line OMARCHY_IPTV_LABEL_MAX   "$OMARCHY_IPTV_LABEL_MAX"
+        qa_env_line OMARCHY_IPTV_ORDER       "$OMARCHY_IPTV_ORDER"
+        qa_env_line OMARCHY_IPTV_ENTRY_MS    "$OMARCHY_IPTV_ENTRY_MS"
+        qa_env_line OMARCHY_IPTV_BAR_NUMBER  "$OMARCHY_IPTV_BAR_NUMBER"
         qa_env_line OMARCHY_IPTV_MPV_ARGS    "${OMARCHY_IPTV_MPV_ARGS:-}"
       } >"$SCRATCH/last-start.env"
       start_detached_shell
@@ -378,7 +397,10 @@ case $cmd in
     echo "[run.sh] quickshell exited with $status (124 = timeout, expected)"
     ;;
   *)
-    sed -n '2,45p' "$0"
+    # The header block, through the environment paragraph. Keep this in step
+    # with the comment above when options are added, or the usage silently
+    # stops listing the newest ones.
+    sed -n '2,48p' "$0"
     exit 2
     ;;
 esac
