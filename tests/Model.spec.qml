@@ -1322,6 +1322,48 @@ TestCase {
     compare(Model.rowAccessibleName({ name: "The One Show", chno: "" }), "The One Show")
   }
 
+  // CN21 / D-CHNO-2 in the engine that actually runs the guide. Typing 1015
+  // on this fixture auto-commits on 101 (nothing extends it) and the 5 then
+  // used to open a NEW entry that tuned somewhere of its own with no error.
+  function test_numberEntrySequenceCN21() {
+    var entry = Model.numberEntry()
+    var resolution = Model.resolveChno(null, "", -1)
+    var commits = []
+    var keys = "1015"
+    for (var i = 0; i < keys.length; i++) {
+      var step = Model.numberKeyStep(entry, spec.chnoIndex, keys.charAt(i), { cursorId: "6", cursorIndex: 5, scopeId: "all", query: "" })
+      compare(step.changed, true)
+      entry = step.entry
+      resolution = step.commit ? Model.resolveChno(null, "", -1) : step.resolution
+      if (step.commit) {
+        commits.push(Model.chnoStatus(step.commit.kind, step.commit.label, "BBC One HD", step.commit.matches, step.commit.ordinal, true))
+        // The auto-commit leaves the digit window running, and the buffer armed.
+        compare(step.timer, "restart")
+        compare(step.entry.active, false)
+        compare(step.entry.resume, true)
+      }
+    }
+    // The 5 resumed 101 rather than starting a new number.
+    compare(entry.active, true)
+    compare(entry.buffer, "1015")
+    compare(resolution.kind, "none")
+    var done = Model.numberCommitStep(entry, resolution, "BBC One HD", { play: false, reason: "timeout" })
+    commits.push(done.plan.status)
+    compare(commits, ["Channel 101" + Model.SEP + "BBC One HD", "No channel 1015"])
+    // A miss restores the row the user was on before the first digit, and
+    // refuses to play whatever the preview passed over (CN1).
+    compare(done.plan.restore, true)
+    compare(done.plan.play, false)
+    compare(done.snapshot.cursorIndex, 5)
+    compare(done.entry.resume, false)
+    // The instant path, unchanged: 101 alone still commits on its last digit.
+    var quick = Model.numberKeyStep(Model.numberKeyStep(Model.numberKeyStep(Model.numberEntry(), spec.chnoIndex, "1", { cursorId: "6" }).entry,
+      spec.chnoIndex, "0", {}).entry, spec.chnoIndex, "1", {})
+    compare(quick.commit === null, false)
+    compare(quick.commit.kind, "exact")
+    compare(quick.resolution.channelIndex, 0)
+  }
+
   // Gate A1 in the engine that actually runs the guide: the modifier bits
   // here are the real Qt enum values, so this also pins that Model.js's
   // integer copies of them match Qt's.

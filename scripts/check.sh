@@ -40,8 +40,8 @@ fail=0
 # between a fifth and a half of each suite could have stopped executing with
 # the gate still green. Raised to what M2-03 leaves behind. Raise a floor when
 # you add tests; never lower one to make a run green.
-QML_SPEC_MIN=${QML_SPEC_MIN:-56}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1150}
+QML_SPEC_MIN=${QML_SPEC_MIN:-57}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1163}
 PY_TESTS_MIN=${PY_TESTS_MIN:-318}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 

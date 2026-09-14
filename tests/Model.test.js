@@ -2052,7 +2052,8 @@ check("CN5.2: the IPC lookup finds the same channel in a reordered array", (() =
 })(), ["h", "f", "f"])
 check("CN2.3: no match, an empty buffer and an unnumbered playlist all resolve to none", [Model.resolveChno(planIdx, "205", -1), Model.resolveChno(planIdx, "", -1), Model.resolveChno(Model.buildChnoIndex([]), "1", -1), Model.resolveChno(null, "1", -1)].map(r => [r.kind, r.channelIndex, r.label, r.matches]), [["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0]])
 
-const plan200 = Model.buildChnoIndex(Model.prepareChannels((() => { const rows = []; for (let i = 1; i <= 200; i++) rows.push(chan("p" + i, String(i))); return rows })()))
+const plan200rows = Model.prepareChannels((() => { const rows = []; for (let i = 1; i <= 200; i++) rows.push(chan("p" + i, String(i))); return rows })())
+const plan200 = Model.buildChnoIndex(plan200rows)
 check("CN2.5: 199 in a 1..200 plan commits on the last digit; 1 does not", [Model.chnoUnambiguous(plan200, "199"), Model.chnoUnambiguous(plan200, "1"), Model.chnoUnambiguous(plan200, "20")], [true, false, false])
 check("CN2.5: an exact major is ambiguous while a subchannel extends it", [Model.chnoUnambiguous(planIdx, "7"), Model.chnoUnambiguous(planIdx, "130"), Model.chnoUnambiguous(planIdx, "205")], [false, true, false])
 
@@ -2087,8 +2088,72 @@ check("CN2.6: popNumberKey to empty deactivates but KEEPS the snapshot to restor
   return [[back.active, back.buffer], [gone.active, gone.buffer, gone.scopeId, gone.query, gone.cursorIndex]]
 })(), [[true, "1"], [false, "", "g:UK", "sky", 12]])
 check("CN2.6: popNumberKey on an inactive entry is harmless", (() => { const r = Model.popNumberKey(Model.numberEntry()); const n = Model.popNumberKey(null); return [r.active, r.buffer, n.active, n.buffer] })(), [false, "", false, ""])
-check("CN2.6: cancelNumberEntry is idempotent and forgets the snapshot", [Model.cancelNumberEntry(Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 4 }).entry), Model.cancelNumberEntry(Model.cancelNumberEntry(null))], [{ active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" }, { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" }])
-check("CN2.3: numberEntry() is the documented zero value", Model.numberEntry(), { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" })
+check("CN2.6: cancelNumberEntry is idempotent and forgets the snapshot", [Model.cancelNumberEntry(Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 4 }).entry), Model.cancelNumberEntry(Model.cancelNumberEntry(null))], [{ active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false }, { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false }])
+check("CN2.3: numberEntry() is the documented zero value", Model.numberEntry(), { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false })
+
+// ---- CN21 / D-CHNO-2: a number that does not exist must say so.
+//
+// The live pass typed 20509 on a 3,000-channel plan and landed on channel
+// 900 with no error anywhere: the auto-commit fired on the proper prefix 205,
+// and the leftover "09" opened a NEW entry that tuned somewhere of its own.
+// 28.4% of absent five-digit numbers did that. The rule that fixes it is one
+// sentence -- the machine may finish a number early only if it can take it
+// back -- and these are its parts.
+const { typer, measure } = require("../scripts/chno-entry-rate.js")
+const missPlan = Model.prepareChannels([chan("t1", "100"), chan("t2", "205"), chan("t3", "300"), chan("t4", "900")])
+const missIdx = Model.buildChnoIndex(missPlan)
+const typeMiss = typer(missPlan, missIdx)
+const miss20509 = typeMiss("20509", 0)
+check("CN21: 205 auto-commits, and the digits after it are still the same number",
+  [miss20509.said, miss20509.toldNoExactly, miss20509.moved, miss20509.commits],
+  [["Channel 205" + Model.SEP + "Ch t2", "No channel 20509"], true, false, 2])
+check("CN21: so the number that does not exist is never a silent landing somewhere else",
+  [miss20509.silent, miss20509.landedOn], [false, "100"])
+// The instant path is what the rule may not destroy: the commit still fires
+// on the last digit, it just stops being the end of the number.
+const instant205 = typeMiss("205", 0)
+check("CN2.5: an unambiguous number still commits on its last digit, with no wait",
+  [instant205.instant, instant205.commits, instant205.landedOn, instant205.said], [true, 1, "205", ["Channel 205" + Model.SEP + "Ch t2"]])
+check("CN21: and the entry it leaves behind is inactive, so the chip and the hints are as they were",
+  [instant205.armed, typeMiss("20509", 0).armed], [true, false])
+
+const armed205 = Model.closeNumberEntry(
+  Model.pushNumberKey(Model.pushNumberKey(Model.pushNumberKey(Model.numberEntry(), "2", { scopeId: "g:UK", query: "sky", cursorIndex: 12, cursorId: "z" }).entry, "0", {}).entry, "5", {}).entry, "auto")
+check("CN21: only the auto-commit arms the buffer; every other reason ends the number for good",
+  ["auto", "timeout", "enter", "key", "cancel", ""].map(r => [Model.closeNumberEntry(armed205, r).resume, Model.closeNumberEntry(armed205, r).buffer]),
+  [[true, "205"], [false, ""], [false, ""], [false, ""], [false, ""], [false, ""]])
+check("CN21: an armed buffer is inactive and keeps the pre-entry snapshot",
+  [armed205.active, armed205.buffer, armed205.scopeId, armed205.query, armed205.cursorIndex, armed205.cursorId], [false, "205", "g:UK", "sky", 12, "z"])
+check("CN21: a key inside the window continues that buffer instead of starting a new entry",
+  (() => { const r = Model.pushNumberKey(armed205, "0", { scopeId: "all", query: "", cursorIndex: 99, cursorId: "q" }); return [r.resumed, r.entry.active, r.entry.buffer, r.entry.scopeId, r.entry.cursorIndex, r.entry.resume] })(),
+  [true, true, "2050", "g:UK", 12, false])
+check("CN21: a separator resumes too, and an unarmed entry still starts fresh",
+  [Model.pushNumberKey(armed205, ".").entry.buffer, Model.pushNumberKey(Model.numberEntry(), "0", { cursorIndex: 99 }).entry.buffer,
+    Model.pushNumberKey(Model.numberEntry(), "0", { cursorIndex: 99 }).resumed], ["205.", "0", false])
+check("CN21: once the window expires the buffer is gone, so the next digit is a new number",
+  (() => { const fresh = Model.pushNumberKey(Model.numberEntry(), "0", { cursorIndex: 4, cursorId: "n" }); return [fresh.resumed, fresh.entry.buffer, fresh.entry.cursorIndex] })(), [false, "0", 4])
+check("CN21: the auto-commit leaves the digit window RUNNING - it is what disarms the buffer",
+  (() => { const s = Model.numberKeyStep(Model.pushNumberKey(Model.numberEntry(), "2", { cursorId: "z" }).entry, missIdx, "0", {}); const t = Model.numberKeyStep(s.entry, missIdx, "5", {}); return [t.commit !== null, t.timer, t.entry.active, t.entry.resume, s.timer] })(),
+  [true, "restart", false, true, "restart"])
+check("CN21: a resumed buffer can only ever resolve to nothing, which is why saying so is safe",
+  (() => {
+    const out = []
+    for (const key of Object.keys(missIdx.byKey)) {
+      if (!Model.chnoUnambiguous(missIdx, key)) continue
+      for (const d of "0123456789.") out.push(Model.resolveChno(missIdx, key + d, -1).kind)
+    }
+    return [out.length, out.every(k => k === "none")]
+  })(), [44, true])
+
+// The rate, on a whole sample rather than one number: every absent number in
+// a range, typed at speed, on a 1..200 plan (where 200x is the trap 20509
+// was). The measurement that reports the live-pass fixture is this same
+// function; see scripts/chno-entry-rate.js.
+const rate200 = measure(plan200rows, plan200, 2000, 2099, 0)
+check("CN21: over a whole sample, nothing lands silently and everything absent is reported",
+  [rate200.absentSample, rate200.silentMistunes, rate200.movedAtAll, rate200.toldNoChannel], [100, 0, 0, 100])
+check("CN21: and the instant path over the same plan is untouched",
+  [rate200.distinctNumbers, rate200.instantCommits, rate200.instantRate, rate200.autoCommittedEarly], [200, 180, "90.0%", 10])
 
 check("CN5.2: orderChannels is identity for playlist order, and for an unnumbered playlist", [Model.orderChannels(plan, "playlist", planIdx) === plan, Model.orderChannels(plan, "number", Model.buildChnoIndex([])) === plan, Model.orderChannels(plan, "", planIdx) === plan], [true, true, true])
 check("CN5.2: number order gathers by chnoSort, unnumbered channels last in playlist order", Model.orderChannels(plan, "number", planIdx).map(c => c.chnoLabel + "/" + c.id), ["7/b", "7.1/d", "7.2/c", "8/e", "10/a", "12/h", "12/i", "130/g", "139/f", "/j", "/k"])

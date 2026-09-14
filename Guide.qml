@@ -869,8 +869,23 @@ Item {
     return !done.plan.restore
   }
 
+  // CN21. The window an auto-commit left armed, expiring. Whatever ends it -
+  // the timer, a key that is not a digit, Esc, Enter, closing the guide - the
+  // number is finished and the next digit starts a new one.
+  function disarmNumberResume() {
+    if (root.numberEntry === null || root.numberEntry.resume !== true) return false
+    numberTimer.stop()
+    root.numberEntry = Model.numberEntry()
+    return true
+  }
+
+  function numberTimerFired() {
+    if (root.numberEntryActive) { root.commitNumberEntry({ play: false, reason: "timeout" }); return }
+    root.disarmNumberResume()
+  }
+
   function cancelNumberEntry() {
-    if (!root.numberEntryActive) return false
+    if (!root.numberEntryActive) { root.disarmNumberResume(); return false }
     numberTimer.stop()
     var entry = root.numberEntry
     root.numberEntry = Model.closeNumberEntry(entry, "cancel")
@@ -882,7 +897,7 @@ Item {
 
   // Any key this feature does not own ends entry first, then does its job.
   function endNumberEntry(commit) {
-    if (!root.numberEntryActive) return
+    if (!root.numberEntryActive) { root.disarmNumberResume(); return }
     if (commit) root.commitNumberEntry({ play: false, reason: "key" })
     else root.cancelNumberEntry()
   }
@@ -903,7 +918,8 @@ Item {
       active: root.numberEntryActive,
       hasNumbers: root.hasNumbers
     })
-    if (action === "pass") return false
+    // A key the buffer does not own ends the number, armed window included.
+    if (action === "pass") { root.disarmNumberResume(); return false }
     if (action === "backspace") { root.popNumberEntry(); return true }
     if (action === "noNumbers") {
       root.showTransient(Model.chnoStatus("noNumbers", "", "", 0, 0, true))
@@ -1643,7 +1659,7 @@ Item {
     id: numberTimer
     interval: root.numberEntryMs
     repeat: false
-    onTriggered: root.commitNumberEntry({ play: false, reason: "timeout" })
+    onTriggered: root.numberTimerFired()
   }
 
   // Only the row SET depends on these; decorations (playing, failed, EPG,
@@ -1770,6 +1786,7 @@ Item {
               root.commitNumberEntry({ play: true, keepOpen: !enter, reason: "enter" })
               return
             }
+            root.disarmNumberResume()
             root.activate(!enter)
           }
           onCloseRequested: root.handleEscape()

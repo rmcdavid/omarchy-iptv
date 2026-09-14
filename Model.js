@@ -765,8 +765,10 @@ function isNumberEntryKey(text) {
 // intermediate digit MOVES the cursor during the live preview, so by the time
 // the last digit lands the live cursor is on whatever the prefix resolved to,
 // never on the previous match (D-CHNO-1).
+// `resume` is set on exactly one thing: a buffer the AUTO-commit closed
+// early. See closeNumberEntry (CN21).
 function numberEntry() {
-  return { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "" }
+  return { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false }
 }
 
 function normalizeNumberEntry(entry) {
@@ -778,7 +780,8 @@ function normalizeNumberEntry(entry) {
     scopeId: str(e.scopeId),
     query: str(e.query),
     cursorIndex: isFinite(at) && at > 0 ? at : 0,
-    cursorId: str(e.cursorId)
+    cursorId: str(e.cursorId),
+    resume: e.resume === true
   }
 }
 
@@ -789,16 +792,28 @@ function normalizeNumberEntry(entry) {
 function pushNumberKey(entry, text, ctx) {
   var cur = normalizeNumberEntry(entry)
   var t = str(text)
-  if (!isNumberEntryKey(t)) return { entry: cur, changed: false }
-  if (cur.buffer.length >= MAX_CHNO_LABEL) return { entry: cur, changed: false }
+  if (!isNumberEntryKey(t)) return { entry: cur, changed: false, resumed: false }
+  if (cur.buffer.length >= MAX_CHNO_LABEL) return { entry: cur, changed: false, resumed: false }
   var buffer = cur.buffer
   if (t === CHNO_ENTRY_SEP || t === ",") {
-    if (buffer === "" || buffer.indexOf(CHNO_ENTRY_SEP) !== -1) return { entry: cur, changed: false }
+    if (buffer === "" || buffer.indexOf(CHNO_ENTRY_SEP) !== -1) return { entry: cur, changed: false, resumed: false }
     buffer += CHNO_ENTRY_SEP
   } else {
     buffer += t
   }
-  if (cur.active) return { entry: { active: true, buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId }, changed: true }
+  // CN21. A key arriving while a buffer is armed continues THAT number
+  // instead of starting a new one. The auto-commit decided the number was
+  // finished; this key is the user saying it was not, and the buffer it
+  // re-opens can only resolve to nothing -- which is the whole point, because
+  // nothing is what the user typed and nothing is what must be reported.
+  var resumed = !cur.active && cur.resume === true && cur.buffer !== ""
+  if (cur.active || resumed) {
+    return {
+      entry: { active: true, buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId, resume: false },
+      changed: true,
+      resumed: resumed
+    }
+  }
   var c = ctx && typeof ctx === "object" ? ctx : {}
   var at = Math.floor(Number(c.cursorIndex))
   return {
@@ -808,9 +823,11 @@ function pushNumberKey(entry, text, ctx) {
       scopeId: str(c.scopeId),
       query: str(c.query),
       cursorIndex: isFinite(at) && at > 0 ? at : 0,
-      cursorId: str(c.cursorId)
+      cursorId: str(c.cursorId),
+      resume: false
     },
-    changed: true
+    changed: true,
+    resumed: false
   }
 }
 
@@ -819,9 +836,9 @@ function pushNumberKey(entry, text, ctx) {
 // restore scope, query and cursor from it.
 function popNumberKey(entry) {
   var cur = normalizeNumberEntry(entry)
-  if (!cur.active || cur.buffer === "") return { active: false, buffer: "", scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId }
+  if (!cur.active || cur.buffer === "") return { active: false, buffer: "", scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId, resume: false }
   var buffer = cur.buffer.substring(0, cur.buffer.length - 1)
-  return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId }
+  return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId, resume: false }
 }
 
 function cancelNumberEntry(entry) {
@@ -832,8 +849,39 @@ function cancelNumberEntry(entry) {
 // (the unambiguous-match commit, which the user did not ask for), "timeout",
 // "enter" (Enter or Space), "key" (any key the buffer does not own) or
 // "cancel" (Esc, Backspace to empty).
+//
+// CN21, and the rule the whole defect turns on: THE MACHINE MAY FINISH A
+// NUMBER EARLY ONLY IF IT CAN TAKE IT BACK. Every other reason is the user's
+// own act and ends the number for good; "auto" is the one the user never
+// asked for, so it closes the entry for display and ARMS the buffer for the
+// rest of the same digit window (numberEntryMs, the one rule that says which
+// digits are one number). A digit arriving inside that window re-opens this
+// buffer instead of starting a new entry that would land somewhere of its own
+// with no error -- which is exactly how 20509 became "you are now on channel
+// 900, and nothing told you" (D-CHNO-2).
+//
+// Nothing else changes: the commit still fires on the last digit, the cursor
+// is already on the target and the footer already names it, so the 93% of
+// numbers that commit instantly still do. An armed entry is inactive, so the
+// chip is gone and the hints are back exactly as before.
+//
+// By construction a resumed buffer can only resolve to nothing: "auto" fires
+// only when NO label extends the buffer, so no label can extend it with one
+// more digit either. The window's cost is therefore bounded and visible - a
+// number retyped inside it reads as one longer number and is reported as the
+// miss it is, rather than silently tuning somewhere.
 function closeNumberEntry(entry, reason) {
-  return numberEntry()
+  var cur = normalizeNumberEntry(entry)
+  if (str(reason) !== "auto" || cur.buffer === "") return numberEntry()
+  return {
+    active: false,
+    buffer: cur.buffer,
+    scopeId: cur.scopeId,
+    query: cur.query,
+    cursorIndex: cur.cursorIndex,
+    cursorId: cur.cursorId,
+    resume: true
+  }
 }
 
 // M2-03 2.5 / 2.9. ONE keystroke, every decision it makes, in order. This
@@ -858,10 +906,10 @@ function numberKeyStep(entry, index, text, ctx) {
   var c = ctx && typeof ctx === "object" ? ctx : {}
   var result = pushNumberKey(entry, text, c)
   var idle = resolveChno(null, "", -1)
-  if (!result.changed) return { changed: false, entry: result.entry, resolution: idle, snapshot: result.entry, commit: null, timer: "none" }
+  if (!result.changed) return { changed: false, entry: result.entry, resolution: idle, snapshot: result.entry, commit: null, timer: "none", resumed: false }
   var next = result.entry
   var hit = resolveChno(index, next.buffer, str(c.cursorId))
-  if (!chnoUnambiguous(index, next.buffer)) return { changed: true, entry: next, resolution: hit, snapshot: next, commit: null, timer: "restart" }
+  if (!chnoUnambiguous(index, next.buffer)) return { changed: true, entry: next, resolution: hit, snapshot: next, commit: null, timer: "restart", resumed: result.resumed === true }
   var plan = chnoCommitPlan(hit.kind, chnoCommitLabel(next, hit), "", hit.matches, hit.ordinal, { play: false })
   return {
     changed: true,
@@ -869,6 +917,7 @@ function numberKeyStep(entry, index, text, ctx) {
     resolution: hit,
     // What a restoring commit restores from: the entry this key closed, snapshot and all.
     snapshot: next,
+    resumed: result.resumed === true,
     commit: {
       reason: "auto",
       restore: plan.restore,
@@ -879,7 +928,9 @@ function numberKeyStep(entry, index, text, ctx) {
       matches: hit.matches,
       ordinal: hit.ordinal
     },
-    timer: "stop"
+    // NOT "stop". The digit window that the auto-commit did not end keeps
+    // running, and it is what disarms the buffer when it expires (CN21).
+    timer: "restart"
   }
 }
 
