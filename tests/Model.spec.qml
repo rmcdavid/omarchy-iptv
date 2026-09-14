@@ -436,7 +436,7 @@ TestCase {
     // M2-02: the launch argv carries no channel at all - no URL, no "--",
     // no header options, no per-channel title (S-03). The channel arrives
     // over the 0600 socket, so `--idle=once` is what makes this possible.
-    var argv = Model.buildMpvArgv({ socketPath: "/tmp/s", name: "N", url: "http://u", headers: { "User-Agent": "VLC" }, extraArgs: [] })
+    var argv = Model.buildMpvArgv({ socketPath: "/tmp/s", stateDir: "/home/u/.local/state/omarchy-iptv", name: "N", url: "http://u", headers: { "User-Agent": "VLC" }, extraArgs: [] })
     compare(argv[0], "mpv")
     compare(argv.indexOf("--") !== -1, false)
     compare(argv.indexOf("http://u") !== -1, false)
@@ -447,6 +447,19 @@ TestCase {
     compare(argv.indexOf("--force-media-title=IPTV") !== -1, true)
     compare(Model.splitMpvArgs("--Profile=x --no-idle --cache=yes").args, ["--cache=yes"])
     compare(Model.splitMpvArgs("--log-file=/tmp/x --osd-msg1=${path} --cache=yes").args, ["--cache=yes"])
+    // PO-11: the player is told where to write. The screenshot is durable
+    // (the user asked for it) and lives under the state directory; the
+    // resume record `Q` writes is not worth keeping and stays in the runtime
+    // directory, private and gone at logout. Neither is $HOME any more.
+    var dirs = Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", "/home/u/.local/state/omarchy-iptv")
+    compare(dirs.cwd, "/run/user/1000/omarchy-iptv")
+    compare(dirs.screenshots, "/home/u/.local/state/omarchy-iptv/screenshots")
+    compare(dirs.watchLater, "/run/user/1000/omarchy-iptv/watch-later")
+    compare(argv.indexOf("--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots") !== -1, true)
+    compare(argv.indexOf("--watch-later-dir=/tmp/watch-later") !== -1, true)
+    // --watch-later-dir is reserved (a resume record names a stream path);
+    // --screenshot-dir is not, so a user can still choose their own.
+    compare(Model.splitMpvArgs("--watch-later-dir=/home/u --screenshot-dir=/home/u/Pictures").args, ["--screenshot-dir=/home/u/Pictures"])
   }
 
   function test_playerArgv() {
