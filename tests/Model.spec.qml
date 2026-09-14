@@ -376,6 +376,23 @@ TestCase {
     compare(after.userState.session, null)
   }
 
+  // The other half of D-PLY-4: a play issued inside the startup probe's
+  // ~130 ms window was not merely stripped of its record, it was dropped -
+  // the probe's "nothing is running" cleared nowPlaying and drainPendingPlay
+  // needs one. 28 of 30 trials never started playing against 396a69a.
+  function test_probeAnIntentHasOvertakenKeepsOnlyItsResync() {
+    compare(Model.probeVerdict(5, 0, 0), { seq: 6, stale: false })   // the startup probe
+    compare(Model.probeVerdict(5, 0, 3), { seq: 6, stale: true })    // a play went out after it
+    compare(Model.probeVerdict(0, 2, 2), { seq: 2, stale: false })
+    // Measured before the resync, or a lock file that names a higher
+    // sequence than a just-started shell makes every probe look stale - and
+    // PO-3's mark silently stops being raised at all.
+    var v = Model.probeVerdict(7, 0, 0)
+    compare(v.stale, false)
+    compare(v.seq, 8)
+    compare(Model.probeVerdict(1, 9, 9).seq, 9)                      // never backwards
+  }
+
   // D-PLY-1, the P1: a helper that ladders a player down and spawns its
   // replacement under one lock delivers the old one's death to the observer
   // while that call is still running. Read as an ending it cleared

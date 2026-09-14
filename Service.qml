@@ -287,6 +287,11 @@ Item {
   property bool playerIdle: false           // observed idle-active, informational
   property string playerKind: ""            // which player verb is in flight
   property bool probeRetried: false         // the one ambiguous-probe re-read (4.5)
+  // `playSeq` as it stood when the probe in flight was ISSUED (4.10). A
+  // probe answers about the world it was sent into; an intent issued after
+  // it - a play from the guide, or over IPC one frame after the shell came
+  // back - is the newer word and must not be overruled by the older answer.
+  property int probeSeq: 0
   property bool reconcilePending: false     // resolve nowPlaying once the cache lands
   property string playerSourceKey: ""       // the source the recovered stash belongs to
   property int playerSocketError: 0         // last QLocalSocket::LocalSocketError, diagnostics only
@@ -388,6 +393,10 @@ Item {
     }
     root.userState = Model.recordPlayed(root.userState, channel, root.maxRecents, nowSec)
     root.sessionConsumed = false        // a new record, not the spent one
+    // A PO-3 mark owed from before this play was about the record this play
+    // has just replaced. Leaving it owed would land it on the channel now
+    // starting, which is the opposite of what PO-3 is for.
+    root.deadSessionPending = false
     root.saveState()
     root.wantFocus = !keepOpen
     // The fork is never a correctness gate (F2): `player start` is
@@ -1075,6 +1084,7 @@ Item {
   // unlink, and it claims the player for this shell.
   function runPlayerProbe() {
     if (playerProc.running) return false
+    root.probeSeq = root.playSeq
     return root.runPlayer("probe", Model.playerProbeArgv(root.socketPath, Quickshell.processId))
   }
 
@@ -1214,10 +1224,19 @@ Item {
       root.playerPending = false
       return
     }
-    // Ordering survives the restart: the next intent is one past whatever
-    // the lock file recorded (4.10). This is also the repair for a sequence
-    // that some other launcher pushed ahead of ours.
-    root.playSeq = Math.max(root.playSeq, probe.seq + 1)
+    // Ordering survives the restart, and an intent issued after this probe
+    // went out is the newer word (4.10, section 15). Both answers come from
+    // the one call because the resync moves the counter the other is
+    // measured against.
+    var verdict = Model.probeVerdict(probe.seq, root.probeSeq, root.playSeq)
+    root.playSeq = verdict.seq
+    if (verdict.stale) {
+      // Everything below is about a world the user has since moved on from;
+      // the play they issued owns the outcome, and drainPendingPlay() is
+      // about to deliver it.
+      root.probeRetried = false
+      return
+    }
     if (root.stopConfirmPending) {
       root.stopConfirmPending = false
       if (probe.running) {

@@ -1242,6 +1242,28 @@ check("D-PLY-4: a garbage or absent file is still a base, and a half-written rec
   Model.stateOnLoad(Model.parseState("{}"), { session: { id: "t:x" } }, { loadedBefore: false }).state.session
 ], [2, null, { id: "t:x", name: "", at: 0 }])
 
+// The other half of D-PLY-4, and the one the harness hits hardest: a play
+// issued inside the startup probe's ~130 ms window was not merely stripped
+// of its record, it was DROPPED - applyProbe()'s "nothing is running"
+// cleared nowPlaying, and drainPendingPlay() needs a nowPlaying. 28 of 30
+// trials at a 20 ms retry never started playing at all against 396a69a.
+check("D-PLY-4: a probe an intent has overtaken keeps only its sequence resync", [
+  Model.probeVerdict(5, 0, 0),          // the startup probe, nothing issued since
+  Model.probeVerdict(5, 0, 3),          // a play went out after it
+  Model.probeVerdict(0, 2, 2),          // a fresh lock file, both sides at 2
+  Model.probeVerdict(9, 4, 4).seq       // the resync is one past the record
+], [{ seq: 6, stale: false }, { seq: 6, stale: true }, { seq: 2, stale: false }, 10])
+check("D-PLY-4: staleness is measured BEFORE the resync, or every startup probe looks stale", (() => {
+  // Reading it after moving playSeq is the mistake that silently switches
+  // PO-3's mark off: the lock file always names a higher sequence than a
+  // shell that has just started.
+  const v = Model.probeVerdict(7, 0, 0)
+  return [v.stale, v.seq, Model.probeVerdict(7, v.seq, v.seq).stale]
+})(), [false, 8, false])
+check("D-PLY-4: the resync never goes backwards, and junk is 0", [
+  Model.probeVerdict(1, 9, 9).seq, Model.probeVerdict(null, 0, 0), Model.probeVerdict("x", "y", "z")
+], [9, { seq: 1, stale: false }, { seq: 1, stale: false }])
+
 // ---- D-PLY-1: a death inside our own respawn is not an ending ----
 // The P1. `player start` and `player restart` ladder a player DOWN and spawn
 // its replacement inside one helper call, so the death of the player they
@@ -1295,6 +1317,17 @@ check("D-PLY-1: the respawn branch keeps the intent alive - wanted true, the obs
   const branch = serviceSource.slice(serviceSource.indexOf('if (death === "respawn")'), serviceSource.indexOf('if (death === "relaunch")'))
   return [/root\.playerWanted = true/.test(branch), /root\.armPlayerSocket\(\)/.test(branch), /root\.nowPlaying = null/.test(branch), /raiseStreamFailure/.test(branch), /noteSessionOutcome\("respawning"\)/.test(branch)]
 })(), [true, true, false, false, true])
+check("D-PLY-4: applyProbe asks the decision instead of resyncing and then comparing", [
+  /var verdict = Model\.probeVerdict\(probe\.seq, root\.probeSeq, root\.playSeq\)/.test(serviceSource),
+  /if \(verdict\.stale\) \{[\s\S]{0,400}?return\n\s+\}/.test(serviceSource),
+  /root\.probeSeq = root\.playSeq[\s\S]{0,200}?playerProbeArgv/.test(serviceSource),
+  /root\.playSeq = Math\.max\(root\.playSeq, probe\.seq \+ 1\)/.test(serviceSource)
+], [true, true, true, false])
+check("D-PLY-4: a play opens a new record and drops a PO-3 mark owed on the one it replaced", [
+  /root\.sessionConsumed = false/.test(serviceSource),
+  /root\.deadSessionPending = false\n\s+relaunchTimer\.stop\(\)|root\.deadSessionPending = false/.test(serviceSource),
+  serviceSource.indexOf("Model.stateOnLoad(") !== -1
+], [true, true, true])
 check("D-PLY-1: a successful start or restart re-arms the observer and cancels the relaunch it just delivered", [
   serviceSource.indexOf("Model.playerSessionFollowUp(") !== -1,
   /root\.relaunchPending = false\n[\s\S]{0,600}?relaunchTimer\.stop\(\)/.test(serviceSource),

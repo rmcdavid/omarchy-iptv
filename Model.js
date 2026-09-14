@@ -1707,6 +1707,26 @@ function endedVerdict(lastEndFile, userStopped, stopping) {
   return { notify: true, reason: detail !== "" ? detail : PLAYER_GENERIC_FAILURE, kind: "failed" }
 }
 
+// What survives a `player probe` reply (4.10, and section 15's race).
+//
+// A probe answers about the world it was ISSUED into. The startup probe goes
+// out from Component.onCompleted and answers about 130 ms later, and a play
+// can arrive inside that window - from the guide, or over IPC one frame
+// after the shell came back. Its "nothing is running" then cleared
+// nowPlaying and playerWanted, and drainPendingPlay(), which needs a
+// nowPlaying, dropped the queued play on the floor.
+//
+// The sequence resync is the one part of a stale reply that is still true,
+// and it MOVES the counter staleness is measured against - so both answers
+// come from one call rather than from two lines a caller can order wrongly.
+// (They were: reading staleness after the resync makes every startup probe
+// look stale, which silently disables PO-3's mark.)
+function probeVerdict(recordedSeq, issuedAt, currentSeq) {
+  var recorded = Math.floor(Number(recordedSeq)) || 0
+  var current = Math.floor(Number(currentSeq)) || 0
+  return { seq: Math.max(current, recorded + 1), stale: current !== (Math.floor(Number(issuedAt)) || 0) }
+}
+
 // What a socket EOF means, which is not always "the player ended" (4.8
 // signal 3). `player start` and `player restart` ladder a player DOWN and
 // spawn its replacement inside one helper call, so the death of the player
@@ -3721,6 +3741,7 @@ if (typeof module !== "undefined") {
     parsePlayerProbe: parsePlayerProbe,
     parsePlayerEvent: parsePlayerEvent,
     endedVerdict: endedVerdict,
+    probeVerdict: probeVerdict,
     playerDeathKind: playerDeathKind,
     playerSessionFollowUp: playerSessionFollowUp,
     PLAYER_LOG_TAIL: PLAYER_LOG_TAIL,
