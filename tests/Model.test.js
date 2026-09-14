@@ -10,10 +10,37 @@ const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join
 let failures = 0
 let checks = 0
 
+// How a value is rendered for comparison. NOT JSON.stringify on its own
+// (audit F8): `JSON.stringify(undefined)` is the value `undefined`, so
+// `check(name, Model.gone(), undefined)` compared undefined with undefined
+// and passed whatever `gone()` did - including not existing. stringify also
+// DROPS undefined object properties and renders NaN and Infinity as null, so
+// `{a: undefined}` read equal to `{}` and `[undefined]` equal to `[null]`.
+// Each of those is the difference between a check and a decoration, which is
+// the whole class this round is closing. The tokens are spelled with angle
+// brackets so they cannot be produced by JSON of a number, and a literal
+// string that spells one is the one (documented) way to fool this.
+function show(value) {
+  if (value === undefined) return "<undefined>"
+  return JSON.stringify(value, function (key, held) {
+    if (held === undefined) return "<undefined>"
+    if (typeof held === "number" && !isFinite(held)) return "<" + String(held) + ">"
+    return held
+  })
+}
+
 function check(name, actual, expected) {
   checks++
-  const a = JSON.stringify(actual)
-  const e = JSON.stringify(expected)
+  // An undefined expectation is never an assertion: it is what you get from
+  // a typo'd property, a renamed export or a helper that returns nothing.
+  if (expected === undefined) {
+    failures++
+    console.log("FAIL " + name + "\n     the expectation is undefined - assert an explicit value"
+      + "\n     got:  " + show(actual))
+    return
+  }
+  const a = show(actual)
+  const e = show(expected)
   if (a === e) {
     console.log("ok   " + name)
   } else {
@@ -35,6 +62,31 @@ function checkCall(name, produce, expected) {
   }
   check(name, actual, expected)
 }
+
+// ---- the runner's own comparison (audit F8) ----
+// Every one of these passed against the JSON.stringify comparison this file
+// shipped with, which is why they are here: a runner that cannot tell
+// "absent" from "equal" makes every check below it worth less than it looks.
+check("runner: undefined is not null and is rendered, not swallowed", [show(undefined) === show(null), show(undefined)], [false, "<undefined>"])
+check("runner: an undefined property is not an absent one", show({ a: undefined }) === show({}), false)
+check("runner: a hole in an array is not a null", show([undefined]) === show([null]), false)
+check("runner: NaN and Infinity are not null", [show(NaN) === show(null), show(Infinity) === show(null)], [false, false])
+check("runner: equal values still compare equal", [show({ a: 1, b: [null, "x"] }) === show({ a: 1, b: [null, "x"] }), show(0) === show(-0)], [true, true])
+;(function () {
+  // The guard itself: an undefined *expectation* must fail. Run one check
+  // with its output swallowed, then put the counters back - that deliberate
+  // failure is not a real one, and the swallowed check is not a real check.
+  const wasFailures = failures
+  const wasChecks = checks
+  const log = console.log
+  console.log = function () {}
+  check("(swallowed)", undefined, undefined)
+  console.log = log
+  const verdict = failures - wasFailures
+  failures = wasFailures
+  checks = wasChecks
+  check("runner: an undefined expectation is a failure, never a pass", verdict, 1)
+})()
 
 const SEP = " \u00b7 "
 
