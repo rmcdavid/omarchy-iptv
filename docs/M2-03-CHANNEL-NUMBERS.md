@@ -150,7 +150,7 @@ var CHNO_SEPARATORS = ".-"          // accepted on parse
 var CHNO_ENTRY_SEP = "."            // canonical, and what the user types
 ```
 
-Vectors (the shared fixture of section 10.1, `tests/fixtures/chno-cases.json`):
+Vectors (the shared fixture of section 10.1, `tests/fixtures/chno-cases.js`):
 
 ```
 "1"        -> 1     sort 1000        "12"    -> 12    sort 12000
@@ -1328,10 +1328,10 @@ Two lanes, zero shared files.
 
 | Lane | Owns | Must not touch |
 |---|---|---|
-| **A: Model + Guide** | `Model.js` (9.1), `Guide.qml` (9.2), `tests/Model.test.js`, `tests/Model.spec.qml`, `tests/fixtures/chno-cases.json` (author) | `Service.qml`, `BarWidget.qml`, `manifest.json`, `bin/omarchy-iptv`, python tests, harness |
+| **A: Model + Guide** | `Model.js` (9.1), `Guide.qml` (9.2), `tests/Model.test.js`, `tests/Model.spec.qml`, `tests/fixtures/chno-cases.js` (author) | `Service.qml`, `BarWidget.qml`, `manifest.json`, `bin/omarchy-iptv`, python tests, harness |
 | **B: Service + bar + harness** | `Service.qml` (9.3), `BarWidget.qml` (9.4), `manifest.json`, `tests/test_playlist.py` (one added assertion), `tests/fixtures/qa-chno.m3u` (author), `scripts/dev-harness/shell.qml`, `scripts/dev-harness/run.sh`, `contrib/bindings.lua`, `README.md` + `CHANGELOG.md` at release | `Model.js`, `Guide.qml`, `bin/omarchy-iptv` |
 
-Order, mirroring SR10: Lane A lands `Model.js` + `chno-cases.json` first (a
+Order, mirroring SR10: Lane A lands `Model.js` + `chno-cases.js` first (a
 day-one PR `feat(model): channel number logic`), because Lane B's `Service.qml`
 calls it. Lane B lands next. Lane A's `Guide.qml` lands last, against the real
 service.
@@ -1352,7 +1352,7 @@ block, which M2-02 does not touch. Raised as OQ 12.
    `service.barShowChannelNumber`, `service.channelByNumber(text)`.
 3. `nowPlaying.chno` and `statusSummary().hasNumbers`.
 4. The IPC `channel(n)` request and both response shapes (3.2).
-5. `tests/fixtures/chno-cases.json` case format:
+5. `tests/fixtures/chno-cases.js` case format:
    `[{ "input": "007", "ok": true, "key": "7", "label": "7", "sort": 7000 },
    { "input": "HD", "ok": false }]`.
 
@@ -1371,7 +1371,7 @@ Added to the shipped flat `check(name, actual, expected)` runner (555 checks
 today), each name prefixed with the ruling id as the file already does:
 
 - `parseChno` over every vector of 1.2, driven from
-  `tests/fixtures/chno-cases.json` in a loop, plus `null` / `undefined` /
+  `tests/fixtures/chno-cases.js` in a loop, plus `null` / `undefined` /
   a number / an object / an array.
 - `buildChnoIndex`: empty and `null` input; a dense 1..20 plan; gaps; a
   duplicate pair (`byKey` array, `duplicates` count); subchannels sorting
@@ -1414,7 +1414,7 @@ today), each name prefixed with the ruling id as the file already does:
 
 `QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/Model.spec.qml`
 
-The same `chno-cases.json` vectors plus `buildChnoIndex`, `resolveChno`,
+The same `chno-cases.js` vectors plus `buildChnoIndex`, `resolveChno`,
 `orderChannels` and `chnoColumnUnits`, to prove the character scanner, the
 integer comparator and the numeric coercions behave identically in V4. The
 spec's 7-channel fixture (`Model.spec.qml:12-21`) gains `chno` values covering a
@@ -1437,7 +1437,7 @@ green untouched.
 
 ```
 scripts/gen-playlist.py --channels 10000 --groups 400 --seed 1 \
-  --out $SCRATCH/gen-10k.m3u                      # synthetic: every channel numbered 1..N,
+  --out $SCRATCH/gen-10k.m3u                      # synthetic: every channel numbered in provider-like blocks with gaps and a subchannel pair,
                                                   # HD/SD twins share a chno (duplicates)
 scripts/gen-playlist.py --profile realistic --channels 10000 --groups 120 --seed 7 \
   --out $SCRATCH/gen-10k-nochno.m3u               # no tvg-chno anywhere (hasNumbers false)
@@ -1626,3 +1626,28 @@ things the design understated. Both are now requirements, not details.
 | CN18 | The label cap is nine, not seven. Seven rejects numbers the design's own grammar admits, so a channel could be displayed and be untypable. |
 | CN19 | The shared number fixture stays a JavaScript file rather than JSON. A test case in the interface layer cannot read a local JSON file without a permissive environment flag, and loosening file reading in the test gate to satisfy a file format is a bad trade. Both engines load the one file, which is what the rule requires. |
 | CN20 | Cycling through duplicate numbers is a guide behaviour only and must never apply to the command verb. A command that returns a different channel each time it is called for the same number is not addressable, and a script cannot see the cursor that drives the cycle. |
+
+## 16. Corrections after integration (product owner, 2026-09-14)
+
+Where this document still disagrees with the shipped code, the code is right
+and these corrections win.
+
+- The label cap is NINE everywhere, per ruling CN18. Section 1.2 step 9 and
+  section 9.1 still say seven. The two lanes actually disagreed on this, seven
+  against nine, and it had a visible effect: asking for a long number echoed a
+  truncated one back. The cap is now derived from the grammar rather than
+  written down twice.
+- The shared number fixture is a JavaScript file, per ruling CN19, not the
+  JSON name section 9.7 gives it.
+- The published surface gained `ids`, `chnoIdAt` and `chnoUnambiguous`, which
+  sections 1.4 and 9.1 predate.
+- Section 9.5 says the alternate number attributes are not done. They shipped,
+  per ruling CN11, and are pinned by a fixture both languages run.
+- The index build measures 17.4 milliseconds on ten thousand channels against
+  the 15 the design assumed. I am correcting the number rather than the code:
+  the budget that matters is the guide opening within 150 milliseconds, and
+  the whole load path measures 76.7. A sub-budget that was an estimate should
+  not be defended once the real figure is known.
+- Test case N17 assumes tuning from 101 lands on 102. That is false for any
+  real provider numbering, which has gaps, and is now false for our own
+  generator. Rewrite it against gaps.
