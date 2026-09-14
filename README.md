@@ -176,10 +176,10 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   Neither exposes your provider credentials.
 - Two consequences of the player being independent, both deliberate. If you
   remove or disable the plugin while something is playing, the player is no
-  longer guaranteed to stop with it. The helper lives inside the plugin
-  directory and is not on your PATH, so stop a stray player with
-  `~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv player stop`,
-  or simply log out. And a stream that fails while the shell is down
+  longer guaranteed to stop with it. Disabling the plugin does stop it, in
+  about seven seconds. Removing it does not, because the files are deleted
+  moments before the stop can run. See Uninstall for how to reap a stray
+  player, or simply log out, which always reaps it. And a stream that fails while the shell is down
   cannot raise a notification, because the notification service is the shell
   itself; the channel is marked as failed in the guide instead, the next time
   you open it.
@@ -223,10 +223,30 @@ Nothing inside the plugin directory is written at runtime.
 ## Uninstall
 
 ```bash
+omarchy plugin disable io.github.rmcdavid.iptv
 omarchy plugin remove io.github.rmcdavid.iptv
 rm -rf ~/.cache/omarchy-iptv ~/.local/state/omarchy-iptv   # optional
 rm -rf "$XDG_RUNTIME_DIR/omarchy-iptv"                     # optional, cleared at logout anyway
 ```
+
+Disable first. Disabling stops a running player; removing on its own deletes
+the plugin's files moments before its own stop can run, which leaves the
+player playing with no way to stop it from the plugin.
+
+If a player is already stranded, this needs nothing installed. Look first,
+then kill:
+
+```bash
+pgrep -af -- '^mpv .*--wayland-app-id=omarchy-iptv'
+```
+
+```bash
+pkill -f -- '^mpv .*--wayland-app-id=omarchy-iptv'
+```
+
+Keep the `^mpv ` at the start of the pattern. Without it the pattern also
+matches the shell you paste it into, and kills that too. Logging out reaps a
+stranded player regardless.
 
 Removal leaves only those directories behind, plus the keybinding, menu,
 and window-rule lines you added by hand.
