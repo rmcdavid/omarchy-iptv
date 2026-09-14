@@ -3,6 +3,37 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.2.0 (unreleased)
+
+M2-01 Sources: configure and switch playlists from inside the guide.
+
+### Added
+- First-run input in the guide: type or paste a playlist URL or path (and
+  an optional EPG URL); the fetch result is shown inline and nothing is saved
+  on failure.
+- Sources screen (`o` or the `Sources` row): history of playlists with
+  label, host, counts, last used; switch (`Enter` / `Space`), add (`a`),
+  Xtream Codes login form (`c`), edit (`e`), remove with confirmation (`x`).
+- Per-source cache directories, so switching back is instant; the 0.1.0 cache
+  is migrated automatically. State file schema v2 with migration.
+- CLI parity: `omarchy bar set ... playlistUrl` and `epgUrl` are reflected
+  in the history.
+- Helper: `cache migrate|remove|prune`, `state source list|add|update|remove`,
+  URL validation shared with the guide through one fixture.
+- Dev harness: scenario suite and new verbs for the Sources flows.
+
+### Security and privacy
+- Clipboard content is treated as data (trimmed, control characters and
+  newlines removed, length caps); only `http(s)` and absolute paths are
+  accepted with no prefix guessing; saved URLs are masked in the UI and
+  never appear in lists, transients, notifications, IPC output, or logs;
+  credentials are never truncated silently; history records with control
+  characters are dropped.
+
+### Known limitations
+- Multi-monitor placement and mouse gestures on the Sources screen were not
+  exercised on the reference machine.
+
 ## 0.1.0 (2026-09-13)
 
 First release: the M1 scope from `docs/PRODUCT.md`, verified by automated

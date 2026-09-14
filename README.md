@@ -109,6 +109,39 @@ omarchy-shell io.github.rmcdavid.iptv refresh
 omarchy-shell io.github.rmcdavid.iptv status              # JSON
 ```
 
+## Sources (playlists inside the guide)
+
+You no longer need the terminal to configure a playlist. On first run the
+guide shows an input: type or paste (`Ctrl+V`) a playlist URL or absolute
+path, optionally an EPG URL, and press `Enter`. The guide fetches it and
+shows the result inline (`1,475 channels in 28 groups`, or the reason it
+failed). Nothing is saved if the fetch fails.
+
+Press `o` in list mode (or pick the `Sources` row at the bottom of the group
+column) to open the Sources screen: every playlist you have used, with its
+label, host, channel count, and when it was last used. Each source keeps its
+own cache, so switching back is instant.
+
+| Key | Action |
+|---|---|
+| `j` / `k` | move |
+| `Enter` | switch to the source and return to the guide |
+| `Space` | switch and stay on the list |
+| `a` | add a source (URL or path) |
+| `c` | add an Xtream Codes login (server, username, password); the URLs are built for you |
+| `e` | edit label, playlist URL, or EPG URL |
+| `x` | remove the source and its cache (asks first) |
+| `Esc` | back to the guide |
+
+In a form: `Tab` moves between fields, `Ctrl+V` or `Shift+Insert` pastes,
+`Ctrl+U` clears the field, `Enter` saves, `Esc` cancels. Saved URLs are shown
+masked (`password=****`); press `Ctrl+R` or the eye button to reveal one
+while editing. Only `http://`, `https://`, and absolute paths are accepted,
+and no prefix is guessed.
+
+`omarchy bar set ... playlistUrl` still works and shows up in the Sources
+list as well; the two stay in sync. Up to 50 sources are kept.
+
 ## Playback notes
 
 - One mpv window, class `omarchy-iptv`, titled with the channel name.
@@ -142,9 +175,12 @@ omarchy-shell io.github.rmcdavid.iptv status              # JSON
 
 ## Files it writes
 
-- `~/.cache/omarchy-iptv/` : `channels.json`, `playlist-status.json`,
-  `epg-now.json`, `epg-status.json` (safe to delete; rebuilt on refresh)
-- `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last played
+- `~/.cache/omarchy-iptv/sources/<key>/` : one directory per source with
+  `channels.json`, `playlist-status.json`, `epg-now.json`, `epg-status.json`
+  (safe to delete; rebuilt on refresh). A 0.1.0 single cache is migrated on
+  first start.
+- `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
+  played, and the Sources history including their URLs (mode 0600)
 - `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` : mpv IPC socket while playing
 
 Nothing inside the plugin directory is written at runtime.
