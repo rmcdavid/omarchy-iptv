@@ -1826,7 +1826,13 @@ function playerStash(params) {
     sourceKey: str(p.sourceKey),
     since: isFinite(since) && since > 0 ? since : 0,
     entryId: isFinite(entry) && entry > 0 ? entry : null,
-    seq: Math.max(0, Math.floor(Number(p.seq)) || 0)
+    seq: Math.max(0, Math.floor(Number(p.seq)) || 0),
+    // Which slot wrote the record last. It exists because `seq` stopped
+    // being able to say so: the zap used to hardcode 0, and "not zero"
+    // therefore meant "a player verb wrote this". Both sides now carry a
+    // real intent number, which is what makes them comparable, so the
+    // writer is named instead of inferred.
+    verb: str(p.verb)
   }
 }
 

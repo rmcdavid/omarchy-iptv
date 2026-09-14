@@ -563,10 +563,12 @@ check("no player argv ever carries a URL or a header value", (() => {
 })(), [])
 
 // ---- the now-playing stash and the probe reply (4.5, 4.6) ----
-check("playerStash normalizes the record mpv carries for us", Model.playerStash({ id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 }),
-  { schema: 1, playing: true, id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 })
+check("playerStash normalizes the record mpv carries for us", Model.playerStash({ id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41, verb: "start" }),
+  { schema: 1, playing: true, id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41, verb: "start" })
 check("playerStash without an id is not a record", [Model.playerStash(null), Model.playerStash({ name: "x" })], [null, null])
-check("playerStash defaults are empty, never undefined", Model.playerStash({ id: "t:x" }), { schema: 1, playing: true, id: "t:x", name: "", group: "", launchedFrom: "", sourceKey: "", since: 0, entryId: null, seq: 0 })
+check("playerStash defaults are empty, never undefined", Model.playerStash({ id: "t:x" }), { schema: 1, playing: true, id: "t:x", name: "", group: "", launchedFrom: "", sourceKey: "", since: 0, entryId: null, seq: 0, verb: "" })
+// A v0.3.0 player is still out there with a stash that predates the field.
+check("playerStash reads a record written before the writer was named", Model.playerStash({ id: "t:x", seq: 3 }).verb, "")
 const probeBody = JSON.stringify({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 301706, idle: false, seq: 41, claimed: true, mpvVersion: "mpv 0.41.0", stash: { schema: 1, playing: true, id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 }, owner: { schema: 1, pid: 301706, startTime: "9912345", at: 1758000100 } })
 check("parsePlayerProbe: a live player", (() => { const p = Model.parsePlayerProbe(probeBody); return [p.valid, p.running, p.responsive, p.pid, p.idle, p.seq, p.stash.launchedFrom, p.stash.entryId, p.owner.pid] })(), [true, true, true, 301706, false, 41, "g:uk", 2, 301706])
 check("parsePlayerProbe: nothing running", (() => { const p = Model.parsePlayerProbe(JSON.stringify({ ok: true, kind: "player.probe", running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 3 })); return [p.valid, p.running, p.pid, p.idle, p.stash, p.seq] })(), [true, false, null, null, null, 3])

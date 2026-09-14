@@ -1797,7 +1797,8 @@ def cmd_play(args: argparse.Namespace) -> int:
     `entryId`, which is what makes a reattach after a shell restart name the
     channel the user actually switched to.
     """
-    client = MpvIpc(socket_path(args.socket), args.ipc_timeout)
+    sock = socket_path(args.socket)
+    client = MpvIpc(sock, args.ipc_timeout)
     scope = getattr(args, "scope", "") or ""
     since = int(getattr(args, "since", 0) or 0)
     session = bool(scope or since)
@@ -1806,8 +1807,16 @@ def cmd_play(args: argparse.Namespace) -> int:
         client.connect()
         stash = None
         if session:
+            # D-PLY-11 / the plan's step 2: the seq used to be a hardcoded 0,
+            # so the two sides could only be seen to DIFFER, never compared.
+            # It is read from the lock record rather than from a `--seq` of
+            # this verb's own, because ruling CL4 forbids giving `play` a
+            # sequence number (and the lock that would come with it) until
+            # refusals are routed. The lock record is a plain file read: no
+            # flock, nothing to block on, nothing that can answer `busy`.
             stash = player_stash(target["id"], target["name"], target["group"], scope,
-                                 source_key_of(cache_dir(args.cache_dir)), since or int(time.time()), 0)
+                                 source_key_of(cache_dir(args.cache_dir)), since or int(time.time()),
+                                 record_seq(read_lock_file(sock)), verb="play")
         entry_id = apply_channel(client, target, stash=stash, label="play")
         payload: dict[str, Any] = {"ok": True, "kind": "play", "id": args.id or None, "name": target["name"]}
         if session:
@@ -1862,7 +1871,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                 log("status: removed stale socket file")
             raise
         values: dict[str, Any] = {}
-        for prop in ("media-title", "path", "pause", "idle-active", "mpv-version"):
+        for prop in ("media-title", "path", "pause", "idle-active", "mpv-version", USER_DATA_STASH):
             ok, data = client.try_command("get_property", prop)
             values[prop] = data if ok else None
         path_value = values["path"]
@@ -1875,6 +1884,12 @@ def cmd_status(args: argparse.Namespace) -> int:
             "paused": bool(values["pause"]) if values["pause"] is not None else None,
             "idle": bool(values["idle-active"]) if values["idle-active"] is not None else None,
             "mpvVersion": values["mpv-version"] if isinstance(values["mpv-version"], str) else None,
+            # The reconciliation input docs/ARCHITECTURE-PLAYER.md 271-273
+            # specified and the code never grew: the health tick already asks
+            # the player a question every few seconds, and until now the one
+            # thing it never asked was WHICH CHANNEL. Never a URL - the record
+            # carries the channel id, the name and the scope and nothing else.
+            "stash": values[USER_DATA_STASH] if isinstance(values[USER_DATA_STASH], dict) else None,
         })
         return EXIT_OK
     except HelperError as error:
@@ -2131,12 +2146,19 @@ def ended_verdict(end_file: dict[str, Any] | None, user_stopped: bool = False,
 
 def player_stash(channel_id: str, name: str, group: str, scope: str, source_key: str,
                  since: int, seq: int, entry_id: int | None = None,
-                 playing: bool = True) -> dict[str, Any]:
+                 playing: bool = True, verb: str = "play") -> dict[str, Any]:
     """Mirror of Model.playerStash: the now-playing record mpv carries for us.
 
     `launchedFrom` is the zap-ring scope - pure UI intent no mpv property
     could ever report, which is why the shell's own value is stashed here and
     echoed back on reattach.
+
+    `verb` says which slot wrote the record last, and it exists because `seq`
+    stopped being able to say so. The zap used to hardcode `seq` to 0, which
+    made "not zero" a usable stand-in for "a player verb wrote this" - the
+    reading wave two's evidence leaned on. Now that both sides carry a real
+    intent number the two can be COMPARED, which is the point, but the
+    writer has to be named outright rather than inferred from a zero.
     """
     return {
         "schema": PLAYER_STASH_SCHEMA,
@@ -2149,6 +2171,7 @@ def player_stash(channel_id: str, name: str, group: str, scope: str, source_key:
         "since": int(since or 0),
         "entryId": entry_id if isinstance(entry_id, int) and entry_id > 0 else None,
         "seq": int(seq or 0),
+        "verb": str(verb or ""),
     }
 
 
@@ -2749,6 +2772,45 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     return entry_id
 
 
+def applied_by_another_client(client: MpvIpc) -> dict[str, Any] | None:
+    """What some other client has already applied to a player this helper has
+    just SPAWNED, or None if the player is still as it was born.
+
+    Only ever asked of a spawned player, and that restriction is the whole of
+    why the answer is safe to act on. A newborn mpv is idle with
+    `playlist-count` 0 and no `user-data/omarchy-iptv` node at all - confirmed
+    against real mpv 0.41, headless: the node answers `property not found`
+    until something writes it, and the count answers 0 until something loads.
+    Nothing on the launch argv can put a file there either (`filter_mpv_args`
+    keeps bare tokens off it, and `--idle=once` idles). So a channel sitting
+    there NOW was applied by a client that connected after the spawn, and
+    every such client is carrying an intent this start was issued BEFORE.
+
+    That ordering is established by the spawn, not by a sequence number,
+    which is what makes the check legal while ruling CL4 stands: `play` gains
+    no `--seq` and takes no lock, so no channel change during a cold start
+    can be delayed or refused.
+
+    An adopted player is never asked: there, a stash is evidence of nothing
+    at all - it may be the last thing the user chose or it may be minutes
+    old, and ordering it would need exactly the sequence number CL4 withholds.
+    """
+    ok, count = client.try_command("get_property", "playlist-count")
+    loaded = bool(ok and isinstance(count, int) and not isinstance(count, bool) and count > 0)
+    ok, data = client.try_command("get_property", USER_DATA_STASH)
+    stash = data if ok and isinstance(data, dict) else None
+    if not loaded and stash is None:
+        return None
+    entry = (stash or {}).get("entryId")
+    return {
+        "id": str((stash or {}).get("id") or ""),
+        "name": str((stash or {}).get("name") or ""),
+        "entryId": entry if isinstance(entry, int) and not isinstance(entry, bool) and entry > 0 else None,
+        "seq": record_seq(stash or {}),
+        "loaded": loaded,
+    }
+
+
 def owner_claim(owner_pid: int) -> dict[str, Any] | None:
     """The claim that tells a successor shell the player is already adopted
     (4.14). Keyed by pid AND start time so a recycled pid cannot inherit it."""
@@ -2899,6 +2961,7 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     warnings.extend(mpv_arg_warnings(mpv_args))
     lock_fd = -1
     client = None
+    newer: dict[str, Any] | None = None
     try:
         target = player_target(args.id, "", args.cache_dir)
         player_runtime(sock)
@@ -2915,8 +2978,33 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         # captured on the connection we already hold (F3).
         client.try_command("request_log_messages", "error")
         stash = player_stash(target["id"], target["name"], target["group"], args.scope,
-                             source_key_of(cache_dir(args.cache_dir)), args.since or int(time.time()), seq)
-        entry_id = apply_channel(client, target, stash=stash, owner=owner_claim(args.owner_pid), label="player %s" % verb)
+                             source_key_of(cache_dir(args.cache_dir)), args.since or int(time.time()), seq,
+                             verb=verb)
+        # D-PLY-11. The measured mechanism (docs/QA-RESULTS.md D1, ruling CL9):
+        # during a cold start a channel change reaches the socket the instant
+        # mpv binds it, while this verb is still inside `wait_for_socket`'s
+        # handshake - and then this line put the burst's FIRST intent back
+        # over it, unconditionally, because nothing here ever looked. Ten
+        # user-visible divergences in twenty cold concurrent bursts.
+        #
+        # So look. A start that discovers it is no longer the newest intent
+        # stands down: it leaves the newer channel playing and says so in its
+        # reply. It does not relabel anything and it does not decide what the
+        # user wanted - the shell is authoritative for that under ruling CL5,
+        # and re-applies its own intent when this reply disagrees with it.
+        newer = applied_by_another_client(client) if outcome["spawned"] else None
+        if newer is None:
+            entry_id = apply_channel(client, target, stash=stash, owner=owner_claim(args.owner_pid),
+                                     label="player %s" % verb)
+        else:
+            entry_id = newer["entryId"]
+            claim = owner_claim(args.owner_pid)
+            if claim is not None:
+                # The claim is about which shell owns the player, not about
+                # which channel is on it, so it is still ours to write.
+                client.try_command("set_property", USER_DATA_OWNER, claim)
+            log("player %s: a newer channel change reached the player first; left it playing" % verb)
+            warnings.append("a newer channel change reached the player first")
     except HelperError as error:
         if lock_fd >= 0:
             release_lock(lock_fd)
@@ -2929,12 +3017,23 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     # `player stop` can interleave (4.4 step 10).
     release_lock(lock_fd)
     try:
-        first_load = observe_first_load(client, entry_id, args.first_load_timeout, outcome.get("launchErrors"))
+        # Nothing of ours is loading when we stood down: the load being
+        # watched for would be someone else's, and waiting out the whole
+        # first-load window for an event that already happened would only
+        # delay the reply. "unknown" is the honest verdict and the one the
+        # observer already handles.
+        first_load = ({"state": "unknown", "reason": ""} if newer is not None
+                      else observe_first_load(client, entry_id, args.first_load_timeout, outcome.get("launchErrors")))
     finally:
         client.close()
     emit({"ok": True, "kind": kind, "spawned": bool(outcome["spawned"]), "pid": int(outcome["pid"]),
           "id": target["id"] or None, "name": target["name"], "entryId": entry_id, "seq": seq,
-          "firstLoad": first_load, "warnings": warnings})
+          "firstLoad": first_load, "warnings": warnings,
+          # Additive, and the two fields the shell's repair reads: whether
+          # this verb's own channel is what the player ended up on, and what
+          # it is on instead when it is not.
+          "applied": newer is None,
+          "playing": None if newer is None else {"id": newer["id"], "name": newer["name"]}})
     return EXIT_OK
 
 
