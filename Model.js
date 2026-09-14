@@ -982,6 +982,7 @@ var PLAYER_OUTCOME_SURVIVES = {
   superseded: true,     // a later intent won the lock; that intent owns the record
   retrying: true,       // busy / no_socket / ipc_error, the backoff is armed
   relaunching: true,    // the health verdict's one automatic relaunch (4.8)
+  respawning: true,     // the helper is mid ladder-and-respawn for this very intent (4.9)
   attached: true,       // the first load failed but the socket is live: its EOF is next
   stopped: false,       // the user stopped it, or a detached stop was confirmed (4.9)
   ended: false,         // socket EOF with no relaunch coming (4.8 signal 3)
@@ -1640,6 +1641,48 @@ function endedVerdict(lastEndFile, userStopped, stopping) {
   if (reason === "quit" || reason === "eof") return { notify: false, reason: "", kind: "silent" }
   var detail = redactUrls(str(end.fileError || end.file_error)).replace(/^\s+|\s+$/g, "")
   return { notify: true, reason: detail !== "" ? detail : PLAYER_GENERIC_FAILURE, kind: "failed" }
+}
+
+// What a socket EOF means, which is not always "the player ended" (4.8
+// signal 3). `player start` and `player restart` ladder a player DOWN and
+// spawn its replacement inside one helper call, so the death of the player
+// they are replacing arrives here while that very call is still in flight -
+// a rung of our own respawn, not an unattended end.
+//
+// Reading it as an end is the reported P1: the shell cleared `nowPlaying`
+// and `playerWanted`, the helper's success reply then read the cleared
+// `nowPlaying` as "a stop overtook this start" and declined to re-arm the
+// observer, and with `wanted` false the 250 ms retry timer was off - so the
+// interface sat idle forever while the freshly spawned player kept playing.
+//
+// Order matters: a stop we issued outranks everything (it is why the player
+// is dying), then our own in-flight respawn, then the health verdict's
+// queued relaunch, then the ending.
+function playerDeathKind(context) {
+  var ctx = context || {}
+  if (ctx.userStopped === true || ctx.stopping === true) return "ended"
+  if (ctx.nowPlaying !== true) return "ended"
+  if (ctx.sessionInFlight === true) return "respawn"
+  if (ctx.relaunchPending === true && ctx.hasChannel === true) return "relaunch"
+  return "ended"
+}
+
+// What to do with the observer when `player start` / `player restart` answers
+// ok. The helper has just reported a live player of this shell's making, so
+// the one answer that is never right is to do nothing - that is the second
+// half of the P1 above.
+//
+//   attached  the observer is already on it; only the birth edge to drop
+//   abandoned a stop really did overtake this start; nothing to hunt
+//   hunt      the player is up, the observer is not on it yet: arm and wait
+//   recover   the same, and we no longer know WHAT is playing, so read it
+//             back out of the player's own stash - the identical path a
+//             shell restart takes (4.5), which is why it needs no new rule
+function playerSessionFollowUp(context) {
+  var ctx = context || {}
+  if (ctx.attached === true) return "attached"
+  if (ctx.stopping === true || ctx.userStopped === true) return "abandoned"
+  return ctx.nowPlaying === true ? "hunt" : "recover"
 }
 
 // ---------------------------------------------------------------------
@@ -3612,6 +3655,8 @@ if (typeof module !== "undefined") {
     parsePlayerProbe: parsePlayerProbe,
     parsePlayerEvent: parsePlayerEvent,
     endedVerdict: endedVerdict,
+    playerDeathKind: playerDeathKind,
+    playerSessionFollowUp: playerSessionFollowUp,
     PLAYER_LOG_TAIL: PLAYER_LOG_TAIL,
     PLAYER_ENTRY_OWNERS: PLAYER_ENTRY_OWNERS,
     playerRouterState: playerRouterState,

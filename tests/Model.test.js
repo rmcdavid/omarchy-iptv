@@ -1031,8 +1031,8 @@ const noteOutcome = (svc, outcome) => {
 const reattachMarks = (svc) => Model.deadSessionVerdict(svc.userState, true, {}, "21:30").failed
 const playingService = () => ({ userState: sessionState, deadSessionPending: false, writes: 0 })
 
-check("the outcome vocabulary is exactly the ten answers Service.qml can get", Model.PLAYER_OUTCOMES.slice().sort(), ["abandoned", "attached", "ended", "failed", "foreign", "mpvMissing", "relaunching", "retrying", "stopped", "superseded"])
-check("a player that is still there or still coming keeps the record; every ending retires it", Model.PLAYER_OUTCOMES.map(o => Model.sessionAfterOutcome(sessionState, o).terminal), [false, false, false, false, true, true, true, true, true, true])
+check("the outcome vocabulary is exactly the eleven answers Service.qml can get", Model.PLAYER_OUTCOMES.slice().sort(), ["abandoned", "attached", "ended", "failed", "foreign", "mpvMissing", "relaunching", "respawning", "retrying", "stopped", "superseded"])
+check("a player that is still there or still coming keeps the record; every ending retires it", Model.PLAYER_OUTCOMES.map(o => Model.sessionAfterOutcome(sessionState, o).terminal), [false, false, false, false, false, true, true, true, true, true, true])
 
 // The six endings, each on its own. Before this change three of them - a
 // failed start, a missing mpv, an abandoned relaunch - left the record.
@@ -1133,6 +1133,33 @@ check("retiring the record leaves Recents, favorites and sources alone", (() => 
   return [out.session, out.favorites, out.lastPlayed.id, out.recents.length, out.sources.length]
 })(), [null, ["t:f"], "t:bbc1.uk", 1, 4])
 
+// ---- D-PLY-1: a death inside our own respawn is not an ending ----
+// The P1. `player start` and `player restart` ladder a player DOWN and spawn
+// its replacement inside one helper call, so the death of the player they
+// replace arrives at the socket observer while that call is still running.
+// Read as an ending it cleared nowPlaying and playerWanted; the helper's
+// success reply then read the cleared nowPlaying as "a stop overtook this
+// start" and declined to re-arm the observer; and with wanted false the
+// 250 ms retry timer was off, so the interface sat idle - for good - while
+// the freshly spawned player kept playing. Two triggers, both deterministic.
+const death = (over) => Model.playerDeathKind(Object.assign({ sessionInFlight: false, relaunchPending: false, nowPlaying: true, hasChannel: true, userStopped: false, stopping: false }, over))
+check("D-PLY-1: the helper is mid ladder-and-respawn, so this EOF is a rung of it, not an end", death({ sessionInFlight: true }), "respawn")
+check("D-PLY-1: trigger A, the health verdict's `player restart --from term`, with the relaunch also queued", death({ sessionInFlight: true, relaunchPending: true }), "respawn")
+check("D-PLY-1: trigger B, `player start` finding the old player unreachable and replacing it", death({ sessionInFlight: true, relaunchPending: false }), "respawn")
+check("D-PLY-1: a stop we issued outranks everything - it is why the player is dying", [death({ sessionInFlight: true, userStopped: true }), death({ sessionInFlight: true, stopping: true }), death({ relaunchPending: true, userStopped: true })], ["ended", "ended", "ended"])
+check("D-PLY-1: nothing playing is always an ending, whatever is in flight", [death({ sessionInFlight: true, nowPlaying: false }), death({ relaunchPending: true, nowPlaying: false })], ["ended", "ended"])
+check("D-PLY-1: the queued relaunch still works, and still needs the channel to be in the playlist", [death({ relaunchPending: true }), death({ relaunchPending: true, hasChannel: false })], ["relaunch", "ended"])
+check("D-PLY-1: a plain death with nothing in flight is an ending, as it always was", [death({}), Model.playerDeathKind({}), Model.playerDeathKind(null)], ["ended", "ended", "ended"])
+
+const follow = (over) => Model.playerSessionFollowUp(Object.assign({ attached: false, stopping: false, userStopped: false, nowPlaying: true }, over))
+check("D-PLY-1: the observer is already on the new player - only the birth edge to drop", follow({ attached: true }), "attached")
+check("D-PLY-1: the helper reported a live player and we do not know what it is playing: read it back out of the stash", follow({ nowPlaying: false }), "recover")
+check("D-PLY-1: the pre-fix answer to exactly that case was to do nothing, which is the defect", [follow({ nowPlaying: false }) === "abandoned", follow({ nowPlaying: false }) === "recover"], [false, true])
+check("D-PLY-1: a stop really did overtake this start - do not hunt a socket being torn down", [follow({ nowPlaying: false, stopping: true }), follow({ userStopped: true }), follow({ nowPlaying: false, userStopped: true })], ["abandoned", "abandoned", "abandoned"])
+check("D-PLY-1: an attached observer wins over a stop, because the EOF is what confirms it", follow({ attached: true, stopping: true }), "attached")
+check("D-PLY-1: the ordinary cold start keeps hunting for the socket", [follow({}), Model.playerSessionFollowUp(null)], ["hunt", "recover"])
+check("D-PLY-1: every answer arms the observer except the two that must not", ["attached", "abandoned", "hunt", "recover"].map(a => a === "hunt" || a === "recover"), [false, false, true, true])
+
 // Service.qml is the only caller, and this pins that it stays the only route:
 // a word the rule does not know, or a branch that reaches past the decision
 // into the state, is exactly how the defect got in.
@@ -1146,6 +1173,26 @@ check("Service.qml reaches the session record through the one decision and nowhe
   serviceSource.indexOf(".session ="),
   (serviceSource.match(/function noteSessionOutcome\(/g) || []).length
 ], [-1, -1, 1])
+
+// Service.qml is where these two decisions have to be spelled, and the
+// source is the only place a test can see that from here (the same pattern
+// the outcome vocabulary above uses).
+check("D-PLY-1: handlePlayerGone routes the EOF through the decision instead of reading relaunchPending itself", [
+  serviceSource.indexOf("Model.playerDeathKind(") !== -1,
+  /death === "respawn"/.test(serviceSource),
+  /root\.relaunchPending && current !== null && !stopped/.test(serviceSource)
+], [true, true, false])
+check("D-PLY-1: the respawn branch keeps the intent alive - wanted true, the observer armed, no toast", (() => {
+  const branch = serviceSource.slice(serviceSource.indexOf('if (death === "respawn")'), serviceSource.indexOf('if (death === "relaunch")'))
+  return [/root\.playerWanted = true/.test(branch), /root\.armPlayerSocket\(\)/.test(branch), /root\.nowPlaying = null/.test(branch), /raiseStreamFailure/.test(branch), /noteSessionOutcome\("respawning"\)/.test(branch)]
+})(), [true, true, false, false, true])
+check("D-PLY-1: a successful start or restart re-arms the observer and cancels the relaunch it just delivered", [
+  serviceSource.indexOf("Model.playerSessionFollowUp(") !== -1,
+  /root\.relaunchPending = false\n[\s\S]{0,600}?relaunchTimer\.stop\(\)/.test(serviceSource),
+  /follow === "recover"[\s\S]{0,120}runPlayerProbe\(\)/.test(serviceSource),
+  /root\.nowPlaying === null\) \{\n\s+\/\/ A stop overtook/.test(serviceSource)
+], [true, true, true, false])
+
 // Every branch that drops the channel is a branch the record's fate hangs on,
 // so pair them by position: the very next thing after each `root.nowPlaying =
 // null` is the decision, in one of its two forms - noteSessionOutcome() for an

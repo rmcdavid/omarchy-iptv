@@ -263,7 +263,7 @@ TestCase {
   // abandoned relaunch each kept it.
   function test_sessionOutcomeRetiresTheRecord() {
     var played = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
-    compare(Model.PLAYER_OUTCOMES.length, 10)
+    compare(Model.PLAYER_OUTCOMES.length, 11)
     var endings = ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned"]
     for (var i = 0; i < endings.length; i++) {
       var svc = freshSession(played)
@@ -312,6 +312,35 @@ TestCase {
     noteOutcome(settled, "mpvMissing")
     compare(settled.deadSessionPending, false)
     compare(settled.userState.session, null)
+  }
+
+  // D-PLY-1, the P1: a helper that ladders a player down and spawns its
+  // replacement under one lock delivers the old one's death to the observer
+  // while that call is still running. Read as an ending it cleared
+  // nowPlaying and playerWanted, the success reply then read the cleared
+  // nowPlaying as "a stop overtook this start" and armed nothing, and the
+  // interface sat idle while the new player kept playing.
+  function test_deathInsideOurOwnRespawnIsNotAnEnding() {
+    var live = { sessionInFlight: false, relaunchPending: false, nowPlaying: true, hasChannel: true, userStopped: false, stopping: false }
+    compare(Model.playerDeathKind(live), "ended")
+    live.sessionInFlight = true
+    compare(Model.playerDeathKind(live), "respawn")     // trigger B: `player start`
+    live.relaunchPending = true
+    compare(Model.playerDeathKind(live), "respawn")     // trigger A: the health verdict
+    live.userStopped = true
+    compare(Model.playerDeathKind(live), "ended")       // our own stop outranks it
+    live.userStopped = false
+    live.sessionInFlight = false
+    compare(Model.playerDeathKind(live), "relaunch")
+    live.hasChannel = false
+    compare(Model.playerDeathKind(live), "ended")
+    // And the reply: a live player the helper just reported is always worth
+    // arming for; when we no longer know what it plays, read the stash.
+    compare(Model.playerSessionFollowUp({ attached: true, nowPlaying: true }), "attached")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: true }), "hunt")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: false }), "recover")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: false, stopping: true }), "abandoned")
+    compare(Model.playerSessionFollowUp({ attached: false, nowPlaying: true, userStopped: true }), "abandoned")
   }
 
   function test_settingsClamps() {

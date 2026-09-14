@@ -1068,16 +1068,30 @@ Item {
       var warnings = Model.statusWarnings(status)
       if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
       root.relaunchPending = false
+      // A start or a restart that answered ok IS the relaunch, delivered.
+      // Leaving the queue armed is how the health path fired a SECOND
+      // `player restart --from term` at the player it had just respawned,
+      // one tick after the observer reattached (the timer's `playerUp`
+      // branch reads a healthy new player as "still not answering").
+      relaunchTimer.stop()
       root.playRetries = 0
       root.rememberEntry(status.entryId, root.nowPlaying)
-      if (root.socketAttached()) {
-        root.playerPending = false
-      } else if (root.stopping || root.userStopped || root.nowPlaying === null) {
-        // A stop overtook this start. The two legitimately interleave: the
-        // helper releases the lock before its first-load window precisely
-        // so a stop ladder can get in. Do not go hunting for a socket that
-        // is being torn down - that would be twelve journal lines for a
-        // player nobody wants any more.
+      // The helper has just reported a live player of this shell's making,
+      // so the observer belongs on it. Doing nothing here is the second
+      // half of the reported P1: `wanted` false leaves the 250 ms retry
+      // timer off, and nothing else ever looks again.
+      var follow = Model.playerSessionFollowUp({
+        attached: root.socketAttached(),
+        stopping: root.stopping,
+        userStopped: root.userStopped,
+        nowPlaying: root.nowPlaying !== null
+      })
+      if (follow === "attached" || follow === "abandoned") {
+        // Already observed, or a stop really did overtake this start - the
+        // two legitimately interleave, because the helper releases the lock
+        // before its first-load window precisely so a stop ladder can get
+        // in. Do not hunt for a socket that is being torn down; that would
+        // be twelve journal lines for a player nobody wants any more.
         root.playerPending = false
       } else {
         // The player is up but the observer has not attached yet: keep the
@@ -1086,6 +1100,10 @@ Item {
         root.playerWanted = true
         root.armPlayerSocket()
         playerWatchdog.restart()
+        // `recover`: a live player and no idea what it is playing. Read the
+        // identity back out of its own stash, which is the reattach path of
+        // 4.5 unchanged - the same answer a shell restart gets.
+        if (follow === "recover") root.runPlayerProbe()
       }
       var first = status.firstLoad && typeof status.firstLoad === "object" ? status.firstLoad : null
       if (first && String(first.state) === "failed") root.playerFirstLoadFailed(String(first.reason || ""))
@@ -1242,7 +1260,10 @@ Item {
     }
     if (stash.entryId) root.rememberEntry(stash.entryId, root.nowPlaying)
     root.reconcilePending = true
-    root.playerPending = true
+    // Only when the observer is not on it yet: raising the birth edge over a
+    // live socket buys nothing and ends in the watchdog's "did not become
+    // observable" twelve seconds later.
+    root.playerPending = !root.socketAttached()
     root.playerWanted = true
     root.armPlayerSocket()
     playerWatchdog.restart()
@@ -1473,7 +1494,17 @@ Item {
       stopping: root.stopping,
       tail: root.mpvStderrTail
     })
-    var relaunch = root.relaunchPending && current !== null && !stopped
+    // Model.playerDeathKind() decides what this EOF was, because a helper
+    // that ladders a player down and spawns its replacement under one lock
+    // delivers the old one's death here while that call is still running.
+    var death = Model.playerDeathKind({
+      sessionInFlight: playerProc.running && (root.playerKind === "start" || root.playerKind === "restart"),
+      relaunchPending: root.relaunchPending,
+      nowPlaying: current !== null,
+      hasChannel: current !== null && !!root.channelIndex[String(current.id)],
+      userStopped: stopped,
+      stopping: root.stopping
+    })
     root.lastEndFile = null
     root.currentEntryId = 0
     root.playerIdle = false
@@ -1490,7 +1521,20 @@ Item {
     // a stop that never had a player to observe.
     root.stopAt = 0
     stopSettleTimer.stop()
-    if (relaunch && root.channelIndex[String(current.id)]) {
+    if (death === "respawn") {
+      // A rung of the ladder the helper is running right now, for this very
+      // channel. The intent is unchanged, so the birth edge is held, the
+      // observer keeps hunting - it is already retrying when the new mpv
+      // binds, with no dependence on the helper's reply arriving - and the
+      // user is told nothing, because nothing has ended. The record outlives
+      // this death for the same reason a queued relaunch does.
+      root.playerPending = true
+      root.playerWanted = true
+      root.armPlayerSocket()
+      root.noteSessionOutcome("respawning")
+      return
+    }
+    if (death === "relaunch") {
       // The health verdict's one automatic relaunch, a moment after the
       // exit: the old socket file is gone by then and a stop() in the
       // meantime cancels it (D-LIVE-15, D-LIVE-17).
