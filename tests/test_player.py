@@ -228,8 +228,13 @@ def sleeper(token, ignore_term=False):
 # /proc identity deliberately instead of waiting for the kernel: same pid,
 # same bound socket, `exec` to a command line that no longer carries the
 # token. The state is real and it lasts exactly as long as the test says.
+#
+# With SHED_ON_TERM it waits for a SIGTERM first, which is how a stop ladder
+# reaches it: the rung reports the player gone the instant its command line
+# stops matching, exactly as it does for a real signalled player, and the
+# socket outlives that instant.
 SHED_DOUBLE = '''#!/usr/bin/env python3
-import os, socket, sys, time
+import os, signal, socket, sys, time
 
 path = ""
 for arg in sys.argv[1:]:
@@ -239,25 +244,40 @@ server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 server.bind(path)
 os.chmod(path, 0o600)
 server.listen(8)
+
+
+def shed(*ignored):
+    # Keep the descriptor across the exec: the socket stays bound to this
+    # same pid while the command line the /proc scan keys on goes away.
+    os.set_inheritable(server.fileno(), True)
+    os.execv(sys.executable, [sys.executable, "-c",
+                              "import os,sys,time; time.sleep(float(sys.argv[1])); os._exit(0)",
+                              os.environ["SHED_HOLD"], "omarchy-iptv-test-socket-holder"])
+
+
+if os.environ.get("SHED_ON_TERM") == "1":
+    signal.signal(signal.SIGTERM, shed)
 with open(os.environ["SHED_READY"], "w", encoding="utf-8") as handle:
     handle.write("1")
-# Keep the descriptor across the exec: the socket stays bound to this same
-# pid while the command line the /proc scan keys on goes away.
-os.set_inheritable(server.fileno(), True)
-os.execv(sys.executable, [sys.executable, "-c",
-                          "import os,sys,time; time.sleep(float(sys.argv[1])); os._exit(0)",
-                          os.environ["SHED_HOLD"], "omarchy-iptv-test-socket-holder"])
+if os.environ.get("SHED_ON_TERM") == "1":
+    time.sleep(60)
+else:
+    shed()
 '''
 
 
-def shed_double(token, hold_s, ready_path):
-    """Start the double above and return once it has bound and shed."""
+def shed_double(token, hold_s, ready_path, on_term=False):
+    """Start the double above. Returns once it has bound - and, unless it is
+    waiting for a SIGTERM, once it has shed."""
     process = subprocess.Popen(["python3", "-c", SHED_DOUBLE, token],
-                               env=dict(os.environ, SHED_READY=ready_path, SHED_HOLD=str(hold_s)),
+                               env=dict(os.environ, SHED_READY=ready_path, SHED_HOLD=str(hold_s),
+                                        SHED_ON_TERM="1" if on_term else "0"),
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline and not os.path.exists(ready_path):
         time.sleep(0.005)
+    if on_term:
+        return process
     # The exec is the last thing it does; wait for the command line to stop
     # carrying the token rather than for a guessed delay.
     while time.monotonic() < deadline:
@@ -350,13 +370,15 @@ class PlayerTestCase(unittest.TestCase):
         self.addCleanup(self.reap_process, process)
         return process
 
-    def shed_double(self, hold=0.4):
+    def shed_double(self, hold=0.4, on_term=False):
         """A process holding our socket bound with our token already gone
         from its command line - the state a just-SIGKILLed player leaves
-        behind - for `hold` seconds."""
+        behind - for `hold` seconds. With `on_term` it carries the token
+        until the ladder signals it, so a whole `player stop` can be driven
+        through it."""
         os.makedirs(self.runtime, 0o700, exist_ok=True)
         process = shed_double("--input-ipc-server=%s" % self.sock, hold,
-                              os.path.join(self.dir, "shed.ready"))
+                              os.path.join(self.dir, "shed.ready"), on_term=on_term)
         self.addCleanup(self.reap_process, process)
         return process
 
@@ -979,6 +1001,26 @@ class LadderTest(PlayerTestCase):
         self.assertEqual(payload["rung"], "term")
         self.assertTrue(wait_gone(victim))
 
+    def test_the_deadline_it_hands_on_is_the_kill_rungs_own_unspent_window(self):
+        # D-PLY-8. The kill rung reserves 500 ms (stop_escalation("term")
+        # gives waitMs 0, so grace falls back to STOP_SETTLE_MS) and spends
+        # almost none of it: wait_for_exit checks before it sleeps and a
+        # SIGKILLed process is gone at the first check. That unspent window
+        # is what the settle gets - it is never a fresh budget on top.
+        os.makedirs(self.runtime, 0o700)
+        stubborn = self.sleeper(ignore_term=True)
+        marks = self.clock()
+        result = helper.stop_ladder(self.sock, helper.find_player(self.sock), "", 0.2)
+        self.assertEqual(result["rung"], "kill")
+        self.assertFalse(result["running"])
+        killed_at = 1000.0 + marks[-1][0]
+        self.assertIsNotNone(result["deadline"])
+        self.assertGreater(result["deadline"], killed_at)
+        self.assertLessEqual(result["deadline"], killed_at + helper.STOP_SETTLE_MS / 1000.0)
+        # And nearly all of it is still ahead of the settle.
+        self.assertGreaterEqual(result["deadline"] - self.clock_state["now"], 0.3)
+        self.assertTrue(wait_gone(stubborn))
+
     def test_nothing_running_is_a_clean_stop_that_unlinks_a_stale_socket(self):
         os.makedirs(self.runtime, 0o700)
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -1011,6 +1053,252 @@ class LadderTest(PlayerTestCase):
         self.assertEqual(payload["rung"], "quit")
         self.assertTrue(wait_gone(pid))
         self.assertFalse(os.path.exists(self.sock))
+
+
+class SettleTest(PlayerTestCase):
+    """D-PLY-8: the socket file left behind by a wedged stop.
+
+    The blocking guard is socket_is_dead, not find_player. A SIGKILLed
+    process runs exit_mm first, so its command line is empty at the first
+    sample (0.13-0.31 ms, 8/8 on real headless mpv 0.41 here) while its
+    listening socket stays bound for another 2.7-4.9 ms - longer for a
+    windowed player. The stop path looks 4.5-7.5 ms after the kill: one
+    /proc scan (3.7-4.9 ms for 225 pids here) after wait_for_exit returns.
+    One look each, and "not yet" was final.
+
+    These cases drive the two guards directly, so nothing here depends on
+    what the kernel happens to do while they run.
+    """
+
+    def stale_socket(self):
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(self.sock)
+        listener.close()
+        self.assertTrue(os.path.exists(self.sock))
+
+    def guards(self, found, dead, connect_cost=0.0):
+        """Successive answers for each guard (the last one repeats), on an
+        injected clock - the LadderTest pattern. `connect_cost` is what one
+        connect() costs the clock: 0 for a refused or accepted one, the full
+        MpvIpc timeout for one that times out.
+        """
+        state = {"now": 1000.0, "finds": 0, "connects": 0}
+        self.clock_state = state
+        originals = {name: getattr(helper, name)
+                     for name in ("_monotonic", "_sleep", "find_player", "socket_is_dead")}
+        for name, value in originals.items():
+            self.addCleanup(setattr, helper, name, value)
+
+        def pick(script, index):
+            return script[min(index, len(script) - 1)]
+
+        def fake_find(path):
+            answer = pick(found, state["finds"])
+            state["finds"] += 1
+            return [{"pid": 424242, "startTime": "1"}] if answer else []
+
+        def fake_dead(path):
+            answer = pick(dead, state["connects"])
+            state["connects"] += 1
+            state["now"] += connect_cost
+            return answer
+
+        def sleep(seconds):
+            if seconds > 0:
+                state["now"] += seconds
+
+        helper._monotonic = lambda: state["now"]
+        helper._sleep = sleep
+        helper.find_player = fake_find
+        helper.socket_is_dead = fake_dead
+        return state
+
+    def test_the_socket_is_unlinked_once_both_guards_agree_and_not_before(self):
+        # Red before this change for a tautological reason - settle_socket
+        # took no deadline at all and looked once by construction. It says
+        # nothing about how wide the kernel's window is; that is measured,
+        # not asserted here.
+        self.stale_socket()
+        state = self.guards(found=[False], dead=[False, False, True])
+        self.assertTrue(helper.settle_socket(self.sock, deadline=1000.5))
+        self.assertFalse(os.path.exists(self.sock))
+        self.assertEqual(state["connects"], 3)
+        # Both guards, every iteration: the finder is what aborts the loop
+        # when a start races us, so it can never be asked less often.
+        self.assertEqual(state["finds"], 3)
+        self.assertLessEqual(state["now"], 1000.5)
+
+    def test_a_successful_connect_keeps_blocking_it_for_the_whole_wait(self):
+        # A wedged player answering through its listen backlog. The guard
+        # gets this right today and must keep getting it right: the re-check
+        # may never widen the conditions, only re-evaluate them.
+        self.stale_socket()
+        state = self.guards(found=[False], dead=[False])
+        self.assertFalse(helper.settle_socket(self.sock, deadline=1000.5))
+        self.assertTrue(os.path.exists(self.sock))
+        self.assertGreater(state["connects"], 1, "it really did re-check")
+        self.assertLessEqual(state["now"] - 1000.0, 0.5)
+
+    def test_a_timed_out_connect_blocks_it_too_and_overruns_by_one_at_most(self):
+        # socket_is_dead is False for a successful connect AND for one that
+        # times out - only ECONNREFUSED or a missing path make it True. A
+        # timed-out connect costs the 0.2 s MpvIpc timeout, which is the
+        # whole worst-case latency argument: the loop can overrun its
+        # deadline by one of those and by nothing more.
+        self.stale_socket()
+        state = self.guards(found=[False], dead=[False], connect_cost=0.2)
+        self.assertFalse(helper.settle_socket(self.sock, deadline=1000.5))
+        self.assertTrue(os.path.exists(self.sock))
+        self.assertLessEqual(round(state["now"] - 1000.0, 6), 0.5 + 0.2)
+
+    def test_a_player_the_finder_can_see_aborts_the_loop_at_once(self):
+        # A racing start. Never a wait, never an unlink - the file belongs to
+        # a live player and the lock we hold is what stops it appearing
+        # between the check and the unlink.
+        self.stale_socket()
+        state = self.guards(found=[True], dead=[True])
+        self.assertFalse(helper.settle_socket(self.sock, deadline=1000.5))
+        self.assertTrue(os.path.exists(self.sock))
+        self.assertEqual([state["finds"], state["connects"]], [1, 0])
+        self.assertEqual(state["now"], 1000.0)
+
+    def test_without_a_deadline_it_behaves_exactly_as_it_always_did(self):
+        # The seven call sites that are not the post-ladder settle pass no
+        # deadline, so this is what they get: one look at each guard, no
+        # sleep, same answer as before.
+        self.stale_socket()
+        state = self.guards(found=[False], dead=[False])
+        self.assertFalse(helper.settle_socket(self.sock))
+        self.assertTrue(os.path.exists(self.sock))
+        self.assertEqual([state["finds"], state["connects"]], [1, 1])
+        self.assertEqual(state["now"], 1000.0)
+
+    def test_a_socket_still_bound_by_a_process_the_finder_cannot_see(self):
+        """The defect itself, with a real process and the shipping guards.
+
+        The double holds the exact state a just-SIGKILLed player leaves
+        behind - blind to the /proc scan, still accepting connections - so
+        this is deterministic where the field case is a few milliseconds
+        wide. What it does not claim is that the field window is this long:
+        the kernel's own is measured (2.7-4.9 ms headless), not modelled.
+        """
+        self.shed_double(hold=0.35)
+        self.assertEqual(helper.find_player(self.sock), [])
+        self.assertFalse(helper.socket_is_dead(self.sock))
+        # One look, which is what the code did: "not yet", and the file stays
+        # until some later helper call happens to clean it up.
+        self.assertFalse(helper.settle_socket(self.sock))
+        self.assertTrue(os.path.exists(self.sock))
+        # Look again inside the window the kill rung already owns and it is
+        # gone, with time to spare.
+        started = time.monotonic()
+        budget = helper.STOP_SETTLE_MS / 1000.0
+        self.assertTrue(helper.settle_socket(self.sock, deadline=started + budget))
+        self.assertFalse(os.path.exists(self.sock))
+        self.assertLess(time.monotonic() - started, budget)
+
+    def test_a_stop_whose_player_outlives_its_own_command_line_still_settles(self):
+        """The whole path, through the real `player stop` verb.
+
+        The double carries the token until the ladder signals it, then sheds
+        it while keeping the socket bound - which is what a signalled player
+        does, in the order a signalled player does it. The ladder therefore
+        reports the player gone (its command line no longer matches) while
+        the socket is still listening, which is the D-PLY-8 instant, and the
+        settle has to look again to get it right.
+        """
+        self.shed_double(hold=0.3, on_term=True)
+        self.assertEqual(len(helper.find_player(self.sock)), 1)
+        started = time.monotonic()
+        code, payload, _, stderr = run("player", "stop", "--socket", self.sock, "--seq", "3",
+                                       "--from", "term", "--ipc-timeout", "0.2")
+        spent = time.monotonic() - started
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["rung"], "term")
+        self.assertFalse(payload["running"])
+        self.assertFalse(os.path.exists(self.sock), "the socket file must not be left behind")
+        # Inside the rung's own window, not on top of it: the term rung
+        # reserves 2 s and the wait for the socket came out of that.
+        self.assertLess(spent, helper.STOP_KILL_GRACE_MS / 1000.0)
+
+    def test_the_settle_that_holds_no_lock_of_its_own_takes_one(self):
+        # X1/X2, ruling CL8. player_probe and player_orphan_check settle
+        # outside any lock, so a start that binds a fresh socket between the
+        # refused connect and the unlink would have the NEW socket deleted.
+        self.stale_socket()
+        self.assertTrue(helper.settle_under_lock(self.sock))
+        self.assertFalse(os.path.exists(self.sock))
+        self.assertTrue(os.path.exists(helper.player_lock_path(self.sock)))
+
+    def hold_the_player_lock(self):
+        """Stand in for another verb being mid-flight. flock is per open file
+        description, so a second open in this same process really does
+        contend - which is what the helper's own acquire_lock will meet."""
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        held = helper.acquire_lock(helper.player_lock_path(self.sock), 1.0)
+        self.addCleanup(helper.release_lock, held)
+        return held
+
+    def test_a_probe_will_not_unlink_a_socket_while_another_verb_holds_the_lock(self):
+        # X2 / CL8, at the call site rather than in the function. The probe
+        # is the reattach read and runs at every service start, so it is the
+        # one most likely to be racing a start.
+        self.stale_socket()
+        self.hold_the_player_lock()
+        code, payload, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "0.2")
+        self.assertEqual(code, 0, stderr)
+        self.assertFalse(payload["running"])
+        self.assertTrue(os.path.exists(self.sock),
+                        "the unlink needs the lock, and somebody else has it")
+
+    def test_a_probe_with_the_lock_free_still_cleans_a_stale_socket_up(self):
+        # The other half: locking it must not turn the cleanup off.
+        self.stale_socket()
+        code, payload, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "0.2")
+        self.assertEqual(code, 0, stderr)
+        self.assertFalse(payload["running"])
+        self.assertFalse(os.path.exists(self.sock))
+
+    def test_an_orphan_check_will_not_unlink_a_socket_while_another_verb_holds_the_lock(self):
+        # X1 / CL8. This one reaps the player first, so by the time it
+        # settles the socket really is stale - and unlinking it without the
+        # lock is exactly how a start that bound a fresh socket in between
+        # loses it.
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        code, _, _, stderr = run("player", "probe", "--socket", self.sock,
+                                 "--owner-pid", str(os.getpid()), "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.hold_the_player_lock()
+        code, payload, _, stderr = run("player", "orphan-check", "--socket", self.sock,
+                                       "--owner-pid", str(os.getpid()), "--grace", "0", "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["reason"], "owner_alive")
+        self.assertTrue(payload["stopped"])
+        self.assertTrue(os.path.exists(self.sock),
+                        "the player is gone, but the unlink still needs the lock")
+
+    def test_an_orphan_check_with_the_lock_free_leaves_nothing_behind(self):
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        code, _, _, stderr = run("player", "probe", "--socket", self.sock,
+                                 "--owner-pid", str(os.getpid()), "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        code, payload, _, stderr = run("player", "orphan-check", "--socket", self.sock,
+                                       "--owner-pid", str(os.getpid()), "--grace", "0", "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["stopped"])
+        self.assertFalse(os.path.exists(self.sock))
+
+    def test_a_settle_that_cannot_take_the_lock_does_not_unlink(self):
+        # Somebody else is mid-verb: their socket, their settle. A probe is
+        # not worth failing over a leftover file either, so it just reports.
+        self.stale_socket()
+        held = helper.acquire_lock(helper.player_lock_path(self.sock), 1.0)
+        self.addCleanup(helper.release_lock, held)
+        self.assertFalse(helper.settle_under_lock(self.sock, lock_timeout=0.1))
+        self.assertTrue(os.path.exists(self.sock))
 
 
 class RestartTest(PlayerTestCase):
