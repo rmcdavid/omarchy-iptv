@@ -781,7 +781,13 @@ function parseState(text) {
   var seenKey = {}
   for (var s = 0; s < srcs.length && state.sources.length < MAX_SOURCES; s++) {
     var rec = normalizeSourceRecord(srcs[s])
-    if (!rec || seenUrl[rec.url] || seenKey[rec.key]) continue
+    if (!rec) {
+      // Logged by key (D-SRC-09); a record without a usable key is silent.
+      var badKey = srcs[s] && typeof srcs[s] === "object" ? str(srcs[s].key) : ""
+      if (isSourceKey(badKey)) warnState("dropped source " + badKey + " (invalid url)")
+      continue
+    }
+    if (seenUrl[rec.url] || seenKey[rec.key]) continue
     seenUrl[rec.url] = true
     seenKey[rec.key] = true
     state.sources.push(rec)
@@ -1452,8 +1458,13 @@ function footerHints(opts) {
   }
   if (o.empty === "loading") return [["Esc", "close"]]
   if (o.empty) {
-    if (o.sourcesExist) return [["r", "reload"], [SOURCE_KEYS.open, "sources"], ["Esc", "close"]]
-    return [["r", "reload"], ["Esc", "close"]]
+    // UX-SOURCES 5.3: `r retry`; `o.retry === false` drops it when nothing
+    // can be retried (the configured value is invalid, D-SRC-06).
+    var pairs = []
+    if (o.retry !== false) pairs.push(["r", "retry"])
+    if (o.sourcesExist) pairs.push([SOURCE_KEYS.open, "sources"])
+    pairs.push(["Esc", "close"])
+    return pairs
   }
   if (mode === "list") {
     return [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"], [SOURCE_KEYS.open, "sources"]]
@@ -1663,7 +1674,9 @@ function validateSourceUrl(text, opts) {
   if (s.charAt(0) === "/") return filePath(s)
   if (s.charAt(0) === "~") return cli ? pass("file", s, "") : fail("relative_path")
   if (s === "." || s === ".." || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
-  var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/)
+  // [\s\S] rather than `.`: a line separator (U+2028 / U+2029) inside an
+  // http URL is whitespace (`invalid`), not a missing scheme (D-SRC-06).
+  var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):([\s\S]*)$/)
   if (!m) return fail(looksLikeHost(s) ? "scheme" : "relative_path")
   var scheme = m[1].toLowerCase()
   var rest = m[2]
@@ -1921,7 +1934,9 @@ function xtreamUrls(server, username, password) {
   if (!v.ok) return fail(v.code === "scheme" ? "server_scheme" : "invalid", "server")
   if (v.kind !== "http") return fail("server_scheme", "server")
   var m = v.url.match(/^(https?:\/\/[^\/?#@]+)\/?$/)
-  if (!m) {
+  // The validator drops a fragment from the normalized URL; on a server it
+  // is refused like a path or a query (ARCH 3.4, D-SRC-08).
+  if (!m || srv.indexOf("#") !== -1) {
     // SR17: credentials belong in the fields below, never in the server URL.
     var authorityEnd = v.url.indexOf("/", 8)
     var hasUserinfo = v.url.indexOf("@") !== -1 && (authorityEnd === -1 || v.url.indexOf("@") < authorityEnd)
@@ -2126,15 +2141,29 @@ function sourceTransient(event, opts) {
 
 // ---- state records and reducers (ARCHITECTURE-SOURCES 2.1, 3.5)
 
+// `search` rather than `test`: CONTROL_RE is global (stateful lastIndex).
+function hasControlChars(text) {
+  return str(text).search(CONTROL_RE) !== -1
+}
+
+// Console line for a record the reader drops (D-SRC-09): the key only,
+// never the URL. Model.js is otherwise silent; node has a console too.
+function warnState(message) {
+  if (typeof console !== "undefined" && console && typeof console.warn === "function") console.warn("omarchy-iptv: state: " + message)
+}
+
+// A record whose `url` carries a control character (NUL, CR, ...) is
+// dropped: it would reach the helper's argv and can never match a key
+// (D-SRC-09). A control character in `epgUrl` clears that field only.
 function normalizeSourceRecord(raw) {
   if (!raw || typeof raw !== "object") return null
   var key = str(raw.key)
   var url = str(raw.url)
-  if (!isSourceKey(key) || url === "" || url.length > MAX_SOURCE_URL) return null
+  if (!isSourceKey(key) || url === "" || url.length > MAX_SOURCE_URL || hasControlChars(url)) return null
   var kind = str(raw.kind)
   if (kind !== "http" && kind !== "file") kind = url.charAt(0) === "/" ? "file" : "http"
   var epg = str(raw.epgUrl)
-  if (epg.length > MAX_SOURCE_URL) epg = ""
+  if (epg.length > MAX_SOURCE_URL || hasControlChars(epg)) epg = ""
   var origin = str(raw.origin)
   if (SOURCE_ORIGINS.indexOf(origin) === -1) origin = "guide"
   var label = capCodePoints(sanitizeInput(raw.label), MAX_LABEL)
@@ -2275,14 +2304,34 @@ function touchSource(state, key, nowSec) {
   return replaceSource(st, key, { lastUsed: nowInt(nowSec) })
 }
 
+// The timestamp a status carries (fetchedAt, else generatedAt), 0 for none.
+function statusFetchedAt(status) {
+  var fetched = Math.floor(Number(status && status.fetchedAt) || 0)
+  if (fetched <= 0) fetched = Math.floor(Number(status && status.generatedAt) || 0)
+  return fetched > 0 ? fetched : 0
+}
+
+// True when a successful status carries counts or a timestamp the record
+// does not have yet, so the service adopts them when the active source's
+// playlist-status.json loads (the migrated cache, a CLI-reconciled record
+// fetched by the startup refresh: D-SRC-01) without rewriting state.json
+// on every load.
+function sourceStatsDiffer(rec, status) {
+  if (!rec || !status || status.ok !== true) return false
+  var fetched = statusFetchedAt(status)
+  var recFetched = Math.max(0, Math.floor(Number(rec.fetchedAt) || 0))
+  if (fetched > 0 ? fetched !== recFetched : recFetched === 0) return true
+  return Math.max(0, Math.floor(Number(status.channelCount) || 0)) !== Math.max(0, Math.floor(Number(rec.channelCount) || 0))
+    || Math.max(0, Math.floor(Number(status.groupCount) || 0)) !== Math.max(0, Math.floor(Number(rec.groupCount) || 0))
+}
+
 // Copies the counts of a successful `playlist` status onto the record so
 // the list shows them without opening N status files. `nowSec` is the
 // fallback when the status carries no fetchedAt.
 function withSourceStats(state, key, status, nowSec) {
   var st = cloneState(state)
   if (!status || status.ok !== true || !findSource(st.sources, key)) return st
-  var fetched = Math.floor(Number(status.fetchedAt) || 0)
-  if (fetched <= 0) fetched = Math.floor(Number(status.generatedAt) || 0)
+  var fetched = statusFetchedAt(status)
   if (fetched <= 0) fetched = Math.max(1, nowInt(nowSec))
   return replaceSource(st, key, {
     fetchedAt: fetched,
@@ -2307,7 +2356,12 @@ function activeSourceKey(state, playlistUrl) {
 // run (no history, legacy cache layout) or "cli" afterwards. Beyond
 // MAX_SOURCES the least recently used non-active records are evicted.
 // `invalid` carries the validation result for a set but invalid URL (D16).
-function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec, origin) {
+// `opts.adoptEpg === false` (D-SRC-10): the settings' epgUrl was written
+// for the previous source (it did not change in the settings write that
+// changed the playlist), so a known record keeps its own epgUrl and a new
+// record starts without one; the default adopts it (a CLI `epgUrl` change,
+// D-SRC-02, or the first reconcile after a state load).
+function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec, origin, opts) {
   var st = cloneState(state)
   var out = { state: st, changed: false, activeKey: "", added: "", evicted: [], invalid: null }
   var raw = sanitizeInput(playlistUrl, MAX_SOURCE_URL + 1)
@@ -2316,14 +2370,15 @@ function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec,
   // no 0.1.0 regression) while the forms keep refusing them.
   var pv = validateSourceUrl(raw, { origin: "cli" })
   if (!pv.ok) { out.invalid = pv; return out }
+  var adoptEpg = !(opts && opts.adoptEpg === false)
   var ev = validateSourceUrl(epgUrl, { kind: "epg", origin: "cli" })
-  var epg = ev.ok ? ev.url : ""
+  var epg = adoptEpg && ev.ok ? ev.url : ""
   var now = nowInt(nowSec)
   var rec = findSourceByUrl(st.sources, pv.url)
   if (rec) {
     var patch = {}
     if (str(rec.key) !== str(previousActiveKey)) patch.lastUsed = now
-    if (ev.ok && epg !== str(rec.epgUrl)) patch.epgUrl = epg
+    if (adoptEpg && ev.ok && epg !== str(rec.epgUrl)) patch.epgUrl = epg
     var keys = 0
     for (var k in patch) keys++
     if (keys > 0) { out.state = replaceSource(st, rec.key, patch); out.changed = true }
@@ -2527,9 +2582,11 @@ function openForm(st, kind, origin, sourceId, values) {
   return next
 }
 
-// The first-run form: the unconfigured empty state contains the input.
+// The first-run form: the unconfigured empty state contains the input. The
+// query is cleared so the header above the form reads `Search channels...`
+// again (UX 3.1.1; D-SRC-05 after the active source was removed).
 function openFirstRun(st) {
-  var next = copyGuide(st)
+  var next = withQuery(st, "")
   next.returnMode = ""
   return openForm(next, "url", "firstRun", "", null)
 }
@@ -2984,11 +3041,14 @@ if (typeof module !== "undefined") {
     cloneState: cloneState,
     withCacheLayout: withCacheLayout,
     normalizeSourceRecord: normalizeSourceRecord,
+    hasControlChars: hasControlChars,
     addSource: addSource,
     updateSource: updateSource,
     removeSource: removeSource,
     touchSource: touchSource,
     withSourceStats: withSourceStats,
+    sourceStatsDiffer: sourceStatsDiffer,
+    statusFetchedAt: statusFetchedAt,
     activeSourceKey: activeSourceKey,
     reconcileSources: reconcileSources,
     sourceForEdit: sourceForEdit,

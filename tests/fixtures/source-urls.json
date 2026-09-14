@@ -16,6 +16,7 @@
   {"input":"http://192.168.1.10:9981/playlist","ok":true,"kind":"http","url":"http://192.168.1.10:9981/playlist","host":"192.168.1.10","key":"3b0d6818","note":"IP literal host"},
   {"input":"http://h.test/a%20b.m3u","ok":true,"kind":"http","url":"http://h.test/a%20b.m3u","host":"h.test","key":"632d797d","note":"percent-encoding in the path kept verbatim"},
   {"input":"http://h.test/a b","ok":false,"code":"invalid","note":"space inside the URL"},
+  {"input":"http://h.test/a\u2028b","ok":false,"code":"invalid","note":"D-SRC-06: a line separator inside an http URL is whitespace (invalid), not a missing scheme"},
   {"input":"http://B\u00fccher.EXAMPLE/list.m3u","ok":true,"kind":"http","url":"http://b\u00fccher.example/list.m3u","host":"b\u00fccher.example","key":"df395abc","note":"IDN host lowercased, kept as Unicode"},
   {"input":"\u00a0http://h.test/x\u00a0","ok":true,"kind":"http","url":"http://h.test/x","host":"h.test","key":"b878d902","note":"NBSP edges trimmed"},
   {"input":"http://h.test/a\u0000b","ok":true,"kind":"http","url":"http://h.test/ab","host":"h.test","key":"002bb14d","note":"control character stripped"},
