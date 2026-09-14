@@ -7,6 +7,7 @@
 #   4. python tests              (python3 -m unittest discover -s tests)
 #   5. QML spec                  (qmltestrunner on tests/Model.spec.qml)
 #   6. harness predicates        (scripts/qa-lib-test.sh)
+#   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
 #   7. ASCII check on code files (glyphs are allowed in .qml only)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
@@ -40,10 +41,12 @@ fail=0
 # between a fifth and a half of each suite could have stopped executing with
 # the gate still green. Raised to what M2-03 leaves behind. Raise a floor when
 # you add tests; never lower one to make a run green.
-QML_SPEC_MIN=${QML_SPEC_MIN:-56}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1150}
+QML_SPEC_MIN=${QML_SPEC_MIN:-58}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1180}
 PY_TESTS_MIN=${PY_TESTS_MIN:-318}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
+# The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
+CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -173,6 +176,27 @@ if bash "$ROOT/scripts/qa-lib-test.sh" >"$CHECK_TMP/qalib.log" 2>&1; then
   if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$CHECK_TMP/qalib.log"; fi
 else
   bad "harness predicates"; cat "$CHECK_TMP/qalib.log"
+fi
+
+step "scripts/dev-harness/chno-entry-scenario.sh check-tree (M2-03 CN23)"
+# The number-entry scenarios had no runner for a whole milestone, and nothing
+# in this gate would have said so. The preflight half needs no display and no
+# quickshell, so it runs here on every commit: if the four harness verbs or
+# the seams they drive disappear, the gate goes red on this machine rather
+# than on the display lane's, weeks later. It proves the code is present,
+# never that it works - only the live half does that.
+chno_log="$CHECK_TMP/chno-entry.log"
+if bash "$ROOT/scripts/dev-harness/chno-entry-scenario.sh" check-tree >"$chno_log" 2>&1; then
+  chno_checks=$(grep -c '^PASS' "$chno_log")
+  if (( chno_checks < CHNO_ENTRY_MIN )); then
+    bad "chno-entry preflight ran $chno_checks checks, expected at least $CHNO_ENTRY_MIN"
+    cat "$chno_log"
+  else
+    ok "chno-entry preflight ($chno_checks checks)"
+    if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$chno_log"; fi
+  fi
+else
+  bad "chno-entry preflight"; cat "$chno_log"
 fi
 
 step "ascii check (code files)"

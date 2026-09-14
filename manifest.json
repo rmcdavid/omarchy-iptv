@@ -32,7 +32,7 @@
       "maxRecents": 10,
       "barLabelMaxWidth": 180,
       "channelOrder": "playlist",
-      "numberEntryMs": 1500,
+      "numberEntryMs": 2000,
       "barShowChannelNumber": true
     },
     "schema": [
@@ -96,7 +96,7 @@
         "min": 400,
         "max": 5000,
         "step": 100,
-        "defaultValue": 1500
+        "defaultValue": 2000
       },
       {
         "key": "barShowChannelNumber",

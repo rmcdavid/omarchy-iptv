@@ -100,7 +100,7 @@ var SETTING_RANGES = {
   // M2-03 CN2: the inter-digit window is a setting, not a constant, because
   // the gap between a slow typist getting channel 101 and getting channels
   // 1, 0 and 1 is an accessibility matter.
-  numberEntryMs: { def: 1500, min: 400, max: 5000 }
+  numberEntryMs: { def: 2000, min: 400, max: 5000 }
 }
 
 // Channel numbers (M2-03 1.2 / 9.1). A number is at most 5 major digits and
@@ -759,8 +759,16 @@ function isNumberEntryKey(text) {
 // `scopeId`, `query` and `cursorIndex` are the snapshot taken when the
 // buffer went from empty to one character; they are what Esc restores, and
 // what Backspace on the last character restores (2.6).
+//
+// `cursorId` is the same snapshot's cursor as an ID rather than a row number.
+// It is what the duplicate cycle of CN9 has to be derived from: every
+// intermediate digit MOVES the cursor during the live preview, so by the time
+// the last digit lands the live cursor is on whatever the prefix resolved to,
+// never on the previous match (D-CHNO-1).
+// `resume` is set on exactly one thing: a buffer the AUTO-commit closed
+// early. See closeNumberEntry (CN21).
 function numberEntry() {
-  return { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }
+  return { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false }
 }
 
 function normalizeNumberEntry(entry) {
@@ -771,7 +779,9 @@ function normalizeNumberEntry(entry) {
     buffer: str(e.buffer),
     scopeId: str(e.scopeId),
     query: str(e.query),
-    cursorIndex: isFinite(at) && at > 0 ? at : 0
+    cursorIndex: isFinite(at) && at > 0 ? at : 0,
+    cursorId: str(e.cursorId),
+    resume: e.resume === true
   }
 }
 
@@ -782,16 +792,28 @@ function normalizeNumberEntry(entry) {
 function pushNumberKey(entry, text, ctx) {
   var cur = normalizeNumberEntry(entry)
   var t = str(text)
-  if (!isNumberEntryKey(t)) return { entry: cur, changed: false }
-  if (cur.buffer.length >= MAX_CHNO_LABEL) return { entry: cur, changed: false }
+  if (!isNumberEntryKey(t)) return { entry: cur, changed: false, resumed: false }
+  if (cur.buffer.length >= MAX_CHNO_LABEL) return { entry: cur, changed: false, resumed: false }
   var buffer = cur.buffer
   if (t === CHNO_ENTRY_SEP || t === ",") {
-    if (buffer === "" || buffer.indexOf(CHNO_ENTRY_SEP) !== -1) return { entry: cur, changed: false }
+    if (buffer === "" || buffer.indexOf(CHNO_ENTRY_SEP) !== -1) return { entry: cur, changed: false, resumed: false }
     buffer += CHNO_ENTRY_SEP
   } else {
     buffer += t
   }
-  if (cur.active) return { entry: { active: true, buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }, changed: true }
+  // CN21. A key arriving while a buffer is armed continues THAT number
+  // instead of starting a new one. The auto-commit decided the number was
+  // finished; this key is the user saying it was not, and the buffer it
+  // re-opens can only resolve to nothing -- which is the whole point, because
+  // nothing is what the user typed and nothing is what must be reported.
+  var resumed = !cur.active && cur.resume === true && cur.buffer !== ""
+  if (cur.active || resumed) {
+    return {
+      entry: { active: true, buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId, resume: false },
+      changed: true,
+      resumed: resumed
+    }
+  }
   var c = ctx && typeof ctx === "object" ? ctx : {}
   var at = Math.floor(Number(c.cursorIndex))
   return {
@@ -800,9 +822,12 @@ function pushNumberKey(entry, text, ctx) {
       buffer: buffer,
       scopeId: str(c.scopeId),
       query: str(c.query),
-      cursorIndex: isFinite(at) && at > 0 ? at : 0
+      cursorIndex: isFinite(at) && at > 0 ? at : 0,
+      cursorId: str(c.cursorId),
+      resume: false
     },
-    changed: true
+    changed: true,
+    resumed: false
   }
 }
 
@@ -811,13 +836,146 @@ function pushNumberKey(entry, text, ctx) {
 // restore scope, query and cursor from it.
 function popNumberKey(entry) {
   var cur = normalizeNumberEntry(entry)
-  if (!cur.active || cur.buffer === "") return { active: false, buffer: "", scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }
+  if (!cur.active || cur.buffer === "") return { active: false, buffer: "", scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId, resume: false }
   var buffer = cur.buffer.substring(0, cur.buffer.length - 1)
-  return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex }
+  return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId, resume: false }
 }
 
+// The Esc / Backspace-to-empty close, kept as its own name because the guide
+// and both test suites call it that. One implementation, not two.
 function cancelNumberEntry(entry) {
-  return numberEntry()
+  return closeNumberEntry(entry, "cancel")
+}
+
+// What the entry becomes when a commit closes it. `reason` is one of "auto"
+// (the unambiguous-match commit, which the user did not ask for), "timeout",
+// "enter" (Enter or Space), "key" (any key the buffer does not own) or
+// "cancel" (Esc, Backspace to empty).
+//
+// CN21, and the rule the whole defect turns on: THE MACHINE MAY FINISH A
+// NUMBER EARLY ONLY IF IT CAN TAKE IT BACK. Every other reason is the user's
+// own act and ends the number for good; "auto" is the one the user never
+// asked for, so it closes the entry for display and ARMS the buffer for the
+// rest of the same digit window (numberEntryMs, the one rule that says which
+// digits are one number). A digit arriving inside that window re-opens this
+// buffer instead of starting a new entry that would land somewhere of its own
+// with no error -- which is exactly how 20509 became "you are now on channel
+// 900, and nothing told you" (D-CHNO-2).
+//
+// Nothing else changes: the commit still fires on the last digit, the cursor
+// is already on the target and the footer already names it, so the 93% of
+// numbers that commit instantly still do. An armed entry is inactive, so the
+// chip is gone and the hints are back exactly as before.
+//
+// By construction a resumed buffer can only resolve to nothing: "auto" fires
+// only when NO label extends the buffer, so no label can extend it with one
+// more digit either. The window's cost is therefore bounded and visible - a
+// number retyped inside it reads as one longer number and is reported as the
+// miss it is, rather than silently tuning somewhere.
+function closeNumberEntry(entry, reason) {
+  var cur = normalizeNumberEntry(entry)
+  if (str(reason) !== "auto" || cur.buffer === "") return numberEntry()
+  return {
+    active: false,
+    buffer: cur.buffer,
+    scopeId: cur.scopeId,
+    query: cur.query,
+    cursorIndex: cur.cursorIndex,
+    cursorId: cur.cursorId,
+    resume: true
+  }
+}
+
+// M2-03 2.5 / 2.9. ONE keystroke, every decision it makes, in order. This
+// lives here rather than in Guide.qml because the ORDER is the thing both
+// D-CHNO-1 and D-CHNO-2 are about, and an order stranded in a QML component
+// is an order no test can reach (CLAUDE.md rule 12). The guide keeps exactly
+// what only it can do: move the cursor, run the timer, draw the transient.
+//
+// `ctx` is the live guide state a NEW entry snapshots: cursorId, cursorIndex,
+// scopeId, query. Returns:
+//   changed     false when the key was refused (the cap, a second separator);
+//               the caller must not restart the timer for a key that did
+//               nothing
+//   entry       the entry after this key, including after an auto-commit
+//   resolution  what the buffer resolves to, for the live preview
+//   commit      null, or the commit this key fired by itself -- the decision
+//               only (restore / play / keepOpen / kind / label / matches /
+//               ordinal), because the status line needs the name of the row
+//               the caller is about to land on, which only the caller knows
+//   timer       "restart" or "stop"
+function numberKeyStep(entry, index, text, ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  var result = pushNumberKey(entry, text, c)
+  var idle = resolveChno(null, "", -1)
+  if (!result.changed) return { changed: false, entry: result.entry, resolution: idle, snapshot: result.entry, commit: null, timer: "none", resumed: false }
+  var next = result.entry
+  // D-CHNO-1 / CN9: the cycle is resolved against the cursor as it was BEFORE
+  // the first digit, never the live one. Every intermediate digit moves the
+  // cursor during the preview -- "3" and "30" both resolve to some lower
+  // number on the way to "301" -- so a live cursor is on the prefix's target
+  // by the time the last digit lands, is never one of the duplicates, and the
+  // cycle restarts at ordinal 1 every time. With a multi-digit plan that
+  // means an HD twin could not be reached by number at all.
+  var hit = resolveChno(index, next.buffer, next.cursorId)
+  if (!chnoUnambiguous(index, next.buffer)) return { changed: true, entry: next, resolution: hit, snapshot: next, commit: null, timer: "restart", resumed: result.resumed === true }
+  var plan = chnoCommitPlan(hit.kind, chnoCommitLabel(next, hit), "", hit.matches, hit.ordinal, { play: false })
+  return {
+    changed: true,
+    entry: closeNumberEntry(next, "auto"),
+    resolution: hit,
+    // What a restoring commit restores from: the entry this key closed, snapshot and all.
+    snapshot: next,
+    resumed: result.resumed === true,
+    commit: {
+      reason: "auto",
+      restore: plan.restore,
+      play: plan.play,
+      keepOpen: plan.keepOpen,
+      kind: str(hit.kind),
+      label: chnoCommitLabel(next, hit),
+      matches: hit.matches,
+      ordinal: hit.ordinal
+    },
+    // NOT "stop". The digit window that the auto-commit did not end keeps
+    // running, and it is what disarms the buffer when it expires (CN21).
+    timer: "restart"
+  }
+}
+
+// Backspace, and what it resolves against. Returns `cancelled` when the
+// buffer emptied: that is the same cancel as Esc, and `snapshot` is what the
+// caller restores scope, query and cursor from (2.6).
+function numberPopStep(entry, index) {
+  var next = popNumberKey(entry)
+  if (!next.active) return { entry: numberEntry(), resolution: resolveChno(null, "", -1), cancelled: true, snapshot: next, timer: "stop" }
+  // The same snapshot cursor the push path resolves against (D-CHNO-1):
+  // backspacing to "3" must preview what "3" meant when entry began.
+  return { entry: next, resolution: resolveChno(index, next.buffer, next.cursorId), cancelled: false, snapshot: next, timer: "restart" }
+}
+
+// The label a commit reports: the resolved one, or the raw buffer when
+// nothing resolved -- which is what puts the number the user actually typed
+// into "No channel 20509".
+function chnoCommitLabel(entry, resolution) {
+  var kind = str((resolution || {}).kind)
+  if (kind === "none" || kind === "") return normalizeNumberEntry(entry).buffer
+  return str((resolution || {}).label)
+}
+
+// M2-03 2.5. A commit the caller asked for: the timeout, Enter or Space, or
+// any key the buffer does not own. `name` is the row the preview landed on,
+// so the status can name it. Returns the plan (including the status line),
+// the entry afterwards, and the snapshot a restoring plan restores from.
+function numberCommitStep(entry, resolution, name, opts) {
+  var o = opts && typeof opts === "object" ? opts : {}
+  var cur = normalizeNumberEntry(entry)
+  var hit = resolution && typeof resolution === "object" ? resolution : { kind: "none", label: "", matches: 0, ordinal: 0 }
+  return {
+    plan: chnoCommitPlan(hit.kind, chnoCommitLabel(cur, hit), name, hit.matches, hit.ordinal, o),
+    entry: closeNumberEntry(cur, str(o.reason) === "" ? "key" : str(o.reason)),
+    snapshot: cur
+  }
 }
 
 // M2-03 4.2. Style.space units for the row's number column, derived from the
@@ -4608,6 +4766,11 @@ if (typeof module !== "undefined") {
     numberEntry: numberEntry,
     pushNumberKey: pushNumberKey,
     popNumberKey: popNumberKey,
+    closeNumberEntry: closeNumberEntry,
+    numberKeyStep: numberKeyStep,
+    numberPopStep: numberPopStep,
+    numberCommitStep: numberCommitStep,
+    chnoCommitLabel: chnoCommitLabel,
     cancelNumberEntry: cancelNumberEntry,
     chnoColumnUnits: chnoColumnUnits,
     chnoStatus: chnoStatus,

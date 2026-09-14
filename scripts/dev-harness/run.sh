@@ -289,7 +289,7 @@ case $cmd in
   start|--*)
     [[ $cmd == start ]] && shift
     OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0
-    ORDER=playlist ENTRY_MS=1500 BAR_NUMBER=true
+    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;

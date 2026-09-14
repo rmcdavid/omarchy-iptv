@@ -379,8 +379,8 @@ check("clampInt parses and clamps", [Model.clampInt("15", 60, 5, 1440), Model.cl
 // The whole settings object, pinned: a new key is only ever added here on
 // purpose. M2-03 7.1 adds the last three.
 check("settingsFrom applies R2 clamps and trims", Model.settingsFrom(Model.findBarEntry(barConfig, "io.github.rmcdavid.iptv")),
-  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 1500, barShowChannelNumber: true })
-check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 1500, barShowChannelNumber: true })
+  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true })
+check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true })
 check("settingsFrom null", Model.settingsFrom(null).refreshMinutes, 360)
 check("clampSetting refreshMinutes range", [Model.clampSetting("refreshMinutes", 5), Model.clampSetting("refreshMinutes", 99999), Model.clampSetting("refreshMinutes", "abc")], [15, 1440, 360])
 check("clampSetting barLabelMaxWidth range", [Model.clampSetting("barLabelMaxWidth", 10), Model.clampSetting("barLabelMaxWidth", 601)], [60, 600])
@@ -2052,7 +2052,8 @@ check("CN5.2: the IPC lookup finds the same channel in a reordered array", (() =
 })(), ["h", "f", "f"])
 check("CN2.3: no match, an empty buffer and an unnumbered playlist all resolve to none", [Model.resolveChno(planIdx, "205", -1), Model.resolveChno(planIdx, "", -1), Model.resolveChno(Model.buildChnoIndex([]), "1", -1), Model.resolveChno(null, "1", -1)].map(r => [r.kind, r.channelIndex, r.label, r.matches]), [["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0], ["none", -1, "", 0]])
 
-const plan200 = Model.buildChnoIndex(Model.prepareChannels((() => { const rows = []; for (let i = 1; i <= 200; i++) rows.push(chan("p" + i, String(i))); return rows })()))
+const plan200rows = Model.prepareChannels((() => { const rows = []; for (let i = 1; i <= 200; i++) rows.push(chan("p" + i, String(i))); return rows })())
+const plan200 = Model.buildChnoIndex(plan200rows)
 check("CN2.5: 199 in a 1..200 plan commits on the last digit; 1 does not", [Model.chnoUnambiguous(plan200, "199"), Model.chnoUnambiguous(plan200, "1"), Model.chnoUnambiguous(plan200, "20")], [true, false, false])
 check("CN2.5: an exact major is ambiguous while a subchannel extends it", [Model.chnoUnambiguous(planIdx, "7"), Model.chnoUnambiguous(planIdx, "130"), Model.chnoUnambiguous(planIdx, "205")], [false, true, false])
 
@@ -2087,8 +2088,161 @@ check("CN2.6: popNumberKey to empty deactivates but KEEPS the snapshot to restor
   return [[back.active, back.buffer], [gone.active, gone.buffer, gone.scopeId, gone.query, gone.cursorIndex]]
 })(), [[true, "1"], [false, "", "g:UK", "sky", 12]])
 check("CN2.6: popNumberKey on an inactive entry is harmless", (() => { const r = Model.popNumberKey(Model.numberEntry()); const n = Model.popNumberKey(null); return [r.active, r.buffer, n.active, n.buffer] })(), [false, "", false, ""])
-check("CN2.6: cancelNumberEntry is idempotent and forgets the snapshot", [Model.cancelNumberEntry(Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 4 }).entry), Model.cancelNumberEntry(Model.cancelNumberEntry(null))], [{ active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }, { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 }])
-check("CN2.3: numberEntry() is the documented zero value", Model.numberEntry(), { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0 })
+check("CN2.6: cancelNumberEntry is idempotent and forgets the snapshot", [Model.cancelNumberEntry(Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 4 }).entry), Model.cancelNumberEntry(Model.cancelNumberEntry(null))], [{ active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false }, { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false }])
+check("CN2.3: numberEntry() is the documented zero value", Model.numberEntry(), { active: false, buffer: "", scopeId: "", query: "", cursorIndex: 0, cursorId: "", resume: false })
+
+// ---- CN21 / D-CHNO-2: a number that does not exist must say so.
+//
+// The live pass typed 20509 on a 3,000-channel plan and landed on channel
+// 900 with no error anywhere: the auto-commit fired on the proper prefix 205,
+// and the leftover "09" opened a NEW entry that tuned somewhere of its own.
+// 28.4% of absent five-digit numbers did that. The rule that fixes it is one
+// sentence -- the machine may finish a number early only if it can take it
+// back -- and these are its parts.
+const { typer, measure } = require("../scripts/chno-entry-rate.js")
+const missPlan = Model.prepareChannels([chan("t1", "100"), chan("t2", "205"), chan("t3", "300"), chan("t4", "900")])
+const missIdx = Model.buildChnoIndex(missPlan)
+const typeMiss = typer(missPlan, missIdx)
+const miss20509 = typeMiss("20509", 0)
+check("CN21: 205 auto-commits, and the digits after it are still the same number",
+  [miss20509.said, miss20509.toldNoExactly, miss20509.moved, miss20509.commits],
+  [["Channel 205" + Model.SEP + "Ch t2", "No channel 20509"], true, false, 2])
+check("CN21: so the number that does not exist is never a silent landing somewhere else",
+  [miss20509.silent, miss20509.landedOn], [false, "100"])
+// The instant path is what the rule may not destroy: the commit still fires
+// on the last digit, it just stops being the end of the number.
+const instant205 = typeMiss("205", 0)
+check("CN2.5: an unambiguous number still commits on its last digit, with no wait",
+  [instant205.instant, instant205.commits, instant205.landedOn, instant205.said], [true, 1, "205", ["Channel 205" + Model.SEP + "Ch t2"]])
+check("CN21: and the entry it leaves behind is inactive, so the chip and the hints are as they were",
+  [instant205.armed, typeMiss("20509", 0).armed], [true, false])
+
+const armed205 = Model.closeNumberEntry(
+  Model.pushNumberKey(Model.pushNumberKey(Model.pushNumberKey(Model.numberEntry(), "2", { scopeId: "g:UK", query: "sky", cursorIndex: 12, cursorId: "z" }).entry, "0", {}).entry, "5", {}).entry, "auto")
+check("CN21: only the auto-commit arms the buffer; every other reason ends the number for good",
+  ["auto", "timeout", "enter", "key", "cancel", ""].map(r => [Model.closeNumberEntry(armed205, r).resume, Model.closeNumberEntry(armed205, r).buffer]),
+  [[true, "205"], [false, ""], [false, ""], [false, ""], [false, ""], [false, ""]])
+check("CN21: an armed buffer is inactive and keeps the pre-entry snapshot",
+  [armed205.active, armed205.buffer, armed205.scopeId, armed205.query, armed205.cursorIndex, armed205.cursorId], [false, "205", "g:UK", "sky", 12, "z"])
+check("CN21: a key inside the window continues that buffer instead of starting a new entry",
+  (() => { const r = Model.pushNumberKey(armed205, "0", { scopeId: "all", query: "", cursorIndex: 99, cursorId: "q" }); return [r.resumed, r.entry.active, r.entry.buffer, r.entry.scopeId, r.entry.cursorIndex, r.entry.resume] })(),
+  [true, true, "2050", "g:UK", 12, false])
+check("CN21: a separator resumes too, and an unarmed entry still starts fresh",
+  [Model.pushNumberKey(armed205, ".").entry.buffer, Model.pushNumberKey(Model.numberEntry(), "0", { cursorIndex: 99 }).entry.buffer,
+    Model.pushNumberKey(Model.numberEntry(), "0", { cursorIndex: 99 }).resumed], ["205.", "0", false])
+check("CN21: once the window expires the buffer is gone, so the next digit is a new number",
+  (() => { const fresh = Model.pushNumberKey(Model.numberEntry(), "0", { cursorIndex: 4, cursorId: "n" }); return [fresh.resumed, fresh.entry.buffer, fresh.entry.cursorIndex] })(), [false, "0", 4])
+check("CN21: the auto-commit leaves the digit window RUNNING - it is what disarms the buffer",
+  (() => { const s = Model.numberKeyStep(Model.pushNumberKey(Model.numberEntry(), "2", { cursorId: "z" }).entry, missIdx, "0", {}); const t = Model.numberKeyStep(s.entry, missIdx, "5", {}); return [t.commit !== null, t.timer, t.entry.active, t.entry.resume, s.timer] })(),
+  [true, "restart", false, true, "restart"])
+check("CN21: a resumed buffer can only ever resolve to nothing, which is why saying so is safe",
+  (() => {
+    const out = []
+    for (const key of Object.keys(missIdx.byKey)) {
+      if (!Model.chnoUnambiguous(missIdx, key)) continue
+      for (const d of "0123456789.") out.push(Model.resolveChno(missIdx, key + d, -1).kind)
+    }
+    return [out.length, out.every(k => k === "none")]
+  })(), [44, true])
+
+// ---- CN9 / D-CHNO-1: three commits of the same number reach both twins.
+//
+// resolveChno was never wrong; what reached it was. Every intermediate digit
+// moves the cursor during the preview ("1" previews 10, "12" is the answer),
+// so the live cursor is never on the previous match and the cycle restarted
+// at ordinal 1 forever. The `plan` fixture carries the duplicate pair on 12.
+const typePlan = typer(plan, planIdx)
+const cycle = (() => {
+  const out = []
+  let at = 0                                  // parked on channel 10, not on either twin
+  for (let i = 0; i < 3; i++) { const r = typePlan("12", at); out.push([r.landedOn, plan[r.cursor].id, r.said[0]]); at = r.cursor }
+  return out
+})()
+check("CN9: re-typing a duplicated number walks to the twin and wraps", cycle,
+  [["12", "h", "Channel 12" + Model.SEP + "Ch h (1 of 2)"],
+   ["12", "i", "Channel 12" + Model.SEP + "Ch i (2 of 2)"],
+   ["12", "h", "Channel 12" + Model.SEP + "Ch h (1 of 2)"]])
+check("CN9: the cycle is derived from the cursor as it was BEFORE the first digit",
+  (() => { const s = Model.numberKeyStep(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "h", cursorIndex: 7 }).entry, planIdx, "2", {}); return [s.commit.ordinal, s.resolution.channelIndex, s.entry.buffer] })(),
+  [2, 8, "12"])
+check("CN9: a preview that moved the cursor cannot restart the cycle",
+  (() => { const one = Model.numberKeyStep(Model.numberEntry(), planIdx, "1", { cursorId: "h", cursorIndex: 7 }); return [one.resolution.label, one.entry.cursorId] })(), ["10", "h"])
+check("CN9: Backspace previews against the same snapshot cursor",
+  (() => { const two = Model.pushNumberKey(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "h", cursorIndex: 7 }).entry, "2", {}).entry; const back = Model.numberPopStep(Model.pushNumberKey(two, "9", {}).entry, planIdx); return [back.entry.buffer, back.resolution.channelIndex, back.resolution.ordinal] })(),
+  ["12", 8, 2])
+check("CN20: the command verb still never cycles, whatever the guide's cursor is doing",
+  [Model.channelByNumber(plan, planIdx, "12").id, Model.channelByNumber(plan, planIdx, "12").id, Model.channelByNumber(plan, planIdx, "12").id], ["h", "h", "h"])
+
+// The rate, on a whole sample rather than one number: every absent number in
+// a range, typed at speed, on a 1..200 plan (where 200x is the trap 20509
+// was). The measurement that reports the live-pass fixture is this same
+// function; see scripts/chno-entry-rate.js.
+const rate200 = measure(plan200rows, plan200, 2000, 2099, 0)
+check("CN21: over a whole sample, nothing lands silently and everything absent is reported",
+  [rate200.absentSample, rate200.silentMistunes, rate200.movedAtAll, rate200.toldNoChannel], [100, 0, 0, 100])
+check("CN21: and the instant path over the same plan is untouched",
+  [rate200.distinctNumbers, rate200.instantCommits, rate200.instantRate, rate200.autoCommittedEarly], [200, 180, "90.0%", 10])
+
+// ---- CN23: the scenarios of section 10.6, by name.
+//
+// Twenty of them had no runner at all and had never executed. The half of
+// each that is a DECISION runs here, against the same functions the guide
+// calls; the half that needs a cursor, a scope hop, a timer or a window is
+// driven by scripts/dev-harness/chno-entry-scenario.sh. N3, N4, N10, N15,
+// N21, N22, N23 and N24 have no decision half and are not here - see that
+// file's header for which of them were struck and why.
+const typeIdx = typer(plan, planIdx)
+check("N1: each digit extends the buffer and previews the lowest match", (() => {
+  const seen = []
+  let e = Model.numberEntry()
+  for (const d of "13") { const s = Model.numberKeyStep(e, planIdx, d, { cursorId: "a", cursorIndex: 0 }); e = s.entry; seen.push([s.entry.buffer, s.resolution.kind, s.resolution.label]) }
+  return seen
+})(), [["1", "prefix", "10"], ["13", "prefix", "130"]])
+check("N2: the window closes the entry and the footer names the channel", (() => {
+  const s = Model.numberKeyStep(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "a" }).entry, planIdx, "3", {})
+  const done = Model.numberCommitStep(s.entry, s.resolution, "Ch g", { play: false, reason: "timeout" })
+  return [done.plan.status, done.entry.active, done.entry.resume, done.plan.restore]
+})(), ["Channel 130" + Model.SEP + "Ch g", false, false, false])
+check("N5: Backspace drops one character and previews what is left", (() => {
+  const two = Model.pushNumberKey(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "a", cursorIndex: 3 }).entry, "3", {}).entry
+  const back = Model.numberPopStep(two, planIdx)
+  return [back.entry.buffer, back.entry.active, back.resolution.label, back.cancelled, back.timer]
+})(), ["1", true, "10", false, "restart"])
+check("N6: Backspace to empty ends the entry and hands back the snapshot to restore", (() => {
+  const one = Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", query: "sky", cursorIndex: 9, cursorId: "f" }).entry
+  const back = Model.numberPopStep(one, planIdx)
+  return [back.cancelled, back.entry.active, back.timer, back.snapshot.scopeId, back.snapshot.query, back.snapshot.cursorIndex]
+})(), [true, false, "stop", "g:UK", "sky", 9])
+check("N7: Esc is the same close, and it forgets the buffer rather than arming it", (() => {
+  const one = Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 9 }).entry
+  const done = Model.numberCommitStep(one, Model.resolveChno(planIdx, "1", "f"), "Ch a", { play: false, reason: "cancel" })
+  return [Model.closeNumberEntry(one, "cancel").buffer, Model.closeNumberEntry(one, "cancel").resume, done.snapshot.cursorIndex]
+})(), ["", false, 9])
+const miss205 = typeIdx("205", 0)
+check("N8: an unknown number reports the digits that were typed, and moves nothing",
+  [miss205.said, miss205.moved, miss205.toldNoExactly], [["No channel 205"], false, true])
+check("N9: Enter on an unknown number refuses to play and restores",
+  Model.chnoCommitPlan("none", "205", "", 0, 0, { play: true, keepOpen: true }), { restore: true, play: false, keepOpen: true, status: "No channel 205" })
+check("N11: a subchannel resolves on either separator, and the major alone waits for the window",
+  [typeIdx("7.1", 0).landedOn, typeIdx("7,1", 0).landedOn, typeIdx("7.1", 0).instant, typeIdx("7", 0).instant, typeIdx("7", 0).said],
+  ["7.1", "7.1", true, false, ["Channel 7" + Model.SEP + "Ch b"]])
+check("N12: three commits of a duplicated number give ordinals 1, 2, 1", cycle.map(c => c[1]), ["h", "i", "h"])
+check("N13: an unambiguous number commits on the last digit, with no wait",
+  [typeIdx("130", 0).instant, typeIdx("130", 0).commits, typeIdx("130", 0).landedOn], [true, 1, "130"])
+check("N14: an unnumbered playlist answers a digit with one transient, and drops the hint",
+  (() => {
+    const none = Model.buildChnoIndex(Model.prepareChannels([chan("x", "HD"), chan("y", null)]))
+    const hints = Model.footerHints({ mode: "list", hasNumbers: false }).map(h => h[0])
+    return [Model.numberKeyAction({ text: "5", hasNumbers: false }), Model.chnoStatus("noNumbers", "", "", 0, 0, true),
+      hints.indexOf("0-9"), Model.chnoColumnUnits(none.maxLabelLen), none.hasNumbers]
+  })(), ["noNumbers", "No channel numbers in this playlist", -1, 24, false])
+// N16's other half - that a digit in search mode never reaches the buffer at
+// all - is the guide's listMode guard, and it is asserted in the scenario.
+check("N16: an all-digit query stays a query, and floats the exact number match",
+  (() => {
+    const rows = Model.filterChannels(plan, "12", 20, [], planIdx)
+    return [Model.isNumericQuery("12"), rows.rows[0].id, rows.rows[0].chnoLabel]
+  })(), [true, "h", "12"])
 
 check("CN5.2: orderChannels is identity for playlist order, and for an unnumbered playlist", [Model.orderChannels(plan, "playlist", planIdx) === plan, Model.orderChannels(plan, "number", Model.buildChnoIndex([])) === plan, Model.orderChannels(plan, "", planIdx) === plan], [true, true, true])
 check("CN5.2: number order gathers by chnoSort, unnumbered channels last in playlist order", Model.orderChannels(plan, "number", planIdx).map(c => c.chnoLabel + "/" + c.id), ["7/b", "7.1/d", "7.2/c", "8/e", "10/a", "12/h", "12/i", "130/g", "139/f", "/j", "/k"])
@@ -2193,8 +2347,8 @@ check("CN6.3: search mode, sources and the empty states are untouched", [Model.f
 check("CN8.1: a numbered row announces its number first", [Model.rowAccessibleName({ name: "Sky Sports Main Event", chno: "101", favorite: true, playing: true }), Model.rowAccessibleName({ name: "Al Jazeera English", chno: "" }), Model.rowAccessibleName({ name: "Al Jazeera English" })], ["Channel 101, Sky Sports Main Event, favorite, playing", "Al Jazeera English", "Al Jazeera English"])
 check("CN6.4: the bar tooltip and accessible name carry the number when there is one", [Model.barTooltip({ playing: true, name: "Sky Sports Main Event", chno: "101" }), Model.barTooltip({ playing: true, name: "Sky Sports Main Event" }), Model.barAccessibleName({ playing: true, name: "Sky Sports Main Event", chno: "101" }), Model.barAccessibleName({ playing: true, name: "Sky Sports Main Event" })], ["Playing 101" + Model.SEP + "Sky Sports Main Event", "Playing Sky Sports Main Event", "IPTV, playing channel 101, Sky Sports Main Event", "IPTV, playing Sky Sports Main Event"])
 
-check("CN7.1: the three new settings default as documented", (() => { const s = Model.settingsFrom({ id: "x" }); return [s.channelOrder, s.numberEntryMs, s.barShowChannelNumber] })(), ["playlist", 1500, true])
-check("CN2/7.1: numberEntryMs clamps at both ends and survives garbage", [Model.settingsFrom({ numberEntryMs: 100 }).numberEntryMs, Model.settingsFrom({ numberEntryMs: 99999 }).numberEntryMs, Model.settingsFrom({ numberEntryMs: "2000" }).numberEntryMs, Model.settingsFrom({ numberEntryMs: "soon" }).numberEntryMs, Model.settingsFrom({ numberEntryMs: null }).numberEntryMs], [400, 5000, 2000, 1500, 1500])
+check("CN7.1: the three new settings default as documented", (() => { const s = Model.settingsFrom({ id: "x" }); return [s.channelOrder, s.numberEntryMs, s.barShowChannelNumber] })(), ["playlist", 2000, true])
+check("CN2/7.1: numberEntryMs clamps at both ends and survives garbage", [Model.settingsFrom({ numberEntryMs: 100 }).numberEntryMs, Model.settingsFrom({ numberEntryMs: 99999 }).numberEntryMs, Model.settingsFrom({ numberEntryMs: "2000" }).numberEntryMs, Model.settingsFrom({ numberEntryMs: "soon" }).numberEntryMs, Model.settingsFrom({ numberEntryMs: null }).numberEntryMs], [400, 5000, 2000, 2000, 2000])
 check("CN7.1: channelOrder and barShowChannelNumber read the same way the shipped keys do", [Model.settingsFrom({ channelOrder: "number" }).channelOrder, Model.settingsFrom({ channelOrder: "NUMBER" }).channelOrder, Model.settingsFrom({ channelOrder: "nonsense" }).channelOrder, Model.settingsFrom({ barShowChannelNumber: false }).barShowChannelNumber, Model.settingsFrom({ barShowChannelNumber: "false" }).barShowChannelNumber, Model.settingsFrom({ barShowChannelNumber: "true" }).barShowChannelNumber], ["number", "number", "playlist", false, false, true])
 check("CN7.1: the seven shipped settings are unchanged by the three additions", (() => { const s = Model.settingsFrom({ playlistUrl: " http://h.test/a.m3u ", epgUrl: "", refreshMinutes: 45, mpvArgs: "--mute", showChannelName: false, maxRecents: 3, barLabelMaxWidth: 200 }); return [s.playlistUrl, s.epgUrl, s.refreshMinutes, s.mpvArgs, s.showChannelName, s.maxRecents, s.barLabelMaxWidth] })(), ["http://h.test/a.m3u", "", 45, "--mute", false, 3, 200])
 

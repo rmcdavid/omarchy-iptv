@@ -1322,6 +1322,73 @@ TestCase {
     compare(Model.rowAccessibleName({ name: "The One Show", chno: "" }), "The One Show")
   }
 
+  // CN21 / D-CHNO-2 in the engine that actually runs the guide. Typing 1015
+  // on this fixture auto-commits on 101 (nothing extends it) and the 5 then
+  // used to open a NEW entry that tuned somewhere of its own with no error.
+  function test_numberEntrySequenceCN21() {
+    var entry = Model.numberEntry()
+    var resolution = Model.resolveChno(null, "", -1)
+    var commits = []
+    var keys = "1015"
+    for (var i = 0; i < keys.length; i++) {
+      var step = Model.numberKeyStep(entry, spec.chnoIndex, keys.charAt(i), { cursorId: "6", cursorIndex: 5, scopeId: "all", query: "" })
+      compare(step.changed, true)
+      entry = step.entry
+      resolution = step.commit ? Model.resolveChno(null, "", -1) : step.resolution
+      if (step.commit) {
+        commits.push(Model.chnoStatus(step.commit.kind, step.commit.label, "BBC One HD", step.commit.matches, step.commit.ordinal, true))
+        // The auto-commit leaves the digit window running, and the buffer armed.
+        compare(step.timer, "restart")
+        compare(step.entry.active, false)
+        compare(step.entry.resume, true)
+      }
+    }
+    // The 5 resumed 101 rather than starting a new number.
+    compare(entry.active, true)
+    compare(entry.buffer, "1015")
+    compare(resolution.kind, "none")
+    var done = Model.numberCommitStep(entry, resolution, "BBC One HD", { play: false, reason: "timeout" })
+    commits.push(done.plan.status)
+    compare(commits, ["Channel 101" + Model.SEP + "BBC One HD", "No channel 1015"])
+    // A miss restores the row the user was on before the first digit, and
+    // refuses to play whatever the preview passed over (CN1).
+    compare(done.plan.restore, true)
+    compare(done.plan.play, false)
+    compare(done.snapshot.cursorIndex, 5)
+    compare(done.entry.resume, false)
+    // The instant path, unchanged: 101 alone still commits on its last digit.
+    var quick = Model.numberKeyStep(Model.numberKeyStep(Model.numberKeyStep(Model.numberEntry(), spec.chnoIndex, "1", { cursorId: "6" }).entry,
+      spec.chnoIndex, "0", {}).entry, spec.chnoIndex, "1", {})
+    compare(quick.commit === null, false)
+    compare(quick.commit.kind, "exact")
+    compare(quick.resolution.channelIndex, 0)
+  }
+
+  // CN9 / D-CHNO-1 in V4. The fixture's 12 is a duplicate pair (ids 3 and 4,
+  // playlist indices 2 and 3). Typing it again has to reach the twin, and it
+  // only can if the cycle is resolved against the cursor as it was before the
+  // first digit: "1" previews 101 on the way, moving the live cursor off both.
+  function test_duplicateCycleFromTheSnapshotCursor() {
+    function typeTwelve(cursorId) {
+      var step = Model.numberKeyStep(Model.numberEntry(), spec.chnoIndex, "1", { cursorId: cursorId, cursorIndex: 0 })
+      compare(step.commit, null)               // 101 still extends "1"
+      return Model.numberKeyStep(step.entry, spec.chnoIndex, "2", {})
+    }
+    var first = typeTwelve("6")                // parked on a channel with no number
+    compare(first.resolution.channelIndex, 2)
+    compare(first.commit.ordinal, 1)
+    compare(first.commit.matches, 2)
+    var second = typeTwelve("3")               // now parked on the first twin
+    compare(second.resolution.channelIndex, 3)
+    compare(second.commit.ordinal, 2)
+    var third = typeTwelve("4")                // and the wrap
+    compare(third.resolution.channelIndex, 2)
+    compare(third.commit.ordinal, 1)
+    // CN20: the verb a script calls must not cycle, whatever the guide does.
+    compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "12").id, "3")
+    compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "12").id, "3")
+  }
+
   // Gate A1 in the engine that actually runs the guide: the modifier bits
   // here are the real Qt enum values, so this also pins that Model.js's
   // integer copies of them match Qt's.
@@ -1373,7 +1440,7 @@ TestCase {
     compare(s.channelOrder, "number")
     compare(s.numberEntryMs, 5000)
     compare(s.barShowChannelNumber, false)
-    compare(Model.settingsFrom({}).numberEntryMs, 1500)
+    compare(Model.settingsFrom({}).numberEntryMs, 2000)
     compare(Model.settingsFrom({}).channelOrder, "playlist")
     compare(Model.settingsFrom({}).barShowChannelNumber, true)
     compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "007").id, "2")

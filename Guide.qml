@@ -764,16 +764,12 @@ Item {
     return -1
   }
 
-  // M2-03 2.3. Resolve once per buffer change and keep the answer: a live
-  // binding over cursorIndex would re-enter the duplicate cycle the moment
-  // the preview moved the cursor, and the footer would report an ordinal the
-  // cursor is not on. The cycle is derived from where the cursor was when
-  // the key was pressed, which is exactly what makes it stateless (2.7).
-  function applyNumberEntry(next) {
-    var hit = Model.resolveChno(root.chnoIndex, next.buffer, root.cursorChannelId)
-    root.numberEntry = next
-    root.numberResolution = hit
-    if (hit.kind === "none") {
+  // M2-03 2.3. The cursor follows the buffer live, and the row it lands on is
+  // what the footer names. WHAT to resolve, and what to resolve it against,
+  // is Model's decision (numberKeyStep); this is the half only the guide can
+  // do -- the cursor, the scope hop and the name.
+  function applyNumberResolution(hit) {
+    if (!hit || hit.kind === "none") {
       // The cursor does not move: the user can Backspace out of a typo
       // without ever having left the row they were on (CN1).
       root.numberTargetName = ""
@@ -796,32 +792,49 @@ Item {
   }
 
   function pushNumberEntry(text) {
-    var result = Model.pushNumberKey(root.numberEntry, text,
-      { scopeId: root.scopeId, query: root.query, cursorIndex: root.cursorIndex })
+    var step = Model.numberKeyStep(root.numberEntry, root.chnoIndex, text,
+      { scopeId: root.scopeId, query: root.query, cursorIndex: root.cursorIndex, cursorId: root.cursorChannelId })
     // A refused key (the cap, a second separator) must NOT restart the
     // timer: the buffer is already as long as any number can be.
-    if (!result.changed) return
-    root.applyNumberEntry(result.entry)
-    numberTimer.restart()
+    if (!step.changed) return
+    root.numberEntry = step.entry
+    root.numberResolution = step.commit ? Model.resolveChno(null, "", -1) : step.resolution
+    root.applyNumberResolution(step.resolution)
+    root.runNumberTimer(step.timer)
     // 2.5: an exact match no label extends commits on the last digit, which
     // is what makes a three-digit plan feel instant.
-    if (Model.chnoUnambiguous(root.chnoIndex, result.entry.buffer)) root.commitNumberEntry({ play: false })
+    if (step.commit) root.finishNumberCommit(step.commit, step.snapshot)
+  }
+
+  // The half of a commit that needs the screen: the status line names the row
+  // the preview landed on, which is why Model hands back the decision and not
+  // the sentence.
+  function finishNumberCommit(commit, snapshot) {
+    var status = Model.chnoStatus(commit.kind, commit.label, root.numberTargetName, commit.matches, commit.ordinal, true)
+    root.numberTargetName = ""
+    if (commit.restore) root.restoreNumberSnapshot(snapshot)
+    root.showTransient(status)
+    if (commit.play) root.activate(commit.keepOpen)
+  }
+
+  function runNumberTimer(what) {
+    if (what === "restart") numberTimer.restart()
+    else if (what === "stop") numberTimer.stop()
   }
 
   function popNumberEntry() {
-    var next = Model.popNumberKey(root.numberEntry)
-    if (!next.active) {
+    var step = Model.numberPopStep(root.numberEntry, root.chnoIndex)
+    root.numberEntry = step.entry
+    root.numberResolution = step.resolution
+    root.runNumberTimer(step.timer)
+    if (step.cancelled) {
       // 2.6: Backspace on the last character is the same cancel as Esc, and
-      // `next` still carries the snapshot to restore from.
-      numberTimer.stop()
-      root.numberEntry = Model.cancelNumberEntry(root.numberEntry)
-      root.numberResolution = Model.resolveChno(null, "", -1)
+      // the step still carries the snapshot to restore from.
       root.numberTargetName = ""
-      root.restoreNumberSnapshot(next)
+      root.restoreNumberSnapshot(step.snapshot)
       return
     }
-    root.applyNumberEntry(next)
-    numberTimer.restart()
+    root.applyNumberResolution(step.resolution)
   }
 
   function restoreNumberSnapshot(entry) {
@@ -843,28 +856,39 @@ Item {
     if (!root.numberEntryActive) return false
     var o = opts || {}
     numberTimer.stop()
-    var hit = root.numberResolution
-    var entry = root.numberEntry
     // Playing whatever happened to be under the cursor after a mistyped
     // number is the one genuinely destructive outcome this feature could
     // have, so the decision has a name and a test of its own.
-    var plan = Model.chnoCommitPlan(hit.kind,
-      hit.kind === "none" ? root.numberBuffer : hit.label,
-      root.numberTargetName, hit.matches, hit.ordinal, o)
-    root.numberEntry = Model.cancelNumberEntry(entry)
+    var done = Model.numberCommitStep(root.numberEntry, root.numberResolution, root.numberTargetName, o)
+    root.numberEntry = done.entry
     root.numberResolution = Model.resolveChno(null, "", -1)
     root.numberTargetName = ""
-    if (plan.restore) root.restoreNumberSnapshot(entry)
-    root.showTransient(plan.status)
-    if (plan.play) root.activate(plan.keepOpen)
-    return !plan.restore
+    if (done.plan.restore) root.restoreNumberSnapshot(done.snapshot)
+    root.showTransient(done.plan.status)
+    if (done.plan.play) root.activate(done.plan.keepOpen)
+    return !done.plan.restore
+  }
+
+  // CN21. The window an auto-commit left armed, expiring. Whatever ends it -
+  // the timer, a key that is not a digit, Esc, Enter, closing the guide - the
+  // number is finished and the next digit starts a new one.
+  function disarmNumberResume() {
+    if (root.numberEntry === null || root.numberEntry.resume !== true) return false
+    numberTimer.stop()
+    root.numberEntry = Model.numberEntry()
+    return true
+  }
+
+  function numberTimerFired() {
+    if (root.numberEntryActive) { root.commitNumberEntry({ play: false, reason: "timeout" }); return }
+    root.disarmNumberResume()
   }
 
   function cancelNumberEntry() {
-    if (!root.numberEntryActive) return false
+    if (!root.numberEntryActive) { root.disarmNumberResume(); return false }
     numberTimer.stop()
     var entry = root.numberEntry
-    root.numberEntry = Model.cancelNumberEntry(entry)
+    root.numberEntry = Model.closeNumberEntry(entry, "cancel")
     root.numberResolution = Model.resolveChno(null, "", -1)
     root.numberTargetName = ""
     root.restoreNumberSnapshot(entry)
@@ -873,8 +897,8 @@ Item {
 
   // Any key this feature does not own ends entry first, then does its job.
   function endNumberEntry(commit) {
-    if (!root.numberEntryActive) return
-    if (commit) root.commitNumberEntry({ play: false })
+    if (!root.numberEntryActive) { root.disarmNumberResume(); return }
+    if (commit) root.commitNumberEntry({ play: false, reason: "key" })
     else root.cancelNumberEntry()
   }
 
@@ -894,7 +918,8 @@ Item {
       active: root.numberEntryActive,
       hasNumbers: root.hasNumbers
     })
-    if (action === "pass") return false
+    // A key the buffer does not own ends the number, armed window included.
+    if (action === "pass") { root.disarmNumberResume(); return false }
     if (action === "backspace") { root.popNumberEntry(); return true }
     if (action === "noNumbers") {
       root.showTransient(Model.chnoStatus("noNumbers", "", "", 0, 0, true))
@@ -1634,7 +1659,7 @@ Item {
     id: numberTimer
     interval: root.numberEntryMs
     repeat: false
-    onTriggered: root.commitNumberEntry({ play: false })
+    onTriggered: root.numberTimerFired()
   }
 
   // Only the row SET depends on these; decorations (playing, failed, EPG,
@@ -1758,9 +1783,10 @@ Item {
             // preview selected -- unless the number resolved to nothing, in
             // which case the commit refuses to play and says so.
             if (root.numberEntryActive) {
-              root.commitNumberEntry({ play: true, keepOpen: !enter })
+              root.commitNumberEntry({ play: true, keepOpen: !enter, reason: "enter" })
               return
             }
+            root.disarmNumberResume()
             root.activate(!enter)
           }
           onCloseRequested: root.handleEscape()
