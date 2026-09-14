@@ -2998,3 +2998,413 @@ Proved at 10:57.
 - Not restored, deliberately: the four notification-history files above, which
   are Omarchy's own and predate no plugin state; and `~/.cache/mpv`, which was
   never written to.
+
+## M1.2/M2 cleanup round - final live confirmation on d76b649 (QA, 2026-09-14, 12:22 - 13:05)
+
+The confirmation pass for the cleanup round: the live half of
+`docs/CLEANUP-PLAN.md` sections 10 and 11, run against `main` at **`d76b649`**
+with the installed clone moved to that commit and back. **This is a measuring
+lane**: it owns this file and nothing else, and every fix it names below is a
+finding, not a diff. Reference machine, display held exclusively; no other lane
+ran. Evidence root `/tmp/claude-1000/omarchy-iptv-qa10/`. `pgrep -x hyprlock`
+was checked before every keystroke batch and every burst run and returned empty
+every time. No logout. Rulings CL1, CL2, CL4, CL5, CL6, CL10, CL12, CL13 and
+CL14 are applied as written.
+
+Setup: the installed plugin at
+`~/.config/omarchy/plugins/io.github.rmcdavid.iptv` was fetched from the local
+repository into `FETCH_HEAD` and checked out detached at `d76b649`
+(`origin/main` was never moved and stayed at `d44dc6e`);
+`omarchy plugin validate` exit 0; `playlistUrl` was pointed at
+`http://127.0.0.1:8791/qa-player.m3u` (`tests/fixtures/qa-player/qa-player.m3u`,
+served on loopback from the repository fixture directory). **Those two are the
+only things changed on the machine**, and both are restored in L7. Baseline
+captured first: 1,474 channels, one source `d5977d8a` (`iptv-org.github.io`),
+**7** recents (the runbook's "five" is still stale), 0 favorites, theme
+`Retropc`, `session` null, runtime directory holding `player.lock` and an empty
+`watch-later`.
+
+Gates at `d76b649` before anything live, `scripts/check.sh` exit **0**: node
+**1000 checks / 0 failures**, python **284 tests OK**, qml spec **49 passed**,
+harness predicates **117 checks**, ascii scan **56 files**. This is the claimed
+green baseline and it reproduces exactly.
+
+### L1. The defect itself - the cold concurrent burst, re-measured
+
+Same procedure as wave two (QA-RESULTS D1), same instrument, same counts: eight
+`play` calls fired simultaneously at a guaranteed-cold player, captured at t+6 s
+with `ipc status`, the window title, and over `socat` the player's
+`media-title`, `force-media-title`, `path`, the whole `playlist` property and
+`user-data/omarchy-iptv`, plus `player.lock`, the recents ring and the shell
+journal.
+
+| Case | Runs | Wave two at `a939fd7` | **This pass at `d76b649`** |
+|---|---|---|---|
+| Cold concurrent burst | 20 | 10 user-visible divergences, 3 further stash-only, 7 clean | **0 divergences of any kind** |
+| Warm concurrent burst | 10 | 0 | **0** |
+| Cold **serial** hammer | 6 | 0 | **0** |
+
+**Zero of twenty.** Every one of the twenty was genuinely cold (`player.up` and
+`player.attached` both false before the burst, 20/20). At t+6 s,
+`status.nowPlaying.id == stash.id` in **20/20**, the shell's channel name equals
+`media-title` in **20/20** and equals the window title in **20/20**. One player
+and one window at every sample. `omarchy-iptv: play failed:` appears **0** times
+and `not_running` **0** times across all thirty-six burst and hammer runs; the
+rollback at `Service.qml:1000` never executed.
+
+**The stand-down, observed live.** The mechanism fired in **5 of the 20** cold
+bursts, each time writing two journal lines - the helper's own and the shell's
+warning raised from the reply's `warnings`:
+
+```
+WARN qml: omarchy-iptv player: omarchy-iptv: player start: a newer channel
+          change reached the player first (intent 662 over 662); left it playing
+WARN qml: omarchy-iptv: player start: a newer channel change reached the
+          player first
+```
+
+In 4 of those 5 the player's current playlist entry id is **1** - the start
+applied nothing at all, so the zap's own `loadfile` is the only one that ever
+happened. That is the fix working at the helper layer, and it is the half wave
+two predicted but could not witness.
+
+**The shell-side repair, observed live.** The CL5 re-apply
+(`omarchy-iptv: the player start settled on another channel; re-applying the
+intent`) fired in **12 of the 20**, which is the other half: where the start won
+the handshake race and applied the burst's first intent, the shell sent its own
+intent again rather than relabelling. The cost is visible and worth recording:
+the entry-id histogram over the twenty reads **1 in 4 runs, 2 in 4, 3 in 12**,
+against wave two's 2 in 18 and 3 in 2. The repair buys correctness with one
+extra `loadfile`.
+
+**The warm control still discriminates.** In all ten warm bursts the lock record
+stayed frozen at `seq 687, verb "start"` - written by the seeding play, never
+advanced - so the burst issued **no `player start` at all** and the cold-start
+family had no trigger. Exactly as at `a939fd7`.
+
+**The cold-serial control, with one change worth noting.** 0 of 6, one player
+and one window each; but `stash.seq` now reads a real intent number
+(762, 771, 780, 789, 798, 807) where wave two recorded a hardcoded **0** every
+time. That is D-PLY-11's detection half landed and it is what lets the two sides
+be compared rather than merely differed.
+
+**Recorded honestly, not counted:** the rig's shakedown run, fired immediately
+after the shell restart and before the counted twenty, **did** diverge at t+6 s
+(the shell on `t:qa.raw`, the player on `t:qa.live`). The re-apply line was
+already in the journal at that sample, and the run had converged by t+20 s and
+held at t+40 s. It is the one observation in twenty-one where the repair was
+still in flight at the six-second mark, and the plausible reason is that it was
+the first cold spawn after a shell restart - the slowest one, with the shader
+cache and the GPU context cold. Wave two's thirteen divergences, by contrast,
+were all still there two health ticks later. Nothing self-corrected then;
+everything self-corrects now.
+
+### L2. The health-tick convergence (CL6), which had no outcome test
+
+The invariant CL6 sets is that the interface's label and the player's channel
+agree within one health tick. `healthTimer` is **10 000 ms**
+(`Service.qml:55`), so that is the ceiling. A divergence was injected directly
+into the live player over `socat`, behind the shell's back, four times: a
+`loadfile` of a different stream, a `user-data/omarchy-iptv` stash naming
+`t:qa.plain`, and - in runs 2, 3 and 4 - `force-media-title` and `title` as
+well, so the window the user actually reads named the impostor too. The shell
+was holding `t:qa.live` throughout. Sampled once a second for 30 s, every
+sample recorded.
+
+| Run | Injection | Converged | Ceiling | `nowPlaying` ever relabelled? |
+|---|---|---|---|---|
+| 1 | stash only | **4 491 ms** | 10 000 ms | **no** |
+| 2 | stash + title + force-media-title | **4 533 ms** | 10 000 ms | **no** |
+| 3 | stash + title + force-media-title | **4 481 ms** | 10 000 ms | **no** |
+| 4 | stash + title + force-media-title | **4 489 ms** | 10 000 ms | **no** |
+
+- **It converges inside one tick, 4/4**, with better than 2x margin.
+- **It re-applies; it does not relabel.** `status.nowPlaying.id` read
+  `t:qa.live` at **all 120 samples across the four runs** and never once read
+  the impostor. The player came back to `t:qa.live` - stash, `media-title` and
+  the window title together - rather than the label moving to meet the player.
+  That is the distinction ruling CL5 exists for, and it is the one that
+  separates a visible reporting bug from a user watching a channel they did not
+  choose with the interface agreeing.
+- The journal carries `omarchy-iptv: the player is not on the channel the guide
+  names; re-applying it` exactly **once per run, 4/4** - the health-tick branch
+  at `Service.qml:1102-1108`, distinct from the start-reply branch of L1.
+- Repairs are capped at `channelRepairMax: 2` per intent, so a player that will
+  not take the channel is reported rather than re-zapped forever. Not reached in
+  any of the four.
+
+**Live guide confirmation.** The guide was opened over IPC, screenshotted, and
+confirmed to hold keyboard focus before any keystroke (full-screen overlay layer
+`omarchy-iptv` at level 3, search prompt focused, footer reading
+`Enter play / Up/Down move / Esc close`). Typing `Plain` filtered the list to
+one match - proof the keystrokes reached the guide and not another surface -
+and `Return` played it. `nowPlaying`, `media-title`, the stash and the window
+title all read `QA Plain No Headers`. Shots in
+`/tmp/claude-1000/omarchy-iptv-qa10/shots/`.
+
+### L3. The scenario suite, both ways
+
+| Suite | At `d76b649` | Against the named baseline | Discriminates? |
+|---|---|---|---|
+| `dev-harness/player-scenario.sh` (P1-P14) | **85 passed, 0 failed, 85 executed** | `396a69a`: **68 passed, 22 failed, 85 executed** | yes |
+| `qa-player-scenarios.sh run cold` (H17 + H18 A) | **20 passed, 0 failed** | - | - |
+| `qa-player-scenarios.sh PLY-H17` | (11 assertions, all green) | `a939fd7`: **6 passed, 6 failed** | yes |
+| `qa-player-scenarios.sh PLY-H18` phase A | (7 assertions, all green) | `a939fd7`: **4 passed, 4 failed** | yes |
+| `qa-player-scenarios.sh PLY-H18` A+B `--with-display` | **12 passed, 0 failed** | `a939fd7`: **7 passed, 5 failed** | yes |
+
+**The repointed one-relaunch assertion discriminates. This is the headline of
+CL10 and it is now settled by measurement.**
+
+```
+d76b649   PASS P11 exactly ONE relaunch, not a second one at the healthy player
+          PASS P11 and the player lock recorded exactly one intent for it
+396a69a   FAIL P11 exactly ONE relaunch, not a second one at the healthy player (got '2', want '1')
+          FAIL P11 and the player lock recorded exactly one intent for it (got '2', want '1')
+```
+
+Compare wave two (QA-RESULTS D4), where `PASS P11 exactly ONE relaunch` appeared
+in **both** summaries. The assertion has moved off a string only the fixed tree
+emits and onto the intent counter, both sides of the lock, and it reads 1 here
+and 2 there - exactly the prediction wave two made from three live
+wedge-and-respawn runs. The assertion floor
+(`the harness ran every check it has`) holds on both trees, 85 executed either
+way, so D-PLY-9's class stays closed.
+
+The 22 baseline failures are P11 (6), P12 (4), P13 (7) and P14 (5), which is the
+rule-11 evidence those four scenarios were written for.
+
+**PLY-H17 and PLY-H18 fail on behaviour, not on a broken setup.** On `a939fd7`
+every positive control still passes - the cold start completed, it really did
+spawn rather than adopt, the channel change landed while the start was parked,
+the start carried the first intent, `status` answered, the player really is
+running - while the behavioural checks read the old tree's answers: the player
+took **2** loads where it must take 1, the channel left playing is
+`t:qa.plain` where it must be `t:qa.live`, and the title the user reads names it
+too. The three `(forward guard only)` checks read `NOFIELD` and are labelled in
+the output as guards rather than as evidence, which is the right treatment.
+
+**PLY-H18 phase B against `a939fd7` is a new measurement** - the display half
+had never been run against another tree. Its result is the CL6 contract made
+visible: `FAIL PLY-H18 the player is back on the channel the user chose (CL6)
+(got 't:qa.plain', want 't:qa.live')`. The old tree leaves the player on the
+impostor forever, which is precisely what wave two measured by hand.
+
+**Finding F2, in the same family this round exists to catch.** In that same run,
+`PASS PLY-H18 the shell never relabelled itself from the player (CL5)` appears
+in **both** summaries. It is true on both trees for different reasons - the
+fixed tree repairs, the old tree simply never looked - so it is a regression
+guard and not evidence, and the runner's own rule (`cmd_list`: "A scenario that
+passes on both trees is a regression guard, not evidence - label it as one")
+says it must be labelled. PLY-H17's three such checks carry
+`(forward guard only)`; this one carries nothing. One string, same defect class
+as CL10.
+
+Also confirmed live: the CL14 fix is doing its job. The baseline runs really did
+execute the exported tree's helper - the transcript shows
+`env OMARCHY_IPTV_PLUGIN_ROOT=/run/user/1000/omarchy-iptv-qa-player/baseline-a939fd7`
+and the replies come back missing fields only today's helper emits. A run that
+had silently used today's helper could not have produced `NOFIELD`.
+
+### L4. The claims that went through the broken baseline, re-run (CL14)
+
+Re-run through the corrected path, with the control each one needed.
+
+| Claim, as recorded | Path it took | Re-run result |
+|---|---|---|
+| `baseline PLY-H17 a939fd7` = 6 pass / 6 fail (51e0f39) | the scenario runner, **after** the fix | **HOLDS.** 6 / 6, identical |
+| `baseline PLY-H18 a939fd7` = 4 pass / 4 fail (51e0f39) | the scenario runner, **after** the fix | **HOLDS.** 4 / 4, identical |
+| `run cold --apply` = 20 pass / 0 fail (51e0f39) | the scenario runner | **HOLDS.** 20 / 0, identical |
+| node gate: this tree `{"intents":1,"seqDelta":1}` 1000/0; `Service.qml` from `396a69a` `{"intents":2,"seqDelta":2}` 1000/1 (78418c9) | never the runner - `IPTV_SERVICE_QML` reads the other tree's own source | **HOLDS.** Reproduced verbatim, and the one failure at `396a69a` is that check and nothing else |
+| python: `test_player.py` 77 tests 4 red, `test_mpv.py` 24 tests 2 red against the pre-change helper (c2a197d) | never the runner - today's tests loaded against the older `bin/omarchy-iptv` | **HOLDS.** 77 tests / 4 red and 24 tests / 2 red, and the assertion texts are the ones the commit quoted: `'BBC One HD' != 'ESPN'` and `2 != 1` |
+| `player-scenario.sh --baseline` evidence, all rounds | never helper-pinned | **UNAFFECTED**, verified in source at `396a69a`, `a939fd7` and `d76b649`: all three spell the helper `$PLUGIN_ROOT/bin/omarchy-iptv` |
+
+**The control that makes the python re-run mean something:** the same mixed tree
+(today's `tests/`, the older `bin/`) with today's helper dropped back in is
+**green on both suites, 77/77 and 24/24**. The six reds are the helper, not the
+arrangement.
+
+**Nothing in this round was an artefact of the pinning, and there is a
+searchable reason.** The pinned `HELPER` lived only in
+`scripts/qa-player-scenarios.sh`; `player-scenario.sh` has always used
+`$PLUGIN_ROOT`. The only asserting scenarios that runner has ever had are
+PLY-H17 and PLY-H18, and both were written in `51e0f39` - **the same commit that
+fixed the pinning**. PLY-H11 to PLY-H16 assert nothing at all (the plan's own
+item B1), so they could never have produced a claim. The blast radius CL14
+feared is empty. That is not an argument against the ruling: the check was
+cheap, and "empty" is only knowable by running it.
+
+### L5. What else a real shell settled
+
+**D-PLY-8, the socket case.** PLY-STOP-03, 5 wedged and 5 responsive: in
+**10 of 10** the socket is already gone at **t+0.2 s** and still gone at t+1 s,
+t+5 s and t+30 s, with no helper call of QA's own in between. The
+`stopSettleTimer` backstop line (`the player outlived a stop`) is absent from
+the journal in all ten. The runtime directory after each stop holds
+`player.lock`, `shader-cache` and `watch-later` and nothing else.
+**D-PLY-8 does not reproduce at `d76b649`**, as at `a939fd7`.
+
+**The teardown window on a real windowed mpv**, five SIGKILLs with
+`/proc/<pid>/cmdline` and `connect()` sampled in a tight loop from the instant
+of the kill:
+
+| Run | RSS | cmdline empty | socket refused | blind-to-unbound window |
+|---|---|---|---|---|
+| 1 | 146 MB | 0.231 ms | 12.923 ms | **12.693 ms** |
+| 2 | 146 MB | 0.180 ms | 23.353 ms | **23.173 ms** |
+| 3 | 144 MB | 0.323 ms | 18.199 ms | **17.876 ms** |
+| 4 | 144 MB | 0.274 ms | 24.970 ms | **24.696 ms** |
+| 5 | 146 MB | 0.301 ms | 9.912 ms | **9.611 ms** |
+
+- `find_player()` goes blind first at **0.18-0.32 ms**, 5/5. The hypothesis
+  corrected in wave two's X4 stays corrected on a second independent run.
+- Every window is still **above** the 4-8 ms observation point the shipping
+  single-shot settle used, 5/5, so the premise the fix rests on holds.
+- **Finding F3:** CL12 records the residue as "fifteen to thirty-seven
+  milliseconds". This pass measured **9.6 to 24.7 ms**. The floor is lower than
+  recorded - 9.6 ms clears 8 ms by 1.2x, not by the 2x the recorded range
+  implies. The conclusion does not change; the recorded bound should.
+- CL12's refusal to write proportionality down survives again: 144-146 MB
+  produced 9.6 ms and 24.7 ms in the same series, no ordering by size.
+
+**PLY-PERF-02 under CL1** (the budget is met when the player process is gone,
+measured by polling `kill -0` from the instant `stop` was issued):
+
+| Path | Runs | Player gone | Budget | Verdict |
+|---|---|---|---|---|
+| Wedged (`kill -STOP` first) | 5 | **4248 / 4260 / 4270 / 4274 / 4279 ms** | 4500 ms | **met 5/5** |
+| Responsive | 5 | **293 / 305 / 334 / 361 / 372 ms** | 500 ms | **met 5/5** |
+
+The stop command itself returned in **59-81 ms** in all ten; under CL1 that is
+not the budget. The wedged figures sit inside `a939fd7`'s 4268-4299 ms and
+~200 ms clear of the ceiling. **Interface clear is recorded as a bound, not a
+verdict** (CL13): 62-168 ms on a poller whose own sample costs ~57 ms. The
+150 ms budget still cannot be decided at this resolution and is still not
+recorded as a regression.
+
+**D-PLY-10, the contained cache.** `~/.cache/mpv` is **unchanged**: the same 46
+file names before and after, and **0 files newer than the start of the pass**
+after roughly forty minutes of windowed playback and about seventy player
+starts. `$XDG_RUNTIME_DIR/omarchy-iptv/shader-cache` exists at **0700** inside a
+**0700** parent and holds **26 files, all at 0600**, including both names
+D-PLY-10 originally filed (`shader_2a337003854863bf`,
+`shader_94d4454b832de9f8`), written during this pass. The player's argv carries
+`--gpu-shader-cache-dir=` and `--icc-cache-dir=` pointing there, ahead of any
+user token. No new top-level entry in `$HOME`. **D-PLY-10 stays closed.**
+
+**S-03 and the privacy sweep.** The live player's full command line is fourteen
+tokens and carries **no URL, no credential, no token, no header value and no
+channel name** - `qa-user`, `qa-secret`, `qa-token-XYZ`, `qa-ua-SENTINEL`,
+`qa-ref-SENTINEL` and `://` all return 0 against it, with the sentinel channel
+playing. The shell journal across the whole pass is 397 lines with **0 needles
+and 0 URLs of any kind**. Omarchy's own notification history holds 10 files with
+**0 needles**.
+
+**CL15 confirmed still open, as ruled.** Neither `scripts/qa-sources-scenarios.sh`
+nor `scripts/dev-harness/sources-scenario.sh` contains the word `baseline`. No
+scenario in that suite has been shown capable of failing. Next round, per the
+ruling.
+
+### L6. Findings handed on
+
+1. **D-CL-1 (new, P4, cosmetic-diagnostic).** The stand-down journal line
+   `a newer channel change reached the player first (intent %d over %d)` can
+   **never** print two different numbers on the only path that reaches it.
+   `cmd_play` takes its seq from the lock record
+   (`record_seq(read_lock_file(sock))`, `bin/omarchy-iptv:1819`) because CL4
+   withholds a `--seq` of its own; during a cold start the lock record is the
+   start's, so the zap borrows the start's number. All five live stand-downs
+   printed `(intent 662 over 662)`, `(intent 654 over 654)`, and so on. Commit
+   3ea61b7 added those two numbers as "the one thing a person reading a journal
+   needs to tell a stand-down from a crash"; as written they tell the reader
+   nothing. Either print something that does differ (the entry id, or the
+   stash's `verb`) or drop the parenthetical. Not a functional defect - the
+   stand-down itself works, 5/5.
+2. **F2 (new, minor, same class as CL10).**
+   `PLY-H18 the shell never relabelled itself from the player (CL5)` passes on
+   both trees and is not labelled a regression guard, contrary to the runner's
+   own stated rule and contrary to how PLY-H17's three such checks are handled.
+   One string in `scripts/qa-player-scenarios.sh`.
+3. **F3.** CL12's recorded socket-residue range (15-37 ms) has an optimistic
+   floor; this pass measured 9.6-24.7 ms on the same class of player. Record the
+   wider range. The ordering and the conclusion are unaffected.
+4. **F4, recorded not filed.** The CL5 repair costs one extra `loadfile` on the
+   cold burst path: entry id 3 in 12 of 20 runs where wave two read 2 in 18.
+   That is the correct trade and it is cheap, but it is a real behaviour change
+   and the design document should say so where it describes the repair.
+5. **F5, recorded not filed.** The repair can still be in flight six seconds
+   after a cold burst - seen once, in the rig's shakedown run, converged by
+   t+20 s. Wave two's divergences never converged at all. If anyone wants the
+   invariant stated as a latency rather than as "within one health tick", that
+   is the measurement to take.
+6. The runbook's "five recents" is still stale; the machine has seven. Third
+   pass in a row this has been recorded.
+
+### L7. Restore
+
+Proved at 13:05. The machine was touched in exactly two ways and both are
+undone: `playlistUrl` pointed at the loopback fixture, and the installed clone
+checked out detached at `d76b649`.
+
+- `~/.config/omarchy/shell.json` - **byte-identical**, `sha256sum -c` OK, and
+  `playlistUrl` reads `https://iptv-org.github.io/iptv/countries/us.m3u` again.
+- `~/.local/state/omarchy-iptv/` and `~/.cache/omarchy-iptv/` - `diff -r`
+  **empty** and **every file checksum identical** to the pre-pass manifest,
+  held 25 s with the shell running.
+- The mode/owner manifest over both trees plus `shell.json` **diffs empty**.
+- Installed clone back on **`main` at `d44dc6e`, tracking `origin/main`**, 0
+  modified and 0 untracked, and `diff -r` against the pre-pass backup is
+  **empty**. `origin/main` was never moved; `d76b649` was fetched from the local
+  repository into `FETCH_HEAD`.
+- `status` **diffs clean** against `status.before.json` apart from
+  `lastUpdated` and `player.seq`: 1,474 channels, source `d5977d8a` on
+  `iptv-org.github.io`, 7 recents, 0 favorites, `nowPlaying` null, `playing`
+  false. `player.seq` is the live intent counter and is not durable state.
+- `$XDG_RUNTIME_DIR/omarchy-iptv` back to `700` holding `player.lock` and an
+  empty `watch-later` - the mode manifest **diffs empty** against the pre-pass
+  one; the socket and the `shader-cache` directory this pass created were
+  removed.
+- Theme `Retropc`, unchanged. `$HOME` has no new top-level entry.
+- Nothing left running: **0** mpv, **0** `omarchy-iptv` windows, **1**
+  quickshell (the user's, on `/usr/share/omarchy/shell`, restarted and
+  screenshotted healthy with the bar and the plugin glyph back), port 8791
+  closed, the fixture server stopped, and both harness scratch trees this pass
+  created (`omarchy-iptv-qa-player`, `omarchy-iptv-harness`) removed. **0**
+  `hyprlock`. No logout.
+- The working repository at `/home/ricky/Projects/omarchy-iptv` is clean at
+  `d76b649` with no untracked files. **Nothing was committed.**
+- **Worth knowing, not damage:** every shell start refetched the user's own
+  source, because the restored cache had aged past its TTL, and that bumps
+  three timestamp fields (`fetchedAt`, `generatedAt`, `durationMs`). The
+  refetched channel set was proved identical - same 437,554 bytes, same 1,474
+  channels, identical id set - and the snapshot was written back as the final
+  on-disk act and verified holding. The same refresh would happen on the user's
+  next login with or without this pass.
+- Not restored, deliberately: `~/.cache/mpv`, which was never written to; the
+  ten Omarchy notification-history files, which are the host's own; and
+  `$XDG_RUNTIME_DIR/omarchy-iptv-qa-sources`, which predates this pass
+  (2026-09-13).
+
+### L8. Release recommendation for this round
+
+**Go.** Every claim the round rests on was re-measured on real hardware and
+every one held.
+
+- The defect the round exists for is **0 of 20** where it was 10 of 20, with
+  both halves of the fix witnessed in the journal - the helper standing down 5
+  times and the shell re-applying 12 times - and the two controls unchanged at
+  0 of 10 warm and 0 of 6 cold-serial.
+- CL6's invariant now has an outcome test and passes it: convergence in
+  **4.5 s against a 10 s tick, 4/4**, with `nowPlaying` never once relabelled
+  across 120 samples. That is the ruling honoured in the direction CL5 asked
+  for.
+- The repointed assertion **discriminates**: `PASS` here, `FAIL (got '2', want
+  '1')` at `396a69a`, where wave two found it passing on both trees.
+- Every downgraded claim **holds**; none was an artefact, and the reason is
+  structural rather than lucky.
+- Every budget met, with the same margins as the last two passes, and the two
+  closed defects (D-PLY-8, D-PLY-10) stay closed.
+
+The two new findings (D-CL-1, F2) are both diagnostics rather than behaviour -
+a journal line that cannot say what it was written to say, and a check that
+needs a label - and neither gates a release. F3 asks for a recorded range to be
+widened, not for a conclusion to change.
