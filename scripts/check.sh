@@ -36,12 +36,12 @@ fail=0
 # below is capable of exiting 0 having run nothing at all.
 #
 # All three of the suite floors had fallen behind what the suites actually run
-# -- python 260 against 318, node 954 against 1148, the qml spec 47 against 56
-# -- so between a fifth and a half of each suite could have stopped executing
-# with the gate still green. Raised to what M2-03 leaves behind. Raise a floor
-# when you add tests; never lower one to make a run green.
+# -- python 260, node 954, the qml spec 47, against the numbers below -- so
+# between a fifth and a half of each suite could have stopped executing with
+# the gate still green. Raised to what M2-03 leaves behind. Raise a floor when
+# you add tests; never lower one to make a run green.
 QML_SPEC_MIN=${QML_SPEC_MIN:-56}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1148}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1150}
 PY_TESTS_MIN=${PY_TESTS_MIN:-318}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 

@@ -31,12 +31,15 @@ BarWidget {
 
   // View-side settings come from the injected entry; the service carries the
   // same values for the guide (decision 7).
-  readonly property bool showChannelName: setting("showChannelName", true) !== false && String(setting("showChannelName", true)) !== "false"
+  // Model.boolSetting is the ONE reading of a boolean setting (R2). This
+  // widget reads its own injected entry rather than going through the
+  // service's settingsFrom, so without it the rule lives in two files.
+  readonly property bool showChannelName: Model.boolSetting(setting("showChannelName", true))
   readonly property int labelMaxWidth: Style.space(Model.clampSetting("barLabelMaxWidth", setting("barLabelMaxWidth", 180)))
   // M2-03 4.5: independent of showChannelName on purpose. `[ 󰕧 101 ]` on a
   // crowded bar is the useful case, and it is only reachable if the two
   // settings are separate.
-  readonly property bool showChannelNumber: setting("barShowChannelNumber", true) !== false && String(setting("barShowChannelNumber", true)) !== "false"
+  readonly property bool showChannelNumber: Model.boolSetting(setting("barShowChannelNumber", true))
 
   readonly property bool serviceReady: service !== null
   readonly property bool playing: serviceReady && service.playing === true

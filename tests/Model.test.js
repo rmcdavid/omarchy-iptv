@@ -2286,7 +2286,25 @@ check("settings parity: settingsFrom keeps both ends of the manifest range and c
     return [entry.min, entry.max, entry.min, entry.max].join("/")
   }))
 
-// ---- 3. the label cap is derived from the grammar, not guessed (CN18)
+// ---- 3. how a boolean setting is read
+//
+// The rule -- anything but `false` and the string "false" means on -- was
+// written out four times: twice in settingsFrom and twice in BarWidget.qml,
+// which reads its own injected entry instead of going through the service.
+// All four agreed. M2-03 added the fourth by copying the third, which is how
+// the next one would have arrived too, so there is one now.
+const boolRaw = [true, false, "true", "false", "False", "0", "1", "", 0, 1, null, undefined, [], {}]
+check("R2: boolSetting is the one reading of a boolean setting",
+  boolRaw.map(function (v) { return Model.boolSetting(v) }),
+  [true, false, true, false, true, true, true, true, true, true, true, true, true, true])
+check("R2: settingsFrom and the bar read a boolean the same way",
+  boolRaw.map(function (v) { return Model.settingsFrom({ barShowChannelNumber: v, showChannelName: v }) })
+    .map(function (s) { return s.barShowChannelNumber === s.showChannelName ? s.showChannelName : "DISAGREE" }),
+  // null and undefined never reach the reader: settingOf substitutes the
+  // default first, so they are the default, true.
+  boolRaw.map(function (v) { return Model.boolSetting(v === null || v === undefined ? true : v) }))
+
+// ---- 4. the label cap is derived from the grammar, not guessed (CN18)
 //
 // The cap was 7 in the design and 7 in lane B's stand-in, and the grammar two
 // steps above it admits "99999.999". At 7 a channel could be displayed and be
