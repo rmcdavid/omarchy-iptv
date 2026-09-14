@@ -2953,10 +2953,12 @@ Item {
   // docs/M2-03-CHANNEL-NUMBERS.md freezes, so integration is mechanical:
   //
   //   1. delete this whole QtObject;
-  //   2. rewrite `chnoStandIn.` as `Model.` (7 call sites in this file);
-  //   3. `chnoStandIn.labelOf(c)` becomes `c.chnoLabel`  (2 of those), which
+  //   2. rewrite `chnoStandIn.` as `Model.` -- 10 call sites in this file
+  //      (settingsFrom, buildChnoIndex x3, orderChannels x2, channelByNumber,
+  //      and the three of 3 and 4 below);
+  //   3. `chnoStandIn.labelOf(c)` becomes `c.chnoLabel` (2 of the 10), which
   //      Model.prepareChannels writes once per row at load time (1.3);
-  //   4. `chnoStandIn.maxLabel` becomes `Model.MAX_CHNO_LABEL` (1 site).
+  //   4. `chnoStandIn.maxLabel` becomes `Model.MAX_CHNO_LABEL` (1 of the 10).
   //
   // Leaving one of these behind is forbidden (CLAUDE.md, working in
   // parallel, rule 4). The integration step greps for `chnoStandIn` and for
