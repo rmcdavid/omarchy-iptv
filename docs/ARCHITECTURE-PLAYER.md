@@ -1208,3 +1208,38 @@ This is the second time in this milestone that a probe overturned a confident
 design detail, after the settings-echo defect. The standing rule holds: for
 this feature, an assumption about host behavior is not evidence until
 something has run.
+
+## 14. Amendment after lane PB (product owner, 2026-09-14)
+
+Lane PB built the service side and found one more thing that only a live shell
+could show. Recording it here so sections 4.9 and 4.10 are not read as correct
+as written.
+
+A detached stop cannot observe a `superseded` refusal. The stop ladder is
+issued as one detached helper call precisely so it completes even if the shell
+dies mid-ladder, but that also means nothing reads its reply. Once any other
+launcher leaves a higher sequence number in the lock, including the
+`omarchy-iptv player stop` command this document tells users to run, every stop
+from the interface became a silent no-op: the interface went idle while the
+player kept playing. Lane PB fixed it by having the stop-settle timer probe and
+re-issue past the recorded sequence. Sections 4.9 and 4.10 must be read with
+that correction: either the service confirms a detached stop, as it now does,
+or `stop` is exempt from the sequence rule. The service confirming it is the
+better answer, because it also covers a stop that loses to an unrelated race.
+
+Two more notes for whoever picks this up next.
+
+The `session` key described in sections 4.6 and 8 was not built by either lane,
+because lane PA finished before the need was clear and lane PB does not own the
+state file. Ruling PO-3, marking a channel failed silently on reattach rather
+than raising a stale notification, is unimplementable without it. A follow-up
+lane is closing that gap and adding the router test cases lane PB could not
+write, since it owns no test file. That ownership rule is right, but it has a
+cost worth naming: a lane that owns implementation and no tests will always
+leave its own paths uncovered, and the plan must schedule someone to close it
+rather than assuming it happens.
+
+Counting the four corrections lane PA found by building and the one lane PB
+found live, this design has now been corrected in eleven places since it was
+accepted, on top of the shape that gate PB-0 withdrew before anyone wrote code.
+Every one came from running something. None came from re-reading the document.
