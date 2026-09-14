@@ -56,7 +56,9 @@ BarWidget {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   // Idle dims like tailscale's inactive icon; playing and error are full.
   property color glyphColor: root.playing || root.hasError ? root.barFg : Qt.darker(root.barFg, 1.55)
-  readonly property string tooltip: chnoStandIn.barTooltip({
+  // M2-03 6.4: Model.barTooltip prepends the number to the playing line when
+  // `chno` is non-empty, on vertical bars too, where the label is glyph-only.
+  readonly property string tooltip: Model.barTooltip({
     serviceMissing: !root.serviceReady,
     configured: root.configured,
     playing: root.playing,
@@ -65,44 +67,6 @@ BarWidget {
     error: root.hasError,
     refreshing: root.refreshing
   })
-
-  // ==================================================================
-  // TEMPORARY STAND-IN BLOCK -- M2-03 Lane A owns Model.js and is adding
-  // `opts.chno` to these two shipped functions now (design 6.4 and 8.1), so
-  // this lane may not open that file. Both members carry the name and the
-  // signature the design freezes; integration deletes this QtObject and
-  // rewrites `chnoStandIn.` as `Model.` (2 call sites in this file).
-  // Leaving it behind is forbidden; the integration step greps for
-  // `chnoStandIn` and for `STAND-IN`.
-  QtObject {
-    id: chnoStandIn
-
-    // Model.barTooltip(opts) with opts.chno: `Playing 101 <SEP> Sky Sports`.
-    // The number is prepended to the name so the shipped ladder - service
-    // missing, not configured, error, refreshing, idle - stays untouched and
-    // no copy of its strings lives here.
-    function barTooltip(opts) {
-      var chno = opts && opts.chno ? String(opts.chno) : ""
-      if (chno === "" || !opts.playing) return Model.barTooltip(opts)
-      return Model.barTooltip(chnoStandIn.withName(opts, chno + Model.SEP + String(opts.name || "")))
-    }
-
-    // Model.barAccessibleName(opts) with opts.chno (8.1): the number is
-    // spoken as `channel 101`, never as a bare digit string.
-    function barAccessibleName(opts) {
-      var chno = opts && opts.chno ? String(opts.chno) : ""
-      if (chno === "" || !opts.playing) return Model.barAccessibleName(opts)
-      return Model.barAccessibleName(chnoStandIn.withName(opts, "channel " + chno + ", " + String(opts.name || "")))
-    }
-
-    function withName(opts, name) {
-      var out = ({})
-      for (var k in opts) out[k] = opts[k]
-      out.name = name
-      return out
-    }
-  }
-  // ================================================ end of the stand-in block
 
   Behavior on glyphColor {
     enabled: !root.bar || root.bar.foregroundAnimationEnabled
@@ -150,8 +114,10 @@ BarWidget {
   implicitHeight: root.vertical ? icon.implicitHeight : root.barSize
 
   Accessible.role: Accessible.Button
-  Accessible.name: chnoStandIn.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
-                                                   chno: root.nowPlayingChno, error: root.hasError })
+  // M2-03 8.1: the number is spoken as "channel 101", never as a bare digit
+  // string.
+  Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
+                                             chno: root.nowPlayingChno, error: root.hasError })
 
   // Mirrors WidgetButton: registered click targets keep receiving clicks
   // while a bar popup (KeyboardPanel) is open.

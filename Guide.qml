@@ -94,9 +94,12 @@ Item {
   property string numberTargetName: ""
   readonly property bool numberEntryActive: root.numberEntry !== null && root.numberEntry.active === true
   readonly property string numberBuffer: root.numberEntry !== null ? String(root.numberEntry.buffer) : ""
-  // Guarded exactly as the Sources API is: Lane B adds service.chnoIndex,
-  // and until it lands (and in the harness) the guide builds its own from
-  // the channels it can see, once per channel-set change, never per key.
+  // Guarded exactly as the Sources API is. Service.qml publishes chnoIndex,
+  // and this is the compatibility path for a service that does not: the
+  // harness stages an older plugin tree through OMARCHY_IPTV_PLUGIN_ROOT so a
+  // scenario can be seen failing against it (CLAUDE.md rule 10), and an
+  // undefined read must never invent a value. It builds the same index with
+  // the same Model function, once per channel-set change, never per key.
   readonly property bool chnoApi: root.serviceReady && root.service.chnoIndex !== undefined && root.service.chnoIndex !== null
   property var fallbackChnoIndex: Model.buildChnoIndex(null)
   readonly property var chnoIndex: root.chnoApi ? root.service.chnoIndex : root.fallbackChnoIndex
@@ -547,9 +550,10 @@ Item {
     }
     if (!root.groupsDirty && root.scopeList.length > 0) return
     root.groupsDirty = false
-    // M2-03 1.4: only until Lane B's service.chnoIndex lands. This runs on a
-    // channel-set change, never on a keystroke, so digit entry stays on the
-    // per-key budget either way.
+    // M2-03 1.4, the compatibility path only (see chnoApi): a service that
+    // publishes chnoIndex never reaches this. It runs on a channel-set change,
+    // never on a keystroke, so digit entry stays on the per-key budget either
+    // way.
     if (!root.chnoApi) root.fallbackChnoIndex = Model.buildChnoIndex(root.service.channels)
     var entries = Model.scopeEntries(root.service.channels, root.service.userState)
     var parts = []
