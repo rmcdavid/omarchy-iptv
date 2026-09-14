@@ -184,6 +184,19 @@ session_id() { qa_session_id "$STATE_JSON"; }
 # until_session <want> <secs>: saveState() is gated on dirsReady, so the write
 # can legitimately land a moment after the play.
 until_session() { until_eq "$1" "$2" session_id; }
+# Waiting for "no record" must accept either shape - a state file with the
+# record retired (NOSESSION) or no state file yet (NOFILE, e.g. straight after
+# `run.sh clean`). The ASSERTIONS stay strict: a vanished state file is a
+# different failure from a retired record and must not read as one.
+until_no_session() {
+  local secs=$1 i now
+  for ((i = 0; i < secs * 10; i++)); do
+    now=$(session_id)
+    [[ $now == "$QA_NO_SESSION" || $now == "$QA_NO_FILE" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
 shell_pid() { cat "$SCRATCH/qs.pid" 2>/dev/null; }
 # The play the successor accepts first: qs ipc fails until the IpcHandler
 # exists, which is exactly the window ARCHITECTURE-PLAYER.md section 15
@@ -441,7 +454,7 @@ landed=""
 for ((trial = 1; trial <= RACE_TRIALS; trial++)); do
   ipc stop >/dev/null
   until_eq 0 10 player_count || true
-  until_session "$QA_NO_SESSION" 6 || true
+  until_no_session 6 || true
   "$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P13 trial $trial: restart-shell failed (see $LOG)"; exit 1; }
   attempt=$(play_asap "t:live1")
   landed="$landed $attempt"
@@ -480,7 +493,7 @@ wait_log 'service loaded' 20 || bad "P14 the shell did not come back"
 until_set 15 svc "d['failedAt'].get('t:live1')" || true
 mark14=$(svc "d['failedAt'].get('t:live1')")
 ck "P14 the channel that died unattended is marked in the guide" 'qa_value "$mark14"'
-until_session "$QA_NO_SESSION" 10 || true
+until_no_session 10 || true
 is "P14 the record is retired once it has been consumed" "$(session_id)" "$QA_NO_SESSION"
 for again in 1 2; do
   "$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P14 restart $again failed (see $LOG)"; exit 1; }
