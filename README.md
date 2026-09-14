@@ -60,6 +60,9 @@ beyond their host name.
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
+| `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
+| `numberEntryMs` | integer 400-5000 | `1500` | how long to wait between digits before jumping |
+| `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
@@ -92,6 +95,8 @@ Guide keys (full map in `docs/UX.md` section 3):
 | list | f | toggle favorite |
 | list | x | remove from Recent, or unfavorite in Favorites |
 | list | s | stop playback |
+| list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
+| list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
 | list | r | refresh playlist and EPG now |
 | list | / or Tab | back to search mode; Esc clears the query, then closes |
 
@@ -115,6 +120,7 @@ omarchy-shell shell toggle io.github.rmcdavid.iptv       # open / close the guid
 omarchy-shell io.github.rmcdavid.iptv play t:bbc1.uk      # play a channel id from the cache
 omarchy-shell io.github.rmcdavid.iptv next                # zap forward
 omarchy-shell io.github.rmcdavid.iptv previous            # zap back
+omarchy-shell io.github.rmcdavid.iptv channel 101         # tune straight to channel 101
 omarchy-shell io.github.rmcdavid.iptv stop
 omarchy-shell io.github.rmcdavid.iptv refresh
 omarchy-shell io.github.rmcdavid.iptv status              # JSON
