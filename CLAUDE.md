@@ -112,7 +112,17 @@ This project is built by role lanes running in separate git worktrees.
    `omarchy plugin add|enable|disable|remove`, `omarchy bar set`, the dev
    harness, quickshell, or mpv with a window.
 3. Finish in the foreground. Never end a turn waiting on a background run.
-   Bound it with `timeout`, or poll it to completion in the same turn.
+   Bound it with `timeout`, or poll it to completion in the same turn. A wait
+   loop MUST have a bound: a maximum number of iterations or a deadline, and
+   it must report that it gave up rather than looping on. An unbounded wait
+   is a bug, not patience.
+   Never write a wait or a kill that can match ITSELF. `pgrep -f foo.py` and
+   `pkill -f foo` match the command line of the shell running them, so a loop
+   that waits for `foo.py` to disappear finds itself and waits forever, and a
+   kill by pattern can kill the terminal it was typed in. Both have happened
+   here. Wait on a pid, a file, or a marker the watched process writes; kill
+   by pid. If a pattern is unavoidable, anchor it and exclude your own pid,
+   and say in a comment why the anchor is load-bearing.
 4. No shims at merge. Stubbing a dependency to build is fine; leaving one is
    not. Integration proves zero stubs with a grep and a green `check.sh`.
 5. Snapshot before, restore after. A live pass backs up `shell.json`, the
