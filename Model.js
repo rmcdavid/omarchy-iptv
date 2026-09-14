@@ -841,8 +841,10 @@ function popNumberKey(entry) {
   return { active: buffer !== "", buffer: buffer, scopeId: cur.scopeId, query: cur.query, cursorIndex: cur.cursorIndex, cursorId: cur.cursorId, resume: false }
 }
 
+// The Esc / Backspace-to-empty close, kept as its own name because the guide
+// and both test suites call it that. One implementation, not two.
 function cancelNumberEntry(entry) {
-  return numberEntry()
+  return closeNumberEntry(entry, "cancel")
 }
 
 // What the entry becomes when a commit closes it. `reason` is one of "auto"
