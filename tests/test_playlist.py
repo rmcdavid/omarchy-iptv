@@ -443,6 +443,29 @@ class ChannelNumberTest(unittest.TestCase):
         self.assertEqual(numbers["Duplicate Twelve"], "12")       # duplicates are legal
         self.assertEqual(numbers["Not A Number"], "N/A")          # CN6 judges it, not the helper
 
+    def test_the_attribute_list_is_the_one_the_model_also_reads(self):
+        """CN11 parity. Which attribute carries a number, and in what order, is
+        stated twice: CHNO_ATTRS here and CHNO_FIELDS in Model.js, in two files
+        two lanes built in parallel. Nothing held them together. Both suites
+        read this fixture now (tests/Model.test.js runs the same file), so a
+        drift is red on one side or the other rather than a playlist that has
+        numbers on one side of the cache and none on the other."""
+        shared = json.loads((FIXTURES / "chno-attrs.json").read_text(encoding="utf-8"))
+        self.assertEqual(list(helper.CHNO_ATTRS), shared["m3uAttributes"])
+        # The behaviour, not only the constant: each attribute alone, and every
+        # ordered pair, so precedence is asserted and not assumed.
+        for key in shared["m3uAttributes"]:
+            self.assertEqual(helper.channel_number({key: "42"}), "42", key)
+        order = shared["m3uAttributes"]
+        for i, earlier in enumerate(order):
+            for later in order[i + 1:]:
+                self.assertEqual(helper.channel_number({earlier: "earlier", later: "later"}),
+                                 "earlier", "%s before %s" % (earlier, later))
+        # The other half of the contract: an attribute nobody agreed to read
+        # must stay unread on BOTH sides.
+        for key in shared["notRead"]:
+            self.assertEqual(helper.channel_number({key: "42"}), "", key)
+
     def test_no_number_means_no_key_at_all(self):
         # "empty" and "absent" must be indistinguishable to a reader, so that
         # `"chno" in channel` is a usable test on the QML side.

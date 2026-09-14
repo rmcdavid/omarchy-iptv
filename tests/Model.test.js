@@ -2198,6 +2198,103 @@ check("CN2/7.1: numberEntryMs clamps at both ends and survives garbage", [Model.
 check("CN7.1: channelOrder and barShowChannelNumber read the same way the shipped keys do", [Model.settingsFrom({ channelOrder: "number" }).channelOrder, Model.settingsFrom({ channelOrder: "NUMBER" }).channelOrder, Model.settingsFrom({ channelOrder: "nonsense" }).channelOrder, Model.settingsFrom({ barShowChannelNumber: false }).barShowChannelNumber, Model.settingsFrom({ barShowChannelNumber: "false" }).barShowChannelNumber, Model.settingsFrom({ barShowChannelNumber: "true" }).barShowChannelNumber], ["number", "number", "playlist", false, false, true])
 check("CN7.1: the seven shipped settings are unchanged by the three additions", (() => { const s = Model.settingsFrom({ playlistUrl: " http://h.test/a.m3u ", epgUrl: "", refreshMinutes: 45, mpvArgs: "--mute", showChannelName: false, maxRecents: 3, barLabelMaxWidth: 200 }); return [s.playlistUrl, s.epgUrl, s.refreshMinutes, s.mpvArgs, s.showChannelName, s.maxRecents, s.barLabelMaxWidth] })(), ["http://h.test/a.m3u", "", 45, "--mute", false, 3, 200])
 
+
+// ================= cross-lane parity (M2-03 integration) =================
+//
+// Three rules in this feature are stated in two files, and the two files
+// belong to two lanes that built in parallel. Nothing held the statements
+// together: each side had its own tests, both were green, and a drift would
+// have shown up only on a user's machine. Every check below reads the OTHER
+// lane's artifact instead of a number retyped here.
+
+// ---- 1. which attribute carries a channel number (CN11)
+//
+// The helper decides the ATTRIBUTE (bin/omarchy-iptv, CHNO_ATTRS); the model
+// decides what the value MEANS (Model.js, CHNO_FIELDS). Both read this one
+// fixture, and so does tests/test_playlist.py.
+const chnoAttrs = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/chno-attrs.json"), "utf8"))
+
+check("CN11 parity: the fixture is the model's field list, cache spellings first",
+  Model.CHNO_FIELDS, chnoAttrs.cacheFields.concat(chnoAttrs.m3uAttributes))
+check("CN11 parity: every attribute the helper reads is read here too",
+  chnoAttrs.m3uAttributes.map(function (key) { const row = {}; row[key] = "42"; return Model.chnoRawOf(row) }),
+  chnoAttrs.m3uAttributes.map(function () { return "42" }))
+check("CN11 parity: every cache spelling is read",
+  chnoAttrs.cacheFields.map(function (key) { const row = {}; row[key] = "42"; return Model.chnoRawOf(row) }),
+  chnoAttrs.cacheFields.map(function () { return "42" }))
+// Precedence, pair by pair over the declared order: an earlier field always
+// wins over every later one, which is the half a single-attribute test cannot
+// see.
+const chnoOrder = chnoAttrs.cacheFields.concat(chnoAttrs.m3uAttributes)
+const chnoPairs = []
+for (let i = 0; i < chnoOrder.length; i++) {
+  for (let j = i + 1; j < chnoOrder.length; j++) {
+    const row = {}
+    row[chnoOrder[i]] = "earlier"
+    row[chnoOrder[j]] = "later"
+    chnoPairs.push(Model.chnoRawOf(row))
+  }
+}
+check("CN11 parity: an earlier field wins over every later one",
+  [chnoPairs.length, chnoPairs.filter(function (v) { return v === "earlier" }).length],
+  [chnoOrder.length * (chnoOrder.length - 1) / 2, chnoOrder.length * (chnoOrder.length - 1) / 2])
+check("CN11 parity: an attribute nobody agreed to read stays unread",
+  chnoAttrs.notRead.map(function (key) { const row = {}; row[key] = "42"; return Model.chnoRawOf(row) }),
+  chnoAttrs.notRead.map(function () { return "" }))
+
+// ---- 2. the settings contract: manifest.json (lane B) vs Model.js (lane A)
+//
+// The host reads manifest.json to decide what control to draw and what range
+// to offer; the plugin reads SETTING_RANGES to decide what it will accept. A
+// manifest offering 400..5000 against a model clamping 500..3000 is a slider
+// that silently does nothing at both ends, and nothing here noticed. The
+// manifest IS the shared artifact, so this reads it.
+const manifest = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "..", "manifest.json"), "utf8"))
+const manifestDefaults = manifest.barWidget.defaults
+const manifestSchema = manifest.barWidget.schema
+const defaulted = Model.settingsFrom(null)
+
+check("settings parity: the model's defaults ARE the manifest's defaults",
+  Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(defaulted[key]) }),
+  Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(manifestDefaults[key]) }))
+check("settings parity: the model knows every key the manifest declares, and no others",
+  Object.keys(defaulted).slice().sort(), Object.keys(manifestDefaults).slice().sort())
+
+const integerKeys = manifestSchema.filter(function (entry) { return entry.type === "integer" }).map(function (entry) { return entry.key })
+check("settings parity: the manifest still declares four integer settings, numberEntryMs among them",
+  [integerKeys.length, integerKeys.indexOf("numberEntryMs") >= 0], [4, true])
+check("settings parity: SETTING_RANGES equals the manifest's own min/max/default",
+  integerKeys.map(function (key) { return key + " " + JSON.stringify(Model.SETTING_RANGES[key]) }),
+  manifestSchema.filter(function (entry) { return entry.type === "integer" })
+    .map(function (entry) { return entry.key + " " + JSON.stringify({ def: entry.defaultValue, min: entry.min, max: entry.max }) }))
+// And the behaviour, not just the constant: what the host lets a user pick is
+// exactly what settingsFrom keeps, at both ends and one step outside them.
+check("settings parity: settingsFrom keeps both ends of the manifest range and clamps outside it",
+  manifestSchema.filter(function (entry) { return entry.type === "integer" }).map(function (entry) {
+    const at = function (value) { const from = {}; from[entry.key] = value; return Model.settingsFrom(from)[entry.key] }
+    return [at(entry.min), at(entry.max), at(entry.min - 1), at(entry.max + 1)].join("/")
+  }),
+  manifestSchema.filter(function (entry) { return entry.type === "integer" }).map(function (entry) {
+    return [entry.min, entry.max, entry.min, entry.max].join("/")
+  }))
+
+// ---- 3. the label cap is derived from the grammar, not guessed (CN18)
+//
+// The cap was 7 in the design and 7 in lane B's stand-in, and the grammar two
+// steps above it admits "99999.999". At 7 a channel could be displayed and be
+// untypable. This ties the constant to the grammar, so raising MAX_CHNO_MAJOR
+// without raising the cap turns the gate red instead of rejecting numbers.
+const widestChno = String(Model.MAX_CHNO_MAJOR) + Model.CHNO_ENTRY_SEP + String(Model.MAX_CHNO_MINOR)
+check("CN18: MAX_CHNO_LABEL is the length of the widest label the grammar admits",
+  [Model.parseChno(widestChno).ok, Model.parseChno(widestChno).label.length, Model.MAX_CHNO_LABEL],
+  [true, widestChno.length, widestChno.length])
+check("CN18: the entry buffer accepts a number that long, so nothing displayable is untypable",
+  (function () {
+    let entry = Model.numberEntry()
+    for (let i = 0; i < widestChno.length; i++) entry = Model.pushNumberKey(entry, widestChno.charAt(i), {}).entry
+    return entry.buffer
+  })(), widestChno)
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")
