@@ -1272,16 +1272,47 @@ function statusWarnings(status) {
 
 // Wording per helper kind; both warning paths share one shape so they can
 // never drift apart (UX 6.3 calls the EPG "Guide data", as the banner does).
-var WARNING_PREFIX = { playlist: "Playlist warning: ", epg: "Guide data warning: " }
+// `player` is PO-10's: it does not come from a helper run at all, it comes
+// from a setting that is in force right now.
+var WARNING_PREFIX = { playlist: "Playlist warning: ", epg: "Guide data warning: ", player: "Player warning: " }
+
+// Which kind a warning already declares, "" when it declares none. The
+// footer holds ONE line for the whole service and the guide passes it two
+// lists, so a third source (the player's own options) would otherwise need a
+// third parameter in Guide.qml. Instead an entry may carry its own prefix
+// and is then shown as it stands - `labelWarnings` is the only thing that
+// puts one on, so a helper's text can never accidentally look labelled
+// unless a helper starts emitting our own footer wording verbatim.
+function warningLabel(text) {
+  var body = str(text)
+  for (var kind in WARNING_PREFIX) {
+    if (body.indexOf(WARNING_PREFIX[kind]) === 0) return kind
+  }
+  return ""
+}
+
+function labelWarning(text, kind) {
+  var body = str(text)
+  if (body === "" || warningLabel(body) !== "") return body
+  return (WARNING_PREFIX[str(kind)] || WARNING_PREFIX.playlist) + body
+}
+
+// Stamp a whole list with its kind so it can travel in another kind's list.
+function labelWarnings(warnings, kind) {
+  var list = statusWarnings({ ok: true, warnings: warnings })
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push(labelWarning(list[i], kind))
+  return out
+}
 
 // Footer line for the warnings of one helper (UX 6 tone, D-LIVE-18): the
 // first warning and, when there are several, how many more; "" without
-// warnings. `kind` is "playlist" (default) or "epg".
+// warnings. `kind` is "playlist" (default), "epg" or "player", and is only
+// consulted for an entry that does not already name its own kind.
 function warningLine(warnings, kind) {
   var list = statusWarnings({ ok: true, warnings: warnings })
   if (list.length === 0) return ""
-  var prefix = WARNING_PREFIX[str(kind)] || WARNING_PREFIX.playlist
-  return prefix + list[0] + (list.length > 1 ? " (+" + (list.length - 1) + " more)" : "")
+  return labelWarning(list[0], kind) + (list.length > 1 ? " (+" + (list.length - 1) + " more)" : "")
 }
 
 // The one warning line the footer's status slot can hold. The playlist's
@@ -1443,8 +1474,76 @@ function barEntryWritable(barConfig, pluginId) {
 
 // ------------------------------------------------------------ mpv
 
+// Options that are allowed through but hand the stream address to a SECOND
+// program (PO-10, D-PLY-5). None of these is reserved and none is refused:
+// PO-5 keeps `--ytdl` available on purpose, because it is the documented way
+// to play a link that is not a direct stream. What the plugin owes the user
+// is that the cost is said out loud at the moment the option is in force,
+// not once in a README they read when they installed it.
+//
+// With `--ytdl=yes`, mpv's builtin `ytdl_hook` runs `yt-dlp ... -- <URL>` on
+// every open, putting the full credentialed URL on another process's 0444
+// command line for seconds (measured in QA-RESULTS M8 / D-PLY-5). The
+// `--ytdl-*` options exist only to configure that handoff, and `--script-opts`
+// reaches the same hook - `ytdl_hook-ytdl_path` even chooses which program
+// receives the address. `--script` / `--scripts` are reserved, so mpv's own
+// builtin scripts are the only ones these options can reach.
+//
+// Mirrored by `mpv_arg_warnings()` in bin/omarchy-iptv and pinned by the
+// `mpvHandoff` vectors in tests/fixtures/player-argv.json.
+var MPV_HANDOFF = {
+  "--ytdl-format": true,
+  "--ytdl-raw-options": true
+}
+// The same hook, reached through a script option: warned on only when the
+// value actually names it, so `--script-opts=osc-scalewindowed=2` is silent.
+var MPV_HANDOFF_SCRIPT_OPTS = { "--script-opts": true, "--script-opt": true }
+// `--ytdl` is a flag: only a value that turns it ON is a handoff, so a user
+// who writes the default out in full (`--ytdl=no`) is never warned at all.
+var MPV_YTDL_OFF = { "no": true, "0": true, "false": true }
+var MPV_HANDOFF_TEXT = " hands the stream address to another program"
+
+// mpv spells the list-option variants `--opt-append`, `--opt-set` and so on;
+// every one of them sets the same option, so the base name is what decides.
+function mpvOptionBase(name) {
+  return str(name).replace(/-(add|append|set|pre|clr|del|remove|toggle)$/, "")
+}
+
+// "" when the token is harmless, else the option NAME to name in the warning.
+// The value is never returned: it can itself carry a credentialed URL (a
+// proxy in `--ytdl-raw-options`, say) and a warning line is a sink (R12).
+function mpvHandoffName(token) {
+  var text = str(token)
+  var eq = text.indexOf("=")
+  var name = eq === -1 ? text : text.substring(0, eq)
+  var value = eq === -1 ? "" : text.substring(eq + 1)
+  // `--no-ytdl` turns the handoff off; there is nothing to warn about.
+  if (name.indexOf("--no-") === 0) return ""
+  var base = mpvOptionBase(name)
+  if (base === "--ytdl") return MPV_YTDL_OFF[value.toLowerCase()] === true ? "" : name
+  if (MPV_HANDOFF[base] === true) return name
+  if (MPV_HANDOFF_SCRIPT_OPTS[base] === true) return value.indexOf("ytdl") === -1 ? "" : name
+  return ""
+}
+
+// One line per distinct option, in the order the user wrote them.
+function mpvArgWarnings(tokens) {
+  var list = asList(tokens)
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var name = mpvHandoffName(list[i])
+    if (name === "" || seen[name] === true) continue
+    seen[name] = true
+    out.push("mpvArg " + name + MPV_HANDOFF_TEXT)
+  }
+  return out
+}
+
 // mpvArgs is one string of whitespace-separated `--key[=value]` tokens.
 // Anything else (including reserved options) is rejected, never guessed.
+// `warnings` covers the tokens that are KEPT: a rejected token never reaches
+// mpv, so it has nothing to warn about beyond the existing `rejected` list.
 function splitMpvArgs(text) {
   var args = []
   var rejected = []
@@ -1457,7 +1556,7 @@ function splitMpvArgs(text) {
     if (!ok || MPV_RESERVED[name] === true || name.indexOf("--no-") === 0 && MPV_RESERVED["--" + name.substring(5)] === true) rejected.push(token)
     else args.push(token)
   }
-  return { args: args, rejected: rejected }
+  return { args: args, rejected: rejected, warnings: mpvArgWarnings(args) }
 }
 
 // Per-channel HTTP headers as mpv argv items. `-append` list form so header
@@ -1490,6 +1589,42 @@ function mpvWindowTitle(name) {
   return MPV_RAW_PREFIX + str(name)
 }
 
+// Where the player is allowed to write (PO-11, D-PLY-7). mpv's own key
+// bindings are live on its window and two of them write a durable file: `s`
+// takes a screenshot and `Q` (quit-watch-later) writes a resume record.
+// Before this they landed wherever the shell happened to be - the user's
+// home for the screenshot, mpv's own ~/.local/state/mpv tree for the resume
+// record - at mode 0644, outside every list of files this plugin says it
+// writes.
+//
+//  - `cwd` is the runtime directory (0700, already there for the socket), so
+//    anything still written relative to the process is private and gone at
+//    logout rather than accumulating in $HOME.
+//  - `screenshots` is durable on purpose: the user asked for that file, so
+//    the runtime directory would be data loss at logout. It sits under the
+//    state directory this plugin already owns and documents.
+//  - `watchLater` is a resume position for a live stream, never worth
+//    keeping: private and ephemeral.
+//
+// Mirrored by `player_dirs()` in bin/omarchy-iptv.
+function playerDirs(socketPath, stateDir) {
+  var runtime = dirnameOf(socketPath)
+  return {
+    cwd: runtime,
+    screenshots: str(stateDir) + "/screenshots",
+    watchLater: runtime + "/watch-later"
+  }
+}
+
+// os.path.dirname for the paths this plugin deals in.
+function dirnameOf(path) {
+  var text = str(path)
+  var cut = text.lastIndexOf("/")
+  if (cut < 0) return ""
+  if (cut === 0) return "/"
+  return text.substring(0, cut)
+}
+
 // Full argv for the mpv launch (ARCHITECTURE-PLAYER.md section 6). Nothing
 // channel-specific is here any more: no URL, no trailing "--", no header
 // options and no per-channel title, because all of them travel over the 0600
@@ -1503,6 +1638,7 @@ function mpvWindowTitle(name) {
 // vectors in tests/fixtures/player-argv.json.
 function buildMpvArgv(params) {
   var p = params || {}
+  var dirs = p.dirs || playerDirs(p.socketPath, p.stateDir)
   var argv = [
     "mpv",
     "--input-ipc-server=" + str(p.socketPath),
@@ -1516,7 +1652,15 @@ function buildMpvArgv(params) {
     // Live streams never need yt-dlp; without this mpv shells out to it on
     // every dead URL (seconds of delay and noise per failed zap). User
     // mpvArgs come later, so `--ytdl=yes` can re-enable it (PO-5).
-    "--ytdl=no"
+    "--ytdl=no",
+    // PO-11: the two directories mpv's own key bindings write into, named
+    // rather than inherited. `--screenshot-dir` is deliberately NOT reserved
+    // - user tokens land after these, so anyone who wants their screenshots
+    // in ~/Pictures can still say so - while `--watch-later-dir` IS
+    // reserved, because a resume record naming a stream path has no business
+    // being pointed back at $HOME.
+    "--screenshot-dir=" + str(dirs.screenshots),
+    "--watch-later-dir=" + str(dirs.watchLater)
   ]
   return argv.concat(asList(p.extraArgs))
 }
@@ -3708,6 +3852,9 @@ if (typeof module !== "undefined") {
     statusHealthy: statusHealthy,
     statusWarnings: statusWarnings,
     WARNING_PREFIX: WARNING_PREFIX,
+    warningLabel: warningLabel,
+    labelWarning: labelWarning,
+    labelWarnings: labelWarnings,
     warningLine: warningLine,
     footerWarning: footerWarning,
     stopEscalation: stopEscalation,
@@ -3722,9 +3869,15 @@ if (typeof module !== "undefined") {
     ownWriteFor: ownWriteFor,
     barEntryWritable: barEntryWritable,
     splitMpvArgs: splitMpvArgs,
+    mpvOptionBase: mpvOptionBase,
+    mpvHandoffName: mpvHandoffName,
+    mpvArgWarnings: mpvArgWarnings,
+    MPV_HANDOFF_TEXT: MPV_HANDOFF_TEXT,
     headerArgs: headerArgs,
     MPV_RAW_PREFIX: MPV_RAW_PREFIX,
     mpvWindowTitle: mpvWindowTitle,
+    dirnameOf: dirnameOf,
+    playerDirs: playerDirs,
     buildMpvArgv: buildMpvArgv,
     MPV_RESERVED: MPV_RESERVED,
     // ---- detached player (M2-02)

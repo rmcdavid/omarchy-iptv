@@ -1,6 +1,7 @@
 {
   "_comment": [
-    "Shared vectors for the detached player (docs/ARCHITECTURE-PLAYER.md 4.6, 4.9, 4.12, 6, 8).",
+    "Shared vectors for the detached player (docs/ARCHITECTURE-PLAYER.md 4.6, 4.9, 4.12, 6, 8,",
+    "plus rulings PO-10 and PO-11 in section 16).",
     "Read by BOTH tests/Model.test.js (Model.buildMpvArgv / stopEscalation /",
     "endedVerdict / parseState) and tests/test_player.py + tests/test_state.py",
     "(mpv_launch_argv / stop_escalation / ended_verdict / normalize_state).",
@@ -9,10 +10,44 @@
     "ASCII only: scripts/check.sh greps tests/fixtures/* for non-ASCII bytes."
   ],
   "genericFailure": "Playback stopped unexpectedly",
+  "playerDirs": {
+    "_comment": [
+      "PO-11 / D-PLY-7: where the player may write. mpv's own key bindings are",
+      "live on its window - `s` screenshots, `Q` writes a resume record - and",
+      "both used to land wherever the shell happened to be, in $HOME, at 0644.",
+      "cwd is the runtime directory so an unanticipated relative write is",
+      "private and gone at logout; screenshots are DURABLE because the user",
+      "asked for that file; watch-later is a resume position for a live stream",
+      "and is never worth keeping. Run by Model.playerDirs and player_dirs()."
+    ],
+    "cases": [
+      {
+        "name": "the live paths",
+        "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+        "stateDir": "/home/u/.local/state/omarchy-iptv",
+        "dirs": {
+          "cwd": "/run/user/1000/omarchy-iptv",
+          "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
+          "watchLater": "/run/user/1000/omarchy-iptv/watch-later"
+        }
+      },
+      {
+        "name": "a socket somewhere else takes the runtime pair with it",
+        "socketPath": "/tmp/s.sock",
+        "stateDir": "/home/u/.local/state/omarchy-iptv",
+        "dirs": {
+          "cwd": "/tmp",
+          "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
+          "watchLater": "/tmp/watch-later"
+        }
+      }
+    ]
+  },
   "mpvArgv": [
     {
       "name": "cold launch carries no channel: no URL, no headers, no title, no trailing --",
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [],
       "argv": [
         "mpv",
@@ -24,13 +59,16 @@
         "--title=$>IPTV",
         "--force-media-title=IPTV",
         "--msg-level=all=error",
-        "--ytdl=no"
+        "--ytdl=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later"
       ]
     },
     {
-      "name": "user mpvArgs land after the fixed options so --ytdl=yes still wins",
+      "name": "user mpvArgs land after the fixed options so --ytdl=yes and --screenshot-dir still win",
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
-      "mpvArgs": ["--profile=low-latency", "--ytdl=yes"],
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
+      "mpvArgs": ["--profile=low-latency", "--ytdl=yes", "--screenshot-dir=/home/u/Pictures"],
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -42,13 +80,17 @@
         "--force-media-title=IPTV",
         "--msg-level=all=error",
         "--ytdl=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--profile=low-latency",
-        "--ytdl=yes"
+        "--ytdl=yes",
+        "--screenshot-dir=/home/u/Pictures"
       ]
     },
     {
       "name": "reserved and malformed tokens are dropped by both filters",
       "socketPath": "/tmp/s.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [
         "--log-file=/tmp/mpv.log",
         "--no-log-file",
@@ -81,10 +123,39 @@
         "--force-media-title=IPTV",
         "--msg-level=all=error",
         "--ytdl=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/tmp/watch-later",
         "--hwdec=auto-safe"
       ]
     }
   ],
+  "mpvHandoff": {
+    "_comment": [
+      "PO-10 / D-PLY-5: the options that are ALLOWED but hand the stream",
+      "address to a second program. Run by Model.mpvArgWarnings (JS) and by",
+      "mpv_arg_warnings (python); `warnings` is what both must return for",
+      "`tokens`. Only the option name may appear in a warning - the value can",
+      "carry a credentialed URL of its own."
+    ],
+    "text": " hands the stream address to another program",
+    "cases": [
+      { "name": "the default settings warn about nothing", "tokens": ["--profile=low-latency", "--hwdec=auto-safe", "--cache=yes"], "warnings": [] },
+      { "name": "--ytdl=yes is the documented escape hatch and the documented cost", "tokens": ["--ytdl=yes"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "the bare flag means yes", "tokens": ["--ytdl"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "--ytdl=1 and --ytdl=true are the same option turned on", "tokens": ["--ytdl=1"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "writing the default out in full is silent", "tokens": ["--ytdl=no"], "warnings": [] },
+      { "name": "so is the --no- form, which turns the handoff off", "tokens": ["--no-ytdl"], "warnings": [] },
+      { "name": "case does not matter in the flag value", "tokens": ["--ytdl=YES"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "yt-dlp's raw options configure the same handoff", "tokens": ["--ytdl-raw-options=proxy=http://u:pw@prox.test:8080"], "warnings": ["mpvArg --ytdl-raw-options hands the stream address to another program"] },
+      { "name": "and so do its list forms", "tokens": ["--ytdl-raw-options-append=cookies=/tmp/c.txt"], "warnings": ["mpvArg --ytdl-raw-options-append hands the stream address to another program"] },
+      { "name": "--ytdl-format reaches it too", "tokens": ["--ytdl-format=best"], "warnings": ["mpvArg --ytdl-format hands the stream address to another program"] },
+      { "name": "a script option that names the hook chooses which program gets the address", "tokens": ["--script-opts=ytdl_hook-ytdl_path=/tmp/mine"], "warnings": ["mpvArg --script-opts hands the stream address to another program"] },
+      { "name": "--script-opt is mpv's alias for --script-opts-append", "tokens": ["--script-opt=ytdl_hook-try_ytdl_first=yes"], "warnings": ["mpvArg --script-opt hands the stream address to another program"] },
+      { "name": "a script option that does not reach the hook is silent", "tokens": ["--script-opts=osc-scalewindowed=2"], "warnings": [] },
+      { "name": "one line per option, in the order the user wrote them", "tokens": ["--ytdl=yes", "--hwdec=auto", "--ytdl-format=best", "--ytdl=yes"], "warnings": ["mpvArg --ytdl hands the stream address to another program", "mpvArg --ytdl-format hands the stream address to another program"] },
+      { "name": "an empty setting warns about nothing", "tokens": [], "warnings": [] }
+    ]
+  },
   "mpvReserved": [
     "--input-ipc-server",
     "--wayland-app-id",

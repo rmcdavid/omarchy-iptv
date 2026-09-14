@@ -56,10 +56,22 @@ STUB_MPV = '''#!/usr/bin/env python3
 import json, os, socket, sys, threading, time
 
 argv = sys.argv[1:]
+mask = os.umask(0o022)
+os.umask(mask)
 record = os.environ.get("STUB_MPV_RECORD", "")
 if record:
     with open(record, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(argv) + "\\n")
+        handle.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "umask": mask}) + "\\n")
+# PO-11: mpv's `s` key writes a screenshot with no explicit mode, into
+# --screenshot-dir or, without one, the directory it was started in. Verified
+# against real mpv 0.41; the stub must not be more forgiving (CLAUDE.md 10).
+if os.environ.get("STUB_MPV_SHOT", ""):
+    shot_dir = ""
+    for arg in argv:
+        if arg.startswith("--screenshot-dir="):
+            shot_dir = arg.split("=", 1)[1]
+    with open(os.path.join(shot_dir, "mpv-shot0001.jpg"), "wb") as handle:
+        handle.write(b"\\xff\\xd8\\xff")
 mode = os.environ.get("STUB_MPV_MODE", "serve")
 load = os.environ.get("STUB_MPV_LOAD", "ok")
 if mode == "nosocket":
@@ -271,10 +283,15 @@ class PlayerTestCase(unittest.TestCase):
         self.addCleanup(self.server.close)
         return self.server
 
-    def spawned_argv(self):
+    def spawned_launches(self):
+        """One record per exec: argv, the working directory it was given and
+        the umask it inherited (PO-11)."""
         if not os.path.exists(self.record):
             return []
         return [json.loads(line) for line in pathlib.Path(self.record).read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def spawned_argv(self):
+        return [launch["argv"] for launch in self.spawned_launches()]
 
     def player_start(self, *args):
         return run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
@@ -359,6 +376,32 @@ class StartTest(PlayerTestCase):
         self.assertEqual(argv.count("--input-ipc-server=%s" % self.sock), 1)
         self.assertEqual(payload["warnings"], ["dropped mpvArg --log-file", "dropped mpvArg --input-ipc-server", "dropped mpvArg ; rm -rf"])
 
+    def test_an_option_that_hands_the_url_to_another_program_is_kept_and_warned_about(self):
+        # PO-10 / D-PLY-5. --ytdl is NOT reserved (PO-5): it reaches mpv, and
+        # it also reaches the user as a warning on the line the guide shows.
+        code, payload, _, stderr = self.player_start(
+            "--mpv-arg=--ytdl=yes", "--mpv-arg=--ytdl-raw-options=proxy=http://u:pw@prox.test:8080",
+            "--mpv-arg=--script-opts=ytdl_hook-ytdl_path=/tmp/mine", "--mpv-arg=--hwdec=auto-safe")
+        self.assertEqual(code, 0, stderr)
+        argv = self.spawned_argv()[0]
+        self.assertIn("--ytdl=yes", argv)                       # kept, never refused
+        self.assertLess(argv.index("--ytdl=no"), argv.index("--ytdl=yes"))
+        self.assertEqual(payload["warnings"], [
+            "mpvArg --ytdl" + helper.MPV_HANDOFF_TEXT,
+            "mpvArg --ytdl-raw-options" + helper.MPV_HANDOFF_TEXT,
+            "mpvArg --script-opts" + helper.MPV_HANDOFF_TEXT,
+        ])
+        # The warning is a sink: the value the user wrote may itself carry a
+        # credentialed URL, and none of it may cross into the reply.
+        blob = json.dumps(payload["warnings"])
+        for secret in ("prox.test", "pw", "http://", "/tmp/mine"):
+            self.assertNotIn(secret, blob, secret)
+
+    def test_the_default_settings_warn_about_nothing(self):
+        code, payload, _, stderr = self.player_start("--mpv-arg=--ytdl=no", "--mpv-arg=--profile=low-latency")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["warnings"], [])
+
     def test_stash_carries_the_source_key_of_the_cache_directory(self):
         key = "a1b2c3d4"
         per_source = os.path.join(self.cache, "sources", key)
@@ -384,6 +427,96 @@ class StartTest(PlayerTestCase):
         self.assertEqual(payload["error"]["code"], "no_cache")
         self.assertEqual(self.spawned_argv(), [])
         self.assertFalse(os.path.exists(self.sock))
+
+
+class WorkingDirectoryTest(PlayerTestCase):
+    """PO-11 / D-PLY-7: the player never inherits the shell's directory, and
+    nothing it writes is world-readable.
+
+    mpv's own key bindings are live on its window: `s` writes a screenshot and
+    `Q` writes a resume record. Before this they landed in whatever directory
+    the shell was started from - the user's home - at mode 0644.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.state = os.path.join(self.dir, "state")
+        self.env(XDG_STATE_HOME=self.state)
+        self.shots = os.path.join(self.state, "omarchy-iptv", "screenshots")
+        self.later = os.path.join(self.runtime, "watch-later")
+
+    def test_the_player_is_given_a_directory_instead_of_inheriting_one(self):
+        # The whole defect in one assertion: whatever the caller's directory
+        # is, the player does not get it.
+        self.assertNotEqual(os.getcwd(), self.runtime)
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        launch = self.spawned_launches()[0]
+        self.assertEqual(launch["cwd"], self.runtime)
+        self.assertNotEqual(launch["cwd"], os.getcwd())
+        self.assertNotEqual(launch["cwd"], os.path.expanduser("~"))
+        # And the mode of anything it creates is settled before the exec.
+        self.assertEqual(launch["umask"], 0o077)
+        self.assertEqual(launch["umask"], helper.PLAYER_UMASK)
+
+    def test_the_output_directories_are_named_on_argv_and_created_0700(self):
+        self.assertFalse(os.path.exists(self.shots))
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        argv = self.spawned_argv()[0]
+        self.assertIn("--screenshot-dir=%s" % self.shots, argv)
+        self.assertIn("--watch-later-dir=%s" % self.later, argv)
+        # mpv WOULD create a missing directory, but at 0755 - which is the
+        # exposure being closed. The helper gets there first.
+        for path in (self.shots, self.later):
+            self.assertTrue(os.path.isdir(path), path)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o700, path)
+        self.assertEqual(payload["warnings"], [])
+
+    def test_a_screenshot_lands_in_the_documented_directory_at_0600(self):
+        self.env(STUB_MPV_SHOT="1")
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        shot = os.path.join(self.shots, "mpv-shot0001.jpg")
+        self.assertTrue(os.path.exists(shot), "the screenshot is where the README says it is")
+        self.assertEqual(stat.S_IMODE(os.stat(shot).st_mode), 0o600)
+        self.assertEqual(os.listdir(self.runtime),
+                         [name for name in os.listdir(self.runtime) if not name.startswith("mpv-shot")])
+        self.assertEqual([name for name in os.listdir(self.dir) if name.startswith("mpv-shot")], [])
+
+    def test_the_screenshot_directory_can_still_be_pointed_somewhere_else(self):
+        # --screenshot-dir is deliberately NOT reserved: user tokens land
+        # after the fixed options, so a deliberate choice still wins.
+        mine = os.path.join(self.dir, "mine")
+        os.makedirs(mine, 0o700)
+        self.env(STUB_MPV_SHOT="1")
+        code, _, _, stderr = self.player_start("--mpv-arg=--screenshot-dir=%s" % mine)
+        self.assertEqual(code, 0, stderr)
+        argv = self.spawned_argv()[0]
+        self.assertLess(argv.index("--screenshot-dir=%s" % self.shots), argv.index("--screenshot-dir=%s" % mine))
+        self.assertTrue(os.path.exists(os.path.join(mine, "mpv-shot0001.jpg")))
+
+    def test_the_watch_later_directory_cannot_be_pointed_back_at_home(self):
+        # A resume record names a stream path, so --watch-later-dir stays
+        # reserved and the user's token is dropped with the existing warning.
+        code, payload, _, stderr = self.player_start("--mpv-arg=--watch-later-dir=%s" % self.dir)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("dropped mpvArg --watch-later-dir", payload["warnings"])
+        self.assertEqual([t for t in self.spawned_argv()[0] if t.startswith("--watch-later-dir=")],
+                         ["--watch-later-dir=%s" % self.later])
+
+    def test_a_directory_that_cannot_be_created_warns_and_still_plays(self):
+        # "What happens when it does not exist" has a second half: what
+        # happens when it cannot be made. Never a refused play.
+        blocked = os.path.join(self.dir, "blocked")
+        pathlib.Path(blocked).write_text("not a directory", encoding="utf-8")
+        self.env(XDG_STATE_HOME=blocked)
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(len(payload["warnings"]), 1)
+        self.assertIn("could not create", payload["warnings"][0])
+        self.assertIn("screenshots", payload["warnings"][0])
 
 
 class IdempotenceTest(PlayerTestCase):
@@ -864,10 +997,35 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(helper.PLAYER_GENERIC_FAILURE, self.fixture["genericFailure"])
         self.assertIn('var PLAYER_GENERIC_FAILURE = "%s"' % self.fixture["genericFailure"], self.model)
 
+    def test_mpv_handoff_warnings_match_every_shared_vector(self):
+        table = self.fixture["mpvHandoff"]
+        self.assertEqual(helper.MPV_HANDOFF_TEXT, table["text"])
+        self.assertIn('var MPV_HANDOFF_TEXT = "%s"' % table["text"], self.model)
+        for vector in table["cases"]:
+            self.assertEqual(helper.mpv_arg_warnings(vector["tokens"]), vector["warnings"], vector["name"])
+
+    def test_the_handoff_sets_match_model_js(self):
+        for name, js in (("MPV_HANDOFF", "MPV_HANDOFF"),
+                         ("MPV_HANDOFF_SCRIPT_OPTS", "MPV_HANDOFF_SCRIPT_OPTS"),
+                         ("MPV_YTDL_OFF", "MPV_YTDL_OFF")):
+            block = re.search(r"var %s = \{(.*?)\}" % js, self.model, re.S)
+            self.assertIsNotNone(block, js)
+            keys = set(re.findall(r'"([^"]+)":\s*true', block.group(1)))
+            self.assertEqual(keys, set(getattr(helper, name)), js)
+        # PO-5: warned about, never reserved. The two lists must not overlap.
+        self.assertEqual(helper.MPV_HANDOFF & helper.MPV_RESERVED, frozenset())
+        self.assertNotIn("--ytdl", helper.MPV_RESERVED)
+
+    def test_player_dirs_match_every_shared_vector(self):
+        for vector in self.fixture["playerDirs"]["cases"]:
+            self.assertEqual(helper.player_dirs(vector["socketPath"], vector["stateDir"]),
+                             vector["dirs"], vector["name"])
+
     def test_mpv_launch_argv_matches_every_shared_vector(self):
         for vector in self.fixture["mpvArgv"]:
             args, rejected = helper.filter_mpv_args(vector["mpvArgs"])
-            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args), vector["argv"], vector["name"])
+            dirs = helper.player_dirs(vector["socketPath"], vector["stateDir"])
+            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs), vector["argv"], vector["name"])
             if "rejected" in vector:
                 self.assertEqual(rejected, vector["rejected"], vector["name"])
 
@@ -890,6 +1048,7 @@ class ParityTest(unittest.TestCase):
                              expected, vector["name"])
 
     def test_the_four_tables_are_all_present_and_non_trivial(self):
+        self.assertGreaterEqual(len(self.fixture["mpvHandoff"]["cases"]), 14)
         self.assertGreaterEqual(len(self.fixture["mpvArgv"]), 3)
         self.assertEqual(len(self.fixture["stopLadder"]), 5)
         self.assertGreaterEqual(len(self.fixture["endedVerdict"]), 12)

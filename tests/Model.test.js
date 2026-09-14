@@ -3,6 +3,9 @@
 // installed dell-power plugin, so QA can read either without a framework).
 // ASCII only: non-ASCII expectations are written as \uXXXX escapes.
 const Model = require("../Model.js")
+// The shared vectors both languages run (CLAUDE.md: a rule written twice gets
+// one fixture). tests/test_player.py reads the same file.
+const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
 
 let failures = 0
 let checks = 0
@@ -17,6 +20,20 @@ function check(name, actual, expected) {
     failures++
     console.log("FAIL " + name + "\n     got:  " + a + "\n     want: " + e)
   }
+}
+
+// A check whose *expression* may not exist yet. A missing Model export
+// throws before check() is ever called, which aborts the whole run and hides
+// every later count - so the before/after counts CLAUDE.md 11 asks for
+// cannot be compared. This turns that into one ordinary failure.
+function checkCall(name, produce, expected) {
+  let actual
+  try {
+    actual = produce()
+  } catch (error) {
+    actual = "threw: " + error.message
+  }
+  check(name, actual, expected)
 }
 
 const SEP = " \u00b7 "
@@ -316,11 +333,11 @@ check("clampSetting barLabelMaxWidth range", [Model.clampSetting("barLabelMaxWid
 check("clampSetting unknown key passthrough", Model.clampSetting("nope", "v"), "v")
 
 // ---- mpv ----
-check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency --hwdec=auto-safe --no-osc "), { args: ["--profile=low-latency", "--hwdec=auto-safe", "--no-osc"], rejected: [] })
-check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"] })
+check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency --hwdec=auto-safe --no-osc "), { args: ["--profile=low-latency", "--hwdec=auto-safe", "--no-osc"], rejected: [], warnings: [] })
+check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"], warnings: [] })
 check("splitMpvArgs rejects --script and --config-dir", Model.splitMpvArgs("--script=/e.lua --config-dir=/x --scripts=/y --input-ipc-client=fd://3").args, [])
-check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [] })
-check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"] })
+check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [], warnings: [] })
+check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: [] })
 check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
@@ -329,7 +346,8 @@ check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\n
 // "--", no header options, no per-channel title. Everything channel-specific
 // travels over the 0600 socket instead. The vectors are shared with the
 // Python mirror in tests/fixtures/player-argv.json.
-const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", extraArgs: ["--profile=low-latency"] })
+const STATE_DIR = "/home/u/.local/state/omarchy-iptv"
+const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--profile=low-latency"] })
 check("buildMpvArgv starts with mpv and ipc socket", argv.slice(0, 2), ["mpv", "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock"])
 check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no"])
 check("buildMpvArgv idles at startup so the first channel arrives over IPC (PO-1)", [argv.indexOf("--idle=once") !== -1, argv.indexOf("--idle=no") !== -1, argv.indexOf("--idle=yes") !== -1], [true, false, false])
@@ -356,7 +374,30 @@ check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpv
 check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 check("buildMpvArgv user args come last", argv[argv.length - 1], "--profile=low-latency")
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later"])
+
+// ---- PO-11 / D-PLY-7: the player writes where it is told, not where it ----
+// mpv's own keys are live on its window: `s` writes a screenshot and `Q` a
+// resume record, and both used to land in whatever directory the shell was
+// started from - $HOME - at mode 0644.
+checkCall("the directory rule matches the shared fixture", () => playerFixture.playerDirs.cases.map(v => Model.playerDirs(v.socketPath, v.stateDir)),
+  playerFixture.playerDirs.cases.map(v => v.dirs))
+checkCall("the launch argv names both output directories", () => [argv.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") !== -1, argv.indexOf("--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later") !== -1], [true, true])
+checkCall("a screenshot is durable, a resume record is not: one under state, one under the runtime dir", () => {
+  const d = Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR)
+  return [d.screenshots.indexOf("/run/user/") === 0, d.watchLater.indexOf("/run/user/") === 0, d.cwd]
+}, [false, true, "/run/user/1000/omarchy-iptv"])
+checkCall("the working directory is never the home the shell runs in", () => {
+  const d = Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR)
+  return [d.cwd === "/home/u", d.cwd === "", d.cwd === Model.dirnameOf("/run/user/1000/omarchy-iptv/mpv.sock")]
+}, [false, false, true])
+checkCall("dirnameOf behaves like os.path.dirname on the paths this plugin uses", () => [Model.dirnameOf("/a/b/c.sock"), Model.dirnameOf("/c.sock"), Model.dirnameOf("c.sock"), Model.dirnameOf("")], ["/a/b", "/", "", ""])
+checkCall("--watch-later-dir stays reserved so a resume record cannot be aimed at $HOME", () => Model.splitMpvArgs("--watch-later-dir=/home/u --screenshot-dir=/home/u/Pictures"),
+  { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: [] })
+checkCall("a user who wants their screenshots elsewhere still wins (last token wins)", () => {
+  const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] })
+  return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
+}, true)
 check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
 
 // ---- MPV_RESERVED, ten additions (ARCHITECTURE-PLAYER.md 4.12) ----
@@ -372,6 +413,37 @@ check("--ytdl stays unreserved (PO-5) and still sorts after the built-in --ytdl=
   const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
   return [r.args, a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes")]
 })(), [["--ytdl=yes"], true])
+
+// ---- PO-10 / D-PLY-5: the options that hand the URL to another program ----
+// Not refused (PO-5 keeps the escape hatch), but never silent. The vectors
+// are the ones tests/test_player.py runs against the python mirror.
+const HANDOFF = playerFixture.mpvHandoff
+const HANDOFF_TEXT = HANDOFF.text
+checkCall("the handoff wording is the one in the shared fixture", () => Model.MPV_HANDOFF_TEXT, HANDOFF_TEXT)
+HANDOFF.cases.forEach(vector => {
+  checkCall("mpvArgWarnings: " + vector.name, () => Model.mpvArgWarnings(vector.tokens), vector.warnings)
+})
+checkCall("splitMpvArgs carries the warning for the tokens it KEEPS", () => Model.splitMpvArgs("--ytdl=yes --hwdec=auto"),
+  { args: ["--ytdl=yes", "--hwdec=auto"], rejected: [], warnings: ["mpvArg --ytdl" + HANDOFF_TEXT] })
+checkCall("a REJECTED token never warns: it never reaches mpv (--script is reserved)",
+  () => Model.splitMpvArgs("--script=/tmp/ytdl_hook.lua --script-opts=ytdl_hook-ytdl_path=/tmp/x").warnings,
+  ["mpvArg --script-opts" + HANDOFF_TEXT])
+checkCall("the warning names the option and never its value (a proxy URL stays out of the sink)", () => {
+  const w = Model.splitMpvArgs("--ytdl-raw-options=proxy=http://u:pw@prox.test:8080").warnings
+  return [w.length, w[0].indexOf("prox.test") !== -1, w[0].indexOf("pw") !== -1, w[0]]
+}, [1, false, false, "mpvArg --ytdl-raw-options" + HANDOFF_TEXT])
+checkCall("mpvOptionBase collapses mpv's list-option spellings onto one option", () => [Model.mpvOptionBase("--ytdl-raw-options-append"), Model.mpvOptionBase("--script-opts-set"), Model.mpvOptionBase("--ytdl"), Model.mpvOptionBase("--script-opt")], ["--ytdl-raw-options", "--script-opts", "--ytdl", "--script-opt"])
+
+// The warning reaches the user through the ONE line the guide already shows
+// (Guide.qml warningText -> Model.footerWarning), by naming its own kind.
+checkCall("a labelled warning keeps its own wording inside the playlist list", () => Model.footerWarning(Model.labelWarnings(["mpvArg --ytdl" + HANDOFF_TEXT], "player"), []),
+  "Player warning: mpvArg --ytdl hands the stream address to another program")
+checkCall("an unlabelled playlist warning is unchanged (D-LIVE-18 wording holds)", () => [Model.footerWarning(["truncated to 50,000 channels"], []), Model.footerWarning([], ["1 programme dropped"])],
+  ["Playlist warning: truncated to 50,000 channels", "Guide data warning: 1 programme dropped"])
+checkCall("the player's line comes first and counts the playlist's as +1 more", () => Model.footerWarning(Model.labelWarnings(["mpvArg --ytdl" + HANDOFF_TEXT], "player").concat(["truncated to 50,000 channels"]), []),
+  "Player warning: mpvArg --ytdl hands the stream address to another program (+1 more)")
+checkCall("labelWarnings is idempotent and drops nothing", () => Model.labelWarnings(Model.labelWarnings(["a"], "player"), "player"), ["Player warning: a"])
+checkCall("warningLabel names the kind an entry already declares", () => [Model.warningLabel("Player warning: x"), Model.warningLabel("Guide data warning: x"), Model.warningLabel("Playlist warning: x"), Model.warningLabel("plain")], ["player", "epg", "playlist", ""])
 
 // ---- helper `player` verb argv (ARCHITECTURE-PLAYER.md 4.3) ----
 check("playerStartArgv: every value its own argv member, user tokens repeated",
@@ -621,12 +693,12 @@ check("endedVerdict: the entry gate fails open (F4) - a null or unknown entry id
 check("endedVerdict: a file_error carrying a URL is redacted", Model.endedVerdict({ reason: "error", file_error: "Failed to open http://u:p@provider.test/live/tok/1.m3u8" }, false, false).reason, "Failed to open provider.test")
 
 // ---- shared vectors with the Python mirror (tests/fixtures/player-argv.json) ----
-const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
+// (loaded at the top of this file; the same bytes tests/test_player.py reads)
 check("player fixture has all four tables", [playerFixture.mpvArgv.length > 0, playerFixture.stopLadder.length, playerFixture.endedVerdict.length > 0, playerFixture.session.length > 0, playerFixture.genericFailure], [true, 5, true, true, Model.PLAYER_GENERIC_FAILURE])
 check("player fixture pins the whole reserved set", playerFixture.mpvReserved.slice().sort(), Object.keys(Model.MPV_RESERVED).sort())
 for (const v of playerFixture.mpvArgv) {
   const filtered = Model.splitMpvArgs((v.mpvArgs || []).join(" "))
-  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, extraArgs: filtered.args }), v.argv)
+  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args }), v.argv)
   if (v.rejected) check("fixture mpvArgv rejects: " + v.name, filtered.rejected, v.rejected)
 }
 for (const v of playerFixture.stopLadder) {

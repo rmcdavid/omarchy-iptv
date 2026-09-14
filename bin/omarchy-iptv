@@ -1925,6 +1925,7 @@ LOCK_RETRIES = 5
 SPAWN_POLL_S = 0.02
 STOP_POLL_S = 0.05
 LAUNCH_STDERR_MAX = 4096          # PO-6: the launch window's stderr, memory only
+PLAYER_UMASK = 0o077              # PO-11: 0600 files / 0700 dirs, requirement 10
 # Mirror of Model.splitMpvArgs (4.12). The helper re-validates every
 # --mpv-arg because bin/omarchy-iptv is a public CLI, and a parity test pins
 # the two reserved sets equal.
@@ -1937,6 +1938,17 @@ MPV_RESERVED = frozenset((
     "--term-status-msg", "--screenshot-template",
 ))
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check")
+# Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
+# allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
+# are not direct streams - but each one puts the credentialed stream address
+# on a SECOND program's command line, so the user is told at the moment the
+# option is in force. Pinned to the JavaScript by the `mpvHandoff` vectors in
+# tests/fixtures/player-argv.json.
+MPV_HANDOFF = frozenset(("--ytdl-format", "--ytdl-raw-options"))
+MPV_HANDOFF_SCRIPT_OPTS = frozenset(("--script-opts", "--script-opt"))
+MPV_YTDL_OFF = frozenset(("no", "0", "false"))
+MPV_HANDOFF_TEXT = " hands the stream address to another program"
+MPV_LIST_SUFFIX_RE = re.compile(r"-(add|append|set|pre|clr|del|remove|toggle)$")
 
 
 def _monotonic() -> float:
@@ -1964,14 +1976,89 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
     return args, rejected
 
 
-def mpv_launch_argv(sock_path: str, mpv_args: list[str]) -> list[str]:
+def mpv_option_base(name: str) -> str:
+    """Mirror of Model.mpvOptionBase: `--opt-append` and `--opt-set` set the
+    same option `--opt` does, so the base name is what decides."""
+    return MPV_LIST_SUFFIX_RE.sub("", str(name))
+
+
+def mpv_arg_hands_off_url(token: str) -> str:
+    """Mirror of Model.mpvHandoffName. "" when the token is harmless, else the
+    option NAME. The VALUE is never returned: it can carry a credentialed URL
+    of its own (a proxy in --ytdl-raw-options) and a warning is a sink (R12).
+    """
+    text = str(token)
+    name, _, value = text.partition("=")
+    if name.startswith("--no-"):          # --no-ytdl turns the handoff OFF
+        return ""
+    base = mpv_option_base(name)
+    if base == "--ytdl":
+        return "" if value.lower() in MPV_YTDL_OFF else name
+    if base in MPV_HANDOFF:
+        return name
+    if base in MPV_HANDOFF_SCRIPT_OPTS:
+        return name if "ytdl" in value else ""
+    return ""
+
+
+def mpv_arg_warnings(tokens: list[str]) -> list[str]:
+    """Mirror of Model.mpvArgWarnings: one line per distinct option, in the
+    order the user wrote them."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in tokens or []:
+        name = mpv_arg_hands_off_url(token)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append("mpvArg " + name + MPV_HANDOFF_TEXT)
+    return out
+
+
+def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, str]:
+    """Where the player is allowed to write (PO-11, D-PLY-7).
+
+    mpv's own key bindings are live on its window and two of them write a
+    durable file: `s` takes a screenshot and `Q` (quit-watch-later) writes a
+    resume record. Both used to land wherever the shell happened to be - the
+    user's home for the screenshot, mpv's own ~/.local/state/mpv tree for the
+    resume record - at mode 0644, outside every list of files this plugin
+    says it writes.
+
+    - `cwd` is the runtime directory (0700, already ensured for the socket).
+      It is where anything relative still lands, so a cwd-relative write we
+      have not anticipated goes somewhere private and disappears at logout
+      instead of accumulating in $HOME.
+    - `screenshots` is durable on purpose: a screenshot is something the user
+      asked for, so the runtime directory would be data loss at logout. It
+      lives under the state directory this plugin already owns and documents.
+    - `watchLater` is a resume position for a live stream, which is never
+      worth keeping: ephemeral, private, gone at logout.
+    """
+    runtime = os.path.dirname(sock_path)
+    return {
+        "cwd": runtime,
+        "screenshots": os.path.join(state_dir(state_override), "screenshots"),
+        "watchLater": os.path.join(runtime, "watch-later"),
+    }
+
+
+def mpv_launch_argv(sock_path: str, mpv_args: list[str],
+                    dirs: dict[str, str] | None = None) -> list[str]:
     """Mirror of Model.buildMpvArgv, pinned by tests/fixtures/player-argv.json.
 
     No URL, no "--", no header options, no per-channel title: the first
     channel arrives over IPC like every later one (S-03). `--idle=once` (PO-1)
     idles at startup and still exits when the playlist finishes, which keeps
     today's UX and the degraded status-poll fallback.
+
+    The two output directories (PO-11) are fixed options, so a user who wants
+    their screenshots elsewhere can still say so: `--screenshot-dir` is not
+    reserved and user tokens land after these. `--watch-later-dir` IS
+    reserved, because a resume record naming a stream path has no business
+    being redirected back into $HOME.
     """
+    where = dirs or player_dirs(sock_path)
     return [
         "mpv",
         "--input-ipc-server=%s" % sock_path,
@@ -1983,6 +2070,8 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str]) -> list[str]:
         "--force-media-title=IPTV",
         "--msg-level=all=error",
         "--ytdl=no",
+        "--screenshot-dir=%s" % where["screenshots"],
+        "--watch-later-dir=%s" % where["watchLater"],
     ] + list(mpv_args or [])
 
 
@@ -2259,7 +2348,7 @@ def _read_pipe(fd: int, timeout: float) -> bytes:
     return b"".join(chunks)
 
 
-def spawn_detached(argv: list[str]) -> dict[str, Any]:
+def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
     """setsid + double fork, and the fd hygiene that makes it survivable.
 
     The grandchild reports its own pid over a pipe (so a spawn that never
@@ -2273,6 +2362,15 @@ def spawn_detached(argv: list[str]) -> dict[str, Any]:
 
     argv[0] is the literal "mpv", never caller-supplied, so `player start` is
     not an arbitrary-exec verb.
+
+    PO-11: the working directory is explicit, never inherited. A process that
+    inherits the shell's cwd is running in the user's home, and mpv's own key
+    bindings write files relative to it. The umask is explicit for the same
+    reason: mpv creates whatever it writes with the process umask, which is
+    0022 under the shell and gave D-PLY-7 its world-readable 0644 screenshot.
+    0o077 puts every file the player creates at 0600 and every directory it
+    creates at 0700, matching requirement 10. `chdir` failing must never
+    leave us in the inherited directory, so "/" is the fallback.
     """
     pid_r, pid_w = os.pipe()
     err_r, err_w = os.pipe2(os.O_CLOEXEC)
@@ -2285,6 +2383,11 @@ def spawn_detached(argv: list[str]) -> dict[str, Any]:
                 os._exit(0)
             os.write(pid_w, str(os.getpid()).encode("ascii"))
             os.close(pid_w)
+            os.umask(PLAYER_UMASK)
+            try:
+                os.chdir(cwd or "/")
+            except OSError:
+                os.chdir("/")
             devnull = os.open(os.devnull, os.O_RDWR)
             os.dup2(devnull, 0)
             os.dup2(devnull, 1)
@@ -2620,8 +2723,26 @@ def check_socket_path(sock_path: str) -> None:
         raise HelperError("socket_path_blocked", "the socket path is not a socket")
 
 
+def ensure_player_dirs(dirs: dict[str, str], warnings: list[str]) -> None:
+    """PO-11: pre-create what the player writes into, at 0700.
+
+    mpv does create a missing --screenshot-dir / --watch-later-dir - verified
+    on 0.41 - but it creates it 0755, which is exactly the exposure being
+    closed. Creating it here first settles the mode. A failure is not worth
+    refusing a play over: the option still goes on argv, mpv reports its own
+    error into the launch window, and the user is told which directory the
+    plugin could not make.
+    """
+    for key in ("screenshots", "watchLater"):
+        try:
+            ensure_private_dir(dirs[key])
+        except OSError as error:
+            warnings.append("could not create %s (%s)" % (dirs[key], error.strerror or "error"))
+
+
 def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
-                   ipc_timeout: float, warnings: list[str]) -> dict[str, Any]:
+                   ipc_timeout: float, warnings: list[str],
+                   dirs: dict[str, str] | None = None) -> dict[str, Any]:
     """Requirement 1, all three layers: the /proc scan is the existence check,
     a live answering player is adopted rather than duplicated, several
     matches collapse to the one that answers, and a spawn whose socket never
@@ -2644,7 +2765,9 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
         warnings.append("stopped an unresponsive player")
         stop_ladder(sock_path, found, "", ipc_timeout)
     settle_socket(sock_path)
-    launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args))
+    where = dirs or player_dirs(sock_path)
+    ensure_player_dirs(where, warnings)
+    launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args, where), where["cwd"])
     errors: list[str] = []
     client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
     if client is None:
@@ -2679,6 +2802,9 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     mpv_args, rejected = filter_mpv_args(list(args.mpv_arg or []))
     for token in rejected:
         warnings.append("dropped mpvArg %s" % token.split("=", 1)[0])
+    # PO-10: kept, not dropped - and said out loud. The service shows the
+    # same line the guide already has; this one is for the CLI and the log.
+    warnings.extend(mpv_arg_warnings(mpv_args))
     lock_fd = -1
     client = None
     try:
