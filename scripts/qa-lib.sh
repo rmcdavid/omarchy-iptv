@@ -106,6 +106,51 @@ print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))
     || printf '%s\n' "$QA_NO_STATE"
 }
 
+# qa_json_field <python-expr over d> <json>: the whole answer, not its
+# "service" half. This is what the M2-03 number verbs answer with
+# (`numberState`, `number`, `commitNumber`, `cancelNumber`), and the sentinels
+# matter more here than anywhere: a harness pointed at a tree WITHOUT those
+# verbs answers `{"ok":false,"error":"no_verb","active":null,...}`, and a check
+# written as [[ "$(field active)" == "false" ]] would then read "the entry is
+# not active" and PASS against a tree that cannot answer at all. NOFIELD is
+# not "false", so it fails instead.
+qa_json_field() {
+  python3 -c '
+import json, sys
+raw = sys.argv[2]
+try:
+    d = json.loads(raw)
+except Exception:
+    print("NOSTATE"); raise SystemExit(0)
+try:
+    v = eval(sys.argv[1])
+except Exception:
+    v = None
+print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))' "$1" "$2" 2>/dev/null \
+    || printf '%s\n' "$QA_NO_STATE"
+}
+
+# qa_guide_field <python-expr over d> <json>: the GUIDE half of `state()`,
+# the half every number-entry scenario reads. NOSTATE when there is no guide
+# in the answer at all - an overlay that failed to load answers `null` there,
+# and `null` must not be able to satisfy a check.
+qa_guide_field() {
+  python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.argv[2])["guide"]
+except Exception:
+    print("NOSTATE"); raise SystemExit(0)
+if d is None:
+    print("NOSTATE"); raise SystemExit(0)
+try:
+    v = eval(sys.argv[1])
+except Exception:
+    v = None
+print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))' "$1" "$2" 2>/dev/null \
+    || printf '%s\n' "$QA_NO_STATE"
+}
+
 # qa_session_id <state.json>: the session record a later shell would read.
 qa_session_id() {
   python3 -c '

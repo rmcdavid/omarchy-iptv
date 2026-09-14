@@ -131,6 +131,46 @@ ck "the same assertion against qa_field now FAILS on a dead IPC" \
 ck "and still PASSES when the service really answers 'no mark'" \
    '[[ "$(qa_field "d['\''failedAt'\''].get('\''t:live1'\'')" "$STATE_JSON")" == "NOFIELD" ]]'
 
+section "qa_json_field / qa_guide_field (M2-03 CN23: the number verbs)"
+
+# What a tree WITH the four verbs answers, and what one without them answers.
+# The second shape is the whole reason these predicates exist: every field is
+# null, so a check written against a bare value would read the absence as the
+# answer and pass against a harness that cannot drive the feature at all.
+NUM_OK='{"ok":true,"error":"","active":true,"buffer":"10","kind":"prefix","label":"101","targetName":"BBC One HD","matches":1,"ordinal":1,"scopeId":"all","cursorIndex":3,"query":"","resume":false,"hasNumbers":true}'
+NUM_NOVERB='{"ok":false,"error":"no_verb","active":null,"buffer":null,"kind":null,"label":null,"targetName":null,"matches":null,"ordinal":null,"scopeId":null,"cursorIndex":null,"query":null,"resume":null,"hasNumbers":null}'
+STATE_GUIDE='{"guide":{"cursorIndex":3,"hasNumbers":true,"numberEntry":{"active":false,"buffer":"","resume":true}},"service":{"playing":false}}'
+STATE_NOGUIDE='{"guide":null,"service":{"playing":false}}'
+
+is "qa_json_field reads a value"          "$(qa_json_field "d['buffer']" "$NUM_OK")" "10"
+is "qa_json_field renders a bool as JSON" "$(qa_json_field "d['active']" "$NUM_OK")" "true"
+is "a number the entry really reports"    "$(qa_json_field "d['cursorIndex']" "$NUM_OK")" "3"
+is "a tree without the verb answers NOFIELD, not false" "$(qa_json_field "d['active']" "$NUM_NOVERB")" "NOFIELD"
+is "and the error it carries is readable" "$(qa_json_field "d['error']" "$NUM_NOVERB")" "no_verb"
+is "a dead IPC is NOSTATE, not ''"        "$(qa_json_field "d['active']" "")" "NOSTATE"
+is "an unparseable answer is NOSTATE"     "$(qa_json_field "d['active']" "{oops")" "NOSTATE"
+# The bug shape this prevents, written out: `active` null reading as inactive.
+old_number_field() { python3 -c '
+import json, sys
+try: d = json.loads(sys.argv[2])
+except Exception: print(""); raise SystemExit(0)
+try: v = eval(sys.argv[1])
+except Exception: v = None
+print(json.dumps(v) if isinstance(v, bool) else ("" if v is None else v))' "$1" "$2" 2>/dev/null; }
+ck "a bare reader answers the no-verb tree with '', which an 'is it off?' check accepts" \
+   '[[ "$(old_number_field "d['\''active'\'']" "$NUM_NOVERB")" != "true" ]]'
+ck "qa_json_field refuses to let that count as an answer" \
+   '[[ "$(qa_json_field "d['\''active'\'']" "$NUM_NOVERB")" == "NOFIELD" ]]'
+ck "and still reports a real 'not active' as false" \
+   '[[ "$(qa_json_field "d['\''active'\'']" "{\"active\":false}")" == "false" ]]'
+
+is "qa_guide_field digs into the guide half"   "$(qa_guide_field "d['cursorIndex']" "$STATE_GUIDE")" "3"
+is "it reaches the nested entry"               "$(qa_guide_field "d['numberEntry']['resume']" "$STATE_GUIDE")" "true"
+is "a guide that never loaded is NOSTATE"      "$(qa_guide_field "d['cursorIndex']" "$STATE_NOGUIDE")" "NOSTATE"
+is "a state() answer without a guide key is NOSTATE" "$(qa_guide_field "d['cursorIndex']" '{"service":{}}')" "NOSTATE"
+is "a dead IPC is NOSTATE here too"            "$(qa_guide_field "d['cursorIndex']" "")" "NOSTATE"
+is "a pre-M2-03 guide answers NOFIELD for the new key" "$(qa_guide_field "d['hasNumbers']" '{"guide":{"cursorIndex":3}}')" "NOFIELD"
+
 ck "qa_value rejects the empty string"  '! qa_value ""'
 ck "qa_value rejects NOSTATE"           '! qa_value "$QA_NO_STATE"'
 ck "qa_value rejects NOFIELD"           '! qa_value "$QA_NO_FIELD"'
@@ -516,12 +556,35 @@ chno_floor_verdict=$(
 )
 is "one skipped chno check turns that run RED" "$chno_floor_verdict" "1"
 
+# M2-03 ruling CN23's runner, the fourth suite. Same two-floor shape as the
+# chno one, and the same reason for asserting it here: scripts/check.sh runs
+# its check-tree half on every commit, so a forgotten bump is caught on this
+# machine rather than on the display lane's.
+CE="$ROOT/scripts/dev-harness/chno-entry-scenario.sh"
+is "the chno-entry scenario exists and declares exactly two floors" \
+   "$(qa_count '^ *EXPECTED_CHECKS=[0-9]+$' "$CE")" "2"
+edeclared_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CE" | sed -n 1p | cut -d= -f2)
+edeclared_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CE" | sed -n 2p | cut -d= -f2)
+# The recipes are written in that file's footer; these are them. The +1 is the
+# run.sh option probe, which bumps `checks` by hand; the live half adds the
+# privacy block's two.
+is "the chno-entry check-tree floor matches the preflight it actually has" \
+   "$edeclared_tree" "$(( $(qa_count '^ *seam ' "$CE") + 1 ))"
+is "the chno-entry live floor matches the assertions that scenario actually has" \
+   "$edeclared_live" "$(( $(qa_count '^ *(check|seam) ' "$CE") + 3 ))"
+# And check.sh's own floor for the preflight must match what the preflight
+# prints: 20 assertions plus its "ran every check" line. A floor above what
+# the runner can produce would make the gate permanently red; one below it
+# would let a section stop executing.
+is "check.sh's preflight floor matches the scenario's own" \
+   "$(grep -oE 'CHNO_ENTRY_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( edeclared_tree + 1 ))"
+
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=121
+EXPECTED=141
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

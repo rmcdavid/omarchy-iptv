@@ -173,6 +173,46 @@ feature's absence: run it against an export of the pre-change tree and it
 fails 12 of its 14 checks. It proves the code is present, never that it
 works.
 
+#### Driving digit entry (the four verbs of ruling CN23)
+
+```bash
+$H ipc number 101      # feeds "1", "0", "1" through the guide's own key router
+$H ipc number "10<"    # "<" is Backspace
+$H ipc number "7,1"    # both separators; anything that is not a digit, "." ","
+                       #   or "<" is refused as {"ok":false,"error":"bad_key"}
+$H ipc numberState     # { active, buffer, kind, label, targetName, matches, ordinal,
+                       #   scopeId, cursorIndex, query, cursorId, resume, hasNumbers,
+                       #   numberWidth, cursorIndexLive, cursorName, cursorChno, transient }
+$H ipc commitNumber true false   # Enter (play, close);  true true = Space (play, keep open)
+$H ipc cancelNumber              # Esc
+$H ipc state           # guide gains hasNumbers, channelOrder, numberEntry, numberWidth
+```
+
+`number` goes through `handleSharedKey`, the guide's real router for these
+keys, so the listMode guard is exercised rather than stepped over: a digit
+sent while the guide is in search mode opens no entry, exactly as on a
+keyboard. Every answer is the same snapshot shape, and every field is `null`
+on a tree that has none of this - which is why the scenarios read them through
+`qa_json_field` rather than bare, so an absent verb fails a check instead of
+satisfying it.
+
+`resume` is ruling CN21's window: after an unambiguous number auto-commits,
+the buffer stays armed for `numberEntryMs` and the next digit continues it.
+`active false` with `resume true` is the state D-CHNO-2 turns on.
+
+```bash
+scripts/dev-harness/chno-entry-scenario.sh check-tree   # no display; run by check.sh
+scripts/dev-harness/chno-entry-scenario.sh              # preflight, then the live half
+```
+
+`chno-entry-scenario.sh` is the runner scenarios N1-N16 never had. Its
+preflight runs in `scripts/check.sh` on every commit and fails 15 of its 20
+checks against an export of the pre-CN23 tree. **Its live half has not been
+run by the lane that wrote it** (that lane does not hold the display), so
+until the display lane runs it those scenarios have a runner rather than a
+result. N15, N21, N23 and N24 are deliberately not in it; the file's header
+says why for each.
+
 `fixtures/harness.m3u.in` carries the numbers the scenario asserts on: 15 of
 its 20 rows are numbered, including the duplicate pair 501, the subchannels
 7.1 and 7.2, `8-1` (which normalizes to 8.1), `0042` (to 42), a non-numeric

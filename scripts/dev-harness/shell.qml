@@ -113,6 +113,51 @@ ShellRoot {
     if (s.stopStage !== undefined) out.stopStage = s.stopStage
   }
 
+  // M2-03 10.6 / CN23. The number-entry state the four verbs answer with, in
+  // one place so `number`, `commitNumber`, `cancelNumber` and `numberState`
+  // cannot drift apart. Read defensively, like addPlayerState: a pre-M2-03
+  // guide has none of these properties, and a scenario has to run against one
+  // to show its checks failing there first (CLAUDE.md rule 10), so an
+  // undefined read must answer null rather than throw or invent a value.
+  //
+  // URL-free by construction: a buffer, a label, channel names, a scope id
+  // and a query. Nothing here ever holds a playlist URL.
+  function numberSnapshot(g) {
+    if (!g || g.numberEntry === undefined || g.numberEntry === null) {
+      return { ok: false, error: "no_verb", active: null, buffer: null, kind: null, label: null,
+               targetName: null, matches: null, ordinal: null, scopeId: null, cursorIndex: null,
+               query: null, resume: null, cursorId: null, hasNumbers: null, cursorName: null, transient: null }
+    }
+    var e = g.numberEntry
+    var r = g.numberResolution === undefined || g.numberResolution === null ? {} : g.numberResolution
+    var row = g.currentRows !== undefined && g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0 ? g.currentRows[g.cursorIndex] : null
+    return {
+      ok: true,
+      error: "",
+      active: e.active === true,
+      buffer: String(e.buffer === undefined ? "" : e.buffer),
+      kind: String(r.kind === undefined ? "" : r.kind),
+      label: String(r.label === undefined ? "" : r.label),
+      targetName: g.numberTargetName === undefined ? null : String(g.numberTargetName),
+      matches: r.matches === undefined ? 0 : r.matches,
+      ordinal: r.ordinal === undefined ? 0 : r.ordinal,
+      // The pre-entry snapshot, which is what Esc and Backspace restore.
+      scopeId: String(e.scopeId === undefined ? "" : e.scopeId),
+      cursorIndex: e.cursorIndex === undefined ? null : e.cursorIndex,
+      query: String(e.query === undefined ? "" : e.query),
+      cursorId: String(e.cursorId === undefined ? "" : e.cursorId),
+      // CN21: the window in which a digit continues the number an auto-commit
+      // closed early. Inactive AND armed is the state D-CHNO-2 turns on.
+      resume: e.resume === true,
+      hasNumbers: g.hasNumbers === undefined ? null : g.hasNumbers,
+      numberWidth: g.numberWidth === undefined ? null : g.numberWidth,
+      cursorIndexLive: g.cursorIndex,
+      cursorName: row === null ? "" : String(row.name),
+      cursorChno: row === null ? "" : String(row.chnoLabel === undefined ? "" : row.chnoLabel),
+      transient: g.transientText === undefined ? null : String(g.transientText)
+    }
+  }
+
   // The guide form as `state()` reports it: URL fields and the server pass
   // through Model.maskUrl, credentials become the mask token, and every
   // field carries its length, so a scenario can verify a paste without the
@@ -415,6 +460,51 @@ ShellRoot {
                               duplicates: ix.duplicates === undefined ? null : ix.duplicates,
                               maxLabelLen: ix.maxLabelLen === undefined ? null : ix.maxLabelLen })
     }
+    // ---- channel numbers, the GUIDE side (M2-03 10.6, ruling CN23). The
+    // four verbs the plan specified and nobody built, which is why scenarios
+    // N1-N16 and N21-N24 had no runner at all.
+    //
+    // `number` feeds one character at a time through `handleSharedKey`, which
+    // is the guide's real router for these keys and carries the listMode
+    // guard of 2.9 -- so a digit typed in search mode stays literal here for
+    // the same reason it does on a keyboard (N16), and the unnumbered-
+    // playlist transient (N14) is reached through the same routing as well.
+    // Driving pushNumberEntry directly would step over both. "<" is
+    // Backspace; anything else is refused rather than silently ignored,
+    // because a scenario that typed "x" and saw nothing would read as a pass.
+    function number(keys: string): string {
+      var g = guideLoader.item
+      if (!g || typeof g.handleNumberKey !== "function" || typeof g.handleSharedKey !== "function")
+        return JSON.stringify(harness.numberSnapshot(null))
+      var text = String(keys)
+      for (var i = 0; i < text.length; i++) {
+        var ch = text.charAt(i)
+        if (ch === "<") g.handleSharedKey({ text: "\b", modifiers: 0, key: Qt.Key_Backspace })
+        else if (Model.isNumberEntryKey(ch)) g.handleSharedKey({ text: ch, modifiers: 0, key: 0 })
+        else return JSON.stringify({ ok: false, error: "bad_key", key: ch })
+      }
+      return JSON.stringify(harness.numberSnapshot(g))
+    }
+    function numberState(): string { return JSON.stringify(harness.numberSnapshot(guideLoader.item)) }
+    // Enter and Space, with their two meanings (CN1). The answer carries the
+    // state AFTER the commit, plus what the commit reported, so a scenario
+    // sees both halves in one round trip.
+    function commitNumber(play: bool, keepOpen: bool): string {
+      var g = guideLoader.item
+      if (!g || typeof g.commitNumberEntry !== "function") return JSON.stringify(harness.numberSnapshot(null))
+      var landed = g.commitNumberEntry({ play: play, keepOpen: keepOpen, reason: "enter" })
+      var out = harness.numberSnapshot(g)
+      out.landed = landed
+      return JSON.stringify(out)
+    }
+    function cancelNumber(): string {
+      var g = guideLoader.item
+      if (!g || typeof g.cancelNumberEntry !== "function") return JSON.stringify(harness.numberSnapshot(null))
+      var cancelled = g.cancelNumberEntry()
+      var out = harness.numberSnapshot(g)
+      out.cancelled = cancelled
+      return JSON.stringify(out)
+    }
     function stop(): string { if (serviceLoader.item) serviceLoader.item.stop(); return "ok" }
     function refresh(): string { if (serviceLoader.item) serviceLoader.item.refresh(); return "ok" }
     function zap(delta: int): string { return serviceLoader.item && serviceLoader.item.zap(delta) ? "ok" : "no" }
@@ -521,7 +611,13 @@ ShellRoot {
           sourcesProbeText: g.sourcesProbeText !== undefined ? g.sourcesProbeText : "",
           invalidSettingsText: g.invalidSettingsText !== undefined ? g.invalidSettingsText : "",
           footerHint: g.footerHintText !== undefined ? String(g.footerHintText).replace(/<[^>]*>/g, "") : "",
-          form: harness.formSnapshot(g)
+          form: harness.formSnapshot(g),
+          // M2-03 10.6: the guide's own number state, so a scenario can read
+          // the entry and the column without a screenshot.
+          hasNumbers: g.hasNumbers === undefined ? null : g.hasNumbers,
+          channelOrder: g.serviceReady && g.service.channelOrder !== undefined ? String(g.service.channelOrder) : null,
+          numberEntry: harness.numberSnapshot(g),
+          numberWidth: g.numberWidth === undefined ? null : g.numberWidth
         }
       }
       if (s) {

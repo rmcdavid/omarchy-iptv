@@ -2183,6 +2183,67 @@ check("CN21: over a whole sample, nothing lands silently and everything absent i
 check("CN21: and the instant path over the same plan is untouched",
   [rate200.distinctNumbers, rate200.instantCommits, rate200.instantRate, rate200.autoCommittedEarly], [200, 180, "90.0%", 10])
 
+// ---- CN23: the scenarios of section 10.6, by name.
+//
+// Twenty of them had no runner at all and had never executed. The half of
+// each that is a DECISION runs here, against the same functions the guide
+// calls; the half that needs a cursor, a scope hop, a timer or a window is
+// driven by scripts/dev-harness/chno-entry-scenario.sh. N3, N4, N10, N15,
+// N21, N22, N23 and N24 have no decision half and are not here - see that
+// file's header for which of them were struck and why.
+const typeIdx = typer(plan, planIdx)
+check("N1: each digit extends the buffer and previews the lowest match", (() => {
+  const seen = []
+  let e = Model.numberEntry()
+  for (const d of "13") { const s = Model.numberKeyStep(e, planIdx, d, { cursorId: "a", cursorIndex: 0 }); e = s.entry; seen.push([s.entry.buffer, s.resolution.kind, s.resolution.label]) }
+  return seen
+})(), [["1", "prefix", "10"], ["13", "prefix", "130"]])
+check("N2: the window closes the entry and the footer names the channel", (() => {
+  const s = Model.numberKeyStep(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "a" }).entry, planIdx, "3", {})
+  const done = Model.numberCommitStep(s.entry, s.resolution, "Ch g", { play: false, reason: "timeout" })
+  return [done.plan.status, done.entry.active, done.entry.resume, done.plan.restore]
+})(), ["Channel 130" + Model.SEP + "Ch g", false, false, false])
+check("N5: Backspace drops one character and previews what is left", (() => {
+  const two = Model.pushNumberKey(Model.pushNumberKey(Model.numberEntry(), "1", { cursorId: "a", cursorIndex: 3 }).entry, "3", {}).entry
+  const back = Model.numberPopStep(two, planIdx)
+  return [back.entry.buffer, back.entry.active, back.resolution.label, back.cancelled, back.timer]
+})(), ["1", true, "10", false, "restart"])
+check("N6: Backspace to empty ends the entry and hands back the snapshot to restore", (() => {
+  const one = Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", query: "sky", cursorIndex: 9, cursorId: "f" }).entry
+  const back = Model.numberPopStep(one, planIdx)
+  return [back.cancelled, back.entry.active, back.timer, back.snapshot.scopeId, back.snapshot.query, back.snapshot.cursorIndex]
+})(), [true, false, "stop", "g:UK", "sky", 9])
+check("N7: Esc is the same close, and it forgets the buffer rather than arming it", (() => {
+  const one = Model.pushNumberKey(Model.numberEntry(), "1", { scopeId: "g:UK", cursorIndex: 9 }).entry
+  const done = Model.numberCommitStep(one, Model.resolveChno(planIdx, "1", "f"), "Ch a", { play: false, reason: "cancel" })
+  return [Model.closeNumberEntry(one, "cancel").buffer, Model.closeNumberEntry(one, "cancel").resume, done.snapshot.cursorIndex]
+})(), ["", false, 9])
+const miss205 = typeIdx("205", 0)
+check("N8: an unknown number reports the digits that were typed, and moves nothing",
+  [miss205.said, miss205.moved, miss205.toldNoExactly], [["No channel 205"], false, true])
+check("N9: Enter on an unknown number refuses to play and restores",
+  Model.chnoCommitPlan("none", "205", "", 0, 0, { play: true, keepOpen: true }), { restore: true, play: false, keepOpen: true, status: "No channel 205" })
+check("N11: a subchannel resolves on either separator, and the major alone waits for the window",
+  [typeIdx("7.1", 0).landedOn, typeIdx("7,1", 0).landedOn, typeIdx("7.1", 0).instant, typeIdx("7", 0).instant, typeIdx("7", 0).said],
+  ["7.1", "7.1", true, false, ["Channel 7" + Model.SEP + "Ch b"]])
+check("N12: three commits of a duplicated number give ordinals 1, 2, 1", cycle.map(c => c[1]), ["h", "i", "h"])
+check("N13: an unambiguous number commits on the last digit, with no wait",
+  [typeIdx("130", 0).instant, typeIdx("130", 0).commits, typeIdx("130", 0).landedOn], [true, 1, "130"])
+check("N14: an unnumbered playlist answers a digit with one transient, and drops the hint",
+  (() => {
+    const none = Model.buildChnoIndex(Model.prepareChannels([chan("x", "HD"), chan("y", null)]))
+    const hints = Model.footerHints({ mode: "list", hasNumbers: false }).map(h => h[0])
+    return [Model.numberKeyAction({ text: "5", hasNumbers: false }), Model.chnoStatus("noNumbers", "", "", 0, 0, true),
+      hints.indexOf("0-9"), Model.chnoColumnUnits(none.maxLabelLen), none.hasNumbers]
+  })(), ["noNumbers", "No channel numbers in this playlist", -1, 24, false])
+// N16's other half - that a digit in search mode never reaches the buffer at
+// all - is the guide's listMode guard, and it is asserted in the scenario.
+check("N16: an all-digit query stays a query, and floats the exact number match",
+  (() => {
+    const rows = Model.filterChannels(plan, "12", 20, [], planIdx)
+    return [Model.isNumericQuery("12"), rows.rows[0].id, rows.rows[0].chnoLabel]
+  })(), [true, "h", "12"])
+
 check("CN5.2: orderChannels is identity for playlist order, and for an unnumbered playlist", [Model.orderChannels(plan, "playlist", planIdx) === plan, Model.orderChannels(plan, "number", Model.buildChnoIndex([])) === plan, Model.orderChannels(plan, "", planIdx) === plan], [true, true, true])
 check("CN5.2: number order gathers by chnoSort, unnumbered channels last in playlist order", Model.orderChannels(plan, "number", planIdx).map(c => c.chnoLabel + "/" + c.id), ["7/b", "7.1/d", "7.2/c", "8/e", "10/a", "12/h", "12/i", "130/g", "139/f", "/j", "/k"])
 check("CN5.2: a duplicate pair keeps playlist order between its members", Model.orderChannels(plan, "number", planIdx).map(c => c.id).join("").indexOf("hi") >= 0, true)
