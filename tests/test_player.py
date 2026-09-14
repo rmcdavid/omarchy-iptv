@@ -359,6 +359,32 @@ class StartTest(PlayerTestCase):
         self.assertEqual(argv.count("--input-ipc-server=%s" % self.sock), 1)
         self.assertEqual(payload["warnings"], ["dropped mpvArg --log-file", "dropped mpvArg --input-ipc-server", "dropped mpvArg ; rm -rf"])
 
+    def test_an_option_that_hands_the_url_to_another_program_is_kept_and_warned_about(self):
+        # PO-10 / D-PLY-5. --ytdl is NOT reserved (PO-5): it reaches mpv, and
+        # it also reaches the user as a warning on the line the guide shows.
+        code, payload, _, stderr = self.player_start(
+            "--mpv-arg=--ytdl=yes", "--mpv-arg=--ytdl-raw-options=proxy=http://u:pw@prox.test:8080",
+            "--mpv-arg=--script-opts=ytdl_hook-ytdl_path=/tmp/mine", "--mpv-arg=--hwdec=auto-safe")
+        self.assertEqual(code, 0, stderr)
+        argv = self.spawned_argv()[0]
+        self.assertIn("--ytdl=yes", argv)                       # kept, never refused
+        self.assertLess(argv.index("--ytdl=no"), argv.index("--ytdl=yes"))
+        self.assertEqual(payload["warnings"], [
+            "mpvArg --ytdl" + helper.MPV_HANDOFF_TEXT,
+            "mpvArg --ytdl-raw-options" + helper.MPV_HANDOFF_TEXT,
+            "mpvArg --script-opts" + helper.MPV_HANDOFF_TEXT,
+        ])
+        # The warning is a sink: the value the user wrote may itself carry a
+        # credentialed URL, and none of it may cross into the reply.
+        blob = json.dumps(payload["warnings"])
+        for secret in ("prox.test", "pw", "http://", "/tmp/mine"):
+            self.assertNotIn(secret, blob, secret)
+
+    def test_the_default_settings_warn_about_nothing(self):
+        code, payload, _, stderr = self.player_start("--mpv-arg=--ytdl=no", "--mpv-arg=--profile=low-latency")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["warnings"], [])
+
     def test_stash_carries_the_source_key_of_the_cache_directory(self):
         key = "a1b2c3d4"
         per_source = os.path.join(self.cache, "sources", key)
@@ -864,6 +890,25 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(helper.PLAYER_GENERIC_FAILURE, self.fixture["genericFailure"])
         self.assertIn('var PLAYER_GENERIC_FAILURE = "%s"' % self.fixture["genericFailure"], self.model)
 
+    def test_mpv_handoff_warnings_match_every_shared_vector(self):
+        table = self.fixture["mpvHandoff"]
+        self.assertEqual(helper.MPV_HANDOFF_TEXT, table["text"])
+        self.assertIn('var MPV_HANDOFF_TEXT = "%s"' % table["text"], self.model)
+        for vector in table["cases"]:
+            self.assertEqual(helper.mpv_arg_warnings(vector["tokens"]), vector["warnings"], vector["name"])
+
+    def test_the_handoff_sets_match_model_js(self):
+        for name, js in (("MPV_HANDOFF", "MPV_HANDOFF"),
+                         ("MPV_HANDOFF_SCRIPT_OPTS", "MPV_HANDOFF_SCRIPT_OPTS"),
+                         ("MPV_YTDL_OFF", "MPV_YTDL_OFF")):
+            block = re.search(r"var %s = \{(.*?)\}" % js, self.model, re.S)
+            self.assertIsNotNone(block, js)
+            keys = set(re.findall(r'"([^"]+)":\s*true', block.group(1)))
+            self.assertEqual(keys, set(getattr(helper, name)), js)
+        # PO-5: warned about, never reserved. The two lists must not overlap.
+        self.assertEqual(helper.MPV_HANDOFF & helper.MPV_RESERVED, frozenset())
+        self.assertNotIn("--ytdl", helper.MPV_RESERVED)
+
     def test_mpv_launch_argv_matches_every_shared_vector(self):
         for vector in self.fixture["mpvArgv"]:
             args, rejected = helper.filter_mpv_args(vector["mpvArgs"])
@@ -890,6 +935,7 @@ class ParityTest(unittest.TestCase):
                              expected, vector["name"])
 
     def test_the_four_tables_are_all_present_and_non_trivial(self):
+        self.assertGreaterEqual(len(self.fixture["mpvHandoff"]["cases"]), 14)
         self.assertGreaterEqual(len(self.fixture["mpvArgv"]), 3)
         self.assertEqual(len(self.fixture["stopLadder"]), 5)
         self.assertGreaterEqual(len(self.fixture["endedVerdict"]), 12)

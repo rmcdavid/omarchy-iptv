@@ -3,6 +3,9 @@
 // installed dell-power plugin, so QA can read either without a framework).
 // ASCII only: non-ASCII expectations are written as \uXXXX escapes.
 const Model = require("../Model.js")
+// The shared vectors both languages run (CLAUDE.md: a rule written twice gets
+// one fixture). tests/test_player.py reads the same file.
+const PLAYER_FIXTURE = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures", "player-argv.json"), "utf-8"))
 
 let failures = 0
 let checks = 0
@@ -17,6 +20,20 @@ function check(name, actual, expected) {
     failures++
     console.log("FAIL " + name + "\n     got:  " + a + "\n     want: " + e)
   }
+}
+
+// A check whose *expression* may not exist yet. A missing Model export
+// throws before check() is ever called, which aborts the whole run and hides
+// every later count - so the before/after counts CLAUDE.md 11 asks for
+// cannot be compared. This turns that into one ordinary failure.
+function checkCall(name, produce, expected) {
+  let actual
+  try {
+    actual = produce()
+  } catch (error) {
+    actual = "threw: " + error.message
+  }
+  check(name, actual, expected)
 }
 
 const SEP = " \u00b7 "
@@ -316,11 +333,11 @@ check("clampSetting barLabelMaxWidth range", [Model.clampSetting("barLabelMaxWid
 check("clampSetting unknown key passthrough", Model.clampSetting("nope", "v"), "v")
 
 // ---- mpv ----
-check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency --hwdec=auto-safe --no-osc "), { args: ["--profile=low-latency", "--hwdec=auto-safe", "--no-osc"], rejected: [] })
-check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"] })
+check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency --hwdec=auto-safe --no-osc "), { args: ["--profile=low-latency", "--hwdec=auto-safe", "--no-osc"], rejected: [], warnings: [] })
+check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"], warnings: [] })
 check("splitMpvArgs rejects --script and --config-dir", Model.splitMpvArgs("--script=/e.lua --config-dir=/x --scripts=/y --input-ipc-client=fd://3").args, [])
-check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [] })
-check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"] })
+check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [], warnings: [] })
+check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: [] })
 check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
@@ -372,6 +389,37 @@ check("--ytdl stays unreserved (PO-5) and still sorts after the built-in --ytdl=
   const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
   return [r.args, a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes")]
 })(), [["--ytdl=yes"], true])
+
+// ---- PO-10 / D-PLY-5: the options that hand the URL to another program ----
+// Not refused (PO-5 keeps the escape hatch), but never silent. The vectors
+// are the ones tests/test_player.py runs against the python mirror.
+const HANDOFF = PLAYER_FIXTURE.mpvHandoff
+const HANDOFF_TEXT = HANDOFF.text
+checkCall("the handoff wording is the one in the shared fixture", () => Model.MPV_HANDOFF_TEXT, HANDOFF_TEXT)
+HANDOFF.cases.forEach(vector => {
+  checkCall("mpvArgWarnings: " + vector.name, () => Model.mpvArgWarnings(vector.tokens), vector.warnings)
+})
+checkCall("splitMpvArgs carries the warning for the tokens it KEEPS", () => Model.splitMpvArgs("--ytdl=yes --hwdec=auto"),
+  { args: ["--ytdl=yes", "--hwdec=auto"], rejected: [], warnings: ["mpvArg --ytdl" + HANDOFF_TEXT] })
+checkCall("a REJECTED token never warns: it never reaches mpv (--script is reserved)",
+  () => Model.splitMpvArgs("--script=/tmp/ytdl_hook.lua --script-opts=ytdl_hook-ytdl_path=/tmp/x").warnings,
+  ["mpvArg --script-opts" + HANDOFF_TEXT])
+checkCall("the warning names the option and never its value (a proxy URL stays out of the sink)", () => {
+  const w = Model.splitMpvArgs("--ytdl-raw-options=proxy=http://u:pw@prox.test:8080").warnings
+  return [w.length, w[0].indexOf("prox.test") !== -1, w[0].indexOf("pw") !== -1, w[0]]
+}, [1, false, false, "mpvArg --ytdl-raw-options" + HANDOFF_TEXT])
+checkCall("mpvOptionBase collapses mpv's list-option spellings onto one option", () => [Model.mpvOptionBase("--ytdl-raw-options-append"), Model.mpvOptionBase("--script-opts-set"), Model.mpvOptionBase("--ytdl"), Model.mpvOptionBase("--script-opt")], ["--ytdl-raw-options", "--script-opts", "--ytdl", "--script-opt"])
+
+// The warning reaches the user through the ONE line the guide already shows
+// (Guide.qml warningText -> Model.footerWarning), by naming its own kind.
+checkCall("a labelled warning keeps its own wording inside the playlist list", () => Model.footerWarning(Model.labelWarnings(["mpvArg --ytdl" + HANDOFF_TEXT], "player"), []),
+  "Player warning: mpvArg --ytdl hands the stream address to another program")
+checkCall("an unlabelled playlist warning is unchanged (D-LIVE-18 wording holds)", () => [Model.footerWarning(["truncated to 50,000 channels"], []), Model.footerWarning([], ["1 programme dropped"])],
+  ["Playlist warning: truncated to 50,000 channels", "Guide data warning: 1 programme dropped"])
+checkCall("the player's line comes first and counts the playlist's as +1 more", () => Model.footerWarning(Model.labelWarnings(["mpvArg --ytdl" + HANDOFF_TEXT], "player").concat(["truncated to 50,000 channels"]), []),
+  "Player warning: mpvArg --ytdl hands the stream address to another program (+1 more)")
+checkCall("labelWarnings is idempotent and drops nothing", () => Model.labelWarnings(Model.labelWarnings(["a"], "player"), "player"), ["Player warning: a"])
+checkCall("warningLabel names the kind an entry already declares", () => [Model.warningLabel("Player warning: x"), Model.warningLabel("Guide data warning: x"), Model.warningLabel("Playlist warning: x"), Model.warningLabel("plain")], ["player", "epg", "playlist", ""])
 
 // ---- helper `player` verb argv (ARCHITECTURE-PLAYER.md 4.3) ----
 check("playerStartArgv: every value its own argv member, user tokens repeated",

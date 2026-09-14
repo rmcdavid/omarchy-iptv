@@ -85,6 +85,33 @@
       ]
     }
   ],
+  "mpvHandoff": {
+    "_comment": [
+      "PO-10 / D-PLY-5: the options that are ALLOWED but hand the stream",
+      "address to a second program. Run by Model.mpvArgWarnings (JS) and by",
+      "mpv_arg_warnings (python); `warnings` is what both must return for",
+      "`tokens`. Only the option name may appear in a warning - the value can",
+      "carry a credentialed URL of its own."
+    ],
+    "text": " hands the stream address to another program",
+    "cases": [
+      { "name": "the default settings warn about nothing", "tokens": ["--profile=low-latency", "--hwdec=auto-safe", "--cache=yes"], "warnings": [] },
+      { "name": "--ytdl=yes is the documented escape hatch and the documented cost", "tokens": ["--ytdl=yes"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "the bare flag means yes", "tokens": ["--ytdl"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "--ytdl=1 and --ytdl=true are the same option turned on", "tokens": ["--ytdl=1"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "writing the default out in full is silent", "tokens": ["--ytdl=no"], "warnings": [] },
+      { "name": "so is the --no- form, which turns the handoff off", "tokens": ["--no-ytdl"], "warnings": [] },
+      { "name": "case does not matter in the flag value", "tokens": ["--ytdl=YES"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
+      { "name": "yt-dlp's raw options configure the same handoff", "tokens": ["--ytdl-raw-options=proxy=http://u:pw@prox.test:8080"], "warnings": ["mpvArg --ytdl-raw-options hands the stream address to another program"] },
+      { "name": "and so do its list forms", "tokens": ["--ytdl-raw-options-append=cookies=/tmp/c.txt"], "warnings": ["mpvArg --ytdl-raw-options-append hands the stream address to another program"] },
+      { "name": "--ytdl-format reaches it too", "tokens": ["--ytdl-format=best"], "warnings": ["mpvArg --ytdl-format hands the stream address to another program"] },
+      { "name": "a script option that names the hook chooses which program gets the address", "tokens": ["--script-opts=ytdl_hook-ytdl_path=/tmp/mine"], "warnings": ["mpvArg --script-opts hands the stream address to another program"] },
+      { "name": "--script-opt is mpv's alias for --script-opts-append", "tokens": ["--script-opt=ytdl_hook-try_ytdl_first=yes"], "warnings": ["mpvArg --script-opt hands the stream address to another program"] },
+      { "name": "a script option that does not reach the hook is silent", "tokens": ["--script-opts=osc-scalewindowed=2"], "warnings": [] },
+      { "name": "one line per option, in the order the user wrote them", "tokens": ["--ytdl=yes", "--hwdec=auto", "--ytdl-format=best", "--ytdl=yes"], "warnings": ["mpvArg --ytdl hands the stream address to another program", "mpvArg --ytdl-format hands the stream address to another program"] },
+      { "name": "an empty setting warns about nothing", "tokens": [], "warnings": [] }
+    ]
+  },
   "mpvReserved": [
     "--input-ipc-server",
     "--wayland-app-id",
