@@ -162,8 +162,28 @@ def sleeper(token, ignore_term=False):
     if ignore_term:
         code += "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
     code += "time.sleep(30)\n"
-    return subprocess.Popen(["python3", "-c", code, token],
-                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen(["python3", "-c", code, token],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Installing SIG_IGN takes an interpreter start, and a rung that spends
+    # none of its grace can deliver SIGTERM inside that window - which would
+    # make the double DIE where the real wedged mpv it stands for survives
+    # (CLAUDE.md 10). Wait for the mask rather than for a guessed delay.
+    if ignore_term:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not ignores_term(process.pid):
+            time.sleep(0.01)
+    return process
+
+
+def ignores_term(pid):
+    """True once /proc/<pid>/status says SIGTERM is in the ignored mask."""
+    try:
+        for line in pathlib.Path("/proc/%d/status" % pid).read_text().splitlines():
+            if line.startswith("SigIgn:"):
+                return bool(int(line.split()[1], 16) & (1 << (signal.SIGTERM - 1)))
+    except Exception:
+        return False
+    return False
 
 
 def wait_gone(process, timeout=6.0):
@@ -495,9 +515,14 @@ class LadderTest(PlayerTestCase):
     """The ladder with an injected clock: quit at 0, SIGTERM at 2 s, SIGKILL
     at 4 s, and never a signal to a pid that is no longer the player."""
 
-    def clock(self):
+    def clock(self, quit_cost=0.0):
+        """`quit_cost` is what the quit rung's own IPC attempt costs before
+        the ladder waits for anything: 0 for a player that answers (or a
+        socket that is not there at all), the full --ipc-timeout for a wedged
+        one, which is the D-PLY-6 case."""
         marks = []
         state = {"now": 1000.0}
+        self.clock_state = state
 
         def monotonic():
             return state["now"]
@@ -516,7 +541,9 @@ class LadderTest(PlayerTestCase):
 
         def record_quit(path, timeout):
             marks.append((round(state["now"] - 1000.0, 2), "quit"))
-            return original_quit(path, timeout)
+            result = original_quit(path, timeout)
+            state["now"] += quit_cost         # an unresponsive player: no answer, no exception
+            return result
 
         helper._monotonic, helper._sleep = monotonic, sleep
         helper.signal_targets, helper.quit_over_ipc = record_signal, record_quit
@@ -541,6 +568,48 @@ class LadderTest(PlayerTestCase):
         self.assertAlmostEqual(marks[1][0], 2.0, delta=0.3)
         self.assertAlmostEqual(marks[2][0], 4.0, delta=0.3)
         self.assertTrue(wait_gone(stubborn))
+
+    def test_a_wedged_players_quit_wait_does_not_push_the_ladder_past_its_budget(self):
+        # D-PLY-6. Against a player that is not answering, `request(["quit"])`
+        # spends the whole --ipc-timeout before the ladder waits for
+        # anything, and that cost used to sit OUTSIDE the 2 s grace: SIGTERM
+        # arrived at 4 s, SIGKILL at 6 s, and a wedged player took ~6.27 s to
+        # reap (6258 / 6265 / 6269 / 6276 ms, live) against a 4.5 s budget.
+        # Each rung's grace is measured from the rung's own start, so the
+        # timeline is the one the README and section 4.9 describe.
+        os.makedirs(self.runtime, 0o700)
+        stubborn = self.sleeper(ignore_term=True)
+        marks = self.clock(quit_cost=2.0)
+        code, payload, _, stderr = run("player", "stop", "--socket", self.sock, "--seq", "5", "--ipc-timeout", "2")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual([mark[1] for mark in marks], ["quit", signal.SIGTERM, signal.SIGKILL])
+        self.assertEqual(marks[0][0], 0.0)
+        self.assertAlmostEqual(marks[1][0], 2.0, delta=0.3)     # was 4.0
+        self.assertAlmostEqual(marks[2][0], 4.0, delta=0.3)     # was 6.0
+        elapsed = self.clock_state["now"] - 1000.0
+        self.assertLessEqual(elapsed, 4.5, "the ladder must finish inside its 4.5 s budget")
+        self.assertEqual(payload["rung"], "kill")
+        self.assertFalse(payload["running"])
+        self.assertTrue(wait_gone(stubborn))
+
+    def test_a_responsive_player_still_gets_a_clean_quit_and_the_whole_grace(self):
+        # The other half of D-PLY-6: counting the IPC cost inside the grace
+        # must not cost a player that answers. It is asked politely first and
+        # still has the full two seconds to go, which is about six times what
+        # one has ever needed (273-331 ms measured).
+        os.makedirs(self.runtime, 0o700)
+        victim = self.sleeper()
+        marks = self.clock(quit_cost=0.01)
+        code, payload, _, stderr = run("player", "stop", "--socket", self.sock, "--seq", "8", "--ipc-timeout", "2")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(marks[0][1], "quit")
+        self.assertEqual(marks[0][0], 0.0)
+        # The sleeper ignores `quit` (it has no socket), so SIGTERM follows -
+        # and it follows at 2 s, with the grace spent waiting rather than
+        # dialling.
+        self.assertEqual(marks[1][1], signal.SIGTERM)
+        self.assertAlmostEqual(marks[1][0], 2.0, delta=0.3)
+        self.assertTrue(wait_gone(victim))
 
     def test_from_term_skips_the_quit_rung(self):
         os.makedirs(self.runtime, 0o700)
