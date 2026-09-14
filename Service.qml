@@ -280,6 +280,10 @@ Item {
   property bool reconcilePending: false     // resolve nowPlaying once the cache lands
   property string playerSourceKey: ""       // the source the recovered stash belongs to
   property int playerSocketError: 0         // last QLocalSocket::LocalSocketError, diagnostics only
+  // A stop whose EOF never came, so the ladder did not end the player. The
+  // stop is detached and its reply is by design unobservable, so this is
+  // the only way to notice one that was refused (4.9, 4.10).
+  property bool stopConfirmPending: false
   // Whose failure has already been toasted for this play. `player start`'s
   // own first-load window and socket EOF are two independent detectors of
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
@@ -360,6 +364,9 @@ Item {
     root.lastError = ""
     root.failedAt = Model.withoutFailed(root.failedAt, key)
     root.notifiedFailureId = ""
+    // A play cancels a pending stop-confirmation: the player that is coming
+    // up is wanted, whatever the one before it did.
+    root.stopConfirmPending = false
     root.playSeq += 1                       // every play is a new intent (4.10)
     root.previousPlaying = root.playerUp ? root.nowPlaying : null
     root.nowPlaying = {
@@ -1113,8 +1120,23 @@ Item {
       return
     }
     // Ordering survives the restart: the next intent is one past whatever
-    // the lock file recorded (4.10).
+    // the lock file recorded (4.10). This is also the repair for a sequence
+    // that some other launcher pushed ahead of ours.
     root.playSeq = Math.max(root.playSeq, probe.seq + 1)
+    if (root.stopConfirmPending) {
+      root.stopConfirmPending = false
+      if (probe.running) {
+        // The stop was refused and the player is still there. Now that the
+        // sequence is resynced, the ladder cannot be superseded again.
+        console.warn("omarchy-iptv: stopping a player that survived a superseded stop")
+        root.stopForeignPlayer()
+      } else {
+        root.playerWanted = false
+        playerSocketTimer.stop()
+        root.playerPending = false
+      }
+      return
+    }
     if (!probe.running) {
       root.playerWanted = false
       playerSocketTimer.stop()
@@ -1359,6 +1381,7 @@ Item {
     root.playerWanted = false
     root.userStopped = false
     root.relaunchPending = false
+    root.stopConfirmPending = false     // the EOF is the confirmation
     root.pendingPlayId = ""
     root.playRetries = 0
     root.healthSkips = 0
@@ -2194,12 +2217,26 @@ Item {
     // Backstop for `stopping` (4.10): normally cleared by the socket EOF
     // that confirms the death. A stop issued with no player attached has no
     // EOF coming, so this releases it.
+    //
+    // It is also where a stop that did NOT take is caught. `player stop` is
+    // detached, so its reply is unobservable by construction, and it aborts
+    // as `superseded` whenever the lock record holds a higher `--seq` than
+    // ours - which a terminal `omarchy-iptv player stop` (the documented
+    // uninstall escape hatch) or any other launcher leaves behind. Found
+    // live: the UI went idle while the player kept playing. One probe
+    // re-reads the record, and applyProbe() then stops it with a sequence
+    // that is past whatever is recorded.
     id: stopSettleTimer
     interval: root.stopSettleMs
     repeat: false
     onTriggered: {
       root.stopAt = 0
       root.userStopped = false
+      if (root.nowPlaying !== null || root.stopConfirmPending) return
+      if (!root.socketAttached() && !root.playerUp) return
+      console.warn("omarchy-iptv: the player outlived a stop, re-reading its sequence")
+      root.stopConfirmPending = true
+      root.runPlayerProbe()
     }
   }
 

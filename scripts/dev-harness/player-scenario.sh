@@ -15,11 +15,15 @@
 #   P6  stop              now-playing clears at once, nothing survives, socket unlinked
 #   P7  dead stream       failure detected, channel marked, reason host-only
 #   P8  two services      a second shell on the same runtime dir adopts, never spawns
+#   P10 superseded stop   a lock sequence pushed ahead by another launcher does not
+#                         turn every later stop into a silent no-op
 #   P9  reap              the harness teardown still finds a detached grandchild
 #
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
-# tree and run the same checks against it. P2, P3, P4 and P8 MUST fail there;
-# the rest are regression guards that must pass on both.
+# tree and run the same checks against it. Against the last pre-M2-02 commit
+# P2, P3, P4, P5, P6 and P8 MUST fail; P10 is evidence against the first
+# detached-player commit, which is the code that shipped that bug. The rest
+# are regression guards that must pass on both.
 #
 #   ./scripts/dev-harness/player-scenario.sh
 #   ./scripts/dev-harness/player-scenario.sh --baseline <pre-M2-02 ref>
@@ -251,6 +255,28 @@ is "P6 no player process survives the ladder" "$(player_count)" "0"
 until_eq 0 4 windows_named || true
 is "P6 no omarchy-iptv window survives" "$(windows_named)" "0"
 ck "P6 the socket file was unlinked" '[[ ! -e "$SOCK" ]]'
+
+echo "== P10 a stop that the lock record would supersede still ends the player"
+# Found in the live pass: `player stop` is detached, so a `superseded`
+# refusal is invisible to the service, and anything that leaves a higher
+# --seq in the lock file (a terminal `omarchy-iptv player stop`, another
+# launcher) made every later stop a silent no-op - the UI went idle with the
+# player still playing. The service must notice and finish the job.
+ipc play "t:live1" >/dev/null
+until_eq 1 15 player_count || bad "P10 no player to stop"
+cache=$(ipc activeCache)
+python3 "$PLUGIN_ROOT/bin/omarchy-iptv" player start --socket "$SOCK" --cache-dir "$cache" \
+  --id "t:live1" --seq 9999 >>"$LOG" 2>&1
+lock_seq=$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("seq"))
+except Exception: print("")' "$SCRATCH/runtime/omarchy-iptv/player.lock")
+is "P10 another launcher pushed the lock sequence ahead" "$lock_seq" "9999"
+is "P10 it adopted rather than spawning" "$(player_count)" "1"
+ipc stop >/dev/null
+is "P10 the UI drops the channel at once" "$(svc "d['playing']")" "false"
+until_eq 0 14 player_count || true
+is "P10 the player is gone despite the superseded first stop" "$(player_count)" "0"
+ck "P10 the socket file was unlinked" '[[ ! -e "$SOCK" ]]'
 
 echo "== P7 a dead stream is detected, named and marked"
 ipc play "t:dead1" >/dev/null
