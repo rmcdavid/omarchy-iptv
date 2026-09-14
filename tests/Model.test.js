@@ -262,7 +262,7 @@ check("trimRecents", Model.trimRecents({ version: 1, favorites: [], recents: [{ 
 check("trimRecents returns same object when within cap", (() => { const st = Model.emptyState(); return Model.trimRecents(st, 5) === st })(), true)
 check("parseState tolerates garbage", Model.parseState("not json"), Model.emptyState())
 check("parseState sanitizes", Model.parseState('{"favorites":["a","a",""],"recents":[{"id":"x","name":"X","at":"7"},{"bad":1}],"lastPlayed":{"id":"x"}}'),
-  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, sources: [] })
+  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, session: null, sources: [] })
 check("parseState tolerates unknown keys", Model.parseState('{"version":9,"favorites":["a"],"future":true}').favorites, ["a"])
 check("isFavorite", [Model.isFavorite(state, "5"), Model.isFavorite(state, "4"), Model.isFavorite(null, "5")], [true, false, false])
 check("withFailed / withoutFailed are copies", (() => { const a = {}; const b = Model.withFailed(a, "x", "21:12"); const c = Model.withoutFailed(b, "x"); return [Object.keys(a).length, b.x, Object.keys(c).length] })(), [0, "21:12", 0])
@@ -564,7 +564,7 @@ check("endedVerdict: a file_error carrying a URL is redacted", Model.endedVerdic
 
 // ---- shared vectors with the Python mirror (tests/fixtures/player-argv.json) ----
 const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
-check("player fixture has all three tables", [playerFixture.mpvArgv.length > 0, playerFixture.stopLadder.length, playerFixture.endedVerdict.length > 0, playerFixture.genericFailure], [true, 5, true, Model.PLAYER_GENERIC_FAILURE])
+check("player fixture has all four tables", [playerFixture.mpvArgv.length > 0, playerFixture.stopLadder.length, playerFixture.endedVerdict.length > 0, playerFixture.session.length > 0, playerFixture.genericFailure], [true, 5, true, true, Model.PLAYER_GENERIC_FAILURE])
 check("player fixture pins the whole reserved set", playerFixture.mpvReserved.slice().sort(), Object.keys(Model.MPV_RESERVED).sort())
 for (const v of playerFixture.mpvArgv) {
   const filtered = Model.splitMpvArgs((v.mpvArgs || []).join(" "))
@@ -576,6 +576,12 @@ for (const v of playerFixture.stopLadder) {
 }
 for (const v of playerFixture.endedVerdict) {
   check("fixture endedVerdict: " + v.name, Model.endedVerdict(v.endFile, v.userStopped, v.stopping), v.verdict)
+}
+// The session record is read by Model.parseState here and by normalize_state
+// in tests/test_state.py, from the same bytes (section 8, PO-3).
+for (const v of playerFixture.session) {
+  check("fixture session: " + v.name, Model.parseState(JSON.stringify(v.state)).session, v.record)
+  check("fixture session via stateSession: " + v.name, Model.stateSession(Model.parseState(JSON.stringify(v.state))), v.record)
 }
 
 // ---- playlist warnings (D-LIVE-18) ----
@@ -849,11 +855,11 @@ check("sourceDetail never carries error text (SR26): errorReason stays on the vi
 check("sourceAccessibleName", [Model.sourceAccessibleName(views4[0]), Model.sourceAccessibleName(Model.sourceView(recCli, "", nowSep))], ["Provider, tv.example.net:8080, 1,475 channels in 28 groups, active, EPG, last used 21:30", "iptv-org, iptv-org.github.io, not loaded yet, never used"])
 
 // ---- state v2 and reducers (ARCHITECTURE-SOURCES 2.1, 2.2, 3.5) ----
-check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: [] })
-check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, sources: [recFile] })
+check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [] })
+check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, session: null, sources: [recFile] })
 check("cloneState copies the arrays", (() => { const src = { sources: [recFile] }; const out = Model.cloneState(src); out.sources.push(recNas); return src.sources.length })(), 1)
 check("withCacheLayout", [Model.withCacheLayout(state4, 0).cacheLayout, Model.withCacheLayout(Model.emptyState(), 2).cacheLayout, Model.withCacheLayout(Model.emptyState(), 5).cacheLayout], [0, 2, 0])
-check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, sources: [] })
+check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, session: null, sources: [] })
 check("parseState v2 round-trips records", Model.parseState(JSON.stringify(state4)).sources, state4.sources)
 check("parseState drops invalid records, duplicate urls and keys keep the first", Model.parseState(JSON.stringify({ version: 2, sources: [recNas, { key: "bad key", url: "http://x.test/" }, { key: "22222222", url: recNas.url }, { key: "11111111", url: "http://other.test/" }, { key: "33333333", url: "" }, "junk"] })).sources.map(s => s.key), ["11111111"])
 check("parseState coerces and defaults a sparse record", Model.parseState(JSON.stringify({ version: 2, sources: [{ key: "abcdef12", url: "http://h.test/x", channelCount: "7", origin: "weird", labelCustom: "yes" }] })).sources[0], { key: "abcdef12", url: "http://h.test/x", epgUrl: "", kind: "http", label: "h.test", labelCustom: false, origin: "guide", addedAt: 0, lastUsed: 0, fetchedAt: 0, channelCount: 7, groupCount: 0 })
@@ -864,6 +870,38 @@ check("withFavorites carries sources", Model.withFavorites(state4, ["c1"]).sourc
 check("removeRecent carries sources", Model.removeRecent(state4, "x").sources.length, 4)
 check("trimRecents carries sources", Model.trimRecents({ ...state4, recents: [{ id: "1" }, { id: "2" }] }, 1).sources.length, 4)
 check("normalizeSourceRecord rejects junk", [Model.normalizeSourceRecord(null), Model.normalizeSourceRecord({ key: "abcdef12", url: "x".repeat(2049) })], [null, null])
+
+// ---- the session record (ARCHITECTURE-PLAYER.md 4.6, section 8, ruling PO-3) ----
+// What the player was last ASKED to play, so a shell that comes back to a dead
+// player knows which row to mark failed in the guide without a toast minutes
+// late. Additive and nullable: STATE_VERSION stays 2, a file without the key
+// reads as null, and an older build drops it. Python mirror: normalize_state.
+const sessionState = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD", url: "http://u:p@h.test/s.m3u8" }, 10, 1758000123)
+check("recordPlayed writes session beside lastPlayed", [sessionState.session, sessionState.lastPlayed], [{ id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }, { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }])
+check("the session record never carries a URL", JSON.stringify(sessionState.session).indexOf("://"), -1)
+check("session survives the service's own write-then-read (JSON.stringify -> parseState)", Model.parseState(JSON.stringify(sessionState, null, 2)).session, { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 })
+check("a state file written before the key reads as a null session", [Model.emptyState().session, Model.parseState('{"version":2,"favorites":["a"],"lastPlayed":null}').session, Model.parseState("not json").session], [null, null, null])
+check("parseState coerces a sparse session, drops one without an id and one that is not an object", [
+  Model.parseState('{"session":{"id":"t:x"}}').session,
+  Model.parseState('{"session":{"id":"t:y","name":7,"at":"1758000123"}}').session,
+  Model.parseState('{"session":{"name":"no id","at":5}}').session,
+  Model.parseState('{"session":"junk"}').session
+], [{ id: "t:x", name: "", at: 0 }, { id: "t:y", name: "7", at: 1758000123 }, null, null])
+check("clearSession empties the key and keeps the rest", (() => { const st = Model.clearSession(Model.withFavorites(sessionState, ["t:f"])); return [st.session, st.lastPlayed, st.favorites, st.recents.length] })(), [null, { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }, ["t:f"], 1])
+check("clearSession returns the same object when there is nothing to clear (no needless write)", (() => { const st = Model.emptyState(); return [Model.clearSession(st) === st, Model.clearSession(sessionState) === sessionState] })(), [true, false])
+check("clearSession does not mutate its input", (() => { Model.clearSession(sessionState); return sessionState.session.id })(), "t:bbc1.uk")
+check("a zap moves the session on, a channel with no id at all leaves both records alone", (() => {
+  const zapped = Model.recordPlayed(sessionState, { tvgId: "bbc2.uk", name: "BBC Two" }, 10, 1758000200)
+  const nameless = Model.recordPlayed(sessionState, null, 10, 1758000300)
+  return [zapped.session.id, nameless.session, nameless.lastPlayed.id]
+})(), ["t:bbc2.uk", sessionState.session, "t:bbc1.uk"])
+check("stateSession normalizes on the way out and never throws", [Model.stateSession(sessionState), Model.stateSession({ session: { id: "t:z", at: "9" } }), Model.stateSession({ session: { name: "no id" } }), Model.stateSession(Model.emptyState()), Model.stateSession(null)], [{ id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }, { id: "t:z", name: "", at: 9 }, null, null, null])
+check("every reducer carries the session through (cloneState)", [
+  Model.withFavorites(sessionState, ["a"]).session,
+  Model.removeRecent(sessionState, "t:bbc1.uk").session,
+  Model.trimRecents({ ...sessionState, recents: [{ id: "1" }, { id: "2" }] }, 1).session,
+  Model.withCacheLayout(sessionState, 2).session
+], [sessionState.session, sessionState.session, sessionState.session, sessionState.session])
 
 const addOk = Model.addSource(Model.emptyState(), { playlistUrl: " HTTP://Provider.Example.TEST:80/get.php?username=u&password=p&type=m3u_plus&output=ts ", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", label: "", origin: "xtream" }, 1000)
 check("addSource normalizes, derives the label, allocates the key", [addOk.ok, addOk.key, addOk.state.sources[0]], [true, "d990c2e4", { key: "d990c2e4", url: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", kind: "http", label: "provider.example.test", labelCustom: false, origin: "xtream", addedAt: 1000, lastUsed: 1000, fetchedAt: 0, channelCount: 0, groupCount: 0 }])

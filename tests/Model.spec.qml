@@ -151,6 +151,29 @@ TestCase {
     compare(Model.parseState("garbage"), Model.emptyState())
   }
 
+  function test_sessionRecord() {
+    // ARCHITECTURE-PLAYER.md 4.6 / section 8 / PO-3: what the player was last
+    // ASKED to play, so a shell that comes back to a dead player can mark that
+    // row failed in the guide instead of toasting minutes after the fact.
+    // Additive and nullable - STATE_VERSION stays 2 and a file without the key
+    // reads as null, which is what an upgrade from v0.2.0 hands us.
+    var played = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD", url: "http://u:p@h.test/s.m3u8" }, 10, 1758000123)
+    compare(played.session, { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 })
+    compare(JSON.stringify(played.session).indexOf("://"), -1)
+    // The service writes JSON.stringify(userState, null, 2) and reads it back
+    // through parseState: the key has to survive that round trip.
+    compare(Model.parseState(JSON.stringify(played, null, 2)).session, played.session)
+    compare(Model.parseState('{"version":2,"favorites":["a"]}').session, null)
+    compare(Model.parseState('{"session":{"name":"no id"}}').session, null)
+    compare(Model.parseState('{"session":{"id":"t:x","at":"7"}}').session, { id: "t:x", name: "", at: 7 })
+    compare(Model.clearSession(played).session, null)
+    compare(Model.clearSession(played).lastPlayed, played.session)   // Recents is untouched
+    compare(Model.clearSession(Model.emptyState()).session, null)
+    compare(Model.stateSession(played), played.session)
+    compare(Model.stateSession(Model.emptyState()), null)
+    compare(Model.stateSession(null), null)
+  }
+
   function test_settingsClamps() {
     var s = Model.settingsFrom({ refreshMinutes: "5", barLabelMaxWidth: 9999, maxRecents: 0, playlistUrl: " http://x " })
     compare(s.refreshMinutes, 15)
@@ -354,7 +377,7 @@ TestCase {
   }
 
   function test_stateV2AndReducers() {
-    compare(Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: [] })
+    compare(Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [] })
     var v1 = Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[],"lastPlayed":null}')
     compare(v1.version, 2)
     compare(v1.favorites, ["t:bbc1.uk"])

@@ -46,6 +46,9 @@ var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
 // state.json schema (docs/ARCHITECTURE-SOURCES.md 2.1): version 2 adds the
 // `sources` history and `cacheLayout`; parseState still reads version 1.
+// The optional nullable `session` key (docs/ARCHITECTURE-PLAYER.md 8) is
+// additive and does NOT bump this: both readers whitelist the keys they
+// know, so an older build drops it and a newer one reads its absence.
 var STATE_VERSION = 2
 
 // Column / scope ids (UX.md 2.2, 2.7). Real groups are "g:<group name>".
@@ -766,7 +769,18 @@ function nextInGroup(list, currentId, delta) {
 // ------------------------------------------------------------ state
 
 function emptyState() {
-  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: [] }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [] }
+}
+
+// One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
+// and `session` all share (python mirror: `normalize_played`). A value
+// without an `id` is dropped, which is also how a state file written
+// before the key existed reads its missing `session` as null.
+function playedRecord(entry) {
+  if (!entry || typeof entry !== "object" || !entry.id) return null
+  // Math.trunc, not Math.floor: python's int() truncates toward zero, and the
+  // shared fixture pins the two readers to the same answer on the same bytes.
+  return { id: String(entry.id), name: str(entry.name), at: Math.trunc(Number(entry.at)) || 0 }
 }
 
 // Every reducer builds its result here so `sources` and `cacheLayout` are
@@ -779,6 +793,7 @@ function cloneState(state, patch) {
     favorites: asList(st.favorites).slice(),
     recents: asList(st.recents).slice(),
     lastPlayed: st.lastPlayed || null,
+    session: st.session || null,
     sources: asList(st.sources).slice()
   }
   var p = patch || {}
@@ -822,16 +837,16 @@ function parseState(text) {
     }
   }
   var recs = asList(parsed.recents)
-  if (recs.length > 0) {
-    for (var r = 0; r < recs.length; r++) {
-      var entry = recs[r]
-      if (!entry || typeof entry !== "object" || !entry.id) continue
-      state.recents.push({ id: String(entry.id), name: str(entry.name), at: Number(entry.at) || 0 })
-    }
+  for (var r = 0; r < recs.length; r++) {
+    var entry = playedRecord(recs[r])
+    if (entry) state.recents.push(entry)
   }
-  if (parsed.lastPlayed && typeof parsed.lastPlayed === "object" && parsed.lastPlayed.id) {
-    state.lastPlayed = { id: String(parsed.lastPlayed.id), name: str(parsed.lastPlayed.name), at: Number(parsed.lastPlayed.at) || 0 }
-  }
+  state.lastPlayed = playedRecord(parsed.lastPlayed)
+  // The detached player's session record (ARCHITECTURE-PLAYER.md 4.6 and
+  // section 8): optional, nullable, and no version bump - STATE_VERSION
+  // stays 2 because both readers whitelist the keys they know, so a file
+  // without it reads as null and a v0.2.0 build simply drops it.
+  state.session = playedRecord(parsed.session)
   return state
 }
 
@@ -864,14 +879,41 @@ function pushRecent(recents, channel, max, nowSec) {
 }
 
 // New state object after the play command (R5: recorded on the command, not
-// on playback success).
+// on playback success). `lastPlayed` and `session` are the same record
+// under two different lifetimes: `lastPlayed` is the Recents memory and
+// survives everything, `session` is "what the player was last asked to
+// play" and is cleared the moment the player stops or ends cleanly
+// (ARCHITECTURE-PLAYER.md section 8). A record left behind therefore means
+// the player died with no shell attached to notice, which is the one thing
+// a reattach needs in order to mark that channel failed in the guide
+// instead of raising a toast minutes late (ruling PO-3). It carries a
+// channel id, a display name and a clock - never a URL, because a display
+// name is never a URL (prepareChannels) and the id is a tvg-id or a hash.
 function recordPlayed(state, channel, max, nowSec) {
   var st = state || emptyState()
   var id = channelId(channel)
+  var played = id === "" ? null : { id: id, name: str(channel.name), at: Math.floor(Number(nowSec) || 0) }
   return cloneState(st, {
     recents: pushRecent(st.recents, channel, max, nowSec),
-    lastPlayed: id === "" ? st.lastPlayed || null : { id: id, name: str(channel.name), at: Math.floor(Number(nowSec) || 0) }
+    lastPlayed: played || st.lastPlayed || null,
+    session: played || st.session || null
   })
+}
+
+// The player stopped, ended cleanly, or its channel has just been marked
+// failed on reattach: the session record has done its job. Returns the SAME
+// object when there is nothing to clear, so a caller can skip the write.
+function clearSession(state) {
+  var st = state || emptyState()
+  if (!st.session) return st
+  return cloneState(st, { session: null })
+}
+
+// What the player was last asked to play, or null. Normalizing on the way
+// out means a hand-edited or truncated record can never reach the guide as
+// half a channel.
+function stateSession(state) {
+  return state ? playedRecord(state.session) : null
 }
 
 function withFavorites(state, favorites) {
@@ -3300,6 +3342,8 @@ if (typeof module !== "undefined") {
     toggleFavorite: toggleFavorite,
     pushRecent: pushRecent,
     recordPlayed: recordPlayed,
+    clearSession: clearSession,
+    stateSession: stateSession,
     withFavorites: withFavorites,
     removeRecent: removeRecent,
     trimRecents: trimRecents,

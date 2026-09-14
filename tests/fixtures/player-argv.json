@@ -1,9 +1,10 @@
 {
   "_comment": [
-    "Shared vectors for the detached player (docs/ARCHITECTURE-PLAYER.md 4.9, 4.12, 6).",
+    "Shared vectors for the detached player (docs/ARCHITECTURE-PLAYER.md 4.6, 4.9, 4.12, 6, 8).",
     "Read by BOTH tests/Model.test.js (Model.buildMpvArgv / stopEscalation /",
-    "endedVerdict) and tests/test_player.py (mpv_launch_argv / stop_escalation /",
-    "ended_verdict). A rule written twice gets one fixture (CLAUDE.md); this file is",
+    "endedVerdict / parseState) and tests/test_player.py + tests/test_state.py",
+    "(mpv_launch_argv / stop_escalation / ended_verdict / normalize_state).",
+    "A rule written twice gets one fixture (CLAUDE.md); this file is",
     "the one that pins the JavaScript and the Python mirrors to each other.",
     "ASCII only: scripts/check.sh greps tests/fixtures/* for non-ASCII bytes."
   ],
@@ -104,6 +105,79 @@
     "--osd-msg3",
     "--term-status-msg",
     "--screenshot-template"
+  ],
+  "session": [
+    {
+      "_comment": [
+        "state.json `session` (section 8, ruling PO-3): the record the service",
+        "writes on play and clears on stop, read back by Model.parseState and by",
+        "normalize_state. `state` is the whole document as it sits on disk,",
+        "`record` is what both readers must produce for its `session` key.",
+        "The four keys of a state file are deliberately exercised together: the",
+        "CLI rewrites the whole document, so a reader that drops the key would",
+        "erase a running player's record on the next `state favorite add`."
+      ],
+      "name": "a full record round-trips through both readers",
+      "state": { "version": 2, "session": { "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000123 } },
+      "record": { "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000123 }
+    },
+    {
+      "name": "a file written before the key exists reads as no session",
+      "state": { "version": 2, "favorites": ["t:bbc1.uk"], "recents": [], "lastPlayed": null },
+      "record": null
+    },
+    {
+      "name": "a version-1 file (0.1.0) has no session either",
+      "state": { "version": 1, "favorites": [], "recents": [], "lastPlayed": null },
+      "record": null
+    },
+    {
+      "name": "an explicit null is the cleared state the service writes on stop",
+      "state": { "version": 2, "session": null },
+      "record": null
+    },
+    {
+      "name": "a record without an id is not a channel and is dropped",
+      "state": { "version": 2, "session": { "name": "BBC One HD", "at": 1758000123 } },
+      "record": null
+    },
+    {
+      "name": "a record that is not an object is dropped",
+      "state": { "version": 2, "session": "t:bbc1.uk" },
+      "record": null
+    },
+    {
+      "name": "an id on its own is enough: name and clock default",
+      "state": { "version": 2, "session": { "id": "u:bf9cf968" } },
+      "record": { "id": "u:bf9cf968", "name": "", "at": 0 }
+    },
+    {
+      "name": "a numeric name and a string clock are coerced, not dropped",
+      "state": { "version": 2, "session": { "id": "t:x", "name": 7, "at": "1758000123" } },
+      "record": { "id": "t:x", "name": "7", "at": 1758000123 }
+    },
+    {
+      "name": "a fractional clock truncates toward zero in both languages",
+      "state": { "version": 2, "session": { "id": "t:x", "at": 1758000123.9 } },
+      "record": { "id": "t:x", "name": "", "at": 1758000123 }
+    },
+    {
+      "name": "an unparsable clock is zero, never an error",
+      "state": { "version": 2, "session": { "id": "t:x", "at": "soon" } },
+      "record": { "id": "t:x", "name": "", "at": 0 }
+    },
+    {
+      "name": "the session rides beside the other keys and none of them lose it",
+      "state": {
+        "version": 2,
+        "cacheLayout": 2,
+        "favorites": ["t:bbc1.uk"],
+        "recents": [{ "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000100 }],
+        "lastPlayed": { "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000100 },
+        "session": { "id": "t:bbc2.uk", "name": "BBC Two", "at": 1758000123 }
+      },
+      "record": { "id": "t:bbc2.uk", "name": "BBC Two", "at": 1758000123 }
+    }
   ],
   "stopLadder": [
     { "name": "idle -> quit over IPC, then the quit grace", "stage": "", "action": "quit", "signal": 0, "waitMs": 2000 },
