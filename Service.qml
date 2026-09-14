@@ -451,7 +451,7 @@ Item {
     // The user asked for it, so nothing died unattended: the session record
     // has done its job and a reattach must not find it (PO-3 would then mark
     // a perfectly good channel red).
-    root.clearSessionRecord()
+    root.noteSessionOutcome("stopped")
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
   }
 
@@ -1097,6 +1097,8 @@ Item {
     var reason = Model.statusReason(status)
     if (code === "superseded") {
       // A later intent already won under the lock; this one never happened.
+      // That intent wrote its own record and owns it, so this one leaves it.
+      root.noteSessionOutcome("superseded")
       root.drainPendingPlay()
       return
     }
@@ -1107,6 +1109,10 @@ Item {
       playerSocketTimer.stop()
       root.nowPlaying = null
       root.notify("mpvMissing", {})
+      // The user has been told, in a critical toast, that the player program
+      // is not installed. Leaving the record would spend that same event a
+      // second time as a red row on the next reattach (PO-3).
+      root.noteSessionOutcome("mpvMissing")
       return
     }
     if ((code === "busy" || code === "no_socket") && root.nowPlaying && !root.userStopped
@@ -1116,6 +1122,7 @@ Item {
       root.playRetries += 1
       playRetryTimer.interval = root.playRetryBaseMs * root.playRetries
       playRetryTimer.restart()
+      root.noteSessionOutcome("retrying")
       return
     }
     root.lastError = reason
@@ -1128,6 +1135,10 @@ Item {
     // The player never started: the same class of event the non-zero exit
     // of an attached mpv used to report (requirement 6).
     if (!root.userStopped && !root.stopping) root.raiseStreamFailure(target, reason)
+    // Terminal either way. The toast above is the user's copy of this event
+    // when the play was theirs; when a stop overtook it, stop() already
+    // retired the record. Neither leaves anything for a reattach to mark.
+    root.noteSessionOutcome("failed")
   }
 
   // `player start` observed the first load fail on its own connection (F3,
@@ -1143,7 +1154,14 @@ Item {
       root.playerWanted = false
       playerSocketTimer.stop()
       root.nowPlaying = null
+      // No socket means no EOF is coming to say this again: the toast the
+      // user just saw is the whole story, so the record ends here too.
+      root.noteSessionOutcome("failed")
+      return
     }
+    // The socket is live, so handlePlayerGone() is moments away and owns the
+    // record; retiring it here would only race that.
+    root.noteSessionOutcome("attached")
   }
 
   function applyProbe(text) {
@@ -1169,6 +1187,10 @@ Item {
         root.playerWanted = false
         playerSocketTimer.stop()
         root.playerPending = false
+        // The detached stop landed after all. stop() already retired the
+        // record; saying so again costs nothing and keeps this branch on the
+        // same decision as every other ending.
+        root.noteSessionOutcome("stopped")
       }
       return
     }
@@ -1251,17 +1273,26 @@ Item {
   }
 
   // The player is gone for good and nobody needs marking: an explicit stop,
-  // a player that ended with no relaunch coming, or one this shell stopped
-  // because it could not identify it. Without this the record outlives every
-  // clean stop and the next reattach marks a channel red that simply ended
-  // (PO-4: a clean end stays silent). clearSession() hands back the same
-  // object when there is nothing to clear, so this writes only when it
-  // actually changed something.
-  function clearSessionRecord() {
-    root.deadSessionPending = false
-    var cleared = Model.clearSession(root.userState)
-    if (cleared === root.userState) return
-    root.userState = cleared
+  // The other half of PO-3, and the ONE place any player outcome is allowed
+  // to reach the session record. Every branch below that ends in "the player
+  // is gone" or "the player is still coming" says so here in one word and
+  // Model.sessionAfterOutcome() decides, because the rule is the same rule
+  // everywhere - a record must not outlive the shell that saw how the play
+  // ended - and a rule spelled out per branch is a rule three branches will
+  // get wrong. They did: a failed start, a missing mpv and an abandoned
+  // relaunch each left the record behind, so the next reattach marked that
+  // channel red a second time for a failure the user had already been shown
+  // and already dealt with.
+  //
+  // Like markDeadSession() this is assignments and a write gate, no rule of
+  // its own: the verdict carries the deferred-PO-3 flag as well as the state,
+  // and hands back the same state object when there is nothing to clear, so
+  // this writes only when it actually changed something.
+  function noteSessionOutcome(outcome) {
+    var verdict = Model.sessionAfterOutcome(root.userState, outcome, root.deadSessionPending)
+    root.deadSessionPending = verdict.pending
+    if (!verdict.write) return
+    root.userState = verdict.state
     root.saveState()
   }
 
@@ -1274,7 +1305,7 @@ Item {
     playerSocketTimer.stop()
     root.playerPending = false
     root.nowPlaying = null
-    root.clearSessionRecord()
+    root.noteSessionOutcome("foreign")
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
   }
 
@@ -1465,6 +1496,10 @@ Item {
       // meantime cancels it (D-LIVE-15, D-LIVE-17).
       root.wantFocus = false
       relaunchTimer.restart()
+      // The record outlives this death on purpose: the same channel is
+      // coming back in a moment, and if the shell dies in between, nothing
+      // watched the outcome after all.
+      root.noteSessionOutcome("relaunching")
       return
     }
     root.nowPlaying = null
@@ -1473,7 +1508,7 @@ Item {
     // toasted and a stop we did not issue all leave the session record
     // behind if nobody clears it, and the next reattach would read that as a
     // channel that died unattended (PO-3).
-    root.clearSessionRecord()
+    root.noteSessionOutcome("ended")
     root.entryOwners = ({})
     if (!report.notify) return
     // report.reason is the log-message tail when there is one ("Failed to
@@ -2333,7 +2368,15 @@ Item {
       if (root.userStopped || root.stopping || !root.nowPlaying) return
       if (playerProc.running) { relaunchTimer.restart(); return }
       var channel = root.channelIndex[String(root.nowPlaying.id)]
-      if (!channel) { root.nowPlaying = null; return }
+      if (!channel) {
+        // The channel left the playlist (a source swap, a refresh that
+        // dropped it) while the relaunch was queued: the one automatic
+        // relaunch handlePlayerGone() kept the record for is never coming,
+        // so the record ends here instead of outliving the shell.
+        root.nowPlaying = null
+        root.noteSessionOutcome("abandoned")
+        return
+      }
       if (root.playerUp) {
         // Still there and still not answering: the verdict stands.
         root.playSeq += 1
