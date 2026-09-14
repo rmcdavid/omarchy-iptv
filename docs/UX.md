@@ -438,7 +438,7 @@ Same row after a failed play this session:
 |                  Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv) |
 |                                                                                                |
 |                                                                                                |
-|                                                                        r reload - Esc close    |
+|                                                             r retry - o sources - Esc close    |
 +------------------------------------------------------------------------------------------------+
 ```
 
@@ -744,8 +744,8 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 |---|---|
 | Search mode | `Enter play - Up/Down move - Left/Right group - Tab keys - Esc close` |
 | Search mode, query non-empty | `Enter play - Up/Down move - Left/Right narrow - Tab keys - Esc clear` |
-| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - r refresh - / search` |
-| Empty states | `r reload - Esc close` (not configured, error); `Esc close` (loading) |
+| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - r refresh - / search - o sources` |
+| Empty states | `r retry - o sources - Esc close` (not configured, error; `r retry` is dropped when the configured value is invalid and `o sources` only when a source history exists); `Esc close` (loading). Since v0.2.0 the not-configured state is the Sources first-run form, see `UX-SOURCES.md` 1.2 and 5.3, which is authoritative for these hints |
 
 Only the key names render at the higher opacity (0.7); the verbs stay at
 0.45.
