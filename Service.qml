@@ -228,6 +228,11 @@ Item {
   readonly property bool playerUp: (root.playerSocket !== null && root.playerSocket.connected) || root.playerPending
   readonly property bool playing: playerUp && nowPlaying !== null
   property var failedAt: ({})               // session-only { id: "HH:MM" } (R11)
+  // PO-3 lost a race and is waiting for state.json (see markDeadSession()):
+  // the probe answered "no player" before the state FileView loaded, so the
+  // verdict has to be re-run from applyUserState() once there is a file to
+  // decide on.
+  property bool deadSessionPending: false
   property bool userStopped: false
   property bool relaunchPending: false
   property bool relaunched: false
@@ -443,6 +448,10 @@ Item {
     root.playSeq += 1
     root.stopAt = Date.now()
     stopSettleTimer.restart()
+    // The user asked for it, so nothing died unattended: the session record
+    // has done its job and a reattach must not find it (PO-3 would then mark
+    // a perfectly good channel red).
+    root.clearSessionRecord()
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
   }
 
@@ -786,6 +795,10 @@ Item {
     root.stateLoaded = true
     root.reconcile(true)
     root.startCacheLayout()
+    // The reattach probe beat the file here (it usually does: ~130 ms from
+    // Component.onCompleted against however long a FileView takes). Now
+    // there is a state to decide on, so PO-3's verdict runs (4.6).
+    if (root.deadSessionPending) root.markDeadSession()
   }
 
   function saveState() {
@@ -1164,6 +1177,9 @@ Item {
       playerSocketTimer.stop()
       root.playerPending = false
       root.nowPlaying = null
+      // Nothing is playing and nothing claimed to have stopped it: if a
+      // session record survived, that channel died unattended (PO-3).
+      root.markDeadSession()
       return
     }
     if (!probe.responsive) {
@@ -1211,14 +1227,54 @@ Item {
     root.reconcileNowPlaying()
   }
 
+  // Ruling PO-3. The probe says nothing is running; if state.json still
+  // holds a session record, the channel it names died with no shell attached
+  // to notice - so the guide gets a red row, silently, and the record is
+  // cleared. A toast for something that stopped minutes ago, possibly on
+  // another login, is noise that arrives without context.
+  //
+  // The race: this runs from the probe reply, about 130 ms after
+  // Component.onCompleted, while stateFile loads whenever it loads - either
+  // can win. Model.deadSessionVerdict() refuses to decide on a state that
+  // has not landed (it would read the empty default, drop the mark, and
+  // write that empty default over the user's file) and asks to be called
+  // again; applyUserState() drains that.
+  function markDeadSession() {
+    var verdict = Model.deadSessionVerdict(root.userState, root.stateLoaded, root.failedAt,
+                                           Model.formatClock(Math.floor(Date.now() / 1000)))
+    root.deadSessionPending = verdict.pending
+    if (!verdict.mark) return
+    root.failedAt = verdict.failed
+    if (!verdict.write) return
+    root.userState = verdict.state
+    root.saveState()
+  }
+
+  // The player is gone for good and nobody needs marking: an explicit stop,
+  // a player that ended with no relaunch coming, or one this shell stopped
+  // because it could not identify it. Without this the record outlives every
+  // clean stop and the next reattach marks a channel red that simply ended
+  // (PO-4: a clean end stays silent). clearSession() hands back the same
+  // object when there is nothing to clear, so this writes only when it
+  // actually changed something.
+  function clearSessionRecord() {
+    root.deadSessionPending = false
+    var cleared = Model.clearSession(root.userState)
+    if (cleared === root.userState) return
+    root.userState = cleared
+    root.saveState()
+  }
+
   // A player that exists but is not ours to show: wedged, foreign, or from
-  // a version that did not stash its identity (migration, section 8).
+  // a version that did not stash its identity (migration, section 8). It
+  // ends in nothing playing, so the session record goes with it.
   function stopForeignPlayer() {
     root.playSeq += 1
     root.playerWanted = false
     playerSocketTimer.stop()
     root.playerPending = false
     root.nowPlaying = null
+    root.clearSessionRecord()
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
   }
 
@@ -1421,6 +1477,12 @@ Item {
       return
     }
     root.nowPlaying = null
+    // Terminal: the player is gone and nothing is bringing it back, whatever
+    // the verdict says. This is where a clean end, a crash we have just
+    // toasted and a stop we did not issue all leave the session record
+    // behind if nobody clears it, and the next reattach would read that as a
+    // channel that died unattended (PO-3).
+    root.clearSessionRecord()
     var target = root.channelForEnd(end, current)
     root.entryOwners = ({})
     if (!verdict.notify) return
