@@ -30,7 +30,10 @@
       "mpvArgs": "",
       "showChannelName": true,
       "maxRecents": 10,
-      "barLabelMaxWidth": 180
+      "barLabelMaxWidth": 180,
+      "channelOrder": "playlist",
+      "numberEntryMs": 1500,
+      "barShowChannelNumber": true
     },
     "schema": [
       {
@@ -80,6 +83,26 @@
         "max": 600,
         "step": 10,
         "defaultValue": 180
+      },
+      {
+        "key": "channelOrder",
+        "type": "string",
+        "label": "Channel list order: playlist or number"
+      },
+      {
+        "key": "numberEntryMs",
+        "type": "integer",
+        "label": "Channel number entry timeout (ms)",
+        "min": 400,
+        "max": 5000,
+        "step": 100,
+        "defaultValue": 1500
+      },
+      {
+        "key": "barShowChannelNumber",
+        "type": "boolean",
+        "label": "Show the channel number in the bar",
+        "defaultValue": true
       }
     ]
   },
