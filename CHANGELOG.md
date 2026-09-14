@@ -3,6 +3,32 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.2.1 (2026-09-14)
+
+Hotfix for two defects that made the Sources feature ineffective on a real
+shell. Both were invisible to the automated suite because the dev harness
+faked the one call involved.
+
+### Fixed
+- Switching to another source, activating a newly added source, and removing
+  the active source now take effect immediately. Previously the setting was
+  written correctly but the guide kept rendering the previous source, and a
+  retry wrongly reported that settings could not be saved. Root cause: the
+  Omarchy shell publishes a plugin's bar configuration one write behind, so a
+  plugin never receives the echo of its own settings write. The service now
+  applies its own write locally and yields to any external change, and the
+  behavior is documented in `docs/OMARCHY-PLUGIN-CONTRACT.md`.
+- Clearing the playlist URL at runtime clears the channel list and group
+  column with it, instead of drawing the setup surface over a stale list.
+- The guide surfaces warnings from the guide-data helper, matching the
+  existing playlist warnings, with a documented precedence so a warning can
+  never hide a failure.
+
+### Changed
+- The dev harness now reproduces the host's settings plumbing faithfully. A
+  scenario suite that passed 51 of 51 against the broken code fails 23 against
+  it after the correction.
+
 ## 0.2.0 (2026-09-13)
 
 M2-01 Sources: configure and switch playlists from inside the guide.

@@ -845,3 +845,16 @@ two use different names, the following applies and both lanes code to it.
 | SR30 | SRC-DEC-20 | At the v0.2.0 release the installed clone's `origin` is re-pointed to `https://github.com/rmcdavid/omarchy-iptv.git` so `omarchy plugin update` behaves as for any user. |
 | SR31 | SRC-DEC-21 | The harness gains verbs `cancelProbe`, `editMasked(id)` (masked strings only), `signals()`, `state()` exposing the form fields (masked values and lengths, focus, mode, returnMode), and `failPersist` to simulate a persist failure. |
 | SR32 | SRC-DEC-22 | List order: the active source first, then by `lastUsedAt` descending, then never-used sources in the order added. UX 5.2 adopts this sentence. |
+
+## Reconciliation rulings, round 3 (product owner, 2026-09-14, after the D-LIVE-20/21 fix)
+
+The live fix for D-LIVE-20 and D-LIVE-21 invalidated two earlier rulings.
+These replace them.
+
+| # | Replaces | Ruling |
+|---|---|---|
+| SR33 | SR25 | A `false` return from `shell.updateEntryInline` means the value was already stored, not that the write failed (shell.qml:1114). It must never surface as an error. The copy `Could not save settings - try omarchy bar set` is reserved for a genuine failure: no host object, or a bar entry that is not writable. A plugin applies its own write locally in the same turn and drops that override as soon as the host reports any other value, so an external `omarchy bar set` still wins. The echo path stays idempotent. The reason is recorded in `OMARCHY-PLUGIN-CONTRACT.md`: the host publishes `barConfig` one write behind and a plugin never receives the echo of its own write. |
+| SR34 | SR31 | The dev harness fake must reproduce the host's plumbing exactly, including declaration order, comparing before persisting, returning `false` without persisting when nothing changed, and giving the writer no echo of its own write. A fake that is more forgiving than the host is a defect in the harness. The `failPersist` verb now removes the function entirely to simulate a genuine failure, since returning `false` no longer means failure. The verbs `setStored` and `hostEntry` are added. Any scenario suite that passes against known-broken code is not evidence; a fidelity change must be accompanied by a scenario that fails against the pre-fix code, and the before and after counts belong in the report. |
+
+Standing rule from this incident, added to `CLAUDE.md`: never wait for the
+host to echo your own write back before updating your own UI.
