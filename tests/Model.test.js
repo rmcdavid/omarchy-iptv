@@ -6,6 +6,11 @@ const Model = require("../Model.js")
 // The shared vectors both languages run (CLAUDE.md: a rule written twice gets
 // one fixture). tests/test_player.py reads the same file.
 const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
+// The picture-in-picture vectors, required here rather than beside the PiP
+// section because the focus checks below run against the same clients list
+// (D-PIP-5) and a second copy of it would be the mirrored data that lets
+// two "identical" fixtures drift.
+const pipFixture = require("./fixtures/pip-cases.js")
 
 let failures = 0
 let checks = 0
@@ -501,7 +506,7 @@ const HYPR_DISPATCH_NAMESPACES = {
 // What this machine's hyprctl does with an argv vector. rc 7 is a Lua error
 // (a bug in OUR string); rc 0 means the compositor accepted the call - which
 // per PIP11 still says nothing about whether the window changed.
-function hyprDispatch(argv) {
+function hyprDispatch(argv, clients) {
   const parts = Array.isArray(argv) ? argv.map(String) : []
   if (parts[0] !== "hyprctl" || parts[1] !== "dispatch") return { rc: 2, error: "not a hyprctl dispatch" }
   // hyprctl joins everything after `dispatch` and evaluates
@@ -522,7 +527,34 @@ function hyprDispatch(argv) {
   const table = /^\{ ([\s\S]*) \}$/.exec(call[2])
   if (!table) return { rc: 7, error: "parse error: expected a table" }
   const window = /window = "([^"]*)"/.exec(table[1])
-  return { rc: 0, ns: call[1], window: window ? window[1] : "" }
+  const selector = window ? window[1] : ""
+  const hit = hyprResolve(selector, clients)
+  return { rc: 0, ns: call[1], window: selector, matches: hit.matches, focused: hit.address }
+}
+
+// WHICH window a selector lands on, which is the half rc could never tell us
+// and the half D-PIP-5 turns on. An `address:` names exactly one client. A
+// `class:` names an APP ID, and the plugin does not get to choose among the
+// windows carrying it: the live pass fired the class-only focus with a
+// user's own `mpv --wayland-app-id=omarchy-iptv` open and watched it land on
+// the stranger three times out of three. scripts/dev-harness/stub-hyprctl.py
+// resolves a class the same way (`match_window`, first match wins), so the
+// two doubles in this project answer this question identically.
+//
+// `matches` is the honest field: a selector that names more than one window
+// is a command whose effect nobody can predict, which is the defect itself
+// rather than a detail of how it came out on the day.
+function hyprResolve(selector, clients) {
+  const list = Array.isArray(clients) ? clients : []
+  if (selector.indexOf("address:") === 0) {
+    const hits = list.filter(function (c) { return String(c.address) === selector.substring(8) })
+    return { matches: hits.length, address: hits.length === 1 ? String(hits[0].address) : "" }
+  }
+  if (selector.indexOf("class:") === 0) {
+    const hits = list.filter(function (c) { return String(c["class"]) === selector.substring(6) })
+    return { matches: hits.length, address: hits.length > 0 ? String(hits[0].address) : "" }
+  }
+  return { matches: 0, address: "" }
 }
 
 checkCall("D-PIP-1: the host double refuses exactly what the compositor refused in the gate, and accepts what it accepted", () => [
@@ -538,17 +570,67 @@ checkCall("D-PIP-1: the host double refuses exactly what the compositor refused 
   hyprDispatch(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"]).rc
 ], [7, 7, 7, 7, 0])
 
-checkCall("D-PIP-1: the shipped focus command survives the host's Lua wrapping and names the player window",
-  () => hyprDispatch(Model.focusPlayerArgv()),
-  { rc: 0, ns: "hl.dsp.focus", window: "class:omarchy-iptv" })
+// ---- D-PIP-5: the second half of that defect, in the same function -----
+//
+// The D-PIP-1 repair fixed the SPELLING and kept the SELECTOR. `class:` names
+// an app id, and PLY-RST-11 reproduced the case where two windows carry ours:
+// a user's own `mpv --wayland-app-id=omarchy-iptv`. Design 4.2 had already
+// ruled for every other verb that "narrowing by pid is not optional", because
+// floating, shrinking and pinning a stranger's window is damage - and focus
+// was simply the verb nobody applied it to. The live pass then measured it:
+// focus landed on the stranger 3 times out of 3.
+//
+// So the evidence below is not the argv. It is WHICH WINDOW the command
+// reaches, with the stranger present and listed first, exactly as the live
+// pass met it.
+const focusClients = [pipFixture.CLIENTS.foreign, pipFixture.CLIENTS.tiled]
+checkCall("D-PIP-5: the class-only command the wave shipped cannot say which window it means, and reaches the stranger", () => {
+  const out = hyprDispatch(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"], focusClients)
+  // rc 0: the compositor accepted it. PIP11 again - acceptance says nothing.
+  return [out.rc, out.matches, out.focused === pipFixture.PLAYER_ADDRESS, out.focused]
+}, [0, 2, false, "0x559c687e09a0"])
 
-checkCall("D-PIP-1: focus goes through the same validated builder every PiP step uses, so a hand-rolled string cannot come back", () => [
-  // One argv item after `dispatch` - more than one is what broke it.
-  Model.focusPlayerArgv().length,
-  Model.focusPlayerArgv()[2] === Model.pipExpression("focus", { window: Model.PIP_CLASS_SELECTOR }),
-  // And the builder vouches for the selector: no other class gets through.
-  Model.pipExpression("focus", { window: "class:not-ours" })
-], [3, true, ""])
+checkCall("D-PIP-5: the shipped command names the window the pid resolved, and lands on OURS", () => {
+  const live = Model.pipFindWindow(focusClients, pipFixture.PLAYER_PID)
+  const out = hyprDispatch(Model.focusPlayerArgv(live.address), focusClients)
+  return [out.rc, out.ns, out.window, out.matches, out.focused]
+}, [0, "hl.dsp.focus", "address:" + pipFixture.PLAYER_ADDRESS, 1, pipFixture.PLAYER_ADDRESS])
+
+checkCall("D-PIP-5: 4.2's refusals reach focus too - no window, or two, means no command at all", () => {
+  const clients = function (list) { return JSON.stringify(list) }
+  return [
+    // Only the stranger is up: our window has not mapped yet.
+    Model.focusPlayerArgv(Model.pipFindWindow(clients([pipFixture.CLIENTS.foreign]), pipFixture.PLAYER_PID).address).length,
+    // Two windows at our own pid: the lookup refuses, so focus does too.
+    Model.focusPlayerArgv(Model.pipFindWindow(clients([pipFixture.CLIENTS.tiled, pipFixture.CLIENTS.twin]), pipFixture.PLAYER_PID).address).length,
+    Model.focusPlayerArgv("").length,
+    Model.focusPlayerArgv().length,
+    Model.focusPlayerArgv(null).length,
+    // And PIP7's boundary is the same one: a hostile address is refused, not
+    // escaped, on this path as on every other.
+    Model.focusPlayerArgv("0xdead\"); os.execute(\"touch /tmp/PWNED\"); --").length,
+    Model.focusPlayerArgv("class:omarchy-iptv").length
+  ]
+}, [0, 0, 0, 0, 0, 0, 0])
+
+checkCall("D-PIP-5: a class selector cannot be built at all any more, by focus or by anything else", () => [
+  // Not merely unused: removed, so a future caller cannot route back to it.
+  Model.pipExpression("focus", { window: "class:omarchy-iptv" }),
+  Model.pipExpression("focus", { window: "class:not-ours" }),
+  Model.pipExpression("float", { window: "class:omarchy-iptv" }),
+  Model.pipDispatchArgv("focus", { window: "class:omarchy-iptv" }).length,
+  typeof Model.PIP_CLASS_SELECTOR
+], ["", "", "", 0, "undefined"])
+
+checkCall("D-PIP-1: focus goes through the same validated builder every PiP step uses, so a hand-rolled string cannot come back", () => {
+  const argv = Model.focusPlayerArgv(pipFixture.PLAYER_ADDRESS)
+  return [
+    // One argv item after `dispatch` - more than one is what broke it.
+    argv.length,
+    argv[0] + " " + argv[1],
+    argv[2] === Model.pipExpression("focus", { window: "address:" + pipFixture.PLAYER_ADDRESS })
+  ]
+}, [3, "hyprctl dispatch", true])
 
 // ---- D-PLY-11: the play fork, and the repair the evidence asked for ----
 // The fork rows record the decision Service.qml.play() makes. The third row
@@ -2618,8 +2700,6 @@ check("CN18: the entry buffer accepts a number that long, so nothing displayable
 // controls can reach a dispatch vector. Nothing here proves Hyprland does
 // what it is told - only the live pass can, and after PIP11 only by reading
 // the state back, which is what pipVerify is.
-const pipFixture = require("./fixtures/pip-cases.js")
-
 // ---- 1. the expression boundary (PIP7, design 4.11)
 
 check("PIP7: the six window verbs and focus build the expressions the gate proved live", [
@@ -2671,8 +2751,12 @@ check("PIP7: the only strings that pass are the compile-time constants", [
   Model.pipExpression("zorder", { window: "address:" + pipFixture.PLAYER_ADDRESS, mode: "bottom" }),
   Model.pipExpression("nosuchverb", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
   Model.pipExpression("constructor", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
-  Model.pipExpression("focus", { window: "class:omarchy-iptv" })
-], ["", "", "", "", "", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"])
+  // D-PIP-5: this row used to be the ONE selector that was not an address,
+  // and it named an app id rather than a window. It is refused now, by the
+  // same builder and for the same reason every other value here is.
+  Model.pipExpression("focus", { window: "class:omarchy-iptv" }),
+  Model.pipExpression("focus", { window: "address:" + pipFixture.PLAYER_ADDRESS })
+], ["", "", "", "", "", "", "hl.dsp.focus({ window = \"address:0x559c6893d940\" })"])
 // The one playlist-derived value with an obvious route in: a channel name. It
 // has no parameter to arrive through, and this says so out loud.
 check("PIP7: nothing playlist-derived can reach a dispatch vector",

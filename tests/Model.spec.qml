@@ -1499,11 +1499,25 @@ TestCase {
             "hl.dsp.window.move({ window = \"address:0x559c6893d940\", x = 940, y = 42 })")
     // D-PIP-1: one argv item after `dispatch`, and the namespace focus really
     // lives at. Two bare tokens are what did not work.
-    var focus = Model.focusPlayerArgv()
+    //
+    // D-PIP-5: and the selector is the pid-resolved ADDRESS. The class-only
+    // spelling this replaces focused a user's own
+    // `mpv --wayland-app-id=omarchy-iptv` three times out of three, and it
+    // cannot be built any more - by focus or by anything else.
+    var resolved = Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.foreign, PipCases.CLIENTS.tiled]),
+                                       PipCases.PLAYER_PID)
+    compare(resolved.address, PipCases.PLAYER_ADDRESS)
+    var focus = Model.focusPlayerArgv(resolved.address)
     compare(focus.length, 3)
     compare(focus[0] + " " + focus[1], "hyprctl dispatch")
-    compare(focus[2], "hl.dsp.focus({ window = \"class:omarchy-iptv\" })")
-    compare(focus[2], Model.pipExpression("focus", { window: Model.PIP_CLASS_SELECTOR }))
+    compare(focus[2], "hl.dsp.focus({ window = \"address:0x559c6893d940\" })")
+    compare(focus[2], Model.pipExpression("focus", { window: "address:" + PipCases.PLAYER_ADDRESS }))
+    compare(Model.pipExpression("focus", { window: "class:omarchy-iptv" }), "")
+    // No window, two windows, or no address at all: no command is built.
+    compare(Model.focusPlayerArgv("").length, 0)
+    compare(Model.focusPlayerArgv().length, 0)
+    compare(Model.focusPlayerArgv(Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.foreign]),
+                                                      PipCases.PLAYER_PID).address).length, 0)
   }
 
   function test_pictureInPicturePlan() {

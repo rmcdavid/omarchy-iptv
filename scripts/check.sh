@@ -56,7 +56,7 @@ CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
 # four the scenario's header reserved for a merged lane V1, and four more for
 # PIP15's single dispatch spelling and the snapshot key's one name), the
 # stub's executable probe, and its own "ran every check" line.
-PIP_PREFLIGHT_MIN=${PIP_PREFLIGHT_MIN:-39}
+PIP_PREFLIGHT_MIN=${PIP_PREFLIGHT_MIN:-41}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }

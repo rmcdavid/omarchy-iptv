@@ -192,6 +192,12 @@ preflight() {
   absent "nor a second builder inside the service"        "$PLUGIN_ROOT/Service.qml" 'pipLegacyDispatch|"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
   # Addressing, the snapshot, and the mpv half.
   seam "the window is narrowed by the player pid"         "$PLUGIN_ROOT/Service.qml" 'pipFindWindow\(text, root\.playerPid, root\.pipClass\)' 1
+  # D-PIP-5: and so is focus, which was the one verb 4.2's rule was never
+  # applied to. With a user's own mpv of the same app id open it focused the
+  # stranger 3 times out of 3. The class selector is removed rather than
+  # left unused, so nothing can route back to it.
+  seam "focus names the window the pid resolved"          "$PLUGIN_ROOT/Model.js" '^function focusPlayerArgv\(address\)' 1
+  absent "and no class selector survives in the builder"  "$PLUGIN_ROOT/Model.js" 'PIP_CLASS_SELECTOR'
   seam "the snapshot lives in the player"                 "$PLUGIN_ROOT/Model.js" 'PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"' 1
   seam "and the service asks for it by that one name"     "$PLUGIN_ROOT/Service.qml" 'Model\.PIP_SNAPSHOT_KEY' 1
   seam "and is read back after a shell restart"           "$PLUGIN_ROOT/Service.qml" '^ *function pipRequestSnapshot\(sock\)' 1
@@ -403,9 +409,9 @@ esac
 # forgotten bump turns check.sh red here rather than on the display lane's
 # machine weeks later. Never lower it to make a run green.
 if [[ ${1:-live} == check-tree ]]; then
-  EXPECTED_CHECKS=38
+  EXPECTED_CHECKS=40
 else
-  EXPECTED_CHECKS=75
+  EXPECTED_CHECKS=77
 fi
 ran=$checks
 checks=$((checks + 1))

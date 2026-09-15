@@ -256,6 +256,34 @@ class StubFidelityTest(unittest.TestCase):
         self.assertEqual(code, 0, "even a miss is exit status 0")
         self.assertIn("window not found", out)
 
+    def test_a_class_selector_cannot_say_which_of_two_windows_it_means(self):
+        # D-PIP-5, with the state that produces it: PLY-RST-11's reproduced
+        # case, a user's own `mpv --wayland-app-id=omarchy-iptv`, listed
+        # first. Both commands below answer `ok` with exit status 0, so the
+        # reply cannot tell them apart -- which is why the stub now records
+        # WHICH window focus reached, and why a double that did not would be
+        # more forgiving than the compositor (CLAUDE.md rule 10).
+        state = base_state()
+        state["clients"].insert(0, {
+            "class": "omarchy-iptv", "pid": 2053730, "address": "0x559c687e0bb0",
+            "at": [0, 0], "size": [800, 600], "floating": False, "pinned": False,
+            "monitor": 0, "workspace": {"id": 1}, "tags": [],
+        })
+        hypr = StubDriver(state=state)
+        self.addCleanup(hypr.close)
+        code, out = hypr.dispatch('hl.dsp.focus({ window = "class:omarchy-iptv" })')
+        self.assertEqual((code, out), (0, "ok"))
+        self.assertEqual(self.focused(hypr), "0x559c687e0bb0",
+                         "a class names an app id, not a window: the stranger got the focus")
+        # The address the pid resolved reaches ours, and nothing else does.
+        code, out = hypr.dispatch('hl.dsp.focus({ window = "address:%s" })' % ADDRESS)
+        self.assertEqual((code, out), (0, "ok"))
+        self.assertEqual(self.focused(hypr), ADDRESS)
+
+    def focused(self, hypr):
+        with open(hypr.state_path, "r", encoding="utf-8") as handle:
+            return json.load(handle).get("focused", "")
+
     def test_the_lua_spelling_is_the_only_one_that_exists_here(self):
         # PIP15. The legacy spelling works on a hyprlang provider and is a
         # Lua syntax error on this one, so there is exactly one spelling to
@@ -355,6 +383,25 @@ class ServiceShapeTest(unittest.TestCase):
         # The narrowing itself, where a node test can call it.
         self.has(MODEL, "if (pipInteger(c.pid, -1) !== want) continue", "Model.js")
         self.has(MODEL, 'if (hits.length > 1) return pipWindowFail("ambiguous")', "Model.js")
+
+    def test_focus_is_narrowed_by_the_pid_like_every_other_window_command(self):
+        # D-PIP-5. The D-PIP-1 repair fixed the spelling and kept the
+        # selector, and `class:` names an app id rather than a window: with a
+        # user's own `mpv --wayland-app-id=omarchy-iptv` open, focus landed
+        # on the stranger three times out of three. 4.2 had already ruled
+        # narrowing by pid non-optional for every other verb.
+        self.has(SERVICE, "root.dispatchFocus(derived.address)", "Service.qml")
+        self.has(SERVICE, "var argv = Model.focusPlayerArgv(address)", "Service.qml")
+        self.has(SERVICE, "if (argv.length === 0) return false", "Service.qml")
+        self.has(MODEL, "function focusPlayerArgv(address) {", "Model.js")
+        self.has(MODEL, '  return pipDispatchArgv("focus", { window: pipAddressSelector(address) })', "Model.js")
+        # And the class selector is GONE, not merely unused: the builder
+        # cannot produce one for any verb, so no future caller can route back
+        # to it. A constant left behind for "compatibility" is how this kind
+        # of defect returns.
+        self.lacks(MODEL, "PIP_CLASS_SELECTOR", "Model.js must not keep a class selector")
+        self.lacks(MODEL, 'if (value === PIP_CLASS_SELECTOR) return value', "Model.js")
+        self.lacks(SERVICE, "Model.focusPlayerArgv()", "Service.qml must not focus without an address")
 
     def test_success_is_decided_by_a_readback_and_by_nothing_else(self):
         # PIP11. The dispatch handler must hand its exit status to a function
@@ -477,7 +524,7 @@ class ServiceShapeTest(unittest.TestCase):
         self.has(SERVICE, "Model.pipDeriveGate({ pid: root.playerPid, busy: root.pipBusy, reading: root.pipPeeking })",
                  "Service.qml")
         self.has(SERVICE, "var derived = Model.pipDeriveState(text, root.playerPid, root.pipClass)", "Service.qml")
-        self.has(SERVICE, "if (derived.decided) root.pipOn = derived.on", "Service.qml")
+        self.has(SERVICE, "if (derived.decided && !root.pipBusy) root.pipOn = derived.on", "Service.qml")
         self.has(MODEL, "function pipDeriveState(clients, pid, className) {", "Model.js")
 
     def test_nothing_reports_picture_in_picture_from_memory(self):

@@ -2998,7 +2998,6 @@ function endedReport(context) {
 // expression that is not an address or a clamped integer.
 var PIP_CLASS = "omarchy-iptv"
 var PIP_TAG = "iptv-pip"
-var PIP_CLASS_SELECTOR = "class:" + PIP_CLASS
 // 4.2 rule 4 / 4.11 rule 1. Lower case only: the compositor prints
 // addresses lower case, and accepting `0xDEAD` too would widen the pattern
 // for nothing.
@@ -3057,11 +3056,19 @@ function pipAddressSelector(address) {
   return PIP_ADDRESS_RE.test(value) ? "address:" + value : ""
 }
 
-// The two window selectors that exist: our own pid-matched address, and the
-// one compile-time class constant the focus command uses.
+// The ONE window selector that exists: our own pid-matched address.
+//
+// It used to accept `class:omarchy-iptv` as well, for the focus command
+// alone, and D-PIP-5 is what that cost: with a user's own
+// `mpv --wayland-app-id=omarchy-iptv` present, focus landed on the
+// STRANGER'S window three times out of three. 4.2 had already learned this
+// for every other verb - "narrowing by pid is not optional" - and focus was
+// simply the verb nobody applied it to. The class branch is gone rather than
+// merely unused, so the selector cannot come back through a future caller:
+// pipExpression refuses `class:` anything now, which is a property a test
+// can assert (CLAUDE.md 11).
 function pipSelector(window) {
   var value = str(window)
-  if (value === PIP_CLASS_SELECTOR) return value
   if (value.indexOf("address:") !== 0) return ""
   return pipAddressSelector(value.substring(8))
 }
@@ -3127,8 +3134,19 @@ function pipDispatchArgv(verb, params) {
 // keeps the shape right: one argv item after `dispatch`, a real namespace
 // (`hl.dsp.focus`, not `hl.dsp.window.focus`, which does not exist), and a
 // selector the builder vouched for.
-function focusPlayerArgv() {
-  return pipDispatchArgv("focus", { window: PIP_CLASS_SELECTOR })
+//
+// D-PIP-5, the second half of the same defect. That repair fixed the
+// spelling and kept the SELECTOR, which was `class:omarchy-iptv` - and with
+// a user's own `mpv --wayland-app-id=omarchy-iptv` open, the live pass
+// watched it focus the stranger's window three times out of three. This is
+// the lesson 4.2 already wrote down for every other verb and that focus was
+// left out of: the plugin knows its player's pid, so it can resolve its own
+// window, and a command that cannot say WHICH window it means must not be
+// sent at all. `address` is the one pipFindWindow resolved; anything else -
+// an empty string because the window has not mapped yet, a second match the
+// lookup refused - yields [] and the caller dispatches nothing.
+function focusPlayerArgv(address) {
+  return pipDispatchArgv("focus", { window: pipAddressSelector(address) })
 }
 
 // Was this dispatch accepted? PIP11: rc cannot answer, because the
@@ -5662,7 +5680,6 @@ if (typeof module !== "undefined") {
     // ---- picture in picture (M2-05)
     PIP_CLASS: PIP_CLASS,
     PIP_TAG: PIP_TAG,
-    PIP_CLASS_SELECTOR: PIP_CLASS_SELECTOR,
     PIP_ADDRESS_RE: PIP_ADDRESS_RE,
     PIP_COORD_LIMIT: PIP_COORD_LIMIT,
     PIP_MIN_WIDTH: PIP_MIN_WIDTH,

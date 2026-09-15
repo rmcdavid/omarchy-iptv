@@ -438,6 +438,10 @@ Item {
   // The bound that makes it safe to fire from three places at once, and the
   // reason Model.pipDeriveGate has a `reading` clause.
   property bool pipPeeking: false
+  // D-PIP-5. The same read answers "which window is ours?", which is what
+  // focus needs and never had: the class-only selector it used focused a
+  // stranger's window of the same app id three times out of three.
+  property bool pipFocusPending: false
   // Bounds (CLAUDE.md "Working in parallel" 3). At most 3 rounds of at most
   // 8 steps, each step and each read watched for 2 s, and the whole sequence
   // capped so `pipBusy` can never latch.
@@ -744,8 +748,42 @@ Item {
     return { ok: true, kind: "channel", id: id, chno: label, name: name }
   }
 
+  // D-PIP-5. Focus is read-then-act now, like every other window command
+  // this plugin issues. The D-PIP-1 repair fixed the spelling and kept the
+  // selector, which was `class:omarchy-iptv`; with a user's own
+  // `mpv --wayland-app-id=omarchy-iptv` open, the live pass watched it focus
+  // the STRANGER'S window three times out of three. Design 4.2 had already
+  // ruled that narrowing by pid is not optional - focus was the one verb
+  // nobody applied it to.
+  //
+  // So there is nothing to dispatch until the compositor has been asked
+  // which window is ours, and the focus retry timer (UX 7.5) was built for
+  // exactly that wait: the mpv window maps a moment after launch. mpv binds
+  // its IPC socket before the video output creates a surface, so the pid is
+  // known by the time there is a window to aim at, and an attempt made
+  // before then simply resolves nothing and retries.
   function focusPlayer() {
-    Quickshell.execDetached(Model.focusPlayerArgv())
+    // A read already in flight answers this one too. Anything else the gate
+    // refuses - no pid, a PiP sequence in progress - means there is nothing
+    // coming and nothing to aim at, so the intent is dropped rather than
+    // held forever.
+    if (root.pipPeek() || root.pipPeeking) {
+      root.pipFocusPending = true
+      return true
+    }
+    root.pipFocusPending = false
+    return false
+  }
+
+  // The one place a focus command leaves this plugin. `address` came out of
+  // the pid-narrowed lookup; the builder checks it again against the address
+  // pattern (PIP7) and answers [] rather than a guess, so an empty vector
+  // means "we cannot say which window", never "focus whatever matches".
+  function dispatchFocus(address) {
+    var argv = Model.focusPlayerArgv(address)
+    if (argv.length === 0) return false
+    Quickshell.execDetached(argv)
+    return true
   }
 
   // ------------------------------------------------------------ picture in picture (M2-05)
@@ -1040,6 +1078,9 @@ Item {
     pipStepWatchdog.stop()
     root.playerPid = 0
     root.pipOn = false
+    // Nothing left to focus either: the window went with the process, and a
+    // pending focus would be aimed at an address that no longer exists.
+    root.pipFocusPending = false
     root.pipMode = ""
     root.pipIntent = ""
     root.pipPhase = ""
@@ -1089,12 +1130,19 @@ Item {
   function pipApplyPeek(text) {
     pipPeekWatchdog.stop()
     root.pipPeeking = false
-    if (root.pipBusy) return
+    var wantedFocus = root.pipFocusPending
+    root.pipFocusPending = false
     var derived = Model.pipDeriveState(text, root.playerPid, root.pipClass)
     // `decided` false means the read could not see OUR window: garbage, no
     // match, or two matches. Saying "off" on the strength of that would be
-    // the same defect pointing the other way, so nothing is written.
-    if (derived.decided) root.pipOn = derived.on
+    // the same defect pointing the other way, so nothing is written. A
+    // request that started in the meantime owns the answer too - its read is
+    // fresher and it is about to verify it.
+    if (derived.decided && !root.pipBusy) root.pipOn = derived.on
+    // D-PIP-5: focus the window this read RESOLVED. An undecided read leaves
+    // the address empty, the builder refuses it, and nothing is dispatched -
+    // which is the honest answer when we cannot say which window we mean.
+    if (wantedFocus && derived.decided) root.dispatchFocus(derived.address)
   }
 
   // The two mpv-side writes (4.6). Both go over the socket the service
