@@ -1,0 +1,325 @@
+"""Mutation proofs for the fidelity guard (CLAUDE.md rule 11).
+
+The guard is new, so there is no "before" to run these against. Rule 11's
+other half applies instead: every case here breaks one decision deliberately
+and asserts the guard goes red at the NAMED layer, so a test cannot pass on an
+unrelated failure. `test_baseline_is_green` is the control -- without it, a
+guard that failed everything would pass every other case in this file.
+
+Runs anywhere: pure text over the repo's own Guide.qml through the guard's own
+declared transform. No display, no D-Bus, no Qt, no harness tree.
+
+    python3 tests/a11y/test_fidelity.py
+
+Deliberately NOT discoverable by `python3 -m unittest discover -s tests`
+(there is no __init__.py here): docs/PLAN-NEXT.md decision 9 keeps the
+accessibility work out of scripts/check.sh.
+
+To grade a copy a real generator produced instead of the reference transform:
+
+    A11Y_GENERATED=/path/to/GuideProbe.qml python3 tests/a11y/test_fidelity.py
+"""
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fidelity
+import qmlscan
+
+GUIDE = os.path.join(fidelity.REPO, "Guide.qml")
+MODEL = os.path.join(fidelity.REPO, "Model.js")
+
+# Floors, in the spirit of scripts/check.sh: a scanner that silently stopped
+# finding declarations would make every assertion below vacuous.
+MIN_DECLARATIONS = 55
+MIN_ELEMENTS = 24
+
+
+def source():
+    with open(GUIDE) as handle:
+        return handle.read()
+
+
+def generated(text=None):
+    """The copy under test: the reference transform, or a real generator's."""
+    override = os.environ.get("A11Y_GENERATED")
+    if override and text is None:
+        with open(override) as handle:
+            return handle.read()
+    return fidelity.apply_transform(text if text is not None else source())
+
+
+def layers(failures):
+    return sorted(set(f.layer for f in failures))
+
+
+def replace_once(case, text, old, new):
+    case.assertEqual(text.count(old), 1,
+                     "the anchor this mutation needs occurs %d time(s), not "
+                     "once: %r" % (text.count(old), old))
+    return text.replace(old, new, 1)
+
+
+class ScannerFloor(unittest.TestCase):
+    def test_the_guide_still_declares_what_the_guard_assumes(self):
+        records, _frames = qmlscan.scan(source(), "Guide.qml")
+        declared = [r for r in records if r["kind"] == "accessible"]
+        elements = set(r["path"] for r in declared)
+        self.assertGreaterEqual(len(declared), MIN_DECLARATIONS)
+        self.assertGreaterEqual(len(elements), MIN_ELEMENTS)
+        siblings = [r for r in records if r["kind"] == "sibling"]
+        self.assertTrue(siblings, "no sibling bindings captured: the text: "
+                                  "binding the credential leaks from would be "
+                                  "invisible to this guard")
+
+    def test_the_scanner_refuses_to_guess(self):
+        with self.assertRaises(qmlscan.QmlParseError):
+            qmlscan.scan("Item {\n  id: root\n", "broken.qml")
+
+
+class Baseline(unittest.TestCase):
+    def test_baseline_is_green(self):
+        found = fidelity.check_pair(source(), generated())
+        self.assertEqual(found, [], "\n".join(str(f) for f in found))
+
+    def test_every_declared_rule_matches_the_shipping_file_exactly(self):
+        # A rule that stopped matching, or started matching twice, means the
+        # shipping file moved under the transform. apply_transform refuses.
+        fidelity.apply_transform(source())
+
+    def test_a_rule_that_does_not_fire_is_red(self):
+        rules = list(fidelity.TRANSFORM_RULES) + [{
+            "id": "T99-stale",
+            "why": "a rule left behind after the line it edited was renamed",
+            "before": ["    visible: root.neverExisted"],
+            "after": ["    visible: false"],
+        }]
+        found = fidelity.check_pair(source(), generated(), rules=rules)
+        self.assertIn("L2", layers(found))
+        self.assertTrue(any("T99-stale" in f.summary for f in found))
+
+
+class DroppedDeclaration(unittest.TestCase):
+    """The failure the whole guard exists for: the transform loses a
+    declaration and the harness grades a copy that never had it."""
+
+    def test_a_dropped_accessible_name_is_red(self):
+        copy = replace_once(
+            self, generated(),
+            "      Accessible.name: root.copy.accessibleCard\n", "")
+        found = fidelity.check_pair(source(), copy)
+        self.assertEqual(layers(found), ["L1", "L2", "L3"])
+        detail = "\n".join(f.detail for f in found)
+        self.assertIn("BorderSurface#card", detail)
+        self.assertIn("Accessible.name", detail)
+
+    def test_a_dropped_whole_element_is_red(self):
+        copy = generated()
+        start = copy.index("        ConfirmDialog {")
+        # Through the block's own closing brace, so the copy still parses and
+        # the guard has to notice the loss rather than the syntax.
+        end = copy.index("\n", copy.index("        }\n", copy.index(
+            "onConfirmed: root.confirmRemove()")))
+        copy = copy[:start] + copy[end + 1:]
+        found = fidelity.check_pair(source(), copy)
+        self.assertIn("L3", layers(found))
+        self.assertIn("ConfirmDialog#removeDialog",
+                      "\n".join(f.detail for f in found))
+
+    def test_a_declaration_the_transform_never_carried_is_red(self):
+        """A NEW declaration in the shipping file that the copy lacks."""
+        marker = '          Accessible.description: "FIDELITY PROOF MARKER"\n'
+        anchor = "          Accessible.name: root.confirmMessage\n"
+        drifted_source = replace_once(self, source(), anchor, anchor + marker)
+        # The honest transform carries it: green.
+        self.assertEqual(
+            fidelity.check_pair(drifted_source,
+                                fidelity.apply_transform(drifted_source)), [])
+        # A transform that drops it: red, naming it.
+        copy = fidelity.apply_transform(drifted_source).replace(marker, "", 1)
+        found = fidelity.check_pair(drifted_source, copy)
+        self.assertIn("L3", layers(found))
+        self.assertIn("FIDELITY PROOF MARKER",
+                      "\n".join(f.detail for f in found))
+
+
+class AddedOrAlteredDeclaration(unittest.TestCase):
+    def test_a_declaration_only_in_the_copy_is_red(self):
+        anchor = "      Accessible.name: root.copy.accessibleCard\n"
+        copy = replace_once(self, generated(), anchor,
+                            anchor + '      Accessible.description: "copy only"\n')
+        found = fidelity.check_pair(source(), copy)
+        self.assertEqual(layers(found), ["L1", "L2", "L3"])
+        self.assertIn("copy only", "\n".join(f.detail for f in found))
+
+    def test_an_altered_value_is_red(self):
+        copy = replace_once(self, generated(),
+                            "      Accessible.name: root.copy.accessibleCard",
+                            '      Accessible.name: "MUTATED CARD"')
+        found = fidelity.check_pair(source(), copy)
+        self.assertIn("L3", layers(found))
+        self.assertIn("MUTATED CARD", "\n".join(f.detail for f in found))
+
+    def test_a_moved_attachment_point_is_red(self):
+        """Same declaration, same value, different element. The string still
+        composes; the node it lands on is not the one the docs describe."""
+        copy = replace_once(self, generated(),
+                            "      Accessible.role: Accessible.Dialog\n"
+                            "      Accessible.name: root.copy.accessibleCard\n",
+                            "      Accessible.role: Accessible.Dialog\n")
+        copy = replace_once(
+            self, copy,
+            "                Accessible.role: Accessible.List\n"
+            "                Accessible.name: root.copy.accessibleGroups\n",
+            "                Accessible.role: Accessible.List\n"
+            "                Accessible.name: root.copy.accessibleGroups\n"
+            "                Accessible.description: root.copy.accessibleCard\n")
+        found = fidelity.check_pair(source(), copy)
+        self.assertIn("L3", layers(found))
+
+
+class SiblingBindings(unittest.TestCase):
+    """Qt derives accessibility from more than the Accessible attached
+    property. The prototype harness's own mutation 7 rebinds the field's
+    `text:` to the masked rendering, which is where the credential is
+    published from -- and which the product owner recorded as silently
+    overwriting the user's stored value (docs/PLAN-NEXT.md decision 9). A
+    harness may only grade that copy while saying out loud that it is not the
+    shipping code."""
+
+    def test_rebinding_the_field_text_is_red(self):
+        copy = replace_once(self, generated(),
+                            "                  text: root.fieldDisplay(fieldRow.fieldId)",
+                            "                  text: Model.maskUrl(root.formValue(fieldRow.fieldId))")
+        found = fidelity.check_pair(source(), copy)
+        self.assertIn("L3", layers(found))
+        detail = "\n".join(f.detail for f in found)
+        self.assertIn("text = ", detail)
+        self.assertIn("maskUrl", detail)
+
+    def test_flipping_the_password_echo_is_red(self):
+        copy = replace_once(self, generated(),
+                            '                  password: fieldRow.fieldId === "password"',
+                            "                  password: false")
+        found = fidelity.check_pair(source(), copy)
+        self.assertIn("L3", layers(found))
+
+
+class UndeclaredChange(unittest.TestCase):
+    def test_an_undeclared_line_change_is_red(self):
+        copy = replace_once(self, generated(),
+                            "    width: 1920", "    width: 1024")
+        found = fidelity.check_pair(source(), copy)
+        self.assertEqual(layers(found), ["L2"])
+
+    def test_an_added_element_may_not_declare_accessibility(self):
+        copy = replace_once(self, generated(),
+                            "    id: probeShim\n",
+                            "    id: probeShim\n"
+                            '    Accessible.name: "probe"\n')
+        found = fidelity.check_pair(source(), copy)
+        self.assertIn("L4", layers(found))
+        self.assertIn("probeShim", "\n".join(f.summary for f in found))
+
+
+class HonestLimit(unittest.TestCase):
+    """What the transform CANNOT carry across has to be red, not quietly
+    regraded. An Accessible declaration on the PanelWindow is graded by this
+    harness as a plain Window that is never shown, which is a different
+    question from the one the shipping code asks."""
+
+    def test_accessibility_on_the_rehosted_window_is_red(self):
+        drifted = replace_once(self, source(),
+                               "    exclusionMode: ExclusionMode.Ignore\n",
+                               "    exclusionMode: ExclusionMode.Ignore\n"
+                               '    Accessible.name: "IPTV guide window"\n')
+        copy = fidelity.apply_transform(drifted)
+        found = fidelity.check_pair(drifted, copy)
+        # The copy carries the new line verbatim, so the line-level layers stay
+        # silent: L1 and L2 see a legal transform. L5 names the limit, and L3
+        # shows why it is one -- the moment that element is accessible, the
+        # four layer-shell bindings and the visibility the transform rewrites
+        # become part of its accessibility projection and are demonstrably not
+        # the ones that ship.
+        self.assertEqual(layers(found), ["L3", "L5"])
+        self.assertIn("IPTV guide window", "\n".join(f.detail for f in found))
+        self.assertIn("WlrLayershell", "\n".join(f.detail for f in found))
+
+
+class VerbatimCopies(unittest.TestCase):
+    def test_a_modified_model_copy_is_red(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as out:
+            with open(MODEL) as handle:
+                out.write(handle.read())
+            out.write("\n// drift\n")
+            path = out.name
+        try:
+            found = fidelity.check_copy(MODEL, path)
+            self.assertEqual(layers(found), ["L6"])
+        finally:
+            os.unlink(path)
+
+    def test_an_identical_model_copy_is_green(self):
+        self.assertEqual(fidelity.check_copy(MODEL, MODEL), [])
+
+
+class TreeGate(unittest.TestCase):
+    """The one-call entry point the harness is meant to gate itself on."""
+
+    def _tree(self, guide_text, model_text=None):
+        import tempfile
+        work = tempfile.mkdtemp(prefix="a11y-tree-")
+        with open(os.path.join(work, "GuideProbe.qml"), "w") as out:
+            out.write(guide_text)
+        with open(MODEL) as handle:
+            model = handle.read()
+        with open(os.path.join(work, "Model.js"), "w") as out:
+            out.write(model if model_text is None else model_text)
+        return work
+
+    def test_a_faithful_tree_passes(self):
+        import shutil
+        work = self._tree(fidelity.apply_transform(source()))
+        try:
+            self.assertEqual(fidelity.guard_tree(work), [])
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def test_a_drifted_tree_is_reported(self):
+        import shutil
+        copy = replace_once(self, fidelity.apply_transform(source()),
+                            "      Accessible.name: root.copy.accessibleCard\n",
+                            "")
+        work = self._tree(copy)
+        try:
+            self.assertIn("L3", layers(fidelity.guard_tree(work)))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def test_a_missing_copy_is_reported(self):
+        import shutil
+        work = self._tree(fidelity.apply_transform(source()))
+        try:
+            os.unlink(os.path.join(work, "GuideProbe.qml"))
+            self.assertEqual(layers(fidelity.guard_tree(work)), ["L0"])
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+class Inventory(unittest.TestCase):
+    def test_a_surface_nobody_grades_is_named(self):
+        gaps = dict(fidelity.ungraded_surfaces(fidelity.REPO, {"Guide.qml"}))
+        self.assertIn("BarWidget.qml", gaps)
+        self.assertGreaterEqual(gaps["BarWidget.qml"], 2)
+
+    def test_a_graded_surface_is_not_named(self):
+        gaps = dict(fidelity.ungraded_surfaces(fidelity.REPO,
+                                               {"Guide.qml", "BarWidget.qml"}))
+        self.assertEqual(gaps, {})
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
