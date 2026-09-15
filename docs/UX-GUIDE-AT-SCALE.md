@@ -1084,7 +1084,7 @@ Where this document and the shipped code disagree, the code is right.
 - The test floors this document named were already stale before the lane
   started, which is its own small lesson about floors.
 
-### The caveat that matters to a user
+### The caveat that matters to a user [SUPERSEDED, see section 14]
 
 The density win is a property of an install with NO guide data. The second
 line is deleted because it renders one identical string on every row, which is
@@ -1120,3 +1120,30 @@ keep if it could keep only one. That change is fifteen lines of arithmetic
 lifted from Omarchy's own picker, whose source comment describes the exact
 defect this guide had. The most valuable thing in this lane was already
 written, in this codebase's own house style, and nobody had looked.
+
+## 14. Corrections after the fixes (product owner, 2026-09-15)
+
+Section 12's caveat is superseded and was wrong in the way that mattered. The
+second row line does not return when guide data is CONFIGURED. It returns when
+guide data MATCHES the playlist, which is a different thing and the only one a
+user can feel. On the subscriber's provider the two differ completely: almost
+no channel carries an identifier to match against, so the old rule gave them a
+blank line on every row and cost them three rows for nothing. The README's
+density claim must not be hedged with the old caveat.
+
+### A finding larger than the lane that found it
+
+While measuring the notice's contrast across all 23 installed themes, the lane
+found that the dim rung used for ambient text throughout the guide, the times
+and the now-and-next line, is itself below the accessibility threshold in 20 of
+those 23 themes. That is not this feature. It is a project-wide decision made
+early and never measured, and it affects text a user reads constantly.
+
+It gets its own item, for the same reason the accessibility tree did: absorbing
+it here would mean changing the look of every surface inside a release about
+list density, with no measurement of the alternatives and no live check of how
+it reads. Measure it properly, decide the rung once, and apply it everywhere.
+
+Two accessibility findings in one pass, neither caused by this work, both
+invisible until someone measured rather than looked. The rules were written
+down long ago; nothing had ever checked them.
