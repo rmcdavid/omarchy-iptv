@@ -191,6 +191,82 @@ class RemoveTest(CacheTestCase):
         self.assertFalse((self.sources / KEY).exists())
 
 
+class EpgClearTest(CacheTestCase):
+    """M2-09 GS11 / D-GS-4. Clearing a source's guide URL has to take the cache
+    that URL produced, for the same reason removing a source takes its whole
+    directory: otherwise the next start loads epg-now.json for a guide source
+    that is no longer configured and its warning is back in the footer. The
+    source itself stays, so the playlist half of the cache and the directory
+    are untouched -- which is the whole difference from `remove`."""
+
+    EPG = ("epg-now.json", "epg-status.json", "epg-window.txt")
+    KEPT = ("channels.json", "playlist-status.json")
+
+    def test_removes_the_epg_files_and_keeps_the_source(self):
+        self.seed(self.sources / KEY)
+        self.seed(self.sources / OTHER)
+        code, payload, _ = self.cache_cmd("epg-clear", "--key", KEY)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "kind": "cache", "action": "epg-clear", "key": KEY,
+                                   "removed": sorted(self.EPG)})
+        self.assertEqual(self.names(self.sources / KEY), sorted(self.KEPT))
+        self.assertEqual(self.names(self.sources / OTHER), sorted(FILES))   # untouched
+
+    def test_clearing_a_url_that_was_never_set_is_not_an_error(self):
+        self.seed(self.sources / KEY, self.KEPT)
+        code, payload, _ = self.cache_cmd("epg-clear", "--key", KEY)
+        self.assertEqual((code, payload["removed"]), (0, []))
+        self.assertEqual(self.names(self.sources / KEY), sorted(self.KEPT))
+        # and again on a source that has no directory at all
+        code, payload, _ = self.cache_cmd("epg-clear", "--key", OTHER)
+        self.assertEqual((code, payload["removed"]), (0, []))
+
+    def test_an_empty_directory_is_left_for_the_source_that_owns_it(self):
+        self.seed(self.sources / KEY, self.EPG)
+        code, payload, _ = self.cache_cmd("epg-clear", "--key", KEY)
+        self.assertEqual(payload["removed"], sorted(self.EPG))
+        self.assertEqual(self.names(self.sources / KEY), [])
+        self.assertTrue((self.sources / KEY).is_dir())
+
+    def test_files_that_are_not_ours_are_not_touched(self):
+        self.seed(self.sources / KEY)
+        (self.sources / KEY / "notes.txt").write_text("mine", encoding="utf-8")
+        (self.sources / KEY / ".tmp-channels.json-0011").write_text("x", encoding="utf-8")
+        code, payload, _ = self.cache_cmd("epg-clear", "--key", KEY)
+        self.assertEqual(payload["removed"], sorted(self.EPG))
+        self.assertEqual(self.names(self.sources / KEY),
+                         sorted([".tmp-channels.json-0011", "notes.txt", *self.KEPT]))
+
+    def test_bad_keys_are_refused_and_nothing_is_deleted(self):
+        self.seed(self.sources / KEY)
+        for bad in ("../x", "abc", "d5977d8a/..", "D5977D8A", "", "sources", "..", "d5977d8a/../" + KEY):
+            code, payload, stderr = self.cache_cmd("epg-clear", "--key", bad)
+            self.assertEqual(code, 1, bad)
+            self.assertEqual(payload["error"]["code"], "bad_key", bad)
+            self.assertEqual(payload["action"], "epg-clear", bad)
+            self.assertNotIn(self.tmp.name, json.dumps(payload) + stderr, bad)
+        self.assertEqual(self.names(self.sources / KEY), sorted(FILES))
+
+    def test_symlinks_are_refused_or_unlinked_never_followed(self):
+        victim = pathlib.Path(self.tmp.name) / "victim"
+        self.seed(victim)
+        self.sources.mkdir(parents=True)
+        os.symlink(victim, self.sources / KEY)
+        code, payload, _ = self.cache_cmd("epg-clear", "--key", KEY)
+        self.assertEqual((code, payload["error"]["code"]), (1, "bad_key"))
+        self.assertEqual(self.names(victim), sorted(FILES))
+        # a symlinked EPG file inside a real key directory is unlinked, and
+        # whatever it pointed at survives
+        target = pathlib.Path(self.tmp.name) / "outside.json"
+        target.write_text("precious", encoding="utf-8")
+        (self.sources / OTHER).mkdir(parents=True)
+        os.symlink(target, self.sources / OTHER / "epg-now.json")
+        code, payload, _ = self.cache_cmd("epg-clear", "--key", OTHER)
+        self.assertEqual((code, payload["removed"]), (0, ["epg-now.json"]))
+        self.assertEqual(target.read_text(encoding="utf-8"), "precious")
+        self.assertEqual(self.names(self.sources / OTHER), [])
+
+
 class PruneTest(CacheTestCase):
     def test_keeps_listed_keys_removes_orphans_and_skips_non_keys(self):
         self.seed(self.sources / KEY)
@@ -271,7 +347,8 @@ class PruneTest(CacheTestCase):
 class CacheCliTest(CacheTestCase):
     def test_exactly_one_json_line_and_no_paths_on_stdout(self):
         self.seed(self.cache, ("channels.json",))
-        for args in (["migrate", "--key", KEY], ["remove", "--key", KEY], ["prune", "--keep", KEY], ["remove", "--key", "../x"]):
+        for args in (["migrate", "--key", KEY], ["remove", "--key", KEY], ["prune", "--keep", KEY], ["remove", "--key", "../x"],
+                     ["epg-clear", "--key", KEY], ["epg-clear", "--key", "../x"]):
             completed = subprocess.run([sys.executable, str(HELPER), "cache", "--cache-dir", str(self.cache), *args],
                                        capture_output=True, text=True, timeout=30)
             self.assertEqual(len(completed.stdout.strip().splitlines()), 1, args)

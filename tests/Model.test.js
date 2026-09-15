@@ -312,6 +312,26 @@ const noGroupTitle = Model.prepareChannels([{ id: "n1", name: "A" }, { id: "n2",
 const noFavs = { version: 1, favorites: [], recents: [], lastPlayed: null }
 const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPlayed: null }
 
+// Several decisions in this lane are only half a decision until Guide.qml
+// actually asks for them, and the source is the only place a unit gate can see
+// that from -- the same pattern the player lane uses on Service.qml further
+// down this file. `qmlBlock` takes an element from its `id:` to the next one.
+const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
+const serviceSource = require("fs").readFileSync(require("path").join(__dirname, "../Service.qml"), "utf8")
+const helperSource = require("fs").readFileSync(require("path").join(__dirname, "../bin/omarchy-iptv"), "utf8")
+function qmlBlock(id) {
+  const at = guideSource.indexOf("id: " + id + "\n")
+  if (at === -1) return ""
+  const next = guideSource.indexOf("id: ", at + 4)
+  return guideSource.slice(at, next === -1 ? guideSource.length : next)
+}
+function qmlFunction(name) {
+  const at = guideSource.indexOf("function " + name + "(")
+  if (at === -1) return ""
+  const next = guideSource.indexOf("\n  function ", at + 4)
+  return guideSource.slice(at, next === -1 ? guideSource.length : next)
+}
+
 // D1: the axis is a property of the data -- a group is a narrowing step only
 // when there is more than one, because groupChannels never emits an empty one.
 checkCall("scopeSurface axis at every real shape", function () { return [oneGroup, twoGroups, manyGroups, noGroupTitle, []].map(function (list) {
@@ -380,7 +400,7 @@ checkCall("requestedScope defers to fallbackScope everywhere else", function () 
 checkCall("rowsHaveDetail truth table, all eight combinations", function () { return [true, false].map(function (g) {
   return [true, false].map(function (n) {
     return [true, false].map(function (e) {
-      return Model.rowsHaveDetail({ scopeIsGroup: g, groupsNarrow: n, epgConfigured: e })
+      return Model.rowsHaveDetail({ scopeIsGroup: g, groupsNarrow: n, epgCarries: e })
     }).join(",")
   }).join(" | ")
 }) }, ["true,false | true,false", "true,true | true,false"])
@@ -398,15 +418,138 @@ checkCall("rowsHaveDetail never reads a failure flag", function () {
   ;[true, false].forEach(function (g) {
     [true, false].forEach(function (n) {
       [true, false].forEach(function (e) {
-        const plain = { scopeIsGroup: g, groupsNarrow: n, epgConfigured: e }
-        const failing = { scopeIsGroup: g, groupsNarrow: n, epgConfigured: e, failedAt: "07:12", anyFailed: true, failedMap: { x: "07:12" } }
+        const plain = { scopeIsGroup: g, groupsNarrow: n, epgCarries: e }
+        const failing = { scopeIsGroup: g, groupsNarrow: n, epgCarries: e, failedAt: "07:12", anyFailed: true, failedMap: { x: "07:12" } }
         answers.push(Model.rowsHaveDetail(plain) === Model.rowsHaveDetail(failing))
         Model.rowsHaveDetail(new Proxy(plain, { get: function (t, k) { reads[String(k)] = true; return t[k] } }))
       })
     })
   })
   return [answers.every(Boolean), Object.keys(reads).sort()]
-}, [true, ["epgConfigured", "groupsNarrow", "scopeIsGroup"]])
+}, [true, ["epgCarries", "groupsNarrow", "scopeIsGroup"]])
+
+// ---- GS9 / D-GS-2: the second line is decided by the data, not by a setting.
+//
+// The caveat this replaces said that configuring guide data correctly returns
+// the second line and reverses the density win. On the subscriber's provider
+// it returns it BLANK on every row: one of their 3,335 channels carries a
+// `tvg-id` at all, and it matches nothing in the guide data. Three visible
+// rows spent on white space is the defect D3 removed, wearing a different hat.
+checkCall("GS9: a configured EPG does not height a row; guide data that reaches the rows does", function () { return [
+  Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: true }),
+  Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: true }),
+  Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: false }),
+  Model.rowsHaveDetail({ scopeIsGroup: true, groupsNarrow: true, epgCarries: true })
+] }, [false, true, false, true])
+
+// The subscriber's shape at a size a test can hold: a list whose channels
+// carry no usable identifier, and one that does.
+const noTvgIds = Model.prepareChannels([
+  { id: "u1", name: "USA FOX NEWS", group: "United States" },
+  { id: "u2", name: "(PLUTO USA) Comedy Central", group: "United States" },
+  { id: "u3", name: "US Escape", group: "United States", tvgId: "escape.us" }
+])
+const matchedIds = Model.prepareChannels([
+  { id: "m1", name: "CNN", group: "News", tvgId: "cnn.us" },
+  { id: "m2", name: "BBC One", group: "UK", tvgId: "bbc1.uk" },
+  { id: "m3", name: "No Guide Data", group: "News" }
+])
+const epgWindow = { "cnn.us": { now: { title: "The Lead", start: 100, stop: 200 }, next: { title: "The Situation Room", start: 200 } } }
+checkCall("GS9: epgCoverage counts the rows guide data can fill, not the rows that exist", function () { return [
+  // the live pass's shape: an EPG is loaded, and it matches nothing here
+  Model.epgCoverage(noTvgIds, { "cnn.us": { now: { title: "The Lead" } } }),
+  // the same playlist with no guide data at all
+  Model.epgCoverage(noTvgIds, {}),
+  // one matching channel is enough: the line then carries something on a row
+  Model.epgCoverage(matchedIds, epgWindow)
+] }, [
+  { total: 3, withId: 1, matched: 0, carries: false },
+  { total: 3, withId: 1, matched: 0, carries: false },
+  { total: 3, withId: 2, matched: 1, carries: true }
+])
+checkCall("GS9: an entry with no titled programme is not coverage, and a next-only entry is", function () { return [
+  Model.epgCoverage(matchedIds, { "cnn.us": {} }).carries,
+  Model.epgCoverage(matchedIds, { "cnn.us": { now: { title: "" }, next: { title: "" } } }).carries,
+  Model.epgCoverage(matchedIds, { "cnn.us": { next: { title: "Newsnight", start: 200 } } }).carries,
+  Model.epgCoverage(matchedIds, { "cnn.us": null }).carries,
+  Model.epgCoverage(matchedIds, null).carries,
+  Model.epgCoverage(null, epgWindow),
+  Model.epgCoverage([], epgWindow).carries
+] }, [false, false, true, false, false, { total: 0, withId: 0, matched: 0, carries: false }, false])
+// The stability requirement, and the reason it is measured on the identifier:
+// `epgFields` hides a `now` whose stop has passed, so a coverage rule that
+// counted what is ON AIR would flip on the 30 s tick and re-height the list
+// under the cursor. This function takes no clock at all.
+checkCall("GS9: coverage does not expire -- the same window answers the same at any hour", function () {
+  const expired = { "cnn.us": { now: { title: "The Lead", start: 100, stop: 200 } } }
+  const later = Model.epgFields(expired["cnn.us"], 9999)
+  return [Model.epgCoverage(matchedIds, expired).carries, later.nowTitle, later.until, Model.epgCoverage.length]
+}, [true, "", "", 2])
+// A tvg-id is provider text: `constructor` and `toString` are on every object
+// and would count as coverage on a playlist that happens to use them.
+checkCall("GS9: an inherited property name is not guide data", function () { return [
+  Model.epgCoverage(Model.prepareChannels([{ id: "p1", name: "Proto", tvgId: "constructor" }, { id: "p2", name: "Str", tvgId: "toString" }]), {}),
+  Model.epgCoverage(Model.prepareChannels([{ id: "p1", name: "Proto", tvgId: "constructor" }]), { constructor: { now: { title: "Real" } } }).carries
+] }, [{ total: 2, withId: 2, matched: 0, carries: false }, true])
+// R-C, and the trap an earlier round of this work named: the verdict is taken
+// once, in open(), BEFORE the card is composed, and held while it is on screen.
+// A binding on `epgMap` would re-height every row the moment an EPG fetch
+// landed, mid-session, under the cursor -- which is exactly what deleting
+// `anyFailedInScope` was for.
+check("GS9: Guide.qml measures the coverage at open and holds it, rather than binding it", [
+  /property bool rowsHaveDetail: Model\.rowsHaveDetail\(\{[\s\S]{0,200}?epgCarries: root\.epgCarriesRows/.test(guideSource),
+  /\n  property bool epgCarriesRows: false\n/.test(guideSource),
+  (guideSource.match(/Model\.epgCoverage\(/g) || []).length,
+  (qmlFunction("measureEpgRows").match(/Model\.epgCoverage\(/g) || []).length,
+  qmlFunction("open").indexOf("root.measureEpgRows()") !== -1
+    && qmlFunction("open").indexOf("root.measureEpgRows()") < qmlFunction("open").indexOf("root.rebuildDisplay()"),
+  /epgCarries: root\.epgConfigured/.test(guideSource),
+  /readonly property bool epgCarriesRows/.test(guideSource),
+  // and on the axis's own cadence: once per channel-set change, past the
+  // groupsDirty guard, so a source switch cannot leave the previous source's
+  // verdict standing over a different channel set
+  /root\.groupsDirty = false\n[\s\S]{0,400}?root\.measureEpgRows\(\)/.test(qmlFunction("rebuildGroups")),
+  (guideSource.match(/root\.measureEpgRows\(\)/g) || []).length
+], [true, true, 1, 1, true, false, false, true, 2])
+
+// ---- GS11 / D-GS-4: a setting the user cleared must not come back because a
+// file outlived it.
+//
+// Clearing a source's guide URL left epg-now.json, epg-status.json and
+// epg-window.txt in its cache, so the next start loaded them and the
+// guide-data warning they carry was back in the footer for a guide source
+// that is no longer configured. Removing a source already deletes its whole
+// directory; this is the same rule for the part of it one setting owns.
+// The handler's DECLARATION, not the first mention of its name: a comment
+// elsewhere that points at it is not the thing being asserted about.
+function qmlHandler(source, name) {
+  const at = source.indexOf("\n  on" + name + "Changed")
+  if (at === -1) return ""
+  const next = source.indexOf("\n  on", at + 4)
+  return source.slice(at, next === -1 ? source.length : next)
+}
+check("GS11: clearing the active guide URL queues the cache job in the handler that clears it in memory", [
+  /root\.queueCacheJob\(\["epg-clear", "--key", root\.activeSourceKey\], null\)/.test(qmlHandler(serviceSource, "ActiveEpgUrl")),
+  // inside the cleared branch, not after it: the handler returns there
+  qmlHandler(serviceSource, "ActiveEpgUrl").indexOf("epg-clear") < qmlHandler(serviceSource, "ActiveEpgUrl").indexOf("return"),
+  // and never for a source that does not exist, which would be a job with an
+  // empty key for the helper to refuse
+  /if \(root\.activeSourceKey !== ""\) root\.queueCacheJob\(\["epg-clear"/.test(serviceSource)
+], [true, true, true])
+check("GS11: an inactive source's cleared guide URL takes its cache too, where activeEpgUrl never moves", [
+  /key !== root\.activeSourceKey && String\(rec\.epgUrl \|\| ""\) !== "" && next && String\(next\.epgUrl \|\| ""\) === ""/.test(serviceSource),
+  (serviceSource.match(/"epg-clear"/g) || []).length
+], [true, 2])
+// The two implementations of one verb: the service names an action the helper
+// has to have, and a rename on either side is how they drift.
+check("GS11: the helper implements the action the service asks for, and it is not `remove` in disguise", [
+  /cache_actions\.add_parser\("epg-clear"/.test(helperSource),
+  /elif action == "epg-clear":\n\s+payload = cache_epg_clear\(directory, args\.key\)/.test(helperSource),
+  /def cache_epg_clear\(directory: str, key: str\)/.test(helperSource),
+  // it walks the EPG names only, and it does not rmdir the source's directory
+  /def cache_epg_clear[\s\S]{0,1400}?for name in EPG_CACHE_FILES/.test(helperSource),
+  /def cache_epg_clear[\s\S]{0,1400}?os\.rmdir/.test(helperSource)
+], [true, true, true, true, false])
 
 // D4: the mandated words come from one constant, so the two slots cannot drift.
 checkCall("rowFailedMeta and rowDetail build the failure notice from the same words", function () { return [Model.rowFailedMeta("07:12"), Model.rowDetail({ failedAt: "07:12" }), Model.rowDetail({ showGroup: true, group: "US Sports", failedAt: "07:12" }), Model.rowFailedMeta("")] },
@@ -427,6 +570,107 @@ checkCall("rowMeta: the slot carries the notice exactly when the row has no deta
     Model.rowMeta(null)
   ]
 }, ["Failed 07:12" + SEP + "Space to retry", "Failed 07:12" + SEP + "Space to retry", "", "until 21:00", "until 21:00", "", ""])
+
+// ---- GS8 / D-GS-1: the string that names a key is not the faintest text on
+// the row.
+//
+// The live pass measured `Failed HH:MM - Space to retry` at 3.78:1 on the
+// CURSOR row against a 4.5:1 threshold, the only text on the card under it,
+// because UX 5.3's dim rung was applied over the selected row's lighter fill.
+// The rung is the whole fix, so the rung is what the shipping code decides and
+// what is asserted here -- and then the consequence is COMPUTED, from the real
+// menu tokens of every theme installed on this machine
+// (tests/fixtures/menu-contrast.json), because a ratio measured on one theme
+// is not evidence about the next one. WCAG 2.1 relative luminance; the row
+// fills are the composites Color.qml builds from the same three tokens.
+const menuTokens = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/menu-contrast.json"), "utf8"))
+function rgbOf(value) {
+  const h = String(value).replace("#", "")
+  return [0, 2, 4].map(function (i) { return parseInt(h.slice(i, i + 2), 16) })
+}
+function composite(fg, bg, alpha) { return [0, 1, 2].map(function (i) { return fg[i] * alpha + bg[i] * (1 - alpha) }) }
+function luminance(rgb) {
+  const lin = rgb.map(function (v) { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) })
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+}
+function contrast(a, b) {
+  const la = luminance(a), lb = luminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+// One theme -> the two row fills and the two text colours the delegate uses.
+function menuSurface(theme) {
+  const background = rgbOf(theme.background)
+  const text = rgbOf(theme.foreground)
+  return {
+    rowFill: background,
+    cursorFill: composite(text, background, menuTokens.selectedBackgroundAlpha),
+    text: text,
+    selectedText: rgbOf(theme.accent)
+  }
+}
+// The notice as the row renders it: Color.menu.text at the rung the shipping
+// code chooses, over whichever fill the row has.
+function noticeRatio(theme, onCursor, alpha) {
+  const s = menuSurface(theme)
+  const fill = onCursor ? s.cursorFill : s.rowFill
+  return contrast(composite(s.text, fill, alpha), fill)
+}
+function round2(n) { return Math.round(n * 100) / 100 }
+const reference = menuTokens.themes[0]
+
+checkCall("rowNoticeEmphasis: the failure notice carries no de-emphasis, ambient meta keeps the dim rung", function () { return [
+  Model.rowNoticeEmphasis("07:12"), Model.rowNoticeEmphasis(""), Model.rowNoticeEmphasis(null), Model.rowNoticeEmphasis(undefined),
+  Model.TEXT_DIM, Model.TEXT_FULL
+] }, [1, 0.52, 0.52, 0.52, 0.52, 1])
+// The defect, and the repair, on the exact theme docs/QA-RESULTS.md measured.
+checkCall("GS8: the notice on the cursor row was under AA and is not any more (" + reference.name + ")", function () {
+  const shipped = Model.rowNoticeEmphasis("07:12")
+  return [
+    round2(noticeRatio(reference, false, Model.TEXT_DIM)), round2(noticeRatio(reference, true, Model.TEXT_DIM)),
+    round2(noticeRatio(reference, false, shipped)), round2(noticeRatio(reference, true, shipped)),
+    noticeRatio(reference, true, Model.TEXT_DIM) < 4.5, noticeRatio(reference, true, shipped) >= 4.5
+  ]
+}, [3.54, 3.52, 10.82, 9.7, true, true])
+// And on every other theme this machine has, because the fix is not allowed to
+// be a property of one palette.
+checkCall("GS8: the notice clears 4.5:1 on both row states in every installed theme, and the dim rung did not", function () {
+  const shipped = Model.rowNoticeEmphasis("07:12")
+  const under = function (alpha) {
+    return menuTokens.themes.filter(function (t) { return noticeRatio(t, false, alpha) < 4.5 || noticeRatio(t, true, alpha) < 4.5 }).length
+  }
+  const floor = menuTokens.themes.reduce(function (lowest, t) { return Math.min(lowest, noticeRatio(t, false, shipped), noticeRatio(t, true, shipped)) }, Infinity)
+  return [menuTokens.themes.length, under(Model.TEXT_DIM), under(shipped), round2(floor) >= 4.5]
+}, [23, 20, 0, true])
+// GS8 in the product owner's own words: the text that tells someone what to do
+// must be the most legible thing on the row, not the least. The channel name is
+// the row's own benchmark -- Color.menu.text on an ordinary row, and the
+// theme's accent (`menu.selected-text`) on the cursor row.
+checkCall("GS8: the notice is never less legible than the channel name beside it", function () {
+  const shipped = Model.rowNoticeEmphasis("07:12")
+  const weaker = menuTokens.themes.filter(function (t) {
+    const s = menuSurface(t)
+    return noticeRatio(t, false, shipped) < contrast(s.text, s.rowFill) - 1e-9
+      || noticeRatio(t, true, shipped) < contrast(s.selectedText, s.cursorFill) - 1e-9
+  })
+  const wasWeaker = menuTokens.themes.filter(function (t) {
+    const s = menuSurface(t)
+    return noticeRatio(t, true, Model.TEXT_DIM) < contrast(s.selectedText, s.cursorFill) - 1e-9
+  })
+  return [weaker.map(function (t) { return t.name }), wasWeaker.length]
+  // 22 of 23 and not all 23: `vantablack` is pure white text on pure black
+  // with a grey accent, so its cursor-row name (5.53:1) was already fainter
+  // than the dimmed notice (5.63:1). It is the one theme where the notice was
+  // not the weakest text on the row, and it still clears the threshold after.
+}, [[], 22])
+// Both slots the notice can land in have to ask, or the ratios above are a
+// property of a function nothing calls.
+check("GS8: the meta slot and the detail line both take their rung from the shipping decision", [
+  /opacity: Model\.rowNoticeEmphasis\(row\.failedAt\)/.test(qmlBlock("meta")),
+  /opacity: Model\.rowNoticeEmphasis\(row\.failedAt\)/.test(qmlBlock("detailText")),
+  /opacity: 0\.52/.test(qmlBlock("meta")),
+  /opacity: 0\.52/.test(qmlBlock("detailText")),
+  (guideSource.match(/Model\.rowNoticeEmphasis\(/g) || []).length
+], [true, true, false, false, 2])
 
 // D5: the header count becomes a position exactly when the list overflows.
 checkCall("scopeLabel: the four forms", function () { return [
@@ -1952,7 +2196,7 @@ check("D-PLY-1: every answer arms the observer except the two that must not", ["
 // Service.qml is the only caller, and this pins that it stays the only route:
 // a word the rule does not know, or a branch that reaches past the decision
 // into the state, is exactly how the defect got in.
-const serviceSource = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
+// (`serviceSource` is read once, at the top of the M2-09 section.)
 const notedOutcomes = []
 serviceSource.replace(/root\.noteSessionOutcome\("([^"]*)"\)/g, (m, word) => { notedOutcomes.push(word); return m })
 check("Service.qml spells every outcome in the vocabulary", [notedOutcomes.length > 0, notedOutcomes.filter(o => Model.PLAYER_OUTCOMES.indexOf(o) === -1)], [true, []])

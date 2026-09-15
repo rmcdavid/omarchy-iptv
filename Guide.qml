@@ -399,8 +399,39 @@ Item {
   // single-line row, a slot that is deliberately blank on a failed row and so
   // is free exactly when it is needed. Row height stops depending on
   // session-mutable state, which is R-C and is better than what ships.
+  //
+  // M2-09 GS9: the EPG half of this asks the data, not the setting. See
+  // `epgCarriesRows` below.
   readonly property bool rowsHaveDetail: Model.rowsHaveDetail({
-    scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows, epgConfigured: root.epgConfigured })
+    scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows, epgCarries: root.epgCarriesRows })
+
+  // M2-09 GS9 / D-GS-2. Whether guide data actually fills the second line,
+  // measured from the channel set and the loaded EPG window rather than read
+  // off `epgConfigured`. On a provider whose channels carry no `tvg-id` the
+  // configured flag is true and the line is blank on every row, which spends
+  // three visible rows on white space and is the defect D3 removed, returning
+  // in a different costume.
+  //
+  // NOT a binding, deliberately, and this is R-C rather than an optimisation.
+  // `epgMap` is replaced when the EPG fetch lands, when a refresh rewrites the
+  // window and when a programme window expires, and every one of those can
+  // happen while the card is on screen -- a binding here would re-height 3,335
+  // rows under the cursor with no user action, which is the hazard D4 deleted
+  // `anyFailedInScope` to be rid of, and the trap an earlier round of this work
+  // already identified.
+  //
+  // So it is measured exactly where the group axis is measured, and on the same
+  // two occasions: in open(), before the first frame is composed, and in
+  // rebuildGroups() when the CHANNEL SET changes. Guide data arriving or
+  // expiring never moves it -- those rows fill on the next open and nothing
+  // jumps in the meantime -- but switching source does, because otherwise the
+  // previous source's verdict would survive its channels and a source with no
+  // guide data at all would inherit a two-line row, which is this defect again.
+  property bool epgCarriesRows: false
+
+  function measureEpgRows() {
+    root.epgCarriesRows = root.serviceReady && Model.epgCoverage(root.service.channels, root.epgMap).carries
+  }
 
   // The whole body decision in one object (Model.guideSurface, D-LIVE-19):
   // which empty state, whether rows and the group column exist, and the
@@ -546,6 +577,12 @@ Item {
     root.sourcesNotice = ""
     root.opened = true
     root.disarmPointer()
+    // GS9 / R-C: the shape is decided here, before the card is composed, and
+    // then held while it is open. rebuildGroups() re-measures both halves when
+    // the channel set changes; on a reopen with the same channels it returns
+    // early on `groupsDirty`, so this call is what takes a fresh reading of
+    // guide data that landed while the guide was closed.
+    root.measureEpgRows()
     root.rebuildDisplay()
     root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
     root.scrollToCursor()
@@ -607,6 +644,10 @@ Item {
     }
     if (!root.groupsDirty && root.scopeList.length > 0) return
     root.groupsDirty = false
+    // GS9: the other half of the row-height shape, on the same cadence as the
+    // axis -- once per channel-set change, never on a keystroke and never on
+    // the EPG clock.
+    root.measureEpgRows()
     // M2-03 1.4, the compatibility path only (see chnoApi): a service that
     // publishes chnoIndex never reaches this. It runs on a channel-set change,
     // never on a keystroke, so digit entry stays on the per-key budget either
@@ -2457,7 +2498,10 @@ Item {
                       // re-entering width through visible -> implicitWidth
                       // is a binding loop. Neighbours anchor on `visible`.
                       color: root.foreground
-                      opacity: 0.52
+                      // M2-09 GS8: `until HH:MM` is ambient and stays on the
+                      // dim rung; the failure notice names a key and carries
+                      // none. Same token either way.
+                      opacity: Model.rowNoticeEmphasis(row.failedAt)
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
                       horizontalAlignment: Text.AlignRight
@@ -2508,7 +2552,12 @@ Item {
                       textFormat: Text.PlainText
                       text: row.detail
                       color: root.foreground
-                      opacity: 0.52
+                      // M2-09 GS8: the same rung as the meta slot, because on
+                      // a two-line row this IS where the failure notice lands
+                      // (rowDetail replaces the EPG segments with it), and the
+                      // two slots must not disagree about how legible the one
+                      // string that names a key is.
+                      opacity: Model.rowNoticeEmphasis(row.failedAt)
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.bodySmall
                       elide: Text.ElideRight

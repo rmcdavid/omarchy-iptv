@@ -3950,6 +3950,43 @@ function epgFields(entry, nowSec) {
   return out
 }
 
+// M2-09 GS9 / D-GS-2. Does guide data actually reach these rows?
+//
+// The rule this lane established for the second line is that it exists when it
+// carries something that VARIES, and the shipped predicate asked the wrong
+// question of the EPG: whether a URL is configured. On the subscriber's
+// provider those are different facts. One of their 3,335 channels carries a
+// `tvg-id` at all and it matches nothing in the guide data, so configuring an
+// EPG did not trade the density for now/next -- it returned a BLANK second
+// line on all 3,335 rows and took three visible rows to print white space.
+// That is the original defect in a different costume. Configured is not
+// present; this counts the rows the data can actually fill.
+//
+// Matched on the IDENTIFIER and on whether the entry holds a titled programme
+// at all -- never on what is on air right now. `epgFields` hides a `now` whose
+// stop has passed, so counting live titles would make this answer, and
+// therefore the row height, change on the 30 s clock tick and re-height the
+// list under the cursor. The trap the earlier round of this work named.
+//
+// One pass, one own-property lookup per row with a `tvg-id`, no clock.
+function epgCoverage(channels, epgMap) {
+  var list = asList(channels)
+  var map = epgMap && typeof epgMap === "object" ? epgMap : {}
+  var out = { total: list.length, withId: 0, matched: 0, carries: false }
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    var id = row ? str(row.tvgId) : ""
+    if (id === "") continue
+    out.withId++
+    if (!Object.prototype.hasOwnProperty.call(map, id)) continue
+    var entry = map[id]
+    if (!entry || typeof entry !== "object") continue
+    if ((entry.now && str(entry.now.title) !== "") || (entry.next && str(entry.next.title) !== "")) out.matched++
+  }
+  out.carries = out.matched > 0
+  return out
+}
+
 // Backwards-compatible strings for callers that only want text.
 function formatEpgLine(entry, nowSec) {
   var f = epgFields(entry, nowSec)
@@ -3995,6 +4032,34 @@ function rowMeta(opts) {
   return str(o.until) === "" ? "" : "until " + str(o.until)
 }
 
+// M2-09 GS8. The opacity rung a row's secondary text carries, lifted out of
+// the two QML bindings that render it (CLAUDE.md rule 12) so a test can call
+// the shipping decision instead of mirroring it.
+//
+// UX 5.3's dim rung is de-emphasis and it is right for ambient text: `until
+// HH:MM`, the group name, now/next are all there to be glanced at. The failure
+// notice is not ambient. It is the one string in the guide that names a key
+// the user is meant to press, and the live pass measured it as the LOWEST
+// contrast text on the card -- 3.78:1 on the cursor row against a 4.5:1
+// threshold -- because the dim rung is applied over the selected row's lighter
+// fill. So the notice carries no de-emphasis at all: same colour token
+// (Color.menu.text, no literal and no new token), full rung.
+//
+// It keeps the card's text colour rather than the row's selected colour, which
+// is what makes this hold in EVERY theme rather than only in the one that was
+// measured: `menu.selected-background` is `menu.text` at 0.08, so the card's
+// text token is near-identical against both row fills, while `selected-text`
+// is the theme's accent and is under 4.5:1 against its own row in eight of the
+// twenty-two installed themes -- for the channel name too, which is not this
+// lane's to change. The notice therefore reads the same whether or not the
+// cursor is on the row, which is the right property for an alert.
+var TEXT_DIM = 0.52
+var TEXT_FULL = 1
+
+function rowNoticeEmphasis(failedAt) {
+  return str(failedAt) === "" ? TEXT_DIM : TEXT_FULL
+}
+
 // Row detail line (UX 2.4): `Group - Now: X - Next: Y`, group omitted inside
 // its own group, EPG segments replaced by the failure notice when set.
 function rowDetail(opts) {
@@ -4019,13 +4084,19 @@ function rowDetail(opts) {
 // EPG now/next. The predicate strictly dominates the shipped `!scopeIsGroup`:
 // exactly one cell of the truth table changes, and no shape loses a row.
 //
+// GS9: the EPG term is `epgCarries`, from `epgCoverage`, and NOT whether an
+// EPG is configured. Both halves of this predicate now ask the same question
+// -- does this line carry something that varies -- of the data rather than of
+// a setting. A guide source whose ids match nothing gives every row a blank
+// second line, which costs three visible rows and returns nothing.
+//
 // THREE parameters, and deliberately no fourth: a failure term here is what
 // made row height depend on session state, so one dead stream re-heighted a
 // whole scope mid-session under the cursor. The notice moved to the meta slot
 // (D4) precisely so this function could stop reading failures.
 function rowsHaveDetail(opts) {
   var o = opts || {}
-  return rowShowsGroup(o) || o.epgConfigured === true
+  return rowShowsGroup(o) || o.epgCarries === true
 }
 
 // Whether a row prints its group on the detail line (M2-09 D3): not inside
@@ -5905,11 +5976,15 @@ if (typeof module !== "undefined") {
     epgFraction: epgFraction,
     epgNowStale: epgNowStale,
     epgFields: epgFields,
+    epgCoverage: epgCoverage,
     formatEpgLine: formatEpgLine,
     joinParts: joinParts,
     rowDetail: rowDetail,
     rowFailedMeta: rowFailedMeta,
     rowMeta: rowMeta,
+    rowNoticeEmphasis: rowNoticeEmphasis,
+    TEXT_DIM: TEXT_DIM,
+    TEXT_FULL: TEXT_FULL,
     rowsHaveDetail: rowsHaveDetail,
     rowShowsGroup: rowShowsGroup,
     rowAccessibleName: rowAccessibleName,
