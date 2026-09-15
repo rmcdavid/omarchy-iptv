@@ -504,8 +504,13 @@ check("GS9: Guide.qml measures the coverage at open and holds it, rather than bi
   qmlFunction("open").indexOf("root.measureEpgRows()") !== -1
     && qmlFunction("open").indexOf("root.measureEpgRows()") < qmlFunction("open").indexOf("root.rebuildDisplay()"),
   /epgCarries: root\.epgConfigured/.test(guideSource),
-  /readonly property bool epgCarriesRows/.test(guideSource)
-], [true, true, 1, 1, true, false, false])
+  /readonly property bool epgCarriesRows/.test(guideSource),
+  // and on the axis's own cadence: once per channel-set change, past the
+  // groupsDirty guard, so a source switch cannot leave the previous source's
+  // verdict standing over a different channel set
+  /root\.groupsDirty = false\n[\s\S]{0,400}?root\.measureEpgRows\(\)/.test(qmlFunction("rebuildGroups")),
+  (guideSource.match(/root\.measureEpgRows\(\)/g) || []).length
+], [true, true, 1, 1, true, false, false, true, 2])
 
 // ---- GS11 / D-GS-4: a setting the user cleared must not come back because a
 // file outlived it.

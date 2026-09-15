@@ -413,14 +413,20 @@ Item {
   // in a different costume.
   //
   // NOT a binding, deliberately, and this is R-C rather than an optimisation.
-  // `epgMap` changes when the EPG fetch lands, when a refresh replaces the
-  // window and when a source swap clears it, and every one of those can happen
-  // while the card is on screen -- a binding here would re-height 3,335 rows
-  // under the cursor with no user action, which is the hazard D4 deleted
-  // `anyFailedInScope` to be rid of. So it is measured once, in open(), before
-  // the first frame is composed, and it does not move until the guide is
-  // opened again. A window that lands while the guide is open fills the rows
-  // it can on the next open, and nothing jumps in the meantime.
+  // `epgMap` is replaced when the EPG fetch lands, when a refresh rewrites the
+  // window and when a programme window expires, and every one of those can
+  // happen while the card is on screen -- a binding here would re-height 3,335
+  // rows under the cursor with no user action, which is the hazard D4 deleted
+  // `anyFailedInScope` to be rid of, and the trap an earlier round of this work
+  // already identified.
+  //
+  // So it is measured exactly where the group axis is measured, and on the same
+  // two occasions: in open(), before the first frame is composed, and in
+  // rebuildGroups() when the CHANNEL SET changes. Guide data arriving or
+  // expiring never moves it -- those rows fill on the next open and nothing
+  // jumps in the meantime -- but switching source does, because otherwise the
+  // previous source's verdict would survive its channels and a source with no
+  // guide data at all would inherit a two-line row, which is this defect again.
   property bool epgCarriesRows: false
 
   function measureEpgRows() {
@@ -572,8 +578,10 @@ Item {
     root.opened = true
     root.disarmPointer()
     // GS9 / R-C: the shape is decided here, before the card is composed, and
-    // then held for as long as it is open -- the group axis in rebuildGroups()
-    // and whether guide data reaches the rows in this call.
+    // then held while it is open. rebuildGroups() re-measures both halves when
+    // the channel set changes; on a reopen with the same channels it returns
+    // early on `groupsDirty`, so this call is what takes a fresh reading of
+    // guide data that landed while the guide was closed.
     root.measureEpgRows()
     root.rebuildDisplay()
     root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
@@ -636,6 +644,10 @@ Item {
     }
     if (!root.groupsDirty && root.scopeList.length > 0) return
     root.groupsDirty = false
+    // GS9: the other half of the row-height shape, on the same cadence as the
+    // axis -- once per channel-set change, never on a keystroke and never on
+    // the EPG clock.
+    root.measureEpgRows()
     // M2-03 1.4, the compatibility path only (see chnoApi): a service that
     // publishes chnoIndex never reaches this. It runs on a channel-set change,
     // never on a keystroke, so digit entry stays on the per-key budget either
