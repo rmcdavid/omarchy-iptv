@@ -81,6 +81,9 @@ $H ipc widget             # JSON dump of the bar widget (glyph, label, number, t
 $H ipc channel 101        # M2-03: tune by channel number; the service's own verb
 $H ipc chnoIndex          # M2-03: { hasNumbers, count, duplicates, maxLabelLen }
 $H ipc tooltip            # last tooltip text the widget asked the bar to show
+$H ipc pip toggle         # M2-05: the service's own verb (on | off | toggle)
+$H ipc pipKey             # M2-05: the guide's p key, through the same entry point
+$H ipc pipState           # M2-05: { available, on, applying, reason, provider, playerPid }
 $H key -k Tab             # real key events via wtype (overlay has exclusive focus)
 $H key j j f              # e.g. list mode: down, down, favorite
 $H shot search            # grim screenshot -> shots/search.png
@@ -218,6 +221,49 @@ its 20 rows are numbered, including the duplicate pair 501, the subchannels
 7.1 and 7.2, `8-1` (which normalizes to 8.1), `0042` (to 42), a non-numeric
 `N/A` that is deliberately NOT a number, and one row for each of the two
 alias attributes of ruling CN11.
+
+### Picture in picture (M2-05)
+
+```bash
+scripts/dev-harness/pip-scenario.sh check-tree   # no display, no quickshell; run by check.sh
+scripts/dev-harness/pip-scenario.sh              # preflight, then the live half
+```
+
+This is the one scenario that must NOT drive the real thing. The feature's
+job is to float, shrink, move and pin a window, so a scenario that reached
+the live compositor would rearrange the session of whoever ran it -- and
+would still pass. `stub-hyprctl.py` goes on PATH in front of the real binary
+(`run.sh harness_env` prepends `$SCRATCH/bin` when a scenario has put
+something there), holds its compositor state in a JSON file the scenario
+seeds, and records the argv of every call. Nothing else in the harness
+creates that directory, so an ordinary run is unaffected.
+
+The stub is seeded twice: once before the shell starts, so the availability
+probe has something to read, and again with the pid the service actually
+holds once a player is up. That second seeding is the point of the exercise:
+the window is resolved by class AND pid, and the fixture carries a second
+client of the same class at a different pid -- PLY-RST-11's reproduced case,
+a user's own `mpv --wayland-app-id=omarchy-iptv`. Every case asserts that
+foreign window is byte-identical afterwards.
+
+`tests/test_pip.py` is where the stub's own fidelity is pinned, against the
+transcript the M2-05-00 gate recorded in `docs/QA-RESULTS.md`. Read that
+file before changing any behaviour here: two of the things it models are
+counter-intuitive and load-bearing. A dispatch aimed at a window that does
+not exist answers `ok` with exit status 0 and changes nothing, and a real
+refusal arrives as `warning:` text on stdout, also with exit status 0. That
+is why nothing in this feature branches on an exit status, and why success
+is defined only as reading the state back (ruling PIP11). The other is that
+the `action` argument is ignored -- float and pin toggle whatever you ask
+for, and asking to unset one on a tiled window floats it (ruling PIP10).
+
+**The live half has not been run by the lane that wrote it** (that lane does
+not hold the display, and starting the harness starts a quickshell), so
+until the display lane runs it these scenarios have a runner rather than a
+result. Its preflight runs in `scripts/check.sh` on every commit and scores
+1 passed / 27 failed against an export of the pre-M2-05 tree. The file's
+header lists the seams that join the preflight when lane V1 merges, and
+what is deliberately absent because only a real compositor can answer it.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

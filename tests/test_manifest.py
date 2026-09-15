@@ -101,5 +101,74 @@ class ChannelNumberSettingsTest(unittest.TestCase):
             self.assertIn(key, BY_KEY, key)
 
 
+class PictureInPictureSettingsTest(unittest.TestCase):
+    """M2-05 section 6, and the one cross-lane deadlock this wave has.
+
+    The three PiP keys cannot be declared here by lane V2 alone.
+    tests/Model.test.js asserts the manifest and Model.SETTINGS_DEFAULTS /
+    SETTING_RANGES 1:1 in BOTH directions, so a manifest key with no model
+    side turns five node checks red, and a model key with no manifest entry
+    turns the same checks red on lane V1's branch. Whichever half lands
+    first is red on its own. Both halves therefore belong in one commit,
+    with tests/Model.test.js's hard-coded "four integer settings" count
+    bumped to six in the same breath -- and all three of those files belong
+    to lane V1. See handover request 1.
+
+    What this lane CAN pin, and does: that the manifest never half-lands the
+    three keys, that the values are the designed ones once they are there,
+    and that Service.qml's own clamp uses exactly those ranges. The clamp is
+    the half a user feels: a range declared here and a different one clamped
+    there is a control whose ends do nothing.
+    """
+
+    PIP_KEYS = ("pipCorner", "pipSizePercent", "pipMargin")
+
+    def test_the_three_keys_land_together_or_not_at_all(self):
+        # A half-landed settings block is the state where the host offers a
+        # control the plugin cannot read, or reads a value the host never
+        # offers. Either way it is worse than neither.
+        in_schema = [key for key in self.PIP_KEYS if key in BY_KEY]
+        in_defaults = [key for key in self.PIP_KEYS if key in DEFAULTS]
+        self.assertEqual(in_schema, in_defaults)
+        self.assertIn(len(in_schema), (0, 3), in_schema)
+
+    def test_the_declared_values_are_the_designed_ones(self):
+        if "pipCorner" not in BY_KEY:
+            self.skipTest("PiP settings are blocked on lane V1 (Model.SETTING_RANGES); "
+                          "see the M2-05 handover, request 1")
+        # PIP4: proportional defaults, top-right. pipCorner has no min/max for
+        # the same reason channelOrder has none -- the schema has no enum type,
+        # so an unreadable value means "top-right" on the service side.
+        corner = BY_KEY["pipCorner"]
+        self.assertEqual(corner["type"], "string")
+        self.assertNotIn("min", corner)
+        self.assertEqual(DEFAULTS["pipCorner"], "top-right")
+        self.assertEqual(
+            corner["label"],
+            "Picture-in-picture corner: top-right, top-left, bottom-right, bottom-left")
+        percent = BY_KEY["pipSizePercent"]
+        self.assertEqual(percent["type"], "integer")
+        self.assertEqual((percent["min"], percent["max"], percent["step"]), (15, 60, 5))
+        self.assertEqual(percent["defaultValue"], 30)
+        margin = BY_KEY["pipMargin"]
+        self.assertEqual(margin["type"], "integer")
+        self.assertEqual((margin["min"], margin["max"], margin["step"]), (0, 200, 4))
+        self.assertEqual(margin["defaultValue"], 16)
+
+    def test_the_service_clamps_to_the_ranges_the_design_gives(self):
+        source = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        self.assertIn("pipSizePercent, 15, 60, 30", source)
+        self.assertIn("pipMargin, 0, 200, 16", source)
+        self.assertIn('var corners = ["top-right", "top-left", "bottom-right", "bottom-left"]',
+                      source)
+
+    def test_the_service_reads_the_keys_from_the_one_bar_entry(self):
+        # Design section 6: "the guide and the service both read the one
+        # entry". Through pipOptions, not through settingsFrom, so the three
+        # keys have exactly one clamp rather than two that can drift.
+        source = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        self.assertIn("root.pipOptions(root.pipConfig())", source)
+
+
 if __name__ == "__main__":
     unittest.main()

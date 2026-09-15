@@ -63,6 +63,9 @@ beyond their host name.
 | `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
 | `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
+| `pipCorner` | string | `top-right` | which corner the picture-in-picture box sits in: `top-right`, `top-left`, `bottom-right`, `bottom-left` |
+| `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
+| `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
@@ -97,6 +100,7 @@ Guide keys (full map in `docs/UX.md` section 3):
 | list | s | stop playback |
 | list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
+| list | p | picture in picture: shrink the player into a corner, or put it back |
 | list | r | refresh playlist and EPG now |
 | list | / or Tab | back to search mode; Esc clears the query, then closes |
 
@@ -121,10 +125,52 @@ omarchy-shell io.github.rmcdavid.iptv play t:bbc1.uk      # play a channel id fr
 omarchy-shell io.github.rmcdavid.iptv next                # zap forward
 omarchy-shell io.github.rmcdavid.iptv previous            # zap back
 omarchy-shell io.github.rmcdavid.iptv channel 101         # tune straight to channel 101
+omarchy-shell io.github.rmcdavid.iptv pip toggle          # picture in picture on / off
 omarchy-shell io.github.rmcdavid.iptv stop
 omarchy-shell io.github.rmcdavid.iptv refresh
 omarchy-shell io.github.rmcdavid.iptv status              # JSON
 ```
+
+## Picture in picture
+
+Press `p` in the guide's list mode while something is playing. The player
+window floats, shrinks to a corner box sized from your monitor, and is pinned
+so it follows you between workspaces; your other windows lay themselves out as
+if it were not there. Press `p` again and it goes back where it came from,
+including the exact rectangle if it was floating before.
+
+From outside the guide, `omarchy-shell io.github.rmcdavid.iptv pip toggle`
+(also `pip on` and `pip off`). `contrib/bindings.lua` has a commented line
+that binds it to `SUPER + SHIFT + P`.
+
+Nothing goes into your Hyprland configuration for this. The plugin asks the
+compositor at runtime and writes no file at all.
+
+Changing channel keeps the box where it is. So does switching theme, and so
+does `omarchy restart shell` -- the window belongs to the compositor, not to
+the shell, and the guide picks the state back up. Stopping playback ends it,
+because the window it was applied to is gone; play again and press `p` again.
+
+**It is not "always on top".** Hyprland has no such window state, so there is
+none to ask for. What you get is a small window that stays with you: it floats
+above the tiling layout and follows you across workspaces, but another
+floating window you focus afterwards can cover it. Anything that promised you
+a window nothing can cover would be wrong.
+
+Three settings control the box (see the Settings table): which corner, how
+wide as a percentage of the monitor, and the margin from the screen edge.
+
+Known limits:
+
+- Verified on Hyprland 0.56.2 with a Lua config provider. Other versions are
+  untested; without Hyprland the key says so and does nothing.
+- Multi-monitor placement is untested. PiP uses the monitor the player is on
+  and does the scale and rotation arithmetic, but no second monitor was
+  available to try it on. What happens when you unplug the monitor holding a
+  pinned box is not established either.
+- If you have pasted the optional float rule from `contrib/windows.lua`, see
+  the caveat in that file: whether a static size rule re-applies underneath
+  PiP has not been measured.
 
 ## Sources (playlists inside the guide)
 
@@ -191,6 +237,10 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   you open it.
 - Channel names are shown verbatim except that leading dashes are stripped
   and mpv property expansion is disabled for the window title.
+- The player window is rendered slightly translucent under the Omarchy
+  defaults. Omarchy exempts media players from its default opacity by class
+  name, and ours is `omarchy-iptv` rather than `mpv`, so the exemption misses
+  it. The first line of `contrib/windows.lua` fixes it.
 - The player's own keys work. mpv's normal key bindings are live on the
   player window, and two of them write files. `s` saves a screenshot to
   `~/.local/state/omarchy-iptv/screenshots/`, and `Shift+Q` saves a resume

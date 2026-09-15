@@ -180,6 +180,15 @@ harness_env() {
   export XDG_RUNTIME_DIR="$SCRATCH/runtime"
   export XDG_CACHE_HOME="$SCRATCH/cache"
   export XDG_STATE_HOME="$SCRATCH/state"
+  # M2-05. $SCRATCH/bin goes in FRONT of PATH when a scenario has put
+  # something there, which is how pip-scenario.sh hands the shell a stub
+  # `hyprctl` (scripts/dev-harness/stub-hyprctl.py). That indirection is not
+  # a convenience: without it the service would drive the REAL compositor and
+  # float, shrink and pin windows in the user's live session. The directory
+  # is created by the scenario and by nothing else, so an ordinary harness
+  # run is unaffected.
+  [[ -d $SCRATCH/bin ]] && export PATH="$SCRATCH/bin:$PATH"
+  return 0
 }
 
 write_fixture() {

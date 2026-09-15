@@ -6,3 +6,9 @@ o.bind("SUPER + SHIFT + T", "IPTV", "omarchy-shell shell toggle io.github.rmcdav
 -- on your machine; check with `omarchy menu keybindings --print`).
 -- o.bind("SUPER + SHIFT + PERIOD", "IPTV next channel", "omarchy-shell io.github.rmcdavid.iptv next")
 -- o.bind("SUPER + SHIFT + COMMA", "IPTV previous channel", "omarchy-shell io.github.rmcdavid.iptv previous")
+
+-- Optional: picture in picture from anywhere, not just from the guide (where
+-- it is `p` in list mode). Stock Omarchy already binds SUPER + O to float and
+-- pin whatever window has focus, so if you only want this once in a while you
+-- need nothing from us -- this is for a key that always means "the player".
+-- o.bind("SUPER + SHIFT + P", "IPTV picture in picture", "omarchy-shell io.github.rmcdavid.iptv pip toggle")

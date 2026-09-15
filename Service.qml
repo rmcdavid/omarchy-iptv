@@ -370,6 +370,86 @@ Item {
   // EPG load, by a cleared epgUrl and by a source swap.
   property var epgWarnings: []
 
+  // ---- picture in picture (M2-05, docs/M2-05-PICTURE-IN-PICTURE.md)
+  //
+  // TWO GATE RESULTS SHAPE EVERYTHING BELOW, and both of them override the
+  // design's own text (section 14, rulings PIP10 and PIP11):
+  //
+  //   PIP11. An exit code cannot detect failure here. `hyprctl dispatch`
+  //   answers rc 0 `ok` for a dispatch aimed at an address that does not
+  //   exist, and a real refusal arrives as `warning:` TEXT on stdout, also
+  //   with rc 0 (QA-RESULTS D-PIP-2). rc is non-zero only for a Lua parse
+  //   error - that is, only for a bug in our own string. So SUCCESS IS
+  //   DEFINED IN EXACTLY ONE PLACE: pipVerify() compares a fresh read of
+  //   `hyprctl -j clients` against what was asked for. Nothing in this file
+  //   may branch on a dispatch's exit status or on its output. The stdout of
+  //   a step is captured for the journal and for nothing else.
+  //
+  //   PIP10. The action argument is IGNORED: float and pin toggle
+  //   unconditionally, and asking to UNSET one on a tiled window floats it. So
+  //   no step is ever issued blind. Every round re-reads the compositor, the
+  //   plan's conditionals are decided from that read, and a round that did
+  //   not achieve the intent is re-planned from the state that now exists
+  //   rather than repeated. That is also what makes a user's own SUPER+T or
+  //   SUPER+O mid-sequence self-correcting instead of inverting.
+  //
+  // The state of record is the compositor, never a remembered boolean:
+  // `pipOn` below is only ever written from a verified read. What the window
+  // WAS before PiP is remembered in the player itself
+  // (user-data/omarchy-iptv-pip), so it has exactly the window's lifetime
+  // and survives both a channel change and `omarchy restart shell` (4.5).
+  readonly property string pipClass: "omarchy-iptv"
+  readonly property string pipTag: "iptv-pip"
+  // The window-owning mpv pid, from `player probe` and from `player start`.
+  // Addressing by class ALONE is a defect, not a shortcut: a user's own
+  // `mpv --wayland-app-id=omarchy-iptv` reproduces as a second client
+  // (QA-PLAYER PLY-RST-11), and floating, shrinking and pinning a stranger's
+  // window is damage. 0 means "we do not know", and PiP refuses.
+  property int playerPid: 0
+  property bool pipAvailable: false          // hyprctl on PATH and a live instance signature (G-8)
+  // "lua" or "legacy": WHICH SPELLING the compositor can parse, resolved once
+  // from `hyprctl systeminfo`. Not a fallback ladder - under a Lua config
+  // provider the legacy spelling is a Lua SYNTAX error (G-1), so "try the
+  // other one on failure" is a second guaranteed failure, and rc could not
+  // tell us to try anyway (PIP11). One selection, made from the host's own
+  // answer, verified like everything else by reading the state back.
+  property string pipProvider: ""
+  property bool pipOn: false                 // VERIFIED, never intended
+  property string pipMode: ""                // the request in flight: on | off | toggle ("" = idle)
+  property string pipIntent: ""              // what that resolved to against the live state
+  property string pipPhase: ""               // resolve | monitors | dispatch | verify
+  property int pipRound: 0
+  property var pipQueue: []                  // argv vectors left in this round
+  property var pipGeom: null                 // { x, y, w, h } asked for
+  property var pipLive: null                 // last pipFindWindow() result
+  property var pipSnapshot: null             // what the window was before PiP (from the player)
+  property string pipReason: ""              // last failure code, "" after a success
+  readonly property bool pipBusy: root.pipMode !== ""
+  // Bounds (CLAUDE.md "Working in parallel" 3). At most 3 rounds of at most
+  // 8 steps, each step and each read watched for 2 s, and the whole sequence
+  // capped so `pipBusy` can never latch.
+  readonly property int pipMaxRounds: 3
+  readonly property int pipMaxSteps: 8
+  readonly property int pipStepMs: 2 * 1000
+  readonly property int pipSequenceMs: 15 * 1000
+  // mpv request ids: 1 and 2 are the two subscriptions onPlayerAttached
+  // already makes. 3 reads our snapshot back after a shell restart (4.5).
+  readonly property int pipSnapshotRequestId: 3
+  // And 4 asks the player for its own pid. G-2 proved mpv's `pid` property
+  // is the pid Hyprland reports for the window, with no wrapper process in
+  // between; the helper resolves it the same way (bin/omarchy-iptv:3029).
+  // Taken over the player's own private socket rather than out of a helper
+  // reply, because that one connection covers all three ways a player
+  // becomes ours - a cold start, a respawn, and a reattach after
+  // `omarchy restart shell` - through a single seam.
+  readonly property int pipPidRequestId: 4
+
+  // The outcome of one PiP sequence, once it has been VERIFIED against the
+  // compositor: { ok, requested, state: "on"|"off", error: { code } }. The
+  // guide turns the code into its footer line (copy lives in lane V1); this
+  // service never emits a user-facing sentence.
+  signal pipOutcome(var result)
+
   // Emitted after a successful playlist helper run; the guide shows
   // `Refreshed - N channels` for a manual refresh (UX 6.1, D-LIVE-05).
   signal playlistRefreshed(int channelCount, bool manual)
@@ -647,6 +727,340 @@ Item {
     Quickshell.execDetached(Model.focusPlayerArgv())
   }
 
+  // ------------------------------------------------------------ picture in picture (M2-05)
+
+  // The guide's `p` key (design section 5). Same answer shape as the IPC
+  // verb, so both surfaces refuse for the same reasons in the same words.
+  function togglePip() {
+    return root.requestPip("toggle")
+  }
+
+  // The one entry point. Returns SYNCHRONOUSLY with what is knowable
+  // synchronously - whether the request was accepted, and why not if it was
+  // refused - and never with a claim of success: success is a fact about the
+  // compositor that only a readback can establish (PIP11), and that readback
+  // is two process round-trips away. The verified outcome arrives on
+  // pipOutcome() and is readable in `status`.
+  function requestPip(mode) {
+    var want = String(mode || "").toLowerCase()
+    if (want !== "on" && want !== "off" && want !== "toggle")
+      return { ok: false, kind: "pip", requested: want, error: { code: "bad_mode" } }
+    if (!root.pipAvailable)
+      return { ok: false, kind: "pip", requested: want, error: { code: "no_compositor" } }
+    // PiP never starts a player (design 4.10). "Nothing playing" covers both
+    // no player and a player whose pid we do not know, because addressing by
+    // class alone is the one thing this feature must not do.
+    if (!root.playing || root.playerPid <= 0)
+      return { ok: false, kind: "pip", requested: want, error: { code: "nothing_playing" } }
+    if (root.pipBusy)
+      return { ok: false, kind: "pip", requested: want, error: { code: "busy" } }
+    root.pipMode = want
+    root.pipIntent = ""
+    root.pipRound = 0
+    root.pipQueue = []
+    root.pipGeom = null
+    root.pipLive = null
+    root.pipReason = ""
+    root.pipPhase = "resolve"
+    pipSequenceWatchdog.restart()
+    root.pipReadClients()
+    return { ok: true, kind: "pip", requested: want, was: root.pipOn, state: "applying" }
+  }
+
+  // Every phase begins here. The read is the same read the verification uses,
+  // which is the point: there is one way to learn what the window is.
+  function pipReadClients() {
+    if (hyprClientsProc.running) return
+    hyprClientsProc.running = true
+    pipStepWatchdog.restart()
+  }
+
+  function pipReadMonitors() {
+    if (hyprMonitorsProc.running) return
+    hyprMonitorsProc.running = true
+    pipStepWatchdog.restart()
+  }
+
+  // `hyprctl -j clients` came back. One function, three phases, because all
+  // three want exactly the same thing: the truth about our window, right now.
+  function pipApplyClients(text) {
+    pipStepWatchdog.stop()
+    if (!root.pipBusy) return
+    var live = root.pipFindWindow(text, root.playerPid, root.pipClass)
+    if (!live.ok) {
+      // Garbage, no match, or more than one match. Never act on a guess.
+      root.pipFinish(false, String(live.reason || "no_window"))
+      return
+    }
+    root.pipLive = live
+    if (root.pipPhase === "resolve") {
+      // The answer to "am I in PiP?" is read out of the compositor, not out
+      // of a boolean this shell may not even have been alive to set (4.7).
+      root.pipOn = root.pipIsOn(live)
+      root.pipIntent = root.pipMode === "toggle" ? (root.pipOn ? "off" : "on") : root.pipMode
+      if (root.pipIntent === "on") {
+        // What the window WAS. Written to the player before the first
+        // dispatch, so a shell that dies mid-sequence still leaves something
+        // that knows how to put the window back. NOT rewritten when PiP is
+        // already on: `pip on` twice must not overwrite the restore point
+        // with the PiP box's own rectangle.
+        if (!root.pipOn) root.pipWriteMpv("on", root.pipSnapshotFrom(live))
+        root.pipPhase = "monitors"
+        root.pipReadMonitors()
+        return
+      }
+      // The tag is what says "we did this to this window" (design 4.8). A
+      // window the user floated and pinned themselves with SUPER+O carries
+      // none, so `pip off` has nothing of ours to undo and must not drag it
+      // back to a rectangle out of a stale snapshot - or, worse, resize a
+      // TILED window, which changes the split ratio of the user's layout.
+      if (!root.pipHasOurTag(live)) {
+        root.pipSnapshot = null
+        root.pipOn = false
+        root.pipFinish(true, "")
+        return
+      }
+      root.pipPhase = "dispatch"
+      root.pipPlanRound()
+      return
+    }
+    if (root.pipPhase === "verify") {
+      root.pipCheck(live)
+      return
+    }
+    root.pipPlanRound()
+  }
+
+  function pipApplyMonitors(text) {
+    pipStepWatchdog.stop()
+    if (!root.pipBusy) return
+    var live = root.pipLive
+    var monitor = root.pipFindMonitor(text, live ? live.monitor : -1)
+    var geom = monitor ? root.pipGeometry(monitor, root.pipOptions(root.pipConfig())) : null
+    if (!geom) {
+      root.pipFinish(false, "no_monitor")
+      return
+    }
+    root.pipGeom = geom
+    // Read the windows again rather than planning against the read the
+    // monitor lookup was entered on. It costs one more process on the way in
+    // and it is what makes "decided from a fresh read" literally true of
+    // every conditional step, rather than true to within a round trip
+    // (PIP10).
+    root.pipPhase = "dispatch"
+    root.pipReadClients()
+  }
+
+  // One round: decide from the read we are holding, then run what it decided.
+  // `pipLive` here is at most a few milliseconds old - it is the read this
+  // round was entered on - which is what "read the live state and act
+  // conditionally" means in a process-driven engine (PIP10).
+  function pipPlanRound() {
+    // Counted here, unconditionally, because this is also the termination
+    // proof: at most pipMaxRounds passes, and a re-plan that has nothing
+    // left to try stops instead of asking the compositor the same question
+    // for ever.
+    root.pipRound += 1
+    var plan = root.pipPlan(root.pipLive, root.pipSnapshot, root.pipGeom, root.pipIntent)
+    if (!plan || plan.length === 0) {
+      if (root.pipRound > 1) {
+        root.pipOn = root.pipIsOn(root.pipLive)
+        root.pipFinish(false, "dispatch_failed")
+        return
+      }
+      // First pass with nothing to do: the window may already be exactly
+      // right. Verify anyway - the compositor, not an empty plan, is what
+      // decides whether we are done (PIP11).
+      root.pipPhase = "verify"
+      root.pipReadClients()
+      return
+    }
+    if (plan.length > root.pipMaxSteps) plan = plan.slice(0, root.pipMaxSteps)
+    root.pipQueue = plan
+    root.pipRunNextStep()
+  }
+
+  function pipRunNextStep() {
+    if (!root.pipBusy) return
+    var queue = root.pipQueue
+    if (!queue || queue.length === 0) {
+      root.pipPhase = "verify"
+      root.pipReadClients()
+      return
+    }
+    var argv = queue[0]
+    root.pipQueue = queue.slice(1)
+    if (!argv || argv.length < 3) {
+      // A builder refused to produce a vector (a value that did not match the
+      // address regex or the integer range, 4.11 / PIP7). Refusing is the
+      // correct outcome; carrying on past it is not.
+      root.pipFinish(false, "bad_step")
+      return
+    }
+    hyprDispatchProc.command = argv
+    hyprDispatchProc.running = true
+    pipStepWatchdog.restart()
+  }
+
+  // PIP11 in one function: the exit code and the text are diagnostics, never
+  // a verdict. `hyprctl` says `ok` for a dispatch that did nothing at all, so
+  // the only thing this does is move to the next step.
+  function pipNoteStep(text, exitCode) {
+    pipStepWatchdog.stop()
+    if (!root.pipBusy) return
+    var line = String(text || "").trim()
+    if (line !== "" && /(^|\n)\s*(error|warning):/i.test(line)) {
+      // Redacted like every other process output, though by construction a
+      // dispatch vector holds an address, integers and constants and nothing
+      // a provider or the user controls (4.11).
+      console.warn("omarchy-iptv pip:", Model.redactUrls(line.split("\n")[0]))
+    }
+    if (exitCode !== 0) {
+      // Non-zero means a Lua parse or nil-call error, i.e. a bug in OUR
+      // string, never a refused effect. Worth one line; the verdict is still
+      // the readback below.
+      console.warn("omarchy-iptv pip: the compositor could not parse a dispatch (rc " + exitCode + ")")
+    }
+    root.pipRunNextStep()
+  }
+
+  // The single definition of success in this feature.
+  function pipCheck(live) {
+    var verdict = root.pipVerify(live, root.pipSnapshot, root.pipGeom, root.pipIntent)
+    if (verdict.ok) {
+      root.pipOn = root.pipIntent === "on"
+      root.pipFinish(true, "")
+      return
+    }
+    if (root.pipRound >= root.pipMaxRounds) {
+      // Stop, leave the window as it is, and say so. A half-applied PiP is
+      // visible, and the next `p` reads this same live state and either
+      // finishes it or undoes it (design 4.10).
+      root.pipOn = root.pipIsOn(live)
+      console.warn("omarchy-iptv pip: the window did not reach the requested state ("
+                   + String(verdict.mismatch || []).substring(0, 120) + ")")
+      root.pipFinish(false, "dispatch_failed")
+      return
+    }
+    // Re-plan from what is true NOW, rather than repeating what was planned
+    // against what was true then. This is the branch that absorbs a user's
+    // own SUPER+T or SUPER+O landing in the middle of our sequence.
+    root.pipPhase = "dispatch"
+    root.pipPlanRound()
+  }
+
+  function pipFinish(ok, code) {
+    pipSequenceWatchdog.stop()
+    pipStepWatchdog.stop()
+    var requested = root.pipMode
+    var intent = root.pipIntent
+    // The player's record of what the window was is retired only once the
+    // window is verifiably back, and the user's own auto-window-resize goes
+    // back with it. On a FAILED exit both are kept: the window is still in
+    // the corner, so the record still describes something true, and the next
+    // `p` reads the live state and finishes or undoes the half-applied
+    // sequence using that same snapshot.
+    if (ok && intent === "off") {
+      root.pipWriteMpv("off", null)
+      root.pipSnapshot = null
+    }
+    root.pipReason = ok ? "" : String(code || "")
+    root.pipMode = ""
+    root.pipIntent = ""
+    root.pipPhase = ""
+    root.pipQueue = []
+    root.pipRound = 0
+    var result = { ok: ok, kind: "pip", requested: requested,
+                   state: root.pipOn ? "on" : "off" }
+    if (!ok) result.error = { code: root.pipReason, intent: intent }
+    root.pipOutcome(result)
+  }
+
+  // The player is gone, so the window it owned is gone, and with it every
+  // piece of state this feature has (PIP3: PiP does not survive stop and
+  // replay - press the key again).
+  function pipReset() {
+    pipSequenceWatchdog.stop()
+    pipStepWatchdog.stop()
+    root.playerPid = 0
+    root.pipOn = false
+    root.pipMode = ""
+    root.pipIntent = ""
+    root.pipPhase = ""
+    root.pipQueue = []
+    root.pipGeom = null
+    root.pipLive = null
+    root.pipSnapshot = null
+  }
+
+  // `player probe` and `player start` both report the mpv pid; G-2 proved it
+  // is the pid Hyprland reports for the window, with no wrapper in between.
+  function notePlayerPid(value) {
+    var pid = Math.floor(Number(value) || 0)
+    if (pid <= 0 || pid === root.playerPid) return
+    root.playerPid = pid
+  }
+
+  // The two mpv-side writes (4.6). Both go over the socket the service
+  // already holds; a dead socket answers false and that is recorded, never
+  // fatal - the compositor half is what PiP actually is.
+  function pipWriteMpv(intent, snapshot) {
+    // Kept in memory too, so an exit in the same session does not depend on
+    // a round trip; the player's copy is what survives a shell restart. Set
+    // BEFORE the write, because the write can fail and the compositor half
+    // still applies - the snapshot must describe what we are about to do
+    // either way. The "off" case does NOT clear it here: pipPlan and
+    // pipVerify are both still to read it; pipFinish clears it.
+    if (intent === "on") root.pipSnapshot = snapshot
+    var sock = root.playerSocket
+    if (!root.socketAttached()) return false
+    var commands = root.pipMpvCommands(intent, snapshot, root.mpvArgs)
+    for (var i = 0; i < commands.length; i++) root.socketWrite(sock, commands[i], 0)
+    if (sock.flush) sock.flush()
+    return true
+  }
+
+  // Does this window carry the tag we dispatch? It is the marker that says
+  // the plugin put this window where it is, and the difference between a
+  // window `p` should EXIT and a window the user floated themselves, which
+  // `p` should ENTER (design 4.8).
+  function pipHasOurTag(live) {
+    var tags = live && live.tags ? live.tags : []
+    for (var i = 0; i < tags.length; i++) if (String(tags[i]) === root.pipTag) return true
+    return false
+  }
+
+  // Read the snapshot back out of the surviving player. Needed in exactly one
+  // case - the shell restarted while in PiP and the user then exits - so it
+  // is one get_property issued from onPlayerAttached, and a failure degrades
+  // to "unpin and unfloat", never to stuck (4.5, 4.7).
+  function pipRequestSnapshot(sock) {
+    root.socketWrite(sock, ["get_property", "user-data/omarchy-iptv-pip"], root.pipSnapshotRequestId)
+    root.socketWrite(sock, ["get_property", "pid"], root.pipPidRequestId)
+  }
+
+  // Our own replies on the player socket, routed by request id. Returns true
+  // when the line was ours, so the event router never sees it.
+  function pipNoteReply(line) {
+    var reply = root.parsePlayerReply(line)
+    if (!reply) return false
+    if (reply.requestId === root.pipSnapshotRequestId) {
+      root.pipSnapshot = reply.ok ? root.pipReadSnapshot(reply.data) : null
+      return true
+    }
+    if (reply.requestId !== root.pipPidRequestId) return false
+    if (reply.ok) root.notePlayerPid(reply.data)
+    return true
+  }
+
+  // The settings entry the guide and the service both read (design section
+  // 6). Read from the bar entry rather than from `settings`, because
+  // `pipOptions` is the clamp for these three keys and running a value
+  // through two different clamps is how they drift apart.
+  function pipConfig() {
+    return Model.findBarEntry(root.shell ? root.shell.barConfig : null, root.pluginId) || ({})
+  }
+
   // Debounced: settings changes, timers and the bar's middle click all funnel
   // through here so the helper never runs twice for one user action.
   // The URL settings are read directly, never through the derived
@@ -714,6 +1128,15 @@ Item {
         stopping: root.stopping,
         seq: root.playSeq,
         entryId: root.currentEntryId
+      },
+      // M2-05. `on` is the last VERIFIED read of the compositor, never an
+      // intent: a script that asks whether picture in picture is on gets the
+      // same answer the feature itself acts on (PIP11).
+      pip: {
+        available: root.pipAvailable,
+        on: root.pipOn,
+        applying: root.pipBusy,
+        reason: root.pipReason
       },
       favorites: root.userState.favorites.length,
       recents: root.userState.recents.length,
@@ -1493,6 +1916,9 @@ Item {
       return
     }
     root.probeRetried = false
+    // M2-05: the reattach path learns the window-owning pid too, so PiP
+    // works on a player this shell did not start (4.7).
+    root.notePlayerPid(probe.pid)
     // Restored from the stash inside the surviving process, BEFORE the
     // channel cache exists: the bar and the guide are correct immediately
     // and the zap ring is fixed by reconcileNowPlaying() when the cache
@@ -1672,6 +2098,12 @@ Item {
     // shell subscribes for itself rather than inheriting (4.4 step 13).
     root.socketWrite(sock, ["request_log_messages", "error"], 1)
     root.socketWrite(sock, ["observe_property", 1, "idle-active"], 2)
+    // M2-05 4.5. One more read on the same connection: what the window was
+    // before PiP, out of the player that outlived us. Needed only when the
+    // shell restarted while in PiP and the user then exits; a failure or an
+    // `active:false` degrades the exit to "unpin and unfloat", never to
+    // stuck.
+    root.pipRequestSnapshot(sock)
     if (sock.flush) sock.flush()
   }
 
@@ -1689,6 +2121,9 @@ Item {
   // and nothing else - a rule that lived here could only ever be pinned by a
   // copy of itself in the spec file (CLAUDE.md 10).
   function handlePlayerLine(line) {
+    // Our own get_property answer (M2-05 4.5), routed by request id before
+    // the event router sees it. Everything else falls through unchanged.
+    if (root.pipNoteReply(line)) return
     var before = { entryId: root.currentEntryId, lastEndFile: root.lastEndFile, idle: root.playerIdle, tail: root.mpvStderrTail }
     var next = Model.routePlayerEvent(before, line)
     // Unchanged fields come back by reference, so this writes only what moved.
@@ -1775,6 +2210,11 @@ Item {
     // a stop that never had a player to observe.
     root.stopAt = 0
     stopSettleTimer.stop()
+    // M2-05 / PIP3. The window PiP was applied to is gone, so PiP is over -
+    // including on a respawn, which brings back a different window with a
+    // different pid. Nothing remembers an intent across a window's lifetime
+    // to re-apply it later; the user presses the key again.
+    root.pipReset()
     if (death === "respawn") {
       // A rung of the ladder the helper is running right now, for this very
       // channel. The intent is unchanged, so the birth edge is held, the
@@ -2279,6 +2719,354 @@ Item {
     return out
   }
 
+  // ============================================================ STAND-IN-M2-05-V1
+  //
+  // TEMPORARY. Every function in this block belongs to lane V1 (task
+  // M2-05-02) and ships in Model.js; this lane needs them to build the
+  // service half before that branch merges, so they are here with the EXACT
+  // names and signatures docs/M2-05-PICTURE-IN-PICTURE.md gives them.
+  //
+  // HOW TO SWAP, when lane V1 has merged: each wrapper below is one line and
+  // the comment on it is the line that replaces it. Do all of them, then
+  // delete everything under the HELPERS marker. Nothing outside these two
+  // markers calls one of those helpers, and tests/test_pip.py asserts it.
+  //
+  //   grep -c 'STAND-IN-M2-05-V1' Service.qml     must be 0 at integration
+  //
+  // Three of these are NOT in the design and are requested of lane V1 in the
+  // handover: pipVerify (PIP11 has no verification function in the design),
+  // pipFindMonitor, pipIsOn, pipSnapshotFrom and pipReadSnapshot.
+
+  function pipOptions(config) { return STANDIN_pipOptions(config) }                                  // -> return Model.pipOptions(config)
+  function pipFindWindow(clientsJson, pid, cls) { return STANDIN_pipFindWindow(clientsJson, pid, cls) } // -> return Model.pipFindWindow(clientsJson, pid, cls)
+  function pipFindMonitor(monitorsJson, id) { return STANDIN_pipFindMonitor(monitorsJson, id) }      // -> return Model.pipFindMonitor(monitorsJson, id)
+  function pipGeometry(monitor, opts) { return STANDIN_pipGeometry(monitor, opts) }                  // -> return Model.pipGeometry(monitor, opts)
+  function pipPlan(live, snapshot, geometry, intent) { return STANDIN_pipPlan(live, snapshot, geometry, intent) } // -> return Model.pipPlan(live, snapshot, geometry, intent)
+  function pipVerify(live, snapshot, geometry, intent) { return STANDIN_pipVerify(live, snapshot, geometry, intent) } // -> return Model.pipVerify(live, snapshot, geometry, intent)
+  function pipLuaDispatch(verb, args) { return STANDIN_pipLuaDispatch(verb, args) }                  // -> return Model.pipLuaDispatch(verb, args)
+  function pipLegacyDispatch(verb, args) { return STANDIN_pipLegacyDispatch(verb, args) }            // -> return Model.pipLegacyDispatch(verb, args)
+  function pipMpvCommands(intent, snapshot, mpvArgs) { return STANDIN_pipMpvCommands(intent, snapshot, mpvArgs) } // -> return Model.pipMpvCommands(intent, snapshot, mpvArgs)
+  function pipRestoreAutoResize(mpvArgs) { return STANDIN_pipRestoreAutoResize(mpvArgs) }            // -> return Model.pipRestoreAutoResize(mpvArgs)
+  function pipIsOn(live) { return STANDIN_pipIsOn(live) }                                            // -> return Model.pipIsOn(live)
+  function pipSnapshotFrom(live) { return STANDIN_pipSnapshotFrom(live) }                            // -> return Model.pipSnapshotFrom(live)
+  function pipReadSnapshot(data) { return STANDIN_pipReadSnapshot(data) }                            // -> return Model.pipReadSnapshot(data)
+  function parsePlayerReply(line) { return STANDIN_parsePlayerReply(line) }                          // -> return Model.parsePlayerReply(line)
+
+  // ---------------------------------------------- STAND-IN-M2-05-V1-HELPERS
+
+  function STANDIN_pipClampInt(value, lo, hi, fallback) {
+    if (value === undefined || value === null || value === "") return fallback
+    var n = Number(value)
+    if (!isFinite(n)) return fallback
+    n = Math.floor(n)
+    if (n < lo) return lo
+    if (n > hi) return hi
+    return n
+  }
+
+  function STANDIN_pipOptions(config) {
+    var c = (config && typeof config === "object") ? config : {}
+    var corners = ["top-right", "top-left", "bottom-right", "bottom-left"]
+    var corner = String(c.pipCorner === undefined || c.pipCorner === null ? "" : c.pipCorner)
+    if (corners.indexOf(corner) < 0) corner = "top-right"
+    return { corner: corner,
+             sizePercent: STANDIN_pipClampInt(c.pipSizePercent, 15, 60, 30),
+             margin: STANDIN_pipClampInt(c.pipMargin, 0, 200, 16) }
+  }
+
+  function STANDIN_pipParse(text) {
+    var out = null
+    try { out = JSON.parse(String(text === undefined || text === null ? "" : text)) } catch (e) { out = null }
+    if (!out || Object.prototype.toString.call(out) !== "[object Array]") return null
+    return out
+  }
+
+  function STANDIN_pipPair(value) {
+    if (!value) return null
+    var a = Math.floor(Number(value[0])), b = Math.floor(Number(value[1]))
+    if (!isFinite(a) || !isFinite(b)) return null
+    return [a, b]
+  }
+
+  function STANDIN_pipFindWindow(clientsJson, pid, cls) {
+    var list = STANDIN_pipParse(clientsJson)
+    if (list === null) return { ok: false, reason: "no_window" }
+    var want = Math.floor(Number(pid) || 0)
+    if (want <= 0) return { ok: false, reason: "no_window" }
+    var name = String(cls || "")
+    var hits = []
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i]
+      if (!c || typeof c !== "object") continue
+      if (String(c["class"]) !== name) continue
+      if (Math.floor(Number(c.pid) || 0) !== want) continue
+      hits.push(c)
+    }
+    if (hits.length === 0) return { ok: false, reason: "no_window" }
+    if (hits.length > 1) return { ok: false, reason: "ambiguous" }
+    var w = hits[0]
+    var address = String(w.address || "")
+    if (!/^0x[0-9a-f]{1,16}$/.test(address)) return { ok: false, reason: "bad_address" }
+    var at = STANDIN_pipPair(w.at), size = STANDIN_pipPair(w.size)
+    if (at === null || size === null) return { ok: false, reason: "bad_address" }
+    // A RULE-applied tag reads back as "default-opacity*" on this machine; a
+    // DISPATCHED one does not (G-11). Compare with the marker stripped.
+    var tags = [], raw = w.tags
+    if (raw && Object.prototype.toString.call(raw) === "[object Array]") {
+      for (var t = 0; t < raw.length; t++) tags.push(String(raw[t]).replace(/\*+$/, ""))
+    }
+    var ws = (w.workspace && typeof w.workspace === "object") ? Math.floor(Number(w.workspace.id) || 0) : 0
+    return { ok: true, address: address, at: at, size: size,
+             floating: w.floating === true, pinned: w.pinned === true,
+             monitor: Math.floor(Number(w.monitor) || 0), workspaceId: ws, tags: tags }
+  }
+
+  function STANDIN_pipFindMonitor(monitorsJson, id) {
+    var list = STANDIN_pipParse(monitorsJson)
+    if (list === null) return null
+    var want = Math.floor(Number(id))
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i]
+      if (m && typeof m === "object" && Math.floor(Number(m.id)) === want) return m
+    }
+    return null
+  }
+
+  // Section 4.4, corrected by the gate: the defaults on a 1366x768 scale-1
+  // transform-0 monitor with reserved [0, 26, 0, 0] give 410x230 at (940, 42)
+  // - the document's own worked example said (932, 42) and was 8 px wrong.
+  function STANDIN_pipGeometry(monitor, opts) {
+    var m = (monitor && typeof monitor === "object") ? monitor : null
+    if (!m) return null
+    var o = (opts && typeof opts === "object") ? opts : STANDIN_pipOptions(null)
+    var scale = Number(m.scale)
+    if (!isFinite(scale) || scale <= 0) scale = 1
+    // hyprctl monitors reports PHYSICAL pixels; a dispatcher speaks logical.
+    var lw = Math.round(Number(m.width) / scale), lh = Math.round(Number(m.height) / scale)
+    if (!isFinite(lw) || !isFinite(lh) || lw <= 0 || lh <= 0) return null
+    if (Math.abs(Math.floor(Number(m.transform) || 0)) % 2 === 1) { var s = lw; lw = lh; lh = s }
+    var res = m.reserved && m.reserved.length === 4 ? m.reserved : [0, 0, 0, 0]
+    var r0 = Math.floor(Number(res[0]) || 0), r1 = Math.floor(Number(res[1]) || 0)
+    var r2 = Math.floor(Number(res[2]) || 0), r3 = Math.floor(Number(res[3]) || 0)
+    // Global layout coordinates: `move` takes them, and only a rule
+    // expression would use per-monitor ones.
+    var mx = Math.floor(Number(m.x) || 0), my = Math.floor(Number(m.y) || 0)
+    var x0 = mx + r0 + o.margin, y0 = my + r1 + o.margin
+    var x1 = mx + lw - r2 - o.margin, y1 = my + lh - r3 - o.margin
+    if (x1 - x0 < 2 || y1 - y0 < 2) return null
+    var w = Math.round(lw * o.sizePercent / 100)
+    if (w < 240) w = 240
+    if (w > x1 - x0) w = x1 - x0
+    var h = Math.round(w * 9 / 16)                 // 16:9 by convention; 4:3 letterboxes inside
+    if (h > y1 - y0) {
+      h = y1 - y0
+      w = Math.round(h * 16 / 9)
+      if (w > x1 - x0) w = x1 - x0
+    }
+    w = w - (w % 2); h = h - (h % 2)
+    if (w < 2 || h < 2) return null
+    var right = o.corner === "top-right" || o.corner === "bottom-right"
+    var bottom = o.corner === "bottom-left" || o.corner === "bottom-right"
+    return { x: right ? x1 - w : x0, y: bottom ? y1 - h : y0, w: w, h: h }
+  }
+
+  function STANDIN_pipHasTag(live, tag) {
+    var tags = live && live.tags ? live.tags : []
+    for (var i = 0; i < tags.length; i++) if (tags[i] === tag) return true
+    return false
+  }
+
+  function STANDIN_pipIsOn(live) {
+    return !!live && live.floating === true && live.pinned === true && STANDIN_pipHasTag(live, "iptv-pip")
+  }
+
+  function STANDIN_pipSnapshotFrom(live) {
+    if (!live || !live.ok) return null
+    return { active: true, at: live.at, size: live.size,
+             floating: live.floating === true, pinned: live.pinned === true,
+             monitor: live.monitor, workspace: live.workspaceId, v: 1 }
+  }
+
+  function STANDIN_pipReadSnapshot(data) {
+    if (!data || typeof data !== "object" || data.active !== true) return null
+    var at = STANDIN_pipPair(data.at), size = STANDIN_pipPair(data.size)
+    if (at === null || size === null) return null
+    return { active: true, at: at, size: size,
+             floating: data.floating === true, pinned: data.pinned === true,
+             monitor: Math.floor(Number(data.monitor) || 0),
+             workspace: Math.floor(Number(data.workspace) || 0), v: 1 }
+  }
+
+  // Section 4.3, with the G-3 correction: `action` is ignored and both verbs
+  // toggle, so every float and pin step stays behind a fresh read. The
+  // unpin-before-unfloat order is load-bearing - `pin` applies to floating
+  // windows, and unfloating a pinned window clears the pin by itself.
+  function STANDIN_pipPlan(live, snapshot, geometry, intent) {
+    var steps = []
+    if (!live || !live.ok) return steps
+    var a = live.address
+    if (intent === "on") {
+      if (!geometry) return steps
+      if (live.floating !== true) steps.push(root.pipDispatch("float", { address: a }))
+      steps.push(root.pipDispatch("resize", { address: a, x: geometry.w, y: geometry.h }))
+      steps.push(root.pipDispatch("move", { address: a, x: geometry.x, y: geometry.y }))
+      if (live.pinned !== true) steps.push(root.pipDispatch("pin", { address: a }))
+      steps.push(root.pipDispatch("alter_zorder", { address: a }))
+      steps.push(root.pipDispatch("tag", { address: a, tag: "+iptv-pip" }))
+      return steps
+    }
+    if (intent !== "off") return steps
+    var snap = (snapshot && typeof snapshot === "object") ? snapshot : {}
+    steps.push(root.pipDispatch("tag", { address: a, tag: "-iptv-pip" }))
+    if (live.pinned === true && snap.pinned !== true) steps.push(root.pipDispatch("pin", { address: a }))
+    if (snap.floating === true) {
+      steps.push(root.pipDispatch("resize", { address: a, x: snap.size[0], y: snap.size[1] }))
+      steps.push(root.pipDispatch("move", { address: a, x: snap.at[0], y: snap.at[1] }))
+    } else if (live.floating === true) {
+      steps.push(root.pipDispatch("float", { address: a }))
+    }
+    return steps
+  }
+
+  // PIP11. What the compositor must report for the request to count as done.
+  // Deliberately exact on all five fields: the gate measured `at` and `size`
+  // landing on the requested integers to the pixel, so a tolerance here would
+  // only hide the failure it was added to survive.
+  function STANDIN_pipVerify(live, snapshot, geometry, intent) {
+    var bad = []
+    if (!live || !live.ok) return { ok: false, mismatch: ["no_window"] }
+    var tagged = STANDIN_pipHasTag(live, "iptv-pip")
+    if (intent === "on") {
+      if (!geometry) return { ok: false, mismatch: ["no_geometry"] }
+      if (live.floating !== true) bad.push("floating")
+      if (live.pinned !== true) bad.push("pinned")
+      if (!tagged) bad.push("tag")
+      if (live.at[0] !== geometry.x || live.at[1] !== geometry.y) bad.push("at")
+      if (live.size[0] !== geometry.w || live.size[1] !== geometry.h) bad.push("size")
+      return { ok: bad.length === 0, mismatch: bad }
+    }
+    if (intent !== "off") return { ok: false, mismatch: ["no_intent"] }
+    var snap = (snapshot && typeof snapshot === "object") ? snapshot : null
+    if (tagged) bad.push("tag")
+    // With no snapshot the exit degrades to "unpin and unfloat and let the
+    // layout take it", which is what the Omarchy precedent does
+    // unconditionally. Degraded, never stuck (4.5).
+    var wantFloating = !!snap && snap.floating === true
+    var wantPinned = !!snap && snap.pinned === true
+    if (live.floating !== wantFloating) bad.push("floating")
+    if (live.pinned !== wantPinned) bad.push("pinned")
+    if (wantFloating) {
+      if (live.at[0] !== snap.at[0] || live.at[1] !== snap.at[1]) bad.push("at")
+      if (live.size[0] !== snap.size[0] || live.size[1] !== snap.size[1]) bad.push("size")
+    }
+    return { ok: bad.length === 0, mismatch: bad }
+  }
+
+  // 4.11 and ruling PIP7. Two kinds of value may reach a dispatch string and
+  // no others: an address that matched /^0x[0-9a-f]{1,16}$/, and integers
+  // inside [-100000, 100000]. Everything else is a constant in this file.
+  // The regex is applied in pipFindWindow and applied AGAIN here so a later
+  // caller cannot route around it.
+  function STANDIN_pipInt(value) {
+    var n = Number(value)
+    if (!isFinite(n)) return null
+    n = Math.floor(n)
+    if (n < -100000 || n > 100000) return null
+    return n
+  }
+
+  function STANDIN_pipArgs(verb, args) {
+    var verbs = ["float", "pin", "resize", "move", "tag", "alter_zorder"]
+    if (verbs.indexOf(String(verb)) < 0) return null
+    var a = (args && typeof args === "object") ? args : {}
+    var address = String(a.address || "")
+    if (!/^0x[0-9a-f]{1,16}$/.test(address)) return null
+    var out = { address: address }
+    if (verb === "resize" || verb === "move") {
+      out.x = STANDIN_pipInt(a.x)
+      out.y = STANDIN_pipInt(a.y)
+      if (out.x === null || out.y === null) return null
+    }
+    if (verb === "tag") {
+      // The only two tag literals this feature has. Not a pattern that
+      // accepts a name: nothing playlist-derived may ever reach this string.
+      out.tag = String(a.tag || "")
+      if (out.tag !== "+iptv-pip" && out.tag !== "-iptv-pip") return null
+    }
+    return out
+  }
+
+  function STANDIN_pipLuaDispatch(verb, args) {
+    var a = STANDIN_pipArgs(verb, args)
+    if (a === null) return null
+    var parts = ['window = "address:' + a.address + '"']
+    if (verb === "resize" || verb === "move") { parts.push("x = " + a.x); parts.push("y = " + a.y) }
+    if (verb === "tag") parts.push('tag = "' + a.tag + '"')
+    if (verb === "alter_zorder") parts.push('mode = "top"')
+    if (verb === "float") parts.push('action = "toggle"')
+    return ["hyprctl", "dispatch", "hl.dsp.window." + verb + "({ " + parts.join(", ") + " })"]
+  }
+
+  // For a Hyprland whose config provider is not Lua. The COMMA spelling from
+  // omarchy-capture-webcam-resize, never the space spelling
+  // omarchy-hyprland-window-pop uses - that one has no window selector at all
+  // and would resize whatever the user is working in.
+  function STANDIN_pipLegacyDispatch(verb, args) {
+    var a = STANDIN_pipArgs(verb, args)
+    if (a === null) return null
+    var target = "address:" + a.address
+    if (verb === "float") return ["hyprctl", "dispatch", "togglefloating", target]
+    if (verb === "pin") return ["hyprctl", "dispatch", "pin", target]
+    if (verb === "resize") return ["hyprctl", "dispatch", "resizewindowpixel", "exact " + a.x + " " + a.y + "," + target]
+    if (verb === "move") return ["hyprctl", "dispatch", "movewindowpixel", "exact " + a.x + " " + a.y + "," + target]
+    if (verb === "alter_zorder") return ["hyprctl", "dispatch", "alterzorder", "top," + target]
+    return ["hyprctl", "dispatch", "tagwindow", a.tag + "," + target]
+  }
+
+  function STANDIN_pipRestoreAutoResize(mpvArgs) {
+    var tokens = String(mpvArgs || "").split(/\s+/)
+    var value = true
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i]
+      if (t === "--no-auto-window-resize") { value = false; continue }
+      if (t === "--auto-window-resize") { value = true; continue }
+      if (t.indexOf("--auto-window-resize=") !== 0) continue
+      var v = t.substring("--auto-window-resize=".length).toLowerCase()
+      value = !(v === "no" || v === "false" || v === "0")
+    }
+    return value
+  }
+
+  function STANDIN_pipMpvCommands(intent, snapshot, mpvArgs) {
+    if (intent === "on") {
+      return [["set_property", "user-data/omarchy-iptv-pip", snapshot || { active: false, v: 1 }],
+              ["set_property", "auto-window-resize", false]]
+    }
+    return [["set_property", "user-data/omarchy-iptv-pip", { active: false, v: 1 }],
+            ["set_property", "auto-window-resize", STANDIN_pipRestoreAutoResize(mpvArgs)]]
+  }
+
+  function STANDIN_parsePlayerReply(line) {
+    var obj = null
+    try { obj = JSON.parse(String(line || "")) } catch (e) { return null }
+    if (!obj || typeof obj !== "object") return null
+    if (obj.event !== undefined) return null            // an event is never a reply
+    if (obj.request_id === undefined) return null
+    var err = String(obj.error === undefined ? "" : obj.error)
+    return { requestId: Math.floor(Number(obj.request_id) || 0), error: err,
+             ok: err === "success", data: obj.data === undefined ? null : obj.data }
+  }
+
+  // ======================================================== end STAND-IN-M2-05-V1
+
+  // Which spelling the compositor can parse, decided once from its own
+  // answer rather than by trying one and reading an exit code that cannot
+  // report a refused effect (PIP11).
+  function pipDispatch(verb, args) {
+    return root.pipProvider === "legacy" ? root.pipLegacyDispatch(verb, args)
+                                         : root.pipLuaDispatch(verb, args)
+  }
+
   // ------------------------------------------------------------ signal handlers
 
   // One handler for both URL settings (D-SRC-02): reconcile() reads the new
@@ -2349,6 +3137,10 @@ Item {
     // state.json itself with mode 0600 (stateInitProc, S-02).
     mkdirProc.running = true
     whichProc.running = true
+    // M2-05 G-8: is there a compositor to talk to at all, and which dispatch
+    // spelling can it parse? Both answers are read once, here, so the `p`
+    // key can refuse honestly instead of firing into the dark.
+    hyprWhichProc.running = true
     // Reattach (4.5). Until the probe answers - about 130 ms - the UI shows
     // idle rather than guessing. `--owner-pid` claims a surviving player for
     // this shell, which is what tells the previous shell's orphan-check to
@@ -2645,6 +3437,36 @@ Item {
   }
 
   Timer {
+    // One bound per compositor round trip. A read or a dispatch that has not
+    // exited in 2 s is terminated and the sequence ends reporting it: there
+    // is no unbounded wait anywhere in this feature (CLAUDE.md rule 3).
+    id: pipStepWatchdog
+    interval: root.pipStepMs
+    repeat: false
+    onTriggered: {
+      if (hyprClientsProc.running) hyprClientsProc.signal(15)
+      if (hyprMonitorsProc.running) hyprMonitorsProc.signal(15)
+      if (hyprDispatchProc.running) hyprDispatchProc.signal(15)
+      if (!root.pipBusy) return
+      console.warn("omarchy-iptv pip: the compositor did not answer in " + Math.floor(root.pipStepMs / 1000) + " s")
+      root.pipFinish(false, "timeout")
+    }
+  }
+
+  Timer {
+    // And one bound on the whole sequence, so `pipBusy` can never latch and
+    // lock the user out of the key for the rest of the session.
+    id: pipSequenceWatchdog
+    interval: root.pipSequenceMs
+    repeat: false
+    onTriggered: {
+      if (!root.pipBusy) return
+      console.warn("omarchy-iptv pip: giving up after " + Math.floor(root.pipSequenceMs / 1000) + " s")
+      root.pipFinish(false, "timeout")
+    }
+  }
+
+  Timer {
     // Backstop for `stopping` (4.10): normally cleared by the socket EOF
     // that confirms the death. A stop issued with no player attached has no
     // EOF coming, so this releases it.
@@ -2803,6 +3625,92 @@ Item {
   Connections {
     target: whichProc
     function onExited(exitCode, exitStatus) { root.mpvAvailable = exitCode === 0 }
+  }
+
+  // ---- picture in picture (M2-05). Five Processes, argv arrays only, no
+  // shell anywhere: two that decide once whether PiP is offered at all, two
+  // that READ the compositor, and one that asks it for something.
+
+  Process {
+    // G-8. Without hyprctl on PATH, or without a live instance signature,
+    // PiP is hidden rather than broken: `p` says so and the IPC verb answers
+    // no_compositor.
+    id: hyprWhichProc
+    command: ["which", "hyprctl"]
+    stdout: StdioCollector { waitForEnd: true }
+  }
+  Connections {
+    target: hyprWhichProc
+    function onExited(exitCode, exitStatus) {
+      if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
+        root.pipAvailable = false
+        return
+      }
+      hyprInfoProc.running = true
+    }
+  }
+
+  Process {
+    // Which dispatch spelling this compositor can parse. Under a Lua config
+    // provider `hyprctl dispatch` wraps its argument as
+    // `return hl.dispatch(<arg>)`, so the legacy spelling is a Lua SYNTAX
+    // error and no spelling of it reaches the compositor at all (G-1). The
+    // answer decides the builder ONCE; it is never a retry ladder, because
+    // an exit code cannot tell us to retry (PIP11).
+    id: hyprInfoProc
+    command: ["hyprctl", "systeminfo"]
+    stdout: StdioCollector { id: hyprInfoStdout; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+  Connections {
+    target: hyprInfoProc
+    function onExited(exitCode, exitStatus) {
+      // Absent means an older Hyprland with the hyprlang provider, which is
+      // exactly the host the legacy spelling exists for.
+      root.pipProvider = /configProvider:\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "legacy"
+      root.pipAvailable = exitCode === 0
+    }
+  }
+
+  Process {
+    // The state of record. Read at the start of every sequence, before every
+    // re-plan, and once more at the end - that last read is the ONLY thing
+    // in this feature that decides whether it worked.
+    id: hyprClientsProc
+    command: ["hyprctl", "-j", "clients"]
+    stdout: StdioCollector { id: hyprClientsStdout; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+  Connections {
+    target: hyprClientsProc
+    function onExited(exitCode, exitStatus) { root.pipApplyClients(hyprClientsStdout.text) }
+  }
+
+  Process {
+    id: hyprMonitorsProc
+    command: ["hyprctl", "-j", "monitors"]
+    stdout: StdioCollector { id: hyprMonitorsStdout; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+  Connections {
+    target: hyprMonitorsProc
+    function onExited(exitCode, exitStatus) { root.pipApplyMonitors(hyprMonitorsStdout.text) }
+  }
+
+  Process {
+    // One step at a time. `command` is a vector a builder produced from a
+    // regex-checked address, clamped integers and compile-time constants
+    // (4.11, PIP7) - never bar.run() and never Util.execArgv, both of which
+    // are `bash -lc` underneath.
+    id: hyprDispatchProc
+    stdout: StdioCollector { id: hyprDispatchStdout; waitForEnd: true }
+    stderr: StdioCollector { id: hyprDispatchStderr; waitForEnd: true }
+  }
+  Connections {
+    target: hyprDispatchProc
+    function onExited(exitCode, exitStatus) {
+      root.pipNoteStep(hyprDispatchStdout.text + "\n" + hyprDispatchStderr.text, exitCode)
+    }
   }
 
   Process {
@@ -2978,6 +3886,19 @@ Item {
     // A mistyped keybinding must not raise a desktop popup, so a failure is
     // this JSON and nothing else - no notification, no toast (6.5).
     function channel(n: string): string { return JSON.stringify(root.tuneByNumber(n)) }
+    // Picture in picture (M2-05). `pip on`, `pip off`, `pip toggle`.
+    //
+    // The reply is what is knowable when the key is pressed, and no more.
+    // Refusals are synchronous and final: bad_mode, no_compositor,
+    // nothing_playing, busy. An ACCEPTED request answers
+    // {"ok":true,"kind":"pip","requested":"on","was":false,"state":"applying"}
+    // and nothing else, because success here is a fact about the compositor
+    // that only a readback can establish (PIP11) and that readback is two
+    // process round-trips away. Poll `status` for the verified answer: its
+    // new `pip` block carries { available, on, applying, reason }, where
+    // `reason` is the last failure code (dispatch_failed, no_window,
+    // ambiguous, timeout, ...) and "" after a success.
+    function pip(mode: string): string { return JSON.stringify(root.requestPip(mode)) }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }

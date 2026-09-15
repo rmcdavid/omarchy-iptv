@@ -43,10 +43,13 @@ fail=0
 # you add tests; never lower one to make a run green.
 QML_SPEC_MIN=${QML_SPEC_MIN:-58}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1180}
-PY_TESTS_MIN=${PY_TESTS_MIN:-318}
+PY_TESTS_MIN=${PY_TESTS_MIN:-347}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
+# The M2-05 picture-in-picture preflight: 26 seams, the stub's executable
+# probe, and its own "ran every check" line.
+PIP_PREFLIGHT_MIN=${PIP_PREFLIGHT_MIN:-28}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -197,6 +200,27 @@ if bash "$ROOT/scripts/dev-harness/chno-entry-scenario.sh" check-tree >"$chno_lo
   fi
 else
   bad "chno-entry preflight"; cat "$chno_log"
+fi
+
+step "scripts/dev-harness/pip-scenario.sh check-tree (M2-05)"
+# The same preflight discipline for picture in picture, and for a sharper
+# reason: PiP is the first feature here whose correctness depends on how a
+# program OUTSIDE the plugin answers, so the seams that must exist are
+# scattered across Service.qml, the harness fake and the stub compositor.
+# This half needs no display, no quickshell and no hyprctl -- it proves the
+# code is present, never that it works. Only the live half does that.
+pip_log="$CHECK_TMP/pip-scenario.log"
+if bash "$ROOT/scripts/dev-harness/pip-scenario.sh" check-tree >"$pip_log" 2>&1; then
+  pip_checks=$(grep -c '^PASS' "$pip_log")
+  if (( pip_checks < PIP_PREFLIGHT_MIN )); then
+    bad "pip preflight ran $pip_checks checks, expected at least $PIP_PREFLIGHT_MIN"
+    cat "$pip_log"
+  else
+    ok "pip preflight ($pip_checks checks)"
+    if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$pip_log"; fi
+  fi
+else
+  bad "pip preflight"; cat "$pip_log"
 fi
 
 step "ascii check (code files)"
