@@ -1105,3 +1105,18 @@ established that the obvious fix would not have worked: caching the group axis
 removes only about a third of the cost, and the larger half is the open path
 building the same index four times over. Worth knowing before anyone spends a
 lane on the wrong half.
+
+## 13. Rulings after the live pass (product owner, 2026-09-15)
+
+| # | Ruling |
+|---|---|
+| GS8 | Fix the contrast before release. The failure notice on a selected row measures below the accessibility threshold, and of everything on the card it is the one piece of text that names a key the user is supposed to press. Text that tells someone what to do must be the most legible thing on the row, not the least. |
+| GS9 | My caveat was wrong and the fix is better than the documentation. I wrote that configuring guide data correctly returns the second line and reverses the density win. On this provider the line comes back BLANK on every row, because almost no channel carries an identifier to match guide data against. So the user loses three rows and gains nothing, which is not correct behaviour, it is the original defect wearing a different hat. Apply the rule the lane already established: the line exists when it carries something that varies, and guide data being configured is not the same as guide data being present. Decide on the data, not the setting. |
+| GS10 | The empty accessibility tree is not ours to fix here and is bigger than this feature. The shell publishes nothing at all with the guide open, so no screen reader can announce anything, which means every accessibility rule this project has written is currently unobservable in practice. Investigate it as its own item, establish whether it is the shell, the toolkit or how the plugin builds its surfaces, and if it belongs upstream report it the way we reported the settings defect. Ruling GS5 stays open until something can actually be heard. |
+| GS11 | Clearing a guide URL must remove its cache, for the same reason removing a source does. A setting the user cleared should not come back after a restart because a file outlived it. |
+
+One note for the record. The pass called the cursor peek the change it would
+keep if it could keep only one. That change is fifteen lines of arithmetic
+lifted from Omarchy's own picker, whose source comment describes the exact
+defect this guide had. The most valuable thing in this lane was already
+written, in this codebase's own house style, and nobody had looked.
