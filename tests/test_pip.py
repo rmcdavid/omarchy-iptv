@@ -256,6 +256,34 @@ class StubFidelityTest(unittest.TestCase):
         self.assertEqual(code, 0, "even a miss is exit status 0")
         self.assertIn("window not found", out)
 
+    def test_a_class_selector_cannot_say_which_of_two_windows_it_means(self):
+        # D-PIP-5, with the state that produces it: PLY-RST-11's reproduced
+        # case, a user's own `mpv --wayland-app-id=omarchy-iptv`, listed
+        # first. Both commands below answer `ok` with exit status 0, so the
+        # reply cannot tell them apart -- which is why the stub now records
+        # WHICH window focus reached, and why a double that did not would be
+        # more forgiving than the compositor (CLAUDE.md rule 10).
+        state = base_state()
+        state["clients"].insert(0, {
+            "class": "omarchy-iptv", "pid": 2053730, "address": "0x559c687e0bb0",
+            "at": [0, 0], "size": [800, 600], "floating": False, "pinned": False,
+            "monitor": 0, "workspace": {"id": 1}, "tags": [],
+        })
+        hypr = StubDriver(state=state)
+        self.addCleanup(hypr.close)
+        code, out = hypr.dispatch('hl.dsp.focus({ window = "class:omarchy-iptv" })')
+        self.assertEqual((code, out), (0, "ok"))
+        self.assertEqual(self.focused(hypr), "0x559c687e0bb0",
+                         "a class names an app id, not a window: the stranger got the focus")
+        # The address the pid resolved reaches ours, and nothing else does.
+        code, out = hypr.dispatch('hl.dsp.focus({ window = "address:%s" })' % ADDRESS)
+        self.assertEqual((code, out), (0, "ok"))
+        self.assertEqual(self.focused(hypr), ADDRESS)
+
+    def focused(self, hypr):
+        with open(hypr.state_path, "r", encoding="utf-8") as handle:
+            return json.load(handle).get("focused", "")
+
     def test_the_lua_spelling_is_the_only_one_that_exists_here(self):
         # PIP15. The legacy spelling works on a hyprlang provider and is a
         # Lua syntax error on this one, so there is exactly one spelling to
@@ -356,6 +384,33 @@ class ServiceShapeTest(unittest.TestCase):
         self.has(MODEL, "if (pipInteger(c.pid, -1) !== want) continue", "Model.js")
         self.has(MODEL, 'if (hits.length > 1) return pipWindowFail("ambiguous")', "Model.js")
 
+    def test_focus_is_narrowed_by_the_pid_like_every_other_window_command(self):
+        # D-PIP-5. The D-PIP-1 repair fixed the spelling and kept the
+        # selector, and `class:` names an app id rather than a window: with a
+        # user's own `mpv --wayland-app-id=omarchy-iptv` open, focus landed
+        # on the stranger three times out of three. 4.2 had already ruled
+        # narrowing by pid non-optional for every other verb.
+        self.has(SERVICE, "root.dispatchFocus(derived.address)", "Service.qml")
+        self.has(SERVICE, "var argv = Model.focusPlayerArgv(address)", "Service.qml")
+        self.has(SERVICE, "if (argv.length === 0) return false", "Service.qml")
+        self.has(MODEL, "function focusPlayerArgv(address) {", "Model.js")
+        self.has(MODEL, '  return pipDispatchArgv("focus", { window: pipAddressSelector(address) })', "Model.js")
+        # And the class selector is GONE, not merely unused: the builder
+        # cannot produce one for any verb, so no future caller can route back
+        # to it. A constant left behind for "compatibility" is how this kind
+        # of defect returns.
+        self.lacks(MODEL, "PIP_CLASS_SELECTOR", "Model.js must not keep a class selector")
+        self.lacks(MODEL, 'if (value === PIP_CLASS_SELECTOR) return value', "Model.js")
+        self.lacks(SERVICE, "Model.focusPlayerArgv()", "Service.qml must not focus without an address")
+        # The retry loop is still bounded, and now ends when a focus lands
+        # rather than always spending its whole budget: an attempt made
+        # before the player's socket has attached resolves no window, so the
+        # budget has to cover that wait, and a loop that never stopped early
+        # would pay for it on every single play.
+        self.has(SERVICE, "readonly property int focusRetries: 12", "Service.qml")
+        self.has(SERVICE, "    focusTimer.stop()\n    return true", "Service.qml")
+        self.has(SERVICE, "root.focusAttempts >= root.focusRetries", "Service.qml")
+
     def test_success_is_decided_by_a_readback_and_by_nothing_else(self):
         # PIP11. The dispatch handler must hand its exit status to a function
         # that only logs it; the verdict comes from pipVerify against a fresh
@@ -455,6 +510,56 @@ class ServiceShapeTest(unittest.TestCase):
         for forbidden in ("setText(", "stateDir", "cacheDir", "FileView", "runtimeDir"):
             self.assertNotIn(forbidden, api, "PiP writes no file at all")
 
+    def test_the_reported_state_is_re_derived_when_a_player_becomes_ours(self):
+        # D-PIP-4 and design 4.7 step 3. The window half already worked: a
+        # request re-reads the compositor before it plans, so `p` exited
+        # correctly after `omarchy restart shell`. What was missing is the
+        # same read taken ONCE when a player becomes ours, which is why
+        # `status.pip.on` answered false on thirty consecutive samples with
+        # the box demonstrably in the corner.
+        #
+        # Two hooks, because the pid can arrive either way round: the
+        # reattach probe learns it before the socket is armed, and a cold
+        # start learns it from the player's own reply afterwards.
+        self.has(SERVICE, "    root.pipPeek()\n  }\n\n  // ---- what picture in picture IS", "Service.qml")
+        attach = SERVICE[SERVICE.index("function onPlayerAttached(sock)"):]
+        attach = attach[:attach.index("\n  }")]
+        self.assertIn("root.pipPeek()", attach,
+                      "onPlayerAttached must re-derive the state (4.7 step 3)")
+        self.assertIn("root.pipRequestSnapshot(sock)", attach,
+                      "and still read back what the window WAS (4.5)")
+        # The read itself, and the two decisions behind it, are the model's.
+        self.has(SERVICE, "Model.pipDeriveGate({ pid: root.playerPid, busy: root.pipBusy, reading: root.pipPeeking })",
+                 "Service.qml")
+        self.has(SERVICE, "var derived = Model.pipDeriveState(text, root.playerPid, root.pipClass)", "Service.qml")
+        self.has(SERVICE, "if (derived.decided && !root.pipBusy) root.pipOn = derived.on", "Service.qml")
+        self.has(MODEL, "function pipDeriveState(clients, pid, className) {", "Model.js")
+
+    def test_nothing_reports_picture_in_picture_from_memory(self):
+        # The defect in one property of the tree: every value `pipOn` can
+        # take comes from a live read of the compositor or from clearing it
+        # outright. There is no cached boolean, no last-known-good and no
+        # "what we asked for" anywhere on the right-hand side -- which is
+        # what makes the state survive a restart this process was not alive
+        # for. `root.pipIntent === "on"` is the one apparent exception and is
+        # not one: pipCheck reaches it only after Model.pipVerify has
+        # compared a FRESH read field by field (PIP11).
+        allowed = {
+            "Model.pipActive(live)",
+            "Model.pipActive(root.pipLive)",
+            'root.pipIntent === "on"',
+            "derived.on",
+            "false",
+        }
+        found = set(re.findall(r"root\.pipOn = (.+)$", SERVICE, re.M))
+        self.assertTrue(found, "no pipOn assignment found at all: this test has stopped testing")
+        self.assertEqual(found - allowed, set(),
+                         "pipOn was assigned from something that is not a live read")
+        # And the derivation cannot be handed one either: three parameters,
+        # all of them facts about the compositor and the player.
+        self.assertIn("function pipDeriveState(clients, pid, className) {", MODEL)
+        self.assertNotIn("function pipDeriveState(clients, pid, className, ", MODEL)
+
     def test_every_wait_is_bounded(self):
         # CLAUDE.md "Working in parallel" rule 3. Three independent bounds:
         # rounds, steps per round, and wall clock on a step and on the whole
@@ -466,6 +571,11 @@ class ServiceShapeTest(unittest.TestCase):
             self.has(SERVICE, bound, "Service.qml")
         self.has(SERVICE, "id: pipStepWatchdog", "Service.qml")
         self.has(SERVICE, "id: pipSequenceWatchdog", "Service.qml")
+        # And the read that is not part of a sequence has its own, or an
+        # hyprctl that never exits would latch `pipPeeking` and the state
+        # would quietly stop being re-derived for the rest of the session.
+        self.has(SERVICE, "id: pipPeekWatchdog", "Service.qml")
+        self.has(SERVICE, "      if (hyprPeekProc.running) hyprPeekProc.signal(15)", "Service.qml")
 
     def test_the_verb_and_its_refusals(self):
         self.has(SERVICE, "function pip(mode: string): string", "Service.qml")
@@ -497,6 +607,7 @@ class ServiceShapeTest(unittest.TestCase):
                      "Model.pipActive(", "Model.pipResolveIntent(", "Model.pipSnapshotFor(",
                      "Model.pipParseSnapshot(", "Model.pipMpvCommands(", "Model.pipHasTag(",
                      "Model.pipResultCode(", "Model.pipKeyRequest(", "Model.pipDispatchAccepted(",
+                     "Model.pipDeriveState(", "Model.pipDeriveGate(",
                      "Model.parsePlayerReply("):
             self.has(SERVICE, call, "Service.qml must call the shipped function")
 

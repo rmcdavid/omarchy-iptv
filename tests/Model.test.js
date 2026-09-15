@@ -6,6 +6,11 @@ const Model = require("../Model.js")
 // The shared vectors both languages run (CLAUDE.md: a rule written twice gets
 // one fixture). tests/test_player.py reads the same file.
 const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
+// The picture-in-picture vectors, required here rather than beside the PiP
+// section because the focus checks below run against the same clients list
+// (D-PIP-5) and a second copy of it would be the mirrored data that lets
+// two "identical" fixtures drift.
+const pipFixture = require("./fixtures/pip-cases.js")
 
 let failures = 0
 let checks = 0
@@ -501,7 +506,7 @@ const HYPR_DISPATCH_NAMESPACES = {
 // What this machine's hyprctl does with an argv vector. rc 7 is a Lua error
 // (a bug in OUR string); rc 0 means the compositor accepted the call - which
 // per PIP11 still says nothing about whether the window changed.
-function hyprDispatch(argv) {
+function hyprDispatch(argv, clients) {
   const parts = Array.isArray(argv) ? argv.map(String) : []
   if (parts[0] !== "hyprctl" || parts[1] !== "dispatch") return { rc: 2, error: "not a hyprctl dispatch" }
   // hyprctl joins everything after `dispatch` and evaluates
@@ -522,7 +527,34 @@ function hyprDispatch(argv) {
   const table = /^\{ ([\s\S]*) \}$/.exec(call[2])
   if (!table) return { rc: 7, error: "parse error: expected a table" }
   const window = /window = "([^"]*)"/.exec(table[1])
-  return { rc: 0, ns: call[1], window: window ? window[1] : "" }
+  const selector = window ? window[1] : ""
+  const hit = hyprResolve(selector, clients)
+  return { rc: 0, ns: call[1], window: selector, matches: hit.matches, focused: hit.address }
+}
+
+// WHICH window a selector lands on, which is the half rc could never tell us
+// and the half D-PIP-5 turns on. An `address:` names exactly one client. A
+// `class:` names an APP ID, and the plugin does not get to choose among the
+// windows carrying it: the live pass fired the class-only focus with a
+// user's own `mpv --wayland-app-id=omarchy-iptv` open and watched it land on
+// the stranger three times out of three. scripts/dev-harness/stub-hyprctl.py
+// resolves a class the same way (`match_window`, first match wins), so the
+// two doubles in this project answer this question identically.
+//
+// `matches` is the honest field: a selector that names more than one window
+// is a command whose effect nobody can predict, which is the defect itself
+// rather than a detail of how it came out on the day.
+function hyprResolve(selector, clients) {
+  const list = Array.isArray(clients) ? clients : []
+  if (selector.indexOf("address:") === 0) {
+    const hits = list.filter(function (c) { return String(c.address) === selector.substring(8) })
+    return { matches: hits.length, address: hits.length === 1 ? String(hits[0].address) : "" }
+  }
+  if (selector.indexOf("class:") === 0) {
+    const hits = list.filter(function (c) { return String(c["class"]) === selector.substring(6) })
+    return { matches: hits.length, address: hits.length > 0 ? String(hits[0].address) : "" }
+  }
+  return { matches: 0, address: "" }
 }
 
 checkCall("D-PIP-1: the host double refuses exactly what the compositor refused in the gate, and accepts what it accepted", () => [
@@ -538,17 +570,67 @@ checkCall("D-PIP-1: the host double refuses exactly what the compositor refused 
   hyprDispatch(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"]).rc
 ], [7, 7, 7, 7, 0])
 
-checkCall("D-PIP-1: the shipped focus command survives the host's Lua wrapping and names the player window",
-  () => hyprDispatch(Model.focusPlayerArgv()),
-  { rc: 0, ns: "hl.dsp.focus", window: "class:omarchy-iptv" })
+// ---- D-PIP-5: the second half of that defect, in the same function -----
+//
+// The D-PIP-1 repair fixed the SPELLING and kept the SELECTOR. `class:` names
+// an app id, and PLY-RST-11 reproduced the case where two windows carry ours:
+// a user's own `mpv --wayland-app-id=omarchy-iptv`. Design 4.2 had already
+// ruled for every other verb that "narrowing by pid is not optional", because
+// floating, shrinking and pinning a stranger's window is damage - and focus
+// was simply the verb nobody applied it to. The live pass then measured it:
+// focus landed on the stranger 3 times out of 3.
+//
+// So the evidence below is not the argv. It is WHICH WINDOW the command
+// reaches, with the stranger present and listed first, exactly as the live
+// pass met it.
+const focusClients = [pipFixture.CLIENTS.foreign, pipFixture.CLIENTS.tiled]
+checkCall("D-PIP-5: the class-only command the wave shipped cannot say which window it means, and reaches the stranger", () => {
+  const out = hyprDispatch(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"], focusClients)
+  // rc 0: the compositor accepted it. PIP11 again - acceptance says nothing.
+  return [out.rc, out.matches, out.focused === pipFixture.PLAYER_ADDRESS, out.focused]
+}, [0, 2, false, "0x559c687e09a0"])
 
-checkCall("D-PIP-1: focus goes through the same validated builder every PiP step uses, so a hand-rolled string cannot come back", () => [
-  // One argv item after `dispatch` - more than one is what broke it.
-  Model.focusPlayerArgv().length,
-  Model.focusPlayerArgv()[2] === Model.pipExpression("focus", { window: Model.PIP_CLASS_SELECTOR }),
-  // And the builder vouches for the selector: no other class gets through.
-  Model.pipExpression("focus", { window: "class:not-ours" })
-], [3, true, ""])
+checkCall("D-PIP-5: the shipped command names the window the pid resolved, and lands on OURS", () => {
+  const live = Model.pipFindWindow(focusClients, pipFixture.PLAYER_PID)
+  const out = hyprDispatch(Model.focusPlayerArgv(live.address), focusClients)
+  return [out.rc, out.ns, out.window, out.matches, out.focused]
+}, [0, "hl.dsp.focus", "address:" + pipFixture.PLAYER_ADDRESS, 1, pipFixture.PLAYER_ADDRESS])
+
+checkCall("D-PIP-5: 4.2's refusals reach focus too - no window, or two, means no command at all", () => {
+  const clients = function (list) { return JSON.stringify(list) }
+  return [
+    // Only the stranger is up: our window has not mapped yet.
+    Model.focusPlayerArgv(Model.pipFindWindow(clients([pipFixture.CLIENTS.foreign]), pipFixture.PLAYER_PID).address).length,
+    // Two windows at our own pid: the lookup refuses, so focus does too.
+    Model.focusPlayerArgv(Model.pipFindWindow(clients([pipFixture.CLIENTS.tiled, pipFixture.CLIENTS.twin]), pipFixture.PLAYER_PID).address).length,
+    Model.focusPlayerArgv("").length,
+    Model.focusPlayerArgv().length,
+    Model.focusPlayerArgv(null).length,
+    // And PIP7's boundary is the same one: a hostile address is refused, not
+    // escaped, on this path as on every other.
+    Model.focusPlayerArgv("0xdead\"); os.execute(\"touch /tmp/PWNED\"); --").length,
+    Model.focusPlayerArgv("class:omarchy-iptv").length
+  ]
+}, [0, 0, 0, 0, 0, 0, 0])
+
+checkCall("D-PIP-5: a class selector cannot be built at all any more, by focus or by anything else", () => [
+  // Not merely unused: removed, so a future caller cannot route back to it.
+  Model.pipExpression("focus", { window: "class:omarchy-iptv" }),
+  Model.pipExpression("focus", { window: "class:not-ours" }),
+  Model.pipExpression("float", { window: "class:omarchy-iptv" }),
+  Model.pipDispatchArgv("focus", { window: "class:omarchy-iptv" }).length,
+  typeof Model.PIP_CLASS_SELECTOR
+], ["", "", "", 0, "undefined"])
+
+checkCall("D-PIP-1: focus goes through the same validated builder every PiP step uses, so a hand-rolled string cannot come back", () => {
+  const argv = Model.focusPlayerArgv(pipFixture.PLAYER_ADDRESS)
+  return [
+    // One argv item after `dispatch` - more than one is what broke it.
+    argv.length,
+    argv[0] + " " + argv[1],
+    argv[2] === Model.pipExpression("focus", { window: "address:" + pipFixture.PLAYER_ADDRESS })
+  ]
+}, [3, "hyprctl dispatch", true])
 
 // ---- D-PLY-11: the play fork, and the repair the evidence asked for ----
 // The fork rows record the decision Service.qml.play() makes. The third row
@@ -2618,8 +2700,6 @@ check("CN18: the entry buffer accepts a number that long, so nothing displayable
 // controls can reach a dispatch vector. Nothing here proves Hyprland does
 // what it is told - only the live pass can, and after PIP11 only by reading
 // the state back, which is what pipVerify is.
-const pipFixture = require("./fixtures/pip-cases.js")
-
 // ---- 1. the expression boundary (PIP7, design 4.11)
 
 check("PIP7: the six window verbs and focus build the expressions the gate proved live", [
@@ -2671,8 +2751,12 @@ check("PIP7: the only strings that pass are the compile-time constants", [
   Model.pipExpression("zorder", { window: "address:" + pipFixture.PLAYER_ADDRESS, mode: "bottom" }),
   Model.pipExpression("nosuchverb", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
   Model.pipExpression("constructor", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
-  Model.pipExpression("focus", { window: "class:omarchy-iptv" })
-], ["", "", "", "", "", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"])
+  // D-PIP-5: this row used to be the ONE selector that was not an address,
+  // and it named an app id rather than a window. It is refused now, by the
+  // same builder and for the same reason every other value here is.
+  Model.pipExpression("focus", { window: "class:omarchy-iptv" }),
+  Model.pipExpression("focus", { window: "address:" + pipFixture.PLAYER_ADDRESS })
+], ["", "", "", "", "", "", "hl.dsp.focus({ window = \"address:0x559c6893d940\" })"])
 // The one playlist-derived value with an obvious route in: a channel name. It
 // has no parameter to arrive through, and this says so out loud.
 check("PIP7: nothing playlist-derived can reach a dispatch vector",
@@ -2816,6 +2900,98 @@ check("pipResolveIntent: an explicit mode wins, a toggle reads the live state", 
   Model.pipResolveIntent("toggle", { ok: true, floating: true, tags: [] }),
   Model.pipResolveIntent("", null)
 ], ["on", "off", "off", "on", "on"])
+
+// ---- 4b. what the plugin REPORTS after a shell restart (4.7 step 3) ----
+//
+// D-PIP-4. The live pass found the window perfect and the report wrong:
+// `status.pip.on` answered false on all THIRTY one-second samples while the
+// box was demonstrably floating, pinned and carrying `iptv-pip`, the bar
+// tooltip never gained its line, and the next accepted request replied
+// `"was":false`. The window half worked because a request re-reads the
+// compositor before it plans; the reporting half was never implemented.
+//
+// The driver below is the whole of what Service.qml does with that answer -
+// the gate, the read, and `if (decided) pipOn = on` - and every decision in
+// it is a CALL into the shipping functions rather than a copy of them
+// (CLAUDE.md 12). `pipOn` starts false the way a process that has just
+// started starts: set by nobody, because nobody was here to set it.
+const pipFreshShell = function (reported) {
+  return {
+    pipOn: reported === true,
+    pid: 0,
+    busy: false,
+    reading: false,
+    // What the reattach path does the moment it learns the pid, and what
+    // onPlayerAttached does again a moment later.
+    peek: function (clients, pid) {
+      if (pid !== undefined) this.pid = pid
+      const gate = Model.pipDeriveGate({ pid: this.pid, busy: this.busy, reading: this.reading })
+      if (!gate.ok) return gate.code
+      const derived = Model.pipDeriveState(clients, this.pid, Model.PIP_CLASS)
+      if (derived.decided) this.pipOn = derived.on
+      return derived.decided ? "decided" : derived.reason
+    }
+  }
+}
+// THE case. A shell that has just started has no snapshot, no flag and no
+// history of its own; the window is still in the corner from before it died.
+checkCall("D-PIP-4: a shell with no memory at all reports the window it finds, not the false it woke up with", () => {
+  const shell = pipFreshShell()
+  const code = shell.peek(pipClients([pipFixture.CLIENTS.foreign, pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID)
+  // And the one surface a user sees it on: PIP2's single tooltip line.
+  return [shell.pipOn, code, Model.barTooltip({ playing: true, name: "BBC One", pip: shell.pipOn }).split("\n")[1]]
+}, [true, "decided", Model.PIP_TOOLTIP_ON])
+// The other direction, which a remembered boolean also gets wrong: the user
+// tiled the box with SUPER+T while this shell was dead.
+checkCall("D-PIP-4: and follows the window back down, rather than a remembered true", () => {
+  const shell = pipFreshShell(true)
+  const code = shell.peek(pipClients([pipFixture.CLIENTS.tiled]), pipFixture.PLAYER_PID)
+  return [shell.pipOn, code, Model.barTooltip({ playing: true, name: "BBC One", pip: shell.pipOn }).indexOf("\n")]
+}, [false, "decided", -1])
+// The property that says "derived, not remembered" in one line: the same
+// bytes answer the same thing whatever this process happened to be saying a
+// moment earlier. A cache, a flag or a last-known-good would break exactly
+// this check and nothing else.
+checkCall("D-PIP-4: the same read answers the same thing whatever the plugin said before it", () => {
+  const inPip = pipClients([pipFixture.CLIENTS.inPip])
+  const tiled = pipClients([pipFixture.CLIENTS.tiled])
+  const a = pipFreshShell(false), b = pipFreshShell(true), c = pipFreshShell(false), d = pipFreshShell(true)
+  a.peek(inPip, pipFixture.PLAYER_PID); b.peek(inPip, pipFixture.PLAYER_PID)
+  c.peek(tiled, pipFixture.PLAYER_PID); d.peek(tiled, pipFixture.PLAYER_PID)
+  return [a.pipOn, b.pipOn, c.pipOn, d.pipOn]
+}, [true, true, false, false])
+// `decided` is the honest half. A read that cannot see OUR window must not
+// be turned into "off": that is the same defect pointing the other way.
+checkCall("D-PIP-4: a read that saw nothing changes nothing", () => {
+  const shell = pipFreshShell(true)
+  const codes = [
+    shell.peek("{not json", pipFixture.PLAYER_PID),
+    shell.peek(pipClients([pipFixture.CLIENTS.foreign])),
+    shell.peek(pipClients([pipFixture.CLIENTS.tiled, pipFixture.CLIENTS.twin])),
+    shell.peek(pipClients([pipFixture.CLIENTS.badAddress]))
+  ]
+  return [codes, shell.pipOn]
+}, [["bad_clients", "no_window", "ambiguous", "bad_address"], true])
+// 4.2 again, one layer up: without the pid there is no read at all, because
+// a class-only lookup is the defect D-PIP-5 is about. And a request owns the
+// answer while it runs - its read is fresher and it is about to verify it.
+checkCall("D-PIP-4: the gate on the read - no pid, no guess; a request in flight wins", () => [
+  Model.pipDeriveGate({ pid: 0 }).code,
+  Model.pipDeriveGate({ pid: -1 }).code,
+  Model.pipDeriveGate({ pid: "not a pid" }).code,
+  Model.pipDeriveGate(null).code,
+  Model.pipDeriveGate({ pid: pipFixture.PLAYER_PID, busy: true }).code,
+  Model.pipDeriveGate({ pid: pipFixture.PLAYER_PID, reading: true }).code,
+  Model.pipDeriveGate({ pid: pipFixture.PLAYER_PID }).ok
+], ["no_pid", "no_pid", "no_pid", "no_pid", "busy", "reading", true])
+// And the structural half: there is nowhere to PUT a remembered value. The
+// compositor's own bytes, the pid and the class are the whole input.
+checkCall("D-PIP-4: the derivation takes the compositor's bytes and nothing else", () => [
+  Model.pipDeriveState.length,
+  Model.pipDeriveState(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID, Model.PIP_CLASS).on,
+  Model.pipDeriveState(pipClients([pipFixture.CLIENTS.userPopped]), pipFixture.PLAYER_PID, Model.PIP_CLASS).on,
+  Model.pipDeriveState(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID, Model.PIP_CLASS).address
+], [3, true, false, pipFixture.PLAYER_ADDRESS])
 
 // ---- 5. the plan (4.3 as PIP10 corrects it)
 

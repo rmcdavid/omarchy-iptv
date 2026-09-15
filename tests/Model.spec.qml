@@ -1499,11 +1499,25 @@ TestCase {
             "hl.dsp.window.move({ window = \"address:0x559c6893d940\", x = 940, y = 42 })")
     // D-PIP-1: one argv item after `dispatch`, and the namespace focus really
     // lives at. Two bare tokens are what did not work.
-    var focus = Model.focusPlayerArgv()
+    //
+    // D-PIP-5: and the selector is the pid-resolved ADDRESS. The class-only
+    // spelling this replaces focused a user's own
+    // `mpv --wayland-app-id=omarchy-iptv` three times out of three, and it
+    // cannot be built any more - by focus or by anything else.
+    var resolved = Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.foreign, PipCases.CLIENTS.tiled]),
+                                       PipCases.PLAYER_PID)
+    compare(resolved.address, PipCases.PLAYER_ADDRESS)
+    var focus = Model.focusPlayerArgv(resolved.address)
     compare(focus.length, 3)
     compare(focus[0] + " " + focus[1], "hyprctl dispatch")
-    compare(focus[2], "hl.dsp.focus({ window = \"class:omarchy-iptv\" })")
-    compare(focus[2], Model.pipExpression("focus", { window: Model.PIP_CLASS_SELECTOR }))
+    compare(focus[2], "hl.dsp.focus({ window = \"address:0x559c6893d940\" })")
+    compare(focus[2], Model.pipExpression("focus", { window: "address:" + PipCases.PLAYER_ADDRESS }))
+    compare(Model.pipExpression("focus", { window: "class:omarchy-iptv" }), "")
+    // No window, two windows, or no address at all: no command is built.
+    compare(Model.focusPlayerArgv("").length, 0)
+    compare(Model.focusPlayerArgv().length, 0)
+    compare(Model.focusPlayerArgv(Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.foreign]),
+                                                      PipCases.PLAYER_PID).address).length, 0)
   }
 
   function test_pictureInPicturePlan() {
@@ -1528,6 +1542,27 @@ TestCase {
     compare(Model.pipActive(inPip), true)
     compare(Model.pipActive(Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.userPopped]), PipCases.PLAYER_PID)), false)
     compare(Model.pipResolveIntent("toggle", inPip), "off")
+
+    // D-PIP-4 / 4.7 step 3. The engine the service actually runs in, asked
+    // the question a shell that has just restarted has to answer: the
+    // window is still in the corner and this process has no memory of it.
+    // `status.pip.on` said false on thirty consecutive samples here.
+    var fresh = Model.pipDeriveState(JSON.stringify([PipCases.CLIENTS.foreign, PipCases.CLIENTS.inPip]),
+                                     PipCases.PLAYER_PID, Model.PIP_CLASS)
+    compare(fresh.decided, true)
+    compare(fresh.on, true)
+    compare(fresh.address, PipCases.PLAYER_ADDRESS)
+    compare(Model.barTooltip({ playing: true, name: "BBC One", pip: fresh.on }).split("\n")[1], Model.PIP_TOOLTIP_ON)
+    // And back down again when the user tiled it while this shell was dead.
+    compare(Model.pipDeriveState(JSON.stringify([PipCases.CLIENTS.tiled]), PipCases.PLAYER_PID, Model.PIP_CLASS).on, false)
+    // A read that could not see OUR window decides nothing, rather than
+    // announcing "off" on the strength of having seen nothing.
+    compare(Model.pipDeriveState("{not json", PipCases.PLAYER_PID, Model.PIP_CLASS).decided, false)
+    compare(Model.pipDeriveState(JSON.stringify([PipCases.CLIENTS.tiled, PipCases.CLIENTS.twin]),
+                                 PipCases.PLAYER_PID, Model.PIP_CLASS).reason, "ambiguous")
+    compare(Model.pipDeriveGate({ pid: 0 }).code, "no_pid")
+    compare(Model.pipDeriveGate({ pid: PipCases.PLAYER_PID, busy: true }).code, "busy")
+    compare(Model.pipDeriveGate({ pid: PipCases.PLAYER_PID }).ok, true)
 
     var exit = Model.pipPlan(inPip, snapshot, geo, "off")
     compare(exit.length, 3)

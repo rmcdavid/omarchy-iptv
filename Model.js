@@ -2998,7 +2998,6 @@ function endedReport(context) {
 // expression that is not an address or a clamped integer.
 var PIP_CLASS = "omarchy-iptv"
 var PIP_TAG = "iptv-pip"
-var PIP_CLASS_SELECTOR = "class:" + PIP_CLASS
 // 4.2 rule 4 / 4.11 rule 1. Lower case only: the compositor prints
 // addresses lower case, and accepting `0xDEAD` too would widen the pattern
 // for nothing.
@@ -3057,11 +3056,19 @@ function pipAddressSelector(address) {
   return PIP_ADDRESS_RE.test(value) ? "address:" + value : ""
 }
 
-// The two window selectors that exist: our own pid-matched address, and the
-// one compile-time class constant the focus command uses.
+// The ONE window selector that exists: our own pid-matched address.
+//
+// It used to accept `class:omarchy-iptv` as well, for the focus command
+// alone, and D-PIP-5 is what that cost: with a user's own
+// `mpv --wayland-app-id=omarchy-iptv` present, focus landed on the
+// STRANGER'S window three times out of three. 4.2 had already learned this
+// for every other verb - "narrowing by pid is not optional" - and focus was
+// simply the verb nobody applied it to. The class branch is gone rather than
+// merely unused, so the selector cannot come back through a future caller:
+// pipExpression refuses `class:` anything now, which is a property a test
+// can assert (CLAUDE.md 11).
 function pipSelector(window) {
   var value = str(window)
-  if (value === PIP_CLASS_SELECTOR) return value
   if (value.indexOf("address:") !== 0) return ""
   return pipAddressSelector(value.substring(8))
 }
@@ -3127,8 +3134,19 @@ function pipDispatchArgv(verb, params) {
 // keeps the shape right: one argv item after `dispatch`, a real namespace
 // (`hl.dsp.focus`, not `hl.dsp.window.focus`, which does not exist), and a
 // selector the builder vouched for.
-function focusPlayerArgv() {
-  return pipDispatchArgv("focus", { window: PIP_CLASS_SELECTOR })
+//
+// D-PIP-5, the second half of the same defect. That repair fixed the
+// spelling and kept the SELECTOR, which was `class:omarchy-iptv` - and with
+// a user's own `mpv --wayland-app-id=omarchy-iptv` open, the live pass
+// watched it focus the stranger's window three times out of three. This is
+// the lesson 4.2 already wrote down for every other verb and that focus was
+// left out of: the plugin knows its player's pid, so it can resolve its own
+// window, and a command that cannot say WHICH window it means must not be
+// sent at all. `address` is the one pipFindWindow resolved; anything else -
+// an empty string because the window has not mapped yet, a second match the
+// lookup refused - yields [] and the caller dispatches nothing.
+function focusPlayerArgv(address) {
+  return pipDispatchArgv("focus", { window: pipAddressSelector(address) })
 }
 
 // Was this dispatch accepted? PIP11: rc cannot answer, because the
@@ -3267,6 +3285,57 @@ function pipResolveIntent(mode, live) {
   var m = str(mode)
   if (m === "on" || m === "off") return m
   return pipActive(live) ? "off" : "on"
+}
+
+// ---- re-deriving the reported state (4.7 step 3, D-PIP-4)
+//
+// The state of record is the compositor. A request already re-reads it
+// before it plans, which is why `p` kept working after `omarchy restart
+// shell`; what was missing is the same read taken ONCE when a player becomes
+// ours, so that what the plugin SAYS about itself follows the window too.
+// Without it the live pass measured `status.pip.on` reading false on all 30
+// one-second samples while the box was demonstrably floating, pinned and
+// tagged, the bar tooltip never gained its line, and the next accepted
+// request replied `"was":false` (D-PIP-4).
+//
+// Note what this function is NOT given: there is no parameter for a
+// previously reported value, and none for a remembered flag, because after a
+// shell restart this process has no memory at all and the window is still in
+// the corner. A boolean would be wrong in exactly the case it exists for.
+//
+// `decided` is the honest half. A read that cannot see OUR window - garbage,
+// no match, a pid we do not know yet, two matches - answers decided:false,
+// and the caller must then leave what it reports alone. Announcing "off" on
+// the strength of a read that saw nothing is the same lie in the other
+// direction.
+function pipDeriveState(clients, pid, className) {
+  var live = pipFindWindow(clients, pid, className)
+  if (live.ok !== true) {
+    return { decided: false, on: false, address: "", reason: str(live.reason), live: live }
+  }
+  return { decided: true, on: pipActive(live), address: live.address, reason: "", live: live }
+}
+
+// May the out-of-band read run at all? Three clauses that would otherwise sit
+// in QML where no test can reach them (CLAUDE.md 12):
+//
+//   no pid   - the window cannot be narrowed, and narrowing is not optional
+//              (4.2); a class-only lookup is the D-PIP-5 defect.
+//   busy     - a request owns the read pipeline and its verified answer wins;
+//              a stray read landing mid-sequence must not overwrite it.
+//   reading  - one read in flight at a time, so a retrying focus cannot fan
+//              out into a queue of hyprctl calls.
+//
+// `available` is deliberately NOT here: reading `hyprctl -j clients` is
+// harmless under any provider, and gating the READ on the dispatch spelling
+// would tie two unrelated facts together. The caller that dispatches is the
+// one that must care.
+function pipDeriveGate(ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  if (pipInteger(c.pid, 0) <= 0) return { ok: false, code: "no_pid" }
+  if (c.busy === true) return { ok: false, code: "busy" }
+  if (c.reading === true) return { ok: false, code: "reading" }
+  return { ok: true, code: "" }
 }
 
 // ---- geometry (4.4)
@@ -5611,7 +5680,6 @@ if (typeof module !== "undefined") {
     // ---- picture in picture (M2-05)
     PIP_CLASS: PIP_CLASS,
     PIP_TAG: PIP_TAG,
-    PIP_CLASS_SELECTOR: PIP_CLASS_SELECTOR,
     PIP_ADDRESS_RE: PIP_ADDRESS_RE,
     PIP_COORD_LIMIT: PIP_COORD_LIMIT,
     PIP_MIN_WIDTH: PIP_MIN_WIDTH,
@@ -5630,6 +5698,8 @@ if (typeof module !== "undefined") {
     pipHasTag: pipHasTag,
     pipActive: pipActive,
     pipResolveIntent: pipResolveIntent,
+    pipDeriveState: pipDeriveState,
+    pipDeriveGate: pipDeriveGate,
     pipFindMonitor: pipFindMonitor,
     pipGeometry: pipGeometry,
     pipBox: pipBox,

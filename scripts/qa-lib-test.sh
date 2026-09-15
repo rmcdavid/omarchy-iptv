@@ -610,12 +610,37 @@ is "the pip scenario never reaches the real compositor" \
 is "and run.sh is what puts it in front of PATH" \
    "$(qa_count 'export PATH="\$SCRATCH/bin:\$PATH"' "$ROOT/scripts/dev-harness/run.sh")" "1"
 
+# D-PIP-6. check.sh runs the preflight and only the preflight, which is
+# right: the live half starts a quickshell and a real player, and no gate may
+# do that. What is NOT right is a live half that answers 63 PASS 11 FAIL in a
+# file nobody runs, which is what it did. It cannot be run from here, so what
+# is asserted from here is the shape that makes its silence honest.
+is "the pip scenario refuses to start a live half it cannot run" \
+   "$(qa_count '^requires_live\(\) \{' "$PS5")" "1"
+is "and the live half is gated on that answer rather than merely offered it" \
+   "$(qa_count '^ *if ! requires_live; then' "$PS5")" "1"
+is "a skip says so with a status of its own, never 0" \
+   "$(qa_count '^LIVE_SKIP=77$' "$PS5")" "1"
+is "and a red preflight is still a failure, skip or no skip" \
+   "$(qa_count 'fail == 0 \)\) \|\| exit 1' "$PS5")" "1"
+# The cause D-PIP-6 turned out to be: the live half played a channel whose
+# URL is a dead local port, mpv exits under --idle=once, and every check
+# after P3 asserted about a player that was gone. The fixture's one channel
+# with a real stream behind it is what it plays now, served by run.sh the way
+# player-scenario.sh has always done it.
+is "the live half plays the channel that has a real stream behind it" \
+   "$(qa_count 'ipc play "t:harness.live"' "$PS5")" "1"
+is "and asks run.sh to serve one, detached so a restart can be tested" \
+   "$(qa_count '"\$RUN" --detach --serve' "$PS5")" "1"
+is "no scenario here plays a dead URL and then asserts about the player" \
+   "$(qa_count 'ipc play "t:(bbc|itv|sky|dw|arte|zdf|kids|expired)' "$PS5")" "0"
+
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=148
+EXPECTED=155
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -70,7 +70,13 @@ Item {
   readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
   readonly property int stopSettleMs: 5 * 1000     // backstop that clears `stopping` (4.10)
   readonly property int focusRetryMs: 500
-  readonly property int focusRetries: 6
+  // D-PIP-5 widened this from 6, and cost nothing by doing so. Focus now
+  // waits for a window the compositor can name rather than dispatching at a
+  // class, so an attempt made before the player's socket has attached
+  // resolves nothing and has to be retried - and dispatchFocus() ends the
+  // loop the moment one lands, where before it always spent all six. Six
+  // seconds, still bounded, still stopped by `playerUp` going false.
+  readonly property int focusRetries: 12
   readonly property int healthFailuresBeforeRestart: 2
   // Watchdog bound for one playlist/EPG helper run (S-05). The helper has
   // its own 60 s download deadline; this is the belt and braces for a
@@ -433,6 +439,15 @@ Item {
   property var pipSnapshot: null             // what the window was before PiP (from the player)
   property string pipReason: ""              // last failure code, "" after a success
   readonly property bool pipBusy: root.pipMode !== ""
+  // D-PIP-4 / 4.7 step 3. One read in flight OUTSIDE a request, so the state
+  // this plugin reports can be re-derived the moment a player becomes ours.
+  // The bound that makes it safe to fire from three places at once, and the
+  // reason Model.pipDeriveGate has a `reading` clause.
+  property bool pipPeeking: false
+  // D-PIP-5. The same read answers "which window is ours?", which is what
+  // focus needs and never had: the class-only selector it used focused a
+  // stranger's window of the same app id three times out of three.
+  property bool pipFocusPending: false
   // Bounds (CLAUDE.md "Working in parallel" 3). At most 3 rounds of at most
   // 8 steps, each step and each read watched for 2 s, and the whole sequence
   // capped so `pipBusy` can never latch.
@@ -739,8 +754,51 @@ Item {
     return { ok: true, kind: "channel", id: id, chno: label, name: name }
   }
 
+  // D-PIP-5. Focus is read-then-act now, like every other window command
+  // this plugin issues. The D-PIP-1 repair fixed the spelling and kept the
+  // selector, which was `class:omarchy-iptv`; with a user's own
+  // `mpv --wayland-app-id=omarchy-iptv` open, the live pass watched it focus
+  // the STRANGER'S window three times out of three. Design 4.2 had already
+  // ruled that narrowing by pid is not optional - focus was the one verb
+  // nobody applied it to.
+  //
+  // So there is nothing to dispatch until the compositor has been asked
+  // which window is ours, and the focus retry timer (UX 7.5) was built for
+  // exactly that wait: the mpv window maps a moment after launch. mpv binds
+  // its IPC socket before the video output creates a surface, so the pid is
+  // known by the time there is a window to aim at, and an attempt made
+  // before then simply resolves nothing and retries.
   function focusPlayer() {
-    Quickshell.execDetached(Model.focusPlayerArgv())
+    // A read already in flight answers this one too. Anything else the gate
+    // refuses - no pid, a PiP sequence in progress - means there is nothing
+    // coming and nothing to aim at, so the intent is dropped rather than
+    // held forever.
+    if (root.pipPeek() || root.pipPeeking) {
+      root.pipFocusPending = true
+      return true
+    }
+    root.pipFocusPending = false
+    return false
+  }
+
+  // The one place a focus command leaves this plugin. `address` came out of
+  // the pid-narrowed lookup; the builder checks it again against the address
+  // pattern (PIP7) and answers [] rather than a guess, so an empty vector
+  // means "we cannot say which window", never "focus whatever matches".
+  function dispatchFocus(address) {
+    var argv = Model.focusPlayerArgv(address)
+    if (argv.length === 0) return false
+    Quickshell.execDetached(argv)
+    // The retry loop (UX 7.5) exists because the mpv window maps a moment
+    // after launch and a focus dispatched before then reaches nothing. We
+    // only get here with a window the compositor listed a few milliseconds
+    // ago, so this one lands and there is nothing left to retry. Before
+    // D-PIP-5 nothing could know that, and the loop dispatched its whole
+    // budget every time.
+    root.wantFocus = false
+    root.focusAttempts = 0
+    focusTimer.stop()
+    return true
   }
 
   // ------------------------------------------------------------ picture in picture (M2-05)
@@ -1035,6 +1093,9 @@ Item {
     pipStepWatchdog.stop()
     root.playerPid = 0
     root.pipOn = false
+    // Nothing left to focus either: the window went with the process, and a
+    // pending focus would be aimed at an address that no longer exists.
+    root.pipFocusPending = false
     root.pipMode = ""
     root.pipIntent = ""
     root.pipPhase = ""
@@ -1050,6 +1111,53 @@ Item {
     var pid = Math.floor(Number(value) || 0)
     if (pid <= 0 || pid === root.playerPid) return
     root.playerPid = pid
+    // A pid we did not have is the first moment the window can be found at
+    // all, so it is the first moment the question in 4.7 step 3 can be
+    // answered. On the reattach path this runs before the socket is even
+    // armed, which is why the restart case is covered twice over.
+    root.pipPeek()
+  }
+
+  // ---- what picture in picture IS, asked of the compositor (4.7, D-PIP-4)
+  //
+  // A request re-reads the window before it plans, which is why `p` kept
+  // working across `omarchy restart shell`. This is the other half: the same
+  // read, taken once when a player becomes ours, so that what the plugin
+  // REPORTS follows the window too. Before it, `status.pip.on` answered
+  // false on 30 consecutive samples with the box demonstrably in the corner,
+  // the bar tooltip never gained its line, and an accepted request replied
+  // `"was":false`.
+  //
+  // Nothing here remembers anything: the decision is Model.pipDeriveState,
+  // which is given the compositor's own bytes and no previous value at all.
+  function pipPeek() {
+    var gate = Model.pipDeriveGate({ pid: root.playerPid, busy: root.pipBusy, reading: root.pipPeeking })
+    if (!gate.ok) return false
+    root.pipPeeking = true
+    hyprPeekProc.running = true
+    pipPeekWatchdog.restart()
+    return true
+  }
+
+  // The read came back. A request that started in the meantime owns the
+  // answer - its read is fresher and it is about to verify it - so this
+  // stands down rather than overwriting a verified state with an older one.
+  function pipApplyPeek(text) {
+    pipPeekWatchdog.stop()
+    root.pipPeeking = false
+    var wantedFocus = root.pipFocusPending
+    root.pipFocusPending = false
+    var derived = Model.pipDeriveState(text, root.playerPid, root.pipClass)
+    // `decided` false means the read could not see OUR window: garbage, no
+    // match, or two matches. Saying "off" on the strength of that would be
+    // the same defect pointing the other way, so nothing is written. A
+    // request that started in the meantime owns the answer too - its read is
+    // fresher and it is about to verify it.
+    if (derived.decided && !root.pipBusy) root.pipOn = derived.on
+    // D-PIP-5: focus the window this read RESOLVED. An undecided read leaves
+    // the address empty, the builder refuses it, and nothing is dispatched -
+    // which is the honest answer when we cannot say which window we mean.
+    if (wantedFocus && derived.decided) root.dispatchFocus(derived.address)
   }
 
   // The two mpv-side writes (4.6). Both go over the socket the service
@@ -2149,6 +2257,11 @@ Item {
     // `active:false` degrades the exit to "unpin and unfloat", never to
     // stuck.
     root.pipRequestSnapshot(sock)
+    // 4.7 step 3, the compositor half of the same recovery: the snapshot
+    // above says what the window WAS, this says what it IS. Both are needed
+    // and neither substitutes for the other - a shell that reattached to a
+    // player in PiP has no memory of either (D-PIP-4).
+    root.pipPeek()
     if (sock.flush) sock.flush()
   }
 
@@ -3151,6 +3264,23 @@ Item {
   }
 
   Timer {
+    // The same bound on the read that is NOT part of a sequence. Without it
+    // an hyprctl that never exits would latch `pipPeeking` and the state
+    // would stop being re-derived for the rest of the session - silently,
+    // which is the shape of defect this feature already carries one of
+    // (CLAUDE.md rule 3, D-PIP-4).
+    id: pipPeekWatchdog
+    interval: root.pipStepMs
+    repeat: false
+    onTriggered: {
+      if (hyprPeekProc.running) hyprPeekProc.signal(15)
+      root.pipPeeking = false
+      if (root.debugTiming) console.warn("omarchy-iptv pip: a state read did not answer in "
+                                         + Math.floor(root.pipStepMs / 1000) + " s")
+    }
+  }
+
+  Timer {
     // And one bound on the whole sequence, so `pipBusy` can never latch and
     // lock the user out of the key for the rest of the session.
     id: pipSequenceWatchdog
@@ -3324,9 +3454,11 @@ Item {
     function onExited(exitCode, exitStatus) { root.mpvAvailable = exitCode === 0 }
   }
 
-  // ---- picture in picture (M2-05). Five Processes, argv arrays only, no
-  // shell anywhere: two that decide once whether PiP is offered at all, two
-  // that READ the compositor, and one that asks it for something.
+  // ---- picture in picture (M2-05). Six Processes, argv arrays only, no
+  // shell anywhere: two that decide once whether PiP is offered at all,
+  // three that READ the compositor (a request's clients read, its monitors
+  // read, and the out-of-band peek 4.7 step 3 needs), and one that asks it
+  // for something.
 
   Process {
     // G-8. Without hyprctl on PATH, or without a live instance signature,
@@ -3390,6 +3522,23 @@ Item {
   Connections {
     target: hyprClientsProc
     function onExited(exitCode, exitStatus) { root.pipApplyClients(hyprClientsStdout.text) }
+  }
+
+  Process {
+    // The same question as hyprClientsProc, asked OUTSIDE a request, and
+    // deliberately a separate process rather than a shared one. A request's
+    // pipeline owns that one step by step under its own watchdog, and it
+    // refuses to start a read while one is running; a peek landing in the
+    // middle of a sequence would either be dropped or answer the wrong
+    // phase's question. Two processes, one rule (Model.pipDeriveState).
+    id: hyprPeekProc
+    command: ["hyprctl", "-j", "clients"]
+    stdout: StdioCollector { id: hyprPeekStdout; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+  Connections {
+    target: hyprPeekProc
+    function onExited(exitCode, exitStatus) { root.pipApplyPeek(hyprPeekStdout.text) }
   }
 
   Process {

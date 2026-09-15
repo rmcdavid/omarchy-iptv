@@ -232,8 +232,19 @@ def dispatch_lua(argv: list, raw: str) -> int:
     if verb != "focus":
         return finish(argv, "error: [string \"return hl.dispatch(...)\"]:1: attempt to "
                             "call a nil value (field '%s')" % verb, 7)
-    if match_window(state, selector(fields)) is None:
+    target = match_window(state, selector(fields))
+    if target is None:
         return finish(argv, "warning: =[C]:-1: hl.focus: window not found", 0)
+    # WHICH window focus reached. A fake that only answered `ok` could not
+    # tell the D-PIP-5 defect from its fix, because both answer ok -- that is
+    # ruling PIP11 applied to focus, and it is exactly the forgiveness
+    # CLAUDE.md rule 10 forbids. `match_window` resolves a class to the FIRST
+    # client carrying it and cannot do better: a class names an app id, not a
+    # window. That is how the live pass met it, with a user's own
+    # `mpv --wayland-app-id=omarchy-iptv` open and focus landing on the
+    # stranger three times out of three.
+    state["focused"] = str(target.get("address", ""))
+    save_state(state)
     return finish(argv, "ok", 0)
 
 
