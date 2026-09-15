@@ -41,6 +41,9 @@ ShellRoot {
   // longer merely returns `false`: a `false` return from a writable entry is
   // the host's `!dirty` branch, which means "already stored", i.e. success.
   property bool persistFails: false
+  // The last pipOutcome() payload, so a scenario can read what the service
+  // decided AFTER it read the compositor back, not what it intended.
+  property var lastPipOutcome: null
   // The entry shell.json starts with. The live value lives in
   // fakeHost.shellConfig from here on; `barEntry` below reads it back.
   readonly property var seedBarEntry: ({
@@ -58,7 +61,14 @@ ShellRoot {
     // project has been bitten by (CLAUDE.md rule 10).
     channelOrder: Quickshell.env("OMARCHY_IPTV_ORDER") || "playlist",
     numberEntryMs: parseInt(Quickshell.env("OMARCHY_IPTV_ENTRY_MS") || "2000", 10),
-    barShowChannelNumber: Quickshell.env("OMARCHY_IPTV_BAR_NUMBER") !== "false"
+    barShowChannelNumber: Quickshell.env("OMARCHY_IPTV_BAR_NUMBER") !== "false",
+    // M2-05, same rule: seeded so `set pipCorner ...` drives the real path,
+    // and with the design's own defaults so this fake is never more generous
+    // than the bar entry a user actually has. These three join manifest.json
+    // when lane V1's Model.SETTING_RANGES lands (handover request 1).
+    pipCorner: Quickshell.env("OMARCHY_IPTV_PIP_CORNER") || "top-right",
+    pipSizePercent: parseInt(Quickshell.env("OMARCHY_IPTV_PIP_PERCENT") || "30", 10),
+    pipMargin: parseInt(Quickshell.env("OMARCHY_IPTV_PIP_MARGIN") || "16", 10)
   })
   // What the host has actually stored (the shell.json truth), as opposed to
   // what it has published to the plugin, which can lag it by one write.
@@ -111,6 +121,31 @@ ShellRoot {
     // Pre-change only: the attached ladder's rung. Reported so the old tree
     // stays inspectable from the same driver.
     if (s.stopStage !== undefined) out.stopStage = s.stopStage
+  }
+
+  // M2-05. The PiP state a scenario can read, every field optional for the
+  // same reason addPlayerState's are: the SAME harness has to drive a
+  // pre-change checkout, because that comparison is what makes a scenario
+  // evidence rather than a claim (CLAUDE.md rule 10).
+  //
+  // `on` is the service's VERIFIED read of the compositor, not an intent, so
+  // a scenario that asserts on it is asserting the same fact the feature
+  // itself acts on (PIP11). `playerPid` is here because the pip-scenario
+  // needs it: the stub compositor's canned clients JSON is rewritten to
+  // carry the pid the service actually holds, so the pid-narrowed lookup is
+  // exercised for real rather than stepped over.
+  function pipSnapshot(s) {
+    if (!s) return { available: null, on: null, applying: null, reason: null, playerPid: null, lastOutcome: null }
+    return {
+      available: s.pipAvailable === undefined ? null : s.pipAvailable,
+      on: s.pipOn === undefined ? null : s.pipOn,
+      applying: s.pipBusy === undefined ? null : s.pipBusy,
+      reason: s.pipReason === undefined ? null : s.pipReason,
+      provider: s.pipProvider === undefined ? null : s.pipProvider,
+      playerPid: s.playerPid === undefined ? null : s.playerPid,
+      snapshot: s.pipSnapshot === undefined || s.pipSnapshot === null ? null : true,
+      lastOutcome: harness.lastPipOutcome
+    }
   }
 
   // M2-03 10.6 / CN23. The number-entry state the four verbs answer with, in
@@ -332,6 +367,14 @@ ShellRoot {
     function onSourceRemoved(id) { harness.record("sourceRemoved", { id: id }) }
     function onSourcesPersistFailed(reason) { harness.record("sourcesPersistFailed", { reason: reason }) }
     function onConfiguredChanged() { harness.record("configuredChanged", { configured: serviceLoader.item ? serviceLoader.item.configured : null }) }
+    // M2-05. The VERIFIED outcome of one PiP sequence, which is the only
+    // moment the service claims anything worked. A pre-change service has no
+    // such signal and Connections simply never fires this, which is what
+    // lets the same harness drive both trees.
+    function onPipOutcome(result) {
+      harness.lastPipOutcome = result
+      harness.record("pipOutcome", result)
+    }
   }
 
   // ---- fake PluginBarApi (Ui/PluginBarApi.qml surface)
@@ -505,6 +548,27 @@ ShellRoot {
       out.cancelled = cancelled
       return JSON.stringify(out)
     }
+    // ---- picture in picture (M2-05). A PASSTHROUGH to the service function
+    // the plugin's own IPC verb calls, not a second implementation of it: a
+    // scenario driving a copy would prove nothing about the verb a user runs
+    // (CLAUDE.md rule 12). A pre-change service has no requestPip, and the
+    // scenario has to run against one to show its checks failing there
+    // first, so the absence answers rather than throws.
+    function pip(mode: string): string {
+      var s = serviceLoader.item
+      if (!s || typeof s.requestPip !== "function")
+        return JSON.stringify({ ok: false, kind: "pip", error: { code: "no_verb" } })
+      return JSON.stringify(s.requestPip(String(mode)))
+    }
+    // The guide's `p` goes through the same service entry point, so the two
+    // surfaces cannot drift. Answers no_verb on a pre-M2-05 tree.
+    function pipKey(): string {
+      var s = serviceLoader.item
+      if (!s || typeof s.togglePip !== "function")
+        return JSON.stringify({ ok: false, kind: "pip", error: { code: "no_verb" } })
+      return JSON.stringify(s.togglePip())
+    }
+    function pipState(): string { return JSON.stringify(harness.pipSnapshot(serviceLoader.item)) }
     function stop(): string { if (serviceLoader.item) serviceLoader.item.stop(); return "ok" }
     function refresh(): string { if (serviceLoader.item) serviceLoader.item.refresh(); return "ok" }
     function zap(delta: int): string { return serviceLoader.item && serviceLoader.item.zap(delta) ? "ok" : "no" }
@@ -645,6 +709,10 @@ ShellRoot {
         out.service.numberEntryMs = s.numberEntryMs === undefined ? null : s.numberEntryMs
         out.service.barShowChannelNumber = s.barShowChannelNumber === undefined ? null : s.barShowChannelNumber
         out.service.nowPlayingChno = s.nowPlayingChno === undefined ? null : s.nowPlayingChno
+        // M2-05. statusSummary() carries its own `pip` block on a current
+        // service; this is the richer one a scenario drives against, with the
+        // player pid the stub compositor's fixture has to match.
+        out.service.pip = harness.pipSnapshot(s)
         out.service.persistFails = harness.persistFails
       }
       return JSON.stringify(out)

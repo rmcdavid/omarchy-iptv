@@ -579,12 +579,35 @@ is "the chno-entry live floor matches the assertions that scenario actually has"
 is "check.sh's preflight floor matches the scenario's own" \
    "$(grep -oE 'CHNO_ENTRY_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( edeclared_tree + 1 ))"
 
+# M2-05's runner, the fifth suite. Same two-floor shape and the same reason.
+PS5="$ROOT/scripts/dev-harness/pip-scenario.sh"
+is "the pip scenario exists and declares exactly two floors" \
+   "$(qa_count '^ *EXPECTED_CHECKS=[0-9]+$' "$PS5")" "2"
+pdeclared_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$PS5" | sed -n 1p | cut -d= -f2)
+pdeclared_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$PS5" | sed -n 2p | cut -d= -f2)
+# The +1 is the stub's executable probe, which bumps `checks` by hand; the
+# live half adds the privacy block's two.
+is "the pip check-tree floor matches the preflight it actually has" \
+   "$pdeclared_tree" "$(( $(qa_count '^ *seam ' "$PS5") + 1 ))"
+is "the pip live floor matches the assertions that scenario actually has" \
+   "$pdeclared_live" "$(( $(qa_count '^ *(check|seam) ' "$PS5") + 3 ))"
+is "check.sh's pip preflight floor matches the scenario's own" \
+   "$(grep -oE 'PIP_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( pdeclared_tree + 1 ))"
+# And the one thing that makes the pip scenario safe to run at all: it drives
+# a STUB compositor, put in front of PATH by run.sh. A scenario that lost
+# that line would float, shrink and pin windows in the session of whoever ran
+# it, and it would still pass.
+is "the pip scenario never reaches the real compositor" \
+   "$(qa_count 'ln -sfn "\$HERE/stub-hyprctl.py" "\$SCRATCH/bin/hyprctl"' "$PS5")" "2"
+is "and run.sh is what puts it in front of PATH" \
+   "$(qa_count 'export PATH="\$SCRATCH/bin:\$PATH"' "$ROOT/scripts/dev-harness/run.sh")" "1"
+
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=141
+EXPECTED=147
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

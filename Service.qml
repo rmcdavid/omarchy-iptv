@@ -385,8 +385,8 @@ Item {
   //   may branch on a dispatch's exit status or on its output. The stdout of
   //   a step is captured for the journal and for nothing else.
   //
-  //   PIP10. `action = "set"` / `"unset"` is IGNORED: float and pin toggle
-  //   unconditionally, and an "unset" aimed at a tiled window floats it. So
+  //   PIP10. The action argument is IGNORED: float and pin toggle
+  //   unconditionally, and asking to UNSET one on a tiled window floats it. So
   //   no step is ever issued blind. Every round re-reads the compositor, the
   //   plan's conditionals are decided from that read, and a round that did
   //   not achieve the intent is re-planned from the state that now exists
@@ -2718,8 +2718,8 @@ Item {
   //
   // HOW TO SWAP, when lane V1 has merged: each wrapper below is one line and
   // the comment on it is the line that replaces it. Do all of them, then
-  // delete everything under STAND-IN-M2-05-V1-HELPERS. Nothing else in this
-  // file calls a STANDIN_ name.
+  // delete everything under the HELPERS marker. Nothing outside these two
+  // markers calls one of those helpers, and tests/test_pip.py asserts it.
   //
   //   grep -c 'STAND-IN-M2-05-V1' Service.qml     must be 0 at integration
   //
