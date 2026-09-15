@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import "../Model.js" as Model
 import "fixtures/chno-cases.js" as ChnoCases
+import "fixtures/pip-cases.js" as PipCases
 
 // Proves Model.js loads inside the Qt QML engine (no ES module syntax, no
 // node-only globals) and that the QML-side results match the node tests:
@@ -1314,9 +1315,11 @@ TestCase {
       "Channel 12" + Model.SEP + "One America (1 of 2)")
     compare(Model.chnoStatus("none", "205", "", 0, 0, true), "No channel 205")
     compare(Model.chnoStatus("noNumbers", "", "", 0, 0, false), "No channel numbers in this playlist")
-    compare(Model.footerHints({ mode: "list", hasNumbers: true })[8][0], "0-9")
-    compare(Model.footerHints({ mode: "list" }).length, 9)
-    compare(Model.footerHints({ mode: "list", hasNumbers: true }).length, 10)
+    // M2-05 section 5 inserts `p pip` after `s stop`, so the digits hint
+    // moved one along and both lists grew by one.
+    compare(Model.footerHints({ mode: "list", hasNumbers: true })[9][0], "0-9")
+    compare(Model.footerHints({ mode: "list" }).length, 10)
+    compare(Model.footerHints({ mode: "list", hasNumbers: true }).length, 11)
     compare(Model.footerHints({ mode: "list", hasNumbers: true, numberEntry: { active: true } }).length, 5)
     compare(Model.rowAccessibleName({ name: "BBC One HD", chno: "101" }), "Channel 101, BBC One HD")
     compare(Model.rowAccessibleName({ name: "The One Show", chno: "" }), "The One Show")
@@ -1445,6 +1448,110 @@ TestCase {
     compare(Model.settingsFrom({}).barShowChannelNumber, true)
     compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "007").id, "2")
     compare(Model.channelByNumber(spec.channels, spec.chnoIndex, "205"), null)
+  }
+
+  // ---- picture in picture (M2-05 10.2) ----
+  //
+  // The SAME vectors tests/Model.test.js runs, in the engine that actually
+  // executes Model.js. Not a duplicate of the node suite: V4 is ES5-only and
+  // its JSON, its regexes and its number handling are a different
+  // implementation, and a builder that emits a Lua expression is exactly the
+  // kind of code where an engine difference would surface as a dispatch the
+  // compositor cannot parse - which is the defect this wave exists to fix.
+  function test_pictureInPictureGeometry() {
+    var rows = PipCases.GEOMETRY
+    for (var i = 0; i < rows.length; i++) {
+      var got = Model.pipGeometry(PipCases.MONITORS[rows[i].monitor], rows[i].opts)
+      compare(JSON.stringify(got), JSON.stringify(rows[i].box), rows[i].why)
+    }
+    // Section 6, and the clamps behind it.
+    compare(Model.pipOptions({ pipCorner: "BOTTOM-LEFT", pipSizePercent: 1e9, pipMargin: -4 }).corner, "bottom-left")
+    compare(Model.pipOptions({ pipSizePercent: 1e9 }).sizePercent, 60)
+    compare(Model.pipOptions({ pipMargin: -4 }).margin, 0)
+    compare(Model.pipOptions({ pipCorner: "middle" }).corner, "top-right")
+    compare(Model.settingsFrom({}).pipCorner, "top-right")
+    compare(Model.settingsFrom({}).pipSizePercent, 30)
+    compare(Model.settingsFrom({}).pipMargin, 16)
+  }
+
+  function test_pictureInPictureBoundary() {
+    // PIP7 in V4: a hostile value is refused, never escaped.
+    var hostile = PipCases.HOSTILE_ADDRESSES
+    for (var i = 0; i < hostile.length; i++) {
+      compare(Model.pipExpression("tag", { window: "address:" + hostile[i], tag: "+iptv-pip" }), "", String(hostile[i]))
+      compare(Model.pipDispatchArgv("move", { window: "address:" + hostile[i], x: 1, y: 2 }).length, 0, String(hostile[i]))
+    }
+    var coords = PipCases.HOSTILE_COORDS
+    for (var c = 0; c < coords.length; c++) {
+      compare(Model.pipExpression("move", { window: "address:" + PipCases.PLAYER_ADDRESS, x: coords[c], y: 0 }), "", String(coords[c]))
+    }
+    compare(Model.pipExpression("move", { window: "address:" + PipCases.PLAYER_ADDRESS, x: 940, y: 42 }),
+            "hl.dsp.window.move({ window = \"address:0x559c6893d940\", x = 940, y = 42 })")
+    // D-PIP-1: one argv item after `dispatch`, and the namespace focus really
+    // lives at. Two bare tokens are what did not work.
+    var focus = Model.focusPlayerArgv()
+    compare(focus.length, 3)
+    compare(focus[0] + " " + focus[1], "hyprctl dispatch")
+    compare(focus[2], "hl.dsp.focus({ window = \"class:omarchy-iptv\" })")
+    compare(focus[2], Model.pipExpression("focus", { window: Model.PIP_CLASS_SELECTOR }))
+  }
+
+  function test_pictureInPicturePlan() {
+    var live = Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.otherApp, PipCases.CLIENTS.tiled]), PipCases.PLAYER_PID)
+    compare(live.ok, true)
+    compare(live.address, PipCases.PLAYER_ADDRESS)
+    compare(live.tags.join(","), "default-opacity")
+    compare(Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.foreign]), PipCases.PLAYER_PID).reason, "no_window")
+    compare(Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.tiled, PipCases.CLIENTS.twin]), PipCases.PLAYER_PID).reason, "ambiguous")
+    compare(Model.pipFindWindow("{not json", PipCases.PLAYER_PID).reason, "bad_clients")
+
+    var geo = Model.pipGeometry(PipCases.MONITORS.live, Model.pipOptions({}))
+    var snapshot = Model.pipSnapshotFor(live)
+    var enter = Model.pipPlan(live, null, geo, "on")
+    compare(enter.length, 6)
+    compare(enter[1][2], "hl.dsp.window.resize({ window = \"address:0x559c6893d940\", x = 410, y = 230 })")
+    compare(enter[2][2], "hl.dsp.window.move({ window = \"address:0x559c6893d940\", x = 940, y = 42 })")
+    // PIP10: the float and pin steps are conditional on a fresh read, because
+    // the action argument is ignored and a blind toggle would undo them.
+    var inPip = Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.inPip]), PipCases.PLAYER_PID)
+    compare(Model.pipPlan(inPip, null, geo, "on").length, 4)
+    compare(Model.pipActive(inPip), true)
+    compare(Model.pipActive(Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.userPopped]), PipCases.PLAYER_PID)), false)
+    compare(Model.pipResolveIntent("toggle", inPip), "off")
+
+    var exit = Model.pipPlan(inPip, snapshot, geo, "off")
+    compare(exit.length, 3)
+    compare(exit[0][2], "hl.dsp.window.tag({ window = \"address:0x559c6893d940\", tag = \"-iptv-pip\" })")
+    compare(exit[1][2], "hl.dsp.window.pin({ window = \"address:0x559c6893d940\" })")
+    compare(exit[2][2], "hl.dsp.window.float({ window = \"address:0x559c6893d940\" })")
+
+    // PIP11: the only definition of success is the state read back.
+    compare(Model.pipVerify(inPip, "on", geo).ok, true)
+    compare(Model.pipVerify(Model.pipFindWindow("[]", PipCases.PLAYER_PID), "on", geo).reason, "no_window")
+    compare(Model.pipResultCode(Model.pipVerify(inPip, "on", { x: 0, y: 0, w: 410, h: 230 }), "on"), "dispatch_failed")
+    compare(Model.pipDispatchAccepted("ok"), true)
+    compare(Model.pipDispatchAccepted("warning: =[C]:-1: Window does not qualify to be pinned"), false)
+
+    // 4.5 / 4.6: the mpv half and the reply reader, in V4's JSON.
+    compare(JSON.stringify(Model.pipMpvCommands("off", { mpvArgs: "--no-auto-window-resize" })[0]),
+            JSON.stringify(["set_property", "auto-window-resize", false]))
+    compare(Model.pipRestoreAutoResize("--auto-window-resize=no"), false)
+    compare(Model.pipRestoreAutoResize(""), true)
+    compare(Model.pipParseSnapshot(JSON.stringify(snapshot)).size.join(","), "650,718")
+    compare(Model.pipParseSnapshot("{not json"), null)
+    compare(Model.parsePlayerReply("{\"error\":\"success\",\"data\":{\"active\":true},\"request_id\":42}").requestId, 42)
+    compare(Model.parsePlayerReply("{\"event\":\"start-file\"}"), null)
+
+    // Section 5: the copy and the key, in the engine the guide runs in.
+    compare(Model.listLetterAction("p"), "pip")
+    compare(Model.listLetterAction("P"), "pip")
+    compare(Model.listLetterAction("z"), "")
+    compare(Model.pipStatusText("nothing_playing"), "Nothing playing")
+    compare(Model.pipStatusText("no_compositor"), "Picture in picture needs Hyprland")
+    compare(Model.pipKeyRequest({ available: true, playing: false }).code, "nothing_playing")
+    compare(Model.pipKeyRequest({ available: true, playing: true }).ok, true)
+    compare(Model.barTooltip({ configured: true, playing: true, name: "Sky", pip: true }), "Playing Sky\nPicture in picture: on")
+    compare(Model.barTooltip({ configured: true, playing: true, name: "Sky" }), "Playing Sky")
   }
 
   function test_formatting() {

@@ -100,7 +100,13 @@ var SETTING_RANGES = {
   // M2-03 CN2: the inter-digit window is a setting, not a constant, because
   // the gap between a slow typist getting channel 101 and getting channels
   // 1, 0 and 1 is an accessibility matter.
-  numberEntryMs: { def: 2000, min: 400, max: 5000 }
+  numberEntryMs: { def: 2000, min: 400, max: 5000 },
+  // M2-05 section 6. The box is a PERCENTAGE of the monitor, not a pixel
+  // constant (PIP4): Omarchy's own 600x338 would take 44 percent of this
+  // 1366x768 display in both axes, and omarchy-hyprland-window-pop's
+  // 1300x900 is taller than the screen.
+  pipSizePercent: { def: 30, min: 15, max: 60 },
+  pipMargin: { def: 16, min: 0, max: 200 }
 }
 
 // Channel numbers (M2-03 1.2 / 9.1). A number is at most 5 major digits and
@@ -2137,6 +2143,10 @@ function clampSetting(key, value) {
 
 // Every setting the plugin knows, clamped (R2). Unknown keys are ignored.
 function settingsFrom(entry) {
+  // M2-05 section 6: the three PiP keys are read in ONE place
+  // (Model.pipOptions), which the service and the guide also call directly,
+  // so a clamp can never be written twice and drift (R2, CLAUDE.md 12).
+  var pip = pipOptions(entry)
   return {
     playlistUrl: str(settingOf(entry, "playlistUrl", "")).replace(/^\s+|\s+$/g, ""),
     epgUrl: str(settingOf(entry, "epgUrl", "")).replace(/^\s+|\s+$/g, ""),
@@ -2148,7 +2158,11 @@ function settingsFrom(entry) {
     // ---- channel numbers (M2-03 7.1)
     channelOrder: channelOrderOf(settingOf(entry, "channelOrder", "playlist")),
     numberEntryMs: clampSetting("numberEntryMs", settingOf(entry, "numberEntryMs", SETTING_RANGES.numberEntryMs.def)),
-    barShowChannelNumber: boolSetting(settingOf(entry, "barShowChannelNumber", true))
+    barShowChannelNumber: boolSetting(settingOf(entry, "barShowChannelNumber", true)),
+    // ---- picture in picture (M2-05 section 6)
+    pipCorner: pip.corner,
+    pipSizePercent: pip.sizePercent,
+    pipMargin: pip.margin
   }
 }
 
@@ -2941,9 +2955,656 @@ function endedReport(context) {
   }
 }
 
-// argv for `hyprctl dispatch focuswindow class:omarchy-iptv` (R9).
+// ------------------------------------------------- picture in picture (M2-05)
+//
+// Everything below is pure: it reads numbers and strings and returns argv
+// vectors, plans and copy. Nothing here runs a process, and nothing here
+// remembers anything. The compositor is the state of record (design 0 and
+// 4.3): every decision takes a `live` read of `hyprctl -j clients` and acts
+// on it, because the user has SUPER+T and SUPER+O bound and can change
+// `floating` and `pinned` behind our back between any two steps.
+//
+// Three facts from the gate (docs/QA-RESULTS.md, M2-05-00) shape this code
+// and override the design text where they disagree:
+//
+//   PIP10  The `action` argument is IGNORED. `float` and `pin` toggle
+//          unconditionally, and asking to *unset* one on a tiled window
+//          floats it instead. So no step here carries an action, and every
+//          float/pin step is conditional on a fresh read. A lane that
+//          "simplifies" a conditional back into a blind set reintroduces the
+//          bug the gate's own probe nearly missed.
+//   PIP11  Exit codes cannot detect failure. The compositor answers rc 0
+//          `ok` for a dispatch aimed at a window that does not exist, and
+//          reports a real refusal as `warning:` text on stdout with rc 0.
+//          So success is defined in exactly one place, pipVerify(): read the
+//          state back and compare it against what was asked for.
+//   G-1    The legacy dispatcher spelling is a Lua SYNTAX ERROR here, not an
+//          unknown dispatcher: `hyprctl dispatch` under a Lua config
+//          provider wraps its argument as `return hl.dispatch(<arg>)`, so
+//          `dispatch tagwindow +x address:0x..` cannot parse. There is no
+//          legacy builder in this file for that reason - see the note on
+//          focusPlayerArgv below, which is the defect that fact uncovered.
+
+// The window class the player is launched with (buildMpvArgv's
+// --wayland-app-id) and the tag this feature owns. Both are compile-time
+// constants, which is what PIP7 requires of every value in a dispatch
+// expression that is not an address or a clamped integer.
+var PIP_CLASS = "omarchy-iptv"
+var PIP_TAG = "iptv-pip"
+var PIP_CLASS_SELECTOR = "class:" + PIP_CLASS
+// 4.2 rule 4 / 4.11 rule 1. Lower case only: the compositor prints
+// addresses lower case, and accepting `0xDEAD` too would widen the pattern
+// for nothing.
+var PIP_ADDRESS_RE = /^0x[0-9a-f]{1,16}$/
+// 4.11 rule 2. Coordinates are integers produced by pipGeometry or read back
+// out of a snapshot we wrote; anything outside this range is refused rather
+// than clamped, because a value that far out is a bug, not a preference.
+var PIP_COORD_LIMIT = 100000
+var PIP_MIN_WIDTH = 240
+var PIP_CORNERS = ["top-right", "top-left", "bottom-right", "bottom-left"]
+var PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"
+var PIP_SNAPSHOT_VERSION = 1
+var PIP_MPV_RESIZE_PROP = "auto-window-resize"
+
+// The only expressions this plugin may build. `call` is the namespace,
+// `fields` the parameters beyond the window selector. Note `focus` sits at
+// `hl.dsp.focus`, one level up from the window verbs: there is no
+// `hl.dsp.window.focus` on this build (gate G-1, "attempt to call a nil
+// value (field 'focus')"), so the namespace is part of what the tests pin.
+// The installed stubs say the same thing independently:
+// /usr/share/hypr/stubs/hl.meta.lua:908-931 lists these six window verbs and
+// no focus, and :870-889 puts `focus` beside `window` at the top level.
+var PIP_VERBS = {
+  float: { call: "hl.dsp.window.float", fields: [] },
+  pin: { call: "hl.dsp.window.pin", fields: [] },
+  resize: { call: "hl.dsp.window.resize", fields: ["x", "y"] },
+  move: { call: "hl.dsp.window.move", fields: ["x", "y"] },
+  zorder: { call: "hl.dsp.window.alter_zorder", fields: ["mode"] },
+  tag: { call: "hl.dsp.window.tag", fields: ["tag"] },
+  focus: { call: "hl.dsp.focus", fields: [] }
+}
+
+// Every non-integer field value is drawn from one of these lists. There is
+// no "pass a string through" branch anywhere in the builder.
+var PIP_ENUMS = {
+  mode: ["top"],
+  tag: ["+" + PIP_TAG, "-" + PIP_TAG]
+}
+
+// The third belt (4.11): whatever the builder assembled must still look like
+// one call with one brace pair and no Lua punctuation of its own. A value
+// that reached this far carrying `(`, `)`, `;`, `\` or a quote would be
+// refused here even if the field checks above had been loosened.
+var PIP_EXPR_RE = /^hl\.dsp\.(window\.)?[a-z_]+\(\{ [A-Za-z0-9_ ."=+:,-]* \}\)$/
+
+function pipAllows(list, value) {
+  for (var i = 0; i < list.length; i++) if (list[i] === value) return true
+  return false
+}
+
+// An address becomes a selector only by matching the pattern. Called at
+// construction (pipFindWindow, pipPlan) and again at the call
+// (pipExpression), so a future caller cannot route around it (PIP7).
+function pipAddressSelector(address) {
+  var value = str(address)
+  return PIP_ADDRESS_RE.test(value) ? "address:" + value : ""
+}
+
+// The two window selectors that exist: our own pid-matched address, and the
+// one compile-time class constant the focus command uses.
+function pipSelector(window) {
+  var value = str(window)
+  if (value === PIP_CLASS_SELECTOR) return value
+  if (value.indexOf("address:") !== 0) return ""
+  return pipAddressSelector(value.substring(8))
+}
+
+// An integer, or null. NOT a coercion: a string, a float, a NaN, an object
+// or a number past the limit is REFUSED, never parsed or clamped into
+// range. PIP7 says only integers already clamped to their ranges may enter
+// the expression, so the clamping belongs to pipGeometry and pipOptions and
+// this is the gate that proves it happened.
+function pipInt(value) {
+  if (typeof value !== "number") return null
+  if (!isFinite(value) || Math.floor(value) !== value) return null
+  if (value < -PIP_COORD_LIMIT || value > PIP_COORD_LIMIT) return null
+  return value
+}
+
+// The one place a compositor expression is built. Returns "" - never a
+// partial or escaped string - for anything it will not vouch for. There is
+// deliberately no escaping function in this file: a value that would need
+// escaping is a value that must not be here (PIP7).
+function pipExpression(verb, params) {
+  var spec = PIP_VERBS[str(verb)]
+  if (!spec || !Object.prototype.hasOwnProperty.call(PIP_VERBS, str(verb))) return ""
+  var p = params && typeof params === "object" ? params : {}
+  var window = pipSelector(p.window)
+  if (window === "") return ""
+  var parts = ["window = \"" + window + "\""]
+  for (var i = 0; i < spec.fields.length; i++) {
+    var field = spec.fields[i]
+    if (field === "x" || field === "y") {
+      var n = pipInt(p[field])
+      if (n === null) return ""
+      parts.push(field + " = " + String(n))
+      continue
+    }
+    var text = str(p[field])
+    if (!pipAllows(PIP_ENUMS[field] || [], text)) return ""
+    parts.push(field + " = \"" + text + "\"")
+  }
+  var expr = spec.call + "({ " + parts.join(", ") + " })"
+  return PIP_EXPR_RE.test(expr) ? expr : ""
+}
+
+// argv for one dispatch, or [] if the expression was refused. One argv
+// vector, no shell (CLAUDE.md 2); the Lua string is one argv ITEM, which is
+// the separate boundary 4.11 governs.
+function pipDispatchArgv(verb, params) {
+  var expr = pipExpression(verb, params)
+  return expr === "" ? [] : ["hyprctl", "dispatch", expr]
+}
+
+// D-PIP-1: focus the player window.
+//
+// This emitted `["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"]`
+// from v0.3.0 until now. Under a Lua config provider `hyprctl dispatch`
+// wraps its argument as `return hl.dispatch(<arg>)`, so those two bare
+// tokens are a Lua syntax error - rc 7, `')' expected near 'class'`, focus
+// unchanged - and every one of the four call sites has been a no-op. It
+// failed silently because it goes out through `Quickshell.execDetached`,
+// which returns void, so rc 7 never reached the plugin.
+//
+// It now goes through the same validated builder PiP uses, which is what
+// keeps the shape right: one argv item after `dispatch`, a real namespace
+// (`hl.dsp.focus`, not `hl.dsp.window.focus`, which does not exist), and a
+// selector the builder vouched for.
 function focusPlayerArgv() {
-  return ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"]
+  return pipDispatchArgv("focus", { window: PIP_CLASS_SELECTOR })
+}
+
+// Was this dispatch accepted? PIP11: rc cannot answer, because the
+// compositor returns 0 for a dispatch that did nothing at all. It prints
+// exactly `ok` on success and `warning: ...` / `error: ...` on a refusal,
+// so this reads the reply as a keyword, never as text to show anyone. It is
+// a cheap first filter only - pipVerify is the definition of success.
+function pipDispatchAccepted(stdout) {
+  return str(stdout).replace(/^\s+|\s+$/g, "") === "ok"
+}
+
+// ---- settings (section 6)
+
+function pipCornerOf(value) {
+  var v = str(value).toLowerCase().replace(/^\s+|\s+$/g, "")
+  return pipAllows(PIP_CORNERS, v) ? v : PIP_CORNERS[0]
+}
+
+// The three PiP settings, clamped. Unknown corner falls back to the default
+// exactly as channelOrder does; the two integers go through clampSetting so
+// their ranges live in SETTING_RANGES with every other range.
+function pipOptions(entry) {
+  return {
+    corner: pipCornerOf(settingOf(entry, "pipCorner", PIP_CORNERS[0])),
+    sizePercent: clampSetting("pipSizePercent", settingOf(entry, "pipSizePercent", SETTING_RANGES.pipSizePercent.def)),
+    margin: clampSetting("pipMargin", settingOf(entry, "pipMargin", SETTING_RANGES.pipMargin.def))
+  }
+}
+
+// ---- resolving the window (4.2)
+
+function pipWindowFail(reason) {
+  return { ok: false, reason: reason, address: "", at: [0, 0], size: [0, 0], floating: false, pinned: false, monitor: -1, workspaceId: -1, tags: [], pip: false }
+}
+
+function pipInteger(value, fallback) {
+  var n = Number(value)
+  return isFinite(n) ? Math.floor(n) : fallback
+}
+
+// A two-integer pair inside the coordinate limit, or null. Used for `at`,
+// `size` and every pair that comes back out of a snapshot - so it goes
+// through pipInt, which REFUSES rather than coerces. A "690" or a 1.5 in a
+// snapshot is corruption, not a preference, and flooring it would put the
+// window somewhere nobody asked for.
+function pipPair(value) {
+  var list = asList(value)
+  if (list.length !== 2) return null
+  var a = pipInt(list[0])
+  var b = pipInt(list[1])
+  return a === null || b === null ? null : [a, b]
+}
+
+// 4.2 rule 5: a rule-applied tag reads back with a trailing `*`
+// (`default-opacity*` on this machine), a dispatched one does not. Confirmed
+// live by G-11.
+function pipTagsOf(entry) {
+  var raw = asList(entry ? entry.tags : null)
+  var out = []
+  for (var i = 0; i < raw.length; i++) out.push(str(raw[i]).replace(/\*+$/, ""))
+  return out
+}
+
+function pipHasTag(live) {
+  var tags = asList(live ? live.tags : null)
+  for (var i = 0; i < tags.length; i++) if (str(tags[i]).replace(/\*+$/, "") === PIP_TAG) return true
+  return false
+}
+
+// Find OUR player window in `hyprctl -j clients`. Narrowing by pid is not
+// optional: PLY-RST-11 reproduced a user's own
+// `mpv --wayland-app-id=omarchy-iptv` making the class match TWO windows.
+// Focusing a stranger's window is a nuisance; floating, shrinking, pinning
+// and moving it is damage. Zero matches and two matches both refuse.
+// Never throws: garbage in, ok:false out.
+function pipFindWindow(clients, pid, className) {
+  var list = clients
+  if (typeof list === "string") {
+    try { list = JSON.parse(list) } catch (error) { return pipWindowFail("bad_clients") }
+  }
+  if (!Array.isArray(list)) return pipWindowFail("bad_clients")
+  var want = pipInteger(pid, -1)
+  if (want <= 0) return pipWindowFail("no_pid")
+  var name = str(className) !== "" ? str(className) : PIP_CLASS
+  var hits = []
+  for (var i = 0; i < list.length; i++) {
+    var c = list[i]
+    if (!c || typeof c !== "object") continue
+    if (str(c["class"]) !== name) continue
+    if (pipInteger(c.pid, -1) !== want) continue
+    hits.push(c)
+  }
+  if (hits.length === 0) return pipWindowFail("no_window")
+  if (hits.length > 1) return pipWindowFail("ambiguous")
+  var win = hits[0]
+  var address = str(win.address)
+  if (pipAddressSelector(address) === "") return pipWindowFail("bad_address")
+  var at = pipPair(win.at)
+  var size = pipPair(win.size)
+  var workspace = win.workspace && typeof win.workspace === "object" ? win.workspace.id : win.workspace
+  var out = {
+    ok: true,
+    reason: "",
+    address: address,
+    at: at || [0, 0],
+    size: size || [0, 0],
+    floating: win.floating === true,
+    pinned: win.pinned === true,
+    monitor: pipInteger(win.monitor, -1),
+    workspaceId: pipInteger(workspace, -1),
+    tags: pipTagsOf(win)
+  }
+  out.pip = pipActive(out)
+  return out
+}
+
+// Is the window in OUR picture in picture right now?
+//
+// The tag is the marker, because it is the only part of the state that says
+// "we did this": a window the user popped themselves with SUPER+O is
+// floating and pinned and must still read as "not in PiP" (4.8), and a
+// window we PiP'd keeps the tag through a shell restart (4.7). `floating`
+// joins it so a box the user has since tiled with SUPER+T reads as off and
+// the next `p` puts it back in the corner rather than only removing a tag.
+// `pinned` is deliberately NOT required: the user may unpin a corner box and
+// it is still theirs to toggle off.
+function pipActive(live) {
+  var l = live && typeof live === "object" ? live : {}
+  if (l.ok === false) return false
+  return l.floating === true && pipHasTag(l)
+}
+
+// "on" / "off" / "toggle" resolved against the live read (never a remembered
+// boolean; 4.3).
+function pipResolveIntent(mode, live) {
+  var m = str(mode)
+  if (m === "on" || m === "off") return m
+  return pipActive(live) ? "off" : "on"
+}
+
+// ---- geometry (4.4)
+
+// Sizes are floored to EVEN integers so a 16:9 box never lands on an odd
+// edge that chroma subsampling has to round.
+function pipEven(value) {
+  var v = Math.floor(value)
+  return v - (v % 2)
+}
+
+// The corner box for one monitor entry of `hyprctl -j monitors`, in GLOBAL
+// layout coordinates, because that is what the `move` dispatcher takes
+// (proven live: `move {x=940, y=42}` landed at exactly [940, 42]). Returns
+// null for a monitor it cannot make a valid box on, so the caller refuses
+// rather than dispatching a guess.
+//
+// `hyprctl monitors` reports PHYSICAL pixels, so every step divides by
+// scale first; an odd `transform` swaps the axes; `reserved` is subtracted
+// explicitly rather than dodged with an inset, because Omarchy's own pip.lua
+// clears this machine's 26 px bar by four pixels of luck.
+function pipGeometry(monitor, opts) {
+  var m = monitor && typeof monitor === "object" ? monitor : null
+  if (!m) return null
+  var width = Number(m.width)
+  var height = Number(m.height)
+  if (!isFinite(width) || !isFinite(height) || width <= 0 || height <= 0) return null
+  var scale = Number(m.scale)
+  if (!isFinite(scale) || scale <= 0) scale = 1
+  var lw = Math.round(width / scale)
+  var lh = Math.round(height / scale)
+  var transform = pipInteger(m.transform, 0)
+  if (Math.abs(transform % 2) === 1) {
+    var swap = lw
+    lw = lh
+    lh = swap
+  }
+  var o = opts && typeof opts === "object" ? opts : {}
+  var corner = pipCornerOf(o.corner)
+  var percent = clampSetting("pipSizePercent", o.sizePercent)
+  var margin = clampSetting("pipMargin", o.margin)
+  var ox = pipInteger(m.x, 0)
+  var oy = pipInteger(m.y, 0)
+  var reserved = asList(m.reserved)
+  var r0 = pipInteger(reserved[0], 0)
+  var r1 = pipInteger(reserved[1], 0)
+  var r2 = pipInteger(reserved[2], 0)
+  var r3 = pipInteger(reserved[3], 0)
+  var x0 = ox + r0 + margin
+  var y0 = oy + r1 + margin
+  var x1 = ox + lw - r2 - margin
+  var y1 = oy + lh - r3 - margin
+  var availW = x1 - x0
+  var availH = y1 - y0
+  if (availW < 2 || availH < 2) return null
+  var w = Math.round(lw * percent / 100)
+  if (w < PIP_MIN_WIDTH) w = PIP_MIN_WIDTH
+  if (w > availW) w = availW
+  var h = Math.round(w * 9 / 16)
+  if (h > availH) {
+    h = availH
+    w = Math.round(h * 16 / 9)
+    if (w > availW) w = availW
+  }
+  w = pipEven(w)
+  h = pipEven(h)
+  if (w < 2 || h < 2) return null
+  var x = corner === "top-right" || corner === "bottom-right" ? x1 - w : x0
+  var y = corner === "bottom-left" || corner === "bottom-right" ? y1 - h : y0
+  return pipBox({ x: x, y: y, w: w, h: h })
+}
+
+// A {x, y, w, h} of four integers inside the dispatch limits, or null. The
+// gate between "geometry was computed" and "geometry may be dispatched".
+function pipBox(box) {
+  var b = box && typeof box === "object" ? box : {}
+  var x = pipInt(pipInteger(b.x, NaN))
+  var y = pipInt(pipInteger(b.y, NaN))
+  var w = pipInt(pipInteger(b.w, NaN))
+  var h = pipInt(pipInteger(b.h, NaN))
+  if (x === null || y === null || w === null || h === null) return null
+  if (w < 1 || h < 1) return null
+  return { x: x, y: y, w: w, h: h }
+}
+
+// ---- the previous state (4.5)
+
+// What we write into the player at PiP-on, so that "what was it before?"
+// has exactly the window's lifetime: it survives a shell restart and a
+// channel change and dies with the window. A window whose rectangle we
+// cannot read is recorded as NOT floating, so the restore degrades to
+// "unfloat and let the layout take it" rather than moving it to 0,0.
+function pipSnapshotFor(live) {
+  var l = live && typeof live === "object" ? live : {}
+  var at = pipPair(l.at)
+  var size = pipPair(l.size)
+  var usable = at !== null && size !== null && size[0] > 0 && size[1] > 0
+  return {
+    active: true,
+    at: at || [0, 0],
+    size: size || [0, 0],
+    floating: l.floating === true && usable,
+    pinned: l.pinned === true,
+    monitor: pipInteger(l.monitor, -1),
+    workspace: pipInteger(l.workspaceId !== undefined ? l.workspaceId : l.workspace, -1),
+    v: PIP_SNAPSHOT_VERSION
+  }
+}
+
+function pipSnapshotClear() {
+  return { active: false, v: PIP_SNAPSHOT_VERSION }
+}
+
+// Read a snapshot back. It arrives from the player over a socket, so it is
+// re-validated field by field before any of it can reach an expression: a
+// string coordinate, a float, a huge number or a missing pair all answer
+// null, and null means the degraded restore. Never throws.
+function pipParseSnapshot(raw) {
+  var s = raw
+  if (typeof s === "string") {
+    try { s = JSON.parse(s) } catch (error) { return null }
+  }
+  if (!s || typeof s !== "object" || Array.isArray(s)) return null
+  if (s.active !== true) return null
+  var at = pipPair(s.at)
+  var size = pipPair(s.size)
+  if (at === null || size === null || size[0] < 1 || size[1] < 1) return null
+  return {
+    active: true,
+    at: at,
+    size: size,
+    floating: s.floating === true,
+    pinned: s.pinned === true,
+    monitor: pipInteger(s.monitor, -1),
+    workspace: pipInteger(s.workspace, -1),
+    v: PIP_SNAPSHOT_VERSION
+  }
+}
+
+// ---- the plan (4.3)
+
+// The ordered argv vectors for one transition. Every float and pin step is
+// conditional on `live` (PIP10); order matters and is the order
+// omarchy-hyprland-window-pop uses: unpin before unfloat, because pin
+// applies to floating windows and unfloating a pinned window clears the pin
+// by itself. Returns [] when anything it would need is missing or refused -
+// a partial plan is worse than none, because half of it would land.
+function pipPlan(live, snapshot, geometry, intent) {
+  var l = live && typeof live === "object" ? live : {}
+  if (l.ok === false) return []
+  var selector = pipAddressSelector(l.address)
+  if (selector === "") return []
+  var want = str(intent) === "off" ? "off" : "on"
+  var steps = []
+  if (want === "on") {
+    var box = pipBox(geometry)
+    if (box === null) return []
+    // No `action` anywhere below: PIP10 proved it is ignored, and a step
+    // that carries an argument the compositor throws away is a lie about
+    // what the code does.
+    if (l.floating !== true) steps.push(pipDispatchArgv("float", { window: selector }))
+    steps.push(pipDispatchArgv("resize", { window: selector, x: box.w, y: box.h }))
+    steps.push(pipDispatchArgv("move", { window: selector, x: box.x, y: box.y }))
+    // pin refuses a tiled window (rc 0 plus a warning), so it comes after
+    // the float step, and only when the window is not already pinned.
+    if (l.pinned !== true) steps.push(pipDispatchArgv("pin", { window: selector }))
+    steps.push(pipDispatchArgv("zorder", { window: selector, mode: "top" }))
+    steps.push(pipDispatchArgv("tag", { window: selector, tag: "+" + PIP_TAG }))
+  } else {
+    var snap = pipParseSnapshot(snapshot)
+    steps.push(pipDispatchArgv("tag", { window: selector, tag: "-" + PIP_TAG }))
+    // Unpin only what we pinned: a window the user had already pinned before
+    // PiP stays pinned.
+    if (l.pinned === true && !(snap && snap.pinned === true)) steps.push(pipDispatchArgv("pin", { window: selector }))
+    if (snap && snap.floating === true && l.floating === true) {
+      steps.push(pipDispatchArgv("resize", { window: selector, x: snap.size[0], y: snap.size[1] }))
+      steps.push(pipDispatchArgv("move", { window: selector, x: snap.at[0], y: snap.at[1] }))
+    } else if (l.floating === true) {
+      // No snapshot, or it says the window was tiled: unfloat and let the
+      // layout take it. Degraded, never stuck.
+      steps.push(pipDispatchArgv("float", { window: selector }))
+    }
+  }
+  for (var i = 0; i < steps.length; i++) if (steps[i].length === 0) return []
+  return steps
+}
+
+// The mpv half (4.6): `auto-window-resize` off while in PiP so a zap to a
+// different resolution cannot resize the box, and the snapshot beside it.
+// The gate found the compositor already ignores a floating window's size
+// request here, so this is portability insurance rather than the load-
+// bearing job 4.6 claims - see the report's open item.
+function pipMpvCommands(intent, opts) {
+  var o = opts && typeof opts === "object" ? opts : {}
+  if (str(intent) === "off") {
+    return [
+      ["set_property", PIP_MPV_RESIZE_PROP, pipRestoreAutoResize(o.mpvArgs)],
+      ["set_property", PIP_SNAPSHOT_KEY, pipSnapshotClear()]
+    ]
+  }
+  return [
+    ["set_property", PIP_MPV_RESIZE_PROP, false],
+    ["set_property", PIP_SNAPSHOT_KEY, pipSnapshotFor(o.live)]
+  ]
+}
+
+// What `auto-window-resize` goes back to at PiP-off: the user's own value if
+// their mpvArgs set one, otherwise mpv's default `yes`. Derived, not read
+// back, because an mpv reply is never proof of anything about the window
+// (2.5) - and because the value we must restore is the user's intent, not
+// whatever we ourselves last wrote.
+function pipRestoreAutoResize(mpvArgs) {
+  var tokens = Array.isArray(mpvArgs) ? mpvArgs : str(mpvArgs).split(/\s+/)
+  var flag = "--" + PIP_MPV_RESIZE_PROP
+  var value = true
+  for (var i = 0; i < tokens.length; i++) {
+    var token = str(tokens[i])
+    if (token === "") continue
+    if (token === "--no-" + PIP_MPV_RESIZE_PROP) value = false
+    else if (token === flag) value = true
+    else if (token.indexOf(flag + "=") === 0) {
+      var raw = token.substring(flag.length + 1).toLowerCase()
+      value = !(raw === "no" || raw === "false" || raw === "0" || raw === "")
+    }
+  }
+  return value
+}
+
+// One line of mpv's IPC, as a REPLY or nothing. An event line carries
+// `event` and is not a reply however much it looks like one; a reply always
+// carries `error`. Never throws. Routing a reply to the request that asked
+// for it is the caller's job - this only says what the line is.
+function parsePlayerReply(line) {
+  var text = str(line).replace(/^\s+|\s+$/g, "")
+  if (text === "") return null
+  var obj
+  try { obj = JSON.parse(text) } catch (error) { return null }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null
+  if (obj.event !== undefined) return null
+  if (obj.error === undefined) return null
+  var id = obj.request_id
+  return {
+    ok: str(obj.error) === "success",
+    requestId: typeof id === "number" && isFinite(id) ? Math.floor(id) : null,
+    error: str(obj.error),
+    data: obj.data === undefined ? null : obj.data
+  }
+}
+
+// ---- did it work? (PIP11)
+
+function pipSamePair(actual, expected) {
+  var a = pipPair(actual)
+  return a !== null && a[0] === expected[0] && a[1] === expected[1]
+}
+
+// THE definition of success in this feature. `live` is a FRESH
+// pipFindWindow after the queue has run; `expected` is the geometry that was
+// asked for (intent "on") or the snapshot that was being restored (intent
+// "off"). Exit codes and stdout are not consulted here on purpose: the
+// compositor reports success for a dispatch aimed at a window that does not
+// exist, so the only honest question is what the window looks like now.
+function pipVerify(live, intent, expected) {
+  var l = live && typeof live === "object" ? live : {}
+  if (l.ok === false) return { ok: false, reason: str(l.reason) !== "" ? str(l.reason) : "no_window" }
+  var tagged = pipHasTag(l)
+  if (str(intent) !== "off") {
+    var box = pipBox(expected)
+    if (box === null) return { ok: false, reason: "bad_geometry" }
+    if (l.floating !== true) return { ok: false, reason: "not_floating" }
+    if (l.pinned !== true) return { ok: false, reason: "not_pinned" }
+    if (!tagged) return { ok: false, reason: "not_tagged" }
+    if (!pipSamePair(l.at, [box.x, box.y])) return { ok: false, reason: "wrong_position" }
+    if (!pipSamePair(l.size, [box.w, box.h])) return { ok: false, reason: "wrong_size" }
+    return { ok: true, reason: "" }
+  }
+  if (tagged) return { ok: false, reason: "still_tagged" }
+  var snap = pipParseSnapshot(expected)
+  if (snap && snap.floating === true) {
+    if (l.floating !== true) return { ok: false, reason: "not_restored" }
+    if (!pipSamePair(l.at, snap.at) || !pipSamePair(l.size, snap.size)) return { ok: false, reason: "wrong_position" }
+    return { ok: true, reason: "" }
+  }
+  if (l.floating === true) return { ok: false, reason: "still_floating" }
+  if (l.pinned === true) return { ok: false, reason: "still_pinned" }
+  return { ok: true, reason: "" }
+}
+
+// ---- copy (section 5) and the key
+
+// Footer lines, section 5's table. Anything not listed answers "" rather
+// than inventing a line; pipResultCode is what turns a verdict into one of
+// these keys, so a new failure reason cannot leak a raw compositor word
+// into the footer.
+var PIP_TEXT = {
+  on: "Picture in picture on",
+  off: "Picture in picture off",
+  nothing_playing: "Nothing playing",
+  no_compositor: "Picture in picture needs Hyprland",
+  no_window: "Cannot find the player window",
+  dispatch_failed: "Hyprland refused the window change"
+}
+var PIP_TOOLTIP_ON = "Picture in picture: on"
+
+function pipStatusText(code) {
+  var key = str(code)
+  return Object.prototype.hasOwnProperty.call(PIP_TEXT, key) ? PIP_TEXT[key] : ""
+}
+
+// A pipVerify verdict becomes one of the six codes above. Every "we asked
+// and the window does not look like it" reason lands on dispatch_failed,
+// which is the honest line: we cannot tell the user WHY the compositor
+// declined, only that the window is not what we asked for.
+function pipResultCode(verdict, intent) {
+  var v = verdict && typeof verdict === "object" ? verdict : {}
+  if (v.ok === true) return str(intent) === "off" ? "off" : "on"
+  var reason = str(v.reason)
+  if (reason === "no_window" || reason === "ambiguous" || reason === "bad_address" || reason === "bad_clients" || reason === "no_pid") return "no_window"
+  return "dispatch_failed"
+}
+
+// What the toggle key answers before anything is dispatched: the two
+// refusals the guide can decide by itself (4.10). Everything else needs the
+// live read and comes back through pipResultCode.
+function pipKeyRequest(ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  if (c.available !== true) return { ok: false, code: "no_compositor", text: pipStatusText("no_compositor") }
+  if (c.playing !== true) return { ok: false, code: "nothing_playing", text: pipStatusText("nothing_playing") }
+  return { ok: true, code: "", text: "" }
+}
+
+// List-mode single-letter commands (UX 3.3, section 5). This used to be a
+// chain of string comparisons inside Guide.qml, where no test could reach
+// it - exactly the shape CLAUDE.md 12 forbids - so the mapping lives here
+// and the guide only dispatches on the answer. Digits, "." and "," never
+// arrive: the number machine takes them first (M2-03 2.9).
+function listLetterAction(text) {
+  var t = str(text)
+  if (t === "f" || t === "F") return "favorite"
+  if (t === "s" || t === "S") return "stop"
+  if (t === "r" || t === "R") return "refresh"
+  if (t === "p" || t === "P") return "pip"
+  if (t === "/") return "search"
+  if (t.toLowerCase() === SOURCE_KEYS.open) return "sources"
+  return ""
 }
 
 // ------------------------------------------------------------ notifications
@@ -3153,16 +3814,24 @@ function barGlyph(opts) {
 }
 
 // UX 6.3 tooltips. `serviceMissing` wins (ARCHITECTURE.md section 7).
+//
+// M2-05 section 5 / PIP2: when picture in picture is on the tooltip gains
+// one LINE for it and nothing else changes - no new mouse gesture, and the
+// glyph stays as it is, because PiP is a window state and the bar already
+// carries playback truth. PIP9: the line says the window is in PiP, never
+// that it is on top of anything.
 function barTooltip(opts) {
   var o = opts || {}
   if (o.serviceMissing) return "IPTV" + SEP + "service not loaded, run omarchy restart shell"
+  var line = ""
   // M2-03 6.4: the number joins the tooltip whenever the playing channel has
   // one, including on a vertical bar where the label itself is glyph-only.
-  if (o.playing && str(o.name) !== "") return "Playing " + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
-  if (o.refreshing) return "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
-  if (!o.configured) return "IPTV" + SEP + "no playlist configured"
-  if (o.error) return "IPTV" + SEP + "playlist error, open the guide"
-  return "IPTV" + SEP + "click to open the guide"
+  if (o.playing && str(o.name) !== "") line = "Playing " + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
+  else if (o.refreshing) line = "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
+  else if (!o.configured) line = "IPTV" + SEP + "no playlist configured"
+  else if (o.error) line = "IPTV" + SEP + "playlist error, open the guide"
+  else line = "IPTV" + SEP + "click to open the guide"
+  return o.pip === true ? line + "\n" + PIP_TOOLTIP_ON : line
 }
 
 function barAccessibleName(opts) {
@@ -3311,7 +3980,13 @@ function footerHints(opts) {
     if (o.numberEntry && o.numberEntry.active === true) {
       return [["0-9", "digits"], [CHNO_ENTRY_SEP, "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]]
     }
-    var list = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"]]
+    var list = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // M2-05 section 5. Gated the way `0-9` is: a machine with no Hyprland
+    // never advertises a key that can only answer "picture in picture needs
+    // Hyprland". An absent flag shows it, so a service that predates PiP is
+    // not silently stripped of the hint.
+    if (o.pipAvailable !== false) list.push(["p", "pip"])
+    list.push(["r", "refresh"], ["/", "search"])
     // Gated on the playlist actually having numbers, so an unnumbered source
     // gains no clutter and never advertises a key that does nothing.
     if (o.hasNumbers === true) list.push(["0-9", "channel"])
@@ -4896,6 +5571,41 @@ if (typeof module !== "undefined") {
     channelForEnd: channelForEnd,
     endedReport: endedReport,
     focusPlayerArgv: focusPlayerArgv,
+    // ---- picture in picture (M2-05)
+    PIP_CLASS: PIP_CLASS,
+    PIP_TAG: PIP_TAG,
+    PIP_CLASS_SELECTOR: PIP_CLASS_SELECTOR,
+    PIP_ADDRESS_RE: PIP_ADDRESS_RE,
+    PIP_COORD_LIMIT: PIP_COORD_LIMIT,
+    PIP_MIN_WIDTH: PIP_MIN_WIDTH,
+    PIP_CORNERS: PIP_CORNERS,
+    PIP_SNAPSHOT_KEY: PIP_SNAPSHOT_KEY,
+    PIP_SNAPSHOT_VERSION: PIP_SNAPSHOT_VERSION,
+    PIP_MPV_RESIZE_PROP: PIP_MPV_RESIZE_PROP,
+    PIP_TOOLTIP_ON: PIP_TOOLTIP_ON,
+    pipExpression: pipExpression,
+    pipDispatchArgv: pipDispatchArgv,
+    pipDispatchAccepted: pipDispatchAccepted,
+    pipAddressSelector: pipAddressSelector,
+    pipOptions: pipOptions,
+    pipCornerOf: pipCornerOf,
+    pipFindWindow: pipFindWindow,
+    pipActive: pipActive,
+    pipResolveIntent: pipResolveIntent,
+    pipGeometry: pipGeometry,
+    pipBox: pipBox,
+    pipSnapshotFor: pipSnapshotFor,
+    pipSnapshotClear: pipSnapshotClear,
+    pipParseSnapshot: pipParseSnapshot,
+    pipPlan: pipPlan,
+    pipMpvCommands: pipMpvCommands,
+    pipRestoreAutoResize: pipRestoreAutoResize,
+    parsePlayerReply: parsePlayerReply,
+    pipVerify: pipVerify,
+    pipStatusText: pipStatusText,
+    pipResultCode: pipResultCode,
+    pipKeyRequest: pipKeyRequest,
+    listLetterAction: listLetterAction,
     notifyArgv: notifyArgv,
     sourceLabel: sourceLabel,
     hostOf: hostOf,
