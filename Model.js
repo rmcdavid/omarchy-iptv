@@ -1230,9 +1230,22 @@ function countRecents(list, st) {
   return n
 }
 
-// Group column entries (UX 2.2): Recent (hidden while empty), Favorites
-// (always), All, then a "GROUPS" header and one entry per playlist group.
-function scopeEntries(channels, state) {
+// The group column and the one fact that decides its shape, in a single pass
+// (M2-09 D1). `axis` is { count, narrows, soleGroup }:
+//
+//   narrows === (count >= 2)
+//
+// which is exactly "choosing a group narrows the list" (GS3), because
+// `groupChannels` never emits an empty group: with one group that group holds
+// every channel and `channelsForScope(ch, "g:<it>")` is element-for-element
+// `channelsForScope(ch, "all")`, so the entry lies about being a step.
+//
+// One function, not two, because `groupChannels` is the most expensive thing
+// on the guide's open path (node median: 0.7 ms at 3,335, 3.7 ms at 11,039,
+// 17.7 ms at MAX_CHANNELS) and asking "how many groups" in a second pass
+// would pay it twice. `Guide.qml`'s `rebuildGroups()` guards on `groupsDirty`,
+// so this runs once per channel-set change and never on a keystroke.
+function scopeSurface(channels, state) {
   var list = asList(channels)
   var st = state || emptyState()
   var out = []
@@ -1241,11 +1254,22 @@ function scopeEntries(channels, state) {
   out.push({ id: SCOPE_FAVORITES, label: FAVORITES_GROUP, kind: "favorites", count: countFavorites(list, st) })
   out.push({ id: SCOPE_ALL, label: "All", kind: "all", count: list.length })
   var groups = groupChannels(list)
-  if (groups.length > 0) out.push({ id: "", label: "GROUPS", kind: "header", count: 0 })
-  for (var i = 0; i < groups.length; i++) {
-    out.push({ id: groupScopeId(groups[i].name), label: groups[i].name, kind: "group", count: groups[i].count })
+  var narrows = groups.length >= 2
+  var axis = { count: groups.length, narrows: narrows, soleGroup: groups.length === 1 ? groups[0].name : "" }
+  if (narrows) {
+    out.push({ id: "", label: "GROUPS", kind: "header", count: 0 })
+    for (var i = 0; i < groups.length; i++) {
+      out.push({ id: groupScopeId(groups[i].name), label: groups[i].name, kind: "group", count: groups[i].count })
+    }
   }
-  return out
+  return { entries: out, axis: axis }
+}
+
+// Group column entries (UX 2.2): Recent (hidden while empty), Favorites
+// (always), All, then a "GROUPS" header and one entry per playlist group --
+// the last two only when a group is a narrowing step (GS3, above).
+function scopeEntries(channels, state) {
+  return scopeSurface(channels, state).entries
 }
 
 // Candidate rows for a scope id. Favorites/Recent resolve through the state.
@@ -1336,6 +1360,19 @@ function fallbackScope(entries, scopeId) {
   return favorites > 0 ? SCOPE_FAVORITES : SCOPE_ALL
 }
 
+// M2-09 D2. A deep link, an IPC payload or a remembered scope naming the sole
+// group of a one-group playlist asks for a list that still exists -- every
+// channel -- but the entry is no longer in the column, so `fallbackScope`
+// would treat it as vanished and send a user with one favourite to a one-row
+// Favorites when they asked for three thousand. Answer All in exactly that
+// case; defer to `fallbackScope` unchanged in every other.
+function requestedScope(entries, scopeId, axis) {
+  var id = str(scopeId) || SCOPE_ALL
+  var a = axis || {}
+  if (isGroupScope(id) && a.narrows === false && str(a.soleGroup) !== "" && scopeName(id) === str(a.soleGroup)) return SCOPE_ALL
+  return fallbackScope(entries, id)
+}
+
 // Default entry on open (UX 2.2): Favorites when it has entries, else All.
 function initialScope(channels, state) {
   var st = state || emptyState()
@@ -1351,11 +1388,73 @@ function cursorFor(rows, playingId) {
   return 0
 }
 
-// Header scope label (UX 6.1).
-function scopeLabel(scopeId, query, count) {
+// M2-09 D5, the fold affordance. `ListView.Contain` alone parks the cursor
+// row flush with the viewport edge, hiding the neighbour entirely and losing
+// any sign that more exists -- the defect Omarchy's own picker names in the
+// comment above `Menu.qml:640` and repairs there, and which this guide has in
+// two places (`scrollToCursor` and the `Contain` branch of `positionColumn`).
+//
+// This is that algorithm as arithmetic rather than as fifteen copied lines of
+// QML: the copy would be exactly the stranded interface logic CLAUDE.md rule
+// 12 forbids, and as a function it is node-testable as data.
+//
+// `peek` is the whole reach the next row keeps -- the caller adds its list
+// spacing to the visible sliver, as Menu.qml does. Returns the new contentY,
+// clamped to the flickable's own bounds; an unmovable view returns what it
+// was given, so the call site can assign unconditionally.
+function revealOffset(opts) {
+  var o = opts || {}
+  var count = Math.floor(Number(o.count) || 0)
+  var index = Math.floor(Number(o.index) || 0)
+  var contentY = Number(o.contentY) || 0
+  if (count <= 0 || index < 0 || index >= count) return contentY
+  var height = Number(o.viewportHeight) || 0
+  var originY = Number(o.originY) || 0
+  var contentHeight = Number(o.contentHeight) || 0
+  var itemY = Number(o.itemY) || 0
+  var itemHeight = Number(o.itemHeight) || 0
+  var reach = Number(o.peek) || 0
+  if (index < count - 1) {
+    var maxY = Math.max(originY, originY + contentHeight - height)
+    var overhang = itemY + itemHeight + reach - (contentY + height)
+    if (overhang > 0) contentY = Math.min(contentY + overhang, maxY)
+  }
+  if (index > 0) {
+    var underhang = contentY - (itemY - reach)
+    if (underhang > 0) contentY = Math.max(contentY - underhang, originY)
+  }
+  return contentY
+}
+
+// Header scope label (UX 6.1, amended by M2-09 D5 / GS4). When the list is
+// longer than the viewport -- the scrollbar condition, which is exactly when
+// the edge scrims are live -- the count becomes the cursor's position and the
+// noun goes away, because the noun is what tells you which form you are
+// reading. The total stays in the footer counts line, which already carries
+// it, so the position costs nothing and removes a duplication.
+//
+//   no query, fits      Favorites - 6 channels
+//   no query, overflows All - 1,204 of 3,335
+//   query, fits         in All - 8 matches
+//   query, overflows    in All - 14 of 200
+//
+// `position` is { index, rows, overflows }: `index` the 0-based cursor row,
+// `rows` what the list actually holds (under a query that is the capped 200,
+// which is what the header can honestly count against; the true match total
+// stays in the footer). Absent or not overflowing gives the shipped strings
+// byte for byte, so the eight existing callers and their tests are unmoved.
+function scopeLabel(scopeId, query, count, position) {
   var name = scopeName(effectiveScope(scopeId, query))
   var n = Number(count) || 0
-  if (tokenize(query).length > 0) return "in " + name + SEP + formatCount(n) + (n === 1 ? " match" : " matches")
+  var searching = tokenize(query).length > 0
+  var pos = position || {}
+  if (pos.overflows === true) {
+    var rows = Number(pos.rows) || 0
+    var at = Math.max(0, Math.min(Math.floor(Number(pos.index) || 0), rows > 0 ? rows - 1 : 0))
+    var here = formatCount(at + 1) + " of " + formatCount(rows)
+    return (searching ? "in " + name : name) + SEP + here
+  }
+  if (searching) return "in " + name + SEP + formatCount(n) + (n === 1 ? " match" : " matches")
   return name + SEP + pluralChannels(n)
 }
 
@@ -3867,6 +3966,35 @@ function joinParts(parts) {
   return out.join(SEP)
 }
 
+// The failure notice, in one place (M2-09 D4). UX.md:181, UX.md:739, ruling 9
+// and UX 7.2 all mandate these exact words paired with the alert glyph, and
+// after D4 they are rendered from two different slots depending on the row's
+// height -- so they are built here once and both callers use it, rather than
+// two string literals that can drift.
+function failedNotice(at) {
+  return joinParts(["Failed " + str(at), "Space to retry"])
+}
+
+// The failure notice as the row's right meta slot carries it on a single-line
+// row (M2-09 D4). That slot renders `until HH:MM` and is deliberately blank on
+// a failed row already, so it is free exactly when it is needed -- which is
+// what lets `rowsHaveDetail` stop depending on session-mutable state.
+function rowFailedMeta(at) {
+  return str(at) === "" ? "" : failedNotice(at)
+}
+
+// The whole of the meta slot's text, so the decision is asserted rather than
+// stranded in a QML ternary (CLAUDE.md rule 12). `until HH:MM` while the row
+// is healthy; the failure notice when the row has failed AND has no detail
+// line to carry it; nothing otherwise -- which is the shipped behaviour of a
+// failed row with a detail line, and the reason the slot was free to take it.
+function rowMeta(opts) {
+  var o = opts || {}
+  var failedAt = str(o.failedAt)
+  if (failedAt !== "") return o.hasDetail === true ? "" : failedNotice(failedAt)
+  return str(o.until) === "" ? "" : "until " + str(o.until)
+}
+
 // Row detail line (UX 2.4): `Group - Now: X - Next: Y`, group omitted inside
 // its own group, EPG segments replaced by the failure notice when set.
 function rowDetail(opts) {
@@ -3874,13 +4002,37 @@ function rowDetail(opts) {
   var parts = []
   if (o.showGroup) parts.push(str(o.group))
   if (str(o.failedAt) !== "") {
-    parts.push("Failed " + str(o.failedAt))
-    parts.push("Space to retry")
-    return joinParts(parts)
+    return joinParts([o.showGroup ? str(o.group) : "", failedNotice(o.failedAt)])
   }
   if (str(o.nowTitle) !== "") parts.push("Now: " + str(o.nowTitle))
   if (str(o.nextTitle) !== "") parts.push("Next: " + str(o.nextTitle))
   return joinParts(parts)
+}
+
+// M2-09 D3, lifted out of a QML binding per CLAUDE.md rule 12 so a test can
+// call the shipping decision rather than reimplement it.
+//
+// Two-line rows wherever the detail line can carry something that varies:
+// the group name (only when a group is a narrowing step -- on a playlist whose
+// 3,335 rows all read `United States` it is a constant, and UX 2.4 already
+// scopes the group line to lists "where the group name is meaningful"), or
+// EPG now/next. The predicate strictly dominates the shipped `!scopeIsGroup`:
+// exactly one cell of the truth table changes, and no shape loses a row.
+//
+// THREE parameters, and deliberately no fourth: a failure term here is what
+// made row height depend on session state, so one dead stream re-heighted a
+// whole scope mid-session under the cursor. The notice moved to the meta slot
+// (D4) precisely so this function could stop reading failures.
+function rowsHaveDetail(opts) {
+  var o = opts || {}
+  return rowShowsGroup(o) || o.epgConfigured === true
+}
+
+// Whether a row prints its group on the detail line (M2-09 D3): not inside
+// that group's own scope, and not when every row would print the same word.
+function rowShowsGroup(opts) {
+  var o = opts || {}
+  return o.scopeIsGroup !== true && o.groupsNarrow !== false
 }
 
 // Accessible name for a channel row (UX 7.1, M2-03 8.1). An unnumbered row
@@ -3894,6 +4046,16 @@ function rowAccessibleName(opts) {
   if (o.playing) out += ", playing"
   if (str(o.nowTitle) !== "") out += ", now " + str(o.nowTitle) + (str(o.until) !== "" ? " until " + str(o.until) : "")
   if (str(o.failedAt) !== "") out += ", failed"
+  // M2-09 D5 / GS5: the position, LAST -- after the failure state, so someone
+  // stepping rows hears the name first and the index after. Today this
+  // announces no index at all, which told a screen-reader user strictly less
+  // about position than the eye once the header started carrying one (UX 7.2:
+  // no fact by position alone). `rowCount` is what the list holds, so under a
+  // query it is the capped 200 the header also counts against; the true match
+  // total stays in the footer. Absent or out of range appends nothing.
+  var total = Math.floor(Number(o.rowCount) || 0)
+  var at = Math.floor(Number(o.rowIndex) || 0)
+  if (total > 0 && at >= 0 && at < total) out += ", row " + formatCount(at + 1) + " of " + formatCount(total)
   return out
 }
 
@@ -4086,7 +4248,7 @@ function footerHints(opts) {
     if (o.numberEntry && o.numberEntry.active === true) {
       return [["0-9", "digits"], [CHNO_ENTRY_SEP, "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]]
     }
-    var list = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    var list = [["j/k", "move"], ["h/l", scopeVerb(o)], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
     // M2-05 section 5. Gated the way `0-9` is: a machine with no Hyprland
     // never advertises a key that can only answer "picture in picture needs
     // Hyprland". An absent flag shows it, so a service that predates PiP is
@@ -4102,7 +4264,18 @@ function footerHints(opts) {
   if (str(o.query) !== "") {
     return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]]
   }
-  return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "group"], ["Tab", "keys"], ["Esc", "close"]]
+  return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", scopeVerb(o)], ["Tab", "keys"], ["Esc", "close"]]
+}
+
+// M2-09 D6. The h/l ring still does something real on a one-group playlist --
+// it rings Recent / Favorites / All -- so the pair is never dropped, only its
+// verb stops naming an axis that is not on screen. Gated the way `hasNumbers`
+// and `pipAvailable` are: an absent flag reads as the shipped wording, so a
+// caller that predates this never loses a hint (CLAUDE.md rule 10). `scope`
+// and `group` are both five characters, so the hint line does not move by a
+// pixel and its existing left-elision is neither fixed nor worsened.
+function scopeVerb(opts) {
+  return (opts || {}).groupsNarrow === false ? "scope" : "group"
 }
 
 // Hints for an open form (UX-SOURCES 2.3 / 5.3): the submit verb is `load`
@@ -5566,6 +5739,7 @@ if (typeof module !== "undefined") {
     isGroupScope: isGroupScope,
     isPinnedScope: isPinnedScope,
     scopeName: scopeName,
+    scopeSurface: scopeSurface,
     scopeEntries: scopeEntries,
     channelsForScope: channelsForScope,
     channelsInGroup: channelsInGroup,
@@ -5574,9 +5748,11 @@ if (typeof module !== "undefined") {
     scopeIndex: scopeIndex,
     columnAnchor: columnAnchor,
     fallbackScope: fallbackScope,
+    requestedScope: requestedScope,
     initialScope: initialScope,
     cursorFor: cursorFor,
     scopeLabel: scopeLabel,
+    revealOffset: revealOffset,
     guideState: guideState,
     withQuery: withQuery,
     withScope: withScope,
@@ -5732,6 +5908,10 @@ if (typeof module !== "undefined") {
     formatEpgLine: formatEpgLine,
     joinParts: joinParts,
     rowDetail: rowDetail,
+    rowFailedMeta: rowFailedMeta,
+    rowMeta: rowMeta,
+    rowsHaveDetail: rowsHaveDetail,
+    rowShowsGroup: rowShowsGroup,
     rowAccessibleName: rowAccessibleName,
     elide: elide,
     noMatchesTitle: noMatchesTitle,

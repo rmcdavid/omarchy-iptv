@@ -282,6 +282,223 @@ check("scopeLabel one channel", Model.scopeLabel("g:UK | KIDS", "", 1), "UK | KI
 check("scopeLabel searching moves to All", Model.scopeLabel("favorites", "sky", 14), "in All" + SEP + "14 matches")
 check("scopeLabel searching in a group with thousands", Model.scopeLabel("g:UK | SPORTS", "sky", 1240), "in UK | SPORTS" + SEP + "1,240 matches")
 
+// ---- M2-09: the guide at real provider scale ----
+//
+// The shapes below mirror the four real playlists this lane was measured
+// against, at a size a test can hold: one group of many (the subscriber's
+// 3,335 / 1), two groups (their sports list, 1,833 / 2), many small groups
+// (the public list, 1,472 / 28) and a playlist with no group-title at all,
+// which `groupChannels` collapses to one synthesised `Ungrouped`. The real
+// caches are measured in the lane's benchmark, not asserted here: a test that
+// reads a scratchpad artefact is a test that stops running.
+//
+// Every assertion in this section goes through `checkCall`, not `check`: most
+// of these functions do not exist in v0.5.0, and a missing export throws
+// before check() is reached, which aborts the run and destroys exactly the
+// before/after counts CLAUDE.md rule 11 asks for. Run this file against the
+// shipping Model.js and it reports 1,287 checks with the new ones red, rather
+// than one stack trace.
+function shapeList(spec) {
+  const rows = []
+  spec.forEach(function (pair) {
+    for (let i = 0; i < pair[1]; i++) rows.push({ id: pair[0] + ":" + i, name: pair[0] + " Channel " + i, group: pair[0] })
+  })
+  return Model.prepareChannels(rows)
+}
+const oneGroup = shapeList([["United States", 6]])
+const twoGroups = shapeList([["PPV Live Events", 4], ["US Sports", 3]])
+const manyGroups = shapeList([["News", 3], ["Sports", 2], ["Movies", 4], ["Music", 1], ["Kids", 2]])
+const noGroupTitle = Model.prepareChannels([{ id: "n1", name: "A" }, { id: "n2", name: "B" }])
+const noFavs = { version: 1, favorites: [], recents: [], lastPlayed: null }
+const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPlayed: null }
+
+// D1: the axis is a property of the data -- a group is a narrowing step only
+// when there is more than one, because groupChannels never emits an empty one.
+checkCall("scopeSurface axis at every real shape", function () { return [oneGroup, twoGroups, manyGroups, noGroupTitle, []].map(function (list) {
+  const a = Model.scopeSurface(list, noFavs).axis
+  return a.count + "/" + a.narrows + "/" + a.soleGroup
+}) }, ["1/false/United States", "2/true/", "5/true/", "1/false/Ungrouped", "0/false/"])
+// The proof the axis stands on: the sole group returns All's own array.
+checkCall("scopeSurface: the dropped entry returned an element-identical list to All", function () {
+  const all = Model.channelsForScope(oneGroup, "all", noFavs)
+  const group = Model.channelsForScope(oneGroup, "g:United States", noFavs)
+  return [all.length, group.length, all.every(function (c, i) { return c === group[i] })]
+}, [6, 6, true])
+checkCall("scopeSurface drops the GROUPS header and the lone entry, keeps everything else", function () { return Model.scopeSurface(oneGroup, oneFav).entries.map(function (e) { return e.kind + "=" + e.count }) }, ["favorites=1", "all=6"])
+checkCall("scopeSurface keeps the header and every entry when the axis narrows", function () { return Model.scopeSurface(twoGroups, noFavs).entries.map(function (e) { return e.id + "=" + e.count }) }, ["favorites=0", "all=7", "=0", "g:PPV Live Events=4", "g:US Sports=3"])
+checkCall("scopeEntries is scopeSurface's entries, byte for byte, so its shipped callers are unmoved", function () {
+  const wrapper = Model.scopeEntries(channels, state)
+  return [JSON.stringify(wrapper) === JSON.stringify(Model.scopeSurface(channels, state).entries), wrapper.length]
+}, [true, 9])
+// P1 as an assertion, not a benchmark: ONE pass over the channel array, not
+// two. groupChannels is the only thing in scopeSurface that reads `group` (the
+// favourite and recent counters index by id), so counting reads of that
+// property counts the passes through the module boundary -- which swapping the
+// exported function cannot do, since the caller is inside the module.
+function groupReadCounter(list) {
+  let reads = 0
+  const watched = list.map(function (row) {
+    const copy = {}
+    Object.keys(row).forEach(function (k) { if (k !== "group") copy[k] = row[k] })
+    Object.defineProperty(copy, "group", { get: function () { reads++; return row.group }, enumerable: true })
+    return copy
+  })
+  return { rows: watched, reads: function () { return reads } }
+}
+checkCall("scopeSurface walks the channel array exactly one groupChannels pass, and a second pass would double it", function () {
+  const alone = groupReadCounter(manyGroups)
+  Model.groupChannels(alone.rows)
+  const onePass = alone.reads()
+  const surface = groupReadCounter(manyGroups)
+  const result = Model.scopeSurface(surface.rows, noFavs)
+  const twice = groupReadCounter(manyGroups)
+  Model.scopeSurface(twice.rows, noFavs)
+  Model.groupChannels(twice.rows)
+  return [onePass > 0, surface.reads() / onePass, twice.reads() / onePass, result.axis.count, result.entries.length]
+}, [true, 1, 2, 5, 8])
+
+// D2: a scope naming the sole group is a request for every channel, not a
+// vanished scope. fallbackScope alone sends a subscriber with one favourite to
+// a one-row Favorites when they asked for three thousand.
+// Lazily, so a run against v0.5.0 reports every check red rather than
+// throwing at module scope and printing no count at all.
+function oneGroupEntries() { return Model.scopeSurface(oneGroup, oneFav).entries }
+function oneGroupAxis() { return Model.scopeSurface(oneGroup, oneFav).axis }
+checkCall("requestedScope: the sole group resolves to All even with a favourite listed", function () { return Model.requestedScope(oneGroupEntries(), "g:United States", oneGroupAxis()) }, "all")
+checkCall("fallbackScope alone would have sent it to Favorites (the defect this repairs)", function () { return Model.fallbackScope(oneGroupEntries(), "g:United States") }, "favorites")
+checkCall("requestedScope defers to fallbackScope everywhere else", function () { return [
+  Model.requestedScope(oneGroupEntries(), "g:Elsewhere", oneGroupAxis()),
+  Model.requestedScope(entries, "g:UK", Model.scopeSurface(channels, state).axis),
+  Model.requestedScope(entries, "recent", Model.scopeSurface(channels, state).axis),
+  Model.requestedScope(Model.scopeSurface(channels, null).entries, "g:Gone", Model.scopeSurface(channels, null).axis),
+  Model.requestedScope(oneGroupEntries(), "", oneGroupAxis()),
+  Model.requestedScope(oneGroupEntries(), "g:United States", null),
+  Model.requestedScope([], "g:UK", oneGroupAxis())
+] }, ["favorites", "g:UK", "recent", "all", "all", "favorites", "g:UK"])
+
+// D3: row height is a pure function of scope kind, group axis and EPG.
+checkCall("rowsHaveDetail truth table, all eight combinations", function () { return [true, false].map(function (g) {
+  return [true, false].map(function (n) {
+    return [true, false].map(function (e) {
+      return Model.rowsHaveDetail({ scopeIsGroup: g, groupsNarrow: n, epgConfigured: e })
+    }).join(",")
+  }).join(" | ")
+}) }, ["true,false | true,false", "true,true | true,false"])
+checkCall("rowShowsGroup truth table", function () { return [true, false].map(function (g) {
+  return [true, false].map(function (n) { return Model.rowShowsGroup({ scopeIsGroup: g, groupsNarrow: n }) }).join(",")
+}) }, ["false,false", "true,false"])
+checkCall("rowsHaveDetail and rowShowsGroup default to the shipped behaviour on an absent flag", function () { return [
+  Model.rowsHaveDetail({}), Model.rowsHaveDetail({ scopeIsGroup: true }), Model.rowShowsGroup({}), Model.rowShowsGroup({ scopeIsGroup: true })
+] }, [true, false, true, false])
+// The hazard this lane removed: a failure term here made row height depend on
+// session state, so one dead stream re-heighted a whole scope under the cursor.
+checkCall("rowsHaveDetail never reads a failure flag", function () {
+  const answers = []
+  const reads = {}
+  ;[true, false].forEach(function (g) {
+    [true, false].forEach(function (n) {
+      [true, false].forEach(function (e) {
+        const plain = { scopeIsGroup: g, groupsNarrow: n, epgConfigured: e }
+        const failing = { scopeIsGroup: g, groupsNarrow: n, epgConfigured: e, failedAt: "07:12", anyFailed: true, failedMap: { x: "07:12" } }
+        answers.push(Model.rowsHaveDetail(plain) === Model.rowsHaveDetail(failing))
+        Model.rowsHaveDetail(new Proxy(plain, { get: function (t, k) { reads[String(k)] = true; return t[k] } }))
+      })
+    })
+  })
+  return [answers.every(Boolean), Object.keys(reads).sort()]
+}, [true, ["epgConfigured", "groupsNarrow", "scopeIsGroup"]])
+
+// D4: the mandated words come from one constant, so the two slots cannot drift.
+checkCall("rowFailedMeta and rowDetail build the failure notice from the same words", function () { return [Model.rowFailedMeta("07:12"), Model.rowDetail({ failedAt: "07:12" }), Model.rowDetail({ showGroup: true, group: "US Sports", failedAt: "07:12" }), Model.rowFailedMeta("")] },
+  ["Failed 07:12" + SEP + "Space to retry", "Failed 07:12" + SEP + "Space to retry", "US Sports" + SEP + "Failed 07:12" + SEP + "Space to retry", ""])
+checkCall("the failure notice is 29 characters at the measured width", function () { return Model.rowFailedMeta("07:12").length }, 29)
+// The meta slot's whole decision, lifted out of the QML ternary so it is
+// asserted rather than only looked at (CLAUDE.md rule 12). The middle row of
+// this table is the one that makes D4 safe: a failed row's meta slot was
+// ALREADY blank, which is why the notice could move into it.
+checkCall("rowMeta: the slot carries the notice exactly when the row has no detail line to carry it", function () {
+  return [
+    Model.rowMeta({ failedAt: "07:12", until: "", hasDetail: false }),
+    Model.rowMeta({ failedAt: "07:12", until: "21:00", hasDetail: false }),
+    Model.rowMeta({ failedAt: "07:12", until: "21:00", hasDetail: true }),
+    Model.rowMeta({ failedAt: "", until: "21:00", hasDetail: true }),
+    Model.rowMeta({ failedAt: "", until: "21:00", hasDetail: false }),
+    Model.rowMeta({ failedAt: "", until: "", hasDetail: false }),
+    Model.rowMeta(null)
+  ]
+}, ["Failed 07:12" + SEP + "Space to retry", "Failed 07:12" + SEP + "Space to retry", "", "until 21:00", "until 21:00", "", ""])
+
+// D5: the header count becomes a position exactly when the list overflows.
+checkCall("scopeLabel: the four forms", function () { return [
+  Model.scopeLabel("favorites", "", 6),
+  Model.scopeLabel("all", "", 3335, { index: 1203, rows: 3335, overflows: true }),
+  Model.scopeLabel("all", "sky", 8),
+  Model.scopeLabel("all", "sky", 2227, { index: 13, rows: 200, overflows: true })
+] }, ["Favorites" + SEP + "6 channels", "All" + SEP + "1,204 of 3,335", "in All" + SEP + "8 matches", "in All" + SEP + "14 of 200"])
+checkCall("scopeLabel: the boundary where the list stops overflowing", function () { return [
+  Model.scopeLabel("all", "", 3335, { index: 0, rows: 3335, overflows: true }),
+  Model.scopeLabel("all", "", 3335, { index: 0, rows: 3335, overflows: false }),
+  Model.scopeLabel("all", "", 12, { index: 11, rows: 12, overflows: false })
+] }, ["All" + SEP + "1 of 3,335", "All" + SEP + "3,335 channels", "All" + SEP + "12 channels"])
+checkCall("scopeLabel: the position is clamped to the rows the list holds", function () { return [
+  Model.scopeLabel("all", "", 5, { index: 99, rows: 5, overflows: true }),
+  Model.scopeLabel("all", "", 5, { index: -4, rows: 5, overflows: true }),
+  Model.scopeLabel("all", "", 0, { index: 0, rows: 0, overflows: true })
+] }, ["All" + SEP + "5 of 5", "All" + SEP + "1 of 5", "All" + SEP + "1 of 0"])
+
+// D5 / GS5: the screen reader is told what the eye is told, and hears it last.
+checkCall("rowAccessibleName appends row N of M last, after the failure state", function () { return Model.rowAccessibleName({ name: "Comedy Central", favorite: true, playing: true, failedAt: "07:12", rowIndex: 1203, rowCount: 3335 }) },
+  "Comedy Central, favorite, playing, failed, row 1,204 of 3,335")
+checkCall("rowAccessibleName says nothing extra without a position", function () { return [
+  Model.rowAccessibleName({ name: "Sky News" }),
+  Model.rowAccessibleName({ name: "Sky News", rowCount: 0 }),
+  Model.rowAccessibleName({ name: "Sky News", rowIndex: 9, rowCount: 9 })
+] }, ["Sky News", "Sky News", "Sky News"])
+
+// D6: the footer stops naming an axis that is not on screen. Same five
+// characters, so the 684 px hint line does not move.
+function hintLine(pairs) { return pairs.map(function (p) { return p[0] + " " + p[1] }).join(SEP) }
+checkCall("footerHints: the h/l verb follows the axis, and the line is the same length", function () {
+  const wide = Model.footerHints({ mode: "list", pipAvailable: false })
+  const narrowed = Model.footerHints({ mode: "list", pipAvailable: false, groupsNarrow: false })
+  const kept = Model.footerHints({ mode: "list", pipAvailable: false, groupsNarrow: true })
+  return [wide[1].join(" "), narrowed[1].join(" "), kept[1].join(" "), hintLine(wide).length === hintLine(narrowed).length, narrowed.length === wide.length]
+}, ["h/l group", "h/l scope", "h/l group", true, true])
+checkCall("footerHints: the search-mode empty-query pair follows it too, and the narrow branch does not", function () {
+  const empty = Model.footerHints({ mode: "search", query: "", groupsNarrow: false })
+  const keptEmpty = Model.footerHints({ mode: "search", query: "" })
+  const queried = Model.footerHints({ mode: "search", query: "sky", groupsNarrow: false })
+  return [empty[2].join(" "), keptEmpty[2].join(" "), queried[2].join(" "), hintLine(empty).length === hintLine(keptEmpty).length]
+}, ["Left/Right scope", "Left/Right group", "Left/Right narrow", true])
+
+// D5: the ported fold affordance, as arithmetic. `peek` is the whole reach --
+// the visible sliver plus the list's spacing, the way Menu.qml adds them.
+function reveal(over) {
+  const base = { itemY: 0, itemHeight: 38, contentY: 0, viewportHeight: 456, originY: 0, contentHeight: 3335 * 42, peek: 25, index: 5, count: 3335 }
+  Object.keys(over).forEach(function (k) { base[k] = over[k] })
+  return Model.revealOffset(base)
+}
+checkCall("revealOffset: a cursor parked flush at the bottom is pushed until the next row peeks", function () { return [reveal({ itemY: 456, contentY: 38 }), reveal({ itemY: 456, contentY: 63 })] }, [63, 63])
+checkCall("revealOffset: a cursor parked flush at the top is pulled until the previous row peeks", function () { return [reveal({ itemY: 500, contentY: 500 }), reveal({ itemY: 500, contentY: 475 })] }, [475, 475])
+checkCall("revealOffset: an already-revealed cursor does not move", function () { return reveal({ itemY: 200, contentY: 100 }) }, 100)
+checkCall("revealOffset: the last row and the first row take no peek in the direction that has nothing", function () { return [reveal({ index: 3334, itemY: 456, contentY: 38 }), reveal({ index: 0, itemY: 0, contentY: 25 })] }, [38, 25])
+checkCall("revealOffset: clamped to the flickable's own bounds, never past them", function () { return [
+  // bottom: the peek would push past the last scrollable offset, so it stops there
+  reveal({ count: 24, index: 22, itemY: 1400, contentY: 500, contentHeight: 1000, viewportHeight: 456 }),
+  // top: the peek would pull above originY, so it stops there
+  reveal({ count: 24, index: 1, itemY: 10, contentY: 5, originY: 0, contentHeight: 1000 }),
+  // and originY is honoured when it is not zero
+  reveal({ count: 24, index: 1, itemY: -90, contentY: -95, originY: -100, contentHeight: 1000 })
+] }, [544, 0, -100])
+checkCall("revealOffset: a viewport taller than its content never scrolls", function () { return [
+  reveal({ count: 4, index: 1, itemY: 126, itemHeight: 38, contentY: 0, contentHeight: 164, viewportHeight: 456 }),
+  reveal({ count: 4, index: 2, itemY: 84, contentY: 0, contentHeight: 164, viewportHeight: 456 })
+] }, [0, 0])
+checkCall("revealOffset: an empty or out-of-range call returns the offset it was given", function () { return [
+  Model.revealOffset({ count: 0, contentY: 77 }), Model.revealOffset({ count: 5, index: 9, contentY: 77 }),
+  Model.revealOffset({ count: 5, index: -1, contentY: 77 }), Model.revealOffset(null)
+] }, [77, 77, 77, 0])
+
 // ---- guide state machine ----
 let g = Model.guideState("favorites")
 check("guideState opens in search mode", [g.mode, g.query, g.scopeId, g.cursorIndex], ["search", "", "favorites", 0])
