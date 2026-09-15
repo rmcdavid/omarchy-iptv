@@ -70,7 +70,13 @@ Item {
   readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
   readonly property int stopSettleMs: 5 * 1000     // backstop that clears `stopping` (4.10)
   readonly property int focusRetryMs: 500
-  readonly property int focusRetries: 6
+  // D-PIP-5 widened this from 6, and cost nothing by doing so. Focus now
+  // waits for a window the compositor can name rather than dispatching at a
+  // class, so an attempt made before the player's socket has attached
+  // resolves nothing and has to be retried - and dispatchFocus() ends the
+  // loop the moment one lands, where before it always spent all six. Six
+  // seconds, still bounded, still stopped by `playerUp` going false.
+  readonly property int focusRetries: 12
   readonly property int healthFailuresBeforeRestart: 2
   // Watchdog bound for one playlist/EPG helper run (S-05). The helper has
   // its own 60 s download deadline; this is the belt and braces for a
@@ -783,6 +789,15 @@ Item {
     var argv = Model.focusPlayerArgv(address)
     if (argv.length === 0) return false
     Quickshell.execDetached(argv)
+    // The retry loop (UX 7.5) exists because the mpv window maps a moment
+    // after launch and a focus dispatched before then reaches nothing. We
+    // only get here with a window the compositor listed a few milliseconds
+    // ago, so this one lands and there is nothing left to retry. Before
+    // D-PIP-5 nothing could know that, and the loop dispatched its whole
+    // budget every time.
+    root.wantFocus = false
+    root.focusAttempts = 0
+    focusTimer.stop()
     return true
   }
 

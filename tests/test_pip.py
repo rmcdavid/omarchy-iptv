@@ -402,6 +402,14 @@ class ServiceShapeTest(unittest.TestCase):
         self.lacks(MODEL, "PIP_CLASS_SELECTOR", "Model.js must not keep a class selector")
         self.lacks(MODEL, 'if (value === PIP_CLASS_SELECTOR) return value', "Model.js")
         self.lacks(SERVICE, "Model.focusPlayerArgv()", "Service.qml must not focus without an address")
+        # The retry loop is still bounded, and now ends when a focus lands
+        # rather than always spending its whole budget: an attempt made
+        # before the player's socket has attached resolves no window, so the
+        # budget has to cover that wait, and a loop that never stopped early
+        # would pay for it on every single play.
+        self.has(SERVICE, "readonly property int focusRetries: 12", "Service.qml")
+        self.has(SERVICE, "    focusTimer.stop()\n    return true", "Service.qml")
+        self.has(SERVICE, "root.focusAttempts >= root.focusRetries", "Service.qml")
 
     def test_success_is_decided_by_a_readback_and_by_nothing_else(self):
         # PIP11. The dispatch handler must hand its exit status to a function
