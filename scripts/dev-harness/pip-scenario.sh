@@ -40,15 +40,28 @@
 # work window does to a pinned one (PIP-12). Those are the PIP- matrix, and
 # they need the display and a real compositor.
 #
-# SEAMS THAT BELONG IN THE PREFLIGHT AND ARE NOT YET THERE. Lane V1 owns the
-# guide's `p` key and the Model.js pure layer; asserting either here would
-# turn scripts/check.sh red on a tree that has not merged V1 yet. When it
-# merges, add:
-#     seam "Guide.qml routes the p key"   "$PLUGIN_ROOT/Guide.qml" 'togglePip\(\)' 1
-#     seam "Model.js owns the plan"       "$PLUGIN_ROOT/Model.js"  '^function pipPlan\(' 1
-#     seam "Model.js owns the geometry"   "$PLUGIN_ROOT/Model.js"  '^function pipGeometry\(' 1
-#     seam "no stand-in survives"         "$PLUGIN_ROOT/Service.qml" 'STAND-IN-M2-05-V1' 0
-# and raise both floors by four.
+# THE FOUR SEAMS THIS HEADER ASKED FOR ARE NOW HERE. They could not be while
+# lane V1 was unmerged - asserting the guide's `p` key or the Model.js pure
+# layer would have turned scripts/check.sh red on a tree that did not have
+# them yet. Integration added them, and four more that only exist because of
+# what integration itself decided: PIP15's single dispatch spelling, the
+# absence of a fallback to it in either file, and the one name the snapshot
+# key has. Both floors went up by eight, not four.
+#
+# One of the four is NOT written the way this header suggested it. The line
+# it proposed was
+#     seam "no stand-in survives" "$PLUGIN_ROOT/Service.qml" 'STAND-IN-M2-05-V1' 0
+# and `seam` passes when the count is at least `want`, so a `want` of 0 is a
+# check that cannot fail: it stays green against a file full of stand-ins, a
+# renamed file and an unreadable one alike. That is the shape this project
+# has now found four times. Absence is asserted by `absent` below, which
+# proves the file is there and readable FIRST and only then that the marker
+# is not.
+#
+# Where a seam points also moved with the code. The plan, the geometry, the
+# verification and the two mpv constants are pure logic and now live in
+# Model.js, where node and the QML spec call them for real (CLAUDE.md 12);
+# what is asserted against Service.qml is that it delegates.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -133,6 +146,22 @@ seam() {
   if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in ${file#"$PLUGIN_ROOT/"})"; fi
 }
 
+# `absent <label> <file> <ere>`: the marker is NOT in the file, and the file
+# is really there. Never `seam ... 0`, which passes against anything at all,
+# including a file that does not exist. The positive probe first is what
+# makes the negative mean something: a non-empty file, then no match.
+absent() {
+  local label=$1 file=$2 ere=$3
+  checks=$((checks + 1))
+  if [[ ! -s $file ]]; then
+    bad "$label (no such file, or empty: ${file#"$PLUGIN_ROOT/"} - an absence test over nothing proves nothing)"
+    return
+  fi
+  local got
+  got=$(qa_count "$ere" "$file")
+  if (( got == 0 )); then ok "$label"; else bad "$label (matched $got in ${file#"$PLUGIN_ROOT/"}, wanted none)"; fi
+}
+
 preflight() {
   echo "== preflight: can this tree drive picture in picture? (plugin: $PLUGIN_ROOT)"
   # The service's two entry points and the verb a user runs.
@@ -143,17 +172,30 @@ preflight() {
   # are behind that read.
   seam "the service reads the compositor"                 "$PLUGIN_ROOT/Service.qml" 'command: \["hyprctl", "-j", "clients"\]' 1
   seam "and reads the monitor it will place the box on"   "$PLUGIN_ROOT/Service.qml" 'command: \["hyprctl", "-j", "monitors"\]' 1
-  seam "the float step is behind a live read"             "$PLUGIN_ROOT/Service.qml" 'if \(live\.floating !== true\) steps\.push' 1
-  seam "the pin step is behind a live read"               "$PLUGIN_ROOT/Service.qml" 'if \(live\.pinned !== true\) steps\.push' 1
+  seam "the float step is behind a live read"             "$PLUGIN_ROOT/Model.js" 'if \(l\.floating !== true\) steps\.push' 1
+  seam "the pin step is behind a live read"               "$PLUGIN_ROOT/Model.js" 'if \(l\.pinned !== true\) steps\.push' 1
   # Verification is the definition of success (PIP11).
   seam "success is a readback, in one place"              "$PLUGIN_ROOT/Service.qml" '^ *function pipCheck\(live\)' 1
-  seam "and the comparison it makes"                      "$PLUGIN_ROOT/Service.qml" '^ *function pipVerify\(live, snapshot, geometry, intent\)' 1
+  seam "and the comparison it makes"                      "$PLUGIN_ROOT/Model.js" '^function pipVerify\(live, intent, expected\)' 1
   seam "a dispatch step reports nothing but its text"     "$PLUGIN_ROOT/Service.qml" '^ *function pipNoteStep\(text, exitCode\)' 1
+  # The pure layer the service calls instead of carrying (M2-05-02), and the
+  # guide key that reaches it. These four are the seams this file's header
+  # asked for once lane V1 had merged.
+  seam "Model.js owns the plan"                           "$PLUGIN_ROOT/Model.js" '^function pipPlan\(' 1
+  seam "Model.js owns the geometry"                       "$PLUGIN_ROOT/Model.js" '^function pipGeometry\(' 1
+  seam "Guide.qml routes the p key"                       "$PLUGIN_ROOT/Guide.qml" 'togglePip\(\)' 1
+  absent "no stand-in survives integration"               "$PLUGIN_ROOT/Service.qml" 'STAND-?IN'
+  # PIP15: one spelling, chosen from the compositor's own answer, no second
+  # arm to fall back to.
+  seam "the dispatch spelling is chosen once"             "$PLUGIN_ROOT/Service.qml" 'root\.pipProvider = /configProvider' 1
+  absent "and no fallback spelling ships"                 "$PLUGIN_ROOT/Model.js" '"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
+  absent "nor a second builder inside the service"        "$PLUGIN_ROOT/Service.qml" 'pipLegacyDispatch|"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
   # Addressing, the snapshot, and the mpv half.
   seam "the window is narrowed by the player pid"         "$PLUGIN_ROOT/Service.qml" 'pipFindWindow\(text, root\.playerPid, root\.pipClass\)' 1
-  seam "the snapshot lives in the player"                 "$PLUGIN_ROOT/Service.qml" 'user-data/omarchy-iptv-pip' 2
+  seam "the snapshot lives in the player"                 "$PLUGIN_ROOT/Model.js" 'PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"' 1
+  seam "and the service asks for it by that one name"     "$PLUGIN_ROOT/Service.qml" 'Model\.PIP_SNAPSHOT_KEY' 1
   seam "and is read back after a shell restart"           "$PLUGIN_ROOT/Service.qml" '^ *function pipRequestSnapshot\(sock\)' 1
-  seam "a channel change cannot resize the box"           "$PLUGIN_ROOT/Service.qml" '"auto-window-resize"' 2
+  seam "a channel change cannot resize the box"           "$PLUGIN_ROOT/Model.js" 'PIP_MPV_RESIZE_PROP' 4
   seam "status carries the verified state"                "$PLUGIN_ROOT/Service.qml" 'available: root\.pipAvailable' 1
   # Bounds (CLAUDE.md rule 3).
   seam "one bound per compositor round trip"              "$PLUGIN_ROOT/Service.qml" 'id: pipStepWatchdog' 1
@@ -339,8 +381,8 @@ esac
 
 # The floor. A check that stops executing must turn the run red rather than
 # shorten the summary (D-PLY-9). Recount with
-#   grep -cE '^ *seam ' pip-scenario.sh            plus 1  -> check-tree
-#   grep -cE '^ *(check|seam) ' pip-scenario.sh    plus 3  -> live
+#   grep -cE '^ *(seam|absent) ' pip-scenario.sh         plus 1  -> check-tree
+#   grep -cE '^ *(check|seam|absent) ' pip-scenario.sh   plus 3  -> live
 # (the 1 is the executable probe, which bumps `checks` by hand; the 3 are that
 # probe plus the privacy block's two. The definitions of check() and seam() do
 # not match the pattern, and the floor's own bump lands after the count is
@@ -348,9 +390,9 @@ esac
 # forgotten bump turns check.sh red here rather than on the display lane's
 # machine weeks later. Never lower it to make a run green.
 if [[ ${1:-live} == check-tree ]]; then
-  EXPECTED_CHECKS=27
+  EXPECTED_CHECKS=35
 else
-  EXPECTED_CHECKS=64
+  EXPECTED_CHECKS=72
 fi
 ran=$checks
 checks=$((checks + 1))

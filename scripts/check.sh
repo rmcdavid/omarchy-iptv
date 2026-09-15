@@ -47,9 +47,11 @@ PY_TESTS_MIN=${PY_TESTS_MIN:-347}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
-# The M2-05 picture-in-picture preflight: 26 seams, the stub's executable
-# probe, and its own "ran every check" line.
-PIP_PREFLIGHT_MIN=${PIP_PREFLIGHT_MIN:-28}
+# The M2-05 picture-in-picture preflight: 34 seams (integration added the
+# four the scenario's header reserved for a merged lane V1, and four more for
+# PIP15's single dispatch spelling and the snapshot key's one name), the
+# stub's executable probe, and its own "ran every check" line.
+PIP_PREFLIGHT_MIN=${PIP_PREFLIGHT_MIN:-36}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }

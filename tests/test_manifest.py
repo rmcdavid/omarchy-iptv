@@ -152,19 +152,35 @@ class PictureInPictureSettingsTest(unittest.TestCase):
         self.assertEqual((margin["min"], margin["max"], margin["step"]), (0, 200, 4))
         self.assertEqual(margin["defaultValue"], 16)
 
-    def test_the_service_clamps_to_the_ranges_the_design_gives(self):
-        source = (ROOT / "Service.qml").read_text(encoding="utf-8")
-        self.assertIn("pipSizePercent, 15, 60, 30", source)
-        self.assertIn("pipMargin, 0, 200, 16", source)
-        self.assertIn('var corners = ["top-right", "top-left", "bottom-right", "bottom-left"]',
-                      source)
+    def test_the_clamp_behind_the_manifest_is_the_manifest(self):
+        # The clamp is the half a user feels: a range declared here and a
+        # different one clamped there is a control whose ends do nothing.
+        # Model.js is where it lives, and tests/Model.test.js asserts
+        # SETTING_RANGES against these very entries in both directions --
+        # this is the Python side of that same pin, so a range edited here
+        # with no model side is red in both suites rather than neither.
+        model = (ROOT / "Model.js").read_text(encoding="utf-8")
+        self.assertIn("pipSizePercent: { def: %d, min: %d, max: %d }"
+                      % (DEFAULTS["pipSizePercent"], BY_KEY["pipSizePercent"]["min"],
+                         BY_KEY["pipSizePercent"]["max"]), model)
+        self.assertIn("pipMargin: { def: %d, min: %d, max: %d }"
+                      % (DEFAULTS["pipMargin"], BY_KEY["pipMargin"]["min"],
+                         BY_KEY["pipMargin"]["max"]), model)
+        # The corner is a string with no range, so the accepted values are a
+        # list rather than a min/max -- and the label the host draws names
+        # exactly those four, in that order.
+        self.assertIn('var PIP_CORNERS = ["top-right", "top-left", "bottom-right", "bottom-left"]',
+                      model)
+        self.assertEqual(
+            BY_KEY["pipCorner"]["label"].split(": ")[1].split(", "),
+            ["top-right", "top-left", "bottom-right", "bottom-left"])
 
     def test_the_service_reads_the_keys_from_the_one_bar_entry(self):
         # Design section 6: "the guide and the service both read the one
         # entry". Through pipOptions, not through settingsFrom, so the three
         # keys have exactly one clamp rather than two that can drift.
         source = (ROOT / "Service.qml").read_text(encoding="utf-8")
-        self.assertIn("root.pipOptions(root.pipConfig())", source)
+        self.assertIn("Model.pipOptions(root.pipConfig())", source)
 
 
 if __name__ == "__main__":
