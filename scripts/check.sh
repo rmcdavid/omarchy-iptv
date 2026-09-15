@@ -73,6 +73,7 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-66}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1331}
 PY_TESTS_MIN=${PY_TESTS_MIN:-382}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
+A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
 # The M2-05 picture-in-picture preflight: 34 seams (integration added the
@@ -338,6 +339,32 @@ elif (( ctrl_bad )); then
   bad "control-byte check ($ctrl_scanned files scanned)"
 else
   ok "control-byte check ($ctrl_scanned files scanned)"
+fi
+
+step "a11y fidelity guard (scripts under tests/a11y)"
+# These 32 cases landed and the gate could not see them: `unittest discover -s
+# tests` does not recurse into tests/a11y because it is not a package, so the
+# suite count stayed at exactly what it was before they existed. A test nobody
+# runs is the same as no test, and this project has now hit that four times.
+#
+# PO ruling: the FIDELITY half goes in the gate, the AT-SPI half does not.
+# Decision 9 kept the harness out of check.sh for two stated reasons, a
+# deliberately red baseline and a first hard dependency on a live graphical
+# session. Neither reaches this file: it is pure text, needs no display, no
+# D-Bus and no Qt, runs in about 7 seconds and is green on shipping code. The
+# guard's own proof must not be allowed to rot unnoticed.
+a11y_log=$CHECK_TMP/a11y.log
+if (cd "$ROOT" && python3 -m unittest discover -s tests/a11y) >"$a11y_log" 2>&1; then
+  a11y_tests=$(grep -oP '^Ran \K[0-9]+' "$a11y_log" | tail -1)
+  if [[ -z $a11y_tests ]]; then
+    bad "a11y fidelity printed no test count at all"
+  elif (( a11y_tests < A11Y_TESTS_MIN )); then
+    bad "a11y fidelity ran $a11y_tests tests, expected at least $A11Y_TESTS_MIN"
+  else
+    ok "a11y fidelity ($a11y_tests tests)"
+  fi
+else
+  cat "$a11y_log"; bad "a11y fidelity"
 fi
 
 step "defect ledger (every filed defect has a row on the board)"

@@ -281,12 +281,59 @@ class TreeGate(unittest.TestCase):
         return work
 
     def test_a_faithful_tree_passes(self):
+        """kit=False is REQUIRED here, and that is the point.
+
+        This fixture has no host kit, so the gate refuses to call itself
+        satisfied unless the caller says that is deliberate. Before that was
+        enforced, guard_tree ran four of its eight layers while its own
+        docstring told the harness to gate on it, and a reviewer swapped the
+        host kit underneath a copy and turned a real credential failure green.
+        """
         import shutil
         work = self._tree(fidelity.apply_transform(source()))
         try:
-            self.assertEqual(fidelity.guard_tree(work), [])
+            self.assertEqual(fidelity.guard_tree(work, kit=False), [])
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    def test_a_tree_with_no_kit_is_a_finding_unless_you_say_so(self):
+        """Silence is the failure mode; an unstated missing kit is red."""
+        import shutil
+        work = self._tree(fidelity.apply_transform(source()))
+        try:
+            found = fidelity.guard_tree(work)
+            self.assertTrue(found, "a missing host kit must not pass quietly")
+            self.assertTrue(any(f.layer == "L8" for f in found),
+                            "the missing kit must be reported as L8, got %s"
+                            % [f.layer for f in found])
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def test_the_gate_runs_every_layer_it_has(self):
+        """The reviewer's finding, pinned.
+
+        guard_tree is documented as the one call a harness gates itself on. It
+        called check_pair and check_copy only; check_kit (L8) and
+        ungraded_surfaces (L7) were reachable from the command line alone. A
+        thing named as the complete check was not the complete check, and only
+        the name said otherwise, which is CLAUDE.md rule 13 inside the guard
+        written to stop exactly that.
+        """
+        import inspect
+        body = inspect.getsource(fidelity.guard_tree)
+        for layer in ("check_pair", "check_copy", "check_kit",
+                      "ungraded_surfaces"):
+            self.assertIn(layer, body,
+                          "guard_tree must call %s; a layer reachable only "
+                          "from the CLI is a layer the harness never runs"
+                          % layer)
+
+    def test_an_accepted_ungraded_surface_needs_a_stated_reason(self):
+        """The L7 allow-list may not become a silent dumping ground."""
+        self.assertIn("BarWidget.qml", fidelity.UNGRADED_ACCEPTED)
+        for name, why in fidelity.UNGRADED_ACCEPTED.items():
+            self.assertTrue(len(why) > 30,
+                            "%s is allow-listed with no real reason" % name)
 
     def test_a_drifted_tree_is_reported(self):
         import shutil

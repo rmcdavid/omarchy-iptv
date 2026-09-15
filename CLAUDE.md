@@ -46,11 +46,18 @@ requests and raise the batch.
    `Model.redactUrls` exists; use it. The accessibility bus was missing from
    this list for the life of the project and D-A11Y-1 is the result. Two things
    publish there and both were missed:
-   - The accessible **Value**. A text-input control publishes its `displayText`;
-     any other annotated item publishes its `text`. Both matter here: the form
-     fields are the first kind, and the search line (`Guide.qml:2090`) is a
-     plain `Text` with an editable role, which is the second. Masking
-     `Accessible.description` protects neither.
+   - The accessible **Value**, and the rule is narrower than it first looks.
+     Measured on Qt 6.11.2 with a purpose-built probe on the real bus:
+     `Accessible.EditableText` publishes the element's own `text` (a text-input
+     control publishes its `displayText`); `Accessible.StaticText` publishes
+     its `Accessible.name`, and its `text` property never reaches the bus at
+     all; `Accessible.Button` exposes no text interface. So **the exposure is
+     confined to elements declared editable** -- both the form fields and the
+     search line at `Guide.qml:2088`, a plain `Text` carrying
+     `Accessible.role: Accessible.EditableText`. Masking
+     `Accessible.description` protects none of them. An earlier version of this
+     rule said any annotated item publishes its `text`; that was wrong, and an
+     over-broad security rule gets ignored rather than followed.
    - The **text-change event payload**. Assigning a whole new string to `text`
      raises `TextUpdated` carrying the full plaintext in both its inserted and
      its removed halves. It fires on every mask and every reveal, on a field
@@ -157,11 +164,25 @@ This project is built by role lanes running in separate git worktrees.
    `pkill -f foo` match the command line of the shell running them, so a loop
    that waits for `foo.py` to disappear finds itself and waits forever, and a
    kill by pattern can kill the terminal it was typed in. Both have happened
-   here. Wait on a pid, a file, or a marker the watched process writes; kill
+   here, and it happened a third time in a task brief I wrote MYSELF while
+   quoting this very rule: `pgrep -f 'quickshell -n -p ...'` returns two pids,
+   the second being the shell running the pgrep, and it changes between
+   invocations. For the shell specifically the stable form is
+   **`pgrep -x quickshell`**. Prefer `-x` over `-f` whenever the process name
+   alone identifies it. Wait on a pid, a file, or a marker the watched process writes; kill
    by pid. If a pattern is unavoidable, anchor it and exclude your own pid,
    and say in a comment why the anchor is load-bearing.
 4. No shims at merge. Stubbing a dependency to build is fine; leaving one is
    not. Integration proves zero stubs with a grep and a green `check.sh`.
+4b. **Lanes get their own worktree, or they get no `git add -A`.** Three lanes
+   were once run concurrently in the SHARED working tree; they committed to
+   `main` directly while the lead was also committing, and one lead commit
+   swept two documents into itself that the lead had neither written nor read,
+   under a message describing something else entirely. That commit was pushed.
+   Nothing detected it, because `git add -A` cannot tell whose work it is
+   staging. Either isolate the lanes, or stage by explicit path and read the
+   diff before every commit. A concurrent tree also produced one measurement
+   that was green only because a second lane had overwritten a mutation.
 5. Snapshot before, restore after. A live pass backs up `shell.json`, the
    state directory and the cache first, and restores the exact end state.
 6. Check `pgrep -x hyprlock` before any keystroke. Typing into a lock prompt

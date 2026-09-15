@@ -62,6 +62,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import qmlscan
 
 
+SHELL_DIR = os.environ.get("OMARCHY_PATH", "/usr/share/omarchy") + "/shell"
 REPO = os.environ.get("A11Y_REPO") or os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
@@ -377,6 +378,16 @@ def check_copy(source_path, copy_path):
     return []
 
 
+# L7 fires for any accessibility-declaring surface nothing grades. These are
+# the ones we have decided to leave ungraded FOR NOW, each with its reason, so
+# the layer reports drift rather than restating a state we already know. Adding
+# a name here is a decision that needs a board row; deleting one is free.
+UNGRADED_ACCEPTED = {
+    "BarWidget.qml":
+        "no generated host yet. Its 2 declarations are graded by nobody, "
+        "which is tracked as an open item, not accepted forever.",
+}
+
 KIT_PATCHED = {
     "Ui/BarIconButton.qml":
         "a debug env flag read through Quickshell.env",
@@ -454,7 +465,7 @@ def check_kit(src_dir, copy_dir, patched=None):
 
 
 def guard_tree(tree_dir, repo=None, guide_copy="GuideProbe.qml",
-               model_copy="Model.js"):
+               model_copy="Model.js", kit=None):
     """Grade a harness tree in one call, for the checker to use as its gate.
 
     The harness should refuse to report a result at all until this returns
@@ -478,6 +489,39 @@ def guard_tree(tree_dir, repo=None, guide_copy="GuideProbe.qml",
     found = check_pair(source_text, generated_text, "Guide.qml", guide_copy)
     found.extend(check_copy(os.path.join(repo, "Model.js"),
                             os.path.join(tree_dir, model_copy)))
+
+    # L8 and L7 used to be reachable ONLY from the command line, while this
+    # function's own docstring told the checker to use it as its gate. So a
+    # checker that did what it was told ran four layers of eight and could not
+    # tell. Measured by the reviewer: swapping the host kit underneath the copy
+    # turned a real credential failure green with this returning no findings.
+    #
+    # That is this project's oldest defect wearing a new hat. A thing named as
+    # the complete check was not the complete check, and only the name said
+    # otherwise (CLAUDE.md rule 13). The kit is the load-bearing case: the
+    # guide's fields ARE host components, and the credential the harness hunts
+    # is published by `Ui/TextField.qml`'s own accessibility rather than by
+    # anything Guide.qml declares.
+    if kit is not False:
+        kit_src = kit or os.environ.get("A11Y_KIT_SRC") or SHELL_DIR
+        kit_copy = os.path.join(tree_dir, "qs")
+        if os.path.isdir(kit_copy) and os.path.isdir(kit_src):
+            found.extend(check_kit(kit_src, kit_copy))
+        else:
+            found.append(Failure(
+                "L8", "the host kit was not graded",
+                "expected a copy at %s and a source at %s. Pass kit=False to "
+                "say a tree has no kit ON PURPOSE. Silence is not an option "
+                "here: an ungraded kit can be swapped underneath the copy and "
+                "take a real failure green with it." % (kit_copy, kit_src)))
+
+    for name, count in ungraded_surfaces(repo, {"Guide.qml"}):
+        if name in UNGRADED_ACCEPTED:
+            continue
+        found.append(Failure(
+            "L7", "%s declares accessibility and nothing grades it" % name,
+            "%d binding(s) with no generated copy. Either generate one, or add "
+            "it to UNGRADED_ACCEPTED with a reason and a board row." % count))
     return found
 
 
