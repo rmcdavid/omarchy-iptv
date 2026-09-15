@@ -235,6 +235,12 @@ TestCase {
     compare(Model.rowDetail({ failedAt: "07:12" }), Model.rowFailedMeta("07:12"))
     compare(Model.rowDetail({ showGroup: true, group: "US Sports", failedAt: "07:12" }), "US Sports · Failed 07:12 · Space to retry")
     compare(Model.rowFailedMeta(""), "")
+    // The meta slot was already blank on a failed row, which is why the
+    // notice could move into it without displacing anything.
+    compare(Model.rowMeta({ failedAt: "07:12", until: "21:00", hasDetail: false }), "Failed 07:12 · Space to retry")
+    compare(Model.rowMeta({ failedAt: "07:12", until: "21:00", hasDetail: true }), "")
+    compare(Model.rowMeta({ failedAt: "", until: "21:00", hasDetail: false }), "until 21:00")
+    compare(Model.rowMeta({ failedAt: "", until: "", hasDetail: false }), "")
     // D5 / GS4: the count becomes a position exactly when the list overflows.
     compare(Model.scopeLabel("all", "", 3335), "All · 3,335 channels")
     compare(Model.scopeLabel("all", "", 3335, { index: 1203, rows: 3335, overflows: true }), "All · 1,204 of 3,335")

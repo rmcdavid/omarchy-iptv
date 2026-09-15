@@ -366,22 +366,18 @@ Item {
   readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : ({})
   readonly property var epgMap: root.serviceReady && root.epgLoaded ? root.service.epgNow : ({})
   // Two-line rows whenever the detail line can have content for this list
-  // (UX 2.4): a mixed list shows the group, EPG adds now/next, and inside a
-  // single group a failed channel still needs its `Failed HH:MM` line.
-  readonly property bool rowsHaveDetail: !root.scopeIsGroup || root.epgConfigured || root.anyFailedInScope(root.failedMap, root.effectiveScope)
-
-  // Inside a single group only the (few) failed ids are checked, never the
-  // rows: a failed channel of this group means two-line rows.
-  function anyFailedInScope(failed, scope) {
-    if (!failed || !root.serviceReady || !Model.isGroupScope(scope)) return false
-    var name = Model.scopeName(scope)
-    var index = root.service.channelIndex
-    for (var id in failed) {
-      var channel = index ? index[id] : null
-      if (channel && Model.primaryGroup(channel) === name) return true
-    }
-    return false
-  }
+  // (UX 2.4): a mixed list shows the group, EPG adds now/next.
+  //
+  // M2-09 D4: and NOT when a channel has failed. The failure notice used to
+  // be reachable only from the detail line, so one dead stream took a whole
+  // group's rows from 38 px to 52 px mid-session, under the cursor, with no
+  // user action -- and the loop that decided it (`anyFailedInScope`, ten
+  // lines of QML walking the failed map on every evaluation of this binding)
+  // is deleted with it. The notice now goes in the row's right meta slot on a
+  // single-line row, a slot that is deliberately blank on a failed row and so
+  // is free exactly when it is needed. Row height stops depending on
+  // session-mutable state, which is R-C and is better than what ships.
+  readonly property bool rowsHaveDetail: !root.scopeIsGroup || root.epgConfigured
 
   // The whole body decision in one object (Model.guideSurface, D-LIVE-19):
   // which empty state, whether rows and the group column exist, and the
@@ -2355,14 +2351,22 @@ Item {
                       verticalAlignment: Text.AlignVCenter
                     }
 
-                    // right meta: until HH:MM
+                    // right meta: until HH:MM, or the failure notice when the
+                    // row has no detail line to carry it (M2-09 D4). The slot
+                    // already evaluated to "" on a failed row, so nothing is
+                    // displaced: `Failed HH:MM - Space to retry` goes where
+                    // `until` would have been, keeping the mandated words
+                    // paired with the alert glyph on BOTH row heights
+                    // (UX.md:181, UX.md:739, ruling 9, UX 7.2). The words come
+                    // from Model.rowFailedMeta, the same constant rowDetail
+                    // builds from, so the two slots cannot drift.
                     Text {
                       id: meta
                       anchors.right: parent.right
                       anchors.top: parent.top
                       height: lead.height
                       textFormat: Text.PlainText
-                      text: row.until !== "" && row.failedAt === "" ? "until " + row.until : ""
+                      text: Model.rowMeta({ failedAt: row.failedAt, until: row.until, hasDetail: root.rowsHaveDetail })
                       visible: text !== ""
                       // Natural width, no `width: implicitWidth` binding: rows
                       // are reused now (D-LIVE-01), and a live text change

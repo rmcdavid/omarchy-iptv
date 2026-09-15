@@ -412,6 +412,21 @@ checkCall("rowsHaveDetail never reads a failure flag", function () {
 checkCall("rowFailedMeta and rowDetail build the failure notice from the same words", function () { return [Model.rowFailedMeta("07:12"), Model.rowDetail({ failedAt: "07:12" }), Model.rowDetail({ showGroup: true, group: "US Sports", failedAt: "07:12" }), Model.rowFailedMeta("")] },
   ["Failed 07:12" + SEP + "Space to retry", "Failed 07:12" + SEP + "Space to retry", "US Sports" + SEP + "Failed 07:12" + SEP + "Space to retry", ""])
 checkCall("the failure notice is 29 characters at the measured width", function () { return Model.rowFailedMeta("07:12").length }, 29)
+// The meta slot's whole decision, lifted out of the QML ternary so it is
+// asserted rather than only looked at (CLAUDE.md rule 12). The middle row of
+// this table is the one that makes D4 safe: a failed row's meta slot was
+// ALREADY blank, which is why the notice could move into it.
+checkCall("rowMeta: the slot carries the notice exactly when the row has no detail line to carry it", function () {
+  return [
+    Model.rowMeta({ failedAt: "07:12", until: "", hasDetail: false }),
+    Model.rowMeta({ failedAt: "07:12", until: "21:00", hasDetail: false }),
+    Model.rowMeta({ failedAt: "07:12", until: "21:00", hasDetail: true }),
+    Model.rowMeta({ failedAt: "", until: "21:00", hasDetail: true }),
+    Model.rowMeta({ failedAt: "", until: "21:00", hasDetail: false }),
+    Model.rowMeta({ failedAt: "", until: "", hasDetail: false }),
+    Model.rowMeta(null)
+  ]
+}, ["Failed 07:12" + SEP + "Space to retry", "Failed 07:12" + SEP + "Space to retry", "", "until 21:00", "until 21:00", "", ""])
 
 // D5: the header count becomes a position exactly when the list overflows.
 checkCall("scopeLabel: the four forms", function () { return [

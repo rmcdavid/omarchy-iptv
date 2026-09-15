@@ -3983,6 +3983,18 @@ function rowFailedMeta(at) {
   return str(at) === "" ? "" : failedNotice(at)
 }
 
+// The whole of the meta slot's text, so the decision is asserted rather than
+// stranded in a QML ternary (CLAUDE.md rule 12). `until HH:MM` while the row
+// is healthy; the failure notice when the row has failed AND has no detail
+// line to carry it; nothing otherwise -- which is the shipped behaviour of a
+// failed row with a detail line, and the reason the slot was free to take it.
+function rowMeta(opts) {
+  var o = opts || {}
+  var failedAt = str(o.failedAt)
+  if (failedAt !== "") return o.hasDetail === true ? "" : failedNotice(failedAt)
+  return str(o.until) === "" ? "" : "until " + str(o.until)
+}
+
 // Row detail line (UX 2.4): `Group - Now: X - Next: Y`, group omitted inside
 // its own group, EPG segments replaced by the failure notice when set.
 function rowDetail(opts) {
@@ -5897,6 +5909,7 @@ if (typeof module !== "undefined") {
     joinParts: joinParts,
     rowDetail: rowDetail,
     rowFailedMeta: rowFailedMeta,
+    rowMeta: rowMeta,
     rowsHaveDetail: rowsHaveDetail,
     rowShowsGroup: rowShowsGroup,
     rowAccessibleName: rowAccessibleName,
