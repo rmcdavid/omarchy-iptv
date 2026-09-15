@@ -929,3 +929,32 @@ by itself. It cannot, and that is now proven rather than assumed.
 | PIP7 | The compositor expression is allowed, on the record, with a hard boundary. Only two kinds of value may ever enter it: a window address matched against the strict pattern, and integers already clamped to their ranges. No channel name, no playlist text, no free-form setting value, no string from any source the user or a provider controls, ever. Enforce it at construction and again at the call, and write a test that proves a hostile value is refused rather than escaped. This is adjacent enough to the argument-vector rule that a silent judgement call would have been wrong, which is why it is written down. |
 | PIP8 | If the gate confirms the focus command is already broken, it is a defect of this wave and gets fixed here. Its test mirrors the constant instead of calling the code, so it passes while the shipped path fails. That is precisely the trap the project rules name, found again in already-released code, and it is worth more than the feature that uncovered it. |
 | PIP9 | Mine, not asked. The honest description of this feature is a small window that follows you, not a window that stays on top. The compositor offers no always-on-top and we will not imply one. Any copy that promises it is wrong, and the limitation belongs in the README beside the others rather than only in this document. |
+
+## 14. Corrections after the gate (product owner, 2026-09-14)
+
+The gate proved most of this design and broke four pieces of it. Where the
+gate and this document disagree, the gate wins: it ran the commands.
+
+| # | Correction |
+|---|---|
+| PIP10 | The action argument is ignored. Float and pin toggle unconditionally, and asking to unset one on a tiled window floats it instead. Every such step must read the live state and act conditionally, never issue a blind instruction. The gate's own check gave a false pass here by starting from a state where the bug is invisible, which is worth remembering: a probe can confirm something that is not true if it only tries the easy direction. |
+| PIP11 | Exit codes cannot detect failure. The compositor reports success for a dispatch aimed at a window that does not exist, and refusals arrive as text on standard output with a success code. The design's failure detection is unimplementable as written. Detect by reading the state back and comparing it against what was asked for, which the design already does for the restore path; extend that to be the only definition of success anywhere in this feature. |
+| PIP12 | The worked example's coordinates are wrong. The formula and the live result agree with each other and not with the document. Correct the example rather than the formula. |
+| PIP13 | The translucency is confirmed, so ruling PIP5 now applies for real: it is its own small defect, fixed on its own terms, and it does not get attached to this feature. |
+
+### The defect this gate found in released software
+
+The command that focuses the player window has not worked since v0.3.0, at
+four call sites. It fails silently because nothing reads its result.
+
+Its test is the part worth dwelling on. The test is green against the broken
+code and red against the working fix, because it mirrors the constant the code
+emits instead of exercising the path that uses it. A test in that shape does
+not merely fail to catch the bug. It defends it: a developer who fixed the code
+correctly would see a red suite and conclude they had broken something.
+
+This is the fourth time this project has found a check that could not fail, and
+the first time one has actively protected a defect. Rule 12 already forbids a
+test that mirrors logic it could call. The fix for the command and the rewrite
+of its test both belong in this wave, and the test must be shown red against
+the broken code before it counts.
