@@ -3269,6 +3269,57 @@ function pipResolveIntent(mode, live) {
   return pipActive(live) ? "off" : "on"
 }
 
+// ---- re-deriving the reported state (4.7 step 3, D-PIP-4)
+//
+// The state of record is the compositor. A request already re-reads it
+// before it plans, which is why `p` kept working after `omarchy restart
+// shell`; what was missing is the same read taken ONCE when a player becomes
+// ours, so that what the plugin SAYS about itself follows the window too.
+// Without it the live pass measured `status.pip.on` reading false on all 30
+// one-second samples while the box was demonstrably floating, pinned and
+// tagged, the bar tooltip never gained its line, and the next accepted
+// request replied `"was":false` (D-PIP-4).
+//
+// Note what this function is NOT given: there is no parameter for a
+// previously reported value, and none for a remembered flag, because after a
+// shell restart this process has no memory at all and the window is still in
+// the corner. A boolean would be wrong in exactly the case it exists for.
+//
+// `decided` is the honest half. A read that cannot see OUR window - garbage,
+// no match, a pid we do not know yet, two matches - answers decided:false,
+// and the caller must then leave what it reports alone. Announcing "off" on
+// the strength of a read that saw nothing is the same lie in the other
+// direction.
+function pipDeriveState(clients, pid, className) {
+  var live = pipFindWindow(clients, pid, className)
+  if (live.ok !== true) {
+    return { decided: false, on: false, address: "", reason: str(live.reason), live: live }
+  }
+  return { decided: true, on: pipActive(live), address: live.address, reason: "", live: live }
+}
+
+// May the out-of-band read run at all? Three clauses that would otherwise sit
+// in QML where no test can reach them (CLAUDE.md 12):
+//
+//   no pid   - the window cannot be narrowed, and narrowing is not optional
+//              (4.2); a class-only lookup is the D-PIP-5 defect.
+//   busy     - a request owns the read pipeline and its verified answer wins;
+//              a stray read landing mid-sequence must not overwrite it.
+//   reading  - one read in flight at a time, so a retrying focus cannot fan
+//              out into a queue of hyprctl calls.
+//
+// `available` is deliberately NOT here: reading `hyprctl -j clients` is
+// harmless under any provider, and gating the READ on the dispatch spelling
+// would tie two unrelated facts together. The caller that dispatches is the
+// one that must care.
+function pipDeriveGate(ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  if (pipInteger(c.pid, 0) <= 0) return { ok: false, code: "no_pid" }
+  if (c.busy === true) return { ok: false, code: "busy" }
+  if (c.reading === true) return { ok: false, code: "reading" }
+  return { ok: true, code: "" }
+}
+
 // ---- geometry (4.4)
 
 // The monitor the window is on, out of `hyprctl -j monitors`, by the `id`
@@ -5630,6 +5681,8 @@ if (typeof module !== "undefined") {
     pipHasTag: pipHasTag,
     pipActive: pipActive,
     pipResolveIntent: pipResolveIntent,
+    pipDeriveState: pipDeriveState,
+    pipDeriveGate: pipDeriveGate,
     pipFindMonitor: pipFindMonitor,
     pipGeometry: pipGeometry,
     pipBox: pipBox,

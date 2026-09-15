@@ -195,6 +195,13 @@ preflight() {
   seam "the snapshot lives in the player"                 "$PLUGIN_ROOT/Model.js" 'PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"' 1
   seam "and the service asks for it by that one name"     "$PLUGIN_ROOT/Service.qml" 'Model\.PIP_SNAPSHOT_KEY' 1
   seam "and is read back after a shell restart"           "$PLUGIN_ROOT/Service.qml" '^ *function pipRequestSnapshot\(sock\)' 1
+  # D-PIP-4 / 4.7 step 3. The snapshot above says what the window WAS; this
+  # says what it IS, and without it the plugin reported `off` for as long as
+  # the user did not press the key. Three seams because it is three things:
+  # a read, the two places a player becomes ours, and a pure decision.
+  seam "and what it IS is re-derived, not remembered"     "$PLUGIN_ROOT/Service.qml" '^ *function pipApplyPeek\(text\)' 1
+  seam "that read runs when a player becomes ours"        "$PLUGIN_ROOT/Service.qml" 'root\.pipPeek\(\)' 2
+  seam "and the derivation is pure, so a test can call it" "$PLUGIN_ROOT/Model.js" '^function pipDeriveState\(' 1
   seam "a channel change cannot resize the box"           "$PLUGIN_ROOT/Model.js" 'PIP_MPV_RESIZE_PROP' 4
   seam "status carries the verified state"                "$PLUGIN_ROOT/Service.qml" 'available: root\.pipAvailable' 1
   # Bounds (CLAUDE.md rule 3).
@@ -396,9 +403,9 @@ esac
 # forgotten bump turns check.sh red here rather than on the display lane's
 # machine weeks later. Never lower it to make a run green.
 if [[ ${1:-live} == check-tree ]]; then
-  EXPECTED_CHECKS=35
+  EXPECTED_CHECKS=38
 else
-  EXPECTED_CHECKS=72
+  EXPECTED_CHECKS=75
 fi
 ran=$checks
 checks=$((checks + 1))

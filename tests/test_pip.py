@@ -455,6 +455,56 @@ class ServiceShapeTest(unittest.TestCase):
         for forbidden in ("setText(", "stateDir", "cacheDir", "FileView", "runtimeDir"):
             self.assertNotIn(forbidden, api, "PiP writes no file at all")
 
+    def test_the_reported_state_is_re_derived_when_a_player_becomes_ours(self):
+        # D-PIP-4 and design 4.7 step 3. The window half already worked: a
+        # request re-reads the compositor before it plans, so `p` exited
+        # correctly after `omarchy restart shell`. What was missing is the
+        # same read taken ONCE when a player becomes ours, which is why
+        # `status.pip.on` answered false on thirty consecutive samples with
+        # the box demonstrably in the corner.
+        #
+        # Two hooks, because the pid can arrive either way round: the
+        # reattach probe learns it before the socket is armed, and a cold
+        # start learns it from the player's own reply afterwards.
+        self.has(SERVICE, "    root.pipPeek()\n  }\n\n  // ---- what picture in picture IS", "Service.qml")
+        attach = SERVICE[SERVICE.index("function onPlayerAttached(sock)"):]
+        attach = attach[:attach.index("\n  }")]
+        self.assertIn("root.pipPeek()", attach,
+                      "onPlayerAttached must re-derive the state (4.7 step 3)")
+        self.assertIn("root.pipRequestSnapshot(sock)", attach,
+                      "and still read back what the window WAS (4.5)")
+        # The read itself, and the two decisions behind it, are the model's.
+        self.has(SERVICE, "Model.pipDeriveGate({ pid: root.playerPid, busy: root.pipBusy, reading: root.pipPeeking })",
+                 "Service.qml")
+        self.has(SERVICE, "var derived = Model.pipDeriveState(text, root.playerPid, root.pipClass)", "Service.qml")
+        self.has(SERVICE, "if (derived.decided) root.pipOn = derived.on", "Service.qml")
+        self.has(MODEL, "function pipDeriveState(clients, pid, className) {", "Model.js")
+
+    def test_nothing_reports_picture_in_picture_from_memory(self):
+        # The defect in one property of the tree: every value `pipOn` can
+        # take comes from a live read of the compositor or from clearing it
+        # outright. There is no cached boolean, no last-known-good and no
+        # "what we asked for" anywhere on the right-hand side -- which is
+        # what makes the state survive a restart this process was not alive
+        # for. `root.pipIntent === "on"` is the one apparent exception and is
+        # not one: pipCheck reaches it only after Model.pipVerify has
+        # compared a FRESH read field by field (PIP11).
+        allowed = {
+            "Model.pipActive(live)",
+            "Model.pipActive(root.pipLive)",
+            'root.pipIntent === "on"',
+            "derived.on",
+            "false",
+        }
+        found = set(re.findall(r"root\.pipOn = (.+)$", SERVICE, re.M))
+        self.assertTrue(found, "no pipOn assignment found at all: this test has stopped testing")
+        self.assertEqual(found - allowed, set(),
+                         "pipOn was assigned from something that is not a live read")
+        # And the derivation cannot be handed one either: three parameters,
+        # all of them facts about the compositor and the player.
+        self.assertIn("function pipDeriveState(clients, pid, className) {", MODEL)
+        self.assertNotIn("function pipDeriveState(clients, pid, className, ", MODEL)
+
     def test_every_wait_is_bounded(self):
         # CLAUDE.md "Working in parallel" rule 3. Three independent bounds:
         # rounds, steps per round, and wall clock on a step and on the whole
@@ -466,6 +516,11 @@ class ServiceShapeTest(unittest.TestCase):
             self.has(SERVICE, bound, "Service.qml")
         self.has(SERVICE, "id: pipStepWatchdog", "Service.qml")
         self.has(SERVICE, "id: pipSequenceWatchdog", "Service.qml")
+        # And the read that is not part of a sequence has its own, or an
+        # hyprctl that never exits would latch `pipPeeking` and the state
+        # would quietly stop being re-derived for the rest of the session.
+        self.has(SERVICE, "id: pipPeekWatchdog", "Service.qml")
+        self.has(SERVICE, "      if (hyprPeekProc.running) hyprPeekProc.signal(15)", "Service.qml")
 
     def test_the_verb_and_its_refusals(self):
         self.has(SERVICE, "function pip(mode: string): string", "Service.qml")
@@ -497,6 +552,7 @@ class ServiceShapeTest(unittest.TestCase):
                      "Model.pipActive(", "Model.pipResolveIntent(", "Model.pipSnapshotFor(",
                      "Model.pipParseSnapshot(", "Model.pipMpvCommands(", "Model.pipHasTag(",
                      "Model.pipResultCode(", "Model.pipKeyRequest(", "Model.pipDispatchAccepted(",
+                     "Model.pipDeriveState(", "Model.pipDeriveGate(",
                      "Model.parsePlayerReply("):
             self.has(SERVICE, call, "Service.qml must call the shipped function")
 

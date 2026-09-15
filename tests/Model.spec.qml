@@ -1529,6 +1529,27 @@ TestCase {
     compare(Model.pipActive(Model.pipFindWindow(JSON.stringify([PipCases.CLIENTS.userPopped]), PipCases.PLAYER_PID)), false)
     compare(Model.pipResolveIntent("toggle", inPip), "off")
 
+    // D-PIP-4 / 4.7 step 3. The engine the service actually runs in, asked
+    // the question a shell that has just restarted has to answer: the
+    // window is still in the corner and this process has no memory of it.
+    // `status.pip.on` said false on thirty consecutive samples here.
+    var fresh = Model.pipDeriveState(JSON.stringify([PipCases.CLIENTS.foreign, PipCases.CLIENTS.inPip]),
+                                     PipCases.PLAYER_PID, Model.PIP_CLASS)
+    compare(fresh.decided, true)
+    compare(fresh.on, true)
+    compare(fresh.address, PipCases.PLAYER_ADDRESS)
+    compare(Model.barTooltip({ playing: true, name: "BBC One", pip: fresh.on }).split("\n")[1], Model.PIP_TOOLTIP_ON)
+    // And back down again when the user tiled it while this shell was dead.
+    compare(Model.pipDeriveState(JSON.stringify([PipCases.CLIENTS.tiled]), PipCases.PLAYER_PID, Model.PIP_CLASS).on, false)
+    // A read that could not see OUR window decides nothing, rather than
+    // announcing "off" on the strength of having seen nothing.
+    compare(Model.pipDeriveState("{not json", PipCases.PLAYER_PID, Model.PIP_CLASS).decided, false)
+    compare(Model.pipDeriveState(JSON.stringify([PipCases.CLIENTS.tiled, PipCases.CLIENTS.twin]),
+                                 PipCases.PLAYER_PID, Model.PIP_CLASS).reason, "ambiguous")
+    compare(Model.pipDeriveGate({ pid: 0 }).code, "no_pid")
+    compare(Model.pipDeriveGate({ pid: PipCases.PLAYER_PID, busy: true }).code, "busy")
+    compare(Model.pipDeriveGate({ pid: PipCases.PLAYER_PID }).ok, true)
+
     var exit = Model.pipPlan(inPip, snapshot, geo, "off")
     compare(exit.length, 3)
     compare(exit[0][2], "hl.dsp.window.tag({ window = \"address:0x559c6893d940\", tag = \"-iptv-pip\" })")

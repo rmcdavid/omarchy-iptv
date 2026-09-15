@@ -2817,6 +2817,98 @@ check("pipResolveIntent: an explicit mode wins, a toggle reads the live state", 
   Model.pipResolveIntent("", null)
 ], ["on", "off", "off", "on", "on"])
 
+// ---- 4b. what the plugin REPORTS after a shell restart (4.7 step 3) ----
+//
+// D-PIP-4. The live pass found the window perfect and the report wrong:
+// `status.pip.on` answered false on all THIRTY one-second samples while the
+// box was demonstrably floating, pinned and carrying `iptv-pip`, the bar
+// tooltip never gained its line, and the next accepted request replied
+// `"was":false`. The window half worked because a request re-reads the
+// compositor before it plans; the reporting half was never implemented.
+//
+// The driver below is the whole of what Service.qml does with that answer -
+// the gate, the read, and `if (decided) pipOn = on` - and every decision in
+// it is a CALL into the shipping functions rather than a copy of them
+// (CLAUDE.md 12). `pipOn` starts false the way a process that has just
+// started starts: set by nobody, because nobody was here to set it.
+const pipFreshShell = function (reported) {
+  return {
+    pipOn: reported === true,
+    pid: 0,
+    busy: false,
+    reading: false,
+    // What the reattach path does the moment it learns the pid, and what
+    // onPlayerAttached does again a moment later.
+    peek: function (clients, pid) {
+      if (pid !== undefined) this.pid = pid
+      const gate = Model.pipDeriveGate({ pid: this.pid, busy: this.busy, reading: this.reading })
+      if (!gate.ok) return gate.code
+      const derived = Model.pipDeriveState(clients, this.pid, Model.PIP_CLASS)
+      if (derived.decided) this.pipOn = derived.on
+      return derived.decided ? "decided" : derived.reason
+    }
+  }
+}
+// THE case. A shell that has just started has no snapshot, no flag and no
+// history of its own; the window is still in the corner from before it died.
+checkCall("D-PIP-4: a shell with no memory at all reports the window it finds, not the false it woke up with", () => {
+  const shell = pipFreshShell()
+  const code = shell.peek(pipClients([pipFixture.CLIENTS.foreign, pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID)
+  // And the one surface a user sees it on: PIP2's single tooltip line.
+  return [shell.pipOn, code, Model.barTooltip({ playing: true, name: "BBC One", pip: shell.pipOn }).split("\n")[1]]
+}, [true, "decided", Model.PIP_TOOLTIP_ON])
+// The other direction, which a remembered boolean also gets wrong: the user
+// tiled the box with SUPER+T while this shell was dead.
+checkCall("D-PIP-4: and follows the window back down, rather than a remembered true", () => {
+  const shell = pipFreshShell(true)
+  const code = shell.peek(pipClients([pipFixture.CLIENTS.tiled]), pipFixture.PLAYER_PID)
+  return [shell.pipOn, code, Model.barTooltip({ playing: true, name: "BBC One", pip: shell.pipOn }).indexOf("\n")]
+}, [false, "decided", -1])
+// The property that says "derived, not remembered" in one line: the same
+// bytes answer the same thing whatever this process happened to be saying a
+// moment earlier. A cache, a flag or a last-known-good would break exactly
+// this check and nothing else.
+checkCall("D-PIP-4: the same read answers the same thing whatever the plugin said before it", () => {
+  const inPip = pipClients([pipFixture.CLIENTS.inPip])
+  const tiled = pipClients([pipFixture.CLIENTS.tiled])
+  const a = pipFreshShell(false), b = pipFreshShell(true), c = pipFreshShell(false), d = pipFreshShell(true)
+  a.peek(inPip, pipFixture.PLAYER_PID); b.peek(inPip, pipFixture.PLAYER_PID)
+  c.peek(tiled, pipFixture.PLAYER_PID); d.peek(tiled, pipFixture.PLAYER_PID)
+  return [a.pipOn, b.pipOn, c.pipOn, d.pipOn]
+}, [true, true, false, false])
+// `decided` is the honest half. A read that cannot see OUR window must not
+// be turned into "off": that is the same defect pointing the other way.
+checkCall("D-PIP-4: a read that saw nothing changes nothing", () => {
+  const shell = pipFreshShell(true)
+  const codes = [
+    shell.peek("{not json", pipFixture.PLAYER_PID),
+    shell.peek(pipClients([pipFixture.CLIENTS.foreign])),
+    shell.peek(pipClients([pipFixture.CLIENTS.tiled, pipFixture.CLIENTS.twin])),
+    shell.peek(pipClients([pipFixture.CLIENTS.badAddress]))
+  ]
+  return [codes, shell.pipOn]
+}, [["bad_clients", "no_window", "ambiguous", "bad_address"], true])
+// 4.2 again, one layer up: without the pid there is no read at all, because
+// a class-only lookup is the defect D-PIP-5 is about. And a request owns the
+// answer while it runs - its read is fresher and it is about to verify it.
+checkCall("D-PIP-4: the gate on the read - no pid, no guess; a request in flight wins", () => [
+  Model.pipDeriveGate({ pid: 0 }).code,
+  Model.pipDeriveGate({ pid: -1 }).code,
+  Model.pipDeriveGate({ pid: "not a pid" }).code,
+  Model.pipDeriveGate(null).code,
+  Model.pipDeriveGate({ pid: pipFixture.PLAYER_PID, busy: true }).code,
+  Model.pipDeriveGate({ pid: pipFixture.PLAYER_PID, reading: true }).code,
+  Model.pipDeriveGate({ pid: pipFixture.PLAYER_PID }).ok
+], ["no_pid", "no_pid", "no_pid", "no_pid", "busy", "reading", true])
+// And the structural half: there is nowhere to PUT a remembered value. The
+// compositor's own bytes, the pid and the class are the whole input.
+checkCall("D-PIP-4: the derivation takes the compositor's bytes and nothing else", () => [
+  Model.pipDeriveState.length,
+  Model.pipDeriveState(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID, Model.PIP_CLASS).on,
+  Model.pipDeriveState(pipClients([pipFixture.CLIENTS.userPopped]), pipFixture.PLAYER_PID, Model.PIP_CLASS).on,
+  Model.pipDeriveState(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID, Model.PIP_CLASS).address
+], [3, true, false, pipFixture.PLAYER_ADDRESS])
+
 // ---- 5. the plan (4.3 as PIP10 corrects it)
 
 const pipLive = function (patch) {
