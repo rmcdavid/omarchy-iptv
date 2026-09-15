@@ -1472,6 +1472,16 @@ TestCase {
     compare(Model.settingsFrom({}).pipCorner, "top-right")
     compare(Model.settingsFrom({}).pipSizePercent, 30)
     compare(Model.settingsFrom({}).pipMargin, 16)
+    // The monitor lookup the service runs before this, in the same engine.
+    // V4's JSON.parse is its own implementation, and this one is handed raw
+    // `hyprctl -j monitors` stdout.
+    var monitors = JSON.stringify([PipCases.MONITORS.live, PipCases.MONITORS.offset])
+    compare(Model.pipFindMonitor(monitors, 4).name, "HDMI-A-1")
+    compare(Model.pipFindMonitor(monitors, 9), null)
+    compare(Model.pipFindMonitor(monitors, null), null)
+    compare(Model.pipFindMonitor("{not json", 0), null)
+    compare(JSON.stringify(Model.pipGeometry(Model.pipFindMonitor(monitors, 4), { corner: "bottom-left", sizePercent: 25, margin: 10 })),
+            JSON.stringify({ x: 1930, y: 440, w: 480, h: 270 }))
   }
 
   function test_pictureInPictureBoundary() {

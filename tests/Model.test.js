@@ -2682,6 +2682,39 @@ check("R2: pipOptions is the ONE reading of the three PiP settings, and settings
 // ---- 3. geometry (4.4). The only place multi-monitor correctness can come
 // from on a machine with one monitor.
 
+// The monitor lookup the service asked lane V1 for in the handover and the
+// design never named: the box goes on the monitor the WINDOW is on (4.9),
+// which means `hyprctl -j monitors` looked up by the id the client entry
+// carries. The fixture's eight monitors are ids 0..7, so a lookup that
+// ignored the id and answered the first entry would place every box on the
+// laptop panel - which is exactly what a single-monitor lane cannot see.
+const pipMonitorList = JSON.stringify([pipFixture.MONITORS.live, pipFixture.MONITORS.hidpi, pipFixture.MONITORS.offset])
+check("pipFindMonitor: the monitor the window is on, by id, from raw stdout or a parsed array", [
+  Model.pipFindMonitor(pipMonitorList, 0).name,
+  Model.pipFindMonitor(pipMonitorList, 1).name,
+  Model.pipFindMonitor(pipMonitorList, 4).name,
+  Model.pipFindMonitor(JSON.parse(pipMonitorList), 4).name,
+  Model.pipFindMonitor(pipMonitorList, "4").name
+], ["eDP-1", "DP-1", "HDMI-A-1", "HDMI-A-1", "HDMI-A-1"])
+// Refusing is the whole point: a fallback to the first monitor is always
+// right on a one-monitor machine and silently wrong on a two-monitor desk.
+check("pipFindMonitor refuses rather than guessing a screen", [
+  Model.pipFindMonitor(pipMonitorList, 9),
+  Model.pipFindMonitor(pipMonitorList, -1),
+  Model.pipFindMonitor(pipMonitorList, null),
+  Model.pipFindMonitor(pipMonitorList, "not a monitor"),
+  Model.pipFindMonitor("[]", 0),
+  Model.pipFindMonitor("{not json", 0),
+  Model.pipFindMonitor(null, 0),
+  Model.pipFindMonitor('{"id":0}', 0),
+  Model.pipFindMonitor([null, undefined, 7], 0)
+], [null, null, null, null, null, null, null, null, null])
+// And the pair the service actually runs: a window on monitor 4 is placed
+// with monitor 4's own scale, reserved strip and global origin.
+check("pipFindMonitor feeds pipGeometry the monitor the window is on, not the first one",
+  Model.pipGeometry(Model.pipFindMonitor(pipMonitorList, 4), { corner: "bottom-left", sizePercent: 25, margin: 10 }),
+  { x: 1930, y: 440, w: 480, h: 270 })
+
 check("pipGeometry: every fixture box, on monitors that mostly do not exist here",
   pipFixture.GEOMETRY.map(function (row) { return row.why + " -> " + JSON.stringify(Model.pipGeometry(pipFixture.MONITORS[row.monitor], row.opts)) }),
   pipFixture.GEOMETRY.map(function (row) { return row.why + " -> " + JSON.stringify(row.box) }))
