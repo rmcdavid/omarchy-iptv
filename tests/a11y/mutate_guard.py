@@ -57,9 +57,21 @@ MUTATIONS = [
      "fidelity.py",
      "    if digest(source_path) != digest(copy_path):",
      "    if False:"),
+    ("L8 off: stop comparing the copied host UI kit",
+     "fidelity.py",
+     "        if not declared:",
+     "        if False:"),
+    ("L8 off: let a kit patch touch accessibility markup",
+     "fidelity.py",
+     "        if touched:\n            failures.append(Failure(\n"
+     '                "L8", "the patch to %s touches accessibility markup" % rel,',
+     "        if False:\n            failures.append(Failure(\n"
+     '                "L8", "the patch to %s touches accessibility markup" % rel,'),
     ("L7 off: stop naming ungraded surfaces",
      "fidelity.py",
+     '        declared = [r for r in records if r["kind"] == "accessible"]\n'
      "        if declared:",
+     '        declared = [r for r in records if r["kind"] == "accessible"]\n'
      "        if False:"),
     ("scanner: forget the sibling bindings (the text: sink)",
      "qmlscan.py",
@@ -129,12 +141,22 @@ def main():
         print("BASELINE IS RED (%s failures): every result below is unreadable"
               % baseline)
         return 1
+    # A mutation that could not be applied is NOT a killed one. Reading None
+    # as success is exactly the "green because nothing ran" failure the floors
+    # in scripts/check.sh exist to stop.
+    unapplied = [label for label, failed in results[1:] if failed is None]
     survivors = [label for label, failed in results[1:] if failed == 0]
+    if unapplied:
+        print("%d mutation(s) could not be APPLIED -- their anchors have "
+              "moved, so they proved nothing:" % len(unapplied))
+        for label in unapplied:
+            print("  " + label)
     if survivors:
         print("%d mutation(s) SURVIVED -- those layers assert nothing:" %
               len(survivors))
         for label in survivors:
             print("  " + label)
+    if unapplied or survivors:
         return 1
     print("baseline green, all %d mutation(s) killed" % (len(results) - 1))
     return 0

@@ -309,6 +309,72 @@ class TreeGate(unittest.TestCase):
             shutil.rmtree(work, ignore_errors=True)
 
 
+class HostKit(unittest.TestCase):
+    """The guide's fields ARE host components. `Ui/TextField.qml` is a
+    Controls TextField and the credential is published by that control's own
+    accessibility, so a guard that watched only Guide.qml would let the kit be
+    swapped underneath it."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.work = tempfile.mkdtemp(prefix="a11y-kit-")
+        self.addCleanup(shutil.rmtree, self.work, ignore_errors=True)
+        self.src = os.path.join(self.work, "Ui")
+        self.copy = os.path.join(self.work, "copy", "Ui")
+        os.makedirs(self.src)
+        os.makedirs(self.copy)
+
+    def write(self, where, name, text):
+        with open(os.path.join(where, name), "w") as out:
+            out.write(text)
+
+    def both(self, name, text):
+        self.write(self.src, name, text)
+        self.write(self.copy, name, text)
+
+    def test_an_identical_kit_passes(self):
+        self.both("TextField.qml", "TextField {\n  id: field\n}\n")
+        self.assertEqual(fidelity.check_kit(self.src, self.copy, {}), [])
+
+    def test_an_undeclared_difference_is_red(self):
+        self.both("TextField.qml", "TextField {\n  id: field\n}\n")
+        self.write(self.copy, "TextField.qml", "TextField {\n  id: other\n}\n")
+        found = fidelity.check_kit(self.src, self.copy, {})
+        self.assertEqual(layers(found), ["L8"])
+        self.assertIn("TextField.qml", found[0].summary)
+
+    def test_a_declared_patch_passes(self):
+        self.both("Util.qml", "QtObject {\n  property int x: 1\n}\n")
+        self.write(self.copy, "Util.qml", "QtObject {\n  property int x: 2\n}\n")
+        self.assertEqual(
+            fidelity.check_kit(self.src, self.copy, {"Ui/Util.qml": "why"}), [])
+
+    def test_a_patch_that_touches_accessibility_is_red(self):
+        self.both("Util.qml", "QtObject {\n  Accessible.name: \"kit\"\n}\n")
+        self.write(self.copy, "Util.qml", "QtObject {\n}\n")
+        found = fidelity.check_kit(self.src, self.copy, {"Ui/Util.qml": "why"})
+        self.assertEqual(layers(found), ["L8"])
+        self.assertIn("touches accessibility", found[0].summary)
+
+    def test_a_stale_patch_declaration_is_red(self):
+        self.both("Util.qml", "QtObject {\n}\n")
+        found = fidelity.check_kit(self.src, self.copy, {"Ui/Util.qml": "why"})
+        self.assertEqual(layers(found), ["L8"])
+        self.assertIn("stale", found[0].summary)
+
+    def test_a_missing_or_extra_file_is_red(self):
+        self.both("TextField.qml", "TextField {\n}\n")
+        self.write(self.src, "Button.qml", "Button {\n}\n")
+        self.write(self.copy, "Invented.qml", "Invented {\n}\n")
+        found = fidelity.check_kit(self.src, self.copy, {})
+        self.assertEqual(layers(found), ["L8"])
+        self.assertEqual(len(found), 2, "missing and extra are separate findings")
+        detail = "\n".join(f.detail for f in found)
+        self.assertIn("Button.qml", detail)
+        self.assertIn("Invented.qml", detail)
+
+
 class Inventory(unittest.TestCase):
     def test_a_surface_nobody_grades_is_named(self):
         gaps = dict(fidelity.ungraded_surfaces(fidelity.REPO, {"Guide.qml"}))

@@ -377,6 +377,82 @@ def check_copy(source_path, copy_path):
     return []
 
 
+KIT_PATCHED = {
+    "Ui/BarIconButton.qml":
+        "a debug env flag read through Quickshell.env",
+    "Commons/Color.qml":
+        "the FileView block that loads the theme",
+    "Commons/Style.qml":
+        "the Process and FileView blocks that read gaps and fonts",
+    "Commons/Util.qml":
+        "Quickshell.env and Quickshell.execDetached",
+}
+
+
+def check_kit(src_dir, copy_dir, patched=None):
+    """L8: the host UI kit the copy imports is the kit that ships.
+
+    The guide's fields ARE host components: `Ui/TextField.qml` is a QtQuick
+    Controls TextField, and the credential the harness hunts is published by
+    that control's own accessibility, not by anything Guide.qml declares. A
+    guard that checks only Guide.qml would let the kit be swapped underneath
+    it. The host kit declares no `Accessible.` property anywhere (measured:
+    zero in Ui/ and Commons/), so every file must be byte-identical except
+    the declared patched set, and no patch may introduce or remove one.
+    """
+    patched = KIT_PATCHED if patched is None else patched
+    failures = []
+
+    def listing(root):
+        out = {}
+        for base, _dirs, files in os.walk(root):
+            for name in files:
+                full = os.path.join(base, name)
+                out[os.path.relpath(full, root)] = full
+        return out
+
+    # Keys are named the way the kit is: "Ui/TextField.qml", not the path a
+    # particular caller happened to pass in.
+    section = os.path.basename(src_dir.rstrip(os.sep))
+
+    src = listing(src_dir)
+    copy = listing(copy_dir)
+    missing = sorted(set(src) - set(copy))
+    extra = sorted(set(copy) - set(src))
+    if missing:
+        failures.append(Failure("L8", "%d host kit file(s) the copy does not "
+                                      "have" % len(missing), "\n".join(missing)))
+    if extra:
+        failures.append(Failure("L8", "%d file(s) in the kit copy that the host "
+                                      "kit does not have" % len(extra),
+                                "\n".join(extra)))
+    for rel in sorted(set(src) & set(copy)):
+        with open(src[rel], "rb") as handle:
+            a = handle.read()
+        with open(copy[rel], "rb") as handle:
+            b = handle.read()
+        declared = "%s/%s" % (section, rel) in patched
+        if a == b:
+            if declared:
+                failures.append(Failure(
+                    "L8", "%s is declared as patched but is byte-identical; "
+                          "the declaration is stale" % rel))
+            continue
+        if not declared:
+            failures.append(Failure(
+                "L8", "%s differs from the host kit and no patch is declared "
+                      "for it" % rel))
+            continue
+        removed, added = _diff_lines(a.decode("utf-8", "replace"),
+                                     b.decode("utf-8", "replace"))
+        touched = [t for _n, t in removed + added if "Accessible." in t]
+        if touched:
+            failures.append(Failure(
+                "L8", "the patch to %s touches accessibility markup" % rel,
+                "\n".join(touched)))
+    return failures
+
+
 def guard_tree(tree_dir, repo=None, guide_copy="GuideProbe.qml",
                model_copy="Model.js"):
     """Grade a harness tree in one call, for the checker to use as its gate.
@@ -438,6 +514,9 @@ def main(argv=None):
     parser.add_argument("--copy", action="append", default=[],
                         metavar="SOURCE=COPY",
                         help="a file the transform copies verbatim")
+    parser.add_argument("--kit", action="append", default=[],
+                        metavar="SRC_DIR=COPY_DIR",
+                        help="the host UI kit and the harness's copy of it")
     parser.add_argument("--repo", default=REPO,
                         help="repo root, for the ungraded-surface inventory")
     parser.add_argument("--generate", metavar="SOURCE=OUT",
@@ -493,6 +572,16 @@ def main(argv=None):
         print("%-16s -> %-20s  verbatim copy, %d finding(s)"
               % (os.path.basename(source_path), os.path.basename(copy_path),
                  len(found)))
+        failures.extend(found)
+
+    for kit in args.kit:
+        src_dir, copy_dir = kit.split("=", 1)
+        found = check_kit(src_dir, copy_dir)
+        total = sum(len(files) for _b, _d, files in os.walk(src_dir))
+        print("%-16s -> %-20s  %d host kit file(s), %d declared patch(es), "
+              "%d finding(s)" % (os.path.basename(src_dir.rstrip("/")),
+                                 os.path.basename(copy_dir.rstrip("/")),
+                                 total, len(KIT_PATCHED), len(found)))
         failures.extend(found)
 
     gaps = ungraded_surfaces(args.repo, graded)
