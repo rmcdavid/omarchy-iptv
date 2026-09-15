@@ -560,12 +560,21 @@ class TwoLanesAgreeTest(unittest.TestCase):
         # PIP9 and section 5: the footer lines and the tooltip line live in
         # Model.js and nowhere else. A sentence in Service.qml or Guide.qml
         # is a line no test can compare against the table.
+        #
+        # Over CODE, not over comments: a comment that quotes a line to
+        # explain a failure mode is documentation, and a test that forbids
+        # quoting the thing it protects teaches people to write vaguer
+        # comments.
+        def code_only(text):
+            return "\n".join(row for row in text.splitlines()
+                             if not row.lstrip().startswith("//"))
+        model, service, guide = code_only(MODEL), code_only(SERVICE), code_only(GUIDE)
         for line in ("Picture in picture on", "Picture in picture off", "Nothing playing",
                      "Picture in picture needs Hyprland", "Cannot find the player window",
                      "Hyprland refused the window change", "Picture in picture: on"):
-            self.assertEqual(MODEL.count('"%s"' % line), 1, line)
-            self.assertNotIn(line, SERVICE, "the service never composes a sentence")
-            self.assertNotIn(line, GUIDE, "the guide renders Model.pipStatusText, never a literal")
+            self.assertEqual(model.count('"%s"' % line), 1, line)
+            self.assertNotIn(line, service, "the service never composes a sentence")
+            self.assertNotIn(line, guide, "the guide renders Model.pipStatusText, never a literal")
 
     def test_the_settings_have_one_clamp_behind_them(self):
         # The manifest declares the range the host offers; Model.SETTING_RANGES

@@ -2414,7 +2414,14 @@ function buildMpvArgv(params) {
   var argv = [
     "mpv",
     "--input-ipc-server=" + str(p.socketPath),
-    "--wayland-app-id=omarchy-iptv",
+    // PIP_CLASS, not a third copy of the string. This flag is what makes the
+    // window findable, and picture in picture matches `class === PIP_CLASS`
+    // to decide which window it may float, shrink, move and pin. Two
+    // literals that agree today can disagree tomorrow, and the failure is
+    // silent: PiP would simply answer "Cannot find the player window" for
+    // ever. The python mirror keeps its own literal and is pinned to this
+    // one by tests/fixtures/player-argv.json.
+    "--wayland-app-id=" + PIP_CLASS,
     "--force-window=immediate",
     "--idle=once",
     "--keep-open=no",

@@ -47,8 +47,8 @@ fail=0
 # smaller. Adding a test means bumping the number in the same commit; that is
 # the intended cost.
 QML_SPEC_MIN=${QML_SPEC_MIN:-61}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1248}
-PY_TESTS_MIN=${PY_TESTS_MIN:-356}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1249}
+PY_TESTS_MIN=${PY_TESTS_MIN:-357}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}

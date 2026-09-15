@@ -3149,6 +3149,29 @@ check("the shared dispatch fixture: and the exit vectors, tag then unpin then un
 check("the shared dispatch fixture: the snapshot written at PiP-on is the one the exit is verified against",
   Model.pipSnapshotFor(pipDispatchLive), pipDispatch.exit.snapshot)
 
+// The third copy of one string, and the one with teeth. The window class PiP
+// matches on is the app-id the player is LAUNCHED with, and that flag is
+// written in three places: here, in bin/omarchy-iptv's mirror, and in the
+// finder. The first two are pinned to each other by player-argv.json; the
+// finder was pinned to neither, so a renamed app-id would have left PiP
+// answering "Cannot find the player window" for ever, silently, with every
+// suite green. buildMpvArgv now builds the flag FROM the constant, and this
+// is the assertion that says so.
+check("one window class: the app-id the player is launched with is the class PiP looks for", (function () {
+  const launched = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: "/state" })
+  const flag = launched.filter(function (item) { return item.indexOf("--wayland-app-id=") === 0 })
+  const fixtureFlags = playerFixture.mpvArgv.map(function (row) {
+    return (row.argv || []).filter(function (item) { return item.indexOf("--wayland-app-id=") === 0 }).join("")
+  })
+  return {
+    flag: flag.join(""),
+    fromConstant: flag.join("") === "--wayland-app-id=" + Model.PIP_CLASS,
+    // And the python mirror's own vectors carry the same value.
+    fixture: fixtureFlags.filter(function (item) { return item !== "--wayland-app-id=" + Model.PIP_CLASS }),
+    finds: Model.pipFindWindow([{ "class": Model.PIP_CLASS, pid: 7, address: "0x1", at: [0, 0], size: [2, 2], floating: false, pinned: false, monitor: 0, workspace: { id: 1 }, tags: [] }], 7).ok
+  }
+})(), { flag: "--wayland-app-id=omarchy-iptv", fromConstant: true, fixture: [], finds: true })
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")

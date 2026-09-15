@@ -1867,6 +1867,23 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(len(names), 19)
         self.assertNotIn("--ytdl", names)          # PO-5
 
+    def test_the_app_id_is_the_class_picture_in_picture_matches_on(self):
+        # M2-05. The window class PiP addresses is the app-id the player is
+        # launched with, and that string is written in three places: this
+        # helper, Model.buildMpvArgv, and Model's PIP_CLASS. The first two
+        # were pinned to each other by this fixture; the third was pinned to
+        # neither, and the failure that produces is silent - a renamed app-id
+        # leaves `p` answering "Cannot find the player window" for ever with
+        # every suite green. Model.js now builds the flag from the constant;
+        # this is the Python half of the same pin.
+        flag = "--wayland-app-id=omarchy-iptv"
+        argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", [])
+        self.assertIn(flag, argv)
+        self.assertIn('var PIP_CLASS = "%s"' % flag.split("=")[1], self.model)
+        self.assertIn('"--wayland-app-id=" + PIP_CLASS', self.model)
+        for case in self.fixture["mpvArgv"]:
+            self.assertIn(flag, case["argv"], case["name"])
+
     def test_generic_failure_text_matches(self):
         self.assertEqual(helper.PLAYER_GENERIC_FAILURE, self.fixture["genericFailure"])
         self.assertIn('var PLAYER_GENERIC_FAILURE = "%s"' % self.fixture["genericFailure"], self.model)
