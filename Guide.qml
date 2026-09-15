@@ -368,6 +368,15 @@ Item {
   // Two-line rows whenever the detail line can have content for this list
   // (UX 2.4): a mixed list shows the group, EPG adds now/next.
   //
+  // M2-09 D3: "content" now means content that VARIES. On the subscriber's
+  // 3,335-row playlist the detail line rendered one identical string on every
+  // row -- `United States`, 3,335 times -- which is UX 2.4's own condition
+  // ("where the group name is meaningful") failing, not an amendment to it.
+  // Dropping it takes the row from 52 px to 38 px, 9 visible rows to 12, and
+  // the walk across the list from 417 PageDowns to 304. The predicate
+  // strictly dominates the shipped `!scopeIsGroup`: exactly one cell of the
+  // truth table changes and no shape loses a row.
+  //
   // M2-09 D4: and NOT when a channel has failed. The failure notice used to
   // be reachable only from the detail line, so one dead stream took a whole
   // group's rows from 38 px to 52 px mid-session, under the cursor, with no
@@ -377,7 +386,8 @@ Item {
   // single-line row, a slot that is deliberately blank on a failed row and so
   // is free exactly when it is needed. Row height stops depending on
   // session-mutable state, which is R-C and is better than what ships.
-  readonly property bool rowsHaveDetail: !root.scopeIsGroup || root.epgConfigured
+  readonly property bool rowsHaveDetail: Model.rowsHaveDetail({
+    scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows, epgConfigured: root.epgConfigured })
 
   // The whole body decision in one object (Model.guideSurface, D-LIVE-19):
   // which empty state, whether rows and the group column exist, and the
@@ -2269,7 +2279,10 @@ Item {
                   readonly property string name: row.channel ? String(row.channel.name || "") : ""
                   readonly property string group: row.channel ? Model.primaryGroup(row.channel) : ""
                   readonly property string tvgId: row.channel ? String(row.channel.tvgId || "") : ""
-                  readonly property bool showGroup: !root.scopeIsGroup
+                  // M2-09 D3: not inside the group's own scope, and not when
+                  // every row of the list would print the same word.
+                  readonly property bool showGroup: Model.rowShowsGroup({
+                    scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows })
                   readonly property bool favorite: row.channelId !== "" && root.favoriteSet[row.channelId] === true
                   readonly property bool playing: row.channelId !== "" && row.channelId === root.playingId
                   readonly property string failedAt: row.channelId !== "" && root.failedMap[row.channelId] ? String(root.failedMap[row.channelId]) : ""
