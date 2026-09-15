@@ -240,10 +240,23 @@ Item {
   property int bannerHeight: Style.space(28)
   property int columnWidth: Style.space(200)
   property int groupEntryHeight: Math.max(Style.space(32), Style.font.body + Style.spacing.controlPaddingY * 2)
+  // The column has its own fold problem and needs the same answer: 31
+  // selectable entries at 32 px in a 469 px viewport is 14 visible, and there
+  // is no scrollbar anywhere in this file. groupList sets no spacing, so its
+  // reach is the sliver alone.
+  readonly property int columnPeek: Math.round(groupEntryHeight * 0.55)
   property int detailRowHeight: Math.max(Style.space(52), Style.font.title + Style.font.bodySmall + Style.space(2) + Style.spacing.rowPaddingX * 2)
   property int singleRowHeight: Math.max(Style.space(38), Style.font.title + Style.spacing.rowPaddingX * 2)
   readonly property int rowHeight: rowsHaveDetail ? detailRowHeight : singleRowHeight
   property int rowSpacing: Style.space(4)
+  // M2-09 D5. How much of the first hidden row stays visible at the fold --
+  // enough to read as a cut-off row rather than a bottom border. The ratio and
+  // the reason are Omarchy's own (`Menu.qml:104-106`); derived from the row
+  // tokens, so 21 px at 38 px rows and 29 px at 52, and it follows the theme.
+  // The reach a cursor keeps is the sliver plus the list's spacing, which is
+  // how the house picker adds them.
+  readonly property int rowPeek: Math.round(rowHeight * 0.55)
+  readonly property int rowReach: rowPeek + rowSpacing
   property int footerHeight: Math.max(Style.space(20), Style.font.caption + Style.space(6))
   property int leadWidth: Style.space(24)
   property int trailWidth: Style.space(20)
@@ -427,7 +440,19 @@ Item {
     return ""
   }
 
-  readonly property string scopeLabelText: root.hasChannels ? Model.scopeLabel(root.scopeId, root.query, root.resultTotal) : ""
+  // M2-09 D5 / GS4: when the list is longer than the viewport -- the
+  // scrollbar condition, which is exactly when the edge scrims are live --
+  // the header's count becomes the cursor's position and the noun goes away.
+  // The total is not lost: the footer counts line already carries it.
+  //
+  // `contentHeight` and not `contentY`: the former changes only when the row
+  // set or the row height does, the latter on every frame of a wheel flick,
+  // and string formatting does not belong there.
+  readonly property bool listOverflows: resultList.contentHeight > resultList.height
+  readonly property string scopeLabelText: root.hasChannels
+    ? Model.scopeLabel(root.scopeId, root.query, root.resultTotal,
+        { index: root.cursorIndex, rows: root.rowCount, overflows: root.listOverflows })
+    : ""
 
   // Helper warnings of the last load (D-LIVE-18 and its EPG twin): one
   // low-key line in the footer status slot, URL-free (Model.statusWarnings),
@@ -677,12 +702,40 @@ Item {
     if (!root.opened || !root.showColumn || groupList.height <= 0) return
     var anchor = Model.columnAnchor(root.scopeList, root.scopeId)
     if (anchor.index < 0 || anchor.index >= groupModel.count) return
-    if (anchor.top) groupList.positionViewAtBeginning()
-    else groupList.positionViewAtIndex(anchor.index, ListView.Contain)
+    if (anchor.top) {
+      groupList.positionViewAtBeginning()
+      return
+    }
+    groupList.positionViewAtIndex(anchor.index, ListView.Contain)
+    root.reveal(groupList, anchor.index, groupModel.count, root.columnPeek)
   }
 
   function scrollToCursor() {
-    if (root.rowCount > 0 && resultList.height > 0) resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+    if (root.rowCount <= 0 || resultList.height <= 0) return
+    resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+    root.reveal(resultList, root.cursorIndex, root.rowCount, root.rowReach)
+  }
+
+  // M2-09 D5. `Contain` alone parks the cursor row flush with the viewport
+  // edge, hiding the neighbour entirely and losing the fold affordance -- the
+  // defect Omarchy's own picker names above `Menu.qml:640` and fixes there,
+  // and which this file had in both places above. The arithmetic lives in
+  // Model.revealOffset rather than as fifteen copied lines of QML, because a
+  // copy is exactly the stranded interface logic CLAUDE.md rule 12 forbids;
+  // Menu.qml is Omarchy's file and not bound by this repo's rule, this would
+  // be. Unconditional: every playlist shape, both lists.
+  //
+  // Called synchronously, not through Qt.callLater: measured over 600 cursor
+  // moves on an 11,039-row list, `itemAtIndex` was never null (P6). An absent
+  // item leaves the Contain result alone, which is v0.5.0's behaviour.
+  function reveal(view, index, count, peek) {
+    var item = view.itemAtIndex(index)
+    if (!item) return
+    view.contentY = Model.revealOffset({
+      itemY: item.y, itemHeight: item.height,
+      contentY: view.contentY, viewportHeight: view.height,
+      originY: view.originY, contentHeight: view.contentHeight,
+      peek: peek, index: index, count: count })
   }
 
   function moveCursorBy(delta, wrap) {
@@ -1994,6 +2047,16 @@ Item {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             text: root.headerRight
+            // M2-09 D5. `All - 1,204 of 3,335` and `All - 3,335 channels` are
+            // the same 20 characters, so the reflow this can cause is 24 px
+            // across the whole of the cursor's travel and searchLine elides
+            // right anyway. The cap is for a theme that makes the caption
+            // font large enough for this to eat the search line; eliding LEFT
+            // keeps the numbers, which are the part that changes, and gives
+            // up the scope name, which the column also shows.
+            width: Math.min(implicitWidth, parent.width * 0.42)
+            elide: Text.ElideLeft
+            horizontalAlignment: Text.AlignRight
             color: root.foreground
             opacity: 0.52
             font.family: root.fontFamily
@@ -2310,7 +2373,15 @@ Item {
                   color: hasCursor ? root.selectedBackground : "transparent"
                   borderSpec: hasCursor ? root.selectedBorderSpec : root.noBorderSpec
                   Accessible.role: Accessible.ListItem
-                  Accessible.name: Model.rowAccessibleName({ name: name, chno: chno, favorite: favorite, playing: playing, nowTitle: nowTitle, until: until, failedAt: failedAt })
+                  // M2-09 D5 / GS5: the position is appended LAST, after the
+                  // failure state, so someone stepping rows hears the name
+                  // first. Under a query `rowCount` is the capped 200 the
+                  // list actually holds and the header also counts against;
+                  // the true match total stays in the footer. Until this lane
+                  // the eye was told a position and a screen reader was not,
+                  // which UX 7.2 does not permit.
+                  Accessible.name: Model.rowAccessibleName({ name: name, chno: chno, favorite: favorite, playing: playing, nowTitle: nowTitle, until: until, failedAt: failedAt,
+                    rowIndex: row.index, rowCount: root.rowCount })
                   Accessible.focused: hasCursor
 
                   Item {
