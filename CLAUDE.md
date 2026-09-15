@@ -71,6 +71,17 @@ requests and raise the batch.
    shipping path is broken. If pure logic is stranded somewhere a test cannot
    reach, such as inside a QML component, lift it into `Model.js` and call it
    for real rather than reimplementing it in the test.
+13. The rule about names applies to documents too, not only to code.
+   Wherever two things are joined by a NAME rather than by a call, nothing
+   verifies the join and the failure is invisible. A defect filed in prose in
+   `docs/QA-RESULTS.md` and a row on the board in `docs/STATUS.md` are joined
+   by an id, and for a long time nothing checked it: a lane already filed
+   F-CHNO-4 saying the board was stale, the board was patched by hand, and 32
+   more ids drifted off it afterwards, one of them a P2 that had been a
+   release gate. `scripts/check-defect-ledger.py` now makes that join a call.
+   When you invent a new cross-document id -- a ruling, a scenario, a defect
+   -- either point an existing check at it or write one. An id that only a
+   human is expected to copy is an id that will eventually stop being copied.
 
 ## Never touch
 

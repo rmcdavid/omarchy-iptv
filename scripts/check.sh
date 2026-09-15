@@ -9,6 +9,9 @@
 #   6. harness predicates        (scripts/qa-lib-test.sh)
 #   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
 #   7. ASCII check on code files (glyphs are allowed in .qml only)
+#   8. defect ledger             (scripts/check-defect-ledger.py: every defect
+#                                id filed in any tracked .md has a row, with a
+#                                severity and a state, in STATUS.md "## Defects")
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -60,9 +63,15 @@ fail=0
 # node checks for the coverage the second line is decided by. GS11 adds six
 # python tests for `cache epg-clear` and three node checks for the two callers
 # that have to name it.
+# The defect-ledger round adds fourteen python cases
+# (tests/test_defect_ledger.py), one per branch of the new ledger check, each
+# building a real git repository and mutating it. Two of them turned red
+# against the checker as first written and found two real defects in it: an
+# empty state cell was misdiagnosed as a short row, and a missing STATUS.md
+# printed a stack trace instead of a sentence.
 QML_SPEC_MIN=${QML_SPEC_MIN:-66}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1302}
-PY_TESTS_MIN=${PY_TESTS_MIN:-367}
+PY_TESTS_MIN=${PY_TESTS_MIN:-381}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
@@ -329,6 +338,21 @@ elif (( ctrl_bad )); then
   bad "control-byte check ($ctrl_scanned files scanned)"
 else
   ok "control-byte check ($ctrl_scanned files scanned)"
+fi
+
+step "defect ledger (every filed defect has a row on the board)"
+# Defects are filed in prose by whichever lane found them, and docs/STATUS.md
+# carries the table that is supposed to be the single view of what is
+# outstanding. Nothing joined the two, so ids drifted off the board and the
+# board looked clean -- CLAUDE.md's named pattern, two things joined by a NAME
+# rather than by a call. A QA lane filed F-CHNO-4 against exactly this once
+# already; 32 more ids went missing afterwards, including a P2 that had been a
+# release gate. This makes the join a call.
+ledger_log=$CHECK_TMP/ledger.log
+if python3 "$ROOT/scripts/check-defect-ledger.py" >"$ledger_log" 2>&1; then
+  ok "$(head -1 "$ledger_log")"
+else
+  cat "$ledger_log"; bad "defect ledger"
 fi
 
 printf '\n'
