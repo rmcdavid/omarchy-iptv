@@ -260,6 +260,26 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   anything but http(s) are refused and credentials are dropped when a
   redirect changes host.
 
+## Picture in picture
+
+Press `p` in the guide's list mode to shrink the player into a corner of your
+screen and keep watching while you work. Press it again to put it back. From
+outside the guide, `omarchy-shell io.github.rmcdavid.iptv pip toggle` does the
+same and can be bound to a key.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `pipCorner` | string | `top-right` | which corner the small window sits in |
+| `pipSizePercent` | integer 15-60 | `30` | its width as a share of the monitor |
+| `pipMargin` | integer 0-200 | `16` | gap from the screen edge, in pixels |
+
+Two honest limitations. It is not "always on top": Hyprland has no such window
+state, so there is none to ask for. What you get is a small window that floats
+above the tiling layout and follows you across workspaces, but another floating
+window you focus afterwards can cover it. And it needs Hyprland configured with
+its Lua provider, which is the Omarchy default; on any other provider the
+feature reports itself unavailable rather than half working.
+
 ## Files it writes
 
 - `~/.cache/omarchy-iptv/sources/<key>/` : one directory per source with

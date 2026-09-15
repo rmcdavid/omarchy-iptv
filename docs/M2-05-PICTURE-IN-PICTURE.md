@@ -978,3 +978,34 @@ not finished.
 | PIP15 | The dispatch spelling is chosen ONCE, by asking the compositor which configuration provider it runs, not by trying one form and falling back on failure. The gate established that the other form is a syntax error here, so a fallback is a guaranteed second failure, and it could never fire anyway because the return code cannot tell us anything. Amend section 4.3. A fallback that cannot be triggered and would not work if it were is worse than no fallback: it reads like safety. |
 | PIP16 | My file-ownership split was wrong and this is my error, not the lane's. I gave the manifest to one lane and the test that pins the manifest against the model to the other, so the settings could not be declared by either without turning the gate red. Ownership must follow the coupling, not the subject matter: two files that a test asserts about each other are one unit. Integration lands them together. I am recording this because the ownership rule has otherwise worked well all project, and this is the shape that defeats it. |
 | PIP17 | The unsettled gate item stays unsettled and is documented as such in the contributed snippet and the README, rather than being quietly presented as compatible. We have not established that behaviour, and a snippet that implies otherwise would be us guessing on the user's behalf in their own configuration file. |
+
+## 17. Corrections after integration (product owner, 2026-09-14)
+
+- Sections 4.3 and 4.10 are amended for ruling PIP15: there is no fallback
+  spelling. The compositor is asked once which configuration provider it runs,
+  and a provider that cannot parse the modern form takes this feature off the
+  offer entirely rather than offering something that will fail.
+- The only genuinely missing handover function was the monitor finder. The
+  verifier, the on/off predicate and both snapshot helpers already existed
+  under different names, which is worth noting because the request list read as
+  four missing functions and was one.
+- The feature's availability depends on the compositor's configuration
+  provider, not merely on its version. The README says so.
+
+### What integration caught, and why it is the step that earns its keep
+
+Seven rules had been implemented separately by the two lanes. Three disagreed.
+
+One would have left the toggle inverted after the user moved workspaces,
+because the two implementations disagreed about whether being pinned is part of
+being in picture in picture. One left a latent mismatch in how a marker is
+read. And the third is the instructive one: the guide listened for an outcome
+the service does not emit, and the interface layer silently tolerates a handler
+for a signal that does not exist, so the footer was wired to nothing at all and
+no test, gate or reviewer would have seen it. There is now a test comparing
+every handler name against the signals that actually exist.
+
+That is the fifth silent no-op this project has found in its own work. The
+pattern is consistent enough to name: wherever two things are connected by a
+NAME rather than by a call, nothing checks the connection, and the failure is
+invisible rather than loud.
