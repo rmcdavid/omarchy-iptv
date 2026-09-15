@@ -538,6 +538,18 @@ announcement that was proven as a string and never as a node - on day one.
 
 ## 9. Upstream drafts
 
+**FILED 2026-09-15.** Report A is https://github.com/omacom/omarchy/issues/12009. Report B is https://github.com/quickshell-mirror/quickshell/issues/1144, filed with the
+broadened scope established in section 6 and with the mechanism recorded
+honestly as not established. Report C remains held, unfiled, for the reason
+given below. The drafts are kept here as written so the filed text can be
+compared against what was intended.
+
+Quickshell's CONTRIBUTING forbids AI-agent CODE contributions on pain of a
+ban, while explicitly welcoming bug reports. The product owner was shown that
+clause before anything was filed and chose to keep the AI-assistance
+disclosure rather than drop it. Anyone filing there later should read that
+file first.
+
 Two reports are ready. A third is held.
 
 ### Report A (ready to file) - Omarchy: the shell exposes no accessibility information
