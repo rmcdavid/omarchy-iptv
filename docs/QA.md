@@ -33,7 +33,18 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 - "How" column: `A` = automated, with the exact command and file; `M` = manual,
   with the runbook step in section 5 that executes it. `A*` = automated test
   that the FE lanes are expected to add (section 2 lists them); until it lands,
-  QA runs the fixture through the helper by hand (section 7 commands).
+  QA runs the fixture through the helper by hand (section 7 commands). `X` =
+  observed at the real sink by the accessibility harness (`tests/a11y/`), which
+  is a lane tool and deliberately **not** part of `scripts/check.sh` (PLAN-NEXT
+  decision 9); an `X` case is satisfied only by a dated run whose output is
+  filed in `docs/QA-RESULTS.md`, never by the harness merely existing.
+- **A criterion may not be a grep for the string the implementation was written
+  to contain** (CLAUDE.md rule 14). Four criteria in this plan and in
+  `docs/QA-SOURCES.md` were exactly that -- TC-A11Y-01, TC-BAR-11, SRC-A11Y-01,
+  SRC-A11Y-05 -- and all four passed for months over a surface that publishes
+  nothing to anybody. They are rewritten as `X` cases. Where neither calling
+  the shipping logic nor observing the sink is possible, the rule the criterion
+  covers is marked UNVERIFIED in the document that states it and stays marked.
 - Every M case is executed on the live shell after the lanes merge, in the
   order of section 5. Results are recorded in `docs/STATUS.md` (handoff
   format, PLAN.md section 7) as `pass` / `fail D-<n>` / `not run <reason>`
@@ -143,7 +154,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-BAR-08 | middle click refreshes (R12: manual refresh notifies) | M 5.4 US4 step 5 | footer `Refreshing...` then `Refreshed - 1,475 channels`; notification `Playlist refreshed` / `1,475 channels in 38 groups` (counts from the live list), urgency low, glyph U+F0450 |
 | TC-BAR-09 | wheel zaps one channel per tick in the zap ring, wraps (UX 3.4) | M 5.4 US4 step 6 | played from Favorites: scroll stays inside Favorites; from a group: inside the group; from Recent: the channel's group; touchpad swipes accumulate (`Util.wheelSteps`) |
 | TC-BAR-10 | vertical bar: glyph only, name in tooltip (R7), optional | M 5.6 | `omarchy bar position left`, check, `omarchy bar position top` |
-| TC-BAR-11 | accessible names (UX 7.1) | A `grep -n 'Accessible' BarWidget.qml` | `IPTV, idle` / `IPTV, playing <name>` / `IPTV, playlist error` |
+| TC-BAR-11 | accessible names (UX 7.1) | X bar scenarios of the accessibility harness, dated run filed in `docs/QA-RESULTS.md` "Accessibility harness runs". **Not** a grep: the old criterion was `grep -n 'Accessible' BarWidget.qml`, which is two lines the widget was written to contain and cannot go red (rule 14) | The harness instantiates `BarWidget.qml` in a plain hidden Qt window, walks the AT-SPI tree and reads back the node for each of the three states: exactly one `push button`, whose **name** is `IPTV, idle` / `IPTV, playing <name>` (`IPTV, playing channel <n>, <name>` when numbered, M2-03 section 11) / `IPTV, playlist error`, the three names distinct, and no Private-Use glyph codepoint inside any published name. **Markup only.** Delivery of these names to an assistive technology is UNVERIFIED and currently impossible (D-GS-3) |
 | TC-BAR-12 | third-party replacement bar facade (ARCH risk 7) | not testable here | recorded `not run`, README mentions the limitation |
 
 #### Favorites and recents (US5, R5, R8, UX 2.2, 3.1 f/x)
@@ -217,7 +228,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-A11Y-01 | roles and names (UX 7.1) | A `grep -n 'Accessible\.' Guide.qml BarWidget.qml` | Dialog `IPTV guide`, EditableText `Search channels`, List `Groups`/`Channels in <scope>`, ListItem per row with `, favorite` `, playing` `, now ... until HH:MM` `, failed`, AlertMessage banner, StaticText footer, Button bar |
+| TC-A11Y-01 | roles and names (UX 7.1) | X guide scenarios of the accessibility harness, dated run filed in `docs/QA-RESULTS.md` "Accessibility harness runs". **Not** a grep: the old criterion was `grep -n 'Accessible\.' Guide.qml BarWidget.qml`, 58 lines the two files were written to contain, and it passed for the whole life of the project while nothing the guide declares reached any screen reader (rule 14, D-GS-3) | Per row of UX 7.1, the node is present in the walked tree with the stated role and the stated name: Dialog `IPTV guide`, EditableText `Search channels` (with its **value** and description equal to the typed query), List `Groups` / `Channels in <scope>`, ListItem per row carrying the suffixes of UX 7.1 that the scenario's fixture populates, AlertMessage banner, StaticText footer, Button bar. A row of UX 7.1 that no scenario populates is marked UNVERIFIED there and is not claimed here. **Markup only.** Delivery is UNVERIFIED (D-GS-3) |
 | TC-A11Y-02 | no colour-only status (UX 7.2) | M review during 5.4 | every state has a glyph or word |
 | TC-A11Y-03 | hit targets (UX 7.3) | M 5.4 US2 step 11 | rows full width >= `Style.space(38)`, lead slot >= 28 px square |
 | TC-A11Y-04 | multi-monitor (UX 7.4, PLAN A7/R12) | M 5.6 | not verifiable on this machine; procedure recorded for a two-monitor run |

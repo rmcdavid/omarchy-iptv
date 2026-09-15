@@ -690,6 +690,53 @@ checkCall("GS8: the notice on the cursor row was under AA and is not any more ("
 }, [3.54, 3.52, 10.82, 9.7, true, true])
 // And on every other theme this machine has, because the fix is not allowed to
 // be a property of one palette.
+// ---- The contrast model, calibrated against real pixels ----
+// A design was REFUSED on the belief that this arithmetic reads 1.25 ratio
+// points low against reality. It does not. The old pass had measured the
+// failure GLYPH, drawn at opacity 0.8, and compared it against a value
+// computed for the 0.52 text rung; on retropc, 0.8 computes to 7.13, which is
+// exactly the figure that pass reported as its peak.
+//
+// Measured properly on 2026-09-15 off screenshots of the running guide, on a
+// dark theme and a light one, the model is accurate to within 0.14 and is
+// always slightly OPTIMISTIC. That direction is the load-bearing part: a
+// design that computes exactly 4.50 renders BELOW the threshold, which is why
+// every contrast target on this project must sit above the line and never on
+// it (see BAR_IDLE_DARKEN, chosen for a 4.71 floor).
+const calib = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/contrast-calibration.json"), "utf8"))
+function calibPredicted(sample) {
+  const theme = menuTokens.themes.filter(function (t) { return t.name === sample.theme })[0]
+  const s = menuSurface(theme)
+  const fill = sample.surface === "cursor" ? s.cursorFill : s.rowFill
+  return contrast(composite(s.text, fill, sample.alpha), fill)
+}
+checkCall("calibration: every sample's theme is in the contrast fixture, so a rename cannot silently skip one", function () {
+  return calib.samples.every(function (sm) { return menuTokens.themes.some(function (t) { return t.name === sm.theme }) })
+}, true)
+checkCall("calibration: the model predicts every rendered measurement within tolerance", function () {
+  return calib.samples.map(function (sm) { return Math.abs(calibPredicted(sm) - sm.measured) <= calib.maxAbsError })
+}, [true, true, true, true, true, true])
+checkCall("calibration: the model is OPTIMISTIC in every sample, never pessimistic", function () {
+  // If this ever goes red the sign of the error has flipped and every "target
+  // above the line" decision on this project needs revisiting.
+  return calib.samples.every(function (sm) { return calibPredicted(sm) >= sm.measured })
+}, true)
+checkCall("calibration: the refuted claim, restated as a number so it cannot come back", function () {
+  const worst = calib.samples.reduce(function (w, sm) { return Math.max(w, Math.abs(calibPredicted(sm) - sm.measured)) }, 0)
+  // The claim was 1.25. The truth is an order of magnitude smaller.
+  return [round2(worst) < 0.2, round2(worst) < 1.25]
+}, [true, true])
+checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pass reported as its peak", function () {
+  // Within a hundredth; the claim is that the old pass measured the 0.8 glyph
+  // and not the 0.52 rung, not a figure to the second decimal. The dim rung it
+  // was compared against computes 3.53, nowhere near.
+  const retro = menuTokens.themes.filter(function (t) { return t.name === "retropc" })[0]
+  const s = menuSurface(retro)
+  const atPointEight = contrast(composite(s.text, s.rowFill, 0.8), s.rowFill)
+  const atDimRung = contrast(composite(s.text, s.rowFill, Model.TEXT_DIM), s.rowFill)
+  return [Math.abs(atPointEight - 7.13) < 0.02, Math.abs(atDimRung - 7.13) > 3]
+}, [true, true])
+
 // ---- D-RUNG-3: the bar's idle glyph, the one element always on screen ----
 // Qt.darker(c, f) divides the HSV value by f. Reimplemented here because the
 // real one lives in the QML engine, which node cannot load; the FACTOR itself

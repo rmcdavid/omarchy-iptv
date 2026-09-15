@@ -1249,3 +1249,89 @@ is a different operation and belongs with the calibration pass.
 
 The assertion was right about the world and wrong about the code. That is the
 most useful kind of red.
+
+## 16. The calibration, and the number that was never real (product owner, 2026-09-15)
+
+Section 15 refused the per-theme contrast floor for three reasons and blocked
+it on a calibration pass. That pass has now run. **One of the three reasons was
+wrong, and it was wrong in a way worth recording, because it was wrong for
+nearly a day and it changed a decision.**
+
+### What was measured
+
+The guide was opened on the live shell and captured with `grim`, twice on the
+dark reference theme and once on a light one. For each sample, a tight crop
+around the text; the modal colour of that crop is the background; the single
+most-contrasting pixel in it is the fully-covered glyph stroke. The two
+captures of the same theme agreed to two decimals.
+
+| Theme | Surface | Rung | Model says | Screen says | Error |
+|---|---|---|---|---|---|
+| retropc | cursor row | 0.52 | 3.54 | 3.40 | -0.14 |
+| retropc | normal row | 0.52 | 3.53 | 3.42 | -0.11 |
+| retropc | normal row | full | 10.82 | 10.78 | -0.04 |
+| catppuccin-latte | cursor row | 0.52 | 2.28 | 2.18 | -0.10 |
+| catppuccin-latte | normal row | 0.52 | 2.38 | 2.33 | -0.05 |
+| catppuccin-latte | normal row | full | 7.06 | 6.98 | -0.08 |
+
+The predicted ink colours matched the measured pixels almost exactly as well:
+the model said the dim rung on retropc renders `#896004` and the screen showed
+`#826004`; it said full opacity renders `#ffb000` and the screen showed
+`#feb000`.
+
+**The model is accurate to within 0.14 ratio points**, on a dark theme and a
+light one, at two opacities.
+
+### Where 1.25 came from
+
+Section 15 said the model reads about 1.25 ratio points low, on the strength of
+`docs/QA-RESULTS.md:4720-4732`, which reported a rendered 4.79 where the model
+computed 3.54. That comparison was not of the same thing.
+
+The string measured was the failure notice, `! Failed 08:13 - Space to retry`.
+It begins with a **glyph, drawn at opacity 0.8**, not at the 0.52 text rung.
+On retropc, opacity 0.8 computes to **7.13** - which is, to the hundredth, the
+figure that pass reported as its peak stroke. Its "glyph-body 4.79" sits
+between the values for 0.62 and 0.7, consistent with a partially covered pixel
+of that same 0.8 glyph.
+
+So the old pass measured the glyph and compared it against a number computed
+for the words. Nothing was wrong with either measurement; they were of
+different things, and the mismatch was read as an error in the model.
+
+**The claim is withdrawn.** It is pinned by
+`tests/fixtures/contrast-calibration.json` and five checks, so it cannot come
+back as folklore. One of those checks fails if a future lane widens the
+tolerance to make a bad model pass, which is the obvious way to lose this
+again.
+
+### What this changes, and what it does not
+
+**Reason 2 of the refusal is withdrawn.** The model can be trusted, so the
+finding that the 0.52 rung is under threshold in 20 of 23 themes is real and
+D-RUNG-2 is not blocked on measurement any more.
+
+**Reason 3 is stronger than it was.** Every one of the six samples came in
+BELOW its predicted value, never above. The model is slightly optimistic. A
+design that computes exactly 4.50, as the refused one did, therefore renders at
+roughly 4.40 on screen: under the threshold, on every theme, while every test
+reports green. That is no longer a worry about unmeasured rendering effects. It
+is measured, and it has a sign.
+
+**Reason 1 is untouched.** Raising the rung still costs the guide its only
+working hierarchy channel, dropping the name-versus-secondary separation from a
+median of 2.86:1 to 2.24:1. That is a design question, not a measurement one,
+and it is now the *only* thing standing between D-RUNG-2 and a fix.
+
+### The ruling
+
+D-RUNG-2 is unblocked and goes back for a redesign with two binding
+constraints: **target above 4.5, never on it**, the way the bar glyph was given
+a 4.71 floor; and **state the hierarchy cost at that higher target**, because a
+higher target makes the separation loss worse, not better, and the previous
+design costed it at the wrong number.
+
+The lesson generalises past contrast. Two numbers that disagree are not
+evidence that one is wrong until somebody has checked they are measurements of
+the same thing. A day of work rested on a comparison nobody had audited, and it
+looked exactly like diligence.

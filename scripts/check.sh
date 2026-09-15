@@ -70,7 +70,7 @@ fail=0
 # empty state cell was misdiagnosed as a short row, and a missing STATUS.md
 # printed a stack trace instead of a sentence.
 QML_SPEC_MIN=${QML_SPEC_MIN:-66}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1326}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1331}
 PY_TESTS_MIN=${PY_TESTS_MIN:-382}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
