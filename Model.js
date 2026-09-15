@@ -3160,12 +3160,15 @@ function pipInteger(value, fallback) {
 }
 
 // A two-integer pair inside the coordinate limit, or null. Used for `at`,
-// `size` and every pair that comes back out of a snapshot.
+// `size` and every pair that comes back out of a snapshot - so it goes
+// through pipInt, which REFUSES rather than coerces. A "690" or a 1.5 in a
+// snapshot is corruption, not a preference, and flooring it would put the
+// window somewhere nobody asked for.
 function pipPair(value) {
   var list = asList(value)
   if (list.length !== 2) return null
-  var a = pipInt(pipInteger(list[0], NaN))
-  var b = pipInt(pipInteger(list[1], NaN))
+  var a = pipInt(list[0])
+  var b = pipInt(list[1])
   return a === null || b === null ? null : [a, b]
 }
 

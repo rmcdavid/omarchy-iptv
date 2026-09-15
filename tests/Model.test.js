@@ -2584,6 +2584,491 @@ check("CN18: the entry buffer accepts a number that long, so nothing displayable
     return entry.buffer
   })(), widestChno)
 
+// ======================================================================
+// Picture in picture (M2-05 section 10.1), lane V1
+// ======================================================================
+//
+// The vectors live in tests/fixtures/pip-cases.js so the QML spec runs the
+// same ones in the engine that actually executes Model.js. Every expected box
+// there is derived by hand from design 4.4, and the first is the box the gate
+// applied to a real window and read back.
+//
+// What these prove, and what they cannot (10.5): the arithmetic on monitors
+// that do not exist on this machine, the plan's order and conditionals, the
+// address pattern, every clamp, and that no value a user or a provider
+// controls can reach a dispatch vector. Nothing here proves Hyprland does
+// what it is told - only the live pass can, and after PIP11 only by reading
+// the state back, which is what pipVerify is.
+const pipFixture = require("./fixtures/pip-cases.js")
+
+// ---- 1. the expression boundary (PIP7, design 4.11)
+
+check("PIP7: the six window verbs and focus build the expressions the gate proved live", [
+  Model.pipExpression("float", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
+  Model.pipExpression("resize", { window: "address:" + pipFixture.PLAYER_ADDRESS, x: 410, y: 230 }),
+  Model.pipExpression("move", { window: "address:" + pipFixture.PLAYER_ADDRESS, x: 940, y: 42 }),
+  Model.pipExpression("pin", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
+  Model.pipExpression("zorder", { window: "address:" + pipFixture.PLAYER_ADDRESS, mode: "top" }),
+  Model.pipExpression("tag", { window: "address:" + pipFixture.PLAYER_ADDRESS, tag: "+iptv-pip" })
+], [
+  "hl.dsp.window.float({ window = \"address:0x559c6893d940\" })",
+  "hl.dsp.window.resize({ window = \"address:0x559c6893d940\", x = 410, y = 230 })",
+  "hl.dsp.window.move({ window = \"address:0x559c6893d940\", x = 940, y = 42 })",
+  "hl.dsp.window.pin({ window = \"address:0x559c6893d940\" })",
+  "hl.dsp.window.alter_zorder({ window = \"address:0x559c6893d940\", mode = \"top\" })",
+  "hl.dsp.window.tag({ window = \"address:0x559c6893d940\", tag = \"+iptv-pip\" })"
+])
+// PIP10: no step carries `action`. The gate proved it is ignored - a `set`
+// toggles, a second `set` toggles back, and an `unset` on a tiled window
+// FLOATS it - so an argument the compositor throws away would be a lie about
+// what the code does, and the next reader would trust it.
+check("PIP10: no step carries the action argument the compositor ignores",
+  Model.pipExpression("float", { window: "address:" + pipFixture.PLAYER_ADDRESS }).indexOf("action") >= 0, false)
+
+// THE hostile-value test (PIP7: "prove a hostile value is REFUSED rather than
+// escaped"). Two of these were fired at the live compositor during the gate's
+// privacy sweep. One was a Lua parse error; the other was accepted in SILENCE
+// with rc 0 and did nothing - which is why the pattern, and never the
+// compositor's reply, is the defence. An empty string out means refused: the
+// builder has no escaping function and never will, because a value that would
+// need escaping is a value that must not be here.
+check("PIP7: a hostile address is REFUSED, not escaped or quoted",
+  pipFixture.HOSTILE_ADDRESSES.map(function (value) { return Model.pipExpression("tag", { window: "address:" + value, tag: "+iptv-pip" }) }),
+  pipFixture.HOSTILE_ADDRESSES.map(function () { return "" }))
+// The same values in the SELECTOR position. "address:0x1" is dropped here
+// and only here: as a selector it is a perfectly good one, which is exactly
+// why it must be refused as an ADDRESS above - double-prefixing is how a
+// caller would smuggle a selector through the address check.
+const hostileSelectors = pipFixture.HOSTILE_ADDRESSES.filter(function (value) { return value !== "address:0x1" })
+check("PIP7: the same values refused as a bare selector, and as argv",
+  hostileSelectors.map(function (value) { return Model.pipExpression("float", { window: value }) + "|" + Model.pipDispatchArgv("float", { window: value }).length }),
+  hostileSelectors.map(function () { return "|0" }))
+check("PIP7: a hostile or non-integer coordinate is refused, never coerced",
+  pipFixture.HOSTILE_COORDS.map(function (value) { return Model.pipExpression("move", { window: "address:" + pipFixture.PLAYER_ADDRESS, x: value, y: 0 }) }),
+  pipFixture.HOSTILE_COORDS.map(function () { return "" }))
+check("PIP7: the only strings that pass are the compile-time constants", [
+  Model.pipExpression("tag", { window: "address:" + pipFixture.PLAYER_ADDRESS, tag: "+default-opacity" }),
+  Model.pipExpression("tag", { window: "address:" + pipFixture.PLAYER_ADDRESS, tag: "+iptv-pip\", x = os.time(), y = \"1" }),
+  Model.pipExpression("zorder", { window: "address:" + pipFixture.PLAYER_ADDRESS, mode: "bottom" }),
+  Model.pipExpression("nosuchverb", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
+  Model.pipExpression("constructor", { window: "address:" + pipFixture.PLAYER_ADDRESS }),
+  Model.pipExpression("focus", { window: "class:omarchy-iptv" })
+], ["", "", "", "", "", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"])
+// The one playlist-derived value with an obvious route in: a channel name. It
+// has no parameter to arrive through, and this says so out loud.
+check("PIP7: nothing playlist-derived can reach a dispatch vector",
+  Model.pipDispatchArgv("tag", { window: "address:" + pipFixture.PLAYER_ADDRESS, tag: "+Sky Sports Main Event" }), [])
+check("PIP7: the address pattern accepts the live address and nothing adjacent to it",
+  [pipFixture.PLAYER_ADDRESS, "0x0", "0x1234567890abcdef", "0x1234567890abcdef0", "0X10", "0x10 ", " 0x10"].map(function (value) { return Model.pipAddressSelector(value) }),
+  ["address:0x559c6893d940", "address:0x0", "address:0x1234567890abcdef", "", "", "", ""])
+
+// ---- 2. settings (section 6)
+
+check("pipOptions accepts all four corners and falls back for anything else",
+  ["top-right", "top-left", "bottom-right", "bottom-left", "TOP-LEFT", "  bottom-right  ", "middle", "", null, 7].map(function (v) { return Model.pipOptions({ pipCorner: v }).corner }),
+  ["top-right", "top-left", "bottom-right", "bottom-left", "top-left", "bottom-right", "top-right", "top-right", "top-right", "top-right"])
+check("pipOptions clamps the width percentage to the manifest range",
+  [0, 14, 15, 30, 60, 61, 1e9, "abc", null, undefined, -5, "45"].map(function (v) { return Model.pipOptions({ pipSizePercent: v }).sizePercent }),
+  [15, 15, 15, 30, 60, 60, 60, 30, 30, 30, 15, 45])
+check("pipOptions clamps the margin the same way",
+  [-1, 0, 16, 200, 201, 1e9, "abc", null, undefined].map(function (v) { return Model.pipOptions({ pipMargin: v }).margin }),
+  [0, 0, 16, 200, 200, 200, 16, 16, 16])
+check("R2: pipOptions is the ONE reading of the three PiP settings, and settingsFrom goes through it", (function () {
+  const raw = { pipCorner: "BOTTOM-LEFT", pipSizePercent: 1e9, pipMargin: -4 }
+  const s = Model.settingsFrom(raw)
+  const o = Model.pipOptions(raw)
+  return [s.pipCorner === o.corner, s.pipSizePercent === o.sizePercent, s.pipMargin === o.margin, s.pipCorner, s.pipSizePercent, s.pipMargin]
+})(), [true, true, true, "bottom-left", 60, 0])
+
+// ---- 3. geometry (4.4). The only place multi-monitor correctness can come
+// from on a machine with one monitor.
+
+check("pipGeometry: every fixture box, on monitors that mostly do not exist here",
+  pipFixture.GEOMETRY.map(function (row) { return row.why + " -> " + JSON.stringify(Model.pipGeometry(pipFixture.MONITORS[row.monitor], row.opts)) }),
+  pipFixture.GEOMETRY.map(function (row) { return row.why + " -> " + JSON.stringify(row.box) }))
+// Not just the numbers: the invariants every box must satisfy whatever the
+// monitor. A box outside the usable rectangle is one under the bar or off the
+// screen edge, and neither is visible in a unit test's output.
+check("pipGeometry: every box is integral, even-sided and inside the usable rectangle",
+  pipFixture.GEOMETRY.filter(function (row) { return row.box !== null }).map(function (row) {
+    const m = pipFixture.MONITORS[row.monitor]
+    const g = Model.pipGeometry(m, row.opts)
+    const lw = Math.abs(m.transform % 2) === 1 ? Math.round(m.height / m.scale) : Math.round(m.width / m.scale)
+    const lh = Math.abs(m.transform % 2) === 1 ? Math.round(m.width / m.scale) : Math.round(m.height / m.scale)
+    const x0 = m.x + m.reserved[0] + row.opts.margin
+    const y0 = m.y + m.reserved[1] + row.opts.margin
+    const x1 = m.x + lw - m.reserved[2] - row.opts.margin
+    const y1 = m.y + lh - m.reserved[3] - row.opts.margin
+    return [g.x, g.y, g.w, g.h].every(function (v) { return typeof v === "number" && v === Math.floor(v) })
+      && g.w % 2 === 0 && g.h % 2 === 0
+      && g.x >= x0 && g.y >= y0 && g.x + g.w <= x1 && g.y + g.h <= y1
+  }),
+  pipFixture.GEOMETRY.filter(function (row) { return row.box !== null }).map(function () { return true }))
+check("pipGeometry refuses a monitor it cannot measure rather than guessing",
+  [null, undefined, {}, { width: 0, height: 768, scale: 1 }, { width: "abc", height: "x", scale: 1 }, { width: 1366, height: 768, scale: 0 }].map(function (m) { return Model.pipGeometry(m, { corner: "top-right", sizePercent: 30, margin: 16 }) }),
+  [null, null, null, null, null, { x: 940, y: 16, w: 410, h: 230 }])
+// A geometry that reached the builder must still be four integers in range.
+check("pipBox is the gate between computed and dispatchable",
+  [Model.pipBox({ x: 1, y: 2, w: 3, h: 4 }), Model.pipBox({ x: 1, y: 2, w: 0, h: 4 }), Model.pipBox({ x: 1e9, y: 2, w: 3, h: 4 }), Model.pipBox({ x: "1", y: 2, w: 3, h: 4 }), Model.pipBox(null)],
+  [{ x: 1, y: 2, w: 3, h: 4 }, null, null, { x: 1, y: 2, w: 3, h: 4 }, null])
+
+// ---- 4. resolving the window (4.2)
+
+const pipClients = function (list) { return JSON.stringify(list) }
+check("pipFindWindow: one match carries the window's whole state",
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.otherApp, pipFixture.CLIENTS.tiled]), pipFixture.PLAYER_PID),
+  { ok: true, reason: "", address: pipFixture.PLAYER_ADDRESS, at: [690, 38], size: [650, 718], floating: false, pinned: false, monitor: 0, workspaceId: 1, tags: ["default-opacity"], pip: false })
+// PLY-RST-11, reproduced: a user's own mpv --wayland-app-id=omarchy-iptv
+// makes the class match twice. Floating, shrinking, pinning and moving a
+// stranger's window is damage, not a nuisance.
+check("PLY-RST-11: with a foreign window of the same class, the pid picks ours",
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.foreign, pipFixture.CLIENTS.tiled]), pipFixture.PLAYER_PID).address,
+  pipFixture.PLAYER_ADDRESS)
+check("pipFindWindow refuses rather than guessing", [
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.foreign]), pipFixture.PLAYER_PID).reason,
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.tiled, pipFixture.CLIENTS.twin]), pipFixture.PLAYER_PID).reason,
+  Model.pipFindWindow(pipClients([]), pipFixture.PLAYER_PID).reason,
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.otherApp]), pipFixture.PLAYER_PID).reason,
+  Model.pipFindWindow("{not json", pipFixture.PLAYER_PID).reason,
+  Model.pipFindWindow(null, pipFixture.PLAYER_PID).reason,
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.tiled]), 0).reason,
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.tiled]), "not a pid").reason,
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.badAddress]), pipFixture.PLAYER_PID).reason
+], ["no_window", "ambiguous", "no_window", "no_window", "bad_clients", "bad_clients", "no_pid", "no_pid", "bad_address"])
+check("pipFindWindow takes an already-parsed array too, because the service has one",
+  Model.pipFindWindow([pipFixture.CLIENTS.tiled], pipFixture.PLAYER_PID).address, pipFixture.PLAYER_ADDRESS)
+// G-11: a rule-applied tag reads back with a trailing asterisk, a dispatched
+// one does not. Without the strip, `default-opacity*` and `iptv-pip` would
+// compare as different kinds of thing and the PiP tag could be missed.
+check("4.2 rule 5: a trailing asterisk on a rule-applied tag is stripped, and ours is found either way", [
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID).tags.join(","),
+  Model.pipFindWindow(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID).pip,
+  Model.pipActive({ ok: true, floating: true, tags: ["iptv-pip*"] }),
+  Model.pipActive({ ok: true, floating: true, tags: ["iptv-pip"] })
+], ["default-opacity,iptv-pip", true, true, true])
+// 4.8: a window the user popped themselves carries no tag of ours, so `p`
+// reads it as "enter", not "exit".
+check("4.8: the tag is what says the PiP is ours", [
+  Model.pipActive(Model.pipFindWindow(pipClients([pipFixture.CLIENTS.userPopped]), pipFixture.PLAYER_PID)),
+  Model.pipActive(Model.pipFindWindow(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID)),
+  Model.pipActive(Model.pipFindWindow(pipClients([pipFixture.CLIENTS.tiled]), pipFixture.PLAYER_PID)),
+  // SUPER+T while in PiP: the tag survives but the window is tiled again, so
+  // the next `p` puts it back in the corner rather than only clearing a tag.
+  Model.pipActive({ ok: true, floating: false, pinned: false, tags: ["iptv-pip"] }),
+  Model.pipActive({ ok: false, reason: "no_window", tags: ["iptv-pip"], floating: true })
+], [false, true, false, false, false])
+check("pipResolveIntent: an explicit mode wins, a toggle reads the live state", [
+  Model.pipResolveIntent("on", { ok: true, floating: true, tags: ["iptv-pip"] }),
+  Model.pipResolveIntent("off", { ok: true, floating: false, tags: [] }),
+  Model.pipResolveIntent("toggle", { ok: true, floating: true, tags: ["iptv-pip"] }),
+  Model.pipResolveIntent("toggle", { ok: true, floating: true, tags: [] }),
+  Model.pipResolveIntent("", null)
+], ["on", "off", "off", "on", "on"])
+
+// ---- 5. the plan (4.3 as PIP10 corrects it)
+
+const pipLive = function (patch) {
+  const base = { ok: true, address: pipFixture.PLAYER_ADDRESS, at: [690, 38], size: [650, 718], floating: false, pinned: false, tags: [] }
+  for (const key in patch) base[key] = patch[key]
+  return base
+}
+// Steps are compared by verb + the integers, which is what the order rule is
+// about; the full expression text is pinned in section 1 above.
+const pipVerbs = function (steps) {
+  return steps.map(function (argv) {
+    const expr = argv[2] || ""
+    const call = expr.substring(0, expr.indexOf("("))
+    const args = expr.replace(/^[^,]*/, "").replace(/ \}\)$/, "").replace(/^, /, "")
+    return args === "" ? call : call + " " + args
+  }).join(" | ")
+}
+const pipGeo = { x: 940, y: 42, w: 410, h: 230 }
+
+check("4.3 enter from a tiled window: float, resize, move, pin, raise, tag",
+  pipVerbs(Model.pipPlan(pipLive({}), null, pipGeo, "on")),
+  "hl.dsp.window.float | hl.dsp.window.resize x = 410, y = 230 | hl.dsp.window.move x = 940, y = 42 | hl.dsp.window.pin | hl.dsp.window.alter_zorder mode = \"top\" | hl.dsp.window.tag tag = \"+iptv-pip\"")
+// PIP10 is the whole point of these two: `action` is ignored, so a float step
+// issued at an already-floating window would UNFLOAT it and a pin step at an
+// already-pinned one would unpin it. The condition is the feature.
+check("PIP10 enter from an already floating window: no float step, or it would unfloat it",
+  pipVerbs(Model.pipPlan(pipLive({ floating: true }), null, pipGeo, "on")),
+  "hl.dsp.window.resize x = 410, y = 230 | hl.dsp.window.move x = 940, y = 42 | hl.dsp.window.pin | hl.dsp.window.alter_zorder mode = \"top\" | hl.dsp.window.tag tag = \"+iptv-pip\"")
+check("PIP10 enter from the user's own SUPER+O (floating AND pinned): neither toggle is issued",
+  pipVerbs(Model.pipPlan(pipLive({ floating: true, pinned: true }), null, pipGeo, "on")),
+  "hl.dsp.window.resize x = 410, y = 230 | hl.dsp.window.move x = 940, y = 42 | hl.dsp.window.alter_zorder mode = \"top\" | hl.dsp.window.tag tag = \"+iptv-pip\"")
+
+const pipSnapFloating = { active: true, at: [300, 300], size: [900, 500], floating: true, pinned: false, monitor: 0, workspace: 1, v: 1 }
+const pipSnapTiled = { active: true, at: [690, 38], size: [650, 718], floating: false, pinned: false, monitor: 0, workspace: 1, v: 1 }
+const pipInPip = pipLive({ floating: true, pinned: true, at: [940, 42], size: [410, 230], tags: ["iptv-pip"] })
+
+check("4.3 exit to a window that was floating: untag, unpin, then put the rectangle back",
+  pipVerbs(Model.pipPlan(pipInPip, pipSnapFloating, pipGeo, "off")),
+  "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.resize x = 900, y = 500 | hl.dsp.window.move x = 300, y = 300")
+check("4.3 exit to a window that was tiled: untag, unpin, unfloat, and let the layout take it",
+  pipVerbs(Model.pipPlan(pipInPip, pipSnapTiled, pipGeo, "off")),
+  "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float")
+check("4.5 exit with NO snapshot degrades to unpin and unfloat, never to stuck",
+  [pipVerbs(Model.pipPlan(pipInPip, null, pipGeo, "off")),
+   pipVerbs(Model.pipPlan(pipInPip, { active: false, v: 1 }, pipGeo, "off")),
+   pipVerbs(Model.pipPlan(pipInPip, "{not json", pipGeo, "off"))],
+  ["hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float",
+   "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float",
+   "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float"])
+check("4.8 exit after the user unfloated it themselves: no float toggle, or PiP would come back",
+  pipVerbs(Model.pipPlan(pipLive({ floating: false, pinned: false, tags: ["iptv-pip"] }), pipSnapTiled, pipGeo, "off")),
+  "hl.dsp.window.tag tag = \"-iptv-pip\"")
+check("4.8 exit after the user unpinned it themselves: no unpin step",
+  pipVerbs(Model.pipPlan(pipLive({ floating: true, pinned: false, tags: ["iptv-pip"] }), pipSnapTiled, pipGeo, "off")),
+  "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.float")
+check("4.8 exit when the window was ALREADY pinned before PiP: we unpin only what we pinned",
+  pipVerbs(Model.pipPlan(pipInPip, { active: true, at: [300, 300], size: [900, 500], floating: true, pinned: true, v: 1 }, pipGeo, "off")),
+  "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.resize x = 900, y = 500 | hl.dsp.window.move x = 300, y = 300")
+// The ordering rule, stated as a rule rather than trusted to the five cases
+// above: pin never comes after float in any exit plan, on any input.
+check("4.3 order: unpin ALWAYS precedes unfloat, because unfloating a pinned window clears the pin itself",
+  [pipSnapFloating, pipSnapTiled, null, { active: false }].map(function (snap) {
+    return [true, false].map(function (floating) {
+      return [true, false].map(function (pinned) {
+        const steps = pipVerbs(Model.pipPlan(pipLive({ floating: floating, pinned: pinned, tags: ["iptv-pip"] }), snap, pipGeo, "off"))
+        const pin = steps.indexOf("hl.dsp.window.pin")
+        const unfloat = steps.indexOf("hl.dsp.window.float")
+        return pin === -1 || unfloat === -1 || pin < unfloat
+      }).join("")
+    }).join("")
+  }).join(" "),
+  "truetruetruetrue truetruetruetrue truetruetruetrue truetruetruetrue")
+check("pipPlan emits nothing at all rather than half a plan", [
+  Model.pipPlan({ ok: false, reason: "no_window" }, null, pipGeo, "on").length,
+  Model.pipPlan(pipLive({ address: "0xnope" }), null, pipGeo, "on").length,
+  Model.pipPlan(pipLive({}), null, null, "on").length,
+  Model.pipPlan(pipLive({}), null, { x: 1e9, y: 0, w: 10, h: 10 }, "on").length,
+  Model.pipPlan(null, null, pipGeo, "on").length,
+  // The bound design 4.10 sets: at most 8 steps, ever.
+  Model.pipPlan(pipLive({}), null, pipGeo, "on").length <= 8
+], [0, 0, 0, 0, 0, true])
+// A snapshot arrives from the player over a socket. Every field is
+// re-validated before any of it can reach an expression.
+check("4.5 a snapshot with a hostile or unusable field degrades the exit instead of dispatching it",
+  [{ active: true, at: ["0x1\"); os.execute(\"x", 0], size: [410, 230], floating: true },
+   { active: true, at: [1.5, 2], size: [410, 230], floating: true },
+   { active: true, at: [1, 2], size: [1e9, 230], floating: true },
+   { active: true, at: [1, 2], size: [0, 0], floating: true },
+   { active: true, at: [1], size: [410, 230], floating: true },
+   { active: true, floating: true }].map(function (snap) { return pipVerbs(Model.pipPlan(pipInPip, snap, pipGeo, "off")) }),
+  ["hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float",
+   "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float",
+   "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float",
+   "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float",
+   "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float",
+   "hl.dsp.window.tag tag = \"-iptv-pip\" | hl.dsp.window.pin | hl.dsp.window.float"])
+
+// ---- 6. the snapshot (4.5)
+
+check("pipSnapshotFor records what the window WAS, from a live read",
+  Model.pipSnapshotFor(Model.pipFindWindow(pipClients([pipFixture.CLIENTS.tiled]), pipFixture.PLAYER_PID)),
+  { active: true, at: [690, 38], size: [650, 718], floating: false, pinned: false, monitor: 0, workspace: 1, v: 1 })
+check("pipSnapshotFor of a floating window keeps the rectangle to put back",
+  Model.pipSnapshotFor(Model.pipFindWindow(pipClients([pipFixture.CLIENTS.userPopped]), pipFixture.PLAYER_PID)),
+  { active: true, at: [300, 300], size: [900, 500], floating: true, pinned: true, monitor: 0, workspace: 1, v: 1 })
+check("a window whose rectangle cannot be read is recorded as tiled, so the restore degrades instead of moving it to 0,0",
+  Model.pipSnapshotFor({ ok: true, floating: true, pinned: false, at: null, size: null, monitor: 0, workspaceId: 1 }).floating, false)
+check("pipSnapshotClear says off and nothing else", Model.pipSnapshotClear(), { active: false, v: 1 })
+check("pipParseSnapshot: what comes back out of the player, re-validated", [
+  Model.pipParseSnapshot(pipSnapFloating).at.join(","),
+  Model.pipParseSnapshot(JSON.stringify(pipSnapFloating)).size.join(","),
+  Model.pipParseSnapshot({ active: false, v: 1 }),
+  Model.pipParseSnapshot(null),
+  Model.pipParseSnapshot("not json"),
+  Model.pipParseSnapshot([1, 2, 3]),
+  Model.pipParseSnapshot({ active: true, at: [1, 2], size: [3, 4] }).floating
+], ["300,300", "900,500", null, null, null, null, false])
+
+// ---- 7. the mpv half (4.6)
+
+check("pipMpvCommands on: stop mpv resizing the box, and write the snapshot",
+  Model.pipMpvCommands("on", { live: Model.pipFindWindow(pipClients([pipFixture.CLIENTS.tiled]), pipFixture.PLAYER_PID) }),
+  [["set_property", "auto-window-resize", false],
+   ["set_property", "user-data/omarchy-iptv-pip", { active: true, at: [690, 38], size: [650, 718], floating: false, pinned: false, monitor: 0, workspace: 1, v: 1 }]])
+check("pipMpvCommands off: restore the user's own value, and clear the snapshot",
+  Model.pipMpvCommands("off", { mpvArgs: "--no-auto-window-resize --profile=low-latency" }),
+  [["set_property", "auto-window-resize", false], ["set_property", "user-data/omarchy-iptv-pip", { active: false, v: 1 }]])
+check("pipRestoreAutoResize derives the restore value from the user's own mpvArgs",
+  ["", "--profile=low-latency", "--auto-window-resize=no", "--auto-window-resize=yes", "--auto-window-resize=false",
+   "--auto-window-resize=true", "--auto-window-resize=0", "--auto-window-resize=1", "--no-auto-window-resize",
+   "--auto-window-resize", "--auto-window-resize=no --auto-window-resize=yes", "--no-auto-window-resize --auto-window-resize=yes",
+   "--auto-window-resize-nonsense=no", null, undefined].map(function (v) { return Model.pipRestoreAutoResize(v) }),
+  [true, true, false, true, false, true, false, true, false, true, true, true, true, true, true])
+check("pipRestoreAutoResize takes a token array too", Model.pipRestoreAutoResize(["--no-auto-window-resize"]), false)
+
+// ---- 8. mpv replies (4.5)
+
+check("parsePlayerReply tells a reply from an event, and never throws", [
+  Model.parsePlayerReply("{\"error\":\"success\",\"data\":{\"active\":true},\"request_id\":42}"),
+  Model.parsePlayerReply("{\"error\":\"property not found\",\"request_id\":7}"),
+  Model.parsePlayerReply("{\"event\":\"start-file\",\"playlist_entry_id\":3}"),
+  Model.parsePlayerReply("{\"event\":\"end-file\",\"error\":\"success\"}"),
+  Model.parsePlayerReply("not json at all"),
+  Model.parsePlayerReply(""),
+  Model.parsePlayerReply(null),
+  Model.parsePlayerReply("[1,2,3]"),
+  Model.parsePlayerReply("{\"error\":\"success\"}")
+], [
+  { ok: true, requestId: 42, error: "success", data: { active: true } },
+  { ok: false, requestId: 7, error: "property not found", data: null },
+  null, null, null, null, null, null,
+  { ok: true, requestId: null, error: "success", data: null }
+])
+
+// ---- 9. PIP11: the only definition of success in this feature
+//
+// The compositor answers rc 0 `ok` for a dispatch aimed at a window that does
+// not exist - all four verbs, measured - and reports a real refusal as
+// `warning:` text on stdout with rc 0. So nothing may conclude "it worked"
+// from an exit status. These are the checks that make that concrete.
+
+check("PIP11: a dispatch reply is read as a keyword, never as prose", [
+  Model.pipDispatchAccepted("ok"), Model.pipDispatchAccepted("ok\n"), Model.pipDispatchAccepted(" ok "),
+  Model.pipDispatchAccepted("warning: =[C]:-1: Window does not qualify to be pinned"),
+  Model.pipDispatchAccepted("warning: =[C]:-1: hl.focus: window not found"),
+  Model.pipDispatchAccepted("error: attempt to call a nil value"),
+  // The reason it is an equality and not a search: a step whose output
+  // carries BOTH is a refusal, and "does it contain ok" would call it a
+  // success. It judges ONE step's output - the batched `ok\n\n\nok` of G-7
+  // is deliberately not accepted, because this design dispatches one step at
+  // a time and reads the state back afterwards either way.
+  Model.pipDispatchAccepted("ok\nwarning: =[C]:-1: Window does not qualify to be pinned"),
+  Model.pipDispatchAccepted("ok\n\n\nok"),
+  Model.pipDispatchAccepted(""), Model.pipDispatchAccepted(null)
+], [true, true, true, false, false, false, false, false, false, false])
+check("PIP11: success means the window looks like what was asked for", [
+  Model.pipVerify(Model.pipFindWindow(pipClients([pipFixture.CLIENTS.inPip]), pipFixture.PLAYER_PID), "on", pipGeo),
+  // The stale-address case: every step answered `ok` and nothing moved.
+  Model.pipVerify(Model.pipFindWindow(pipClients([]), pipFixture.PLAYER_PID), "on", pipGeo),
+  Model.pipVerify(pipLive({ floating: true, pinned: true, at: [940, 42], size: [410, 230], tags: [] }), "on", pipGeo),
+  Model.pipVerify(pipLive({ floating: false, pinned: false, tags: ["iptv-pip"] }), "on", pipGeo),
+  Model.pipVerify(pipLive({ floating: true, pinned: false, tags: ["iptv-pip"] }), "on", pipGeo),
+  Model.pipVerify(pipLive({ floating: true, pinned: true, at: [932, 42], size: [410, 230], tags: ["iptv-pip"] }), "on", pipGeo),
+  Model.pipVerify(pipLive({ floating: true, pinned: true, at: [940, 42], size: [600, 338], tags: ["iptv-pip"] }), "on", pipGeo),
+  Model.pipVerify(pipInPip, "on", null)
+], [
+  { ok: true, reason: "" }, { ok: false, reason: "no_window" }, { ok: false, reason: "not_tagged" },
+  { ok: false, reason: "not_floating" }, { ok: false, reason: "not_pinned" },
+  { ok: false, reason: "wrong_position" }, { ok: false, reason: "wrong_size" }, { ok: false, reason: "bad_geometry" }
+])
+check("PIP11: and on the way out, that it went back where it came from", [
+  Model.pipVerify(pipLive({ floating: false, pinned: false, tags: ["default-opacity"] }), "off", pipSnapTiled),
+  Model.pipVerify(pipLive({ floating: true, pinned: false, at: [300, 300], size: [900, 500], tags: [] }), "off", pipSnapFloating),
+  Model.pipVerify(pipLive({ floating: true, pinned: true, at: [940, 42], size: [410, 230], tags: ["iptv-pip"] }), "off", pipSnapTiled),
+  Model.pipVerify(pipLive({ floating: true, pinned: false, tags: [] }), "off", pipSnapTiled),
+  Model.pipVerify(pipLive({ floating: false, pinned: false, tags: [] }), "off", pipSnapFloating),
+  Model.pipVerify(pipLive({ floating: true, pinned: false, at: [1, 1], size: [900, 500], tags: [] }), "off", pipSnapFloating),
+  Model.pipVerify(pipLive({ floating: false, pinned: true, tags: [] }), "off", null)
+], [
+  { ok: true, reason: "" }, { ok: true, reason: "" }, { ok: false, reason: "still_tagged" },
+  { ok: false, reason: "still_floating" }, { ok: false, reason: "not_restored" },
+  { ok: false, reason: "wrong_position" }, { ok: false, reason: "still_pinned" }
+])
+
+// ---- 10. copy and the key (section 5)
+
+check("section 5: every footer line, and nothing invented for a code that is not one",
+  ["on", "off", "nothing_playing", "no_compositor", "no_window", "dispatch_failed", "", "wrong_size", "constructor", "toString"].map(function (c) { return Model.pipStatusText(c) }),
+  ["Picture in picture on", "Picture in picture off", "Nothing playing", "Picture in picture needs Hyprland",
+   "Cannot find the player window", "Hyprland refused the window change", "", "", "", ""])
+// PIP9: the honest description is a small window that follows you. No copy in
+// this feature may say "on top", because the compositor has no such state.
+check("PIP9: no line in this feature promises always-on-top",
+  ["on", "off", "nothing_playing", "no_compositor", "no_window", "dispatch_failed"].map(function (c) { return Model.pipStatusText(c) })
+    .concat([Model.PIP_TOOLTIP_ON])
+    .filter(function (line) { return /on top|above|always/i.test(line) }), [])
+check("a verdict becomes exactly one of the six codes",
+  [Model.pipResultCode({ ok: true }, "on"), Model.pipResultCode({ ok: true }, "off"),
+   Model.pipResultCode({ ok: false, reason: "no_window" }, "on"), Model.pipResultCode({ ok: false, reason: "ambiguous" }, "on"),
+   Model.pipResultCode({ ok: false, reason: "bad_address" }, "on"), Model.pipResultCode({ ok: false, reason: "wrong_position" }, "on"),
+   Model.pipResultCode({ ok: false, reason: "not_tagged" }, "off"), Model.pipResultCode(null, "on")].map(function (c) { return c + "=" + Model.pipStatusText(c) }),
+  ["on=Picture in picture on", "off=Picture in picture off", "no_window=Cannot find the player window",
+   "no_window=Cannot find the player window", "no_window=Cannot find the player window",
+   "dispatch_failed=Hyprland refused the window change", "dispatch_failed=Hyprland refused the window change",
+   "dispatch_failed=Hyprland refused the window change"])
+check("4.10: the two refusals the guide answers by itself, before anything is dispatched", [
+  Model.pipKeyRequest({ available: false, playing: true }),
+  Model.pipKeyRequest({ available: true, playing: false }),
+  Model.pipKeyRequest({ available: true, playing: true }),
+  Model.pipKeyRequest(null),
+  Model.pipKeyRequest({})
+], [
+  { ok: false, code: "no_compositor", text: "Picture in picture needs Hyprland" },
+  { ok: false, code: "nothing_playing", text: "Nothing playing" },
+  { ok: true, code: "", text: "" },
+  { ok: false, code: "no_compositor", text: "Picture in picture needs Hyprland" },
+  { ok: false, code: "no_compositor", text: "Picture in picture needs Hyprland" }
+])
+// CLAUDE.md 12: this mapping used to be a chain of comparisons inside
+// Guide.qml, where no test could reach it. The guide now dispatches on the
+// answer, so `p` is exercised for real here.
+check("the list-mode letters, including the new one",
+  ["f", "F", "s", "S", "r", "R", "p", "P", "/", "o", "O", "a", "x", "", "pp", "1", null, undefined].map(function (t) { return Model.listLetterAction(t) }),
+  ["favorite", "favorite", "stop", "stop", "refresh", "refresh", "pip", "pip", "search", "sources", "sources", "", "", "", "", "", "", ""])
+check("section 5: the bar tooltip gains ONE line when PiP is on, and the glyph is untouched", [
+  Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: true }),
+  Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: false }),
+  Model.barTooltip({ configured: true, pip: true }),
+  // serviceMissing wins: with no service there is no PiP truth to report.
+  Model.barTooltip({ serviceMissing: true, pip: true }),
+  Model.barGlyph({ playing: true, pip: true }) === Model.barGlyph({ playing: true })
+], [
+  "Playing Sky Sports Main Event\nPicture in picture: on",
+  "Playing Sky Sports Main Event",
+  "IPTV" + SEP + "click to open the guide\nPicture in picture: on",
+  "IPTV" + SEP + "service not loaded, run omarchy restart shell",
+  true
+])
+check("section 5: `p pip` joins the list-mode hints, and is hidden where PiP cannot work", [
+  Model.footerHints({ mode: "list" }).map(function (h) { return h[0] }).join(" "),
+  Model.footerHints({ mode: "list", pipAvailable: true }).map(function (h) { return h[0] }).join(" "),
+  Model.footerHints({ mode: "list", pipAvailable: false }).map(function (h) { return h[0] }).join(" "),
+  Model.footerHints({ mode: "search", pipAvailable: true }).map(function (h) { return h[0] }).join(" ")
+], [
+  "j/k h/l Enter Space f s p r / o",
+  "j/k h/l Enter Space f s p r / o",
+  "j/k h/l Enter Space f s r / o",
+  "Enter Up/Down Left/Right Tab Esc"
+])
+
+// ---- 11. the whole round trip, as the service will run it
+//
+// Not a new rule: the same functions, wired in the order Service.qml wires
+// them, so a change that keeps every unit green while breaking the seam
+// between two of them still fails. Two toggles must return the window to
+// exactly the state it started in, which is also what the harness scenario
+// (10.3) and PIP-02 assert on real windows.
+check("the round trip: tiled -> PiP -> tiled, ending byte-identical to the start", (function () {
+  const started = pipFixture.CLIENTS.tiled
+  const live = Model.pipFindWindow(pipClients([pipFixture.CLIENTS.otherApp, started]), pipFixture.PLAYER_PID)
+  const geo = Model.pipGeometry(pipFixture.MONITORS.live, Model.pipOptions({}))
+  const snapshot = Model.pipSnapshotFor(live)
+  const enter = Model.pipPlan(live, null, geo, "on")
+  // What the compositor then reports, per the gate's own transcript.
+  const afterOn = { ok: true, address: live.address, at: [geo.x, geo.y], size: [geo.w, geo.h], floating: true, pinned: true, monitor: 0, workspaceId: 1, tags: ["default-opacity", "iptv-pip"] }
+  const onVerdict = Model.pipVerify(afterOn, "on", geo)
+  const exit = Model.pipPlan(afterOn, snapshot, geo, "off")
+  const afterOff = { ok: true, address: live.address, at: started.at, size: started.size, floating: false, pinned: false, monitor: 0, workspaceId: 1, tags: ["default-opacity"] }
+  const offVerdict = Model.pipVerify(afterOff, "off", snapshot)
+  return {
+    enter: enter.length,
+    on: Model.pipResultCode(onVerdict, "on"),
+    exit: exit.length,
+    off: Model.pipResultCode(offVerdict, "off"),
+    back: afterOff.at.join(",") + " " + afterOff.size.join(",") + " " + afterOff.floating + " " + afterOff.pinned,
+    // Not one argv item in either plan carries anything but the address,
+    // integers and the constants (PIP7 / MR10: no URL, no channel name).
+    urls: enter.concat(exit).filter(function (argv) { return /:\/\//.test(argv.join(" ")) }).length,
+    // One argv item after `dispatch` in every step - the shape the focus
+    // defect got wrong.
+    clean: enter.concat(exit).every(function (argv) { return argv.length === 3 && argv[0] === "hyprctl" && argv[1] === "dispatch" })
+  }
+})(), { enter: 6, on: "on", exit: 3, off: "off", back: "690,38 650,718 false false", urls: 0, clean: true })
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")
