@@ -102,23 +102,23 @@ class ChannelNumberSettingsTest(unittest.TestCase):
 
 
 class PictureInPictureSettingsTest(unittest.TestCase):
-    """M2-05 section 6, and the one cross-lane deadlock this wave has.
+    """M2-05 section 6, and the one cross-lane deadlock this wave had.
 
-    The three PiP keys cannot be declared here by lane V2 alone.
+    The three PiP keys could not be declared by lane V2 alone.
     tests/Model.test.js asserts the manifest and Model.SETTINGS_DEFAULTS /
     SETTING_RANGES 1:1 in BOTH directions, so a manifest key with no model
-    side turns five node checks red, and a model key with no manifest entry
-    turns the same checks red on lane V1's branch. Whichever half lands
-    first is red on its own. Both halves therefore belong in one commit,
-    with tests/Model.test.js's hard-coded "four integer settings" count
-    bumped to six in the same breath -- and all three of those files belong
-    to lane V1. See handover request 1.
+    side turned five node checks red, and a model key with no manifest entry
+    turned the same checks red on lane V1's branch. Whichever half landed
+    first was red on its own, which is ruling PIP16: two files a test
+    asserts about each other are one unit, and ownership has to follow the
+    coupling. Integration landed both halves and this file's own skip with
+    them, so every assertion below now runs.
 
-    What this lane CAN pin, and does: that the manifest never half-lands the
-    three keys, that the values are the designed ones once they are there,
-    and that Service.qml's own clamp uses exactly those ranges. The clamp is
-    the half a user feels: a range declared here and a different one clamped
-    there is a control whose ends do nothing.
+    What this pins: that the manifest never half-lands the three keys, that
+    the values are the designed ones, and that the clamp behind them uses
+    exactly those ranges. The clamp is the half a user feels: a range
+    declared here and a different one clamped there is a control whose ends
+    do nothing.
     """
 
     PIP_KEYS = ("pipCorner", "pipSizePercent", "pipMargin")
@@ -133,9 +133,6 @@ class PictureInPictureSettingsTest(unittest.TestCase):
         self.assertIn(len(in_schema), (0, 3), in_schema)
 
     def test_the_declared_values_are_the_designed_ones(self):
-        if "pipCorner" not in BY_KEY:
-            self.skipTest("PiP settings are blocked on lane V1 (Model.SETTING_RANGES); "
-                          "see the M2-05 handover, request 1")
         # PIP4: proportional defaults, top-right. pipCorner has no min/max for
         # the same reason channelOrder has none -- the schema has no enum type,
         # so an unreadable value means "top-right" on the service side.

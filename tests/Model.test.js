@@ -2515,28 +2515,24 @@ const defaulted = Model.settingsFrom(null)
 check("settings parity: the model's defaults ARE the manifest's defaults",
   Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(defaulted[key]) }),
   Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(manifestDefaults[key]) }))
-// M2-05 section 6 adds three PiP keys to the model. `manifest.json` belongs
-// to lane V2, which merges AFTER this lane (M2-05 design section 9), so for
-// one wave the model knows three settings the manifest has not declared yet.
-// They are excluded from the equality by NAME, never by a wildcard, so every
-// other key stays pinned exactly and a typo still fails. The checks above and
-// below need no exception: they walk the MANIFEST's keys, so they say nothing
-// today and hold the PiP defaults and ranges to the model the moment lane V2
-// declares them - which is the assertion that actually matters.
-const pipSettingKeys = ["pipCorner", "pipMargin", "pipSizePercent"]
-const withoutPip = function (keys) { return keys.filter(function (key) { return pipSettingKeys.indexOf(key) === -1 }).slice().sort() }
-check("settings parity: the model knows every key the manifest declares, and no others (PiP keys excepted while lane V2 is in flight)",
-  withoutPip(Object.keys(defaulted)), withoutPip(Object.keys(manifestDefaults)))
+// M2-05 section 6's three PiP keys. The design gave `manifest.json` to lane
+// V2 and this file to lane V1, so neither could declare them without turning
+// the other's gate red (ruling PIP16: two files a test asserts about each
+// other are one unit). They land together at integration, and the exception
+// that stood in for that - a by-name exclusion list here - is gone with them:
+// the equality below is total again, in both directions.
+check("settings parity: the model knows every key the manifest declares, and no others",
+  Object.keys(defaulted).slice().sort(), Object.keys(manifestDefaults).slice().sort())
 
 const integerKeys = manifestSchema.filter(function (entry) { return entry.type === "integer" }).map(function (entry) { return entry.key })
-// Was "the manifest declares exactly four integer settings". That count is
-// about to become six, in a file this lane may not open, so it is stated as
-// the property it was standing in for: every integer control the host draws
-// is one the model ranges. A dropped key still fails; a key lane V2 adds does
-// not, as long as SETTING_RANGES already knows it.
-check("settings parity: every integer setting the manifest declares is one the model ranges, numberEntryMs among them",
-  [integerKeys.filter(function (key) { return Model.SETTING_RANGES[key] === undefined }), integerKeys.indexOf("numberEntryMs") >= 0, integerKeys.length >= 4],
-  [[], true, true])
+// The count is stated AND the property it stands for: every integer control
+// the host draws is one the model ranges. The bare count catches a key
+// silently dropped from the schema (which the property below cannot see,
+// because it only walks what the manifest still declares); the property
+// catches a key declared with no clamp behind it.
+check("settings parity: every integer setting the manifest declares is one the model ranges, all six of them",
+  [integerKeys.filter(function (key) { return Model.SETTING_RANGES[key] === undefined }), integerKeys.indexOf("numberEntryMs") >= 0, integerKeys.length],
+  [[], true, 6])
 check("settings parity: SETTING_RANGES equals the manifest's own min/max/default",
   integerKeys.map(function (key) { return key + " " + JSON.stringify(Model.SETTING_RANGES[key]) }),
   manifestSchema.filter(function (entry) { return entry.type === "integer" })

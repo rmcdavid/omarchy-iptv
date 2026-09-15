@@ -33,7 +33,10 @@
       "barLabelMaxWidth": 180,
       "channelOrder": "playlist",
       "numberEntryMs": 2000,
-      "barShowChannelNumber": true
+      "barShowChannelNumber": true,
+      "pipCorner": "top-right",
+      "pipSizePercent": 30,
+      "pipMargin": 16
     },
     "schema": [
       {
@@ -103,6 +106,29 @@
         "type": "boolean",
         "label": "Show the channel number in the bar",
         "defaultValue": true
+      },
+      {
+        "key": "pipCorner",
+        "type": "string",
+        "label": "Picture-in-picture corner: top-right, top-left, bottom-right, bottom-left"
+      },
+      {
+        "key": "pipSizePercent",
+        "type": "integer",
+        "label": "Picture-in-picture width (percent of the monitor)",
+        "min": 15,
+        "max": 60,
+        "step": 5,
+        "defaultValue": 30
+      },
+      {
+        "key": "pipMargin",
+        "type": "integer",
+        "label": "Picture-in-picture margin from the screen edge (px)",
+        "min": 0,
+        "max": 200,
+        "step": 4,
+        "defaultValue": 16
       }
     ]
   },
