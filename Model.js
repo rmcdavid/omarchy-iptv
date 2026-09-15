@@ -3950,6 +3950,43 @@ function epgFields(entry, nowSec) {
   return out
 }
 
+// M2-09 GS9 / D-GS-2. Does guide data actually reach these rows?
+//
+// The rule this lane established for the second line is that it exists when it
+// carries something that VARIES, and the shipped predicate asked the wrong
+// question of the EPG: whether a URL is configured. On the subscriber's
+// provider those are different facts. One of their 3,335 channels carries a
+// `tvg-id` at all and it matches nothing in the guide data, so configuring an
+// EPG did not trade the density for now/next -- it returned a BLANK second
+// line on all 3,335 rows and took three visible rows to print white space.
+// That is the original defect in a different costume. Configured is not
+// present; this counts the rows the data can actually fill.
+//
+// Matched on the IDENTIFIER and on whether the entry holds a titled programme
+// at all -- never on what is on air right now. `epgFields` hides a `now` whose
+// stop has passed, so counting live titles would make this answer, and
+// therefore the row height, change on the 30 s clock tick and re-height the
+// list under the cursor. The trap the earlier round of this work named.
+//
+// One pass, one own-property lookup per row with a `tvg-id`, no clock.
+function epgCoverage(channels, epgMap) {
+  var list = asList(channels)
+  var map = epgMap && typeof epgMap === "object" ? epgMap : {}
+  var out = { total: list.length, withId: 0, matched: 0, carries: false }
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    var id = row ? str(row.tvgId) : ""
+    if (id === "") continue
+    out.withId++
+    if (!Object.prototype.hasOwnProperty.call(map, id)) continue
+    var entry = map[id]
+    if (!entry || typeof entry !== "object") continue
+    if ((entry.now && str(entry.now.title) !== "") || (entry.next && str(entry.next.title) !== "")) out.matched++
+  }
+  out.carries = out.matched > 0
+  return out
+}
+
 // Backwards-compatible strings for callers that only want text.
 function formatEpgLine(entry, nowSec) {
   var f = epgFields(entry, nowSec)
@@ -4047,13 +4084,19 @@ function rowDetail(opts) {
 // EPG now/next. The predicate strictly dominates the shipped `!scopeIsGroup`:
 // exactly one cell of the truth table changes, and no shape loses a row.
 //
+// GS9: the EPG term is `epgCarries`, from `epgCoverage`, and NOT whether an
+// EPG is configured. Both halves of this predicate now ask the same question
+// -- does this line carry something that varies -- of the data rather than of
+// a setting. A guide source whose ids match nothing gives every row a blank
+// second line, which costs three visible rows and returns nothing.
+//
 // THREE parameters, and deliberately no fourth: a failure term here is what
 // made row height depend on session state, so one dead stream re-heighted a
 // whole scope mid-session under the cursor. The notice moved to the meta slot
 // (D4) precisely so this function could stop reading failures.
 function rowsHaveDetail(opts) {
   var o = opts || {}
-  return rowShowsGroup(o) || o.epgConfigured === true
+  return rowShowsGroup(o) || o.epgCarries === true
 }
 
 // Whether a row prints its group on the detail line (M2-09 D3): not inside
@@ -5933,6 +5976,7 @@ if (typeof module !== "undefined") {
     epgFraction: epgFraction,
     epgNowStale: epgNowStale,
     epgFields: epgFields,
+    epgCoverage: epgCoverage,
     formatEpgLine: formatEpgLine,
     joinParts: joinParts,
     rowDetail: rowDetail,

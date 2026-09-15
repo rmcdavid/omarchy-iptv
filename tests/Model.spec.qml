@@ -222,11 +222,14 @@ TestCase {
   function test_guideAtScaleRowsAndLabels() {
     // D3: row height is a pure function of scope kind, group axis and EPG --
     // and of nothing that changes mid-session.
-    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: false }), false)
-    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: true, epgConfigured: false }), true)
-    compare(Model.rowsHaveDetail({ scopeIsGroup: true, groupsNarrow: true, epgConfigured: false }), false)
-    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: true }), true)
-    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: false, anyFailed: true }), false)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: false }), false)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: true, epgCarries: false }), true)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: true, groupsNarrow: true, epgCarries: false }), false)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: true }), true)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: false, anyFailed: true }), false)
+    // GS9: the setting alone heights nothing. Guide data that reaches the rows
+    // does, and that is a fact about the data, not about a field being filled.
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: true }), false)
     compare(Model.rowShowsGroup({ scopeIsGroup: false, groupsNarrow: false }), false)
     compare(Model.rowShowsGroup({ scopeIsGroup: false, groupsNarrow: true }), true)
     compare(Model.rowShowsGroup({ scopeIsGroup: true, groupsNarrow: true }), false)
@@ -257,6 +260,36 @@ TestCase {
     compare(Model.footerHints({ mode: "list" })[1][1], "group")
     compare(Model.footerHints({ mode: "search", query: "", groupsNarrow: false })[2][1], "scope")
     compare(Model.footerHints({ mode: "search", query: "" })[2][1], "group")
+  }
+
+  // GS9 / D-GS-2: whether guide data reaches the rows, in the engine that
+  // decides the row height from it. Guide.qml calls this once per open, on the
+  // whole channel array, so it runs here on the shape that produced the defect.
+  function test_guideAtScaleEpgCoverage() {
+    var noIds = Model.prepareChannels([
+      { id: "u1", name: "USA FOX NEWS", group: "United States" },
+      { id: "u2", name: "US Escape", group: "United States", tvgId: "escape.us" }
+    ])
+    var withIds = Model.prepareChannels([
+      { id: "c1", name: "CNN", group: "News", tvgId: "cnn.us" },
+      { id: "c2", name: "No Guide Data", group: "News" }
+    ])
+    var window = ({ "cnn.us": { now: { title: "The Lead", start: 100, stop: 200 }, next: { title: "The Situation Room", start: 200 } } })
+    // The live pass's shape: an EPG is loaded and it matches nothing here, so
+    // the second line would have been blank on every row.
+    compare(Model.epgCoverage(noIds, window).carries, false)
+    compare(Model.epgCoverage(noIds, window).withId, 1)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: Model.epgCoverage(noIds, window).carries }), false)
+    // And the shape where it does reach a row.
+    compare(Model.epgCoverage(withIds, window).matched, 1)
+    compare(Model.epgCoverage(withIds, window).carries, true)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: Model.epgCoverage(withIds, window).carries }), true)
+    // Measured on the identifier, never on what is on air: an entry whose
+    // programme has already stopped still counts, so the 30 s tick can never
+    // re-height the list under the cursor.
+    compare(Model.epgFields(window["cnn.us"], 9999).nowTitle, "")
+    compare(Model.epgCoverage(withIds, window).carries, true)
+    compare(Model.epgCoverage(withIds, ({})).carries, false)
   }
 
   // GS8 / D-GS-1: the rung the two secondary slots carry, in the engine that

@@ -399,8 +399,33 @@ Item {
   // single-line row, a slot that is deliberately blank on a failed row and so
   // is free exactly when it is needed. Row height stops depending on
   // session-mutable state, which is R-C and is better than what ships.
+  //
+  // M2-09 GS9: the EPG half of this asks the data, not the setting. See
+  // `epgCarriesRows` below.
   readonly property bool rowsHaveDetail: Model.rowsHaveDetail({
-    scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows, epgConfigured: root.epgConfigured })
+    scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows, epgCarries: root.epgCarriesRows })
+
+  // M2-09 GS9 / D-GS-2. Whether guide data actually fills the second line,
+  // measured from the channel set and the loaded EPG window rather than read
+  // off `epgConfigured`. On a provider whose channels carry no `tvg-id` the
+  // configured flag is true and the line is blank on every row, which spends
+  // three visible rows on white space and is the defect D3 removed, returning
+  // in a different costume.
+  //
+  // NOT a binding, deliberately, and this is R-C rather than an optimisation.
+  // `epgMap` changes when the EPG fetch lands, when a refresh replaces the
+  // window and when a source swap clears it, and every one of those can happen
+  // while the card is on screen -- a binding here would re-height 3,335 rows
+  // under the cursor with no user action, which is the hazard D4 deleted
+  // `anyFailedInScope` to be rid of. So it is measured once, in open(), before
+  // the first frame is composed, and it does not move until the guide is
+  // opened again. A window that lands while the guide is open fills the rows
+  // it can on the next open, and nothing jumps in the meantime.
+  property bool epgCarriesRows: false
+
+  function measureEpgRows() {
+    root.epgCarriesRows = root.serviceReady && Model.epgCoverage(root.service.channels, root.epgMap).carries
+  }
 
   // The whole body decision in one object (Model.guideSurface, D-LIVE-19):
   // which empty state, whether rows and the group column exist, and the
@@ -546,6 +571,10 @@ Item {
     root.sourcesNotice = ""
     root.opened = true
     root.disarmPointer()
+    // GS9 / R-C: the shape is decided here, before the card is composed, and
+    // then held for as long as it is open -- the group axis in rebuildGroups()
+    // and whether guide data reaches the rows in this call.
+    root.measureEpgRows()
     root.rebuildDisplay()
     root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
     root.scrollToCursor()

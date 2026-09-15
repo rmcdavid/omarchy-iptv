@@ -56,9 +56,10 @@ fail=0
 # GS8 adds the contrast rung: one qml spec case, five node checks (the rung,
 # the ratios on the theme the live pass measured, the same ratios across every
 # installed theme, the notice against the channel name beside it, and the two
-# QML slots that have to ask for it).
-QML_SPEC_MIN=${QML_SPEC_MIN:-65}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1293}
+# QML slots that have to ask for it). GS9 adds one more qml spec case and six
+# node checks for the coverage the second line is decided by.
+QML_SPEC_MIN=${QML_SPEC_MIN:-66}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1299}
 PY_TESTS_MIN=${PY_TESTS_MIN:-361}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -312,6 +312,24 @@ const noGroupTitle = Model.prepareChannels([{ id: "n1", name: "A" }, { id: "n2",
 const noFavs = { version: 1, favorites: [], recents: [], lastPlayed: null }
 const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPlayed: null }
 
+// Several decisions in this lane are only half a decision until Guide.qml
+// actually asks for them, and the source is the only place a unit gate can see
+// that from -- the same pattern the player lane uses on Service.qml further
+// down this file. `qmlBlock` takes an element from its `id:` to the next one.
+const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
+function qmlBlock(id) {
+  const at = guideSource.indexOf("id: " + id + "\n")
+  if (at === -1) return ""
+  const next = guideSource.indexOf("id: ", at + 4)
+  return guideSource.slice(at, next === -1 ? guideSource.length : next)
+}
+function qmlFunction(name) {
+  const at = guideSource.indexOf("function " + name + "(")
+  if (at === -1) return ""
+  const next = guideSource.indexOf("\n  function ", at + 4)
+  return guideSource.slice(at, next === -1 ? guideSource.length : next)
+}
+
 // D1: the axis is a property of the data -- a group is a narrowing step only
 // when there is more than one, because groupChannels never emits an empty one.
 checkCall("scopeSurface axis at every real shape", function () { return [oneGroup, twoGroups, manyGroups, noGroupTitle, []].map(function (list) {
@@ -380,7 +398,7 @@ checkCall("requestedScope defers to fallbackScope everywhere else", function () 
 checkCall("rowsHaveDetail truth table, all eight combinations", function () { return [true, false].map(function (g) {
   return [true, false].map(function (n) {
     return [true, false].map(function (e) {
-      return Model.rowsHaveDetail({ scopeIsGroup: g, groupsNarrow: n, epgConfigured: e })
+      return Model.rowsHaveDetail({ scopeIsGroup: g, groupsNarrow: n, epgCarries: e })
     }).join(",")
   }).join(" | ")
 }) }, ["true,false | true,false", "true,true | true,false"])
@@ -398,15 +416,94 @@ checkCall("rowsHaveDetail never reads a failure flag", function () {
   ;[true, false].forEach(function (g) {
     [true, false].forEach(function (n) {
       [true, false].forEach(function (e) {
-        const plain = { scopeIsGroup: g, groupsNarrow: n, epgConfigured: e }
-        const failing = { scopeIsGroup: g, groupsNarrow: n, epgConfigured: e, failedAt: "07:12", anyFailed: true, failedMap: { x: "07:12" } }
+        const plain = { scopeIsGroup: g, groupsNarrow: n, epgCarries: e }
+        const failing = { scopeIsGroup: g, groupsNarrow: n, epgCarries: e, failedAt: "07:12", anyFailed: true, failedMap: { x: "07:12" } }
         answers.push(Model.rowsHaveDetail(plain) === Model.rowsHaveDetail(failing))
         Model.rowsHaveDetail(new Proxy(plain, { get: function (t, k) { reads[String(k)] = true; return t[k] } }))
       })
     })
   })
   return [answers.every(Boolean), Object.keys(reads).sort()]
-}, [true, ["epgConfigured", "groupsNarrow", "scopeIsGroup"]])
+}, [true, ["epgCarries", "groupsNarrow", "scopeIsGroup"]])
+
+// ---- GS9 / D-GS-2: the second line is decided by the data, not by a setting.
+//
+// The caveat this replaces said that configuring guide data correctly returns
+// the second line and reverses the density win. On the subscriber's provider
+// it returns it BLANK on every row: one of their 3,335 channels carries a
+// `tvg-id` at all, and it matches nothing in the guide data. Three visible
+// rows spent on white space is the defect D3 removed, wearing a different hat.
+checkCall("GS9: a configured EPG does not height a row; guide data that reaches the rows does", function () { return [
+  Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: true }),
+  Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: true }),
+  Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgCarries: false }),
+  Model.rowsHaveDetail({ scopeIsGroup: true, groupsNarrow: true, epgCarries: true })
+] }, [false, true, false, true])
+
+// The subscriber's shape at a size a test can hold: a list whose channels
+// carry no usable identifier, and one that does.
+const noTvgIds = Model.prepareChannels([
+  { id: "u1", name: "USA FOX NEWS", group: "United States" },
+  { id: "u2", name: "(PLUTO USA) Comedy Central", group: "United States" },
+  { id: "u3", name: "US Escape", group: "United States", tvgId: "escape.us" }
+])
+const matchedIds = Model.prepareChannels([
+  { id: "m1", name: "CNN", group: "News", tvgId: "cnn.us" },
+  { id: "m2", name: "BBC One", group: "UK", tvgId: "bbc1.uk" },
+  { id: "m3", name: "No Guide Data", group: "News" }
+])
+const epgWindow = { "cnn.us": { now: { title: "The Lead", start: 100, stop: 200 }, next: { title: "The Situation Room", start: 200 } } }
+checkCall("GS9: epgCoverage counts the rows guide data can fill, not the rows that exist", function () { return [
+  // the live pass's shape: an EPG is loaded, and it matches nothing here
+  Model.epgCoverage(noTvgIds, { "cnn.us": { now: { title: "The Lead" } } }),
+  // the same playlist with no guide data at all
+  Model.epgCoverage(noTvgIds, {}),
+  // one matching channel is enough: the line then carries something on a row
+  Model.epgCoverage(matchedIds, epgWindow)
+] }, [
+  { total: 3, withId: 1, matched: 0, carries: false },
+  { total: 3, withId: 1, matched: 0, carries: false },
+  { total: 3, withId: 2, matched: 1, carries: true }
+])
+checkCall("GS9: an entry with no titled programme is not coverage, and a next-only entry is", function () { return [
+  Model.epgCoverage(matchedIds, { "cnn.us": {} }).carries,
+  Model.epgCoverage(matchedIds, { "cnn.us": { now: { title: "" }, next: { title: "" } } }).carries,
+  Model.epgCoverage(matchedIds, { "cnn.us": { next: { title: "Newsnight", start: 200 } } }).carries,
+  Model.epgCoverage(matchedIds, { "cnn.us": null }).carries,
+  Model.epgCoverage(matchedIds, null).carries,
+  Model.epgCoverage(null, epgWindow),
+  Model.epgCoverage([], epgWindow).carries
+] }, [false, false, true, false, false, { total: 0, withId: 0, matched: 0, carries: false }, false])
+// The stability requirement, and the reason it is measured on the identifier:
+// `epgFields` hides a `now` whose stop has passed, so a coverage rule that
+// counted what is ON AIR would flip on the 30 s tick and re-height the list
+// under the cursor. This function takes no clock at all.
+checkCall("GS9: coverage does not expire -- the same window answers the same at any hour", function () {
+  const expired = { "cnn.us": { now: { title: "The Lead", start: 100, stop: 200 } } }
+  const later = Model.epgFields(expired["cnn.us"], 9999)
+  return [Model.epgCoverage(matchedIds, expired).carries, later.nowTitle, later.until, Model.epgCoverage.length]
+}, [true, "", "", 2])
+// A tvg-id is provider text: `constructor` and `toString` are on every object
+// and would count as coverage on a playlist that happens to use them.
+checkCall("GS9: an inherited property name is not guide data", function () { return [
+  Model.epgCoverage(Model.prepareChannels([{ id: "p1", name: "Proto", tvgId: "constructor" }, { id: "p2", name: "Str", tvgId: "toString" }]), {}),
+  Model.epgCoverage(Model.prepareChannels([{ id: "p1", name: "Proto", tvgId: "constructor" }]), { constructor: { now: { title: "Real" } } }).carries
+] }, [{ total: 2, withId: 2, matched: 0, carries: false }, true])
+// R-C, and the trap an earlier round of this work named: the verdict is taken
+// once, in open(), BEFORE the card is composed, and held while it is on screen.
+// A binding on `epgMap` would re-height every row the moment an EPG fetch
+// landed, mid-session, under the cursor -- which is exactly what deleting
+// `anyFailedInScope` was for.
+check("GS9: Guide.qml measures the coverage at open and holds it, rather than binding it", [
+  /property bool rowsHaveDetail: Model\.rowsHaveDetail\(\{[\s\S]{0,200}?epgCarries: root\.epgCarriesRows/.test(guideSource),
+  /\n  property bool epgCarriesRows: false\n/.test(guideSource),
+  (guideSource.match(/Model\.epgCoverage\(/g) || []).length,
+  (qmlFunction("measureEpgRows").match(/Model\.epgCoverage\(/g) || []).length,
+  qmlFunction("open").indexOf("root.measureEpgRows()") !== -1
+    && qmlFunction("open").indexOf("root.measureEpgRows()") < qmlFunction("open").indexOf("root.rebuildDisplay()"),
+  /epgCarries: root\.epgConfigured/.test(guideSource),
+  /readonly property bool epgCarriesRows/.test(guideSource)
+], [true, true, 1, 1, true, false, false])
 
 // D4: the mandated words come from one constant, so the two slots cannot drift.
 checkCall("rowFailedMeta and rowDetail build the failure notice from the same words", function () { return [Model.rowFailedMeta("07:12"), Model.rowDetail({ failedAt: "07:12" }), Model.rowDetail({ showGroup: true, group: "US Sports", failedAt: "07:12" }), Model.rowFailedMeta("")] },
@@ -520,16 +617,7 @@ checkCall("GS8: the notice is never less legible than the channel name beside it
   // not the weakest text on the row, and it still clears the threshold after.
 }, [[], 22])
 // Both slots the notice can land in have to ask, or the ratios above are a
-// property of a function nothing calls. Guide.qml is the only caller and the
-// source is the only place a unit gate can see that from, the way the player
-// lane already asserts about Service.qml further down this file.
-const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
-function qmlBlock(id) {
-  const at = guideSource.indexOf("id: " + id + "\n")
-  if (at === -1) return ""
-  const next = guideSource.indexOf("id: ", at + 4)
-  return guideSource.slice(at, next === -1 ? guideSource.length : next)
-}
+// property of a function nothing calls.
 check("GS8: the meta slot and the detail line both take their rung from the shipping decision", [
   /opacity: Model\.rowNoticeEmphasis\(row\.failedAt\)/.test(qmlBlock("meta")),
   /opacity: Model\.rowNoticeEmphasis\(row\.failedAt\)/.test(qmlBlock("detailText")),
