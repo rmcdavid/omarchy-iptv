@@ -41,9 +41,14 @@ fail=0
 # between a fifth and a half of each suite could have stopped executing with
 # the gate still green. Raised to what M2-03 leaves behind. Raise a floor when
 # you add tests; never lower one to make a run green.
-QML_SPEC_MIN=${QML_SPEC_MIN:-58}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1180}
-PY_TESTS_MIN=${PY_TESTS_MIN:-347}
+#
+# M2-05 integration raises all three to exactly what the suites now run, so a
+# suite that stops executing even one case is red here rather than quietly
+# smaller. Adding a test means bumping the number in the same commit; that is
+# the intended cost.
+QML_SPEC_MIN=${QML_SPEC_MIN:-61}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1248}
+PY_TESTS_MIN=${PY_TESTS_MIN:-356}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
