@@ -263,6 +263,38 @@
       "record": { "id": "t:bbc2.uk", "name": "BBC Two", "at": 1758000123 }
     }
   ],
+  "playerProbe": {
+    "_comment": [
+      "`player probe` stdout: what the helper WRITES and what Model.parsePlayerProbe",
+      "READS, as one document instead of two hand-written copies.",
+      "M2-05 made this load-bearing. The service takes the window-owning mpv pid",
+      "from `probe.pid` and refuses picture in picture without it (addressing by",
+      "class alone would float, shrink and pin a stranger's mpv, PLY-RST-11), and",
+      "it reads it DEFENSIVELY - notePlayerPid ignores anything that is not a",
+      "positive integer. So a helper that stopped emitting `pid`, or renamed it,",
+      "would not raise anything anywhere: the pid would stay 0 and the p key would",
+      "answer `Nothing playing` while a channel was plainly playing. Both sides run",
+      "this vector, so the key name is a contract rather than a coincidence:",
+      "tests/test_player.py asserts a REAL probe emits exactly these keys with a",
+      "pid that is the player's own, and tests/Model.test.js asserts the parser",
+      "reads them back.",
+      "`claimed` is emitted but not parsed - the shell does not act on it - which",
+      "is why `parsed` names every field the model does produce rather than",
+      "mirroring the reply key for key."
+    ],
+    "reply": {
+      "ok": true, "kind": "player.probe", "running": true, "responsive": true,
+      "pid": 301706, "idle": false, "mpvVersion": "mpv 0.41.0",
+      "stash": { "schema": 1, "playing": true, "id": "t:bbc1.uk", "name": "BBC One HD", "group": "UK", "launchedFrom": "g:uk", "sourceKey": "a1b2c3d4", "since": 1758000123, "entryId": 2, "seq": 41 },
+      "owner": { "schema": 1, "pid": 301706, "startTime": "9912345", "at": 1758000100 },
+      "seq": 41, "claimed": true
+    },
+    "keys": ["claimed", "idle", "kind", "mpvVersion", "ok", "owner", "pid", "responsive", "running", "seq", "stash"],
+    "parsed": {
+      "valid": true, "running": true, "responsive": true, "pid": 301706,
+      "idle": false, "seq": 41, "stashId": "t:bbc1.uk", "ownerPid": 301706
+    }
+  },
   "stopLadder": [
     { "name": "idle -> quit over IPC, then the quit grace", "stage": "", "action": "quit", "signal": 0, "waitMs": 2000 },
     { "name": "quit ignored -> SIGTERM, then the kill grace", "stage": "quit", "action": "term", "signal": 15, "waitMs": 2000 },

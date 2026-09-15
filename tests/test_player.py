@@ -1424,6 +1424,34 @@ class ProbeTest(PlayerTestCase):
         for secret in (PASSWORD, TOKEN, "/live/", "stale title"):
             self.assertNotIn(secret, stdout + stderr, secret)
 
+    def test_the_probe_emits_the_pid_key_the_shell_addresses_the_window_by(self):
+        # M2-05. The service takes the window-owning mpv pid from here and
+        # refuses picture in picture without it, because addressing by class
+        # alone would float, shrink, move and pin a stranger's
+        # `mpv --wayland-app-id=omarchy-iptv` (PLY-RST-11). It reads the value
+        # DEFENSIVELY - anything not a positive integer is ignored - so a
+        # helper that dropped or renamed this key would raise nothing at all:
+        # the pid would stay 0 and `p` would answer "Nothing playing" over a
+        # channel that is plainly playing.
+        #
+        # The shared vector is what closes that: the key set asserted here is
+        # the object tests/Model.test.js runs the parser over, so a rename on
+        # either side of the JS/Python boundary turns both suites red.
+        fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))["playerProbe"]
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        self.start(props={"mpv-version": "mpv 0.41.0", "idle-active": False},
+                   user_data={"omarchy-iptv": self.stash()})
+        code, payload, _, stderr = run("player", "probe", "--socket", self.sock,
+                                       "--ipc-timeout", "1", "--owner-pid", str(os.getpid()))
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(sorted(payload), sorted(fixture["keys"]))
+        self.assertEqual(payload["pid"], idle.pid)
+        self.assertIs(type(payload["pid"]), int)
+        # And the vector the parser is fed is the same document, key for key.
+        self.assertEqual(sorted(fixture["reply"]), sorted(fixture["keys"]))
+        self.assertEqual(fixture["parsed"]["pid"], fixture["reply"]["pid"])
+
     def test_the_owner_claim_is_written_only_with_owner_pid(self):
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()

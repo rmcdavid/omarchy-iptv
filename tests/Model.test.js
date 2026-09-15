@@ -745,7 +745,27 @@ check("playerStash without an id is not a record", [Model.playerStash(null), Mod
 check("playerStash defaults are empty, never undefined", Model.playerStash({ id: "t:x" }), { schema: 1, playing: true, id: "t:x", name: "", group: "", launchedFrom: "", sourceKey: "", since: 0, entryId: null, seq: 0, verb: "" })
 // A v0.3.0 player is still out there with a stash that predates the field.
 check("playerStash reads a record written before the writer was named", Model.playerStash({ id: "t:x", seq: 3 }).verb, "")
-const probeBody = JSON.stringify({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 301706, idle: false, seq: 41, claimed: true, mpvVersion: "mpv 0.41.0", stash: { schema: 1, playing: true, id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 }, owner: { schema: 1, pid: 301706, startTime: "9912345", at: 1758000100 } })
+// The probe reply is the SHARED vector now (fixtures/player-argv.json), not a
+// copy written here: tests/test_player.py asserts a real `player probe` emits
+// exactly these keys, so a helper that renamed `pid` turns both suites red.
+// It matters beyond tidiness since M2-05 - the service takes the window-owning
+// pid from here and reads it defensively, so a missing key would not throw,
+// it would silently answer "Nothing playing" to the `p` of a playing channel.
+const probeFixture = playerFixture.playerProbe
+const probeBody = JSON.stringify(probeFixture.reply)
+check("parsePlayerProbe: a live player, from the shared vector",
+  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid } })(),
+  probeFixture.parsed)
+check("parsePlayerProbe: the pid M2-05 addresses the window by survives every shape the helper can send it in", [
+  Model.parsePlayerProbe(probeBody).pid,
+  Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { pid: 0 }))).pid,
+  Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { pid: null }))).pid,
+  Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { pid: "301706" }))).pid,
+  (() => { const bare = Object.assign({}, probeFixture.reply); delete bare.pid; return Model.parsePlayerProbe(JSON.stringify(bare)).pid })(),
+  probeFixture.keys.indexOf("pid") >= 0
+], [301706, null, null, 301706, null, true])
+check("parsePlayerProbe: the fixture's own reply declares every key the helper emits",
+  Object.keys(probeFixture.reply).slice().sort(), probeFixture.keys.slice().sort())
 check("parsePlayerProbe: a live player", (() => { const p = Model.parsePlayerProbe(probeBody); return [p.valid, p.running, p.responsive, p.pid, p.idle, p.seq, p.stash.launchedFrom, p.stash.entryId, p.owner.pid] })(), [true, true, true, 301706, false, 41, "g:uk", 2, 301706])
 check("parsePlayerProbe: nothing running", (() => { const p = Model.parsePlayerProbe(JSON.stringify({ ok: true, kind: "player.probe", running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 3 })); return [p.valid, p.running, p.pid, p.idle, p.stash, p.seq] })(), [true, false, null, null, null, 3])
 check("parsePlayerProbe never throws: garbage, truncated, wrong kind, error reply, empty", [
