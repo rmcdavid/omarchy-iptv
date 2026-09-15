@@ -4218,3 +4218,377 @@ this lane may not.
 Two defects are filed against released software: **D-PIP-1 (P2)**, the dead
 focus command and its inverted test, which PIP8 already assigns to lane V1 this
 wave; and **D-PIP-3 (P3)**, the translucent player, which PIP5 keeps separate.
+
+## M2-05 picture-in-picture LIVE pass on 5e3a374 (QA, 2026-09-14, 22:30 - 23:00)
+
+Task M2-05-06. The whole PIP- matrix of
+`docs/M2-05-PICTURE-IN-PICTURE.md` 10.4 was run against a player **started
+through the plugin**, plus the four questions the brief added: restore from
+both starting states, the three warned-about cases, what the user actually
+sees on a failure, and the released-software defect this wave repaired. This
+lane wrote only this file. Every dispatch in this pass named either the
+plugin's own player window or a window this lane started itself; the user's
+window was never sent a state-changing instruction until the closing focus
+restore, which put focus back where it began.
+
+**Bottom line.** The feature works, and it works for the reason the design
+says it does: read-then-act. The three restore paths - from tiled, from
+user-floated, from user-popped float+pin - all put the window back byte for
+byte, which is the case the gate's G-3 failure predicted would break a blind
+implementation. The channel change, the theme switch, the user-dragged box,
+the foreign same-class window and the stop-while-in-PiP cases all pass. Three
+new defects, none of them in the dispatch path: one P2 reporting defect after
+a shell restart, one P3 left behind by the focus repair, and one P3 coverage
+gap in the harness the work plan counts as lane V2's acceptance. Two
+documented limitations came out different from expected, both in the honest
+direction.
+
+### Environment
+
+| Fact | Value |
+|---|---|
+| Repo under test | `5e3a374`, branch `main`, tree clean |
+| Installed copy during the pass | detached at `5e3a374`, fetched from the local repo; `omarchy plugin validate .` rc 0 |
+| Installed copy before and after | `5d1a27e` (v0.3.1), `* main 5d1a27e [origin/main]`, porcelain empty |
+| Hyprland | 0.56.2, `configProvider: lua` (line 68 of `hyprctl systeminfo`), signature `efb50993..._1789339912_1242840277` |
+| Monitor | `eDP-1`, 1366x768, scale 1, transform 0, reserved `[0, 26, 0, 0]`, x 0 y 0, id 0 |
+| mpv | v0.41.0 |
+| Shell | quickshell 1943634 -> 2043920 -> 2047679 -> 2065245 -> 2066537 -> 2071249 (five restarts: one to install the code under test, one as PIP-05, three during the restore) |
+| Source | iptv-org.github.io, 1474 channels on disk, 28 groups, theme Retropc |
+| Channels used | `t:CookingPanda.us@SD` (decodes 1024x576), `t:ReutersTV.us@SD` (decodes 1920x1080) |
+| Player window | class `omarchy-iptv`, pid 2045335, address `0x559c6713d0b0` (later 2055289) |
+| Evidence root | `/tmp/claude-1000/omarchy-iptv-qa13/` - opening/closing clients, monitors, workspaces, layers, status, the snapshot tree and its sha256 manifests, twelve screenshots, two harness logs |
+
+### 1. The feature does what section 1 promises
+
+| Case | Verdict | Evidence |
+|---|---|---|
+| PIP-01 `pip on` from a tiled player | **PASS** | `at [940, 42] size [410, 230] float True pin True tags ['default-opacity*', 'iptv-pip']` - exactly `Model.pipGeometry`'s computed `(940, 42) 410x230`, the value the gate corrected from the document's `(932, 42)`. The user's other window reflowed to full width `[12, 38] 1342x718`, identical to the opening capture: the box really is out of the layout |
+| It follows you across workspaces | **PASS** | Active workspace driven 1 -> 2 -> 3 -> 1 with `hl.dsp.focus({ workspace = ... })`; the client's `workspace.id` followed each time with `at [940, 42] size [410, 230] pin True` unchanged. `shot-02-pip-on-ws2.png` shows the box rendering video on an otherwise empty workspace 2 |
+| PIP-02 `pip off` from a tiled origin | **PASS** | Both windows compared field by field against the pre-PiP capture: `SAME com.anthropic.Claude`, `SAME omarchy-iptv` (`[690, 38] 650x718 float False pin False`), tag gone |
+| PIP-10 guide over the PiP box | **PASS** | The guide is a level-3 layer (`eDP-1 level 3 omarchy-iptv 0 0 1366 768`) and draws above the box (`shot-05-after-p.png`); `Esc` closed it and the box was untouched, `pip.on` still true |
+| PIP-14 one window throughout | **PASS** | The plugin's own `omarchy-iptv` client count was 1 at every step of every case; the only time it read 2 was PIP-11, where the second was the foreign window this lane started |
+
+**The key itself, pressed for real.** `wtype p` into the guide's list mode
+(`pgrep -x hyprlock` checked clear before every keystroke, guide layer
+confirmed present each time). First press: footer reads
+**`Picture in picture on`**, window shrinks to the corner. Second press:
+footer reads **`Picture in picture off`**, window returns to the layout.
+The list-mode hint line carries `p pip` in the shipped rhythm
+(`... f favorite · s stop · p pip · r refresh · / search · o sources`,
+`shot-04-list-mode.png`). Note the hint line is elided on the left on this
+1366 px display - `j/k move` is cut off - which is pre-existing narrow-display
+behaviour, not PiP's.
+
+### 2. Restore from BOTH starting states, and a third
+
+This is the case ruling PIP10 exists for: the compositor ignores the `action`
+argument, so an implementation that issued a blind unset would float a tiled
+window instead of restoring it. Three starting states were set up by
+dispatching against the player's own address only, then entered and exited
+through the product:
+
+| Started as | Snapshot the plugin wrote into the player | After `pip off` |
+|---|---|---|
+| Tiled `[690, 38] 650x718` | `{"active":true,"at":[690,38],"size":[650,718],"floating":false,"pinned":false,"monitor":0,"workspace":1,"v":1}` | `[690, 38] 650x718 float False pin False` - **SAME**, and the other window retiled with it |
+| Floating, user-placed `[120, 300] 700x400`, unpinned | `floating:true, pinned:false` | `[120, 300] 700x400 float True pin False` - **SAME**. It did **not** unfloat into the layout |
+| User-popped float+pin `[713, 227] 600x340` | `floating:true, pinned:true` | `[713, 227] 600x340 float True pin True` - **SAME**, tag removed, **pin kept** because the snapshot said it was already pinned |
+
+All three restored the tag to `['default-opacity*']` alone. The snapshot is
+read out of `user-data/omarchy-iptv-pip` in the player, confirmed live over
+the socket at each step, and `pip off` leaves it `{"active": false, "v": 1}`.
+
+### 3. The three cases the gate and integration warned about
+
+**PIP-04, change channel while in PiP - PASS.** In PiP at `[940, 42]
+410x230`, zapped from a 1024x576 stream to a 1920x1080 one and sampled once a
+second for twelve seconds: `at [940, 42] size [410, 230]` on **every** sample,
+tags intact. `video-params/w,h` confirmed `1024x576 -> 1920x1080` and
+`media-title` confirmed `Reuters (1080p)`. Ruling PIP14's property is really
+written: `auto-window-resize` read back `False` while in PiP and `True` again
+after `pip off`, with no `mpvArgs` set. The snapshot survived the
+`loadfile ... replace` byte-identical - G-6 proven on the live player, not
+only headless.
+
+**PIP-05, restart the shell while in PiP - PART PASS, one new P2.** The
+window half is perfect: `omarchy restart shell` with the box in the corner
+left both windows **SAME** on class, at, size, floating, pinned, tags, pid and
+address, and the snapshot inside the player survived
+(`{"active":true,"at":[690,38],...}`) along with `auto-window-resize:false`.
+The next `p` correctly **exited** and restored `[690, 38] 650x718` tiled. But
+the plugin never re-derives the state: `status.pip.on` read `false` on all
+**30** one-second samples after the restart while the window was demonstrably
+in PiP, and the accepted request's reply said `"was":false`. Design 4.7 step 3
+("read `hyprctl -j clients` and look for `floating && pinned && tag`") is not
+implemented, and PIP-05's own acceptance - "within 2 s the guide reports PiP
+on" - is unmet. Filed as D-PIP-4 below.
+
+**PIP-06, move or resize the box yourself - PASS, and it does not fight you.**
+Two sub-cases, both sensible:
+
+```
+in PiP at [940, 42] 410x230
+user drags/resizes to [180, 420] 520x300
+`pip on` again      -> [940, 42] 410x230, and the snapshot is UNCHANGED
+                       ({"at":[690,38],"size":[650,718]}) - a second `on`
+                       re-snaps the box and does not overwrite the restore point
+user drags again to [-35, 425] 600x340 (deliberately off the left edge)
+`p` (toggle)        -> EXIT to [690, 38] 650x718 tiled, the true original,
+                       not the stale box and not the dragged rectangle
+```
+
+**PIP-07 in both orders - PASS.** Enter PiP, then the user unfloats and
+unpins it themselves, then `pip off`: ends `[690, 38] 650x718 float False pin
+False`, tag removed, no inverted state. And the reverse - a window the user
+popped with float+pin and that carries no `iptv-pip` tag - is read as
+**enter**, not exit, exactly as 4.8 says.
+
+**PIP-09 theme switch while in PiP - PASS.** `omarchy theme set Nord` then
+back to `Retropc`: `at [940, 42] size [410, 230] float True pin True tags
+[..., 'iptv-pip']` identical through both switches. G-12 holds against the
+product, not only against hand-dispatched state.
+
+**PIP-11 foreign same-app-id window - PASS.** A second
+`mpv --wayland-app-id=omarchy-iptv` (started by this lane, pid 2053730) made
+the `omarchy-iptv` client count 2, the PLY-RST-11 shape. A full `pip off` /
+`pip on` cycle left it **byte-identical** on at, size, floating, pinned and
+tags, as it did the user's own window. Pid narrowing works.
+
+**PIP-08 stop while in PiP - PASS.** `stop` -> the plugin's player window
+count 1 -> 0 within 0.5 s, `playing/up/pipOn` all false, no floating leftover.
+
+**Multi-monitor - NOT ESTABLISHED.** One output, `eDP-1`. `card1-DP-1`,
+`card1-HDMI-A-1` and `card1-HDMI-A-2` exist but nothing is attached and this
+lane has no second display to attach honestly. Documented limitation 3 stands
+unchanged.
+
+**G-5 (a pasted static float rule) - STILL UNSETTLED.** Unchanged from the
+gate: settling it needs a write under `~/.config/hypr`, which `CLAUDE.md`
+"Never touch" forbids this lane and which the brief did not authorise. Ruling
+PIP17 already covers it.
+
+### 4. What the user sees when it cannot do what was asked
+
+The compositor still reports success for instructions aimed at windows that
+do not exist. Re-confirmed read-only against the address of a player killed a
+moment earlier:
+
+```
+hl.dsp.window.tag({ window = "address:0x559c6713d0b0", tag = "+zz-qa13" })   rc=0  ok
+hl.dsp.window.move({ window = "address:0x559c6713d0b0", x = 10, y = 10 })    rc=0  ok
+hl.dsp.window.float({ window = "address:0x559c6713d0b0", action="toggle" })  rc=0  ok
+stray zz-qa13 tag anywhere afterwards: 0
+```
+
+D-PIP-2's premise holds and the implementation is right to verify by readback.
+What the user actually meets:
+
+| Situation | What the user sees | Recovers? |
+|---|---|---|
+| Player dies mid-PiP, `p` pressed at once | Desktop toast `Stream failed - "Reuters (1080p)" did not play - Playback stopped unexpectedly`; the row marks `Failed 22:47 - Space to retry`; no PiP footer line (`shot-10-failure.png`) | Yes |
+| `p` with nothing playing | Footer `Nothing playing` (`shot-11-nothing-playing.png`); IPC `{"ok":false,...,"code":"nothing_playing","error":{"code":"nothing_playing"}}` | Yes - the next press is clean, nothing compounds |
+| `pip zzz` | IPC `{"ok":false,...,"code":"bad_mode"}`; no footer line, deliberately - `bad_mode` has no entry in `Model.pipStatusText` | Yes |
+| `pip on` in the gap between play and the window mapping | `nothing_playing` - the pid gate answers before the window question is asked | Yes |
+
+`no_window` and `dispatch_failed` were **not reachable from outside**. Both a
+timed race at play and a bounded burst of twenty `pip toggle` calls fired
+immediately after `kill -9` on the player were answered `nothing_playing` on
+the **first** attempt: the plugin's own liveness gate closes those codes off
+faster than a user could press a key. Recorded as unsettled by observation
+rather than claimed - forcing a refused dispatch would need a source change,
+which this lane may not make. `status.pip.reason` was `""` in every state
+observed, including after the kill.
+
+### 5. D-PIP-1, the released defect, confirmed fixed on a real window
+
+`Model.focusPlayerArgv()` in the installed copy under test emits
+`["hyprctl","dispatch","hl.dsp.focus({ window = \"class:omarchy-iptv\" })"]`.
+A/B with focus parked on a window this lane started, the player window
+present:
+
+```
+focus BEFORE: qa13-probe 0x559c68918460
+
+$ hyprctl dispatch focuswindow class:omarchy-iptv          # as shipped in v0.3.0/v0.3.1
+rc=7  error: [string "return hl.dispatch(focuswindow class:omarchy-..."]:1: ')' expected near 'class'
+focus AFTER : qa13-probe 0x559c68918460                    <- still a no-op
+
+$ hyprctl dispatch 'hl.dsp.focus({ window = "class:omarchy-iptv" })'   # what the fix emits
+rc=0  ok
+focus AFTER : omarchy-iptv 0x559c6713d0b0                  <- focus moved
+```
+
+And through the product, not only the command: with focus on this lane's own
+window, the guide was opened and `Enter` pressed on the playing row - the
+`play(key, keepOpen=false)` path at `Service.qml:525` - the guide closed and
+`hyprctl -j activewindow` reported `omarchy-iptv 0x559c6713d0b0`. **The focus
+command moves focus again.** The PiP box was untouched by it.
+
+### 6. The two documented limitations
+
+**Limitation 2, "another floating window you focus afterwards can cover it" -
+could NOT be reproduced, in the honest direction.** Three attempts against a
+floating window this lane started and placed over the box at `[860, 20]
+500x320`:
+
+| Attempt | Result |
+|---|---|
+| `hl.dsp.focus` onto the covering floating window | PiP box still drawn on top (`shot-07-covered.png`) |
+| `hl.dsp.window.alter_zorder({ mode = "top" })` on the covering window | PiP box still on top (`shot-08-raised.png`) |
+| Fullscreen the covering window (`fullscreen: 2`, with `binds:allow_pin_fullscreen` `{"bool":false,"set":false}`) | PiP box still on top, over a full-screen window that had hidden the bar (`shot-09-fullscreen.png`) |
+
+On this compositor a **pinned** floating window sits above the rest of the
+floating stack and above a fullscreen window. The README's limitation is
+therefore more pessimistic than what this machine does, which is the safe
+direction to be wrong in - it promises less than it delivers. It should not be
+rewritten to promise always-on-top (PIP9 forbids that, and Hyprland still has
+no such state), but it is worth recording that no covering could be provoked
+here. This also answers PIP-12, which the design left as observation only.
+
+**Limitation 1, "reports itself unavailable rather than half working" -
+PARTLY SETTLED, the compositor half honestly unsettled.** The positive arm is
+proven live: `hyprctl systeminfo` line 68 reads `configProvider: lua`, the
+service's one probe answers `available: true`, and everything above worked.
+The negative arm cannot be settled against a real compositor without
+reconfiguring the user's - which the brief forbids - so it was settled as far
+as it can be, at the service level, by running the existing harness scenario
+with its documented provider override
+(`OMARCHY_IPTV_PIP_PROVIDER=hyprlang scripts/dev-harness/pip-scenario.sh live`,
+a stub `hyprctl` on PATH and its own `XDG_RUNTIME_DIR`, so it cannot reach the
+real compositor):
+
+```
+FAIL the service never decided PiP was available    <- available stayed false, as intended
+PASS P2: the answer is a refusal
+FAIL P2: named nothing_playing                      <- it refused for the EARLIER reason, no_compositor
+PASS P2: and it issued no dispatch at all
+```
+
+So on a provider whose dispatch language the plugin does not speak, the
+feature is taken off the offer, the verb refuses, and **no dispatch is issued
+at all** - it does not half-work. That a real hyprlang Hyprland behaves the
+same way remains untested and stays a documented limitation.
+
+### 7. Usability, on this 1366x768 display
+
+| Question | Finding |
+|---|---|
+| The defaults | 30 % of width, top-right, 16 px margin -> `410x230` at `(940, 42)`. That is 9 % of the screen area. `shot-01-pip-on.png`: the video is comfortably legible, on-screen station text ("FOLLOW THE SHOW @localbrewtv") is readable, and the box clears the 26 px bar with 16 px to spare. **Recommend keeping PIP4's proportional defaults unchanged.** Omarchy's own 600x338 would be 44 % of this screen in both axes and would sit on top of half the working area |
+| The corner | Top-right is the right default here: the bar's right cluster is clock and tray, not content, and the tiling layout's newest window enters from the right, so the box lands where the eye already is. No change recommended |
+| Is the transition jarring? | No. Sampled every ~120 ms through an enter, the compositor reports exactly **two** states: the tiled baseline at t+0.06 s and the final `[940, 42] 410x230 float True pin True` tagged box at t+0.19 s. No intermediate "floating at the default 960x540, centred" state is observable in the product - the gate saw one only because it stepped the six dispatches by hand with a read between each. Whole-request wall clock including the IPC round trip: **0.81 s** |
+| Does the footer tell you what happened? | Yes, and in the user's words: `Picture in picture on` / `Picture in picture off` / `Nothing playing`, each for 3 s (`Guide.transientMs`). No toast, per UX 6.4 - correct, the effect is on screen already |
+| Anything missing | After a shell restart the bar tooltip does not say `Picture in picture: on` even when it is - see D-PIP-4. And for roughly the first second after a shell restart `pip.available` reads `false` while the two availability probes are still in flight, so a `p` pressed immediately would answer `Picture in picture needs Hyprland` rather than "not ready yet". Both were observed; the second is cosmetic |
+
+### 8. Privacy and hygiene
+
+| Check | Result |
+|---|---|
+| `status \| grep -c '://'` | **0** |
+| `pip toggle` reply `\| grep -c '://'` | **0** |
+| `journalctl --user -t omarchy-shell --since -60min \| grep iptv \| grep '://'`, excluding QML `file:///` paths | **0** |
+| Any `hl.dsp` string in the journal | **0** - no dispatch string is logged at all |
+| Console hygiene | 58 repeats of `WARN scene: QML MouseArea at .../Guide.qml[2437:19]: Cannot anchor to an item that isn't a parent or sibling.` This is **not** PiP's: `git log -L 2420,2445:Guide.qml` puts that MouseArea in `22996f4` (M2-03 numeric zap). Pre-existing noise, recorded here because this pass is the first to count it |
+
+### 9. New defects
+
+> **D-PIP-4, P2.** After a shell restart while in picture in picture, the
+> plugin never re-derives the state from the compositor. `status.pip.on` read
+> `false` on all 30 one-second samples while the window was demonstrably
+> floating, pinned and carrying `iptv-pip`; the bar tooltip's
+> `Picture in picture: on` line therefore never appears; and the next
+> accepted request replies `"was":false`. Design 4.7 step 3 specifies the
+> read and PIP-05 makes "within 2 s the guide reports PiP on" an acceptance
+> criterion - neither holds. **Behaviour is not affected**: the request path
+> takes a fresh read before planning, so `p` still exits correctly and
+> restores the true rectangle. This is a reporting defect: what the plugin
+> *says* about its own state is wrong until the user acts. Fix: run the same
+> `pipReadClients` + `Model.pipActive` pair once on `onPlayerAttached`, which
+> is where 4.7 already puts the snapshot read.
+
+> **D-PIP-5, P3.** The D-PIP-1 repair fixed the spelling and left the
+> selector. `Model.focusPlayerArgv()` still emits
+> `hl.dsp.focus({ window = "class:omarchy-iptv" })` - class only - while PiP
+> itself refuses to act on anything but a pid-narrowed address (4.2, and
+> `docs/QA-PLAYER.md:124` records the reproduced two-client case). With a
+> foreign `mpv --wayland-app-id=omarchy-iptv` present, the focus command
+> focused the **stranger's** window 3 times out of 3. Focusing a stranger's
+> window is a nuisance rather than damage, which is why this is P3 and not
+> P2, but it is the same shape of bug the wave was opened to fix, in the same
+> function. Fix: focus by the address `Model.pipFindWindow` already resolves,
+> and refuse when the match is ambiguous.
+
+> **D-PIP-6, P3 (coverage).** The live half of
+> `scripts/dev-harness/pip-scenario.sh` does not pass on this machine: 63
+> PASS, 11 FAIL, every failure cascading from `FAIL P3: the service learned
+> the player pid from the player itself` - the harness's fake player never
+> yields a non-zero pid, so the geometry, ordering, address, readback and
+> key-path assertions (P4, P5, P6, P8) all assert about nothing.
+> `scripts/check.sh:212` runs only `pip-scenario.sh check-tree`, the
+> preflight, so this is invisible to the gates, and the file's own header
+> already says the live half had never been run. The work plan makes
+> "Harness scenario passes headless against a stub `hyprctl`" M2-05-04's
+> acceptance criterion, so that criterion is currently unmet. Everything the
+> eleven checks would have proven **was** proven for real in sections 1-3
+> above, which is why this is P3 and not a release blocker.
+
+### 10. Machine and desktop restored
+
+| Item | Proof |
+|---|---|
+| `~/.config/omarchy/shell.json` | sha256 identical to the opening snapshot |
+| `~/.local/state/omarchy-iptv/` | every file sha256 identical; tree and modes identical (`700` dir, `600` state.json); watched for 20 s afterwards and not rewritten |
+| `~/.cache/omarchy-iptv/` | every file sha256 identical; tree and modes identical |
+| Installed plugin | back on `5d1a27e`, `* main 5d1a27e [origin/main]`, porcelain empty, the temporary `refs/qa13/under-test` deleted (0 refs left), and **all 93 files sha256-identical** to the opening manifest |
+| Repo | `git status --porcelain` empty, branch `main`, `5e3a374` |
+| Shell | restarted; plugin answers `status` `"ready"`, 1474 channels, 28 groups, 7 recents, 0 favorites, `lastUpdated 13:24` - matching the opening capture field by field. `pip` verb answers `Function not found.`, which is itself proof the pre-PiP v0.3.1 copy is what is installed |
+| Player | `pgrep -x mpv` empty; every window this lane started killed **by pid** |
+| Theme | `omarchy theme current` -> `Retropc` |
+| Windows | opening capture 1 client, closing capture 1 client, compared on class/at/size/floating/pinned/workspace/monitor/tags: **SAME** (`com.anthropic.Claude [12, 38] 1342x718 float False pin False ws 1`) |
+| Focused workspace | opening ws 1 -> closing ws 1, **SAME**; workspace list `[(1, 1)] -> [(1, 1)]`, **SAME** |
+| Focused window | `0x559c687e09a0` -> `0x559c687e09a0`, **SAME** |
+| Probe tags | `grep -cE 'iptv-pip\|iptv-probe\|zz-qa13\|"b1"\|"b2"'` over all clients -> **0** |
+
+Two honest notes on the restore, both worth writing down because the next
+live lane will hit them.
+
+*The refresh.* Three of this pass's five shell restarts triggered the
+plugin's overdue playlist refresh (`refreshMinutes` 360, last fetch 13:24),
+which each time rewrote the cache to 1472 channels - upstream had dropped two
+entries - and bumped the source's `channelCount` and `fetchedAt` inside
+`state.json`. That refresh was due and would have happened without this pass.
+It was resolved by letting the last refresh finish, *then* writing the user's
+bytes back, then watching for 25 s to confirm nothing rewrote them. Disk and
+the running shell now both report the opening numbers: `ready`, 1474
+channels, 28 groups, 7 recents, 0 favorites, `lastUpdated 13:24`.
+
+*The swap.* Restoring the cache by `rm -rf` on the directory and copying the
+tree back put the running plugin into `loading` with 0 channels and it stayed
+there for 40 s of polling: the `FileView` was watching an inode that no
+longer existed and never recovered. Restarting the shell fixed it, and the
+final restore was done by overwriting the three files **in place**, which the
+plugin picked up without complaint. A live lane that swaps a watched
+directory under a running shell and then walks away leaves the user with an
+empty guide. Overwrite the files; do not replace the directory.
+
+### Verdict
+
+**GO for release, with D-PIP-4 fixed first.**
+
+The feature is sound where it is hardest to be sound. Every restore path was
+exercised from a real starting state rather than assumed, and the one the
+gate warned about - already floating - is the one that would have broken a
+blind implementation and does not break this one. The channel change, the
+theme switch, the dragged box, the foreign window and stop-while-in-PiP all
+hold. The defect the wave repaired in released software now demonstrably
+moves focus on a real window, through the real product path.
+
+D-PIP-4 is small and it is not in the dispatch path, but it falsifies a
+promise the design makes in writing (4.7) and an acceptance criterion the
+matrix states (PIP-05), and the wrong answer is the one a script polling
+`status` would act on. It is an hour of work in the place 4.7 already
+specifies. D-PIP-5 and D-PIP-6 can follow the release; neither risks a
+user's windows.
+
+Zero P1. One P2 (D-PIP-4). Two P3 (D-PIP-5, D-PIP-6). D-PIP-3, the
+translucent player, remains open on its own terms per PIP5 and was visible
+throughout this pass without ever mattering to PiP.
