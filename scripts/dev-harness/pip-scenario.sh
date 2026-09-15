@@ -258,6 +258,12 @@ live() {
   seed_stub 1
   export STUB_HYPRCTL_STATE="$STUB_STATE"
   export STUB_HYPRCTL_LOG="$STUB_CALLS"
+  # PIP15: the provider decides the spelling ONCE, and there is only one
+  # spelling. Overriding this to `hyprlang` therefore does not exercise a
+  # legacy path - there is none - it exercises the refusal: the service reads
+  # the provider, finds a compositor whose dispatch language it does not
+  # speak, and takes PiP off the offer. P1 below asserts the lua case, so an
+  # override makes P1 fail on purpose; run it only to watch the refusal.
   export STUB_HYPRCTL_PROVIDER=${OMARCHY_IPTV_PIP_PROVIDER:-lua}
   export HYPRLAND_INSTANCE_SIGNATURE=${HYPRLAND_INSTANCE_SIGNATURE:-harness}
 
