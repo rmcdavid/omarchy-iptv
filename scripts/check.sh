@@ -46,9 +46,15 @@ fail=0
 # suite that stops executing even one case is red here rather than quietly
 # smaller. Adding a test means bumping the number in the same commit; that is
 # the intended cost.
-QML_SPEC_MIN=${QML_SPEC_MIN:-61}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1249}
-PY_TESTS_MIN=${PY_TESTS_MIN:-357}
+#
+# M2-09 raises the two suites this lane adds to, and closes the drift that had
+# crept into all three: node was floored at 1249 against 1258 actually run, and
+# python at 357 against 361, so either suite could have lost nine cases and
+# stayed green. Floors are again exactly what the suites run. This lane adds no
+# python test; its 361 is the existing suite, floored honestly.
+QML_SPEC_MIN=${QML_SPEC_MIN:-64}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1287}
+PY_TESTS_MIN=${PY_TESTS_MIN:-361}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}

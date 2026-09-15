@@ -69,6 +69,15 @@ Item {
   property int rowCount: 0
   property bool truncated: false
   property var scopeList: []
+  // M2-09 D1: the one measured fact about the group axis, taken from the same
+  // pass that builds the column. `narrows` is false when there is a single
+  // group, because that group IS All and choosing it is not a step.
+  //
+  // The default is `narrows: true` -- the shipped surface, never a value
+  // invented from `undefined` (CLAUDE.md rule 10). If the axis ever failed to
+  // resolve before the first frame, the failure mode would be the v0.5.0
+  // layout collapsing once, not a wrong layout that stays.
+  property var groupAxis: ({ count: 0, narrows: true, soleGroup: "" })
   property string groupSignature: ""
   // The column only needs recomputing when channels or the user state
   // change, not on every keystroke.
@@ -465,7 +474,11 @@ Item {
     var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form,
       hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null,
       // M2-05 section 5: `p pip` only where it can do something.
-      pipAvailable: root.pipAvailable })
+      pipAvailable: root.pipAvailable,
+      // M2-09 D6: the h/l pair is never dropped -- the key still rings
+      // Recent / Favorites / All -- but it stops naming an axis that is not
+      // on screen. `scope` and `group` are the same five characters.
+      groupsNarrow: root.groupAxis.narrows })
     var out = []
     for (var i = 0; i < pairs.length; i++) {
       out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
@@ -555,6 +568,7 @@ Item {
   function rebuildGroups() {
     if (!root.serviceReady) {
       root.scopeList = []
+      root.groupAxis = { count: 0, narrows: true, soleGroup: "" }
       groupModel.clear()
       root.groupSignature = ""
       root.groupsDirty = true
@@ -567,11 +581,18 @@ Item {
     // never on a keystroke, so digit entry stays on the per-key budget either
     // way.
     if (!root.chnoApi) root.fallbackChnoIndex = Model.buildChnoIndex(root.service.channels)
-    var entries = Model.scopeEntries(root.service.channels, root.service.userState)
+    // M2-09 D1: one pass over the channel array produces both the column and
+    // the axis. Asking "how many groups" separately would pay groupChannels
+    // twice on the guide's most expensive path. R-C: this is where the shape
+    // is decided, and rebuildDisplay calls it before the rows are resolved, so
+    // nothing about the layout moves once the card is on screen.
+    var surface = Model.scopeSurface(root.service.channels, root.service.userState)
+    var entries = surface.entries
     var parts = []
     for (var i = 0; i < entries.length; i++) parts.push(entries[i].id + "=" + entries[i].count)
     var signature = parts.join("|")
     root.scopeList = entries
+    root.groupAxis = surface.axis
     if (signature === root.groupSignature) return
     root.groupSignature = signature
     groupModel.clear()
@@ -590,7 +611,12 @@ Item {
     // The cursor's scope may have left the column (last Recent entry
     // removed, a group gone after a refresh): move to a visible entry
     // before the rows are resolved (UX 2.2, D-LIVE-07).
-    var fallback = Model.fallbackScope(root.scopeList, root.scopeId)
+    // M2-09 D2: a deep link or a restored entry naming the sole group of a
+    // one-group playlist is asking for every channel, and that list still
+    // exists -- so it resolves to All rather than through the vanished-scope
+    // rule, which would land a subscriber with one favourite in a one-row
+    // Favorites when they asked for three thousand.
+    var fallback = Model.requestedScope(root.scopeList, root.scopeId, root.groupAxis)
     if (fallback !== root.scopeId) root.guide = Model.withScope(root.guide, fallback)
     var favorites = root.serviceReady ? root.service.userState.favorites : []
     // CN5 / 2.8: an all-digit query floats the exact number match to the top

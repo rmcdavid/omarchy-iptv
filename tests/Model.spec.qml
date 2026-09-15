@@ -181,6 +181,101 @@ TestCase {
     compare(Model.initialScope(channels, null), "all")
   }
 
+  // ---- M2-09: the guide at real provider scale ----
+  //
+  // The same pure decisions the node suite asserts, run in the engine that
+  // actually ships them. These are the functions Guide.qml's bindings call on
+  // the open path and on every cursor move, so "it works in node" is not the
+  // claim being made here.
+  function test_guideAtScaleAxisAndColumn() {
+    // The subscriber's shape: one group holding every channel. Choosing it
+    // narrows nothing, so it is not listed (GS3) -- and All is reachable when
+    // a deep link asks for it by name, even with a favourite in the column.
+    var one = Model.prepareChannels([
+      { id: "a", name: "US One", group: "United States" },
+      { id: "b", name: "US Two", group: "United States" },
+      { id: "c", name: "US Three", group: "United States" }
+    ])
+    var fav = ({ version: 1, favorites: ["a"], recents: [], lastPlayed: null })
+    var surface = Model.scopeSurface(one, fav)
+    compare(surface.axis.count, 1)
+    compare(surface.axis.narrows, false)
+    compare(surface.axis.soleGroup, "United States")
+    compare(surface.entries.length, 2)
+    compare(surface.entries[1].id, "all")
+    compare(Model.channelsForScope(one, "g:United States", fav).length, Model.channelsForScope(one, "all", fav).length)
+    compare(Model.requestedScope(surface.entries, "g:United States", surface.axis), "all")
+    compare(Model.fallbackScope(surface.entries, "g:United States"), "favorites")
+    // Two groups is a real choice, so nothing changes.
+    var many = Model.scopeSurface(channels, userState)
+    compare(many.axis.narrows, true)
+    compare(many.axis.count, 5)
+    compare(many.axis.soleGroup, "")
+    compare(many.entries[3].kind, "header")
+    compare(JSON.stringify(many.entries), JSON.stringify(Model.scopeEntries(channels, userState)))
+    // A playlist with no group-title at all collapses to one synthesised
+    // group and is caught without a special case.
+    compare(Model.scopeSurface(Model.prepareChannels([{ id: "x", name: "X" }]), null).axis.narrows, false)
+    compare(Model.scopeSurface([], null).axis.count, 0)
+  }
+
+  function test_guideAtScaleRowsAndLabels() {
+    // D3: row height is a pure function of scope kind, group axis and EPG --
+    // and of nothing that changes mid-session.
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: false }), false)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: true, epgConfigured: false }), true)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: true, groupsNarrow: true, epgConfigured: false }), false)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: true }), true)
+    compare(Model.rowsHaveDetail({ scopeIsGroup: false, groupsNarrow: false, epgConfigured: false, anyFailed: true }), false)
+    compare(Model.rowShowsGroup({ scopeIsGroup: false, groupsNarrow: false }), false)
+    compare(Model.rowShowsGroup({ scopeIsGroup: false, groupsNarrow: true }), true)
+    compare(Model.rowShowsGroup({ scopeIsGroup: true, groupsNarrow: true }), false)
+    // D4: one set of words, two slots, so they cannot drift apart.
+    compare(Model.rowFailedMeta("07:12"), "Failed 07:12 · Space to retry")
+    compare(Model.rowDetail({ failedAt: "07:12" }), Model.rowFailedMeta("07:12"))
+    compare(Model.rowDetail({ showGroup: true, group: "US Sports", failedAt: "07:12" }), "US Sports · Failed 07:12 · Space to retry")
+    compare(Model.rowFailedMeta(""), "")
+    // D5 / GS4: the count becomes a position exactly when the list overflows.
+    compare(Model.scopeLabel("all", "", 3335), "All · 3,335 channels")
+    compare(Model.scopeLabel("all", "", 3335, { index: 1203, rows: 3335, overflows: true }), "All · 1,204 of 3,335")
+    compare(Model.scopeLabel("all", "sky", 8), "in All · 8 matches")
+    compare(Model.scopeLabel("all", "sky", 2227, { index: 13, rows: 200, overflows: true }), "in All · 14 of 200")
+    compare(Model.scopeLabel("all", "", 12, { index: 3, rows: 12, overflows: false }), "All · 12 channels")
+    // GS5: the position is spoken last, after the failure state.
+    compare(Model.rowAccessibleName({ name: "Comedy Central", failedAt: "07:12", rowIndex: 1203, rowCount: 3335 }),
+      "Comedy Central, failed, row 1,204 of 3,335")
+    compare(Model.rowAccessibleName({ name: "Comedy Central" }), "Comedy Central")
+    // D6: the verb follows the axis; an absent flag keeps the shipped wording.
+    compare(Model.footerHints({ mode: "list", groupsNarrow: false })[1][1], "scope")
+    compare(Model.footerHints({ mode: "list", groupsNarrow: true })[1][1], "group")
+    compare(Model.footerHints({ mode: "list" })[1][1], "group")
+    compare(Model.footerHints({ mode: "search", query: "", groupsNarrow: false })[2][1], "scope")
+    compare(Model.footerHints({ mode: "search", query: "" })[2][1], "group")
+  }
+
+  function test_guideAtScaleRevealOffset() {
+    // D5: the fold affordance Omarchy's own picker carries, as arithmetic.
+    // 24 rows of 38 px + 4 spacing in a 456 px viewport, peek reach 25.
+    var base = {
+      itemY: 0, itemHeight: 38, contentY: 0, viewportHeight: 456,
+      originY: 0, contentHeight: 24 * 42, peek: 25, index: 5, count: 24
+    }
+    function at(over) {
+      var o = {}
+      for (var k in base) o[k] = base[k]
+      for (var j in over) o[j] = over[j]
+      return Model.revealOffset(o)
+    }
+    compare(at({ itemY: 456, contentY: 38 }), 63)          // pushed until the next row peeks
+    compare(at({ itemY: 500, contentY: 500 }), 475)        // pulled until the previous row peeks
+    compare(at({ itemY: 200, contentY: 100 }), 100)        // already revealed: no move
+    compare(at({ index: 23, itemY: 456, contentY: 38 }), 38)   // nothing below the last row
+    compare(at({ index: 0, itemY: 0, contentY: 25 }), 25)      // nothing above the first
+    compare(at({ index: 22, itemY: 1400, contentY: 500, contentHeight: 1000 }), 544)  // clamped to maxY
+    compare(at({ index: 1, itemY: 10, contentY: 5 }), 0)       // clamped to originY
+    compare(Model.revealOffset({ count: 0, contentY: 77 }), 77)
+  }
+
   function test_keyboardStateMachine() {
     var g = Model.guideState("favorites")
     compare(g.mode, "search")
