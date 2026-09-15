@@ -1063,3 +1063,45 @@ the subscriber's list the second line of every row renders one identical string
 across all 3,335 rows. Deleting it buys a third more visible rows and a quarter
 fewer page presses, at zero cost. Most of the value in this lane comes from
 taking things away.
+
+## 12. Corrections after the build (product owner, 2026-09-15)
+
+Where this document and the shipped code disagree, the code is right.
+
+- Section 3.2 wrote one binding out as interface-layer code. That is stranded
+  logic a test can only mirror, which the project rules forbid, and lifting it
+  is what let the lane actually verify the claim the change rests on: a failed
+  row's meta slot was already blank, so the notice moves into space that is
+  free exactly when it is needed.
+- The design said one function could become a wrapper so its callers stayed
+  byte-identical. Its only real caller is the guide, so that was self
+  contradictory, and the two changes had to land together. Splitting them
+  would have left a window where a deep link to a sole group falls into a
+  one-row Favourites, which is the defect the other half exists to prevent.
+- Minor re-measurements moved slightly and changed nothing: fourteen distinct
+  bracketed tokens rather than sixteen, and 1,062 stem collisions rather than
+  1,092. The refusal stands on the same footing.
+- The test floors this document named were already stale before the lane
+  started, which is its own small lesson about floors.
+
+### The caveat that matters to a user
+
+The density win is a property of an install with NO guide data. The second
+line is deleted because it renders one identical string on every row, which is
+true when there is nothing else to put there. Configure an XMLTV source and
+that line carries what is on now and next, which varies per row, so it returns
+and the visible rows go back from twelve to nine. That is correct behaviour,
+not a regression, but it means the improvement is largest for exactly the
+setup this was measured on and smaller for someone with guide data. Say so in
+the README rather than advertising a number that depends on an empty field.
+
+### A lane raised, not absorbed
+
+Opening the guide on a maximum-size playlist takes about 291 milliseconds
+against a 150 millisecond budget. It is pre-existing and this work neither
+caused nor worsened it, measuring 295 before. Ruling GS6 forbade absorbing a
+data-format change here, and the lane stopped, which was right. It also
+established that the obvious fix would not have worked: caching the group axis
+removes only about a third of the cost, and the larger half is the open path
+building the same index four times over. Worth knowing before anyone spends a
+lane on the wrong half.
