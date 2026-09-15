@@ -44,10 +44,19 @@ requests and raise the batch.
    tooltips, guide text, console, IPC output, helper stdout and stderr, **and
    the accessibility bus**. Playlist URLs carry provider credentials.
    `Model.redactUrls` exists; use it. The accessibility bus was missing from
-   this list for the life of the project and D-A11Y-1 is the result: Qt derives
-   an editable field's accessible Value from the control's `text`, so masking
-   only `Accessible.description` leaves a revealed URL and the Xtream server
-   and username publishing in full. When you add a sink, add it here.
+   this list for the life of the project and D-A11Y-1 is the result. Two things
+   publish there and both were missed:
+   - The accessible **Value**. A text-input control publishes its `displayText`;
+     any other annotated item publishes its `text`. Both matter here: the form
+     fields are the first kind, and the search line (`Guide.qml:2090`) is a
+     plain `Text` with an editable role, which is the second. Masking
+     `Accessible.description` protects neither.
+   - The **text-change event payload**. Assigning a whole new string to `text`
+     raises `TextUpdated` carrying the full plaintext in both its inserted and
+     its removed halves. It fires on every mask and every reveal, on a field
+     whose Value reads as bullets, and on an `Accessible.ignored` field, so the
+     states that look safe leak on the way into themselves.
+   When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
    `$XDG_RUNTIME_DIR/omarchy-iptv/`. Modes 0700 for directories, 0600 for files.

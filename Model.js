@@ -1074,10 +1074,39 @@ function containsAll(text, tokens) {
   return true
 }
 
+// D-SG-1: every token present as a WHOLE WORD, not as a fragment. Tokens
+// never contain spaces, so padding both sides is the whole test.
+function containsAllWords(text, tokens) {
+  var padded = " " + str(text) + " "
+  for (var i = 0; i < tokens.length; i++) {
+    if (padded.indexOf(" " + tokens[i] + " ") === -1) return false
+  }
+  return true
+}
+
 // Ranking tiers (R4 / UX 2.5). -1 no match; 0 name starts with the query;
 // 1 a word in the name starts with the query; 2 name contains every term;
-// 3 only the group carries some of the terms. Every term must occur in the
-// search key (AND semantics).
+// 3 only the group carries every term, AS WHOLE WORDS. Every term must occur
+// in the search key (AND semantics).
+//
+// D-SG-1. Tier 3 used to accept any substring of the search key, which is
+// name + " " + group. On a one-group list every key therefore ends in the same
+// words, so every FRAGMENT of the group name matched every channel: on the
+// 3,335-channel US list `st`, `sta`, `ted` and 22 other queries each reported
+// 3,335 matches against as few as 4 real ones, paged 1,533 junk rows into the
+// first 200 and fired "keep typing" when every genuine match already fitted.
+// Requiring whole words takes that list from 25 polluted queries to 0 and a
+// multi-group list from 36 to 2, while keeping the tier itself, which is the
+// only route to 1,000 event channels and 691 of 833 sports channels and so
+// earns its place on data.
+//
+// Testing the WHOLE key for the whole word is deliberate, and is the same test
+// as inspecting the group half: a token that is not a substring of the name
+// cannot be a whole word of it, and a whole-word match cannot straddle the
+// name/group junction because tokens contain no spaces. Confirmed over
+// 78,248,154 rank decisions with zero disagreements. The half-splitting helper
+// this replaces assumed the cached key is name-prefixed and silently dropped
+// every group match where it is not.
 function matchRank(key, tokens, nameKey) {
   var text = str(key)
   if (tokens.length === 0) return 2
@@ -1087,7 +1116,45 @@ function matchRank(key, tokens, nameKey) {
   if (name.indexOf(phrase) === 0) return 0
   if ((" " + name).indexOf(" " + phrase) !== -1) return 1
   if (containsAll(name, tokens)) return 2
-  return 3
+  if (containsAllWords(text, tokens)) return 3
+  return -1
+}
+
+// D-SG-1 follow-through, PO ruling SG1. Requiring whole words removes the lie
+// of "3,335 matches" but it creates a dead zone on the way to the group's own
+// name: on the one-group US list `unit` and `unite` now match nothing, while
+// every row on screen prints "United States". A bare "No matches" there is a
+// worse lie than the wrong number it replaced, because the user can see the
+// words they typed. So the guide says what is actually true: nothing is NAMED
+// that, and the group they are heading for is one keystroke further on.
+//
+// Returns the group name worth naming, or "" when there is nothing useful to
+// say. Earlier tokens must be whole words of the group; the LAST token must be
+// a strict prefix of one of its words, which is exactly "typing toward it".
+// Called only when a query matched nothing, so it never runs on a keystroke
+// that produced rows.
+function groupWordHint(query, groupNames) {
+  var tokens = tokenize(query)
+  if (tokens.length === 0) return ""
+  var names = asList(groupNames)
+  for (var i = 0; i < names.length; i++) {
+    var raw = str(names[i])
+    if (raw === "") continue
+    var words = normalizeText(raw).split(" ")
+    var ok = true
+    for (var t = 0; t < tokens.length && ok; t++) {
+      var wantPrefix = t === tokens.length - 1
+      var hit = false
+      for (var w = 0; w < words.length; w++) {
+        if (wantPrefix) {
+          if (words[w].length > tokens[t].length && words[w].indexOf(tokens[t]) === 0) { hit = true; break }
+        } else if (words[w] === tokens[t]) { hit = true; break }
+      }
+      ok = hit
+    }
+    if (ok) return raw
+  }
+  return ""
 }
 
 function favoriteSet(favorites) {
@@ -5990,6 +6057,8 @@ if (typeof module !== "undefined") {
     rowAccessibleName: rowAccessibleName,
     elide: elide,
     noMatchesTitle: noMatchesTitle,
+    groupWordHint: groupWordHint,
+    containsAllWords: containsAllWords,
     barGlyph: barGlyph,
     barTooltip: barTooltip,
     barAccessibleName: barAccessibleName,

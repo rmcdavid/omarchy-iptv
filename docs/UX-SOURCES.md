@@ -1160,9 +1160,20 @@ See 7.1; they reuse the strings above.
 6. Clipboard content is data: sanitized on arrival, never executed, never
    echoed anywhere but the field it landed in. Paste into a masked field
    replaces the value and the result is masked again before the next frame.
-7. `Accessible.description` of a URL field is the masked rendering even
-   while revealed (a screen reader never gets the query); the password
-   field sets `Accessible.passwordEdit: true` so its text is never exposed.
+7. `Accessible.description` of a URL field is the masked rendering even while
+   revealed. **That sentence used to end "a screen reader never gets the
+   query", which was false and is corrected here.** The description is masked;
+   the accessible VALUE is not, because Qt derives it from the control's own
+   display text. So a revealed URL publishes its credentials in full, and the
+   Xtream server and username, which have no mask and no eye button, publish
+   theirs always. Filed as D-A11Y-1 and unfixed: see ruling AX2 for why the
+   obvious remedy was refused.
+   The password field previously set `Accessible.passwordEdit: true`. On
+   Qt 6.11.2 that property is **inert in both directions**, measured twice by
+   different toolchains, so it promised protection it never gave and left the
+   field with no label at all. It is removed; the password now carries its
+   label explicitly. Nothing published here reaches the accessibility bus
+   today at all, because no Quickshell window publishes a tree (D-GS-3).
 8. Console: the guide logs mode changes at most, never field values (shipped
    rule R12 extended to the new input surface).
 9. `Space` / `Enter` on a source, `x` remove, and the CLI path all go through
@@ -1189,7 +1200,7 @@ See 7.1; they reuse the strings above.
 | EPG field | `Accessible.EditableText` | `EPG URL, optional`; description masked |
 | Server field | `Accessible.EditableText` | `Server URL` |
 | Username field | `Accessible.EditableText` | `Username` |
-| Password field | `Accessible.EditableText` | `Password`; `Accessible.passwordEdit: true` |
+| Password field | `Accessible.EditableText` | `Password`, set through `Accessible.description`. **Not** `passwordEdit`: inert on Qt 6.11.2, see 6.7 item 7 |
 | Eye button | `Accessible.Button` | `Show query` / `Hide query`; `Accessible.checked` = revealed |
 | Link rows | `Accessible.Button` | `Use Xtream login instead`, `Saved sources, 3` |
 | Buttons | `Accessible.Button` | `Load`, `Save`, `Cancel` |

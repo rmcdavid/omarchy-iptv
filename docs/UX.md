@@ -193,13 +193,32 @@ group with no EPG configured, rows are single-line. Row heights are in 5.2.
 | A group / All | Playlist order. Never alphabetize by default: providers and Tvheadend order channels deliberately (channel numbers, M2, will follow the same order). |
 | Favorites | Order favorited, oldest first. (Manual reordering is M2.) |
 | Recent | Most recently played first; a replay moves the entry to the top. |
-| Search results | Rank tiers, then playlist order within a tier: (1) name starts with the query, (2) a word in the name starts with the query, (3) name contains the query, (4) group name contains the query. Favorites sort first inside each tier. |
+| Search results | Rank tiers, then playlist order within a tier: (1) name starts with the query, (2) a word in the name starts with the query, (3) name contains the query, (4) the group carries every term **as whole words**. Favorites sort first inside each tier. Tier 4 changed in ruling SG1; 2.6 says what that costs. |
 
 ### 2.6 Search semantics
 
 - Case-insensitive, diacritics folded (`e` matches `e` with any accent),
   whitespace-separated terms are ANDed, each term matched against
   `name + " " + group`.
+- **A group is reachable by its WORDS, never by a fragment of one (SG1).** A
+  term that appears only in the group half must match a whole word there.
+  Without this, a list whose channels all sit in one group had every fragment
+  of that group's name match every channel: on a real 3,335-channel list, 25
+  queries reported 3,335 matches against as few as 4 real ones, paged 1,533
+  irrelevant rows onto the first page, and told the user to keep typing when
+  every genuine match already fitted on screen.
+  Three costs were measured and accepted rather than discovered later:
+  1. **Typing toward a group name passes through a dead zone.** On a one-group
+     `United States` list, `unit` and `unite` now match nothing while every row
+     on screen prints those words. A bare `No matches` there would be a worse
+     lie than the wrong number it replaced, so the empty state names the group
+     the user is heading for instead of shrugging.
+  2. **A count can grow as you type.** `sport` may report fewer rows than
+     `sports`, because the longer query completes a group word. The footer's
+     `keep typing` hint no longer implies the number only falls.
+  3. **A multi-group list loses some rows it used to show.** Measured at 44
+     queries on a real 1,833-channel list. The group column still reaches those
+     channels, and one more keystroke restores them.
 - Results are bounded to the first 200 matches (the clipboard shows 50, the
   emoji picker 1000). When more exist, the footer says
   `First 200 of 1,240 - keep typing`.
@@ -616,13 +635,13 @@ the channel name lives in the tooltip. Same three glyphs.
 | Header scope label (right) | `Style.font.caption` | opacity 0.52 |
 | Banner text | `Style.font.bodySmall` | opacity 1 |
 | Group entry name | `Style.font.body` | selected entry: `Color.menu.selectedText`, others `Color.menu.text` |
-| Group entry count | `Style.font.caption` | opacity 0.45, right aligned |
+| Group entry count | `Style.font.caption` | opacity 0.7, right aligned (was 0.45, ruling SG2) |
 | GROUPS section label | `PanelSectionHeader` defaults | -- |
 | Channel name | `Style.font.title` | `Font.Normal`; `Font.Bold` only when playing |
 | Detail line | `Style.font.bodySmall` | opacity 0.52 (menu detail) |
 | Right meta `until HH:MM` | `Style.font.caption` | opacity 0.52 |
 | Lead / trail glyphs | `Style.font.icon` | favorite star opacity 1; failed glyph opacity 0.8 |
-| Footer status and hints | `Style.font.caption` | opacity 0.45; key names at opacity 0.7 |
+| Footer status and hints | `Style.font.caption` | opacity 0.7 throughout (was 0.45 with key names at 0.7, ruling SG2) |
 | Empty-state glyph | `Style.font.displayLarge` | `Color.menu.selectedText`, opacity 0.8 |
 | Empty-state title | `Style.font.title` | opacity 0.7 |
 | Empty-state body / command | `Style.font.body` | opacity 1 for the command, 0.7 for prose |
@@ -753,8 +772,11 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 | List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - r refresh - / search - o sources` |
 | Empty states | `r retry - o sources - Esc close` (not configured, error; `r retry` is dropped when the configured value is invalid and `o sources` only when a source history exists); `Esc close` (loading). Since v0.2.0 the not-configured state is the Sources first-run form, see `UX-SOURCES.md` 1.2 and 5.3, which is authoritative for these hints |
 
-Only the key names render at the higher opacity (0.7); the verbs stay at
-0.45.
+Key names and verbs both render at opacity 0.7 (ruling SG2). **They used to
+differ, keys at 0.7 and verbs at 0.45, and that distinction is deliberately
+gone:** measured across all 23 installed theme token sets, 0.45 falls under the
+4.5:1 contrast threshold in every single one, worst 1.98:1. Losing the
+key/verb contrast is the accepted cost of the footer being readable at all.
 
 ### 6.3 Empty, loading, and error states
 

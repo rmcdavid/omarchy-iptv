@@ -1147,3 +1147,78 @@ it reads. Measure it properly, decide the rung once, and apply it everywhere.
 Two accessibility findings in one pass, neither caused by this work, both
 invisible until someone measured rather than looked. The rules were written
 down long ago; nothing had ever checked them.
+
+## 15. The rungs, measured and split (product owner, 2026-09-15)
+
+Section 14 sent the dim rung to its own item. It was measured, a fix was
+designed, and a reviewer attacked the design. The result is a split: one rung
+ships, one is refused with numbers, and two more elements turned up that the
+design had not looked at. Four ids, so each can be decided on its own evidence.
+
+The guide uses five dimness levels, 0.45, 0.52, 0.58, 0.70 and 0.80, plus full.
+Only two are named constants; the rest are bare literals. All five are
+inherited verbatim from Omarchy's own pickers, so any change makes the guide
+read differently from the menu beside it.
+
+| Id | Element | Measured | Outcome |
+|---|---|---|---|
+| **D-RUNG-1** | The 0.45 rung: footer status, footer verbs, group entry count, Sources pinned count | Under 4.5:1 in **23 of 23** themes, worst 1.98:1, median 3.17:1 | **Raised to 0.7** (ruling SG2). 23 of 23 under becomes 6 of 23 |
+| **D-RUNG-2** | The 0.52 rung: detail line, header scope label, right-hand meta | Computes under 4.5:1 in **20 of 23** themes | **Refused for now.** See below |
+| **D-RUNG-3** | The bar's idle glyph, dimmed by `Qt.darker(barFg, 1.55)` | Under 4.5:1 in **7 of 23** themes | Open, and ahead of D-RUNG-2 in the queue |
+| **D-RUNG-4** | The accent ink on the cursor row | Under 4.5:1 in **8 of 23** themes at FULL opacity | Open, tied to D-RUNG-2 |
+
+### Why one rung moved and the other did not
+
+The difference is arithmetic, not taste, and it rests on the single most
+useful measurement in this repository.
+
+`docs/QA-RESULTS.md:4720-4732` is the only place where a rendered pixel and a
+computed value have ever been compared on this project. On the reference theme
+the model computes 3.54:1 and the screen measures 4.79:1 glyph-body and 7.13:1
+peak, repeated on a second capture. **On the one case where both numbers exist,
+the model fails and the screen passes, by about 1.25 ratio points.**
+
+So the model understates. Apply that error as a margin:
+
+- 0.45 has a median of 3.17. Even 3.17 plus 1.25 is 4.42, still under the
+  threshold. The finding survives the error, so the rung moves.
+- 0.52 has a median of 3.64 to 3.80. Plus 1.25 it clears comfortably. The
+  finding does NOT survive the error, so the rung stays until somebody
+  calibrates.
+
+### What the refusal bought
+
+A per-theme contrast floor over the 0.52 rung was designed and costed. It was
+refused, and the reasons are worth keeping because they are the shape of a fix
+that passes a test while making the product worse.
+
+1. **It spends the only hierarchy the guide has left.** The
+   name-versus-secondary separation on a non-cursor row falls from a median of
+   2.86:1 to 2.24:1, and to 1.35:1 in the worst theme. There is nowhere else to
+   put that hierarchy: the installed font ships four faces and Bold already
+   means "playing", and the row height is pinned.
+2. **It would pay that on the number that is known to be wrong**, in the
+   direction that says the screen is already fine.
+3. **It leaves no margin.** After the floor all 23 themes land at exactly 4.50,
+   and the proposed test asserted 4.50. Every rendering effect nobody has
+   checked, antialiasing on a 10-pixel stem, hinting, gamma, moves the real
+   figure off that line, and the suite could not tell. Green on every layer,
+   under threshold on screen, hierarchy already spent.
+
+The next step is the calibration pass, not the fix. The method already exists
+here: sample rendered luminance off screenshots, glyph body and peak stroke,
+repeated for stability. Run it on the reference theme and one light theme at
+the caption size, then reconcile the model to the pixels or record the offset.
+Then decide the 0.52 rung with a target above 4.5, never on it.
+
+### The one the design never looked at
+
+D-RUNG-3 is the bar's idle glyph. The contrast design ruled the bar widget out
+by searching it for `opacity:` and finding none; the bar dims by a different
+mechanism entirely, one named outright in a UX row the design cited for
+something else. It is under threshold in 7 themes and it is **the only part of
+this plugin that is on screen permanently**. It goes ahead of the guide's 0.52
+rung for that reason, and it lives in a file no other item writes.
+
+Which is the same lesson as section 14, arriving by a different route: the
+measurement was not wrong, the search for what to measure was.

@@ -220,6 +220,63 @@ check("filterChannels diacritic query", Model.filterChannels(Model.prepareChanne
 check("filterChannels no match", Model.filterChannels(channels, "zzz", 10), { rows: [], total: 0, truncated: false })
 check("filterChannels bounded with total", (() => { const r = Model.filterChannels(channels, "b", 1); return [r.rows.length, r.total, r.truncated] })(), [1, 3, true])
 check("filterChannels default cap is 200", Model.MAX_ROWS_DEFAULT, 200)
+
+// ---- D-SG-1: a group is reachable by its WORDS, never by fragments ----
+// Every check below is red against the parent commit, where tier 3 accepted
+// any substring of `name + " " + group`. The shape that matters is a ONE-GROUP
+// list, which is what the subscriber's own 3,335-channel playlist is: there,
+// every search key ends in the same words, so a fragment of the group name
+// used to match every channel on the list.
+const sgOne = Model.prepareChannels([
+  { id: "s1", name: "USA STARZ", group: "United States" },
+  { id: "s2", name: "CNN HD", group: "United States" },
+  { id: "s3", name: "ESPN", group: "United States" },
+  { id: "s4", name: "STATE TV", group: "United States" }
+])
+// RED before: each of these reported all four rows.
+check("SG1 a fragment of the sole group name matches nothing by itself", Model.filterChannels(sgOne, "ted", 10).total, 0)
+check("SG1 another fragment, the one QA measured", Model.filterChannels(sgOne, "ited", 10).total, 0)
+check("SG1 a fragment that IS in some names keeps only those", Model.filterChannels(sgOne, "st", 10).rows.map(c => c.id), ["s4", "s1"])
+check("SG1 the count is the number of real matches, not the list length", Model.filterChannels(sgOne, "sta", 10).total, 2)
+// GREEN before and after: the tier still earns its place.
+check("SG1 the whole group word still reaches every channel in it", Model.filterChannels(sgOne, "united", 10).total, 4)
+check("SG1 the whole group phrase still works", Model.filterChannels(sgOne, "united states", 10).total, 4)
+check("SG1 a name match is unaffected", Model.filterChannels(sgOne, "starz", 10).rows.map(c => c.id), ["s1"])
+// A multi-group list must not lose its group tier: this is the case that
+// refuted "just drop group matching" on the subscriber's other playlist.
+const sgMany = Model.prepareChannels([
+  { id: "m1", name: "Alpha", group: "UK | SPORTS" },
+  { id: "m2", name: "Beta", group: "UK | SPORTS" },
+  { id: "m3", name: "Gamma", group: "Kids" }
+])
+check("SG1 a whole group word still selects its group", Model.filterChannels(sgMany, "sports", 10).rows.map(c => c.id), ["m1", "m2"])
+check("SG1 a fragment of a group word no longer does", Model.filterChannels(sgMany, "spor", 10).total, 0)
+check("SG1 containsAllWords is whole-word, both edges", [
+  Model.containsAllWords("usa starz united states", ["st"]),
+  Model.containsAllWords("usa starz united states", ["united"]),
+  Model.containsAllWords("usa starz united states", ["usa"]),
+  Model.containsAllWords("usa starz united states", ["states"]),
+  Model.containsAllWords("usa starz united states", ["united", "usa"]),
+  Model.containsAllWords("usa starz united states", ["united", "nope"])
+], [false, true, true, true, true, false])
+
+// ---- SG1: the dead zone whole-word matching creates, and what we say in it ----
+// Typing toward the group name now passes through queries that match nothing
+// while every visible row prints that group. A bare "No matches" there is a
+// worse lie than the number it replaced, so the guide names the group instead.
+check("SG1 hint fires while typing toward the sole group", Model.groupWordHint("unit", ["United States"]), "United States")
+check("SG1 hint fires one keystroke later too", Model.groupWordHint("unite", ["United States"]), "United States")
+check("SG1 hint is silent once the word is whole, because the query matches", Model.groupWordHint("united", ["United States"]), "")
+check("SG1 hint is silent for a query going nowhere", Model.groupWordHint("zzz", ["United States"]), "")
+check("SG1 hint is silent with no query", Model.groupWordHint("", ["United States"]), "")
+check("SG1 hint is silent with no groups", Model.groupWordHint("unit", []), "")
+check("SG1 hint needs earlier tokens to be whole words", [
+  Model.groupWordHint("united stat", ["United States"]),
+  Model.groupWordHint("unit stat", ["United States"])
+], ["United States", ""])
+check("SG1 hint picks a group on a multi-group list", Model.groupWordHint("spor", ["Kids", "UK | SPORTS"]), "UK | SPORTS")
+check("SG1 hint folds case and diacritics like the search does", Model.groupWordHint("QUE", ["Qu\u00e9bec TV"]), "Qu\u00e9bec TV")
+
 check("filterChannels default cap applied", (() => {
   const many = []
   for (let i = 0; i < 450; i++) many.push({ id: "c" + i, name: "Chan " + i, group: "G", searchKey: "chan " + i + " g" })

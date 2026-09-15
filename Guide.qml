@@ -78,6 +78,9 @@ Item {
   // resolve before the first frame, the failure mode would be the v0.5.0
   // layout collapsing once, not a wrong layout that stays.
   property var groupAxis: ({ count: 0, narrows: true, soleGroup: "" })
+  // D-SG-1 / SG1: the group names, for the no-match hint only. Measured on the
+  // same cadence as the axis, never on a keystroke.
+  property var groupNames: []
   property string groupSignature: ""
   // The column only needs recomputing when channels or the user state
   // change, not on every keystroke.
@@ -147,6 +150,8 @@ Item {
     noFavoritesTitle: "No favorites yet",
     noFavoritesProse: "Press f on any channel to pin it here",
     noMatchesAll: "Esc clears the search",
+    // SG1: what to say in the dead zone whole-word matching creates.
+    noMatchesTyping: "Keep typing for ",
     noMatchesGroup: "h/l other groups" + Model.SEP + "Home for All",
     emptyScopeTitle: "No channels in ",
     bannerPlaylist: "Playlist refresh failed (",
@@ -528,7 +533,18 @@ Item {
   })
 
   readonly property string keyColor: Util.alpha(root.foreground, 0.7).toString()
-  readonly property string verbColor: Util.alpha(root.foreground, 0.45).toString()
+  // A1 (PO ruling SG2). The verbs were 0.45, a rung NO installed theme can
+  // carry: measured across all 23 theme token sets, every one falls under the
+  // 4.5:1 threshold on at least one of the two surfaces this text sits on,
+  // worst 1.98:1, median 3.17:1. The finding survives the known error in the
+  // contrast model too, which is why this rung moves now and the 0.52 rung
+  // does not: the model reads 1.25 ratio points LOW against the one rendered
+  // measurement this project has taken (docs/QA-RESULTS.md:4720-4732), and
+  // 3.17 plus 1.25 is still 4.42, under the line.
+  // The cost, accepted: the key/verb pair collapses to one rung, so key names
+  // no longer stand out from the verbs beside them. docs/UX.md:756-757 is
+  // amended to say so.
+  readonly property string verbColor: Util.alpha(root.foreground, 0.7).toString()
   readonly property string footerHintText: {
     var empty = ""
     if (root.emptyKind === "loading") empty = "loading"
@@ -637,6 +653,7 @@ Item {
     if (!root.serviceReady) {
       root.scopeList = []
       root.groupAxis = { count: 0, narrows: true, soleGroup: "" }
+      root.groupNames = []
       groupModel.clear()
       root.groupSignature = ""
       root.groupsDirty = true
@@ -665,6 +682,15 @@ Item {
     var signature = parts.join("|")
     root.scopeList = entries
     root.groupAxis = surface.axis
+    // SG1. A one-group list publishes no group ENTRIES (scopeSurface only
+    // emits them when the axis narrows), and that is precisely the list
+    // D-SG-1 bites on, so the sole group has to come off the axis.
+    var names = []
+    if (surface.axis.soleGroup !== "") names.push(surface.axis.soleGroup)
+    for (var gi = 0; gi < entries.length; gi++) {
+      if (entries[gi].kind === "group") names.push(entries[gi].label)
+    }
+    root.groupNames = names
     if (signature === root.groupSignature) return
     root.groupSignature = signature
     groupModel.clear()
@@ -2240,7 +2266,8 @@ Item {
                       anchors.verticalCenter: parent.verticalCenter
                       text: Model.formatCount(groupRow.count)
                       color: root.foreground
-                      opacity: 0.45
+                      // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
+                      opacity: 0.7
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
                       horizontalAlignment: Text.AlignRight
@@ -2326,7 +2353,8 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   text: Model.formatCount(root.sourceCount)
                   color: root.foreground
-                  opacity: 0.45
+                  // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
+                  opacity: 0.7
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   horizontalAlignment: Text.AlignRight
@@ -2747,7 +2775,13 @@ Item {
                 return root.service.statusReason + " from " + root.service.statusHost + Model.SEP + root.copy.errorCheck
               }
               if (root.emptyKind === "noFavorites") return root.copy.noFavoritesProse
-              if (root.emptyKind === "noMatches") return root.scopeIsGroup ? root.copy.noMatchesGroup : root.copy.noMatchesAll
+              if (root.emptyKind === "noMatches") {
+                // SG1. Only reachable when nothing matched, so the hint costs
+                // nothing on a keystroke that produced rows.
+                var hint = Model.groupWordHint(root.query, root.groupNames)
+                if (hint !== "") return root.copy.noMatchesTyping + hint + Model.SEP + root.copy.noMatchesAll
+                return root.scopeIsGroup ? root.copy.noMatchesGroup : root.copy.noMatchesAll
+              }
               return ""
             }
             readonly property string command: root.copy.unconfiguredCommand
@@ -3168,9 +3202,27 @@ Item {
                   Keys.forwardTo: [formKeys]
                   Accessible.role: Accessible.EditableText
                   Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
-                  // A screen reader never gets the query (UX-SOURCES 6.7).
-                  Accessible.description: fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : ""
-                  Accessible.passwordEdit: fieldRow.fieldId === "password"
+                  // D-A11Y-1. The old comment here claimed a screen reader
+                  // never gets the query. That is true of this DESCRIPTION and
+                  // false of the accessible VALUE, which Qt derives from the
+                  // control's own display text, so a revealed URL and the
+                  // never-maskable Xtream server and username all publish in
+                  // full. Masking the value is a separate change with a real
+                  // UX cost and is NOT done here; see D-A11Y-1 and ruling AX2.
+                  // Nothing reaches the bus at all today (D-GS-3, a Quickshell
+                  // defect), so this is latent rather than live.
+                  //
+                  // The password row also had `Accessible.passwordEdit: true`.
+                  // It was inert in both directions on Qt 6.11.2, measured
+                  // twice independently by different toolchains, and its only
+                  // effect was to make the docs promise something Qt cannot
+                  // deliver. Removed. The password field had NO label at all
+                  // as a result: it is not maskable, so the description below
+                  // resolved to the empty string and the placeholder fallback
+                  // could not fire. It gets its label explicitly now.
+                  Accessible.description: fieldRow.fieldId === "password"
+                    ? root.fieldLabelText(fieldRow.fieldId)
+                    : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
                   onTextChanged: root.fieldEdited(fieldRow.fieldId, text)
                   onActiveFocusChanged: if (activeFocus) root.fieldFocused(fieldRow.fieldId)
                 }
@@ -3388,7 +3440,8 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: root.footerStatusText
             color: root.foreground
-            opacity: 0.45
+            // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
+            opacity: 0.7
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
