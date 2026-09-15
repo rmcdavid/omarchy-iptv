@@ -820,7 +820,6 @@ Item {
         root.pipFinish(true, "")
         return
       }
-      root.pipWriteMpv("off", null)
       root.pipPhase = "dispatch"
       root.pipPlanRound()
       return
@@ -843,8 +842,13 @@ Item {
       return
     }
     root.pipGeom = geom
+    // Read the windows again rather than planning against the read the
+    // monitor lookup was entered on. It costs one more process on the way in
+    // and it is what makes "decided from a fresh read" literally true of
+    // every conditional step, rather than true to within a round trip
+    // (PIP10).
     root.pipPhase = "dispatch"
-    root.pipPlanRound()
+    root.pipReadClients()
   }
 
   // One round: decide from the read we are holding, then run what it decided.
@@ -950,10 +954,16 @@ Item {
     pipStepWatchdog.stop()
     var requested = root.pipMode
     var intent = root.pipIntent
-    // The restore point is spent once the window is verifiably back. Kept on
-    // a failure, because the next `p` reads the live state and finishes or
-    // undoes the half-applied sequence, and it needs the same snapshot.
-    if (ok && intent === "off") root.pipSnapshot = null
+    // The player's record of what the window was is retired only once the
+    // window is verifiably back, and the user's own auto-window-resize goes
+    // back with it. On a FAILED exit both are kept: the window is still in
+    // the corner, so the record still describes something true, and the next
+    // `p` reads the live state and finishes or undoes the half-applied
+    // sequence using that same snapshot.
+    if (ok && intent === "off") {
+      root.pipWriteMpv("off", null)
+      root.pipSnapshot = null
+    }
     root.pipReason = ok ? "" : String(code || "")
     root.pipMode = ""
     root.pipIntent = ""
