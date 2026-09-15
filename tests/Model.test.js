@@ -377,10 +377,10 @@ check("findBarEntry null config", Model.findBarEntry(null, "x"), {})
 check("settingOf fallback", Model.settingOf({ a: null }, "a", 3), 3)
 check("clampInt parses and clamps", [Model.clampInt("15", 60, 5, 1440), Model.clampInt("x", 60, 5, 1440), Model.clampInt(2, 60, 5, 1440)], [15, 60, 5])
 // The whole settings object, pinned: a new key is only ever added here on
-// purpose. M2-03 7.1 adds the last three.
+// purpose. M2-03 7.1 added three; M2-05 section 6 adds the last three.
 check("settingsFrom applies R2 clamps and trims", Model.settingsFrom(Model.findBarEntry(barConfig, "io.github.rmcdavid.iptv")),
-  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true })
-check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true })
+  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
+check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
 check("settingsFrom null", Model.settingsFrom(null).refreshMinutes, 360)
 check("clampSetting refreshMinutes range", [Model.clampSetting("refreshMinutes", 5), Model.clampSetting("refreshMinutes", 99999), Model.clampSetting("refreshMinutes", "abc")], [15, 1440, 360])
 check("clampSetting barLabelMaxWidth range", [Model.clampSetting("barLabelMaxWidth", 10), Model.clampSetting("barLabelMaxWidth", 601)], [60, 600])
@@ -452,7 +452,100 @@ checkCall("a user who wants their screenshots elsewhere still wins (last token w
   const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] })
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
 }, true)
-check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
+// ---- D-PIP-1: focus the player, and a check that can actually fail -------
+//
+// What was here was
+//   check("focusPlayerArgv", Model.focusPlayerArgv(),
+//         ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])
+// - the expectation transcribed from the constant the function returns. It
+// passed for every one of the 1180 checks of v0.3.0 .. v0.4.0 while the
+// command it describes did nothing at all: under a Lua config provider
+// `hyprctl dispatch` wraps its argument as `return hl.dispatch(<arg>)`, so
+// two bare tokens are a Lua SYNTAX error (rc 7, `')' expected near 'class'`)
+// and focus never moved. Four call sites in Service.qml have been no-ops
+// since v0.3.0, silently, because they go out through
+// `Quickshell.execDetached`, which returns void.
+//
+// The shape of the old check is the point (CLAUDE.md 12). It did not merely
+// miss the bug: it DEFENDED it. Fixing the code correctly turned the suite
+// red, so a developer doing the right thing would have concluded they had
+// broken something and reverted. Measured in this tree: shipped builder +
+// old check = 1180 checks, 0 failures; fixed builder + old check = 1180
+// checks, 1 failure, and the failing line was the fix.
+//
+// So the replacement does not describe the argv. It RUNS it, through a
+// double of the one thing that decides whether the command works: hyprctl's
+// Lua wrapping. Every branch below is a verdict the gate measured live on
+// this machine (docs/QA-RESULTS.md, M2-05-00, G-1 and the D-PIP-1 A/B), and
+// the double is held to those verdicts by its own check, because a double
+// more forgiving than the real thing is the other half of this trap
+// (CLAUDE.md 10).
+const HYPR_DISPATCH_NAMESPACES = {
+  // Proven present, live, against the player window: G-1 and the six-step
+  // "enter" transcript. Also declared at /usr/share/hypr/stubs/hl.meta.lua
+  // :908-931 (HL.DspWindowNamespace).
+  "hl.dsp.window.float": true,
+  "hl.dsp.window.pin": true,
+  "hl.dsp.window.resize": true,
+  "hl.dsp.window.move": true,
+  "hl.dsp.window.alter_zorder": true,
+  "hl.dsp.window.tag": true,
+  // Focus sits one level UP. `hl.dsp.window.focus` is not a member:
+  // `attempt to call a nil value (field 'focus')`.
+  "hl.dsp.focus": true
+}
+
+// What this machine's hyprctl does with an argv vector. rc 7 is a Lua error
+// (a bug in OUR string); rc 0 means the compositor accepted the call - which
+// per PIP11 still says nothing about whether the window changed.
+function hyprDispatch(argv) {
+  const parts = Array.isArray(argv) ? argv.map(String) : []
+  if (parts[0] !== "hyprctl" || parts[1] !== "dispatch") return { rc: 2, error: "not a hyprctl dispatch" }
+  // hyprctl joins everything after `dispatch` and evaluates
+  // `return hl.dispatch(<joined>)`. The gate's own error text shows the
+  // join: `[string "return hl.dispatch(tagwindow +iptv-probe2 add..."]`.
+  const wrapped = parts.slice(2).join(" ")
+  if (wrapped === "") return { rc: 7, error: "parse error: empty dispatch" }
+  // A quoted string is syntactically fine and still refused at run time:
+  // `hl.dispatch: expected a dispatcher (e.g. hl.dsp.window.close())`.
+  if (/^"[^"]*"$/.test(wrapped)) return { rc: 7, error: "hl.dispatch: expected a dispatcher" }
+  const call = /^([A-Za-z_][A-Za-z0-9_.]*)\(([\s\S]*)\)$/.exec(wrapped)
+  // Anything that is not a call expression is a Lua parse error - which is
+  // what EVERY legacy dispatcher spelling is here, space or comma.
+  if (!call) return { rc: 7, error: "parse error near '" + wrapped.split(/[\s,]+/).slice(1).join(" ") + "'" }
+  if (!Object.prototype.hasOwnProperty.call(HYPR_DISPATCH_NAMESPACES, call[1])) {
+    return { rc: 7, error: "attempt to call a nil value (" + call[1] + ")" }
+  }
+  const table = /^\{ ([\s\S]*) \}$/.exec(call[2])
+  if (!table) return { rc: 7, error: "parse error: expected a table" }
+  const window = /window = "([^"]*)"/.exec(table[1])
+  return { rc: 0, ns: call[1], window: window ? window[1] : "" }
+}
+
+checkCall("D-PIP-1: the host double refuses exactly what the compositor refused in the gate, and accepts what it accepted", () => [
+  // The command this plugin shipped from v0.3.0. rc 7, focus unchanged.
+  hyprDispatch(["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"]).rc,
+  // The legacy comma spelling design 2.5 told lanes to copy. Also rc 7.
+  hyprDispatch(["hyprctl", "dispatch", "tagwindow", "+iptv-probe3,address:0x559c6893d940"]).rc,
+  // Quoting the legacy form does not rescue it.
+  hyprDispatch(["hyprctl", "dispatch", "\"focuswindow class:zz-nonexistent-qa12\""]).rc,
+  // The plausible wrong namespace - there is no hl.dsp.window.focus.
+  hyprDispatch(["hyprctl", "dispatch", "hl.dsp.window.focus({ window = \"class:omarchy-iptv\" })"]).rc,
+  // The spelling proven to move focus on this machine.
+  hyprDispatch(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"class:omarchy-iptv\" })"]).rc
+], [7, 7, 7, 7, 0])
+
+checkCall("D-PIP-1: the shipped focus command survives the host's Lua wrapping and names the player window",
+  () => hyprDispatch(Model.focusPlayerArgv()),
+  { rc: 0, ns: "hl.dsp.focus", window: "class:omarchy-iptv" })
+
+checkCall("D-PIP-1: focus goes through the same validated builder every PiP step uses, so a hand-rolled string cannot come back", () => [
+  // One argv item after `dispatch` - more than one is what broke it.
+  Model.focusPlayerArgv().length,
+  Model.focusPlayerArgv()[2] === Model.pipExpression("focus", { window: Model.PIP_CLASS_SELECTOR }),
+  // And the builder vouches for the selector: no other class gets through.
+  Model.pipExpression("focus", { window: "class:not-ours" })
+], [3, true, ""])
 
 // ---- D-PLY-11: the play fork, and the repair the evidence asked for ----
 // The fork rows record the decision Service.qml.play() makes. The third row
@@ -821,7 +914,7 @@ check("footerStatus blank without channels (loading / error)", [Model.footerStat
 check("epgNowStale", [Model.epgNowStale({ validUntil: 200 }, 100), Model.epgNowStale({ validUntil: 100 }, 100), Model.epgNowStale({}, 100), Model.epgNowStale(null, 100), Model.epgNowStale({ validUntil: "x" }, 1)], [false, true, true, true, true])
 check("footerHints search", Model.footerHints({ mode: "search", query: "" }).map(h => h[0]), ["Enter", "Up/Down", "Left/Right", "Tab", "Esc"])
 check("footerHints search with query says clear/narrow", Model.footerHints({ mode: "search", query: "x" }).slice(2), [["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]])
-check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s r / o")
+check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s p r / o")
 check("footerHints empty states (UX-SOURCES 5.3: r retry)", [Model.footerHints({ empty: "error" }), Model.footerHints({ empty: "loading" })], [[["r", "retry"], ["Esc", "close"]], [["Esc", "close"]]])
 
 // ---- player shutdown ladder (D-LIVE-17) ----
@@ -2338,9 +2431,9 @@ check("CN6.2: the (n of m) suffix appears only when m > 1", [Model.chnoStatus("e
 check("CN6.2: a commit with no name still reads as a channel", Model.chnoStatus("prefix", "10", "", 1, 1, true), "Channel 10")
 
 const hintsBase = { mode: "list", query: "" }
-const shippedList = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"], ["o", "sources"]]
+const shippedList = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["o", "sources"]]
 check("CN6.3: an unnumbered playlist gains no hint at all", Model.footerHints(hintsBase), shippedList)
-check("CN6.3: hasNumbers inserts 0-9 channel between / search and o sources", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true })), [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["r", "refresh"], ["/", "search"], ["0-9", "channel"], ["o", "sources"]])
+check("CN6.3: hasNumbers inserts 0-9 channel between / search and o sources", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true })), [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["0-9", "channel"], ["o", "sources"]])
 check("CN6.3: while typing, the hint line is the entry line and nothing else", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true, numberEntry: liveEntry })), [["0-9", "digits"], [".", "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]])
 check("CN6.3: search mode, sources and the empty states are untouched", [Model.footerHints({ mode: "search", query: "", hasNumbers: true }), Model.footerHints({ mode: "search", query: "sky", hasNumbers: true }), Model.footerHints({ mode: "list", empty: "loading", hasNumbers: true })], [[["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "group"], ["Tab", "keys"], ["Esc", "close"]], [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]], [["Esc", "close"]]])
 
@@ -2419,12 +2512,28 @@ const defaulted = Model.settingsFrom(null)
 check("settings parity: the model's defaults ARE the manifest's defaults",
   Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(defaulted[key]) }),
   Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(manifestDefaults[key]) }))
-check("settings parity: the model knows every key the manifest declares, and no others",
-  Object.keys(defaulted).slice().sort(), Object.keys(manifestDefaults).slice().sort())
+// M2-05 section 6 adds three PiP keys to the model. `manifest.json` belongs
+// to lane V2, which merges AFTER this lane (M2-05 design section 9), so for
+// one wave the model knows three settings the manifest has not declared yet.
+// They are excluded from the equality by NAME, never by a wildcard, so every
+// other key stays pinned exactly and a typo still fails. The checks above and
+// below need no exception: they walk the MANIFEST's keys, so they say nothing
+// today and hold the PiP defaults and ranges to the model the moment lane V2
+// declares them - which is the assertion that actually matters.
+const pipSettingKeys = ["pipCorner", "pipMargin", "pipSizePercent"]
+const withoutPip = function (keys) { return keys.filter(function (key) { return pipSettingKeys.indexOf(key) === -1 }).slice().sort() }
+check("settings parity: the model knows every key the manifest declares, and no others (PiP keys excepted while lane V2 is in flight)",
+  withoutPip(Object.keys(defaulted)), withoutPip(Object.keys(manifestDefaults)))
 
 const integerKeys = manifestSchema.filter(function (entry) { return entry.type === "integer" }).map(function (entry) { return entry.key })
-check("settings parity: the manifest still declares four integer settings, numberEntryMs among them",
-  [integerKeys.length, integerKeys.indexOf("numberEntryMs") >= 0], [4, true])
+// Was "the manifest declares exactly four integer settings". That count is
+// about to become six, in a file this lane may not open, so it is stated as
+// the property it was standing in for: every integer control the host draws
+// is one the model ranges. A dropped key still fails; a key lane V2 adds does
+// not, as long as SETTING_RANGES already knows it.
+check("settings parity: every integer setting the manifest declares is one the model ranges, numberEntryMs among them",
+  [integerKeys.filter(function (key) { return Model.SETTING_RANGES[key] === undefined }), integerKeys.indexOf("numberEntryMs") >= 0, integerKeys.length >= 4],
+  [[], true, true])
 check("settings parity: SETTING_RANGES equals the manifest's own min/max/default",
   integerKeys.map(function (key) { return key + " " + JSON.stringify(Model.SETTING_RANGES[key]) }),
   manifestSchema.filter(function (entry) { return entry.type === "integer" })
