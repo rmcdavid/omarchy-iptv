@@ -970,3 +970,11 @@ the shell already holds, and it is restored on exit like everything else.
 
 A feature that survives every exotic case and breaks on the ordinary one is
 not finished.
+
+## 16. Rulings PIP15 to PIP17 (product owner, 2026-09-14)
+
+| # | Ruling |
+|---|---|
+| PIP15 | The dispatch spelling is chosen ONCE, by asking the compositor which configuration provider it runs, not by trying one form and falling back on failure. The gate established that the other form is a syntax error here, so a fallback is a guaranteed second failure, and it could never fire anyway because the return code cannot tell us anything. Amend section 4.3. A fallback that cannot be triggered and would not work if it were is worse than no fallback: it reads like safety. |
+| PIP16 | My file-ownership split was wrong and this is my error, not the lane's. I gave the manifest to one lane and the test that pins the manifest against the model to the other, so the settings could not be declared by either without turning the gate red. Ownership must follow the coupling, not the subject matter: two files that a test asserts about each other are one unit. Integration lands them together. I am recording this because the ownership rule has otherwise worked well all project, and this is the shape that defeats it. |
+| PIP17 | The unsettled gate item stays unsettled and is documented as such in the contributed snippet and the README, rather than being quietly presented as compatible. We have not established that behaviour, and a snippet that implies otherwise would be us guessing on the user's behalf in their own configuration file. |
