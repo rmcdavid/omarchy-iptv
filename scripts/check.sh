@@ -216,6 +216,14 @@ step "scripts/dev-harness/pip-scenario.sh check-tree (M2-05)"
 # scattered across Service.qml, the harness fake and the stub compositor.
 # This half needs no display, no quickshell and no hyprctl -- it proves the
 # code is present, never that it works. Only the live half does that.
+#
+# D-PIP-6: the live half stays out of this gate, deliberately. It starts a
+# quickshell and a real player, and no check that runs on every commit may do
+# that on somebody's desktop. What changed is that the live half can no
+# longer fail in silence: it refuses to start on a machine that cannot run it
+# and exits 77, and scripts/qa-lib-test.sh (the step above) asserts that
+# refusal is wired in. The live half is the display lane's to run, by hand,
+# and its result belongs in docs/QA-RESULTS.md like every other live pass.
 pip_log="$CHECK_TMP/pip-scenario.log"
 if bash "$ROOT/scripts/dev-harness/pip-scenario.sh" check-tree >"$pip_log" 2>&1; then
   pip_checks=$(grep -c '^PASS' "$pip_log")

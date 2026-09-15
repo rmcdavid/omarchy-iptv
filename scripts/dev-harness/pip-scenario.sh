@@ -28,10 +28,32 @@
 #
 # STATUS OF THE LIVE HALF, stated plainly. The preflight below has been run
 # and has been seen failing against a tree without the seams. The live half
-# has NOT been run by the lane that wrote it -- that lane does not hold the
-# display, and starting the harness starts a quickshell. Until the display
-# lane runs it, these scenarios are "has a runner", not "passes". Do not
-# record them as passing on the strength of this file existing.
+# has NOT been run by any lane that wrote it -- writing it does not come with
+# the display, and starting the harness starts a quickshell. It is "has a
+# runner", not "passes". Do not record it as passing on the strength of this
+# file existing.
+#
+# D-PIP-6 is what that costs when it is left there. The live half was run by
+# QA and answered 63 PASS, 11 FAIL, every failure cascading from ONE line: it
+# played a channel whose URL is a dead local port, mpv exits within a second
+# under `--idle=once` (measured: exit status 2), and by P3 there was no
+# player left to report a pid. So P4 to P8 asserted about a window that was
+# not there. scripts/check.sh runs only `check-tree`, so nothing saw it.
+#
+# Two things changed here because of that, and only one of them is the bug:
+#
+#   * the cause. The harness now runs with `--serve`, which is what
+#     player-scenario.sh has always done: ffmpeg generates a 120 s stream,
+#     run.sh serves it on 127.0.0.1:8765 and points the fixture's "Harness
+#     Live" channel at it, and P3 plays THAT. The shell is detached, because
+#     P11 restarts it.
+#   * the silence. `requires_live` below refuses to start anything when the
+#     display or a tool it needs is missing, and exits 77 -- a SKIP with a
+#     reason, printed. A scenario that cannot run must say so; what it must
+#     never do is run sixty assertions about nothing and be quoted as
+#     coverage. That is the fifth time this project has found a check that
+#     could not fail, counting the one this very file's `seam ... 0` would
+#     have been.
 #
 # WHAT IS NOT HERE, and why. Everything the stub cannot honestly model:
 # whether Hyprland accepts the Lua dispatch form at all (G-1), whether the
@@ -74,7 +96,14 @@ FIX="$SCRATCH/fixtures"
 LOG="$SCRATCH/pip-scenario.log"
 STUB_STATE="$SCRATCH/hypr-state.json"
 STUB_CALLS="$SCRATCH/hypr-calls.log"
-HARNESS_PID=""
+# The live half starts a DETACHED shell, the way `restart-shell` needs, so
+# nothing here is a child of this script and the teardown is ours to do. The
+# flag is what keeps a `check-tree` run - which starts nothing - from reaping
+# a harness somebody else has up.
+HARNESS_STARTED=0
+# Exit status for "this machine cannot run the live half". 77 is the usual
+# spelling for a skip; the one thing it must not be is 0 (D-PIP-6).
+LIVE_SKIP=77
 pass=0
 fail=0
 checks=0
@@ -90,7 +119,15 @@ pf()   { qa_json_field "d$1" "$(ipc pipState)"; }
 sf()   { qa_field "d$1" "$(ipc state)"; }
 
 cleanup() {
-  if [[ -n $HARNESS_PID ]]; then kill -TERM "$HARNESS_PID" 2>/dev/null; wait "$HARNESS_PID" 2>/dev/null; fi
+  # `--detach` deliberately installs no trap of its own: the shell and the
+  # player must outlive the run.sh invocation that started them, because that
+  # is the state `restart-shell` acts on. So the teardown is ours. `run.sh
+  # reap` matches only what is bound to THIS scratch directory - the
+  # quickshell config root and the player's own --input-ipc-server path -
+  # never a pattern that could reach the caller's own session, and never one
+  # that could match this script (CLAUDE.md rule 3).
+  (( HARNESS_STARTED )) || return 0
+  "$RUN" reap >/dev/null 2>&1
   return 0
 }
 
@@ -103,6 +140,20 @@ wait_for() {
     sleep 0.1
   done
   echo "[pip-scenario] gave up waiting ${secs}s for '$want' from: $*" >&2
+  return 1
+}
+
+# The same, for an answer whose VALUE cannot be known in advance: the player
+# pid. Bounded the same way, and it says so the same way.
+wait_nonzero() {
+  local secs=$1; shift
+  local i value
+  for ((i = 0; i < secs * 10; i++)); do
+    value=$("$@")
+    [[ $value =~ ^[0-9]+$ && $value != 0 ]] && return 0
+    sleep 0.1
+  done
+  echo "[pip-scenario] gave up waiting ${secs}s for a non-zero answer from: $*" >&2
   return 1
 }
 
@@ -232,6 +283,37 @@ preflight() {
 }
 
 # ------------------------------------------------------------------- live
+#
+# WHAT THE LIVE HALF NEEDS, checked BEFORE anything is started.
+#
+# D-PIP-6 is the reason this function exists. The live half ran 63 PASS and
+# 11 FAIL on the reference machine, every failure cascading from one line -
+# and because scripts/check.sh runs only `check-tree`, nobody saw it. A
+# scenario that fails where nobody looks is worth less than no scenario at
+# all, because its existence is quoted as coverage.
+#
+# So: a missing requirement is a SKIP with a reason and exit status 77. Not a
+# pass, which would be a lie, and not sixty-odd failures about a player that
+# was never there, which is what the absence of this check produced.
+requires_live() {
+  local missing=""
+  [[ -n ${WAYLAND_DISPLAY:-} ]] \
+    || missing+="  - WAYLAND_DISPLAY  this starts a quickshell, which needs a Wayland session\n"
+  command -v quickshell >/dev/null 2>&1 \
+    || missing+="  - quickshell       the shell the service under test runs inside\n"
+  command -v mpv >/dev/null 2>&1 \
+    || missing+="  - mpv              the player whose pid every window lookup is narrowed by\n"
+  command -v ffmpeg >/dev/null 2>&1 \
+    || missing+="  - ffmpeg           run.sh --serve generates the 120 s test stream with it\n"
+  [[ -z $missing ]] && return 0
+  echo
+  echo "SKIP the live half needs a display and the tools below, and this machine has not got them:"
+  printf '%b' "$missing"
+  echo "     Nothing was started and nothing was asserted. Exit status $LIVE_SKIP means SKIPPED."
+  echo "     Run it from the lane that holds the display (CLAUDE.md 'Working in parallel' 2)."
+  return 1
+}
+
 seed_stub() {
   # One tiled player window at the pid the SERVICE holds, plus a foreign
   # client of the same class at another pid -- PLY-RST-11's case, which is
@@ -260,9 +342,18 @@ json.dump({
 
 live() {
   echo "== setup (scratch $SCRATCH)"
+  "$RUN" reap >/dev/null 2>&1
   "$RUN" clean >/dev/null
   mkdir -p "$FIX" "$SCRATCH/bin"
-  sed "s|__LIVE__|http://127.0.0.1:9/dead/live.m3u8|g" "$HERE/fixtures/harness.m3u.in" >"$FIX/harness.m3u"
+  # D-PIP-6, the root cause. This wrote its own fixture with every URL
+  # pointing at 127.0.0.1:9, a port nothing listens on - and then run.sh
+  # overwrote it with the same dead URL anyway. mpv ships with `--idle=once`
+  # and `--keep-open=no`, so a load that fails ENDS the only file there was
+  # and the player quits within a second: measured here, exit status 2. By
+  # P3 the player was gone, pipReset() had cleared the pid, and every
+  # assertion after it was about a window that did not exist. `--serve`
+  # below is what player-scenario.sh has always used for exactly this
+  # reason, and run.sh writes the fixture that points at it.
   : >"$LOG"
   : >"$STUB_CALLS"
   # The stub has to be on PATH before the shell starts, and it needs a state
@@ -280,10 +371,15 @@ live() {
   export STUB_HYPRCTL_PROVIDER=${OMARCHY_IPTV_PIP_PROVIDER:-lua}
   export HYPRLAND_INSTANCE_SIGNATURE=${HYPRLAND_INSTANCE_SIGNATURE:-harness}
 
-  echo "== start harness"
-  HARNESS_TIMEOUT=${OMARCHY_IPTV_SCENARIO_TIMEOUT:-300}
-  "$RUN" --keep --timeout "$HARNESS_TIMEOUT" --playlist "$FIX/harness.m3u" >>"$LOG" 2>&1 &
-  HARNESS_PID=$!
+  echo "== start harness (detached, serving a real stream, player kept across restarts)"
+  # Detached, like player-scenario.sh: `restart-shell` needs a shell that
+  # outlives the invocation that started it, and P11 below is the D-PIP-4
+  # case, which is a shell restart. `--serve` generates a 120 s test stream
+  # with ffmpeg and points the fixture's "Harness Live" channel at it, so the
+  # player is still there to be addressed when the checks run.
+  HARNESS_STARTED=1
+  "$RUN" --detach --serve >>"$LOG" 2>&1 \
+    || { bad "the harness did not start (see $LOG); every check below is about nothing"; return 1; }
   wait_for 20 30 sf "['channels']" || bad "the fixture playlist never loaded; every check below is about nothing"
 
   echo "== P1 availability, decided once from the host's own answer"
@@ -300,10 +396,16 @@ live() {
   check "P2: an unknown mode is refused too"                    '[[ "$(qa_json_field "d['\''error'\''][\"code\"]" "$(ipc pip sideways)")" == "bad_mode" ]]'
 
   echo "== P3 play a channel, then teach the fake compositor our pid"
-  ipc play "t:bbc1.uk" >/dev/null
+  # The one channel with a real stream behind it. D-PIP-6: this played
+  # `t:bbc1.uk`, whose URL is a dead local port, and the pid comes back over
+  # the player's OWN socket - so it needs a player that is still alive to
+  # answer, and there was not one.
+  ipc play "t:harness.live" >/dev/null
   wait_for true 20 sf "['playerUp']" || bad "the player never came up; every check below is about nothing"
+  wait_nonzero 20 pf "['playerPid']" || bad "the service never learned the player pid; every check below is about nothing"
   pid=$(pf "['playerPid']")
   check "P3: the service learned the player pid from the player itself" '[[ "$pid" =~ ^[0-9]+$ && "$pid" != 0 ]]'
+  check "P3: and the player is still there to be addressed"      '[[ "$(sf "['\''playerUp'\'']")" == true ]]'
   seed_stub "$pid"
   : >"$STUB_CALLS"
 
@@ -324,7 +426,7 @@ live() {
   check "P5: every dispatch names our address, never a class"    '[[ "$(qa_count "0x559c6893d940" "$STUB_CALLS")" -ge 6 && "$(qa_count "class:" "$STUB_CALLS")" == 0 ]]'
   check "P5: and never the foreign window's"                     '[[ "$(qa_count "0x559c687e09a0" "$STUB_CALLS")" == 0 ]]'
   check "P5: no URL reached the compositor"                      '[[ "$(qa_count "://" "$STUB_CALLS")" == 0 ]]'
-  check "P5: no channel name did either"                         '[[ "$(qa_count "BBC" "$STUB_CALLS")" == 0 ]]'
+  check "P5: no channel name did either"                         '[[ "$(qa_count "Harness" "$STUB_CALLS")" == 0 ]]'
   check "P5: the sequence ENDED by reading the state back"       '[[ "$(qa_json_field "d['\''argv'\'']" "$(tail -1 "$STUB_CALLS")")" == *"clients"* ]]'
   check "P5: and the foreign window is still untouched"          '[[ "$(foreign)" == "$FOREIGN_UNTOUCHED" ]]'
 
@@ -352,6 +454,31 @@ live() {
   wait_for false 10 pf "['on']" || bad "the p key did not leave PiP"
   check "P8: p leaves"                                           '[[ "$(win "c['\''floating'\'']")" == false ]]'
   check "P8: two toggles return to the starting state"           '[[ "$(win "c['\''at'\'']")" == "[690, 38]" ]]'
+
+  echo "== P11 D-PIP-4: a new shell works out for itself that it is in PiP"
+  # The window half of this was always right and the live pass confirmed it:
+  # after `omarchy restart shell` both windows came back byte-identical and
+  # the next `p` exited correctly. What was wrong is what the plugin SAID -
+  # status.pip.on read false on all thirty one-second samples while the box
+  # was demonstrably floating, pinned and tagged, so the bar tooltip never
+  # gained its line and the next accepted request replied "was":false.
+  #
+  # PIP-05's acceptance bar is "within 2 s the guide reports PiP on". The
+  # wait below doubles it, and the check after it is the one that was unmet.
+  ipc pip on >/dev/null
+  wait_for false 10 pf "['applying']" || bad "the box never went up for the restart case"
+  check "P11: in picture in picture before the restart"           '[[ "$(pf "['\''on'\'']")" == true ]]'
+  before_restart=$(win "[c['at'], c['size'], c['floating'], c['pinned'], c['tags']]")
+  "$RUN" restart-shell >>"$LOG" 2>&1 || bad "restart-shell failed (see $LOG); the P11 checks are about nothing"
+  wait_for 20 30 sf "['channels']" || bad "the new shell never came up"
+  wait_nonzero 20 pf "['playerPid']" || bad "the new shell never learned the surviving player's pid"
+  wait_for true 4 pf "['on']" || bad "the new shell never worked out that it is in PiP (D-PIP-4)"
+  check "P11: the new shell reports PiP on, derived and not remembered" '[[ "$(pf "['\''on'\'']")" == true ]]'
+  check "P11: and it did not touch the window to find that out" '[[ "$(win "[c['\''at'\''], c['\''size'\''], c['\''floating'\''], c['\''pinned'\''], c['\''tags'\'']]")" == "$before_restart" ]]'
+  check "P11: nor the foreign window of the same class"          '[[ "$(foreign)" == "$FOREIGN_UNTOUCHED" ]]'
+  ipc pip off >/dev/null
+  wait_for false 10 pf "['applying']" || bad "the exit after the restart never finished"
+  check "P11: and the exit restores the rectangle the snapshot survived with" '[[ "$(win "c['\''at'\'']")" == "[690, 38]" && "$(pf "['\''on'\'']")" == false ]]'
 
   echo "== P9 a window the user popped themselves is not ours to undo"
   python3 -c '
@@ -394,7 +521,21 @@ trap cleanup EXIT
 
 case ${1:-live} in
   check-tree) preflight ;;
-  live|"")    preflight; live ;;
+  live|"")
+    preflight
+    # The skip is decided AFTER the preflight, because the preflight needs no
+    # display and is worth running anywhere - and BEFORE anything is started,
+    # because that is the whole point (D-PIP-6). A red preflight is still a
+    # failure: a machine that cannot run the live half does not get to hide a
+    # broken tree behind a skip.
+    if ! requires_live; then
+      echo
+      echo "summary: $pass passed, $fail failed, $checks assertions executed (preflight only, live half SKIPPED)"
+      (( fail == 0 )) || exit 1
+      exit $LIVE_SKIP
+    fi
+    live
+    ;;
   *) echo "usage: pip-scenario.sh [check-tree|live]" >&2; exit 2 ;;
 esac
 
@@ -411,7 +552,7 @@ esac
 if [[ ${1:-live} == check-tree ]]; then
   EXPECTED_CHECKS=40
 else
-  EXPECTED_CHECKS=77
+  EXPECTED_CHECKS=83
 fi
 ran=$checks
 checks=$((checks + 1))
