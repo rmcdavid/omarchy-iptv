@@ -4122,6 +4122,25 @@ function rowMeta(opts) {
 // cursor is on the row, which is the right property for an alert.
 var TEXT_DIM = 0.52
 var TEXT_FULL = 1
+// D-RUNG-3. The bar's idle glyph is darkened rather than faded, so it never
+// appeared in any search for an opacity rung -- which is exactly how the
+// contrast design missed the one element of this plugin that is on screen
+// permanently. It lives here, not as a literal in BarWidget.qml, so a test can
+// call the shipping value instead of transcribing it (CLAUDE.md rule 12).
+//
+// Was 1.55, which put the idle glyph under 4.5:1 in 7 of 23 installed themes,
+// all dark ones: everforest 3.18, gruvbox 3.56, tokyo-night 3.60, miasma 3.82,
+// nord 3.85, osaka-jade 4.18, matte-black 4.43. Darkening a light theme's ink
+// raises its contrast, so only dark themes could fail.
+//
+// 1.25 clears every theme with a floor of 4.71, chosen with margin rather than
+// on the 4.5 line, because sitting on the line is the mistake D-RUNG-2 was
+// refused for. The dimming loses some of its range: the active glyph now has
+// about 1.57x the contrast of the idle one rather than 2.32x. That is
+// affordable HERE and nowhere else in this plugin, because ruling R7 already
+// requires a DIFFERENT GLYPH per state, so the dimming is decorative and the
+// state is never carried by colour alone.
+var BAR_IDLE_DARKEN = 1.25
 
 function rowNoticeEmphasis(failedAt) {
   return str(failedAt) === "" ? TEXT_DIM : TEXT_FULL
@@ -6051,6 +6070,7 @@ if (typeof module !== "undefined") {
     rowMeta: rowMeta,
     rowNoticeEmphasis: rowNoticeEmphasis,
     TEXT_DIM: TEXT_DIM,
+    BAR_IDLE_DARKEN: BAR_IDLE_DARKEN,
     TEXT_FULL: TEXT_FULL,
     rowsHaveDetail: rowsHaveDetail,
     rowShowsGroup: rowShowsGroup,

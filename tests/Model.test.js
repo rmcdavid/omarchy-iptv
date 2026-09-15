@@ -690,6 +690,75 @@ checkCall("GS8: the notice on the cursor row was under AA and is not any more ("
 }, [3.54, 3.52, 10.82, 9.7, true, true])
 // And on every other theme this machine has, because the fix is not allowed to
 // be a property of one palette.
+// ---- D-RUNG-3: the bar's idle glyph, the one element always on screen ----
+// Qt.darker(c, f) divides the HSV value by f. Reimplemented here because the
+// real one lives in the QML engine, which node cannot load; the FACTOR itself
+// is read from Model, never transcribed, so a change to the shipping value
+// moves these numbers (CLAUDE.md rule 12).
+function qtDarker(rgb, factor) {
+  const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn
+  let h = 0
+  if (d) {
+    if (mx === r) h = ((g - b) / d) % 6
+    else if (mx === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+    if (h < 0) h += 360
+  }
+  const sat = mx === 0 ? 0 : d / mx
+  let v = mx / factor
+  if (v > 1) v = 1
+  const c = v * sat, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c
+  let p
+  if (h < 60) p = [c, x, 0]
+  else if (h < 120) p = [x, c, 0]
+  else if (h < 180) p = [0, c, x]
+  else if (h < 240) p = [0, x, c]
+  else if (h < 300) p = [x, 0, c]
+  else p = [c, 0, x]
+  return p.map(function (q) { return Math.round((q + m) * 255) })
+}
+// No installed theme overrides bar.text or bar.background: both fall back to
+// the theme foreground and background (Color.qml:73-77, and a grep across all
+// 23 theme directories finds no override), so this fixture covers the bar.
+function barIdleRatio(theme, factor) {
+  const fg = rgbOf(theme.foreground), bg = rgbOf(theme.background)
+  return contrast(qtDarker(fg, factor), bg)
+}
+checkCall("D-RUNG-3: the idle bar glyph was under 4.5:1 in 7 of 23 themes and now clears every one", function () {
+  const under = function (f) { return menuTokens.themes.filter(function (t) { return barIdleRatio(t, f) < 4.5 }).length }
+  const floor = function (f) { return menuTokens.themes.reduce(function (lo, t) { return Math.min(lo, barIdleRatio(t, f)) }, Infinity) }
+  return [menuTokens.themes.length, under(1.55), under(Model.BAR_IDLE_DARKEN), round2(floor(Model.BAR_IDLE_DARKEN)) >= 4.5]
+}, [23, 7, 0, true])
+checkCall("D-RUNG-3: the seven themes that failed are named, so a regression says which", function () {
+  return menuTokens.themes.filter(function (t) { return barIdleRatio(t, 1.55) < 4.5 }).map(function (t) { return t.name }).sort()
+}, ["everforest", "gruvbox", "matte-black", "miasma", "nord", "osaka-jade", "tokyo-night"])
+checkCall("D-RUNG-3: the fix keeps a margin rather than sitting on the line, which is why D-RUNG-2 was refused", function () {
+  const floor = menuTokens.themes.reduce(function (lo, t) { return Math.min(lo, barIdleRatio(t, Model.BAR_IDLE_DARKEN)) }, Infinity)
+  return [round2(floor) > 4.5, round2(floor) >= 4.7]
+}, [true, true])
+// This check was first written asserting "dimmer in EVERY theme" and went red,
+// which is how D-RUNG-5 was found. On a LIGHT theme, darkening the ink raises
+// its contrast against a pale background, so the idle glyph renders BOLDER
+// than the active one -- the opposite of the documented intent, and true of
+// the shipped 1.55 as well. The assertion is corrected to what is real.
+checkCall("D-RUNG-3: on dark themes, where dimming is the intent, the idle glyph is still visibly dimmer", function () {
+  const dark = menuTokens.themes.filter(function (t) { return luminance(rgbOf(t.background)) < luminance(rgbOf(t.foreground)) })
+  return [dark.length, dark.every(function (t) {
+    return contrast(rgbOf(t.foreground), rgbOf(t.background)) > barIdleRatio(t, Model.BAR_IDLE_DARKEN) * 1.15
+  })]
+}, [18, true])
+// D-RUNG-5, filed rather than silently accepted. The inversion PRE-DATES this
+// change and this change shrinks it: on rose-pine the idle glyph measured
+// 10.76 against an active 6.66 before, and 8.69 after. No state is lost,
+// because ruling R7 gives each state its own glyph and never relies on colour.
+checkCall("D-RUNG-5: the light themes where dimming inverts are named, and the change narrows the gap", function () {
+  const inverted = menuTokens.themes.filter(function (t) { return barIdleRatio(t, 1.55) > contrast(rgbOf(t.foreground), rgbOf(t.background)) })
+  const narrowed = inverted.every(function (t) { return barIdleRatio(t, Model.BAR_IDLE_DARKEN) <= barIdleRatio(t, 1.55) })
+  return [inverted.map(function (t) { return t.name }).sort(), narrowed]
+}, [["catppuccin-latte", "flexoki-light", "lupine", "rose-pine"], true])
+
 checkCall("GS8: the notice clears 4.5:1 on both row states in every installed theme, and the dim rung did not", function () {
   const shipped = Model.rowNoticeEmphasis("07:12")
   const under = function (alpha) {

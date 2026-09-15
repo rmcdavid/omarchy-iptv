@@ -63,7 +63,10 @@ BarWidget {
   readonly property color barFg: bar ? bar.barForeground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   // Idle dims like tailscale's inactive icon; playing and error are full.
-  property color glyphColor: root.playing || root.hasError ? root.barFg : Qt.darker(root.barFg, 1.55)
+  // D-RUNG-3: the factor lives in Model.js so a test can call it rather than
+  // transcribe it. It was 1.55, under 4.5:1 in 7 of 23 themes on the only
+  // element of this plugin that is on screen permanently.
+  property color glyphColor: root.playing || root.hasError ? root.barFg : Qt.darker(root.barFg, Model.BAR_IDLE_DARKEN)
   // M2-03 6.4: Model.barTooltip prepends the number to the playing line when
   // `chno` is non-empty, on vertical bars too, where the label is glyph-only.
   readonly property string tooltip: Model.barTooltip({

@@ -1222,3 +1222,30 @@ rung for that reason, and it lives in a file no other item writes.
 
 Which is the same lesson as section 14, arriving by a different route: the
 measurement was not wrong, the search for what to measure was.
+
+### D-RUNG-3 shipped, and a fifth finding fell out of it
+
+The bar's idle glyph moved from a darkening factor of 1.55 to 1.25, taking 7
+themes under the threshold to none, with a floor of 4.71 rather than a value
+sitting on 4.5. The factor now lives in `Model.BAR_IDLE_DARKEN` so a test calls
+the shipping number instead of transcribing it.
+
+The dimming loses range: the active glyph now reads about 1.57 times the
+contrast of the idle one instead of 2.32. That is affordable **here and nowhere
+else in this plugin**, because ruling R7 already requires a different glyph per
+state. The dimming is decorative; the state is in the glyph.
+
+Writing the test found **D-RUNG-5**. The check first asserted that the idle
+glyph is dimmer than the active one in every theme, and it went red. On a light
+theme, darkening the ink moves it away from a pale background, so the idle
+glyph renders BOLDER than the active one: catppuccin-latte measured 11.00 idle
+against 7.06 active, rose-pine 10.76 against 6.66. On the `white` theme they
+are identical at 21.00, because darkening pure black does nothing.
+
+That inverts the documented intent, it predates this change, and this change
+narrows it rather than causing it. It is filed rather than absorbed, because
+the real repair is to dim toward the BACKGROUND instead of toward black, which
+is a different operation and belongs with the calibration pass.
+
+The assertion was right about the world and wrong about the code. That is the
+most useful kind of red.
