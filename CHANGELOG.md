@@ -3,6 +3,36 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.6.0 (2026-09-15)
+
+The guide at real provider scale. Mostly subtraction.
+
+### Changed
+- Rows show a second line only when it carries something that differs between
+  them. On a playlist where every channel sits in one group, that line was the
+  same text on every row, so it is gone and you see twelve channels at a time
+  instead of nine. Walking a 3,335-channel list drops from 417 page presses to
+  304.
+- The group column no longer lists a group that contains everything, since
+  choosing it narrows nothing. The column itself stays, with Recent, Favourites,
+  All and Sources.
+- The header shows where you are rather than repeating a total the footer
+  already carries.
+- The cursor no longer parks flush against the bottom edge, so you can always
+  see there is more below. This is Omarchy's own behaviour from its menu.
+
+### Fixed
+- The failed-channel notice was hard to read on the selected row, which is the
+  one place it matters, being the text that names the key to retry. It is now
+  the most legible text on the row in every installed theme.
+- Clearing a guide-data URL now removes its cache, so a warning it produced
+  cannot come back after a restart.
+
+### Notes
+- The second line returns when guide data actually matches your playlist, not
+  merely when a guide URL is set. Providers vary a great deal in whether their
+  channels carry the identifiers that make that match possible.
+
 ## 0.5.0 (2026-09-14)
 
 Picture in picture.
