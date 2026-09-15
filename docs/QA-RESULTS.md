@@ -4592,3 +4592,310 @@ user's windows.
 Zero P1. One P2 (D-PIP-4). Two P3 (D-PIP-5, D-PIP-6). D-PIP-3, the
 translucent player, remains open on its own terms per PIP5 and was visible
 throughout this pass without ever mattering to PiP.
+
+## M2-09 the guide at real provider scale, live pass on 030ba9b (QA, 2026-09-15, 08:03 - 08:30)
+
+The judgement pass for `docs/UX-GUIDE-AT-SCALE.md` section 9.2, run on the
+user's machine against the subscriber's real 3,335-channel list and the
+public 1,472/28 cache, with a direct A/B against the installed v0.5.0. This
+lane wrote only this file. Every measured claim in section 5 was checked on
+screen; where the code does exactly what the design says and the result is
+still not better, that is said here rather than scored as a pass.
+
+**Bottom line.** The five changes do what they claim, and four of them are an
+improvement you can see without being told to look. The density win is real
+and large, the fold peek fixes a defect that is obvious once seen side by
+side, and the many-small-groups shape is not merely unregressed - it gets the
+better of the two column fixes. Two things are worse than the design
+predicts. The failure notice on the **selected** row measures 3.8:1 against
+its own background, under the 4.5:1 the rest of the card clears. And the
+guide-data caveat in section 12 is understated: on a one-group playlist whose
+channels carry no `tvg-id`, configuring an EPG does not trade the density for
+now/next - it trades it for **3,335 rows with an empty second line**. Zero
+P1. One P2, two P3, all named below.
+
+### Environment
+
+| Fact | Value |
+|---|---|
+| Repo under test | `030ba9b`, branch `main`, tree clean |
+| Installed copy during the pass | detached at `030ba9b` via `refs/qa14/under-test`, fetched from the local repo; `omarchy plugin validate` rc 0 |
+| Installed copy before and after | `db47c37` (v0.5.0), `* main db47c37 [origin/main]`, porcelain empty |
+| Hyprland / mpv / shell | 0.56.2 (`efb50993`), mpv running once through the plugin, quickshell 0.3.1, six shell restarts |
+| Monitor | `eDP-1` 1366x768 scale 1, reserved `[0, 26, 0, 0]`, theme `Retropc`, `repeat_rate 40` / `repeat_delay 250` |
+| Shape A | subscriber `USChannels.m3u`, **3,335 channels, 1 group** (`United States`), added as a **local file path**; the credentialed URL was never used, typed, or written |
+| Shape C | live install's own cache, iptv-org.github.io, 1,472 channels / 28 groups |
+| Shape A EPG | `tests/fixtures/qa-epg.xml` by absolute path; **1 of 3,335** playlist entries carries a `tvg-id` at all |
+| Evidence root | `/tmp/claude-1000/omarchy-iptv-qa14/` - snapshot tree with sha256 manifests, opening/closing `hyprctl` captures, 40 screenshots and crops |
+
+### 1. The measured claims, confirmed on screen (shape A)
+
+Every figure below is read off a screenshot, not off a test.
+
+| Claim (design 3.5 / 5.1) | On screen | Evidence |
+|---|---|---|
+| 12 visible rows rather than 9 | **12** single-line rows at the top of the list (`USA FOX NEWS` ... `USA USA NETWORK`), against **9** two-line rows on v0.5.0 with the same list | `12-subscriber-all.png` vs `50-v050-subscriber-all.png` |
+| `pageSize()` 8 -> 11 | header stepped `1 of 3,335` -> `12 of 3,335` -> `23 of 3,335` on two `PgDn`. **11** | `14-sub-pgdn1.png`, `15-sub-pgdn2.png` |
+| Group column keeps its pinned entries, loses the entry that lies | column is `Favorites 0 / All 3,335` + pinned `Sources`, **no `GROUPS` header, no `United States 3,335`**. v0.5.0 shows both. `Recent` reappears the moment a recent resolves | `12-subscriber-all.png` vs `50-v050-subscriber-all.png` |
+| Header carries a position, not a bare total | `All - 1 of 3,335`, `All - 23 of 3,335`, `All - 3,335 of 3,335` at `End`; v0.5.0 reads `All - 3,335 channels` at every cursor row | `22-sub-end.png`, `50-v050-...png` |
+| The cursor no longer parks flush | after `PgDn` the cursor row sits **one clipped row above the edge**, with a second clipped row at the top. On v0.5.0 the cursor row is itself clipped by the footer and nothing below it is visible | `15-sub-pgdn2.png` vs `52-v050-sub-pgdn2.png` |
+| Footer verb | `h/l scope` on shape A, `h/l group` on shape C; `Left/Right scope` in search mode | `12-`, `02-`, `13-open-frame2.png` |
+| No row-height pop, no column pop on open | the **first painted frame** of a fresh open already carries 12 single-line rows and no `GROUPS` section | `13-open-frame2.png` (caught mid fade-in) |
+| Header label width | left edge at 1,048 px (1 digit), 1,042 (2), 1,036 (3), **1,024 (4)** - and v0.5.0's `All - 3,335 channels` also starts at **1,024**. The widest new form is exactly as wide as the form it replaces; total travel 24 px, as predicted | luminance scan of `12-`, `16-`, `17-`, `22-`, `50-` |
+| `searchLine` reflow invisible | no visible movement of the placeholder or the query at any cursor position | all shape A shots |
+
+Search at this scale is as good as the design says: `espn` returns **8
+matches** in one screen (`in All - 8 matches`), `usa` overflows to
+`in All - 1 of 200` with `First 200 of 982 - keep typing` in the footer.
+
+### 2. Judgement: is it actually better
+
+**Yes on the list, unambiguously, and the A/B is what makes it obvious.**
+Nine rows of `United States` stacked under nine channel names is not a
+neutral loss - on v0.5.0 the eye has to skip a line of identical grey text
+between every pair of channels. At 38 px the names form a single column the
+eye can run down. Twelve names against nine, with no line of noise between
+them, is a bigger difference to use than +33% suggests.
+
+**The peek is the change I would keep if I could only keep one.**
+`52-v050-sub-pgdn2.png` is the whole argument: the v0.5.0 cursor row is
+parked so hard against the bottom that its own second line is cut off by the
+footer, and there is nothing at all to say 3,318 rows follow. The new
+behaviour puts a clipped row under the cursor and one above the top. It is
+the difference between a list that ends and a list that continues.
+
+**Does the moving position number distract while holding a key?** Measured
+honestly: with `repeat_rate 40` a held `j` moves 40 rows a second, and the
+header ticked `103 -> 154` over a 1.5 s hold. At that speed the number is not
+readable and cannot inform - but it did not pull my eye either. It is
+caption-10 at opacity 0.52, in the far top-right corner, roughly 250 px from
+the nearest row text, and the digits share an envelope; the only visible
+motion is a 6 px shift of the whole label when the digit count changes, which
+happens four times across 3,335 rows. **Not distracting.** What it is good
+for is the moment you stop: you let go and the number tells you where you
+landed. Keep it.
+
+**Where it is not better.** Three things, none fatal:
+
+1. The header's `in All - 1 of 200` sits diagonally opposite the footer's
+   `First 200 of 982 - keep typing`. Both are true, both are on screen at
+   once, and the smaller number is a **cap** while the larger is a **count**.
+   I read the header first and briefly believed the query had 200 matches.
+   The design chose this split deliberately (3.2 D5) and I would not reverse
+   it, but it is the one place where two numbers on one card fight.
+2. With two sources configured the footer counts line elides in list mode:
+   `USChannels.m3u - 3,335 channels - updated 0...`. Pre-existing to this
+   lane (the source label is M2-01's), but this lane's own headline claim -
+   that the total lives in the footer now - is the thing being cut off.
+3. Nothing in this lane helps the actual work of finding a channel **by
+   browsing** 3,335 names. It gives you three more of them and tells you
+   where you are. Search is still the only thing that makes this list
+   tractable, exactly as GS7 says.
+
+### 3. The shape that must not regress: many small groups
+
+Public cache, 1,472 channels / 28 groups, compared frame to frame against
+v0.5.0 on the same cache.
+
+| Check | Result |
+|---|---|
+| Group column | identical: `Recent 6 / Favorites 0 / All 1,472`, `GROUPS`, the same ten visible groups with the same counts, the pinned `Sources` row, same 219 px | `01b-public-all.png` vs `54-v050-public-all.png` |
+| `h`/`l` ring | walked 12 stops out and 12 back; every scope reached, silent wrap intact, `Comedy 39` selected and returned to `All` | `04-`, `05-` |
+| Two-line rows where the second line varies | present and correct - `Movies`, `Religious`, `Animation`, `Music` down one screen. Inside a group rows are single-line, as they already were | `01b-`, `04-` |
+| `pageSize()` | 8, unchanged (`1 -> 9 -> 17 -> 25` on three `PgDn`) | `06-` |
+| Failure notice | still on the detail line in `All` (two-line rows), unchanged | section 4 |
+| What changed at all | the header form, and the peek | - |
+| **Did anything get worse** | **No.** And the column peek is a real gain here: on v0.5.0 `Comedy` is the last thing in the column with the separator directly under it, and nothing says sixteen more groups exist. Under test, `Shop 13` is clipped beneath it | `crop-55-v050-col.png` vs `crop-04-new-col.png` |
+
+### 4. The failure notice, in the slot it moved to
+
+Provoked for real: played `US (MAX) ESPN UNLIMITED (FEED)` from the
+subscriber list; the stream failed on its own within 3 s and the channel was
+marked (`failedAt {"u:74eadab4": "08:13"}`).
+
+- **Unselected row:** `! Failed 08:13 - Space to retry` in the right meta
+  slot, glyph and words adjacent and paired, name slot untouched
+  (`crop-26-failed-unselected.png`).
+- **Selected row:** same string, same place, legible (`crop-27-failed-selected.png`).
+- **The design was right that the selected row is the hard case, and it is
+  worse than "needs an eye".** Measured off the screenshots (sRGB relative
+  luminance, modal background vs the text):
+
+| Row state | Notice, glyph-body | Notice, peak stroke | Channel name, same row |
+|---|---|---|---|
+| Unselected | **4.79:1** | 7.13:1 | 9.52:1 |
+| Selected (cursor) | **3.78:1** | 4.86:1 | 6.20:1 |
+
+  Repeated on a second capture: identical to two decimals. The notice on the
+  cursor row is the lowest-contrast text on the card and the only text that
+  falls below 4.5:1, and it is the one string in the guide that tells the user
+  what key to press. Filed as **D-GS-1 (P2)**.
+- With a guide source configured the notice moves back to the detail line and
+  the glyph to the trail slot, still paired (`crop-35-epg-failed.png`). Both
+  row heights carry it, which is what GS2 asked for.
+
+### 5. The guide-data caveat, and why it reads as broken
+
+Set `tests/fixtures/qa-epg.xml` as the EPG for the subscriber source. It
+fetched and parsed cleanly (`epg.loaded true`).
+
+- Rows returned to two lines, visible rows **12 -> 9**, `pageSize()` **11 ->
+  8** (`1 -> 9` on one `PgDn`). The reversal is exactly as section 12 states.
+- **But the returned line is empty.** 1 of 3,335 entries in this playlist
+  carries a `tvg-id`, so `rowDetail` has no now/next to print, and
+  `rowShowsGroup` is false because the group does not narrow. Every row on
+  screen is 52 px tall with a **blank** second line (`33-epg-configured-rows.png`).
+  The user pays a third of the list for white space.
+- This does **not** read as correct. It reads as a rendering fault. On v0.5.0
+  the same configuration at least printed `United States`, which was useless
+  but looked deliberate.
+- The one signal that something is off is the footer, and it is elided
+  mid-phrase: `Guide data warning: 27 programmes for chann...`. The second
+  warning - `no EPG channel id matches a playlist tvg-id`, which is the one
+  that explains the blank lines - is hidden behind a `(+1 more)`.
+- Clearing the EPG field restored 12 single-line rows immediately, no
+  restart (`41-epg-removed-rows.png`).
+
+Filed as **D-GS-2 (P3)**: a two-line row whose detail line resolves to empty
+for the whole scope. Any fix has to respect R-C (row height must not depend
+on session-mutable state), so the honest options are a documentation change,
+or making `epgConfigured` mean "this source's guide data matched something"
+computed once per channel-set change rather than per session. That is a
+design decision, not a diff, and it belongs to the owner of section 12.
+
+### 6. Accessibility: unsettled, and for a bigger reason than GS5 expected
+
+**No screen reader is installed on this machine** (`orca` absent, no
+`pyatspi`), so the Orca pass of 9.2.8 could not be run. Rather than guess, I
+probed AT-SPI directly:
+
+- `at-spi2-core 2.60.6` is installed and `org.a11y.Bus` is running. With
+  `toolkit-accessibility` off, `IsEnabled` is false.
+- Enabled it; the shell connected to the accessibility bus within a second
+  without a restart, and again after a restart with it enabled from startup.
+- **Both times the shell's accessible root (`quickshell`, role
+  `application`) reports `ChildCount 0` and `GetChildren` returns an empty
+  array, with the guide open on 3,335 rows.** The registry lists it as an
+  application; it publishes no objects. A GTK client on the same bus in the
+  same moment (`xdg-desktop-portal-gtk`) reports a child, so the probe works.
+
+So on this machine a screen reader would find nothing in the guide to
+announce - not the row name, not the failure state, not `row N of M`. GS5's
+question cannot double-announce here because nothing is announced at all.
+**Marked unsettled, not passed and not failed.** The appended string costs
+nothing where nothing is read, so I would leave it in place and keep GS5
+open. The larger question - whether any of the guide's `Accessible.*` work
+reaches AT-SPI on Quickshell layer-shell surfaces at all - is worth its own
+scoped investigation and is not this lane's to answer. Filed as
+**D-GS-3 (P3, investigation)**.
+
+### 7. What the design did not anticipate
+
+- **Removing an EPG URL leaves its cache behind.** After clearing the field,
+  `epg.configured` goes false but `epg-now.json`, `epg-status.json` and
+  `epg-window.txt` stay in the source's cache dir, and after the next shell
+  restart the footer shows `Guide data warning: ...` again for a guide source
+  the user has removed (`43-mode-check.png`, `epg.configured false` +
+  `epg.loaded true` + two warnings in the same `status` reply). Pre-existing
+  to this lane (EPG/Sources lifecycle). Filed as **D-GS-4 (P3)**.
+- **Clearing the EPG field writes `"epgUrl": ""` into `shell.json`** rather
+  than removing the key. Harmless, but it is a visible change to the user's
+  config file produced by an action that removes a setting. Noted, not filed.
+- **`Enter` closes the guide when it starts playback**, so the failure notice
+  is only ever seen on the *next* opening. That is shipped behaviour and not
+  this lane's, but it means the new meta-slot string is first read in a list
+  the user has just re-entered, with the cursor elsewhere - which is why the
+  unselected-row rendering matters more than the selected one, and the
+  selected one is still the one that falls under 4.5:1.
+- **Process note for the next live lane.** A layer-namespace check is not a
+  focus check. `hyprctl layers` still lists `omarchy-iptv` for a moment after
+  the guide closes, and one batch of keystrokes aimed at the Sources screen
+  landed in the user's focused application instead, which typed two
+  characters into a text box and eventually raised a file-chooser dialog. The
+  dialog was cancelled (`hl.dsp.window.close`, nothing selected) and the
+  desktop compares clean against the opening capture (section 10). **Two
+  stray characters are left in that application's input box and were
+  deliberately not removed**: clearing them means typing into the user's own
+  window, which is not this lane's to do. The guard has to be re-run
+  *between* keystrokes, not once per batch, and any step that can close the
+  guide has to be re-verified before the next key.
+
+### 8. Defects
+
+| ID | Sev | Where | What |
+|---|---|---|---|
+| D-GS-1 | P2 | `Guide.qml` meta slot, D4 | `Failed HH:MM - Space to retry` on the **cursor** row measures 3.78:1 glyph-body / 4.86:1 peak against `Color.menu.selectedBackground`, below 4.5:1, while the same string off-cursor measures 4.79:1 / 7.13:1. It is the only text on the card under the threshold and it is the one that names a key. The design flagged the row state as needing an eye (9.2.5) and accepted whatever the eye said; the eye says legible-but-weakest, and the number says under AA |
+| D-GS-2 | P3 | `Model.rowsHaveDetail` / `rowDetail`, D3 | On a one-group playlist with an EPG configured but no `tvg-id` matches, every row is 52 px with an **empty** detail line: the density is spent and nothing is printed. Section 12's caveat describes the trade as density-for-now/next; on this playlist it is density-for-nothing |
+| D-GS-3 | P3 | host / plugin a11y | The shell publishes an empty AT-SPI tree (`ChildCount 0`) with the guide open, so no screen reader on this machine can read any of the guide - including everything UX 7.2 mandates. Not caused by this lane; it makes GS5 unanswerable here |
+| D-GS-4 | P3 | EPG/Sources lifecycle | Clearing a source's EPG URL leaves `epg-*.json` in its cache, and the guide-data warning returns in the footer after the next shell restart for a guide source that is no longer configured |
+
+Nothing in D1-D6 behaved differently from its specification. All four are
+findings about what the specification produces, which is what this pass was
+for.
+
+### 9. Credential sweep
+
+The subscriber list was added **as a local absolute path**; the provider's
+credentialed playlist URL was never typed, never stored, never fetched.
+
+| Sink | Result |
+|---|---|
+| `status` JSON | `sourceHost: "local file"`, no path, no URL |
+| Sources screen and rows | `USChannels.m3u - local file - 3,335 channels in 1 group`; no path on the row |
+| Guide header, footer, row text | label only |
+| This file and the evidence tree | **0 byte-exact hits** for the provider's host across `docs/` and `/tmp/claude-1000/omarchy-iptv-qa14/`, and no stream URL in any screenshot (the Sources row reads `local file`, the form fields held the local path). The only URLs in the tree are inside the untouched snapshot copies of the user's own `state.json` and `shell.json`, which carry the public iptv-org playlist address and no credential; every URL written into this file is redacted to scheme and host |
+| `state.json`, `shell.json` | 0600, and both restored byte for byte |
+| Playback | one channel played and one failed through the product path; the stream URL reached mpv over the private socket, never a command line (`ps` showed the channel id only) |
+
+### 10. Machine restored, proved
+
+| Item | Proof |
+|---|---|
+| `~/.config/omarchy/shell.json` | `sha256sum -c` **OK** against the opening snapshot, mode 0600. It had gained `"epgUrl": ""`; restored with the shell stopped, and still OK after 25 s of the shell running |
+| `~/.local/state/omarchy-iptv/` | every file sha256-identical, tree and modes identical (`700` dir, `600` state.json), unchanged after 25 s |
+| `~/.cache/omarchy-iptv/` | every file sha256-identical, tree and modes identical; the test source's whole cache dir removed through the product's own `x` confirm (`Remove "USChannels.m3u"? Its cache is deleted too.`) |
+| Test source | gone: `sources` back to one entry, `activeSource iptv-org.github.io` |
+| EPG setting | removed, `epg.configured false`, `warnings []` |
+| Installed plugin | back on `db47c37`, `* main db47c37 [origin/main]`, porcelain empty, `refs/qa14/under-test` deleted (0 refs left), **all 106 files sha256-identical** to the opening manifest, `validate` rc 0 |
+| Running plugin | `ready`, 1,472 channels, 28 groups, 0 favorites, **7 recents**, `lastUpdated 05:41`, `failedAt {}` - the opening capture field for field |
+| Player | `pgrep -x mpv` empty; playback stopped through the plugin's own `stop` verb |
+| Accessibility setting | `toolkit-accessibility` back to `false`, `IsEnabled false` |
+| Windows | opening 1 client, closing 1 client, **SAME** on class/at/size/floating/pinned/workspace/monitor/tags; focused window **SAME** (`0x559c687e09a0`); workspaces `[(1, 1)] -> [(1, 1)]` **SAME** |
+| Theme | `Retropc` |
+| Repo | `main`, `030ba9b`, porcelain empty apart from this file |
+
+One honest note, and it cost twenty minutes: **the plugin wins any edit to
+`state.json` made under a running shell.** Writing the snapshot bytes while
+the shell was up was undone within 1-2 s by the plugin's own `FileView` write
+(watched: restored hash at t=0, plugin's hash at t=1, stable from t=2), and a
+restart immediately afterwards made it worse - the new process read a file
+the dying one had already rewritten, found no sources, re-migrated
+`playlistUrl` from `shell.json` and dropped all seven recents. The fix, and
+the recipe for the next lane: stop the shell with
+`quickshell kill -p /usr/share/omarchy/shell --any-display` until it exits,
+overwrite the files **in place** with nothing running, then relaunch with
+`hyprctl dispatch 'hl.dsp.exec_cmd("omarchy-launch-shell")'`. Restore before
+relaunch, never after.
+
+### Verdict
+
+**GO**, with D-GS-1 fixed first.
+
+Four of the five changes are a plain improvement on the surface the user
+looks at daily, and the two the design was least sure about - the column
+losing a row on a one-group playlist, and a number moving in the header -
+are both fine in practice. The many-small-groups shape did not pay for it.
+
+D-GS-1 is small and worth doing before release: the string that tells a user
+which key retries a dead channel is the least legible text on the card
+exactly when the cursor is on that channel, which is exactly when they are
+about to press it. A rung of opacity, or the selected-row foreground, fixes
+it inside the existing tokens.
+
+D-GS-2 is not a release blocker but section 12's caveat should be rewritten
+before it reaches the README: on a playlist with no `tvg-id` the EPG trade is
+not "density for now/next", it is density for a blank line, and a user who
+configures guide data and gets that will file it as a bug.
+
+D-GS-3 leaves GS5 open. Per the ruling's own terms, the addition stays until
+a real screen-reader pass can be run; it is announced to nobody today.
