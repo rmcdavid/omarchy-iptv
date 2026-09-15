@@ -586,11 +586,19 @@ is "the pip scenario exists and declares exactly two floors" \
 pdeclared_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$PS5" | sed -n 1p | cut -d= -f2)
 pdeclared_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$PS5" | sed -n 2p | cut -d= -f2)
 # The +1 is the stub's executable probe, which bumps `checks` by hand; the
-# live half adds the privacy block's two.
+# live half adds the privacy block's two. `absent` counts with `seam`: it is
+# the same kind of tree assertion, written so that an absence test proves the
+# file is there first (a `seam ... 0` would pass against a deleted file).
 is "the pip check-tree floor matches the preflight it actually has" \
-   "$pdeclared_tree" "$(( $(qa_count '^ *seam ' "$PS5") + 1 ))"
+   "$pdeclared_tree" "$(( $(qa_count '^ *(seam|absent) ' "$PS5") + 1 ))"
 is "the pip live floor matches the assertions that scenario actually has" \
-   "$pdeclared_live" "$(( $(qa_count '^ *(check|seam) ' "$PS5") + 3 ))"
+   "$pdeclared_live" "$(( $(qa_count '^ *(check|seam|absent) ' "$PS5") + 3 ))"
+# And no absence is ever asserted with a `want` of 0, which `seam` treats as
+# "at least none" and can therefore never fail. This is the fifth check-that-
+# cannot-fail this project has had to remove; it is worth one line to stop
+# the sixth.
+is "no seam in the pip scenario asserts a count of zero" \
+   "$(qa_count '^ *seam .* 0$' "$PS5")" "0"
 is "check.sh's pip preflight floor matches the scenario's own" \
    "$(grep -oE 'PIP_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( pdeclared_tree + 1 ))"
 # And the one thing that makes the pip scenario safe to run at all: it drives
@@ -607,7 +615,7 @@ is "and run.sh is what puts it in front of PATH" \
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=147
+EXPECTED=148
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -2414,7 +2414,14 @@ function buildMpvArgv(params) {
   var argv = [
     "mpv",
     "--input-ipc-server=" + str(p.socketPath),
-    "--wayland-app-id=omarchy-iptv",
+    // PIP_CLASS, not a third copy of the string. This flag is what makes the
+    // window findable, and picture in picture matches `class === PIP_CLASS`
+    // to decide which window it may float, shrink, move and pin. Two
+    // literals that agree today can disagree tomorrow, and the failure is
+    // silent: PiP would simply answer "Cannot find the player window" for
+    // ever. The python mirror keeps its own literal and is pinned to this
+    // one by tests/fixtures/player-argv.json.
+    "--wayland-app-id=" + PIP_CLASS,
     "--force-window=immediate",
     "--idle=once",
     "--keep-open=no",
@@ -3263,6 +3270,36 @@ function pipResolveIntent(mode, live) {
 }
 
 // ---- geometry (4.4)
+
+// The monitor the window is on, out of `hyprctl -j monitors`, by the `id`
+// the client entry reports (4.9). Takes the raw stdout or an already-parsed
+// array, exactly as pipFindWindow does, and never throws: garbage, an empty
+// list and an id no monitor claims all answer null, and null means the
+// caller refuses instead of placing the box on a guessed screen.
+//
+// There is deliberately no "fall back to the first monitor" branch. On the
+// single-monitor machine this was written on that fallback would always be
+// right and would therefore never be exercised; on the two-monitor desk it
+// exists for, it would silently throw the player onto the other screen.
+function pipFindMonitor(monitors, id) {
+  var list = monitors
+  if (typeof list === "string") {
+    try { list = JSON.parse(list) } catch (error) { return null }
+  }
+  if (!Array.isArray(list)) return null
+  // `null` is not monitor 0. pipInteger coerces it there (Number(null) is 0),
+  // which would turn "the service does not know which monitor" into "the
+  // first one", so the absent cases are refused before it is consulted.
+  if (id === null || id === undefined || id === "" || typeof id === "boolean") return null
+  var want = pipInteger(id, -1)
+  if (want < 0) return null
+  for (var i = 0; i < list.length; i++) {
+    var m = list[i]
+    if (!m || typeof m !== "object") continue
+    if (pipInteger(m.id, -1) === want) return m
+  }
+  return null
+}
 
 // Sizes are floored to EVEN integers so a 16:9 box never lands on an odd
 // edge that chroma subsampling has to round.
@@ -5590,8 +5627,10 @@ if (typeof module !== "undefined") {
     pipOptions: pipOptions,
     pipCornerOf: pipCornerOf,
     pipFindWindow: pipFindWindow,
+    pipHasTag: pipHasTag,
     pipActive: pipActive,
     pipResolveIntent: pipResolveIntent,
+    pipFindMonitor: pipFindMonitor,
     pipGeometry: pipGeometry,
     pipBox: pipBox,
     pipSnapshotFor: pipSnapshotFor,

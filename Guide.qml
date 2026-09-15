@@ -770,9 +770,15 @@ Item {
   //
   // The guide answers exactly the two refusals it can answer by itself
   // (4.10); everything after that needs a live read of the compositor, which
-  // is the service's, and comes back as a code through onPipResult. No text
+  // is the service's, and comes back as a code through onPipOutcome. No text
   // is composed here: Model.pipStatusText owns every line, so the footer can
   // never speak a raw compositor word.
+  //
+  // Model.pipKeyRequest is the SAME function the service asks (requestPip),
+  // so the two surfaces cannot drift into refusing for different reasons:
+  // the guide answers from what it can see, the service re-asks with the one
+  // fact the guide does not have - whether the player's pid is known - and
+  // its answer arrives on the same signal with the same code.
   function togglePip() {
     if (!root.serviceReady) return
     var request = Model.pipKeyRequest({ available: root.pipAvailable, playing: root.playingNow })
@@ -1722,11 +1728,21 @@ Item {
     function onConfiguredChanged() { root.onConfiguredFlip() }
     function onClipboardText(text) { root.pasteFromProcess(text) }
     // M2-05: the outcome of a toggle, once the service has dispatched and
-    // read the state back (PIP11 - there is no other definition of success).
-    // The code is one of six; the line is Model.pipStatusText's.
-    function onPipResult(code) {
+    // read the state back (PIP11 - there is no other definition of success),
+    // or immediately for a request that never started.
+    //
+    // The handler name is the SIGNAL's name. It was `onPipResult` here while
+    // the service emitted `pipOutcome`, and `ignoreUnknownSignals: true` -
+    // which this block needs, because the Sources and PiP signals may be
+    // absent on an older service - made that silence rather than an error:
+    // the footer was wired to a signal nobody emits. tests/test_pip.py now
+    // compares the two files so the next rename cannot do it again.
+    //
+    // The code is one of six; the line is Model.pipStatusText's. A code with
+    // no line (`busy`, `bad_mode`) shows nothing, which is right.
+    function onPipOutcome(result) {
       if (!root.opened) return
-      var text = Model.pipStatusText(code)
+      var text = Model.pipStatusText(result && result.code !== undefined ? result.code : "")
       if (text !== "") root.showTransient(text)
     }
   }

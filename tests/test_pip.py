@@ -15,11 +15,17 @@ them backwards would make the plugin pass its own tests and fail on a desktop:
   * `action` is ignored -- float and pin toggle, and an "unset" aimed at a
     tiled window floats it (G-3, ruling PIP10).
 
-SECOND, the shape those two rulings force on Service.qml. `pipVerify` against
-a fresh read is the only definition of success, and no float or pin step may
-be issued without a live read behind it. Both are structural properties of
-the file, and a structural property with nothing asserting it is one
+SECOND, the shape those two rulings force on the code. `Model.pipVerify`
+against a fresh read is the only definition of success, and no float or pin
+step may be issued without a live read behind it. Both are structural
+properties, and a structural property with nothing asserting it is one
 refactor away from gone.
+
+Where a rule lives decides which file is read here. Integration moved the
+pure half out of Service.qml and into Model.js, where node and the QML spec
+call it for real (CLAUDE.md 12), so the decisions are asserted against
+Model.js and what is asserted against Service.qml is that it DELEGATES: it
+holds no compositor expression, no address pattern and no plan of its own.
 
 Run: python3 -m unittest discover -s tests
 """
@@ -34,6 +40,8 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STUB = ROOT / "scripts" / "dev-harness" / "stub-hyprctl.py"
 SERVICE = (ROOT / "Service.qml").read_text(encoding="utf-8")
+MODEL = (ROOT / "Model.js").read_text(encoding="utf-8")
+GUIDE = (ROOT / "Guide.qml").read_text(encoding="utf-8")
 
 ADDRESS = "0x559c6893d940"
 FOREIGN = "0x559c687e09a0"
@@ -248,15 +256,16 @@ class StubFidelityTest(unittest.TestCase):
         self.assertEqual(code, 0, "even a miss is exit status 0")
         self.assertIn("window not found", out)
 
-    def test_the_legacy_builder_has_somewhere_to_run(self):
-        # The comma spelling, on the hyprlang provider it ships for. This is
-        # what keeps Model.pipLegacyDispatch from being untested code.
+    def test_the_lua_spelling_is_the_only_one_that_exists_here(self):
+        # PIP15. The legacy spelling works on a hyprlang provider and is a
+        # Lua syntax error on this one, so there is exactly one spelling to
+        # build and the provider decides whether we can speak at all. The
+        # stub still models the hyprlang side, because that is what makes
+        # "the other form is not a fallback, it is another compositor" a
+        # fact this suite can point at rather than a claim.
         hypr = StubDriver(provider="hyprlang")
         self.addCleanup(hypr.close)
         self.assertIn("configProvider: hyprlang", hypr.run("systeminfo")[1])
-        # Argv items, exactly as Model.pipLegacyDispatch emits them: the
-        # dispatcher name and its argument are two separate items, and the
-        # selector is joined to the geometry by a COMMA.
         hypr.run("dispatch", "togglefloating", "address:" + ADDRESS)
         hypr.run("dispatch", "resizewindowpixel", "exact 410 230,address:" + ADDRESS)
         hypr.run("dispatch", "movewindowpixel", "exact 940 42,address:" + ADDRESS)
@@ -266,6 +275,48 @@ class StubFidelityTest(unittest.TestCase):
         self.assertEqual((window["at"], window["size"]), ([940, 42], [410, 230]))
         self.assertEqual((window["floating"], window["pinned"]), (True, True))
         self.assertIn("iptv-pip", window["tags"])
+        # And the same argv on the Lua provider does nothing at all, which is
+        # why shipping it as a fallback would have been a second failure
+        # dressed as safety.
+        lua = StubDriver(provider="lua")
+        self.addCleanup(lua.close)
+        code, out = lua.run("dispatch", "togglefloating", "address:" + ADDRESS)
+        self.assertEqual(code, 7, out)
+        self.assertIs(lua.window()["floating"], False)
+
+    def test_the_stub_understands_exactly_what_model_js_builds(self):
+        # CLAUDE.md: a rule written twice gets one fixture that both
+        # implementations run. Model.js builds these expressions and this
+        # stub parses them - one grammar, two languages, two lanes - and
+        # before tests/fixtures/pip-dispatch.json nothing compared the two:
+        # this suite drove the fake with strings written by hand HERE, and
+        # tests/Model.test.js asserted the builder against strings written by
+        # hand THERE. Both could be green with the halves unable to speak.
+        #
+        # So the vectors below are not written here at all. They are the ones
+        # tests/Model.test.js asserts pipPlan emits, replayed verbatim, with
+        # the leading "hyprctl" dropped because this file IS hyprctl.
+        fixture = json.loads((ROOT / "tests" / "fixtures" / "pip-dispatch.json")
+                             .read_text(encoding="utf-8"))
+        hypr = StubDriver(state={"clients": [fixture["window"]],
+                                 "monitors": [fixture["monitor"]]})
+        self.addCleanup(hypr.close)
+        address = fixture["address"]
+        for leg in ("enter", "exit"):
+            for argv in fixture[leg]["argv"]:
+                self.assertEqual(argv[0], "hyprctl", argv)
+                code, out = hypr.run(*argv[1:])
+                # `ok` and nothing else: a grammar the fake did not recognise
+                # answers with a Lua error here, exactly as the compositor
+                # does, rather than being silently ignored.
+                self.assertEqual((code, out), (0, "ok"), argv[2])
+            window = hypr.window(address)
+            after = fixture[leg]["after"]
+            self.assertEqual(window["at"], after["at"], leg)
+            self.assertEqual(window["size"], after["size"], leg)
+            self.assertIs(window["floating"], after["floating"], leg)
+            self.assertIs(window["pinned"], after["pinned"], leg)
+            self.assertEqual(window["tags"], after["tags"], leg)
 
     def test_every_invocation_is_recorded_with_its_argv(self):
         # The scenario asserts on these: the address in every vector, and that
@@ -281,16 +332,29 @@ class StubFidelityTest(unittest.TestCase):
 
 
 class ServiceShapeTest(unittest.TestCase):
-    """The rulings, as properties of Service.qml that a refactor must keep."""
+    """The rulings, as properties of the tree that a refactor must keep.
+
+    Integration moved every decision into Model.js, so a rule is asserted
+    against the file that now owns it. What is asserted against Service.qml
+    is delegation: the decisions it must not make for itself.
+    """
+
+    def has(self, haystack, needle, label):
+        # assertIn on a 180 KB file prints the file. Say where and what.
+        self.assertTrue(needle in haystack, "%s: %s" % (label, needle))
+
+    def lacks(self, haystack, needle, label):
+        self.assertFalse(needle in haystack, "%s: %s" % (label, needle))
 
     def test_the_window_is_resolved_by_class_and_by_the_player_pid(self):
         # Never by class alone: a user's own mpv --wayland-app-id=omarchy-iptv
         # reproduces as a second client, and floating, shrinking and pinning a
         # stranger's window is damage rather than a nuisance.
-        self.assertIn("root.pipFindWindow(text, root.playerPid, root.pipClass)", SERVICE)
-        self.assertIn('reason: "ambiguous"', SERVICE)
-        self.assertIn("if (!root.playing || root.playerPid <= 0)", SERVICE)
-        self.assertIn('if (Math.floor(Number(c.pid) || 0) !== want) continue', SERVICE)
+        self.has(SERVICE, "Model.pipFindWindow(text, root.playerPid, root.pipClass)", "Service.qml")
+        self.has(SERVICE, "playing: root.playing && root.playerPid > 0", "Service.qml")
+        # The narrowing itself, where a node test can call it.
+        self.has(MODEL, "if (pipInteger(c.pid, -1) !== want) continue", "Model.js")
+        self.has(MODEL, 'if (hits.length > 1) return pipWindowFail("ambiguous")', "Model.js")
 
     def test_success_is_decided_by_a_readback_and_by_nothing_else(self):
         # PIP11. The dispatch handler must hand its exit status to a function
@@ -306,8 +370,12 @@ class ServiceShapeTest(unittest.TestCase):
         # And the one place that declares victory reads the verdict.
         victory = re.search(r"function pipCheck\(live\) \{(.*?)\n  \}", SERVICE, re.S)
         self.assertIsNotNone(victory)
-        self.assertIn("root.pipVerify(live,", victory.group(1))
+        self.assertIn("Model.pipVerify(live, root.pipIntent, expected)", victory.group(1))
         self.assertIn("root.pipFinish(true", victory.group(1))
+        # What "asked for" means on each leg: the geometry in, the snapshot
+        # out. Passing one where the other belongs would verify the window
+        # against the wrong rectangle and call a failure a success.
+        self.assertIn('root.pipIntent === "off" ? root.pipSnapshot : root.pipGeom', victory.group(1))
 
     def test_the_only_pipFinish_true_outside_pipCheck_is_the_nothing_to_undo_case(self):
         # A second "it worked" that did not go through a readback is exactly
@@ -315,35 +383,71 @@ class ServiceShapeTest(unittest.TestCase):
         self.assertEqual(SERVICE.count("root.pipFinish(true"), 2)
 
     def test_no_float_or_pin_step_is_issued_blind(self):
-        # PIP10. Both conditionals must read `live`, and the two words that
-        # would signal a blind instruction must appear nowhere in the tree.
-        self.assertIn('if (live.floating !== true) steps.push(root.pipDispatch("float"', SERVICE)
-        self.assertIn('if (live.pinned !== true) steps.push(root.pipDispatch("pin"', SERVICE)
-        self.assertNotIn('action = "set"', SERVICE)
-        self.assertNotIn('action = "unset"', SERVICE)
+        # PIP10. Both conditionals must read the live window, and the two
+        # words that would signal a blind instruction appear in no source
+        # file in the tree.
+        self.has(MODEL, 'if (l.floating !== true) steps.push(pipDispatchArgv("float"', "Model.js")
+        self.has(MODEL, 'if (l.pinned !== true) steps.push(pipDispatchArgv("pin"', "Model.js")
+        for source in (MODEL, SERVICE, GUIDE):
+            self.assertNotIn('action = "set"', source)
+            self.assertNotIn('action = "unset"', source)
 
     def test_unpin_comes_before_unfloat_on_the_way_out(self):
-        exit_plan = SERVICE[SERVICE.index('if (intent !== "off") return steps'):]
-        pin_at = exit_plan.index('root.pipDispatch("pin"')
-        float_at = exit_plan.index('root.pipDispatch("float"')
+        exit_plan = MODEL[MODEL.index("var snap = pipParseSnapshot(snapshot)"):]
+        pin_at = exit_plan.index('pipDispatchArgv("pin"')
+        float_at = exit_plan.index('pipDispatchArgv("float"')
         self.assertLess(pin_at, float_at,
                         "pin applies to floating windows; unfloating first loses the unpin")
 
     def test_only_an_address_and_integers_can_reach_a_dispatch_string(self):
-        # 4.11 and ruling PIP7. The regex is applied when the window is found
-        # and applied AGAIN when the string is built, so a later caller cannot
-        # route around it, and the tag is a two-value whitelist rather than a
-        # pattern that would accept a channel name.
-        self.assertEqual(SERVICE.count("/^0x[0-9a-f]{1,16}$/.test("), 2)
-        self.assertIn('if (out.tag !== "+iptv-pip" && out.tag !== "-iptv-pip") return null', SERVICE)
-        self.assertIn("if (n < -100000 || n > 100000) return null", SERVICE)
+        # 4.11 and ruling PIP7. The pattern is applied when the window is
+        # found and applied AGAIN when the string is built, so a later caller
+        # cannot route around it; the tag is a whitelist of two literals
+        # rather than a pattern that would accept a channel name; and the
+        # expression is re-checked as a whole before it leaves the builder.
+        self.has(MODEL, 'if (pipAddressSelector(address) === "") return pipWindowFail("bad_address")', "Model.js")
+        self.has(MODEL, '  tag: ["+" + PIP_TAG, "-" + PIP_TAG]', "Model.js")
+        self.has(MODEL, "  if (value < -PIP_COORD_LIMIT || value > PIP_COORD_LIMIT) return null", "Model.js")
+        self.has(MODEL, '  return PIP_EXPR_RE.test(expr) ? expr : ""', "Model.js")
+
+    def test_the_service_builds_no_compositor_expression_of_its_own(self):
+        # The strongest form of "one implementation": after integration the
+        # service holds no expression, no address pattern, no tag literal and
+        # no window-state parsing at all. Every one of those was a local copy
+        # of a Model.js rule while the two lanes were separate, and a copy
+        # that agrees today is a copy that can disagree tomorrow.
+        # Needles that cannot appear in prose: a quoted literal or a call.
+        # (Both files still NAME these things in comments, which is the
+        # documentation this test exists to keep honest.)
+        for forbidden in ("hl.dsp.", "/^0x", '"user-data/', '"iptv-pip"', "JSON.parse("):
+            self.lacks(SERVICE, forbidden, "Service.qml must not carry this rule")
+        self.has(SERVICE, "readonly property string pipClass: Model.PIP_CLASS", "Service.qml")
+        self.has(SERVICE, "readonly property string pipTag: Model.PIP_TAG", "Service.qml")
+        self.has(SERVICE, "Model.PIP_SNAPSHOT_KEY", "Service.qml")
+
+    def test_there_is_no_fallback_spelling(self):
+        # PIP15. One question to the compositor, one answer, one builder. A
+        # second arm could not be reached (rc cannot report a refusal) and
+        # would not work if it were (the other form is a syntax error here),
+        # so it must not exist to read like safety.
+        self.has(SERVICE,
+                 'root.pipProvider = /configProvider:\\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "other"',
+                 "Service.qml")
+        self.has(SERVICE, 'root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"', "Service.qml")
+        # As argv items, which is the only way a legacy spelling could ship.
+        # Model.js's comment still explains why the form is a syntax error
+        # here; what must not exist is a builder that emits one.
+        for forbidden in ('"tagwindow"', '"togglefloating"', '"resizewindowpixel"',
+                          '"movewindowpixel"', '"alterzorder"', '"pin"]', "pipLegacyDispatch"):
+            self.lacks(SERVICE, forbidden, "no legacy spelling ships")
+            self.lacks(MODEL, forbidden, "no legacy spelling ships")
 
     def test_the_snapshot_lives_in_the_player_and_writes_no_file(self):
         # No new file, no state.json schema change, no write outside the
         # plugin's own directories -- in fact no write to disk at all. The
         # snapshot's lifetime is the window's because it lives in the process
         # that owns the window (4.5).
-        self.assertIn('"user-data/omarchy-iptv-pip"', SERVICE)
+        self.has(MODEL, 'var PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"', "Model.js")
         start = SERVICE.index("// ------------ picture in picture (M2-05)".replace(
             "------------", "------------------------------------------------------------"))
         api = SERVICE[start:SERVICE.index("// Debounced: settings changes", start)]
@@ -359,44 +463,130 @@ class ServiceShapeTest(unittest.TestCase):
                       "readonly property int pipMaxSteps: 8",
                       "readonly property int pipStepMs: 2 * 1000",
                       "readonly property int pipSequenceMs: 15 * 1000"):
-            self.assertIn(bound, SERVICE)
-        self.assertIn("id: pipStepWatchdog", SERVICE)
-        self.assertIn("id: pipSequenceWatchdog", SERVICE)
+            self.has(SERVICE, bound, "Service.qml")
+        self.has(SERVICE, "id: pipStepWatchdog", "Service.qml")
+        self.has(SERVICE, "id: pipSequenceWatchdog", "Service.qml")
 
     def test_the_verb_and_its_refusals(self):
-        self.assertIn("function pip(mode: string): string", SERVICE)
-        for code in ("bad_mode", "no_compositor", "nothing_playing", "busy"):
-            self.assertIn('code: "%s"' % code, SERVICE)
+        self.has(SERVICE, "function pip(mode: string): string", "Service.qml")
+        for refusal in ('root.pipRefuse(want, "bad_mode")', 'root.pipRefuse(want, "busy")',
+                        "root.pipRefuse(want, gate.code)"):
+            self.has(SERVICE, refusal, "Service.qml")
+        # And the two the gate answers are the model's, not a second list.
+        self.has(MODEL, 'return { ok: false, code: "no_compositor", text: pipStatusText("no_compositor") }',
+                 "Model.js")
+        self.has(MODEL, 'return { ok: false, code: "nothing_playing", text: pipStatusText("nothing_playing") }',
+                 "Model.js")
 
-    def test_no_stand_in_is_called_from_outside_its_marked_block(self):
+    def test_no_stand_in_survives_anywhere(self):
         # CLAUDE.md "Working in parallel" rule 4: stubbing a dependency to
         # build is fine, leaving one is not, and integration proves it with a
-        # grep. This passes BOTH before lane V1 merges (every STANDIN_ name
-        # sits inside the marked block) and after (there are none at all), so
-        # it never has to be edited to stay true.
-        start = "============ STAND-IN-M2-05-V1\n"
-        end = "======== end STAND-IN-M2-05-V1"
-        if start not in SERVICE:
-            self.assertNotIn("STANDIN_", SERVICE)
-            return
-        outside = SERVICE[:SERVICE.index(start)] + SERVICE[SERVICE.index(end):]
-        self.assertNotIn("STANDIN_", outside)
-        # And the block really is one contiguous region with both ends on it,
-        # so the swap is a deletion rather than a hunt.
-        self.assertLess(SERVICE.index(start), SERVICE.index(end))
+        # grep. This is that grep, run over every file a stand-in could hide
+        # in rather than over the one it was known to be in.
+        for name in ("Service.qml", "Guide.qml", "BarWidget.qml", "Model.js"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for marker in ("STANDIN_", "STAND-IN-M2-05-V1"):
+                self.lacks(text, marker, "%s still carries a stand-in" % name)
 
-    def test_the_swap_recipe_is_complete(self):
-        # Each stand-in is one line and says which line replaces it, so the
-        # merge is mechanical rather than archaeological.
-        wrappers = re.findall(r"^  function (\w+)\([^)]*\) \{ return STANDIN_\w+\([^)]*\) \}"
-                              r"\s*// -> return Model\.(\w+)\(", SERVICE, re.M)
-        if not wrappers:
-            self.assertNotIn("STANDIN_", SERVICE)
-            return
-        for local, modelled in wrappers:
-            self.assertEqual(local, modelled)
-        self.assertEqual(len(wrappers),
-                         len(re.findall(r"^  function \w+\([^)]*\) \{ return STANDIN_", SERVICE, re.M)))
+    def test_the_service_calls_the_model_for_every_pip_decision(self):
+        # The other half of the stand-in grep: the names are not merely gone,
+        # they are gone BECAUSE the real functions are called. A wrapper
+        # deleted along with its call site would pass the grep above.
+        for call in ("Model.pipFindWindow(", "Model.pipFindMonitor(", "Model.pipGeometry(",
+                     "Model.pipOptions(", "Model.pipPlan(", "Model.pipVerify(",
+                     "Model.pipActive(", "Model.pipResolveIntent(", "Model.pipSnapshotFor(",
+                     "Model.pipParseSnapshot(", "Model.pipMpvCommands(", "Model.pipHasTag(",
+                     "Model.pipResultCode(", "Model.pipKeyRequest(", "Model.pipDispatchAccepted(",
+                     "Model.parsePlayerReply("):
+            self.has(SERVICE, call, "Service.qml must call the shipped function")
+
+
+class TwoLanesAgreeTest(unittest.TestCase):
+    """Where the same rule was implemented on both sides of a lane boundary.
+
+    This project has twice shipped two implementations of one rule that
+    quietly disagreed, once where a user could see it. These are the places
+    M2-05 could do it again, each reduced to one function or one constant
+    and then pinned here.
+    """
+
+    def guide_service_handlers(self):
+        """Every on<Signal> the guide listens for on the service object."""
+        block = re.search(r"Connections \{\s*\n\s*target: root\.service\b(.*?)\n  \}",
+                          GUIDE, re.S)
+        self.assertIsNotNone(block, "the guide's service Connections block moved")
+        return re.findall(r"function on([A-Z]\w*)\(", block.group(1))
+
+    def test_the_guide_listens_for_signals_the_service_actually_emits(self):
+        # THE defect this integration found. The guide had `onPipResult` and
+        # the service emitted `pipOutcome`; `ignoreUnknownSignals: true` is
+        # required there (an older service has neither Sources nor PiP), so
+        # the mismatch was not an error, not a warning, and not a failure --
+        # the footer was simply wired to a signal nobody emits, and every
+        # gate stayed green. A name is a contract between two files; compare
+        # them.
+        signals = set(re.findall(r"^  signal (\w+)\(", SERVICE, re.M))
+        properties = set(re.findall(r"^  (?:readonly )?property \w+ (\w+)", SERVICE, re.M))
+        functions = set(re.findall(r"^  function (\w+)\(", SERVICE, re.M))
+        handlers = self.guide_service_handlers()
+        self.assertIn("PipOutcome", handlers, "the guide stopped listening for the PiP outcome")
+        for handler in handlers:
+            lower = handler[0].lower() + handler[1:]
+            known = (lower in signals
+                     or lower in functions
+                     or (lower.endswith("Changed") and lower[:-len("Changed")] in properties))
+            self.assertTrue(known,
+                            "Guide.qml listens for on%s; Service.qml emits no such signal" % handler)
+
+    def test_one_gate_decides_whether_pip_may_start(self):
+        # The guide answers the two refusals it can see; the service re-asks
+        # with the fact the guide does not have (the player's pid). Both go
+        # through Model.pipKeyRequest, so they cannot drift into refusing for
+        # different reasons or saying it in different words.
+        self.assertIn("Model.pipKeyRequest({", GUIDE)
+        self.assertIn("Model.pipKeyRequest({", SERVICE)
+
+    def test_one_definition_of_being_in_picture_in_picture(self):
+        # The service's own copy of this predicate required `pinned` as well
+        # as the tag; Model.pipActive deliberately does not, because a user
+        # who unpins the corner box still owns it and `p` must still put it
+        # back. Two answers to "am I in PiP?" is an inverted toggle: the key
+        # enters when it should exit.
+        self.assertIn("function pipActive(live)", MODEL)
+        self.assertEqual(SERVICE.count("Model.pipActive("), 3)
+        self.assertNotIn("function pipIsOn", SERVICE)
+
+    def test_one_copy_of_every_line_the_user_reads(self):
+        # PIP9 and section 5: the footer lines and the tooltip line live in
+        # Model.js and nowhere else. A sentence in Service.qml or Guide.qml
+        # is a line no test can compare against the table.
+        #
+        # Over CODE, not over comments: a comment that quotes a line to
+        # explain a failure mode is documentation, and a test that forbids
+        # quoting the thing it protects teaches people to write vaguer
+        # comments.
+        def code_only(text):
+            return "\n".join(row for row in text.splitlines()
+                             if not row.lstrip().startswith("//"))
+        model, service, guide = code_only(MODEL), code_only(SERVICE), code_only(GUIDE)
+        for line in ("Picture in picture on", "Picture in picture off", "Nothing playing",
+                     "Picture in picture needs Hyprland", "Cannot find the player window",
+                     "Hyprland refused the window change", "Picture in picture: on"):
+            self.assertEqual(model.count('"%s"' % line), 1, line)
+            self.assertNotIn(line, service, "the service never composes a sentence")
+            self.assertNotIn(line, guide, "the guide renders Model.pipStatusText, never a literal")
+
+    def test_the_settings_have_one_clamp_behind_them(self):
+        # The manifest declares the range the host offers; Model.SETTING_RANGES
+        # is what the plugin accepts; tests/Model.test.js asserts the two are
+        # equal in both directions. What is asserted here is that there is no
+        # THIRD clamp: the service reads the one bar entry through
+        # Model.pipOptions rather than clamping for itself.
+        self.assertIn("Model.pipOptions(root.pipConfig())", SERVICE)
+        self.assertNotIn("pipSizePercent, 15, 60", SERVICE)
+        self.assertNotIn("pipMargin, 0, 200", SERVICE)
+        self.assertEqual(MODEL.count("pipSizePercent: { def: 30, min: 15, max: 60 }"), 1)
+        self.assertEqual(MODEL.count("pipMargin: { def: 16, min: 0, max: 200 }"), 1)
 
 
 if __name__ == "__main__":

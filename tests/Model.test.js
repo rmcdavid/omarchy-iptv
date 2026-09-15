@@ -745,7 +745,27 @@ check("playerStash without an id is not a record", [Model.playerStash(null), Mod
 check("playerStash defaults are empty, never undefined", Model.playerStash({ id: "t:x" }), { schema: 1, playing: true, id: "t:x", name: "", group: "", launchedFrom: "", sourceKey: "", since: 0, entryId: null, seq: 0, verb: "" })
 // A v0.3.0 player is still out there with a stash that predates the field.
 check("playerStash reads a record written before the writer was named", Model.playerStash({ id: "t:x", seq: 3 }).verb, "")
-const probeBody = JSON.stringify({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 301706, idle: false, seq: 41, claimed: true, mpvVersion: "mpv 0.41.0", stash: { schema: 1, playing: true, id: "t:bbc1.uk", name: "BBC One HD", group: "UK", launchedFrom: "g:uk", sourceKey: "a1b2c3d4", since: 1758000123, entryId: 2, seq: 41 }, owner: { schema: 1, pid: 301706, startTime: "9912345", at: 1758000100 } })
+// The probe reply is the SHARED vector now (fixtures/player-argv.json), not a
+// copy written here: tests/test_player.py asserts a real `player probe` emits
+// exactly these keys, so a helper that renamed `pid` turns both suites red.
+// It matters beyond tidiness since M2-05 - the service takes the window-owning
+// pid from here and reads it defensively, so a missing key would not throw,
+// it would silently answer "Nothing playing" to the `p` of a playing channel.
+const probeFixture = playerFixture.playerProbe
+const probeBody = JSON.stringify(probeFixture.reply)
+check("parsePlayerProbe: a live player, from the shared vector",
+  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid } })(),
+  probeFixture.parsed)
+check("parsePlayerProbe: the pid M2-05 addresses the window by survives every shape the helper can send it in", [
+  Model.parsePlayerProbe(probeBody).pid,
+  Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { pid: 0 }))).pid,
+  Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { pid: null }))).pid,
+  Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { pid: "301706" }))).pid,
+  (() => { const bare = Object.assign({}, probeFixture.reply); delete bare.pid; return Model.parsePlayerProbe(JSON.stringify(bare)).pid })(),
+  probeFixture.keys.indexOf("pid") >= 0
+], [301706, null, null, 301706, null, true])
+check("parsePlayerProbe: the fixture's own reply declares every key the helper emits",
+  Object.keys(probeFixture.reply).slice().sort(), probeFixture.keys.slice().sort())
 check("parsePlayerProbe: a live player", (() => { const p = Model.parsePlayerProbe(probeBody); return [p.valid, p.running, p.responsive, p.pid, p.idle, p.seq, p.stash.launchedFrom, p.stash.entryId, p.owner.pid] })(), [true, true, true, 301706, false, 41, "g:uk", 2, 301706])
 check("parsePlayerProbe: nothing running", (() => { const p = Model.parsePlayerProbe(JSON.stringify({ ok: true, kind: "player.probe", running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 3 })); return [p.valid, p.running, p.pid, p.idle, p.stash, p.seq] })(), [true, false, null, null, null, 3])
 check("parsePlayerProbe never throws: garbage, truncated, wrong kind, error reply, empty", [
@@ -2515,28 +2535,24 @@ const defaulted = Model.settingsFrom(null)
 check("settings parity: the model's defaults ARE the manifest's defaults",
   Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(defaulted[key]) }),
   Object.keys(manifestDefaults).map(function (key) { return key + "=" + JSON.stringify(manifestDefaults[key]) }))
-// M2-05 section 6 adds three PiP keys to the model. `manifest.json` belongs
-// to lane V2, which merges AFTER this lane (M2-05 design section 9), so for
-// one wave the model knows three settings the manifest has not declared yet.
-// They are excluded from the equality by NAME, never by a wildcard, so every
-// other key stays pinned exactly and a typo still fails. The checks above and
-// below need no exception: they walk the MANIFEST's keys, so they say nothing
-// today and hold the PiP defaults and ranges to the model the moment lane V2
-// declares them - which is the assertion that actually matters.
-const pipSettingKeys = ["pipCorner", "pipMargin", "pipSizePercent"]
-const withoutPip = function (keys) { return keys.filter(function (key) { return pipSettingKeys.indexOf(key) === -1 }).slice().sort() }
-check("settings parity: the model knows every key the manifest declares, and no others (PiP keys excepted while lane V2 is in flight)",
-  withoutPip(Object.keys(defaulted)), withoutPip(Object.keys(manifestDefaults)))
+// M2-05 section 6's three PiP keys. The design gave `manifest.json` to lane
+// V2 and this file to lane V1, so neither could declare them without turning
+// the other's gate red (ruling PIP16: two files a test asserts about each
+// other are one unit). They land together at integration, and the exception
+// that stood in for that - a by-name exclusion list here - is gone with them:
+// the equality below is total again, in both directions.
+check("settings parity: the model knows every key the manifest declares, and no others",
+  Object.keys(defaulted).slice().sort(), Object.keys(manifestDefaults).slice().sort())
 
 const integerKeys = manifestSchema.filter(function (entry) { return entry.type === "integer" }).map(function (entry) { return entry.key })
-// Was "the manifest declares exactly four integer settings". That count is
-// about to become six, in a file this lane may not open, so it is stated as
-// the property it was standing in for: every integer control the host draws
-// is one the model ranges. A dropped key still fails; a key lane V2 adds does
-// not, as long as SETTING_RANGES already knows it.
-check("settings parity: every integer setting the manifest declares is one the model ranges, numberEntryMs among them",
-  [integerKeys.filter(function (key) { return Model.SETTING_RANGES[key] === undefined }), integerKeys.indexOf("numberEntryMs") >= 0, integerKeys.length >= 4],
-  [[], true, true])
+// The count is stated AND the property it stands for: every integer control
+// the host draws is one the model ranges. The bare count catches a key
+// silently dropped from the schema (which the property below cannot see,
+// because it only walks what the manifest still declares); the property
+// catches a key declared with no clamp behind it.
+check("settings parity: every integer setting the manifest declares is one the model ranges, all six of them",
+  [integerKeys.filter(function (key) { return Model.SETTING_RANGES[key] === undefined }), integerKeys.indexOf("numberEntryMs") >= 0, integerKeys.length],
+  [[], true, 6])
 check("settings parity: SETTING_RANGES equals the manifest's own min/max/default",
   integerKeys.map(function (key) { return key + " " + JSON.stringify(Model.SETTING_RANGES[key]) }),
   manifestSchema.filter(function (entry) { return entry.type === "integer" })
@@ -2685,6 +2701,39 @@ check("R2: pipOptions is the ONE reading of the three PiP settings, and settings
 
 // ---- 3. geometry (4.4). The only place multi-monitor correctness can come
 // from on a machine with one monitor.
+
+// The monitor lookup the service asked lane V1 for in the handover and the
+// design never named: the box goes on the monitor the WINDOW is on (4.9),
+// which means `hyprctl -j monitors` looked up by the id the client entry
+// carries. The fixture's eight monitors are ids 0..7, so a lookup that
+// ignored the id and answered the first entry would place every box on the
+// laptop panel - which is exactly what a single-monitor lane cannot see.
+const pipMonitorList = JSON.stringify([pipFixture.MONITORS.live, pipFixture.MONITORS.hidpi, pipFixture.MONITORS.offset])
+check("pipFindMonitor: the monitor the window is on, by id, from raw stdout or a parsed array", [
+  Model.pipFindMonitor(pipMonitorList, 0).name,
+  Model.pipFindMonitor(pipMonitorList, 1).name,
+  Model.pipFindMonitor(pipMonitorList, 4).name,
+  Model.pipFindMonitor(JSON.parse(pipMonitorList), 4).name,
+  Model.pipFindMonitor(pipMonitorList, "4").name
+], ["eDP-1", "DP-1", "HDMI-A-1", "HDMI-A-1", "HDMI-A-1"])
+// Refusing is the whole point: a fallback to the first monitor is always
+// right on a one-monitor machine and silently wrong on a two-monitor desk.
+check("pipFindMonitor refuses rather than guessing a screen", [
+  Model.pipFindMonitor(pipMonitorList, 9),
+  Model.pipFindMonitor(pipMonitorList, -1),
+  Model.pipFindMonitor(pipMonitorList, null),
+  Model.pipFindMonitor(pipMonitorList, "not a monitor"),
+  Model.pipFindMonitor("[]", 0),
+  Model.pipFindMonitor("{not json", 0),
+  Model.pipFindMonitor(null, 0),
+  Model.pipFindMonitor('{"id":0}', 0),
+  Model.pipFindMonitor([null, undefined, 7], 0)
+], [null, null, null, null, null, null, null, null, null])
+// And the pair the service actually runs: a window on monitor 4 is placed
+// with monitor 4's own scale, reserved strip and global origin.
+check("pipFindMonitor feeds pipGeometry the monitor the window is on, not the first one",
+  Model.pipGeometry(Model.pipFindMonitor(pipMonitorList, 4), { corner: "bottom-left", sizePercent: 25, margin: 10 }),
+  { x: 1930, y: 440, w: 480, h: 270 })
 
 check("pipGeometry: every fixture box, on monitors that mostly do not exist here",
   pipFixture.GEOMETRY.map(function (row) { return row.why + " -> " + JSON.stringify(Model.pipGeometry(pipFixture.MONITORS[row.monitor], row.opts)) }),
@@ -3071,6 +3120,57 @@ check("the round trip: tiled -> PiP -> tiled, ending byte-identical to the start
     clean: enter.concat(exit).every(function (argv) { return argv.length === 3 && argv[0] === "hyprctl" && argv[1] === "dispatch" })
   }
 })(), { enter: 6, on: "on", exit: 3, off: "off", back: "690,38 650,718 false false", urls: 0, clean: true })
+
+// ---- 12. the far side of the interface (CLAUDE.md: one rule, one fixture)
+//
+// These vectors are BUILT here and PARSED by scripts/dev-harness/stub-hyprctl.py,
+// which is the fake the whole harness scenario drives the service against.
+// Two implementations of one expression grammar, in two languages, written by
+// two lanes - and until this fixture, nothing compared them: the node suite
+// asserted the builder against strings written in this file, the python suite
+// asserted the fake against strings written in that one, and both would stay
+// green with the two halves unable to speak to each other. Only the live
+// harness half would have noticed, and it needs a display.
+//
+// tests/test_pip.py replays exactly these vectors through the stub and
+// asserts the window lands on `after`.
+const pipDispatch = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/pip-dispatch.json"), "utf8"))
+const pipDispatchLive = Model.pipFindWindow([pipDispatch.window], pipDispatch.playerPid)
+check("the shared dispatch fixture: the geometry both suites run is the one pipGeometry computes",
+  Model.pipGeometry(pipDispatch.monitor, Model.pipOptions({})), pipDispatch.enter.geometry)
+check("the shared dispatch fixture: pipPlan emits the enter vectors the stub is replayed with",
+  Model.pipPlan(pipDispatchLive, null, pipDispatch.enter.geometry, "on"), pipDispatch.enter.argv)
+check("the shared dispatch fixture: and the exit vectors, tag then unpin then unfloat",
+  Model.pipPlan(Model.pipFindWindow([Object.assign({}, pipDispatch.window, {
+    at: pipDispatch.enter.after.at, size: pipDispatch.enter.after.size,
+    floating: true, pinned: true, tags: pipDispatch.enter.after.tags
+  })], pipDispatch.playerPid), pipDispatch.exit.snapshot, pipDispatch.enter.geometry, "off"),
+  pipDispatch.exit.argv)
+check("the shared dispatch fixture: the snapshot written at PiP-on is the one the exit is verified against",
+  Model.pipSnapshotFor(pipDispatchLive), pipDispatch.exit.snapshot)
+
+// The third copy of one string, and the one with teeth. The window class PiP
+// matches on is the app-id the player is LAUNCHED with, and that flag is
+// written in three places: here, in bin/omarchy-iptv's mirror, and in the
+// finder. The first two are pinned to each other by player-argv.json; the
+// finder was pinned to neither, so a renamed app-id would have left PiP
+// answering "Cannot find the player window" for ever, silently, with every
+// suite green. buildMpvArgv now builds the flag FROM the constant, and this
+// is the assertion that says so.
+check("one window class: the app-id the player is launched with is the class PiP looks for", (function () {
+  const launched = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: "/state" })
+  const flag = launched.filter(function (item) { return item.indexOf("--wayland-app-id=") === 0 })
+  const fixtureFlags = playerFixture.mpvArgv.map(function (row) {
+    return (row.argv || []).filter(function (item) { return item.indexOf("--wayland-app-id=") === 0 }).join("")
+  })
+  return {
+    flag: flag.join(""),
+    fromConstant: flag.join("") === "--wayland-app-id=" + Model.PIP_CLASS,
+    // And the python mirror's own vectors carry the same value.
+    fixture: fixtureFlags.filter(function (item) { return item !== "--wayland-app-id=" + Model.PIP_CLASS }),
+    finds: Model.pipFindWindow([{ "class": Model.PIP_CLASS, pid: 7, address: "0x1", at: [0, 0], size: [2, 2], floating: false, pinned: false, monitor: 0, workspace: { id: 1 }, tags: [] }], 7).ok
+  }
+})(), { flag: "--wayland-app-id=omarchy-iptv", fromConstant: true, fixture: [], finds: true })
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
