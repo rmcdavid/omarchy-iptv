@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.rmcdavid.iptv",
   "name": "IPTV",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "David McDavid",
   "license": "MIT",
   "description": "Live TV channel guide for Omarchy: type to find a channel, Enter plays it in mpv.",

@@ -90,7 +90,7 @@ Rule: FE does not start a task whose Deps (PLAN.md) are not all `done` here.
 | M2-02x | Multiple playlists | - | superseded by M2-01 (PO-7) | the source history is the multi-playlist model; the M2-02 id now means the detached player |
 | M2-03 | Channel numbers + numeric zap | - | done | built in two lanes, integrated with zero stand-ins, live-passed; two P2 defects from the live pass fixed (a number that does not exist no longer silently tunes elsewhere; duplicate cycling advances). The user's own provider carries no channel numbers, so the feature shows the no-numbers message for them |
 | M2-04 | Channel logos | - | todo | |
-| M2-05 | PiP via hyprctl float + pin | - | todo | |
+| M2-05 | PiP via hyprctl float + pin | - | done | |
 | M2-06 | Recording via ffmpeg | - | todo | |
 | M2-07 | Catch-up / timeshift | - | todo | |
 | M2-08 | First-class vertical bar layout | - | todo | |

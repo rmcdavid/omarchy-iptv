@@ -3,6 +3,30 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.5.0 (2026-09-14)
+
+Picture in picture.
+
+### Added
+- Press `p` in the guide to shrink the player into a corner and keep watching
+  while you work. Press it again to put it back exactly where it was, whether
+  that was tiled, floating, or floating and pinned. The small window follows
+  you across workspaces, and changing channel does not resize it.
+- A new command does the same from outside the guide:
+  `omarchy-shell io.github.rmcdavid.iptv pip toggle`. Three settings control
+  the corner, the size as a share of your monitor, and the margin.
+
+### Fixed
+- The command that focuses the player window had not worked since 0.3.0, at
+  four places, and failed silently because nothing read its result. It also
+  identified the window by class alone, so with a second player open it would
+  focus the wrong one. Both are fixed.
+
+### Notes
+- Picture in picture needs Hyprland configured with its Lua provider, which is
+  the Omarchy default. Elsewhere the feature reports itself unavailable rather
+  than half working.
+
 ## 0.4.0 (2026-09-14)
 
 Channel numbers and numeric tuning.
