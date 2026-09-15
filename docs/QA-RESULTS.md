@@ -3746,3 +3746,475 @@ at that shape; it is the browsing affordances that stop paying rent when a
 provider ships 3,335 channels under one heading. That is a design conversation
 for the product owner, not a release gate, and it is worth having because this
 is the shape of the owner's own list.
+
+## M2-05 picture-in-picture GATE pass on c4d4075 (QA, 2026-09-14, 20:46 - 21:12)
+
+Task M2-05-00. Every row of `docs/M2-05-PICTURE-IN-PICTURE.md` section 3 was
+run on this machine against a player **started through the plugin** on a channel
+chosen for the pass. Nothing in the repo or in the installed plugin was
+modified; this lane wrote only this file.
+
+**Bottom line.** The mechanism is real and it works: eleven of thirteen rows
+proven, one disproven in a way that costs the design nothing but removes an
+optimisation and invalidates the gate's own probe, one unsettled for a reason
+that cannot be removed by this lane. Two findings matter more than the score.
+The legacy dispatcher spelling is not merely a fallback that never runs here -
+it is **syntactically unparseable** under this compositor, which confirms open
+question 8: **`Model.focusPlayerArgv()` is dead code in released software**, and
+its test is green *because* the code is broken. Separately, **`hyprctl` reports
+success for a dispatch that did nothing at all**, which breaks the failure
+detection section 4.10 specifies.
+
+### Environment
+
+| Fact | Value |
+|---|---|
+| Hyprland | 0.56.2, commit `efb50993...`, tag v0.56.2, `dirty: false` |
+| Config provider | `configProvider: lua` (from `hyprctl systeminfo`; **not** in `hyprctl -j version`) |
+| `ecosystem:enforce_permissions` | `{"option":"ecosystem:enforce_permissions","bool":false,"set":false}` |
+| `hyprctl configerrors` | empty |
+| `binds:allow_pin_fullscreen` | `{"bool":false,"set":false}` |
+| Monitor | `eDP-1`, 1366x768, scale 1, transform 0, reserved `[0, 26, 0, 0]`, x 0, y 0 |
+| mpv | v0.41.0 |
+| Shell | quickshell pid 1800527 (1943634 after the restart) |
+| Plugin | installed copy `5d1a27e` (v0.3.1) on `main`, tracking `origin/main`, clean. Untouched. |
+| Source | iptv-org.github.io, 1474 channels, 28 groups, theme Retropc |
+| Channels used | `t:ReutersTV.us@SD` (decodes 1920x1080), `t:CookingPanda.us@SD` (decodes 1280x720) |
+| Player window | class `omarchy-iptv`, pid 1937373, address `0x559c6893d940` |
+
+### Gate results
+
+| # | Verdict | Evidence |
+|---|---|---|
+| G-1 | **Lua form PROVEN. Legacy form DISPROVEN.** | See below - the headline result |
+| G-2 | **PROVEN** | `player probe` -> `"pid": 1937373`; `hyprctl -j clients` -> `omarchy-iptv pid 1937373 0x559c6893d940`. Identical. No wrapper. `ps -o ppid= -p 1937373` -> 831 (user systemd), i.e. the window belongs to a process that is **not** a child of the shell. Correction to the gate command: `status` carries **no** `pid` key; the pid comes from `player probe` |
+| G-3 | **DISPROVEN** | `action` is ignored; `float` and `pin` are toggle-only. Detail below |
+| G-4 | **PROVEN, but not by the mechanism the design credits** | Detail below |
+| G-5 | **UNSETTLED** | Cannot be run by this lane. Reason below |
+| G-6 | **PROVEN** | Detail below |
+| G-7 | **PROVEN** | `hyprctl --batch "dispatch hl.dsp.window.tag({...+b1}) ; dispatch hl.dsp.window.tag({...+b2})"` -> rc 0, `ok\n\n\nok`; tags read back `['b1', 'b2', 'default-opacity*', 'iptv-pip']`. Both applied |
+| G-8 | **PROVEN** | `/usr/bin/hyprctl`; `HYPRLAND_INSTANCE_SIGNATURE=efb50993780079460b0cbed1363e2166a2de1d9f_1789339912_1242840277`; `$XDG_RUNTIME_DIR/hypr/` holds that one instance directory, mode 0700 |
+| G-9 | **PROVEN (the negative holds)** | `strings -a /usr/bin/mpv \| grep -cE '^zwlr_layer_shell_v1$'` -> **0**; same grep over `/usr/bin/Hyprland` -> **1**. mpv 0.41.0 cannot reach the overlay layer |
+| G-10 | **PROVEN** | `reserved [0, 26, 0, 0]`, 26 in slot 2 = top. `hyprctl -j layers`: `eDP-1 level 2 omarchy-bar 0 0 1366 26`. Confirmed visually: the box at y 42 sits clear of the bar |
+| G-11 | **PROVEN - the translucency is real, not an inference** | Detail below |
+| G-12 | **PROVEN** | Detail below |
+| G-13 | **PROVEN (already-failed as expected)** | `PanelKeyCatcher.qml` signals at `:38-44` carry no modifier; `:71` is `if (event.key === Qt.Key_Return \|\| event.key === Qt.Key_Enter) { returnRequested(); activateRequested(); event.accepted = true; return }`. `Shift+Enter` is undeliverable. PIP1 stands, now with a citation |
+
+### G-1 - the dispatch spelling. The design is right about the mechanism and right about the defect
+
+Against the live player window, address `0x559c6893d940`:
+
+```
+# Lua form
+$ hyprctl dispatch 'hl.dsp.window.tag({ window = "address:0x559c6893d940", tag = "+iptv-probe" })'
+rc=0  ok
+$ hyprctl -j clients | grep -c iptv-probe
+1
+  tags now: ['default-opacity*', 'iptv-probe']
+
+# Legacy form, space spelling (the shipped one)
+$ hyprctl dispatch tagwindow +iptv-probe2 address:0x559c6893d940
+rc=7  error: [string "return hl.dispatch(tagwindow +iptv-probe2 add..."]:1: ')' expected near 'address'
+      -> Note: dispatch in lua is a shorthand for hl.dispatch(...), your syntax might need to be updated.
+$ hyprctl -j clients | grep -c iptv-probe2
+0
+
+# Legacy form, comma spelling (the one 2.5 tells lanes to copy from omarchy-capture-webcam-resize)
+$ hyprctl dispatch tagwindow "+iptv-probe3,address:0x559c6893d940"
+rc=7  error: [string "return hl.dispatch(tagwindow +iptv-probe3,add..."]:1: <name> expected near '0x559c6893d940'
+$ hyprctl -j clients | grep -c iptv-probe3
+0
+
+# Removal, to prove the state is ours to undo
+$ hyprctl dispatch 'hl.dsp.window.tag({ window = "address:0x559c6893d940", tag = "-iptv-probe" })'
+rc=0  ok
+  tags now: ['default-opacity*']
+```
+
+The mechanism is confirmed: `hyprctl dispatch` under a Lua provider wraps its
+argument as `return hl.dispatch(<arg>)`, so a bare legacy dispatcher name is a
+**Lua syntax error**, not an unknown-dispatcher error. Passing the legacy
+command as a quoted *string* does not rescue it either:
+
+```
+$ hyprctl dispatch '"focuswindow class:zz-nonexistent-qa12"'
+rc=7  error: return hl.dispatch("focuswindow class:zz-nonexistent-qa12"):1:
+      hl.dispatch: expected a dispatcher (e.g. hl.dsp.window.close())
+```
+
+**There is no spelling of the legacy form that reaches this compositor.** The
+design's plan - Lua primary, legacy fallback shipped for other people's
+hyprlang Hyprlands - is correct and unchanged. The fallback must never be
+expected to run here, and the service must not treat "the Lua step failed, try
+legacy" as a recovery path on this host: it is a second guaranteed failure.
+
+**One correction the lanes need.** Section 4.3's table and the decision row both
+spell focus-adjacent verbs under `hl.dsp.window.*`. That namespace is right for
+`float`, `pin`, `resize`, `move`, `tag` and `alter_zorder` - all present in
+`/usr/share/hypr/stubs/hl.meta.lua:908-931` (`HL.DspWindowNamespace`) and all
+verified live below. But there is **no `hl.dsp.window.focus`**:
+
+```
+$ hyprctl dispatch 'hl.dsp.focus({ window = "class:zz-nonexistent-qa12" })'    # correct
+rc=0  warning: =[C]:-1: hl.focus: window not found
+$ hyprctl dispatch 'hl.dsp.window.focus({ window = "class:zz-nonexistent-qa12" })'  # wrong
+rc=7  error: ... attempt to call a nil value (field 'focus')
+```
+
+Focus lives at `hl.dsp.focus({ window = ... })`, one level up. That is the
+spelling the PIP8 fix must use.
+
+### The focus defect - D-PIP-1, confirmed by direct A/B on the live window
+
+Open question 8 and ruling PIP8 are **confirmed**. `Model.js:2945-2947` returns
+`["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"]`. Run exactly as
+shipped, with focus starting on another window and the player window present:
+
+```
+focus BEFORE: com.anthropic.Claude 0x559c687e09a0
+
+$ hyprctl dispatch focuswindow class:omarchy-iptv
+rc=7
+error: [string "return hl.dispatch(focuswindow class:omarchy-..."]:1: ')' expected near 'class'
+focus AFTER : com.anthropic.Claude 0x559c687e09a0      <- unchanged: the shipped command is a no-op
+
+$ hyprctl dispatch 'hl.dsp.focus({ window = "class:omarchy-iptv" })'
+rc=0  ok
+focus AFTER : omarchy-iptv 0x559c6893d940              <- the fix works
+```
+
+The failure is silent in the product because `Service.qml:578` fires it through
+`Quickshell.execDetached(Model.focusPlayerArgv())`, which returns void: rc 7
+never reaches the plugin. Four call sites in the shipped copy depend on it -
+`Service.qml:400` (play with `keepOpen` false), `:460` (`wantFocus`), `:577`
+(the function) and `:2651`. Every one of them has been a no-op since v0.3.0.
+
+**And the test cannot see it, exactly as `CLAUDE.md` 12 predicts.**
+`tests/Model.test.js:455` is
+`check("focusPlayerArgv", Model.focusPlayerArgv(), ["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"])`
+- the expectation is a transcription of the constant. Measured in a scratch copy
+of the tree (no repo file touched):
+
+```
+repo as shipped, broken command:   1180 checks, 0 failure(s)   All Model.js tests passed.
+command replaced with the spelling PROVEN to work on this host:
+  FAIL focusPlayerArgv
+       got:  ["hyprctl","dispatch","hl.dsp.focus({ window = \"class:omarchy-iptv\" })"]
+       want: ["hyprctl","dispatch","focuswindow","class:omarchy-iptv"]
+                                   1180 checks, 1 failure(s)
+```
+
+The suite is **green on the broken code and red on the fix**. Its polarity is
+inverted: it pins the defect in place and would reject the repair. This is the
+`CLAUDE.md` 12 trap found in released software, and it is worth more than the
+feature that uncovered it.
+
+> **D-PIP-1, P2.** `Model.focusPlayerArgv()` emits a legacy Hyprland dispatcher
+> that cannot parse under a Lua config provider. Focus-the-player has never
+> worked on this machine since v0.3.0 and fails silently through
+> `execDetached`. Fix: emit `hl.dsp.focus({ window = "class:omarchy-iptv" })`
+> through the same validated builder PiP uses. **Replace** the mirrored
+> assertion at `tests/Model.test.js:455` with one that asserts the Lua
+> *shape* - there is no `hl.dsp.window.focus`, so the test must also pin the
+> namespace. Per PIP8, lane V1, this wave.
+
+### G-3 - DISPROVEN. `action` is ignored; `float` and `pin` toggle unconditionally
+
+The gate row says "either result is acceptable; we need to know which", and
+notes that a pass would let `Model.pipPlan` emit fewer steps. It is a fail, and
+the gate's own command would have reported a false pass: it only applies
+`action = "set"` **once, from tiled**, where a toggle and a set are
+indistinguishable. Applying it twice separates them:
+
+```
+baseline                                    float False
+float action="set"                 rc=0 ok  float True    <- looks correct
+float action="set"   (again)       rc=0 ok  float False   <- a set is not idempotent: it toggled
+float action="unset" (from tiled)  rc=0 ok  float True    <- an unset from tiled FLOATED the window
+float action="toggle"              rc=0 ok  float False
+```
+
+`pin` behaves identically: no `action` key toggles, `action = "set"` toggles,
+and a second `action = "set"` toggles back off. An unrecognised value is
+accepted in silence - `float({ ..., action = "zzz" })` returns rc 0 `ok`.
+
+Consequences:
+
+- **The design survives intact.** 4.3 already emits `action = "toggle"` behind a
+  read of `live.floating` / `live.pinned`, and 4.5's "never a remembered
+  boolean" is exactly the discipline that makes this harmless. Verified end to
+  end below.
+- **The optimisation in the G-3 failure branch is withdrawn.** `pipPlan` cannot
+  emit unconditional set/unset steps. Every float and pin step stays
+  conditional on a fresh read. A lane that "simplifies" this reintroduces the
+  bug.
+- Two further live facts for `pipPlan`'s fixtures: **unfloating a pinned window
+  clears the pin by itself** (float toggle from floating+pinned landed at
+  `float False pin False`), and **pin refuses a tiled window** -
+  `warning: =[C]:-1: Window does not qualify to be pinned`, **rc 0**. 4.3's
+  "unpin before unfloat" ordering is right and must not be reordered.
+
+### Does the state apply to a window the plugin did not spawn? Yes - all six steps
+
+This is the assumption the feature rests on. The target was started by the
+helper and reparented to systemd (ppid 831), so it is not a child of the shell;
+the dispatches were issued from an unrelated shell, so not a child of the
+dispatcher either. Design 4.3 "enter", in order, with a read after each step:
+
+```
+baseline                                       iptv: at [690, 38]  size [650, 718] float False pin False
+1 float  (toggle)                    rc=0 ok   iptv: at [404, 127] size [960, 540] float True  pin False
+2 resize {x=410, y=230}              rc=0 ok   iptv: at [679, 282] size [410, 230] float True  pin False
+3 move   {x=940, y=42}               rc=0 ok   iptv: at [940, 42]  size [410, 230] float True  pin False
+4 pin                                rc=0 ok   iptv: at [940, 42]  size [410, 230] float True  pin True
+5 alter_zorder {mode="top"}          rc=0 ok   iptv: at [940, 42]  size [410, 230] float True  pin True
+6 tag {tag="+iptv-pip"}              rc=0 ok   tags ['default-opacity*', 'iptv-pip']
+```
+
+`at` and `size` land **exactly** on the requested integers. `resize {x,y}` is
+absolute pixels, `move {x,y}` is absolute global layout coordinates - 4.4's
+choice of global over per-monitor coordinates is correct. The user's other
+window reflowed to full width `[12, 38] 1342x718` the moment the player left
+the layout, which is the promise in section 1.
+
+The pin promise was exercised directly. Switching the active workspace to 2,
+then 3, then back to 1, the client's `workspace.id` followed each time with
+`at [940, 42] size [410, 230] pin True` unchanged. It really does follow you.
+
+Screenshot evidence at `/tmp/claude-1000/omarchy-iptv-qa12/12-pip-onscreen.png`:
+the box renders video in the top-right corner, clear of the 26 px bar.
+
+Design 4.3 "exit", from `{floating:false, pinned:false}`:
+
+```
+1 tag {tag="-iptv-pip"}     rc=0 ok   tags ['default-opacity*']
+2 pin  (unpin)              rc=0 ok   float True  pin False
+3' float (toggle)           rc=0 ok   iptv: at [690, 38] size [650, 718] float False pin False
+```
+
+Compared field by field against the pre-PiP capture, **both windows are
+identical**: `SAME com.anthropic.Claude`, `SAME omarchy-iptv`.
+
+### A new defect the gate was not looking for - D-PIP-2
+
+Section 4.10 says "a dispatch step exits non-zero after the fallback -> stop the
+queue ... report `dispatch_failed`". **Exit code cannot carry that signal.**
+Against an address that does not exist:
+
+```
+$ hyprctl dispatch 'hl.dsp.window.tag({ window = "address:0xdeadbeef", tag = "+zz" })'    rc=0  ok
+$ hyprctl dispatch 'hl.dsp.window.move({ window = "address:0xdeadbeef", x = 10, y = 10 })' rc=0  ok
+$ hyprctl dispatch 'hl.dsp.window.float({ window = "address:0xdeadbeef", action = "toggle" })' rc=0  ok
+$ hyprctl dispatch 'hl.dsp.window.pin({ window = "address:0xdeadbeef" })'                 rc=0  ok
+```
+
+All four did nothing and all four reported success. A refusal that *is* reported
+arrives as `warning:` text on **stdout with rc 0** (`Window does not qualify to
+be pinned`, `hl.focus: window not found`). rc is non-zero only for a Lua parse
+or nil-call error - that is, only for a bug in our own string, never for a
+failed effect. A stale address is the routine case here: the window dies
+whenever playback stops.
+
+> **D-PIP-2, P2 (design defect, pre-implementation).** `Service.qml` must not
+> decide `dispatch_failed` from `Process` exit status. Detect failure by
+> (a) scanning the step's stdout for `warning:` / `error:` and (b) re-reading
+> `hyprctl -j clients` after the queue and comparing against the intent.
+> Section 4.10 needs rewriting before lane V2 codes against it.
+
+### G-4 - PROVEN, and the mpv-side job turns out not to be load-bearing here
+
+In PiP at `at [940, 42] size [410, 230]`, with `auto-window-resize` left at its
+default:
+
+```
+$ get_property auto-window-resize   ->  True     (never set to false in this run)
+before zap: video 1280x720   win at [940, 42] size [410, 230]
+zap to the 1080p entry, polled once a second for 10 s:
+  t+1s ... t+10s   win at [940, 42] size [410, 230]   (every sample)
+after zap:  video 1920x1080  win at [940, 42] size [410, 230]
+```
+
+The gate's assertion holds - `at` and `size` unchanged across a real
+1280x720 -> 1920x1080 change. But it held **with `auto-window-resize` still
+`true`**, which is not what 4.6 predicts. On Wayland a client can only *request*
+a size, and Hyprland ignores the request for a floating window whose geometry a
+dispatcher set explicitly. `auto-window-resize` is inert here for the same
+reason `ontop` is inert: the same class of player-side control the design
+already proved powerless in 2.1.
+
+This does not break anything - it removes a justification. 4.6 presents the mpv
+write as "the one job the compositor cannot do for us"; on this host the
+compositor does it anyway. Keeping the write is defensible as portability
+insurance for other compositors, but the design should stop claiming it is
+required, and the product owner should decide whether
+`Model.pipRestoreAutoResize(mpvArgs)` - a pure function, its own test matrix and
+a restore path - is worth carrying for an effect never observed. **A new open
+question for M2-05-01.**
+
+### G-6 - PROVEN. The snapshot can live in the player
+
+Headless mpv (`--no-config --idle=yes --vo=null --ao=null --force-window=no`),
+no window opened, killed by pid afterwards:
+
+```
+set  user-data/omarchy-iptv-pip {...}                      error: success
+get  (same client)    {'active': True, 'at': [1, 2], 'size': [410, 230], 'floating': False,
+                       'pinned': False, 'monitor': 0, 'workspace': 1, 'v': 1}
+loadfile <local wav> replace                               error: success  {'playlist_entry_id': 1}
+get  (a NEW client connected AFTER the load)
+                      {'active': True, 'at': [1, 2], 'size': [410, 230], 'floating': False,
+                       'pinned': False, 'monitor': 0, 'workspace': 1, 'v': 1}
+get  user-data        {'osc': {...}, 'omarchy-iptv-pip': {...}}     <- our key sits beside mpv's own
+```
+
+Byte-identical after the load, from a client that connected afterwards. 4.5's
+storage choice stands: no new file, no `state.json` schema change.
+
+Three reply-shape facts confirmed in the same run, all supporting 2.5's
+corrections: `auto-window-resize` defaults to `True`; `osd-width` returns
+`success` with **0** when there is no VO (a readback check written against the
+original description fails open); `ontop` accepts `True` and reads back `True`
+on a platform where it does nothing; an unknown property returns
+`property not found`. **Never verify window state from an mpv reply.**
+
+### G-11 - PROVEN. The player is being rendered translucent
+
+```
+tags on the player window: ['default-opacity*']
+/usr/share/omarchy/default/hypr/windows.lua:6   o.window(".*", { tag = "+default-opacity" })
+/usr/share/omarchy/default/hypr/windows.lua:25  o.window({ tag = "default-opacity" }, { opacity = "0.985 0.96" })
+/usr/share/omarchy/default/hypr/apps/system.lua:40-51
+    o.window("^(zoom|vlc|mpv|org.kde.kdenlive|com.obsproject.Studio|...)$", { tag = "-default-opacity" })
+    o.window("^(zoom|vlc|mpv|...)$", { opacity = "1 1" })
+$ hyprctl getprop address:0x559c6893d940 opaque   ->  false
+```
+
+The anchored media-opacity exemption matches on **class**, and our class is
+`omarchy-iptv`, not `mpv` - the app-id that gives the plugin its window identity
+is the same one that costs it the exemption. Confirmed, not inferred. Per PIP5
+this is its own small defect, not PiP's to carry:
+
+> **D-PIP-3, P3.** The player window is rendered at `0.985 / 0.96` because
+> `--wayland-app-id=omarchy-iptv` misses Omarchy's `^(...|mpv|...)$` media-opacity
+> exemption. `contrib/windows.lua` already ships the `-default-opacity` line;
+> the README should point at it. Fix on its own terms (PIP5).
+
+Also confirmed here: a rule-applied tag reads back as `default-opacity*` with a
+trailing asterisk, a dispatched one (`iptv-pip`, `b1`, `b2`) does not.
+`Model.pipFindWindow` rule 5 is correct and necessary.
+
+### G-12 - PROVEN. A theme switch cannot un-PiP the user
+
+```
+theme Retropc, in PiP:  at [940, 42] size [410, 230] float True pin True tags ['default-opacity*', 'iptv-pip']
+$ omarchy theme set Nord      rc=0      at [940, 42] size [410, 230] float True pin True tags [... 'iptv-pip']
+$ omarchy theme set Retropc   rc=0      at [940, 42] size [410, 230] float True pin True tags [... 'iptv-pip']
+```
+
+Geometry, both booleans **and the dispatched tag** survived in both directions.
+2.5's correction is confirmed live: dispatched window state is not Lua state, so
+`reinitLuaState()` cannot touch it.
+
+### G-5 - UNSETTLED, and this lane cannot settle it
+
+The row requires the contrib float rule "pasted into `~/.config/hypr` **by the
+user on a scratch config**". `CLAUDE.md` "Never touch" makes that directory
+read-only for this lane and the brief did not authorise a change there. The only
+runtime alternative is `hyprctl eval` + `hl.window_rule(...)`, which the design
+itself rejects in 2.2 and which would register a rule in the user's live
+compositor session that could match windows this lane does not own.
+
+Not papered over, and not cost-free: G-5 is the one input to **PIP-03** and to
+the README caveat in section 7. It bites only users who paste the optional
+float line, so it does not block the lanes. **It must be settled by the user, or
+by an explicitly authorised pass, before section 7's contrib text claims the
+float rule is compatible with PiP.** One partial observation, worth exactly what
+it is worth: ~30 s of playing video plus two zaps produced no positional drift
+at all, but no static float/size rule matched our window during this pass, so
+this says nothing about the rule re-applying on a commit.
+
+### Arithmetic correction for lane V1 - section 4.4's worked example is wrong
+
+4.4's formula, applied to this monitor (`1366x768`, scale 1, transform 0,
+reserved `[0,26,0,0]`, x 0 y 0) with the defaults (top-right, 30 %, 16 px):
+
+```
+x0,y0,x1,y1 = 16 42 1350 752
+w,h         = 410 230
+top-right   = (940, 42)
+```
+
+The document states **"410x230 box at `(932, 42)`"** in 4.4 and again in open
+question 4 / PIP4. `1350 - 410 = 940`, not 932. The formula is right and the
+worked number is wrong by 8 px. This matters because 10.1 makes that example the
+`pipGeometry` fixture. `(940, 42)` was applied live and is the value that clears
+both the right edge at a 16 px margin and the 26 px bar. **Correct the prose to
+(940, 42) before the fixture is written.**
+
+### Privacy and safety sweep
+
+| Check | Result |
+|---|---|
+| `status \| grep -c '://'` | 0, before and after |
+| `journalctl --user -t omarchy-shell \| grep omarchy-iptv \| grep -c '://'` | 0 |
+| Hostile address, `0xdead"); os.execute("touch ...PWNED"); --` | rc 7, Lua parse error, **no file created**; would also be refused by 4.11's regex before construction |
+| Hostile address, `0x1 end os.time()` | rc 0 `ok`, no effect, no execution |
+| Stray marker file | absent |
+
+4.11 and PIP7 hold. Note that the second hostile value was *silently accepted*,
+which is one more reason the regex, not the compositor's reply, is the only
+defence - enforce it at construction and at the call, as PIP7 requires.
+
+### Machine restored
+
+| Item | Proof |
+|---|---|
+| `~/.config/omarchy/shell.json` | sha256 identical to the opening snapshot |
+| `~/.local/state/omarchy-iptv/` | every file sha256 identical; tree and modes identical (`700` dir, `600` state.json) |
+| `~/.cache/omarchy-iptv/` | every file sha256 identical; tree and modes identical |
+| Installed plugin | `5d1a27e`, `* main 5d1a27e [origin/main]`, `git status --porcelain` empty. Never modified |
+| Repo | `git status --short` empty, branch `main` |
+| Shell | restarted (`omarchy restart shell`), quickshell pid 1800527 -> 1943634, plugin answers `status` with `"status":"ready"`, 1474 channels, 28 groups, 7 recents, 0 favorites - matching the opening capture |
+| Player | `pgrep -x mpv` empty; `omarchy-iptv` client count 0 |
+| Theme | `omarchy theme current` -> `Retropc` |
+| Windows | opening capture 1 client, closing capture 1 client, compared on class/at/size/floating/pinned/workspace/monitor/tags: **SAME** |
+| Workspaces | one, `ws 1 windows 1`, as at the start |
+| Probe tags | `grep -cE 'iptv-pip\|iptv-probe\|"b1"\|"b2"'` over all clients -> 0 |
+
+One honest note on the restore. The shell restart triggered the plugin's own
+overdue playlist refresh (`refreshMinutes` 360, last fetch 13:24, restart
+~21:05), which rewrote the cache to 1472 channels - upstream iptv-org had
+dropped 4 entries and added 2. That refresh was due and would have happened
+without this pass. The user's original bytes were put back afterwards and
+verified, so disk is exactly as found; the running shell holds the fresher list
+in memory and will rewrite it on its next scheduled refresh. Favorites, recents
+and `lastPlayed` were never altered by anything but the two channels this pass
+played, and those were restored.
+
+Evidence root: `/tmp/claude-1000/omarchy-iptv-qa12/` (opening and closing
+clients/monitors/layers/status JSON, the snapshot tree and its sha256 manifest,
+the in-PiP capture, the screenshot).
+
+### Verdict for the lanes
+
+**The build lanes can start**, with four written corrections carried into the
+design first:
+
+1. **G-3 is a fail.** Delete the "a pass lets `Model.pipPlan` emit fewer steps"
+   branch. Every float/pin step stays conditional on a fresh read. Add the two
+   live facts: unfloat clears pin, and pin refuses a tiled window with rc 0.
+2. **Section 4.10 is unimplementable as written** (D-PIP-2). Rewrite failure
+   detection to scan stdout and re-read `clients`. Lane V2 blocks on this.
+3. **Section 4.4's worked example is off by 8 px** - `(940, 42)`, not
+   `(932, 42)`. Fix before the `pipGeometry` fixture is written.
+4. **The focus fix is `hl.dsp.focus({ window = ... })`**, not
+   `hl.dsp.window.focus` - that namespace member does not exist.
+
+Two items go to the product owner as M2-05-01 additions: whether
+`auto-window-resize` and `pipRestoreAutoResize` are worth carrying now that the
+effect they defend against is unobservable here (G-4), and who runs G-5, which
+this lane may not.
+
+Two defects are filed against released software: **D-PIP-1 (P2)**, the dead
+focus command and its inverted test, which PIP8 already assigns to lane V1 this
+wave; and **D-PIP-3 (P3)**, the translucent player, which PIP5 keeps separate.
