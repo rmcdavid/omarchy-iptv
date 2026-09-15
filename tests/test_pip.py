@@ -284,6 +284,40 @@ class StubFidelityTest(unittest.TestCase):
         self.assertEqual(code, 7, out)
         self.assertIs(lua.window()["floating"], False)
 
+    def test_the_stub_understands_exactly_what_model_js_builds(self):
+        # CLAUDE.md: a rule written twice gets one fixture that both
+        # implementations run. Model.js builds these expressions and this
+        # stub parses them - one grammar, two languages, two lanes - and
+        # before tests/fixtures/pip-dispatch.json nothing compared the two:
+        # this suite drove the fake with strings written by hand HERE, and
+        # tests/Model.test.js asserted the builder against strings written by
+        # hand THERE. Both could be green with the halves unable to speak.
+        #
+        # So the vectors below are not written here at all. They are the ones
+        # tests/Model.test.js asserts pipPlan emits, replayed verbatim, with
+        # the leading "hyprctl" dropped because this file IS hyprctl.
+        fixture = json.loads((ROOT / "tests" / "fixtures" / "pip-dispatch.json")
+                             .read_text(encoding="utf-8"))
+        hypr = StubDriver(state={"clients": [fixture["window"]],
+                                 "monitors": [fixture["monitor"]]})
+        self.addCleanup(hypr.close)
+        address = fixture["address"]
+        for leg in ("enter", "exit"):
+            for argv in fixture[leg]["argv"]:
+                self.assertEqual(argv[0], "hyprctl", argv)
+                code, out = hypr.run(*argv[1:])
+                # `ok` and nothing else: a grammar the fake did not recognise
+                # answers with a Lua error here, exactly as the compositor
+                # does, rather than being silently ignored.
+                self.assertEqual((code, out), (0, "ok"), argv[2])
+            window = hypr.window(address)
+            after = fixture[leg]["after"]
+            self.assertEqual(window["at"], after["at"], leg)
+            self.assertEqual(window["size"], after["size"], leg)
+            self.assertIs(window["floating"], after["floating"], leg)
+            self.assertIs(window["pinned"], after["pinned"], leg)
+            self.assertEqual(window["tags"], after["tags"], leg)
+
     def test_every_invocation_is_recorded_with_its_argv(self):
         # The scenario asserts on these: the address in every vector, and that
         # nothing playlist-derived appears in any of them.

@@ -3121,6 +3121,34 @@ check("the round trip: tiled -> PiP -> tiled, ending byte-identical to the start
   }
 })(), { enter: 6, on: "on", exit: 3, off: "off", back: "690,38 650,718 false false", urls: 0, clean: true })
 
+// ---- 12. the far side of the interface (CLAUDE.md: one rule, one fixture)
+//
+// These vectors are BUILT here and PARSED by scripts/dev-harness/stub-hyprctl.py,
+// which is the fake the whole harness scenario drives the service against.
+// Two implementations of one expression grammar, in two languages, written by
+// two lanes - and until this fixture, nothing compared them: the node suite
+// asserted the builder against strings written in this file, the python suite
+// asserted the fake against strings written in that one, and both would stay
+// green with the two halves unable to speak to each other. Only the live
+// harness half would have noticed, and it needs a display.
+//
+// tests/test_pip.py replays exactly these vectors through the stub and
+// asserts the window lands on `after`.
+const pipDispatch = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/pip-dispatch.json"), "utf8"))
+const pipDispatchLive = Model.pipFindWindow([pipDispatch.window], pipDispatch.playerPid)
+check("the shared dispatch fixture: the geometry both suites run is the one pipGeometry computes",
+  Model.pipGeometry(pipDispatch.monitor, Model.pipOptions({})), pipDispatch.enter.geometry)
+check("the shared dispatch fixture: pipPlan emits the enter vectors the stub is replayed with",
+  Model.pipPlan(pipDispatchLive, null, pipDispatch.enter.geometry, "on"), pipDispatch.enter.argv)
+check("the shared dispatch fixture: and the exit vectors, tag then unpin then unfloat",
+  Model.pipPlan(Model.pipFindWindow([Object.assign({}, pipDispatch.window, {
+    at: pipDispatch.enter.after.at, size: pipDispatch.enter.after.size,
+    floating: true, pinned: true, tags: pipDispatch.enter.after.tags
+  })], pipDispatch.playerPid), pipDispatch.exit.snapshot, pipDispatch.enter.geometry, "off"),
+  pipDispatch.exit.argv)
+check("the shared dispatch fixture: the snapshot written at PiP-on is the one the exit is verified against",
+  Model.pipSnapshotFor(pipDispatchLive), pipDispatch.exit.snapshot)
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")
