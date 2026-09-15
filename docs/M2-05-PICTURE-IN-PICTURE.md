@@ -958,3 +958,15 @@ the first time one has actively protected a defect. Rule 12 already forbids a
 test that mirrors logic it could call. The fix for the command and the rewrite
 of its test both belong in this wave, and the test must be shown red against
 the broken code before it counts.
+
+## 15. Ruling PIP14 (product owner, 2026-09-14)
+
+Carry the player-side property that stops a channel change resizing the box.
+Without it the feature breaks on the single most common thing a user does
+while in picture in picture, which is change channel: the small window would
+resize itself to whatever the next stream's dimensions happen to be, and the
+carefully placed corner box would jump. It is one property set over a socket
+the shell already holds, and it is restored on exit like everything else.
+
+A feature that survives every exotic case and breaks on the ordinary one is
+not finished.
