@@ -3995,6 +3995,34 @@ function rowMeta(opts) {
   return str(o.until) === "" ? "" : "until " + str(o.until)
 }
 
+// M2-09 GS8. The opacity rung a row's secondary text carries, lifted out of
+// the two QML bindings that render it (CLAUDE.md rule 12) so a test can call
+// the shipping decision instead of mirroring it.
+//
+// UX 5.3's dim rung is de-emphasis and it is right for ambient text: `until
+// HH:MM`, the group name, now/next are all there to be glanced at. The failure
+// notice is not ambient. It is the one string in the guide that names a key
+// the user is meant to press, and the live pass measured it as the LOWEST
+// contrast text on the card -- 3.78:1 on the cursor row against a 4.5:1
+// threshold -- because the dim rung is applied over the selected row's lighter
+// fill. So the notice carries no de-emphasis at all: same colour token
+// (Color.menu.text, no literal and no new token), full rung.
+//
+// It keeps the card's text colour rather than the row's selected colour, which
+// is what makes this hold in EVERY theme rather than only in the one that was
+// measured: `menu.selected-background` is `menu.text` at 0.08, so the card's
+// text token is near-identical against both row fills, while `selected-text`
+// is the theme's accent and is under 4.5:1 against its own row in eight of the
+// twenty-two installed themes -- for the channel name too, which is not this
+// lane's to change. The notice therefore reads the same whether or not the
+// cursor is on the row, which is the right property for an alert.
+var TEXT_DIM = 0.52
+var TEXT_FULL = 1
+
+function rowNoticeEmphasis(failedAt) {
+  return str(failedAt) === "" ? TEXT_DIM : TEXT_FULL
+}
+
 // Row detail line (UX 2.4): `Group - Now: X - Next: Y`, group omitted inside
 // its own group, EPG segments replaced by the failure notice when set.
 function rowDetail(opts) {
@@ -5910,6 +5938,9 @@ if (typeof module !== "undefined") {
     rowDetail: rowDetail,
     rowFailedMeta: rowFailedMeta,
     rowMeta: rowMeta,
+    rowNoticeEmphasis: rowNoticeEmphasis,
+    TEXT_DIM: TEXT_DIM,
+    TEXT_FULL: TEXT_FULL,
     rowsHaveDetail: rowsHaveDetail,
     rowShowsGroup: rowShowsGroup,
     rowAccessibleName: rowAccessibleName,

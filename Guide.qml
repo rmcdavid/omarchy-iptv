@@ -2457,7 +2457,10 @@ Item {
                       // re-entering width through visible -> implicitWidth
                       // is a binding loop. Neighbours anchor on `visible`.
                       color: root.foreground
-                      opacity: 0.52
+                      // M2-09 GS8: `until HH:MM` is ambient and stays on the
+                      // dim rung; the failure notice names a key and carries
+                      // none. Same token either way.
+                      opacity: Model.rowNoticeEmphasis(row.failedAt)
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
                       horizontalAlignment: Text.AlignRight
@@ -2508,7 +2511,12 @@ Item {
                       textFormat: Text.PlainText
                       text: row.detail
                       color: root.foreground
-                      opacity: 0.52
+                      // M2-09 GS8: the same rung as the meta slot, because on
+                      // a two-line row this IS where the failure notice lands
+                      // (rowDetail replaces the EPG segments with it), and the
+                      // two slots must not disagree about how legible the one
+                      // string that names a key is.
+                      opacity: Model.rowNoticeEmphasis(row.failedAt)
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.bodySmall
                       elide: Text.ElideRight

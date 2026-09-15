@@ -1,0 +1,144 @@
+{
+  "note": "Menu-surface colours of every theme installed on the reference machine, for the GS8 contrast assertions in tests/Model.test.js. Read from each theme's colors.toml; retropc is first because it is the theme docs/QA-RESULTS.md measured D-GS-1 on, and its values come from the generated current-theme colors.toml. The menu surface derives from these three by /usr/share/omarchy/default/themed/shell.toml.tpl: menu.background = background, menu.text = foreground, menu.selected-text = accent, menu.selected-background = foreground at selectedBackgroundAlpha over menu.background.",
+  "selectedBackgroundAlpha": 0.08,
+  "themes": [
+    {
+      "name": "retropc",
+      "background": "#0a0a08",
+      "foreground": "#ffb000",
+      "accent": "#cc9900"
+    },
+    {
+      "name": "catppuccin",
+      "background": "#1e1e2e",
+      "foreground": "#cdd6f4",
+      "accent": "#89b4fa"
+    },
+    {
+      "name": "catppuccin-latte",
+      "background": "#eff1f5",
+      "foreground": "#4c4f69",
+      "accent": "#1e66f5"
+    },
+    {
+      "name": "ethereal",
+      "background": "#060B1E",
+      "foreground": "#ffcead",
+      "accent": "#7d82d9"
+    },
+    {
+      "name": "everforest",
+      "background": "#2d353b",
+      "foreground": "#d3c6aa",
+      "accent": "#7fbbb3"
+    },
+    {
+      "name": "flexoki-light",
+      "background": "#FFFCF0",
+      "foreground": "#100F0F",
+      "accent": "#205EA6"
+    },
+    {
+      "name": "gruvbox",
+      "background": "#282828",
+      "foreground": "#d4be98",
+      "accent": "#7daea3"
+    },
+    {
+      "name": "hackerman",
+      "background": "#0B0C16",
+      "foreground": "#ddf7ff",
+      "accent": "#82FB9C"
+    },
+    {
+      "name": "kanagawa",
+      "background": "#1f1f28",
+      "foreground": "#dcd7ba",
+      "accent": "#dcd7ba"
+    },
+    {
+      "name": "last-horizon",
+      "background": "#0c0b0c",
+      "foreground": "#FAFCFB",
+      "accent": "#b59790"
+    },
+    {
+      "name": "lumon",
+      "background": "#16242d",
+      "foreground": "#d6e2ee",
+      "accent": "#8bc9eb"
+    },
+    {
+      "name": "lupine",
+      "background": "#fafafa",
+      "foreground": "#212121",
+      "accent": "#3264eb"
+    },
+    {
+      "name": "matte-black",
+      "background": "#121212",
+      "foreground": "#bebebe",
+      "accent": "#e68e0d"
+    },
+    {
+      "name": "miasma",
+      "background": "#222222",
+      "foreground": "#c2c2b0",
+      "accent": "#78824b"
+    },
+    {
+      "name": "nord",
+      "background": "#2e3440",
+      "foreground": "#d8dee9",
+      "accent": "#81a1c1"
+    },
+    {
+      "name": "osaka-jade",
+      "background": "#111c18",
+      "foreground": "#C1C497",
+      "accent": "#509475"
+    },
+    {
+      "name": "retro-82",
+      "background": "#05182e",
+      "foreground": "#f6dcac",
+      "accent": "#faa968"
+    },
+    {
+      "name": "ristretto",
+      "background": "#2c2525",
+      "foreground": "#e6d9db",
+      "accent": "#f38d70"
+    },
+    {
+      "name": "rose-pine",
+      "background": "#faf4ed",
+      "foreground": "#575279",
+      "accent": "#56949f"
+    },
+    {
+      "name": "solitude",
+      "background": "#101315",
+      "foreground": "#cacccc",
+      "accent": "#798186"
+    },
+    {
+      "name": "tokyo-night",
+      "background": "#1a1b26",
+      "foreground": "#a9b1d6",
+      "accent": "#7aa2f7"
+    },
+    {
+      "name": "vantablack",
+      "background": "#000000",
+      "foreground": "#ffffff",
+      "accent": "#8d8d8d"
+    },
+    {
+      "name": "white",
+      "background": "#ffffff",
+      "foreground": "#000000",
+      "accent": "#6e6e6e"
+    }
+  ]
+}

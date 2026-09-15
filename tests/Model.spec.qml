@@ -259,6 +259,21 @@ TestCase {
     compare(Model.footerHints({ mode: "search", query: "" })[2][1], "group")
   }
 
+  // GS8 / D-GS-1: the rung the two secondary slots carry, in the engine that
+  // renders them. Guide.qml binds `opacity` straight to this, so a value the
+  // QML engine coerced differently from node would be a silently faint notice.
+  function test_guideAtScaleNoticeEmphasis() {
+    compare(Model.rowNoticeEmphasis("07:12"), 1)
+    compare(Model.rowNoticeEmphasis(""), 0.52)
+    compare(Model.rowNoticeEmphasis(null), Model.TEXT_DIM)
+    compare(Model.TEXT_FULL, 1)
+    // The rung is a number the engine can multiply, not a string that reads
+    // as one: `opacity: "1"` binds, and renders at full, and would make the
+    // dim case silently opaque too.
+    compare(typeof Model.rowNoticeEmphasis("07:12"), "number")
+    compare(typeof Model.rowNoticeEmphasis(""), "number")
+  }
+
   function test_guideAtScaleRevealOffset() {
     // D5: the fold affordance Omarchy's own picker carries, as arithmetic.
     // 24 rows of 38 px + 4 spacing in a 456 px viewport, peek reach 25.

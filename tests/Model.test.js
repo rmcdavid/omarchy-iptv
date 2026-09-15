@@ -428,6 +428,116 @@ checkCall("rowMeta: the slot carries the notice exactly when the row has no deta
   ]
 }, ["Failed 07:12" + SEP + "Space to retry", "Failed 07:12" + SEP + "Space to retry", "", "until 21:00", "until 21:00", "", ""])
 
+// ---- GS8 / D-GS-1: the string that names a key is not the faintest text on
+// the row.
+//
+// The live pass measured `Failed HH:MM - Space to retry` at 3.78:1 on the
+// CURSOR row against a 4.5:1 threshold, the only text on the card under it,
+// because UX 5.3's dim rung was applied over the selected row's lighter fill.
+// The rung is the whole fix, so the rung is what the shipping code decides and
+// what is asserted here -- and then the consequence is COMPUTED, from the real
+// menu tokens of every theme installed on this machine
+// (tests/fixtures/menu-contrast.json), because a ratio measured on one theme
+// is not evidence about the next one. WCAG 2.1 relative luminance; the row
+// fills are the composites Color.qml builds from the same three tokens.
+const menuTokens = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/menu-contrast.json"), "utf8"))
+function rgbOf(value) {
+  const h = String(value).replace("#", "")
+  return [0, 2, 4].map(function (i) { return parseInt(h.slice(i, i + 2), 16) })
+}
+function composite(fg, bg, alpha) { return [0, 1, 2].map(function (i) { return fg[i] * alpha + bg[i] * (1 - alpha) }) }
+function luminance(rgb) {
+  const lin = rgb.map(function (v) { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) })
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+}
+function contrast(a, b) {
+  const la = luminance(a), lb = luminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+// One theme -> the two row fills and the two text colours the delegate uses.
+function menuSurface(theme) {
+  const background = rgbOf(theme.background)
+  const text = rgbOf(theme.foreground)
+  return {
+    rowFill: background,
+    cursorFill: composite(text, background, menuTokens.selectedBackgroundAlpha),
+    text: text,
+    selectedText: rgbOf(theme.accent)
+  }
+}
+// The notice as the row renders it: Color.menu.text at the rung the shipping
+// code chooses, over whichever fill the row has.
+function noticeRatio(theme, onCursor, alpha) {
+  const s = menuSurface(theme)
+  const fill = onCursor ? s.cursorFill : s.rowFill
+  return contrast(composite(s.text, fill, alpha), fill)
+}
+function round2(n) { return Math.round(n * 100) / 100 }
+const reference = menuTokens.themes[0]
+
+checkCall("rowNoticeEmphasis: the failure notice carries no de-emphasis, ambient meta keeps the dim rung", function () { return [
+  Model.rowNoticeEmphasis("07:12"), Model.rowNoticeEmphasis(""), Model.rowNoticeEmphasis(null), Model.rowNoticeEmphasis(undefined),
+  Model.TEXT_DIM, Model.TEXT_FULL
+] }, [1, 0.52, 0.52, 0.52, 0.52, 1])
+// The defect, and the repair, on the exact theme docs/QA-RESULTS.md measured.
+checkCall("GS8: the notice on the cursor row was under AA and is not any more (" + reference.name + ")", function () {
+  const shipped = Model.rowNoticeEmphasis("07:12")
+  return [
+    round2(noticeRatio(reference, false, Model.TEXT_DIM)), round2(noticeRatio(reference, true, Model.TEXT_DIM)),
+    round2(noticeRatio(reference, false, shipped)), round2(noticeRatio(reference, true, shipped)),
+    noticeRatio(reference, true, Model.TEXT_DIM) < 4.5, noticeRatio(reference, true, shipped) >= 4.5
+  ]
+}, [3.54, 3.52, 10.82, 9.7, true, true])
+// And on every other theme this machine has, because the fix is not allowed to
+// be a property of one palette.
+checkCall("GS8: the notice clears 4.5:1 on both row states in every installed theme, and the dim rung did not", function () {
+  const shipped = Model.rowNoticeEmphasis("07:12")
+  const under = function (alpha) {
+    return menuTokens.themes.filter(function (t) { return noticeRatio(t, false, alpha) < 4.5 || noticeRatio(t, true, alpha) < 4.5 }).length
+  }
+  const floor = menuTokens.themes.reduce(function (lowest, t) { return Math.min(lowest, noticeRatio(t, false, shipped), noticeRatio(t, true, shipped)) }, Infinity)
+  return [menuTokens.themes.length, under(Model.TEXT_DIM), under(shipped), round2(floor) >= 4.5]
+}, [23, 20, 0, true])
+// GS8 in the product owner's own words: the text that tells someone what to do
+// must be the most legible thing on the row, not the least. The channel name is
+// the row's own benchmark -- Color.menu.text on an ordinary row, and the
+// theme's accent (`menu.selected-text`) on the cursor row.
+checkCall("GS8: the notice is never less legible than the channel name beside it", function () {
+  const shipped = Model.rowNoticeEmphasis("07:12")
+  const weaker = menuTokens.themes.filter(function (t) {
+    const s = menuSurface(t)
+    return noticeRatio(t, false, shipped) < contrast(s.text, s.rowFill) - 1e-9
+      || noticeRatio(t, true, shipped) < contrast(s.selectedText, s.cursorFill) - 1e-9
+  })
+  const wasWeaker = menuTokens.themes.filter(function (t) {
+    const s = menuSurface(t)
+    return noticeRatio(t, true, Model.TEXT_DIM) < contrast(s.selectedText, s.cursorFill) - 1e-9
+  })
+  return [weaker.map(function (t) { return t.name }), wasWeaker.length]
+  // 22 of 23 and not all 23: `vantablack` is pure white text on pure black
+  // with a grey accent, so its cursor-row name (5.53:1) was already fainter
+  // than the dimmed notice (5.63:1). It is the one theme where the notice was
+  // not the weakest text on the row, and it still clears the threshold after.
+}, [[], 22])
+// Both slots the notice can land in have to ask, or the ratios above are a
+// property of a function nothing calls. Guide.qml is the only caller and the
+// source is the only place a unit gate can see that from, the way the player
+// lane already asserts about Service.qml further down this file.
+const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
+function qmlBlock(id) {
+  const at = guideSource.indexOf("id: " + id + "\n")
+  if (at === -1) return ""
+  const next = guideSource.indexOf("id: ", at + 4)
+  return guideSource.slice(at, next === -1 ? guideSource.length : next)
+}
+check("GS8: the meta slot and the detail line both take their rung from the shipping decision", [
+  /opacity: Model\.rowNoticeEmphasis\(row\.failedAt\)/.test(qmlBlock("meta")),
+  /opacity: Model\.rowNoticeEmphasis\(row\.failedAt\)/.test(qmlBlock("detailText")),
+  /opacity: 0\.52/.test(qmlBlock("meta")),
+  /opacity: 0\.52/.test(qmlBlock("detailText")),
+  (guideSource.match(/Model\.rowNoticeEmphasis\(/g) || []).length
+], [true, true, false, false, 2])
+
 // D5: the header count becomes a position exactly when the list overflows.
 checkCall("scopeLabel: the four forms", function () { return [
   Model.scopeLabel("favorites", "", 6),
