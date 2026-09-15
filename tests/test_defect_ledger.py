@@ -181,6 +181,19 @@ class LedgerCase(unittest.TestCase):
             'expected a loud empty-run failure, got:\n' + out)
         self.assertNotIn('Traceback', out)
 
+    def test_a_family_name_containing_digits_is_still_seen(self):
+        """`D-A11Y-1` must be an id, not invisible text.
+
+        The first id filed after this check shipped was exactly that, and the
+        pattern of the day could not see it: a silent miss inside the check
+        written to stop silent misses. It was caught only because the row
+        count failed to move.
+        """
+        self.good_ledger()
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1, D-AAA-2 and D-A11Y-1.\n')
+        self.assertRed(r'D-A11Y-1 is filed in docs/QA-RESULTS\.md but has no row')
+
     def test_a_finding_id_is_tracked_exactly_like_a_defect_id(self):
         """F- and D- are the same obligation.
 

@@ -34,8 +34,12 @@ import sys
 # Both prefixes. `D-` is a defect, `F-` a finding that a lane filed instead
 # of a defect -- the distinction is about tone, not about whether somebody
 # has to act, and both went untracked for the same reason.
-ID = re.compile(r'\b[DF]-[A-Z]+-[0-9]+\b')
-ROW = re.compile(r'^\|\s*([DF]-[A-Z]+-[0-9]+)\s*\|(.*)$')
+# The family part allows digits after its first letter. It did not, and the
+# very first id filed after this check shipped was `D-A11Y-1`, which the
+# pattern could not see -- a silent miss, in the check written to stop silent
+# misses. Caught within the hour only because the row count did not move.
+ID = re.compile(r'\b[DF]-[A-Z][A-Z0-9]*-[0-9]+\b')
+ROW = re.compile(r'^\|\s*([DF]-[A-Z][A-Z0-9]*-[0-9]+)\s*\|(.*)$')
 LEDGER_FILE = 'docs/STATUS.md'
 LEDGER_HEADING = '## Defects'
 

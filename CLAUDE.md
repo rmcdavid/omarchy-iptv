@@ -20,6 +20,7 @@ Read these before changing anything; they outrank your instincts.
 | `docs/ARCHITECTURE-PLAYER.md` | The detached player (M2-02). Section 12 is my rulings, section 13 is a binding amendment that withdraws part of section 9 |
 | `docs/SPIKE-QUICKSHELL-SOCKET.md` | Proof of how Quickshell's socket type really behaves. Read before writing socket code; a failed connect is permanent |
 | `docs/M2-03-CHANNEL-NUMBERS.md` | Channel numbers and numeric zap. Section 13 is my rulings CN1-CN14 |
+| `docs/ACCESSIBILITY-INVESTIGATION.md` | Why nothing the guide declares reaches a screen reader. Section 6 settles the cause with measurements; section 8 is what we change regardless; section 9 holds the upstream drafts |
 | `docs/STATUS.md` | Living board, defects, decisions log |
 | `docs/QA.md`, `docs/QA-SOURCES.md`, `docs/QA-RESULTS.md` | Test plans and evidence |
 | `docs/OMARCHY-PLUGIN-CONTRACT.md` | Verified facts about the Omarchy plugin API on this machine |
@@ -40,8 +41,13 @@ requests and raise the batch.
    imports, no new runtime dependency.
 4. No sudo, ever. No writes inside the plugin directory at runtime.
 5. URLs are redacted to scheme and host at every sink: notifications,
-   tooltips, guide text, console, IPC output, helper stdout and stderr.
-   Playlist URLs carry provider credentials. `Model.redactUrls` exists; use it.
+   tooltips, guide text, console, IPC output, helper stdout and stderr, **and
+   the accessibility bus**. Playlist URLs carry provider credentials.
+   `Model.redactUrls` exists; use it. The accessibility bus was missing from
+   this list for the life of the project and D-A11Y-1 is the result: Qt derives
+   an editable field's accessible Value from the control's `text`, so masking
+   only `Accessible.description` leaves a revealed URL and the Xtream server
+   and username publishing in full. When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
    `$XDG_RUNTIME_DIR/omarchy-iptv/`. Modes 0700 for directories, 0600 for files.
@@ -82,6 +88,17 @@ requests and raise the batch.
    When you invent a new cross-document id -- a ruling, a scenario, a defect
    -- either point an existing check at it or write one. An id that only a
    human is expected to copy is an id that will eventually stop being copied.
+14. An acceptance criterion may not be a grep for the string the
+   implementation was written to contain. Verify by calling the shipping logic
+   or by observing the real sink. A rule that can be verified by neither is
+   marked UNVERIFIED in the document that states it, and stays marked until
+   something observes it. This project wrote accessibility rules from M0 and
+   graded them with `grep -n 'Accessible\.' Guide.qml`, a test that cannot go
+   red, so nobody noticed for months that NOTHING the guide declares reaches a
+   screen reader (D-GS-3). The 17 executable assertions that existed all tested
+   the string builders, proving a name composes correctly and never that it
+   becomes a node. Applied retroactively this rule would have caught that, the
+   credential leak on the same sink, and the row announcement, on day one.
 
 ## Never touch
 

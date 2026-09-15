@@ -63,7 +63,7 @@ fail=0
 # node checks for the coverage the second line is decided by. GS11 adds six
 # python tests for `cache epg-clear` and three node checks for the two callers
 # that have to name it.
-# The defect-ledger round adds fourteen python cases
+# The defect-ledger round adds fifteen python cases
 # (tests/test_defect_ledger.py), one per branch of the new ledger check, each
 # building a real git repository and mutating it. Two of them turned red
 # against the checker as first written and found two real defects in it: an
@@ -71,7 +71,7 @@ fail=0
 # printed a stack trace instead of a sentence.
 QML_SPEC_MIN=${QML_SPEC_MIN:-66}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1302}
-PY_TESTS_MIN=${PY_TESTS_MIN:-381}
+PY_TESTS_MIN=${PY_TESTS_MIN:-382}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
