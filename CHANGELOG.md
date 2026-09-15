@@ -3,6 +3,56 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.0 (2026-09-15)
+
+Search tells the truth, and the text you read is readable.
+
+### Changed
+- **A group is found by its words, not by fragments of them.** On a playlist
+  where every channel sits in one group, typing `sta` used to report every
+  channel on the list as a match, because the group name was part of what each
+  channel was searched against. On a real 3,335-channel list that happened for
+  25 different queries, put over 1,500 irrelevant rows on the first page, and
+  told you to keep typing when every genuine match already fitted on screen.
+  Now a term that only appears in the group has to match a whole word there:
+  `sta` reports 67, which is how many there are.
+  Three consequences, all deliberate. Typing toward a group name passes through
+  a gap where nothing matches yet, so the empty state names the group you are
+  heading for rather than just saying no matches. A count can now grow as you
+  type, when the extra letter completes a group word. And on a playlist with
+  many groups, some searches return fewer rows than before; the group column
+  still reaches those channels and one more keystroke brings them back.
+- **The faintest text in the guide is no longer unreadable.** The footer status
+  and hints, the group counts and the Sources count were drawn at a dimness
+  that falls below the readable contrast threshold in every one of the 23
+  installed themes, worst case by more than half. They are now drawn at the
+  same level as the key names beside them, which means key names no longer
+  stand out from the verbs; that trade is the cost of the footer being legible
+  at all.
+
+### Fixed
+- **The bar icon, the one part of this plugin that is always on screen, was the
+  least readable thing in it.** When idle it was below the readable threshold
+  in 7 of the 23 installed themes. It is now clear of it in all 23, with the
+  icon still visibly quieter than when something is playing on every dark
+  theme.
+- The password field in the Sources form had no label for a screen reader at
+  all. It has one now. The property that was supposed to protect it turned out
+  to do nothing on this version of Qt, in either direction, so it is gone and
+  the documentation no longer promises it.
+
+### Notes
+- A comment in the code claimed a screen reader never receives your playlist
+  URL. That was true of one channel and false of another: the value of a text
+  field is published as well, so a revealed URL and the Xtream server and
+  username are exposed. Nothing reaches a screen reader on this desktop at all
+  today, for a separate reason reported upstream, so this is latent rather than
+  live. The obvious fix was measured to break the Xtream login form outright
+  and was refused; the proper repair is scheduled to land with the upstream fix.
+- Two accessibility reports were filed upstream this release: one against
+  Quickshell, whose windows publish nothing to assistive technology, and one
+  against Omarchy, whose shell carries no roles or names at all.
+
 ## 0.6.0 (2026-09-15)
 
 The guide at real provider scale. Mostly subtraction.
