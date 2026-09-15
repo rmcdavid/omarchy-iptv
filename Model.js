@@ -3011,6 +3011,9 @@ var PIP_MPV_RESIZE_PROP = "auto-window-resize"
 // `hl.dsp.focus`, one level up from the window verbs: there is no
 // `hl.dsp.window.focus` on this build (gate G-1, "attempt to call a nil
 // value (field 'focus')"), so the namespace is part of what the tests pin.
+// The installed stubs say the same thing independently:
+// /usr/share/hypr/stubs/hl.meta.lua:908-931 lists these six window verbs and
+// no focus, and :870-889 puts `focus` beside `window` at the top level.
 var PIP_VERBS = {
   float: { call: "hl.dsp.window.float", fields: [] },
   pin: { call: "hl.dsp.window.pin", fields: [] },

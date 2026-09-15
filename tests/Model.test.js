@@ -482,8 +482,11 @@ checkCall("a user who wants their screenshots elsewhere still wins (last token w
 // (CLAUDE.md 10).
 const HYPR_DISPATCH_NAMESPACES = {
   // Proven present, live, against the player window: G-1 and the six-step
-  // "enter" transcript. Also declared at /usr/share/hypr/stubs/hl.meta.lua
-  // :908-931 (HL.DspWindowNamespace).
+  // "enter" transcript. Independently confirmed by reading the installed
+  // stubs: /usr/share/hypr/stubs/hl.meta.lua:908-931 declares
+  // HL.DspWindowNamespace with exactly these six among its fields and NO
+  // focus, while :870-889 declares HL.DspNamespace with `focus` at the top
+  // level beside `window`. Two sources, one answer.
   "hl.dsp.window.float": true,
   "hl.dsp.window.pin": true,
   "hl.dsp.window.resize": true,
