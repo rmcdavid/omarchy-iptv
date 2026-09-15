@@ -317,6 +317,8 @@ const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPl
 // that from -- the same pattern the player lane uses on Service.qml further
 // down this file. `qmlBlock` takes an element from its `id:` to the next one.
 const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
+const serviceSource = require("fs").readFileSync(require("path").join(__dirname, "../Service.qml"), "utf8")
+const helperSource = require("fs").readFileSync(require("path").join(__dirname, "../bin/omarchy-iptv"), "utf8")
 function qmlBlock(id) {
   const at = guideSource.indexOf("id: " + id + "\n")
   if (at === -1) return ""
@@ -504,6 +506,45 @@ check("GS9: Guide.qml measures the coverage at open and holds it, rather than bi
   /epgCarries: root\.epgConfigured/.test(guideSource),
   /readonly property bool epgCarriesRows/.test(guideSource)
 ], [true, true, 1, 1, true, false, false])
+
+// ---- GS11 / D-GS-4: a setting the user cleared must not come back because a
+// file outlived it.
+//
+// Clearing a source's guide URL left epg-now.json, epg-status.json and
+// epg-window.txt in its cache, so the next start loaded them and the
+// guide-data warning they carry was back in the footer for a guide source
+// that is no longer configured. Removing a source already deletes its whole
+// directory; this is the same rule for the part of it one setting owns.
+// The handler's DECLARATION, not the first mention of its name: a comment
+// elsewhere that points at it is not the thing being asserted about.
+function qmlHandler(source, name) {
+  const at = source.indexOf("\n  on" + name + "Changed")
+  if (at === -1) return ""
+  const next = source.indexOf("\n  on", at + 4)
+  return source.slice(at, next === -1 ? source.length : next)
+}
+check("GS11: clearing the active guide URL queues the cache job in the handler that clears it in memory", [
+  /root\.queueCacheJob\(\["epg-clear", "--key", root\.activeSourceKey\], null\)/.test(qmlHandler(serviceSource, "ActiveEpgUrl")),
+  // inside the cleared branch, not after it: the handler returns there
+  qmlHandler(serviceSource, "ActiveEpgUrl").indexOf("epg-clear") < qmlHandler(serviceSource, "ActiveEpgUrl").indexOf("return"),
+  // and never for a source that does not exist, which would be a job with an
+  // empty key for the helper to refuse
+  /if \(root\.activeSourceKey !== ""\) root\.queueCacheJob\(\["epg-clear"/.test(serviceSource)
+], [true, true, true])
+check("GS11: an inactive source's cleared guide URL takes its cache too, where activeEpgUrl never moves", [
+  /key !== root\.activeSourceKey && String\(rec\.epgUrl \|\| ""\) !== "" && next && String\(next\.epgUrl \|\| ""\) === ""/.test(serviceSource),
+  (serviceSource.match(/"epg-clear"/g) || []).length
+], [true, 2])
+// The two implementations of one verb: the service names an action the helper
+// has to have, and a rename on either side is how they drift.
+check("GS11: the helper implements the action the service asks for, and it is not `remove` in disguise", [
+  /cache_actions\.add_parser\("epg-clear"/.test(helperSource),
+  /elif action == "epg-clear":\n\s+payload = cache_epg_clear\(directory, args\.key\)/.test(helperSource),
+  /def cache_epg_clear\(directory: str, key: str\)/.test(helperSource),
+  // it walks the EPG names only, and it does not rmdir the source's directory
+  /def cache_epg_clear[\s\S]{0,1400}?for name in EPG_CACHE_FILES/.test(helperSource),
+  /def cache_epg_clear[\s\S]{0,1400}?os\.rmdir/.test(helperSource)
+], [true, true, true, true, false])
 
 // D4: the mandated words come from one constant, so the two slots cannot drift.
 checkCall("rowFailedMeta and rowDetail build the failure notice from the same words", function () { return [Model.rowFailedMeta("07:12"), Model.rowDetail({ failedAt: "07:12" }), Model.rowDetail({ showGroup: true, group: "US Sports", failedAt: "07:12" }), Model.rowFailedMeta("")] },
@@ -2150,7 +2191,7 @@ check("D-PLY-1: every answer arms the observer except the two that must not", ["
 // Service.qml is the only caller, and this pins that it stays the only route:
 // a word the rule does not know, or a branch that reaches past the decision
 // into the state, is exactly how the defect got in.
-const serviceSource = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
+// (`serviceSource` is read once, at the top of the M2-09 section.)
 const notedOutcomes = []
 serviceSource.replace(/root\.noteSessionOutcome\("([^"]*)"\)/g, (m, word) => { notedOutcomes.push(word); return m })
 check("Service.qml spells every outcome in the vocabulary", [notedOutcomes.length > 0, notedOutcomes.filter(o => Model.PLAYER_OUTCOMES.indexOf(o) === -1)], [true, []])

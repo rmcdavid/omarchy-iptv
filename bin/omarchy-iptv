@@ -3368,6 +3368,24 @@ def cache_remove(directory: str, key: str) -> dict[str, Any]:
     return {"key": key, "removed": removed, "kept": kept}
 
 
+def cache_epg_clear(directory: str, key: str) -> dict[str, Any]:
+    """Delete one source's EPG files, keeping the source itself (M2-09 GS11).
+
+    Removing a source deletes its whole cache directory; clearing that
+    source's guide URL has to do the same for the part of the cache the URL
+    produced, or the warnings it raised come back after the next restart for
+    a guide source the user has removed. The playlist half of the cache is
+    untouched -- the source is still there, only its guide data is gone -- and
+    so is the directory, which the source still owns. Idempotent: clearing a
+    URL that was never set removes nothing and still succeeds."""
+    path = source_dir(directory, key)
+    removed: list[str] = []
+    for name in EPG_CACHE_FILES:
+        if remove_regular(os.path.join(path, name)):
+            removed.append(name)
+    return {"key": key, "removed": sorted(removed)}
+
+
 def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age: float) -> dict[str, Any]:
     """Delete every sources/<key> not in `keep`; age the EPG files of kept,
     non-active keys older than `epg_max_age` seconds. The `active` key is
@@ -3418,6 +3436,8 @@ def cmd_cache(args: argparse.Namespace) -> int:
             payload = cache_migrate(directory, args.key or None)
         elif action == "remove":
             payload = cache_remove(directory, args.key)
+        elif action == "epg-clear":
+            payload = cache_epg_clear(directory, args.key)
         else:
             payload = cache_prune(directory, list(args.keep or []), args.active or None, args.epg_max_age)
         result: dict[str, Any] = {"ok": True, "kind": "cache", "action": action}
@@ -3869,6 +3889,8 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--key", default="", help="key of the active source that owns the legacy files")
     remove_dir = cache_actions.add_parser("remove", parents=[cache_common], help="delete the known cache files of one source and its directory")
     remove_dir.add_argument("--key", required=True, help="source key")
+    epg_clear = cache_actions.add_parser("epg-clear", parents=[cache_common], help="delete one source's EPG files, keeping the source's playlist cache and directory")
+    epg_clear.add_argument("--key", required=True, help="source key")
     prune = cache_actions.add_parser("prune", parents=[cache_common], help="delete the directories of keys not listed; age the EPG files of inactive ones")
     prune.add_argument("--keep", nargs="*", default=[], help="keys to keep (every key in the history)")
     prune.add_argument("--active", default="", help="the active key: its EPG files are never aged")

@@ -1362,6 +1362,14 @@ Item {
       root.userState = updated.state
       root.saveState()
       var next = Model.findSource(updated.state.sources, key)
+      // M2-09 GS11: the other half of "a cleared guide URL takes its cache
+      // with it". The ACTIVE source reaches that through onActiveEpgUrlChanged
+      // below, which also catches a change made from outside the plugin; this
+      // is an INACTIVE source edited in the Sources form, where activeEpgUrl
+      // never moves and nothing else would notice the file is now an orphan.
+      if (key !== root.activeSourceKey && String(rec.epgUrl || "") !== "" && next && String(next.epgUrl || "") === "") {
+        root.queueCacheJob(["epg-clear", "--key", key], null)
+      }
       if (next && key === root.activeSourceKey && next.epgUrl !== root.epgUrl) {
         if (!root.persistActive(rec.url, next.epgUrl)) return root.sourceResult(false, "persist_failed", Model.sourceErrorMessage("persist_failed"), key)
       }
@@ -2914,6 +2922,15 @@ Item {
       root.epgNow = ({})
       root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
       root.epgWarnings = []
+      // M2-09 GS11 / D-GS-4: the cache the URL produced goes with the setting.
+      // Without this, epg-now.json, epg-status.json and epg-window.txt outlive
+      // the field, the next start loads them, and the guide-data warning they
+      // carry is back in the footer for a guide source the user has removed.
+      // Removing a source already deletes its whole directory; a setting the
+      // user cleared gets the same treatment for the part of it that setting
+      // owns. The playlist half of the cache is untouched. This is also the
+      // path a CLI `omarchy bar set ... epgUrl ""` arrives on.
+      if (root.activeSourceKey !== "") root.queueCacheJob(["epg-clear", "--key", root.activeSourceKey], null)
       return
     }
     // A cache swap in flight fetches the EPG from its freshness check.

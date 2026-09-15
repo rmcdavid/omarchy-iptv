@@ -57,10 +57,12 @@ fail=0
 # the ratios on the theme the live pass measured, the same ratios across every
 # installed theme, the notice against the channel name beside it, and the two
 # QML slots that have to ask for it). GS9 adds one more qml spec case and six
-# node checks for the coverage the second line is decided by.
+# node checks for the coverage the second line is decided by. GS11 adds six
+# python tests for `cache epg-clear` and three node checks for the two callers
+# that have to name it.
 QML_SPEC_MIN=${QML_SPEC_MIN:-66}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1299}
-PY_TESTS_MIN=${PY_TESTS_MIN:-361}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1302}
+PY_TESTS_MIN=${PY_TESTS_MIN:-367}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
