@@ -1184,13 +1184,18 @@ no handler: `numberEntryMs` is read when the timer is armed, and
 
 Extends UX.md 7.1; every other row of that table is unchanged.
 
-| Surface | `Accessible.role` | `Accessible.name` |
-|---|---|---|
-| Channel row, numbered | `Accessible.ListItem` | `Channel 101, Sky Sports Main Event` + `, favorite` + `, playing` + `, now <programme> until 21:30` + `, failed` as applicable |
-| Channel row, unnumbered | `Accessible.ListItem` | unchanged (no `Channel ,` prefix, no empty slot announced) |
-| Number chip | `Accessible.AlertMessage` | `Entering channel number 101`; `Entering channel number 205, no match` |
-| Footer status | `Accessible.StaticText` | unchanged binding to `root.footerStatusText`, which now carries the entry and commit strings of 6.2 -- so the commit result is announced through the wiring that already exists |
-| Bar widget | `Accessible.Button` | `IPTV, playing channel 101, Sky Sports Main Event`; unchanged when the channel has no number |
+Markers per CLAUDE.md rule 14, defined and explained in `docs/UX.md` 7.1.
+**Nothing in this table reaches assistive technology today** (D-GS-3); an
+OBSERVED marker means the markup was seen becoming a real node in a plain Qt
+window, never that a user heard it.
+
+| Surface | `Accessible.role` | `Accessible.name` | Verified |
+|---|---|---|---|
+| Channel row, numbered | `Accessible.ListItem` | `Channel 101, Sky Sports Main Event` + `, favorite` + `, playing` + `, now <programme> until 21:30` + `, failed` as applicable | Prefix **COMPOSED** (`Model.rowAccessibleName` with `chno`). **UNVERIFIED** at the node: no harness scenario loads a numbered channel list, so nothing has seen the `Channel <n>, ` prefix become a node |
+| Channel row, unnumbered | `Accessible.ListItem` | unchanged (no `Channel ,` prefix, no empty slot announced) | **OBSERVED** (query, scale scenarios -- their fixtures are unnumbered, which is why the numbered row above is not) |
+| Number chip | `Accessible.AlertMessage` | `Entering channel number 101`; `Entering channel number 205, no match` | **UNVERIFIED.** No scenario enters a channel number. The strings are literals in `Guide.qml:2658`, not `Model.js`, so there is no builder to compose either -- the one row in this table with no evidence of any kind |
+| Footer status | `Accessible.StaticText` | unchanged binding to `root.footerStatusText`, which now carries the entry and commit strings of 6.2 -- so the commit result is announced through the wiring that already exists | Node **OBSERVED** (banner scenario). "Announced" is **UNVERIFIED and overstated**: nothing calls `Accessible.announce()`, so a client not already watching the node learns nothing. See `docs/UX.md` 7.1, banner row |
+| Bar widget | `Accessible.Button` | `IPTV, playing channel 101, Sky Sports Main Event`; unchanged when the channel has no number | **OBSERVED** (bar scenarios, including the numbered form); text **COMPOSED** (`Model.barAccessibleName`) |
 
 `Model.rowAccessibleName(opts)` (`Model.js:1370`) gains one field, `chno`, and
 prepends `"Channel " + chno + ", "` when it is non-empty. `Model.barAccessibleName`
@@ -1199,7 +1204,9 @@ which is why the strings live there and not in QML.
 
 The footer **hints** `Text` has no `Accessible.*` today and gains none: it is
 `Text.StyledText` full of `<font>` markup, and the accessible channel for
-transient information is the footer status, which is already bound.
+transient information is the footer status, which is already bound. That is
+a deliberate gap, recorded as one in `docs/UX.md` 7.1: a keyboard-only user
+hears what happened and not which key does it.
 
 ### 8.2 No colour-only status
 

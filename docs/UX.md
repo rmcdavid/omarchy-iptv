@@ -828,22 +828,130 @@ previous toast rather than stacking.
 
 ## 7. Accessibility and ergonomics
 
-Omarchy's shell sets no `Accessible.*` properties today; the guide sets a
-minimal, cheap set so screen readers and `qmllint` see a coherent surface.
+Omarchy's shell sets no `Accessible.*` properties today. The guide sets a
+minimal, cheap set, and `qmllint` sees a coherent surface.
+
+**This section used to end "so screen readers and `qmllint` see a coherent
+surface". Half of that was false for the life of the project and is corrected
+here.** No screen reader has ever seen any of it. Not because the properties
+are wrong -- they are right, and 7.1 now says which of them have been observed
+becoming real nodes -- but because no window Quickshell creates publishes an
+accessibility tree at all. A `PanelWindow` reports `ChildCount 0`; so does a
+plain `FloatingWindow`; a plain Qt window in the same session, on the same bus,
+with the same bridge, reports a real child. That is D-GS-3, the cause is
+settled, it is not layer-shell and it is not ours, and it is filed upstream as
+quickshell issue 1144 (`docs/ACCESSIBILITY-INVESTIGATION.md` section 6).
 
 ### 7.1 Accessible roles and names
 
-| Surface | `Accessible.role` | `Accessible.name` |
-|---|---|---|
-| Guide card | `Accessible.Dialog` | `IPTV guide` |
-| Search line | `Accessible.EditableText` | `Search channels`; `Accessible.description` = current query |
-| Group column | `Accessible.List` | `Groups` |
-| Group entry | `Accessible.ListItem` | `<name>, <n> channels`; `Accessible.selected` = is the selected entry |
-| Channel list | `Accessible.List` | `Channels in <scope>` |
-| Channel row | `Accessible.ListItem` | `<name>` + `, favorite` + `, playing` + `, now <programme> until <HH:MM>` + `, failed` as applicable; `Accessible.focused` = hasCursor |
-| Banner | `Accessible.AlertMessage` | banner text |
-| Footer status | `Accessible.StaticText` | status text |
-| Bar widget | `Accessible.Button` | `IPTV, idle` / `IPTV, playing <name>` / `IPTV, playlist error` |
+**The delivery statement, plainly.** On this desktop today, **nothing this
+table declares reaches assistive technology.** Not one role, not one name, not
+one state, in the shipping plugin, for any user. That is true of every row
+below without exception and it is not a property of the rows; it is the
+upstream defect above. These are two different claims and this document must
+not blur them:
+
+1. *Our markup is correct.* Testable, and increasingly tested. The guide's
+   content is ordinary QtQuick, so the accessibility harness (`tests/a11y/`)
+   instantiates it in a plain hidden Qt window where the bridge does work,
+   walks the real AT-SPI tree and asserts the nodes. A row marked OBSERVED has
+   been seen becoming a node with the right role and the right name.
+2. *A user can hear it.* **Not true of any row, and not testable here.** It
+   becomes testable when quickshell 1144 lands, and not before. Every OBSERVED
+   below means "our side would be correct if the host were", which is worth
+   having and is not the same as delivered.
+
+**Marker column.** Per CLAUDE.md rule 14, a rule nothing observes carries the
+marker until something observes it.
+
+- **OBSERVED** -- the harness instantiates this surface, walks the tree, and
+  asserts this row's role and name at the node. Evidence is the dated run filed
+  in `docs/QA-RESULTS.md` under "Accessibility harness runs"; a marker with no
+  filed run behind it is a coverage claim, not evidence, and the QA case
+  (TC-A11Y-01, TC-BAR-11) is the thing that goes red.
+- **COMPOSED** -- only the string builder is asserted, from node, against
+  `Model.js`. It proves the text is right. **It has never proved that the text
+  becomes a node**, which is exactly the gap that let this whole area pass for
+  months: all 17 executable assertions that existed were of this kind.
+- **OBSERVED-ONCE** -- seen becoming a real node by the prototype run that
+  established this approach (19 checks, re-run and reproduced by a second
+  lane), but **not** covered by a scenario in the landed harness at the time
+  this marker was written. It is evidence that the markup is right and it is
+  not a standing assertion: nothing re-checks it, so it decays. Treat it as a
+  coverage gap with a receipt, not as coverage.
+- **UNVERIFIED** -- nothing observes it and no builder covers it. The promise
+  stands as a promise.
+
+| Surface | `Accessible.role` | `Accessible.name` | Verified |
+|---|---|---|---|
+| Guide card | `Accessible.Dialog` | `IPTV guide` | **OBSERVED-ONCE.** The prototype asserted this node; no landed scenario does. Every scenario instantiates the card, so this is the cheapest gap in the table to close |
+| Search line | `Accessible.EditableText` | `Search channels`; `Accessible.description` = current query | **OBSERVED** (query scenario): name, description **and value**. The value is asserted because Qt publishes an editable node's value from its `text` and that is the sink D-A11Y-1 leaks from; a role-and-name check passes cleanly over a leak |
+| Group column | `Accessible.List` | `Groups` | **OBSERVED-ONCE.** Prototype only; no landed scenario asserts the group column |
+| Group entry | `Accessible.ListItem` | `<name>, <n> channels` | **OBSERVED** (scale scenario); the count text also **COMPOSED** (`Model.pluralChannels`) |
+| Group entry | `Accessible.selected` = is the selected entry | -- | **OBSERVED-ONCE.** The prototype asserted the `selected` state on exactly the selected entry. No landed scenario does, so nothing today would notice the binding being lost |
+| Channel list | `Accessible.List` | `Channels in <scope>` | **OBSERVED** (scale scenario, as `Channels in All`); scope text **COMPOSED** (`Model.scopeName`). No scenario yet walks the tree with a group or Favorites scope, so the `<scope>` substitution itself is COMPOSED, not OBSERVED |
+| Channel row | `Accessible.ListItem` | `<name>` (+ `Channel <n>, ` prefix when numbered, M2-03 section 11) | **OBSERVED** (query, scale scenarios) |
+| Channel row | -- | suffixes `, favorite`, `, playing`, `, now <programme> until <HH:MM>`, `, failed` | `, favorite` **OBSERVED-ONCE** (the prototype asked `Model.rowAccessibleName` for a favourite row's name and then required that exact string on the bus). `, playing`, `, now ... until <HH:MM>` and `, failed` are **COMPOSED only** (`Model.rowAccessibleName`, 5 node assertions): no scenario fixture sets a playing, a now/next or a failed row, so three of the four states a user most needs to hear are string builders with a promise attached. A suffix becomes OBSERVED when a filed run populates it, and not before |
+| Channel row | `Accessible.focused` = hasCursor | -- | **OBSERVED-ONCE.** Prototype only. No landed scenario asserts the `focused` state, and it is the one state a screen-reader user navigating rows depends on most |
+| Channel row | -- | *the row's position in the list* (`row N of M`) | **UNVERIFIED.** Never promised here and never delivered. Virtualisation means the tree holds the realised rows, not all of them, so a client counting children counts the window, not the list. Raised in `docs/ACCESSIBILITY-INVESTIGATION.md` section 8 item 5 and unowned |
+| Banner | `Accessible.AlertMessage` | banner text | **OBSERVED** (banner scenario: the node exists and its name equals the banner text on screen, redacted as the screen is) |
+| Banner | -- | *the transition is announced* | **UNVERIFIED.** Nothing calls `Accessible.announce()`; a client that is not already watching the node never learns the banner changed. The double-announce question (GS5) has to be settled first -- investigation section 8 item 4 |
+| Footer status | `Accessible.StaticText` | status text | **OBSERVED** (banner scenario, including the degraded `cached ... offline` wording); text **COMPOSED** (`Model.footerStatus`) |
+| Footer hints | -- | *the key hints beside the status* | **UNVERIFIED**, and deliberately: the hints `Text` carries no `Accessible.*` and M2-03 section 11 declines to give it any. A keyboard-only user hears the status and not the keys that act on it. Recorded as a known gap, not a defect |
+| Bar widget | `Accessible.Button` | `IPTV, idle` / `IPTV, playing <name>` / `IPTV, playlist error` (`IPTV, playing channel <n>, <name>` when numbered) | **OBSERVED** (bar scenarios: exactly one button node per state, the three names distinct, no Private-Use codepoint inside a published name); text **COMPOSED** (`Model.barAccessibleName`) |
+
+**Declared in the code and absent from this table.** These publish today and
+this document never promised them, which is the same failure in the other
+direction -- an undocumented promise nobody grades. Listed so they are visible;
+adding them as rows is the UX owner's call, not a test lane's:
+`Guide.qml:2053` confirm `Dialog`, `:2107` header `Heading`, `:2319` the
+pinned Sources `Button`, `:2658` the numeric-zap `AlertMessage` (documented
+instead in `docs/M2-03-CHANNEL-NUMBERS.md` section 11), and the whole Sources
+surface (documented in `docs/UX-SOURCES.md` 7.1).
+
+**Empty, loading and error surfaces have nothing to say.** Each is a `Dialog`
+containing no named node. **UNVERIFIED**, and there is nothing to verify:
+no name is composed for them anywhere. Investigation section 8 item 3.
+
+**Scenario names** above are the harness's own: `bar`, `firstrun`, `banner`,
+`query`, `scale`, `xtream`. The set is the harness lane's to extend; a row here
+marked OBSERVED against a scenario that is renamed or dropped becomes wrong
+silently, which is the next paragraph.
+
+**The markers above are joined to the harness by a name, not by a call**, which
+is the drift CLAUDE.md rule 13 is about. Until a check reads this table and the
+filed run together, an OBSERVED marker survives the assertion behind it being
+renamed, weakened or deleted. Proposed with the gate conditions in 7.1a.
+
+### 7.1a When this stops being a lane tool
+
+The harness is a tool the accessibility lane runs, **not** a commit gate, ruled
+so by the product owner (`docs/PLAN-NEXT.md` decision 9) for two reasons that
+are both about `scripts/check.sh` and neither about the harness: its baseline
+on shipping code is deliberately red -- D-A11Y-1 is open and unfixed, so a run
+that went green would mean the check stopped asking -- and CLAUDE.md forbids
+committing a red gate; and it would be the first hard dependency on a live
+graphical session in a gate that is headless today.
+
+It moves into `scripts/check.sh` when **all three** hold, and the third is the
+one this section adds:
+
+1. **A green baseline.** D-A11Y-1 is closed under a ruling (decision 7 for the
+   unconsented sinks, decision 8 for the consented reveal), so a green run
+   means "no leak" rather than "no ruling yet".
+2. **A headless route.** Today only the `wayland` platform publishes a tree on
+   this machine: `offscreen` has no bridge, and there is no Xvfb and no
+   headless compositor installed. A gate that needs somebody's session is a
+   gate that fails on a machine that is fine. Either a headless compositor
+   becomes a declared build dependency, or the tree is dumped through
+   `QAccessible` in-process where `tests/Model.spec.qml` already runs.
+3. **The markers are joined by a call.** A check that fails when a row here
+   says OBSERVED and no filed run asserts it, and when a filed run asserts a
+   row this table does not carry. It needs no display and could gate today;
+   it belongs with `scripts/check-defect-ledger.py`, whose job is the same.
+
+Until then, `scripts/check.sh` stays green and headless, and these markers are
+re-earned by running the harness and filing the output.
 
 ### 7.2 No color-only status
 

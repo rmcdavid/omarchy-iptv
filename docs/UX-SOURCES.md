@@ -1184,29 +1184,49 @@ See 7.1; they reuse the strings above.
 
 ## 7. Accessibility
 
+**The delivery statement, plainly.** On this desktop today, **nothing this
+section declares reaches assistive technology** -- no role, no name, no state,
+for any user of the shipping plugin. No window Quickshell creates publishes an
+accessibility tree at all (D-GS-3, cause settled, filed upstream as quickshell
+issue 1144, `docs/ACCESSIBILITY-INVESTIGATION.md` section 6). Two claims live
+here and must not be blurred: *our markup is correct*, which is testable and is
+now partly tested at the real sink by the accessibility harness (`tests/a11y/`)
+running the guide's content in a plain hidden Qt window where the bridge works;
+and *a user can hear it*, which is false for every row and untestable until
+1144 lands. An OBSERVED marker below means the first, never the second.
+
 ### 7.1 Roles and names
 
-| Surface | `Accessible.role` | `Accessible.name` / notes |
-|---|---|---|
-| Header title (sources, forms) | `Accessible.Heading` | the title; the search line's `EditableText` role applies only in search / list |
-| Pinned Sources row | `Accessible.Button` | `Sources, 3 saved` |
-| Sources list | `Accessible.List` | `Sources` |
-| Source row | `Accessible.ListItem` | `<label>, <host>, <n> channels in <m> groups` + `, active` + `, EPG` + `, last used <x>` / `, never used` / `, not loaded yet`; `Accessible.focused` = hasCursor; `Accessible.selected` = active |
-| Action rows | `Accessible.ListItem` | `Add source`, `Add Xtream login` |
-| Action buttons | `Accessible.Button` | `Edit <label>`, `Remove <label>` |
-| Form column | `Accessible.Dialog` | `Add source` / `Edit source` / `Add Xtream login` / `Set up a playlist` (first run) |
-| Label field | `Accessible.EditableText` | `Label, optional` |
-| Playlist field | `Accessible.EditableText` | `Playlist URL or path`; `Accessible.description` = masked rendering (always) |
-| EPG field | `Accessible.EditableText` | `EPG URL, optional`; description masked |
-| Server field | `Accessible.EditableText` | `Server URL` |
-| Username field | `Accessible.EditableText` | `Username` |
-| Password field | `Accessible.EditableText` | `Password`, set through `Accessible.description`. **Not** `passwordEdit`: inert on Qt 6.11.2, see 6.7 item 7 |
-| Eye button | `Accessible.Button` | `Show query` / `Hide query`; `Accessible.checked` = revealed |
-| Link rows | `Accessible.Button` | `Use Xtream login instead`, `Saved sources, 3` |
-| Buttons | `Accessible.Button` | `Load`, `Save`, `Cancel` |
-| Result / error line | `Accessible.AlertMessage` | the line's text |
-| Confirm dialog | `Accessible.Dialog` | the message; its buttons `Accessible.Button` `Cancel` / `Remove` |
-| Footer status | `Accessible.StaticText` | shipped |
+Markers per CLAUDE.md rule 14, defined in `docs/UX.md` 7.1 and used the same
+way here: **OBSERVED** (a landed harness scenario walks the tree and asserts
+this node), **OBSERVED-ONCE** (seen becoming a node by the prototype run that
+established the approach, not carried into a landed scenario -- evidence with
+no standing assertion behind it, so it decays), **COMPOSED** (only the string
+builder is asserted from node; proves the text, never that the text becomes a
+node), **UNVERIFIED** (nothing observes it at all). Scenario names are the
+harness's own: `bar`, `firstrun`, `banner`, `query`, `scale`, `xtream`.
+
+| Surface | `Accessible.role` | `Accessible.name` / notes | Verified |
+|---|---|---|---|
+| Header title (sources, forms) | `Accessible.Heading` | the title; the search line's `EditableText` role applies only in search / list | **UNVERIFIED.** No scenario asserts the heading node |
+| Pinned Sources row | `Accessible.Button` | `Sources, 3 saved` | **OBSERVED-ONCE** (prototype, as `Sources, 1 saved`); text also **COMPOSED** (`Model.sourcesRowAccessibleName`, SRC-A11Y-06 neighbours) |
+| Sources list | `Accessible.List` | `Sources` | **OBSERVED-ONCE** (prototype) |
+| Source row | `Accessible.ListItem` | `<label>, <host>, <n> channels in <m> groups` + `, active` + `, EPG` + `, last used <x>` / `, never used` / `, not loaded yet`; `Accessible.focused` = hasCursor; `Accessible.selected` = active | **COMPOSED only** (`Model.sourceAccessibleName`, SRC-A11Y-06). The prototype asserted the rows around it and never this one, so the richest name the Sources screen composes has never been seen becoming a node. `focused` and `selected` are **UNVERIFIED** |
+| Action rows | `Accessible.ListItem` | `Add source`, `Add Xtream login` | **OBSERVED-ONCE** (prototype, both rows) |
+| Action buttons | `Accessible.Button` | `Edit <label>`, `Remove <label>` | **OBSERVED-ONCE** (prototype, `Edit Provider` / `Remove Provider`) |
+| Form column | `Accessible.Dialog` | `Add source` / `Edit source` / `Add Xtream login` / `Set up a playlist` (first run) | **OBSERVED** for `Set up a playlist` (firstrun) and `Add Xtream login` (xtream); **OBSERVED-ONCE** for `Add source` (prototype); **UNVERIFIED** for `Edit source`, which no scenario opens |
+| Label field | `Accessible.EditableText` | `Label, optional` | **OBSERVED-ONCE** (prototype) |
+| Playlist field | `Accessible.EditableText` | `Playlist URL or path`; `Accessible.description` = masked rendering (always) | Name **OBSERVED** (firstrun asserts the field and that it starts empty). The `description` = masked-rendering-always claim is **UNVERIFIED**: the only run that touched it asked whether a secret was *absent*, which passes whether the description is masked, empty, or the field has been silently emptied. Asserting the revealed case at all is blocked on PLAN-NEXT decision 8 |
+| EPG field | `Accessible.EditableText` | `EPG URL, optional`; description masked | **UNVERIFIED.** No scenario names this field |
+| Server field | `Accessible.EditableText` | `Server URL` | **OBSERVED** (xtream), name and **value**: this is one of the two fields that publish a credential with no user action and no affordance to stop it (D-A11Y-1, PLAN-NEXT decision 7) |
+| Username field | `Accessible.EditableText` | `Username` | **OBSERVED** (xtream), name and **value**: the other unconsented sink |
+| Password field | `Accessible.EditableText` | `Password`, set through `Accessible.description`. **Not** `passwordEdit`: inert on Qt 6.11.2, see 6.7 item 7 | **OBSERVED** (xtream): the label arrives through `Accessible.description`, which is what replaced the deleted `passwordEdit` |
+| Eye button | `Accessible.Button` | `Show query` / `Hide query`; `Accessible.checked` = revealed | **UNVERIFIED.** No scenario asserts the eye button or its `checked` state, so the one control that tells a screen-reader user whether the field beside it is masked is ungraded |
+| Link rows | `Accessible.Button` | `Use Xtream login instead`, `Saved sources, 3` | **UNVERIFIED** |
+| Buttons | `Accessible.Button` | `Load`, `Save`, `Cancel` | `Load` **OBSERVED** (firstrun); `Save` / `Cancel` **OBSERVED-ONCE** (prototype) |
+| Result / error line | `Accessible.AlertMessage` | the line's text | **UNVERIFIED.** The guide's banner `AlertMessage` is observed; this is a different node and no scenario reaches it |
+| Confirm dialog | `Accessible.Dialog` | the message; its buttons `Accessible.Button` `Cancel` / `Remove` | **UNVERIFIED**, dialog and both buttons |
+| Footer status | `Accessible.StaticText` | shipped | **OBSERVED** (banner scenario); text **COMPOSED** (`Model.footerStatus`) |
 
 ### 7.2 No color-only state
 
@@ -1239,6 +1259,30 @@ Rows: full width, `detailRowHeight` / `singleRowHeight`. Action buttons:
 `PanelActionButton` default size (at least `Style.space(22)` square).
 Fields: full field width by their implicit height. Pinned Sources row: full
 column width by `groupEntryHeight`. Link rows and buttons: kit padding.
+
+**UNVERIFIED**, all of it. Hit targets are geometry, and the accessibility
+harness reads an AT-SPI tree, not a layout: it can say a node exists and what
+it is called, and it cannot say the node is 38 pixels tall. SRC-A11Y-04's
+`grep` is not retired here because it is not the same failure -- a token name
+in the source is weak evidence about geometry, but it is evidence about
+something the source actually decides, where a grep for `Accessible.` was
+evidence about nothing. Verifying it properly needs a rendered measurement
+(the class of evidence `docs/QA-RESULTS.md` C6 takes off screenshots), which
+nothing schedules today.
+
+### 7.5 What is not delivered, and by whom
+
+Neither this section nor `docs/UX.md` 7 is delivered to any user, and the
+reason is not in either document. Ownership, so it is not re-litigated:
+D-GS-3 is upstream (quickshell 1144) and this project's part of it is to keep
+its own markup correct and observable, which 7.1's markers now account for.
+D-A11Y-1 is ours and open: the Xtream server and username publish provider
+credentials as their accessible Value with no user action, which
+PLAN-NEXT decision 7 recommends ruling as the defect, and 6.7 item 7 records.
+What a *deliberately revealed* field may publish is PLAN-NEXT decision 8 and
+is unanswered; until it is answered, no document here states a rule about it
+and no test asserts one, because a test written first would settle the ruling
+by accident.
 
 ---
 

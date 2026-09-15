@@ -37,7 +37,9 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
   observed at the real sink by the accessibility harness (`tests/a11y/`), which
   is a lane tool and deliberately **not** part of `scripts/check.sh` (PLAN-NEXT
   decision 9); an `X` case is satisfied only by a dated run whose output is
-  filed in `docs/QA-RESULTS.md`, never by the harness merely existing.
+  filed in `docs/QA-RESULTS.md`, never by the harness merely existing. The
+  conditions under which the harness would join `scripts/check.sh` are
+  proposed, and not implemented, in `docs/UX.md` 7.1a.
 - **A criterion may not be a grep for the string the implementation was written
   to contain** (CLAUDE.md rule 14). Four criteria in this plan and in
   `docs/QA-SOURCES.md` were exactly that -- TC-A11Y-01, TC-BAR-11, SRC-A11Y-01,

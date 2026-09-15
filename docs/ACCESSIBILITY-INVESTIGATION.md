@@ -62,6 +62,15 @@ written as greps of our own source:
 | SRC-A11Y-01 roles and names | ``A `grep -n 'Accessible\.' Guide.qml` `` | docs/QA-SOURCES.md:239 |
 | SRC-A11Y-05 no secret to a screen reader | `A grep` | docs/QA-SOURCES.md:243 |
 
+**All four were retired on 2026-09-15** and now read `X`: observed at the real
+sink by the accessibility harness, satisfied only by a dated run filed in
+`docs/QA-RESULTS.md` under "Accessibility harness runs". None is satisfied
+today -- no run is filed -- and the `pass` rows they earned by grep, together
+with the later passes that carried those results forward, are retracted in
+place in that file. The line numbers above are the
+pre-retirement ones and are kept as the record of what was found. Section 8
+item 1 is the recommendation; this is where it landed.
+
 `grep -rn Accessible scripts/` returns nothing. The only executable assertions
 anywhere are 12 in tests/Model.test.js and 5 in tests/Model.spec.qml, and all 17
 are on the pure string builders (`rowAccessibleName`, `barAccessibleName`,

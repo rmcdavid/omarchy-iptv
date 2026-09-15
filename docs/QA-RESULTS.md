@@ -140,7 +140,7 @@ Failures map to defects: TC-CFG-06 -> D-LIVE-02 (P2); TC-BRW-21 -> D-LIVE-06; TC
 | TC-BAR-08 | not run | pointer; refresh function via `r`/IPC `refresh`: notification `Playlist refreshed` / `10 channels in 8 groups` low U+F0450 correct, but the footer never shows `Refreshed - N channels` (D-LIVE-05) |
 | TC-BAR-09 | pass | ring via `service.zap` (what the wheel calls): from All -> group ring A,B,C; from Favorites -> A,C with wrap; from Recent -> the channel's group (run4); wheel routing itself not run (pointer); re-selecting the playing channel from another list keeps the old ring (D-LIVE-12) |
 | TC-BAR-10 | pass | `--vertical`: while playing label empty, tooltip `Playing Harness Live A`, width 28 (run8b) |
-| TC-BAR-11 | pass | `Accessible.name: Model.barAccessibleName(...)` at BarWidget.qml:104 |
+| TC-BAR-11 | pass (retracted) | `Accessible.name: Model.barAccessibleName(...)` at BarWidget.qml:104 **RETRACTED 2026-09-15, criterion, not observation.** The evidence quoted here is real and the conclusion drawn from it was not available: this is a grep over source the source was written to satisfy, so the case could not have failed whatever the plugin published. See "Accessibility harness runs" at the end of this file. Result stands as `not run`. |
 | TC-BAR-12 | not run | third-party bar facade; README does not mention the limitation (D-LIVE-13) |
 
 ### FAV - Favorites and recents
@@ -214,7 +214,7 @@ Failures map to defects: TC-CFG-06 -> D-LIVE-02 (P2); TC-BRW-21 -> D-LIVE-06; TC
 
 | ID | Result | Evidence |
 |---|---|---|
-| TC-A11Y-01 | pass | `Guide.qml` 594-1214: Dialog `IPTV guide`, EditableText `Search channels`, List `Groups` / `Channels in <scope>`, ListItem via `Model.rowAccessibleName`, AlertMessage banner, StaticText footer; BarWidget Button |
+| TC-A11Y-01 | pass (retracted) | `Guide.qml` 594-1214: Dialog `IPTV guide`, EditableText `Search channels`, List `Groups` / `Channels in <scope>`, ListItem via `Model.rowAccessibleName`, AlertMessage banner, StaticText footer; BarWidget Button **RETRACTED 2026-09-15, criterion, not observation.** The evidence quoted here is real and the conclusion drawn from it was not available: this is a grep over source the source was written to satisfy, so the case could not have failed whatever the plugin published. See "Accessibility harness runs" at the end of this file. Result stands as `not run`. |
 | TC-A11Y-02 | pass | review: every state seen carries a glyph or a word (star, play glyph + footer, `Failed HH:MM`, `cached ... offline`, banner text) |
 | TC-A11Y-03 | pass | `Guide.qml:131-137, 1026`: `space(38)` rows, `space(32)` entries, lead slot `space(24)` padded to `space(28)`; click targets not exercised (pointer) |
 | TC-A11Y-04 | blocked: needs live shell | one monitor here; procedure in QA.md 5.6 |
@@ -603,7 +603,7 @@ Verification counts: 23 verified fixed (15 D-LIVE, 8 S), 0 still open, 0 partial
 | SEC | 01, 02, 03, 04, 05, 06, 07, 08, 09, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 | pass | greps for shell strings / sudo / XMLHttpRequest empty; argv tail `--`, URL; R5 privacy; `/proc/self/environ` -> `unsafe_path`; `ftp://` -> `unsupported_scheme`; modes `700` cache/state/runtime dirs, `600` `channels.json` / `playlist-status.json` / `epg-*` / `state.json` / `mpv.sock` (owner ricky); no symlinks; service IPC `play` with `http://evil.example.test/x`, `u:deadbeef`, `file:///etc/passwd`, `-- --script=/tmp/x` -> `unknown`, nothing launched; SEC-20 by the S-06 mock (`file:` and `ftp:` both refused now) |
 | PERF | 01-07 | pass | section R4 |
 
-Not re-run (first-pass result kept): TC-CFG-07/09/10/11, TC-BRW-02/19/23/24, TC-PLAY-13, TC-BAR-05/06/07/08/10/11/12, TC-FAV-11, TC-RFR-02, TC-A11Y-01/02/03, SEC-10, TC-MODEL-08.
+Not re-run (first-pass result kept): TC-CFG-07/09/10/11, TC-BRW-02/19/23/24, TC-PLAY-13, TC-BAR-05/06/07/08/10/11/12, TC-FAV-11, TC-RFR-02, TC-A11Y-01/02/03, SEC-10, TC-MODEL-08. **(2026-09-15: the kept result for TC-A11Y-01 and TC-BAR-11 is retracted -- it was a grep over source written to satisfy it. See "Accessibility harness runs" at the end of this file.)**
 
 ## R4. Performance, first pass vs now
 
@@ -785,7 +785,7 @@ Verification counts: 3 verified fixed, 0 still open, 0 reopened.
 | SEC | 01, 02, 04, 05, 06, 07, 08, 12, 13, 14, 15, 16, 17, 18, 21 | pass | greps for `bash -c`/`sh -c`, sudo, `shell=True`, `os.system`, XMLHttpRequest/eval all 0; S-04 quoted name; scheme allow-lists; argv tail `--hwdec=auto-safe -- http://127.0.0.1:8765`; RR5 privacy; local path rules; source schemes; mpvArgs; modes `700` cache/state/runtime dirs, `600` `channels.json` / `playlist-status.json` / `state.json` / `mpv.sock` (owner ricky), 0 symlinks; no writes in the plugin dir; service IPC `play` with `http://evil.example.test/x`, `u:deadbeef`, `file:///etc/passwd`, `-- --script=/tmp/x` -> `unknown`, nothing launched; `channels.json` holds the URL by design (1 hit) |
 | PERF | 01-07 | pass | section RR4 |
 
-Not re-run this pass (previous result kept): TC-CFG-03/07/09/10/11, TC-BRW-08/16/18/20, TC-PLAY-03/07/08/13, TC-BAR-10/11, TC-FAV-09/10, TC-RFR-02/10, TC-UI-08/12, TC-A11Y-01/02, SEC-03/09/10/11/19/20 (S-05 trickle and S-06 redirect mocks: helper unchanged), TC-MODEL-08, plus the mouse and live-shell cases listed in R8 (the live-shell block passed in the live section above).
+Not re-run this pass (previous result kept): TC-CFG-03/07/09/10/11, TC-BRW-08/16/18/20, TC-PLAY-03/07/08/13, TC-BAR-10/11, TC-FAV-09/10, TC-RFR-02/10, TC-UI-08/12, TC-A11Y-01/02, SEC-03/09/10/11/19/20 (S-05 trickle and S-06 redirect mocks: helper unchanged), TC-MODEL-08, plus the mouse and live-shell cases listed in R8 (the live-shell block passed in the live section above). **(2026-09-15: the kept result for TC-A11Y-01 and TC-BAR-11 is retracted -- it was a grep over source written to satisfy it. See "Accessibility harness runs" at the end of this file.)**
 
 ### RR4. Performance, 2ce0b52 vs 502f4b3
 
@@ -1045,11 +1045,11 @@ Runs: `h01` migration (+ `h01-keep`, `h01-t0`, `h01-none`, `h01-garbage`), `h02a
 
 | ID | Result | Evidence |
 |---|---|---|
-| SRC-A11Y-01 | pass | `logs/static-greps.txt` A11Y-01: Heading, Button `sourcesRowAccessibleName`, List `accessibleSources`, ListItem `sourceAccessibleName` with `focused` / `selected`, Buttons `Edit <label>` / `Remove <label>`, Dialog `formAccessibleName` / `Set up a playlist`, EditableText `fieldAccessibleName`, eye Button `Show query` / `Hide query` with `checked`, link Buttons `Saved sources, n` / `Use Xtream login instead`, `Load` / `Save` / `Cancel`, AlertMessage result line, confirm Dialog |
+| SRC-A11Y-01 | pass (retracted) | `logs/static-greps.txt` A11Y-01: Heading, Button `sourcesRowAccessibleName`, List `accessibleSources`, ListItem `sourceAccessibleName` with `focused` / `selected`, Buttons `Edit <label>` / `Remove <label>`, Dialog `formAccessibleName` / `Set up a playlist`, EditableText `fieldAccessibleName`, eye Button `Show query` / `Hide query` with `checked`, link Buttons `Saved sources, n` / `Use Xtream login instead`, `Load` / `Save` / `Cancel`, AlertMessage result line, confirm Dialog **RETRACTED 2026-09-15, criterion, not observation.** The evidence quoted here is real and the conclusion drawn from it was not available: this is a grep over source the source was written to satisfy, so the case could not have failed whatever the plugin published. See "Accessibility harness runs" at the end of this file. Result stands as `not run`. |
 | SRC-A11Y-02 | pass | screenshots: active = glyph + bold + `active`; error = glyph + words; fetching = glyph + words + dimmed controls; revealed vs masked = text + eye/eye-off; destructive = urgent fill + `Remove` |
 | SRC-A11Y-03 | pass | first run `playlist -> epg -> (savedSources) -> xtream -> load -> wrap` (`h02c`, `h06`); edit `label -> playlist -> epg -> save -> cancel -> label` (`h12`); Xtream `server -> username -> password -> save -> cancel -> label -> server` (`h10`); the eye is never a stop |
 | SRC-A11Y-04 | pass | rows `detailRowHeight` / `singleRowHeight` (`Guide.qml:2178,2202`), pinned row `groupEntryHeight`; button size by tokens (grep); click targets are live-shell |
-| SRC-A11Y-05 | pass | `Guide.qml:2464` `Accessible.description: fieldRow.maskable ? Model.maskUrl(...) : ""`, `:2465` `Accessible.passwordEdit: fieldRow.fieldId === "password"` |
+| SRC-A11Y-05 | pass (retracted) | `Guide.qml:2464` `Accessible.description: fieldRow.maskable ? Model.maskUrl(...) : ""`, `:2465` `Accessible.passwordEdit: fieldRow.fieldId === "password"` **RETRACTED 2026-09-15, and it was wrong on its own terms.** The case claims a screen reader never gets a secret; `Accessible.description` is not where Qt publishes an editable field's content, so the grep read the one property that was already masked and never the Value that was leaking (D-A11Y-1). `Accessible.passwordEdit` was additionally inert in both directions on Qt 6.11.2 and has since been deleted. Result stands as `not run`. |
 | SRC-A11Y-06 | pass | `Bravo, 127.0.0.1:8765, 5 channels in 2 groups, active, last used 15:16`; `x.m3u, local file, not loaded yet, never used`; no URL |
 
 #### PRIV - Privacy rules
@@ -1062,7 +1062,7 @@ Runs: `h01` migration (+ `h01-keep`, `h01-t0`, `h01-none`, `h01-garbage`), `h02a
 | SRC-PRIV-04 | pass | every transient of S3 checked; `notifications.log` gained no line from any Sources operation across all runs - the only lines are M1's `Playlist error` (a CLI-set active source failing with no cache, `h09`/`h09b`), `Stream failed`, `Playlist refreshed`, `Guide data error` from the M1 regression runs |
 | SRC-PRIV-05 | pass | `password: true` echo (screenshot), field emptied after the URLs are built, edit form masked only |
 | SRC-PRIV-06 | pass | `h04`: sanitized on arrival (multi-line, RTL, 100 KB), never executed, console has 0 lines with the pasted text (`grep -c aaaa...` 0, `qa-user` 0); paste over a masked field re-masks before the next dump |
-| SRC-PRIV-07 | pass | SRC-A11Y-05 |
+| SRC-PRIV-07 | pass (retracted) | SRC-A11Y-05 **RETRACTED 2026-09-15** with SRC-A11Y-05, which it defers to entirely. Result stands as `not run`. |
 | SRC-PRIV-08 | pass | `logs/sweep/console.log` plugin lines: keys, labels, hosts, codes, modes only; `grep -cE '://|password=|username=|@'` on plugin lines = 0 in every run log (`h05` count 0, `h08`/`h09` 0, `h13` 0) |
 | SRC-PRIV-09 | pass | `grep -n 'playlistUrl' Guide.qml`: the copy strings, `openEditForm` pre-fill and the two service calls only; keys and the CLI go through `service.switchSource` / `removeSource` / reconcile (harness signals identical for both paths) |
 
@@ -1770,7 +1770,7 @@ live sample on the real shell.
 | `h20` M1 sample | BRW 05, 06, 07, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 22; FAV 01-07; EPG 01-03; PLAY 01, 02, 04, 05, 06, 10; RFR 01, 03, 04, 07, 08, 09; UI 01, 02, 03, 09, 10, 13 + TC-CFG-04; PERF 01, 02, 03, 07 | pass. `diff` against the d50e364 transcript is timestamps and PIDs only, except the two items below |
 | `h21` clean re-run | EPG 01-04, RFR 01, 03, 04, 07, 08, 09, 10, BRW-17, PERF-07 | pass; the only content difference from d50e364 is the new EPG warning footer (O18) |
 | `h15` helper key safety | SRC-SEC-08, SRC-SEC-23, SRC-RM-07, SRC-MIG-09, SRC-HELP-05..08, SRC-PERF-07 | identical to the d50e364 transcript apart from paths and stamps |
-| `static` greps | SRC-UI-12/13/14/15, SRC-KEY-12, SRC-SEC-12/13, SRC-A11Y-01/05, SRC-PRIV-09 | identical apart from line-number shifts; **O11 is closed** (UX.md now says `r retry`) |
+| `static` greps | SRC-UI-12/13/14/15, SRC-KEY-12, SRC-SEC-12/13, SRC-A11Y-01/05, SRC-PRIV-09 | identical apart from line-number shifts; **O11 is closed** (UX.md now says `r retry`) **(2026-09-15: SRC-A11Y-01 and SRC-A11Y-05 are retracted from this row. "Identical apart from line-number shifts" is true and was never evidence about accessibility: both greps matched source written to contain the strings. The remaining ids in this row are unaffected.)** |
 | live sample | guide open/close, search `bloomberg` -> `in All - 5 matches`, `Esc` clears, `Tab` list mode, group column, `f` / `f` favourite and unfavourite (`state.json` `[]` again), `r` refresh (`lastUpdated` 21:41 -> 23:03, 1,474 channels), theme `tokyo-night` and back with Sources open (SRC-UI-19), restart with a non-default source active | pass, `shots/L13*`, `L14*`, `L15a` |
 
 Two `h20` lines needed a follow-up rather than reading as regressions:
@@ -4899,3 +4899,59 @@ configures guide data and gets that will file it as a bug.
 
 D-GS-3 leaves GS5 open. Per the ruling's own terms, the addition stays until
 a real screen-reader pass can be run; it is announced to nobody today.
+
+---
+
+## Accessibility harness runs (TC-A11Y-01, TC-BAR-11, SRC-A11Y-01, SRC-A11Y-05)
+
+**Runs filed as of 2026-09-15: none. All four cases are therefore UNSATISFIED,
+and that is the honest state, not a regression.** Until this pass they read
+`pass` on the strength of a `grep` for strings the implementation was written
+to contain -- a criterion that cannot go red (CLAUDE.md rule 14). They now read
+`not run` until a run is filed here, which is a worse-looking board and a truer
+one. SRC-A11Y-05 is the sharpest example: it claimed to prove that no secret
+reaches a screen reader, and a secret was reaching that sink the whole time it
+passed (D-A11Y-1).
+
+### What a filed run must contain
+
+One subsection per run, headed `### <date> <time>, <commit>, <host summary>`,
+carrying:
+
+1. **The invocation**, verbatim, and the harness commit. A run is evidence
+   about the harness that produced it, not about a harness in general.
+2. **The full check list**, one line per check id, `pass` / `fail`, with the
+   observed value on any failure. Totals: checks run, failures. A run that
+   reports fewer checks than the previous filed run is a regression in the
+   harness and is called out as one.
+3. **The fidelity result.** The harness grades a generated copy of `Guide.qml`
+   and a copied host UI kit, not the shipping files. Every claim a run makes is
+   void if the copy has drifted, so the fidelity guard's result is part of the
+   run, not a separate concern (`tests/a11y/test_fidelity.py`).
+4. **The mutation evidence** required by CLAUDE.md rule 11: which assertions
+   were mutated, and that each went red. A check nobody has seen fail is
+   decoration, and this whole area is what that rule was written about.
+5. **The markup/delivery split, restated.** A green run means the plugin's
+   accessibility markup becomes correct nodes in a plain Qt window. It does
+   **not** mean a screen reader can use the shipping guide: no window
+   Quickshell creates publishes a tree at all (D-GS-3, quickshell issue 1144).
+   A run that is quoted without this sentence is being misquoted.
+
+### What a green run does not mean
+
+A remedy for D-A11Y-1 was once reported by a checker as "19 checks, 0
+failures", and the remedy silently replaced the user's stored credentials with
+the mask and saved clean. The check asked only whether a secret was absent, and
+absence was achieved by destroying the data. **Absence of a secret is not a
+pass.** SRC-A11Y-05 accordingly requires the field to be undamaged as well as
+the bus to be clean, and a run that reports only the absence half is not a run
+of SRC-A11Y-05.
+
+### Status of the four cases
+
+| Case | Was | Is | Satisfied by |
+|---|---|---|---|
+| TC-A11Y-01 | `A grep -n 'Accessible\.' Guide.qml BarWidget.qml` | `X` harness, guide scenarios | a run filed above; markers in `docs/UX.md` 7.1 say which rows it covers |
+| TC-BAR-11 | `A grep -n 'Accessible' BarWidget.qml` | `X` harness, bar scenarios | as above |
+| SRC-A11Y-01 | `A grep -n 'Accessible\.' Guide.qml` | `X` harness, Sources and form scenarios | a run filed above; markers in `docs/UX-SOURCES.md` 7.1 |
+| SRC-A11Y-05 | `A grep` | `X` harness, Xtream and form scenarios, asserting the **Value** and the field's integrity | a run filed above, containing both halves |
