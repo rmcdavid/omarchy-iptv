@@ -273,12 +273,14 @@ same and can be bound to a key.
 | `pipSizePercent` | integer 15-60 | `30` | its width as a share of the monitor |
 | `pipMargin` | integer 0-200 | `16` | gap from the screen edge, in pixels |
 
-Two honest limitations. It is not "always on top": Hyprland has no such window
-state, so there is none to ask for. What you get is a small window that floats
-above the tiling layout and follows you across workspaces, but another floating
-window you focus afterwards can cover it. And it needs Hyprland configured with
-its Lua provider, which is the Omarchy default; on any other provider the
-feature reports itself unavailable rather than half working.
+Two honest notes. It is not "always on top" in the sense of a window state you
+can ask for, because Hyprland has none. What you get is a small window that
+floats above the tiling layout and follows you across workspaces. In testing it
+stayed on top through focusing other windows, raising them explicitly and
+fullscreening them, but since nothing guarantees that, treat it as reliable in
+practice rather than promised. And the feature needs Hyprland configured with
+its Lua provider, which is the Omarchy default; on any other provider it reports
+itself unavailable rather than half working.
 
 ## Files it writes
 
