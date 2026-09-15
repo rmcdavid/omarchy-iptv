@@ -256,6 +256,16 @@ Item {
   readonly property string playingId: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.id) : ""
   readonly property string playingName: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.name) : ""
   readonly property int nowSec: serviceReady ? service.nowSec : Math.floor(Date.now() / 1000)
+
+  // ---- picture in picture (M2-05). Every access is guarded the way the
+  // Sources API is: the service may not carry PiP yet (lane V2 merges after
+  // this one, and the harness runs this guide against a pre-change service),
+  // and an undefined read must never invent a value (CLAUDE.md rule 10). A
+  // service without PiP reports unavailable, which is the honest answer: the
+  // `p` key then says so and the hint line does not advertise it.
+  readonly property bool playingNow: serviceReady && service.playing === true
+  readonly property bool pipAvailable: serviceReady && service.pipAvailable === true
+  readonly property bool pipOn: serviceReady && service.pipOn === true
   readonly property bool showColumn: surface.showColumn
   readonly property bool scopeIsGroup: Model.isGroupScope(effectiveScope)
 
@@ -453,7 +463,9 @@ Item {
     if (root.emptyKind === "loading") empty = "loading"
     else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service") empty = "error"
     var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form,
-      hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null })
+      hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null,
+      // M2-05 section 5: `p pip` only where it can do something.
+      pipAvailable: root.pipAvailable })
     var out = []
     for (var i = 0; i < pairs.length; i++) {
       out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
@@ -750,6 +762,27 @@ Item {
     root.showTransient(root.copy.transientCopied)
   }
 
+  // ------------------------------------------------------------ picture in picture (M2-05)
+
+  // `p` in list mode (PIP1: the modified-Enter shortcut is not implemented,
+  // because the host's key catcher swallows Return and reports no modifier,
+  // so it is undeliverable rather than merely awkward).
+  //
+  // The guide answers exactly the two refusals it can answer by itself
+  // (4.10); everything after that needs a live read of the compositor, which
+  // is the service's, and comes back as a code through onPipResult. No text
+  // is composed here: Model.pipStatusText owns every line, so the footer can
+  // never speak a raw compositor word.
+  function togglePip() {
+    if (!root.serviceReady) return
+    var request = Model.pipKeyRequest({ available: root.pipAvailable, playing: root.playingNow })
+    if (!request.ok) {
+      root.showTransient(request.text)
+      return
+    }
+    if (typeof root.service.togglePip === "function") root.service.togglePip()
+  }
+
   // ------------------------------------------------------------ channel numbers (M2-03)
   //
   // The guide owns the timer, the cursor and the chip. Every decision below
@@ -1006,13 +1039,20 @@ Item {
   }
 
   // List-mode single-letter commands delivered by PanelKeyCatcher.textKey.
+  //
+  // Which letter means what is Model.listLetterAction's, not this file's:
+  // the mapping used to be a chain of string comparisons here, where no test
+  // could reach it, which is the shape CLAUDE.md 12 forbids. This dispatches
+  // on the answer, so the `p` of M2-05 is exercised for real by
+  // tests/Model.test.js and by the QML spec in the engine that runs it.
   function handleListLetter(text) {
-    var t = String(text || "")
-    if (t === "f" || t === "F") root.toggleFavoriteAt(root.cursorIndex)
-    else if (t === "s" || t === "S") root.stopPlayback()
-    else if (t === "r" || t === "R") root.refresh()
-    else if (t.toLowerCase() === Model.SOURCE_KEYS.open) root.openSources()
-    else if (t === "/") {
+    var action = Model.listLetterAction(text)
+    if (action === "favorite") root.toggleFavoriteAt(root.cursorIndex)
+    else if (action === "stop") root.stopPlayback()
+    else if (action === "refresh") root.refresh()
+    else if (action === "pip") root.togglePip()
+    else if (action === "sources") root.openSources()
+    else if (action === "search") {
       root.swallowKey = true
       root.switchMode()
     }
@@ -1681,6 +1721,14 @@ Item {
     function onSourcesPersistFailed(reason) { root.showPersistFailed() }
     function onConfiguredChanged() { root.onConfiguredFlip() }
     function onClipboardText(text) { root.pasteFromProcess(text) }
+    // M2-05: the outcome of a toggle, once the service has dispatched and
+    // read the state back (PIP11 - there is no other definition of success).
+    // The code is one of six; the line is Model.pipStatusText's.
+    function onPipResult(code) {
+      if (!root.opened) return
+      var text = Model.pipStatusText(code)
+      if (text !== "") root.showTransient(text)
+    }
   }
 
   // Form key handler target (Keys.forwardTo on every field and button).

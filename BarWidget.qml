@@ -51,6 +51,11 @@ BarWidget {
   readonly property bool configured: serviceReady && service.configured === true
   readonly property bool refreshing: serviceReady && service.refreshing === true
   readonly property bool hasError: serviceReady && service.status === "error"
+  // M2-05 / PIP2: picture in picture gets ONE tooltip line and no new mouse
+  // gesture - every gesture is already spoken for. Guarded for `undefined`
+  // like nowPlayingChno above: a service that predates PiP reports nothing,
+  // and an undefined read must never invent a value (CLAUDE.md rule 10).
+  readonly property bool pipOn: serviceReady && service.pipOn === true
   readonly property string glyph: Model.barGlyph({ playing: root.playing, error: root.hasError })
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""
   // Vertical bars stay glyph-only (UX 8 #12); the number is in the tooltip.
@@ -68,7 +73,8 @@ BarWidget {
     name: root.nowPlayingName,
     chno: root.nowPlayingChno,
     error: root.hasError,
-    refreshing: root.refreshing
+    refreshing: root.refreshing,
+    pip: root.pipOn
   })
 
   Behavior on glyphColor {
