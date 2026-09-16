@@ -69,9 +69,33 @@ fail=0
 # against the checker as first written and found two real defects in it: an
 # empty state cell was misdiagnosed as a short row, and a missing STATUS.md
 # printed a stack trace instead of a sentence.
-QML_SPEC_MIN=${QML_SPEC_MIN:-66}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1345}
-PY_TESTS_MIN=${PY_TESTS_MIN:-384}
+# D-ID-1 raises all three, and states the margin, because the margin is what
+# went wrong. These floors were left at the counts of the milestone BEFORE the
+# channel-id work: python 384 against 407 run, node 1345 against 1399, the qml
+# spec 66 against 66. So the whole D-ID-1 suite could be deleted -- every case
+# that proves a favorite survives a password rotation -- and this gate stayed
+# green, because what remained still cleared a number written before any of it
+# existed. A floor that trails the suite protects the settled tests and leaves
+# the newest, least-settled ones unprotected, which is exactly backwards.
+#
+# MARGIN LEFT BELOW THE CURRENT COUNT: ZERO, on all three. Deliberate.
+#   qml spec   66 -> 68    (floor 68)
+#   node    1,399 -> 1,422 (floor 1422)
+#   python    407 -> 423   (floor 423)
+# A floor set n below the count is a licence to delete n cases in silence, and
+# there is no n this project can afford: the last three times a suite went
+# quiet here, nobody noticed for a milestone. Adding a test means bumping the
+# number in the same commit; that is the intended cost and it is cheap. Never
+# lower one to make a run green.
+#
+# A count is not the only guard on the D-ID-1 work, because a count cannot see
+# a suite that shrinks and grows at once. tests/fixtures/channel-ids.json is
+# run by node and by python, and BOTH assert its row counts before using it
+# (`channel-ids fixture loaded`, `test_fixture_is_not_empty`), so deleting a
+# vector is red on an assertion rather than on arithmetic here.
+QML_SPEC_MIN=${QML_SPEC_MIN:-68}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1422}
+PY_TESTS_MIN=${PY_TESTS_MIN:-423}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
