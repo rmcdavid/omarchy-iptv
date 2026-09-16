@@ -506,7 +506,27 @@ def guard_tree(tree_dir, repo=None, guide_copy="GuideProbe.qml",
         kit_src = kit or os.environ.get("A11Y_KIT_SRC") or SHELL_DIR
         kit_copy = os.path.join(tree_dir, "qs")
         if os.path.isdir(kit_copy) and os.path.isdir(kit_src):
-            found.extend(check_kit(kit_src, kit_copy))
+            # check_kit grades ONE SECTION at a time: it derives the key
+            # prefix from the basename of the source directory, so
+            # KIT_PATCHED's "Ui/BarIconButton.qml" only matches when it is
+            # handed the Ui directory itself. Handing it the whole shell
+            # compared 400-odd unrelated host files against a copy holding two
+            # subdirectories, and reported every declared patch as undeclared.
+            # Grade each section the copy actually has.
+            sections = sorted(name for name in os.listdir(kit_copy)
+                              if os.path.isdir(os.path.join(kit_copy, name)))
+            if not sections:
+                found.append(Failure(
+                    "L8", "the kit copy at %s holds no sections" % kit_copy))
+            for section in sections:
+                src_section = os.path.join(kit_src, section)
+                if not os.path.isdir(src_section):
+                    found.append(Failure(
+                        "L8", "the copy has a kit section the host does not: %s"
+                        % section))
+                    continue
+                found.extend(check_kit(src_section,
+                                       os.path.join(kit_copy, section)))
         else:
             found.append(Failure(
                 "L8", "the host kit was not graded",

@@ -455,3 +455,59 @@ time.
 The harness's own AT-SPI half is still in a session scratchpad and will not
 survive. Moving it into `tests/a11y/` is open item 12 and is the next thing
 here, ahead of any filed run.
+
+## 11. The harness is in the repo, and it found something on its first run
+
+Open item 12 said everything but the fidelity guard lived in a session
+scratchpad that would not survive. It is now in `tests/a11y/`, with the lane
+numbers stripped out of the filenames, the hardcoded home directory replaced by
+a path derived from the file's own location, and the generated tree moved out
+of the repo into a temporary directory.
+
+`scripts/a11y-probe.sh` runs the whole thing: build the tree, refuse to measure
+if it has drifted, walk the bus. See `tests/a11y/README.md`.
+
+**Two defects in the guard were fixed on the way in**, both of them the same
+shape as everything else this project keeps finding.
+
+`guard_tree` graded the host kit by handing `check_kit` the entire shell
+directory at once. `check_kit` derives its patch-list prefix from the basename
+of the directory it is given, so it compared four hundred unrelated host files
+against a copy holding two subdirectories and reported every *declared* patch as
+undeclared. It now grades each section the copy actually has. Caught by running
+it, not by reading it.
+
+### The baseline, and what it means
+
+    64 checks, 3 failures
+
+| Check | What it says |
+|---|---|
+| `L2-XT-05` | the provider login pasted into the unmaskable Server field reaches the bus |
+| `L2-XT-06` | the Xtream username reaches the bus |
+| `L2-XT-11` | contested; see open item 15 |
+
+The first two are **D-A11Y-1, confirmed at the real sink** rather than inferred
+from reading code. They are the exposure the product owner ruled is the defect
+(decision 7), as against the deliberate reveal, which nothing here asserts on
+because decision 8 is unanswered.
+
+### D-A11Y-6, and the first claim this project has verified by observation
+
+The first run reported a fourth failure, `L2-Q-05`: *when nothing matches,
+something on the bus should say so*. Measured with 0 rows, 0 nodes naming the
+query. Reading the code confirmed it: **the entire empty state carried no
+accessibility markup at all** -- no matches, first run, loading, error, no
+favourites. At the one moment the screen is nothing but an explanation, a
+screen-reader user heard silence.
+
+Ruling SG1 had just sharpened this from latent into real. Whole-word group
+matching creates a dead zone where a query legitimately matches nothing, and the
+empty state becomes the only thing explaining the screen. A hint was added there
+for the eye in 0.7.0; there was no equivalent for the ear.
+
+Fixed, and then **verified at the sink**: the same tree went from 4 failures to
+3. Every `grep Accessible.` criterion this project ever ran passed cleanly over
+this defect for months, because the markup they searched for was never there to
+find. That is the whole argument for rule 14, and this is the first time it has
+paid for itself.

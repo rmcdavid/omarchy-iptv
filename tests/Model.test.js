@@ -260,6 +260,26 @@ check("SG1 containsAllWords is whole-word, both edges", [
   Model.containsAllWords("usa starz united states", ["united", "nope"])
 ], [false, true, true, true, true, false])
 
+// ---- D-A11Y-6: the empty state had no voice at all ----
+// Found by the harness as L2-Q-05, measured on the real bus: with a query that
+// matched nothing, zero rows and zero nodes named the query, so a screen-reader
+// user heard silence. Ruling SG1 made that worse by design: whole-word matching
+// creates a dead zone where the empty state is the ONLY thing explaining the
+// screen.
+check("A11Y6 title and prose are announced as one statement", Model.emptyStateAccessibleName("No matches for x", "Esc clears the search"), "No matches for x. Esc clears the search")
+check("A11Y6 a title alone needs no trailing punctuation", Model.emptyStateAccessibleName("Loading", ""), "Loading")
+check("A11Y6 prose alone is announced alone", Model.emptyStateAccessibleName("", "just prose"), "just prose")
+check("A11Y6 nothing to say announces nothing", Model.emptyStateAccessibleName("", ""), "")
+check("A11Y6 null and undefined are not the strings 'null' and 'undefined'", [
+  Model.emptyStateAccessibleName(null, null),
+  Model.emptyStateAccessibleName(undefined, "prose"),
+  Model.emptyStateAccessibleName("title", undefined)
+], ["", "prose", "title"])
+check("A11Y6 the dead zone SG1 creates is the case that matters, end to end", Model.emptyStateAccessibleName(
+  Model.noMatchesTitle("unit", "all"),
+  "Keep typing for " + Model.groupWordHint("unit", ["United States"])),
+  "No matches for \u201cunit\u201d. Keep typing for United States")
+
 // ---- SG1: the dead zone whole-word matching creates, and what we say in it ----
 // Typing toward the group name now passes through queries that match nothing
 // while every visible row prints that group. A bare "No matches" there is a

@@ -2744,6 +2744,11 @@ Item {
             anchors.centerIn: parent
             width: Math.min(body.width, Style.space(640))
             spacing: Style.space(8)
+            // D-A11Y-6: this whole surface was silent. When it is showing it is
+            // the only thing on screen, so it announces as one statement rather
+            // than as three unlabelled fragments a reader has to assemble.
+            Accessible.role: Accessible.StaticText
+            Accessible.name: Model.emptyStateAccessibleName(emptyState.title, emptyState.prose)
             // The Sources screens own the body in their modes; the
             // unconfigured state normally shows as the first-run form.
             visible: root.emptyKind !== "" && root.guideMode

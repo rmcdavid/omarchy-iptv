@@ -4222,6 +4222,25 @@ function elide(text, max) {
   return value.length > limit ? value.substring(0, limit - 1) + ELLIPSIS : value
 }
 
+// D-A11Y-6. The whole empty state -- no matches, first run, loading, error,
+// no favourites -- carried NO accessibility markup at all, so a screen-reader
+// user got silence at the one moment the screen is nothing but an explanation.
+// The harness found it as L2-Q-05: "when nothing matches, SOMETHING on the bus
+// says so", measured with 0 rows and 0 nodes naming the query.
+//
+// Ruling SG1 sharpened this into a real defect rather than a latent one. Whole-
+// word group matching creates a dead zone where a query legitimately matches
+// nothing, and the empty state is then the ONLY thing on screen telling the
+// user what happened. A hint was added there for the eye; this is the same
+// sentence for the ear.
+function emptyStateAccessibleName(title, prose) {
+  var head = str(title)
+  var body = str(prose)
+  if (head === "") return body
+  if (body === "") return head
+  return head + ". " + body
+}
+
 function noMatchesTitle(query, scopeId) {
   var name = scopeName(effectiveScope(scopeId, query))
   var base = "No matches for " + QUOTE_OPEN + str(query) + QUOTE_CLOSE
@@ -6077,6 +6096,7 @@ if (typeof module !== "undefined") {
     rowAccessibleName: rowAccessibleName,
     elide: elide,
     noMatchesTitle: noMatchesTitle,
+    emptyStateAccessibleName: emptyStateAccessibleName,
     groupWordHint: groupWordHint,
     containsAllWords: containsAllWords,
     barGlyph: barGlyph,
