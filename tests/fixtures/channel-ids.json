@@ -1,0 +1,295 @@
+{
+  "comment": [
+    "Channel id scheme 2 (ARCHITECTURE.md decision 6), run by BOTH readers:",
+    "tests/test_channel_ids.py drives bin/omarchy-iptv, tests/Model.test.js",
+    "drives Model.js, and neither reimplements the rule. Every id here is a",
+    "literal, computed from the pinned fnv1a32 vectors, so a change to either",
+    "implementation has to disagree with the file rather than with itself.",
+    "",
+    "`rotate` is the defect: the provider changes the account password, which",
+    "lives inside every stream URL. Both readers apply it to every url and",
+    "recount how many ids survived. Hosts are .test and the credentials are",
+    "obviously fake; no real URL is ever committed."
+  ],
+  "rotate": { "from": "/p4ssw0rd/", "to": "/n3wp4ss/" },
+  "foldComment": [
+    "Folding is two jobs. `search` is normalize_text / Model.normalizeText,",
+    "which every query and every searchKey goes through and which must keep",
+    "dropping punctuation: a user typing `amc` has to reach `USA: AMC+`.",
+    "`id` is normalize_id_text / Model.normalizeIdText, which keeps + and *",
+    "because those are the characters that tell two live streams apart.",
+    "Both readers run this table, so neither implementation can change one",
+    "job while believing it changed the other. Accented spellings are",
+    "written as \\u escapes: CLAUDE.md rule 8, ASCII only in .py and .js,",
+    "and this file is read by both."
+  ],
+  "folds": [
+    { "name": "USA  AMC", "id": "usa amc", "search": "usa amc" },
+    { "name": "USA: AMC+", "id": "usa amc+", "search": "usa amc" },
+    { "name": "USA: AMC +", "id": "usa amc +", "search": "usa amc" },
+    { "name": "US: ESPN", "id": "us espn", "search": "us espn" },
+    { "name": "US: ESPN*", "id": "us espn*", "search": "us espn" },
+    { "name": "US NESN (A)", "id": "us nesn a", "search": "us nesn a" },
+    { "name": "US NESN+ (A)", "id": "us nesn+ a", "search": "us nesn a" },
+    { "name": "T\u00e9l\u00e9 Qu\u00e9bec", "id": "tele quebec", "search": "tele quebec" },
+    { "name": "Tele-Quebec", "id": "tele quebec", "search": "tele quebec" },
+    { "name": "  US: Sky Sports  Main Event  ", "id": "us sky sports main event", "search": "us sky sports main event" },
+    { "name": "+++", "id": "+++", "search": "" },
+    { "name": "***", "id": "***", "search": "" },
+    { "name": "Channel 11", "id": "channel 11", "search": "channel 11" },
+    { "name": "!@#$%^&()", "id": "", "search": "" }
+  ],
+  "vectors": [
+    {
+      "name": "a credential rotation empties every scheme-1 reference and no scheme-2 one",
+      "channels": [
+        { "name": "US: Sky Sports Main Event", "url": "http://line.example.test/u5er/p4ssw0rd/101" },
+        { "name": "US: ESPN", "url": "http://line.example.test/u5er/p4ssw0rd/102" },
+        { "name": "US: ESPN HD", "url": "http://line.example.test/u5er/p4ssw0rd/103" },
+        { "name": "Tele-Quebec", "url": "http://line.example.test/u5er/p4ssw0rd/104" },
+        { "name": "BBC One HD", "url": "http://line.example.test/u5er/p4ssw0rd/105" }
+      ],
+      "scheme1": ["u:51f81870", "u:54f81d29", "u:53f81b96", "u:56f8204f", "u:55f81ebc"],
+      "scheme2": ["n:0cb5a7e4", "n:bc9e3e3d", "n:883b613b", "n:e3fa404e", "n:ed9f8db6"],
+      "remap": {
+        "u:51f81870": "n:0cb5a7e4",
+        "u:54f81d29": "n:bc9e3e3d",
+        "u:53f81b96": "n:883b613b",
+        "u:56f8204f": "n:e3fa404e",
+        "u:55f81ebc": "n:ed9f8db6"
+      },
+      "survivesScheme1": 0,
+      "survivesScheme2": 5
+    },
+    {
+      "name": "an HD/SD pair under one name keeps two ids: neither row may use the name",
+      "channels": [
+        { "name": "US: Golf Channel", "url": "http://line.example.test/u5er/p4ssw0rd/101" },
+        { "name": "US GOLF CHANNEL", "url": "http://line.example.test/u5er/p4ssw0rd/102" },
+        { "name": "US: ESPN", "url": "http://line.example.test/u5er/p4ssw0rd/103" }
+      ],
+      "scheme1": ["u:51f81870", "u:54f81d29", "u:53f81b96"],
+      "scheme2": ["u:51f81870", "u:54f81d29", "n:bc9e3e3d"],
+      "remap": { "u:53f81b96": "n:bc9e3e3d" },
+      "survivesScheme1": 0,
+      "survivesScheme2": 1
+    },
+    {
+      "name": "a unique tvg-id still wins, and the scheme change moves nothing at all",
+      "channels": [
+        { "name": "BBC One HD", "tvgId": "bbc1.uk", "url": "http://stream.example.test/live/a.m3u8" },
+        { "name": "US: ESPN", "tvgId": "espn.us", "url": "http://stream.example.test/live/b.m3u8" }
+      ],
+      "scheme1": ["t:bbc1.uk", "t:espn.us"],
+      "scheme2": ["t:bbc1.uk", "t:espn.us"],
+      "remap": {},
+      "survivesScheme1": 2,
+      "survivesScheme2": 2
+    },
+    {
+      "name": "a tvg-id two rows share falls to the name, not to the URL",
+      "channels": [
+        { "name": "US: ESPN", "tvgId": "sports.feed", "url": "http://line.example.test/u5er/p4ssw0rd/101" },
+        { "name": "US: ESPN HD", "tvgId": "sports.feed", "url": "http://line.example.test/u5er/p4ssw0rd/102" }
+      ],
+      "scheme1": ["u:51f81870", "u:54f81d29"],
+      "scheme2": ["n:bc9e3e3d", "n:883b613b"],
+      "remap": { "u:51f81870": "n:bc9e3e3d", "u:54f81d29": "n:883b613b" },
+      "survivesScheme1": 0,
+      "survivesScheme2": 2
+    },
+    {
+      "name": "the generated Channel <n> name is a row POSITION, so it keys nothing",
+      "channels": [
+        { "name": "Channel 3", "url": "http://line.example.test/u5er/p4ssw0rd/103" },
+        { "name": "Alpha", "url": "http://line.example.test/u5er/p4ssw0rd/104" }
+      ],
+      "scheme1": ["u:53f81b96", "u:56f8204f"],
+      "scheme2": ["u:53f81b96", "n:5d8b6dab"],
+      "remap": { "u:56f8204f": "n:5d8b6dab" },
+      "survivesScheme1": 0,
+      "survivesScheme2": 1
+    },
+    {
+      "name": "an accented title and its plain spelling are one name, so both fall through",
+      "channels": [
+        { "name": "T\u00e9l\u00e9 Qu\u00e9bec", "url": "http://line.example.test/u5er/p4ssw0rd/101" },
+        { "name": "Tele-Quebec", "url": "http://line.example.test/u5er/p4ssw0rd/102" },
+        { "name": "Alpha", "url": "http://line.example.test/u5er/p4ssw0rd/103" }
+      ],
+      "scheme1": ["u:51f81870", "u:54f81d29", "u:53f81b96"],
+      "scheme2": ["u:51f81870", "u:54f81d29", "n:5d8b6dab"],
+      "remap": { "u:53f81b96": "n:5d8b6dab" },
+      "survivesScheme1": 0,
+      "survivesScheme2": 1
+    },
+    {
+      "name": "two rows on one URL: the row that keeps a URL id keeps its SUFFIX too",
+      "channels": [
+        { "name": "Alpha", "url": "http://stream.example.test/live/a.m3u8" },
+        { "name": "Dup", "url": "http://stream.example.test/live/a.m3u8" },
+        { "name": "Dup", "url": "http://stream.example.test/live/b.m3u8" }
+      ],
+      "scheme1": ["u:a33ee365", "u:a33ee365#2", "u:b0ad877e"],
+      "scheme2": ["n:5d8b6dab", "u:a33ee365#2", "u:b0ad877e"],
+      "remap": { "u:a33ee365": "n:5d8b6dab" },
+      "survivesScheme1": 3,
+      "survivesScheme2": 3
+    },
+    {
+      "name": "AMC+ is not AMC and ESPN* is not ESPN: the id fold keeps + and *",
+      "comment": [
+        "Every name here is from the user's own lists. Under the SEARCH fold",
+        "these are three pairs that collapse onto three keys, and the first",
+        "version of this change keyed ids with that fold -- so AMC+ and AMC",
+        "were one channel, ESPN* and ESPN were one channel, and a favorite",
+        "on either meant whichever row the playlist happened to list first.",
+        "Merging two live streams under one id is worse than losing an id.",
+        "normalize_id_text keeps + and * and all six rows stay six channels."
+      ],
+      "channels": [
+        { "name": "USA  AMC", "url": "http://line.example.test/u5er/p4ssw0rd/201" },
+        { "name": "USA: AMC+", "url": "http://line.example.test/u5er/p4ssw0rd/202" },
+        { "name": "US: ESPN", "url": "http://line.example.test/u5er/p4ssw0rd/203" },
+        { "name": "US: ESPN*", "url": "http://line.example.test/u5er/p4ssw0rd/204" },
+        { "name": "US NESN (A)", "url": "http://line.example.test/u5er/p4ssw0rd/205" },
+        { "name": "US NESN+ (A)", "url": "http://line.example.test/u5er/p4ssw0rd/206" }
+      ],
+      "scheme1": ["u:d28f81c1", "u:cf8f7d08", "u:d08f7e9b", "u:d58f867a", "u:d68f880d", "u:d38f8354"],
+      "scheme2": ["n:9f60f3d3", "n:dda00f68", "n:bc9e3e3d", "n:041bbe35", "n:59910da0", "n:31343883"],
+      "remap": {
+        "u:d28f81c1": "n:9f60f3d3",
+        "u:cf8f7d08": "n:dda00f68",
+        "u:d08f7e9b": "n:bc9e3e3d",
+        "u:d58f867a": "n:041bbe35",
+        "u:d68f880d": "n:59910da0",
+        "u:d38f8354": "n:31343883"
+      },
+      "survivesScheme1": 0,
+      "survivesScheme2": 6
+    },
+    {
+      "name": "a name that normalizes to nothing keys nothing",
+      "channels": [
+        { "name": "", "url": "http://line.example.test/u5er/p4ssw0rd/101" },
+        { "name": "Alpha", "url": "http://line.example.test/u5er/p4ssw0rd/102" }
+      ],
+      "scheme1": ["u:51f81870", "u:54f81d29"],
+      "scheme2": ["u:51f81870", "n:5d8b6dab"],
+      "remap": { "u:54f81d29": "n:5d8b6dab" },
+      "survivesScheme1": 0,
+      "survivesScheme2": 1
+    }
+  ],
+  "states": [
+    {
+      "name": "the upgrade moves favorites, recents, lastPlayed and session",
+      "vector": 0,
+      "before": {
+        "favorites": ["u:51f81870", "u:53f81b96", "t:from.another.source"],
+        "recents": [
+          { "id": "u:54f81d29", "name": "US: ESPN", "at": 100 },
+          { "id": "u:00000001", "name": "A channel this source never had", "at": 90 }
+        ],
+        "lastPlayed": { "id": "u:56f8204f", "name": "Tele-Quebec", "at": 80 },
+        "session": { "id": "u:55f81ebc", "name": "BBC One HD", "at": 70 }
+      },
+      "after": {
+        "favorites": ["n:0cb5a7e4", "n:883b613b", "t:from.another.source"],
+        "recents": [
+          { "id": "n:bc9e3e3d", "name": "US: ESPN", "at": 100 },
+          { "id": "u:00000001", "name": "A channel this source never had", "at": 90 }
+        ],
+        "lastPlayed": { "id": "n:e3fa404e", "name": "Tele-Quebec", "at": 80 },
+        "session": { "id": "n:ed9f8db6", "name": "BBC One HD", "at": 70 }
+      },
+      "moved": 5
+    },
+    {
+      "name": "running it a second time moves nothing (idempotent, with no marker)",
+      "vector": 0,
+      "before": {
+        "favorites": ["n:0cb5a7e4", "n:883b613b", "t:from.another.source"],
+        "recents": [
+          { "id": "n:bc9e3e3d", "name": "US: ESPN", "at": 100 },
+          { "id": "u:00000001", "name": "A channel this source never had", "at": 90 }
+        ],
+        "lastPlayed": { "id": "n:e3fa404e", "name": "Tele-Quebec", "at": 80 },
+        "session": { "id": "n:ed9f8db6", "name": "BBC One HD", "at": 70 }
+      },
+      "after": {
+        "favorites": ["n:0cb5a7e4", "n:883b613b", "t:from.another.source"],
+        "recents": [
+          { "id": "n:bc9e3e3d", "name": "US: ESPN", "at": 100 },
+          { "id": "u:00000001", "name": "A channel this source never had", "at": 90 }
+        ],
+        "lastPlayed": { "id": "n:e3fa404e", "name": "Tele-Quebec", "at": 80 },
+        "session": { "id": "n:ed9f8db6", "name": "BBC One HD", "at": 70 }
+      },
+      "moved": 0
+    },
+    {
+      "name": "a favorite that lands on one already held is merged, not duplicated",
+      "vector": 0,
+      "before": {
+        "favorites": ["u:51f81870", "n:0cb5a7e4"],
+        "recents": [],
+        "lastPlayed": null,
+        "session": null
+      },
+      "after": {
+        "favorites": ["n:0cb5a7e4"],
+        "recents": [],
+        "lastPlayed": null,
+        "session": null
+      },
+      "moved": 1
+    },
+    {
+      "name": "a recent that lands on one already held is merged too, most recent kept",
+      "comment": [
+        "Recents are keyed by id exactly as favorites are, and the first",
+        "version of this change de-duplicated only favorites, so the guide",
+        "would have rendered the merged channel twice in Recents."
+      ],
+      "vector": 0,
+      "before": {
+        "favorites": [],
+        "recents": [
+          { "id": "u:51f81870", "name": "US: Sky Sports Main Event", "at": 100 },
+          { "id": "n:0cb5a7e4", "name": "Sky Sports Main Event", "at": 90 },
+          { "id": "u:00000001", "name": "Another source", "at": 80 }
+        ],
+        "lastPlayed": null,
+        "session": null
+      },
+      "after": {
+        "favorites": [],
+        "recents": [
+          { "id": "n:0cb5a7e4", "name": "US: Sky Sports Main Event", "at": 100 },
+          { "id": "u:00000001", "name": "Another source", "at": 80 }
+        ],
+        "lastPlayed": null,
+        "session": null
+      },
+      "moved": 1
+    },
+    {
+      "name": "two rows on one URL: one moves, the other is left exactly where it was",
+      "vector": 6,
+      "before": {
+        "favorites": ["u:a33ee365", "u:a33ee365#2"],
+        "recents": [{ "id": "u:a33ee365", "name": "Alpha", "at": 50 }],
+        "lastPlayed": { "id": "u:a33ee365", "name": "Alpha", "at": 50 },
+        "session": null
+      },
+      "after": {
+        "favorites": ["n:5d8b6dab", "u:a33ee365#2"],
+        "recents": [{ "id": "n:5d8b6dab", "name": "Alpha", "at": 50 }],
+        "lastPlayed": { "id": "n:5d8b6dab", "name": "Alpha", "at": 50 },
+        "session": null
+      },
+      "moved": 3
+    }
+  ]
+}

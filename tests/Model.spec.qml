@@ -122,6 +122,50 @@ TestCase {
     compare(Model.channelId({ url: "foobar" }), "u:bf9cf968")
   }
 
+  // Id scheme 2 inside the Qt engine. The ids themselves are written by the
+  // python helper; the service runs THIS code to move a state file written
+  // under scheme 1 onto them, so the two have to agree byte for byte on the
+  // same name. The literal is the pin: tests/fixtures/channel-ids.json carries
+  // the same one for node and for python.
+  function test_channelIdSchemeTwo() {
+    compare(Model.nameIdKey("US: ESPN"), "n:bc9e3e3d")
+    // The fold has to reach the Qt engine too, or an accented title would key
+    // one thing here and another in the helper.
+    compare(Model.nameIdKey("Télé Québec"), Model.nameIdKey("Tele-Quebec"))
+    compare(Model.nameIdKey("Channel 11"), "")
+    // The id fold keeps `+` and `*`; the search fold still drops them. Both
+    // pairs are real rows on the user's lists, and keying ids with the search
+    // fold merged each pair into one channel.
+    compare(Model.normalizeIdText("USA: AMC+"), "usa amc+")
+    compare(Model.normalizeText("USA: AMC+"), "usa amc")
+    verify(Model.nameIdKey("USA  AMC") !== Model.nameIdKey("USA: AMC+"))
+    verify(Model.nameIdKey("US: ESPN") !== Model.nameIdKey("US: ESPN*"))
+    compare(Model.searchKey("US: ESPN", ""), Model.searchKey("US: ESPN*", ""))
+    var rows = [
+      { name: "US: ESPN", url: "http://line.test/u/p/1" },
+      { name: "US: Golf Channel", url: "http://line.test/u/p/2" },
+      { name: "US GOLF CHANNEL", url: "http://line.test/u/p/3" }
+    ]
+    var legacy = Model.channelIds(rows, Model.CHANNEL_ID_SCHEME_LEGACY)
+    var fresh = Model.channelIds(rows)
+    compare(fresh[0], "n:bc9e3e3d")
+    // The twin pair shares one name, so neither may use it.
+    compare(fresh[1], legacy[1])
+    compare(fresh[2], legacy[2])
+    verify(fresh[1] !== fresh[2])
+  }
+
+  function test_channelIdRemapIsIdempotent() {
+    var rows = [{ name: "US: ESPN", url: "http://line.test/u/p/1" }]
+    var before = Model.cloneState(Model.emptyState(), { favorites: Model.channelIds(rows, Model.CHANNEL_ID_SCHEME_LEGACY) })
+    var once = Model.remapChannelIds(before, rows)
+    compare(once.moved, 1)
+    compare(once.state.favorites, ["n:bc9e3e3d"])
+    var twice = Model.remapChannelIds(once.state, rows)
+    compare(twice.moved, 0)
+    compare(twice.state.favorites, ["n:bc9e3e3d"])
+  }
+
   function test_displayNameNeverUrl() {
     var rows = Model.prepareChannels([{ name: "http://h.test/x", tvgName: "Arte", url: "http://h.test/x" }, { name: "", url: "u2" }])
     compare(rows[0].name, "Arte")

@@ -215,6 +215,20 @@ var FOLD = (function() {
 // searchable. Mirrors _PUNCT in bin/omarchy-iptv.
 var PUNCT_RE = /[\s!-\/:-@\[-`{-~]+/g
 
+// The same class WITHOUT `*` (U+002A) and `+` (U+002B), for the id fold only.
+// Folding is two jobs, not one. SEARCH wants punctuation gone: a user typing
+// "amc" must reach "USA: AMC+", so normalizeText stays exactly as it is. An
+// ID wants every character that tells two streams apart, and `+` and `*` are
+// the two that do: measured over the user's four real playlists, dropping
+// them merges "USA  AMC" with "USA: AMC+", "US: ESPN" with "US: ESPN*",
+// "US NESN (A)" with "US NESN+ (A)" and four Fanduel regional pairs -- 9
+// colliding groups and 20 rows that are different streams under one key.
+// Keeping them takes the four lists from 75 colliding groups / 155 rows to
+// 65 / 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#`
+// and `@` were measured the same way and change nothing on any of the four,
+// so they are not in the class. Mirrors _ID_PUNCT in bin/omarchy-iptv.
+var ID_PUNCT_RE = /[\s!-\)\,-\/:-@\[-`{-~]+/g
+
 function str(value) {
   return String(value === undefined || value === null ? "" : value)
 }
@@ -245,13 +259,24 @@ function decompose(text) {
 }
 
 function normalizeText(value) {
+  return foldText(value, PUNCT_RE)
+}
+
+// The id fold (python mirror: normalize_id_text). Identical to normalizeText
+// except that `+` and `*` survive, because they are the difference between
+// two channels rather than noise inside one. Never use it for search.
+function normalizeIdText(value) {
+  return foldText(value, ID_PUNCT_RE)
+}
+
+function foldText(value, punct) {
   var text = decompose(str(value).toLowerCase())
   var out = ""
   for (var i = 0; i < text.length; i++) {
     var ch = text.charAt(i)
     out += FOLD[ch] !== undefined ? FOLD[ch] : ch
   }
-  return out.replace(PUNCT_RE, " ").replace(/^ | $/g, "")
+  return out.replace(punct, " ").replace(/^ | $/g, "")
 }
 
 // R4: searchKey = fold(name + " " + group). The whole multi-group string
@@ -310,9 +335,195 @@ function fnv1a32(value) {
   return hex
 }
 
-// The helper assigns `id` when it writes channels.json (tvg-id when unique
-// in the playlist, else a URL hash; see ARCHITECTURE.md decision 6). This
-// mirrors the per-channel rule for callers that build channels in memory.
+// Channel id schemes (ARCHITECTURE.md decision 6; python mirror:
+// CHANNEL_ID_SCHEME in bin/omarchy-iptv). Scheme 1 shipped from 0.1 to 0.7:
+// `t:<tvg-id>` when unique in the playlist, else `u:<fnv1a32(url)>`. An
+// Xtream stream URL carries the account password, so every `u:` id dies the
+// day that password is rotated -- 1 id of 3,335 survived one on the user's
+// own list, taking every favorite and recent with it. Scheme 2 tries the
+// channel NAME in between: the one column a rotation cannot touch.
+var CHANNEL_ID_SCHEME_LEGACY = 1
+var CHANNEL_ID_SCHEME = 2
+// The last-resort display name, `Channel <n>`, whose n is the row's POSITION.
+// Both the word and the pattern that recognises one after normalizeText come
+// from the same constant, and displayName() below builds the name from it --
+// CLAUDE.md rule 13, two things joined by a call rather than by a name. The
+// python mirror does the same with GENERATED_NAME_WORD.
+var GENERATED_NAME_WORD = "Channel"
+var GENERATED_NAME_RE = new RegExp("^" + GENERATED_NAME_WORD.toLowerCase() + " [0-9]+$")
+
+// The `n:` base of a channel name, or "" when the name cannot key one: a name
+// that normalizes to nothing, or a generated `Channel <n>`, whose id would
+// move the moment the provider inserts a row above it.
+function nameIdKey(name) {
+  var norm = normalizeIdText(name)
+  if (norm === "" || GENERATED_NAME_RE.test(norm)) return ""
+  return "n:" + fnv1a32(norm)
+}
+
+// `#2`, `#3`... on a repeated base so every row stays addressable.
+function suffixIds(bases) {
+  var seen = {}
+  var out = []
+  for (var i = 0; i < bases.length; i++) {
+    var count = (seen[bases[i]] || 0) + 1
+    seen[bases[i]] = count
+    out.push(count === 1 ? bases[i] : bases[i] + "#" + count)
+  }
+  return out
+}
+
+// Every channel's id, in playlist order (python mirror: channel_ids).
+//
+// Scheme 2 is scheme 1 with ONE substitution: a row that would fall back to
+// the URL hash uses its `n:` name key instead, and only when that key is
+// unique across the whole playlist. Every other row keeps the exact id it
+// already had.
+//
+// Doing it as a substitution rather than as a third branch of the base rule
+// is what makes the upgrade safe, and it took a failing test to find that
+// out. Recompute the suffixes over the new stream instead and a list with two
+// rows on one URL re-uses one row's OLD id for the OTHER row -- the saved
+// favorite still resolves, silently, to a different channel, the exact
+// failure this change exists to stop. As a substitution, a scheme-2 id is
+// either the row's own scheme-1 id or an `n:` id that has never existed
+// before, so no id can change meaning.
+//
+// The uniqueness test on the name is the other half: a name two rows share
+// cannot tell them apart, so an HD/SD twin pair keeps its URL ids rather than
+// being merged into one favorite, and an fnv1a32 collision between two
+// different names lands in the same branch. Names are counted over EVERY
+// channel, including those taking a `t:` id, so the name pool depends on
+// nothing but names.
+//
+// ACCEPTED LIMIT, UNRESOLVED (D-ID-1). The uniqueness test is answered from
+// ONE snapshot, and uniqueness only exists across snapshots: refusing a
+// colliding pair today DEFERS the collision rather than settling it. Remove
+// one member later and the survivor becomes unique, takes the `n:` key, and
+// inherits any favorite that meant the row which went away -- a silent WRONG
+// channel. Measured with nameIdKey over the user's four real lists, 26
+// colliding groups on USChannels (55 rows, largest 3) and 39 on SportsPPVAll
+// (78 rows, largest 2), so at most 133 rows of 5,221 are exposed and only if
+// the provider drops one of a pair. The rate is unknown: nobody has a second
+// snapshot. The full note, and what would settle it, is in the python mirror
+// (channel_ids in bin/omarchy-iptv).
+function channelIds(channels, scheme) {
+  var legacy = legacyChannelIds(channels)
+  if ((scheme === undefined ? CHANNEL_ID_SCHEME : Number(scheme)) < CHANNEL_ID_SCHEME) return legacy
+  return substituteNameIds(channels, legacy)
+}
+
+// Scheme 1, and the base every scheme-2 id is built from.
+function legacyChannelIds(channels) {
+  var list = asList(channels)
+  var tvgCounts = {}
+  var bases = []
+  var i, tvg
+  for (i = 0; i < list.length; i++) {
+    tvg = str(list[i] && list[i].tvgId)
+    if (tvg !== "") tvgCounts[tvg] = (tvgCounts[tvg] || 0) + 1
+  }
+  for (i = 0; i < list.length; i++) {
+    tvg = str(list[i] && list[i].tvgId)
+    bases.push(tvg !== "" && tvgCounts[tvg] === 1 ? "t:" + tvg : "u:" + fnv1a32(str(list[i] && list[i].url)))
+  }
+  return suffixIds(bases)
+}
+
+// The one substitution scheme 2 makes on top of scheme 1. Separate from
+// channelIds so channelIdRemap hashes every URL once instead of twice.
+function substituteNameIds(channels, legacy) {
+  var list = asList(channels)
+  var nameKeys = []
+  var nameCounts = {}
+  var i
+  for (i = 0; i < list.length; i++) {
+    var key = nameIdKey(list[i] && list[i].name)
+    nameKeys.push(key)
+    if (key !== "") nameCounts[key] = (nameCounts[key] || 0) + 1
+  }
+  var out = []
+  for (i = 0; i < legacy.length; i++) {
+    var substitute = legacy[i].indexOf("u:") === 0 && nameKeys[i] !== "" && nameCounts[nameKeys[i]] === 1
+    out.push(substitute ? nameKeys[i] : legacy[i])
+  }
+  return out
+}
+
+// {scheme-1 id: scheme-2 id} for the rows the scheme change moves.
+//
+// Idempotent with no marker anywhere in state.json, and no schema change of
+// any kind. Because scheme 2 is a substitution (channelIds), every key of
+// this map is the scheme-1 id of a row that now answers to an `n:` id, and an
+// `n:` id is never a key -- so after one pass nothing in the state holds a
+// key and a second pass moves nothing. The node and python suites both pin
+// that invariant rather than trusting this paragraph.
+function channelIdRemap(channels) {
+  var old = legacyChannelIds(channels)
+  var fresh = substituteNameIds(channels, old)
+  var remap = {}
+  for (var i = 0; i < old.length; i++) if (old[i] !== fresh[i]) remap[old[i]] = fresh[i]
+  return remap
+}
+
+// Move every channel reference state.json persists onto the current scheme.
+// Returns a NEW state plus the number of references moved; 0 means the state
+// was already current and the caller must not write. Favorites keep their
+// order and one that lands on a favorite already in the list is merged rather
+// than duplicated -- possible because favorites are global across sources
+// (ARCHITECTURE-SOURCES.md D14) and another source may already hold the
+// target id.
+function remapStateIds(state, remap) {
+  var st = cloneState(state, {})
+  var moved = 0
+  var i, target
+  if (!remap) return { state: st, moved: 0 }
+  var favorites = []
+  for (i = 0; i < st.favorites.length; i++) {
+    target = remap[st.favorites[i]] !== undefined ? remap[st.favorites[i]] : st.favorites[i]
+    if (target !== st.favorites[i]) moved++
+    if (favorites.indexOf(target) === -1) favorites.push(target)
+  }
+  st.favorites = favorites
+  // Recents are keyed by id exactly as favorites are, so the remap has to
+  // merge them the same way: two rows that moved onto one id are one entry,
+  // most recent kept, or the list grows a duplicate the guide then renders
+  // twice. This was the asymmetry review found -- favorites merged, recents
+  // did not.
+  var recents = []
+  var seenRecent = {}
+  for (i = 0; i < st.recents.length; i++) {
+    var entry = st.recents[i]
+    if (!entry) continue
+    target = remap[str(entry.id)]
+    if (target === undefined) target = str(entry.id)
+    else moved++
+    if (seenRecent[target] === true) continue
+    seenRecent[target] = true
+    recents.push({ id: target, name: str(entry.name), at: entry.at })
+  }
+  st.recents = recents
+  var records = ["lastPlayed", "session"]
+  for (i = 0; i < records.length; i++) {
+    var played = st[records[i]]
+    target = played ? remap[str(played.id)] : undefined
+    if (target === undefined) continue
+    moved++
+    st[records[i]] = { id: target, name: str(played.name), at: played.at }
+  }
+  return { state: st, moved: moved }
+}
+
+// The service's call site: the loaded state and the loaded channel list.
+// Write only when `moved` is non-zero -- after one pass it always is zero.
+function remapChannelIds(state, channels) {
+  return remapStateIds(state, channelIdRemap(channels))
+}
+
+// The helper assigns `id` when it writes channels.json (channelIdBases
+// above). This mirrors the per-channel half of the rule for callers that
+// build channels in memory: the playlist-wide uniqueness tests cannot be
+// answered from one row, so a caller holding the whole list uses assignIds.
 function channelId(channel) {
   if (!channel) return ""
   if (typeof channel.id === "string" && channel.id !== "") return channel.id
@@ -368,7 +579,7 @@ function displayName(channel, position) {
   if (name !== "" && !looksLikeUrl(name)) return name
   var tvg = cleanName(channel && channel.tvgName)
   if (tvg !== "" && !looksLikeUrl(tvg)) return tvg
-  return "Channel " + (Number(position) > 0 ? Math.floor(Number(position)) : "?")
+  return GENERATED_NAME_WORD + " " + (Number(position) > 0 ? Math.floor(Number(position)) : "?")
 }
 
 // One pass at load time (off the open path): guarantees `id`, `searchKey`,
@@ -6004,6 +6215,15 @@ if (typeof module !== "undefined") {
     searchKey: searchKey,
     tokenize: tokenize,
     fnv1a32: fnv1a32,
+    CHANNEL_ID_SCHEME: CHANNEL_ID_SCHEME,
+    CHANNEL_ID_SCHEME_LEGACY: CHANNEL_ID_SCHEME_LEGACY,
+    normalizeIdText: normalizeIdText,
+    nameIdKey: nameIdKey,
+    suffixIds: suffixIds,
+    channelIds: channelIds,
+    channelIdRemap: channelIdRemap,
+    remapStateIds: remapStateIds,
+    remapChannelIds: remapChannelIds,
     channelId: channelId,
     indexById: indexById,
     findByUrl: findByUrl,

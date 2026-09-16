@@ -128,6 +128,140 @@ check("channelId prefers explicit id", Model.channelId({ id: "t:x", tvgId: "y", 
 check("channelId tvg", Model.channelId({ tvgId: "bbc1.uk", url: "http://a" }), "t:bbc1.uk")
 check("channelId url hash", Model.channelId({ url: "foobar" }), "u:bf9cf968")
 check("channelId null", Model.channelId(null), "")
+
+// ---- channel id scheme 2 and the one-time remap (ARCHITECTURE.md 6) ----
+// Scheme 1 keyed every row without a unique tvg-id by a hash of its STREAM
+// URL, and an Xtream stream URL carries the account password: measured on the
+// user's own 3,335-channel list, 1 id of 3,335 survived a password rotation,
+// so every favorite and recent silently stopped naming anything. These run
+// tests/fixtures/channel-ids.json, the same file tests/test_channel_ids.py
+// drives against bin/omarchy-iptv, so the two implementations are pinned to
+// one file rather than to each other.
+const idFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/channel-ids.json"), "utf8"))
+check("channel-ids fixture loaded", [idFixture.vectors.length >= 9, idFixture.states.length >= 5, idFixture.folds.length >= 14], [true, true, true])
+// Folding is two jobs. SEARCH drops punctuation, so a user typing "amc"
+// reaches "USA: AMC+"; the ID fold keeps `+` and `*`, because those are the
+// characters that tell two live streams apart. The first version of this
+// change keyed ids with the search fold and merged "USA  AMC" with
+// "USA: AMC+" and "US: ESPN" with "US: ESPN*" -- both pairs are real rows on
+// the user's own lists. One table, run by python too, so neither
+// implementation can change one job believing it changed the other.
+idFixture.folds.forEach(function (row) {
+  checkCall("fold: " + JSON.stringify(row.name), function () {
+    return { id: Model.normalizeIdText(row.name), search: Model.normalizeText(row.name) }
+  }, { id: row.id, search: row.search })
+})
+idFixture.vectors.forEach(function (vector) {
+  checkCall("ids scheme 1: " + vector.name, function () {
+    return Model.channelIds(vector.channels, Model.CHANNEL_ID_SCHEME_LEGACY)
+  }, vector.scheme1)
+  checkCall("ids scheme 2: " + vector.name, function () {
+    return Model.channelIds(vector.channels)
+  }, vector.scheme2)
+  checkCall("remap: " + vector.name, function () {
+    return Model.channelIdRemap(vector.channels)
+  }, vector.remap)
+  checkCall("a password rotation, both schemes: " + vector.name, function () {
+    const after = vector.channels.map(function (channel) {
+      const copy = {}
+      for (const key in channel) copy[key] = channel[key]
+      copy.url = String(channel.url).split(idFixture.rotate.from).join(idFixture.rotate.to)
+      return copy
+    })
+    function survivors(scheme) {
+      const before = Model.channelIds(vector.channels, scheme)
+      const now = Model.channelIds(after, scheme)
+      return before.filter(function (id, i) { return id === now[i] }).length
+    }
+    return { scheme1: survivors(Model.CHANNEL_ID_SCHEME_LEGACY), scheme2: survivors(Model.CHANNEL_ID_SCHEME) }
+  }, { scheme1: vector.survivesScheme1, scheme2: vector.survivesScheme2 })
+  // The invariant the whole upgrade rests on: a moved id is never some OTHER
+  // row's new id, so no saved favorite can silently start naming a different
+  // channel and a second pass has nothing to move.
+  checkCall("no moved id is also a new id: " + vector.name, function () {
+    const fresh = Model.channelIds(vector.channels)
+    return Object.keys(Model.channelIdRemap(vector.channels)).filter(function (key) { return fresh.indexOf(key) !== -1 })
+  }, [])
+})
+idFixture.states.forEach(function (one) {
+  const vector = idFixture.vectors[one.vector]
+  checkCall("state remap: " + one.name, function () {
+    const result = Model.remapChannelIds(Model.cloneState(Model.emptyState(), one.before), vector.channels)
+    return {
+      moved: result.moved,
+      favorites: result.state.favorites,
+      recents: result.state.recents,
+      lastPlayed: result.state.lastPlayed,
+      session: result.state.session
+    }
+  }, {
+    moved: one.moved,
+    favorites: one.after.favorites,
+    recents: one.after.recents,
+    lastPlayed: one.after.lastPlayed,
+    session: one.after.session
+  })
+  checkCall("state remap runs twice with no marker: " + one.name, function () {
+    const once = Model.remapChannelIds(Model.cloneState(Model.emptyState(), one.before), vector.channels)
+    const twice = Model.remapChannelIds(once.state, vector.channels)
+    return { moved: twice.moved, same: JSON.stringify(twice.state) === JSON.stringify(once.state) }
+  }, { moved: 0, same: true })
+})
+checkCall("nameIdKey folds case and punctuation the way searchKey does", function () {
+  return [Model.nameIdKey("US: ESPN") === Model.nameIdKey("us espn"),
+    Model.nameIdKey("Tele-Quebec") === Model.nameIdKey("T\u00e9l\u00e9 Qu\u00e9bec")]
+}, [true, true])
+checkCall("nameIdKey refuses the generated name, an empty one, and nothing else", function () {
+  return [Model.nameIdKey("Channel 11"), Model.nameIdKey(""), Model.nameIdKey("   "),
+    Model.nameIdKey("Channel 4 News") === "", Model.nameIdKey("Discovery Channel 4") === ""]
+}, ["", "", "", false, false])
+// Rule 13: the name displayName() invents and the pattern that refuses to key
+// on it are joined by a call. This is the assertion that says so, in both
+// languages (python: test_the_generated_name_and_its_pattern_cannot_drift).
+checkCall("the generated display name and the key that refuses it cannot drift", function () {
+  const rows = Model.prepareChannels([{ name: "", url: "http://h.test/1" }, { name: "", url: "http://h.test/2" }])
+  return { names: rows.map(function (r) { return r.name }), keys: rows.map(function (r) { return Model.nameIdKey(r.name) }) }
+}, { names: ["Channel 1", "Channel 2"], keys: ["", ""] })
+checkCall("AMC+ is not AMC and ESPN* is not ESPN, and search still folds both", function () {
+  const pairs = [["USA  AMC", "USA: AMC+"], ["US: ESPN", "US: ESPN*"], ["US NESN (A)", "US NESN+ (A)"]]
+  const rows = []
+  pairs.forEach(function (pair) { pair.forEach(function (name, i) { rows.push({ name: name, url: "http://h.test/" + rows.length }) }) })
+  const ids = Model.channelIds(rows)
+  return {
+    distinctIds: new Set(ids).size,
+    allNamed: ids.every(function (id) { return id.slice(0, 2) === "n:" }),
+    idKeysDiffer: pairs.every(function (p) { return Model.nameIdKey(p[0]) !== Model.nameIdKey(p[1]) }),
+    searchKeysAgree: pairs.every(function (p) { return Model.searchKey(p[0], "") === Model.searchKey(p[1], "") })
+  }
+}, { distinctIds: 6, allNamed: true, idKeysDiffer: true, searchKeysAgree: true })
+checkCall("the id fold keeps + and * and nothing else", function () {
+  const kept = "&#@!?()[]{}<>,.;:'\"/\\|~`^%$-_=".split("").filter(function (ch) { return Model.normalizeIdText("A" + ch + "B") !== "a b" })
+  return { kept: kept, plus: Model.normalizeIdText("A+B"), star: Model.normalizeIdText("A*B") }
+}, { kept: [], plus: "a+b", star: "a*b" })
+checkCall("a name two rows share never merges them into one id", function () {
+  const rows = [{ name: "US: ESPN", url: "http://h.test/1" }, { name: "US: ESPN", url: "http://h.test/2" }]
+  const ids = Model.channelIds(rows)
+  return { distinct: ids[0] !== ids[1], kinds: ids.map(function (id) { return id.slice(0, 2) }) }
+}, { distinct: true, kinds: ["u:", "u:"] })
+checkCall("scheme 2 only ever substitutes a brand new n: id", function () {
+  // A list built to break the substitution property: shared names, shared
+  // URLs, a duplicate tvg-id, a unique one, a generated name and an empty one.
+  const rows = [
+    { name: "A", url: "http://h.test/1" }, { name: "A", url: "http://h.test/2" },
+    { name: "B", url: "http://h.test/3" }, { name: "B", url: "http://h.test/3" },
+    { name: "Channel 1", url: "http://h.test/4" }, { name: "", url: "http://h.test/4" },
+    { name: "C", tvgId: "dup", url: "http://h.test/5" }, { name: "D", tvgId: "dup", url: "http://h.test/6" },
+    { name: "E", tvgId: "solo", url: "http://h.test/7" }, { name: "F", url: "http://h.test/7" },
+    { name: "G", url: "http://h.test/8" }, { name: "G", tvgId: "also.solo", url: "http://h.test/9" }
+  ]
+  const old = Model.channelIds(rows, Model.CHANNEL_ID_SCHEME_LEGACY)
+  const fresh = Model.channelIds(rows, Model.CHANNEL_ID_SCHEME)
+  return {
+    moved: old.filter(function (id, i) { return id !== fresh[i] && fresh[i].slice(0, 2) !== "n:" }),
+    reused: Object.keys(Model.channelIdRemap(rows)).filter(function (key) { return fresh.indexOf(key) !== -1 }),
+    unique: new Set(fresh).size === fresh.length
+  }
+}, { moved: [], reused: [], unique: true })
 check("indexById first wins", Object.keys(Model.indexById([{ id: "a", name: 1 }, { id: "a", name: 2 }, { id: "b" }])), ["a", "b"])
 check("findByUrl", Model.findByUrl([{ id: "a", url: "http://x" }, { id: "b", url: "http://y" }], "http://y").id, "b")
 check("asList copies array-likes and passes arrays through", (() => { const a = [1]; const like = { length: 2, 0: "x", 1: "y" }; return [Model.asList(a) === a, Model.asList(like), Model.asList(null), Model.asList("str")] })(), [true, ["x", "y"], [], []])

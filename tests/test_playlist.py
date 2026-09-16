@@ -89,7 +89,11 @@ class ParseM3uTest(unittest.TestCase):
         self.assertEqual(channels[0]["url"], "http://stream.example.test/live/bbc1.m3u8")
         self.assertEqual(channels[0]["searchKey"], "bbc one hd uk")
         self.assertEqual(channels[0]["id"], "t:bbc1.uk")
-        self.assertEqual(channels[2]["id"], "u:" + helper.fnv1a32(channels[2]["url"]))
+        # Id scheme 2: a row with no tvg-id and a name nothing else in the
+        # playlist shares is keyed by the NAME, not by its stream URL, so the
+        # id outlives a provider credential rotation (tests/test_channel_ids.py).
+        self.assertEqual(channels[2]["id"], "n:858057a4")
+        self.assertNotEqual(channels[2]["id"], "u:" + helper.fnv1a32(channels[2]["url"]))
         self.assertEqual(result["warnings"], [])
 
     def test_attributes_fixture(self):
@@ -104,16 +108,23 @@ class ParseM3uTest(unittest.TestCase):
         self.assertEqual(espn["options"], {"vlc:network-caching": "1000"})
         # group-title beats the persisting #EXTGRP
         self.assertEqual(channels[1]["group"], "Movies")
-        # duplicate tvg-id falls back to URL hashes for both members
-        self.assertEqual(espn["id"], "u:" + helper.fnv1a32(espn["url"]))
-        self.assertEqual(channels[1]["id"], "u:" + helper.fnv1a32(channels[1]["url"]))
+        # A duplicate tvg-id is still refused by both members. Under id scheme
+        # 2 they land on their (distinct, unique) names rather than on their
+        # stream URLs; what matters is that neither claims `t:espn.us`.
+        self.assertEqual(espn["id"], "n:c3066d6f")
+        self.assertEqual(channels[1]["id"], "n:e7a4441e")
+        self.assertNotIn("t:espn.us", [c["id"] for c in channels])
         # #EXTGRP persists until replaced
         self.assertEqual(channels[2]["group"], "Sports")
         self.assertEqual(channels[2]["headers"], {"User-Agent": "Kodi/20", "X-Forwarded-For": "1.2.3.4"})
         self.assertEqual(channels[2]["options"], {"kodi:inputstream.adaptive.manifest_type": "hls"})
-        # identical URLs get distinct ids
-        self.assertEqual(channels[3]["id"], "u:" + helper.fnv1a32(channels[3]["url"]))
-        self.assertEqual(channels[4]["id"], channels[3]["id"] + "#2")
+        # Identical URLs still get distinct ids. These two differ by name, so
+        # scheme 2 keys them by name; the `#2` suffix path is exercised where
+        # a shared URL comes with a shared name (tests/test_channel_ids.py,
+        # ChannelIdRuleTest.test_a_shared_url_and_a_shared_name_still_suffix).
+        self.assertEqual(channels[3]["id"], "n:67c1a069")
+        self.assertEqual(channels[4]["id"], "n:64c19bb0")
+        self.assertEqual(channels[3]["url"], channels[4]["url"])
         self.assertIn("3 entries skipped: unsupported URL scheme", result["warnings"])
         self.assertIn("1 URL lines without #EXTINF skipped", result["warnings"])
 
@@ -665,8 +676,16 @@ class QaFixtureTest(unittest.TestCase):
         self.assertEqual(ids[0], "t:espn.us")
         self.assertEqual(channels[0]["chno"], "12")
         self.assertEqual(channels[0]["group"], "Sports")
-        self.assertEqual(ids[1:5], ["u:a3d5424f", "u:8e5692d2", "u:cc5a0021", "u:cc5a0021#2"])
-        self.assertEqual(ids[1], "u:" + helper.fnv1a32(channels[1]["url"]))
+        # The duplicate tvg-id pair and the exact-duplicate-URL pair: four rows
+        # that must stay four ids. Under scheme 2 each has a name of its own,
+        # so each is keyed by it and survives a credential rotation; none of
+        # them claims the shared `t:hd.test`.
+        self.assertEqual(ids[1:5], ["n:b964ced6", "n:ab4ef27d", "n:d866f053", "n:d966f1e6"])
+        self.assertNotIn("t:hd.test", ids)
+        self.assertEqual(channels[3]["url"], channels[4]["url"])
+        # D-QA-02's row keeps a URL id: its name is the generated `Channel 11`,
+        # which is a row POSITION and must never key anything.
+        self.assertEqual(ids[10], "u:" + helper.fnv1a32(channels[10]["url"]))
         self.assertEqual(channels[5]["name"], "Title, With, Commas")
         self.assertEqual(channels[5]["group"], "News, World")
         self.assertEqual(channels[8]["name"], "Broken EXTINF Without Comma")
