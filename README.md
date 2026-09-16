@@ -3,10 +3,14 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.2.0. The MVP and the Sources feature have shipped; `CHANGELOG.md`
-has the release notes. `docs/PRODUCT.md` holds the product vision and the
-roadmap, `docs/ARCHITECTURE.md` the design and standards, `docs/UX.md` the
-interaction and visual spec, and `docs/STATUS.md` the live build status.
+Status: v0.7.0. Shipped so far: the MVP guide, Sources, the detached player
+that keeps playing across a shell restart, channel numbers with numeric
+tuning, and picture in picture; the two most recent releases went to the
+guide at real provider scale, and to search accuracy and readable contrast.
+`CHANGELOG.md` has the release notes. `docs/PRODUCT.md` holds the product
+vision and the roadmap, `docs/ARCHITECTURE.md` the design and standards,
+`docs/UX.md` the interaction and visual spec, and `docs/STATUS.md` the live
+build status.
 Contributors should start with `CLAUDE.md`.
 
 The plugin ships no content. Bring a playlist you are entitled to use.
