@@ -96,6 +96,85 @@ Xtream Codes URL helper, multiple playlists, channel numbers and numeric zap,
 channel logos, catch-up, picture-in-picture mode via hyprctl float + pin,
 recording via ffmpeg, first-class layout on vertical bars.
 
+**Most of that list has shipped. See the roadmap below, which replaces it.**
+
+## Roadmap (product owner, 2026-09-15, supersedes the M2 list above)
+
+Ten releases, v0.1.0 to v0.7.0. Of the original M2 list, the Xtream helper,
+multiple playlists, channel numbers and picture in picture are all shipped, and
+the detached player and the guide at provider scale were added along the way.
+What follows is what is actually left, in the order I would take it.
+
+### 1. The two upstream reports, which gate real work
+
+Neither is ours to fix and both block something:
+
+| Report | Blocks |
+|---|---|
+| [quickshell#1144](https://github.com/quickshell-mirror/quickshell/issues/1144) | Nothing this plugin declares reaches a screen reader, so every accessibility rule we have written is unobservable, and D-A11Y-1's credential exposure stays latent |
+| [omacom/omarchy#12009](https://github.com/omacom/omarchy/issues/12009) | The host shell carries no accessibility information at all, so even a fixed framework leaves the desktop unusable with a reader |
+
+Nothing to build. Watch, and keep the harness ready for the day the first one
+lands, because that is the day D-A11Y-1 stops being latent and becomes live.
+
+### 2. Settle the thirty-one unverified fixes
+
+Thirty-one board rows read `fixed` rather than `verified fixed`: a commit
+repairs them and no test ran afterwards. That is structural, not sloppiness.
+The QA record stopped being written three releases ago while four releases
+shipped over it. One pass re-running the original repros settles most of them,
+and it costs one session that holds the display. It should ride with the next
+release rather than being scheduled alone.
+
+### 3. Finish the contrast family
+
+Four open rungs, and the calibration that unblocked them is done:
+
+- **D-RUNG-6 (P2)** the bar's real surface is not what any fixture models, so
+  its ceiling is about 2.25:1 and no icon in it can be made readable. Needs a
+  fixture MEASURED from the running bar, and then a decision about whether our
+  glyph should diverge from every other widget to be legible. It may also be
+  worth reporting to Omarchy, since it affects every bar widget and not ours.
+- **D-RUNG-7 (P3)** the runtime picks a different cursor ink than the model
+  computes, in the safe direction. One probe printing three resolved tokens
+  settles it.
+- **D-RUNG-2 (P3)** the guide's dim second line. REFUSED with numbers and
+  recorded as accepted risk. Reopen only against the conditions in
+  `docs/CONTRAST-RULING.md`.
+- **D-RUNG-5 (P3)** light-theme dimming inversion, narrowed but not closed.
+
+### 4. Features, ranked by what the measurements say
+
+- **M2-08 vertical bar layout.** Small, cosmetic, no blocker. The cheapest
+  remaining thing a user would notice.
+- **M2-04 channel logos.** Measured across the subscriber's own four playlists:
+  1,396 of 5,221 channels carry one, 27 per cent, all from a single
+  third-party host. It would be the first feature to fetch remote images on the
+  user's behalf. Needs a privacy ruling before any design work, and the design
+  has to lead with the three-in-four placeholder case.
+- **M2-06 recording via ffmpeg.** Large. A second long-lived child process with
+  a different lifecycle from the player, files of unbounded size outside the
+  cache, and its own failure surface.
+- **M2-07 catch-up and timeshift.** BLOCKED, and not on effort. Not one of the
+  5,221 channels available here advertises catch-up, so not a single acceptance
+  case could be verified against real data. Building it against fixtures alone
+  is how the v0.2.0 defects happened.
+
+### 5. Standing, not scheduled
+
+- **D-PIP-3 (P3)** the player window renders translucent because our app id
+  misses the host's media-opacity exemption, which matches on class.
+- **The accessibility harness** needs the rest of its open items from
+  `docs/QA-A11Y.md` section 9 before any filed run counts as evidence. Four
+  acceptance criteria currently name it and none is satisfied.
+
+### What is deliberately NOT on this list
+
+No multi-monitor work: there is one output here, so nothing could be verified.
+No packaging or distribution: the plugin installs from a git clone and that has
+worked for ten releases. No settings UI beyond Sources: every remaining setting
+is a number a user sets once.
+
 ## Quality bar (definition of done for M1)
 
 - `omarchy plugin validate .` passes. `qmllint` is clean with the `qs` modules
