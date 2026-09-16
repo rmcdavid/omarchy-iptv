@@ -36,6 +36,13 @@ Search tells the truth, and the text you read is readable.
   in 7 of the 23 installed themes. It is now clear of it in all 23, with the
   icon still visibly quieter than when something is playing on every dark
   theme.
+  **Correction, 2026-09-15: the second sentence is wrong and this note is left
+  in place rather than rewritten.** The measurement behind it modelled the bar
+  as using the theme's own text colour. A capture of the running bar shows it
+  draws at roughly half that, so its text tops out near 2.25:1 and no icon in
+  it reaches the readable threshold, ours included. What the change did achieve
+  is real and is confirmed on screen: the idle icon is no longer *bolder* than
+  the playing one. Filed as D-RUNG-6.
 - The password field in the Sources form had no label for a screen reader at
   all. It has one now. The property that was supposed to protect it turned out
   to do nothing on this version of Qt, in either direction, so it is gone and

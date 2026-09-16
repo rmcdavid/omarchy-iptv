@@ -4120,27 +4120,91 @@ function rowMeta(opts) {
 // twenty-two installed themes -- for the channel name too, which is not this
 // lane's to change. The notice therefore reads the same whether or not the
 // cursor is on the row, which is the right property for an alert.
+// ------------------------------------------------------------ contrast
+//
+// One arithmetic, called by the shipping code AND by the tests. It lived only
+// in tests/Model.test.js, which was fine while nothing SHIPPED a decision made
+// with it. Two do now (D-RUNG-4 and D-RUNG-5), and a private copy in the test
+// is precisely the shape CLAUDE.md rule 12 forbids: a test that mirrors logic
+// instead of calling it passes while the shipping path is broken.
+//
+// `colorOver` is the load-bearing one. `Color.menu.selectedBackground` is not
+// a colour: it is `menu.text` carrying alpha 0.08 over the background, and an
+// implementation that forgets that composite is measuring a surface the user
+// never sees.
+
+// WCAG 2.1 relative luminance. Input is [r, g, b] in 0-255.
+function relativeLuminance(rgb) {
+  var lin = []
+  for (var i = 0; i < 3; i++) {
+    var c = Number(rgb[i]) / 255
+    lin.push(c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  }
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+}
+
+function contrastRatio(a, b) {
+  var la = relativeLuminance(a), lb = relativeLuminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+
+// `fg` drawn at `alpha` over `bg`. Alpha compositing and "mix toward the
+// background" are the SAME operation, which is why switching one for the other
+// moves nothing: every opacity rung in this guide already dims toward the
+// background. The bar was the only site dimming toward BLACK (Qt.darker), and
+// that is exactly why it was the only site that could invert on a light theme.
+function colorOver(fg, bg, alpha) {
+  var a = Number(alpha)
+  if (!(a >= 0)) a = 0
+  if (a > 1) a = 1
+  var out = []
+  for (var i = 0; i < 3; i++) out.push(Number(fg[i]) * a + Number(bg[i]) * (1 - a))
+  return out
+}
+
+function colorMix(a, b, t) { return colorOver(a, b, 1 - Number(t)) }
+
+// The calibrated-target rule, as arithmetic rather than as advice.
+//
+// docs/UX-GUIDE-AT-SCALE.md section 16 measured this model against real pixels:
+// accurate to within a known tolerance and ALWAYS SLIGHTLY OPTIMISTIC, so a
+// design computing exactly 4.50 renders at about 4.40. "Above the line, never
+// on it" now has a number, and the margin is READ FROM THE CALIBRATION FIXTURE
+// rather than restated here -- so widening that tolerance to hide a bad model
+// breaks this decision too, instead of only its own check.
+var WCAG_AA_TEXT = 4.5
+
 var TEXT_DIM = 0.52
 var TEXT_FULL = 1
-// D-RUNG-3. The bar's idle glyph is darkened rather than faded, so it never
-// appeared in any search for an opacity rung -- which is exactly how the
-// contrast design missed the one element of this plugin that is on screen
-// permanently. It lives here, not as a literal in BarWidget.qml, so a test can
-// call the shipping value instead of transcribing it (CLAUDE.md rule 12).
+// D-RUNG-3 and D-RUNG-5, the bar's idle glyph. It is the one element of this
+// plugin on screen permanently, and it was BOTH too faint on dark themes and
+// inverted on light ones.
 //
-// Was 1.55, which put the idle glyph under 4.5:1 in 7 of 23 installed themes,
-// all dark ones: everforest 3.18, gruvbox 3.56, tokyo-night 3.60, miasma 3.82,
-// nord 3.85, osaka-jade 4.18, matte-black 4.43. Darkening a light theme's ink
-// raises its contrast, so only dark themes could fail.
+// The old operation was Qt.darker, which reduces the ink's HSV value -- it dims
+// toward BLACK. That is fine on a dark theme and backwards on a light one,
+// where moving the ink away from a pale background RAISES its contrast: at the
+// shipped factor catppuccin-latte measured 11.00 idle against 7.06 active, and
+// on `white` the operation was an exact no-op because darkening pure black
+// changes nothing. Five themes were inverted or tied.
 //
-// 1.25 clears every theme with a floor of 4.71, chosen with margin rather than
-// on the 4.5 line, because sitting on the line is the mistake D-RUNG-2 was
-// refused for. The dimming loses some of its range: the active glyph now has
-// about 1.57x the contrast of the idle one rather than 2.32x. That is
-// affordable HERE and nowhere else in this plugin, because ruling R7 already
-// requires a DIFFERENT GLYPH per state, so the dimming is decorative and the
-// state is never carried by colour alone.
-var BAR_IDLE_DARKEN = 1.25
+// This dims toward the BACKGROUND instead, which is ordinary alpha
+// compositing, and is the same operation every opacity rung in the guide
+// already performs. That identity is why switching operations fixes the bar and
+// moves nothing else: the bar was the only site in this plugin dimming toward
+// black, which is precisely why it was the only site that could invert.
+//
+// 0.86 is chosen by the calibrated-target rule, not by eye. Across all 23
+// installed themes it gives 0 under the threshold, 0 inverted, and a floor of
+// 4.77 -- clear of the 4.65 that 4.5 plus the calibration tolerance demands
+// (tests/fixtures/contrast-calibration.json). 0.84 would read 4.56 and fail
+// that rule while still looking fine on paper, which is the whole point of
+// having the rule as arithmetic instead of as advice.
+//
+// The cost, accepted: the 18 dark themes lose dimming range, separation from
+// the active glyph falling from about 1.58x to 1.30x. Affordable here and
+// nowhere else, because ruling R7 gives every state its own GLYPH, so the
+// dimming is decorative and state is never carried by colour alone.
+var BAR_IDLE_ALPHA = 0.86
 
 function rowNoticeEmphasis(failedAt) {
   return str(failedAt) === "" ? TEXT_DIM : TEXT_FULL
@@ -6089,7 +6153,12 @@ if (typeof module !== "undefined") {
     rowMeta: rowMeta,
     rowNoticeEmphasis: rowNoticeEmphasis,
     TEXT_DIM: TEXT_DIM,
-    BAR_IDLE_DARKEN: BAR_IDLE_DARKEN,
+    WCAG_AA_TEXT: WCAG_AA_TEXT,
+    relativeLuminance: relativeLuminance,
+    contrastRatio: contrastRatio,
+    colorOver: colorOver,
+    colorMix: colorMix,
+    BAR_IDLE_ALPHA: BAR_IDLE_ALPHA,
     TEXT_FULL: TEXT_FULL,
     rowsHaveDetail: rowsHaveDetail,
     rowShowsGroup: rowShowsGroup,

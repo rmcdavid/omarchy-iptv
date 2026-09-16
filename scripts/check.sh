@@ -70,7 +70,7 @@ fail=0
 # empty state cell was misdiagnosed as a short row, and a missing STATUS.md
 # printed a stack trace instead of a sentence.
 QML_SPEC_MIN=${QML_SPEC_MIN:-66}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1337}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1336}
 PY_TESTS_MIN=${PY_TESTS_MIN:-382}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}

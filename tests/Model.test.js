@@ -665,15 +665,13 @@ function rgbOf(value) {
   const h = String(value).replace("#", "")
   return [0, 2, 4].map(function (i) { return parseInt(h.slice(i, i + 2), 16) })
 }
-function composite(fg, bg, alpha) { return [0, 1, 2].map(function (i) { return fg[i] * alpha + bg[i] * (1 - alpha) }) }
-function luminance(rgb) {
-  const lin = rgb.map(function (v) { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) })
-  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
-}
-function contrast(a, b) {
-  const la = luminance(a), lb = luminance(b)
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
-}
+// These CALL the shipping arithmetic rather than keeping a private copy
+// (CLAUDE.md rule 12). They were local while nothing shipped a decision made
+// with them; D-RUNG-4 and D-RUNG-5 both do now, so a second implementation
+// here could agree with itself while the guide was wrong.
+const composite = Model.colorOver
+const luminance = Model.relativeLuminance
+const contrast = Model.contrastRatio
 // One theme -> the two row fills and the two text colours the delegate uses.
 function menuSurface(theme) {
   const background = rgbOf(theme.background)
@@ -757,11 +755,26 @@ checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pas
   return [Math.abs(atPointEight - 7.13) < 0.02, Math.abs(atDimRung - 7.13) > 3]
 }, [true, true])
 
-// ---- D-RUNG-3: the bar's idle glyph, the one element always on screen ----
-// Qt.darker(c, f) divides the HSV value by f. Reimplemented here because the
-// real one lives in the QML engine, which node cannot load; the FACTOR itself
-// is read from Model, never transcribed, so a change to the shipping value
-// moves these numbers (CLAUDE.md rule 12).
+// ---- D-RUNG-3 / D-RUNG-5: the bar's idle glyph, always on screen ----
+//
+// READ THIS BEFORE ADDING A THRESHOLD ASSERTION HERE. The fixture below is
+// menu-contrast.json, and it models the MENU surface. D-RUNG-3 used it for the
+// bar on the reasoning that no theme overrides `bar.text` or `bar.background`,
+// so both fall back to the theme foreground and background. The tokens do fall
+// back. THE RENDERED BAR DOES NOT MATCH THEM.
+//
+// Measured on the running shell on rose-pine, captured with grim:
+//   bar background         #faf4ed   matches the theme, as modelled
+//   bar text, full         #a8a3b3   2.25:1   -- the model says 6.66:1
+//   our idle glyph         #a09ba7   2.48:1   -- BOLDER than full strength
+// The bar draws its content at roughly half opacity, which the token chain
+// does not express, so the ceiling on the real bar is about 2.25:1 and NO
+// alpha applied to that ink can reach 4.5:1.
+//
+// So D-RUNG-3's claim that the idle glyph "clears 4.5:1 in all 23 themes",
+// which shipped in 0.7.0, is FALSE on the running bar. It is filed as
+// D-RUNG-6. The assertions here are confined to what the screen confirms:
+// the ORDERING of idle against active, which is D-RUNG-5 and is real.
 function qtDarker(rgb, factor) {
   const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn
@@ -786,45 +799,40 @@ function qtDarker(rgb, factor) {
   else p = [c, 0, x]
   return p.map(function (q) { return Math.round((q + m) * 255) })
 }
-// No installed theme overrides bar.text or bar.background: both fall back to
-// the theme foreground and background (Color.qml:73-77, and a grep across all
-// 23 theme directories finds no override), so this fixture covers the bar.
-function barIdleRatio(theme, factor) {
-  const fg = rgbOf(theme.foreground), bg = rgbOf(theme.background)
-  return contrast(qtDarker(fg, factor), bg)
-}
-checkCall("D-RUNG-3: the idle bar glyph was under 4.5:1 in 7 of 23 themes and now clears every one", function () {
-  const under = function (f) { return menuTokens.themes.filter(function (t) { return barIdleRatio(t, f) < 4.5 }).length }
-  const floor = function (f) { return menuTokens.themes.reduce(function (lo, t) { return Math.min(lo, barIdleRatio(t, f)) }, Infinity) }
-  return [menuTokens.themes.length, under(1.55), under(Model.BAR_IDLE_DARKEN), round2(floor(Model.BAR_IDLE_DARKEN)) >= 4.5]
-}, [23, 7, 0, true])
-checkCall("D-RUNG-3: the seven themes that failed are named, so a regression says which", function () {
-  return menuTokens.themes.filter(function (t) { return barIdleRatio(t, 1.55) < 4.5 }).map(function (t) { return t.name }).sort()
-}, ["everforest", "gruvbox", "matte-black", "miasma", "nord", "osaka-jade", "tokyo-night"])
-checkCall("D-RUNG-3: the fix keeps a margin rather than sitting on the line, which is why D-RUNG-2 was refused", function () {
-  const floor = menuTokens.themes.reduce(function (lo, t) { return Math.min(lo, barIdleRatio(t, Model.BAR_IDLE_DARKEN)) }, Infinity)
-  return [round2(floor) > 4.5, round2(floor) >= 4.7]
+// The ORDER of these two is what the bar's own opacity cannot change: a
+// uniform factor applied to both ink and its comparison leaves which-is-dimmer
+// untouched. That is why the ordering assertions survive the modelling error
+// and the threshold assertions do not.
+function barIdle(t) { return Model.colorOver(rgbOf(t.foreground), rgbOf(t.background), Model.BAR_IDLE_ALPHA) }
+function barActive(t) { return rgbOf(t.foreground) }
+function barBg(t) { return rgbOf(t.background) }
+checkCall("D-RUNG-5: the idle glyph is no longer BOLDER than the active one anywhere", function () {
+  // The defect, as a user would see it, and confirmed on a real screen:
+  // rose-pine measured idle 2.48:1 against active 2.25:1 before this change.
+  const now = menuTokens.themes.filter(function (t) { return contrast(barIdle(t), barBg(t)) >= contrast(barActive(t), barBg(t)) })
+  const before = menuTokens.themes.filter(function (t) { return contrast(qtDarker(rgbOf(t.foreground), 1.25), barBg(t)) >= contrast(barActive(t), barBg(t)) })
+  return [before.map(function (t) { return t.name }).sort(), now.length]
+}, [["catppuccin-latte", "flexoki-light", "lupine", "rose-pine", "white"], 0])
+checkCall("D-RUNG-5: `white` dims for the first time, where darkening pure black was a no-op", function () {
+  const w = menuTokens.themes.filter(function (t) { return t.name === "white" })[0]
+  const active = contrast(barActive(w), barBg(w))
+  return [round2(contrast(qtDarker(rgbOf(w.foreground), 1.25), barBg(w))) === round2(active),
+          contrast(barIdle(w), barBg(w)) < active]
 }, [true, true])
-// This check was first written asserting "dimmer in EVERY theme" and went red,
-// which is how D-RUNG-5 was found. On a LIGHT theme, darkening the ink raises
-// its contrast against a pale background, so the idle glyph renders BOLDER
-// than the active one -- the opposite of the documented intent, and true of
-// the shipped 1.55 as well. The assertion is corrected to what is real.
-checkCall("D-RUNG-3: on dark themes, where dimming is the intent, the idle glyph is still visibly dimmer", function () {
-  const dark = menuTokens.themes.filter(function (t) { return luminance(rgbOf(t.background)) < luminance(rgbOf(t.foreground)) })
-  return [dark.length, dark.every(function (t) {
-    return contrast(rgbOf(t.foreground), rgbOf(t.background)) > barIdleRatio(t, Model.BAR_IDLE_DARKEN) * 1.15
-  })]
-}, [18, true])
-// D-RUNG-5, filed rather than silently accepted. The inversion PRE-DATES this
-// change and this change shrinks it: on rose-pine the idle glyph measured
-// 10.76 against an active 6.66 before, and 8.69 after. No state is lost,
-// because ruling R7 gives each state its own glyph and never relies on colour.
-checkCall("D-RUNG-5: the light themes where dimming inverts are named, and the change narrows the gap", function () {
-  const inverted = menuTokens.themes.filter(function (t) { return barIdleRatio(t, 1.55) > contrast(rgbOf(t.foreground), rgbOf(t.background)) })
-  const narrowed = inverted.every(function (t) { return barIdleRatio(t, Model.BAR_IDLE_DARKEN) <= barIdleRatio(t, 1.55) })
-  return [inverted.map(function (t) { return t.name }).sort(), narrowed]
-}, [["catppuccin-latte", "flexoki-light", "lupine", "rose-pine"], true])
+checkCall("D-RUNG-5: idle is dimmer than active in EVERY theme, dark and light alike", function () {
+  // Qt.darker could only ever satisfy this on dark themes. Alpha satisfies it
+  // everywhere, and unlike a threshold this survives the bar's own opacity.
+  return menuTokens.themes.every(function (t) { return contrast(barIdle(t), barBg(t)) < contrast(barActive(t), barBg(t)) })
+}, true)
+checkCall("D-RUNG-6: no threshold claim is made about the bar from this fixture", function () {
+  // A guard, not a measurement. The fixture models the menu; the running bar
+  // renders at roughly half this opacity, so a 4.5:1 assertion built on it is
+  // green while the screen is at 2.25:1. If you want a threshold here, measure
+  // the bar and build a bar fixture.
+  const src = require("fs").readFileSync(__filename, "utf8")
+  const block = src.slice(src.indexOf("D-RUNG-3 / D-RUNG-5: the bar's idle glyph"), src.indexOf("guide state machine"))
+  return [/barIdle\([^)]*\)[^\n]*<\s*4\.5/.test(block), /4\.5\s*[<>]=?[^\n]*barIdle/.test(block)]
+}, [false, false])
 
 checkCall("GS8: the notice clears 4.5:1 on both row states in every installed theme, and the dim rung did not", function () {
   const shipped = Model.rowNoticeEmphasis("07:12")
