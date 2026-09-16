@@ -591,3 +591,46 @@ state it as an accepted, measured limit rather than design around it blind.
 4. Recents de-duplicated on the same terms as favourites.
 5. The cross-snapshot limit written down, with the name-changes-hands case
    named as an accepted risk rather than left implicit.
+
+---
+
+## Phase 1 result: NO API. Clean negative, run by the user 2026-09-16
+
+The user ran `scripts/probe-provider-api.sh` against their own subscription.
+
+| Request | Result |
+|---|---|
+| bare (user_info) | HTTP 200, `text/html`, 748 bytes |
+| get_live_streams | HTTP 200, `text/html`, 748 bytes |
+| get_live_categories | HTTP 200, `text/html`, 748 bytes |
+
+**All three returned the identical 748-byte HTML page.** That is a stronger
+negative than three different errors would have been: the server does not vary
+its response with the query at all, so it is not parsing the request. There is
+a web server at that path and no provider interface behind it.
+
+The first run of the probe reported this as "HTTP 200, 0 KB, not JSON" and
+called it a negative by luck rather than by evidence -- the size was divided by
+1024 and every sub-kilobyte body read as zero. The conclusion was right and the
+reasoning was not, which is worth recording given how often on this project the
+reverse has been true.
+
+### What this settles
+
+- **M2-07 catch-up stays BLOCKED and correctly closed.** There is no source of
+  archive data anywhere: not in the M3U (the four files carry exactly four
+  attribute keys and none of them is a catch-up flag) and not from an API.
+- **M2-04 logos gain no provider source.** The only logo data is the
+  `tvg-logo` already in the M3U, on 1,396 of 5,221 channels from one host.
+- **M2-03 channel numbers stay inert for this subscriber.** No numbers in the
+  M3U, none available from a panel.
+- **The single-group problem has no provider-side fix.** Real categories were
+  the one clean answer and they are not obtainable.
+- **Phase 2's sizing resolves to M, not S.** The identity fix gets no
+  credential-independent stream id, so the name-based key the refused worktree
+  chose is not one option among several. **It is the only option**, which
+  raises the value of that lane's measurement work and makes its rework the
+  next thing to do rather than a thing to reconsider.
+
+Nothing is lost by the negative. Four items stay closed for a measured reason
+instead of an assumed one, and the fifth now has a settled shape.
