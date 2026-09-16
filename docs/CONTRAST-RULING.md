@@ -509,3 +509,54 @@ headers, the progress hairline, the empty-state glyphs, the `ConfirmDialog`
 site, the non-cursor number column, vantablack's pre-existing cursor-row
 inversion, and the guide's missing scrollbar -- each with a severity and a
 state. They will make the board look worse. They are already true.
+---
+
+## Addendum: the live pass, and what it changed (product owner, 2026-09-15)
+
+PO decision 8 made the live pass a gate rather than a follow-up. It ran on
+rose-pine, the binding theme, and it earned that status twice.
+
+### D-RUNG-4 is confirmed, defect and fix both
+
+Captured with `grim` on the running shell, same crop before and after:
+
+| | ink | measured | model said |
+|---|---|---|---|
+| cursor-row name, before | `#5d94a0` | **2.78:1** | 2.80 |
+| cursor-row name, after | `#59537e` | **5.83:1** | 4.72 |
+| selection mark, on the card | `#575279` | **5.98:1** | 5.30 |
+
+The defect modelled almost perfectly. The fix overshoots its target in the safe
+direction, and the ink the runtime chose is nearer the menu text than the 0.69
+mix the model computes. That disagreement is filed as **D-RUNG-7** rather than
+enjoyed, because the previous item on this page is what happens when a model
+and a runtime quietly disagree.
+
+### D-RUNG-6: the bar was never the surface we modelled
+
+The same pass found that `tests/fixtures/menu-contrast.json`, which every
+contrast conclusion on this project has been drawn from, does not describe the
+bar. Measured on rose-pine: the bar's own full-strength text renders at
+**2.25:1**, where the model says 6.66. The ceiling on the real bar is about
+2.25, so no icon in it can reach 4.5:1, ours included.
+
+The mechanism is now known and is worth writing down, because it invalidates a
+premise rather than a number. **There is a generated
+`~/.local/state/omarchy/current/theme/shell.toml`** that sets `[bar] text` and
+`[menu] text` explicitly, and it is regenerated on every theme switch. The
+fixture was built from `colors.toml`. For the menu the two agree, which is why
+the guide's numbers reproduce to two decimals. For the bar they do not.
+
+An earlier grep for bar overrides looked in `/usr/share/omarchy/themes/` and
+`~/.config/omarchy/themes/` and found none. The file is in neither place.
+**That grep is why the false claim shipped**, and it is the same failure this
+project has now hit in four different costumes: a search that looked where the
+thing was not, and returned nothing, and was read as evidence of absence.
+
+### What this means for anything built on that fixture
+
+Every threshold claim drawn from `menu-contrast.json` is valid for the MENU
+surface and unproven for any other. D-RUNG-1 and D-RUNG-2 are menu-surface
+claims and stand. D-RUNG-3's bar claim did not and is withdrawn. Before the
+next contrast decision on a surface that is not the guide's own rows, build a
+fixture for that surface by measuring it, not by deriving it.
