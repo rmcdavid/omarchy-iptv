@@ -528,3 +528,66 @@ all, and the dozen that remain will produce false greens unless the source
 configuration is declared per row first. Nothing new should be built on top of a
 board that is wrong about itself - and once it is right, the feature worth
 building is the one the user already built by hand.
+---
+
+## Phase 2 verdict: REFUSED at review, back for rework (product owner, 2026-09-16)
+
+The fix was built in an isolated worktree at `959bf2e` and attacked by three
+reviewers with separate lenses. **All three concluded it can lose user data.**
+It is not merged. The defect it addresses is now on the board as **D-ID-1**
+regardless, because it is real whether or not this particular fix ships.
+
+### What survived, and it is most of the thinking
+
+All three reviewers independently reproduced every survival figure through the
+shipping code, over all four real playlists and the configured list, and none
+could find a number that did not hold. **The key itself is sound**: prefer a
+unique `tvg-id`, else a hash of the normalized name when that name is unique
+across the playlist, else the old URL hash. Survival goes from 1 of 3,335 to
+3,271 of 3,335 with zero collisions inside any playlist.
+
+The reasoning for rejecting the alternatives is the best on this project so
+far, and should be kept: group, tvg-name and channel number were all measured
+to give collision counts IDENTICAL to name alone, so every one of them is a
+field that costs id stability and buys nothing. A URL-derived key measures
+perfectly on this data and was refused anyway because it would key a favourite
+by row position on a provider whose playlist puts the channel in a query
+parameter.
+
+### Why it is refused
+
+| Finding | Severity |
+|---|---|
+| **The commit is RED.** Two reviewers ran `check.sh` on it and it fails the ASCII gate on two new files. The build reported "check.sh green". I re-ran it myself: `FAIL ascii check (89 files scanned)`, `check.sh: FAILED` | Blocking, and the false green is worse than the failure |
+| **The test suite writes the user's live `state.json`.** Instrumented, 130 remap calls during one `unittest discover`, **124 of them on the real file**. The new call site defaults its state directory when the flag is absent, and roughly fourteen existing tests invoke `playlist` without one | Blocking. A test suite that mutates the data it exists to protect |
+| **The only executing path of the fix is asserted by nothing.** Delete the remap call from `cmd_playlist` entirely and the full suite stays green: 407 python, 1,399 node | Blocking. Rule 11 |
+| **`normalize_text` deletes `+` and `*`,** so `USA: AMC+` folds onto `USA AMC`, and `US: ESPN*` onto `US: ESPN`. Genuinely different streams, merged | Blocking |
+| **The gate floors leave exactly zero margin,** so the entire new suite can be deleted and the gate stays green | Blocking. The floors exist for this |
+| `playlist` now rewrites `state.json` through a whitelist, silently dropping keys it does not know | Serious |
+| An ad-hoc helper run with `--cache-dir /tmp/x` and no state flag mutates the live state | Serious |
+| Recents are not de-duplicated by the remap where favourites are | Moderate |
+
+### The deepest finding, which is not mechanical
+
+One reviewer named the thing the others did not: **this is a single-snapshot
+analysis of a property that only exists across snapshots.** Every number comes
+from one download of each playlist. A stable id is for surviving change over
+time, and the uniqueness test that refuses a collision today defers that
+collision rather than refusing it: the moment a provider re-uses a name, or
+removes one member of a colliding pair, the survivor inherits the key and any
+favourite that meant the row which went away. That is a silent wrong channel
+rather than a silent loss, and it is worse.
+
+Nobody can fix that without a second snapshot over time. The rework should
+state it as an accepted, measured limit rather than design around it blind.
+
+### Rework required before this merges
+
+1. Green gate, and the floors raised with margin, in the same commit.
+2. The state directory must never default to the live file from a test path,
+   and the executing call site must have a test that goes red when it is
+   removed.
+3. `+` and `*` must not fold, with the AMC and ESPN pairs as fixtures.
+4. Recents de-duplicated on the same terms as favourites.
+5. The cross-snapshot limit written down, with the name-changes-hands case
+   named as an accepted risk rather than left implicit.
