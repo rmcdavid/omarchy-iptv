@@ -560,3 +560,32 @@ surface and unproven for any other. D-RUNG-1 and D-RUNG-2 are menu-surface
 claims and stand. D-RUNG-3's bar claim did not and is withdrawn. Before the
 next contrast decision on a surface that is not the guide's own rows, build a
 fixture for that surface by measuring it, not by deriving it.
+
+### Correction to the addendum above (product owner, 2026-09-15)
+
+**The mechanism given above for D-RUNG-6 is wrong**, and it is left in place
+rather than rewritten so the error is visible.
+
+I wrote that a generated `shell.toml` sets `[bar] text` and `[menu] text` to
+different values, and that the fixture matched one and not the other. Three
+review lanes checked the template at
+`/usr/share/omarchy/default/themed/shell.toml.tpl` and I confirmed it: it writes
+`[bar] text = {{ foreground }}` and `[menu] text = {{ foreground }}`. **The same
+key into both sections.** I read a colour under `[bar]` in the generated output
+and called it an override. It is the theme foreground, identical to the menu's.
+
+The observation stands: the bar's text measured 2.25:1 on rose-pine where the
+model says 6.66. The rendered deficit solves to alpha 0.5031, 0.5000 and 0.5000
+on the three channels, which points at something drawing bar content at half
+opacity rather than at any token. But two innocent explanations are now live and
+neither is excluded. The capture may have caught the 420 ms `barForeground`
+animation mid-flight. Or the peak-pixel method may have under-read a thin glyph
+stroke, which the calibration fixture in this very repository already documents
+it doing by 7 to 9 per cent on small text.
+
+So the P2 may evaporate. What does not evaporate is the lesson, and it is the
+same one twice in one day: **I reasoned from a file I had found to a mechanism I
+had not tested.** The first time, a grep in two directories missed a file in a
+third and I read absence as evidence. The second time I found the file and
+misread what was in it. Both times the conclusion was stated with more
+confidence than the evidence carried.
