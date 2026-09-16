@@ -58,31 +58,79 @@ python3 - "$HOST" "$USER_SEG" "$PASS_SEG" <<'PY'
 import json, ssl, sys, urllib.parse, urllib.request
 
 host, user, pw = sys.argv[1], sys.argv[2], sys.argv[3]
-q = urllib.parse.urlencode({"username": user, "password": pw,
-                            "action": "get_live_streams"})
-url = host + "/player_api.php?" + q
+ctx = ssl.create_default_context()
 
-try:
-    ctx = ssl.create_default_context()
-    with urllib.request.urlopen(url, timeout=20, context=ctx) as r:
-        body = r.read(8 * 1024 * 1024)
-        code = r.status
-except Exception as exc:
-    print("NO ANSWER: %s" % type(exc).__name__)
-    print("")
-    print("That is a clean negative. The three backlog items that depend on it")
-    print("stay correctly closed and nothing is lost.")
+
+def ask(params, label):
+    """Return (status, content-type, body) or None. Prints nothing sensitive.
+
+    A bare player_api.php call returns user_info, which on most panels ECHOES
+    THE USERNAME AND PASSWORD BACK in its values. So nothing here ever prints a
+    VALUE from the response -- only status, type, length, and KEY NAMES.
+    """
+    q = urllib.parse.urlencode(dict(params, username=user, password=pw))
+    try:
+        with urllib.request.urlopen(host + "/player_api.php?" + q,
+                                    timeout=20, context=ctx) as r:
+            return r.status, (r.headers.get("Content-Type") or "?"), r.read(8 * 1024 * 1024)
+    except Exception as exc:
+        print("%-22s no answer (%s)" % (label, type(exc).__name__))
+        return None
+
+
+def classify(body):
+    head = body[:400].lstrip()
+    if not body:
+        return "EMPTY (zero bytes)"
+    low = head.lower()
+    if low.startswith(b"<!doctype") or low.startswith(b"<html"):
+        return "an HTML page, so this path is a web server and not an API"
+    if head[:1] in (b"{", b"["):
+        return "JSON"
+    return "neither JSON nor HTML"
+
+
+print("%-22s %s" % ("request", "result"))
+print("")
+results = {}
+for label, params in (("bare (user_info)", {}),
+                      ("get_live_streams", {"action": "get_live_streams"}),
+                      ("get_live_categories", {"action": "get_live_categories"})):
+    got = ask(params, label)
+    if not got:
+        continue
+    status, ctype, raw = got
+    results[label] = raw
+    print("%-22s HTTP %s, %s, %d bytes -- %s"
+          % (label, status, ctype.split(";")[0], len(raw), classify(raw)))
+
+print("")
+usable = None
+for label, raw in results.items():
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        continue
+    usable = (label, data)
+    break
+
+if usable is None:
+    print("VERDICT: no usable API. Every response was empty, HTML, or")
+    print("unparseable, so there is nothing here to build on. That is a clean")
+    print("negative and three backlog items stay correctly closed.")
     raise SystemExit(0)
 
-print("answered: HTTP %d, %d KB" % (code, len(body) // 1024))
-try:
-    data = json.loads(body)
-except ValueError:
-    print("...but the body is not JSON, so there is no usable API here.")
+label, data = usable
+print("VERDICT: %s returned JSON." % label)
+if isinstance(data, dict):
+    print("top-level keys: %s" % ", ".join(sorted(data.keys())))
+    for k in ("user_info", "server_info"):
+        if isinstance(data.get(k), dict):
+            print("  %s keys: %s" % (k, ", ".join(sorted(data[k].keys()))))
     raise SystemExit(0)
 
 if not isinstance(data, list) or not data:
-    print("...but it returned no stream list. Treat as a negative.")
+    print("...but it is not a stream list. Treat as a negative.")
     raise SystemExit(0)
 
 n = len(data)
@@ -104,11 +152,10 @@ FIELDS = [
 ]
 print("%-22s %-9s %s" % ("field", "present", "what it would give us"))
 for f, meaning in FIELDS:
-    c = count(f)
-    print("%-22s %-9s %s" % (f, "%d/%d" % (c, n), meaning))
+    print("%-22s %-9s %s" % (f, "%d/%d" % (count(f), n), meaning))
 print("")
-cats = {s.get("category_id") for s in data if isinstance(s, dict)}
-print("distinct categories offered: %d" % len(cats))
+print("distinct categories offered: %d"
+      % len({s.get("category_id") for s in data if isinstance(s, dict)}))
 print("")
 print("Paste this whole output back; it contains no credentials and no URLs.")
 PY
