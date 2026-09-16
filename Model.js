@@ -4174,6 +4174,79 @@ function colorMix(a, b, t) { return colorOver(a, b, 1 - Number(t)) }
 // breaks this decision too, instead of only its own check.
 var WCAG_AA_TEXT = 4.5
 
+// D-RUNG-4. The channel name and number on the CURSOR row are inked with the
+// theme accent (`Color.menu.selectedText`), which is under 4.5:1 against its
+// own fill in 8 of 23 installed themes AT FULL OPACITY: rose-pine 2.80,
+// miasma 3.26, nord 3.77, catppuccin-latte 3.87, solitude 4.05, lupine 4.15,
+// osaka-jade 4.15, white 4.26. No opacity change can reach that; only the ink
+// can.
+//
+// Raising the FILL instead is counterproductive and monotonically so, because
+// the fill moves toward the foreground and the accent sits between them: the
+// failing count goes 8 at alpha 0.08 to 19 at 0.25 to 23 at 0.50.
+//
+// So: keep the accent wherever it already clears the target, and elsewhere mix
+// it the least distance toward `Color.menu.text` that does. 15 of 23 themes are
+// byte-identical on screen; the other 8 keep between 30 and 93 per cent of
+// their accent distance.
+//
+// THE TARGET IS 4.70, NOT 4.50, and the margin is not arbitrary. Measured off
+// real screenshots (docs/UX-GUIDE-AT-SCALE.md section 16 and the rose-pine pass
+// that followed it), this arithmetic is optimistic by about 1 per cent at title
+// size and 2 per cent at body size, so 4.70 renders near 4.62. The same target
+// would NOT be safe for caption-size text, which loses 7 to 9 per cent; a
+// 10-pixel string needs its own, higher target.
+var CURSOR_INK_TARGET = 4.7
+
+// Both inputs and the fill are [r, g, b] in 0-255. Returns [r, g, b].
+function cursorInk(accent, text, fill) {
+  if (contrastRatio(accent, fill) >= CURSOR_INK_TARGET) return accent.slice ? accent.slice(0) : accent
+  for (var step = 1; step <= 100; step++) {
+    var mixed = colorMix(accent, text, step / 100)
+    if (contrastRatio(mixed, fill) >= CURSOR_INK_TARGET) return mixed
+  }
+  return text.slice ? text.slice(0) : text
+}
+
+// The QML seam. A QML `color` exposes r, g and b as 0-1 floats, and a binding
+// wants a string back. Kept here rather than in Guide.qml so the whole decision
+// is one node-testable function and the QML side holds no arithmetic at all
+// (CLAUDE.md rule 12).
+function qmlRgb(c) {
+  if (!c) return [0, 0, 0]
+  if (typeof c.length === "number") return [Number(c[0]), Number(c[1]), Number(c[2])]
+  return [Number(c.r) * 255, Number(c.g) * 255, Number(c.b) * 255]
+}
+
+function hexOf(rgb) {
+  var out = "#"
+  for (var i = 0; i < 3; i++) {
+    var v = Math.round(Number(rgb[i]))
+    if (v < 0) v = 0
+    if (v > 255) v = 255
+    var h = v.toString(16)
+    out += h.length === 1 ? "0" + h : h
+  }
+  return out
+}
+
+// What Guide.qml binds. `fill` is Color.menu.selectedBackground, which the host
+// has ALREADY composited from menu.text at alpha 0.08 -- it is a real colour by
+// the time it reaches here, not a token needing composition.
+function cursorInkHex(accent, text, fill) {
+  return hexOf(cursorInk(qmlRgb(accent), qmlRgb(text), qmlRgb(fill)))
+}
+
+// How far the ink travelled, 0 meaning "the accent is untouched". Reported so
+// the cost of this change is a number in a test rather than an impression.
+function cursorInkMix(accent, text, fill) {
+  if (contrastRatio(accent, fill) >= CURSOR_INK_TARGET) return 0
+  for (var step = 1; step <= 100; step++) {
+    if (contrastRatio(colorMix(accent, text, step / 100), fill) >= CURSOR_INK_TARGET) return step / 100
+  }
+  return 1
+}
+
 var TEXT_DIM = 0.52
 var TEXT_FULL = 1
 // D-RUNG-3 and D-RUNG-5, the bar's idle glyph. It is the one element of this
@@ -6154,6 +6227,12 @@ if (typeof module !== "undefined") {
     rowNoticeEmphasis: rowNoticeEmphasis,
     TEXT_DIM: TEXT_DIM,
     WCAG_AA_TEXT: WCAG_AA_TEXT,
+    CURSOR_INK_TARGET: CURSOR_INK_TARGET,
+    cursorInk: cursorInk,
+    cursorInkHex: cursorInkHex,
+    qmlRgb: qmlRgb,
+    hexOf: hexOf,
+    cursorInkMix: cursorInkMix,
     relativeLuminance: relativeLuminance,
     contrastRatio: contrastRatio,
     colorOver: colorOver,

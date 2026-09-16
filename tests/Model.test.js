@@ -755,6 +755,110 @@ checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pas
   return [Math.abs(atPointEight - 7.13) < 0.02, Math.abs(atDimRung - 7.13) > 3]
 }, [true, true])
 
+// ---- D-RUNG-4: the accent ink on the cursor row ----
+// The accent is under 4.5:1 against its OWN selected fill in 8 of 23 themes at
+// full opacity, worst 2.80. No opacity change reaches that; only the ink can.
+// The menu fixture IS valid here, unlike for the bar (see D-RUNG-6): a capture
+// of the running guide on rose-pine measured the channel name at 6.59:1 where
+// this model says 6.66, and the detail line at 2.28 where it says 2.33.
+function cursorSurface(theme) {
+  const text = rgbOf(theme.foreground)
+  const fill = composite(text, rgbOf(theme.background), menuTokens.selectedBackgroundAlpha)
+  return { text: text, fill: fill, accent: rgbOf(theme.accent) }
+}
+checkCall("D-RUNG-4: the eight themes that fail, and by how far, before any change", function () {
+  return menuTokens.themes.filter(function (t) {
+    const s = cursorSurface(t)
+    return contrast(s.accent, s.fill) < 4.5
+  }).map(function (t) { return t.name }).sort()
+}, ["catppuccin-latte", "lupine", "miasma", "nord", "osaka-jade", "rose-pine", "solitude", "white"])
+checkCall("D-RUNG-4: fifteen themes keep their accent untouched, byte-identical on screen", function () {
+  const untouched = menuTokens.themes.filter(function (t) {
+    const s = cursorSurface(t)
+    return Model.cursorInkMix(s.accent, s.text, s.fill) === 0
+  })
+  return untouched.length
+}, 15)
+checkCall("D-RUNG-4: the eight mix fractions, so the COST is a number and not an impression", function () {
+  // Returned as PAIRS ordered by how far the ink had to travel, so the list
+  // reads as the cost it is: rose-pine gives up 70 per cent of its accent
+  // distance, white 7.
+  return menuTokens.themes.map(function (t) {
+    const s = cursorSurface(t)
+    return [t.name, Model.cursorInkMix(s.accent, s.text, s.fill)]
+  }).filter(function (p) { return p[1] > 0 }).sort(function (a, b) { return a[1] - b[1] })
+}, [["white", 0.07], ["lupine", 0.11], ["solitude", 0.15], ["osaka-jade", 0.18], ["nord", 0.3], ["catppuccin-latte", 0.35], ["miasma", 0.42], ["rose-pine", 0.7]])
+checkCall("D-RUNG-4: every theme clears the target after the change", function () {
+  const under = menuTokens.themes.filter(function (t) {
+    const s = cursorSurface(t)
+    return contrast(Model.cursorInk(s.accent, s.text, s.fill), s.fill) < Model.CURSOR_INK_TARGET
+  })
+  const floor = menuTokens.themes.reduce(function (lo, t) {
+    const s = cursorSurface(t)
+    return Math.min(lo, contrast(Model.cursorInk(s.accent, s.text, s.fill), s.fill))
+  }, Infinity)
+  return [under.length, Math.round(floor * 10000) / 10000]
+}, [0, 4.7025])
+checkCall("D-RUNG-4: the target sits ABOVE the line by the measured loss at this text size", function () {
+  // Rose-pine capture: this arithmetic is optimistic by about 1 per cent at
+  // title size (the channel name) and 2 per cent at body size (the number).
+  // 4.70 therefore renders near 4.62. The same target would NOT be safe for
+  // caption-size text, which lost 7 to 9 per cent in the same capture.
+  const floor = 4.7025
+  return [Model.CURSOR_INK_TARGET > Model.WCAG_AA_TEXT, floor * 0.98 > Model.WCAG_AA_TEXT]
+}, [true, true])
+checkCall("D-RUNG-4: the QML seam returns a usable colour string", function () {
+  const rp = menuTokens.themes.filter(function (t) { return t.name === "rose-pine" })[0]
+  const s = cursorSurface(rp)
+  const qml = function (rgb) { return { r: rgb[0] / 255, g: rgb[1] / 255, b: rgb[2] / 255 } }
+  const hex = Model.cursorInkHex(qml(s.accent), qml(s.text), qml(s.fill))
+  return [/^#[0-9a-f]{6}$/.test(hex), hex === Model.hexOf(Model.cursorInk(s.accent, s.text, s.fill))]
+}, [true, true])
+checkCall("D-RUNG-4: at the OLD 0.8 rung the number fails in 16 of 23 themes even with the corrected ink", function () {
+  // Why the number had to go to full opacity rather than inherit the shared
+  // ink alone. Floor 3.25 at 0.8; three themes cannot be rescued by any ink at
+  // that rung. This is the arithmetic behind the decision, asserted so the
+  // decision cannot be quietly undone.
+  const under = menuTokens.themes.filter(function (t) {
+    const s = cursorSurface(t)
+    const ink = Model.cursorInk(s.accent, s.text, s.fill)
+    return contrast(composite(ink, s.fill, 0.8), s.fill) < 4.5
+  })
+  const floor = menuTokens.themes.reduce(function (lo, t) {
+    const s = cursorSurface(t)
+    const ink = Model.cursorInk(s.accent, s.text, s.fill)
+    return Math.min(lo, contrast(composite(ink, s.fill, 0.8), s.fill))
+  }, Infinity)
+  return [under.length, round2(floor)]
+}, [16, 3.25])
+checkCall("D-RUNG-4: and the shipping code actually asks for full opacity there", function () {
+  // The mutant that survived the first time this was written: reverting the
+  // rung to 0.8 left every other check green, because nothing read the rung.
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Guide.qml"), "utf8")
+  const code = src.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) }).join("\n")
+  return [
+    (code.match(/hasCursor \? 0\.8 : 0\.52/g) || []).length,
+    (code.match(/row\.hasCursor \? 1 : 0\.52/g) || []).length
+  ]
+}, [0, 1])
+
+checkCall("D-RUNG-4: NO site inks with the raw accent over the selected fill", function () {
+  // The design's own gate counted only `hasCursor ? root.selectedText` and
+  // reported clean while a fifth site spelled it as a property assignment --
+  // `selectedText: root.selectedText`, handed to the host's ConfirmDialog,
+  // whose selected button draws that colour over that same fill, one keypress
+  // from the remove-source dialog. Both forms are counted here. False
+  // assurance from the one check whose job is to prove the guide asks is worse
+  // than no check.
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Guide.qml"), "utf8")
+  const code = src.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) }).join("\n")
+  return [
+    (code.match(/hasCursor \? root\.selectedText/g) || []).length,
+    (code.match(/selectedText: root\.selectedText/g) || []).length,
+    (code.match(/root\.cursorInk/g) || []).length >= 4
+  ]
+}, [0, 0, true])
+
 // ---- D-RUNG-3 / D-RUNG-5: the bar's idle glyph, always on screen ----
 //
 // READ THIS BEFORE ADDING A THRESHOLD ASSERTION HERE. The fixture below is

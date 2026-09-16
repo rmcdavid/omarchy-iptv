@@ -233,6 +233,14 @@ Item {
   property color scrim: Color.menu.scrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
+  // D-RUNG-4. The accent is under 4.5:1 against its OWN selected fill in 8 of
+  // 23 installed themes at full opacity, worst 2.80, and no opacity change can
+  // reach that -- only the ink can. `cursorInk` returns the accent untouched
+  // where it already clears the target (15 themes, byte-identical on screen)
+  // and otherwise mixes it the least distance toward the menu text that does.
+  // All of the arithmetic is in Model.js so a test calls it rather than
+  // mirroring it; this binding evaluates once per theme, never per row.
+  readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground)
   property color accent: Color.accent
   property color urgent: Color.urgent
   readonly property int cornerRadius: Style.cornerRadius
@@ -2047,7 +2055,13 @@ Item {
           foreground: root.foreground
           scrim: root.scrim
           selectedBackground: root.selectedBackground
-          selectedText: root.selectedText
+          // D-RUNG-4 amendment 1. This is the fifth site and the design's own
+          // gate reported clean over it, because it spells the binding as a
+          // property assignment rather than as `hasCursor ? root.selectedText`.
+          // The host's ConfirmDialog draws its selected button with exactly this
+          // colour over exactly this fill, so it fails in the identical eight
+          // themes, one keypress from the remove-source dialog.
+          selectedText: root.cursorInk
           fontFamily: root.fontFamily
           cornerRadius: root.cornerRadius
           Accessible.role: Accessible.Dialog
@@ -2434,13 +2448,39 @@ Item {
                   readonly property string detail: Model.rowDetail({ showGroup: showGroup, group: group, failedAt: failedAt, nowTitle: nowTitle, nextTitle: nextTitle })
                   readonly property bool showProgress: nowTitle !== "" && nowStop > nowStart && failedAt === ""
                   readonly property real fraction: showProgress ? Model.epgFraction(root.nowSec, nowStart, nowStop) : 0
-                  readonly property color primaryColor: hasCursor ? root.selectedText : root.foreground
+                  readonly property color primaryColor: hasCursor ? root.cursorInk : root.foreground
 
                   width: ListView.view.width
                   height: root.rowHeight
                   radius: root.cornerRadius
                   color: hasCursor ? root.selectedBackground : "transparent"
                   borderSpec: hasCursor ? root.selectedBorderSpec : root.noBorderSpec
+
+                  // D-RUNG-4, the addition. Until now the ONLY thing saying
+                  // which row is selected was the accent ink, because the
+                  // selected fill measures 1.12 to 1.23:1 against the row fill
+                  // in 23 of 23 themes and there is no border: the generated
+                  // shell.toml ships a selected-border colour and no width, and
+                  // both this file and the host's own menu pass a fallback
+                  // width of 0. WCAG 1.4.11 asks 3:1 of a state indicator.
+                  //
+                  // Correcting the ink alone would therefore have SPENT that
+                  // one signal to buy legibility -- on rose-pine the cursor
+                  // ink's separation from an ordinary row's ink falls to
+                  // 1.26:1. This rule is what makes that affordable: it is a
+                  // non-text indicator no opacity arithmetic can produce, drawn
+                  // OUTSIDE the selected fill so it sits on the card, where
+                  // cursorInk measures 5.29:1 at the floor.
+                  Rectangle {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(2)
+                    height: Math.round(parent.height * 0.62)
+                    radius: width / 2
+                    color: root.cursorInk
+                    visible: row.hasCursor
+                  }
+
                   Accessible.role: Accessible.ListItem
                   // M2-09 D5 / GS5: the position is appended LAST, after the
                   // failure state, so someone stepping rows hears the name
@@ -2479,8 +2519,16 @@ Item {
                       height: lead.height
                       textFormat: Text.PlainText
                       text: row.chno
-                      color: row.hasCursor ? root.selectedText : root.foreground
-                      opacity: row.hasCursor ? 0.8 : 0.52
+                      color: row.hasCursor ? root.cursorInk : root.foreground
+                      // D-RUNG-4: was 0.8 on the cursor row, which left the
+                      // number under 4.5:1 in 16 of 23 themes even with the
+                      // corrected ink, floor 3.25. It is the one thing the user
+                      // is looking at during numeric zap. Full opacity is
+                      // forced, not chosen; docs/M2-03-CHANNEL-NUMBERS.md:677's
+                      // promise that the number is dimmer than the name on the
+                      // cursor row is withdrawn, and subordination is carried by
+                      // the right-aligned digit column and by being digits.
+                      opacity: row.hasCursor ? 1 : 0.52
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       horizontalAlignment: Text.AlignRight
@@ -2919,7 +2967,7 @@ Item {
                 // The separator before the action rows travels with the first of them.
                 readonly property bool separatorAbove: srow.rowKind === "add"
                 readonly property int separatorHeight: srow.separatorAbove ? Style.space(6) * 2 + Style.normalBorderWidth : 0
-                readonly property color primaryColor: srow.hasCursor ? root.selectedText : root.foreground
+                readonly property color primaryColor: srow.hasCursor ? root.cursorInk : root.foreground
 
                 width: ListView.view.width
                 height: (srow.isSource ? root.detailRowHeight : root.singleRowHeight) + srow.separatorHeight
