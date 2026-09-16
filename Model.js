@@ -2840,6 +2840,28 @@ function helperArgv(helperPath, args) {
   return ["python3", str(helperPath)].concat(asList(args))
 }
 
+// D-ID-1. The two playlist invocations differ by ONE argument and the
+// difference decides whether a user's favourites are rewritten. Building both
+// here rather than inline in Service.qml is the point: nothing could see that
+// argv before, so nothing could assert it, and the review that caught the
+// missing flag caught it by reading rather than by a test.
+//
+// `--state-dir` is what makes the one-time id remap run, and the helper
+// touches no state file without it. So the ACTIVE fetch carries it -- that is
+// the one moment we know the user means this list -- and the PROBE must not,
+// because a probe runs for every source add, edit, switch and re-check,
+// including ones the user then cancels. Remapping global favourites against a
+// playlist that never became active would be a loss caused by a fix.
+function playlistFetchArgv(helperPath, url, cacheDir, stateDir) {
+  var args = ["playlist", "--url", str(url), "--cache-dir", str(cacheDir)]
+  if (str(stateDir) !== "") args = args.concat(["--state-dir", str(stateDir)])
+  return helperArgv(helperPath, args)
+}
+
+function playlistProbeArgv(helperPath, url, cacheDir) {
+  return helperArgv(helperPath, ["playlist", "--url", str(url), "--cache-dir", str(cacheDir)])
+}
+
 function seqArg(seq) {
   var n = Math.floor(Number(seq))
   return String(isFinite(n) && n > 0 ? n : 0)
@@ -6358,6 +6380,8 @@ if (typeof module !== "undefined") {
     PLAYER_ORPHAN_GRACE_SEC: PLAYER_ORPHAN_GRACE_SEC,
     PLAYER_GENERIC_FAILURE: PLAYER_GENERIC_FAILURE,
     helperArgv: helperArgv,
+    playlistFetchArgv: playlistFetchArgv,
+    playlistProbeArgv: playlistProbeArgv,
     playerStartArgv: playerStartArgv,
     playerStopArgv: playerStopArgv,
     playerRestartArgv: playerRestartArgv,

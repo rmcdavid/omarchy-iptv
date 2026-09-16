@@ -889,6 +889,43 @@ checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pas
   return [Math.abs(atPointEight - 7.13) < 0.02, Math.abs(atDimRung - 7.13) > 3]
 }, [true, true])
 
+// ---- D-ID-1: the one argument that decides whether favourites are rewritten ----
+// Two playlist invocations differ by a single flag. `--state-dir` is what makes
+// the one-time id remap run, and the helper touches no state file without it.
+// The ACTIVE fetch must carry it; the source PROBE must not, because a probe
+// runs for every add, edit, switch and re-check, including ones the user
+// cancels, and remapping global favourites against a list that never became
+// active would be a loss caused by the fix.
+//
+// This existed inline in Service.qml where nothing could see it, so the review
+// that caught the missing flag caught it by READING. Lifted here so it is
+// asserted (CLAUDE.md rule 12).
+check("D-ID-1 the active fetch carries the state dir", Model.playlistFetchArgv("/h", "http://x", "/c", "/s"),
+  ["python3", "/h", "playlist", "--url", "http://x", "--cache-dir", "/c", "--state-dir", "/s"])
+check("D-ID-1 the probe does NOT, and that absence is the safety property", Model.playlistProbeArgv("/h", "http://x", "/c"),
+  ["python3", "/h", "playlist", "--url", "http://x", "--cache-dir", "/c"])
+check("D-ID-1 the probe can never grow the flag by accident", Model.playlistProbeArgv("/h", "http://x", "/c").indexOf("--state-dir"), -1)
+check("D-ID-1 an empty state dir omits the flag rather than passing a blank", Model.playlistFetchArgv("/h", "http://x", "/c", ""),
+  ["python3", "/h", "playlist", "--url", "http://x", "--cache-dir", "/c"])
+checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of its own", function () {
+  // The gap the review named: nothing asserted the argv Service constructs.
+  // A literal argv here would be invisible to every test again.
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Service.qml"), "utf8")
+  const code = src.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) }).join("\n")
+  return [
+    (code.match(/Model\.playlistFetchArgv\(/g) || []).length,
+    (code.match(/Model\.playlistProbeArgv\(/g) || []).length,
+    (code.match(/"playlist", "--url"/g) || []).length,
+    // The mutant that SURVIVED the first version of this check: the call is
+    // present but handed an empty state dir, which is byte-for-byte the state
+    // two reviewers refused. Counting the call was never enough; what matters
+    // is the ARGUMENT, so assert the whole call including root.stateDir.
+    (code.match(/Model\.playlistFetchArgv\(root\.helperPath, root\.playlistUrl, root\.activeCacheDir, root\.stateDir\)/g) || []).length,
+    // And the probe must never be handed one, by any spelling.
+    /playlistProbeArgv\([^)]*stateDir/.test(code)
+  ]
+}, [1, 1, 0, 1, false])
+
 // ---- D-RUNG-4: the accent ink on the cursor row ----
 // The accent is under 4.5:1 against its OWN selected fill in 8 of 23 themes at
 // full opacity, worst 2.80. No opacity change reaches that; only the ink can.

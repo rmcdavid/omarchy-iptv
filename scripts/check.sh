@@ -94,7 +94,7 @@ fail=0
 # (`channel-ids fixture loaded`, `test_fixture_is_not_empty`), so deleting a
 # vector is red on an assertion rather than on arithmetic here.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1422}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1427}
 PY_TESTS_MIN=${PY_TESTS_MIN:-423}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}

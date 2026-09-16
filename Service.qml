@@ -1633,7 +1633,23 @@ Item {
     if (root.playlistUrl === "" || root.activeCacheDir === "" || root.settingsInvalid || playlistProc.running) return
     root.playlistAttempted = true
     root.playlistTimedOut = false
-    playlistProc.command = ["python3", root.helperPath, "playlist", "--url", root.playlistUrl, "--cache-dir", root.activeCacheDir]
+    // D-ID-1. `--state-dir` is what makes the one-time id remap run, and it is
+    // REQUIRED for it: the helper touches no state file without it, by design.
+    // That is the whole safety property, and it is why only THIS call site
+    // carries the flag. The active source's fetch is the one moment we know
+    // the user means this list, so it is the one moment the saved references
+    // may be rewritten to match it. The source PROBE at sourceProbeProc below
+    // must never pass it -- probing a candidate the user may cancel must not
+    // rewrite favourites against a list they never adopted.
+    //
+    // Without this line the helper still writes scheme-2 ids into channels.json
+    // while the migration sits dead, so 4,898 of 5,221 rows change id with
+    // nothing repairing the references to them. The fix would CAUSE the loss it
+    // exists to prevent, on an ordinary refresh. Two reviewers refused the
+    // change for exactly that, and they were right: the lane could not land it
+    // because Service.qml was not in its ownership, which was my error and not
+    // theirs (CLAUDE.md parallel rule 1, ownership follows the coupling).
+    playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.playlistUrl, root.activeCacheDir, root.stateDir)
     playlistProc.running = true
     playlistWatchdog.restart()
   }
@@ -2553,7 +2569,13 @@ Item {
     root.probeCancelled = false
     root.probeTimedOut = false
     root.sourceErrors = root.withoutKey(root.sourceErrors, key)
-    sourceProbeProc.command = ["python3", root.helperPath, "playlist", "--url", rec.url, "--cache-dir", Model.sourceCacheDir(root.cacheDir, dirKey)]
+    // D-ID-1: NO `--state-dir` here, deliberately, and this absence is
+    // load-bearing rather than an oversight. A probe runs for every source
+    // add, edit, switch and re-check, including ones the user then cancels.
+    // Passing the flag would remap the global favourites against a playlist
+    // that never became the active list. The helper touches no state file
+    // without the flag, so this is safe by construction.
+    sourceProbeProc.command = Model.playlistProbeArgv(root.helperPath, rec.url, Model.sourceCacheDir(root.cacheDir, dirKey))
     sourceProbeProc.running = true
     probeWatchdog.restart()
     return root.sourceResult(true, "ok", "", key)
