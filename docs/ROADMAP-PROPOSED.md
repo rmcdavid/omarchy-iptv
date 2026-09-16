@@ -634,3 +634,58 @@ reverse has been true.
 
 Nothing is lost by the negative. Four items stay closed for a measured reason
 instead of an assumed one, and the fifth now has a settled shape.
+
+---
+
+## Phase 2 result: shipped, after two refusals (product owner, 2026-09-16)
+
+D-ID-1 is fixed. It took two review rounds and six attackers, and both refusals
+were correct.
+
+**Round one** was refused on five blockers. The worst was a test suite that
+wrote the user's live `state.json` 124 times in a single run, which is a test
+suite mutating the data it exists to protect. The commit was also red while
+reporting itself green.
+
+**Round two** closed all five, and all three attackers verified each one
+independently rather than believing the report. And two of them still refused
+it, for a reason that was mine rather than the lane's: the helper shipped the
+new id scheme live while the migration that repairs saved references sat dead,
+because `Service.qml` was not in the lane's ownership so it could not wire its
+own call site. Measured, 4,898 of 5,221 rows change id, so the fix would have
+caused the loss it exists to prevent on an ordinary refresh.
+
+The lane had said so in its own unsettled list in round one. I read it and
+scoped round two the same way. **Ownership follows the coupling**, and a helper
+flag and its only caller are one thing.
+
+### What shipped
+
+Survival across a provider password change goes from **1 of 3,335 to 3,271 of
+3,335**, with zero collisions inside any playlist. The key prefers a unique
+`tvg-id`, else a hash of the folded name when that name is unique, else the old
+URL hash, so every row that is not substituted keeps the id it already had.
+
+The asymmetry in the wiring is the safety property: the active fetch carries
+`--state-dir` and the source probe deliberately does not, because a probe runs
+for every add, edit and cancel, and the helper touches no state file without
+the flag.
+
+### The lesson worth keeping
+
+The missing flag was caught by a reviewer READING the diff, because nothing
+could see the argv `Service.qml` built. Both builders now live in `Model.js`.
+Then the first version of the check counted the call and **survived a mutant
+that handed it an empty state directory**, which is byte-for-byte the refused
+state. Counting the call was never the test. The argument was the whole
+decision.
+
+### D-ID-2, filed rather than solved
+
+A name key is refused when two channels share it, so a collision costs nothing
+today. But that is a single-snapshot property and a stable id exists only
+across snapshots: when a provider later removes one member of a colliding pair,
+the survivor inherits the key and any favourite that meant the row which went
+away. A silent WRONG channel, worse than a loss. 26 colliding groups on
+USChannels, 39 on SportsPPVAll. Nobody has a second snapshot over time, so it
+is accepted and recorded with its numbers rather than designed around blind.
