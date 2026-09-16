@@ -496,8 +496,16 @@ into `hyprctl eval`).
 **Only two kinds of value may ever be interpolated into a Lua dispatch string:**
 
 1. A window address that has matched `/^0x[0-9a-f]{1,16}$/`. The regex is applied
-   in `Model.pipFindWindow` and applied **again** in `Model.pipLuaDispatch`, so a
-   future caller cannot route around it.
+   in `Model.pipFindWindow` (`Model.js:3412`) and applied **again** by
+   `Model.pipAddressSelector` on every dispatch path that builds a window
+   argument (`Model.js:3315`, `:3685`), so a future caller cannot route around
+   it. **Until 2026-09-16 this row named a Model function called
+   pipLuaDispatch, written without backticks here so the citation check does
+   not flag this correction, and no such function has ever existed in any
+   commit** -- an acceptance criterion
+   grading a name nobody had checked. The double application it asserts is
+   real; only the name was invented. Found by the citation check that
+   `scripts/check-defect-ledger.py` gained in phase 0.
 2. Integers produced by `Math.floor` inside `Model.pipGeometry`, re-checked to be
    finite and within `[-100000, 100000]`.
 

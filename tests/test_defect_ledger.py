@@ -181,6 +181,32 @@ class LedgerCase(unittest.TestCase):
             'expected a loud empty-run failure, got:\n' + out)
         self.assertNotIn('Traceback', out)
 
+    def test_a_cited_model_symbol_that_does_not_exist_is_red(self):
+        """A citation is a fact a script can settle, unlike a state.
+
+        The checker's own docstring says it cannot verify that a state is TRUE,
+        which is right about states and too modest about names. Two citations
+        had already drifted before this existed: a board row described a
+        constant that had been renamed, and an ACCEPTANCE CRITERION graded a
+        function that never existed in any commit.
+        """
+        self.good_ledger()
+        self.write('Model.js', 'function realThing() { return 1 }\n')
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.realThing`.\n')
+        self.assertGreen()
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.ghostThing`.\n')
+        self.assertRed(r'Model\.ghostThing is cited in docs/QA-RESULTS\.md')
+
+    def test_citations_with_no_model_file_are_red_but_silence_is_not(self):
+        """A repo with neither citations nor a Model.js is consistent."""
+        self.good_ledger()
+        self.assertGreen()
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1, D-AAA-2 and cites `Model.anything`.\n')
+        self.assertRed(r'Model\.js is unreadable')
+
     def test_a_family_name_containing_digits_is_still_seen(self):
         """`D-A11Y-1` must be an id, not invisible text.
 

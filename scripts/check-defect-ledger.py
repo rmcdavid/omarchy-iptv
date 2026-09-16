@@ -178,6 +178,64 @@ def main(argv=None):
             'Either the id is misspelled on the board or the defect was '
             'never written up' % ident)
 
+    # ---- every cited Model symbol must actually exist ------------------
+    #
+    # The docstring above says this check "does not check that a state is
+    # TRUE. Nothing can." That is right about states and too modest about
+    # CITATIONS. A row that says `Model.BAR_IDLE_DARKEN` is not expressing an
+    # opinion; it is naming a symbol, and whether that symbol exists is a fact
+    # a script can settle.
+    #
+    # It had drifted twice before anyone noticed. D-RUNG-3's state cell
+    # described a constant and a factor that had been replaced, so a reader
+    # sizing the contrast work read numbers that were gone. And an ACCEPTANCE
+    # CRITERION graded `Model.pipLuaDispatch`, a function that never existed in
+    # any commit -- a test specified against a name nobody had checked.
+    sources = {}
+    for name in ('Model.js',):
+        try:
+            sources[name] = read(root, name)
+        except IOError:
+            pass
+    if not sources:
+        # A repository with no Model.js and no citations of one is consistent,
+        # not broken -- the synthetic fixtures in tests/test_defect_ledger.py
+        # are exactly that. Only a repo that CITES symbols it cannot resolve
+        # has a problem, so the complaint moves inside the citation scan.
+        cited_anywhere = any(
+            re.search(r'`Model\.[A-Za-z_]', read(root, rel))
+            for rel in tracked_markdown(root))
+        if cited_anywhere:
+            problems.append(
+                'documents cite Model.* symbols but Model.js is unreadable, '
+                'so no citation could be checked')
+    else:
+        blob = '\n'.join(sources.values())
+        cited = {}
+        for rel in tracked_markdown(root):
+            text = read(root, rel)
+            for m in re.finditer(r'`Model\.([A-Za-z_][A-Za-z0-9_]*)`', text):
+                cited.setdefault(m.group(1), set()).add(rel)
+        # `Model.js` is the FILE, named in 22 documents, and `Model.X` is the
+        # placeholder this very check is described with. Neither is a citation.
+        # Kept as a named, short list rather than a clever pattern: an
+        # exception you can read is an exception somebody will notice.
+        not_symbols = {'js', 'X'}
+        for symbol in sorted(cited):
+            if symbol in not_symbols:
+                continue
+            # A symbol resolves if it is exported, defined, or declared.
+            if re.search(r'\b%s\s*[:=]' % re.escape(symbol), blob):
+                continue
+            if re.search(r'function\s+%s\b' % re.escape(symbol), blob):
+                continue
+            problems.append(
+                'Model.%s is cited in %s and resolves in no source file. '
+                'Either the symbol was renamed and the document was not, or '
+                'the document names something that never existed'
+                % (symbol, ', '.join(sorted(cited[symbol]))))
+        print('symbol citations: %d distinct Model.* names checked' % len(cited))
+
     print('defect ledger: %d rows on the board, %d ids across %d markdown '
           'files' % (len(declared), len(set(mentions) | set(declared)), scanned))
     if problems:

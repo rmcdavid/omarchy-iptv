@@ -1227,7 +1227,7 @@ measurement was not wrong, the search for what to measure was.
 
 The bar's idle glyph moved from a darkening factor of 1.55 to 1.25, taking 7
 themes under the threshold to none, with a floor of 4.71 rather than a value
-sitting on 4.5. The factor now lives in `Model.BAR_IDLE_DARKEN` so a test calls
+sitting on 4.5. The factor now lives in `Model.BAR_IDLE_ALPHA` so a test calls
 the shipping number instead of transcribing it.
 
 The dimming loses range: the active glyph now reads about 1.57 times the
