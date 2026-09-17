@@ -1,8 +1,19 @@
 # Marketplace submission, drafted for review
 
-**Nothing has been filed.** This is the text that would go into the GitHub
-issue at `omacom/omarchy-plugin-marketplace` using the `submit-plugin.yml`
-template. Read it, change anything, then say go.
+**FILED 2026-09-17:** https://github.com/omacom/omarchy-plugin-marketplace/issues/7374
+
+This is the text that went in, kept so the submission can be compared against
+what was intended. It follows the `submit-plugin.yml` template, whose real
+fields were read from the repository rather than from the rendered page.
+
+**One thing did not take.** The template applies a `submission` label
+automatically when filed through the web form. Filing through the CLI could
+not set it -- a label on another organisation's repository needs write access
+we do not have -- so the issue is open with **no label**. If that repository
+triages by label, this could sit unseen. The title carries the `[Plugin]:`
+prefix the template mandates and the body matches the form's field headings,
+so it is identifiable either way, but it is worth watching and worth a polite
+nudge if nothing happens.
 
 The template's fields were read from the repository rather than from the
 rendered page, so the field names and validation below are the real ones.
