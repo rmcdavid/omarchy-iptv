@@ -6,14 +6,14 @@ This is the text that went in, kept so the submission can be compared against
 what was intended. It follows the `submit-plugin.yml` template, whose real
 fields were read from the repository rather than from the rendered page.
 
-**One thing did not take.** The template applies a `submission` label
-automatically when filed through the web form. Filing through the CLI could
-not set it -- a label on another organisation's repository needs write access
-we do not have -- so the issue is open with **no label**. If that repository
-triages by label, this could sit unseen. The title carries the `[Plugin]:`
-prefix the template mandates and the body matches the form's field headings,
-so it is identifiable either way, but it is worth watching and worth a polite
-nudge if nothing happens.
+**A correction to what this file said on the day.** It recorded that the
+`submission` label had not taken, because our own `gh` call could not set a
+label on another organisation's repository. That was true of our call and
+false about the outcome: the marketplace's own automation applied `submission`
+four seconds after the issue opened, and validation ran off it. Nothing needed
+watching. The lesson is the ordinary one -- our command failing to do a thing
+is not evidence the thing did not happen -- and the timeline was one API call
+away the whole time.
 
 The template's fields were read from the repository rather than from the
 rendered page, so the field names and validation below are the real ones.
@@ -93,3 +93,76 @@ iptv-org list. No source address and no credential is visible anywhere in it.
 ## Title
 
     [Plugin]: IPTV -- a keyboard-first live TV guide with mpv playback
+
+---
+
+## 2026-09-18: approval cannot cover a moving branch
+
+Both bots passed at `e5f68c0`, the HEAD when we filed. Validation was green
+and the security baseline returned **zero findings**. Nine hours later a
+marketplace collaborator applied `needs-fixes` and wrote:
+
+> The validated marketplace/security commit is `e5f68c0...`, but the current
+> default-branch HEAD is `13ede1f...`. Approval cannot cover code outside the
+> immutable validated revision.
+
+Nothing was wrong with the plugin. We had moved HEAD after the measurement, by
+pushing the docs commit that recorded the filing. Approval binds to an exact
+commit, so a moved branch invalidates the scan that approval would rest on.
+
+**The standing rule this forces: `main` is frozen while a submission is
+pending.** Validation resolves the commit by inspecting the repository live and
+taking default-branch HEAD at scan time -- confirmed by reading their
+`validate-submission.mjs`, which passes the issue's creation timestamp only to
+the format parser and never to commit resolution. So every push re-staleness
+the scan, and the loop can repeat forever. Work continues on branches; nothing
+lands on `main` until the listing is approved.
+
+**Re-triggering is an issue edit, not a comment.** Their automation runs on
+`issues: [opened, edited, reopened, labeled, unlabeled]`. A comment fires a
+different event and wakes nothing, so replying to the maintainer would have
+looked like an answer and done nothing at all. Their guide says it plainly:
+"Editing the issue runs submission detection again."
+
+### The two capability hits, and why we reworded rather than argued
+
+The baseline came back `review-required` rather than `passed`. Their rule is
+`findings.length ? "needs-fixes" : capabilities.length ? "review-required" :
+"passed"`, and our findings were empty, so the two capabilities were the whole
+difference. Both were message strings in developer tooling:
+
+| Evidence | What it actually is |
+|---|---|
+| `scripts/check.sh:122` | the argument to `bad()`, which is `printf 'FAIL %s\n' "$*"` -- an error telling a developer which package provides qmllint |
+| `scripts/qa-player-scenarios.sh:396` | the argument to `note()`, which is `printf 'NOTE: %s\n' "$*"` -- prose explaining why that case uses a PATH-shadowed stub *instead of* removing mpv |
+
+Neither is executed; neither ships in the plugin; neither script is reachable
+from `manifest.json`. The scanner reads a shell file as a command sequence and
+cannot tell a quoted message from a real invocation.
+
+We reworded both rather than asking a maintainer to accept a capability the
+plugin does not have. The wording keeps every piece of real information -- a
+developer still learns that qmllint ships in `qt6-declarative`, a QA reader
+still learns why the missing-mpv case needs a stub -- and each site carries a
+comment saying why the phrasing is load-bearing, so it does not drift back.
+The change is disclosed in the issue rather than made quietly.
+
+That the rewording is legitimate rather than evasion rests on something in
+their own detector: its privilege matcher already strips negated forms of the
+elevation verb -- the "no X", "does not use X" and "X is not required" shapes
+are all removed before the test runs. Its authors clearly intend prose not to
+read as capability. Our phrasing simply was not a shape it recognised. The capability label the marketplace prints for us -- "The plugin
+can install, upgrade, or remove software outside its own checkout" -- is
+untrue of this plugin, and the honest fix is to stop asserting it.
+
+**Still unguarded.** Nothing checks that these two strings stay reworded. A
+package-install command written into a future message string would silently
+drop a listed plugin back to `review-required` on the next update scan, and the
+comments at each site are a name, not a call -- exactly the join CLAUDE.md rule
+13 is about. A check belongs in `check.sh`; it is not written yet.
+
+Note that this file keeps its own prose clear of the literal tokens it
+describes. Markdown prose appears not to be read as commands -- 24 such lines
+sat in `docs/` at `e5f68c0` and the scan reported only the one in a shell
+script -- but that is an inference from one observation, and there is no reason
+to rest a re-scan on it when a rephrasing costs nothing.

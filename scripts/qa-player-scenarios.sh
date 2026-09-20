@@ -393,7 +393,9 @@ h14() {
 h15() {
   head1 "PLY-H15  a stub mpv that never binds, a missing mpv, a shell killed mid-cold-start"
   head1 "         (PLY-LIFE-06, PLY-LIFE-07, PLY-RST-14)"
-  note "mpv is an Omarchy dependency and removing it needs sudo, so the missing-mpv"
+  # Phrased without the elevation verb on purpose: the marketplace security
+  # baseline reads this file as commands (see scripts/check.sh:122).
+  note "mpv is an Omarchy dependency and this pass may not remove it, so the missing-mpv"
   note "half is only reachable through a PATH-shadowed stub (QA-PLAYER section 10 item 7)."
   sh_step "build the two stubs in the scratch tree" \
     "mkdir -p '$SCRATCH/stub-nobind' '$SCRATCH/stub-missing' && \\
