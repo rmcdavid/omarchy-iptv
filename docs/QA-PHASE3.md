@@ -160,3 +160,43 @@ separator, which shifted every relabelled state one column right while the
 gate stayed green -- caught by diffing the per-row cell count against the
 baseline, not by the gate.
 
+## Addendum: the two unresolved rows, settled
+
+Both turned out to be defects in `README.md` -- the file a marketplace reviewer
+reads -- and both were settled the same day, at the desk.
+
+**D-QA-17.** One of its four halves was not unverified but FALSE. The row
+claimed the README carried `previous` and `toggle` in the command list.
+`previous` was there; the plugin's own `toggle` verb never was. What the README
+documented was the HOST's `omarchy-shell shell toggle <id>` and the `pip
+toggle` mode, and the claim had been graded by a grep that hits both of those.
+Rule 14 again, and the third instance this pass found. `Service.qml:3758` ships
+`function toggle(): string`; it is now documented.
+
+**D-PLY-10.** The interesting one. The containment fix was proven live twice,
+so the row looked closeable -- but the fix had made the README wrong in the
+opposite direction. The README still listed `~/.cache/mpv/` under Files it
+writes, a write that no longer happens, while omitting the two that do. A row
+can rot by being fixed.
+
+The correction was written by reading the argv the helper really builds rather
+than its docstring: `--gpu-shader-cache-dir` and `--icc-cache-dir` land in
+`$XDG_RUNTIME_DIR/omarchy-iptv/shader-cache`, `--watch-later-dir` in
+`.../watch-later`, and `--screenshot-dir` under the state directory the README
+already documents. Stated as a default rather than a guarantee, because ruling
+CL2 leaves both cache paths unreserved so an `mpvArgs` token can still move
+them.
+
+## Addendum: the gate could not see the damage this pass did
+
+While relabelling, the apply script emitted a doubled cell separator. Every row
+it touched grew an empty cell and its state slid one column right, and
+`check.sh` stayed green throughout: the ledger asked for "at least 4" cells and
+then read the LAST one, which still held a state word. It was caught by diffing
+per-row cell counts against a baseline, which nobody will remember to do.
+
+`scripts/check-defect-ledger.py` now requires exactly four cells and splits on
+an UNESCAPED pipe. Both halves are load-bearing: exactness alone would condemn
+D-PLY-9, whose Repro cell legitimately quotes shell containing a pipe. Proven
+in both directions -- the doubled-separator case is green against the checker as
+it shipped and red against the fix.

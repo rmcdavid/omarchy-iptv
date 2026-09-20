@@ -125,6 +125,7 @@ Shell IPC verbs, usable from any keybinding or script:
 
 ```bash
 omarchy-shell shell toggle io.github.rmcdavid.iptv       # open / close the guide
+omarchy-shell io.github.rmcdavid.iptv toggle             # the same thing, as the plugin's own verb
 omarchy-shell io.github.rmcdavid.iptv play t:bbc1.uk      # play a channel id from the cache
 omarchy-shell io.github.rmcdavid.iptv next                # zap forward
 omarchy-shell io.github.rmcdavid.iptv previous            # zap back
@@ -296,10 +297,16 @@ itself unavailable rather than half working.
   played, and the Sources history including their URLs (mode 0600)
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
-- `~/.cache/mpv/` : mpv's own shader cache, written by the player. It holds
-  no information about what you watched and is safe to delete.
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is
-  running, and a small lock file used to guarantee only one player exists
+  running, a small lock file used to guarantee only one player exists, and
+  two directories that exist only until you log out -- `shader-cache` for
+  mpv's compiled shaders and ICC profiles, and `watch-later` for its resume
+  records. Both would otherwise land in `~/.cache/mpv/` and
+  `~/.local/state/mpv/`, outside this list; the player is pointed at the
+  runtime directory instead so nothing durable accumulates in your home.
+  A shader cache is content-free and is not keyed to what you watched.
+  This is a default rather than a guarantee: neither path is reserved, so
+  an `mpvArgs` token of your own can still send them elsewhere.
 
 Nothing inside the plugin directory is written at runtime.
 
