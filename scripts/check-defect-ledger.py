@@ -40,6 +40,11 @@ import sys
 # misses. Caught within the hour only because the row count did not move.
 ID = re.compile(r'\b[DF]-[A-Z][A-Z0-9]*-[0-9]+\b')
 ROW = re.compile(r'^\|\s*([DF]-[A-Z][A-Z0-9]*-[0-9]+)\s*\|(.*)$')
+# A cell boundary is a pipe the author did not escape. Splitting on every pipe
+# scattered D-PLY-9's Repro cell -- which legitimately quotes shell containing
+# `\|` -- across five phantom cells, and the state was then read from the last
+# of them by luck rather than by parse.
+CELL = re.compile(r'(?<!\\)\|')
 LEDGER_FILE = 'docs/STATUS.md'
 LEDGER_HEADING = '## Defects'
 
@@ -110,7 +115,7 @@ def main(argv=None):
         if ident in declared:
             dupes.append(ident)
             continue
-        cells = [c.strip() for c in rest.split('|')]
+        cells = [c.strip() for c in CELL.split(rest)]
         # Strip exactly ONE trailing empty cell: the artifact of the row's
         # closing pipe. Stripping every trailing empty made an EMPTY STATE
         # CELL vanish, so a row with nothing in its state was reported as a
@@ -127,10 +132,20 @@ def main(argv=None):
     # ---- every row must carry a severity and a state ---------------------
     for ident in sorted(declared):
         cells = declared[ident]
-        if len(cells) < 4:
+        if len(cells) != 4:
+            # Was "at least 4", which is how a corrupted board stayed green.
+            # A script relabelling rows in bulk emitted a doubled separator, so
+            # every row it touched grew an empty cell and its state slid one
+            # column right. The board rendered wrong, the state was no longer
+            # where the schema says it is, and this check passed anyway: five
+            # cells cleared "at least 4", and cells[-1] still happened to hold
+            # a state word. A row is four cells exactly, and too many is the
+            # direction that hides damage rather than announcing it.
             problems.append(
-                '%s row has %d cells after the id, expected at least 4 '
-                '(Sev, Task, Repro, State)' % (ident, len(cells)))
+                '%s row has %d cells after the id, expected exactly 4 '
+                '(Sev, Task, Repro, State). A pipe inside a cell must be '
+                'written \\| or the column it opens shifts every cell after '
+                'it' % (ident, len(cells)))
             continue
         sev, state = cells[0], cells[-1]
         if not re.match(r'^P[1-4]\b', sev):

@@ -131,6 +131,36 @@ class LedgerCase(unittest.TestCase):
             '| D-AAA-2 | - | M1 | another thing | open |\n'))
         self.assertRed(r"D-AAA-2 severity cell is '-'")
 
+    def test_a_doubled_cell_separator_is_red(self):
+        """The real incident: a bulk relabel emitted `| | state |`.
+
+        Every row it touched grew an empty cell and its state slid one column
+        right. The board rendered wrong and the whole gate stayed green,
+        because the old check asked for "at least 4" cells and then read the
+        LAST one, which still held a state word. Too many cells is the
+        direction that hides damage, so the shape is now exact.
+        """
+        self.good_ledger()
+        self.write('docs/STATUS.md', HEADER + (
+            '| D-AAA-1 | P2 | M1 | a thing broke | verified fixed at abc1234 |\n'
+            '| D-AAA-2 | P3 | M1 | another thing | | open |\n'))
+        self.assertRed(r'D-AAA-2 row has 5 cells after the id, '
+                       r'expected exactly 4')
+
+    def test_an_escaped_pipe_inside_a_cell_stays_green(self):
+        """The fix must not punish a cell that legitimately quotes a pipe.
+
+        D-PLY-9's Repro cell quotes shell containing a pipe, written `\\|` so
+        the table still renders. Splitting on every pipe scattered that row
+        across five phantom cells; an exact-shape check over a naive split
+        would have called the board corrupt and been wrong.
+        """
+        self.good_ledger()
+        self.write('docs/STATUS.md', HEADER + (
+            '| D-AAA-1 | P2 | M1 | a thing broke | verified fixed at abc1234 |\n'
+            '| D-AAA-2 | P3 | M1 | `grep -c x \\| head -1` lies | open |\n'))
+        self.assertGreen()
+
     def test_a_truncated_row_is_red(self):
         self.good_ledger()
         self.write('docs/STATUS.md', HEADER + (
