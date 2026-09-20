@@ -129,6 +129,13 @@ fallback is a name-plus-group hash plus a one-time remap of favourites and
 recents - additive state, no version bump.
 
 ### Phase 3 - Settle the 31, in three tiers
+
+> **Superseded in part, 2026-09-20.** Tiers 3a and 3b have run; the
+> result and the fixture matrix are in `docs/QA-PHASE3.md`. The
+> estimates below were optimistic: 11 free relabels, not about 15, and
+> 7 rows need data the configured list cannot produce, not the 2 this
+> section names. Five rows were classified as free relabels and then
+> refuted. 3c and 3d are still outstanding as written.
 *Desk lane, then display lane. Size: one desk day, then one or two screen sessions of about an hour each.*
 
 The headline is one number covering five different problems.
