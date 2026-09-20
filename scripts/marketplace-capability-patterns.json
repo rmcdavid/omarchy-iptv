@@ -1,0 +1,170 @@
+{
+  "_comment": [
+    "The Omarchy marketplace security baseline, transcribed as data.",
+    "",
+    "WHY THIS IS A .json FILE AND NOT PART OF THE CHECKER.",
+    "The baseline scans .sh, .py, .js, .qml and a root README as command",
+    "sequences. It does not scan .json. Holding the literal patterns here",
+    "keeps the checker itself off the scan surface: a checker written in",
+    "Python that spelled these patterns inline would be reported as every",
+    "capability it exists to prevent. scripts/check-marketplace-capabilities.py",
+    "scans itself along with everything else, so that claim is tested, not",
+    "asserted.",
+    "",
+    "Transcribed on 2026-09-20 from omacom/omarchy-plugin-marketplace:",
+    "  scripts/security-baseline-analysis.mjs  detectElevatedCapabilities,",
+    "                                          invokesPrivilegeBoundary,",
+    "                                          installerEvidence,",
+    "                                          isSudoersPolicyFile,",
+    "                                          invokesSudoersModification",
+    "  scripts/security-baseline-scope.mjs     isSecurityScanPath, isRootReadme",
+    "  scripts/security-github-snapshot.mjs    isBinaryAssetPath",
+    "Each pattern below is the ECMAScript source of the upstream regular",
+    "expression, unchanged. All of them are matched case-insensitively,",
+    "as upstream does with the i flag. When upstream changes, re-read those",
+    "files and update this one; nothing here is inferred."
+  ],
+  "baselineVersion": "3",
+  "source": {
+    "repository": "omacom/omarchy-plugin-marketplace",
+    "files": [
+      "scripts/security-baseline-analysis.mjs",
+      "scripts/security-baseline-scope.mjs",
+      "scripts/security-github-snapshot.mjs"
+    ],
+    "transcribed": "2026-09-20"
+  },
+
+  "submissionRepository": "rmcdavid/omarchy-iptv",
+
+  "scope": {
+    "excludedDirectories": [
+      ".github", "coverage", "docs", "fixtures", "node_modules",
+      "spec", "specs", "test", "tests"
+    ],
+    "scannedExtensions": [
+      ".bash", ".cjs", ".desktop", ".fish", ".js", ".lua", ".mjs", ".pl",
+      ".py", ".qml", ".rb", ".service", ".sh", ".sudoers", ".toml",
+      ".yaml", ".yml", ".zsh"
+    ],
+    "binaryAssetExtensions": [
+      ".apng", ".avif", ".bmp", ".gif", ".heic", ".heif", ".ico", ".jfif",
+      ".jpe", ".jpeg", ".jpg", ".jxl", ".png", ".tif", ".tiff", ".webp"
+    ],
+    "rootReadme": "^readme(?:\\.[^/]+)?$",
+    "setupNamedBasename": "(?:install|installer|setup|uninstall)",
+    "commentOnly": "^(?:#|//|/\\*|\\*|<!--)",
+    "lineContinued": "\\\\\\s*$|(?:\\||&&|\\|\\|)\\s*$",
+    "stripInlineComment": "\\s+#.*$",
+    "readmeFenceOpen": "^ {0,3}(`{3,}|~{3,})\\s*(?:(?:ba|z|fi|da|a|k)?sh|shell)\\s*$",
+    "readmeFenceClose": "^ {0,3}(`{3,}|~{3,})\\s*$",
+    "readmeHeading": "^ {0,3}#{1,6}\\s+(.+)$",
+    "readmeFenceExemptContext": "\\b(?:development|contributing|contributors?|testing|tests?)\\b"
+  },
+
+  "commandCapabilities": [
+    {
+      "id": "package-manager",
+      "title": "Package management",
+      "any": [
+        "\\bomarchy\\s+pkg\\s+(?:add|drop|remove|update)\\b",
+        "\\b(?:pacman|paru|yay|apt|apt-get|dnf|zypper|apk)\\s+(?:-[A-Za-z]*[SRU]|install|remove|upgrade|add|del)\\b",
+        "(?:^|[\\s/'\"])(?:pip|pip3|pipx)[\"']?\\s+install\\b",
+        "\\bpython[23]?(?:\\.[0-9]+)?\\s+-m\\s+pip\\s+install\\b",
+        "\\b(?:npm|pnpm|yarn|bun)\\s+(?:install|add)\\b",
+        "\\bcargo\\s+install\\b",
+        "\\bgo\\s+install\\b",
+        "\\bgem\\s+install\\b",
+        "\\bbrew\\s+(?:install|uninstall|upgrade)\\b"
+      ]
+    },
+    {
+      "id": "service-management",
+      "title": "Service management",
+      "any": [
+        "\\bsystemctl\\b",
+        "\\bsystemd-run\\b"
+      ]
+    },
+    {
+      "id": "sudoers-modification",
+      "title": "Sudoers policy modification",
+      "any": [
+        "/etc/sudoers(?:\\.d)?(?:/|\\b)",
+        "\\bvisudo\\b",
+        "\\bSUDOERS(?:_FILE)?\\s*="
+      ]
+    },
+    {
+      "id": "remote-build",
+      "title": "Remote source build (an unpinned Cargo Git build)",
+      "all": [
+        "\\bcargo\\s+install\\b",
+        "\\s--git(?:\\s|=)"
+      ]
+    },
+    {
+      "id": "remote-build",
+      "title": "Remote source build (a fetch of this repository's own source)",
+      "any": [
+        "\\b(?:git\\s+(?:clone|fetch|pull)|curl|wget)\\b"
+      ],
+      "requiresSubmissionRepositoryUrl": true
+    }
+  ],
+
+  "privilegeBoundary": {
+    "id": "privilege",
+    "title": "Privilege request",
+    "names": "(?:sudo|pkexec)",
+    "list": "NAMES(?:\\s*(?:,|/|\\bor\\b|\\band\\b)\\s*NAMES)*",
+    "explicitNegativeList": "NAMES(?:\\s*(?:/|\\bor\\b|\\band\\b)\\s*(?:no\\s+)?NAMES)*",
+    "negativePredicate": "\\s+(?:is|are)(?:\\s+not)?\\s+(?:required|needed)\\b",
+    "notUsedPredicate": "\\s+(?:is|are)\\s+not\\s+used\\b",
+    "noUsePredicate": "\\s+(?:is|are)(?:\\s+not)?\\s+used\\b",
+    "terminal": "(?=\\s*(?:[.;!?]|,\\s*(?:no|without)\\b|$))",
+    "strip": [
+      "\\b(?:no|without)(?:\\s+(?:use\\s+of|using))?\\s+EXPLICITNEGATIVELIST(?:NEGATIVEPREDICATE|NOUSEPREDICATE)",
+      "\\bLIST(?:NOTUSEDPREDICATE|\\s+(?:is|are)\\s+not\\s+(?:required|needed)\\b)",
+      "\\b(?:no|without)(?:\\s+(?:use\\s+of|using))?\\s+LISTTERMINAL",
+      "\\b(?:does\\s+not|doesn't|do\\s+not|don't|never)\\s+(?:use|run|invoke|require|need)\\s+LISTTERMINAL"
+    ],
+    "detect": "\\bNAMES\\b"
+  },
+
+  "fileCapabilities": [
+    {
+      "id": "installer",
+      "title": "Installer or setup path",
+      "pathBasename": "(?:^|[-_])(?:install|installer|setup|uninstall)(?:[-_.]|$)"
+    },
+    {
+      "id": "service-management",
+      "title": "Service management (a systemd unit)",
+      "path": "\\.service$"
+    },
+    {
+      "id": "sudoers-modification",
+      "title": "Sudoers policy modification (a policy file)",
+      "path": "(?:^|/)(?:sudoers(?:\\.d)?(?:/|$)|[^/]+\\.sudoers$)"
+    }
+  ],
+
+  "_notPorted": [
+    "Two upstream capability rules are NOT reproduced here, deliberately,",
+    "and the checker says so on every run rather than implying coverage",
+    "it does not have:",
+    "  1. remote-build by git acquisition followed by an execution sink",
+    "     (isGitAcquisition + isExecutionSink over compoundSegments). It",
+    "     needs working-directory tracking across && and ; and cannot be",
+    "     approximated without flagging ordinary git use.",
+    "  2. The RULE catalog (curl-pipe-shell, cargo-git-unpinned,",
+    "     remote-git-execution-unpinned, the two sudoers rules). Those are",
+    "     findings, not capabilities; a finding is a needs-fixes outcome",
+    "     and a far louder failure than the silent drop to review-required",
+    "     that this check exists to catch.",
+    "This repository contains no git clone, no download-and-execute path",
+    "and no policy file, so neither gap is live today. If one is ever",
+    "introduced, port the rule."
+  ]
+}

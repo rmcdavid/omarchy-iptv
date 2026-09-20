@@ -261,6 +261,7 @@ M2-02 fix verification on b16b479 (QA, 2026-09-14, `docs/QA-RESULTS.md` section 
 | 2026-09-13 | v0.1.0 released and published: github.com/rmcdavid/omarchy-iptv made PUBLIC at the user's request; GitHub release created | PO |
 | 2026-09-13 | M2 starts with the Sources lane (user request); Xtream helper and multiple playlists fold into it; detached/idle mpv is lane 2 | PO |
 | 2026-09-13 | Sources reconciliation SR1-SR10 (ARCHITECTURE-SOURCES.md): UX names for the view model over state-file names via Model.sourceView; cancelProbe added; mask token **** with type/output visible; architecture caps canonical (label 64, credentials 256); UX 5.4 codes canonical; lane 1 merges first | PO |
+| 2026-09-20 | Marketplace capability regression guard: `scripts/check-marketplace-capabilities.py` runs in `check.sh` as step 9, applying the marketplace's transcribed capability patterns to the files its scan actually reads (docs/ and tests/ excluded, root README and its shell fences included). The patterns live in a `.json` file because `.json` is off that scan surface, and the checker reads itself to prove it | PO |
 
 ## Blockers
 

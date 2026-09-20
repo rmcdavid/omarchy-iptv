@@ -12,6 +12,9 @@
 #   8. defect ledger             (scripts/check-defect-ledger.py: every defect
 #                                id filed in any tracked .md has a row, with a
 #                                severity and a state, in STATUS.md "## Defects")
+#   9. marketplace capabilities  (scripts/check-marketplace-capabilities.py: no
+#                                tracked file the marketplace scan reads holds a
+#                                string it would report as a capability)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -88,6 +91,12 @@ fail=0
 # number in the same commit; that is the intended cost and it is cheap. Never
 # lower one to make a run green.
 #
+# The marketplace-capability round adds 46 python cases
+# (tests/test_marketplace_capabilities.py), so the floor moves 423 -> 469,
+# again with zero margin. Fifteen mutations were run against the checker and
+# its transcribed patterns and every one of them turned this suite red; two
+# went green on the first sweep and both were real gaps, since closed.
+#
 # A count is not the only guard on the D-ID-1 work, because a count cannot see
 # a suite that shrinks and grows at once. tests/fixtures/channel-ids.json is
 # run by node and by python, and BOTH assert its row counts before using it
@@ -95,7 +104,7 @@ fail=0
 # vector is red on an assertion rather than on arithmetic here.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1427}
-PY_TESTS_MIN=${PY_TESTS_MIN:-423}
+PY_TESTS_MIN=${PY_TESTS_MIN:-469}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -105,6 +114,10 @@ CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
 # PIP15's single dispatch spelling and the snapshot key's one name), the
 # stub's executable probe, and its own "ran every check" line.
 PIP_PREFLIGHT_MIN=${PIP_PREFLIGHT_MIN:-41}
+# The marketplace scan surface: 30 tracked files at the time this landed. A
+# floor for the same reason as every other number here -- a scan that reads
+# nothing exits 0 having proved nothing at all.
+MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-30}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -121,6 +134,8 @@ ln -sfn "$SHELL_DIR/Ui" "$QMLROOT/qs/Ui" || bad "could not link qs.Ui into $QMLR
 if [[ ! -x "$QT_BIN/qmllint" ]]; then
   # Name the package, not an install command: the marketplace security baseline
   # scans this file as commands and cannot tell a message string from a real one.
+  # scripts/check-marketplace-capabilities.py is what holds this phrasing in
+  # place; this comment alone never did.
   bad "qmllint not found at $QT_BIN/qmllint (it ships in the qt6-declarative package)"
 else
   linted=0
@@ -406,6 +421,30 @@ if python3 "$ROOT/scripts/check-defect-ledger.py" >"$ledger_log" 2>&1; then
   ok "$(head -1 "$ledger_log")"
 else
   cat "$ledger_log"; bad "defect ledger"
+fi
+
+step "marketplace capability scan (developer messages stay messages)"
+# The Omarchy marketplace runs a deterministic security scan over every
+# submitted commit and rescans on listing updates. It parses this
+# repository's shell-like files into command sequences and cannot tell a
+# quoted message from an executed line. Two message strings in developer
+# tooling -- one in THIS file, one in scripts/qa-player-scenarios.sh -- were
+# therefore reported as capabilities this plugin does not have, and any
+# capability at all moves the listing from passed to review-required.
+#
+# Both sites were reworded in f2d1dbf and both carry a comment saying why the
+# phrasing is load-bearing. A comment is a NAME, not a call (CLAUDE.md rule
+# 13), and nothing verified it: the next edit that writes an install line or
+# an elevation verb into a log message would drop the listing back to manual
+# review on the following scan, with nobody connecting the two. This is the
+# call. It respects the real scan surface, so the docs/ prose that discusses
+# these subjects on purpose stays out of it.
+marketplace_log=$CHECK_TMP/marketplace.log
+if python3 "$ROOT/scripts/check-marketplace-capabilities.py" \
+     --root "$ROOT" --min-files "$MARKETPLACE_FILES_MIN" >"$marketplace_log" 2>&1; then
+  ok "$(head -1 "$marketplace_log")"
+else
+  cat "$marketplace_log"; bad "marketplace capability scan"
 fi
 
 printf '\n'

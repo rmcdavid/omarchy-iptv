@@ -394,7 +394,10 @@ h15() {
   head1 "PLY-H15  a stub mpv that never binds, a missing mpv, a shell killed mid-cold-start"
   head1 "         (PLY-LIFE-06, PLY-LIFE-07, PLY-RST-14)"
   # Phrased without the elevation verb on purpose: the marketplace security
-  # baseline reads this file as commands (see scripts/check.sh:122).
+  # baseline reads this file as commands and cannot tell a message string from
+  # an executed one. scripts/check-marketplace-capabilities.py, in the gate,
+  # is what keeps it that way; this comment alone never did, and the line
+  # number it used to cite had already gone stale.
   note "mpv is an Omarchy dependency and this pass may not remove it, so the missing-mpv"
   note "half is only reachable through a PATH-shadowed stub (QA-PLAYER section 10 item 7)."
   sh_step "build the two stubs in the scratch tree" \
