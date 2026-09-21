@@ -1169,6 +1169,27 @@ check("GS8: the meta slot and the detail line both take their rung from the ship
   (guideSource.match(/Model\.rowNoticeEmphasis\(/g) || []).length
 ], [true, true, false, false, 2])
 
+// The production window: a PanelWindow on the Overlay layer that takes the
+// keyboard exclusively. It lives in a Component now, chosen by a Loader,
+// because the dev harness can host the same content in a FloatingWindow where
+// no layer-shell exists (docs/SPIKE-CAGE-HEADLESS.md). qmlBlock slices from
+// `id: layerHost` to the next id, which is the floating host, and from there
+// to `id: windowContent`: the layer, the focus mode and the namespace must all be
+// inside the first slice and none of them in the second, or a refactor that
+// dropped one -- or let a WlrLayershell line out of its Component -- would
+// still lint and still load on the real shell.
+check("window: the production host is a PanelWindow on the Overlay layer with exclusive keyboard focus", [
+  /^\s*PanelWindow \{/m.test(qmlBlock("layerHost")),
+  /WlrLayershell\.layer: WlrLayer\.Overlay/.test(qmlBlock("layerHost")),
+  /WlrLayershell\.keyboardFocus: WlrKeyboardFocus\.Exclusive/.test(qmlBlock("layerHost")),
+  /WlrLayershell\.namespace: "omarchy-iptv"/.test(qmlBlock("layerHost")),
+  /^\s*FloatingWindow \{/m.test(qmlBlock("floatingHost")),
+  /WlrLayershell/.test(qmlBlock("floatingHost")),
+  /\n  property bool harnessFloatingWindow: false\n/.test(guideSource),
+  /Component\.onCompleted: sourceComponent = root\.harnessFloatingWindow \? floatingHost : layerHost/.test(guideSource),
+  (guideSource.match(/WlrLayershell\.layer:/g) || []).length
+], [true, true, true, true, true, false, true, true, 1])
+
 // D5: the header count becomes a position exactly when the list overflows.
 checkCall("scopeLabel: the four forms", function () { return [
   Model.scopeLabel("favorites", "", 6),
