@@ -3,6 +3,29 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.2 (2026-09-21)
+
+The first release through the new pipeline, closing the three things the
+marketplace review opened and held back so the reviewed code stayed
+byte-identical.
+
+### Fixed
+- **The helper now reports the plugin's real version.** `bin/omarchy-iptv
+  --version` and the User-Agent on every outbound request had said 0.2.0
+  since 0.2.0; a constant nobody joined to the manifest. The version is now
+  read from `manifest.json` beside the helper, and a test fails if the two
+  ever differ. (D-REL-1)
+- **One collection for the empty-state hint's group names.** The guide and
+  its search fixture each carried a copy of the loop that decides which
+  group names the hint may offer; now both call `Model.groupNamesForHint`,
+  and the node suite pins its two shapes. (D-SG-2)
+
+### Changed
+- Comments in the shipped code no longer cite `CLAUDE.md` or `docs/`,
+  `tests/` and `scripts/` paths that do not exist in an install; they name
+  the engineering rule and the `dev` branch instead, and the release check
+  now refuses a shipped source that names a dev-only path. (D-REL-2)
+
 ## 0.7.1 (2026-09-20)
 
 A password change no longer empties your favorites, and what gets installed is

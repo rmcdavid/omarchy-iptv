@@ -46,7 +46,7 @@ BarWidget {
   readonly property string nowPlayingName: playing && service.nowPlaying ? String(service.nowPlaying.name || "") : ""
   // The service derives this from the loaded cache. Guarded for `undefined`
   // because the harness runs this widget against a pre-change service too,
-  // and an undefined read must never invent a value (CLAUDE.md rule 10).
+  // and an undefined read must never invent a value (engineering rule 10 (dev branch)).
   readonly property string nowPlayingChno: playing && service.nowPlayingChno !== undefined ? String(service.nowPlayingChno) : ""
   readonly property bool configured: serviceReady && service.configured === true
   readonly property bool refreshing: serviceReady && service.refreshing === true
@@ -54,7 +54,7 @@ BarWidget {
   // M2-05 / PIP2: picture in picture gets ONE tooltip line and no new mouse
   // gesture - every gesture is already spoken for. Guarded for `undefined`
   // like nowPlayingChno above: a service that predates PiP reports nothing,
-  // and an undefined read must never invent a value (CLAUDE.md rule 10).
+  // and an undefined read must never invent a value (engineering rule 10 (dev branch)).
   readonly property bool pipOn: serviceReady && service.pipOn === true
   readonly property string glyph: Model.barGlyph({ playing: root.playing, error: root.hasError })
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""

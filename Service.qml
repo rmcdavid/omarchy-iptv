@@ -376,7 +376,7 @@ Item {
   // EPG load, by a cleared epgUrl and by a source swap.
   property var epgWarnings: []
 
-  // ---- picture in picture (M2-05, docs/M2-05-PICTURE-IN-PICTURE.md)
+  // ---- picture in picture (M2-05, M2-05-PICTURE-IN-PICTURE.md (dev branch))
   //
   // TWO GATE RESULTS SHAPE EVERYTHING BELOW, and both of them override the
   // design's own text (section 14, rulings PIP10 and PIP11):
@@ -407,7 +407,7 @@ Item {
   // Both constants are Model's, not copies of them: the class is the one
   // buildMpvArgv launches the player with and the tag is the one the plan
   // dispatches, and a second spelling of either here would be a rule written
-  // twice that nothing compares (CLAUDE.md 12).
+  // twice that nothing compares (engineering rule 12 (dev branch)).
   readonly property string pipClass: Model.PIP_CLASS
   readonly property string pipTag: Model.PIP_TAG
   // The window-owning mpv pid, from `player probe` and from `player start`.
@@ -448,7 +448,7 @@ Item {
   // focus needs and never had: the class-only selector it used focused a
   // stranger's window of the same app id three times out of three.
   property bool pipFocusPending: false
-  // Bounds (CLAUDE.md "Working in parallel" 3). At most 3 rounds of at most
+  // Bounds (parallel rule 3 (dev branch)). At most 3 rounds of at most
   // 8 steps, each step and each read watched for 2 s, and the whole sequence
   // capped so `pipBusy` can never latch.
   readonly property int pipMaxRounds: 3
@@ -475,7 +475,7 @@ Item {
   //
   // The guide turns `code` into its footer line through Model.pipStatusText;
   // this service never emits a user-facing sentence. The handler name on the
-  // other side of this signal is pinned by tests/test_pip.py, because a
+  // other side of this signal is pinned by test_pip.py (dev branch tests), because a
   // Connections block with `ignoreUnknownSignals` set silently listens for a
   // signal that does not exist - which is how the guide's footer was wired
   // to nothing at all until integration.
@@ -608,7 +608,7 @@ Item {
   // a zap refresh the now-playing stash inside mpv, which is what lets a
   // shell restart recover the channel the user last switched TO rather than
   // the one the player was started with (4.6, requirement 11). The rule is
-  // Model.zapArgs (CLAUDE.md 12) - it was the one argv builder still spelled
+  // Model.zapArgs (engineering rule 12 (dev branch)) - it was the one argv builder still spelled
   // here, and the decision it makes reaches all the way into the helper.
   function playArgs(key) {
     return Model.zapArgs(root.socketPath, root.activeCacheDir, key, root.nowPlaying)
@@ -727,7 +727,7 @@ Item {
   }
 
   // The `channel` IPC verb's answer, as an object so the harness drives the
-  // same path the CLI does instead of a copy of it (CLAUDE.md rule 12).
+  // same path the CLI does instead of a copy of it (engineering rule 12 (dev branch)).
   //
   // Rulings CN1 and CN10: inside the guide digits only move the cursor, but
   // out here there is no cursor and no one browsing - somebody bound a key to
@@ -1648,7 +1648,7 @@ Item {
     // exists to prevent, on an ordinary refresh. Two reviewers refused the
     // change for exactly that, and they were right: the lane could not land it
     // because Service.qml was not in its ownership, which was my error and not
-    // theirs (CLAUDE.md parallel rule 1, ownership follows the coupling).
+    // theirs (parallel rule 1 (dev branch), ownership follows the coupling).
     playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.playlistUrl, root.activeCacheDir, root.stateDir)
     playlistProc.running = true
     playlistWatchdog.restart()
@@ -2301,7 +2301,7 @@ Item {
   // loading, whether the last end-file still stands, idle-active, and the
   // log tail. This method is the four property writes that decision implies,
   // and nothing else - a rule that lived here could only ever be pinned by a
-  // copy of itself in the spec file (CLAUDE.md 10).
+  // copy of itself in the spec file (engineering rule 10 (dev branch)).
   function handlePlayerLine(line) {
     // Our own get_property answer (M2-05 4.5), routed by request id before
     // the event router sees it. Everything else falls through unchanged.
@@ -3288,7 +3288,7 @@ Item {
   Timer {
     // One bound per compositor round trip. A read or a dispatch that has not
     // exited in 2 s is terminated and the sequence ends reporting it: there
-    // is no unbounded wait anywhere in this feature (CLAUDE.md rule 3).
+    // is no unbounded wait anywhere in this feature (engineering rule 3 (dev branch)).
     id: pipStepWatchdog
     interval: root.pipStepMs
     repeat: false
@@ -3307,7 +3307,7 @@ Item {
     // an hyprctl that never exits would latch `pipPeeking` and the state
     // would stop being re-derived for the rest of the session - silently,
     // which is the shape of defect this feature already carries one of
-    // (CLAUDE.md rule 3, D-PIP-4).
+    // (engineering rule 3 (dev branch), D-PIP-4).
     id: pipPeekWatchdog
     interval: root.pipStepMs
     repeat: false

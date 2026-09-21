@@ -13,7 +13,7 @@ Exit codes:
   2  usage error (argparse)
   3  reserved (not implemented; no subcommand uses it any more)
 
-Subcommands (contract of record: docs/ARCHITECTURE.md section 5):
+Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
   playlist --url U [--cache-dir D] [--timeout S]
       fetch + parse M3U -> channels.json, playlist-status.json
   epg [--url U] [--cache-dir D] [--timeout S] [--ttl S] [--force] [--now-only] [--now T]
@@ -55,7 +55,25 @@ from typing import Any, BinaryIO
 # xml.etree, traceback) are imported where needed so that `play`, `status`
 # and `epg --now-only` start faster.
 
-VERSION = "0.2.0"
+def _manifest_version() -> str:
+    """The plugin's version, read from manifest.json beside this helper.
+
+    D-REL-1: a constant here said 0.2.0 for four releases while the manifest
+    moved on, so --version and the User-Agent both lied and nothing noticed.
+    manifest.json is on the release allowlist, so it is always beside the
+    helper in an install; the fallback only keeps a stray copy starting."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, os.pardir, "manifest.json"), encoding="utf-8") as fh:
+            found = json.load(fh).get("version")
+        if isinstance(found, str) and found.strip():
+            return found.strip()
+    except (OSError, ValueError):
+        pass
+    return "0.0.0+unknown"
+
+
+VERSION = _manifest_version()
 USER_AGENT = "omarchy-iptv/" + VERSION
 
 EXIT_OK = 0
@@ -161,7 +179,7 @@ _URL_ANYWHERE = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_text. Built from the same constant so the two cannot drift:
-# CLAUDE.md rule 13, two things joined by a name rather than by a call.
+# engineering rule 13 (dev branch), two things joined by a name rather than by a call.
 GENERATED_NAME_WORD = "Channel"
 GENERATED_NAME_FORMAT = GENERATED_NAME_WORD + " %d"
 _GENERATED_NAME = re.compile(r"^" + GENERATED_NAME_WORD.lower() + r" [0-9]+$")
@@ -377,7 +395,7 @@ def fnv1a32(value: Any) -> str:
 # -------------------------------------------------------------- sources
 # Python mirror of Model.sanitizeInput / validateSourceUrl / sourceKey /
 # deriveLabel (ARCHITECTURE-SOURCES.md section 3, codes per UX-SOURCES.md
-# 5.4 as ruled by SR6). Both sides run tests/fixtures/source-urls.json.
+# 5.4 as ruled by SR6). Both sides run the source-urls.json. fixture (dev branch)
 
 def utf16_length(text: str) -> int:
     """Length in UTF-16 code units, the unit JS strings and caps use."""
@@ -2198,7 +2216,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             "paused": bool(values["pause"]) if values["pause"] is not None else None,
             "idle": bool(values["idle-active"]) if values["idle-active"] is not None else None,
             "mpvVersion": values["mpv-version"] if isinstance(values["mpv-version"], str) else None,
-            # The reconciliation input docs/ARCHITECTURE-PLAYER.md 271-273
+            # The reconciliation input ARCHITECTURE-PLAYER.md (dev branch) 271-273
             # specified and the code never grew: the health tick already asks
             # the player a question every few seconds, and until now the one
             # thing it never asked was WHICH CHANNEL. Never a URL - the record
@@ -2208,7 +2226,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         return EXIT_OK
     except HelperError as error:
         # `running` keeps its socket-answered meaning (Model.statusHealthy and
-        # the 23 tests/test_mpv.py cases depend on it). `process` is additive
+        # the 23 test_mpv.py (dev branch tests) cases depend on it). `process` is additive
         # and says whether the player is gone or merely wedged, so the health
         # verdict does not need a second call (4.13).
         found = find_player(path)
@@ -2221,7 +2239,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------- player
-# The detached player (docs/ARCHITECTURE-PLAYER.md). mpv runs as a setsid'd
+# The detached player (ARCHITECTURE-PLAYER.md (dev branch)). mpv runs as a setsid'd
 # grandchild of this helper, reparented to the session subreaper, so it
 # outlives every shell restart and is still reaped at logout by the
 # compositor's own cgroup. The shell observes it over mpv's JSON IPC socket.
@@ -2276,7 +2294,7 @@ PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check")
 # are not direct streams - but each one puts the credentialed stream address
 # on a SECOND program's command line, so the user is told at the moment the
 # option is in force. Pinned to the JavaScript by the `mpvHandoff` vectors in
-# tests/fixtures/player-argv.json.
+# the player-argv.json. fixture (dev branch)
 MPV_HANDOFF = frozenset(("--ytdl-format", "--ytdl-raw-options"))
 MPV_HANDOFF_SCRIPT_OPTS = frozenset(("--script-opts", "--script-opt"))
 MPV_YTDL_OFF = frozenset(("no", "0", "false"))
@@ -2388,7 +2406,7 @@ def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, 
 
 def mpv_launch_argv(sock_path: str, mpv_args: list[str],
                     dirs: dict[str, str] | None = None) -> list[str]:
-    """Mirror of Model.buildMpvArgv, pinned by tests/fixtures/player-argv.json.
+    """Mirror of Model.buildMpvArgv, pinned by the player-argv.json. fixture (dev branch)
 
     No URL, no "--", no header options, no per-channel title: the first
     channel arrives over IPC like every later one (S-03). `--idle=once` (PO-1)
@@ -3351,7 +3369,7 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         stash = player_stash(target["id"], target["name"], target["group"], args.scope,
                              source_key_of(cache_dir(args.cache_dir)), args.since or int(time.time()), seq,
                              verb=verb)
-        # D-PLY-11. The measured mechanism (docs/QA-RESULTS.md D1, ruling CL9):
+        # D-PLY-11. The measured mechanism (QA-RESULTS.md (dev branch) D1, ruling CL9):
         # during a cold start a channel change reaches the socket the instant
         # mpv binds it, while this verb is still inside `wait_for_socket`'s
         # handshake - and then this line put the burst's FIRST intent back
@@ -4104,7 +4122,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--ipc-timeout", type=float, default=DEFAULT_IPC_TIMEOUT, help="seconds to wait for mpv (default %.0f)" % DEFAULT_IPC_TIMEOUT)
     status.set_defaults(func=cmd_status)
 
-    # The detached player (docs/ARCHITECTURE-PLAYER.md 4.3). User mpv tokens
+    # The detached player (ARCHITECTURE-PLAYER.md (dev branch) 4.3). User mpv tokens
     # travel as repeated --mpv-arg so argparse can never swallow an
     # option-looking token and no token is ever joined or split.
     player = sub.add_parser("player", help="start, stop, restart, probe or orphan-check the detached player")
