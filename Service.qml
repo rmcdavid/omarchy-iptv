@@ -1488,7 +1488,14 @@ Item {
       var parsed = Model.parseChannels(text)
       var channels = parsed.ok ? Model.prepareChannels(parsed.channels) : []
       prepared = { text: text, channels: channels, channelIndex: Model.indexById(channels),
-                   chnoIndex: Model.buildChnoIndex(channels), channelsMeta: parsed.meta }
+                   chnoIndex: Model.buildChnoIndex(channels), channelsMeta: parsed.meta,
+                   // D-ID-3. The scheme-1 -> scheme-2 map of THIS list, computed
+                   // once here where the O(n) parse is already paid: it hashes
+                   // every URL and folds every name, 60-140 ms on 10,000 rows in
+                   // node, which no LRU hit inside the 150 ms switch budget can
+                   // afford. The map depends on the channels alone; what it is
+                   // applied to (the state) is decided at apply time below.
+                   idRemap: Model.channelIdRemap(channels) }
     }
     if (text !== "" && prepared.channels.length > 0) {
       var next = [prepared]
@@ -1506,9 +1513,34 @@ Item {
     root.channelsMeta = prepared.channelsMeta
     root.switchParseMs = t1 - t0
     root.switchAssignMs = Date.now() - t1
+    root.adoptIdScheme(prepared.idRemap)
     // A now-playing recovered from the player's stash resolves against the
     // cache the moment it lands (4.5); until then it is name-only.
     root.reconcileNowPlaying()
+  }
+
+  // D-ID-3. Move the loaded state onto the id scheme of the channel set that
+  // was just applied. The helper does the same to state.json when the active
+  // fetch carries --state-dir (D-ID-1), but this service then wrote the state
+  // it had loaded BEFORE the helper ran straight back over that file
+  // (handlePlaylistExit -> applyPlaylistStatus -> adoptSourceStats ->
+  // saveState), on the same fetch, every time observed
+  // (QA-HEADLESS-2026-09-21.md on the dev branch, section 1): the rewrite reaches
+  // neither memory nor, for longer than its own write, disk. Remapping the
+  // in-memory state against every applied list makes this service's writes
+  // agree with the helper's, so the order of the two writers stops mattering.
+  // Idempotent: scheme 2 is a substitution (Model.channelIdRemap), so after
+  // one pass no reference is a key of the map, `moved` is 0 and nothing is
+  // written; a list on another scheme-1 vintage (a rotated URL, a probe of a
+  // different source) has no key in the state either. Guarded on stateLoaded
+  // for the record only: activeCacheDir is "" until the state has loaded, so
+  // channels.json cannot be applied before the state is.
+  function adoptIdScheme(remap) {
+    if (!root.stateLoaded) return
+    var moved = Model.remapStateIds(root.userState, remap)
+    if (!(moved.moved > 0)) return
+    root.userState = moved.state
+    root.saveState()
   }
 
   // Re-derive root.channels from the prepared (playlist-order) array when

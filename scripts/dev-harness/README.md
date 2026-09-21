@@ -222,6 +222,33 @@ its 20 rows are numbered, including the duplicate pair 501, the subchannels
 `N/A` that is deliberately NOT a number, and one row for each of the two
 alias attributes of ruling CN11.
 
+### Channel id migration at the sink (D-ID-3)
+
+```bash
+scripts/dev-harness/id-rotate-scenario.sh check-tree   # no display, no quickshell
+scripts/dev-harness/id-rotate-scenario.sh              # preflight, then the live half
+```
+
+The helper moves `state.json` onto id scheme 2 when the active fetch carries
+`--state-dir` (D-ID-1), and until D-ID-3 the shell wrote the state it had
+loaded before the fetch straight back over that file on the same fetch. Every
+earlier proof drove the helper alone; this scenario drives the SHELL, over
+IPC only (no `wtype`, no screenshot), so it runs under a nested headless cage
+(`docs/SPIKE-CAGE-HEADLESS.md`) as well as live. It seeds
+`tests/fixtures/qa-id-rotate/state-seed.json` at 0600 after `run.sh clean`,
+starts on `list-v1.m3u`, and asserts what only a running shell can answer:
+the guide's Favorites scope resolves 7 rows (4 was the defect), read by name
+through the guide's own rows; `state.json` holds the migrated ids at 0600;
+`moved` appears exactly once in the harness log after the first fetch and
+still exactly once after `ipc refresh`; the file is byte-stable across that
+refresh except `sources[].fetchedAt`, the one field a successful fetch
+rewrites; and after `addSource list-v2.m3u` (the rotated URLs) five
+favourites still resolve by name, with the two D-ID-2 accepted-limit rows
+named as the ones that cannot. Against dev's `Service.qml` before the fix it
+answers 4 rows and two `moved` lines; the counts are on the D-ID-3 row of
+`docs/STATUS.md`. Set `OMARCHY_IPTV_HEADLESS_ONLY=1` to make it refuse
+`wayland-1`.
+
 ### Picture in picture (M2-05)
 
 ```bash

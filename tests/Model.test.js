@@ -947,6 +947,35 @@ checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of 
   ]
 }, [1, 1, 0, 1, false])
 
+// ---- D-ID-3: the shell adopts the helper's id scheme, or undoes it ----
+// With --state-dir the helper moved state.json onto scheme 2 (`moved 8`) and
+// the shell then wrote the state it had loaded BEFORE the fetch back over the
+// file, on the same fetch, twice of twice observed
+// (docs/QA-HEADLESS-2026-09-21.md section 1). Model.channelIdRemap and
+// Model.remapStateIds were lifted for exactly this call site and nothing in
+// Service.qml called either. This check is a NAME-join (CLAUDE.md 13): it
+// proves only that the two calls are spelled, with the loaded state as the
+// argument of the second and a write gated on `moved`. It is not
+// Model.remapChannelIds, the one-call composition, because that hashes every
+// URL and folds every name on each call (60-140 ms on 10,000 rows in node) and
+// applyChannels runs on every switch, LRU hits included, inside a 150 ms
+// budget; so the map is computed once per parsed list and applied per apply.
+// The observation that the join WORKS -- favourites resolving 7 rows not 4,
+// one `moved` line across a refresh, state.json stable, names surviving the
+// rotation -- is scripts/dev-harness/id-rotate-scenario.sh against the real
+// shell, headless. Rule 11: against dev's Service.qml (zero references) this
+// answers [0, 0, false] and goes red.
+checkCall("D-ID-3 Service.qml derives the id map per parsed list and moves the loaded state onto it, writing only a move", function () {
+  const code = serviceSource.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) }).join("\n")
+  return [
+    (code.match(/idRemap: Model\.channelIdRemap\(channels\)/g) || []).length,
+    (code.match(/Model\.remapStateIds\(root\.userState, remap\)/g) || []).length,
+    // The write is gated on something having moved, or every apply would
+    // rewrite state.json (and a fresh cache would rewrite it at every start).
+    /Model\.remapStateIds\(root\.userState, remap\)[\s\S]{0,200}\.moved > 0\)\) return[\s\S]{0,120}root\.saveState\(\)/.test(code)
+  ]
+}, [1, 1, true])
+
 // ---- D-RUNG-4: the accent ink on the cursor row ----
 // The accent is under 4.5:1 against its OWN selected fill in 8 of 23 themes at
 // full opacity, worst 2.80. No opacity change reaches that; only the ink can.
