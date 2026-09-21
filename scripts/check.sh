@@ -15,6 +15,9 @@
 #   9. marketplace capabilities  (scripts/check-marketplace-capabilities.py: no
 #                                tracked file the marketplace scan reads holds a
 #                                string it would report as a capability)
+#  10. release allowlist         (scripts/release.py check: what main ships is
+#                                exactly what the runtime, the manifest and the
+#                                README need, and no agent-instruction file)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -104,7 +107,7 @@ fail=0
 # vector is red on an assertion rather than on arithmetic here.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1427}
-PY_TESTS_MIN=${PY_TESTS_MIN:-469}
+PY_TESTS_MIN=${PY_TESTS_MIN:-485}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -448,5 +451,18 @@ else
 fi
 
 printf '\n'
+step "release allowlist (what main ships is exactly what is needed)"
+# main is the install artifact, exported from dev by scripts/release.py from
+# an explicit allowlist. This proves the list is whole before anything is cut:
+# every runtime import and manifest entry point is on it, the README names
+# nothing off it, and no agent-instruction file is on it. Found the hard way:
+# CLAUDE.md shipped into every user's plugin directory (marketplace #7374).
+release_log=$CHECK_TMP/release.log
+if python3 "$ROOT/scripts/release.py" check >"$release_log" 2>&1; then
+  ok "$(head -1 "$release_log")"
+else
+  cat "$release_log"; bad "release allowlist"
+fi
+
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi
 echo "check.sh: all green"

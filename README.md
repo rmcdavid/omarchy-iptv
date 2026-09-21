@@ -7,11 +7,12 @@ Status: v0.7.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
-`CHANGELOG.md` has the release notes. `docs/PRODUCT.md` holds the product
-vision and the roadmap, `docs/ARCHITECTURE.md` the design and standards,
-`docs/UX.md` the interaction and visual spec, and `docs/STATUS.md` the live
-build status.
-Contributors should start with `CLAUDE.md`.
+`CHANGELOG.md` has the release notes.
+
+This branch is the install artifact and nothing else: what `omarchy plugin
+add` clones is exactly what the plugin needs to run. The design documents,
+the product roadmap, the live build status, the tests and the tooling all live
+on the `dev` branch, https://github.com/rmcdavid/omarchy-iptv/tree/dev, and contributors should start there.
 
 The plugin ships no content. Bring a playlist you are entitled to use.
 
@@ -87,7 +88,7 @@ in search mode: type part of a channel or group name, `Enter` plays it in mpv
 and closes the guide. Press `Tab` (or `/`) to switch to list mode, where the
 vim keys and single-letter commands are live.
 
-Guide keys (full map in `docs/UX.md` section 3):
+Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 
 | Mode | Key | Action |
 |---|---|---|
@@ -362,22 +363,13 @@ it still opens the guide and playback works from the guide.
 
 ## Development
 
-```bash
-scripts/check.sh                       # validate + qmllint + node + python + qml spec
-#   qmllint baseline: only missing-property / unqualified access on host-injected
-#   objects and Style/Color children, uncreatable-type for PanelWindow, and
-#   signal-handler-parameters on Process.onExited are accepted; anything else fails review
-node tests/Model.test.js
-python3 -m unittest discover -s tests
-/usr/lib/qt6/bin/qmltestrunner -input tests/Model.spec.qml
-omarchy plugin validate .
-```
-
-For live testing clone the repo to
-`~/.config/omarchy/plugins/io.github.rmcdavid.iptv/` (no symlinks allowed
-inside a plugin folder), then `omarchy-shell shell rescanPlugins` and
-`omarchy plugin enable io.github.rmcdavid.iptv`. `docs/QA.md` has the full
-runbook.
+Development happens on the `dev` branch: https://github.com/rmcdavid/omarchy-iptv/tree/dev. It carries everything this
+branch deliberately does not -- the design and QA documents, the test suites,
+the gate, the dev harness, and the agent instruction file -- and its README
+section of the same name has the commands. `main` is produced from `dev` by
+the release exporter there; nothing is committed to `main` by hand, and only
+an explicit allowlist of files is ever exported, which is why a fresh install
+contains no documentation beyond this file and the changelog.
 
 ## License
 

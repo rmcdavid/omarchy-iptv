@@ -205,3 +205,51 @@ outright: `excludedDirectories` contains `docs`, and `.md` is absent from
 `scannedExtensions`. Only a root `README` is read as markdown. The habit of
 keeping this file clear of the literal tokens it describes is still worth
 keeping -- it costs nothing -- but it is no longer load-bearing.
+
+---
+
+## 2026-09-20, later: the reviewer read our disclosure and followed it
+
+Thirty minutes after the re-validation went green, HANCORE-linux applied
+`needs-fixes` again and wrote:
+
+> `CLAUDE.md:9-42` is a root-level agent instruction file ... The submission
+> confirms that `omarchy plugin add` installs the whole repository, so this
+> file lands in the installed plugin tree and can be automatically
+> interpreted by coding agents working there, extending repository-supplied
+> instructions into the user's agent context. Please remove it from the
+> published root/install artifact ... then revalidate the exact commit.
+
+They were right, and we handed them the thread: the maintainer notes said in
+so many words that the whole repository is cloned. The bots were still green
+at `f2d1dbf`; this was a human finding, applied by hand thirteen seconds
+before the comment.
+
+**The answer is structural, not a rename.** Moving `CLAUDE.md` under `docs/`
+would have satisfied the sentence and left the cause: everything on `main`
+ships, because the install path is a whole-repository clone with no
+allowlist. So `main` is now the install artifact and nothing else -- thirteen
+files, spelled out in `ALLOWLIST` in `scripts/release.py`, exported from a
+clean green `dev` and committed onto `main` linearly, since
+`omarchy-plugin-update` is `git merge --ff-only` and a rewritten `main` would
+strand every install. `release.py check` runs in the gate and proves the list
+is whole. Nothing is committed to `main` by hand again.
+
+What this removes from every install at once: `CLAUDE.md`; `docs/`; `tests/`;
+`scripts/`, including `qa-live.sh`, which with `--apply` installs and removes
+the plugin and which we had already had to disclose; and `.claude/`. What it
+cannot remove is the history already in `.git`, which a clone still carries.
+A coding agent reads the working tree, not the reflog, so that is the
+reviewer's sentence satisfied; but it is a limit and is stated to them as one.
+
+The version moved to 0.7.1 in the same push. `main` at `f2d1dbf` already
+carried the D-ID-1 fix under the 0.7.0 label, which the marketplace had
+already displayed as "IPTV 0.7.0"; the restructure was the honest moment to
+stop that.
+
+**Bundled and disclosed.** The phase-3 branch (relabels, the ledger shape
+check, the two README corrections, the capability guard) rode in the same
+push. Every head of it had already returned `passed` from the marketplace's
+own scanner, run locally against GitHub exactly as their bot runs it, and two
+of its commits correct the README the reviewer is reading. One review cycle
+instead of two, said plainly in the reply rather than left to be noticed.

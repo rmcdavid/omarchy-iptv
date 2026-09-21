@@ -4,7 +4,39 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released: v0.1.0 (MVP), v0.2.0 (Sources).
+Quickshell process. Released through v0.7.1.
+
+## Branches: `dev` is the tree, `main` is the artifact
+
+You are on `dev`. Everything is here. `main` holds ONLY the install artifact:
+the thirteen files in `ALLOWLIST` in `scripts/release.py`, exported from a
+clean, green `dev` by `scripts/release.py build`, committed onto `main` with
+its previous tip as parent, and tagged. Nobody commits to `main` by hand, and
+nothing is ever pushed to `main` except the output of that script.
+
+Why. `omarchy plugin add` is a whole-repository `git clone`, and the
+marketplace validates default-branch HEAD. So for the life of this project
+every file on `main` landed in every user's plugin directory -- including this
+one, a root-level agent instruction file that any coding agent opened inside
+`~/.config/omarchy/plugins/io.github.rmcdavid.iptv/` would obey as its own.
+A marketplace reviewer found that on 2026-09-20 (issue #7374) and was right.
+The fix is structural, not a rename: what ships is an explicit allowlist, and
+`release.py check` runs in the gate to prove the list is whole -- every
+runtime import resolves inside it, every manifest entry point is on it, the
+README names nothing outside it, and no agent-instruction filename is on it.
+
+Consequences you must respect:
+- This file never ships. Neither does `docs/`, `tests/`, `scripts/`, or
+  `.claude/`. Do not reference them from README.md by path; link the `dev`
+  branch by URL. The gate rejects a bare `docs/...` in the README.
+- Adding a file the plugin needs at runtime means adding it to `ALLOWLIST`,
+  or the release ships broken. The gate catches an import it cannot find.
+- `main` must stay linear: `omarchy-plugin-update` is `git merge --ff-only`,
+  so a force-push to `main` strands every install. Never rewrite it.
+- A release is: bump `manifest.json` and `CHANGELOG.md` on `dev`, green
+  gate, `scripts/release.py build --gate-already-green`, then push `dev`,
+  `main` and the tag. While a marketplace review is open, `main` moves only
+  when the reviewer asks for a new commit.
 
 ## Where the truth lives
 
