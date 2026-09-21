@@ -1,7 +1,0 @@
-#EXTM3U url-tvg="http://epg.example.test/guide.xml.gz"
-#EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" tvg-logo="http://logos.example.test/bbc1.png" group-title="UK",BBC One HD
-http://stream.example.test/live/bbc1.m3u8
-#EXTINF:-1 tvg-id="cnn.us" group-title="News, World",CNN International, Europe feed
-https://stream.example.test/live/cnn.m3u8
-#EXTINF:-1,Plain Channel
-http://stream.example.test/live/plain.ts

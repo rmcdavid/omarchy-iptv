@@ -3,15 +3,16 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.7.1. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
-`CHANGELOG.md` has the release notes. `docs/PRODUCT.md` holds the product
-vision and the roadmap, `docs/ARCHITECTURE.md` the design and standards,
-`docs/UX.md` the interaction and visual spec, and `docs/STATUS.md` the live
-build status.
-Contributors should start with `CLAUDE.md`.
+`CHANGELOG.md` has the release notes.
+
+This branch is the install artifact and nothing else: what `omarchy plugin
+add` clones is exactly what the plugin needs to run. The design documents,
+the product roadmap, the live build status, the tests and the tooling all live
+on the `dev` branch, https://github.com/rmcdavid/omarchy-iptv/tree/dev, and contributors should start there.
 
 The plugin ships no content. Bring a playlist you are entitled to use.
 
@@ -87,7 +88,7 @@ in search mode: type part of a channel or group name, `Enter` plays it in mpv
 and closes the guide. Press `Tab` (or `/`) to switch to list mode, where the
 vim keys and single-letter commands are live.
 
-Guide keys (full map in `docs/UX.md` section 3):
+Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 
 | Mode | Key | Action |
 |---|---|---|
@@ -125,6 +126,7 @@ Shell IPC verbs, usable from any keybinding or script:
 
 ```bash
 omarchy-shell shell toggle io.github.rmcdavid.iptv       # open / close the guide
+omarchy-shell io.github.rmcdavid.iptv toggle             # the same thing, as the plugin's own verb
 omarchy-shell io.github.rmcdavid.iptv play t:bbc1.uk      # play a channel id from the cache
 omarchy-shell io.github.rmcdavid.iptv next                # zap forward
 omarchy-shell io.github.rmcdavid.iptv previous            # zap back
@@ -264,7 +266,7 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   anything but http(s) are refused and credentials are dropped when a
   redirect changes host.
 
-## Picture in picture
+## Picture in picture settings
 
 Press `p` in the guide's list mode to shrink the player into a corner of your
 screen and keep watching while you work. Press it again to put it back. From
@@ -296,10 +298,16 @@ itself unavailable rather than half working.
   played, and the Sources history including their URLs (mode 0600)
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
-- `~/.cache/mpv/` : mpv's own shader cache, written by the player. It holds
-  no information about what you watched and is safe to delete.
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is
-  running, and a small lock file used to guarantee only one player exists
+  running, a small lock file used to guarantee only one player exists, and
+  two directories that exist only until you log out -- `shader-cache` for
+  mpv's compiled shaders and ICC profiles, and `watch-later` for its resume
+  records. Both would otherwise land in `~/.cache/mpv/` and
+  `~/.local/state/mpv/`, outside this list; the player is pointed at the
+  runtime directory instead so nothing durable accumulates in your home.
+  A shader cache is content-free and is not keyed to what you watched.
+  This is a default rather than a guarantee: neither path is reserved, so
+  an `mpvArgs` token of your own can still send them elsewhere.
 
 Nothing inside the plugin directory is written at runtime.
 
@@ -355,22 +363,14 @@ it still opens the guide and playback works from the guide.
 
 ## Development
 
-```bash
-scripts/check.sh                       # validate + qmllint + node + python + qml spec
-#   qmllint baseline: only missing-property / unqualified access on host-injected
-#   objects and Style/Color children, uncreatable-type for PanelWindow, and
-#   signal-handler-parameters on Process.onExited are accepted; anything else fails review
-node tests/Model.test.js
-python3 -m unittest discover -s tests
-/usr/lib/qt6/bin/qmltestrunner -input tests/Model.spec.qml
-omarchy plugin validate .
-```
-
-For live testing clone the repo to
-`~/.config/omarchy/plugins/io.github.rmcdavid.iptv/` (no symlinks allowed
-inside a plugin folder), then `omarchy-shell shell rescanPlugins` and
-`omarchy plugin enable io.github.rmcdavid.iptv`. `docs/QA.md` has the full
-runbook.
+Development happens on the `dev` branch:
+https://github.com/rmcdavid/omarchy-iptv/tree/dev. It carries everything this
+branch deliberately does not -- the design and QA documents, the test suites,
+the gate script, the dev harness, and the agent instruction file. The gate and
+the QA runbook there say how to run and test the plugin. `main` is produced
+from `dev` by the release exporter there; nothing is committed to `main` by
+hand, and only an explicit allowlist of files is ever exported, which is why a
+fresh install contains no documentation beyond this file and the changelog.
 
 ## License
 

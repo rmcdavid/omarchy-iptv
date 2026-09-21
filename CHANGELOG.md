@@ -3,6 +3,40 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.1 (2026-09-20)
+
+A password change no longer empties your favorites, and what gets installed is
+only the plugin.
+
+### Fixed
+- **Favorites and recents survive a provider credential change.** On a
+  playlist with no `tvg-id`, a channel's identity used to be a hash of its
+  stream URL, and that URL carries the account password, so rotating it
+  silently orphaned every favorite and recent. Identity is now keyed by the
+  channel's name where no `tvg-id` exists, and saved state is remapped on the
+  first load after upgrade. (D-ID-1; live confirmation of the migration on an
+  installed plugin is still owed, and is tracked on the board.)
+- The README now documents the plugin's own `toggle` IPC verb, which was
+  shipped but never listed; only the host's `shell toggle` and the `pip
+  toggle` mode were.
+- The README's list of files the plugin writes was wrong in both directions:
+  it named `~/.cache/mpv/`, which the player has not written since the
+  containment fix, and omitted the runtime `shader-cache` and `watch-later`
+  directories it does.
+
+### Changed
+- **The published branch is the install artifact only.** `omarchy plugin add`
+  clones the whole repository, so until now every install carried the design
+  documents, the QA harness, developer scripts, and a root-level agent
+  instruction file that a coding agent opened inside the plugin directory
+  would obey. A marketplace reviewer found the last of those. `main` now
+  holds an explicit allowlist of thirteen files exported from `dev` by a
+  release script, and a gate check proves that list is whole. Updating an
+  existing install fast-forwards to the lean tree and removes the rest.
+- Two developer-script messages were reworded so they no longer read as
+  invocations. No executed instruction changed; a gate check keeps the
+  phrasing that way.
+
 ## 0.7.0 (2026-09-15)
 
 Search tells the truth, and the text you read is readable.
