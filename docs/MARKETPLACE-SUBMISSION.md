@@ -268,3 +268,11 @@ before the cut: the artifact README said `Status: v0.7.0` beside a 0.7.1
 manifest (now pinned by `release.py check`); its Development paragraph pointed
 at "the dev README's section of the same name", which is the same blob; and
 the `dev` branch it links to did not exist on the remote yet.
+
+**Superseded the same evening.** The reply told the reviewer the
+no-hand-commits rule was "held by the script, the gate and its tests, not by a
+branch ruleset". True when written; a ruleset (`main-is-the-artifact`,
+#23743896: no force-push, linear history, no deletion, no bypass actors) now
+enforces it on `refs/heads/main` as well. Not re-posted to the issue -- it
+changes nothing about the validated commit -- but recorded here so the reply
+is not read later as the current state.

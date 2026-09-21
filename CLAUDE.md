@@ -32,7 +32,11 @@ Consequences you must respect:
 - Adding a file the plugin needs at runtime means adding it to `ALLOWLIST`,
   or the release ships broken. The gate catches an import it cannot find.
 - `main` must stay linear: `omarchy-plugin-update` is `git merge --ff-only`,
-  so a force-push to `main` strands every install. Never rewrite it.
+  so a force-push to `main` strands every install. Never rewrite it. A GitHub
+  ruleset (`main-is-the-artifact`, #23743896) enforces this on the remote --
+  no force-push, no merge commits, no deletion, no bypass for anyone -- so a
+  by-hand `git push origin X:main` that is not a fast-forward is refused
+  there, not only by convention here.
 - A release is: bump `manifest.json` and `CHANGELOG.md` on `dev`, green
   gate, `scripts/release.py build --gate-already-green`, then push `dev`,
   `main` and the tag. While a marketplace review is open, `main` moves only
