@@ -3,6 +3,19 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+### Fixed
+- **Favorites and recents now actually survive a provider credential change.**
+  0.7.1 and 0.7.2 said they did, and the helper's half was right: it moved
+  every saved reference onto the name-keyed scheme. But the shell then wrote
+  the state it had loaded before the helper ran straight back over the file,
+  on every fetch, so on a playlist without `tvg-id` the migration never took
+  hold and a password rotation still orphaned favorites. The shell now moves
+  its own copy of the state onto the new scheme whenever a channel list is
+  applied, so its writes agree with the helper's. Found by observing the
+  running plugin rather than the helper alone. (D-ID-3)
+
 ## 0.7.2 (2026-09-21)
 
 The first release through the new pipeline, closing the three things the

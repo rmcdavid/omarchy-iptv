@@ -1491,7 +1491,7 @@ Item {
                    chnoIndex: Model.buildChnoIndex(channels), channelsMeta: parsed.meta,
                    // D-ID-3. The scheme-1 -> scheme-2 map of THIS list, computed
                    // once here where the O(n) parse is already paid: it hashes
-                   // every URL and folds every name, 60-140 ms on 10,000 rows in
+                   // every URL and folds every name, tens of milliseconds on 10,000 rows in
                    // node, which no LRU hit inside the 150 ms switch budget can
                    // afford. The map depends on the channels alone; what it is
                    // applied to (the state) is decided at apply time below.

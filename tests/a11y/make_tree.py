@@ -119,46 +119,21 @@ def ui():
         % ", ".join(patched))
 
 
-GUIDE_EDITS = [
-    # (regex, replacement, why)
-    (r"^import Quickshell\.Wayland\n", "",
-     "layer-shell attached properties, panel window only"),
-    (r"^import Quickshell\n", "import QtQuick.Window\n",
-     "swap the Quickshell module for the plain Window module"),
-    (r"^(\s*)PanelWindow \{\n", r"\1Window {\n",
-     "the one line this whole lane exists to route around"),
-    (r"^\s*WlrLayershell\.[A-Za-z]+:.*\n", "",
-     "layer-shell only"),
-    (r"^\s*exclusionMode: ExclusionMode\.Ignore\n", "",
-     "layer-shell only"),
-    (r"Quickshell\.execDetached\(", "probeShim.execDetached(",
-     "clipboard write, not an accessibility sink"),
-    (r"Quickshell\.clipboardText", "probeShim.clipboardText",
-     "clipboard read, not an accessibility sink"),
-]
-
-
 def guide():
-    text = open(os.path.join(REPO, "Guide.qml")).read()
-    orig = text
-    for pat, rep, why in GUIDE_EDITS:
-        text, n = re.subn(pat, rep, text, flags=re.M)
-        log("guide", "%-46s x%d  (%s)" % (pat.replace("\\n", ""), n, why))
-    # The probe needs a window that is never shown and a fixed size, since
-    # PanelWindow got its geometry from the layer-shell anchors that just went.
-    text = text.replace("  Window {\n    id: panel\n    visible: root.opened\n",
-                        "  Window {\n    id: panel\n"
-                        "    visible: false\n"
-                        "    width: 1920\n    height: 1080\n")
-    text = text.replace('    anchors { top: true; bottom: true; left: true; right: true }\n', "")
-    # A tiny object standing in for the two Quickshell clipboard calls.
-    text = text.replace("Item {\n  id: root\n",
-                        "Item {\n  id: root\n\n"
-                        "  QtObject {\n"
-                        "    id: probeShim\n"
-                        "    property string clipboardText: \"\"\n"
-                        "    function execDetached(argv) { }\n"
-                        "  }\n", 1)
+    """Write GuideProbe.qml by CALLING fidelity.apply_transform, the same rules
+    the fidelity guard grades against. This file used to carry its own copy
+    of the edits (a regex list plus two string replaces keyed on the old
+    `PanelWindow { id: panel` header); when the window moved inside a Loader
+    Component that copy matched nothing and would have produced a copy that
+    cannot load. Two lists joined by a name drifted; one function joined by a
+    call cannot (CLAUDE.md rule 13). fidelity.py raises if a rule stops
+    matching, which is the failure mode we want: loud, not a silent no-op."""
+    sys.path.insert(0, HERE)
+    import fidelity
+    orig = open(os.path.join(REPO, "Guide.qml")).read()
+    text = fidelity.apply_transform(orig)
+    for rule in fidelity.TRANSFORM_RULES:
+        log("guide", "%-22s applied  (%s)" % (rule["id"], rule.get("why", "")[:60].replace("\n", " ")))
     os.makedirs(TREE, exist_ok=True)
     open(os.path.join(TREE, "GuideProbe.qml"), "w").write(text)
     shutil.copy(os.path.join(REPO, "Model.js"), TREE)

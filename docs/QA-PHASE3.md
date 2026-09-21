@@ -319,3 +319,39 @@ guide under cage, takes keystrokes, and captures in theme colours; its
 verifier refuted three specifics -- a red a11y transform anchored on the old
 window header, a coverage gap on the moved block's anchors, and a false
 attribution in its README -- so it integrates with those fixed, not as-is.
+
+## Addendum: 3c integration, and a proof that had to be fixed before it counted
+
+2026-09-21, later. Three lanes in their own worktrees: the D-ID-3 fix, the
+harness floating-window mode with its verifier's fixes, and the two scenario
+scripts. All three merged cleanly onto `dev` (different hunks of the two
+shared files).
+
+**D-ID-3 is fixed** -- `applyChannels` carries the scheme map per parsed list
+and `adoptIdScheme` moves the in-memory state onto it, writing only on a move
+-- and its verifier refuted the first proof artefact for a reason worth
+keeping: two of the scenario's assertions had encoded one side of a load-time
+race. With the seed's `session` record present, `Model.stateOnLoad`'s
+in-flight replay and the PO-3 dead-session clear race on load; the lane's
+machine saw the replay win (`moved 8`, the session in recents and
+lastPlayed), the verifier's saw the clear win (`moved 7`). The lane had
+written "by ruling PO-3" for what was actually the other path. The seed is
+now installed without its session record, the expectations are the fixture
+README's own table, and the invariant is the *count* of `moved` lines, not
+its number. Re-run by the integrator under cage: 37 / 0 green on the
+integrated tree, 23 / 14 red against `dev`'s `Service.qml`, both
+deterministic.
+
+**One integration mistake, caught by the scenario itself:** a comment
+rewrite above `RECENT_IDS` swallowed three variable definitions, and the
+scenario died at an unbound variable on its first run. The substantive
+numbers were already visible in both outputs; the artefact was not whole.
+Restored from the lane's commit and re-run.
+
+**Also landed:** the id-rotate check-tree in `check.sh` as its own step
+(floor 14); `tests/a11y/make_tree.py` now obtains the probe's copy by calling
+`fidelity.apply_transform` -- the generator had carried its own list of
+edits keyed on the old window header, which the harness mode had silently
+turned into a copy that could not load; one function joined by a call cannot
+drift the way two lists joined by a name did. D-CHNO-6 filed for a `MouseArea`
+anchor Qt refuses, pre-existing and now visible per rendered row.

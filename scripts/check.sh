@@ -121,7 +121,7 @@ fail=0
 # vector is red on an assertion rather than on arithmetic here.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1427}
-PY_TESTS_MIN=${PY_TESTS_MIN:-522}
+PY_TESTS_MIN=${PY_TESTS_MIN:-531}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -318,6 +318,21 @@ if bash "$ROOT/scripts/dev-harness/pip-scenario.sh" check-tree >"$pip_log" 2>&1;
   fi
 else
   bad "pip preflight"; cat "$pip_log"
+fi
+
+step "scripts/dev-harness/id-rotate-scenario.sh check-tree (D-ID-3)"
+# The fix for D-ID-3 lives in Service.qml, which no unit test can reach; the
+# scenario's live half proved it at the sink headless under cage. Its
+# check-tree half runs here so the three seams the fix depends on cannot be
+# refactored away silently: the map per parsed list, the move at apply, the
+# write gated on a move. Floor recipe in the scenario's footer.
+ID_ROTATE_MIN=${ID_ROTATE_MIN:-14}
+idrot_log=$CHECK_TMP/id-rotate.log
+if "$ROOT/scripts/dev-harness/id-rotate-scenario.sh" check-tree >"$idrot_log" 2>&1; then
+  idrot_n=$(grep -cE '^(PASS|ok) ' "$idrot_log" || true)
+  if (( idrot_n < ID_ROTATE_MIN )); then cat "$idrot_log"; bad "id-rotate preflight ran $idrot_n checks, expected at least $ID_ROTATE_MIN"; else ok "id-rotate preflight ($idrot_n checks)"; fi
+else
+  cat "$idrot_log"; bad "id-rotate preflight"
 fi
 
 step "ascii check (code files)"

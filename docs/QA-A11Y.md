@@ -183,7 +183,7 @@ generator and a checker cannot drift into two truths. Eight layers: L1 no
 changed line may contain `Accessible.` at all; L2 every added or removed line
 attributed to a declared rule with exact counts, and a rule that *stops* firing
 is red too; L3 projection equality after exactly one declared attachment rename
-(`PanelWindow#panel` -> `Window#panel`); L4 elements the transform adds declare
+(the `PanelWindow` inside `Component { id: layerHost }` -> a plain `Window`, the Loader and the reparented content kept; `tests/a11y/make_tree.py` obtains the copy by calling `fidelity.apply_transform`, so the generator and the guard share one rule set); L4 elements the transform adds declare
 no accessibility; L5 the shipping file declares no accessibility on the element
 being rehosted; L6 verbatim copies byte-identical; L7 inventory of surfaces
 nobody grades; L8 the copied host UI kit byte-identical except four declared

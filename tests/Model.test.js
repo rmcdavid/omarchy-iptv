@@ -948,7 +948,7 @@ checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of 
 }, [1, 1, 0, 1, false])
 
 // ---- D-ID-3: the shell adopts the helper's id scheme, or undoes it ----
-// With --state-dir the helper moved state.json onto scheme 2 (`moved 8`) and
+// With --state-dir the helper moved state.json onto scheme 2 (`moved N`) and
 // the shell then wrote the state it had loaded BEFORE the fetch back over the
 // file, on the same fetch, twice of twice observed
 // (docs/QA-HEADLESS-2026-09-21.md section 1). Model.channelIdRemap and
@@ -957,7 +957,7 @@ checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of 
 // proves only that the two calls are spelled, with the loaded state as the
 // argument of the second and a write gated on `moved`. It is not
 // Model.remapChannelIds, the one-call composition, because that hashes every
-// URL and folds every name on each call (60-140 ms on 10,000 rows in node) and
+// URL and folds every name on each call (tens of milliseconds on 10,000 rows in node, paid on every LRU hit) and
 // applyChannels runs on every switch, LRU hits included, inside a 150 ms
 // budget; so the map is computed once per parsed list and applied per apply.
 // The observation that the join WORKS -- favourites resolving 7 rows not 4,
