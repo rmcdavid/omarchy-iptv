@@ -35,6 +35,9 @@
 #                       this invocation, which is what `restart-shell` needs. Reap with `reap`.
 #   --instance NAME     a second config root (root<NAME>) sharing the same cache / state /
 #                       runtime dirs: two services, one runtime directory, one player
+#   --window MODE       layer (default): the production PanelWindow + layer-shell. floating: host
+#                       the guide in a FloatingWindow (xdg toplevel) so it maps under a compositor
+#                       with no layer-shell, e.g. headless cage (docs/SPIKE-CAGE-HEADLESS.md). Harness-only.
 #
 # Environment: OMARCHY_IPTV_PLUGIN_ROOT overrides which checkout the harness
 # loads Service.qml / Guide.qml / BarWidget.qml / bin/omarchy-iptv from
@@ -298,7 +301,7 @@ case $cmd in
   start|--*)
     [[ $cmd == start ]] && shift
     OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0
-    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true
+    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
@@ -324,6 +327,12 @@ case $cmd in
         --keep-player) KEEP_PLAYER=1 ;;
         --detach) DETACH=1; KEEP_PLAYER=1 ;;
         --instance) INSTANCE=$2; shift ;;
+        # Harness-only: which window hosts the guide. Rejected here for the
+        # same reason as --order: shell.qml compares the string, so a typo
+        # would silently run the production window under a compositor that
+        # cannot map it and every pixel check after it would be vacuous.
+        --window) WINDOW=$2; shift
+                 [[ $WINDOW == layer || $WINDOW == floating ]] || die "--window takes layer or floating, not '$WINDOW'" ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
       esac
       shift
@@ -361,8 +370,9 @@ case $cmd in
     export OMARCHY_IPTV_ORDER="$ORDER"
     export OMARCHY_IPTV_ENTRY_MS="$ENTRY_MS"
     export OMARCHY_IPTV_BAR_NUMBER="$BAR_NUMBER"
+    export OMARCHY_IPTV_HARNESS_WINDOW="$WINDOW"
     # scheme://host only: the URL may carry provider credentials (S-08).
-    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
+    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s window=$WINDOW playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
     if (( DETACH )); then
       # Record the environment so `restart-shell` can bring the same shell
       # back without re-deriving anything (the fixture server, the cache and
@@ -388,6 +398,7 @@ case $cmd in
         qa_env_line OMARCHY_IPTV_ORDER       "$OMARCHY_IPTV_ORDER"
         qa_env_line OMARCHY_IPTV_ENTRY_MS    "$OMARCHY_IPTV_ENTRY_MS"
         qa_env_line OMARCHY_IPTV_BAR_NUMBER  "$OMARCHY_IPTV_BAR_NUMBER"
+        qa_env_line OMARCHY_IPTV_HARNESS_WINDOW "$OMARCHY_IPTV_HARNESS_WINDOW"
         qa_env_line OMARCHY_IPTV_MPV_ARGS    "${OMARCHY_IPTV_MPV_ARGS:-}"
       } >"$SCRATCH/last-start.env"
       start_detached_shell
@@ -409,7 +420,7 @@ case $cmd in
     # The header block, through the environment paragraph. Keep this in step
     # with the comment above when options are added, or the usage silently
     # stops listing the newest ones.
-    sed -n '2,48p' "$0"
+    sed -n '2,51p' "$0"
     exit 2
     ;;
 esac

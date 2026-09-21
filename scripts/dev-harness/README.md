@@ -64,8 +64,42 @@ scripts/dev-harness/run.sh --open --playlist /nonexistent.m3u --keep   # error b
 scripts/dev-harness/run.sh --open --vertical         # glyph-only bar widget
 scripts/dev-harness/run.sh --open --order number      # channelOrder=number (M2-03)
 scripts/dev-harness/run.sh --open --entry-ms 3000 --no-bar-number
+scripts/dev-harness/run.sh --open --window floating   # harness-only window mode (headless cage)
 scripts/dev-harness/run.sh clean
 ```
+
+### Headless: `--window floating`
+
+In production the guide is a `PanelWindow` on the layer-shell Overlay layer
+with exclusive keyboard focus. A compositor with no `zwlr_layer_shell_v1` --
+the headless `cage` of `docs/SPIKE-CAGE-HEADLESS.md` -- never maps it, so
+under cage the guide answered over IPC but no pixel and no keystroke ever
+reached it. `--window floating` hosts the same content in a `FloatingWindow`
+(an xdg toplevel, which cage fullscreens and hands the keyboard to), so
+`grim` captures it and `wtype` reaches it. Measured inside cage: the guide
+maps 2.3 s after launch, the capture carries the shell-resolved
+`Color.menu.background` on half a million pixels, and `wtype` filters the
+rows through the guide's own search path.
+
+The switch is `Guide.qml`'s `harnessFloatingWindow`, a plain property with
+the production default; `shell.qml` hands it in as an INITIAL property
+through `Loader.setSource` when `OMARCHY_IPTV_HARNESS_WINDOW=floating`, so
+the guide's window `Loader` decides once at creation and the layer-shell
+`Component` is never instantiated in floating mode (its `WlrLayershell`
+attached properties are a creation error on a platform without the
+protocol). Nothing in the real shell sets it, and it is not a setting.
+`ipc theme` reports the resolved tokens and which window the loaded guide
+says it has, so a capture is checked against the running value.
+
+What does not transfer: focus semantics. The floating window has ordinary
+toplevel focus, not the exclusive layer-shell focus, so cases about focus
+itself stay on the real shell; cases about what is painted and what a key
+does to the model run here. Measured under cage: `wtype -d 40 sky` arrived
+whole (`query='sky'`, three rows) on four consecutive invocations, with and
+without `-s`. A scenario should still read the query back over IPC rather
+than assume it: the one truncated arrival seen while this landed (`ky`) came
+from an id that shadowed the guide's `surface` property, which the a11y and
+node checks now cover, and it did not recur once that was fixed.
 
 Drive a running harness from another terminal:
 

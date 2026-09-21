@@ -25,12 +25,21 @@ import "Model.js" as Model
 //   OMARCHY_IPTV_ORDER      channelOrder setting ("playlist" | "number")
 //   OMARCHY_IPTV_ENTRY_MS   numberEntryMs setting
 //   OMARCHY_IPTV_BAR_NUMBER "false" hides the channel number in the bar
+//   OMARCHY_IPTV_HARNESS_WINDOW "floating" hosts the guide in a FloatingWindow (harness-only; see floatingGuide)
 //
 // Drive it with `run.sh ipc <fn> [args]` (IpcHandler target "harness").
 ShellRoot {
   id: harness
 
   readonly property string repoRoot: Quickshell.env("OMARCHY_IPTV_ROOT")
+  // Harness-only window mode (docs/SPIKE-CAGE-HEADLESS.md). "floating" hosts
+  // the guide in a FloatingWindow, an xdg toplevel, so it maps under a
+  // compositor with no layer-shell (headless cage) and wtype and grim reach
+  // it. It is handed to Guide.qml as an INITIAL property through
+  // Loader.setSource, before the guide's own window Loader decides, so the
+  // layer-shell component is never instantiated in floating mode; assigning
+  // it after load would build the production window first and swap it out.
+  readonly property bool floatingGuide: Quickshell.env("OMARCHY_IPTV_HARNESS_WINDOW") === "floating"
   readonly property string pluginId: "io.github.rmcdavid.iptv"
   property string lastTooltip: ""
   // The last 20 source signal payloads (URL-free by contract), for `signals()`.
@@ -413,7 +422,11 @@ ShellRoot {
 
   Loader {
     id: guideLoader
-    source: "file://" + harness.repoRoot + "/Guide.qml"
+    // The initial property is passed only in floating mode: a pre-change tree
+    // (OMARCHY_IPTV_PLUGIN_ROOT at a baseline) has no such property and must
+    // still load in the default mode for a rule-11 comparison.
+    Component.onCompleted: setSource("file://" + harness.repoRoot + "/Guide.qml",
+                                     harness.floatingGuide ? { harnessFloatingWindow: true } : {})
     onLoaded: {
       item.shell = fakeShell
       item.manifest = harness.manifest
@@ -466,6 +479,17 @@ ShellRoot {
 
     function open(payload: string): string { fakeShell.summon(harness.pluginId, payload); return "ok" }
     function close(): string { fakeShell.hide(harness.pluginId); return "ok" }
+    // The theme tokens the guide paints with, as THIS shell resolved them, so
+    // a headless capture is checked against the running value rather than a
+    // number copied from a theme file; and which window the loaded guide
+    // reports hosting it (the harness-only floating mode, or production).
+    function theme(): string {
+      var g = guideLoader.item
+      return JSON.stringify({
+        background: String(Color.background), menuBackground: String(Color.menu.background),
+        guideWindow: g && g.harnessFloatingWindow === true ? "floating" : "layer"
+      })
+    }
     function toggle(): string { return fakeShell.toggle(harness.pluginId, "{}") ? "ok" : "no" }
     function query(text: string): string { if (guideLoader.item) guideLoader.item.setQuery(text); return "ok" }
     function mode(): string { if (guideLoader.item) guideLoader.item.switchMode(); return "ok" }
