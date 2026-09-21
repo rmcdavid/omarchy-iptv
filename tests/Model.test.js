@@ -1190,6 +1190,26 @@ check("window: the production host is a PanelWindow on the Overlay layer with ex
   (guideSource.match(/WlrLayershell\.layer:/g) || []).length
 ], [true, true, true, true, true, false, true, true, 1])
 
+// The moved body, line for line. The check above pins the layer, the focus
+// mode and the namespace and says nothing about the rest of the block, so
+// `bottom: true` could fall off the anchors line, or the exclusion mode go,
+// and every gate stayed green while the production window stopped covering
+// the screen. qmlBlockAfter slices the PanelWindow's own braces (the grouped
+// `anchors { }` inside counts as one nested pair), so this is the whole body
+// that moved into the Component, in order, indentation aside: the eight
+// lines that shipped before the Loader, minus the id the Component scope
+// took away.
+check("window: the PanelWindow body that moved into layerHost is exactly the one that shipped",
+  qmlBlockAfter(qmlBlock("layerHost"), "PanelWindow {").split("\n")
+    .map(function (line) { return line.trim() }).filter(Boolean),
+  ["visible: root.opened",
+   "anchors { top: true; bottom: true; left: true; right: true }",
+   'color: "transparent"',
+   'WlrLayershell.namespace: "omarchy-iptv"',
+   "WlrLayershell.layer: WlrLayer.Overlay",
+   "WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive",
+   "exclusionMode: ExclusionMode.Ignore"])
+
 // D5: the header count becomes a position exactly when the list overflows.
 checkCall("scopeLabel: the four forms", function () { return [
   Model.scopeLabel("favorites", "", 6),

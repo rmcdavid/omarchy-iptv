@@ -26,18 +26,21 @@ L2  Every line the copy adds or removes is attributed to exactly one declared
     rule in TRANSFORM_RULES below, with exact counts. An undeclared change is
     red, and a declared rule that did not fire is red too, so the table cannot
     rot into a permissive wildcard.
-L3  The ACCESSIBILITY PROJECTION of the two files is equal, after exactly one
-    declared attachment rewrite (`PanelWindow#panel` -> `Window#panel`). The
-    projection is every `Accessible.*` binding AND every other binding on the
-    same element, because Qt derives accessibility from more than the
-    `Accessible` attached property: the credential this round is about
-    (D-A11Y-1) is published from the field's `text:` binding. See qmlscan.py.
+L3  The ACCESSIBILITY PROJECTION of the two files is equal, after exactly the
+    declared attachment rewrites in PATH_REWRITES (the window inside each
+    hosting Component, `PanelWindow` and the harness `FloatingWindow`, each
+    graded as a plain `Window`). The projection is every `Accessible.*`
+    binding AND every other binding on the same element, because Qt derives
+    accessibility from more than the `Accessible` attached property: the
+    credential this round is about (D-A11Y-1) is published from the field's
+    `text:` binding. See qmlscan.py.
 L4  Elements the transform ADDS declare no accessibility at all, so the copy
     cannot publish a node the shipping guide does not have.
-L5  The shipping file declares no accessibility on the element the transform
+L5  The shipping file declares no accessibility on the elements the transform
     rehosts. That is the honest limit: an `Accessible.*` on the `PanelWindow`
-    could not be graded faithfully by this harness, so its arrival must be
-    red rather than quietly regraded under a different type.
+    (or on the harness window) could not be graded faithfully by this
+    harness, so its arrival must be red rather than quietly regraded under a
+    different type.
 L6  Files the transform copies verbatim (Model.js, which composes the row,
     source and bar names) are byte-identical.
 L7  Inventory: every tracked .qml that declares accessibility and has no
@@ -125,44 +128,87 @@ TRANSFORM_RULES = [
     },
     {
         "id": "T5-window",
-        "why": "The one line this whole harness exists to route around. A "
+        "why": "The one element this whole harness exists to route around. A "
                "PanelWindow is not a QQuickWindow and publishes no tree; a "
-               "plain Window does. Its geometry came from the layer-shell "
+               "plain Window does. Since the harness floating-window round "
+               "the production window lives inside `Component { id: "
+               "layerHost }`, which a Loader picks once at completion, and "
+               "the content (`windowContent`) reparents into whichever window "
+               "loaded. The copy keeps the Loader, the Component and the "
+               "reparenting, and swaps only the window inside: so the copy "
+               "still IS the guide, hosted the way production hosts it, with "
+               "one type changed. Its geometry came from the layer-shell "
                "anchors that go with it, so a fixed size replaces them, and "
                "the window is never shown (visible: false) so nothing maps on "
-               "the compositor. `id`, `color` and every child are untouched.",
+               "the compositor. `color` and everything after it are "
+               "untouched; the block ends before the closing braces so a line "
+               "added to the window (L5's case) still matches.",
         "before": [
-            "  PanelWindow {",
-            "    id: panel",
-            "    visible: root.opened",
-            "    anchors { top: true; bottom: true; left: true; right: true }",
-            "    color: \"transparent\"",
-            "    WlrLayershell.namespace: \"omarchy-iptv\"",
-            "    WlrLayershell.layer: WlrLayer.Overlay",
-            "    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive",
-            "    exclusionMode: ExclusionMode.Ignore",
+            "  Component {",
+            "    id: layerHost",
+            "    PanelWindow {",
+            "      visible: root.opened",
+            "      anchors { top: true; bottom: true; left: true; right: true }",
+            "      color: \"transparent\"",
+            "      WlrLayershell.namespace: \"omarchy-iptv\"",
+            "      WlrLayershell.layer: WlrLayer.Overlay",
+            "      WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive",
+            "      exclusionMode: ExclusionMode.Ignore",
         ],
         "after": [
-            "  Window {",
-            "    id: panel",
-            "    visible: false",
-            "    width: 1920",
-            "    height: 1080",
-            "    color: \"transparent\"",
+            "  Component {",
+            "    id: layerHost",
+            "    Window {",
+            "      visible: false",
+            "      width: 1920",
+            "      height: 1080",
+            "      color: \"transparent\"",
+        ],
+    },
+    {
+        "id": "T6-floating-host",
+        "why": "The harness-only FloatingWindow is a Quickshell type too. The "
+               "copy never instantiates it (harnessFloatingWindow keeps its "
+               "production default, so the Loader picks layerHost), but a "
+               "QML document resolves every type it declares when it loads, "
+               "inline Components included: measured on Qt 6.11.2 offscreen, "
+               "an unresolved type inside a Component is a load error, not a "
+               "lazy one. A plain Window stands in, never shown; the implicit "
+               "sizes go with the type (Window has none) and the title stays.",
+        "before": [
+            "    FloatingWindow {",
+            "      visible: root.opened",
+            "      title: \"omarchy-iptv (dev harness)\"",
+            "      color: \"transparent\"",
+            "      implicitWidth: Style.space(1280)",
+            "      implicitHeight: Style.space(720)",
+        ],
+        "after": [
+            "    Window {",
+            "      visible: false",
+            "      title: \"omarchy-iptv (dev harness)\"",
+            "      color: \"transparent\"",
         ],
     },
 ]
 
-# The ONE attachment point the transform is allowed to rename, and the only
-# reason L3 is not a plain equality. Anything else that moves is drift.
-PATH_REWRITES = [("PanelWindow#panel", "Window#panel")]
+# The attachment points the transform is allowed to rename, and the only
+# reason L3 is not a plain equality. Anything else that moves is drift. The
+# window inside each hosting Component carries no id (the ids that matter,
+# layerHost and floatingHost, are the Components'), so qmlscan names each one
+# by type and ordinal: `Type[1]`.
+PATH_REWRITES = [
+    ("Component#layerHost/PanelWindow[1]", "Component#layerHost/Window[1]"),
+    ("Component#floatingHost/FloatingWindow[1]",
+     "Component#floatingHost/Window[1]"),
+]
 
 # Elements that exist only in the copy. Each must declare no accessibility.
 ADDED_ELEMENT_IDS = ["probeShim"]
 
-# The element the transform rehosts: nothing accessibility-bearing may be
-# declared directly on it (L5).
-REHOSTED_ELEMENT_ID = "panel"
+# The elements the transform rehosts, by attachment path: nothing
+# accessibility-bearing may be declared directly on either (L5).
+REHOSTED_ELEMENT_PATHS = [old for old, _new in PATH_REWRITES]
 
 
 class Failure(object):
@@ -336,14 +382,15 @@ def check_pair(source_text, generated_text, source_name="Guide.qml",
                 "\n".join("%s:%d  %s" % (generated_name, r["line"], r["prop"])
                           for r in offenders)))
 
-    # ---- L5: nothing accessibility-bearing on the rehosted element --------
+    # ---- L5: nothing accessibility-bearing on the rehosted elements -------
     src_records, _src_frames = qmlscan.scan(source_text, source_name)
-    marker = "#%s" % REHOSTED_ELEMENT_ID
     on_window = [r for r in src_records
-                 if r["kind"] == "accessible" and r["path"].endswith(marker)]
+                 if r["kind"] == "accessible"
+                 and any(r["path"].endswith(marker)
+                         for marker in REHOSTED_ELEMENT_PATHS)]
     if on_window:
         failures.append(Failure(
-            "L5", "%d accessibility declaration(s) sit on the element the "
+            "L5", "%d accessibility declaration(s) sit on an element the "
                   "transform rehosts. This harness cannot grade them: the copy "
                   "gives that element a different type and never shows it."
                   % len(on_window),

@@ -94,12 +94,18 @@ says it has, so a capture is checked against the running value.
 What does not transfer: focus semantics. The floating window has ordinary
 toplevel focus, not the exclusive layer-shell focus, so cases about focus
 itself stay on the real shell; cases about what is painted and what a key
-does to the model run here. Measured under cage: `wtype -d 40 sky` arrived
-whole (`query='sky'`, three rows) on four consecutive invocations, with and
-without `-s`. A scenario should still read the query back over IPC rather
-than assume it: the one truncated arrival seen while this landed (`ky`) came
-from an id that shadowed the guide's `surface` property, which the a11y and
-node checks now cover, and it did not recur once that was fixed.
+does to the model run here.
+
+The first keystroke can be lost (F-HARNESS-1 on the board). Measured by the
+verifier: the FIRST `wtype` keystroke into a fresh floating shell is
+intermittently dropped -- 1 of 4 fresh shells received `sky` as `ky` -- and
+a row count cannot tell the two apart, because `sky` and `ky` both filter
+the 20 fixture rows to 3. So a headless keystroke scenario must:
+
+1. assert the exact query string read back over IPC (`ipc state`, the
+   `guide.query` field), never a row count;
+2. before grading, either send a throwaway key first, or reset with
+   `ipc query ""` and retry the typing once.
 
 Drive a running harness from another terminal:
 

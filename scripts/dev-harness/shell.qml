@@ -485,9 +485,20 @@ ShellRoot {
     // reports hosting it (the harness-only floating mode, or production).
     function theme(): string {
       var g = guideLoader.item
+      // Which window the guide LOADED, read from the loaded object's own
+      // type (String(hostWindow) is "<class>(0x...)"), never from the
+      // property that asked for it: a `harnessFloatingWindow` reading true
+      // beside an instantiated layer window would have said "floating" about
+      // a window no headless capture can see. The address is dropped. The
+      // class behind PanelWindow is platform-specific -- measured under cage
+      // it is qs::wayland::layershell::WaylandPanelInterface, not the
+      // PanelWindowInterface the qmltypes export -- so "Panel" is the token.
+      var host = g && g.hostWindow ? String(g.hostWindow).split("(")[0] : ""
+      var kind = host.indexOf("FloatingWindow") >= 0 ? "floating"
+               : host.indexOf("Panel") >= 0 ? "layer" : "none"
       return JSON.stringify({
         background: String(Color.background), menuBackground: String(Color.menu.background),
-        guideWindow: g && g.harnessFloatingWindow === true ? "floating" : "layer"
+        guideWindow: kind, guideWindowType: host
       })
     }
     function toggle(): string { return fakeShell.toggle(harness.pluginId, "{}") ? "ok" : "no" }
