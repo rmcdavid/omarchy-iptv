@@ -258,3 +258,25 @@ rooted on `dev`'s head before merging. The merge helper's ownership check
 first diffed each branch against `dev`'s moving head and refused a clean lane
 because an earlier lane had already landed; it now diffs against the branch's
 merge-base. A refusal that is wrong is still cheaper than a merge that is.
+
+## Addendum: 3d, the closures
+
+Desk work, 2026-09-21. D-RUNG-2 closes as **accepted**: the obvious fix was
+refused with numbers, ruling Step 4's own trigger ("only if decision 2 goes to
+`menu.text`") never fired because decision 2 shipped as Option A, and the one
+site its row never listed -- the non-cursor channel number at 0.52 -- is now
+its own row with the product question stated rather than buried.
+
+`docs/CONTRAST-RULING.md`'s "What none of this fixes" held six measured
+findings with no id, which rule 13 says is a finding nobody owns. They now
+have ids and rows, each with a severity and a state, in the same commit as the
+text that names them: F-HOST-1 (Omarchy's own launcher and clipboard share the
+defect; upstream), F-RUNG-8 (the fill is not a state indicator; accepted, the
+mark is), D-RUNG-9 (host section headers, inherited), D-RUNG-10 (the EPG
+hairline), D-RUNG-11 (the 28px glyphs), D-RUNG-12 (the non-cursor number, a
+D-RUNG-2 site), and F-UX-1 (no scrollbar, so the 0.52 header string is the
+only position indicator). "Contrast is not legibility" is an observation about
+method and stays unfiled on purpose.
+
+D-PLY-11, which the roadmap listed under 3d, had already been settled in 3a:
+its reachability argument turned out to be a verified fix, not a closure.

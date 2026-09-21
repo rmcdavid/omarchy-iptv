@@ -405,7 +405,7 @@ board row closes as accepted, with the accepted risk named.
 
 ## What none of this fixes
 
-- **Omarchy's own desktop.** `Menu.qml:1242,1284,1326` and `Clipboard.qml:508`
+- **F-HOST-1 -- Omarchy's own desktop.** `Menu.qml:1242,1284,1326` and `Clipboard.qml:508`
   draw the identical `hasCursor ? Color.menu.selectedText : foreground` over the
   identical fill and fail in the identical eight themes. The launcher and the
   clipboard picker stay as they are. The guide either diverges or waits; this
@@ -413,22 +413,22 @@ board row closes as accepted, with the accepted risk named.
   `menu.selected-text` in `/usr/share/omarchy/default/themed/shell.toml.tpl`,
   which is package-owned and read-only from here -- file the observation, do not
   write the file.
-- **The selected fill is still not a state indicator** at 1.115-1.230:1 against
+- **F-RUNG-8 -- The selected fill is still not a state indicator** at 1.115-1.230:1 against
   3:1, in 23 of 23 themes, with no border in any of them. Only the mark
   (decision 3) changes that, and only on the guide's own rows.
-- **The host's section headers.** `Ui/PanelSectionHeader.qml:18` is
+- **D-RUNG-9 -- The host's section headers.** `Ui/PanelSectionHeader.qml:18` is
   `Qt.darker(foreground, 1.4)`, instantiated at `Guide.qml:2230` (the GROUPS
   header) and `3173` (Sources form labels): under 4.5:1 in 3 of 23 (everforest
   3.80, gruvbox 4.25, tokyo-night 4.28) and bolder-or-tied than body text in the
   same five light themes, `white` an exact tie again. Same defect class as
   D-RUNG-5, inherited rather than invented, and untouched here.
-- **Three adjacent guide sites.** The cursor-row EPG progress hairline (under
+- **D-RUNG-10, D-RUNG-11, D-RUNG-12 -- Three adjacent guide sites.** The cursor-row EPG progress hairline (D-RUNG-10, under
   3:1 in 15 of 23 by my computation, floor 1.80 -- worse than the design
   claimed, and its 13/1.88 reproduces under no compositing), the empty-state and
   first-run glyphs at 28px (under the large-text 3:1 in 2 of 23, rose-pine 2.42,
-  miasma 2.97), and the **non-cursor** channel number at 0.52 (under 4.5:1 in 20
+  miasma 2.97; D-RUNG-11), and the **non-cursor** channel number at 0.52 (D-RUNG-12, under 4.5:1 in 20
   of 23, floor 2.33), which is a D-RUNG-2 site the board's row never listed.
-- **The guide has no scrollbar.** `grep -c ScrollBar Guide.qml` returns 0, so the
+- **F-UX-1 -- The guide has no scrollbar.** `grep -c ScrollBar Guide.qml` returns 0, so the
   header scope label (`All - 1,204 of 3,335`) is the only position indicator on a
   3,335-row list. Refusing D-RUNG-2 leaves that string at 0.52. It was
   classified as ambient; it is read.
@@ -436,11 +436,11 @@ board row closes as accepted, with the accepted risk named.
   10px caption, the pinned row height, or the four installed font faces. The
   guide's hierarchy will still be carried by 14px against 11px, line position,
   and Bold meaning "playing".
-- **None of the findings in this section has an id.** Rule 13 means whoever
-  writes one into a tracked document mints the `D-`/`F-` id **and** its
-  `docs/STATUS.md` row with a severity and a state in the same commit, or
-  `scripts/check-defect-ledger.py` fails the gate. This read-only pass minted
-  none, deliberately.
+- **Every finding above now carries an id** (minted 2026-09-21 in phase 3d,
+  each with a `docs/STATUS.md` row, severity and state, in the same commit --
+  rule 13). The read-only pass that wrote this section minted none,
+  deliberately; the desk pass that closed the board did. "Contrast is not
+  legibility" is an observation about method, not a defect, and stays unfiled.
 
 ## Decisions
 
