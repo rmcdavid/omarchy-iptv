@@ -276,3 +276,24 @@ branch ruleset". True when written; a ruleset (`main-is-the-artifact`,
 enforces it on `refs/heads/main` as well. Not re-posted to the issue -- it
 changes nothing about the validated commit -- but recorded here so the reply
 is not read later as the current state.
+
+---
+
+## 2026-09-21: listed
+
+`approved-and-verified` at 04:48 UTC, `listed` at 05:04, issue closed by the
+bot: https://omarchyplugins.com/plugin.html?id=io.github.rmcdavid.iptv.
+Registry snapshot `7499ff3db635a502af573fcbc361fc583c9cc789`, v0.7.1, baseline
+`passed`, verification method **`automated`** -- the exact consequence stated
+to the reviewer the evening before, chosen by them with the disclosure in
+front of them. Four days from filing to listing, two human review rounds, both
+findings ours to own: a moved branch, and a whole-repository install.
+
+**What changes now.** The review freeze on `main` is over; the branch model is
+the whole rule. The marketplace re-inspects the branch head on its scheduled
+catalog refreshes and shows `Update unverified` the moment `main` moves past
+the validated commit, so the release recipe gains one step: `release.py build`
+on `dev`, push `main` and the tag, then file the **Plugin verification** form
+with "Verify and publish a newer upstream commit" and the full SHA. D-REL-1
+and D-REL-2, held back so the reviewed code stayed byte-identical, are the
+first things in 0.7.2.
