@@ -253,3 +253,18 @@ push. Every head of it had already returned `passed` from the marketplace's
 own scanner, run locally against GitHub exactly as their bot runs it, and two
 of its commits correct the README the reviewer is reading. One review cycle
 instead of two, said plainly in the reply rather than left to be noticed.
+
+**What the pre-push audit found and this round leaves alone, on purpose.**
+Three independent lenses were asked to refute the artifact before it was
+pushed. Completeness held: from an extracted copy the helper ran every verb,
+qmllint output was identical to `dev`, and nothing the runtime loads is
+missing. Two things were found and deliberately not fixed in 0.7.1, because
+every code blob on `main` is byte-identical to the SHA the marketplace
+validated and that property is worth more during a review than either fix:
+D-REL-1, the helper's `VERSION` constant still reads 0.2.0; and D-REL-2, 34
+shipped comments cite `CLAUDE.md` by name and 36 cite dev-only paths. Both are
+on the board and both are disclosed to the reviewer. Three things WERE fixed
+before the cut: the artifact README said `Status: v0.7.0` beside a 0.7.1
+manifest (now pinned by `release.py check`); its Development paragraph pointed
+at "the dev README's section of the same name", which is the same blob; and
+the `dev` branch it links to did not exist on the remote yet.

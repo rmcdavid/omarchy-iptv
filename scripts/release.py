@@ -63,12 +63,18 @@ ALLOWLIST = (
 # Files a coding agent discovers and obeys automatically. None may ship, and
 # the assertion is by NAME so a future edit to ALLOWLIST cannot sneak one in.
 AGENT_INSTRUCTION_NAMES = (
-    'CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules',
-    '.clinerules', '.windsurfrules', '.github/copilot-instructions.md',
+    'CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'AGENT.md', 'GEMINI.md',
+    '.cursorrules', '.clinerules', '.windsurfrules', '.rules',
+    '.github/copilot-instructions.md',
 )
 
-# Directories that are development-only by construction.
-DEV_ONLY_DIRS = ('docs', 'tests', 'scripts', '.claude', '.github')
+# Directories that are development-only by construction, plus every
+# directory an agent tool treats as its own rule store. A name guard is
+# narrower than the real convention set, so the allowlist stays explicit
+# paths and any dot-directory at the root is dev-only regardless.
+DEV_ONLY_DIRS = ('docs', 'tests', 'scripts', '.claude', '.github', '.cursor',
+                 '.windsurf', '.clinerules', '.roo', '.junie', '.amazonq',
+                 '.kiro')
 
 # The three QML entry points and the shared model: the runtime surface.
 RUNTIME_SOURCES = ('BarWidget.qml', 'Guide.qml', 'Service.qml', 'Model.js')
@@ -115,7 +121,7 @@ def check(root, out=sys.stdout):
         if path not in have:
             problems.append('%s is on the allowlist but is not tracked' % path)
         top = path.split('/')[0]
-        if top in DEV_ONLY_DIRS:
+        if top in DEV_ONLY_DIRS or (top.startswith('.') and '/' in path):
             problems.append('%s is under a development-only directory' % path)
         if path in AGENT_INSTRUCTION_NAMES or os.path.basename(path) in AGENT_INSTRUCTION_NAMES:
             problems.append('%s is an agent instruction file and may not ship' % path)
@@ -151,6 +157,16 @@ def check(root, out=sys.stdout):
             problems.append(
                 'README.md names %r, which is not on the artifact; point at '
                 'the dev branch by URL instead' % m.group(0))
+        # The README states a version in prose and the manifest states it as
+        # data; the artifact shipped once with 0.7.0 beside 0.7.1. A stated
+        # version must match; a README that states none is not asked to.
+        stated = re.search(r'\bStatus:\s*v(\d+\.\d+\.\d+)', text)
+        if stated and 'manifest.json' in have:
+            actual = json.loads(read(root, 'manifest.json')).get('version')
+            if stated.group(1) != actual:
+                problems.append(
+                    'README.md says Status: v%s but manifest.json says %s'
+                    % (stated.group(1), actual))
 
     out.write('release allowlist: %d files, %d runtime sources scanned\n'
               % (len(ALLOWLIST), len(RUNTIME_SOURCES)))

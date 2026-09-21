@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.7.1. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
@@ -266,7 +266,7 @@ list as well; the two stay in sync. Up to 50 sources are kept.
   anything but http(s) are refused and credentials are dropped when a
   redirect changes host.
 
-## Picture in picture
+## Picture in picture settings
 
 Press `p` in the guide's list mode to shrink the player into a corner of your
 screen and keep watching while you work. Press it again to put it back. From
@@ -363,13 +363,14 @@ it still opens the guide and playback works from the guide.
 
 ## Development
 
-Development happens on the `dev` branch: https://github.com/rmcdavid/omarchy-iptv/tree/dev. It carries everything this
+Development happens on the `dev` branch:
+https://github.com/rmcdavid/omarchy-iptv/tree/dev. It carries everything this
 branch deliberately does not -- the design and QA documents, the test suites,
-the gate, the dev harness, and the agent instruction file -- and its README
-section of the same name has the commands. `main` is produced from `dev` by
-the release exporter there; nothing is committed to `main` by hand, and only
-an explicit allowlist of files is ever exported, which is why a fresh install
-contains no documentation beyond this file and the changelog.
+the gate script, the dev harness, and the agent instruction file. The gate and
+the QA runbook there say how to run and test the plugin. `main` is produced
+from `dev` by the release exporter there; nothing is committed to `main` by
+hand, and only an explicit allowlist of files is ever exported, which is why a
+fresh install contains no documentation beyond this file and the changelog.
 
 ## License
 

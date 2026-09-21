@@ -175,6 +175,19 @@ class ReleaseCase(unittest.TestCase):
         self.commit_all()
         self.assertEqual([], release.check(self.dir, out=io.StringIO()))
 
+    def test_a_readme_version_that_disagrees_with_the_manifest_is_a_problem(self):
+        """The artifact shipped once saying Status: v0.7.0 beside a 0.7.1 manifest."""
+        self.write('README.md', 'Status: v0.9.8. Copy `contrib/bindings.lua`.\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('Status: v0.9.8 but manifest.json says 0.9.9' in p
+                            for p in problems), problems)
+
+    def test_a_readme_version_that_matches_the_manifest_is_fine(self):
+        self.write('README.md', 'Status: v0.9.9. Copy `contrib/bindings.lua`.\n')
+        self.commit_all()
+        self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+
     def test_a_manifest_entry_point_outside_the_allowlist_is_a_problem(self):
         self.write('manifest.json', '{"version": "0.9.9", "entryPoints": '
                    '{"overlay": "Other.qml"}}\n')

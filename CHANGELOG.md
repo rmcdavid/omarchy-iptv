@@ -33,9 +33,9 @@ only the plugin.
   holds an explicit allowlist of thirteen files exported from `dev` by a
   release script, and a gate check proves that list is whole. Updating an
   existing install fast-forwards to the lean tree and removes the rest.
-- Two developer-script messages were reworded so the marketplace's security
-  baseline stops reporting capabilities the plugin does not have. No executed
-  instruction changed; a gate check keeps the phrasing that way.
+- Two developer-script messages were reworded so they no longer read as
+  invocations. No executed instruction changed; a gate check keeps the
+  phrasing that way.
 
 ## 0.7.0 (2026-09-15)
 
