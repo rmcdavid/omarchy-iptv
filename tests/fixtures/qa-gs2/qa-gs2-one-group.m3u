@@ -1,0 +1,27 @@
+#EXTM3U url-tvg="http://epg.example.test/guide.xml"
+# tests/fixtures/qa-gs2/qa-gs2-one-group.m3u -- the D-GS-2 shape (ruling GS9),
+# small enough to read. The 60-row list tests/test_fixture_gs2.py generates has
+# exactly this shape:
+#   ONE group on every row, so choosing it narrows nothing (groupsNarrow false)
+#     and the EPG term alone decides whether rows get a second line;
+#   a tvg-id on EVERY row, ch00001.test .. ch00008.test -- the ids the synthetic
+#     profile of scripts/gen-playlist.py assigns by index, so a run with
+#     `--channels 8 --epg-ids 1.0 --xmltv` yields the guide that MATCHES this
+#     list and a `--profile realistic` run yields one that is DISJOINT from it.
+# Hosts stay under the reserved .test TLD. No credentials anywhere.
+#EXTINF:-1 tvg-id="ch00001.test" group-title="Group 001 Comedy",QA GS2 Channel 1
+http://stream.example.test/live/00001.m3u8
+#EXTINF:-1 tvg-id="ch00002.test" group-title="Group 001 Comedy",QA GS2 Channel 2
+http://stream.example.test/live/00002.m3u8
+#EXTINF:-1 tvg-id="ch00003.test" group-title="Group 001 Comedy",QA GS2 Channel 3
+http://stream.example.test/live/00003.m3u8
+#EXTINF:-1 tvg-id="ch00004.test" group-title="Group 001 Comedy",QA GS2 Channel 4
+http://stream.example.test/live/00004.m3u8
+#EXTINF:-1 tvg-id="ch00005.test" group-title="Group 001 Comedy",QA GS2 Channel 5
+http://stream.example.test/live/00005.m3u8
+#EXTINF:-1 tvg-id="ch00006.test" group-title="Group 001 Comedy",QA GS2 Channel 6
+http://stream.example.test/live/00006.m3u8
+#EXTINF:-1 tvg-id="ch00007.test" group-title="Group 001 Comedy",QA GS2 Channel 7
+http://stream.example.test/live/00007.m3u8
+#EXTINF:-1 tvg-id="ch00008.test" group-title="Group 001 Comedy",QA GS2 Channel 8
+http://stream.example.test/live/00008.m3u8
