@@ -1,0 +1,128 @@
+#EXTM3U
+# QA fixture for D-SG-1 (docs/STATUS.md "## Defects", ruling SG1): a list whose
+# EVERY row sits in the same two-word group, "United States", so every search
+# key ends "... united states". Under the pre-fix ranking any fragment of those
+# two words (st, sta, ted, ited, unit, states) matched all 50 rows; under the
+# shipping ranking a term found only in the group half must be a whole word.
+# The names below are chosen so that the fragment queries have a NON-TRIVIAL
+# number of genuine name matches, which is what makes the two counts differ
+# in a way a reader can check by eye. Expected counts: tests/test_fixture_sg1.py.
+#
+# Names that genuinely contain a fragment of "united states":
+#   st    -> the five STARZ rows, the two STATE rows, FIRST LOOK TV, HISTORY,
+#            TASTEMADE, PLUTO TV WESTERNS                          (11 rows)
+#   sta   -> the five STARZ rows, the two STATE rows                ( 7 rows)
+#   ted   -> UNITED SPORTS x2, PLUTO TV ANIMATED, LIMITED EDITION TV ( 4 rows)
+#   ited  -> UNITED SPORTS x2, LIMITED EDITION TV                    ( 3 rows)
+#   unit  -> UNITED SPORTS x2                                        ( 2 rows)
+#   starz -> the five STARZ rows; not a fragment of the group name, so the
+#            pre-fix and shipping counts agree here                  ( 5 rows)
+# Two more that the accepted costs in docs/UX.md 2.6 predict:
+#   states      -> a WHOLE word of the group, so it still reaches all 50 rows:
+#                  the tier survives, and the count GROWS from `state` (2,
+#                  the two STATE names) to `states` (50)
+#   united stat -> `united` is a whole group word but `stat` only a fragment
+#                  of the other one, and no name carries both: nothing
+#                  matches, and the empty state must name "United States"
+#                  (Model.groupWordHint) instead of shrugging      ( 0 rows)
+# Hosts stay under the reserved .test TLD; nothing here can be fetched.
+#EXTINF:-1 tvg-id="sg1-01.test" group-title="United States",USA STARZ
+http://stream.qa-sg1.test/live/01.m3u8
+#EXTINF:-1 tvg-id="sg1-02.test" group-title="United States",USA STARZ ENCORE WESTERNS
+http://stream.qa-sg1.test/live/02.m3u8
+#EXTINF:-1 tvg-id="sg1-03.test" group-title="United States",USA STARZ ENCORE ACTION
+http://stream.qa-sg1.test/live/03.m3u8
+#EXTINF:-1 tvg-id="sg1-04.test" group-title="United States",USA STARZ EDGE
+http://stream.qa-sg1.test/live/04.m3u8
+#EXTINF:-1 tvg-id="sg1-05.test" group-title="United States",STATE TV
+http://stream.qa-sg1.test/live/05.m3u8
+#EXTINF:-1 tvg-id="sg1-06.test" group-title="United States",STATE NEWS NETWORK
+http://stream.qa-sg1.test/live/06.m3u8
+#EXTINF:-1 tvg-id="sg1-07.test" group-title="United States",UNITED SPORTS
+http://stream.qa-sg1.test/live/07.m3u8
+#EXTINF:-1 tvg-id="sg1-08.test" group-title="United States",UNITED SPORTS 2
+http://stream.qa-sg1.test/live/08.m3u8
+#EXTINF:-1 tvg-id="sg1-09.test" group-title="United States",FIRST LOOK TV
+http://stream.qa-sg1.test/live/09.m3u8
+#EXTINF:-1 tvg-id="sg1-10.test" group-title="United States",HISTORY
+http://stream.qa-sg1.test/live/10.m3u8
+#EXTINF:-1 tvg-id="sg1-11.test" group-title="United States",TASTEMADE
+http://stream.qa-sg1.test/live/11.m3u8
+#EXTINF:-1 tvg-id="sg1-12.test" group-title="United States",PLUTO TV ANIMATED
+http://stream.qa-sg1.test/live/12.m3u8
+#EXTINF:-1 tvg-id="sg1-13.test" group-title="United States",USA ESPN
+http://stream.qa-sg1.test/live/13.m3u8
+#EXTINF:-1 tvg-id="sg1-14.test" group-title="United States",ESPN 2
+http://stream.qa-sg1.test/live/14.m3u8
+#EXTINF:-1 tvg-id="sg1-15.test" group-title="United States",ESPN NEWS
+http://stream.qa-sg1.test/live/15.m3u8
+#EXTINF:-1 tvg-id="sg1-16.test" group-title="United States",ESPN U
+http://stream.qa-sg1.test/live/16.m3u8
+#EXTINF:-1 tvg-id="sg1-17.test" group-title="United States",USA FOX NEWS
+http://stream.qa-sg1.test/live/17.m3u8
+#EXTINF:-1 tvg-id="sg1-18.test" group-title="United States",USA CNN
+http://stream.qa-sg1.test/live/18.m3u8
+#EXTINF:-1 tvg-id="sg1-19.test" group-title="United States",USA MSNBC
+http://stream.qa-sg1.test/live/19.m3u8
+#EXTINF:-1 tvg-id="sg1-20.test" group-title="United States",USA CBS
+http://stream.qa-sg1.test/live/20.m3u8
+#EXTINF:-1 tvg-id="sg1-21.test" group-title="United States",USA NBC
+http://stream.qa-sg1.test/live/21.m3u8
+#EXTINF:-1 tvg-id="sg1-22.test" group-title="United States",USA ABC
+http://stream.qa-sg1.test/live/22.m3u8
+#EXTINF:-1 tvg-id="sg1-23.test" group-title="United States",PLUTO TV NEWS
+http://stream.qa-sg1.test/live/23.m3u8
+#EXTINF:-1 tvg-id="sg1-24.test" group-title="United States",PLUTO TV MOVIES
+http://stream.qa-sg1.test/live/24.m3u8
+#EXTINF:-1 tvg-id="sg1-25.test" group-title="United States",PLUTO TV COMEDY
+http://stream.qa-sg1.test/live/25.m3u8
+#EXTINF:-1 tvg-id="sg1-26.test" group-title="United States",PLUTO TV KIDS
+http://stream.qa-sg1.test/live/26.m3u8
+#EXTINF:-1 tvg-id="sg1-27.test" group-title="United States",PLUTO TV DRAMA
+http://stream.qa-sg1.test/live/27.m3u8
+#EXTINF:-1 tvg-id="sg1-28.test" group-title="United States",PLUTO TV WESTERNS
+http://stream.qa-sg1.test/live/28.m3u8
+#EXTINF:-1 tvg-id="sg1-29.test" group-title="United States",PLUTO TV SCI FI
+http://stream.qa-sg1.test/live/29.m3u8
+#EXTINF:-1 tvg-id="sg1-30.test" group-title="United States",PLUTO TV ACTION
+http://stream.qa-sg1.test/live/30.m3u8
+#EXTINF:-1 tvg-id="sg1-31.test" group-title="United States",PLUTO TV CRIME
+http://stream.qa-sg1.test/live/31.m3u8
+#EXTINF:-1 tvg-id="sg1-32.test" group-title="United States",PLUTO TV DOCS
+http://stream.qa-sg1.test/live/32.m3u8
+#EXTINF:-1 tvg-id="sg1-33.test" group-title="United States",PLUTO TV MUSIC
+http://stream.qa-sg1.test/live/33.m3u8
+#EXTINF:-1 tvg-id="sg1-34.test" group-title="United States",PLUTO TV FOOD
+http://stream.qa-sg1.test/live/34.m3u8
+#EXTINF:-1 tvg-id="sg1-35.test" group-title="United States",PLUTO TV TRAVEL
+http://stream.qa-sg1.test/live/35.m3u8
+#EXTINF:-1 tvg-id="sg1-36.test" group-title="United States",PLUTO TV NATURE
+http://stream.qa-sg1.test/live/36.m3u8
+#EXTINF:-1 tvg-id="sg1-37.test" group-title="United States",PLUTO TV SPORTS
+http://stream.qa-sg1.test/live/37.m3u8
+#EXTINF:-1 tvg-id="sg1-38.test" group-title="United States",PLUTO TV RETRO
+http://stream.qa-sg1.test/live/38.m3u8
+#EXTINF:-1 tvg-id="sg1-39.test" group-title="United States",PLUTO TV CARS
+http://stream.qa-sg1.test/live/39.m3u8
+#EXTINF:-1 tvg-id="sg1-40.test" group-title="United States",PLUTO TV GAMING
+http://stream.qa-sg1.test/live/40.m3u8
+#EXTINF:-1 tvg-id="sg1-41.test" group-title="United States",USA HBO
+http://stream.qa-sg1.test/live/41.m3u8
+#EXTINF:-1 tvg-id="sg1-42.test" group-title="United States",USA SHOWTIME
+http://stream.qa-sg1.test/live/42.m3u8
+#EXTINF:-1 tvg-id="sg1-43.test" group-title="United States",USA AMC
+http://stream.qa-sg1.test/live/43.m3u8
+#EXTINF:-1 tvg-id="sg1-44.test" group-title="United States",USA TNT
+http://stream.qa-sg1.test/live/44.m3u8
+#EXTINF:-1 tvg-id="sg1-45.test" group-title="United States",USA TBS
+http://stream.qa-sg1.test/live/45.m3u8
+#EXTINF:-1 tvg-id="sg1-46.test" group-title="United States",USA NETWORK
+http://stream.qa-sg1.test/live/46.m3u8
+#EXTINF:-1 tvg-id="sg1-47.test" group-title="United States",USA WEATHER
+http://stream.qa-sg1.test/live/47.m3u8
+#EXTINF:-1 tvg-id="sg1-48.test" group-title="United States",USA COURT TV
+http://stream.qa-sg1.test/live/48.m3u8
+#EXTINF:-1 tvg-id="sg1-49.test" group-title="United States",STARZ KIDS AND FAMILY
+http://stream.qa-sg1.test/live/49.m3u8
+#EXTINF:-1 tvg-id="sg1-50.test" group-title="United States",LIMITED EDITION TV
+http://stream.qa-sg1.test/live/50.m3u8
