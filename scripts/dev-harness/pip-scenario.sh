@@ -118,6 +118,45 @@ ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
 pf()   { qa_json_field "d$1" "$(ipc pipState)"; }
 sf()   { qa_field "d$1" "$(ipc state)"; }
 
+# argv_count <needle> <stub-log>: how many invocations of the stub carried
+# <needle> somewhere in their ARGV.
+#
+# F-PIP-1. The stub writes one JSON object per line -- {"argv", "rc", "out"}
+# -- and `qa_count` greps the WHOLE line. The `out` of a `-j clients` readback
+# echoes the seeded clients list, foreign address included, so the P5 check
+# "never the foreign window's address" counted the compositor's ANSWERS as if
+# they were commands: 20 hits, every one inside `out`, none on argv, and the
+# check failed against correct behaviour on every display. What that check is
+# about is what the service SENT, which is the argv field and nothing else.
+# Three outcomes, like qa-lib.sh: an integer; NOFILE for a missing or empty
+# log; NOJSON when a line is not the stub's shape. Neither sentinel is 0, so
+# an absence check over nothing, or over a log that is not this log, fails
+# instead of passing. The needle is a substring, not a pattern, so an address
+# is matched literally.
+argv_count() {
+  python3 -c '
+import json, sys
+needle, path = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+except OSError:
+    print("NOFILE"); raise SystemExit(0)
+if not lines:
+    print("NOFILE"); raise SystemExit(0)
+hits = 0
+for line in lines:
+    try:
+        argv = json.loads(line)["argv"]
+    except Exception:
+        print("NOJSON"); raise SystemExit(0)
+    if not isinstance(argv, list):
+        print("NOJSON"); raise SystemExit(0)
+    if any(needle in str(item) for item in argv):
+        hits += 1
+print(hits)' "$1" "$2" 2>/dev/null || printf '%s\n' "$QA_NO_STATE"
+}
+
 cleanup() {
   # `--detach` deliberately installs no trap of its own: the shell and the
   # player must outlive the run.sh invocation that started them, because that
@@ -424,7 +463,10 @@ live() {
 
   echo "== P5 every vector, inspected"
   check "P5: every dispatch names our address, never a class"    '[[ "$(qa_count "0x559c6893d940" "$STUB_CALLS")" -ge 6 && "$(qa_count "class:" "$STUB_CALLS")" == 0 ]]'
-  check "P5: and never the foreign window's"                     '[[ "$(qa_count "0x559c687e09a0" "$STUB_CALLS")" == 0 ]]'
+  # F-PIP-1: argv only. The foreign address is in every `-j clients` readback
+  # the stub answers, so a whole-line count fails here against correct
+  # behaviour; see argv_count above.
+  check "P5: and never the foreign window's"                     '[[ "$(argv_count "0x559c687e09a0" "$STUB_CALLS")" == 0 ]]'
   check "P5: no URL reached the compositor"                      '[[ "$(qa_count "://" "$STUB_CALLS")" == 0 ]]'
   check "P5: no channel name did either"                         '[[ "$(qa_count "Harness" "$STUB_CALLS")" == 0 ]]'
   check "P5: the sequence ENDED by reading the state back"       '[[ "$(qa_json_field "d['\''argv'\'']" "$(tail -1 "$STUB_CALLS")")" == *"clients"* ]]'
