@@ -280,3 +280,42 @@ method and stays unfiled on purpose.
 
 D-PLY-11, which the roadmap listed under 3d, had already been settled in 3a:
 its reachability argument turned out to be a verified fix, not a closure.
+
+## Addendum: 3c, the headless half, and what observing the sink found
+
+2026-09-21. After the cage spike (`docs/SPIKE-CAGE-HEADLESS.md`), the rows
+whose residue is IPC- or process-observable ran headless under a nested
+compositor, the live session untouched by pid and socket mtime; an
+independent verifier reproduced every settled row. Report:
+`docs/QA-HEADLESS-2026-09-21.md`.
+
+**Settled:** D-QA-04 (both verbs invoked for the first time in this
+repository's history, with a real player on the nested display), D-GS-4 (both
+clearing paths), D-PIP-4 and D-PIP-6 (the scenario's live half ran for the
+first time, 83 of 84), D-PIP-5 in behaviour, F-CHNO-3's verbs, and the argv
+half of D-ID-1: `--state-dir` present on both active fetches and absent on the
+probe, read from the running helper with `ps` -- the one observation that
+would have caught `stateDir: ""`.
+
+**Found:** the observation went one step past the fixture and the phase was
+built for exactly that step. **D-ID-3, P2.** The helper remaps `state.json`
+(`moved 8`) and the shell writes its pre-fetch state straight back over it;
+`refresh` logs `moved 8` again; favorites resolve 4 where the remapped state
+resolves 7. `Service.qml` never calls the `Model.remapChannelIds` that phase 2
+lifted for this call site. Shipped in 0.7.1 and 0.7.2 under a changelog line
+that claims the opposite. The fixture could not see it because it drives the
+helper alone -- the class two review rounds refused, caught only at the sink.
+
+**Tooling, filed rather than fixed in the same breath:** F-CHNO-5 (the
+number-entry scenario assumes list mode at open; 34 of its 73 failures are
+its own), F-PIP-1 (the P5 check greps readback output as if it were argv),
+F-HARNESS-1 (under the new floating-window mode the first keystroke into a
+fresh shell is intermittently lost, so headless scenarios must assert the
+exact query, never a row count).
+
+**The harness-mode branch** (a Loader choosing the production `PanelWindow`
+or a harness-only `FloatingWindow`, production lines moved verbatim) maps the
+guide under cage, takes keystrokes, and captures in theme colours; its
+verifier refuted three specifics -- a red a11y transform anchored on the old
+window header, a coverage gap on the moved block's anchors, and a false
+attribution in its README -- so it integrates with those fixed, not as-is.
