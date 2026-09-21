@@ -22,6 +22,20 @@
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
 #
+# The known qmllint warning baseline (CLAUDE.md, "Verify before you claim"):
+# missing-property and unqualified access on host-injected objects and on
+# Style / Color children, uncreatable-type for PanelWindow, and
+# signal-handler-parameters on Process.onExited. Plus, since the harness
+# floating-window round, two more [unqualified] in Guide.qml on the two
+# `visible: root.opened` bindings, one inside each inline Component
+# (layerHost, floatingHost) the window Loader chooses between: qmllint cannot
+# see the file's ids from inside a nested Component, while at runtime they
+# resolve (measured under headless cage and on the shell). The remedy it
+# proposes, `pragma ComponentBehavior: Bound`, would change how every delegate
+# in the file reaches its model roles, so it is declined. Guide.qml went
+# 222 -> 224 warnings, same three categories; anything outside this baseline
+# is a real finding.
+#
 # EVERY COUNT THIS FILE PRINTS IS ALSO ASSERTED. A runner that exits 0 having
 # executed nothing is the failure this whole cleanup round is about: the gate
 # used to print `ok   qml spec (0 passed)` and stay green, and an emptied

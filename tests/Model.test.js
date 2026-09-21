@@ -1198,6 +1198,47 @@ check("GS8: the meta slot and the detail line both take their rung from the ship
   (guideSource.match(/Model\.rowNoticeEmphasis\(/g) || []).length
 ], [true, true, false, false, 2])
 
+// The production window: a PanelWindow on the Overlay layer that takes the
+// keyboard exclusively. It lives in a Component now, chosen by a Loader,
+// because the dev harness can host the same content in a FloatingWindow where
+// no layer-shell exists (docs/SPIKE-CAGE-HEADLESS.md). qmlBlock slices from
+// `id: layerHost` to the next id, which is the floating host, and from there
+// to `id: windowContent`: the layer, the focus mode and the namespace must all be
+// inside the first slice and none of them in the second, or a refactor that
+// dropped one -- or let a WlrLayershell line out of its Component -- would
+// still lint and still load on the real shell.
+check("window: the production host is a PanelWindow on the Overlay layer with exclusive keyboard focus", [
+  /^\s*PanelWindow \{/m.test(qmlBlock("layerHost")),
+  /WlrLayershell\.layer: WlrLayer\.Overlay/.test(qmlBlock("layerHost")),
+  /WlrLayershell\.keyboardFocus: WlrKeyboardFocus\.Exclusive/.test(qmlBlock("layerHost")),
+  /WlrLayershell\.namespace: "omarchy-iptv"/.test(qmlBlock("layerHost")),
+  /^\s*FloatingWindow \{/m.test(qmlBlock("floatingHost")),
+  /WlrLayershell/.test(qmlBlock("floatingHost")),
+  /\n  property bool harnessFloatingWindow: false\n/.test(guideSource),
+  /Component\.onCompleted: sourceComponent = root\.harnessFloatingWindow \? floatingHost : layerHost/.test(guideSource),
+  (guideSource.match(/WlrLayershell\.layer:/g) || []).length
+], [true, true, true, true, true, false, true, true, 1])
+
+// The moved body, line for line. The check above pins the layer, the focus
+// mode and the namespace and says nothing about the rest of the block, so
+// `bottom: true` could fall off the anchors line, or the exclusion mode go,
+// and every gate stayed green while the production window stopped covering
+// the screen. qmlBlockAfter slices the PanelWindow's own braces (the grouped
+// `anchors { }` inside counts as one nested pair), so this is the whole body
+// that moved into the Component, in order, indentation aside: the eight
+// lines that shipped before the Loader, minus the id the Component scope
+// took away.
+check("window: the PanelWindow body that moved into layerHost is exactly the one that shipped",
+  qmlBlockAfter(qmlBlock("layerHost"), "PanelWindow {").split("\n")
+    .map(function (line) { return line.trim() }).filter(Boolean),
+  ["visible: root.opened",
+   "anchors { top: true; bottom: true; left: true; right: true }",
+   'color: "transparent"',
+   'WlrLayershell.namespace: "omarchy-iptv"',
+   "WlrLayershell.layer: WlrLayer.Overlay",
+   "WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive",
+   "exclusionMode: ExclusionMode.Ignore"])
+
 // D5: the header count becomes a position exactly when the list overflows.
 checkCall("scopeLabel: the four forms", function () { return [
   Model.scopeLabel("favorites", "", 6),

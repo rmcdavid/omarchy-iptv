@@ -273,8 +273,11 @@ Item {
   property int footerHeight: Math.max(Style.space(20), Style.font.caption + Style.space(6))
   property int leadWidth: Style.space(24)
   property int trailWidth: Style.space(20)
-  property int cardWidth: Math.min(Style.space(960), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(Style.space(620), panel.height - Style.gapsOut * 2)
+  // Measured on `windowContent`, the item that fills whichever window is
+  // hosting the guide (its size is the window's). The window itself lives
+  // inside a Component now, out of this scope; see `windowLoader`.
+  property int cardWidth: Math.min(Style.space(960), windowContent.width - Style.gapsOut * 2)
+  property int cardHeight: Math.min(Style.space(620), windowContent.height - Style.gapsOut * 2)
   readonly property bool narrow: cardWidth < Style.space(720)
 
   // ---- derived from the service
@@ -1909,15 +1912,72 @@ Item {
     }
   }
 
-  PanelWindow {
-    id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
-    WlrLayershell.namespace: "omarchy-iptv"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    exclusionMode: ExclusionMode.Ignore
+  // ---- the hosting window
+  //
+  // Production hosts the guide in a PanelWindow on the Overlay layer with
+  // exclusive keyboard focus, and nothing below changes that. But that is a
+  // layer-shell surface: a compositor without zwlr_layer_shell_v1 never maps
+  // it, and on a platform without the protocol at all the WlrLayershell
+  // attached properties are a creation error (measured in the headless cage
+  // spike, SPIKE-CAGE-HEADLESS on the dev branch).
+  // So the window is chosen by a Loader between two Components, and the
+  // layer-shell one is not instantiated unless it is the one in use.
+  //
+  // `harnessFloatingWindow` is set by the dev harness ALONE, as an initial
+  // property through Loader.setSource before this file completes. The host
+  // never sets it, no setting or payload reaches it, and its default is
+  // production. The choice is made once, when this file completes, rather
+  // than bound: a binding would let a later write swap the window under a
+  // running guide.
+  //
+  // The content (`windowContent`; not `surface`, which is the D-LIVE-19
+  // property an id would shadow) is declared once, below both Components,
+  // and reparents into whichever window loaded, so the pixels a headless
+  // capture grades are the pixels production paints.
+  property bool harnessFloatingWindow: false
+
+  Loader {
+    id: windowLoader
+    Component.onCompleted: sourceComponent = root.harnessFloatingWindow ? floatingHost : layerHost
+  }
+
+  Component {
+    id: layerHost
+    PanelWindow {
+      visible: root.opened
+      anchors { top: true; bottom: true; left: true; right: true }
+      color: "transparent"
+      WlrLayershell.namespace: "omarchy-iptv"
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+      exclusionMode: ExclusionMode.Ignore
+    }
+  }
+
+  Component {
+    id: floatingHost
+    // Harness only: an ordinary xdg toplevel, which a kiosk compositor
+    // fullscreens and hands the keyboard to. Focus semantics differ from the
+    // exclusive layer-shell focus above, so cases about focus itself stay on
+    // the real shell; cases about what is painted and what a key does to the
+    // model can run here.
+    FloatingWindow {
+      visible: root.opened
+      title: "omarchy-iptv (dev harness)"
+      color: "transparent"
+      implicitWidth: Style.space(1280)
+      implicitHeight: Style.space(720)
+    }
+  }
+
+  // `var`, not the Loader's QObject-typed `item`, so the window's
+  // contentItem is reached without a type the linter would flag.
+  readonly property var hostWindow: windowLoader.item
+
+  Item {
+    id: windowContent
+    parent: root.hostWindow ? root.hostWindow.contentItem : null
+    anchors.fill: parent
 
     Rectangle {
       anchors.fill: parent
