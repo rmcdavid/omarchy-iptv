@@ -188,6 +188,21 @@ class ReleaseCase(unittest.TestCase):
         self.commit_all()
         self.assertEqual([], release.check(self.dir, out=io.StringIO()))
 
+    def test_a_shipped_source_that_cites_a_dev_path_is_a_problem(self):
+        """D-REL-2: 0.7.1 shipped 70 comments naming CLAUDE.md, docs/, tests/
+        or scripts/ -- citations to files that do not exist in an install."""
+        self.write('Model.js', '// see docs/UX.md section 3 and CLAUDE.md rule 12\n')
+        self.write('bin/omarchy-iptv', '#!/usr/bin/env python3\n# pinned by tests/fixtures/x.json\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("Model.js:1 names 'docs/UX.md'" in p for p in problems), problems)
+        self.assertTrue(any("bin/omarchy-iptv:2 names 'tests/fixtures/x.json'" in p for p in problems), problems)
+
+    def test_a_shipped_source_naming_the_rule_and_the_branch_is_fine(self):
+        self.write('Model.js', '// engineering rule 12 (dev branch); UX.md section 3 on the dev branch\n')
+        self.commit_all()
+        self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+
     def test_a_manifest_entry_point_outside_the_allowlist_is_a_problem(self):
         self.write('manifest.json', '{"version": "0.9.9", "entryPoints": '
                    '{"overlay": "Other.qml"}}\n')

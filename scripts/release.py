@@ -85,6 +85,13 @@ RUNTIME_REF = re.compile(
 README_DEV_REF = re.compile(
     r'(?<![/\w.-])(?:docs|tests|scripts)/[\w./-]+|(?<![/\w.-])CLAUDE\.md\b')
 
+# Nor may the shipped SOURCES, comments included. 0.7.1 shipped 34 comments
+# citing CLAUDE.md by name and 36 naming docs/, tests/ or scripts/ paths that
+# do not exist in an install (D-REL-2). A reader who greps the plugin for
+# CLAUDE finds them first, and a cited path that cannot be opened is a
+# citation to nothing. The helper's --help text was one of them.
+SHIPPED_SOURCES = RUNTIME_SOURCES + ('bin/omarchy-iptv',)
+
 
 class ReleaseError(Exception):
     pass
@@ -167,6 +174,18 @@ def check(root, out=sys.stdout):
                 problems.append(
                     'README.md says Status: v%s but manifest.json says %s'
                     % (stated.group(1), actual))
+
+    # Shipped sources may not cite what does not ship, even in a comment.
+    for src in SHIPPED_SOURCES:
+        if src not in have:
+            continue
+        for n, line in enumerate(read(root, src).splitlines(), 1):
+            m = README_DEV_REF.search(line)
+            if m:
+                problems.append(
+                    '%s:%d names %r, which does not exist in an install; cite '
+                    'the rule or the document by name and say it is on the dev '
+                    'branch' % (src, n, m.group(0)))
 
     out.write('release allowlist: %d files, %d runtime sources scanned\n'
               % (len(ALLOWLIST), len(RUNTIME_SOURCES)))

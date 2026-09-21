@@ -9,7 +9,7 @@ import "Model.js" as Model
 // (manifest kind "overlay", keepLoaded so the layer-shell window stays
 // mounted between summons and opens in well under 150 ms).
 //
-// Implements docs/UX.md: scrim + centered card on the [menu] surface, a
+// Implements UX.md (dev branch): scrim + centered card on the [menu] surface, a
 // synthetic search line (no TextField), two keyboard modes (search on open;
 // Tab or "/" for list mode with j/k/h/l, f, x, s, r, Space, Enter, Esc),
 // a left group column (Recent / Favorites / All / GROUPS), rows with EPG
@@ -17,8 +17,8 @@ import "Model.js" as Model
 // mode-aware hints. Pure decisions live in Model.js (ranking, scope rules,
 // the mode state machine); this file only renders and dispatches.
 //
-// M2-01 Sources (docs/UX-SOURCES.md under the rulings of
-// docs/ARCHITECTURE-SOURCES.md): the first-run empty state carries the
+// M2-01 Sources (UX-SOURCES.md (dev branch) under the rulings of
+// ARCHITECTURE-SOURCES.md (dev branch)): the first-run empty state carries the
 // playlist / EPG input, a pinned `Sources` row under the group column and
 // the `o` key open the Sources list (switch / add / edit / remove with a
 // ConfirmDialog), and the add / edit / Xtream forms are qs.Ui TextFields
@@ -74,7 +74,7 @@ Item {
   // group, because that group IS All and choosing it is not a step.
   //
   // The default is `narrows: true` -- the shipped surface, never a value
-  // invented from `undefined` (CLAUDE.md rule 10). If the axis ever failed to
+  // invented from `undefined` (engineering rule 10 (dev branch)). If the axis ever failed to
   // resolve before the first frame, the failure mode would be the v0.5.0
   // layout collapsing once, not a wrong layout that stays.
   property var groupAxis: ({ count: 0, narrows: true, soleGroup: "" })
@@ -109,7 +109,7 @@ Item {
   // Guarded exactly as the Sources API is. Service.qml publishes chnoIndex,
   // and this is the compatibility path for a service that does not: the
   // harness stages an older plugin tree through OMARCHY_IPTV_PLUGIN_ROOT so a
-  // scenario can be seen failing against it (CLAUDE.md rule 10), and an
+  // scenario can be seen failing against it (engineering rule 10 (dev branch)), and an
   // undefined read must never invent a value. It builds the same index with
   // the same Model function, once per channel-set change, never per key.
   readonly property bool chnoApi: root.serviceReady && root.service.chnoIndex !== undefined && root.service.chnoIndex !== null
@@ -295,7 +295,7 @@ Item {
   // ---- picture in picture (M2-05). Every access is guarded the way the
   // Sources API is: the service may not carry PiP yet (lane V2 merges after
   // this one, and the harness runs this guide against a pre-change service),
-  // and an undefined read must never invent a value (CLAUDE.md rule 10). A
+  // and an undefined read must never invent a value (engineering rule 10 (dev branch)). A
   // service without PiP reports unavailable, which is the honest answer: the
   // `p` key then says so and the hint line does not advertise it.
   readonly property bool playingNow: serviceReady && service.playing === true
@@ -547,10 +547,10 @@ Item {
   // worst 1.98:1, median 3.17:1. The finding survives the known error in the
   // contrast model too, which is why this rung moves now and the 0.52 rung
   // does not: the model reads 1.25 ratio points LOW against the one rendered
-  // measurement this project has taken (docs/QA-RESULTS.md:4720-4732), and
+  // measurement this project has taken (QA-RESULTS.md (dev branch):4720-4732), and
   // 3.17 plus 1.25 is still 4.42, under the line.
   // The cost, accepted: the key/verb pair collapses to one rung, so key names
-  // no longer stand out from the verbs beside them. docs/UX.md:756-757 is
+  // no longer stand out from the verbs beside them. UX.md (dev branch):756-757 is
   // amended to say so.
   readonly property string verbColor: Util.alpha(root.foreground, 0.7).toString()
   readonly property string footerHintText: {
@@ -690,15 +690,9 @@ Item {
     var signature = parts.join("|")
     root.scopeList = entries
     root.groupAxis = surface.axis
-    // SG1. A one-group list publishes no group ENTRIES (scopeSurface only
-    // emits them when the axis narrows), and that is precisely the list
-    // D-SG-1 bites on, so the sole group has to come off the axis.
-    var names = []
-    if (surface.axis.soleGroup !== "") names.push(surface.axis.soleGroup)
-    for (var gi = 0; gi < entries.length; gi++) {
-      if (entries[gi].kind === "group") names.push(entries[gi].label)
-    }
-    root.groupNames = names
+    // SG1 / D-SG-2: the one collection, in Model.js, called here and by the
+    // qa-sg1 fixture, so the hint's candidate names cannot drift apart.
+    root.groupNames = Model.groupNamesForHint(surface)
     if (signature === root.groupSignature) return
     root.groupSignature = signature
     groupModel.clear()
@@ -796,7 +790,7 @@ Item {
   // defect Omarchy's own picker names above `Menu.qml:640` and fixes there,
   // and which this file had in both places above. The arithmetic lives in
   // Model.revealOffset rather than as fifteen copied lines of QML, because a
-  // copy is exactly the stranded interface logic CLAUDE.md rule 12 forbids;
+  // copy is exactly the stranded interface logic engineering rule 12 (dev branch) forbids;
   // Menu.qml is Omarchy's file and not bound by this repo's rule, this would
   // be. Unconditional: every playlist shape, both lists.
   //
@@ -1208,9 +1202,9 @@ Item {
   //
   // Which letter means what is Model.listLetterAction's, not this file's:
   // the mapping used to be a chain of string comparisons here, where no test
-  // could reach it, which is the shape CLAUDE.md 12 forbids. This dispatches
+  // could reach it, which is the shape engineering rule 12 (dev branch) forbids. This dispatches
   // on the answer, so the `p` of M2-05 is exercised for real by
-  // tests/Model.test.js and by the QML spec in the engine that runs it.
+  // Model.test.js (dev branch tests) and by the QML spec in the engine that runs it.
   function handleListLetter(text) {
     var action = Model.listLetterAction(text)
     if (action === "favorite") root.toggleFavoriteAt(root.cursorIndex)
@@ -1895,7 +1889,7 @@ Item {
     // the service emitted `pipOutcome`, and `ignoreUnknownSignals: true` -
     // which this block needs, because the Sources and PiP signals may be
     // absent on an older service - made that silence rather than an error:
-    // the footer was wired to a signal nobody emits. tests/test_pip.py now
+    // the footer was wired to a signal nobody emits. test_pip.py (dev branch tests) now
     // compares the two files so the next rename cannot do it again.
     //
     // The code is one of six; the line is Model.pipStatusText's. A code with
@@ -2524,7 +2518,7 @@ Item {
                       // number under 4.5:1 in 16 of 23 themes even with the
                       // corrected ink, floor 3.25. It is the one thing the user
                       // is looking at during numeric zap. Full opacity is
-                      // forced, not chosen; docs/M2-03-CHANNEL-NUMBERS.md:677's
+                      // forced, not chosen; M2-03-CHANNEL-NUMBERS.md (dev branch):677's
                       // promise that the number is dimmer than the name on the
                       // cursor row is withdrawn, and subordination is carried by
                       // the right-aligned digit column and by being digits.

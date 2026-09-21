@@ -109,9 +109,6 @@ cited as if it were: the header and footer strings composed from them, the
 empty state rendering the hint while typing toward the sole group name, and
 per-keystroke responsiveness in the QML engine at 3,335 rows.
 
-Also UNVERIFIED, by construction: verify.js collects `groupNames` with a copy
-of the loop at Guide.qml:696-700 (the sole group off the axis, then each
-group entry), not by calling shared logic. The counts it passes to
-`groupWordHint` are therefore the counts Guide.qml WOULD pass only if that
-copy stays in step. Filed as D-SG-2: lift the collection into Model.js so
-both call it.
+The `groupNames` the hint sees are collected by `Model.groupNamesForHint`,
+which Guide.qml `rebuildGroups` and verify.js both call (D-SG-2, closed in
+0.7.2); the node suite pins its two shapes.

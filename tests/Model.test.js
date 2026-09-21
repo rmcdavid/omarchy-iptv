@@ -430,6 +430,19 @@ check("SG1 hint fires while typing toward the sole group", Model.groupWordHint("
 check("SG1 hint fires one keystroke later too", Model.groupWordHint("unite", ["United States"]), "United States")
 check("SG1 hint is silent once the word is whole, because the query matches", Model.groupWordHint("united", ["United States"]), "")
 check("SG1 hint is silent for a query going nowhere", Model.groupWordHint("zzz", ["United States"]), "")
+// D-SG-2: the hint's candidate names come from ONE function that Guide.qml and
+// the qa-sg1 fixture both call. The sole group comes off the axis, then group
+// entries in order; header/all/favorites/recent entries never do.
+check("SG2 one-group list: the sole group off the axis", Model.groupNamesForHint({
+  axis: { count: 1, narrows: false, soleGroup: "United States" },
+  entries: [{ id: "all", label: "All", kind: "all", count: 3 }]
+}), ["United States"])
+check("SG2 multi-group list: group entries in order, nothing else", Model.groupNamesForHint({
+  axis: { count: 2, narrows: true, soleGroup: "" },
+  entries: [{ id: "f", label: "Favorites", kind: "favorites", count: 0 }, { id: "", label: "GROUPS", kind: "header", count: 0 },
+            { id: "g:News", label: "News", kind: "group", count: 2 }, { id: "g:Sport", label: "Sport", kind: "group", count: 1 }]
+}), ["News", "Sport"])
+check("SG2 a malformed surface yields no names, not a throw", Model.groupNamesForHint(null), [])
 check("SG1 hint is silent with no query", Model.groupWordHint("", ["United States"]), "")
 check("SG1 hint is silent with no groups", Model.groupWordHint("unit", []), "")
 check("SG1 hint needs earlier tokens to be whole words", [

@@ -232,9 +232,8 @@ class SingleGroupSearchFixtureTest(unittest.TestCase):
         self.assertEqual(self.small_status["channelCount"], 50)
         self.assertEqual(self.small_status["groupCount"], 1)
         self.assertEqual(self.small["channels"], 50)
-        # verify.js collects groupNames the way Guide.qml:696-700 does, by a
-        # COPY of that loop, not a call: the join is unverified (D-SG-2).
-        self.assertEqual(self.small["groupNames"], [GROUP], "the sole group must come off the axis")
+        # verify.js and Guide.qml both call Model.groupNamesForHint (D-SG-2).
+        self.assertEqual(self.small["groupNames"], [GROUP], "the sole group must come off the axis, as Guide.qml collects it")
         self.assertEqual(self.small["limit"], 200)
 
     def test_committed_list_shipping_counts_are_the_real_name_matches(self):

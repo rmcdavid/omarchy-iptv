@@ -1,6 +1,6 @@
 // Model.js -- pure logic for io.github.rmcdavid.iptv.
 //
-// Rules (see docs/ARCHITECTURE.md, "Coding standards"):
+// Rules (see ARCHITECTURE.md (dev branch), "Coding standards"):
 //   - No QML, no I/O, no timers, no Quickshell APIs. Inputs in, values out.
 //   - ES5-style functions and `var`: this file is loaded by the QML engine
 //     (`import "Model.js" as Model`) and by node (`require("./Model.js")`).
@@ -9,12 +9,12 @@
 //   - Text normalization here MUST stay byte-for-byte compatible with
 //     `normalize_text` / `search_key` / `fnv1a32` in bin/omarchy-iptv; the
 //     helper writes searchKey/id into channels.json and the guide only
-//     normalizes the query. tests/Model.test.js and tests/test_playlist.py
+//     normalizes the query. Model.test.js (dev branch tests) and test_playlist.py (dev branch tests)
 //     pin the shared vectors.
 //   - ASCII only. Nerd Font glyphs and typographic characters are written
 //     as \uXXXX escapes (surrogate pairs for the supplementary plane).
 //
-// Rulings applied (docs/ARCHITECTURE.md section 12): R2 settings clamps,
+// Rulings applied (ARCHITECTURE.md (dev branch) section 12): R2 settings clamps,
 // R3 result cap 200, R4 search key + ranking tiers, R5 first-group placement
 // and recents on the play command, R7 bar glyphs, R8 model fields, R9 zap
 // ring, R11 session-only failedAt, R12 notification privacy.
@@ -49,9 +49,9 @@ var PLAYER_ENTRY_OWNERS = 4
 var FAVORITES_GROUP = "Favorites"
 var RECENT_GROUP = "Recent"
 var UNGROUPED = "Ungrouped"
-// state.json schema (docs/ARCHITECTURE-SOURCES.md 2.1): version 2 adds the
+// state.json schema (ARCHITECTURE-SOURCES.md (dev branch) 2.1): version 2 adds the
 // `sources` history and `cacheLayout`; parseState still reads version 1.
-// The optional nullable `session` key (docs/ARCHITECTURE-PLAYER.md 8) is
+// The optional nullable `session` key (ARCHITECTURE-PLAYER.md (dev branch) 8) is
 // additive and does NOT bump this: both readers whitelist the keys they
 // know, so an older build drops it and a newer one reads its absence.
 var STATE_VERSION = 2
@@ -347,7 +347,7 @@ var CHANNEL_ID_SCHEME = 2
 // The last-resort display name, `Channel <n>`, whose n is the row's POSITION.
 // Both the word and the pattern that recognises one after normalizeText come
 // from the same constant, and displayName() below builds the name from it --
-// CLAUDE.md rule 13, two things joined by a call rather than by a name. The
+// engineering rule 13 (dev branch), two things joined by a call rather than by a name. The
 // python mirror does the same with GENERATED_NAME_WORD.
 var GENERATED_NAME_WORD = "Channel"
 var GENERATED_NAME_RE = new RegExp("^" + GENERATED_NAME_WORD.toLowerCase() + " [0-9]+$")
@@ -632,7 +632,7 @@ function prepareChannels(channels) {
 
 // ------------------------------------------------------------ channel numbers (M2-03)
 //
-// Rulings CN1-CN14 (docs/M2-03-CHANNEL-NUMBERS.md section 13) and the
+// Rulings CN1-CN14 (M2-03-CHANNEL-NUMBERS.md (dev branch) section 13) and the
 // technical contract in section 9.1. Everything here is pure: the guide owns
 // the timer, the cursor and the chip, and owns no number logic at all.
 
@@ -1106,7 +1106,7 @@ function closeNumberEntry(entry, reason) {
 // M2-03 2.5 / 2.9. ONE keystroke, every decision it makes, in order. This
 // lives here rather than in Guide.qml because the ORDER is the thing both
 // D-CHNO-1 and D-CHNO-2 are about, and an order stranded in a QML component
-// is an order no test can reach (CLAUDE.md rule 12). The guide keeps exactly
+// is an order no test can reach (engineering rule 12 (dev branch)). The guide keeps exactly
 // what only it can do: move the cursor, run the timer, draw the transient.
 //
 // `ctx` is the live guide state a NEW entry snapshots: cursorId, cursorIndex,
@@ -1344,6 +1344,23 @@ function matchRank(key, tokens, nameKey) {
 // a strict prefix of one of its words, which is exactly "typing toward it".
 // Called only when a query matched nothing, so it never runs on a keystroke
 // that produced rows.
+// SG1 / D-SG-2. The names the empty-state hint may offer: the sole group off
+// the axis first (a one-group list publishes no group ENTRIES, because
+// scopeSurface only emits them when the axis narrows, and that is precisely
+// the list D-SG-1 bites on), then every group entry in order. Guide.qml
+// rebuildGroups and the qa-sg1 fixture (dev branch)/verify.js both CALL this; until
+// D-SG-2 the fixture carried a copy of the loop and nothing kept them in step.
+function groupNamesForHint(surface) {
+  var s = surface && typeof surface === "object" ? surface : {}
+  var axis = s.axis && typeof s.axis === "object" ? s.axis : {}
+  var entries = asList(s.entries)
+  var names = []
+  if (str(axis.soleGroup) !== "") names.push(str(axis.soleGroup))
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i] && entries[i].kind === "group") names.push(str(entries[i].label))
+  }
+  return names
+}
 function groupWordHint(query, groupNames) {
   var tokens = tokenize(query)
   if (tokens.length === 0) return ""
@@ -1673,7 +1690,7 @@ function cursorFor(rows, playingId) {
 // two places (`scrollToCursor` and the `Contain` branch of `positionColumn`).
 //
 // This is that algorithm as arithmetic rather than as fifteen copied lines of
-// QML: the copy would be exactly the stranded interface logic CLAUDE.md rule
+// QML: the copy would be exactly the stranded interface logic the engineering rules (dev branch)
 // 12 forbids, and as a function it is node-testable as data.
 //
 // `peek` is the whole reach the next row keeps -- the caller adds its list
@@ -2141,7 +2158,7 @@ function deadSessionVerdict(state, stateLoaded, failed, clock) {
 // This lives here rather than as a condition per branch in Service.qml
 // because that is how the reported defect happened: three of the terminal
 // branches wrote the clear and three did not, and nothing outside a running
-// shell could call the rule to find out (CLAUDE.md 11, 12).
+// shell could call the rule to find out (engineering rule 11 (dev branch), 12).
 
 // Every answer Service.qml can get about the player it asked for, and whether
 // the player survives it. `false` is "gone, and nothing is bringing it back".
@@ -2522,7 +2539,7 @@ function clampSetting(key, value) {
 function settingsFrom(entry) {
   // M2-05 section 6: the three PiP keys are read in ONE place
   // (Model.pipOptions), which the service and the guide also call directly,
-  // so a clamp can never be written twice and drift (R2, CLAUDE.md 12).
+  // so a clamp can never be written twice and drift (R2, engineering rule 12 (dev branch)).
   var pip = pipOptions(entry)
   return {
     playlistUrl: str(settingOf(entry, "playlistUrl", "")).replace(/^\s+|\s+$/g, ""),
@@ -2633,7 +2650,7 @@ function barEntryWritable(barConfig, pluginId) {
 // builtin scripts are the only ones these options can reach.
 //
 // Mirrored by `mpv_arg_warnings()` in bin/omarchy-iptv and pinned by the
-// `mpvHandoff` vectors in tests/fixtures/player-argv.json.
+// `mpvHandoff` vectors in the player-argv.json. fixture (dev branch)
 var MPV_HANDOFF = {
   "--ytdl-format": true,
   "--ytdl-raw-options": true
@@ -2784,7 +2801,7 @@ function dirnameOf(path) {
 // The neutral `--title=$>IPTV` / `--force-media-title=IPTV` keep mpv from
 // flashing its own "No file - mpv"; the channel title follows over IPC.
 // Mirrored by `mpv_launch_argv()` in bin/omarchy-iptv, pinned by the shared
-// vectors in tests/fixtures/player-argv.json.
+// vectors in the player-argv.json. fixture (dev branch)
 function buildMpvArgv(params) {
   var p = params || {}
   var dirs = p.dirs || playerDirs(p.socketPath, p.stateDir)
@@ -2797,7 +2814,7 @@ function buildMpvArgv(params) {
     // literals that agree today can disagree tomorrow, and the failure is
     // silent: PiP would simply answer "Cannot find the player window" for
     // ever. The python mirror keeps its own literal and is pinned to this
-    // one by tests/fixtures/player-argv.json.
+    // one by the player-argv.json. fixture (dev branch)
     "--wayland-app-id=" + PIP_CLASS,
     "--force-window=immediate",
     "--idle=once",
@@ -2932,7 +2949,7 @@ function playerProbeArgv(socket, ownerPid) {
 //
 // What the shell decides when a channel is asked for, lifted here so it can
 // be stated in vectors instead of living where no test can reach it
-// (CLAUDE.md 12). Checked against Service.qml's play() by the lane that
+// (engineering rule 12 (dev branch)). Checked against Service.qml's play() by the lane that
 // wired it; if the two ever disagree, the shipping fork is right.
 //
 //   start  spawn or adopt a player and play there (`player start`)
@@ -2944,7 +2961,7 @@ function playerProbeArgv(socket, ownerPid) {
 // true because pending counts, and the fork therefore answers "zap" - a zap
 // aimed at a socket nothing is listening on yet. That state is no longer a
 // hypothesis: wave two measured it on a real shell (ruling CL9,
-// docs/QA-RESULTS.md D1) at TEN user-visible divergences in twenty cold
+// QA-RESULTS.md (dev branch) D1) at TEN user-visible divergences in twenty cold
 // concurrent bursts, none in ten warm and none in six cold serial, with the
 // mechanism observed rather than inferred - a change wins the socket and the
 // cold start's own `apply_channel` lands after it.
@@ -2972,7 +2989,7 @@ function playForkBlind(state) {
 }
 
 // `play --id ... --socket ... --cache-dir ...`, plus the additive session
-// flags. Lifted out of Service.qml.playArgs (CLAUDE.md 12): the decision
+// flags. Lifted out of Service.qml.playArgs (engineering rule 12 (dev branch)): the decision
 // that SKIPS `--scope`/`--since` is the decision that skips the stash write
 // at the far end (`cmd_play` computes `session = bool(scope or since)`), and
 // it was the one argv builder in the file with no vectors anywhere.
@@ -3262,7 +3279,7 @@ function playerSessionFollowUp(context) {
 // What it must not own is the DECISION, because a decision that lives in a
 // QML method can only be pinned by a copy of itself in the spec file, and a
 // copy passes just as happily when the shipping path is broken - the same
-// trap as a test double more forgiving than the real thing (CLAUDE.md 10).
+// trap as a test double more forgiving than the real thing (engineering rule 10 (dev branch)).
 // So handlePlayerLine(), rememberEntry(), channelForEnd() and the terminal
 // half of handlePlayerGone() are these four functions plus assignments.
 
@@ -3370,7 +3387,7 @@ function endedReport(context) {
 // on it, because the user has SUPER+T and SUPER+O bound and can change
 // `floating` and `pinned` behind our back between any two steps.
 //
-// Three facts from the gate (docs/QA-RESULTS.md, M2-05-00) shape this code
+// Three facts from the gate (QA-RESULTS.md (dev branch), M2-05-00) shape this code
 // and override the design text where they disagree:
 //
 //   PIP10  The `action` argument is IGNORED. `float` and `pin` toggle
@@ -3465,7 +3482,7 @@ function pipAddressSelector(address) {
 // simply the verb nobody applied it to. The class branch is gone rather than
 // merely unused, so the selector cannot come back through a future caller:
 // pipExpression refuses `class:` anything now, which is a property a test
-// can assert (CLAUDE.md 11).
+// can assert (engineering rule 11 (dev branch)).
 function pipSelector(window) {
   var value = str(window)
   if (value.indexOf("address:") !== 0) return ""
@@ -3512,7 +3529,7 @@ function pipExpression(verb, params) {
 }
 
 // argv for one dispatch, or [] if the expression was refused. One argv
-// vector, no shell (CLAUDE.md 2); the Lua string is one argv ITEM, which is
+// vector, no shell (engineering rule 2 (dev branch)); the Lua string is one argv ITEM, which is
 // the separate boundary 4.11 governs.
 function pipDispatchArgv(verb, params) {
   var expr = pipExpression(verb, params)
@@ -3716,7 +3733,7 @@ function pipDeriveState(clients, pid, className) {
 }
 
 // May the out-of-band read run at all? Three clauses that would otherwise sit
-// in QML where no test can reach them (CLAUDE.md 12):
+// in QML where no test can reach them (engineering rule 12 (dev branch)):
 //
 //   no pid   - the window cannot be narrowed, and narrowing is not optional
 //              (4.2); a class-only lookup is the D-PIP-5 defect.
@@ -4098,7 +4115,7 @@ function pipKeyRequest(ctx) {
 
 // List-mode single-letter commands (UX 3.3, section 5). This used to be a
 // chain of string comparisons inside Guide.qml, where no test could reach
-// it - exactly the shape CLAUDE.md 12 forbids - so the mapping lives here
+// it - exactly the shape engineering rule 12 (dev branch) forbids - so the mapping lives here
 // and the guide only dispatches on the answer. Digits, "." and "," never
 // arrive: the number machine takes them first (M2-03 2.9).
 function listLetterAction(text) {
@@ -4321,7 +4338,7 @@ function rowFailedMeta(at) {
 }
 
 // The whole of the meta slot's text, so the decision is asserted rather than
-// stranded in a QML ternary (CLAUDE.md rule 12). `until HH:MM` while the row
+// stranded in a QML ternary (engineering rule 12 (dev branch)). `until HH:MM` while the row
 // is healthy; the failure notice when the row has failed AND has no detail
 // line to carry it; nothing otherwise -- which is the shipped behaviour of a
 // failed row with a detail line, and the reason the slot was free to take it.
@@ -4333,7 +4350,7 @@ function rowMeta(opts) {
 }
 
 // M2-09 GS8. The opacity rung a row's secondary text carries, lifted out of
-// the two QML bindings that render it (CLAUDE.md rule 12) so a test can call
+// the two QML bindings that render it (engineering rule 12 (dev branch)) so a test can call
 // the shipping decision instead of mirroring it.
 //
 // UX 5.3's dim rung is de-emphasis and it is right for ambient text: `until
@@ -4356,9 +4373,9 @@ function rowMeta(opts) {
 // ------------------------------------------------------------ contrast
 //
 // One arithmetic, called by the shipping code AND by the tests. It lived only
-// in tests/Model.test.js, which was fine while nothing SHIPPED a decision made
+// in Model.test.js (dev branch tests), which was fine while nothing SHIPPED a decision made
 // with it. Two do now (D-RUNG-4 and D-RUNG-5), and a private copy in the test
-// is precisely the shape CLAUDE.md rule 12 forbids: a test that mirrors logic
+// is precisely the shape engineering rule 12 (dev branch) forbids: a test that mirrors logic
 // instead of calling it passes while the shipping path is broken.
 //
 // `colorOver` is the load-bearing one. `Color.menu.selectedBackground` is not
@@ -4399,7 +4416,7 @@ function colorMix(a, b, t) { return colorOver(a, b, 1 - Number(t)) }
 
 // The calibrated-target rule, as arithmetic rather than as advice.
 //
-// docs/UX-GUIDE-AT-SCALE.md section 16 measured this model against real pixels:
+// UX-GUIDE-AT-SCALE.md (dev branch) section 16 measured this model against real pixels:
 // accurate to within a known tolerance and ALWAYS SLIGHTLY OPTIMISTIC, so a
 // design computing exactly 4.50 renders at about 4.40. "Above the line, never
 // on it" now has a number, and the margin is READ FROM THE CALIBRATION FIXTURE
@@ -4424,7 +4441,7 @@ var WCAG_AA_TEXT = 4.5
 // their accent distance.
 //
 // THE TARGET IS 4.70, NOT 4.50, and the margin is not arbitrary. Measured off
-// real screenshots (docs/UX-GUIDE-AT-SCALE.md section 16 and the rose-pine pass
+// real screenshots (UX-GUIDE-AT-SCALE.md (dev branch) section 16 and the rose-pine pass
 // that followed it), this arithmetic is optimistic by about 1 per cent at title
 // size and 2 per cent at body size, so 4.70 renders near 4.62. The same target
 // would NOT be safe for caption-size text, which loses 7 to 9 per cent; a
@@ -4444,7 +4461,7 @@ function cursorInk(accent, text, fill) {
 // The QML seam. A QML `color` exposes r, g and b as 0-1 floats, and a binding
 // wants a string back. Kept here rather than in Guide.qml so the whole decision
 // is one node-testable function and the QML side holds no arithmetic at all
-// (CLAUDE.md rule 12).
+// (engineering rule 12 (dev branch)).
 function qmlRgb(c) {
   if (!c) return [0, 0, 0]
   if (typeof c.length === "number") return [Number(c[0]), Number(c[1]), Number(c[2])]
@@ -4502,7 +4519,7 @@ var TEXT_FULL = 1
 // 0.86 is chosen by the calibrated-target rule, not by eye. Across all 23
 // installed themes it gives 0 under the threshold, 0 inverted, and a floor of
 // 4.77 -- clear of the 4.65 that 4.5 plus the calibration tolerance demands
-// (tests/fixtures/contrast-calibration.json). 0.84 would read 4.56 and fail
+// (the contrast-calibration.json fixture (dev branch)). 0.84 would read 4.56 and fail
 // that rule while still looking fine on paper, which is the whole point of
 // having the rule as arithmetic instead of as advice.
 //
@@ -4530,7 +4547,7 @@ function rowDetail(opts) {
   return joinParts(parts)
 }
 
-// M2-09 D3, lifted out of a QML binding per CLAUDE.md rule 12 so a test can
+// M2-09 D3, lifted out of a QML binding per engineering rule 12 (dev branch) so a test can
 // call the shipping decision rather than reimplement it.
 //
 // Two-line rows wherever the detail line can carry something that varies:
@@ -4817,7 +4834,7 @@ function footerHints(opts) {
 // it rings Recent / Favorites / All -- so the pair is never dropped, only its
 // verb stops naming an axis that is not on screen. Gated the way `hasNumbers`
 // and `pipAvailable` are: an absent flag reads as the shipped wording, so a
-// caller that predates this never loses a hint (CLAUDE.md rule 10). `scope`
+// caller that predates this never loses a hint (engineering rule 10 (dev branch)). `scope`
 // and `group` are both five characters, so the hint line does not move by a
 // pixel and its existing left-elision is neither fixed nor worsened.
 function scopeVerb(opts) {
@@ -4850,8 +4867,8 @@ function formHints(form) {
 
 // ------------------------------------------------------------ sources (M2-01)
 //
-// docs/ARCHITECTURE-SOURCES.md section 3 (state records, keys, validation,
-// masking, Xtream, reducers) and docs/UX-SOURCES.md 5.4-5.8 / 8.1 (codes,
+// ARCHITECTURE-SOURCES.md (dev branch) section 3 (state records, keys, validation,
+// masking, Xtream, reducers) and UX-SOURCES.md (dev branch) 5.4-5.8 / 8.1 (codes,
 // copy, view objects, form state) under the reconciliation rulings SR1-SR10:
 // the state file keeps the architecture's field names (`key`, `url`,
 // `epgUrl`, `lastUsed`, `fetchedAt`), the guide only ever sees `sourceView`
@@ -6484,6 +6501,7 @@ if (typeof module !== "undefined") {
     BAR_IDLE_ALPHA: BAR_IDLE_ALPHA,
     TEXT_FULL: TEXT_FULL,
     rowsHaveDetail: rowsHaveDetail,
+    groupNamesForHint: groupNamesForHint,
     rowShowsGroup: rowShowsGroup,
     rowAccessibleName: rowAccessibleName,
     elide: elide,
