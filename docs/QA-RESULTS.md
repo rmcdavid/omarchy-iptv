@@ -4955,3 +4955,549 @@ of SRC-A11Y-05.
 | TC-BAR-11 | `A grep -n 'Accessible' BarWidget.qml` | `X` harness, bar scenarios | as above |
 | SRC-A11Y-01 | `A grep -n 'Accessible\.' Guide.qml` | `X` harness, Sources and form scenarios | a run filed above; markers in `docs/UX-SOURCES.md` 7.1 |
 | SRC-A11Y-05 | `A grep` | `X` harness, Xtream and form scenarios, asserting the **Value** and the field's integrity | a run filed above, containing both halves |
+
+## Live pass 2026-09-21, segment A: contrast and accessibility
+
+Display lane, on the user's live session, with written authorization for
+exactly: opening the guide and typing into it, three theme switches restored
+to Catppuccin, cropped local captures, a local served stream, and the AT-SPI
+probe. Code under test: the INSTALLED plugin 0.7.2 at
+`~/.config/omarchy/plugins/io.github.rmcdavid.iptv` (never written).
+Measured 15:48:24-16:00:07, about 12 min of display time (14 min from the
+15:45:54 snapshot). Evidence root
+`E=/tmp/claude-1000/live-A/`: `shots/` (38 crops, PPM + PNG, card 960x620 at
+203,74 and bar strip 1366x26; every full frame was deleted in the same script
+step that cropped it, `full/` is empty), `logs/` (phase transcripts,
+`shell-<slug>.toml` copies of the generated theme tokens, `a11y-probe.log`,
+`nodes-<scenario>.json` bus dumps), `snapshot/` (pre-pass copies), `px.py`
+(stdlib PPM crop / measure / histogram), `sites.py` (the site boxes),
+`predict.js` (calls `Model.js` for every prediction; nothing recomputed by
+hand), `restore.sh` (the EXIT/INT/TERM trap of every phase script).
+
+Method: the ruling's own. `grim -t ppm` of the running shell, a tight box per
+site, the modal colour of the box as the background, the single
+most-contrasting pixel as the fully-covered stroke, WCAG 2.1 ratio. Every
+prediction is `Model.relativeLuminance` / `contrastRatio` / `colorOver` /
+`cursorInk` / `BAR_IDLE_ALPHA` from the dev-branch `Model.js` (the installed
+`Model.js` returns the same `cursorInkHex`), fed the tokens read from the
+generated `~/.local/state/omarchy/current/theme/shell.toml` after each switch
+(copies in `E/logs/shell-*.toml`; `[menu]` text / background /
+selected-background 0.08 / selected-text are identical to the theme's
+`colors.toml` on all three themes). Captures were taken 2.5 s or more after a
+switch; the settled Catppuccin frame was 11 s after. `pgrep -x hyprlock` was
+empty before every `wtype`, and every keystroke was gated on the
+`omarchy-iptv` layer being up and `status` reporting `ready`.
+
+**One correction to the protocol as written**: the guide opens in SEARCH
+mode, so the first sources attempt typed `o`, `a` and the path into the query
+(`E/shots/src-add-typed.png`; harmless, 0 matches, Esc). `Tab` first, then
+`o`, works (`E/shots/src2-*.png`).
+
+### 1. Calibration top-up (CONTRAST-RULING Step 2)
+
+Measured ratio, model prediction, delta (measured minus model). Sites in
+`E/shots/<slug>-A-card.ppm` unless stated. Box coordinates: the card sites are
+in `E/sites.py`; the boxes that file does not hold are recorded here so every
+figure below reproduces without re-locating them (card coordinates; the
+empty-state title and prose boxes were on file nowhere and are the audit's,
+which reproduce 3.31 / 3.21, 4.62 / 4.49 and 6.17 / 5.98 exactly): `leftRule2`
+235,66 6x40 (the cursor mark over the card, section 4); `emptyGlyph` 455,278
+50x26, `emptyTitle` 380,318 200x18 and `emptyProse` 400,345 160x16 on the
+`*-B-card` crops; the bar glyph runs x 923-932 (playing) and x 1039-1050
+(idle), y 3-23, on the `*-bar-{playing,idle}` strips; and the closed-bar
+boxes, clock 641,4 85x18 and glyph 1036,4 18x18, on `catppuccin-closed-bar`
+(section 3).
+
+| Site (size, alpha, surface) | rose-pine | tokyo-night | catppuccin |
+|---|---|---|---|
+| cursor-row name (14 px, 1.0, cursor fill) - rendered ink | `#59537e` **5.83** | `#a7b0cf` **6.86** | `#c5d5f2` **9.13** |
+| ... model `cursorInk` says | `#576684` 4.72 (+1.11) | `#7aa2f7` 5.87 (+0.99) | `#89b4fa` 6.44 (+2.69) |
+| ... text over the cursor fill says | 5.94 (-0.11) | 7.00 (-0.14) | 9.38 (-0.25) |
+| cursor mark, left rule (2 px, on the card) | `#575279` 6.66 | `#a9b1d6` 8.10 | `#cdd6f4` 11.34 |
+| ... model (`cursorInk` on the card) | 5.30 (+1.36) | 6.79 (+1.31) | 7.79 (+3.55) |
+| non-cursor name (14 px, 1.0, card) | 6.59 / 6.66 (-0.07) | 8.03 / 8.10 (-0.07) | 11.25 / 11.34 (-0.09) |
+| detail line (11 px, 0.52, card) | 2.28 / 2.33 (-0.05) | 3.08 / 3.16 (-0.08) | 3.97 / 4.07 (-0.10) |
+| detail line (11 px, 0.52, cursor fill) | 2.15 / 2.24 (-0.09) | 2.81 / 2.98 (**-0.17**) | 3.48 / 3.71 (**-0.23**) |
+| header scope label (10 px, 0.52, card) | 2.16 / 2.33 (**-0.17**) | 2.87 / 3.16 (**-0.29**) | 3.67 / 4.07 (**-0.40**) |
+| group entry count (10 px, 0.7) | 2.96 / 3.34 (**-0.38**) | 4.12 / 4.64 (**-0.52**) | 5.45 / 6.24 (**-0.79**) |
+| footer status line (10 px, 0.7) | 3.05 / 3.34 (**-0.29**) | 4.25 / 4.64 (**-0.39**) | 5.70 / 6.24 (**-0.54**) |
+| footer verbs (10 px, 0.7) | 3.15 / 3.34 (**-0.19**) | 4.30 / 4.64 (**-0.34**) | 5.70 / 6.24 (**-0.54**) |
+| Sources pinned count (10 px, 0.7) | 2.96 / 3.34 (**-0.38**) | 4.12 / 4.64 (**-0.52**) | 5.46 / 6.24 (**-0.78**) |
+| empty-state title (14 px, 0.7) `*-B` | 3.31 / 3.34 (-0.03) | 4.62 / 4.64 (-0.02) | 6.17 / 6.24 (-0.07) |
+| empty-state prose (12 px, 0.7) `*-B` | 3.21 / 3.34 (-0.13) | 4.49 / 4.64 (-0.15) | 5.98 / 6.24 (**-0.26**) |
+| empty-state glyph (28 px, accent 0.8) `*-B` | `#77a7af` 2.42 / 2.42 (0.00) | `#6787cd` 4.82 / 4.82 (0.00) | `#7496d1` 5.49 / 5.48 (+0.01) |
+| bar idle glyph (text 0.86, bar) `*-bar-idle` | `#6e6989` 4.75 / 4.77 (-0.02) | not captured | `#b4bcd8` 8.69 / 8.72 (-0.03) |
+| bar playing glyph (text 1.0, bar) `*-bar-playing` | `#575279` 6.66 / 6.66 (0.00) | not captured | `#cdd6f4` 11.34 / 11.34 (0.00) |
+| GROUPS header (10 px bold, `Qt.darker` 1.4) | `#3e3b57` 9.77 / 9.82 (-0.05) | `#797e98` 4.27 / 4.29 (-0.02) | `#9299ad` 5.77 / 5.77 (0.00) |
+
+Catppuccin was captured twice (`catppuccin-A`, `catppuccin-settled`, 11 s
+apart); every site agrees to two decimals. Read across the rows:
+
+- **The model is accurate to 0.10 for 11-14 px text at 1.0 and 0.52 on the
+  card, and to 0.03 for the 28 px glyph and the bar glyph.** The one
+  requested sample between alpha 0.6 and 0.9 exists twice in shipping code:
+  the empty-state glyph at 0.8 (delta 0.00 to +0.01 on all three themes) and
+  the bar idle glyph at 0.86 (delta -0.02, -0.03). No adjustment is warranted
+  there.
+- **Every 10 px regular-weight caption reads 0.17 to 0.79 below the model**,
+  which is 11 to 13 per cent of the ratio (catppuccin group count 5.45 / 6.24
+  = 0.873; rose-pine 0.886; tokyo-night 0.888), worse than the 7 to 9 per
+  cent the D-RUNG-4 row recorded. The 10 px BOLD host header does not lose
+  it (delta 0.00 to -0.05): the loss is stroke coverage, not size. **Finding
+  F-CAL-1**: `maxAbsError` 0.15 does not hold for caption text at 0.7; it
+  is reported here, not adjusted by the pass. (Applied afterwards under the
+  lead's F-CAL-1 ruling: every fixture row carries a `sizeClass`, a caption
+  row is allowed 15 per cent of its measured value, every other class keeps
+  `maxAbsError` 0.15, and the calibration block of `tests/Model.test.js`
+  derives its expectations from the rows.)
+- **The rows were appended to `tests/fixtures/contrast-calibration.json`**
+  (17 rows: cursor 1.0 / cursor 0.52 / row 1.0 / row 0.52 / row 0.7 for each
+  theme, and bar 0.86 for rose-pine and catppuccin; existing rows and
+  `maxAbsError` untouched). Consequence, measured: `node tests/Model.test.js`
+  goes from **1434 checks, 0 failures** to **1434 checks, 2 failures**, both
+  at the calibration checks. The tolerance check fails on VALUE for the six
+  caption / cursor-fill samples above 0.15 (rose-pine row 0.7, tokyo-night
+  cursor 0.52 and row 0.7, catppuccin cursor 1.0, cursor 0.52 and row 0.7)
+  and would fail on SHAPE regardless, because its expected value is a
+  hard-coded `[true x 6]`; and "the refuted claim restated" fails because the
+  worst delta is now 0.79, not under 0.2. The optimism check stays green: all
+  23 samples are still below their prediction. Not committed by the pass;
+  the lead's ruling is F-CAL-1, above. Note that three of the six samples
+  over 0.15 are not captions: they are the 11 px detail line and the 14 px
+  name ON THE CURSOR FILL (tokyo-night cursor 0.52, catppuccin cursor 1.0
+  and 0.52), off by 0.17, 0.25 and 0.23 against the text class's 0.15. The
+  model's arithmetic is not at fault there (section 4: the fill measures as
+  modelled and the rendered ink is the text token less a few units of
+  coverage). **Finding F-CAL-2**: the cursor-fill side loses more than the
+  card on five of the six themes in the fixture, and the same on retropc
+  (0.12 on both), but this pass, like the one before it, measured a
+  DIFFERENT string on each surface (`cursorName` is row 1 and `rowName` is
+  row 2 in `E/sites.py`, on every theme), so a surface effect is not
+  separated from the peak coverage of those particular glyphs; the row
+  delegate carries no transform, Behavior or animation that would move its
+  text off the pixel grid (`Guide.qml:2480-2600`). Ruling: the three rows
+  are pinned by name in the fixture (`knownDeviation: "F-CAL-2"`) and the
+  test holds them strictly, red the day one of them holds, so no tolerance
+  widens; the next live pass measures ONE string on both surfaces by moving
+  the cursor one row.
+- The consumer maps surface `bar` to the row fill; that is only valid because
+  the generated `shell.toml` sets `[bar] background = [menu] background` and
+  `[bar] text = [menu] text` on all three themes (`E/logs/shell-*.toml`),
+  which the pass confirmed by reading the file, not by assuming it.
+
+### 2. D-RUNG-5, the bar glyph, playing against idle
+
+Local stream: `E/serve/test.ts` (the qa-player fixture, 900 s) served by
+`python3 -m http.server 8765 --bind 127.0.0.1`, added as a file-path source
+through the guide's own Add form (`E/shots/src2-typed.png`,
+`src2-after-load.png`: `local file`, 1 channel, active), played by
+`omarchy-shell io.github.rmcdavid.iptv play http://127.0.0.1:8765/test.ts`
+(`ok`; mpv pids 1136680 and 1137651; an `omarchy-iptv` client appeared next to
+the user's two windows and was gone after `stop`). The bar strip was captured
+with the guide CLOSED, 1.5 s after `status` reported `playing:true, up:true`,
+and again 1.5 s after `playing:false` with no mpv. Nothing left the machine.
+
+| Theme | glyph run | playing | idle | model active / idle |
+|---|---|---|---|---|
+| rose-pine | x 923-932 playing, x 1039-1050 idle | `#575279` **6.66** | `#6e6989` **4.75** | 6.66 / 4.77 |
+| catppuccin | same | `#cdd6f4` **11.34** | `#b4bcd8` **8.69** | 11.34 / 8.72 |
+
+D-RUNG-5's fix is **live-confirmed**: the idle glyph is dimmer than the
+active one on a light theme and a dark one, and on rose-pine, the binding
+theme, the idle glyph renders at 4.75 against the 4.77 floor
+`Model.BAR_IDLE_ALPHA` was chosen for - 0.25 above 4.5, so the calibrated
+margin held with 0.10 to spare. Evidence `E/shots/{rose-pine,catppuccin}-bar-{playing,idle}.{ppm,png}`.
+
+### 3. D-RUNG-6 is a METHOD defect, settled
+
+`E/shots/catppuccin-closed-bar.ppm`: guide closed, no theme switch for over
+two minutes, no typing. Histogram of the ratio of every pixel in each glyph's
+bounding box against the bar background `#1e1e2e`:
+
+| Glyph | box | ink px | distribution | peak |
+|---|---|---|---|---|
+| host clock `Monday 15:53` (12 px digits) | 641,4 85x18 | 320 of 1530 (21%) | spread evenly from 1.5 to 11.5, 8 to 31 px per half-ratio bin | `#cdd6f4` **11.34** = the full text token |
+| our TV glyph U+F0502 | 1036,4 18x18 | 64 of 324 (20%) | 27 px at 8.0-8.5 (fully covered strokes), 20 px at 1.5-2.0 (edges), 11 px at 6.0 | `#b4bcd8` **8.69** = `colorOver(text, bg, 0.86)` 8.72 |
+
+**Neither glyph shows the deficit.** The host's thick clock reaches its full
+token and our thin glyph reaches its 0.86 rung, both within 0.03. So it is
+not stroke weight. The half-opacity observation reproduces exactly and has a
+cause: **the bar was captured with the guide open, and the guide's own
+full-screen PanelWindow paints `Color.menu.scrim` (background at alpha 0.5)
+over the bar** (`Guide.qml:1912-1926` in the INSTALLED 0.7.2 file; on the dev
+branch the same PanelWindow is at `Guide.qml:1946-1984`; anchored to all four
+edges, `ExclusionMode.Ignore`). Proof by arithmetic on this pass's own frames: the
+bar crop taken through the open guide (`E/shots/catppuccin-A-bar.ppm`, same
+minute, same theme) peaks at `#757a91` **3.87**, and
+`Model.colorOver(#cdd6f4, #1e1e2e, 0.5)` gives `[117.5, 122, 145]`, `#767a91`
+rounded (3.87 unrounded, 3.88 as the hex), one unit off the measured
+`#757a91` in red and the same 3.87 to two decimals. And D-RUNG-6's own rose-pine
+figure, `#a8a3b3` at 2.25: `Model.colorOver(#575279, #faf4ed, 0.5)` gives
+`#a9a3b3` (2.24) against the measured `#a8a3b3` (2.25). The P2 evaporates; Omarchy's bar text is fine
+and there is nothing to report upstream. Recommend closing D-RUNG-6 as a
+capture through the scrim and lifting the "UNASSERTED" on D-RUNG-3's
+threshold claim, which the table in section 1 now asserts on two themes.
+
+### 4. D-RUNG-7, the cursor ink, settled with the mechanism
+
+The three resolved tokens, read from the generated `shell.toml` after each
+switch (`E/logs/shell-*.toml`), and what `Model.cursorInk` computes from them
+against what rendered:
+
+| Theme | accent (`selected-text`) | text | fill (`selected-background` 0.08 over background) | model ink | rendered name ink | rendered left rule |
+|---|---|---|---|---|---|---|
+| rose-pine | `#56949f` | `#575279` | `#ede7e4` (measured modal `#ede8e4`) | `#576684` (mix 0.70) | `#59537e` | `#575279` |
+| tokyo-night | `#7aa2f7` | `#a9b1d6` | `#252734` (measured `#262734`) | `#7aa2f7` (mix 0) | `#a7b0cf` | `#a9b1d6` |
+| catppuccin | `#89b4fa` | `#cdd6f4` | `#2c2d3e` (measured `#2c2d3e`) | `#89b4fa` (mix 0) | `#c5d5f2` | `#cdd6f4` |
+
+The rendered left rule is the menu TEXT token to the byte on all three
+themes, including the two where the model says the accent survives
+untouched. The runtime ink is `Color.menu.text` everywhere, never the
+accent. The cause is in the host kit, read not guessed:
+`/usr/share/omarchy/shell/Commons/Color.qml:99` defines
+`menu.selectedBackground` as `Util.alpha(flatColor(...), 0.08)`, a QColor
+whose r, g, b are the FOREGROUND's and whose alpha is 0.08 - it is never
+composited. `Model.qmlRgb` (`Model.js:4465-4469`, dev and installed alike)
+reads `c.r, c.g, c.b` and
+ignores `c.a`, so `cursorInk` receives the text colour as its "fill",
+`contrastRatio(accent, text)` is far under 4.70, the mix walks toward the
+text and can never reach 4.70 against the text itself, and the loop falls
+through to `return text`. **Finding D-RUNG-13 (P3)**: the cursor
+row has lost its accent on every theme, not the eight the design costed; the
+direction is safe (5.83 / 6.86 / 9.13 against the fill), the D-RUNG-4 defect
+is still fixed, but the "15 of 23 byte-identical" claim is false on screen.
+Fix shape: composite in `qmlRgb`/`cursorInkHex` when `c.a < 1` (over
+`Color.menu.background`), or hand `cursorInkHex` the alpha and the
+background; then the model's `#576684` on rose-pine can be checked against
+the screen. The model's own contrast arithmetic is not at fault: text over
+the fill predicts 5.94 / 7.00 / 9.38 and the screen reads 5.83 / 6.86 / 9.13.
+
+### 5. D-RUNG-1, D-RUNG-9, D-RUNG-11; D-RUNG-10 and D-RUNG-12 blocked
+
+- **D-RUNG-1** (the 0.7 caption sites, table in section 1): catppuccin
+  5.45-5.70 (clear), rose-pine 2.96-3.15 (under, as the model says), and
+  **tokyo-night 4.12-4.30, UNDER 4.5 where the model says 4.64 and counts the
+  theme as passing.** With an 11-13 per cent caption loss, any theme whose
+  model value is under about 5.1 fails on screen, so SG2's "6 of 23 under" is
+  understated. Finding D-RUNG-14.
+- **D-RUNG-9**: the GROUPS host header renders at model accuracy (bold):
+  rose-pine 9.77, catppuccin 5.77, **tokyo-night 4.27 under 4.5**, confirming
+  the ruling's 4.28 on screen.
+- **D-RUNG-11**: the 28 px empty-state glyph (`Model.GLYPHS.tvOff`, accent at
+  0.8) after typing `/zzqxv` (`E/shots/*-B-card.png`): **rose-pine 2.42**,
+  under the 3:1 large-text floor exactly as modelled; tokyo-night 4.82,
+  catppuccin 5.49. Confirmed on screen; the raise-the-rung remedy is safe to
+  size from the model, which is exact at this size.
+- **D-RUNG-10** (EPG hairline) and **D-RUNG-12** (non-cursor channel number):
+  **BLOCKED** on this install: the cached iptv-org US list
+  (`~/.cache/omarchy-iptv/sources/d5977d8a/channels.json`) holds 1471
+  channels, 0 of them with a `chno` or `number` field, and the only source
+  record in `~/.local/state/omarchy-iptv/state.json` has `epgUrl` `""`, so
+  neither site renders and nothing was measured. Not faked. (Both facts are
+  read from those files; the phase scripts' gate grepped `status` only for
+  `ready` and kept no output, so no log under `E/logs` records `hasNumbers`
+  or `epg`.)
+- Also captured, unmeasured for time: the remove-source ConfirmDialog with
+  `Remove` preselected (`E/shots/src2c-confirm.png`), the fifth D-RUNG-4
+  site.
+
+### 6. D-A11Y-4: all eight declared roles on the real bus
+
+`./scripts/a11y-probe.sh` (`E/logs/a11y-probe.log`): no drift, **64 checks,
+4 failures**. Three are the recorded baseline (L2-XT-05, L2-XT-06, L2-XT-11).
+The fourth, **L2-SC-02** (`10,000 channels: the group entry counts in words,
+thousands separated`, expected `All, 10,000 channels`), is NEW against the
+baseline in `docs/QA-A11Y.md` and is reported as observed; whether it is a
+regression on dev or a scenario timing issue was not investigated in this
+segment. Then `tests/a11y/walk.py` was run directly on the same tree for the
+`query`, `querynomatch`, `xtream`, `firstrun`, `banner` and bar `idle`
+scenarios (`E/logs/nodes-*.json`, 24-33 nodes each, all settled in 3 walks),
+and every node was tabulated by role, extending the three-row table at
+`docs/QA-A11Y.md:417`:
+
+| Declared role | AT-SPI role | `Accessible.name` reaches the bus | Text interface | What the text body carries |
+|---|---|---|---|---|
+| `Button` | push button | yes (7-11 per scenario, all named) | none | - |
+| `List` | list | yes (3 of 3: Groups, Channels in All, Sources) | none | - |
+| `Dialog` | dialog | yes (IPTV guide, the confirm message, the form title); the unnamed dialog is the sources form, named only when `headerTitle` is set (`Set up a playlist`, `Add Xtream login`); the ConfirmDialog is always named | none | - |
+| `AlertMessage` | alert message | yes when non-empty (the banner; `Entering channel number ...`); empty ones publish `''` | none | - |
+| `StaticText` | label | yes | Text | **the name**, verbatim (`No channels in All`, `3 channels - updated 0`, the first-run prose); the element's own `text` never appears |
+| `ListItem` | list item | yes (`BBC One HD, row 1 of 1`; the source row with its counts) | none | - |
+| `EditableText` | text | yes (`Search channels`; `Playlist URL or path`; `Server URL`; `Username`; the password field has name `''` and description `Password`) | Text, plus EditableText on real fields | **the element's own displayed text**: the search line publishes `bbc` with an active query and its PLACEHOLDER `Search channels...` when empty; the fields publish their values, including `USERTOKEN2` and the Server URL with the login in its query string (the D-A11Y-1 exposure, seen at the sink again); the password field publishes bullets |
+| `Heading` | heading | yes when `headerTitle` is set (`Add Xtream login`, `Add source`); `''` in list mode | Text | **the name** (equal to it in every sample; `''` when unnamed) |
+
+New against the three-row table: `Heading` behaves like `StaticText` (a Text
+interface carrying the name), `AlertMessage`, `List`, `ListItem` and `Dialog`
+carry no text interface at all, and the search line's placeholder reaches
+the bus as its value. No role was unreachable; the bar scenario publishes
+exactly one push button and nothing else. All of this is on a hidden Qt
+window; nothing Quickshell shows publishes a tree (D-GS-3), unchanged.
+
+### 7. Machine restored, proved at 16:00:08
+
+`sha256` of `shell.json` `af7ef4195973f031...` and of `state.json`
+`79bd045f401bed91...` equal the snapshot (the lead's own values); `diff -r`
+of the cache directory and of the state directory against the snapshot:
+identical; modes 700/600 intact; theme `Catppuccin`; no `omarchy-iptv`
+layer; no mpv, no cage, no `http.server`, nothing listening on 8765; the only
+quickshell is pid 1058; `E/full/` empty and no PPM outside `E/shots/`; the
+user's two clients (`com.anthropic.Claude` on workspace 1, `chromium` on 2)
+present; hyprlock never ran. The temporary source was removed through the
+guide's own confirm dialog before the file restore, and the running shell's
+in-memory state agrees with the restored file (`status`: 1 source, 7
+recents). Residuals: none known. Nothing left the machine.
+
+## Live pass 2026-09-21, segment B: PiP on the real compositor, and the harness on the real display
+
+Owner: QA (display lane, segment B). Machine: the user's live session, WAYLAND_DISPLAY
+wayland-1, Hyprland 0.56.2, one monitor eDP-1 1366x768 scale 1 transform 0 reserved
+[0, 26, 0, 0], theme Catppuccin throughout (no theme switch was needed in this
+segment). Installed plugin 0.7.2 (main 53ad47e) for part 1; the dev tree (branch
+dev, this checkout) for part 2. Evidence root: /tmp/claude-1000/live-B/ (logs/,
+shots/ crops only, snapshot/; two crops were removed and the window-title fields
+of the clients dumps stripped after the audit, for privacy, see section 3). The
+user was not at the machine; the user's two
+windows (com.anthropic.Claude 0x5d8ed65f0d70 pid 3789 on workspace 1, chromium
+0x5d8ed66ef2b0 pid 21260 on workspace 2) were present before and after. Nothing
+left the machine: the stream, the playlist and every fixture were served from
+127.0.0.1:8765 or read from a local path. The sg1 and gs2 fixture copies, like
+the repo's single-group.m3u, carry no url-tvg; the harness.m3u copies keep the
+template's url-tvg, which points at 127.0.0.1 port 9 (nothing listens there), so
+no .test host was ever resolved.
+
+Protocol as run. Snapshot first (shell.json sha256 af7ef4195973f031..., state.json
+79bd045f401bed91..., cache tree, theme, hyprctl clients and monitors); every
+keystroke gated on `pgrep -x hyprlock` empty AND the guide's own layer surface
+(namespace omarchy-iptv) mapped per `hyprctl -j layers` (the host has no
+`isPluginOpen` IPC verb and `status` carries no opened flag, so the compositor
+was the witness); every wait bounded; every kill by recorded pid; captures taken
+with `grim -g <geometry>` so no full frame was ever written (the card at
+203,74 960x620, the PiP corner, the bar). One correction to the protocol as
+written: a bash trap cannot outlive one tool invocation, so each phase script
+installed an EXIT trap that runs a standalone restore script unless the phase
+reached its end marker, and the same script was run explicitly at the end.
+
+### 1. Picture in picture on the installed plugin against real Hyprland (D-PIP-4/5/6, live half)
+
+Local stream: tests/fixtures/qa-player/test.ts (MPEG-TS, h264+aac, 120 s) and a
+copy of scripts/dev-harness/fixtures/harness.m3u.in with the live slot pointed at
+http://127.0.0.1:8765/test.ts, served by `python3 -m http.server 8765 --bind
+127.0.0.1` from scratch. The playlist was added to the LIVE plugin as a source
+through the plugin's own helper, `omarchy-iptv state source add --url ... --label
+"QA local" --origin cli` (key 7dc750f0); the running service picked the record up
+through its state FileView within 2 s (status listed it as never loaded). The
+switch was made on the Sources screen (`Tab`, `o`, `j`, `Enter`): active
+7dc750f0, status ready, 20 channels, 200 ms after Enter. The guide was hidden
+over IPC before playback. `play http://127.0.0.1:8765/test.ts` resolved the
+channel by URL: player up and attached 300 ms later, nowPlaying `Harness Live`
+(chno 300), one client of class omarchy-iptv (pid 1152118) tiled at [690, 38]
+size [650, 718] on workspace 1 next to the Claude window.
+
+Predicted box, computed by `node` against the INSTALLED Model.js with the
+monitor record from `hyprctl -j monitors` and the plugin defaults `pipOptions`
+returns for an entry with no pip keys (top-right, 30 per cent, 16 px margin):
+`{x: 940, y: 42, w: 410, h: 230}`.
+
+| Step | Command | Reply / settle | mpv client record after | Foreign records |
+|---|---|---|---|---|
+| pip on | `pip toggle` | `{"ok":true,"kind":"pip","requested":"toggle","was":false,"state":"applying"}`; status pip.on true, applying false after 359 ms | at [940, 42] size [410, 230] floating true pinned true tags default-opacity*, iptv-pip; equals the prediction on all four numbers | Chromium: identical, all 32 fields. Claude: at/size changed [25, 38] [651, 718] -> [12, 38] [1342, 718], which is the tiling layout re-filling workspace 1 when the mpv window left it (PIP-02 "the other windows retile"); no other field changed |
+| pip off | `pip toggle` | `was:true`, settled in 244 ms | at [690, 38] size [650, 718] floating false pinned false, tag gone: identical to the record before PiP | Chromium identical; Claude identical to its pre-PiP record (all 32 fields) |
+| pip on again | `pip toggle` | settled in about 300 ms | as row 1, all fields identical to row 1 | both identical to row 1 |
+| shell restart with PiP on | `omarchy restart shell` (the one authorized restart) | rc 0 in 1495 ms; `shell ping` ok 2.8 s after the command; quickshell pid 1058 -> 1152526 | FIRST status sample after ping, 4925 ms after the restart command: pip.available true, pip.on true, applying false, reason "", player up true attached true. The client record is identical to the pre-restart one in all 32 fields: the window was not touched (D-PIP-4) | both identical, all 32 fields |
+| pip off after restart | `pip off` | `was:true`, settled in about 480 ms | at [690, 38] size [650, 718] floating false pinned false: restored | Chromium identical; Claude retiled to [25, 38] [651, 718] as before |
+| stop | `stop` | ok; no omarchy-iptv client 300 ms later; `pgrep -x mpv` empty | - | both identical to the records taken before playback (all 32 fields) |
+
+Verdicts. D-PIP-4 (state after a shell restart): PASS on the real compositor,
+the new shell derived pip.on true from the readback within its first status
+sample and the window was untouched. Evidence: logs/phase1.log
+16:12:40-16:12:45, logs/clients-04-pip-on-2.json against
+logs/clients-05-after-restart.json, shots/p1-pip-region.png (the exact 940,42
+410x230 box) and shots/p1-bar-after-restart.png; the wider after-restart corner
+crop was removed for privacy (section 3). D-PIP-5 (foreign windows): PASS with
+two real strangers. The Chromium record is identical in all 32 fields across the
+five PiP transitions (01->02, 02->03, 03->04, 04->05, 05->06) and in the 00 vs
+07 comparison; its focusHistoryID changed at play (00->01, 1 -> 2) and at stop
+(06->07, 2 -> 1), as did the Claude record's (0 -> 1, 1 -> 0), which is focus
+history moving when a window appears and disappears, not PiP. The Claude record
+changed at/size on every retile step, 00->01, 01->02, 02->03, 03->04, 05->06 and
+06->07 (the tiling layout re-filling workspace 1 as the mpv window entered or
+left it, floated or unfloated), and on nothing else; 04->05, the restart with
+mpv floating, changed no field of either record. D-PIP-6 (the geometry, ordering and readback assertions
+asserting about a real pid): the service learned the player pid from the player
+(status player.attached true, client pid 1152118) and every geometry above is a
+readback, not a plan. The window rendered translucent as D-PIP-3 says it does
+(unchanged, open on its own terms). Note for the restore proof: the authorized
+restart replaced quickshell pid 1058 with 1152526; "no quickshell but 1058"
+cannot hold after that step by construction, and the proof below shows exactly
+one quickshell, the one the restart started.
+
+### 2. The dev harness on the real display (a second quickshell from the dev tree)
+
+`OMARCHY_IPTV_HARNESS_DIR=/tmp/claude-1000/live-B/harness scripts/dev-harness/run.sh
+--open --fake-epg --detach --timeout 0`, window mode `layer` (the production
+PanelWindow path), pid 1154435, the installed guide closed throughout.
+
+(a) Mapping and focus. `hyprctl -j layers` 2.6 s after start (16:13:57.165 ->
+16:13:59.758): `omarchy-iptv`
+0,0 1366x768 at level 3 (Overlay) owned by pid 1154435, plus the harness's fake
+bar `omarchy-iptv-harness` 0,0 1366x26 at level 2 (it overlaps the real
+omarchy-bar surface at the same geometry while the harness runs; cosmetic,
+harness-only). `hyprctl -j activewindow` stayed com.anthropic.Claude before and
+after typing, and no character reached it: the FIRST keystrokes on the fresh
+shell, one `wtype sky` call, read back over `ipc state` as query `sky`, 3 rows
+of 20. A second sample after `ipc query ""`, typed key by key, read back `bbc`.
+F-HARNESS-1 (first keystroke lost) did NOT reproduce under real layer-shell
+exclusive keyboard focus: 1 of 1 fresh shell arrived whole. That is one sample;
+the floating-window mode where it was seen was not run here.
+
+(b) D-CHNO-6. Every `Cannot anchor` line in the harness log is the same
+message, `QML MouseArea at Guide.qml[2730:19]: Cannot anchor to an item that
+isn't a parent or sibling`. The log survives at
+/tmp/claude-1000/live-B/harness/harness.log (361 lines, 341 of them this
+warning; `run.sh clean` removes cache, state, runtime and shots, not the log).
+The counts on file, all in logs/phase2.log: 47 lines after the open and the
+`sky` and `bbc` samples (3 rows in the model); 60 after clearing the query to
+the 20-row list (+13); 76 after the SG1 switch, a 50-row list (+16, not 50);
++27, +23 and +18 for the queries `st`, `sta` and `unit` typed key by key (11, 7
+and 2 rows); 287 at the end of phase 2b; 341 at the end of the session. The
+reading that it fires once per row DELEGATE INSTANTIATED and not on delegate
+reuse is consistent with those numbers (a 50-row render adding 16, about the
+visible rows plus the cacheBuffer) but is not proven by them; an earlier draft's
+per-query series on the 60-row list is in no file and is withdrawn. The only
+other warning in the log is Qt's portal app-id registration
+notice, once.
+
+(c) D-SG-1 display residue. Source: a copy of tests/fixtures/qa-sg1/single-group.m3u
+(50 rows, one group "United States") added over `ipc addSource` and switched
+to by the probe (SG1, ready, 50). Queries typed with wtype; strings read over
+`ipc state` and checked against the card crops (shots/sg1-*.png):
+
+| Query | Header (top right) | Rows | Footer (bottom left) | Empty state |
+|---|---|---|---|---|
+| (empty) | `All - 1 of 50` | 50 | `SG1 - 50 channels - updated 16:15` | - |
+| `st` | `in All - 11 matches` | 11: STATE TV, STATE NEWS NETWORK, STARZ KIDS AND FAMILY, USA STARZ, USA STARZ ENCORE WESTERNS, USA STARZ ENCORE ACTION, USA STARZ EDGE, FIRST LOOK TV, HISTORY, TASTEMADE, PLUTO TV WESTERNS | same | - |
+| `sta` | `in All - 7 matches` | 7 | same | - |
+| `unit` | `in All - 2 matches` | 2, cursor on UNITED SPORTS | same | - |
+| `united stat` | `in All - 0 matches` | 0, emptyKind noMatches | same | icon, then `No matches for "united stat"`, then the hint `Keep typing for United States - Esc clears the search` |
+
+On screen the separator in every header, footer and hint string is U+00B7
+(middle dot) and the query in the empty state is wrapped in U+201C/U+201D; both
+are written as `-` and `"` here for the ASCII rule, everything else verbatim.
+The footer hint line in search mode with a query reads `Enter play - Up/Down
+move - Left/Right narrow - Tab keys - Esc clear`, and `... Left/Right scope ...
+Esc close` with the query empty. The counts are the fixture's own expected
+numbers (11, 7, 2), so the shipping whole-word rule is what the screen shows.
+No `First 200 of 3,335 - keep typing` shape can appear on a 50-row list; the
+3,335-row shape remains a terminal-only measurement.
+
+(d) D-GS-2 display residue. Source: a generated 60-row one-group list with a
+tvg-id on every row (the shape tests/fixtures/qa-gs2/README.md describes; the
+committed 8-row file is too short to overflow the card), added over `ipc
+addSource`, list mode, cursor at row 0. Pixel method: the cursor row's highlight
+band in the card crop (modal colour per pixel row across the list column differs
+from the card background) gives the row height directly, and its top edge after
+`ipc move 1` gives the pitch; ink runs in the name column count the text lines.
+
+| EPG state | rowsHaveDetail | highlight band | band top at cursor 0 -> 1 | pitch | rows fully visible |
+|---|---|---|---|---|---|
+| fake EPG disjoint (the harness's ids are bbc1.uk etc., no ch0000N.test entry) | false | 38 px tall | 60 -> 102 | 42 px (38 + 4 spacing) | 12 (text lines at 70, 112, ..., 532) |
+| matching epg-now.json written into the source's cache dir (60 entries with now and next titles) | true, after a guide close and reopen | 52 px tall | 60 -> 116 | 56 px (52 + 4) | 9 (name 14 px + detail 10 px + 2 px progress bar per row) |
+
+So the screen shows 38 versus 52 px rows and 12 versus 9 visible rows, the
+numbers D-GS-2 was filed on, and the disjoint guide leaves every row single-line
+(the fix). One observation for the row, not a defect against it: `epgCarriesRows`
+is measured, not bound (Guide.qml:446, by design), so an epg-now.json that lands
+while the guide is open does not re-skin the rows until the next open; the
+matching file had been loaded by the service (status epg.loaded true by
+16:16:15) about 90 s before the guide re-measured on reopen at 16:17:45 (the
+15 s in the log is the bound of the wait_for that gave up on rowsHaveDetail
+while the guide stayed open). Removing the file and reopening returned to 38 px.
+
+(e) chno-entry-scenario.sh N15 / N21 / N24. The scenario's header keeps all three
+live-only and exposes no way to run them: N15 needs real key events, N21 a
+window resize the overlay cannot take over IPC, N24 a theme re-skin. The keypad
+half of N15 was run by hand on the harness: list mode, `wtype -k KP_1 -k KP_0
+-k KP_1`, `ipc numberState` answered buffer `101`, hasNumbers true, transient
+`Channel 101 - BBC One HD`, cursor on BBC One HD (chno 101). The shifted half
+cannot be produced on this keyboard: the active keymap is English (US), where
+Shift+1 is `!` by design; the AZERTY case stays unrun. N21 and N24 were not
+attempted (N24 would have needed a theme switch this segment did not otherwise
+need, and the user's other windows would have been re-skinned with it).
+
+Teardown: the harness shell was stopped by its recorded pid (exited within 100
+ms of SIGTERM), `run.sh clean` wiped the scratch cache, state, runtime and
+shots (the harness log at /tmp/claude-1000/live-B/harness/harness.log survives
+it),
+`hyprctl -j layers` then listed only the real omarchy-background and omarchy-bar
+surfaces, both owned by the restarted shell.
+
+### 3. Restore proof
+
+All checks taken at 16:21:35-16:22:18 after the restore script (shell.json first,
+a 3 s settle, then state.json with a re-check, then the cache), by the same reads
+the snapshot used.
+
+| Item | Snapshot | End state |
+|---|---|---|
+| ~/.config/omarchy/shell.json sha256 | af7ef4195973f0316f648329dba76acdc9ed5e74f63b46ffdae6c70a51646562 | identical; mode 600 |
+| ~/.local/state/omarchy-iptv/state.json sha256 | 79bd045f401bed91bb0b9f2050cf11f0c7c2074deaa65d31ecffc6990fd7102e | identical, re-checked 45 s later still identical; mode 600 |
+| ~/.cache/omarchy-iptv | tree copied | `diff -rq` clean; every mode under cache and state identical to the snapshot listing; the temporary source's cache dir 7dc750f0 was removed by the plugin's own `x` (confirm) before the copy |
+| theme | Catppuccin | Catppuccin (never switched in this segment) |
+| guide | closed | closed: `hyprctl -j layers` lists only omarchy-background (level 0) and omarchy-bar (level 2), both pid 1152526 |
+| mpv | none | none (`pgrep -x mpv` empty) |
+| quickshell | pid 1058 | exactly one, pid 1152526: the shell `omarchy restart shell` started in step 1 (the authorized restart necessarily replaced 1058) |
+| http.server | none | none, port 8765 has no listener (see the slip below) |
+| cage | none | none |
+| hyprlock | none | none at every gate |
+| full-frame captures | - | zero written at any point (every capture was `grim -g` of the card, the PiP corner or the bar); 31 crops were written under /tmp/claude-1000/live-B/shots, none committed, and 29 are kept: two, p1-pip-after-restart.png and p1-pip-region-wide.png (466x270 at 900,26, whose 40 px left margin lay over the user's Claude window and, in the first, showed readable text fragments), were removed for privacy after the audit; p1-pip-region.png, the exact 940,42 410x230 PiP box, is kept. The eight logs/clients-*.json dumps and snapshot/clients.before.json had their title and initialTitle fields stripped for the same reason (a browser tab title carried the user's mail address) |
+| user windows | com.anthropic.Claude 0x5d8ed65f0d70 pid 3789, chromium 0x5d8ed66ef2b0 pid 21260 | both present, both tiled at [12, 38] size [1342, 718] on their workspaces, as at the start |
+| installed plugin dir | 53ad47e, clean | 53ad47e, `git status --porcelain` empty |
+| plugin status | iptv-org.github.io, ready, 1471, one source | the same: one source d5977d8a, playing false, pip off |
+
+A slip the proof caught, and fixed before the end: the fixture server was
+started as `setsid python3 -m http.server ... &` and its pid recorded from `$!`;
+setsid forked, so the recorded pid (1146775) was the wrapper and the server
+itself ran as 1146777. The restore script's kill-by-pid therefore hit nothing at
+16:11, and the second server started afterwards failed with `Address already in
+use` (its log says so) while the original kept serving; the final proof found
+the listener by `ss -ltnp`, matched its cwd and command line to this segment's
+scratch directory, and killed it by that pid (exited at once; 0 listeners on
+8765 afterwards). Rule for the next pass: record a detached server's pid from
+the listener (`ss -ltnp`) or start it without setsid, never from `$!` behind
+setsid.
+
+### 4. Defects and observations to file
+
+- OBS-B1 (protocol, restore ordering): restoring state.json by file copy while
+  the shell runs is undone if shell.json is restored AFTER it: the playlistUrl
+  change makes the service touch the source record and save its in-memory state
+  over the copy (seen once at 16:11: the re-read state.json no longer matched
+  the snapshot's sha; the value read then was recorded only in the transcript,
+  not in any log, so it is not cited here). Restore shell.json first, let the switch settle, then state.json,
+  then re-check the sha. The restore script used from then on does exactly that.
+- OBS-B2 (harness, cosmetic): in layer mode the harness maps its fake bar as a
+  real layer surface `omarchy-iptv-harness` at level 2 over the real bar's
+  geometry for the life of the run.
+- D-CHNO-6 stands, on the real layer surface: 341 of the warning by the end of
+  the session, +16 for a 50-row render and +13 for a 20-row one (section 2(b),
+  file-backed); the per-delegate reading is consistent with those counts, not
+  proven by them.
+- OBS-B3 (protocol): `$!` behind `setsid` records the wrapper's pid, not the
+  server's; see the restore proof. Kill by the listener's pid.
+- OBS-B4 (Sources screen), downgraded after the audit: not a plugin defect on
+  this evidence. The source added with `state source add --label "QA local"`
+  showed its custom label before it was fetched (shots/p1-sources.png, 16:09),
+  and shots/p1-sources-2.png (16:12:34, taken BEFORE the second switch) already
+  shows the derived label `127.0.0.1:8765`, `used 16:11`, `not loaded yet`, so
+  the probe-and-switch path is exonerated. The audit's real calls on the
+  installed Model.js: `reconcileSources` on a known URL and `touchSource` both
+  preserve label `QA local` and labelCustom true; a state restored from the
+  snapshot (record absent) with the URL still arriving from settings recreates
+  the record with the derived label and labelCustom false; and the helper's
+  `add` refuses an existing URL as a duplicate and derives the label when
+  --label is absent. The likeliest path is therefore the 16:11:09 external
+  restore of state.json under a shell.json still pointing at the URL (OBS-B1);
+  how 7dc750f0 was recreated between 16:11:10 and 16:12:34 is to be established
+  from the transcript before anything is filed against the plugin.
+- F-HARNESS-1 did not reproduce in layer mode (1 fresh shell); no change to the
+  row, which is filed against the floating-window mode.

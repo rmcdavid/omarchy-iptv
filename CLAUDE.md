@@ -205,7 +205,11 @@ This project is built by role lanes running in separate git worktrees.
    the second being the shell running the pgrep, and it changes between
    invocations. For the shell specifically the stable form is
    **`pgrep -x quickshell`**. Prefer `-x` over `-f` whenever the process name
-   alone identifies it. Wait on a pid, a file, or a marker the watched process writes; kill
+   alone identifies it.
+   A detached server's pid is read from the LISTENER, never from `$!`: behind
+   `setsid`, `$!` is the wrapper, and a live pass once "killed" its fixture
+   server that way and found it still serving at the next segment. `ss -ltnp`
+   names the pid that holds the port; kill that. Wait on a pid, a file, or a marker the watched process writes; kill
    by pid. If a pattern is unavoidable, anchor it and exclude your own pid,
    and say in a comment why the anchor is load-bearing.
 4. No shims at merge. Stubbing a dependency to build is fine; leaving one is
@@ -221,6 +225,11 @@ This project is built by role lanes running in separate git worktrees.
    that was green only because a second lane had overwritten a mutation.
 5. Snapshot before, restore after. A live pass backs up `shell.json`, the
    state directory and the cache first, and restores the exact end state.
+   Restore ORDER matters while the shell is running: `shell.json` first, a
+   few seconds to settle, then `state.json`, then re-check the hash. The
+   other order is undone -- the settings change makes the service touch the
+   source record and save its in-memory state over the copy you just wrote.
+   Seen on 2026-09-21; the restore script was corrected mid-pass.
 6. Check `pgrep -x hyprlock` before any keystroke. Typing into a lock prompt
    registers as failed unlock attempts.
 

@@ -876,29 +876,88 @@ checkCall("GS8: the notice on the cursor row was under AA and is not any more ("
 // design that computes exactly 4.50 renders BELOW the threshold, which is why
 // every contrast target on this project must sit above the line and never on
 // it (see BAR_IDLE_DARKEN, chosen for a 4.71 floor).
+//
+// The 2026-09-21 top-up (17 rows on rose-pine, tokyo-night and catppuccin;
+// docs/QA-RESULTS.md, "Live pass 2026-09-21, segment A", section 1) showed the
+// error is SIZE-DEPENDENT: 11-14 px text stays within about 0.1 on the card
+// and the bar glyph within 0.03, but every 10 px regular-weight caption renders
+// 11-13 per cent below the model, up to 0.79 ratio points, while bold 10 px
+// does not lose it. F-CAL-1, the lead's ruling: every row carries a sizeClass,
+// a caption row is allowed tolerance.captionRel of its MEASURED value, every
+// other class keeps maxAbsError, and the expectations below are DERIVED from
+// the rows rather than hard-coded, so a row the ruling does not classify is
+// refused instead of defaulting to a tolerance it never earned.
 const calib = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/contrast-calibration.json"), "utf8"))
+// The classes the ruling defines and which tolerance each draws. A sizeClass
+// that is not a key here is an error, never silently a "text" row.
+const CALIB_CLASS_TOLERANCE = { "text": "abs", "caption": "captionRel", "bold-caption": "abs", "glyph": "abs" }
+function calibLabel(sample) { return sample.theme + " " + sample.surface + " " + sample.alpha }
+function calibAllowance(sample) {
+  const draws = CALIB_CLASS_TOLERANCE[sample.sizeClass]
+  if (!draws) throw new Error("unclassified calibration row " + calibLabel(sample) + " (sizeClass " + show(sample.sizeClass) + ")")
+  return draws === "captionRel" ? calib.tolerance.captionRel * sample.measured : calib.maxAbsError
+}
 function calibPredicted(sample) {
   const theme = menuTokens.themes.filter(function (t) { return t.name === sample.theme })[0]
   const s = menuSurface(theme)
   const fill = sample.surface === "cursor" ? s.cursorFill : s.rowFill
   return contrast(composite(s.text, fill, sample.alpha), fill)
 }
+function calibError(sample) { return Math.abs(calibPredicted(sample) - sample.measured) }
 checkCall("calibration: every sample's theme is in the contrast fixture, so a rename cannot silently skip one", function () {
   return calib.samples.every(function (sm) { return menuTokens.themes.some(function (t) { return t.name === sm.theme }) })
 }, true)
-checkCall("calibration: the model predicts every rendered measurement within tolerance", function () {
-  return calib.samples.map(function (sm) { return Math.abs(calibPredicted(sm) - sm.measured) <= calib.maxAbsError })
-}, [true, true, true, true, true, true])
+checkCall("calibration: every row carries a size class the ruling defines; an unclassified row is refused, not defaulted", function () {
+  return calib.samples.filter(function (sm) { return !CALIB_CLASS_TOLERANCE[sm.sizeClass] }).map(calibLabel)
+}, [])
+checkCall("calibration: the absolute tolerance was not raised to fit the captions; the captions got a relative one instead", function () {
+  return [calib.maxAbsError, calib.tolerance.abs, calib.tolerance.captionRel]
+}, [0.15, 0.15, 0.15])
+function calibHolds(sample) { return calibError(sample) <= calibAllowance(sample) }
+function calibReport(sample) {
+  return calibLabel(sample) + " [" + sample.sizeClass + "] off by " + round2(calibError(sample)) + ", allowed " + round2(calibAllowance(sample))
+}
+checkCall("calibration: the model predicts every rendered measurement within its row's own tolerance, except the rows pinned as a known deviation", function () {
+  // Judged row by row against the tolerance its size class draws, so the
+  // result is empty exactly when every unpinned row holds, and a failing row
+  // names itself with its class, its error and its allowance.
+  return calib.samples.filter(function (sm) { return !sm.knownDeviation && !calibHolds(sm) }).map(calibReport)
+}, [])
+checkCall("calibration: the pinned deviations are exactly the three cursor-fill text rows of F-CAL-2, so a fourth cannot be pinned in passing", function () {
+  // F-CAL-2 (dev branch, docs/STATUS.md): three 11 and 14 px text rows ON THE
+  // CURSOR FILL miss the text tolerance by 0.02 to 0.10, and the pass that
+  // measured them read a different string on each surface, so the surface
+  // is not separated from the glyphs. They are pinned by NAME, not absorbed
+  // by a wider tolerance: the fixture's own history (UX-GUIDE-AT-SCALE
+  // section 16, dev branch) is a check against that move.
+  return calib.samples.filter(function (sm) { return sm.knownDeviation }).map(function (sm) { return calibLabel(sm) + " -> " + sm.knownDeviation })
+}, ["tokyo-night cursor 0.52 -> F-CAL-2", "catppuccin cursor 1 -> F-CAL-2", "catppuccin cursor 0.52 -> F-CAL-2"])
+checkCall("calibration: a pinned deviation is still a deviation; a pinned row that holds must lose its pin, not keep it as a habit", function () {
+  // Strict, the way a strict xfail is: when the residual is explained and
+  // fixed, or the row is re-measured within tolerance, this goes red and the
+  // pin comes off in the same change.
+  return calib.samples.filter(function (sm) { return sm.knownDeviation && calibHolds(sm) }).map(calibReport)
+}, [])
 checkCall("calibration: the model is OPTIMISTIC in every sample, never pessimistic", function () {
   // If this ever goes red the sign of the error has flipped and every "target
   // above the line" decision on this project needs revisiting.
   return calib.samples.every(function (sm) { return calibPredicted(sm) >= sm.measured })
 }, true)
 checkCall("calibration: the refuted claim, restated as a number so it cannot come back", function () {
-  const worst = calib.samples.reduce(function (w, sm) { return Math.max(w, Math.abs(calibPredicted(sm) - sm.measured)) }, 0)
-  // The claim was 1.25. The truth is an order of magnitude smaller.
-  return [round2(worst) < 0.2, round2(worst) < 1.25]
-}, [true, true])
+  // The claim was 1.25. What the fixture shows: the worst absolute delta is
+  // 0.79 and it is on a CAPTION (catppuccin, row 0.7: 5.45 measured against
+  // the model's 6.24), and the worst relative loss is 12.7 per cent of the
+  // two-decimal model value, the same row. An order of magnitude under the
+  // withdrawn figure, and every point of it on 10 px regular text.
+  const worst = calib.samples.reduce(function (w, sm) {
+    return calibError(sm) > w.err ? { err: calibError(sm), sample: sm } : w
+  }, { err: 0, sample: null })
+  const worstRelPct = calib.samples.reduce(function (w, sm) {
+    const model = round2(calibPredicted(sm))
+    return Math.max(w, (model - sm.measured) / model * 100)
+  }, 0)
+  return [round2(worst.err), worst.sample.sizeClass, Math.round(worstRelPct * 10) / 10, round2(worst.err) < 1.25]
+}, [0.79, "caption", 12.7, true])
 checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pass reported as its peak", function () {
   // Within a hundredth; the claim is that the old pass measured the 0.8 glyph
   // and not the 0.52 rung, not a figure to the second decimal. The dim rung it

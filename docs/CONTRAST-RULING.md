@@ -9,6 +9,45 @@ this pass rather than reused from the lanes. Where my figure and a lane's
 figure disagree, mine is stated and the lane's is named, because this project
 has already lost a day to a number nobody audited.
 
+### Measurement rule, learned 2026-09-21
+
+Three things the live pass of 2026-09-21 settled about the method above, which
+every later measurement follows (evidence: `docs/QA-RESULTS.md`, "Live pass
+2026-09-21, segment A", sections 1, 3 and 4):
+
+1. **Capture the bar with the guide CLOSED.** The open guide's PanelWindow
+   paints `Color.menu.scrim`, the background at alpha 0.5, over the whole
+   screen, the bar included. A bar crop taken through it on this pass
+   reproduces the D-RUNG-6 reading: the rose-pine bar crop peaks at
+   `#a8a3b3`, 2.25, the addendum's figure to the byte, and
+   `Model.colorOver(text, background, 0.5)` predicts each such reading one
+   unit off in one channel (`#a9a3b3`, 2.24, for that pair; catppuccin's
+   clock through the scrim `#757a91`, 3.87, against a predicted `#767a91`,
+   3.87). On a settled closed-guide frame the host clock
+   reaches its full text token (11.34) and our idle glyph its 0.86 rung (8.69
+   against a model 8.72). D-RUNG-6 was a capture through the scrim, which
+   settles the question the addendum's correction left open (section 3).
+2. **The model's error is size-dependent.** 11 to 14 px text on the card
+   renders within 0.10 of the model and the 28 px glyph and the bar glyph within 0.03
+   (including the two shipped sites between alpha 0.6 and 0.9), but every
+   10 px regular-weight caption renders 0.17 to 0.79 below it, 11 to 13 per
+   cent of the ratio, while bold 10 px does not lose it. Hence F-CAL-1:
+   fixture rows carry a `sizeClass`, captions get a relative tolerance, every
+   other class keeps `maxAbsError` (section 1). Three text rows ON THE CURSOR
+   FILL (tokyo-night 0.52, catppuccin 1.0 and 0.52) sit 0.17 to 0.25 off,
+   beyond the text class: that residual is F-CAL-2, pinned by name in the
+   fixture rather than absorbed by a tolerance, because the pass measured a
+   different string on each surface and could not separate the surface from
+   the glyphs. Until a pass measures one string on both surfaces, "within
+   0.10" is a card figure.
+3. **The cursor fill carries an alpha the model drops.**
+   `Color.menu.selectedBackground` is `Util.alpha(foreground, 0.08)`,
+   uncomposited, and `Model.qmlRgb` reads r, g, b and ignores a, so
+   `cursorInk` receives the text colour as its fill and returns text on every
+   theme. That is D-RUNG-13, and it is why the "after" ink in the addendum's
+   table sits nearer the menu text than the 0.69 mix (section 4). Hand the
+   model a composited fill, or it is modelling a colour that never paints.
+
 ## In one paragraph
 
 Three separate dimming defects were designed and attacked. **Two are worth

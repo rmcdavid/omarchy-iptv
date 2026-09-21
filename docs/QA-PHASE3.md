@@ -355,3 +355,45 @@ edits keyed on the old window header, which the harness mode had silently
 turned into a copy that could not load; one function joined by a call cannot
 drift the way two lists joined by a name did. D-CHNO-6 filed for a `MouseArea`
 anchor Qt refuses, pre-existing and now visible per rendered row.
+
+## Addendum: the live session, unattended and authorized
+
+2026-09-21, 15:48 to 16:23, two display segments in sequence on the user's
+real session with the user away, under written authorization, each snapshot
+first and restored on exit, each audited from its files by a lane that never
+touched the display. Both audits confirmed the restore byte for byte; the
+lead re-checked it independently afterwards. Evidence lives in
+`docs/QA-RESULTS.md`, the one home for live evidence from now on.
+
+**Contrast.** The calibration top-up ruling SG2 had required is done on
+rose-pine, tokyo-night and catppuccin, 17 rows. The model is accurate to 0.10
+for 11-14 px text and 0.03 for glyphs -- and every 10 px regular caption
+renders 11 to 13 per cent below it, which the single tolerance had hidden
+(F-CAL-1). That shortfall puts tokyo-night's 0.7 captions under 4.5:1 on
+screen where the model passes them (D-RUNG-14). D-RUNG-5 is verified on the
+real bar. D-RUNG-6 evaporates: the 2.25:1 bar reading had been captured
+through the open guide's scrim, reproduced to the byte as
+colorOver(text, background, 0.5); the P2 and the upstream report are gone,
+and the rule is written down: capture the bar with the guide closed. D-RUNG-7
+found its mechanism and became D-RUNG-13: the cursor row has lost its accent
+on every theme, because the fill handed to cursorInk carries an alpha the
+model drops.
+
+**Accessibility.** All eight roles the guide declares were read from the
+real bus (D-A11Y-4 verified); rule 5 stands as measured, and one new probe
+failure is D-A11Y-7.
+
+**The real compositor.** Picture in picture against Hyprland 0.56.2 with the
+user's own Chromium and Claude windows as the strangers: D-PIP-4, D-PIP-5,
+D-PIP-6 verified, the shell restarted once as authorized. The dev harness on
+the real display closed D-SG-1's and D-GS-2's residues in strings and pixels,
+confirmed D-CHNO-6 per delegate, and did not reproduce F-HARNESS-1 under
+real layer-shell focus.
+
+**Two protocol lessons, now rules:** restore `shell.json` before
+`state.json` with a settle between, or the service writes over your copy;
+and take a detached server's pid from the listener, never from `$!` behind
+`setsid`. **One privacy correction, made before anything else:** two crops
+whose margin overlapped the user's Claude window, and compositor dumps
+carrying a Chromium tab title with the user's address, were deleted and
+stripped from the scratch directory; nothing of either was in the repo.

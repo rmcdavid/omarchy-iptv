@@ -57,7 +57,7 @@ Needs a real graphical session (Wayland platform plugin; see section 7):
 ```
 cd <probe>
 python3 make_tree.py && python3 make_bartree_lane2.py
-python3 check_lane2.py            # 64 checks, ~17 s, 4 failures expected
+python3 check_lane2.py            # 64 checks, ~17 s, 3 failures expected (the baseline below); a fourth, L2-SC-02, seen 2026-09-21, is D-A11Y-7
 python3 mutate_lane2.py           # 24 mutations, each a full regenerate + run
 python3 selftest_settle_lane2.py  # the waits, proven both ways, ~20 s
 python3 check_a11y.py             # the prototype, 19 checks, ~3.9 s, 1 failure (see open item 11)
@@ -422,6 +422,12 @@ So the exposure is confined to elements declared editable, which is the form
 fields and the search line at `Guide.qml:2088`. The rule now says that. Being
 wrong in the safe direction is still being wrong, and an over-broad security
 rule gets ignored rather than followed.
+
+The live pass of 2026-09-21 extended this table to all eight roles `Guide.qml`
+declares, on the real bus: `docs/QA-RESULTS.md`, "Live pass 2026-09-21, segment
+A", section 6. Heading behaves like StaticText (a Text interface carrying the
+name); AlertMessage, List, ListItem and Dialog carry no text interface; and the
+search line's placeholder reaches the bus as its value when the query is empty.
 
 **D-A11Y-5, rule 13 drift inside the table written to end it.** `docs/UX.md` 7.1
 marked the channel row's `row N of M` announcement UNVERIFIED, "never promised
