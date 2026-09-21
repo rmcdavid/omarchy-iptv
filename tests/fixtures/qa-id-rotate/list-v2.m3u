@@ -1,0 +1,51 @@
+#EXTM3U
+# QA fixture for D-ID-1 (docs/STATUS.md): the provider list BEFORE a password
+# rotation. list-v2.m3u is byte-identical except that the path segment after
+# /live/ differs on every stream URL; that segment stands in for the
+# credential slot of an Xtream URL and is NOT a credential. Read README.md.
+#
+# A. six rows with no tvg-id and a unique name: legacy u:<fnv1a32(url)>,
+#    scheme 2 n:<fnv1a32(folded name)>. These MUST move.
+#EXTINF:-1 group-title="News",Alpha News
+http://rotate.example.test/live/k2/alpha.m3u8
+#EXTINF:-1 group-title="Sports",Bravo Sports
+http://rotate.example.test/live/k2/bravo.m3u8
+#EXTINF:-1 group-title="Kids",Charlie Kids
+http://rotate.example.test/live/k2/charlie.m3u8
+#EXTINF:-1 group-title="Movies",Delta Movies
+http://rotate.example.test/live/k2/delta.m3u8
+#EXTINF:-1 group-title="Music",Echo Music
+http://rotate.example.test/live/k2/echo.m3u8
+#EXTINF:-1 group-title="Docs",Foxtrot Docs
+http://rotate.example.test/live/k2/foxtrot.m3u8
+# B. one tvg-id shared by an HD/SD pair with distinct names: the tvg-id is
+#    not unique so legacy falls to u:, the names are unique so scheme 2 is
+#    n:. These MUST move, through the non-unique-id path.
+#EXTINF:-1 tvg-id="golf.test" tvg-name="Golf" group-title="Sports",Golf HD
+http://rotate.example.test/live/k2/golf-hd.m3u8
+#EXTINF:-1 tvg-id="golf.test" tvg-name="Golf" group-title="Sports",Golf SD
+http://rotate.example.test/live/k2/golf-sd.m3u8
+# C. four rows with a unique tvg-id: t:<tvg-id> under both schemes. These
+#    must NOT move, and their ids survive the rotation on their own.
+#EXTINF:-1 tvg-id="hotel.test" group-title="News",Hotel TV
+http://rotate.example.test/live/k2/hotel.m3u8
+#EXTINF:-1 tvg-id="india.test" group-title="News",India TV
+http://rotate.example.test/live/k2/india.m3u8
+#EXTINF:-1 tvg-id="juliet.test" group-title="News",Juliet TV
+http://rotate.example.test/live/k2/juliet.m3u8
+#EXTINF:-1 tvg-id="kilo.test" group-title="News",Kilo TV
+http://rotate.example.test/live/k2/kilo.m3u8
+# D. exactly one colliding-name pair: no tvg-id, byte-identical names,
+#    different URLs. The name key is refused, both stay u:, and both are
+#    orphaned by the rotation. This is D-ID-2's accepted limit, observable.
+#EXTINF:-1 group-title="Sports",Lima Twins
+http://rotate.example.test/live/k2/lima-a.m3u8
+#EXTINF:-1 group-title="Sports",Lima Twins
+http://rotate.example.test/live/k2/lima-b.m3u8
+# E. two DIFFERENT names whose folded fnv1a32 collide (both n:e63189cb).
+#    The uniqueness test runs on the hashed key, so both are refused and
+#    stay u:, exactly like D. Found by brute force through name_id_key.
+#EXTINF:-1 group-title="Sports",Hash Twin 132789
+http://rotate.example.test/live/k2/hash-a.m3u8
+#EXTINF:-1 group-title="Sports",Hash Twin 729192
+http://rotate.example.test/live/k2/hash-b.m3u8
