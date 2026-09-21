@@ -25,10 +25,32 @@
 #
 # STATUS OF THE LIVE HALF, stated plainly because CN23 is about exactly this:
 # the preflight below has been run and has been seen failing against a tree
-# without the verbs. The live half has NOT been run by the lane that wrote it
-# -- that lane does not hold the display -- so until the display lane runs it,
-# these scenarios are "has a runner", not "passes". Do not record them as
-# passing on the strength of this file existing.
+# without the verbs. The live half is IPC-only (no wtype, no screenshot), so
+# it runs headless under a nested cage (docs/SPIKE-CAGE-HEADLESS.md) as well
+# as on the display. It was first run that way on 2026-09-21 and failed 34 of
+# 73 assertions for its OWN reasons (F-CHNO-5 and the quoting slip below),
+# then passed in full after the fix. A pass is evidence only for the run that
+# produced it; do not record these scenarios as passing on the strength of
+# this file existing.
+#
+# F-CHNO-5. The guide opens in SEARCH mode on every display: Model.guideState
+# says so and Guide.open() rebuilds the state from it on EVERY open, a reopen
+# included. The harness `number` verb routes through handleSharedKey, whose
+# listMode guard keeps a digit literal in search mode (that is N16's rule),
+# so a scenario that types a digit without entering list mode first is
+# testing N16 thirty times over. This file assumed list mode at open and its
+# N16 block toggled from there. `enter_mode` below is the fix: it reads the
+# mode, toggles only when the parity calls for it, and the caller asserts
+# what it got. It is called after every open and around N16.
+#
+# The quoting slip, found by the same run: seven reads outside a `check` were
+# spelled gf "['\''x'\'']" -- the '\'' idiom that ends and restarts a
+# SINGLE-quoted check expression -- inside DOUBLE quotes, where the backslash
+# survives and python sees a syntax error. Every one answered NOFIELD, so two
+# waits could never match, three "parked row" comparisons compared against a
+# sentinel, the N10 scope lookup found no UK group, and N22's `key` was
+# NOFIELD (the add's own auto-switch is what made the reads after it pass).
+# Outside a check the spelling is plain: gf "['x']".
 #
 # Cases that are NOT here, and why (the honest half of CN23):
 #   N15  keypad and shifted digits: only real key events through the
@@ -97,6 +119,17 @@ wait_for() {
 # The digit window, plus a margin. Every timeout check waits exactly this.
 wait_out_entry() { sleep "$(awk -v ms="$ENTRY_MS" 'BEGIN { printf "%.2f", ms / 1000 + 0.4 }')"; }
 
+# enter_mode <list|search>: put the guide in that mode (F-CHNO-5, header).
+# `ipc mode` is a TOGGLE, so sending it blind is right only when the parity
+# is; this reads first. It asserts nothing itself: the caller checks the mode
+# it needed, so a harness whose `mode` verb is a no-op goes red there rather
+# than being corrected here silently.
+enter_mode() {
+  local want=$1
+  [[ "$(gf "['mode']")" == "$want" ]] || ipc mode >/dev/null
+  return 0
+}
+
 # ---------------------------------------------------------------- preflight
 #
 # `seam <label> <file> <ere> <at least>`: a POSITIVE count, never a `! grep`.
@@ -160,17 +193,25 @@ live() {
   HARNESS_PID=$!
   wait_for 20 30 sf "['channels']" || bad "the fixture playlist never loaded; every check below is about nothing"
   wait_for true 10 gf "['opened']" || bad "the guide never opened; every check below is about nothing"
+  # F-CHNO-5: the guide is in search mode here, and a digit typed there is
+  # literal. Every number check below is about list mode.
+  enter_mode list
+  check "setup: the guide is in list mode before the first digit (F-CHNO-5)" '[[ "$(gf "['\''mode'\'']")" == "list" ]]'
   ipc setScope all >/dev/null
   ipc move -99 >/dev/null
 
   echo "== N1 live preview, one digit at a time"
+  # The harness `move` verb WRAPS (moveCursorBy(delta, true)), so `move -99`
+  # is not "park at the top": on this 20-row list it is +1 mod 20. No check
+  # here may assume an index; it reads where the cursor is and compares.
+  parked0=$(gf "['cursorIndex']")
   a1=$(ipc number 1)
   check "N1: the first digit opens entry and previews the lowest match"  '[[ "$(nf "['\''active'\'']" "$a1")" == true && "$(nf "['\''buffer'\'']" "$a1")" == "1" && "$(nf "['\''label'\'']" "$a1")" == "101" ]]'
   check "N1: and the cursor is already on it"                            '[[ "$(nf "['\''cursorName'\'']" "$a1")" == "BBC One HD" ]]'
   a2=$(ipc number 0)
   check "N1: the second digit extends the same buffer"                   '[[ "$(nf "['\''buffer'\'']" "$a2")" == "10" && "$(nf "['\''kind'\'']" "$a2")" == "prefix" ]]'
   check "N1: an ambiguous buffer does NOT commit"                        '[[ "$(nf "['\''active'\'']" "$a2")" == true ]]'
-  check "N1: the entry snapshot remembers where the cursor started"      '[[ "$(nf "['\''cursorIndex'\'']" "$a2")" == 0 ]]'
+  check "N1: the entry snapshot remembers where the cursor started"      'qa_value "$parked0" && [[ "$(nf "['\''cursorIndex'\'']" "$a2")" == "$parked0" ]]'
 
   echo "== N2 the timeout commits"
   wait_out_entry
@@ -182,6 +223,9 @@ live() {
 
   echo "== N13 an unambiguous number commits on its last digit"
   ipc move -99 >/dev/null
+  # N8 below continues THIS entry (CN21), so the row it restores to is the
+  # one the cursor is on now, before the first digit.
+  before_cursor=$(gf "['cursorIndex']")
   a4=$(ipc number 300)
   check "N13: 300 commits without waiting for the window"                '[[ "$(nf "['\''active'\'']" "$a4")" == false && "$(nf "['\''cursorName'\'']" "$a4")" == "Harness Live" ]]'
   check "N13: the footer says so immediately"                            '[[ "$(nf "['\''transient'\'']" "$a4")" == *"300"* ]]'
@@ -190,9 +234,10 @@ live() {
   check "CN21: and the buffer it closed early is armed, not forgotten"   '[[ "$(nf "['\''resume'\'']" "$a4")" == true ]]'
 
   echo "== N8 / D-CHNO-2 a number that does not exist says so"
-  ipc move -99 >/dev/null
-  before_cursor=$(gf "['\''cursorIndex'\'']")
-  a5=$(ipc number 3009)
+  # CN21: the buffer 300 is still armed from N13, so the FOURTH digit alone
+  # continues it. This used to move the cursor and type all of 3009 again,
+  # which appended to the armed buffer and asserted about "3003009".
+  a5=$(ipc number 9)
   check "CN21: the fourth digit continues 300 instead of starting a new number" '[[ "$(nf "['\''active'\'']" "$a5")" == true && "$(nf "['\''buffer'\'']" "$a5")" == "3009" ]]'
   check "N8: which resolves to nothing"                                  '[[ "$(nf "['\''kind'\'']" "$a5")" == "none" ]]'
   wait_out_entry
@@ -207,8 +252,8 @@ live() {
   check "N5: Backspace drops the last digit and previews what is left"   '[[ "$(nf "['\''buffer'\'']" "$a7")" == "1" && "$(nf "['\''active'\'']" "$a7")" == true ]]'
   ipc cancelNumber >/dev/null
   ipc move 4 >/dev/null
-  parked=$(gf "['\''cursorIndex'\'']")
-  parked_name=$(gf "['\''cursorName'\'']")
+  parked=$(gf "['cursorIndex']")
+  parked_name=$(gf "['cursorName']")
   a8=$(ipc number "1<")
   check "N6: Backspace to empty ends the entry"                          '[[ "$(nf "['\''active'\'']" "$a8")" == false && "$(nf "['\''buffer'\'']" "$a8")" == "" ]]'
   check "N6: and restores the row the user was parked on"                '[[ "$(nf "['\''cursorIndexLive'\'']" "$a8")" == "$parked" && "$(nf "['\''cursorName'\'']" "$a8")" == "$parked_name" ]]'
@@ -248,7 +293,10 @@ live() {
   wait_out_entry
 
   echo "== N10 the scope hop"
-  uk=$(gf "[s.split('\''='\'')[0] for s in d['\''scopes'\''] if s.startswith('\''g:UK'\'')][0]")
+  # gf prefixes the expression with `d`; `d['scopes'][0] and ...` keeps that
+  # prefix meaningful and still answers NOFIELD (IndexError) when there is no
+  # scope at all or no UK group among them.
+  uk=$(gf "['scopes'][0] and [s.split('=')[0] for s in d['scopes'] if s.startswith('g:UK')][0]")
   check "N10: there is a UK group to scope into"                         'qa_value "$uk"'
   ipc setScope "$uk" >/dev/null
   d1=$(ipc number 900)
@@ -257,14 +305,17 @@ live() {
   wait_out_entry
 
   echo "== N16 digits stay literal in search mode"
-  ipc mode >/dev/null
+  # F-CHNO-5: entered explicitly and asserted, not reached by toggling from
+  # an assumed list mode.
+  enter_mode search
   check "N16: the guide is in search mode"                               '[[ "$(gf "['\''mode'\'']")" == "search" ]]'
   e1=$(ipc number 101)
   check "N16: a digit there opens no entry at all"                       '[[ "$(nf "['\''active'\'']" "$e1")" == false && "$(nf "['\''buffer'\'']" "$e1")" == "" ]]'
   ipc query 101 >/dev/null
   check "N16: an all-digit query floats the exact number match first"    '[[ "$(gf "['\''cursorName'\'']")" == "BBC One HD" ]]'
   ipc query "" >/dev/null
-  ipc mode >/dev/null
+  enter_mode list
+  check "N16: and list mode is back for the checks that follow"          '[[ "$(gf "['\''mode'\'']")" == "list" ]]'
 
   echo "== N3 / N4 Enter plays and closes, Space plays and stays"
   ipc move -99 >/dev/null
@@ -274,28 +325,40 @@ live() {
   check "N3: the guide closes"                                           '[[ "$(gf "['\''opened'\'']")" == false ]]'
   check "N3: and the service is playing the number that was typed"       '[[ "$(sf "['\''nowPlaying'\''][\"chno\"]")" == "101" ]]'
   ipc open '{}' >/dev/null
-  wait_for true 10 gf "['\''opened'\'']" || bad "the guide did not reopen"
+  wait_for true 10 gf "['opened']" || bad "the guide did not reopen"
+  # F-CHNO-5: Guide.open() rebuilds the state on every open, so the reopened
+  # guide is in search mode again.
+  enter_mode list
+  check "N4: the reopened guide is back in list mode before the next digit" '[[ "$(gf "['\''mode'\'']")" == "list" ]]'
   ipc setScope all >/dev/null
   ipc move -99 >/dev/null
-  ipc number 102 >/dev/null
+  # 102 is unambiguous and commits on its own last digit, leaving nothing for
+  # Space to commit (landed false, by design). 50 is a prefix of the 501
+  # twins, so the entry is still open and Space plays what the preview chose.
+  ipc number 50 >/dev/null
   f2=$(ipc commitNumber true true)
   check "N4: Space commits and keeps the guide open"                     '[[ "$(nf "['\''landed'\'']" "$f2")" == true && "$(gf "['\''opened'\'']")" == true ]]'
-  check "N4: playing what the preview selected"                          '[[ "$(sf "['\''nowPlaying'\''][\"chno\"]")" == "102" ]]'
+  check "N4: playing what the preview selected"                          '[[ "$(sf "['\''nowPlaying'\''][\"chno\"]")" == "501" ]]'
 
   echo "== N9 Enter on a number that does not exist refuses to play"
   ipc move -99 >/dev/null
   ipc number 3009 >/dev/null
+  # "Nothing new" is what is playing before against after, read either side
+  # of the commit: the URLs here are dead, so mpv exits within a second and
+  # nowPlaying clears on its own; a fixed "still 501" would race that.
+  np_before=$(sf "['nowPlaying']")
   g1=$(ipc commitNumber true false)
+  np_after=$(sf "['nowPlaying']")
   check "N9: the commit reports that it did not land"                    '[[ "$(nf "['\''landed'\'']" "$g1")" == false ]]'
-  check "N9: it says which number, and plays nothing new"                '[[ "$(nf "['\''transient'\'']" "$g1")" == "No channel 3009" && "$(sf "['\''nowPlaying'\''][\"chno\"]")" == "102" ]]'
+  check "N9: it says which number, and plays nothing new"                '[[ "$(nf "['\''transient'\'']" "$g1")" == "No channel 3009" && "$np_after" == "$np_before" ]]'
   check "N9: and the guide is still open"                                '[[ "$(gf "['\''opened'\'']")" == true ]]'
 
   echo "== N14 / N22 a source with no numbers at all"
   add=$(ipc addSource "$FIX/nonumbers.m3u" "" "No Numbers")
-  key=$(qa_json_field "d['\''id'\'']" "$add")
+  key=$(qa_json_field "d['id']" "$add")
   check "N22: the unnumbered source was added"                           'qa_value "$key"'
   ipc switchSource "$key" >/dev/null
-  wait_for false 20 sf "['\''hasNumbers'\'']" || bad "the service never reported hasNumbers false after the switch"
+  wait_for false 20 sf "['hasNumbers']" || bad "the service never reported hasNumbers false after the switch"
   check "N22: the index follows the active source"                       '[[ "$(qa_json_field "d['\''hasNumbers'\'']" "$(ipc chnoIndex)")" == false ]]'
   check "N14: the guide knows there are no numbers"                      '[[ "$(gf "['\''hasNumbers'\'']")" == false ]]'
   check "N14: and draws no number column"                                '[[ "$(gf "['\''numberWidth'\'']")" == 0 ]]'
@@ -342,7 +405,7 @@ esac
 if [[ ${1:-live} == check-tree ]]; then
   EXPECTED_CHECKS=20
 else
-  EXPECTED_CHECKS=72
+  EXPECTED_CHECKS=75
 fi
 ran=$checks
 checks=$((checks + 1))
