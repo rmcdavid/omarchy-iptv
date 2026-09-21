@@ -77,13 +77,16 @@ pass can run without a credential anywhere near it.
 
 ### Fixtures that must be written before the display session
 
-**D-GS-2** -- A pair generated with scripts/gen-playlist.py into a scratch dir (never committed with credentials; hosts stay under .test). (a) NEGATIVE: one playlist, ONE group only (--groups 1, so groupsNarrow is false and epgCarries is the term that decides height), >= 60 channels so the fold is visible, tvg-id on 100% of rows, plus an XMLTV generated with --xmltv and --now $(date +%s) --hours 24 whose channel ids are DISJOINT from every id in the playlist (generate the XMLTV from a second run with a different id prefix, then verify the intersection is empty with a two-line python set check before the pas...
+Written out in full; an earlier revision of this file truncated each spec at
+600 characters, which the D-ID-1 lane's verifier caught.
+
+**D-GS-2** -- A pair generated with scripts/gen-playlist.py into a scratch dir (never committed with credentials; hosts stay under .test). (a) NEGATIVE: one playlist, ONE group only (--groups 1, so groupsNarrow is false and epgCarries is the term that decides height), >= 60 channels so the fold is visible, tvg-id on 100% of rows, plus an XMLTV generated with --xmltv and --now $(date +%s) --hours 24 whose channel ids are DISJOINT from every id in the playlist (generate the XMLTV from a second run with a different id prefix, then verify the intersection is empty with a two-line python set check before the pass). Expect: epg.loaded true, the "no EPG channel id matches a playlist tvg-id" warning, and rows that STAY single-line (38 px), visible rows and pageSize unchanged from the no-EPG baseline. (b) POSITIVE control: the same playlist with the matching XMLTV, expect two-line rows with now/next actually printed. (c) BOUNDARY, the case the shipped rule does not cover: the same playlist with an XMLTV matching exactly ONE channel - carries flips true and every other row gets a blank second line. Record that number; it is the original complaint at 1/N rather than 0/N and the pass should say whether the product owner accepts it.
 
 **D-GS-4** -- Not needed for the shape, but the EPG URL must point at an XMLTV that actually loads so the three files exist to be deleted: regenerate one with scripts/gen-playlist.py --xmltv --now $(date +%s) into a scratch dir. tests/fixtures/qa-epg.xml is dated 2026-09-12 and now falls outside the +-24 h window, so it is a poor choice for this.
 
-**D-ID-1** -- A committed pair of local .m3u files plus a seeded state.json, all ASCII, plain http:// or local paths, no userinfo and no credentials (suggested: tests/fixtures/qa-id-rotate/list-v1.m3u, list-v2.m3u, state-seed.json). list-v1.m3u must contain, in one file: 1. ~6 rows with NO tvg-id and a UNIQUE channel name -> legacy id `u:<fnv1a32(url)>`, scheme-2 id `n:<hash(name)>`. These are the rows that must move; six rather than one so `moved N` is a visible count and an off-by-one is legible. 2. ~2 rows whose tvg-id is DUPLICATED across an HD/SD pair (the qa-attrs.m3u shape) -> legacy `u:` because the...
+**D-ID-1** -- A committed pair of local .m3u files plus a seeded state.json, all ASCII, plain http:// or local paths, no userinfo and no credentials (suggested: tests/fixtures/qa-id-rotate/list-v1.m3u, list-v2.m3u, state-seed.json). list-v1.m3u must contain, in one file: 1. ~6 rows with NO tvg-id and a UNIQUE channel name -> legacy id `u:<fnv1a32(url)>`, scheme-2 id `n:<hash(name)>`. These are the rows that must move; six rather than one so `moved N` is a visible count and an off-by-one is legible. 2. ~2 rows whose tvg-id is DUPLICATED across an HD/SD pair (the qa-attrs.m3u shape) -> legacy `u:` because the id is not unique, but distinct names, so scheme 2 substitutes them too. This exercises the non-unique-id path into `n:`, which the unique-name-only rows do not. 3. ~4 rows WITH a unique tvg-id -> `t:` under both schemes. These must NOT move; they prove `moved` counts only what moved rather than rewriting the file wholesale. 4. Exactly one COLLIDING-NAME pair with no tvg-id (two rows, byte-identical names, different URLs) -> the uniqueness test must refuse the name key and leave both at `u:`. This makes D-ID-2's accepted limit observable in the same run instead of a surprise. 5. One row whose scheme-2 `n:` id collides with a `t:`/`n:` id already present from another row, if one can be constructed - to exercise the favourites merge-not-duplicate path. list-v2.m3u: byte-identical to list-v1 EXCEPT that every stream URL's path segment differs (the rotation being simulated - e.g. /live/AAAA/ -> /live/BBBB/). Names, tvg-ids, groups and order unchanged. This is the whole point: after the migration, the ids of the rows in (1) and (2) must be identical across v1 and v2, while their legacy `u:` ids differ on every row. state-seed.json (v2 shape, written 0600 into a scratch state dir, NEVER the user's): seed the legacy `u:` ids into ALL FOUR slots `remap_state_ids` touches - `favorites`, `recents`, `lastPlayed` AND `session`. Only favorites and recents get the de-duplicating merge path, so a pass that seeds favourites alone verifies half the function. Include one favourite that is already the TARGET id of another row's remap, to observe the merge rather than a duplicate. Include one unrelated top-level key the current helper does not know, to confirm remap_state_file preserves it. The live steps this fixture makes possible, which the configured list cannot: a. Snapshot ~/.local/state/omarchy-iptv/state.json and the cache first and restore after (CLAUDE.md working-in-parallel rule 5) - the migration is one-time and irreversible per state file. b. Point the plugin at list-v1, then observe the REAL argv of the running helper (`ps -o args=` on the helper pid, the technique docs/QA-SOURCES.md SRC-H13 already uses) to confirm `--state-dir` IS present on the ACTIVE fetch and IS ABSENT on the source PROBE. This is the only way to close the rule-14 hole: it observes the sink instead of grepping Service.qml, and it is the one check that would have caught `stateDir: ""`. c. Confirm the helper logs `moved N saved channel reference(s)` with N equal to the seeded count, and that a second refresh moves nothing and does not rewrite the file (idempotence). d. Switch the active source to list-v2 and confirm the favourites, recents, lastPlayed and session all still resolve to the same channels - the actual harm this defect is about. e. Confirm the colliding-name pair did NOT move, and that the guide renders the merged favourite once rather than twice.
 
-**D-SG-1** -- One playlist, generated into a scratch dir with scripts/gen-playlist.py (URLs stay under the reserved .test TLD; no credentials, unlike the subscriber's list), added to the plugin as a LOCAL FILE PATH: (a) exactly ONE group, whose group-title is a two-word name sharing fragments with ordinary queries - "United States" is the name the measurements and the hint tests already use, so post-process the generated group-title to it if --groups 1 does not yield a multi-word name; (b) >= 3,000 channels so the 200-row cap and the "First 200 of N - keep typing" footer both appear (3,335 reproduces the fi...
+**D-SG-1** -- One playlist, generated into a scratch dir with scripts/gen-playlist.py (URLs stay under the reserved .test TLD; no credentials, unlike the subscriber's list), added to the plugin as a LOCAL FILE PATH: (a) exactly ONE group, whose group-title is a two-word name sharing fragments with ordinary queries - "United States" is the name the measurements and the hint tests already use, so post-process the generated group-title to it if --groups 1 does not yield a multi-word name; (b) >= 3,000 channels so the 200-row cap and the "First 200 of N - keep typing" footer both appear (3,335 reproduces the filed numbers exactly); (c) among the names, at least a handful that genuinely contain the polluting fragments - e.g. "USA STARZ", "STATE TV", "UNITED SPORTS" - so the before/after counts for `st`, `sta`, `ted`, `ited`, `unit`, `starz` are non-trivial and can be read off the header; (d) tvg-id present or absent does not matter. Also generate a second, MULTI-group list (--groups 26) to see the two costs that only show there: counts that grow as you type, and the queries that now return fewer rows. Check on screen: the header and footer counts for those queries, the empty state naming the group while typing `unit` / `unite`, and per-keystroke responsiveness at 3,335 in the QML engine (the 2.05 -> 2.89 ms figure in the row was measured in node, not in V4).
 
 ## Every row, by tier
 
@@ -200,3 +203,58 @@ an UNESCAPED pipe. Both halves are load-bearing: exactness alone would condemn
 D-PLY-9, whose Repro cell legitimately quotes shell containing a pipe. Proven
 in both directions -- the doubled-separator case is green against the checker as
 it shipped and red against the fix.
+
+## Addendum: the three fixtures, built
+
+Three lanes, each in its own worktree with ownership declared file by file,
+each proven by mutation, each then handed to an independent verifier told to
+refute it. The verifiers earned their keep twice.
+
+**What was built.** `tests/fixtures/qa-gs2/` (one group, 60 rows, three guides
+generated at test time plus a fourth), `tests/fixtures/qa-id-rotate/` (two
+committed lists and a seeded state), and `tests/fixtures/qa-sg1/` (a committed
+50-row one-group list, with the 3,335-row list and a 26-group control
+generated at test time and pinned by sha256). Each has a README, a `verify.js`
+bridge that calls the shipping `Model.js` by path, and a discoverable python
+test that drives the real helper with explicit `--cache-dir`/`--state-dir`
+under a temp directory, behind `tests/helper_loader.py`.
+
+**What the verifiers caught.** For D-SG-1, a rule that whole-word-checks only
+the LAST token survived all thirteen tests, the node suite (1,427 checks) and
+the QML spec: the fixture's central claim, "every term", was observed for one
+term. Fragment-first queries (`unit states`, `stat states`, `ted states`) now
+kill it in the fixture and at `tests/Model.test.js` (1 of 1,428), and the
+hint's negative case kills a hint that names a group unconditionally. For
+D-GS-2, a blind spot: the helper's `matched` counts id matches while
+`epgCoverage` counts fillable rows, and no case separated them -- a guide whose
+ids all match but whose programmes are three days old does (matched 60,
+nowCount 0, rows single-line). One claim written before its measurement
+came back was wrong and is withdrawn: a Model.js mutant counting id matches
+does NOT fail on that case, because the helper writes zero entries for a
+stale guide and Model.js sees an empty map. The separation is at the helper
+boundary, which (d) observes; it does not exercise epgCoverage's arithmetic
+beyond what (a) already does. For D-ID-1, nothing blocking; the
+verifier's fifteen mutants all die between this fixture and the existing
+suites. It also found this file's fixture specs truncated at 600 characters
+by the generator that wrote it; restored above.
+
+**One join by copy, filed.** `qa-sg1/verify.js` collects `groupNames` with a
+copy of the loop at `Guide.qml:696-700`, not a call, and the test asserted the
+result "as Guide.qml collects it" -- rules 12 and 14 exactly. The claim is
+withdrawn, the fixture README marks the join UNVERIFIED, and D-SG-2 asks for
+the collection to be lifted into `Model.js` and called from both.
+
+**The board.** D-GS-2, D-ID-1 and D-SG-1 now read verified at the terminal,
+each row citing its test file and naming what a screen still owes. D-ID-1's
+residue is the one that matters: `--state-dir` observed on the running
+helper's argv during an active fetch, the only observation of the Service.qml
+join that would have caught `stateDir: ""`. 3c is therefore lighter than the
+roadmap had it, and every remaining screen item is named rather than implied.
+
+**Integration notes.** The lanes' worktrees were cut from `main` -- the
+thirteen-file release artifact -- not from `dev`; two lanes said so and
+re-based their own branch before writing, and all three were checked to be
+rooted on `dev`'s head before merging. The merge helper's ownership check
+first diffed each branch against `dev`'s moving head and refused a clean lane
+because an earlier lane had already landed; it now diffs against the branch's
+merge-base. A refusal that is wrong is still cheaper than a merge that is.

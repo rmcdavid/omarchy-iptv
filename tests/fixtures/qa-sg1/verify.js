@@ -73,6 +73,8 @@ function load(Model, text) {
   // one-group list publishes no group entries, and that is precisely the list
   // D-SG-1 bites on.
   var surface = Model.scopeSurface(channels, state)
+  // A COPY of Guide.qml:696-700, not a call (D-SG-2): nothing verifies the two
+  // stay in step. Lift it into Model.js and call it from both when fixing that.
   var groupNames = []
   if (surface.axis.soleGroup !== "") groupNames.push(surface.axis.soleGroup)
   for (var i = 0; i < surface.entries.length; i++) {

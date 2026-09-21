@@ -114,10 +114,10 @@ def run_helper(*args):
     return code, payload, err.getvalue()
 
 
-def generate(out_m3u, out_xml, *flags):
+def generate(out_m3u, out_xml, *flags, now=NOW):
     """scripts/gen-playlist.py for real, as an argv list (never a shell string)."""
     argv = [sys.executable, str(GENERATOR), "--out", str(out_m3u), "--xmltv", str(out_xml),
-            "--now", str(NOW), "--hours", str(HOURS), *flags]
+            "--now", str(now), "--hours", str(HOURS), *flags]
     subprocess.run(argv, check=True, capture_output=True, text=True, timeout=60)
 
 
@@ -156,6 +156,12 @@ class Gs2FixtureTest(unittest.TestCase):
         cls.xml_one = cls.tmp / "one-match.xml"
         generate(cls.tmp / "one-source.m3u", cls.xml_one, "--profile", "synthetic", "--channels", "1",
                  "--groups", "1", "--epg-ids", "1.0", "--dupes", "0", "--seed", "1")
+        # (d) STALE: the playlist's OWN guide, every id matching, but generated
+        # three days ago so no programme falls in the -2h..+12h window.
+        cls.xml_stale = cls.tmp / "stale.xml"
+        generate(cls.tmp / "stale-source.m3u", cls.xml_stale, "--profile", "synthetic", "--channels", str(CHANNELS),
+                 "--groups", "1", "--epg-ids", "1.0", "--dupes", "0", "--headers", "0",
+                 "--multi-group", "0", "--seed", "1", now=NOW - 259200)
 
     def verdict(self, xml, playlist=None, model=MODEL):
         """The whole shipping pipeline on one (playlist, XMLTV) pair.
@@ -214,8 +220,8 @@ class Gs2FixtureTest(unittest.TestCase):
         Pre-fix, `epgConfigured` was true here and every row got a second
         line with nothing on it. Now `epgCoverage` says the data fills no row
         and `rowsHaveDetail` is false: single-line rows. The helper's own
-        `matched` count and its warning say the same thing about the same
-        data, one layer down."""
+        `matched` count agrees here, but it counts ID matches while
+        `epgCoverage` counts FILLABLE rows; case (d) is where they part."""
         _, epg, verdict = self.verdict(self.xml_disjoint)
         self.assertEqual(epg["matched"], 0)
         self.assertEqual(epg["channelTotal"], CHANNELS)
@@ -260,6 +266,19 @@ class Gs2FixtureTest(unittest.TestCase):
         self.assertEqual(verdict["rowsHaveDetail"], verdict["coverage"]["carries"])
         self.assertIs(verdict["rowsHaveDetail"], True, "recorded: 1 of 60 is enough for the shipping rule")
         self.assertEqual((verdict["detailBlankRows"], verdict["detailFilledRows"]), (CHANNELS - 1, 1))
+
+    def test_d_stale_guide_matches_every_id_and_fills_no_row(self):
+        """(d) The verifier's blind spot: the helper's `matched` counts id
+        matches, `epgCoverage` counts rows the data can FILL. A guide whose
+        ids all match but whose programmes are three days old is where they
+        part -- matched 60, nothing to print, and the rows must stay single."""
+        _, epg, verdict = self.verdict(self.xml_stale)
+        self.assertEqual(epg["matched"], CHANNELS)
+        self.assertEqual(epg["nowCount"], 0)
+        self.assertEqual(epg["programmeCount"], 0)
+        self.assertEqual(verdict["coverage"], {"total": CHANNELS, "withId": CHANNELS, "matched": 0, "carries": False})
+        self.assertIs(verdict["rowsHaveDetail"], False, verdict)
+        self.assertEqual((verdict["detailBlankRows"], verdict["detailFilledRows"]), (CHANNELS, 0))
 
     def test_prefix_decision_reproduces_the_defect(self):
         """The fixture shows the DEFECT, not only the fix (rule 11, kept runnable).

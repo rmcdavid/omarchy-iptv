@@ -104,10 +104,12 @@ CONTROL_SHA256 = "910400e046c2890ba339dc420ea755267872008c26910306dc91007f362480
 # The six queries docs/QA-PHASE3.md names, then the ones the accepted costs
 # in docs/UX.md 2.6 predict, then the control's group-noun fragments.
 SIX = ["st", "sta", "ted", "ited", "unit", "starz"]
-SMALL_QUERIES = SIX + ["stat", "state", "states", "united", "united states", "united stat"]
-SCALE_QUERIES = SIX + ["es", "tes", "ni", "stat", "state", "unite", "states", "united", "united states"]
+SMALL_QUERIES = SIX + ["stat", "state", "states", "united", "united states", "united stat",
+                       "unit states", "stat states", "ted states", "ited united"]
+SCALE_QUERIES = SIX + ["es", "tes", "ni", "stat", "state", "unite", "states", "united", "united states",
+                       "unit states", "stat states", "ted states"]
 CONTROL_QUERIES = ["port", "istor", "atur", "ew", "cienc", "utdoor", "lassic",
-                   "sports", "news", "history", "roup", "grou"]
+                   "sports", "news", "history", "roup", "grou", "sport"]
 
 
 def sha256_of(path):
@@ -230,7 +232,9 @@ class SingleGroupSearchFixtureTest(unittest.TestCase):
         self.assertEqual(self.small_status["channelCount"], 50)
         self.assertEqual(self.small_status["groupCount"], 1)
         self.assertEqual(self.small["channels"], 50)
-        self.assertEqual(self.small["groupNames"], [GROUP], "the sole group must come off the axis, as Guide.qml collects it")
+        # verify.js collects groupNames the way Guide.qml:696-700 does, by a
+        # COPY of that loop, not a call: the join is unverified (D-SG-2).
+        self.assertEqual(self.small["groupNames"], [GROUP], "the sole group must come off the axis")
         self.assertEqual(self.small["limit"], 200)
 
     def test_committed_list_shipping_counts_are_the_real_name_matches(self):
@@ -247,6 +251,35 @@ class SingleGroupSearchFixtureTest(unittest.TestCase):
         # `starz` is not a fragment of the group name: the ranking never
         # touched it, and it is the query the filed row counted 19 of.
         self.assertEqual(pre["starz"], post["starz"])
+
+    def test_every_term_must_be_a_whole_word_not_only_the_last(self):
+        """The verifier's catch: a rule that checks only the LAST token as a
+        whole word survived every query here, the node suite and the QML spec.
+        A fragment BEFORE a whole word is the case that tells them apart:
+        `unit states` has a whole second word and a fragment first."""
+        first = ["unit states", "stat states", "ted states"]
+        self.assertEqual(self.post(self.small, first), {q: 0 for q in first})
+        self.assertEqual(self.pre(self.small, first), {q: 50 for q in first})
+        self.assertEqual(self.post(self.scale, first), {q: 0 for q in first})
+        self.assertEqual(self.pre(self.scale, first), {q: SCALE for q in first})
+        # and one that DOES match, so the rule is not simply "two tokens -> 0"
+        self.assertEqual(self.post(self.small, ["ited united"]), {"ited united": 2})
+        self.assertEqual(self.pre(self.small, ["ited united"]), {"ited united": 50})
+
+    def test_the_hint_stays_silent_when_the_query_is_not_a_group_word_prefix(self):
+        """The negative half of the hint. A hint that unconditionally named the
+        first group passed every positive assertion here."""
+        for q in ("ted", "ited", "tes", "starz"):
+            self.assertEqual(self.scale["results"][q]["hint"], "", q)
+        self.assertEqual(self.control["results"]["roup"]["hint"], "")
+
+    def test_control_list_one_more_keystroke_restores_the_group(self):
+        # docs/UX.md 2.6 cost 3, second clause: `sport` answers with names
+        # only; `sports`, one keystroke on, is a whole group word again.
+        post = self.post(self.control, ["sport", "sports"])
+        self.assertGreater(post["sport"], 0)
+        self.assertLess(post["sport"], post["sports"])
+        self.assertEqual(post["sports"], 631)
 
     def test_committed_list_whole_group_words_still_reach_every_row(self):
         # docs/UX.md 2.6 cost 2: a count can GROW as you type, because the

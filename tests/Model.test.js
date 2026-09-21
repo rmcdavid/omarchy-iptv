@@ -393,6 +393,14 @@ check("SG1 containsAllWords is whole-word, both edges", [
   Model.containsAllWords("usa starz united states", ["united", "usa"]),
   Model.containsAllWords("usa starz united states", ["united", "nope"])
 ], [false, true, true, true, true, false])
+// A rule that only whole-word-checks the LAST token survived every check above
+// and the whole tests/fixtures/qa-sg1 fixture: a fragment BEFORE a whole word
+// is what tells the shipped rule from that one. Found by the fixture's verifier.
+check("SG1 every term is whole-word, not only the last", [
+  Model.containsAllWords("usa starz united states", ["st", "united"]),
+  Model.containsAllWords("usa starz united states", ["unit", "states"]),
+  Model.containsAllWords("usa starz united states", ["usa", "united", "states"])
+], [false, false, true])
 
 // ---- D-A11Y-6: the empty state had no voice at all ----
 // Found by the harness as L2-Q-05, measured on the real bus: with a query that

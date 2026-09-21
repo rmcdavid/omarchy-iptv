@@ -5,7 +5,13 @@
 //
 // CLAUDE.md rule 12: the row-height decision lives in Model.js and a python
 // test cannot reach it, so this is the bridge. It CALLS the shipping functions
-// along the exact path Service.qml and Guide.qml take, and restates none:
+// in the order Service.qml and Guide.qml call them, with two deviations named
+// so they are not mistaken for fidelity: it passes a fourth key,
+// epgConfigured: true, which Guide.qml:418 does not pass (kept so the pre-fix
+// predicate can be reproduced on a scratch copy), and it walks the prepared
+// channels rather than filterChannels rows (the same objects; Guide.qml:2423,
+// Model.js:1415). tests/a11y/check_bus.py drove node before this file did;
+// this is the first bridge that takes the Model.js PATH as an argument.
 //
 //   Service.qml  applyChannels:  Model.parseChannels(text) -> Model.prepareChannels
 //   Service.qml  applyEpgNow:    Model.parseEpgNow(text).channels      (= root.epgNow)
@@ -43,7 +49,7 @@ if (!isFinite(nowSec) || nowSec <= 0) usage("nowSec must be a positive number of
 
 var Model = require(modelPath)
 
-// Service.qml applyChannels / applyEpgNow, verbatim.
+// Service.qml applyChannels / applyEpgNow, the same two calls in the same order.
 var channelsDoc = Model.parseChannels(fs.readFileSync(channelsPath, "utf8"))
 var channels = channelsDoc.ok ? Model.prepareChannels(channelsDoc.channels) : []
 var epgDoc = Model.parseEpgNow(fs.readFileSync(epgNowPath, "utf8"))

@@ -89,9 +89,29 @@ on every title, so the word `Group` is shared by all 26 and a fragment of it
 reproduced the defect on a multi-group list. The condition is a word common to
 every key's group half; one group is only the commonest way to get there.
 
+## By hand, at scale
+
+The display session wants the 3,335-row list as a local file path
+(docs/QA-PHASE3.md). It is deterministic, so it need not be committed:
+
+    S=$(mktemp -d)
+    python3 scripts/gen-playlist.py --channels 3335 --groups 1 --seed 1 --out "$S/gen.m3u"
+    sha256sum "$S/gen.m3u"    # 9b6cb8d10d0e8c6a92915364f9924d12b5430f79636cf490eb0f129ce040adc9
+    sed 's/group-title="Group 001 Comedy"/group-title="United States"/' "$S/gen.m3u" > "$S/united-states.m3u"
+    python3 bin/omarchy-iptv playlist --url "$S/united-states.m3u" --cache-dir "$S"
+
+Then add `$S/united-states.m3u` as a source from inside the guide.
+
 ## What still needs a screen
 
 The numbers above are what the guide is TOLD. Not settled here, and not to be
 cited as if it were: the header and footer strings composed from them, the
 empty state rendering the hint while typing toward the sole group name, and
 per-keystroke responsiveness in the QML engine at 3,335 rows.
+
+Also UNVERIFIED, by construction: verify.js collects `groupNames` with a copy
+of the loop at Guide.qml:696-700 (the sole group off the axis, then each
+group entry), not by calling shared logic. The counts it passes to
+`groupWordHint` are therefore the counts Guide.qml WOULD pass only if that
+copy stays in step. Filed as D-SG-2: lift the collection into Model.js so
+both call it.
