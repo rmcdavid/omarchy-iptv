@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "cacheLayout": 0,
+  "favorites": [
+    "u:9712e180",
+    "t:hotel.test",
+    "n:d8cf1772",
+    "u:36f90b72",
+    "u:4a0e659f",
+    "u:402cf731",
+    "u:58b2a668",
+    "u:e2ffd78c"
+  ],
+  "recents": [
+    {"id": "u:33db2e82", "name": "Delta Movies", "at": 1758400300},
+    {"id": "t:india.test", "name": "India TV", "at": 1758400200},
+    {"id": "u:b170b7bd", "name": "Echo Music", "at": 1758400100}
+  ],
+  "lastPlayed": {"id": "u:f91b61c4", "name": "Foxtrot Docs", "at": 1758400400},
+  "session": {"id": "u:1db3ed20", "name": "Golf SD", "at": 1758400500},
+  "sources": [],
+  "qaUnknownTopLevelKey": {
+    "keep": [1, 2, 3],
+    "why": "a key this helper version does not know must survive the rewrite"
+  }
+}
