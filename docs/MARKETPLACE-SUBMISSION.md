@@ -155,14 +155,53 @@ read as capability. Our phrasing simply was not a shape it recognised. The capab
 can install, upgrade, or remove software outside its own checkout" -- is
 untrue of this plugin, and the honest fix is to stop asserting it.
 
-**Still unguarded.** Nothing checks that these two strings stay reworded. A
-package-install command written into a future message string would silently
-drop a listed plugin back to `review-required` on the next update scan, and the
-comments at each site are a name, not a call -- exactly the join CLAUDE.md rule
-13 is about. A check belongs in `check.sh`; it is not written yet.
+### Guarded, as of this branch
 
-Note that this file keeps its own prose clear of the literal tokens it
-describes. Markdown prose appears not to be read as commands -- 24 such lines
-sat in `docs/` at `e5f68c0` and the scan reported only the one in a shell
-script -- but that is an inference from one observation, and there is no reason
-to rest a re-scan on it when a rephrasing costs nothing.
+`scripts/check-marketplace-capabilities.py` now runs in `check.sh` as step 9.
+It applies the marketplace's own capability patterns to the files the
+marketplace actually reads, and fails naming the file, the line and the
+capability the string would be reported as. The comments at each site now
+name that check instead of each other; one of them had already gone stale,
+citing `scripts/check.sh:122` after the line had moved.
+
+Two properties are worth stating, because they are what make it usable rather
+than noise:
+
+* **It respects the real scan surface.** `docs/` is an excluded directory
+  *and* `.md` is not a scanned extension, so the prose under `docs/` that
+  discusses these subjects on purpose is out of scope. So is `tests/`. The
+  root `README.md` is in scope, including its shell-tagged fences, and a
+  fenced line is reported at its real line in the README rather than its
+  offset inside the fence.
+* **Comments are not commands.** The scanner strips trailing comments and
+  drops comment-only lines, so `scripts/qa-player-scenarios.sh:33` and
+  `scripts/qa-sources-scenarios.sh:23`, which both spell the elevation verb
+  in a comment, stay silent. The one asymmetry is faithful rather than tidy:
+  upstream strips a trailing comment only for the privilege rule, so a
+  package verb in a trailing comment IS reported. Do not "fix" that.
+
+The patterns live in `scripts/marketplace-capability-patterns.json`,
+transcribed from `detectElevatedCapabilities`, `invokesPrivilegeBoundary` and
+`isSecurityScanPath` upstream. They are in a `.json` file for a reason the
+check then proves: `.json` is not a scanned extension, so a checker that
+spelled these patterns inline in Python would be reported as every capability
+it exists to prevent. The checker reads itself along with everything else,
+so that is observed on every run, not asserted. What is *not* ported is
+listed in the same file under `_notPorted` and printed on every run, so the
+check never implies coverage it lacks.
+
+It was run against `f2d1dbf~1`, where both strings were still present: 2
+capability hits, `scripts/check.sh:122` as `package-manager` and
+`scripts/qa-player-scenarios.sh:396` as `privilege`, exit 1. Against this
+branch: 30 files, 0 hits, exit 0. Its own suite is 46 cases, and fifteen
+mutations of the checker and its patterns each turned that suite red -- two
+of them went green on the first sweep and both were real gaps, since closed.
+
+One inference in the section above is now settled rather than inferred. This
+file used to note that markdown prose *appears* not to be read as commands,
+on the evidence of 24 such lines sitting in `docs/` at `e5f68c0` while the
+scan reported only the shell script. `security-baseline-scope.mjs` says so
+outright: `excludedDirectories` contains `docs`, and `.md` is absent from
+`scannedExtensions`. Only a root `README` is read as markdown. The habit of
+keeping this file clear of the literal tokens it describes is still worth
+keeping -- it costs nothing -- but it is no longer load-bearing.
