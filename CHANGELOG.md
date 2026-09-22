@@ -6,6 +6,12 @@ version lives in `manifest.json`.
 ## Unreleased
 
 ### Fixed
+- **A single "runs forever" programme no longer wipes the whole guide.** Some
+  providers mark a 24/7 stream as ending in the year 9999. One such entry was
+  enough to corrupt the cached guide data for *every* channel on that source,
+  so Now/Next simply vanished everywhere — with nothing reported, and
+  refreshing rebuilt the same broken file. A subtler version of the same fault
+  made a long-running programme look like it had finished years ago. (D-EPG-1)
 - **Section labels are readable on every theme.** The headings above the group
   list and beside each form field were dimmed by a method that darkens rather
   than fades, which on light themes made them *darker* than the text they sit

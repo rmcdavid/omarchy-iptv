@@ -1561,8 +1561,34 @@ def source_key(url: str) -> str:
     return hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
 
 
+# The last epoch second that still fits ten digits: 2286-11-20T17:46:39Z.
+#
+# Ten digits is not a formatting preference, it is the record format's
+# CONTRACT. The readers slice [0:10], [11:21] and [22:] rather than splitting,
+# because bisect over fixed-width prefixes is what buys the 10,000-channel
+# budget (see EPG_RECORD_SEP). But "%010d" sets a MINIMUM width and not a
+# maximum, so a larger timestamp pushed the title into the number field and
+# produced a line no JSON parser would accept -- and epg-now.json is written by
+# concatenation, so ONE such programme cost every channel of that source its
+# guide data, silently, while the helper exited 0 reporting ok:true. An
+# eleven-digit stop was quieter and worse: valid JSON carrying a truncated
+# stop, so the row showed as having nothing on.
+#
+# Feeds really do carry these. `99991231235959` is a common "runs forever"
+# sentinel for 24/7 streams, and it is twelve digits.
+#
+# Clamping here makes the function total and keeps the invariant at the one
+# place records are made, rather than asking three readers to defend against
+# input their own format forbids.
+EPG_MAX_EPOCH = 9999999999
+
+
 def encode_record(start: int, stop: int, title: str) -> str:
-    """See EPG_RECORD_SEP. `start`/`stop` are non-negative epoch seconds."""
+    """See EPG_RECORD_SEP. `start`/`stop` are clamped into the ten-digit range
+    the record format requires; a stop past 2286 means "runs forever" and is
+    truthfully represented by the furthest instant the format can hold."""
+    start = 0 if start < 0 else min(start, EPG_MAX_EPOCH)
+    stop = 0 if stop < 0 else min(stop, EPG_MAX_EPOCH)
     return "%010d %010d %s" % (start, stop, json.dumps(title, ensure_ascii=False))
 
 

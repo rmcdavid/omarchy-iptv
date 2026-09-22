@@ -489,6 +489,61 @@ class EpgPerformanceTest(unittest.TestCase):
             self.assertEqual(status["nowCount"], 2000)
             self.assertLess(elapsed, 2.0, "epg fetch took %.0f ms for 48k programmes" % (elapsed * 1000))
 
+    def test_a_runs_forever_stop_does_not_destroy_every_channels_guide(self):
+        """One programme with a 12-digit stop made epg-now.json unparseable.
+
+        `99991231235959` is a common "runs forever" sentinel for a 24/7 stream.
+        It parses to 253402300799, which needs twelve digits, and the record
+        format is fixed-width ten: the title was pushed into the number field,
+        and because epg-now.json is written by concatenation, ONE such
+        programme cost EVERY channel of the source its guide data -- silently,
+        with the helper exiting 0 and reporting ok:true, so the guide showed no
+        banner and `r` rewrote the same broken file.
+
+        Run against the shipping code before the clamp this is asserting, the
+        json.loads below raises JSONDecodeError (CLAUDE.md rule 11).
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            xml = os.path.join(tmp, "farstop.xml")
+            with open(xml, "w", encoding="utf-8") as fh:
+                fh.write('<tv>\n'
+                         '<programme channel="a" start="20260101000000 +0000" '
+                         'stop="20260101060000 +0000"><title>Morning</title></programme>\n'
+                         '<programme channel="a" start="20260101060000 +0000" '
+                         'stop="99991231235959 +0000"><title>24/7 Stream</title></programme>\n'
+                         '</tv>\n')
+            code, status, stderr = run("epg", "--url", xml, "--cache-dir", tmp, "--now", "1767247200")
+            self.assertEqual(code, 0, stderr)
+            self.assertTrue(status["ok"], status)
+            with open(os.path.join(tmp, "epg-now.json"), encoding="utf-8") as fh:
+                now = json.load(fh)        # this is the line that used to raise
+            entry = now["channels"]["a"]["now"]
+            self.assertEqual(entry["title"], "24/7 Stream")
+            # Clamped to the furthest instant the ten-digit format can hold,
+            # which is the truthful reading of "runs forever" here.
+            self.assertEqual(entry["stop"], 9999999999)
+
+    def test_an_eleven_digit_stop_is_not_silently_truncated(self):
+        """The quieter half: eleven digits produced VALID JSON with a stop of
+        1000000000 -- September 2001 -- so the row rendered as having nothing
+        on rather than as broken. Valid-but-wrong is worse than unparseable,
+        because nothing anywhere reports it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            xml = os.path.join(tmp, "eleven.xml")
+            with open(xml, "w", encoding="utf-8") as fh:
+                fh.write('<tv>\n'
+                         '<programme channel="a" start="20260101060000 +0000" '
+                         'stop="25000101000000 +0000"><title>Long Run</title></programme>\n'
+                         '</tv>\n')
+            code, status, stderr = run("epg", "--url", xml, "--cache-dir", tmp, "--now", "1767247200")
+            self.assertEqual(code, 0, stderr)
+            with open(os.path.join(tmp, "epg-now.json"), encoding="utf-8") as fh:
+                now = json.load(fh)
+            entry = now["channels"]["a"]["now"]
+            self.assertEqual(entry["title"], "Long Run")
+            self.assertGreater(entry["stop"], 1767247200,
+                               "a stop in the future must not read as one in the past")
+
 
 if __name__ == "__main__":
     unittest.main()
