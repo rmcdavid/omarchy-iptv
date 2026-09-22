@@ -1,0 +1,87 @@
+{
+  "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may.",
+  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
+  "vectors": [
+    {
+      "why": "the ordinary case both suites already had",
+      "text": "Failed to open http://u5er:p4ss@prov.example.test:8080/live/1.ts.",
+      "host": "prov.example.test",
+      "mustNotAppear": [
+        "u5er",
+        "p4ss",
+        "8080",
+        "live/1.ts"
+      ]
+    },
+    {
+      "why": "D-SINK-1: an un-encoded '@' inside the password",
+      "text": "Failed to open http://qa-user:qa@pass-SENTINEL@prov.example.test:8080/live/1.ts.",
+      "host": "prov.example.test",
+      "mustNotAppear": [
+        "qa-user",
+        "qa@pass",
+        "SENTINEL"
+      ]
+    },
+    {
+      "why": "two '@' and no password, which is still userinfo",
+      "text": "http://name@sub@host.example.test/a.ts",
+      "host": "host.example.test",
+      "mustNotAppear": [
+        "name@sub",
+        "name",
+        "sub@"
+      ]
+    },
+    {
+      "why": "credentials in the query string, the Xtream shape",
+      "text": "probe http://prov.example.test/get.php?username=U5ER&password=P4SSW0RD&type=m3u_plus done",
+      "host": "prov.example.test",
+      "mustNotAppear": [
+        "U5ER",
+        "P4SSW0RD",
+        "get.php",
+        "username="
+      ]
+    },
+    {
+      "why": "credentials in the path, the other Xtream shape",
+      "text": "http://prov.example.test/live/U5ER/P4SSW0RD/1.ts",
+      "host": "prov.example.test",
+      "mustNotAppear": [
+        "U5ER",
+        "P4SSW0RD"
+      ]
+    },
+    {
+      "why": "no userinfo at all must survive unharmed",
+      "text": "no userinfo http://plain.example.test:8080/a.ts here",
+      "host": "plain.example.test",
+      "mustNotAppear": [
+        "8080",
+        "a.ts"
+      ]
+    },
+    {
+      "why": "two URLs in one line, the second carrying the doubled '@'",
+      "text": "first http://a5:b6@one.example.test/1 then http://c7:d8@e9@two.example.test/2",
+      "host": "two.example.test",
+      "mustNotAppear": [
+        "a5",
+        "b6",
+        "c7",
+        "d8",
+        "e9"
+      ]
+    },
+    {
+      "why": "an unknown scheme is still a URL and still redacts",
+      "text": "httpx://u5er:p4ss@odd.example.test/x",
+      "host": "odd.example.test",
+      "mustNotAppear": [
+        "u5er",
+        "p4ss"
+      ]
+    }
+  ]
+}

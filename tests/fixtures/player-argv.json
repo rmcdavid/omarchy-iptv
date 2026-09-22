@@ -76,7 +76,12 @@
       "name": "user mpvArgs land after the fixed options so --ytdl=yes, --screenshot-dir and the caches still win",
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
       "stateDir": "/home/u/.local/state/omarchy-iptv",
-      "mpvArgs": ["--profile=low-latency", "--ytdl=yes", "--screenshot-dir=/home/u/Pictures", "--gpu-shader-cache-dir=/home/u/.cache/shaders"],
+      "mpvArgs": [
+        "--profile=low-latency",
+        "--ytdl=yes",
+        "--screenshot-dir=/home/u/Pictures",
+        "--gpu-shader-cache-dir=/home/u/.cache/shaders"
+      ],
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -152,43 +157,158 @@
     ],
     "text": " hands the stream address to another program",
     "cases": [
-      { "name": "the default settings warn about nothing", "tokens": ["--profile=low-latency", "--hwdec=auto-safe", "--cache=yes"], "warnings": [] },
-      { "name": "--ytdl=yes is the documented escape hatch and the documented cost", "tokens": ["--ytdl=yes"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
-      { "name": "the bare flag means yes", "tokens": ["--ytdl"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
-      { "name": "--ytdl=1 and --ytdl=true are the same option turned on", "tokens": ["--ytdl=1"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
-      { "name": "writing the default out in full is silent", "tokens": ["--ytdl=no"], "warnings": [] },
-      { "name": "so is the --no- form, which turns the handoff off", "tokens": ["--no-ytdl"], "warnings": [] },
-      { "name": "case does not matter in the flag value", "tokens": ["--ytdl=YES"], "warnings": ["mpvArg --ytdl hands the stream address to another program"] },
-      { "name": "yt-dlp's raw options configure the same handoff", "tokens": ["--ytdl-raw-options=proxy=http://u:pw@prox.test:8080"], "warnings": ["mpvArg --ytdl-raw-options hands the stream address to another program"] },
-      { "name": "and so do its list forms", "tokens": ["--ytdl-raw-options-append=cookies=/tmp/c.txt"], "warnings": ["mpvArg --ytdl-raw-options-append hands the stream address to another program"] },
-      { "name": "--ytdl-format reaches it too", "tokens": ["--ytdl-format=best"], "warnings": ["mpvArg --ytdl-format hands the stream address to another program"] },
-      { "name": "a script option that names the hook chooses which program gets the address", "tokens": ["--script-opts=ytdl_hook-ytdl_path=/tmp/mine"], "warnings": ["mpvArg --script-opts hands the stream address to another program"] },
-      { "name": "--script-opt is mpv's alias for --script-opts-append", "tokens": ["--script-opt=ytdl_hook-try_ytdl_first=yes"], "warnings": ["mpvArg --script-opt hands the stream address to another program"] },
-      { "name": "a script option that does not reach the hook is silent", "tokens": ["--script-opts=osc-scalewindowed=2"], "warnings": [] },
-      { "name": "one line per option, in the order the user wrote them", "tokens": ["--ytdl=yes", "--hwdec=auto", "--ytdl-format=best", "--ytdl=yes"], "warnings": ["mpvArg --ytdl hands the stream address to another program", "mpvArg --ytdl-format hands the stream address to another program"] },
-      { "name": "an empty setting warns about nothing", "tokens": [], "warnings": [] }
+      {
+        "name": "the default settings warn about nothing",
+        "tokens": [
+          "--profile=low-latency",
+          "--hwdec=auto-safe",
+          "--cache=yes"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "--ytdl=yes is the documented escape hatch and the documented cost",
+        "tokens": [
+          "--ytdl=yes"
+        ],
+        "warnings": [
+          "mpvArg --ytdl hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "the bare flag means yes",
+        "tokens": [
+          "--ytdl"
+        ],
+        "warnings": [
+          "mpvArg --ytdl hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "--ytdl=1 and --ytdl=true are the same option turned on",
+        "tokens": [
+          "--ytdl=1"
+        ],
+        "warnings": [
+          "mpvArg --ytdl hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "writing the default out in full is silent",
+        "tokens": [
+          "--ytdl=no"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "so is the --no- form, which turns the handoff off",
+        "tokens": [
+          "--no-ytdl"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "case does not matter in the flag value",
+        "tokens": [
+          "--ytdl=YES"
+        ],
+        "warnings": [
+          "mpvArg --ytdl hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "yt-dlp's raw options configure the same handoff",
+        "tokens": [
+          "--ytdl-raw-options=proxy=http://u:pw@prox.test:8080"
+        ],
+        "warnings": [
+          "mpvArg --ytdl-raw-options hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "and so do its list forms",
+        "tokens": [
+          "--ytdl-raw-options-append=cookies=/tmp/c.txt"
+        ],
+        "warnings": [
+          "mpvArg --ytdl-raw-options-append hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "--ytdl-format reaches it too",
+        "tokens": [
+          "--ytdl-format=best"
+        ],
+        "warnings": [
+          "mpvArg --ytdl-format hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "a script option that names the hook chooses which program gets the address",
+        "tokens": [
+          "--script-opts=ytdl_hook-ytdl_path=/tmp/mine"
+        ],
+        "warnings": [
+          "mpvArg --script-opts hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "--script-opt is mpv's alias for --script-opts-append",
+        "tokens": [
+          "--script-opt=ytdl_hook-try_ytdl_first=yes"
+        ],
+        "warnings": [
+          "mpvArg --script-opt hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "a script option that does not reach the hook is silent",
+        "tokens": [
+          "--script-opts=osc-scalewindowed=2"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "one line per option, in the order the user wrote them",
+        "tokens": [
+          "--ytdl=yes",
+          "--hwdec=auto",
+          "--ytdl-format=best",
+          "--ytdl=yes"
+        ],
+        "warnings": [
+          "mpvArg --ytdl hands the stream address to another program",
+          "mpvArg --ytdl-format hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "an empty setting warns about nothing",
+        "tokens": [],
+        "warnings": []
+      }
     ]
   },
   "mpvReserved": [
-    "--input-ipc-server",
-    "--wayland-app-id",
-    "--title",
+    "--config-dir",
+    "--dump-stats",
     "--force-media-title",
     "--idle",
+    "--include",
     "--input-ipc-client",
-    "--script",
-    "--scripts",
-    "--config-dir",
+    "--input-ipc-server",
     "--log-file",
-    "--dump-stats",
-    "--stream-record",
-    "--save-position-on-quit",
-    "--watch-later-dir",
     "--osd-msg1",
     "--osd-msg2",
     "--osd-msg3",
+    "--save-position-on-quit",
+    "--screenshot-template",
+    "--script",
+    "--scripts",
+    "--stream-record",
     "--term-status-msg",
-    "--screenshot-template"
+    "--title",
+    "--watch-later-dir",
+    "--wayland-app-id"
   ],
   "session": [
     {
@@ -202,65 +322,160 @@
         "erase a running player's record on the next `state favorite add`."
       ],
       "name": "a full record round-trips through both readers",
-      "state": { "version": 2, "session": { "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000123 } },
-      "record": { "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000123 }
+      "state": {
+        "version": 2,
+        "session": {
+          "id": "t:bbc1.uk",
+          "name": "BBC One HD",
+          "at": 1758000123
+        }
+      },
+      "record": {
+        "id": "t:bbc1.uk",
+        "name": "BBC One HD",
+        "at": 1758000123
+      }
     },
     {
       "name": "a file written before the key exists reads as no session",
-      "state": { "version": 2, "favorites": ["t:bbc1.uk"], "recents": [], "lastPlayed": null },
+      "state": {
+        "version": 2,
+        "favorites": [
+          "t:bbc1.uk"
+        ],
+        "recents": [],
+        "lastPlayed": null
+      },
       "record": null
     },
     {
       "name": "a version-1 file (0.1.0) has no session either",
-      "state": { "version": 1, "favorites": [], "recents": [], "lastPlayed": null },
+      "state": {
+        "version": 1,
+        "favorites": [],
+        "recents": [],
+        "lastPlayed": null
+      },
       "record": null
     },
     {
       "name": "an explicit null is the cleared state the service writes on stop",
-      "state": { "version": 2, "session": null },
+      "state": {
+        "version": 2,
+        "session": null
+      },
       "record": null
     },
     {
       "name": "a record without an id is not a channel and is dropped",
-      "state": { "version": 2, "session": { "name": "BBC One HD", "at": 1758000123 } },
+      "state": {
+        "version": 2,
+        "session": {
+          "name": "BBC One HD",
+          "at": 1758000123
+        }
+      },
       "record": null
     },
     {
       "name": "a record that is not an object is dropped",
-      "state": { "version": 2, "session": "t:bbc1.uk" },
+      "state": {
+        "version": 2,
+        "session": "t:bbc1.uk"
+      },
       "record": null
     },
     {
       "name": "an id on its own is enough: name and clock default",
-      "state": { "version": 2, "session": { "id": "u:bf9cf968" } },
-      "record": { "id": "u:bf9cf968", "name": "", "at": 0 }
+      "state": {
+        "version": 2,
+        "session": {
+          "id": "u:bf9cf968"
+        }
+      },
+      "record": {
+        "id": "u:bf9cf968",
+        "name": "",
+        "at": 0
+      }
     },
     {
       "name": "a numeric name and a string clock are coerced, not dropped",
-      "state": { "version": 2, "session": { "id": "t:x", "name": 7, "at": "1758000123" } },
-      "record": { "id": "t:x", "name": "7", "at": 1758000123 }
+      "state": {
+        "version": 2,
+        "session": {
+          "id": "t:x",
+          "name": 7,
+          "at": "1758000123"
+        }
+      },
+      "record": {
+        "id": "t:x",
+        "name": "7",
+        "at": 1758000123
+      }
     },
     {
       "name": "a fractional clock truncates toward zero in both languages",
-      "state": { "version": 2, "session": { "id": "t:x", "at": 1758000123.9 } },
-      "record": { "id": "t:x", "name": "", "at": 1758000123 }
+      "state": {
+        "version": 2,
+        "session": {
+          "id": "t:x",
+          "at": 1758000123.9
+        }
+      },
+      "record": {
+        "id": "t:x",
+        "name": "",
+        "at": 1758000123
+      }
     },
     {
       "name": "an unparsable clock is zero, never an error",
-      "state": { "version": 2, "session": { "id": "t:x", "at": "soon" } },
-      "record": { "id": "t:x", "name": "", "at": 0 }
+      "state": {
+        "version": 2,
+        "session": {
+          "id": "t:x",
+          "at": "soon"
+        }
+      },
+      "record": {
+        "id": "t:x",
+        "name": "",
+        "at": 0
+      }
     },
     {
       "name": "the session rides beside the other keys and none of them lose it",
       "state": {
         "version": 2,
         "cacheLayout": 2,
-        "favorites": ["t:bbc1.uk"],
-        "recents": [{ "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000100 }],
-        "lastPlayed": { "id": "t:bbc1.uk", "name": "BBC One HD", "at": 1758000100 },
-        "session": { "id": "t:bbc2.uk", "name": "BBC Two", "at": 1758000123 }
+        "favorites": [
+          "t:bbc1.uk"
+        ],
+        "recents": [
+          {
+            "id": "t:bbc1.uk",
+            "name": "BBC One HD",
+            "at": 1758000100
+          }
+        ],
+        "lastPlayed": {
+          "id": "t:bbc1.uk",
+          "name": "BBC One HD",
+          "at": 1758000100
+        },
+        "session": {
+          "id": "t:bbc2.uk",
+          "name": "BBC Two",
+          "at": 1758000123
+        }
       },
-      "record": { "id": "t:bbc2.uk", "name": "BBC Two", "at": 1758000123 }
+      "record": {
+        "id": "t:bbc2.uk",
+        "name": "BBC Two",
+        "at": 1758000123
+      }
     }
   ],
   "playerProbe": {
@@ -283,105 +498,284 @@
       "mirroring the reply key for key."
     ],
     "reply": {
-      "ok": true, "kind": "player.probe", "running": true, "responsive": true,
-      "pid": 301706, "idle": false, "mpvVersion": "mpv 0.41.0",
-      "stash": { "schema": 1, "playing": true, "id": "t:bbc1.uk", "name": "BBC One HD", "group": "UK", "launchedFrom": "g:uk", "sourceKey": "a1b2c3d4", "since": 1758000123, "entryId": 2, "seq": 41 },
-      "owner": { "schema": 1, "pid": 301706, "startTime": "9912345", "at": 1758000100 },
-      "seq": 41, "claimed": true
+      "ok": true,
+      "kind": "player.probe",
+      "running": true,
+      "responsive": true,
+      "pid": 301706,
+      "idle": false,
+      "mpvVersion": "mpv 0.41.0",
+      "stash": {
+        "schema": 1,
+        "playing": true,
+        "id": "t:bbc1.uk",
+        "name": "BBC One HD",
+        "group": "UK",
+        "launchedFrom": "g:uk",
+        "sourceKey": "a1b2c3d4",
+        "since": 1758000123,
+        "entryId": 2,
+        "seq": 41
+      },
+      "owner": {
+        "schema": 1,
+        "pid": 301706,
+        "startTime": "9912345",
+        "at": 1758000100
+      },
+      "seq": 41,
+      "claimed": true
     },
-    "keys": ["claimed", "idle", "kind", "mpvVersion", "ok", "owner", "pid", "responsive", "running", "seq", "stash"],
+    "keys": [
+      "claimed",
+      "idle",
+      "kind",
+      "mpvVersion",
+      "ok",
+      "owner",
+      "pid",
+      "responsive",
+      "running",
+      "seq",
+      "stash"
+    ],
     "parsed": {
-      "valid": true, "running": true, "responsive": true, "pid": 301706,
-      "idle": false, "seq": 41, "stashId": "t:bbc1.uk", "ownerPid": 301706
+      "valid": true,
+      "running": true,
+      "responsive": true,
+      "pid": 301706,
+      "idle": false,
+      "seq": 41,
+      "stashId": "t:bbc1.uk",
+      "ownerPid": 301706
     }
   },
   "stopLadder": [
-    { "name": "idle -> quit over IPC, then the quit grace", "stage": "", "action": "quit", "signal": 0, "waitMs": 2000 },
-    { "name": "quit ignored -> SIGTERM, then the kill grace", "stage": "quit", "action": "term", "signal": 15, "waitMs": 2000 },
-    { "name": "SIGTERM ignored -> SIGKILL, nothing left to arm", "stage": "term", "action": "kill", "signal": 9, "waitMs": 0 },
-    { "name": "after SIGKILL only the exit is awaited", "stage": "kill", "action": "kill", "signal": 0, "waitMs": 0 },
-    { "name": "an unknown stage never re-signals", "stage": "bogus", "action": "kill", "signal": 0, "waitMs": 0 }
+    {
+      "name": "idle -> quit over IPC, then the quit grace",
+      "stage": "",
+      "action": "quit",
+      "signal": 0,
+      "waitMs": 2000
+    },
+    {
+      "name": "quit ignored -> SIGTERM, then the kill grace",
+      "stage": "quit",
+      "action": "term",
+      "signal": 15,
+      "waitMs": 2000
+    },
+    {
+      "name": "SIGTERM ignored -> SIGKILL, nothing left to arm",
+      "stage": "term",
+      "action": "kill",
+      "signal": 9,
+      "waitMs": 0
+    },
+    {
+      "name": "after SIGKILL only the exit is awaited",
+      "stage": "kill",
+      "action": "kill",
+      "signal": 0,
+      "waitMs": 0
+    },
+    {
+      "name": "an unknown stage never re-signals",
+      "stage": "bogus",
+      "action": "kill",
+      "signal": 0,
+      "waitMs": 0
+    }
   ],
   "endedVerdict": [
     {
       "name": "the user stopped it: silent, whatever mpv reported",
-      "endFile": { "reason": "error", "file_error": "loading failed", "playlist_entry_id": 2 },
-      "userStopped": true, "stopping": false,
-      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+      "endFile": {
+        "reason": "error",
+        "file_error": "loading failed",
+        "playlist_entry_id": 2
+      },
+      "userStopped": true,
+      "stopping": false,
+      "verdict": {
+        "notify": false,
+        "reason": "",
+        "kind": "silent"
+      }
     },
     {
       "name": "a stop ladder is running: silent",
-      "endFile": { "reason": "stop", "playlist_entry_id": 2 },
-      "userStopped": false, "stopping": true,
-      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+      "endFile": {
+        "reason": "stop",
+        "playlist_entry_id": 2
+      },
+      "userStopped": false,
+      "stopping": true,
+      "verdict": {
+        "notify": false,
+        "reason": "",
+        "kind": "silent"
+      }
     },
     {
       "name": "the user pressed q in mpv: silent, as exit 0 is today",
-      "endFile": { "reason": "quit", "playlist_entry_id": 1 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+      "endFile": {
+        "reason": "quit",
+        "playlist_entry_id": 1
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": false,
+        "reason": "",
+        "kind": "silent"
+      }
     },
     {
       "name": "clean end of stream: silent stop (PO-4, zero behaviour change)",
-      "endFile": { "reason": "eof", "playlist_entry_id": 1 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": false, "reason": "", "kind": "silent" }
+      "endFile": {
+        "reason": "eof",
+        "playlist_entry_id": 1
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": false,
+        "reason": "",
+        "kind": "silent"
+      }
     },
     {
       "name": "dead stream: notify with the file_error",
-      "endFile": { "reason": "error", "file_error": "loading failed", "playlist_entry_id": 1 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "loading failed", "kind": "failed" }
+      "endFile": {
+        "reason": "error",
+        "file_error": "loading failed",
+        "playlist_entry_id": 1
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "loading failed",
+        "kind": "failed"
+      }
     },
     {
       "name": "error with no file_error falls back to the generic reason",
-      "endFile": { "reason": "error", "playlist_entry_id": 1 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+      "endFile": {
+        "reason": "error",
+        "playlist_entry_id": 1
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "Playback stopped unexpectedly",
+        "kind": "failed"
+      }
     },
     {
       "name": "reason stop with no user stop: a load we issued was replaced, then it died",
-      "endFile": { "reason": "stop", "playlist_entry_id": 3 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+      "endFile": {
+        "reason": "stop",
+        "playlist_entry_id": 3
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "Playback stopped unexpectedly",
+        "kind": "failed"
+      }
     },
     {
       "name": "redirect is never terminal (the .m3u8 masters IPTV uses most)",
-      "endFile": { "reason": "redirect", "playlist_entry_id": 4 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": false, "reason": "", "kind": "ignored" }
+      "endFile": {
+        "reason": "redirect",
+        "playlist_entry_id": 4
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": false,
+        "reason": "",
+        "kind": "ignored"
+      }
     },
     {
       "name": "no end-file at all (crash, SIGKILL): notify with the generic reason",
       "endFile": null,
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "Playback stopped unexpectedly",
+        "kind": "failed"
+      }
     },
     {
       "name": "fail open: a missing entry id never suppresses the failure",
-      "endFile": { "reason": "error", "file_error": "loading failed" },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "loading failed", "kind": "failed" }
+      "endFile": {
+        "reason": "error",
+        "file_error": "loading failed"
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "loading failed",
+        "kind": "failed"
+      }
     },
     {
       "name": "fail open: an unknown entry id never suppresses the failure",
-      "endFile": { "reason": "error", "file_error": "loading failed", "playlist_entry_id": 99 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "loading failed", "kind": "failed" }
+      "endFile": {
+        "reason": "error",
+        "file_error": "loading failed",
+        "playlist_entry_id": 99
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "loading failed",
+        "kind": "failed"
+      }
     },
     {
       "name": "an unknown reason is treated as a failure, never swallowed",
-      "endFile": { "reason": "something-new", "playlist_entry_id": 1 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "Playback stopped unexpectedly", "kind": "failed" }
+      "endFile": {
+        "reason": "something-new",
+        "playlist_entry_id": 1
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "Playback stopped unexpectedly",
+        "kind": "failed"
+      }
     },
     {
       "name": "a file_error carrying a URL is redacted to its host",
       "_comment": "The two redactors differ in shape on purpose and have since v0.1: redact_urls() in python keeps scheme://host (it is also the helper's stdout/stderr filter), Model.redactUrls reduces to the host alone. Both drop the userinfo, the port, the path and the query, and QML redacts a second time, so the two converge at the sink. verdictPython pins the python shape rather than pretending they are identical.",
-      "endFile": { "reason": "error", "file_error": "Failed to open http://user:pw@provider.test/live/token/1.m3u8", "playlist_entry_id": 1 },
-      "userStopped": false, "stopping": false,
-      "verdict": { "notify": true, "reason": "Failed to open provider.test", "kind": "failed" },
-      "verdictPython": { "notify": true, "reason": "Failed to open http://provider.test", "kind": "failed" }
+      "endFile": {
+        "reason": "error",
+        "file_error": "Failed to open http://user:pw@provider.test/live/token/1.m3u8",
+        "playlist_entry_id": 1
+      },
+      "userStopped": false,
+      "stopping": false,
+      "verdict": {
+        "notify": true,
+        "reason": "Failed to open provider.test",
+        "kind": "failed"
+      },
+      "verdictPython": {
+        "notify": true,
+        "reason": "Failed to open http://provider.test",
+        "kind": "failed"
+      }
     }
   ]
 }

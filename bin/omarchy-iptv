@@ -2310,6 +2310,10 @@ MPV_ARG_RE = re.compile(r"^--[a-z0-9][a-z0-9-]*(=.*)?$")
 MPV_RESERVED = frozenset((
     "--input-ipc-server", "--wayland-app-id", "--title", "--force-media-title",
     "--idle", "--input-ipc-client", "--script", "--scripts", "--config-dir",
+    # D-SINK-2: --script is mpv's ALIAS for --scripts-append, so naming only
+    # the alias reserved nothing. Matching is by base name now (see
+    # filter_mpv_args), and --include loads a config that can set any of these.
+    "--include",
     "--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit",
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
     "--term-status-msg", "--screenshot-template",
@@ -2345,8 +2349,15 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
     for token in tokens or []:
         text = str(token)
         name = text.split("=", 1)[0]
-        no_form = name.startswith("--no-") and ("--" + name[5:]) in MPV_RESERVED
-        if not MPV_ARG_RE.match(text) or name in MPV_RESERVED or no_form:
+        # D-SINK-2: the BASE name decides. `mpv_option_base` was defined
+        # fifteen lines below this filter and never used by it, so
+        # `--scripts-append` -- which mpv's own --list-options calls the
+        # option that `--script` is an ALIAS for -- was accepted here and by
+        # the JavaScript mirror.
+        base = mpv_option_base(name)
+        bare = "--" + name[5:] if name.startswith("--no-") else ""
+        no_form = bool(bare) and (bare in MPV_RESERVED or mpv_option_base(bare) in MPV_RESERVED)
+        if not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form:
             rejected.append(text)
         else:
             args.append(text)

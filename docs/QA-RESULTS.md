@@ -5292,6 +5292,123 @@ guide's own confirm dialog before the file restore, and the running shell's
 in-memory state agrees with the restored file (`status`: 1 source, 7
 recents). Residuals: none known. Nothing left the machine.
 
+## Defect hunt 2026-09-22: four areas, adversarially verified
+
+The board had reached zero open rows, so rather than wait for defects to be
+reported, four lanes went looking -- the helper, the service and its state, the
+player path, and CLAUDE.md rule 5's credential sinks. Every finding had to be
+DEMONSTRATED by running the shipping code, and each lane's output was handed to
+an independent lane told to refute it. One P3 was refuted outright and is not
+filed (see the end).
+
+### Fixed in this pass
+
+**D-EPG-1 (P2), and it is the one that mattered.** `99991231235959` is a common
+provider sentinel for a 24/7 stream. It parses to 253402300799 -- twelve digits
+-- and the EPG record format is fixed-width TEN by contract: the readers slice
+`[0:10]`, `[11:21]` and `[22:]` rather than splitting, because bisect over
+fixed prefixes is what buys the 10,000-channel budget. `%010d` sets a minimum
+width, not a maximum, so the title was pushed into the number field. Because
+`epg-now.json` is written by concatenation, ONE such programme cost EVERY
+channel of that source its guide data.
+
+Silently: the helper exits 0 with `ok:true` and `nowCount` set, so the guide
+shows no banner, no warning and no notification -- it reads exactly like a
+provider shipping an EPG with no programmes -- and pressing `r` re-runs the
+helper, which reports success again and rewrites the same broken file. The only
+escape was removing the EPG URL.
+
+An ELEVEN-digit stop was quieter and worse: valid JSON carrying a truncated
+stop of 1000000000, September 2001, so the row rendered as having nothing on.
+Valid-but-wrong beats unparseable, because nothing anywhere reports it.
+
+Fixed by clamping at `encode_record`, the single place records are made, so the
+invariant lives with the format rather than in three readers defending against
+input their own format forbids. Two tests, proven red against the shipped code.
+
+**D-SINK-1 (P3).** `Model.redactUrls`'s userinfo group could not span a second
+`@` while its host group accepted one, so a password containing an un-encoded
+`@` kept its TAIL in the host position -- and that string reached a desktop
+notification through `raiseStreamFailure`. The helper's python implementation
+was correct, because it hands the match to `urllib` rather than a regex.
+
+The deeper fix is the test. The two implementations of one rule were pinned by
+two DISJOINT hand-written vector lists, and every vector in both carried
+exactly one `@`, so the defect was invisible to both suites at once. CLAUDE.md
+says one rule implemented twice gets ONE fixture;
+`tests/fixtures/redaction-vectors.json` now exists and both suites run it. It
+pins the PROPERTY -- the host survives, no credential fragment does -- not the
+formatting, which differs on purpose (the helper emits `scheme://host`, Model
+emits the bare host).
+
+**D-SINK-2 (P3).** mpv's own `--list-options` says `--script` is "alias for
+--scripts-append". The reserved set named the alias, so the real option was
+open, along with `--scripts-add` and `--include`. Demonstrated against real mpv
+0.41 headless: a Lua script loaded through `--scripts-append` read `path` --
+the credentialed stream URL -- and wrote it to its own file, and `--include`
+pointing at a one-line config containing `log-file=` produced a 20 KB log
+carrying the stream address three times.
+
+The helper already DEFINED the normaliser that would have caught this,
+`mpv_option_base`, fifteen lines below the filter that ignored it. Both mirrors
+now match on the base option name, so naming a list option once covers every
+spelling.
+
+Worth recording: fixing this, `--script-opts` was also reserved, and **the
+suite caught it** -- ruling PO-10 keeps it a handoff option that warns rather
+than a rejected one. The parity test a lane had called "two copies of the same
+wrong list" could not catch the original omission, but it did catch an
+incorrect addition, which is more than it was credited with.
+
+### Filed, not yet fixed
+
+**D-PLY-12 (P2).** A zap inside the first-load window reports the channel you
+just LEFT as a failed stream. Real mpv broadcasts to every IPC client, so
+`player start`'s observer receives `end-file reason="stop"` for its own entry
+id when the zap replaces it, and `observe_first_load` hands that live
+mid-stream event to the POST-MORTEM reducer, which reads "stop" as "a load we
+issued was replaced AND THEN THE PROCESS DIED".
+
+**F-MPV-1 (P3)** is why D-PLY-12 was never found: both mpv test doubles deliver
+a loadfile's events only to the connection that issued them, where real mpv
+broadcasts. That is CLAUDE.md rule 10 exactly -- a double more forgiving than
+the real thing -- and it makes D-PLY-12's triggering input inexpressible in the
+suite. Fix F-MPV-1 first; D-PLY-12's fix is untestable until it is.
+
+**D-ID-4 (P3).** Switching to a second source from the same provider RELOCATES
+a favourite made on the first. Its verifier corrected the hunter's wording:
+nothing is deleted, and saying so on the board would have been wrong.
+
+**D-SINK-3 (P3)** is a documentation defect, not a new leak, and its verifier
+corrected the hunter for implying otherwise: argv exposure is a knowingly
+accepted residual named at `docs/ARCHITECTURE.md:259-264`. What is genuinely
+wrong is that rule 5's sink list omits argv while instructing the reader to add
+sinks to it, and that the README tells the user to set a credentialed URL with
+`omarchy bar set`, which puts it in their shell history DURABLY -- a worse
+exposure than the one the architecture accepted.
+
+### Refuted, and deliberately not filed
+
+A lane reported as P3 that a `state.json` the shell cannot read is treated as
+absent and then overwritten empty, losing favourites. Its verifier showed this
+is the specified tolerant-reader contract, that it was specified before it was
+built, and that two existing test cases already grade it PASS at the sink. The
+hunter's own status line conceded the trigger was unmeasured. It is not a
+defect and it is not on the board.
+
+### What held
+
+Recorded because it is as useful as a finding. Redaction held on every other
+sink the helper reaches. The 200 MB playlist is refused in 161 ms before any
+read; a billion-laughs XMLTV is refused by expat's amplification limit. Rule 7
+is met with headroom: three 10,000-channel runs at 546, 628 and 567 ms against
+a 1 s budget. Rule 6 held -- 0700 directories, 0600 files, no temp residue
+after success or after a mid-parse failure. Forty concurrent `state` writers
+produced a valid 0600 single-line document with no corruption, only a lost
+update. Cache path safety held: the source key is validated before it becomes a
+path component, and neither `remove_regular` nor `cache_prune` follows a
+symlink.
+
 ## Recalibration 2026-09-22: the longest-string ruling, applied
 
 Five themes attempted, four measured, under headless cage. Per theme the

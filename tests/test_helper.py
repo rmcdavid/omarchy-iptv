@@ -420,5 +420,38 @@ class HardeningTest(unittest.TestCase):
             self.assertEqual(written["fetchedAt"], first["fetchedAt"])
             self.assertEqual(written["sourceHost"], "local file")
 
+class SharedRedactionVectors(unittest.TestCase):
+    """The same fixture tests/Model.test.js runs.
+
+    CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE shared
+    fixture that both implementations run. Before this existed the two were
+    pinned by disjoint hand-written lists whose every vector carried exactly one
+    '@', so D-SINK-1 was invisible to both suites at once.
+    """
+
+    def vectors(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "fixtures", "redaction-vectors.json"), encoding="utf-8") as fh:
+            return json.load(fh)["vectors"]
+
+    def test_every_shared_vector_keeps_its_host_and_loses_every_credential(self):
+        bad = []
+        for v in self.vectors():
+            out = helper.redact_urls(v["text"])
+            if v["host"] not in out:
+                bad.append("%s -> host missing: %s" % (v["why"], out))
+                continue
+            for frag in v["mustNotAppear"]:
+                if frag in out:
+                    bad.append("%s -> leaked %r: %s" % (v["why"], frag, out))
+        self.assertEqual([], bad)
+
+    def test_the_shared_fixture_still_carries_the_case_that_started_it(self):
+        texts = [v["text"] for v in self.vectors()]
+        self.assertGreaterEqual(len(texts), 8)
+        self.assertTrue(any("qa@pass" in t for t in texts),
+                        "the doubled-@ vector is the reason this fixture exists")
+
+
 if __name__ == "__main__":
     unittest.main()

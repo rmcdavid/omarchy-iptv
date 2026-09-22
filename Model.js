@@ -152,8 +152,21 @@ var MPV_RESERVED = {
   "--force-media-title": true,
   "--idle": true,
   "--input-ipc-client": true,
+  // D-SINK-2. `--script` is not the option: mpv's own `--list-options` calls it
+  // "alias for --scripts-append". So reserving it and not `--scripts-append`
+  // reserved the alias and left the real option open, and a pasted
+  // `--scripts-append=/tmp/x.lua` ran arbitrary Lua inside the player, which
+  // can read `path` -- the credentialed stream URL. The reserved set is now
+  // matched against the option's BASE name (mpvOptionBase strips -append,
+  // -add, -set, -pre, -clr, -del, -remove, -toggle), so every spelling of a
+  // list option is covered by naming it once.
   "--script": true,
   "--scripts": true,
+  // NOT --script-opts: ruling PO-10 / D-PLY-5 keeps it a HANDOFF option,
+  // allowed with a warning, and the suite holds that line. Base-name matching
+  // still covers its spellings, so --script-opts-append warns like --script-opts
+  // rather than slipping through unwarned.
+  "--include": true,              // loads a config file, which can set any of these
   "--config-dir": true,
   "--log-file": true,             // 0644, forced -v -v, writes the URL per failed load
   "--dump-stats": true,           // on-disk file carrying the command line
@@ -2713,7 +2726,12 @@ function splitMpvArgs(text) {
     if (token === "") continue
     var ok = /^--[a-z0-9][a-z0-9-]*(=.*)?$/.test(token)
     var name = token.indexOf("=") === -1 ? token : token.substring(0, token.indexOf("="))
-    if (!ok || MPV_RESERVED[name] === true || name.indexOf("--no-") === 0 && MPV_RESERVED["--" + name.substring(5)] === true) rejected.push(token)
+    // The BASE name decides (D-SINK-2): `--scripts-append` sets the same
+    // option `--scripts` does, and reserving one spelling reserved nothing.
+    var base = mpvOptionBase(name)
+    if (!ok || MPV_RESERVED[name] === true || MPV_RESERVED[base] === true
+        || name.indexOf("--no-") === 0 && (MPV_RESERVED["--" + name.substring(5)] === true
+                                           || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)) rejected.push(token)
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvArgWarnings(args) }
@@ -4185,8 +4203,15 @@ function hostOf(url) {
 // Replace every `scheme://...` in free text by its host alone (R12, D-QA-01):
 // userinfo, port, path and query are gone. Applied at every sink that can
 // carry mpv or helper output (notifications, lastError, console, tooltips).
+// D-SINK-1. The userinfo group used to be `(?:[^@\/\s]*@)?`, which cannot span
+// a SECOND `@` -- while the host group happily accepted one. A provider whose
+// password contains an un-encoded `@` therefore had its password TAIL survive
+// into the host position and out through a desktop notification. RFC 3986 puts
+// userinfo before the LAST `@` of the authority, so the group now runs to it
+// and the host excludes `@` entirely. Both changes are needed: either alone
+// still leaks.
 function redactUrls(text) {
-  return str(text).replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^@\/\s]*@)?([^\/\s?#:]*)[^\s]*/gi, function(all, host) {
+  return str(text).replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^\/\s]*@)?([^\/\s?#:@]*)[^\s]*/gi, function(all, host) {
     return host !== "" ? host : "[url]"
   })
 }

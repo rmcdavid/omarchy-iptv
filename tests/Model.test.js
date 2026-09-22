@@ -1502,6 +1502,33 @@ function headerRatio(theme) {
   const a = Model.sectionHeaderAlpha(s.text, s.rowFill)
   return contrast(composite(s.text, s.rowFill, a), s.rowFill)
 }
+// ---- D-SINK-1: redaction, against the SHARED fixture both languages run ----
+//
+// Before this fixture the rule was pinned by two disjoint hand-written vector
+// lists, one per language, and every vector in both carried exactly one "@".
+// A password containing an un-encoded "@" therefore kept its TAIL in the host
+// position and went out through a desktop notification, invisible to both
+// suites. CLAUDE.md: one rule implemented twice gets ONE fixture.
+//
+// The vectors pin the PROPERTY, not the formatting, because the two renderings
+// differ on purpose -- the helper emits scheme://host and this emits the bare
+// host. tests/test_helper.py runs the same file.
+const redactionVectors = JSON.parse(require("fs").readFileSync(
+  require("path").join(__dirname, "fixtures/redaction-vectors.json"), "utf8"))
+checkCall("D-SINK-1: every shared vector keeps its host and loses every credential fragment", function () {
+  return redactionVectors.vectors.filter(function (v) {
+    const out = Model.redactUrls(v.text)
+    if (out.indexOf(v.host) < 0) return true
+    return v.mustNotAppear.some(function (frag) { return out.indexOf(frag) >= 0 })
+  }).map(function (v) { return v.why + " -> " + Model.redactUrls(v.text) })
+}, [])
+checkCall("D-SINK-1: the fixture is not empty and carries the doubled-at case that started it", function () {
+  // A shared fixture that quietly loses its vectors is the failure mode this
+  // whole exercise is about, so its size and its key case are asserted.
+  return [redactionVectors.vectors.length >= 8,
+          redactionVectors.vectors.some(function (v) { return v.text.indexOf("qa@pass") >= 0 })]
+}, [true, true])
+
 checkCall("D-RUNG-9: the header the HOST draws is under 4.5 on three themes and INVERTED on five", function () {
   // The defect, asserted before the fix so the fix has something to beat.
   const under = menuTokens.themes.filter(function (t) {
@@ -2197,9 +2224,28 @@ checkCall("neither cache option is reserved (CL2: the list is a privacy instrume
 }, [[], true])
 
 
-// ---- MPV_RESERVED, ten additions (ARCHITECTURE-PLAYER.md 4.12) ----
+// ---- MPV_RESERVED (ARCHITECTURE-PLAYER.md 4.12, plus D-SINK-2) ----
 const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit", "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3", "--term-status-msg", "--screenshot-template"]
-check("MPV_RESERVED gained exactly ten entries", Object.keys(Model.MPV_RESERVED).length, 19)
+// D-SINK-2 added an eleventh, `--include`: it loads a config file, and a
+// config file can set every other option on this list, so reserving the
+// others and not it reserved nothing. `--script-opts` was deliberately NOT
+// added -- ruling PO-10 keeps it a HANDOFF option that warns rather than a
+// rejected one, and the suite holds that line (it caught an attempt to add it).
+check("MPV_RESERVED gained exactly eleven entries", Object.keys(Model.MPV_RESERVED).length, 20)
+check("D-SINK-2: every spelling of a reserved list option is rejected, not just the one we named", (() => {
+  // `--script` is mpv's own ALIAS for `--scripts-append` (mpv --list-options
+  // says so), so naming the alias reserved nothing and a pasted
+  // `--scripts-append=x.lua` ran arbitrary Lua inside the player -- which can
+  // read `path`, the credentialed stream URL. Matching is on the BASE name now.
+  const spellings = ["--scripts-append=/tmp/x.lua", "--scripts-add=/tmp/x.lua", "--scripts-set=/tmp/x.lua",
+                     "--log-file-set=/tmp/l", "--watch-later-dir-append=/tmp/w", "--include=/tmp/evil.conf"]
+  const r = Model.splitMpvArgs(spellings.join(" "))
+  return [r.args, r.rejected.length]
+})(), [[], 6])
+check("D-SINK-2: and an ordinary option with a list suffix is still accepted", (() => {
+  const r = Model.splitMpvArgs("--sub-files-append=/tmp/a.srt --volume=50")
+  return [r.args.length, r.rejected]
+})(), [2, []])
 check("splitMpvArgs rejects every addition and its --no- form", (() => {
   const tokens = RESERVED_ADDED.map(n => n + "=/tmp/x").concat(RESERVED_ADDED.map(n => "--no-" + n.slice(2)))
   const r = Model.splitMpvArgs(tokens.join(" "))

@@ -1864,8 +1864,16 @@ class ParityTest(unittest.TestCase):
         names = set(re.findall(r'"(--[a-z0-9-]+)":\s*true', block.group(1)))
         self.assertEqual(names, set(helper.MPV_RESERVED))
         self.assertEqual(names, set(self.fixture["mpvReserved"]))
-        self.assertEqual(len(names), 19)
+        # D-SINK-2 made it twenty: `--include` loads a config file, and a config
+        # file can set every other option on this list, so reserving the others
+        # and not it reserved nothing.
+        self.assertEqual(len(names), 20)
+        self.assertIn("--include", names)
         self.assertNotIn("--ytdl", names)          # PO-5
+        # NOT reserved, deliberately: ruling PO-10 / D-PLY-5 keeps --script-opts
+        # a HANDOFF option that warns. This line is what caught an attempt to
+        # reserve it while fixing D-SINK-2.
+        self.assertNotIn("--script-opts", names)
 
     def test_the_app_id_is_the_class_picture_in_picture_matches_on(self):
         # M2-05. The window class PiP addresses is the app-id the player is
