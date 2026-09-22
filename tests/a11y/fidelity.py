@@ -162,6 +162,19 @@ TRANSFORM_RULES = [
             "      visible: false",
             "      width: 1920",
             "      height: 1080",
+            # D-A11Y-7. A top-level Window sizes its contentItem from its own
+            # width and height even when it is never shown; one created inside
+            # a Component by a Loader does not. When be7fc3c moved the guide's
+            # window behind a Loader so the harness could host it in a
+            # FloatingWindow, this copy's contentItem silently became 0x0 --
+            # and `windowContent` reparents into it, so cardHeight went to
+            # -10, both ListViews lost their viewport, and the probe began
+            # grading a tree with one channel row and no group entries at all.
+            # It still reported 63 of 64 green over it. Measured: node counts
+            # fell 34/38/36/35/55/46 to 28/25/25/24/25/33 and the 10,000
+            # channel scenario became the same size as the 3 channel one.
+            # Sizing the contentItem explicitly restores every count exactly.
+            "      Component.onCompleted: { contentItem.width = width; contentItem.height = height }",
             "      color: \"transparent\"",
         ],
     },

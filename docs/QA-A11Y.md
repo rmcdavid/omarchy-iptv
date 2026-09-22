@@ -74,7 +74,14 @@ restarted (pid stable; use `pgrep -x quickshell`, **not** `pgrep -f`, see open
 item 16). Child stdout goes to a file, not an unread pipe.
 
 Node counts, reproduced independently by an attacker: bar 3, first run 33,
-no-match query 34, query 35, banner 37, Xtream 45, 10,000 channels 54. The
+no-match query 34, query 35, banner 37, Xtream 45, 10,000 channels 54.
+**Re-measured 2026-09-22 and each is one higher** -- 34 / 35 / 36 / 38 / 46 /
+55, bar still 3 -- consistently across all six guide scenarios. The drift
+predates the D-A11Y-7 harness regression: running the probe at `be7fc3c^`
+gives the same +1, so a node was added to every guide scenario some time after
+2026-09-15 and the record was never updated. The figures above are the
+2026-09-15 record; the parenthesised set is what the probe produces today.
+Anyone comparing should use the newer set. The
 prototype's three guide scenarios are 37 / 43 / 43 (the design's "45" for the
 revealed form is stale -- decision 5 deleted `Accessible.passwordEdit` and two
 nodes with it). Settle is a bounded stability poll (12 s deadline, 40 polls, 3
