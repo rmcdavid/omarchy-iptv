@@ -1192,22 +1192,69 @@ checkCall("D-RUNG-4: and the shipping code actually asks for full opacity there"
   ]
 }, [0, 1])
 
-checkCall("D-RUNG-4: NO site inks with the raw accent over the selected fill", function () {
-  // The design's own gate counted only `hasCursor ? root.selectedText` and
-  // reported clean while a fifth site spelled it as a property assignment --
-  // `selectedText: root.selectedText`, handed to the host's ConfirmDialog,
-  // whose selected button draws that colour over that same fill, one keypress
-  // from the remove-source dialog. Both forms are counted here. False
-  // assurance from the one check whose job is to prove the guide asks is worse
-  // than no check.
+// D-RUNG-4 / D-RUNG-13: THE SITES ARE AN INVENTORY, NOT A PATTERN.
+//
+// The check that stood here counted two spellings of `root.selectedText` and
+// reported clean while FOUR other sites inked with the raw accent, one of them
+// never costed at all. Its own comment records the first time this happened --
+// a fifth site spelled as a property assignment -- and then it happened again,
+// to the same check, because the next site wrapped the token in `Util.alpha()`
+// and the regex did not reach through it. Counting spellings cannot work:
+// that is engineering rule 14's failure mode occurring inside the one check
+// whose job is to prevent it.
+//
+// So both gates below are INVENTORIES. Every line mentioning the token is
+// listed whatever its shape, and the assertion is the SET. Adding a site --
+// however it is spelled -- turns this red and obliges its author to write the
+// line here, with its surface and its bar, where a reviewer will see it. Line
+// CONTENT rather than line NUMBER, so ordinary edits above do not disturb it.
+function qmlSites(pattern) {
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Guide.qml"), "utf8")
-  const code = src.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) }).join("\n")
-  return [
-    (code.match(/hasCursor \? root\.selectedText/g) || []).length,
-    (code.match(/selectedText: root\.selectedText/g) || []).length,
-    (code.match(/root\.cursorInk/g) || []).length >= 4
-  ]
-}, [0, 0, true])
+  return src.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) && pattern.test(l) })
+    .map(function (l) { return l.trim() })
+}
+checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventory", function () {
+  // Surfaces and bars, in order below:
+  //   1. the property itself; 2. the cursorInk binding (D-RUNG-13's seam);
+  //   3. the selected GROUP label -- raw accent, body text, on the card, so a
+  //      4.5:1 bar: UNDER IT ON 3 OF 23, floor 3.1355 rose-pine, then miasma
+  //      3.86 and catppuccin-latte 4.34. D-RUNG-4 corrected the channel name
+  //      and never touched this one, and no gate has ever reported it;
+  //   4. the EPG progress fill on the cursor row -- non-text, a 3:1 bar
+  //      (D-RUNG-10, which has never rendered on any screen here);
+  //   5, 6. the empty-state and first-run glyphs at displayLarge, large text,
+  //      a 3:1 bar (D-RUNG-11: 2 of 23 under, rose-pine 2.42, miasma 2.97).
+  return qmlSites(/root\.selectedText|Color\.menu\.selectedText/)
+}, [
+  "property color selectedText: Color.menu.selectedText",
+  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground)",
+  "color: groupRow.selected ? root.selectedText : root.foreground",
+  "color: row.hasCursor ? Util.alpha(root.selectedText, 0.7) : Util.alpha(root.accent, 0.55)",
+  "color: root.selectedText",
+  "color: root.selectedText"
+])
+checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirection included", function () {
+  // `root.cursorInk` is read at five places, but `primaryColor` forwards it to
+  // six more, so the ink lands on ELEVEN lines and EIGHT painted sites -- not
+  // the two the design costed. Three of them then apply an opacity rung: the
+  // failed-channel glyph at 0.8 and the two Sources action rows at 0.7. That
+  // matters because any change to the ink is a change to all of them, and the
+  // rungs are where it would bite hardest. The indirection is exactly what hid
+  // them, so the inventory follows the indirection.
+  return qmlSites(/cursorInk|primaryColor/)
+}, [
+  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground)",
+  "selectedText: root.cursorInk",
+  "readonly property color primaryColor: hasCursor ? root.cursorInk : root.foreground",
+  "color: root.cursorInk",
+  "color: row.hasCursor ? root.cursorInk : root.foreground",
+  "color: row.primaryColor",
+  "color: row.primaryColor",
+  "color: row.primaryColor",
+  "readonly property color primaryColor: srow.hasCursor ? root.cursorInk : root.foreground",
+  "color: srow.primaryColor",
+  "color: srow.primaryColor"
+])
 
 // ---- D-RUNG-3 / D-RUNG-5: the bar's idle glyph, always on screen ----
 //
