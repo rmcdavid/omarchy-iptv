@@ -891,7 +891,12 @@ const calib = JSON.parse(require("fs").readFileSync(require("path").join(__dirna
 // The classes the ruling defines and which tolerance each draws. A sizeClass
 // that is not a key here is an error, never silently a "text" row.
 const CALIB_CLASS_TOLERANCE = { "text": "abs", "caption": "captionRel", "bold-caption": "abs", "glyph": "abs" }
-function calibLabel(sample) { return sample.theme + " " + sample.surface + " " + sample.alpha }
+function calibLabel(sample) {
+  // The site rides in the label because several sites share one {theme,
+  // surface, alpha} key and therefore one prediction; without it a failing
+  // row cannot say which glyph run it came from.
+  return sample.theme + " " + sample.surface + " " + sample.alpha + (sample.site ? " (" + sample.site + ")" : "")
+}
 function calibAllowance(sample) {
   const draws = CALIB_CLASS_TOLERANCE[sample.sizeClass]
   if (!draws) throw new Error("unclassified calibration row " + calibLabel(sample) + " (sizeClass " + show(sample.sizeClass) + ")")
@@ -1094,6 +1099,71 @@ checkCall("D-RUNG-4: the QML seam returns a usable colour string", function () {
   const hex = Model.cursorInkHex(qml(s.accent), qml(s.text), qml(s.fill))
   return [/^#[0-9a-f]{6}$/.test(hex), hex === Model.hexOf(Model.cursorInk(s.accent, s.text, s.fill))]
 }, [true, true])
+// D-RUNG-13. The double above hands cursorInkHex three OPAQUE colours and a
+// fill that is ALREADY composited. The host hands it neither, and that gap is
+// the whole defect: Color.qml:99 defines menu.selectedBackground as
+// Util.alpha(foreground, 0.08) -- a QColor whose r, g and b are the
+// FOREGROUND'S and whose alpha is 0.08, never composited. So every D-RUNG-4
+// figure above is computed against a surface that has never painted.
+//
+// A double more forgiving than the real thing is exactly what engineering
+// rule 10 forbids, and this one hid the defect for the life of the feature.
+// The seam was not untested; it was tested with an input the host never sends.
+// That is rule 12 failing at a SEAM rather than in a formula: the test called
+// the shipping function and still learned nothing, because it called it with
+// the wrong shape.
+function hostColor(rgb, alpha) {
+  // What a QML `color` property really carries across the seam: channels in
+  // 0-1 and an alpha the consumer is free to ignore. Faithful on purpose.
+  return { r: rgb[0] / 255, g: rgb[1] / 255, b: rgb[2] / 255, a: alpha === undefined ? 1 : alpha }
+}
+checkCall("D-RUNG-13: handed the fill the HOST really sends, the seam returns the plain text token on every theme", function () {
+  // GREEN BECAUSE THE DEFECT IS LIVE. This is the defect's signature, not an
+  // endorsement of it: it goes RED the day the seam is fixed, and whoever
+  // fixes it updates this to the intended ink -- at which point the D-RUNG-4
+  // arithmetic above becomes a claim about the screen for the first time.
+  // Listed by name so a partial fix says which themes it moved.
+  return menuTokens.themes.filter(function (t) {
+    const s = cursorSurface(t)
+    const hex = Model.cursorInkHex(hostColor(s.accent), hostColor(s.text),
+                                   hostColor(s.text, menuTokens.selectedBackgroundAlpha))
+    return hex !== Model.hexOf(s.text)
+  }).map(function (t) { return t.name })
+}, [])
+checkCall("D-RUNG-13: the mechanism, asserted at the one line that drops it", function () {
+  // qmlRgb reads r, g and b and never a, so an alpha-carrying token arrives as
+  // its own undimmed colour. Pinned separately from the symptom above so the
+  // cause cannot drift away from it.
+  return Model.qmlRgb({ r: 1, g: 1, b: 1, a: 0.08 })
+}, [255, 255, 255])
+checkCall("D-RUNG-13: the double is faithful -- the alpha really rides across the seam", function () {
+  // Without this, the double can quietly stop carrying `a` and NOTHING goes
+  // red, because an ignored alpha and an absent one produce the same fill --
+  // they are indistinguishable by outcome, which is precisely how the original
+  // double passed for the life of the feature. Proven by mutation: strip `a`
+  // from hostColor and only this check falls. So the double's shape is
+  // asserted directly, alongside the difference a consumer that READ the alpha
+  // would have seen.
+  const rp = menuTokens.themes.filter(function (t) { return t.name === "rose-pine" })[0]
+  const s = cursorSurface(rp)
+  const sent = hostColor(s.text, menuTokens.selectedBackgroundAlpha)
+  const asRead = Model.hexOf(Model.qmlRgb(sent))
+  const ifItHadBeenRead = Model.hexOf(Model.colorOver(Model.qmlRgb(sent), rgbOf(rp.background), sent.a))
+  return [sent.a, asRead === Model.hexOf(s.text), ifItHadBeenRead !== asRead]
+}, [0.08, true, true])
+checkCall("D-RUNG-13: and the fall-through is not a near miss that a target tweak would mask", function () {
+  // Why the seam cannot be repaired by moving CURSOR_INK_TARGET: with the
+  // wrong fill the comparison is accent-against-TEXT, and the best any theme
+  // manages is white at 4.119. Lower the target under that and white alone
+  // starts returning its accent, which would look like a partial fix and be
+  // none. The fix is the fill, not the threshold.
+  const best = menuTokens.themes.reduce(function (hi, t) {
+    const s = cursorSurface(t)
+    return Math.max(hi, contrast(s.accent, s.text))
+  }, 0)
+  return [round2(best), best < Model.CURSOR_INK_TARGET]
+}, [4.12, true])
+
 checkCall("D-RUNG-4: at the OLD 0.8 rung the number fails in 16 of 23 themes even with the corrected ink", function () {
   // Why the number had to go to full opacity rather than inherit the shared
   // ink alone. Floor 3.25 at 0.8; three themes cannot be rescued by any ink at
