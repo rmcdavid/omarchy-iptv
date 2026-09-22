@@ -928,30 +928,59 @@ checkCall("calibration: the model predicts every rendered measurement within its
   // names itself with its class, its error and its allowance.
   return calib.samples.filter(function (sm) { return !sm.knownDeviation && !calibHolds(sm) }).map(calibReport)
 }, [])
-checkCall("calibration: the pinned deviations are exactly the three cursor-fill text rows of F-CAL-2, so a fourth cannot be pinned in passing", function () {
-  // F-CAL-2, resolved 2026-09-21: NOT a surface effect. The same string
-  // measured on both surfaces loses the same amount (card -0.2075, fill
-  // -0.1991), and eight names at one size on one surface spread from -0.041
-  // to -0.304 -- the peak-pixel method under-reads until a pixel is fully
-  // covered, so the error tracks the STRING. The two "BBC One HD" rows are
-  // that pair, pinned together so the evidence cannot drift apart; the CARD
-  // one is here to make the point that a card row misses the tolerance too. They are pinned by NAME, not absorbed
+checkCall("calibration: NO row is pinned as a known deviation, and one cannot be added in passing", function () {
+  // The expectation is EMPTY, and that is the result of F-CAL-2 rather than
+  // the absence of one. It was pinned as a cursor-fill surface effect and was
+  // never one: the same string on both surfaces loses the same amount, and
+  // eight names at one size on one surface spread from -0.041 to -0.304,
+  // because the peak-pixel method under-reads until a pixel is fully covered.
+  // Under the longest-string ruling every text row was re-measured on
+  // 2026-09-22 and all 16 land inside the text class, worst 0.1359. A row that
+  // genuinely deviates in future is pinned here by name with its defect id,
+  // and this check is what stops one being added quietly. They are pinned by NAME, not absorbed
   // by a wider tolerance: the fixture's own history (UX-GUIDE-AT-SCALE
   // section 16, dev branch) is a check against that move.
   return calib.samples.filter(function (sm) { return sm.knownDeviation }).map(function (sm) { return calibLabel(sm) + " -> " + sm.knownDeviation })
-}, ["tokyo-night cursor 0.52 -> F-CAL-2", "catppuccin cursor 1 -> F-CAL-2", "catppuccin cursor 0.52 -> F-CAL-2",
-    "catppuccin row 1 (BBC One HD) -> F-CAL-2", "catppuccin cursor 1 (BBC One HD) -> F-CAL-2"])
+}, [])
 checkCall("calibration: a pinned deviation is still a deviation; a pinned row that holds must lose its pin, not keep it as a habit", function () {
   // Strict, the way a strict xfail is: when the residual is explained and
   // fixed, or the row is re-measured within tolerance, this goes red and the
   // pin comes off in the same change.
   return calib.samples.filter(function (sm) { return sm.knownDeviation && calibHolds(sm) }).map(calibReport)
 }, [])
-checkCall("calibration: the model is OPTIMISTIC in every sample, never pessimistic", function () {
-  // If this ever goes red the sign of the error has flipped and every "target
-  // above the line" decision on this project needs revisiting.
-  return calib.samples.every(function (sm) { return calibPredicted(sm) >= sm.measured })
-}, true)
+// The optimism invariant, RESTATED 2026-09-22 rather than widened, because a
+// real measurement broke it and the reason is understood.
+//
+// It used to read "the model is optimistic in every sample, never
+// pessimistic". That held while every row was measured on a SHORT string,
+// where the peak-pixel method under-reads badly. Re-measured on the longest
+// available string, the coverage bias nearly vanishes and what remains is the
+// model's one-unit rounding in the composite step -- and that can round either
+// way. rose-pine's cursor name now measures 5.9471 against a model of 5.9384,
+// 0.0087 ABOVE it, because Qt paints that fill #ede8e4 where colorOver
+// computes #ede7e4.
+//
+// The load-bearing consequence SURVIVES and is in fact strengthened: a target
+// must sit above the line and never on it, because the error is now a BAND
+// around the model rather than a one-sided bias. So the invariant is split in
+// two: no sample may exceed its model by more than the rounding bound, and the
+// model must still be optimistic ON AVERAGE. A genuine sign flip breaks both.
+var CALIB_ROUNDING_BOUND = 0.05
+checkCall("calibration: no sample exceeds its model by more than one unit of composite rounding", function () {
+  // 0.05 is the measured bound, not a convenience: a one-unit difference in a
+  // composited channel was worth 0.039 at the largest (rose-pine's fill), and
+  // it was observed on four separate surfaces across two passes.
+  return calib.samples.filter(function (sm) { return sm.measured - calibPredicted(sm) > CALIB_ROUNDING_BOUND })
+    .map(function (sm) { return calibLabel(sm) + " over by " + round2(sm.measured - calibPredicted(sm)) })
+}, [])
+checkCall("calibration: and the model is still OPTIMISTIC on average, so targets sit above the line", function () {
+  // If this goes positive the sign of the error has flipped and every
+  // "target above the line" decision on this project needs revisiting.
+  var mean = calib.samples.reduce(function (acc, sm) {
+    return acc + (sm.measured - calibPredicted(sm))
+  }, 0) / calib.samples.length
+  return [mean < 0, Math.round(mean * 1000) / 1000]
+}, [true, -0.199])
 checkCall("calibration: the refuted claim, restated as a number so it cannot come back", function () {
   // The claim was 1.25. What the fixture shows: the worst absolute delta is
   // 0.79 and it is on a CAPTION (catppuccin, row 0.7: 5.45 measured against

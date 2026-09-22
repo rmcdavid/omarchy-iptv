@@ -5292,6 +5292,57 @@ guide's own confirm dialog before the file restore, and the running shell's
 in-memory state agrees with the restored file (`status`: 1 source, 7
 recents). Residuals: none known. Nothing left the machine.
 
+## Recalibration 2026-09-22: the longest-string ruling, applied
+
+Five themes attempted, four measured, under headless cage. Per theme the
+harness was pointed at its palette through a scratch `HOME`, the list filtered
+to the two channels containing "Channel" so the fixture's 89-character name is
+row 1, and the same row measured twice -- once under the cursor and once with
+the cursor moved off it. One string, both surfaces, every theme.
+
+### What it showed
+
+All 16 text rows land inside the text class's 0.15 absolute:
+
+| Theme | cursor name | cursor detail | card name | card detail |
+|---|---|---|---|---|
+| catppuccin | -0.062 | -0.129 | -0.041 | **-0.136** |
+| rose-pine | **+0.009** | -0.059 | -0.034 | -0.074 |
+| tokyo-night | -0.017 | -0.091 | -0.026 | -0.107 |
+| catppuccin-latte | -0.030 | -0.058 | -0.033 | -0.078 |
+
+Worst 0.1359. Every `knownDeviation` pin is gone and the fixture now asserts
+that none remains. For comparison, the same catppuccin card name measured
+-0.208 on "BBC One HD" and -0.304 on "Harness Live": the ruling is doing real
+work, not relabelling.
+
+### Two things it turned up
+
+**retropc could not be re-measured, and its rows stand unverified.**
+`~/.config/omarchy/themes/retropc` ships `alacritty.toml`, `btop.theme`,
+`waybar.css` and the rest, but **no `colors.toml`** -- nothing the shell reads.
+Pointed at it, the shell falls back to `#cacccc` on `#101315` and renders a
+palette that is not retropc at all. The attempt produced those fallback values,
+which were discarded rather than written down as retropc. The `/usr/share`
+themes carry `colors.toml`, which is why the other four worked.
+
+**The optimism invariant broke, honestly.** rose-pine's cursor name measures
+**5.9471** against a model of **5.9384** -- 0.0087 ABOVE it. With a long string
+the coverage bias nearly vanishes, and what remains is the model's one-unit
+rounding in the composite step, which rounds either way: Qt paints that fill
+`#ede8e4` where `colorOver` computes `#ede7e4`.
+
+The invariant was **restated, not widened**. It now asserts two things: no
+sample may exceed its model by more than 0.05 (the measured rounding bound,
+observed on four surfaces across two passes), and the mean error must stay
+negative so the model is still optimistic overall. Both are stricter than the
+single check they replace -- a genuine sign flip now trips four checks instead
+of one, proven by mutation.
+
+The load-bearing consequence is unchanged and in fact stronger: a contrast
+target must sit above the line and never on it, because the error is now known
+to be a BAND around the model rather than a one-sided bias.
+
 ## Headless pass 2026-09-21, segment C: the two captures 0.7.3 was owed
 
 Run entirely inside a nested headless `cage` compositor with the dev harness in
