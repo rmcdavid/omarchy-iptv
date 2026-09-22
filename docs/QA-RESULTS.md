@@ -5436,6 +5436,23 @@ DELETED (the favourite is relocated and still shows on the other source), and
 the same move is made by the helper's `remap_state_file`, not only by
 `Service.adoptIdScheme`, so any fix lands in both.
 
+**Measured before ruling on it.** The id scheme only reaches `u:`/`n:` when a
+row's tvg-id is absent or duplicated. On the maintainer's own cached list --
+1471 channels -- all 1471 tvg-ids are present and DISTINCT, so the shipping
+`channelIds` assigns `t:` to every row and `channelIdRemap` returns an empty
+map. This defect cannot occur on that list at all. It needs a playlist without
+unique tvg-ids, AND two sources from one provider, AND a name whose uniqueness
+differs between the two lists.
+
+Ruled 2026-09-22: **accepted**, to be fixed when channel identity is next
+opened deliberately, with a README caveat in the Sources section meanwhile.
+The fix, recorded so it is not re-derived: stop storing ONE key. A favourite
+should carry the name-key AND the url-key, matching url-key first (it tells
+HD/SD twins apart) and falling back to the name-key (it survives a credential
+rotation). There is no single list-independent key -- url-derived ids break on
+rotation, name-derived ids break on duplicates, and choosing between them by
+LIST-LOCAL uniqueness is the entire cause.
+
 **D-SINK-3 (P3)** is a documentation defect, not a new leak, and its verifier
 corrected the hunter for implying otherwise: argv exposure is a knowingly
 accepted residual named at `docs/ARCHITECTURE.md:259-264`. What is genuinely

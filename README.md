@@ -235,6 +235,15 @@ and no prefix is guessed.
 `omarchy bar set ... playlistUrl` still works and shows up in the Sources
 list as well; the two stay in sync. Up to 50 sources are kept.
 
+One caveat if you keep **two lists from the same provider** — a full one and a
+filtered one, say. Favourites are shared across sources on purpose, and a
+channel is normally recognised by the id its provider gives it. When a playlist
+does not give its channels ids, the plugin has to recognise them by name
+instead, and a channel whose name is unique in one of your two lists but shared
+in the other (an HD and an SD version, typically) can lose its star from one of
+them when you switch. Star it again on the list you are using. Playlists that
+carry channel ids — most do — are not affected at all.
+
 ## Playback notes
 
 - One mpv window, class `omarchy-iptv`, titled with the channel name.
