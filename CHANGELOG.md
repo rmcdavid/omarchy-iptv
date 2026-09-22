@@ -3,7 +3,12 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## Unreleased
+## 0.7.3 (2026-09-22)
+
+Selection you can actually see, and a favorites bug whose fix the last two
+changelogs had already claimed. Everything visual here was measured on a real
+screen across all twenty-three installed themes rather than computed and hoped
+for.
 
 ### Changed
 - **The cursor row is marked by a 2 px mark, and the accent now means
