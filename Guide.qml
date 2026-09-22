@@ -2318,6 +2318,15 @@ Item {
                     anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
                     text: groupRow.label
                     foreground: root.foreground
+                    // D-RUNG-9: the host dims this with Qt.darker, which dims
+                    // toward BLACK -- under 4.5:1 on three themes and INVERTED
+                    // (bolder than the body text it sits under) on five light
+                    // ones. Overriding `color` dims toward the background
+                    // instead, at an alpha that holds the separation near 1.93x
+                    // rather than at one fixed rung, so the header still reads
+                    // as dimmed on all 23 themes instead of only clearing a
+                    // threshold. Arithmetic in Model.js (rule 12).
+                    color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
                     fontFamily: root.fontFamily
                   }
 
@@ -3415,6 +3424,10 @@ Item {
                   width: root.narrow ? parent.width : formColumn.labelWidth
                   text: root.fieldLabelText(fieldRow.fieldId)
                   foreground: root.foreground
+                  // D-RUNG-9, same override as the GROUPS header. It matters
+                  // more here: these are form field labels, read while typing
+                  // a provider login, not ambient orientation.
+                  color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
                   fontFamily: root.fontFamily
                   elide: Text.ElideRight
                 }

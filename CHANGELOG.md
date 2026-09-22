@@ -6,6 +6,14 @@ version lives in `manifest.json`.
 ## Unreleased
 
 ### Fixed
+- **Section labels are readable on every theme.** The headings above the group
+  list and beside each form field were dimmed by a method that darkens rather
+  than fades, which on light themes made them *darker* than the text they sit
+  above -- so the heading came out bolder than the body instead of quieter.
+  On three themes they were also simply too faint to read comfortably. They
+  now fade toward the background, by an amount chosen per theme so a heading
+  stays about as much quieter than the body text as it always looked.
+  (D-RUNG-9)
 - **Clicking a channel's number no longer toggles its favourite.** The
   favourite hit target was meant to start at the star slot, but the position
   it was given was rejected at build time and silently fell back to the row's

@@ -4542,6 +4542,53 @@ function cursorInkMix(accent, text, fill) {
   return 1
 }
 
+// D-RUNG-9. The host's section header dims with `Qt.darker(foreground, 1.4)`,
+// which divides the ink's HSV value -- it dims toward BLACK. That is the exact
+// operation D-RUNG-3 and D-RUNG-5 removed from the bar, and it fails the same
+// two ways: on three themes the 10 px bold label lands under 4.5:1
+// (everforest 3.8017, gruvbox 4.2533, tokyo-night 4.2788), and on five LIGHT
+// themes it moves the ink AWAY from a pale background, so the "dimmed" header
+// comes out bolder than the body text it is meant to sit under -- rose-pine
+// 9.79 against 6.66, and on `white` an exact tie at 21.00 against 21.00,
+// because darkening pure black is a no-op.
+//
+// So the guide overrides `color` at its two call sites and dims toward the
+// BACKGROUND instead, which is ordinary alpha compositing and cannot invert.
+//
+// The alpha is not a constant, and that is the point. A single rung -- the
+// bar's 0.86, say -- clears every threshold but lifts the 18 dark themes by
+// 2.05 to 4.86 ratio points and collapses the header's separation from body
+// text from about 1.94x to 1.32x: the header stops reading as dimmed on every
+// theme this machine ships, to fix three. Spending a signal that works
+// everywhere to buy one that works in a few places is the trade D-RUNG-13
+// already refused on the cursor row.
+//
+// Instead: hold the SEPARATION roughly constant and let the alpha vary, with a
+// hard floor so the fix cannot undo itself. Same shape as `cursorInk` -- walk
+// until a target is met and stop at the first value that does.
+var SECTION_HEADER_SEPARATION = 1.93
+// 4.50 plus the calibration fixture's own `tolerance.abs`, because a 10 px
+// BOLD caption renders at model accuracy (D-RUNG-14, measured) and so a target
+// of 4.65 really does land above the line rather than on it.
+var SECTION_HEADER_FLOOR = 4.65
+
+// Both inputs are QML colours or [r, g, b]. Returns the opacity to draw the
+// section header at, over `background`.
+function sectionHeaderAlpha(foreground, background) {
+  var fg = qmlRgb(foreground), bg = qmlRgb(background)
+  var full = contrastRatio(fg, bg)
+  var target = Math.max(SECTION_HEADER_FLOOR, full / SECTION_HEADER_SEPARATION)
+  // A theme whose BODY text is already at or under the target has no dimming
+  // to give: full opacity is the honest answer, not a rung that reads as a
+  // defect somewhere else.
+  if (full <= target) return 1
+  for (var step = 1; step <= 100; step++) {
+    var a = step / 100
+    if (contrastRatio(colorOver(fg, bg, a), bg) >= target) return a
+  }
+  return 1
+}
+
 var TEXT_DIM = 0.52
 var TEXT_FULL = 1
 // D-RUNG-3 and D-RUNG-5, the bar's idle glyph. It is the one element of this
@@ -6540,6 +6587,9 @@ if (typeof module !== "undefined") {
     qmlRgb: qmlRgb,
     hexOf: hexOf,
     cursorInkMix: cursorInkMix,
+    sectionHeaderAlpha: sectionHeaderAlpha,
+    SECTION_HEADER_SEPARATION: SECTION_HEADER_SEPARATION,
+    SECTION_HEADER_FLOOR: SECTION_HEADER_FLOOR,
     relativeLuminance: relativeLuminance,
     contrastRatio: contrastRatio,
     colorOver: colorOver,

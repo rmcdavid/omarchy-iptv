@@ -1473,6 +1473,86 @@ function qtDarker(rgb, factor) {
 function barIdle(t) { return Model.colorOver(rgbOf(t.foreground), rgbOf(t.background), Model.BAR_IDLE_ALPHA) }
 function barActive(t) { return rgbOf(t.foreground) }
 function barBg(t) { return rgbOf(t.background) }
+// ---- D-RUNG-9: the host section header, dimmed toward the background ----
+//
+// Qt.darker dims toward BLACK, so on a light theme it moves the ink AWAY from
+// the background and the "dimmed" header comes out bolder than the body text.
+// Same failure D-RUNG-3/5 removed from the bar. The guide overrides `color` at
+// both PanelSectionHeader call sites; the arithmetic is Model.sectionHeaderAlpha.
+function qtDarker(rgb, f) {
+  // Qt.darker divides the HSV VALUE. Reimplemented here on purpose and used
+  // ONLY to describe the host's behaviour, which is not our code and which we
+  // are asserting we no longer depend on. Nothing shipping is mirrored.
+  const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b)
+  const v = mx / f, sat = mx === 0 ? 0 : (mx - mn) / mx
+  let h = 0
+  if (mx !== mn) {
+    const d = mx - mn
+    h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? ((b - r) / d + 2) : ((r - g) / d + 4)
+    h /= 6
+  }
+  const i = Math.floor(h * 6), fr = h * 6 - i
+  const pp = v * (1 - sat), q = v * (1 - fr * sat), t = v * (1 - (1 - fr) * sat)
+  const c = [[v, t, pp], [q, v, pp], [pp, v, t], [pp, q, v], [t, pp, v], [v, pp, q]][i % 6]
+  return c.map(function (x) { return Math.round(x * 255) })
+}
+function headerRatio(theme) {
+  const s = menuSurface(theme)
+  const a = Model.sectionHeaderAlpha(s.text, s.rowFill)
+  return contrast(composite(s.text, s.rowFill, a), s.rowFill)
+}
+checkCall("D-RUNG-9: the header the HOST draws is under 4.5 on three themes and INVERTED on five", function () {
+  // The defect, asserted before the fix so the fix has something to beat.
+  const under = menuTokens.themes.filter(function (t) {
+    const s = menuSurface(t)
+    return contrast(qtDarker(s.text, 1.4), s.rowFill) < 4.5
+  }).map(function (t) { return t.name })
+  const inverted = menuTokens.themes.filter(function (t) {
+    const s = menuSurface(t)
+    return contrast(qtDarker(s.text, 1.4), s.rowFill) >= contrast(s.text, s.rowFill) - 1e-9
+  }).map(function (t) { return t.name })
+  return [under, inverted]
+}, [["everforest", "gruvbox", "tokyo-night"],
+    ["catppuccin-latte", "flexoki-light", "lupine", "rose-pine", "white"]])
+checkCall("D-RUNG-9: our own ink clears the floor on all 23 and inverts on none", function () {
+  const under = menuTokens.themes.filter(function (t) { return headerRatio(t) < Model.SECTION_HEADER_FLOOR })
+    .map(function (t) { return t.name })
+  const inverted = menuTokens.themes.filter(function (t) {
+    const s = menuSurface(t)
+    return headerRatio(t) >= contrast(s.text, s.rowFill) - 1e-9
+  }).map(function (t) { return t.name })
+  return [under, inverted]
+}, [[], []])
+checkCall("D-RUNG-9: and it still READS as dimmed, which is what a fixed rung would have spent", function () {
+  // The cost, as a number rather than an impression (the SG4 precedent). A
+  // single 0.86 rung would clear every threshold too, and collapse this band
+  // from about 1.9x to 1.32x -- the header would stop looking dim on all 23
+  // themes to fix three. The band is what makes the fix worth more than the
+  // defect it removes.
+  const sep = menuTokens.themes.map(function (t) {
+    const s = menuSurface(t)
+    return contrast(s.text, s.rowFill) / headerRatio(t)
+  })
+  // The band, pinned as numbers. The TOP is the separation target itself.
+  // The BOTTOM is rose-pine, and it is low for a reason worth keeping
+  // visible: its body text is only 6.66, so the 4.65 FLOOR binds before the
+  // 1.93 target can be reached, and the header gives up separation rather
+  // than legibility. That is the correct priority and the floor is what
+  // enforces it -- but it means a theme with dim body text gets a header
+  // that is only a little dimmer, which is a real, named cost and not a bug.
+  return [round2(Math.min.apply(null, sep)), round2(Math.max.apply(null, sep)),
+          round2(Math.min.apply(null, menuTokens.themes.map(headerRatio)))]
+}, [1.43, 1.93, 4.66])
+checkCall("D-RUNG-9: the floor and the separation are pinned, so neither can be relaxed to fit", function () {
+  return [Model.SECTION_HEADER_FLOOR, Model.SECTION_HEADER_SEPARATION]
+}, [4.65, 1.93])
+checkCall("D-RUNG-9: and the guide really asks for it, at BOTH call sites", function () {
+  // Rule 14: the arithmetic above is worth nothing if the QML still takes the
+  // host default. Both PanelSectionHeader instances must override `color`.
+  return qmlSites(/Model\.sectionHeaderAlpha/).length
+}, 2)
+
 checkCall("D-RUNG-5: the idle glyph is no longer BOLDER than the active one anywhere", function () {
   // The defect, as a user would see it, and confirmed on a real screen:
   // rose-pine measured idle 2.48:1 against active 2.25:1 before this change.
