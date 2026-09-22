@@ -18,6 +18,12 @@ version lives in `manifest.json`.
   faint to count as a marker, next to a border that every theme ships zero
   pixels wide. On the two action rows, and on any source that was not the
   active one, nothing at all showed which row `x remove` would act on.
+- **The programme progress bar is easier to see.** It was drawn in the theme
+  accent, a colour too close to the track it sits in: on nineteen of the
+  twenty-three installed themes it fell below the visibility threshold for a
+  graphical indicator, and no amount of brightening the accent could fix it on
+  every theme. It is now drawn in the regular text colour, which clears the
+  threshold everywhere. It no longer carries the accent hue. (D-RUNG-10)
 - **Small counts and the footer line are bold**, which makes them readable on
   themes where they were previously below the accessibility threshold, without
   making them louder.

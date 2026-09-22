@@ -667,10 +667,10 @@ the channel name lives in the tooltip. Same three glyphs.
   did not mention it, which made 5.4 a criterion nothing could observe.
 - **The accent means ACTIVE, never CURSOR.** `Color.menu.selectedText` marks
   which group is filtering the list and which button a dialog has chosen. It
-  never inks the cursor row's TEXT -- one non-text exception survives, the EPG
-  progress fill (5.6), where the cursor emphasis is an intensity step on the
-  same hue rather than a hue change; it is D-RUNG-10's open site and is settled
-  there, not here. This REPLACES the previous clause, "name, lead
+  never inks the cursor row, with no exceptions. The EPG progress fill (5.6)
+  was the last one and lost the accent on 2026-09-22 under D-RUNG-10, because
+  the accent could not clear the 3:1 non-text bar against its own track at any
+  alpha. This REPLACES the previous clause, "name, lead
   glyph, and trail glyph in `Color.menu.selectedText`": on screen that clause
   had never once been true (D-RUNG-13 -- the arithmetic was handed an
   uncomposited fill and fell through to the text token on 23 of 23 themes),

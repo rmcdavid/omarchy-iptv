@@ -2553,11 +2553,11 @@ Item {
                   readonly property real fraction: showProgress ? Model.epgFraction(root.nowSec, nowStart, nowStop) : 0
                   // PO ruling 2026-09-21: the 2 px mark means "your cursor is
                   // here"; the accent means "this one is active". The cursor
-                  // row therefore keeps the plain text token on every element
-                  // of its TEXT. One non-text exception survives below: the
-                  // EPG progress fill brightens to the accent on the cursor
-                  // row, which is an intensity step on the same hue (0.55 ->
-                  // 0.70), not a hue change, and is D-RUNG-10's open site.
+                  // row therefore keeps the plain text token on every
+                  // element, with no exceptions: the EPG progress fill was the
+                  // last one and D-RUNG-10 took the accent off it too
+                  // (2026-09-22), because the accent could not clear 3:1
+                  // against its own track at any alpha.
                   // Inking it with the accent instead costs contrast on 22 of
                   // 23 themes, median 31 per cent and up to 73 (white
                   // 17.55 -> 4.78), leaves the selected row's name FAINTER than
@@ -2782,7 +2782,28 @@ Item {
                         anchors.bottom: parent.bottom
                         width: parent.width * row.fraction
                         radius: parent.radius
-                        color: row.hasCursor ? Util.alpha(root.selectedText, 0.7) : Util.alpha(root.accent, 0.55)
+                        // D-RUNG-10, PO ruling 2026-09-22. This fill was the
+                        // accent, and the accent CANNOT carry it: measured
+                        // against its own track it is under the 3:1 bar of
+                        // WCAG 1.4.11 on 19 of 23 themes at the shipped 0.55,
+                        // and still on 2 of 23 at FULL opacity -- no alpha
+                        // rescues a hue this close to the track it sits in.
+                        // Rendered and confirmed on screen 2026-09-21 under
+                        // headless cage (2.8340 on catppuccin, the first time
+                        // this element had ever been measured).
+                        //
+                        // The text token clears it on all 23: 0.73 gives an
+                        // ordinary-row floor of 3.22 and 0.88 a cursor-row
+                        // floor of 3.98. One alpha for both was tried and
+                        // rejected -- 0.73 everywhere puts the cursor row at
+                        // 3.0148, ON the line, and this project's rule is to
+                        // sit above it and never on it.
+                        //
+                        // It also removes the last place the accent marked a
+                        // CURSOR row, which the 2026-09-21 ruling had to carve
+                        // out by hand: the mark means cursor, the accent means
+                        // active, and now there are no exceptions.
+                        color: row.hasCursor ? Util.alpha(root.foreground, 0.88) : Util.alpha(root.foreground, 0.73)
                       }
                     }
                   }

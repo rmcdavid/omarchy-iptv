@@ -1256,12 +1256,7 @@ function qmlSites(pattern) {
 checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventory", function () {
   // Surfaces and bars, in order below:
   //   1. the property itself; 2. the cursorInk binding (D-RUNG-13's seam);
-  //   3. the EPG progress fill on the cursor row -- non-text, a 3:1 bar
-  //      (D-RUNG-10, which has never rendered on any screen here). It is the
-  //      ONE place the raw accent still marks a cursor row, and it is exempt
-  //      as an intensity step (0.55 -> 0.70 of the same hue) rather than a
-  //      hue change; see docs/UX.md 5.4;
-  //   4, 5. the empty-state and first-run glyphs at displayLarge, large text,
+  //   3, 4. the empty-state and first-run glyphs at displayLarge, large text,
   //      a 3:1 bar (D-RUNG-11: 2 of 23 under, rose-pine 2.42, miasma 2.97).
   //
   // The selected GROUP label LEFT this inventory under D-RUNG-15: at the raw
@@ -1284,7 +1279,12 @@ checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventor
   // It is also the one cursor in the guide with no 2 px mark, because the
   // host draws a border change instead.
   "selectedText: root.cursorInk",
-  "color: row.hasCursor ? Util.alpha(root.selectedText, 0.7) : Util.alpha(root.accent, 0.55)",
+  // The EPG progress fill LEFT this inventory on 2026-09-22 (D-RUNG-10): the
+  // accent could not clear 3:1 against its own track at any alpha -- 19 of 23
+  // themes under it at the shipped 0.55 and still 2 of 23 at full opacity --
+  // so it takes the text token now. That was also the last site where the raw
+  // accent marked a CURSOR row, so the 2026-09-21 ruling no longer needs its
+  // hand-written exception.
   "color: root.selectedText",
   "color: root.selectedText"
 ])
