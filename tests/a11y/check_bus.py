@@ -128,8 +128,43 @@ def bar(name):
     return _scenario("barhost.qml", "barscenario.txt", name, "BAR_HOST_READY")
 
 
+# D-A11Y-7. The tree this harness grades can COLLAPSE without a single check
+# turning red, and it did: when the guide's window moved behind a Loader
+# (be7fc3c) the probe copy's contentItem became 0x0, cardHeight computed to
+# -10, both ListViews lost their viewport, and the suite went on reporting 63
+# of 64 green over a tree holding one channel row and no group entries at all.
+# The 10,000-channel scenario became the same size as the 3-channel one.
+#
+# That is the same failure L2-FIDELITY exists to prevent, one level down: a
+# green run over a tree that is not the thing we meant to grade LOOKS like
+# proof. So every guide scenario now carries a floor on its own size.
+#
+# FLOORS, not equalities. A tree may legitimately GAIN nodes -- these counts
+# each rose by one between 2026-09-15 and 2026-09-22 and nobody noticed,
+# which is exactly why an equality would be edited away rather than believed.
+# It may not lose them. Raise a floor when a scenario grows; never lower one
+# to make a run green.
+TREE_FLOOR = {
+    "firstrun": 30,
+    "banner": 34,
+    "query": 32,
+    "querynomatch": 31,
+    "scale10k": 50,
+    "xtream": 42,
+}
+
+
 def guide(name):
-    return _scenario("host2.qml", "scenario2.txt", name, "PROBE_READBACK_FINAL")
+    nodes, rb = _scenario("host2.qml", "scenario2.txt", name, "PROBE_READBACK_FINAL")
+    floor = TREE_FLOOR.get(name)
+    if floor is not None:
+        check("L2-TREE-%s" % name,
+              nodes is not None and len(nodes) >= floor,
+              "%s: the tree is the size a rendered guide produces, not a collapsed one" % name,
+              "%d nodes, floor %d -- below the floor means the scenario is grading "
+              "a guide that never laid out, and every PASS below it is worthless"
+              % (len(nodes) if nodes else 0, floor))
+    return nodes, rb
 
 
 # ---------------------------------------------------------------- helpers

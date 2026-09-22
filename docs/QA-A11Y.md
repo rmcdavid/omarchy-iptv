@@ -75,6 +75,16 @@ item 16). Child stdout goes to a file, not an unread pipe.
 
 Node counts, reproduced independently by an attacker: bar 3, first run 33,
 no-match query 34, query 35, banner 37, Xtream 45, 10,000 channels 54.
+**Since 2026-09-22 these are enforced, not merely recorded.** Every guide
+scenario carries a floor on its own node count (`TREE_FLOOR` in
+`check_bus.py`), asserted as `L2-TREE-<scenario>`. D-A11Y-7 is why: the probe
+copy's window lost its size, both ListViews lost their viewport, and the suite
+reported 63 of 64 green over a tree with one channel row and no group entries.
+That regression now produces seven named failures saying the tree collapsed,
+instead of one that looks like a string defect. They are FLOORS: a tree may
+gain nodes, never lose them. Raise one when a scenario grows; never lower one
+to make a run green. Baseline is now **72 checks, 3 failures**.
+
 **Re-measured 2026-09-22 and each is one higher** -- 34 / 35 / 36 / 38 / 46 /
 55, bar still 3 -- consistently across all six guide scenarios. The drift
 predates the D-A11Y-7 harness regression: running the probe at `be7fc3c^`
