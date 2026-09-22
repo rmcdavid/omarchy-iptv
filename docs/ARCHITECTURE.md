@@ -261,7 +261,19 @@ Credentials caveat: Xtream-style URLs embed username/password. They live in
 milliseconds. The helper never logs or prints a URL (errors carry the host
 only), `channels.json` stores `sourceHost` rather than the URL, but stream
 URLs inside `channels.json` do contain the credentials (cache dir is 0700,
-files 0600). Document this in the README's settings section.
+files 0600). Documented in the README's settings section.
+
+Amended 2026-09-22 (D-SINK-3). The argv exposure above is transient and was
+reasoned about; a second one was not. The README's own install instructions
+told the user to set a credentialed URL with `omarchy bar set`, which writes it
+into shell history PERMANENTLY -- a strictly worse exposure than the one this
+paragraph accepts, created by our own documentation. The install section now
+sends a paid provider to the in-app form, which reaches neither argv nor the
+shell, and the settings section names both escapes. `/proc/<pid>/cmdline` is
+world-readable where `/proc/<pid>/environ` is not, so an environment variable
+would be a real improvement over argv if this is ever revisited; it is recorded
+here rather than changed, because moving it touches the helper's interface and
+the transient exposure is the one already accepted.
 
 ## 7. Error handling, offline behavior, performance
 

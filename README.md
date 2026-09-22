@@ -29,8 +29,19 @@ The plugin ships no content. Bring a playlist you are entitled to use.
 
 ```bash
 omarchy plugin add https://github.com/rmcdavid/omarchy-iptv.git --enable
+```
+
+Then click the TV icon that appears in your bar — left click opens the guide —
+and it starts on a form that asks for your playlist. **Add a paid
+provider there, not on the command line.** The form masks what you type, and
+nothing you enter reaches your shell history. `Add Xtream login` takes the
+server, username and password as separate fields.
+
+If you want to point it at a free, public playlist to try it out, that has no
+credentials in it and a command line is fine:
+
+```bash
 omarchy bar set io.github.rmcdavid.iptv playlistUrl "https://iptv-org.github.io/iptv/countries/us.m3u"
-omarchy bar set io.github.rmcdavid.iptv epgUrl "https://example.test/xmltv.php?username=U&password=P"
 ```
 
 The plugin id is `io.github.rmcdavid.iptv`. Enabling it places the bar widget
@@ -52,8 +63,21 @@ Settings live inline on the widget's entry in `~/.config/omarchy/shell.json`
 (mode 0600) and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
 The guide, the bar widget, and the service all read that one entry. Playlist
 URLs from paid providers embed credentials: they stay in that file and in the
-channel cache, both readable only by you, and are never shown or logged
-beyond their host name.
+channel cache, both readable only by you, and are never shown or logged beyond
+their host name.
+
+Two places they can escape that, both worth knowing:
+
+- **Your shell history.** Setting a credentialed URL with `omarchy bar set`
+  writes the whole thing into `~/.bash_history` or `~/.zsh_history`, where it
+  stays until you remove it. Use the in-app form instead — that is what it is
+  for. If you have already done it, `history -d` the line and check the file.
+- **The process list, briefly.** When the plugin fetches your playlist it
+  passes the URL to its helper as a command-line argument, so for the few
+  hundred milliseconds that fetch runs another account on the same machine
+  could read it from `/proc`. On a single-user machine this is nothing; on a
+  shared one it is worth knowing. Nothing else on the plugin's side writes the
+  URL anywhere but the two 0600 files above.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|

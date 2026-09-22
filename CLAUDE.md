@@ -99,6 +99,18 @@ requests and raise the batch.
      its removed halves. It fires on every mask and every reveal, on a field
      whose Value reads as bullets, and on an `Accessible.ignored` field, so the
      states that look safe leak on the way into themselves.
+   - **Process argv**, which was missing from this list while the list itself
+     said to add sinks to it (D-SINK-3). The helper is handed the composed
+     playlist URL as an argument, so it is in `/proc/<pid>/cmdline` -- which is
+     world-readable, unlike `/proc/<pid>/environ` -- for as long as the fetch
+     runs. That much is a KNOWINGLY ACCEPTED residual and is reasoned about in
+     `docs/ARCHITECTURE.md` section 6: it is transient, and the alternatives
+     (a pipe, a temp file) each trade it for a different exposure.
+     What is NOT accepted, and what the rule missed, is the DURABLE form: the
+     README used to instruct the user to set a credentialed URL with
+     `omarchy bar set`, which writes it into their shell history permanently.
+     A transient exposure reasoned about is not a licence for a durable one
+     nobody costed. Prefer the in-app form, which reaches neither.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
