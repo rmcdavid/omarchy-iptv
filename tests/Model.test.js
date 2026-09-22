@@ -1502,6 +1502,42 @@ function headerRatio(theme) {
   const a = Model.sectionHeaderAlpha(s.text, s.rowFill)
   return contrast(composite(s.text, s.rowFill, a), s.rowFill)
 }
+// ---- D-PLY-14: a stale failure mark on a channel that is playing ----
+//
+// Found on the real display: a transient error during first load marked a
+// channel, the stream recovered, and the guide showed a channel the user was
+// WATCHING as "Failed 15:07 - Space to retry" with the alert glyph and no
+// playing glyph. mpv reported h264 with 33.9 s of cache at that moment, and
+// `status` reported playing:true for the very id sitting in failedAt.
+const failedTwo = { "t:a": "15:07", "t:b": "14:00" }
+checkCall("D-PLY-14: a healthy player on the named channel drops that channel's stale mark", function () {
+  return Model.failedAfterHealthy(failedTwo, "agree", { id: "t:a" })
+}, { "t:b": "14:00" })
+checkCall("D-PLY-14: and it drops ONLY that channel's -- a real failure elsewhere keeps its mark", function () {
+  const out = Model.failedAfterHealthy(failedTwo, "agree", { id: "t:a" })
+  return [out["t:b"], out["t:a"] === undefined]
+}, ["14:00", true])
+checkCall("D-PLY-14: every weaker verdict leaves the mark alone, so a channel that really failed keeps it", function () {
+  // "agree" is the strictest verdict reconcileVerdict gives: player up, our
+  // source, exact channel. Anything less is not proof of playback.
+  return ["diverged", "unknown", ""].map(function (v) {
+    return Model.failedAfterHealthy(failedTwo, v, { id: "t:a" })["t:a"]
+  })
+}, ["15:07", "15:07", "15:07"])
+checkCall("D-PLY-14: no nowPlaying, or a channel with no mark, changes nothing", function () {
+  return [Model.failedAfterHealthy(failedTwo, "agree", null)["t:a"],
+          Model.failedAfterHealthy(failedTwo, "agree", { id: "t:z" })["t:a"],
+          Object.keys(Model.failedAfterHealthy(failedTwo, "agree", { id: "t:z" })).length]
+}, ["15:07", "15:07", 2])
+checkCall("D-PLY-14: and the service really asks, in the HEALTHY branch", function () {
+  // Rule 14: the arithmetic above is worth nothing if the QML never calls it,
+  // and the call has to sit where a healthy check lands rather than anywhere.
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Service.qml"), "utf8")
+  const healthy = src.indexOf("Model.statusHealthy(status)")
+  const call = src.indexOf("Model.failedAfterHealthy(")
+  return [call > healthy, call - healthy < 700, (src.match(/Model\.failedAfterHealthy\(/g) || []).length]
+}, [true, true, 1])
+
 // ---- D-ID-4: one provider, two lists, and a favourite that moves ----
 //
 // channelIdRemap's idempotence argument holds within ONE list and fails across

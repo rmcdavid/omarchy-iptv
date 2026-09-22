@@ -1723,7 +1723,14 @@ Item {
       var code = status.error ? String(status.error.code) : ""
       if (Model.statusHealthy(status)) {
         root.healthFailures = 0
-        root.checkPlayerChannel(status)
+        // D-PLY-14: a healthy player that its own stash says is on this exact
+        // channel is proof the channel plays, so any failure mark it still
+        // carries is stale and goes. The only other clear runs when a play
+        // STARTS, so without this a transient first-load error left a channel
+        // the user was watching showing "Failed - Space to retry".
+        root.failedAt = Model.failedAfterHealthy(root.failedAt,
+                                                 root.checkPlayerChannel(status),
+                                                 root.nowPlaying)
       } else if (code === "not_implemented" || code === "no_output") {
         // The helper cannot tell (stub or crash): neither healthy nor a
         // strike, so a missing subcommand never reaps a working player.

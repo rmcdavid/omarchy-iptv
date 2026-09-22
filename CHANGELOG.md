@@ -6,6 +6,12 @@ version lives in `manifest.json`.
 ## Unreleased
 
 ### Fixed
+- **A channel you are watching is no longer shown as failed.** A brief network
+  hiccup while a channel was opening could mark it as failed, and the mark
+  stayed even after the channel recovered and played normally — so the guide
+  showed "Failed · Space to retry" for something you were watching, and hid the
+  playing marker while it did. The mark now clears as soon as the player
+  confirms it is playing that channel. (D-PLY-14)
 - **Zapping quickly no longer marks the channel you left as broken.** If you
   pressed Enter on one channel and then another before the first had opened,
   the first was reported as a failed stream — a "did not play" message for a

@@ -2272,6 +2272,31 @@ function withFailed(failed, id, clock) {
   return out
 }
 
+// D-PLY-14. A failure mark says "this channel would not play". A healthy
+// player whose OWN STASH says it is playing that channel is proof to the
+// contrary, so the mark is dropped.
+//
+// Without this the mark outlives the failure, because the only other place
+// that clears one runs when a play STARTS, not when one succeeds: a transient
+// error during first load marked a channel, the stream then recovered, and the
+// guide showed a channel the user was watching as "Failed HH:MM - Space to
+// retry", with the alert glyph and WITHOUT the playing glyph, because the
+// failure state displaces the playing state. Seen on the real display
+// 2026-09-22 with mpv reporting h264 and 33.9 s of cache at the time.
+//
+// Only "agree" clears, and that is deliberately the strictest verdict
+// reconcileVerdict gives: the player is up, on our source, and on the exact
+// channel the guide names. "unknown" (stopping, nothing playing, or the
+// player's record says playing false) and "diverged" both leave the mark
+// alone, so a channel that really did fail keeps its mark.
+function failedAfterHealthy(failed, verdictState, nowPlaying) {
+  var src = failed && typeof failed === "object" ? failed : {}
+  if (str(verdictState) !== "agree" || !nowPlaying) return src
+  var id = str(nowPlaying.id)
+  if (id === "" || src[id] === undefined) return src
+  return withoutFailed(src, id)
+}
+
 function withoutFailed(failed, id) {
   var out = {}
   var src = failed && typeof failed === "object" ? failed : {}
@@ -6471,6 +6496,7 @@ if (typeof module !== "undefined") {
     trimRecents: trimRecents,
     withFailed: withFailed,
     withoutFailed: withoutFailed,
+    failedAfterHealthy: failedAfterHealthy,
     parseJsonObject: parseJsonObject,
     parseChannels: parseChannels,
     parseEpgNow: parseEpgNow,
