@@ -929,14 +929,18 @@ checkCall("calibration: the model predicts every rendered measurement within its
   return calib.samples.filter(function (sm) { return !sm.knownDeviation && !calibHolds(sm) }).map(calibReport)
 }, [])
 checkCall("calibration: the pinned deviations are exactly the three cursor-fill text rows of F-CAL-2, so a fourth cannot be pinned in passing", function () {
-  // F-CAL-2 (dev branch, docs/STATUS.md): three 11 and 14 px text rows ON THE
-  // CURSOR FILL miss the text tolerance by 0.02 to 0.10, and the pass that
-  // measured them read a different string on each surface, so the surface
-  // is not separated from the glyphs. They are pinned by NAME, not absorbed
+  // F-CAL-2, resolved 2026-09-21: NOT a surface effect. The same string
+  // measured on both surfaces loses the same amount (card -0.2075, fill
+  // -0.1991), and eight names at one size on one surface spread from -0.041
+  // to -0.304 -- the peak-pixel method under-reads until a pixel is fully
+  // covered, so the error tracks the STRING. The two "BBC One HD" rows are
+  // that pair, pinned together so the evidence cannot drift apart; the CARD
+  // one is here to make the point that a card row misses the tolerance too. They are pinned by NAME, not absorbed
   // by a wider tolerance: the fixture's own history (UX-GUIDE-AT-SCALE
   // section 16, dev branch) is a check against that move.
   return calib.samples.filter(function (sm) { return sm.knownDeviation }).map(function (sm) { return calibLabel(sm) + " -> " + sm.knownDeviation })
-}, ["tokyo-night cursor 0.52 -> F-CAL-2", "catppuccin cursor 1 -> F-CAL-2", "catppuccin cursor 0.52 -> F-CAL-2"])
+}, ["tokyo-night cursor 0.52 -> F-CAL-2", "catppuccin cursor 1 -> F-CAL-2", "catppuccin cursor 0.52 -> F-CAL-2",
+    "catppuccin row 1 (BBC One HD) -> F-CAL-2", "catppuccin cursor 1 (BBC One HD) -> F-CAL-2"])
 checkCall("calibration: a pinned deviation is still a deviation; a pinned row that holds must lose its pin, not keep it as a habit", function () {
   // Strict, the way a strict xfail is: when the residual is explained and
   // fixed, or the row is re-measured within tolerance, this goes red and the

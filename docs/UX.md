@@ -691,9 +691,9 @@ the channel name lives in the tooltip. Same three glyphs.
   hints -- are **bold** (D-RUNG-14). 10 px regular renders 11 to 13 per cent
   below the contrast model and 10 px bold renders at model accuracy, so bold
   buys the shortfall back without raising the opacity rung, which is what
-  keeps secondary text secondary. UNVERIFIED on our own sites until a capture
-  of one of them exists; the bold-caption class currently rests on a host
-  header measurement.
+  keeps secondary text secondary. VERIFIED on our own sites 2026-09-21 under
+  headless cage: the four measured -0.0007 to -0.054 against a model of
+  6.2384, where the same sites at regular weight measured -0.79.
 - Row `MouseArea`: `hoverEnabled: true`, `cursorShape: Qt.PointingHandCursor`; click = play and close (Enter); click on the lead slot = toggle favorite only.
 - No color animation on the cursor; the clipboard has none, and 10k-row lists must stay cheap.
 

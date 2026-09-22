@@ -5292,6 +5292,104 @@ guide's own confirm dialog before the file restore, and the running shell's
 in-memory state agrees with the restored file (`status`: 1 source, 7
 recents). Residuals: none known. Nothing left the machine.
 
+## Headless pass 2026-09-21, segment C: the two captures 0.7.3 was owed
+
+Run entirely inside a nested headless `cage` compositor with the dev harness in
+`--window floating` mode. **Nothing on the user's session was touched**: no
+theme change, no shell restart, no keystroke into the live display, no window
+of the user's in any frame. Proven on exit -- `shell.json`, the state directory,
+the cache and `theme.name` all hash-identical to the 22:15 snapshot, the live
+`quickshell` still pid 1152526 (never restarted), the installed plugin still at
+53ad47e. The light-theme capture used a scratch `HOME` whose
+`.local/state/omarchy/current/theme` symlinks to rose-pine, because
+`Color.qml:17` derives the theme path from `$HOME` and not from
+`XDG_STATE_HOME`; the user's own theme stayed catppuccin throughout.
+
+### 1. D-RUNG-14: the bold captions, measured on our own sites
+
+Model for catppuccin at the 0.7 rung on the card: **6.2384**.
+
+| Site | measured | error |
+|---|---|---|
+| group entry count | 6.2377 | **-0.0007** |
+| footer status line | 6.2377 | **-0.0007** |
+| UK-ENTERTAINMENT count | 6.1841 | -0.0543 |
+| Sources pinned count | 6.1841 | -0.0543 |
+| *the same sites at REGULAR weight, 2026-09-21 earlier* | *5.45* | *-0.79* |
+
+The `bold-caption` class had zero rows of ours and now has four. The
+UNVERIFIED mark on UX.md 5.4 is lifted.
+
+One site is recorded but deliberately NOT added as a fixture row: the footer
+hints measured **6.2594**, which is 0.021 ABOVE the model and would break the
+fixture's "the model is optimistic in every sample" invariant. It is not a
+0.7 opacity rung -- it is dimmed by `<font color>` inside `StyledText`
+(`verbColor`, `Util.alpha(foreground, 0.7).toString()`), a different operation
+from the scene-graph opacity every other row models. Modelling it as a 0.7 row
+would assert something false.
+
+### 2. The Sources cursor mark, on a non-active source
+
+The state that had nothing: no bold label, no check glyph, and before this
+change no mark.
+
+| Theme | the mark | the fill alone, which was the only signal |
+|---|---|---|
+| catppuccin (dark) | `#cdd6f4`, the text token byte-exact, **9.3561** | **1.2122** against the card |
+| rose-pine (light, the worst case of 23) | `#575279` byte-exact, **5.9772** | **1.1138** against the card |
+
+WCAG 1.4.11 asks 3:1 of a state indicator. The fill was under it on both; the
+mark clears it by a factor of two at its worst theme. The label is the text
+token on both, so the ruling is in effect on screen.
+
+### 3. F-CAL-2, resolved: it was never the surface
+
+The hypothesis was that text loses more on the cursor fill than on the card.
+Measured with the SAME STRING on both surfaces for the first time, by moving
+the cursor one row between two frames:
+
+| String | on the card | on the fill | difference |
+|---|---|---|---|
+| BBC One HD | 11.1336 (model 11.3411, **-0.2075**) | 9.1849 (model 9.3840, **-0.1991**) | **0.008** |
+| Harness Live | 11.0372 (**-0.3039**) | 9.1130 (**-0.2710**) | 0.033 |
+
+There is no surface effect. The error tracks the **string**. Eight 14 px names
+on one surface, one theme, one model value of 11.3411:
+
+`Sky Sports Main Event` 11.3001 | `Sky Sports Football` 11.3001 | `Sky News`
+11.3001 | `GB News` 11.2538 | `BBC One HD` 11.1336 | `BBC News` 11.0820 |
+`Harness Live` 11.0372 | `ITV1 HD` 11.0372
+
+A spread of **0.041 to 0.304** at one size, one surface, one theme. The
+peak-pixel method under-reads until some pixel is fully covered, and a longer
+string reaches that sooner. That one mechanism explains the whole of F-CAL-1's
+"size dependence" too: bold and glyphs have thick strokes and reach the token;
+10 px regular has the thinnest strokes and falls 11 to 13 per cent short.
+
+**And the model itself is exact.** Its only arithmetic error is a one-unit
+rounding in the composite: rose-pine's fill computes to `#ede7e4` (236.96,
+231.04, 227.72) where Qt paints `#ede8e4`; catppuccin's `#2c2d3e` matches
+byte-for-byte. Given the fill Qt really paints, the mark measured 5.9772 and
+9.3561 where the model says 5.9772 and 9.3561 -- equal to four decimals.
+
+So what is left open is a ruling about the METHOD, not the arithmetic: record
+the string on every calibration row, always measure the longest available
+string, or widen the text class. A card row misses the 0.15 text tolerance
+exactly as a cursor row does, and both are now in the fixture, pinned, to show
+it.
+
+### 4. Harness notes
+
+- F-HARNESS-1 reproduced: the first keystroke after the window maps is
+  dropped. Every move in this pass was therefore sent in a bounded retry that
+  verified the result from the pixels before continuing, and reported giving up.
+- The guide opens in **search** mode (`Model.guideState` defaults there), so a
+  printable key types rather than acting. `run.sh ipc mode` (`switchMode`)
+  reaches list mode deterministically; `o` only then opens Sources.
+- `cage` must be stopped by killing its CHILD, and the child must trap TERM:
+  bash defers a signal while a foreground `sleep` runs, so the first teardown
+  left cage alive and a stale `wayland-0` behind.
+
 ## Live pass 2026-09-21, segment B: PiP on the real compositor, and the harness on the real display
 
 Owner: QA (display lane, segment B). Machine: the user's live session, WAYLAND_DISPLAY
