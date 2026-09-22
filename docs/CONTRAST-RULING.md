@@ -193,6 +193,18 @@ Four amendments before merge, all from the review and all confirmed here:
 4. **Repoint the duplicated WCAG arithmetic in the same commit**, not as a
    "should". See the build order.
 
+> **SUPERSEDED 2026-09-21 by product-owner ruling.** Three clauses of this
+> section no longer describe what ships. (1) The mark is drawn in
+> `Color.menu.text`, NOT `cursorInk`, and is pinned there. (2) It does not lie
+> on the card: measured on screen, rose-pine x238 card / x239-240 mark / x241
+> fill, so its right edge and both rounded ends abut the FILL, which is the
+> neighbour that governs it -- against the fill the text token measures 5.94 at
+> the floor and the raw accent would measure 2.80. (3) The cursor row's text is
+> no longer inked at all: the mark means CURSOR and the accent means ACTIVE.
+> The reasoning below is preserved as written because the decision it records
+> was correct on the evidence available; what changed is that the evidence was
+> computed against a fill that had never painted (D-RUNG-13).
+
 **The addition, and it is the architect's call rather than a lane's.** Add a
 selection mark -- a left rule, drawn in `cursorInk`, sited **outside** the
 selected fill so it lies on the card. Measured: `cursorInk` against the card

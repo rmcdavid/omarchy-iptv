@@ -1117,12 +1117,28 @@ function hostColor(rgb, alpha) {
   // 0-1 and an alpha the consumer is free to ignore. Faithful on purpose.
   return { r: rgb[0] / 255, g: rgb[1] / 255, b: rgb[2] / 255, a: alpha === undefined ? 1 : alpha }
 }
-checkCall("D-RUNG-13: handed the fill the HOST really sends, the seam returns the plain text token on every theme", function () {
-  // GREEN BECAUSE THE DEFECT IS LIVE. This is the defect's signature, not an
-  // endorsement of it: it goes RED the day the seam is fixed, and whoever
-  // fixes it updates this to the intended ink -- at which point the D-RUNG-4
-  // arithmetic above becomes a claim about the screen for the first time.
-  // Listed by name so a partial fix says which themes it moved.
+checkCall("D-RUNG-13 FIXED: handed the host's own fill AND the surface under it, the seam returns the intended ink", function () {
+  // This is the assertion that would have caught the shipped defect on day
+  // one, and it is now the live path: Guide.qml passes Color.menu.background
+  // as the fourth argument, so the alpha-carrying fill is composited before
+  // the comparison. 15 themes keep the accent untouched; the other 8 carry
+  // the recorded mix fractions. Mutant: drop the fourth argument, or make
+  // qmlFill ignore the alpha again, and all 23 collapse to the text token.
+  return menuTokens.themes.map(function (t) {
+    const s = cursorSurface(t)
+    const hex = Model.cursorInkHex(hostColor(s.accent), hostColor(s.text),
+                                   hostColor(s.text, menuTokens.selectedBackgroundAlpha),
+                                   hostColor(rgbOf(t.background)))
+    return hex === Model.hexOf(Model.cursorInk(s.accent, s.text, s.fill))
+  }).filter(function (ok) { return !ok }).length
+}, 0)
+checkCall("D-RUNG-13: the UNSAFE path is still unsafe, and pinned so nobody restores it by accident", function () {
+  // Called with THREE arguments -- no surface to composite over -- qmlFill
+  // keeps the old behaviour rather than throwing, because a QML binding that
+  // raises leaves the guide's cursor ink undefined. That fall-back is exactly
+  // how this defect survived, so the guard is here instead: three arguments
+  // still collapse to the text token on 23 of 23, and the inventory below
+  // asserts the shipping binding passes four.
   return menuTokens.themes.filter(function (t) {
     const s = cursorSurface(t)
     const hex = Model.cursorInkHex(hostColor(s.accent), hostColor(s.text),
@@ -1137,20 +1153,28 @@ checkCall("D-RUNG-13: the mechanism, asserted at the one line that drops it", fu
   return Model.qmlRgb({ r: 1, g: 1, b: 1, a: 0.08 })
 }, [255, 255, 255])
 checkCall("D-RUNG-13: the double is faithful -- the alpha really rides across the seam", function () {
-  // Without this, the double can quietly stop carrying `a` and NOTHING goes
-  // red, because an ignored alpha and an absent one produce the same fill --
-  // they are indistinguishable by outcome, which is precisely how the original
-  // double passed for the life of the feature. Proven by mutation: strip `a`
-  // from hostColor and only this check falls. So the double's shape is
-  // asserted directly, alongside the difference a consumer that READ the alpha
-  // would have seen.
+  // Without this, the double could quietly stop carrying `a` and nothing would
+  // notice, because an ignored alpha and an absent one produce the same fill --
+  // indistinguishable by outcome, which is precisely how the original double
+  // passed for the life of the feature. So the double's shape is asserted
+  // directly, alongside the difference a consumer that READ the alpha would
+  // have seen. (Before the seam was fixed this was the ONLY check that fell
+  // when `a` was stripped; now the seam check falls with it.)
+  //
+  // The alpha is compared with a tolerance because the real seam is not exact:
+  // Qt stores a QColor alpha as a 16-bit ushort, so `Util.alpha(c, 0.08)`
+  // arrives as 0.0800030529499054, not 0.08. An exact compare would be the
+  // very defect this check exists to prevent -- a double cleaner than reality
+  // -- and would go red for the wrong reason the day someone points it at a
+  // real QML probe. 3e-6 of alpha cannot move a composited byte.
   const rp = menuTokens.themes.filter(function (t) { return t.name === "rose-pine" })[0]
   const s = cursorSurface(rp)
   const sent = hostColor(s.text, menuTokens.selectedBackgroundAlpha)
   const asRead = Model.hexOf(Model.qmlRgb(sent))
   const ifItHadBeenRead = Model.hexOf(Model.colorOver(Model.qmlRgb(sent), rgbOf(rp.background), sent.a))
-  return [sent.a, asRead === Model.hexOf(s.text), ifItHadBeenRead !== asRead]
-}, [0.08, true, true])
+  return [Math.abs(sent.a - menuTokens.selectedBackgroundAlpha) < 1e-4,
+          asRead === Model.hexOf(s.text), ifItHadBeenRead !== asRead]
+}, [true, true, true])
 checkCall("D-RUNG-13: and the fall-through is not a near miss that a target tweak would mask", function () {
   // Why the seam cannot be repaired by moving CURSOR_INK_TARGET: with the
   // wrong fill the comparison is accent-against-TEXT, and the best any theme
@@ -1208,50 +1232,159 @@ checkCall("D-RUNG-4: and the shipping code actually asks for full opacity there"
 // however it is spelled -- turns this red and obliges its author to write the
 // line here, with its surface and its bar, where a reviewer will see it. Line
 // CONTENT rather than line NUMBER, so ordinary edits above do not disturb it.
+// EVERY shipped QML, not just Guide.qml: `qmlFill` degrades silently to the
+// old behaviour when the fourth argument is absent, so a three-argument
+// `cursorInkHex` call added in BarWidget.qml or Service.qml would reproduce
+// D-RUNG-13 with nothing to catch it. Scanning one file was the same
+// single-site assumption that let the accent gates be walked past twice.
+const SHIPPED_QML = ["BarWidget.qml", "Guide.qml", "Service.qml"]
+function qmlLines() {
+  const fs = require("fs"), path = require("path")
+  return SHIPPED_QML.reduce(function (acc, name) {
+    const src = fs.readFileSync(path.join(__dirname, "..", name), "utf8")
+    return acc.concat(src.split("\n").map(function (l, i) { return { file: name, n: i + 1, text: l } }))
+  }, [])
+}
 function qmlSites(pattern) {
-  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Guide.qml"), "utf8")
-  return src.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) && pattern.test(l) })
-    .map(function (l) { return l.trim() })
+  return qmlLines().filter(function (l) { return !/^\s*\/\//.test(l.text) && pattern.test(l.text) })
+    .map(function (l) { return l.text.trim() })
 }
 checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventory", function () {
   // Surfaces and bars, in order below:
   //   1. the property itself; 2. the cursorInk binding (D-RUNG-13's seam);
-  //   3. the selected GROUP label -- raw accent, body text, on the card, so a
-  //      4.5:1 bar: UNDER IT ON 3 OF 23, floor 3.1355 rose-pine, then miasma
-  //      3.86 and catppuccin-latte 4.34. D-RUNG-4 corrected the channel name
-  //      and never touched this one, and no gate has ever reported it;
-  //   4. the EPG progress fill on the cursor row -- non-text, a 3:1 bar
-  //      (D-RUNG-10, which has never rendered on any screen here);
-  //   5, 6. the empty-state and first-run glyphs at displayLarge, large text,
+  //   3. the EPG progress fill on the cursor row -- non-text, a 3:1 bar
+  //      (D-RUNG-10, which has never rendered on any screen here). It is the
+  //      ONE place the raw accent still marks a cursor row, and it is exempt
+  //      as an intensity step (0.55 -> 0.70 of the same hue) rather than a
+  //      hue change; see docs/UX.md 5.4;
+  //   4, 5. the empty-state and first-run glyphs at displayLarge, large text,
   //      a 3:1 bar (D-RUNG-11: 2 of 23 under, rose-pine 2.42, miasma 2.97).
-  return qmlSites(/root\.selectedText|Color\.menu\.selectedText/)
+  //
+  // The selected GROUP label LEFT this inventory under D-RUNG-15: at the raw
+  // accent it was under 4.5:1 on 8 of 23 themes against the FILL it sits on
+  // (floor 2.7969), and it now takes the calibrated ink, so it appears in the
+  // cursor-ink inventory below instead. It did not vanish, it moved.
+  //
+  // The pattern matches the bare word too, so a new spelling -- an alias, a
+  // `Color.menu[...]` lookup, a forwarding property -- lands here rather than
+  // slipping past a two-form regex, which is how this gate was defeated twice.
+  return qmlSites(/\bselectedText\b|Color\.menu\[/)
 }, [
   "property color selectedText: Color.menu.selectedText",
-  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground)",
-  "color: groupRow.selected ? root.selectedText : root.foreground",
+  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
+  // The host dialog's selected button. It is an ACTIVE state, so it takes the
+  // calibrated ink, not the raw accent -- and the host spends that colour on
+  // three things, the button's text, the button's border and the dialog
+  // CARD's border (Ui/ConfirmDialog.qml). All stay above their bars: the card
+  // border floor is 5.29 against the menu background, 0 of 23 under 3:1.
+  // It is also the one cursor in the guide with no 2 px mark, because the
+  // host draws a border change instead.
+  "selectedText: root.cursorInk",
   "color: row.hasCursor ? Util.alpha(root.selectedText, 0.7) : Util.alpha(root.accent, 0.55)",
   "color: root.selectedText",
   "color: root.selectedText"
 ])
+checkCall("D-RUNG-14: every 10 px caption, with its rung and its weight, by inventory", function () {
+  // The whole of D-RUNG-14's fix is four `font.bold: true` lines. Deleting all
+  // four left the suite at 1445 checks and 0 failures, while the board said
+  // "fixed" -- a shipped behaviour change with nothing observing it, in the
+  // one file whose gates have twice been walked past. So the caption sites are
+  // inventoried the same way the ink sites are.
+  //
+  // WHY BOLD AND NOT A HIGHER RUNG: 10 px REGULAR renders 11 to 13 per cent
+  // below the contrast model (F-CAL-1), which puts these sites at 4.12:1 on
+  // tokyo-night where the model says 4.64; 10 px BOLD renders at model
+  // accuracy. Bold therefore recovers the shortfall without touching the
+  // opacity rung, which is what keeps secondary text secondary.
+  //
+  // The two deliberately-regular 0.7 sites are in the list on purpose: the
+  // Xtream prose and the first-run terminal caption share the rung, were never
+  // measured, and are prose rather than labels, so bolding them would read
+  // wrong. Leaving them here makes "left regular on purpose" a check instead
+  // of a sentence on the board.
+  const lines = qmlLines()
+  return lines.filter(function (l) { return /^\s*font\.pixelSize: Style\.font\.caption\s*$/.test(l.text) })
+    .map(function (l) {
+      const i = lines.indexOf(l)
+      const w = lines.slice(Math.max(0, i - 16), i + 3).filter(function (x) { return x.file === l.file })
+      const pick = function (re) {
+        const hit = w.filter(function (x) { return re.test(x.text) })
+        return hit.length ? hit[hit.length - 1].text.trim() : null
+      }
+      return (pick(/^\s*opacity:/) || "opacity: 1") + " | " + (pick(/^\s*font\.bold:/) || "regular")
+    })
+}, [
+  "opacity: 0.52 | regular",                                 // header scope label
+  "opacity: 0.7 | font.bold: true",                          // group entry count
+  "opacity: 0.7 | font.bold: true",                          // Sources pinned count
+  "opacity: Model.rowNoticeEmphasis(row.failedAt) | regular", // row meta / failure notice
+  "opacity: 0.52 | regular",                                 // the no-match chip
+  "opacity: 0.52 | regular",                                 // Sources row meta
+  "opacity: 0.7 | regular",                                  // Xtream prose, left regular
+  "opacity: 0.7 | regular",                                  // first-run terminal caption, left regular
+  "opacity: 0.7 | font.bold: true",                          // footer status line
+  "opacity: 1 | font.bold: true"                             // footer hints (dimmed via verbColor, not opacity)
+])
+checkCall("PO ruling 2026-09-21: the CURSOR MARKS, by inventory -- every list with a cursor has one, and none of them inks", function () {
+  // The mark is the whole reason the cursor row's text can stay at the plain
+  // text token, so losing one silently removes the only compliant selection
+  // signal on that surface -- which is the state the Sources overlay shipped
+  // in: a fill at 1.12-1.23:1 against a 3:1 bar and a border 0 px wide, on 23
+  // of 23 themes. Proven necessary by mutation: with only the ink inventories,
+  // deleting the Sources mark left the suite green.
+  //
+  // Anchored on the RECTANGLE BLOCK, not on one spelling of `width`, and it
+  // reports the block's whole property set. An earlier version keyed on
+  // `width: Style.space(2)` and reported only colour and visibility, so
+  // changing a mark's height from 0.62 to 0.90 of the row -- or adding a third
+  // mark written differently -- went green. That is the same evasion this
+  // file's accent gates were defeated by twice, reappearing inside the check
+  // written after them.
+  const lines = qmlLines()
+  const out = []
+  lines.forEach(function (l, i) {
+    if (!/^\s*visible:.*hasCursor\s*$/.test(l.text)) return
+    let open = -1
+    for (let j = i; j >= 0 && j > i - 14; j--) {
+      if (/^\s*Rectangle\s*\{\s*$/.test(lines[j].text) && lines[j].file === l.file) { open = j; break }
+    }
+    if (open < 0) return                       // not a Rectangle: the cursor-only buttons
+    const props = lines.slice(open + 1, i + 1)
+      .filter(function (x) { return /^\s*(width|height|radius|color|visible|opacity):/.test(x.text) })
+      .map(function (x) { return x.text.trim() })
+    out.push(l.file + ": " + props.join("; "))
+  })
+  return out
+}, [
+  "Guide.qml: width: Style.space(2); height: Math.round(parent.height * 0.62); radius: width / 2; color: root.foreground; visible: row.hasCursor",
+  "Guide.qml: width: Style.space(2); height: Math.round(parent.height * 0.62); radius: width / 2; color: root.foreground; visible: srow.hasCursor"
+])
 checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirection included", function () {
-  // `root.cursorInk` is read at five places, but `primaryColor` forwards it to
-  // six more, so the ink lands on ELEVEN lines and EIGHT painted sites -- not
-  // the two the design costed. Three of them then apply an opacity rung: the
-  // failed-channel glyph at 0.8 and the two Sources action rows at 0.7. That
-  // matters because any change to the ink is a change to all of them, and the
-  // rungs are where it would bite hardest. The indirection is exactly what hid
-  // them, so the inventory follows the indirection.
+  // After the PO ruling of 2026-09-21 the ink has exactly TWO consumers and
+  // both mean ACTIVE: the selected group label, and the ConfirmDialog's
+  // selected button (which the host also uses for the dialog card's border).
+  //
+  // The inventory still follows `primaryColor`, because that indirection is
+  // what once hid SIX sites: the ink was read at five places and forwarded to
+  // six more, landing on eleven lines and eight painted sites when the design
+  // had costed two -- three of them under an opacity rung. It would hide them
+  // again the moment anyone rebinds `primaryColor` to the ink.
+  //
+  // Note what this gate CANNOT do: it knows the forwarding names it was told.
+  // A NEW forwarding property is caught at its declaration only, never at its
+  // consumers, so adding one to this pattern is mandatory whenever a new
+  // colour-forwarding property is introduced. The gate cannot enforce its own
+  // extension, and pretending otherwise is how the last two were defeated.
   return qmlSites(/cursorInk|primaryColor/)
 }, [
-  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground)",
+  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
   "selectedText: root.cursorInk",
-  "readonly property color primaryColor: hasCursor ? root.cursorInk : root.foreground",
-  "color: root.cursorInk",
-  "color: row.hasCursor ? root.cursorInk : root.foreground",
+  "color: groupRow.selected ? root.cursorInk : root.foreground",
+  "readonly property color primaryColor: root.foreground",
   "color: row.primaryColor",
   "color: row.primaryColor",
   "color: row.primaryColor",
-  "readonly property color primaryColor: srow.hasCursor ? root.cursorInk : root.foreground",
+  "readonly property color primaryColor: root.foreground",
   "color: srow.primaryColor",
   "color: srow.primaryColor"
 ])

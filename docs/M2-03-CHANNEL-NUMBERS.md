@@ -674,7 +674,7 @@ It is also the smallest diff in `Guide.qml`: only `lead.anchors.left` moves
 | text | `row.chnoLabel` (empty string when the channel has no number) |
 | alignment | `horizontalAlignment: Text.AlignRight`, `verticalAlignment: Text.AlignVCenter` |
 | font | `Style.font.body`, `font.family: root.fontFamily` |
-| color / opacity | `Color.menu.text` at opacity 0.52; on the cursor row `Color.menu.selectedText` at opacity 0.8 |
+| color / opacity | `Color.menu.text` at opacity 0.52; on the cursor row `Color.menu.text` at FULL opacity. Both halves of the original were superseded: the 0.8 rung by D-RUNG-4 amendment 2 (the number is what the user reads during numeric zap), and the accent by the PO ruling of 2026-09-21, which took the accent off the cursor row entirely and gave the cursor a 2 px mark |
 | weight | `Font.Normal` always, including the playing row -- the name already carries `Font.Bold` and two bold elements in one row is noise |
 | elide | none; `Model.parseChno` caps the label at 7 characters, so it cannot overflow the widest slot |
 | `textFormat` | `Text.PlainText` (provider data) |

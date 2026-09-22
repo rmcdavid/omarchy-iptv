@@ -4367,8 +4367,9 @@ function rowMeta(opts) {
 // measured: `menu.selected-background` is `menu.text` at 0.08, so the card's
 // text token is near-identical against both row fills, while `selected-text`
 // is the theme's accent and is under 4.5:1 against its own row in eight of the
-// twenty-two installed themes -- for the channel name too, which is not this
-// lane's to change. The notice therefore reads the same whether or not the
+// twenty-three installed themes -- which is why the selected GROUP label now
+// takes the calibrated ink (D-RUNG-15) and the channel name takes the plain
+// text token (product-owner ruling 2026-09-21). The notice therefore reads the same whether or not the
 // cursor is on the row, which is the right property for an alert.
 // ------------------------------------------------------------ contrast
 //
@@ -4424,12 +4425,20 @@ function colorMix(a, b, t) { return colorOver(a, b, 1 - Number(t)) }
 // breaks this decision too, instead of only its own check.
 var WCAG_AA_TEXT = 4.5
 
-// D-RUNG-4. The channel name and number on the CURSOR row are inked with the
-// theme accent (`Color.menu.selectedText`), which is under 4.5:1 against its
-// own fill in 8 of 23 installed themes AT FULL OPACITY: rose-pine 2.80,
-// miasma 3.26, nord 3.77, catppuccin-latte 3.87, solitude 4.05, lupine 4.15,
-// osaka-jade 4.15, white 4.26. No opacity change can reach that; only the ink
-// can.
+// D-RUNG-15. The accent (`Color.menu.selectedText`) is under 4.5:1 against its
+// own selected fill in 8 of 23 installed themes AT FULL OPACITY: rose-pine
+// 2.80, miasma 3.26, nord 3.77, catppuccin-latte 3.87, solitude 4.05, lupine
+// 4.15, osaka-jade 4.15, white 4.26. No opacity change can reach that; only
+// the ink can.
+//
+// WHERE THIS APPLIES, since 2026-09-21: the accent means ACTIVE, never CURSOR.
+// Its sites are the selected GROUP label and the confirm dialog's selected
+// button. It was originally written for the channel name and number on the
+// cursor row (D-RUNG-4), and that is no longer where it is used: a 2 px mark
+// carries the cursor, and the row's text stays at the plain text token. Inking
+// the cursor row instead costs contrast on 22 of 23 themes, median 31 per cent
+// and up to 73, and leaves the selected name fainter than an unselected one on
+// 23 of 23.
 //
 // Raising the FILL instead is counterproductive and monotonically so, because
 // the fill moves toward the foreground and the accent sits between them: the
@@ -4437,8 +4446,11 @@ var WCAG_AA_TEXT = 4.5
 //
 // So: keep the accent wherever it already clears the target, and elsewhere mix
 // it the least distance toward `Color.menu.text` that does. 15 of 23 themes are
-// byte-identical on screen; the other 8 keep between 30 and 93 per cent of
-// their accent distance.
+// byte-identical; the other 8 keep between 30 and 93 per cent of their accent
+// distance. ("On screen" was in that sentence for a long time and was false
+// the whole time -- see D-RUNG-13: the fill reaching this arithmetic was
+// uncomposited, so the mix fell through to the text token on every theme and
+// none of these figures had ever painted.)
 //
 // THE TARGET IS 4.70, NOT 4.50, and the margin is not arbitrary. Measured off
 // real screenshots (UX-GUIDE-AT-SCALE.md (dev branch) section 16 and the rose-pine pass
@@ -4480,11 +4492,44 @@ function hexOf(rgb) {
   return out
 }
 
-// What Guide.qml binds. `fill` is Color.menu.selectedBackground, which the host
-// has ALREADY composited from menu.text at alpha 0.08 -- it is a real colour by
-// the time it reaches here, not a token needing composition.
-function cursorInkHex(accent, text, fill) {
-  return hexOf(cursorInk(qmlRgb(accent), qmlRgb(text), qmlRgb(fill)))
+// Resolve a QML colour that carries alpha over the surface it actually paints
+// on. An opaque colour resolves to itself, so a caller that composited already
+// is unaffected.
+//
+// D-RUNG-13. The sentence that stood here said the fill "is a real colour by
+// the time it reaches here, not a token needing composition". That was false,
+// and it was the defect stated in prose: the host defines
+// `Color.menu.selectedBackground` as `Util.alpha(menu.text, 0.08)` -- a colour
+// whose r, g and b are the TEXT'S and whose alpha is 0.08, never composited.
+// `qmlRgb` reads three channels, so `cursorInk` was handed the text colour as
+// its fill, `contrastRatio(accent, text)` never reached the target (the best
+// any theme manages is white at 4.12), the mix walked toward the text and
+// could not gain on it, and the loop fell through to `return text` on 23 of 23
+// themes. The 100-step loop was dead code and every figure costed against that
+// fill described a surface that has never painted.
+//
+// A MISSING background keeps the old, unsafe behaviour rather than throwing: a
+// QML binding that raises leaves `color` undefined and paints something worse
+// than a wrong colour, and this one is the guide's own cursor ink. The guard
+// against forgetting the argument is therefore a test, not an exception: the
+// suite on the dev branch asserts both paths and the binding's own text,
+// because a silent fall back to "treat it as opaque" is precisely how this
+// defect survived for the life of the feature.
+function qmlFill(fill, background) {
+  var a = fill && typeof fill.a === "number" ? Number(fill.a) : 1
+  if (!(a < 1) || background === undefined || background === null) return qmlRgb(fill)
+  // `background` is taken as OPAQUE and is not composited recursively. A theme
+  // may set `menu.background-alpha` below 1, and then the real surface beneath
+  // the card is the wallpaper, which is unknowable from here -- so treating the
+  // card as opaque is the only defensible reading, not an oversight. No
+  // installed theme does it today.
+  return colorOver(qmlRgb(fill), qmlRgb(background), a)
+}
+
+// What Guide.qml binds. `background` is Color.menu.background, the surface the
+// selected fill is painted over; it is required whenever `fill` carries alpha.
+function cursorInkHex(accent, text, fill, background) {
+  return hexOf(cursorInk(qmlRgb(accent), qmlRgb(text), qmlFill(fill, background)))
 }
 
 // How far the ink travelled, 0 meaning "the accent is untouched". Reported so
@@ -6491,6 +6536,7 @@ if (typeof module !== "undefined") {
     CURSOR_INK_TARGET: CURSOR_INK_TARGET,
     cursorInk: cursorInk,
     cursorInkHex: cursorInkHex,
+    qmlFill: qmlFill,
     qmlRgb: qmlRgb,
     hexOf: hexOf,
     cursorInkMix: cursorInkMix,

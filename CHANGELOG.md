@@ -5,7 +5,33 @@ version lives in `manifest.json`.
 
 ## Unreleased
 
+### Changed
+- **The cursor row is marked by a 2 px mark, and the accent now means
+  "active" rather than "where you are".** The mark in the left gutter was
+  always there; what changed is that it is now the whole answer on the channel
+  list, the Sources list gained one, and the theme accent moved to the two
+  places that mean a choice: which group is filtering the list, and which
+  button a confirm dialog has selected. The mark is defined by brightness
+  rather than colour, so it works on every theme and in greyscale.
+- **The selected source row is finally visible.** The Sources list marked its
+  cursor with a background tint alone, which on every installed theme is too
+  faint to count as a marker, next to a border that every theme ships zero
+  pixels wide. On the two action rows, and on any source that was not the
+  active one, nothing at all showed which row `x remove` would act on.
+- **Small counts and the footer line are bold**, which makes them readable on
+  themes where they were previously below the accessibility threshold, without
+  making them louder.
+
 ### Fixed
+- **The selected group name was hard to read on eight themes.** It was drawn
+  in the raw theme accent over the selection tint, which on eight of the
+  twenty-three installed themes falls below the readability threshold, worst
+  at 2.80:1. It now uses an ink calibrated per theme, clearing the threshold
+  on all twenty-three while keeping the accent exactly as it was on the
+  fifteen that never had a problem. Theme colours that carry transparency are
+  now blended against the surface beneath them before the guide checks
+  readability, so the check measures what you actually see. (D-RUNG-13,
+  D-RUNG-15)
 - **Favorites and recents now actually survive a provider credential change.**
   0.7.1 and 0.7.2 said they did, and the helper's half was right: it moved
   every saved reference onto the name-keyed scheme. But the shell then wrote

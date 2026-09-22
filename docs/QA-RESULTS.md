@@ -5172,6 +5172,51 @@ background; then the model's `#576684` on rose-pine can be checked against
 the screen. The model's own contrast arithmetic is not at fault: text over
 the fill predicts 5.94 / 7.00 / 9.38 and the screen reads 5.83 / 6.86 / 9.13.
 
+#### Settled 2026-09-21, after the costing and the UX panel
+
+The mechanism above was fixed (`Model.qmlFill` composites the alpha-carrying
+fill over `Color.menu.background` before the comparison; `cursorInkHex` takes
+the surface as a fourth argument), but the corrected ink was NOT given to the
+cursor row. Costed across all 23 themes by calling the shipping code: inking
+the cursor-row name would lose contrast on **22 of 23 themes, median 31 per
+cent, worst white 17.55 -> 4.78 (-73%)**, and on **23 of 23** it would leave
+the selected row's name FAINTER than an unselected row's. On `white`,
+`vantablack` and `solitude` the accent is achromatic (HSV saturation 0.00,
+0.00, 0.10), so those three pay 73, 70 and 53 per cent of the row's contrast
+for no hue at all. A UX panel recommended inking it anyway; a refuter
+overturned that on these numbers, which the panel's floor figure
+(5.94 -> 4.70) had hidden entirely, since the floor theme is among the
+smallest movers.
+
+**PO ruling 2026-09-21: the 2 px mark means CURSOR, the accent means ACTIVE.**
+The cursor row keeps the plain text token on every element and the mark
+carries selection; `Color.menu.selectedText` marks which group is filtering
+and which dialog button is chosen. Consequences, all shipped together:
+
+- The mark is **pinned** to `Color.menu.text` (`Guide.qml`, channel delegate).
+  Measured on this pass's own frames, rose-pine x238 card / x239-240 mark /
+  x241 fill: its right edge and both rounded ends abut the FILL, so the fill
+  governs it. As the text token it measures 5.94 at the floor; as the raw
+  accent it would measure 2.80. The comment claiming it "sits on the card" was
+  wrong and is corrected. Without the pin the seam fix alone would have
+  silently inked it, because the mark and the name read the same property.
+- **Finding D-RUNG-15**: the selected GROUP label inked with the RAW accent and
+  sits on the fill, so it was under 4.5:1 on **8 of 23** themes, floor 2.7969
+  (rose-pine). No gate reported it -- the gate matched one spelling. Fixed by
+  pointing it at `Model.cursorInkHex`: 0 of 23 under 4.5, floor 4.7025, accent
+  untouched on 15 themes. This is the site `cursorInk` was written for and had
+  never been aimed at.
+- The **Sources list gained the mark** (F-RUNG-8's carve-out was that defect
+  stated in passing): its cursor had only the 1.12-1.23 fill and a 0 px
+  border, and its cursor-only buttons appear on source rows alone.
+- The four informational 10 px captions are **bold** (D-RUNG-14).
+
+Test discipline: the `cursorInkHex` double now carries the host's real alpha,
+three inventories pin the accent sites, the cursor-ink consumers and the
+cursor marks themselves, and each was proven by a mutation that turns exactly
+it red -- including one that caught the Sources mark shipping with no test at
+all.
+
 ### 5. D-RUNG-1, D-RUNG-9, D-RUNG-11; D-RUNG-10 and D-RUNG-12 blocked
 
 - **D-RUNG-1** (the 0.7 caption sites, table in section 1): catppuccin

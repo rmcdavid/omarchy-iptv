@@ -1165,7 +1165,7 @@ read differently from the menu beside it.
 | **D-RUNG-1** | The 0.45 rung: footer status, footer verbs, group entry count, Sources pinned count | Under 4.5:1 in **23 of 23** themes, worst 1.98:1, median 3.17:1 | **Raised to 0.7** (ruling SG2). 23 of 23 under becomes 6 of 23 |
 | **D-RUNG-2** | The 0.52 rung: detail line, header scope label, right-hand meta | Computes under 4.5:1 in **20 of 23** themes | **Refused for now.** See below |
 | **D-RUNG-3** | The bar's idle glyph, dimmed by `Qt.darker(barFg, 1.55)` | Under 4.5:1 in **7 of 23** themes | Open, and ahead of D-RUNG-2 in the queue |
-| **D-RUNG-4** | The accent ink on the cursor row | Under 4.5:1 in **8 of 23** themes at FULL opacity | Open, tied to D-RUNG-2 |
+| **D-RUNG-4** | The accent ink on the cursor row (historical) | Under 4.5:1 in **8 of 23** themes at FULL opacity | Fixed under SG4, then superseded 2026-09-21: the accent left the cursor row entirely and a 2 px mark carries the cursor. See STATUS D-RUNG-4, D-RUNG-13, D-RUNG-15 |
 
 ### Why one rung moved and the other did not
 

@@ -655,12 +655,45 @@ the channel name lives in the tooltip. Same three glyphs.
   (`referenceItem: card`, `reset()` after every keyboard move or list
   rebuild), exactly as the clipboard and menu do. There is no separate hover
   color.
+- **The cursor is carried by a MARK, not by ink** (PO ruling 2026-09-21,
+  amending the clause below and ruling SG4). A 2 px rounded vertical mark sits
+  in the row's left gutter, `Style.space(2)` wide, 62 per cent of the row
+  height, `Color.menu.text`, visible only on the cursor row. It is defined by
+  luminance rather than hue, so it survives greyscale and every colour vision
+  deficiency, and it is one size in one position on every row, so a moving eye
+  can track it. It measures 5.94:1 at the floor against the fill it abuts.
+  Every list with a cursor has one: the channel list and the Sources list.
+  This paragraph exists because the mark shipped in 0.7.0 while this section
+  did not mention it, which made 5.4 a criterion nothing could observe.
+- **The accent means ACTIVE, never CURSOR.** `Color.menu.selectedText` marks
+  which group is filtering the list and which button a dialog has chosen. It
+  never inks the cursor row's TEXT -- one non-text exception survives, the EPG
+  progress fill (5.6), where the cursor emphasis is an intensity step on the
+  same hue rather than a hue change; it is D-RUNG-10's open site and is settled
+  there, not here. This REPLACES the previous clause, "name, lead
+  glyph, and trail glyph in `Color.menu.selectedText`": on screen that clause
+  had never once been true (D-RUNG-13 -- the arithmetic was handed an
+  uncomposited fill and fell through to the text token on 23 of 23 themes),
+  and making it true would cost contrast on 22 of 23 themes, median 31 per
+  cent and up to 73 (white 17.55 -> 4.78), leave the selected row's name
+  fainter than an unselected row's on 23 of 23, and buy nothing at all on
+  white, vantablack and solitude, whose accents are grey.
 - Cursor row: background `Color.menu.selectedBackground`, radius
-  `Style.cornerRadius`; name, lead glyph, and trail glyph in
-  `Color.menu.selectedText`; the detail line and right meta stay
-  `Color.menu.text` at their reduced opacity (menu convention).
-- Optional theme border: `Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)` on the cursor row, `Border.none()` otherwise (menu convention; zero width unless the theme asks).
-- Group column selected entry: same fill and text tokens.
+  `Style.cornerRadius`; name, number, lead glyph and trail glyph stay
+  `Color.menu.text`; the detail line and right meta stay `Color.menu.text` at
+  their reduced opacity (menu convention).
+- Optional theme border: `Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)` on the cursor row, `Border.none()` otherwise (menu convention; zero width unless the theme asks). Note it ships **0 px wide on every installed theme**, so it is not a selection signal and the mark above is not optional.
+- Group column selected entry: same fill, and the label inked with the
+  calibrated active ink (`Model.cursorInkHex`), not the raw accent -- raw, it
+  was under 4.5:1 on 8 of 23 themes against the fill it sits on, floor 2.80.
+- Captions at 10 px (`Style.font.caption`) that carry information -- the group
+  entry count, the Sources pinned count, the footer status line and the footer
+  hints -- are **bold** (D-RUNG-14). 10 px regular renders 11 to 13 per cent
+  below the contrast model and 10 px bold renders at model accuracy, so bold
+  buys the shortfall back without raising the opacity rung, which is what
+  keeps secondary text secondary. UNVERIFIED on our own sites until a capture
+  of one of them exists; the bold-caption class currently rests on a host
+  header measurement.
 - Row `MouseArea`: `hoverEnabled: true`, `cursorShape: Qt.PointingHandCursor`; click = play and close (Enter); click on the lead slot = toggle favorite only.
 - No color animation on the cursor; the clipboard has none, and 10k-row lists must stay cheap.
 

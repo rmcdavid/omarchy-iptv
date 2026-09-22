@@ -233,14 +233,23 @@ Item {
   property color scrim: Color.menu.scrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
-  // D-RUNG-4. The accent is under 4.5:1 against its OWN selected fill in 8 of
-  // 23 installed themes at full opacity, worst 2.80, and no opacity change can
-  // reach that -- only the ink can. `cursorInk` returns the accent untouched
-  // where it already clears the target (15 themes, byte-identical on screen)
-  // and otherwise mixes it the least distance toward the menu text that does.
-  // All of the arithmetic is in Model.js so a test calls it rather than
-  // mirroring it; this binding evaluates once per theme, never per row.
-  readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground)
+  // The ACTIVE ink. `cursorInk` mixes the accent the least distance toward the
+  // menu text that clears 4.70:1 against the fill it is painted on, and returns
+  // it untouched on the 15 themes that already do. The arithmetic lives in
+  // Model.js so a test calls it rather than mirroring it (rule 12); this
+  // binding evaluates once per theme, never per row.
+  //
+  // It means ACTIVE, not CURSOR -- see the rule in the channel delegate. Its
+  // only consumers are the selected GROUP (which group is filtering the list)
+  // and the ConfirmDialog's selected button (which answer is chosen). Where the
+  // user's CURSOR is, is carried by the 2 px mark, never by ink.
+  //
+  // The fourth argument is load-bearing and D-RUNG-13 is what happens without
+  // it: `Color.menu.selectedBackground` is `Util.alpha(menu.text, 0.08)`, whose
+  // r, g and b are the TEXT'S, so handing it over uncomposited measured the
+  // accent against the text colour and fell through to the text token on 23 of
+  // 23 themes for the life of the feature.
+  readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)
   property color accent: Color.accent
   property color urgent: Color.urgent
   readonly property int cornerRadius: Style.cornerRadius
@@ -549,9 +558,15 @@ Item {
   // 4.5:1 threshold on at least one of the two surfaces this text sits on,
   // worst 1.98:1, median 3.17:1. The finding survives the known error in the
   // contrast model too, which is why this rung moves now and the 0.52 rung
-  // does not: the model reads 1.25 ratio points LOW against the one rendered
-  // measurement this project has taken (QA-RESULTS.md (dev branch):4720-4732), and
-  // 3.17 plus 1.25 is still 4.42, under the line.
+  // does not. NOTE the reason first written here has been withdrawn: it was
+  // "the model reads 1.25 ratio points low", which came from measuring the
+  // failure GLYPH at low opacity. The calibration fixture now pins the real
+  // error and it is size-dependent (F-CAL-1): at 10 px regular the model reads
+  // 11 to 13 per cent HIGH, the opposite direction. That is why these captions
+  // are BOLD (D-RUNG-14) rather than raised again -- and it is why the 0.52
+  // rung's acceptance rests on its own board row (D-RUNG-2), not on this
+  // comment, which is about a different rung and no longer carries evidence
+  // for it.
   // The cost, accepted: the key/verb pair collapses to one rung, so key names
   // no longer stand out from the verbs beside them. UX.md (dev branch):756-757 is
   // amended to say so.
@@ -2320,7 +2335,15 @@ Item {
                       anchors.rightMargin: Style.space(6)
                       anchors.verticalCenter: parent.verticalCenter
                       text: groupRow.label
-                      color: groupRow.selected ? root.selectedText : root.foreground
+                      // ACTIVE, so it inks. The RAW accent here was under
+                      // 4.5:1 on 8 of 23 themes against the fill it sits on
+                      // (floor 2.80, rose-pine) -- an uncosted failure that no
+                      // gate reported, because D-RUNG-4 corrected the channel
+                      // name and never looked at this column. `cursorInk` is
+                      // the function written for exactly this case and had
+                      // never been pointed at it: 0 of 23 under 4.5, floor
+                      // 4.70, and the accent survives untouched on 15 themes.
+                      color: groupRow.selected ? root.cursorInk : root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       elide: Text.ElideRight
@@ -2336,6 +2359,19 @@ Item {
                       color: root.foreground
                       // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
                       opacity: 0.7
+                      // D-RUNG-14 (PO ruling 2026-09-21): bold, not a
+                      // higher rung. 10 px REGULAR text renders 11 to 13 per
+                      // cent below the contrast model (F-CAL-1), which puts
+                      // this site at 4.12:1 on tokyo-night where the model
+                      // says 4.64; 10 px BOLD renders at model accuracy
+                      // (0.00 to 0.05). So bold buys the whole shortfall back
+                      // without touching the rung, which is what keeps
+                      // secondary text secondary. `monospace` resolves to
+                      // JetBrainsMono Nerd Font, which ships a real Bold face
+                      // (fc-match monospace:bold), so this is not synthesised,
+                      // and a monospace bold has the same advance width, so
+                      // nothing reflows.
+                      font.bold: true
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
                       horizontalAlignment: Text.AlignRight
@@ -2423,6 +2459,19 @@ Item {
                   color: root.foreground
                   // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
                   opacity: 0.7
+                  // D-RUNG-14 (PO ruling 2026-09-21): bold, not a
+                  // higher rung. 10 px REGULAR text renders 11 to 13 per
+                  // cent below the contrast model (F-CAL-1), which puts
+                  // this site at 4.12:1 on tokyo-night where the model
+                  // says 4.64; 10 px BOLD renders at model accuracy
+                  // (0.00 to 0.05). So bold buys the whole shortfall back
+                  // without touching the rung, which is what keeps
+                  // secondary text secondary. `monospace` resolves to
+                  // JetBrainsMono Nerd Font, which ships a real Bold face
+                  // (fc-match monospace:bold), so this is not synthesised,
+                  // and a monospace bold has the same advance width, so
+                  // nothing reflows.
+                  font.bold: true
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   horizontalAlignment: Text.AlignRight
@@ -2502,7 +2551,20 @@ Item {
                   readonly property string detail: Model.rowDetail({ showGroup: showGroup, group: group, failedAt: failedAt, nowTitle: nowTitle, nextTitle: nextTitle })
                   readonly property bool showProgress: nowTitle !== "" && nowStop > nowStart && failedAt === ""
                   readonly property real fraction: showProgress ? Model.epgFraction(root.nowSec, nowStart, nowStop) : 0
-                  readonly property color primaryColor: hasCursor ? root.cursorInk : root.foreground
+                  // PO ruling 2026-09-21: the 2 px mark means "your cursor is
+                  // here"; the accent means "this one is active". The cursor
+                  // row therefore keeps the plain text token on every element
+                  // of its TEXT. One non-text exception survives below: the
+                  // EPG progress fill brightens to the accent on the cursor
+                  // row, which is an intensity step on the same hue (0.55 ->
+                  // 0.70), not a hue change, and is D-RUNG-10's open site.
+                  // Inking it with the accent instead costs contrast on 22 of
+                  // 23 themes, median 31 per cent and up to 73 (white
+                  // 17.55 -> 4.78), leaves the selected row's name FAINTER than
+                  // an unselected row's on 23 of 23, and buys nothing at all on
+                  // white, vantablack and solitude, whose accents are grey
+                  // (saturation 0.00, 0.00, 0.10).
+                  readonly property color primaryColor: root.foreground
 
                   width: ListView.view.width
                   height: root.rowHeight
@@ -2518,20 +2580,30 @@ Item {
                   // both this file and the host's own menu pass a fallback
                   // width of 0. WCAG 1.4.11 asks 3:1 of a state indicator.
                   //
-                  // Correcting the ink alone would therefore have SPENT that
-                  // one signal to buy legibility -- on rose-pine the cursor
-                  // ink's separation from an ordinary row's ink falls to
-                  // 1.26:1. This rule is what makes that affordable: it is a
-                  // non-text indicator no opacity arithmetic can produce, drawn
-                  // OUTSIDE the selected fill so it sits on the card, where
-                  // cursorInk measures 5.29:1 at the floor.
+                  // THIS MARK IS THE CURSOR, and it is why the row's text can
+                  // stay at full legibility. It is a non-text indicator no
+                  // opacity arithmetic can produce: one size and one position
+                  // on every row, defined by luminance rather than hue, so it
+                  // survives greyscale and every colour vision deficiency.
+                  //
+                  // It is PINNED to the text token and must not be bound to
+                  // `cursorInk`. Measured on screen 2026-09-21, rose-pine
+                  // x238 card / x239-240 mark / x241 fill: its left edge abuts
+                  // the card and its right edge and both rounded ends abut the
+                  // FILL, so the fill is the neighbour that governs it. At the
+                  // text token it measures 5.94 at the floor (0 of 23 under
+                  // 3:1); at the raw accent it would measure 2.80 (1 of 23
+                  // under). Handing it the accent trades the one signal that
+                  // works on every theme for a hue that 20 of 23 themes render
+                  // within 3:1 of the text anyway. An earlier comment here said
+                  // it "sits on the card"; the pixels say otherwise.
                   Rectangle {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     width: Style.space(2)
                     height: Math.round(parent.height * 0.62)
                     radius: width / 2
-                    color: root.cursorInk
+                    color: root.foreground
                     visible: row.hasCursor
                   }
 
@@ -2573,7 +2645,7 @@ Item {
                       height: lead.height
                       textFormat: Text.PlainText
                       text: row.chno
-                      color: row.hasCursor ? root.cursorInk : root.foreground
+                      color: root.foreground
                       // D-RUNG-4: was 0.8 on the cursor row, which left the
                       // number under 4.5:1 in 16 of 23 themes even with the
                       // corrected ink, floor 3.25. It is the one thing the user
@@ -3021,7 +3093,9 @@ Item {
                 // The separator before the action rows travels with the first of them.
                 readonly property bool separatorAbove: srow.rowKind === "add"
                 readonly property int separatorHeight: srow.separatorAbove ? Style.space(6) * 2 + Style.normalBorderWidth : 0
-                readonly property color primaryColor: srow.hasCursor ? root.cursorInk : root.foreground
+                // A cursor, not an active state: the text token, and the mark
+                // below carries the selection (see the channel delegate).
+                readonly property color primaryColor: root.foreground
 
                 width: ListView.view.width
                 height: (srow.isSource ? root.detailRowHeight : root.singleRowHeight) + srow.separatorHeight
@@ -3052,6 +3126,32 @@ Item {
                   radius: root.cornerRadius
                   color: srow.hasCursor ? root.selectedBackground : "transparent"
                   borderSpec: srow.hasCursor ? root.selectedBorderSpec : root.noBorderSpec
+
+                  // The same cursor mark the channel list has, which this
+                  // overlay went without. Until now the ONLY thing marking the
+                  // selected source row was this fill, which measures 1.12 to
+                  // 1.23:1 against the card on 23 of 23 themes, under a 3:1
+                  // bar, beside a selected border the theme ships 0 px wide.
+                  // The cursor-only buttons appear on SOURCE rows alone, so on
+                  // the two action rows -- and on any source row that is not
+                  // the active one, which has neither the bold label nor the
+                  // check glyph -- nothing whatsoever showed where the cursor
+                  // was, on the surface that carries "x remove". WCAG 1.4.11
+                  // and 1.4.1 both, live, on every theme.
+                  //
+                  // Parented to srowBody and not to the delegate: the delegate
+                  // also holds the separator above the action rows, so a mark
+                  // centred on IT would be mis-sized and mis-centred on the
+                  // `add` row by half the separator height.
+                  Rectangle {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(2)
+                    height: Math.round(parent.height * 0.62)
+                    radius: width / 2
+                    color: root.foreground
+                    visible: srow.hasCursor
+                  }
 
                   MouseArea {
                     anchors.fill: parent
@@ -3549,6 +3649,19 @@ Item {
             color: root.foreground
             // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
             opacity: 0.7
+            // D-RUNG-14 (PO ruling 2026-09-21): bold, not a
+            // higher rung. 10 px REGULAR text renders 11 to 13 per
+            // cent below the contrast model (F-CAL-1), which puts
+            // this site at 4.12:1 on tokyo-night where the model
+            // says 4.64; 10 px BOLD renders at model accuracy
+            // (0.00 to 0.05). So bold buys the whole shortfall back
+            // without touching the rung, which is what keeps
+            // secondary text secondary. `monospace` resolves to
+            // JetBrainsMono Nerd Font, which ships a real Bold face
+            // (fc-match monospace:bold), so this is not synthesised,
+            // and a monospace bold has the same advance width, so
+            // nothing reflows.
+            font.bold: true
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
@@ -3565,6 +3678,19 @@ Item {
             width: Math.min(implicitWidth, parent.width * 0.7)
             text: root.footerHintText
             color: root.foreground
+            // D-RUNG-14 (PO ruling 2026-09-21): bold, not a
+            // higher rung. 10 px REGULAR text renders 11 to 13 per
+            // cent below the contrast model (F-CAL-1), which puts
+            // this site at 4.12:1 on tokyo-night where the model
+            // says 4.64; 10 px BOLD renders at model accuracy
+            // (0.00 to 0.05). So bold buys the whole shortfall back
+            // without touching the rung, which is what keeps
+            // secondary text secondary. `monospace` resolves to
+            // JetBrainsMono Nerd Font, which ships a real Bold face
+            // (fc-match monospace:bold), so this is not synthesised,
+            // and a monospace bold has the same advance width, so
+            // nothing reflows.
+            font.bold: true
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideLeft
