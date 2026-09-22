@@ -5,6 +5,18 @@ version lives in `manifest.json`.
 
 ## Unreleased
 
+### Corrected
+
+- **A claim made in 0.7.3 about small text was wrong, and is withdrawn.** That
+  release said making the small counts and the footer line bold "makes them
+  readable on themes where they were previously below the accessibility
+  threshold". It does not. The bold was verified against a test renderer, where
+  it does help; on a real display it measures the same as the regular weight it
+  replaced. The bold stays — it costs nothing and looks no worse — but on the
+  themes where these captions were hard to read, they still are. We are not
+  leaving it there; the remedy is being chosen with measurements taken on a
+  real screen this time. (F-CAL-3, reopening D-RUNG-14)
+
 ### Fixed
 - **A channel you are watching is no longer shown as failed.** A brief network
   hiccup while a channel was opening could mark it as failed, and the mark
