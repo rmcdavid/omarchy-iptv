@@ -393,6 +393,19 @@ non-text rule at 5.29:1) that no opacity arithmetic can produce.
    the samples actually show: the error is proportional to alpha, so a
    translucent target needs more margin than a full-opacity one, and no target
    should be set in an alpha region the fixture has never sampled.
+   **Amended again by F-CAL-3, 2026-09-22, and this one is not about alpha.**
+   A target may not be set against rows from an environment the user does not
+   have. Every fixture row now records an `env`, `live` or `cage`, and the
+   tolerance is drawn per `(sizeClass, env)` pair rather than per class, because
+   the two environments do not rasterise text alike: against the same
+   arithmetic the live session loses **-0.376** on average and headless cage
+   loses **-0.048**, nearly eight times less. The pooled mean this replaced,
+   -0.199, described no rendering that exists. A class measured only under cage
+   has earned no tolerance at all for the live display and cannot certify a
+   design decision, however precise its cage figure was -- D-RUNG-14 was
+   certified exactly that way and was wrong. The difference is confined to
+   glyph coverage, which is measured and not assumed: a solid 2 px rule at the
+   text token reads identically in both.
 2. **One arithmetic, called by both sides.** The WCAG formula currently lives
    only in `tests/Model.test.js:669-693`, which was fine while nothing shipped a
    decision made with it. Two of these changes do. `relativeLuminance`,

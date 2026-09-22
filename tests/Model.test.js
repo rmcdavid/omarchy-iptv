@@ -888,18 +888,44 @@ checkCall("GS8: the notice on the cursor row was under AA and is not any more ("
 // the rows rather than hard-coded, so a row the ruling does not classify is
 // refused instead of defaulting to a tolerance it never earned.
 const calib = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/contrast-calibration.json"), "utf8"))
-// The classes the ruling defines and which tolerance each draws. A sizeClass
-// that is not a key here is an error, never silently a "text" row.
-const CALIB_CLASS_TOLERANCE = { "text": "abs", "caption": "captionRel", "bold-caption": "abs", "glyph": "abs" }
+// The classes the ruling defines and which tolerance each draws, keyed by
+// (sizeClass, env). F-CAL-3: the pair, never the class alone. The two
+// environments do not rasterise text alike -- the same four bold captions, same
+// theme, same code, read 6.2377 under headless cage and 5.4475 to 5.6956 on the
+// user's real session -- so a class that has earned the absolute tolerance in
+// one environment has earned NOTHING in the other. A pair that is not a key
+// here is an error, never silently a "text" row and never silently the other
+// environment's tolerance. That inheritance is the whole defect: `bold-caption`
+// was measured under cage alone, drew the absolute tolerance on that evidence,
+// and D-RUNG-14 shipped a claim about the user's screen on the strength of it.
+const CALIB_CLASS_TOLERANCE = {
+  "text|live": "abs",
+  "text|cage": "abs",
+  "caption|live": "captionRel",
+  // Bold 10 px holds model accuracy under cage and does NOT hold it live,
+  // where it behaves exactly like the regular weight it was meant to rescue.
+  "bold-caption|cage": "abs",
+  "bold-caption|live": "captionRel",
+  "glyph|live": "abs",
+  // A solid rule has no stroke coverage to lose, so it reads at model accuracy
+  // in both environments. That is what makes it the control.
+  "solid|live": "abs",
+  "solid|cage": "abs",
+}
+const CALIB_ENVS = ["live", "cage"]
+function calibKey(sample) { return sample.sizeClass + "|" + sample.env }
 function calibLabel(sample) {
   // The site rides in the label because several sites share one {theme,
   // surface, alpha} key and therefore one prediction; without it a failing
-  // row cannot say which glyph run it came from.
-  return sample.theme + " " + sample.surface + " " + sample.alpha + (sample.site ? " (" + sample.site + ")" : "")
+  // row cannot say which glyph run it came from. The env rides in it because
+  // two rows can otherwise be identical in every printed field and describe
+  // different renderings.
+  return sample.theme + " " + sample.surface + " " + sample.alpha +
+    (sample.site ? " (" + sample.site + ")" : "") + " {" + sample.env + "}"
 }
 function calibAllowance(sample) {
-  const draws = CALIB_CLASS_TOLERANCE[sample.sizeClass]
-  if (!draws) throw new Error("unclassified calibration row " + calibLabel(sample) + " (sizeClass " + show(sample.sizeClass) + ")")
+  const draws = CALIB_CLASS_TOLERANCE[calibKey(sample)]
+  if (!draws) throw new Error("unclassified calibration row " + calibLabel(sample) + " (pair " + show(calibKey(sample)) + ")")
   return draws === "captionRel" ? calib.tolerance.captionRel * sample.measured : calib.maxAbsError
 }
 function calibPredicted(sample) {
@@ -909,11 +935,32 @@ function calibPredicted(sample) {
   return contrast(composite(s.text, fill, sample.alpha), fill)
 }
 function calibError(sample) { return Math.abs(calibPredicted(sample) - sample.measured) }
+function calibIn(env) { return calib.samples.filter(function (sm) { return sm.env === env }) }
 checkCall("calibration: every sample's theme is in the contrast fixture, so a rename cannot silently skip one", function () {
   return calib.samples.every(function (sm) { return menuTokens.themes.some(function (t) { return t.name === sm.theme }) })
 }, true)
-checkCall("calibration: every row carries a size class the ruling defines; an unclassified row is refused, not defaulted", function () {
-  return calib.samples.filter(function (sm) { return !CALIB_CLASS_TOLERANCE[sm.sizeClass] }).map(calibLabel)
+checkCall("calibration: every row records which environment rendered it; a row that does not is refused, not assumed live", function () {
+  // F-CAL-3. A row without an env cannot be read at all: the date does not
+  // settle it, because 2026-09-21 ran a live segment AND a cage segment.
+  return calib.samples.filter(function (sm) { return CALIB_ENVS.indexOf(sm.env) === -1 }).map(function (sm) {
+    return sm.theme + " " + sm.surface + " " + sm.alpha + " -> " + show(sm.env)
+  })
+}, [])
+checkCall("calibration: every row carries a (size class, env) pair the ruling defines; an unclassified pair is refused, not defaulted", function () {
+  return calib.samples.filter(function (sm) { return !CALIB_CLASS_TOLERANCE[calibKey(sm)] }).map(calibLabel)
+}, [])
+checkCall("calibration: every size class has at least one LIVE row, because cage certifies nothing the user can see", function () {
+  // THE rule F-CAL-3 exists to install. A class measured only under cage has
+  // no evidence about the display anybody looks at, and a design decision made
+  // on it is unfounded however precise the cage figure was. `bold-caption` was
+  // in exactly that state when D-RUNG-14 was certified, and this check is red
+  // against that fixture.
+  const byClass = {}
+  calib.samples.forEach(function (sm) {
+    byClass[sm.sizeClass] = byClass[sm.sizeClass] || {}
+    byClass[sm.sizeClass][sm.env] = true
+  })
+  return Object.keys(byClass).sort().filter(function (c) { return !byClass[c]["live"] })
 }, [])
 checkCall("calibration: the absolute tolerance was not raised to fit the captions; the captions got a relative one instead", function () {
   return [calib.maxAbsError, calib.tolerance.abs, calib.tolerance.captionRel]
@@ -923,7 +970,7 @@ function calibReport(sample) {
   return calibLabel(sample) + " [" + sample.sizeClass + "] off by " + round2(calibError(sample)) + ", allowed " + round2(calibAllowance(sample))
 }
 checkCall("calibration: the model predicts every rendered measurement within its row's own tolerance, except the rows pinned as a known deviation", function () {
-  // Judged row by row against the tolerance its size class draws, so the
+  // Judged row by row against the tolerance its (class, env) pair draws, so the
   // result is empty exactly when every unpinned row holds, and a failing row
   // names itself with its class, its error and its allowance.
   return calib.samples.filter(function (sm) { return !sm.knownDeviation && !calibHolds(sm) }).map(calibReport)
@@ -948,6 +995,78 @@ checkCall("calibration: a pinned deviation is still a deviation; a pinned row th
   // pin comes off in the same change.
   return calib.samples.filter(function (sm) { return sm.knownDeviation && calibHolds(sm) }).map(calibReport)
 }, [])
+
+// ---- F-CAL-3: the environments differ in TEXT ONLY, and that is measured ----
+//
+// The conclusion the env split rests on is not "cage is different somehow".
+// It is precise: colour and compositing agree, glyph rasterisation does not.
+// Both halves are asserted, because only the pair licenses the split. If the
+// control ever diverges, the environments differ in a second way and every
+// cross-environment reading in this project needs redoing.
+checkCall("calibration: the CONTROL -- a solid rule reads identically in both environments, so colour and compositing agree", function () {
+  // A 2 px rule at the text token has no partial stroke coverage to lose, so
+  // it is the one thing that can isolate rasterisation from everything else.
+  const byKey = {}
+  calib.samples.filter(function (sm) { return sm.sizeClass === "solid" }).forEach(function (sm) {
+    const k = sm.theme + "|" + sm.surface + "|" + sm.alpha
+    byKey[k] = byKey[k] || {}
+    byKey[k][sm.env] = sm.measured
+  })
+  const both = Object.keys(byKey).filter(function (k) { return byKey[k].live !== undefined && byKey[k].cage !== undefined })
+  const disagree = both.filter(function (k) { return Math.abs(byKey[k].live - byKey[k].cage) > 0.0001 })
+  // The count is returned so this cannot pass by comparing nothing.
+  return [both.length, disagree]
+}, [1, []])
+checkCall("calibration: and TEXT does not -- the same bold caption sites lose this much off the live display", function () {
+  // The number that refuted D-RUNG-14, computed site by site rather than as a
+  // class average, so each entry is one element of one theme under one build
+  // measured twice. Nothing but the environment differs across a pair.
+  const bySite = {}
+  calib.samples.filter(function (sm) { return sm.sizeClass === "bold-caption" }).forEach(function (sm) {
+    const k = sm.theme + " " + sm.site
+    bySite[k] = bySite[k] || {}
+    bySite[k][sm.env] = sm.measured
+  })
+  return Object.keys(bySite).sort().filter(function (k) {
+    return bySite[k].live !== undefined && bySite[k].cage !== undefined
+  }).map(function (k) { return [k, round2(bySite[k].cage - bySite[k].live)] })
+}, [
+  ["catppuccin footer status", 0.54],
+  ["catppuccin group count", 0.79],
+  ["catppuccin sources count", 0.73],
+])
+checkCall("calibration: live bold 10 px is no better than live regular 10 px, which is what D-RUNG-14 claimed it fixed", function () {
+  // D-RUNG-14's claim was that bold recovers the caption shortfall. On the
+  // display the user actually has, the same site at the same rung measures the
+  // same either way. Both figures come from the fixture, so the claim cannot be
+  // restated in prose without this going red.
+  function liveAt(cls, site) {
+    return calib.samples.filter(function (sm) {
+      return sm.env === "live" && sm.sizeClass === cls && sm.theme === "catppuccin" &&
+        sm.surface === "row" && sm.alpha === 0.7 && sm.site === site
+    })[0]
+  }
+  const regular = liveAt("caption", "group count")
+  const bold = liveAt("bold-caption", "group count")
+  return [round2(regular.measured), round2(bold.measured), Math.abs(bold.measured - regular.measured) < 0.02]
+}, [5.45, 5.45, true])
+checkCall("calibration: bold was verified live on the one theme that never failed, and these are the themes still owed a live measurement", function () {
+  // The second half of F-CAL-3, and the sharper half. The live bold pass ran on
+  // catppuccin, whose 0.7 caption rung already measured 5.45 -- above 4.5
+  // before any change. The themes that actually failed the rung live were never
+  // measured bold at all, so the fix is unverified precisely where it was
+  // needed. Derived from the rows, so it goes red the moment one is measured.
+  const fails = {}
+  calib.samples.filter(function (sm) {
+    return sm.env === "live" && sm.sizeClass === "caption" && sm.alpha === 0.7 && sm.measured < 4.5
+  }).forEach(function (sm) { fails[sm.theme] = true })
+  const haveBold = {}
+  calib.samples.filter(function (sm) {
+    return sm.env === "live" && sm.sizeClass === "bold-caption"
+  }).forEach(function (sm) { haveBold[sm.theme] = true })
+  return Object.keys(fails).sort().filter(function (t) { return !haveBold[t] })
+}, ["rose-pine", "tokyo-night"])
+
 // The optimism invariant, RESTATED 2026-09-22 rather than widened, because a
 // real measurement broke it and the reason is understood.
 //
@@ -973,20 +1092,26 @@ checkCall("calibration: no sample exceeds its model by more than one unit of com
   return calib.samples.filter(function (sm) { return sm.measured - calibPredicted(sm) > CALIB_ROUNDING_BOUND })
     .map(function (sm) { return calibLabel(sm) + " over by " + round2(sm.measured - calibPredicted(sm)) })
 }, [])
-checkCall("calibration: and the model is still OPTIMISTIC on average, so targets sit above the line", function () {
-  // If this goes positive the sign of the error has flipped and every
-  // "target above the line" decision on this project needs revisiting.
-  var mean = calib.samples.reduce(function (acc, sm) {
-    return acc + (sm.measured - calibPredicted(sm))
-  }, 0) / calib.samples.length
-  return [mean < 0, Math.round(mean * 1000) / 1000]
-}, [true, -0.199])
+checkCall("calibration: and the model is still OPTIMISTIC on average IN EACH ENVIRONMENT, so targets sit above the line", function () {
+  // Per environment since F-CAL-3, because a mean taken across two renderings
+  // describes neither, and the pooled figure moves when rows are added to one
+  // side. Both must stay negative: if either sign flips, every "target above
+  // the line" decision taken in that environment needs revisiting.
+  return CALIB_ENVS.map(function (env) {
+    const rows = calibIn(env)
+    const mean = rows.reduce(function (acc, sm) { return acc + (sm.measured - calibPredicted(sm)) }, 0) / rows.length
+    return [env, rows.length, mean < 0, Math.round(mean * 1000) / 1000]
+  })
+}, [["live", 24, true, -0.376], ["cage", 22, true, -0.048]])
+// Those two means are F-CAL-3 in one line. The live rendering loses nearly
+// EIGHT TIMES what cage loses against the same arithmetic, -0.376 against
+// -0.048, which is why a cage figure cannot stand in for a live one and why
+// the pooled mean this replaced (-0.199) described no rendering that exists.
 checkCall("calibration: the refuted claim, restated as a number so it cannot come back", function () {
   // The claim was 1.25. What the fixture shows: the worst absolute delta is
-  // 0.79 and it is on a CAPTION (catppuccin, row 0.7: 5.45 measured against
-  // the model's 6.24), and the worst relative loss is 12.7 per cent of the
-  // two-decimal model value, the same row. An order of magnitude under the
-  // withdrawn figure, and every point of it on 10 px regular text.
+  // 0.79, an order of magnitude under the withdrawn figure. Since F-CAL-3 it
+  // also carries WHERE: the worst row in the whole fixture is a BOLD caption
+  // measured LIVE -- which is the finding, because bold was the remedy.
   const worst = calib.samples.reduce(function (w, sm) {
     return calibError(sm) > w.err ? { err: calibError(sm), sample: sm } : w
   }, { err: 0, sample: null })
@@ -994,8 +1119,8 @@ checkCall("calibration: the refuted claim, restated as a number so it cannot com
     const model = round2(calibPredicted(sm))
     return Math.max(w, (model - sm.measured) / model * 100)
   }, 0)
-  return [round2(worst.err), worst.sample.sizeClass, Math.round(worstRelPct * 10) / 10, round2(worst.err) < 1.25]
-}, [0.79, "caption", 12.7, true])
+  return [round2(worst.err), worst.sample.sizeClass, worst.sample.env, Math.round(worstRelPct * 10) / 10, round2(worst.err) < 1.25]
+}, [0.79, "bold-caption", "live", 12.7, true])
 checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pass reported as its peak", function () {
   // Within a hundredth; the claim is that the old pass measured the 0.8 glyph
   // and not the 0.52 rung, not a figure to the second decimal. The dim rung it

@@ -688,12 +688,26 @@ the channel name lives in the tooltip. Same three glyphs.
   was under 4.5:1 on 8 of 23 themes against the fill it sits on, floor 2.80.
 - Captions at 10 px (`Style.font.caption`) that carry information -- the group
   entry count, the Sources pinned count, the footer status line and the footer
-  hints -- are **bold** (D-RUNG-14). 10 px regular renders 11 to 13 per cent
-  below the contrast model and 10 px bold renders at model accuracy, so bold
-  buys the shortfall back without raising the opacity rung, which is what
-  keeps secondary text secondary. VERIFIED on our own sites 2026-09-21 under
-  headless cage: the four measured -0.0007 to -0.054 against a model of
-  6.2384, where the same sites at regular weight measured -0.79.
+  hints -- are **bold** (D-RUNG-14). The bold ships and stays: it costs
+  nothing, it keeps secondary text secondary where raising the opacity rung
+  would not, and under a headless renderer it does lift these captions to model
+  accuracy. What it does NOT do is fix the defect it was chosen for.
+  **The claim that bold buys the shortfall back is WITHDRAWN** (F-CAL-3). On
+  the display the user actually has, the same four sites measure 5.4475 to
+  5.6956 against a model of 6.2384 -- the regular-weight values to two
+  decimals -- so bold recovers nothing anyone can see. The 2026-09-21
+  verification was run under headless cage, where 10 px text rasterises
+  differently; the control proves the difference is glyph coverage and nothing
+  else, since a solid 2 px rule reads 9.3561 in both environments.
+  And the live pass that later measured bold ran on **catppuccin, the one
+  theme that never failed** -- its 0.7 caption rung already measured 5.45,
+  above 4.5 before any change. The themes that do fail the rung live,
+  rose-pine and tokyo-night, have never been measured bold at all. So the
+  0.7 caption rung is still under 4.5:1 on a real screen on those themes and
+  the remedy is unchosen: D-RUNG-14 is reopened. Every figure here is
+  asserted from `tests/fixtures/contrast-calibration.json` by the F-CAL-3
+  block of `tests/Model.test.js`, including which themes are still owed a
+  measurement, so this paragraph cannot drift from the fixture.
 - Row `MouseArea`: `hoverEnabled: true`, `cursorShape: Qt.PointingHandCursor`; click = play and close (Enter); click on the lead slot = toggle favorite only.
 - No color animation on the cursor; the clipboard has none, and 10k-row lists must stay cheap.
 

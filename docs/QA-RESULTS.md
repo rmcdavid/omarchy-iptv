@@ -6037,3 +6037,123 @@ setsid.
   from the transcript before anything is filed against the plugin.
 - F-HARNESS-1 did not reproduce in layer mode (1 fresh shell); no change to the
   row, which is filed against the floating-window mode.
+
+## F-CAL-3 fixed 2026-09-22: the fixture now says which screen it describes
+
+Repo-only pass. The display was never touched: no capture, no theme change, no
+keystroke, no shell restart. Every figure below was already measured -- this
+change moves figures out of prose and into rows, and changes how the rows are
+read. Nothing was re-measured, and nothing needed to be.
+
+### Why neither option in the defect was taken on its own
+
+F-CAL-3 offered two: re-measure everything live, or record the environment per
+row and stop comparing across them. Each is wrong by itself.
+
+**Re-measuring everything live destroys the evidence.** The cage rows are not
+noise to be replaced. They are the only reason we know the divergence is glyph
+rasterisation and not a broken model: the same four sites, same theme, same
+build, read 6.2377 under cage and 5.4475 to 5.6956 live. Delete the cage half
+and that becomes an unexplained live shortfall again -- which is precisely the
+state that produced the withdrawn 1.25 claim years of this document ago.
+
+**Recording the environment without changing how tolerance is DRAWN fixes
+nothing.** A comment saying "these rows are cage" does not stop `bold-caption`
+drawing the absolute tolerance on cage evidence and then being cited about the
+user's screen. That is the whole defect, and it is a naming join, not a call
+(CLAUDE.md rule 13).
+
+So the fix is both, plus the part neither option named: the tolerance table is
+keyed by the PAIR.
+
+### What changed in the fixture
+
+| | before | after |
+|---|---|---|
+| rows | 40 | 46 |
+| rows stating their environment | 0 | 46 |
+| tolerance keyed by | `sizeClass` | `(sizeClass, env)` |
+| `bold-caption` live rows | 0 | 3 |
+| control rows (solid rule, both environments) | 0 | 3 |
+| optimism mean | one pooled -0.199 | live **-0.376**, cage **-0.048** |
+
+The pooled mean is the clearest single symptom: **-0.199 described no rendering
+that exists.** It was the average of a live population losing 0.376 and a cage
+population losing 0.048, and it moved whenever rows were added to either side.
+
+### The rows that were prose
+
+The live bold measurements that refuted D-RUNG-14 lived only in a paragraph.
+Three are now rows on catppuccin at the 0.7 rung: group count 5.4475, Sources
+count 5.4590, footer status 5.6956.
+
+The live footer hints (5.8559) is deliberately **not** a row, for the same
+reason its cage twin was left out on 2026-09-21: it is dimmed by `<font color>`
+inside `StyledText`, not by scene-graph opacity, so predicting it as a 0.7 row
+would assert something false about how it is drawn. An exclusion that is right
+under one environment is right under both; taking the live figure because it
+happened to suit the argument would have been the same error in the other
+direction.
+
+### The control, which is the load-bearing part
+
+The conclusion is not "cage differs somehow" -- it is "colour and compositing
+agree, glyph coverage does not", and only the pair licenses the split. A solid
+2 px rule at the text token has no partial coverage to lose:
+
+| | live | cage |
+|---|---|---|
+| catppuccin cursor mark, 2 px solid rule | **9.3561** | **9.3561** |
+| the four bold captions, same theme, same build | 5.4475 - 5.6956 | 6.1841 - 6.2377 |
+
+Both halves are asserted. The control check returns the number of pairs it
+compared alongside its result, so it cannot pass by comparing nothing --
+deleting the live control row turns it red on the count, not silently green.
+
+### The second finding, which is worse than the first
+
+The live bold pass ran on **catppuccin**, whose 0.7 caption rung already
+measured **5.45** -- above 4.5 before any change. It measured the one theme
+that never failed.
+
+| theme, 0.7 caption rung, live | regular | bold |
+|---|---|---|
+| rose-pine | 2.96 - 3.15 | never measured |
+| tokyo-night | 4.12 - 4.30 | never measured |
+| catppuccin | 5.45 - 5.70 | 5.4475 - 5.6956 |
+
+So even a perfect measurement there proved nothing about the failing case.
+**D-RUNG-14 is reopened.** The set of themes owed a live bold measurement is
+derived from the fixture by a check, not written down, so it goes red the
+moment one is taken.
+
+### Proof the checks catch something (CLAUDE.md rule 11)
+
+Six new checks, node **1464 -> 1470**. Run against the fixture exactly as it
+shipped at `d4e0552`, **ten checks go red**, including all six new ones. Each
+was also mutated individually:
+
+| mutation | red |
+|---|---|
+| the fixture as it shipped | 10, incl. all 6 new |
+| a row loses its `env` | 4 |
+| a caption row claims an environment its class never had | 3 |
+| the live bold rows removed -- the state D-RUNG-14 was certified in | 5 |
+| the control diverges between environments | 2 |
+| the control has nothing left to compare | 3 |
+| pretend bold DID work live | 4 |
+| someone measures tokyo-night live at bold | 3 |
+
+The fixture was restored from backup after the battery and the suite verified
+back to 1470 / 0.
+
+### Corrections to earlier text
+
+- F-CAL-3's own board row said the cage bold pass was 2026-09-22. It was
+  **2026-09-21, segment C**. The fixture's dates were right and the prose was
+  wrong, which is itself the argument for reading `env` and never the date --
+  2026-09-21 ran a live segment *and* a cage segment.
+- `docs/UX.md` 5.4 claimed bold "buys the shortfall back". Withdrawn.
+- `docs/CONTRAST-RULING.md`'s calibrated-target derivation gains a clause: a
+  target may not be set against rows from an environment the user does not
+  have.
