@@ -5390,6 +5390,74 @@ it.
   bash defers a signal while a foreground `sleep` runs, so the first teardown
   left cage alive and a stale `wayland-0` behind.
 
+## Headless pass 2026-09-21, segment D: the three rows that were "blocked on a screen"
+
+Same recipe as segment C, same proof of non-interference: `shell.json`, the
+state directory, the cache and `theme.name` hash-identical to the snapshot, the
+live shell still pid 1152526 and never restarted, the plugin still 53ad47e,
+theme still catppuccin. Three board rows carried the words "never rendered" or
+"blocked"; the harness renders all three.
+
+### 1. D-RUNG-10, the EPG progress hairline -- rendered for the first time
+
+`run.sh --fake-epg` supplies the EPG rows this install's own data cannot: its
+`epgUrl` is empty and 0 of 1471 channels carry a number. The hairline draws at
+y=446-447, 2 px tall, as a track with a filled portion inside it.
+
+| Surface | filled | track | measured | model | error |
+|---|---|---|---|---|---|
+| ordinary row | `#627aa8` | `#333445` | **2.8340** | 2.8468 | -0.013 |
+| cursor row | `#7392c8` | `#404253` | **3.1451** | 3.1677 | -0.023 |
+
+The ordinary row is **under** the 3:1 bar of WCAG 1.4.11; the cursor row clears
+it. With the model validated to 0.013 and 0.023 on this surface, its 23-theme
+figures can be trusted -- and they are WORSE than the board recorded, because
+the board's "15 of 23, floor 1.7980" is the CURSOR variant:
+
+- **ordinary row: 19 of 23 under 3:1, floor rose-pine 1.6551**
+- cursor row: 15 of 23 under 3:1, floor rose-pine 1.7980
+- worst five ordinary: rose-pine 1.66, miasma 1.85, white 1.95,
+  catppuccin-latte 2.02, lupine 2.04
+
+D-RUNG-10 is no longer an evidence gap. It is a product decision.
+
+### 2. D-RUNG-11, the 28 px empty-state glyph -- model byte-exact
+
+Rendered by querying a string that matches nothing. The glyph draws `#7496d1`
+where the model computes `#7496d1` -- byte-exact -- measuring **5.4874**
+against a model of 5.4846, an error of +0.003. The glyph class is exact, so the
+row's "2 of 23 under 3:1" (rose-pine 2.42, miasma 2.97) stands without needing
+a capture of either failing theme.
+
+On the same frame, consistent with the stroke-coverage mechanism of segment C:
+the 14 px title measured -0.074 and the 12 px prose -0.256 against the same
+model value of 6.2384.
+
+### 3. The composite rounding, now seen four times
+
+Every surface measured across segments C and D shows the model's only
+arithmetic error to be a one-unit rounding in the composite step:
+
+| Surface | model | Qt paints |
+|---|---|---|
+| rose-pine cursor fill | `#ede7e4` | `#ede8e4` |
+| catppuccin cursor fill | `#2c2d3e` | `#2c2d3e` (match) |
+| hairline track | `#333446` | `#333445` |
+| hairline fill | `#627aa9` | `#627aa8` |
+
+Worth at most 0.039 ratio points. Given the colour Qt actually paints, every
+measurement in both segments equals the model to within the stroke-coverage
+bias and nothing else.
+
+### 4. F-CAL-2's method, ruled
+
+The product owner ruled: **measure the longest available string at each site,
+and record the string on the row.** The text class keeps its 0.15 absolute and
+the pins come off as rows are re-measured under that rule. The fixture note
+carries it. Rows that carry a `site` but were measured before the ruling are
+owed a re-measure; that is a fixture-wide sweep of its own, one harness run per
+theme, and it is not done here.
+
 ## Live pass 2026-09-21, segment B: PiP on the real compositor, and the harness on the real display
 
 Owner: QA (display lane, segment B). Machine: the user's live session, WAYLAND_DISPLAY
