@@ -5433,6 +5433,20 @@ On the same frame, consistent with the stroke-coverage mechanism of segment C:
 the 14 px title measured -0.074 and the 12 px prose -0.256 against the same
 model value of 6.2384.
 
+### 1b. D-RUNG-10's fix, verified on screen the same day
+
+The re-ink was measured before it was called fixed. Same headless recipe,
+catppuccin, ordinary row:
+
+| | filled | track | ratio |
+|---|---|---|---|
+| before (accent @0.55) | `#627aa8` | `#333445` | **2.8340** -- under the 3:1 bar |
+| after (text token @0.73) | `#a4aac5` | `#333445` | **5.3174** -- clears it by 77 per cent |
+
+Model for the fix: `#a3aac5`, 5.3120. Error +0.005, with the same one-unit
+composite rounding seen on every other surface. The machine was hash-identical
+before and after, the live shell never restarted.
+
 ### 2b. D-RUNG-12, the dimmed channel number -- and a warning about the method
 
 From the same `--order number` frame. Non-cursor numbers at the 0.52 rung on
