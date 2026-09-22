@@ -5292,6 +5292,60 @@ guide's own confirm dialog before the file restore, and the running shell's
 in-memory state agrees with the restored file (`status`: 1 source, 7
 recents). Residuals: none known. Nothing left the machine.
 
+## Live pass 2026-09-22: 0.7.3 in actual use, on the real display
+
+The maintainer asked for 0.7.3 to be given real use while away from the
+machine. Driven through the plugin's own IPC (`toggle`, `play`, `stop`,
+`status`) rather than keystrokes, with one `wtype` to type a query. Snapshot
+first, state restored on exit and verified identical. The source is
+`iptv-org.github.io`, the free public playlist, so no credentials and no paid
+subscription were involved.
+
+**What worked.** The guide opens and renders correctly; the 2 px cursor mark is
+visible and measures `#cdd6f4` at **9.3561** against the fill -- the text token
+byte-exact, identical to the headless figure. The cursor-row name renders the
+text token (`#c5d5f2`, 9.1326), not the accent, so the 2026-09-21 ruling is in
+force on screen. The selected group label renders the calibrated active ink
+(`#83adf4`, 5.9593), D-RUNG-15's fix, matching headless exactly. Playback
+started, the bar widget showed the channel name with live throughput, a zap
+worked, and `stop` left no mpv behind.
+
+**D-PLY-14, found by using it.** A transient error during first load marks a
+channel failed, and nothing clears that mark when the stream recovers. The end
+state was self-contradictory and user-visible: status reported `playing: true`
+with `nowPlaying` set to the same id that appeared in `failedAt`; mpv reported
+`video-format: h264`, 33.9 s of demuxer cache and `eof-reached: false`; the bar
+showed the channel and its throughput -- and the guide row read
+`Music - Failed 15:07 - Space to retry` with the alert glyph and neither the
+playing glyph nor the bold name, because the failure state displaces the
+playing state. `raiseStreamFailure` sets the mark; the only clear runs when a
+play STARTS, not when one succeeds. The hook for the fix already exists and
+already runs every 10 s: the healthy branch of the status check.
+
+**F-CAL-3, and it undoes a claim made yesterday.** The four bold caption sites
+measured 6.2377 under headless cage -- model accuracy, which is what D-RUNG-14
+rested on. On the live display, same day, same theme, same code, they read
+5.4475, 5.4590, 5.6956 and 5.8559. **5.45 is exactly what the REGULAR weight
+measured on this display on 2026-09-21**, so bold changed nothing the user can
+see. The bold is applied (four `font.bold: true` on the right elements in the
+installed file) and a real Bold face resolves (`fc-match monospace:bold`), so
+this is glyph rasterisation differing between the two environments.
+
+The control makes that conclusive: the 2 px cursor mark, a SOLID shape,
+measured **9.3561 in both environments** -- identical. Colour and compositing
+agree; only text differs. So `contrast-calibration.json` currently mixes
+environments -- its 2026-09-21 rows are live, its 2026-09-22 rows headless --
+and does not describe one rendering.
+
+**Process note, recorded because it nearly went wrong.** One capture was taken
+while the guide was in fact closed, and the fixed crop coordinates caught the
+desktop instead of the card. It was deleted immediately and not examined. The
+cause was using hardcoded coordinates instead of the card-detection guard
+written earlier the same day; every capture after that point goes through a
+wrapper that refuses to write a crop unless the card fill dominates its own
+centre line, and the two retained images were verified to be plugin surfaces
+only. Full frames are deleted as soon as a crop is taken.
+
 ## Defect hunt 2026-09-22: four areas, adversarially verified
 
 The board had reached zero open rows, so rather than wait for defects to be
