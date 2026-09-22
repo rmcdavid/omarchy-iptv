@@ -3,6 +3,15 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+### Fixed
+- **Clicking a channel's number no longer toggles its favourite.** The
+  favourite hit target was meant to start at the star slot, but the position
+  it was given was rejected at build time and silently fell back to the row's
+  left edge, so on a playlist with channel numbers the number column sat
+  inside it. (D-CHNO-6)
+
 ## 0.7.3 (2026-09-22)
 
 Selection you can actually see, and a favorites bug whose fix the last two

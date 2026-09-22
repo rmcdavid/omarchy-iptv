@@ -2817,12 +2817,27 @@ Item {
                   }
 
                   // Lead-slot hit target (UX 7.3): toggles favorite without
-                  // playing. M2-03 4.2: anchored to `lead`, not to the row's
-                  // left edge, or a click on the number column would toggle
-                  // the favorite. UX 7.3's Style.space(28) minimum stands.
+                  // playing. M2-03 4.2: it starts at the LEAD slot's left
+                  // edge, not the row's, or a click on the number column would
+                  // toggle the favorite. UX 7.3's Style.space(28) minimum stands.
+                  //
+                  // D-CHNO-6. This was `anchors.left: lead.left`, and Qt
+                  // refused it on every row it ever drew: `lead` is a
+                  // grandchild of this delegate and this MouseArea is a child,
+                  // so they are uncle and nephew, not parent or sibling. The
+                  // anchor was dropped, `x` fell back to 0, and the target
+                  // therefore started at the row's left edge -- covering the
+                  // number column, which is the one thing the anchor existed
+                  // to prevent. So the warning was not cosmetic: on a numbered
+                  // playlist a click on a channel's NUMBER toggled its
+                  // favorite.
+                  //
+                  // Binding `x` crosses the generation that anchors may not.
+                  // It is written as rowContent's own offset plus lead's
+                  // offset within it, rather than the algebraically equal
+                  // `lead.x`, so it still tracks a change to either margin.
                   MouseArea {
-                    anchors.left: lead.left
-                    anchors.leftMargin: -Style.space(12)
+                    x: rowContent.x + lead.x - Style.space(12)
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: Math.max(Style.space(28), Style.space(12) + root.leadWidth)
