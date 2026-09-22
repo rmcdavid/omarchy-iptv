@@ -5433,6 +5433,21 @@ On the same frame, consistent with the stroke-coverage mechanism of segment C:
 the 14 px title measured -0.074 and the 12 px prose -0.256 against the same
 model value of 6.2384.
 
+### 2b. D-RUNG-12, the dimmed channel number -- and a warning about the method
+
+From the same `--order number` frame. Non-cursor numbers at the 0.52 rung on
+catppuccin measured **4.0245** ("7.1") and **3.8348** ("300") against a model
+of 4.0728 -- both under 4.5:1, confirming the defect on screen.
+
+The cursor-row number at full opacity measured 7.8080 against a model of
+9.3840, and that sample is **discarded rather than reported as an error**. Its
+string is the single digit "7", and its peak pixel came back `#b9c9b9` -- a
+green-tinted colour lying on no path between the text token `#cdd6f4` and the
+fill `#2c2d3e`. That is the signature of subpixel antialiasing fringing, not of
+ink. A one-glyph sample can put the peak-pixel method on a fringe pixel and
+produce a number that means nothing, which is the sharpest argument yet for the
+ruling that calibration samples the LONGEST available string.
+
 ### 3. The composite rounding, now seen four times
 
 Every surface measured across segments C and D shows the model's only
