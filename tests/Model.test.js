@@ -1502,6 +1502,61 @@ function headerRatio(theme) {
   const a = Model.sectionHeaderAlpha(s.text, s.rowFill)
   return contrast(composite(s.text, s.rowFill, a), s.rowFill)
 }
+// ---- D-ID-4: one provider, two lists, and a favourite that moves ----
+//
+// channelIdRemap's idempotence argument holds within ONE list and fails across
+// two. `u:` is fnv1a32 of the STREAM URL, so two playlists from one provider
+// share that id space exactly; whether a row is keyed `u:` or `n:` depends on
+// whether its NAME is unique IN THAT LIST. The same channel therefore has
+// different ids in the two lists, and favourites are global (D14), so applying
+// one list's map to the whole state rewrites the other list's reference.
+//
+// These checks PIN the current behaviour rather than assert it is right. It is
+// not right, and the row says so. They exist so the next person to touch
+// channel identity has to confront it deliberately instead of rediscovering it.
+const idBig = [{ name: "Sports One", url: "http://prov.test/live/u1/p1/8801.ts" },
+               { name: "Sports One", url: "http://prov.test/live/u1/p1/8802.ts" },
+               { name: "News Ten", url: "http://prov.test/live/u1/p1/9001.ts" }]
+const idSmall = [{ name: "Sports One", url: "http://prov.test/live/u1/p1/8801.ts" },
+                 { name: "Movies Two", url: "http://prov.test/live/u1/p1/7001.ts" }]
+function withIds(list) {
+  const ids = Model.channelIds(list)
+  return list.map(function (c, i) { return { name: c.name, url: c.url, id: ids[i] } })
+}
+checkCall("D-ID-4: one stream URL, two lists, two different ids -- the whole cause in one line", function () {
+  // The big list has an HD/SD twin so the name is not unique there; the
+  // filtered list has the channel once, so it is.
+  return [withIds(idBig)[0].id, withIds(idSmall)[0].id]
+}, ["u:4bc351f3", "n:ceb9a086"])
+checkCall("D-ID-4: a favourite starred on one list stops showing there once the other is opened", function () {
+  const big = withIds(idBig), small = withIds(idSmall)
+  let st = { favorites: [big[0].id], recents: [], lastPlayed: null, session: null, sources: [] }
+  const shown = function (list) {
+    return (Model.channelsForScope(list, "favorites", st) || []).map(function (c) { return c.name })
+  }
+  const before = shown(big)
+  st = Model.remapStateIds(st, Model.channelIdRemap(small)).state   // open the filtered list
+  const afterSmall = shown(small)
+  const afterBig = shown(big)
+  // Re-applying the big list does NOT bring it back: its own remap moves 0,
+  // because the state now holds an id that is already current for `small`.
+  const again = Model.remapStateIds(st, Model.channelIdRemap(big))
+  return [before, afterSmall, afterBig, again.moved, shown(big)]
+}, [["Sports One"], ["Sports One"], [], 0, []])
+checkCall("D-ID-4: and the obvious fix does not work -- matching on aliases is AMBIGUOUS", function () {
+  // Recorded because it is the first thing anyone will reach for. Once the
+  // remap has rewritten the favourite to the name key, the URL that told the
+  // twins apart is GONE FROM STATE, so a matcher that accepts any alias
+  // accepts BOTH twins and one star renders as two rows. The fix cannot be a
+  // matching change; it has to stop the state discarding what distinguishes
+  // them, which is a schema change and the owner's call.
+  const fav = "n:ceb9a086"
+  const ids = Model.channelIds(idBig)
+  return idBig.filter(function (c, i) {
+    return ids[i] === fav || "u:" + Model.fnv1a32(c.url) === fav || Model.nameIdKey(c.name) === fav
+  }).length
+}, 2)
+
 // ---- D-SINK-1: redaction, against the SHARED fixture both languages run ----
 //
 // Before this fixture the rule was pinned by two disjoint hand-written vector

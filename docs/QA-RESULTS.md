@@ -5405,9 +5405,36 @@ broadcasts. That is CLAUDE.md rule 10 exactly -- a double more forgiving than
 the real thing -- and it makes D-PLY-12's triggering input inexpressible in the
 suite. Fix F-MPV-1 first; D-PLY-12's fix is untestable until it is.
 
-**D-ID-4 (P3).** Switching to a second source from the same provider RELOCATES
-a favourite made on the first. Its verifier corrected the hunter's wording:
-nothing is deleted, and saying so on the board would have been wrong.
+**D-ID-4 (P3), reproduced and pinned rather than fixed.** Run through the
+shipping functions:
+
+| step | favourites on disk | Favorites shows |
+|---|---|---|
+| star "Sports One" while the big list is active | `["u:4bc351f3"]` | Sports One |
+| open the filtered list (remap moves 1) | `["n:ceb9a086"]` | Sports One |
+| go back to the big list | `["n:ceb9a086"]` | **nothing** |
+| re-apply the big list (its remap moves 0) | `["n:ceb9a086"]` | **nothing** |
+
+`u:` is fnv1a32 of the STREAM URL, so two lists from one provider share that id
+space exactly; whether a row is keyed `u:` or `n:` depends on whether its NAME
+is unique IN THAT LIST. One channel therefore has two ids, and favourites are
+global (D14). `channelIdRemap`'s idempotence argument is sound within one list
+and silent about two.
+
+**Why the obvious fix is wrong, which is the part worth keeping.** Matching a
+favourite against any of a channel's alias ids does not work. Once the remap
+has rewritten the favourite to the name key, the URL that told the HD/SD twins
+apart is GONE FROM STATE, so a tolerant matcher accepts BOTH twins and one star
+renders as two rows. That is demonstrated and pinned as a check. The fix cannot
+be a matching change: the state has to stop discarding what distinguishes them,
+which is a schema change and the owner's call. It was not made here, at the end
+of a long session, in the area that has already produced D-ID-1, D-ID-2 and
+D-ID-3 -- the last of which shipped a changelog claim that was false twice.
+
+Its verifier also corrected the lane on two points now on the board: nothing is
+DELETED (the favourite is relocated and still shows on the other source), and
+the same move is made by the helper's `remap_state_file`, not only by
+`Service.adoptIdScheme`, so any fix lands in both.
 
 **D-SINK-3 (P3)** is a documentation defect, not a new leak, and its verifier
 corrected the hunter for implying otherwise: argv exposure is a knowingly
