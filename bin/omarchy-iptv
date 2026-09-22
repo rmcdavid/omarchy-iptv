@@ -3272,6 +3272,29 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                 return {"state": "playing", "reason": ""}
             elif event == "end-file" and mine:
                 verdict = ended_verdict(message)
+                why = str(message.get("reason") or "")
+                # `ended_verdict` is the POST-MORTEM reducer (4.8): it answers
+                # "why did the player end", for a player that has ended. Here
+                # the connection is still open and mpv is still running, so two
+                # of its answers mean something different and must not be taken
+                # at face value.
+                if verdict["kind"] == "ignored":
+                    # D-PLY-13. "redirect" is mpv resolving an .m3u8 master,
+                    # which is the commonest shape in IPTV. The load has NOT
+                    # ended, so returning here stopped the watch before the
+                    # resolved stream could fail -- and an expired subscription
+                    # failing at exactly that moment is what this watch exists
+                    # for. Keep draining.
+                    continue
+                if verdict["kind"] == "failed" and why == "stop":
+                    # D-PLY-12. After the fact, "stop" can only mean "a load we
+                    # issued was replaced AND THEN the process died", so the
+                    # reducer calls it a failure. On a LIVE connection it cannot
+                    # mean that: it means another IPC client replaced our entry,
+                    # which is a zap. Reporting failure here put a "did not
+                    # play" notification on screen for a channel the user had
+                    # deliberately just left, and marked it failed in the guide.
+                    return {"state": "unknown", "reason": ""}
                 if verdict["kind"] == "failed":
                     # The log line says what actually went wrong; mpv's own
                     # file_error is a generic "loading failed". Both are

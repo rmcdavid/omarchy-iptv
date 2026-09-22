@@ -6,6 +6,13 @@ version lives in `manifest.json`.
 ## Unreleased
 
 ### Fixed
+- **Zapping quickly no longer marks the channel you left as broken.** If you
+  pressed Enter on one channel and then another before the first had opened,
+  the first was reported as a failed stream — a "did not play" message for a
+  channel you had simply moved on from. (D-PLY-12)
+- **A stream that fails while resolving is now reported.** Many providers hand
+  out a playlist that points at the real stream; if that second step failed —
+  an expired subscription, most often — the guide said nothing at all. (D-PLY-13)
 - **A single "runs forever" programme no longer wipes the whole guide.** Some
   providers mark a 24/7 stream as ending in the year 9999. One such entry was
   enough to corrupt the cached guide data for *every* channel on that source,

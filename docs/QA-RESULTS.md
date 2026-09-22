@@ -5360,6 +5360,36 @@ than a rejected one. The parity test a lane had called "two copies of the same
 wrong list" could not catch the original omission, but it did catch an
 incorrect addition, which is more than it was credited with.
 
+### Fixed after the hunt, once the instrument was fixed first
+
+**F-MPV-1, then D-PLY-12 and D-PLY-13.** The order was forced: D-PLY-12's
+triggering input could not be written down until the double stopped being more
+forgiving than real mpv.
+
+F-MPV-1 is narrower than it was filed. Only `STUB_MPV` was wrong; `FakeMpv`'s
+`inject` already broadcast to every connection and its `loadfile` emits no
+events at all, so it was never mis-delivering anything. Two things were needed:
+the stub now broadcasts events to every client while keeping command REPLIES
+point-to-point, and it emits `end-file reason="stop"` for the previous entry on
+a `loadfile ... replace`, which it did not before. Without the second half a
+zap still looked like nothing had ended.
+
+Both player defects then turned out to be the same four lines.
+`observe_first_load` was asking `ended_verdict` -- the POST-MORTEM reducer --
+about a connection that is still open. Two of its answers mean something
+different while live:
+
+- `reason="stop"` after the fact can only mean "a load we issued was replaced
+  AND THEN the process died", so the reducer calls it failed. Live, it means
+  another IPC client replaced our entry: a zap. **D-PLY-12.**
+- `reason="redirect"` is already classified non-terminal, but the site returned
+  on any end-file for its own entry, so the watch ended while an .m3u8 master
+  was still resolving -- and the resolved stream's failure, the very thing the
+  watch exists for, was never seen. **D-PLY-13.**
+
+Both tests were proven red against the shipped code by removing the live/
+post-mortem distinction, which turns exactly those two red and nothing else.
+
 ### Filed, not yet fixed
 
 **D-PLY-12 (P2).** A zap inside the first-load window reports the channel you

@@ -110,7 +110,44 @@ def orderly_exit(code):
     os._exit(code)
 
 
+# F-MPV-1. Real mpv BROADCASTS events to every connected IPC client; only the
+# reply to a command goes to the client that issued it. Measured on mpv 0.41
+# headless with two AF_UNIX clients: when client B issues
+# `loadfile ... replace`, client A receives end-file reason="stop" for its OWN
+# entry id, then start-file for B's.
+#
+# This stub used to send events only down the issuing connection, which made
+# every defect depending on one client hearing ANOTHER client's event
+# inexpressible in the suite -- and that is exactly why D-PLY-12 went unfound
+# for the life of the feature. A double more forgiving than the real thing is
+# CLAUDE.md rule 10, and this was one.
+clients = []
+clients_lock = threading.Lock()
+
+
+def broadcast(payload):
+    line = (json.dumps(payload) + chr(10)).encode("utf-8")
+    with clients_lock:
+        targets = list(clients)
+    for client in targets:
+        try:
+            client.sendall(line)
+        except OSError:
+            pass
+
+
 def handle(conn):
+    with clients_lock:
+        clients.append(conn)
+    try:
+        _handle(conn)
+    finally:
+        with clients_lock:
+            if conn in clients:
+                clients.remove(conn)
+
+
+def _handle(conn):
     buffer = b""
     while True:
         try:
@@ -174,6 +211,15 @@ def handle(conn):
                 state["props"][command[1]] = command[2]
                 reply = {"error": "success", "request_id": rid}
             elif name == "loadfile":
+                # F-MPV-1, second half. Real mpv 0.41 measured headless: a
+                # `loadfile ... replace` over a live entry emits end-file
+                # reason="stop" for the OLD entry id before start-file for the
+                # new one, and both go to every client. The stub emitted only
+                # start-file, so a zap looked like nothing had ended and
+                # D-PLY-12's input could not be written down.
+                if state["entry"]:
+                    events.append({"event": "end-file", "reason": "stop",
+                                   "playlist_entry_id": state["entry"]})
                 state["entry"] += 1
                 state["url"] = command[1]
                 reply = {"error": "success", "data": {"playlist_entry_id": state["entry"]}, "request_id": rid}
@@ -188,8 +234,10 @@ def handle(conn):
             else:
                 reply = {"error": "success", "data": None, "request_id": rid}
             conn.sendall((json.dumps(reply) + "\\n").encode("utf-8"))
+            # The REPLY is point-to-point; the EVENTS reach every client, as
+            # real mpv does (F-MPV-1).
             for event in events:
-                conn.sendall((json.dumps(event) + "\\n").encode("utf-8"))
+                broadcast(event)
             if load == "fail" and name == "loadfile":
                 time.sleep(0.05)
                 orderly_exit(2)      # --idle=once exits when the playlist ends
@@ -1989,6 +2037,152 @@ class IpcEventTest(unittest.TestCase):
         self.server.close()
         self.assertIsNone(client.drain_events(time.monotonic() + 1.0))
         self.assertTrue(client.closed)
+
+
+class BroadcastAndZap(PlayerTestCase):
+    """F-MPV-1 and D-PLY-12.
+
+    Real mpv broadcasts events to every connected IPC client. Until the stub
+    did too, no test in this suite could express "one client hears an event
+    raised by another" -- which is why D-PLY-12 was never found.
+    """
+
+    def issue(self, command):
+        """A second IPC client, the way `omarchy-iptv play` is one."""
+        import socket as _socket
+        client = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(self.sock)
+        self.addCleanup(client.close)
+        client.sendall((json.dumps(command) + "\n").encode("utf-8"))
+        return client
+
+    def read_events(self, client, budget=2.0):
+        """Every JSON line the client receives within the budget."""
+        out, buf, deadline = [], b"", time.monotonic() + budget
+        client.settimeout(0.2)
+        while time.monotonic() < deadline:
+            try:
+                chunk = client.recv(65536)
+            except OSError:
+                continue
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if line.strip():
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        pass
+        return out
+
+    def test_f_mpv_1_an_event_reaches_a_client_that_did_not_cause_it(self):
+        """The property the stub lacked. Client A connects and stays quiet;
+        client B loads a file; A must hear B's events.
+
+        Proven necessary by mutation: send the events down the issuing
+        connection only, as the stub used to, and A hears nothing.
+        """
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload.get("firstLoad", {}).get("state"), "playing", payload)
+        watcher = self.issue({"command": ["get_property", "pid"], "request_id": 99})
+        self.read_events(watcher, 0.3)          # drain the reply
+        self.issue({"command": ["loadfile", "http://127.0.0.1:1/b.ts", "replace"], "request_id": 1})
+        heard = [e.get("event") for e in self.read_events(watcher, 2.0) if "event" in e]
+        self.assertIn("start-file", heard,
+                      "a client that issued nothing must still hear another client's events")
+
+    def test_d_ply_12_a_zap_during_first_load_is_not_a_stream_failure(self):
+        """The channel you just LEFT must not be reported as broken.
+
+        Cold start: `player start` loads A and watches for first load. Before
+        A's picture arrives the user presses Enter on B, so `omarchy-iptv play`
+        issues `loadfile ... replace` as a second IPC client. Real mpv then
+        emits end-file reason="stop" for A's entry id -- to EVERY client,
+        including the observer -- and observe_first_load hands that live
+        mid-stream event to ended_verdict, the POST-MORTEM reducer, which reads
+        "stop" as "a load we issued was replaced and then the process died".
+
+        The process has not died. It has been zapped. Reporting `failed` here
+        puts a "did not play" notification on screen for a channel the user
+        deliberately left, and marks it failed in the guide.
+
+        Expressible only because the stub now broadcasts and emits end-file on
+        replace (F-MPV-1); before that this input could not be written down.
+        """
+        import threading as _t
+        # A live player is ADOPTED (entry_ids on, no file-loaded of its own),
+        # so `player start` issues its loadfile and then waits -- which is the
+        # window the zap has to land in. Injecting is how the timing is made
+        # deterministic rather than raced.
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        server = self.start(props={"mpv-version": "mpv 0.41.0"}, entry_ids=True)
+
+        def zap():
+            for _ in range(200):                       # bounded: ~2 s
+                if any(c[:1] == ["loadfile"] for c in server.commands):
+                    break
+                time.sleep(0.01)
+            else:
+                return                                 # gave up; the assert below still runs
+            # Exactly what real mpv 0.41 sends to every client when a second
+            # client replaces the live entry, measured headless.
+            server.inject({"event": "end-file", "reason": "stop", "playlist_entry_id": 1})
+            server.inject({"event": "start-file", "playlist_entry_id": 2})
+
+        worker = _t.Thread(target=zap, daemon=True)
+        worker.start()
+        code, payload, _, stderr = self.player_start()
+        worker.join(3)
+        self.assertEqual(code, 0, stderr)
+        state = payload.get("firstLoad", {}).get("state")
+        self.assertNotEqual(state, "failed",
+                            "a zap is not a stream failure; payload was %r" % (payload,))
+
+    def test_d_ply_13_a_redirect_does_not_end_the_watch_before_the_real_failure(self):
+        """An .m3u8 master resolving must not blind the first-load watch.
+
+        mpv emits end-file reason="redirect" while it resolves a master
+        playlist -- the commonest shape in IPTV. `ended_verdict` already
+        classifies that as non-terminal, but `observe_first_load` returned on
+        it anyway, so the watch stopped before the RESOLVED stream could fail.
+        An expired subscription failing at exactly that moment is the failure
+        this watch exists to catch, and it was the one it could not see.
+
+        Red against the code that shipped: the redirect returns `unknown` and
+        the error that follows is never observed.
+        """
+        import threading as _t
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        server = self.start(props={"mpv-version": "mpv 0.41.0"}, entry_ids=True)
+
+        def resolve_then_fail():
+            for _ in range(200):                       # bounded: ~2 s
+                if any(c[:1] == ["loadfile"] for c in server.commands):
+                    break
+                time.sleep(0.01)
+            else:
+                return
+            server.inject({"event": "end-file", "reason": "redirect", "playlist_entry_id": 1})
+            time.sleep(0.05)
+            server.inject({"event": "log-message", "prefix": "stream", "level": "error",
+                           "text": "Server returned 401 Unauthorized"})
+            server.inject({"event": "end-file", "reason": "error",
+                           "file_error": "loading failed", "playlist_entry_id": 1})
+
+        worker = _t.Thread(target=resolve_then_fail, daemon=True)
+        worker.start()
+        code, payload, _, stderr = self.player_start()
+        worker.join(3)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload.get("firstLoad", {}).get("state"), "failed",
+                         "the failure after the redirect must still be seen; payload was %r" % (payload,))
+        self.assertIn("401", payload["firstLoad"]["reason"])
 
 
 if __name__ == "__main__":
