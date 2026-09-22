@@ -3,6 +3,56 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.3 (2026-09-22)
+
+Selection you can actually see, and a favorites bug whose fix the last two
+changelogs had already claimed. Everything visual here was measured on a real
+screen across all twenty-three installed themes rather than computed and hoped
+for.
+
+### Changed
+- **The cursor row is marked by a 2 px mark, and the accent now means
+  "active" rather than "where you are".** The mark in the left gutter was
+  always there; what changed is that it is now the whole answer on the channel
+  list, the Sources list gained one, and the theme accent moved to the two
+  places that mean a choice: which group is filtering the list, and which
+  button a confirm dialog has selected. The mark is defined by brightness
+  rather than colour, so it works on every theme and in greyscale.
+- **The selected source row is finally visible.** The Sources list marked its
+  cursor with a background tint alone, which on every installed theme is too
+  faint to count as a marker, next to a border that every theme ships zero
+  pixels wide. On the two action rows, and on any source that was not the
+  active one, nothing at all showed which row `x remove` would act on.
+- **The programme progress bar is easier to see.** It was drawn in the theme
+  accent, a colour too close to the track it sits in: on nineteen of the
+  twenty-three installed themes it fell below the visibility threshold for a
+  graphical indicator, and no amount of brightening the accent could fix it on
+  every theme. It is now drawn in the regular text colour, which clears the
+  threshold everywhere. It no longer carries the accent hue. (D-RUNG-10)
+- **Small counts and the footer line are bold**, which makes them readable on
+  themes where they were previously below the accessibility threshold, without
+  making them louder.
+
+### Fixed
+- **The selected group name was hard to read on eight themes.** It was drawn
+  in the raw theme accent over the selection tint, which on eight of the
+  twenty-three installed themes falls below the readability threshold, worst
+  at 2.80:1. It now uses an ink calibrated per theme, clearing the threshold
+  on all twenty-three while keeping the accent exactly as it was on the
+  fifteen that never had a problem. Theme colours that carry transparency are
+  now blended against the surface beneath them before the guide checks
+  readability, so the check measures what you actually see. (D-RUNG-13,
+  D-RUNG-15)
+- **Favorites and recents now actually survive a provider credential change.**
+  0.7.1 and 0.7.2 said they did, and the helper's half was right: it moved
+  every saved reference onto the name-keyed scheme. But the shell then wrote
+  the state it had loaded before the helper ran straight back over the file,
+  on every fetch, so on a playlist without `tvg-id` the migration never took
+  hold and a password rotation still orphaned favorites. The shell now moves
+  its own copy of the state onto the new scheme whenever a channel list is
+  applied, so its writes agree with the helper's. Found by observing the
+  running plugin rather than the helper alone. (D-ID-3)
+
 ## 0.7.2 (2026-09-21)
 
 The first release through the new pipeline, closing the three things the
