@@ -7246,3 +7246,55 @@ both say 0.7.6. Fixed in 0.7.2 and still correct.
 What this does **not** establish is the state of any listing badge, which is
 outside this repository. `omarchy plugin update` never consults the
 marketplace, so the badge gates discovery rather than delivery.
+
+## Update pass 2026-09-23: D-HOST-1's notice has never been seen to fire (D-HOST-2)
+
+Updated the install 0.7.5 → 0.7.7 and restarted the shell, as asked. Both
+worked; state came through byte-identical. What did not work is the notice I
+shipped for D-HOST-1.
+
+### It stayed silent through the exact update it exists for
+
+0.7.5 carried the check (3 `staleBuild` references in its `Model.js`, 6
+manifest-watch references in its `Service.qml`), the ladder order was right, and
+`savedSearches` above it was empty. After the update and before the restart, the
+guide's footer measured **180 px** — the same as before the update, and the
+width of the ordinary counts line. The notice is 50 characters and would be
+about 300 px.
+
+### The cause of that failure is proven
+
+An update **replaces** the file rather than editing it. Measured on a scratch
+clone of the public repository:
+
+```
+at v0.7.5   manifest.json inode 495084   version 0.7.5
+after ff    manifest.json inode 495097   version 0.7.7
+```
+
+So the `FileView`'s `watchChanges` was bound to a file that no longer exists. It
+never fired, `onDiskVersion` still held the version read at startup, that
+equalled `PLUGIN_VERSION`, and `staleBuild` answered false — correctly, by its
+own rule that it answers false whenever either side is unknown.
+
+### The candidate fix is UNVERIFIED and is not claimed as fixed
+
+`recheckBuild()` reloads the manifest from its **path**, and the guide calls it
+on open — the moment the notice would be read. Two mutations catch it; the gate
+is green.
+
+What is missing is the only thing that matters. A harness attempt replaced
+`manifest.json` with a different version, closed and reopened the guide, and the
+footer did not change. Either the fix does not work, or the harness does not
+exercise this path, and I could not tell which from outside.
+
+**So the notice has never been observed to fire, in any environment.** That is
+the honest state, and it is the same shape as the defect it is meant to fix:
+D-HOST-1 shipped on unit tests with no observation, which is precisely what rule
+14 is about. Shipping a second unobserved fix on top would repeat it.
+
+### Next, and it is one measurement rather than more code
+
+Expose `onDiskVersion` and `staleBuild` over the status IPC. Then the question
+is answered by reading a value instead of inferring it from the pixel width of a
+footer, and the harness can assert it without a screen at all.

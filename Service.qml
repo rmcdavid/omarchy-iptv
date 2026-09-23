@@ -3089,10 +3089,26 @@ Item {
   FileView {
     id: manifestFile
     path: root.manifestPath
+    // watchChanges is kept, and it is NOT what makes this work. D-HOST-2: an
+    // update REPLACES the file rather than editing it -- measured, a git
+    // fast-forward took manifest.json from inode 495084 to 495097 -- so a
+    // watcher bound to the old inode never fires, and the notice this exists
+    // for stayed silent through the exact update it was built to catch. The
+    // watcher stays because an in-place edit is free to catch; the reload
+    // below is what actually catches an update.
     watchChanges: true
     printErrors: false
     onLoaded: root.onDiskVersion = Model.manifestVersion(text())
     onLoadFailed: root.onDiskVersion = ""
+  }
+
+  // Re-read the manifest from its PATH, which is the only way to see a file
+  // that was replaced underneath us. Called when the guide opens: that is the
+  // moment the notice would be shown, so it is the moment the answer has to be
+  // current, and it costs one small read against a 150 ms budget whose open
+  // work measures about 20 ms.
+  function recheckBuild() {
+    manifestFile.reload()
   }
 
   FileView {

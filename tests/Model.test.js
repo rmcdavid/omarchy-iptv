@@ -1951,6 +1951,16 @@ checkCall("D-HOST-1: the notice sits below a real warning and above the plain co
   "Copied",
   true,
 ])
+checkCall("D-HOST-2: the manifest is re-read from its PATH when the guide opens", function () {
+  // The watcher is not what makes this work, and D-HOST-2 is the proof: an
+  // update REPLACES the file -- measured, a git fast-forward took manifest.json
+  // from inode 495084 to 495097 -- so a FileView bound to the old inode never
+  // fires. 0.7.5 carried the check, had the right ladder order, and stayed
+  // silent through the 0.7.5 -> 0.7.7 update it was built to catch.
+  return [qmlSites(/function recheckBuild\(\)/).length,
+          qmlSites(/manifestFile\.reload\(\)/).length,
+          qmlSites(/if \(root\.serviceReady\) root\.service\.recheckBuild\(\)/).length]
+}, [1, 1, 1])
 checkCall("D-HOST-1: the runtime reads its OWN directory, and the guide passes the answer on", function () {
   // Two names joined by nothing but spelling, so they are inventoried. The
   // manifest path must resolve against the RUNNING component (Qt.resolvedUrl),
