@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.7.8"
+var PLUGIN_VERSION = "0.7.9"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -1565,11 +1565,18 @@ function scopeName(scopeId) {
   return id
 }
 
+// D-SAVE-2: the COUNT is the length of the ROWS, by calling the same function.
+//
+// This counted `st.favorites` alone, while channelsForScope returns the stars
+// PLUS every channel a saved search matched. So the scope ring read
+// "Favorites 0" on a scope holding three channels -- a scope the user has no
+// reason to open, because the label says there is nothing in it.
+//
+// Found by a live pass and not by the suite: rows and count were each tested,
+// and nothing compared them. That is the third time today one divergence has
+// been fixed by making two things one call instead of two implementations.
 function countFavorites(list, st) {
-  var index = indexById(list)
-  var n = 0
-  for (var f = 0; f < st.favorites.length; f++) if (index[st.favorites[f]]) n++
-  return n
+  return channelsForScope(list, SCOPE_FAVORITES, st).length
 }
 
 function countRecents(list, st) {
@@ -1829,7 +1836,7 @@ function scopeLabel(scopeId, query, count, position) {
 // `sourceXtream` and `confirmRemove` are the Sources screens. `returnMode`
 // remembers where Sources was opened from, `form` holds the open form
 // (section "sources" below), `sourceCursor` is the Sources list cursor.
-var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove"]
+var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos"]
 
 function guideMode(mode) {
   var m = str(mode)
@@ -1915,7 +1922,7 @@ function toggleMode(st) {
 function onEscape(st, opts) {
   var cur = copyGuide(st)
   var out = { state: cur, close: false, cancelProbe: false }
-  if (cur.mode === "confirmRemove") { out.state = withMode(cur, "sources"); return out }
+  if (cur.mode === "confirmRemove" || cur.mode === "confirmLogos") { out.state = withMode(cur, "sources"); return out }
   if (cur.mode === "sources") { out.state = closeSources(cur, opts); return out }
   if (cur.mode === "sourceEdit" || cur.mode === "sourceXtream") {
     var f = cur.form
@@ -2868,10 +2875,282 @@ function settingsFrom(entry) {
     channelOrder: channelOrderOf(settingOf(entry, "channelOrder", "playlist")),
     numberEntryMs: clampSetting("numberEntryMs", settingOf(entry, "numberEntryMs", SETTING_RANGES.numberEntryMs.def)),
     barShowChannelNumber: boolSetting(settingOf(entry, "barShowChannelNumber", true)),
+    // ---- logos (M2-04). optInSetting, not boolSetting: see the comment there.
+    showLogos: optInSetting(settingOf(entry, "showLogos", false)),
     // ---- picture in picture (M2-05 section 6)
     pipCorner: pip.corner,
     pipSizePercent: pip.sizePercent,
     pipMargin: pip.margin
+  }
+}
+
+// ------------------------------------------------------------ logos (M2-04)
+//
+// The ruling is RULING-LOGOS.md (dev branch) and its first line is the whole of it:
+// off by default, because turning logos on tells sixty-three third parties
+// which channels this user has and hands i.imgur.com alone a request pattern
+// covering two thirds of the list. Everything here serves that line.
+
+var LOGO_SCHEMES = ["https"]
+
+// The one setting in this plugin that must FAIL CLOSED, and the reason it does
+// not go through boolSetting.
+//
+// boolSetting is "anything but false and the string false means on", which is
+// right for showChannelName: a junk value in a hand-edited shell.json leaves
+// the name visible, and the worst case is a label the user did not ask for.
+// Applied to this setting the same rule would let `showLogos: 0`,
+// `showLogos: "no"` and `showLogos: null` each contact sixty-three hosts,
+// because none of them is false or "false". A privacy switch whose unknown
+// values mean ON is not off by default; it is off by default only for the
+// people whose config file happens to be well formed.
+//
+// So: only a real true, or the string "true", turns this on. Everything else,
+// including absence, is off.
+function optInSetting(value) {
+  return value === true || str(value) === "true"
+}
+
+// Who enabling logos would contact, counted from the cache and contacting
+// nothing. The mirror of `logo_survey` in bin/omarchy-iptv; both run
+// the shared logo-survey fixture (dev branch) so the two cannot drift, because the
+// sentence the user consents to is composed from these numbers and a guide
+// that disagrees with the helper is a guide that lies in the consent dialog.
+function logoSurvey(channels) {
+  var rows = asList(channels)
+  var hosts = {}
+  var schemes = {}
+  var withLogo = 0
+  var refused = 0
+  for (var i = 0; i < rows.length; i++) {
+    var channel = rows[i]
+    if (!channel || typeof channel !== "object") continue
+    var raw = channel.logo
+    if (typeof raw !== "string" || raw === "") continue
+    withLogo++
+    var parsed = splitLogoUrl(raw)
+    schemes[parsed.scheme] = (schemes[parsed.scheme] || 0) + 1
+    if (LOGO_SCHEMES.indexOf(parsed.scheme) === -1 || parsed.host === "") {
+      // Counted, never contacted. Three ways to land here: a scheme that is
+      // not https (rule 3), no host at all, and userinfo -- fetch_logo
+      // refuses a URL carrying userinfo rather than stripping it, so a survey
+      // that counted one as contactable would promise a fetch that cannot
+      // happen AND would print `user:pass@provider.test` into the consent
+      // text the user is reading. The credential-sink rule (engineering rule 5): every sink redacts to
+      // scheme and host, and the consent dialog is a sink.
+      refused++
+      continue
+    }
+    hosts[parsed.host] = (hosts[parsed.host] || 0) + 1
+  }
+  var names = []
+  for (var host in hosts) if (Object.prototype.hasOwnProperty.call(hosts, host)) names.push(host)
+  names.sort(function (a, b) {
+    if (hosts[b] !== hosts[a]) return hosts[b] - hosts[a]
+    return a < b ? -1 : (a > b ? 1 : 0)
+  })
+  var ordered = []
+  var wouldContact = 0
+  for (var n = 0; n < names.length; n++) {
+    ordered.push({ host: names[n], channels: hosts[names[n]] })
+    wouldContact += hosts[names[n]]
+  }
+  return {
+    channels: rows.length,
+    withLogo: withLogo,
+    wouldContact: wouldContact,
+    refused: refused,
+    hostCount: ordered.length,
+    hosts: ordered,
+    schemes: schemes
+  }
+}
+
+// scheme and host of a logo URL, lowercased, without pulling in a URL parser.
+// Deliberately narrow: anything it cannot read confidently comes back with an
+// empty host, which logoSurvey counts as refused and logoFile declines to
+// name. Being wrong in the direction of "do not fetch this" is free.
+function splitLogoUrl(raw) {
+  var text = str(raw)
+  var mark = text.indexOf("://")
+  if (mark <= 0) return { scheme: "", host: "" }
+  var scheme = text.substring(0, mark).toLowerCase()
+  var rest = text.substring(mark + 3)
+  var cut = rest.length
+  var stops = ["/", "?", "#"]
+  for (var i = 0; i < stops.length; i++) {
+    var at = rest.indexOf(stops[i])
+    if (at !== -1 && at < cut) cut = at
+  }
+  return { scheme: scheme, host: logoHost(rest.substring(0, cut)) }
+}
+
+// The host a logo URL would disclose to, or "" when it discloses to none.
+// The mirror of `logo_host` in bin/omarchy-iptv.
+//
+// The PORT is not part of the answer: the question the survey exists to
+// answer is how many parties learn which channels this user has, and
+// `cdn.test` and `cdn.test:8443` are one party. Counting them separately
+// inflates the only number in the consent sentence.
+//
+// Userinfo makes the answer "". fetch_logo refuses such a URL outright, so
+// the host is never contacted, and naming it would print the credentials.
+function logoHost(netloc) {
+  var text = str(netloc).replace(/^\s+|\s+$/g, "").toLowerCase()
+  if (text.indexOf("@") !== -1) return ""
+  if (text.charAt(0) === "[") {
+    var close = text.indexOf("]")
+    return close === -1 ? "" : text.substring(0, close + 1)
+  }
+  var colon = text.indexOf(":")
+  return colon === -1 ? text : text.substring(0, colon)
+}
+
+// The sentence the user consents to (ruling rule 6). A generic "logos may
+// contact third parties" is not informed consent when the real answer is
+// countable, and it is countable without making a single request.
+//
+// The busiest host is named because sixty-three is an abstraction and
+// `i.imgur.com` is not: the number says how wide the disclosure is and the
+// name says who actually receives most of it.
+function logoConsentLines(survey) {
+  var s = survey && typeof survey === "object" ? survey : {}
+  var hostCount = Math.max(0, Math.floor(Number(s.hostCount) || 0))
+  var contact = Math.max(0, Math.floor(Number(s.wouldContact) || 0))
+  var withLogoEarly = Math.max(0, Math.floor(Number(s.withLogo) || 0))
+  var refusedEarly = Math.max(0, Math.floor(Number(s.refused) || 0))
+  if (hostCount === 0 || contact === 0) {
+    // D-LOGO-6. These are two different answers and the dialog used to give
+    // the first for both. A playlist whose logo URLs are ALL http has
+    // withLogo > 0, refused > 0 and hostCount 0 -- every channel offers a
+    // logo and the policy is declining every one of them. Telling that user
+    // "no channel offers a logo" sends them away believing their provider
+    // supplies none.
+    if (withLogoEarly > 0) {
+      return [formatCount(withLogoEarly) + (withLogoEarly === 1 ? " channel offers a logo" : " channels offer a logo")
+              + ", and none of them can be used.",
+              "Every one is either not https or has no host, so nothing would be fetched"
+              + " and nothing would be contacted.",
+              "No credentials are ever sent with a logo request."]
+    }
+    return ["No channel in this playlist offers a logo.",
+            "Turning this on would contact nobody, and change nothing on screen."]
+  }
+  var top = asList(s.hosts)[0]
+  var lead = "Turning logos on will contact " + formatCount(hostCount)
+           + (hostCount === 1 ? " host" : " hosts")
+  if (top && str(top.host) !== "") {
+    lead += ", the busiest being " + str(top.host) + " (" + pluralChannels(top.channels) + ")"
+  }
+  var withLogo = Math.max(0, Math.floor(Number(s.withLogo) || 0))
+  var lines = [lead + ".",
+               formatCount(withLogo) + " of "
+               + pluralChannels(Math.max(0, Math.floor(Number(s.channels) || 0)))
+               + (withLogo === 1 ? " carries" : " carry")
+               + " a logo. Each one is fetched once and cached."]
+  var refused = Math.max(0, Math.floor(Number(s.refused) || 0))
+  if (refused > 0) {
+    lines.push(formatCount(refused) + (refused === 1 ? " logo is" : " logos are")
+               + " not https and will be skipped.")
+  }
+  lines.push("No credentials are ever sent with a logo request.")
+  return lines
+}
+
+// The cached file for a channel's logo, or "" when there is nothing to name.
+//
+// The name is the fnv1a32 of the URL and nothing else -- no extension. That is
+// what lets this be a pure function of the channel and the directory: with an
+// extension the guide would have to read an index to learn which one, and that
+// index is a JSON parse inside the 150 ms open budget. Qt loads a local image
+// by content rather than by name (measured on 6.11.2), so the extension bought
+// nothing to begin with.
+//
+// Returns a path, NOT a url: the caller adds the scheme, because a QML Image
+// wants `file://` and a test wants a path it can stat.
+function logoFile(channel, logoDir) {
+  var dir = str(logoDir)
+  if (dir === "" || !channel || typeof channel !== "object") return ""
+  var raw = channel.logo
+  if (typeof raw !== "string" || raw === "") return ""
+  var parsed = splitLogoUrl(raw)
+  if (LOGO_SCHEMES.indexOf(parsed.scheme) === -1 || parsed.host === "") return ""
+  return dir.replace(/\/+$/, "") + "/" + fnv1a32(raw)
+}
+
+// What the row draws in the logo slot. One function so the slot, its width and
+// the accessible name cannot disagree about whether there is a picture there.
+//
+// `kind` is "image" when a file can be named, "blank" when the setting is on
+// and this channel simply has none, and "off" when the column is not there at
+// all.
+function logoSlot(opts) {
+  var o = opts || {}
+  if (o.enabled !== true) return { kind: "off", path: "" }
+  var path = logoFile(o.channel, o.logoDir)
+  if (path === "") return { kind: "blank", path: "" }
+  // `have` is the set of file names the last fetch reported ON DISK. Pointing
+  // a QML Image at a file that is not there is not merely a blank slot: Qt
+  // logs "Cannot open" for every attempt, so one dead logo host fills the
+  // user's journal every time the row scrolls into view. Seen live before
+  // this argument existed.
+  //
+  // Absent `have` means "do not know yet", and the slot stays blank rather
+  // than guessing -- the fetch that populates it runs on every channel load,
+  // so this is a few hundred milliseconds after the guide first opens and it
+  // costs no requests when the files are already cached.
+  if (!o.have || typeof o.have !== "object") return { kind: "blank", path: "" }
+  var name = path.substring(path.lastIndexOf("/") + 1)
+  return o.have[name] === true ? { kind: "image", path: path } : { kind: "blank", path: "" }
+}
+
+// The lookup `logoSlot` wants, from the `names` array the helper prints.
+function logoHaveSet(names) {
+  var list = asList(names)
+  var out = {}
+  for (var i = 0; i < list.length; i++) {
+    var name = str(list[i])
+    if (name !== "") out[name] = true
+  }
+  return out
+}
+
+// Is the logo column present at all?
+//
+// The same rule the channel-number column follows (M2-03 4.2): zero width on a
+// playlist that has none, so those rows are drawn exactly as they were before
+// the feature existed. The test is over the rows ON SCREEN rather than the
+// whole playlist, so a group holding no logos does not reserve a column for
+// them -- and it reads the logo URL rather than the fetched file, so the
+// column does not appear and disappear underneath the user while the fetch
+// runs.
+//
+// A channel with no logo gets blank space inside the column, never a drawn
+// placeholder. The codebase already settled this for the number column: a
+// placeholder in a column reads as a value, and the absence is the
+// information. At the 27 per cent coverage of the provider list that decision
+// is the difference between a list and a list of empty boxes.
+function logoColumnShown(rows, enabled, logoDir) {
+  if (enabled !== true) return false
+  var list = asList(rows)
+  for (var i = 0; i < list.length; i++) {
+    if (logoFile(list[i], logoDir) !== "") return true
+  }
+  return false
+}
+
+// What the helper's fetch reported, parsed defensively. Anything unreadable
+// answers "no names", which leaves every slot blank -- the failure direction
+// that draws nothing rather than the one that logs on every scroll.
+function logoNamesFrom(stdoutText) {
+  var text = str(stdoutText)
+  if (text === "") return []
+  try {
+    var doc = JSON.parse(text)
+    if (!doc || typeof doc !== "object") return []
+    return asList(doc.names).filter(function (n) { return typeof n === "string" && n !== "" })
+  } catch (e) {
+    return []
   }
 }
 
@@ -2901,29 +3180,82 @@ function ownWriteInForce(hostSettings, ownWrite) {
   var value = ownWrite.value
   if (!base || typeof base !== "object" || !value || typeof value !== "object") return false
   var host = hostSettings || {}
-  return str(host.playlistUrl) === str(base.playlistUrl) && str(host.epgUrl) === str(base.epgUrl)
+  // Over the keys the write actually carries, rather than the two URL keys
+  // by name. M2-04 made `showLogos` the third thing the plugin writes about
+  // itself, and a rule spelled as two field comparisons would have silently
+  // held a logo override in force while the host changed it underneath.
+  // Comparison is by `str` so a boolean and the string "false" a hand-edited
+  // shell.json can produce are the same value, which is what boolSetting and
+  // optInSetting already assume everywhere else.
+  for (var key in base) {
+    if (!Object.prototype.hasOwnProperty.call(base, key)) continue
+    if (str(host[key]) !== str(base[key])) return false
+  }
+  return true
 }
 
 // The settings the plugin acts on: the host's, with our own pending write
-// laid over the two URL keys while it is still in force. Every other key
-// always comes from the host (only the URLs are ours to write).
+// laid over the keys that write carried, while it is still in force. Every
+// other key always comes from the host.
 function settingsWithOwnWrite(hostSettings, ownWrite) {
   var host = hostSettings || {}
   if (!ownWriteInForce(host, ownWrite)) return host
   var out = {}
   for (var k in host) out[k] = host[k]
-  out.playlistUrl = str(ownWrite.value.playlistUrl)
-  out.epgUrl = str(ownWrite.value.epgUrl)
+  for (var w in ownWrite.value) {
+    if (Object.prototype.hasOwnProperty.call(ownWrite.value, w)) out[w] = ownWrite.value[w]
+  }
   return out
 }
 
-// The record of a write just made against `hostSettings`.
-function ownWriteFor(hostSettings, playlistUrl, epgUrl) {
+// The record of a write just made against `hostSettings`, over any set of
+// keys. `base` is what the host said at the moment of the write, which is how
+// the override knows to lapse when the host says anything else.
+function ownWriteOf(hostSettings, values) {
   var host = hostSettings || {}
-  return {
-    base: { playlistUrl: str(host.playlistUrl), epgUrl: str(host.epgUrl) },
-    value: { playlistUrl: str(playlistUrl), epgUrl: str(epgUrl) }
+  var base = {}
+  var value = {}
+  for (var key in values) {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) continue
+    base[key] = host[key]
+    value[key] = values[key]
   }
+  return { base: base, value: value }
+}
+
+// Every key this plugin owns inside the host's bar entry.
+//
+// D-LOGO-2, and the reason all of them are always stated. The entry handed to
+// `updateEntryInline` is composed from `barConfig`, which the host publishes
+// ONE WRITE BEHIND (see the last section of OMARCHY-PLUGIN-CONTRACT.md (dev
+// branch)). A write that mentions only its own key therefore carries the
+// PREVIOUS value of every other key back to disk -- so turning logos off and
+// then editing a source URL wrote `showLogos: true` again, the setting came
+// back on by itself, and the fetch resumed. The same hole existed in the
+// other direction.
+//
+// Stating all three on every write makes both writers idempotent and makes
+// neither able to revert the other. It is cheap because there are three.
+var OWNED_SETTINGS = ["playlistUrl", "epgUrl", "showLogos"]
+
+// The patch for a settings write: every owned key, at the value it should
+// hold AFTER this write. `effective` is what the plugin currently acts on
+// (settings, i.e. the host's values with any own-write already laid over
+// them), and `overrides` is what this particular write is changing.
+function ownedEntryPatch(effective, overrides) {
+  var eff = effective || {}
+  var ov = overrides || {}
+  var out = {}
+  for (var i = 0; i < OWNED_SETTINGS.length; i++) {
+    var key = OWNED_SETTINGS[i]
+    out[key] = Object.prototype.hasOwnProperty.call(ov, key) ? ov[key] : eff[key]
+  }
+  return out
+}
+
+// The URL pair, which is what every caller before M2-04 writes.
+function ownWriteFor(hostSettings, playlistUrl, epgUrl) {
+  return ownWriteOf(hostSettings, { playlistUrl: str(playlistUrl), epgUrl: str(epgUrl) })
 }
 
 // Can `updateEntryInline` carry our settings at all? It rewrites a layout
@@ -3197,6 +3529,14 @@ function playlistFetchArgv(helperPath, url, cacheDir, stateDir) {
 
 function playlistProbeArgv(helperPath, url, cacheDir) {
   return helperArgv(helperPath, ["playlist", "--url", str(url), "--cache-dir", str(cacheDir)])
+}
+
+// M2-04. The fetch the consent screen authorizes, and the only place logos
+// are downloaded. `--fetch` is what turns the helper's default survey into a
+// download, so a command built without it contacts nobody -- the opt-in is
+// spelled twice, once in the setting and once here.
+function logoFetchArgv(helperPath, cacheDir) {
+  return helperArgv(helperPath, ["logos", "--fetch", "--cache-dir", str(cacheDir)])
 }
 
 function seqArg(seq) {
@@ -5326,11 +5666,15 @@ function footerStatus(opts) {
 function footerHints(opts) {
   var o = opts || {}
   var mode = str(o.mode)
-  if (mode === "confirmRemove") return [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]]
+  if (mode === "confirmRemove" || mode === "confirmLogos") return [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]]
   if (mode === "sourceEdit" || mode === "sourceXtream") return formHints(o.form)
   if (mode === "sources") {
     if (o.cursorKind === "add" || o.cursorKind === "xtream") return [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]]
-    return [["j/k", "move"], ["Enter", "switch"], [SOURCE_KEYS.add, "add"], [SOURCE_KEYS.xtream, "Xtream"], [SOURCE_KEYS.edit, "edit"], [SOURCE_KEYS.remove, "remove"], ["Esc", "back"]]
+    // M2-04: `g logos` reads the CURRENT state, so the key says what it will
+    // do rather than what is on. A hint that always reads "logos" leaves the
+    // user pressing it to find out, and finding out means contacting sixty-
+    // three hosts.
+    return [["j/k", "move"], ["Enter", "switch"], [SOURCE_KEYS.add, "add"], [SOURCE_KEYS.xtream, "Xtream"], [SOURCE_KEYS.edit, "edit"], [SOURCE_KEYS.remove, "remove"], [SOURCE_KEYS.logos, o.showLogos === true ? "logos off" : "logos on"], ["Esc", "back"]]
   }
   if (o.empty === "loading") return [["Esc", "close"]]
   if (o.empty) {
@@ -5429,7 +5773,7 @@ var MASK_CLEAR_PARAMS = ["type", "output"]
 var LIMITS = { url: MAX_SOURCE_URL, label: MAX_LABEL, server: MAX_XTREAM_SERVER, user: MAX_XTREAM_FIELD, pass: MAX_XTREAM_FIELD, sources: MAX_SOURCES }
 // The keys of the Sources screens, next to the hint table so the two cannot
 // drift (UX-SOURCES 4.8). Guide.qml never spells a key.
-var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
+var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
 var SOURCE_KEY_RE = /^[0-9a-f]{8}(-[0-9]{1,3})?$/
 var SOURCE_ORIGINS = ["guide", "xtream", "cli", "migrated"]
 var URL_FIELDS = ["playlist", "epg"]
@@ -6008,6 +6352,16 @@ function sourcesHeaderCount(n) {
 // Pinned column row name (UX-SOURCES 7.1).
 function sourcesRowAccessibleName(n) {
   return "Sources, " + formatCount(n) + " saved"
+}
+
+// M2-04 / ruling rule 6. The message the logo switch is thrown against.
+//
+// Turning it ON is a disclosure to hosts the user did not choose, so it is
+// confirmed and the confirmation states the count. Turning it OFF discloses
+// nothing and is not confirmed at all: a dialog in front of the safe
+// direction teaches people to dismiss dialogs.
+function confirmLogosMessage(survey) {
+  return logoConsentLines(survey).join("\n")
 }
 
 // Confirm dialog message (UX-SOURCES 5.7).
@@ -6703,7 +7057,7 @@ function cursorAfterRemove(index, remaining) {
 
 function openSources(st, views) {
   var cur = copyGuide(st)
-  if (cur.mode === "sources" || cur.mode === "confirmRemove") return cur
+  if (cur.mode === "sources" || cur.mode === "confirmRemove" || cur.mode === "confirmLogos") return cur
   cur.returnMode = cur.mode === "sourceEdit" || cur.mode === "sourceXtream" ? "sourceEdit" : cur.mode
   cur.mode = "sources"
   cur.sourceCursor = sourcesInitialCursor(views)
@@ -6743,6 +7097,19 @@ function startRemove(st, sourceCount) {
   var cur = copyGuide(st)
   if (cur.mode !== "sources" || sourcesRowKind(cur.sourceCursor, sourceCount) !== "source") return cur
   cur.mode = "confirmRemove"
+  return cur
+}
+
+// M2-04. Turning logos ON is confirmed, because it is a disclosure to hosts
+// the user did not choose and the ruling requires the count to be stated
+// first. Turning them OFF is not: it discloses nothing, and a dialog in front
+// of the safe direction teaches people to dismiss dialogs. So this returns
+// the state unchanged when `showLogos` is already true, and the caller writes
+// the setting directly in that case.
+function startLogosConsent(st, showLogos) {
+  var cur = copyGuide(st)
+  if (cur.mode !== "sources" || showLogos === true) return cur
+  cur.mode = "confirmLogos"
   return cur
 }
 
@@ -6915,6 +7282,20 @@ if (typeof module !== "undefined") {
     clampInt: clampInt,
     clampSetting: clampSetting,
     settingsFrom: settingsFrom,
+    ownWriteOf: ownWriteOf,
+    ownedEntryPatch: ownedEntryPatch,
+    OWNED_SETTINGS: OWNED_SETTINGS,
+    confirmLogosMessage: confirmLogosMessage,
+    logoFetchArgv: logoFetchArgv,
+    optInSetting: optInSetting,
+    logoSurvey: logoSurvey,
+    logoConsentLines: logoConsentLines,
+    logoFile: logoFile,
+    logoSlot: logoSlot,
+    logoHaveSet: logoHaveSet,
+    logoNamesFrom: logoNamesFrom,
+    logoColumnShown: logoColumnShown,
+    splitLogoUrl: splitLogoUrl,
     ownWriteInForce: ownWriteInForce,
     settingsWithOwnWrite: settingsWithOwnWrite,
     ownWriteFor: ownWriteFor,
@@ -7139,6 +7520,7 @@ if (typeof module !== "undefined") {
     sourcesHeaderCount: sourcesHeaderCount,
     sourcesRowAccessibleName: sourcesRowAccessibleName,
     confirmRemoveMessage: confirmRemoveMessage,
+    startLogosConsent: startLogosConsent,
     fetchingLine: fetchingLine,
     probeFailureLine: probeFailureLine,
     sourceTransient: sourceTransient,

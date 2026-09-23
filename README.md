@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.8. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.7.9. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
@@ -93,11 +93,12 @@ Two places they can escape that, both worth knowing:
 
 | `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
+| `showLogos` | boolean | `false` | show channel logos. Off until you turn it on, because logos are fetched from the third-party hosts your playlist names -- see below |
 | `pipCorner` | string | `top-right` | which corner the picture-in-picture box sits in: `top-right`, `top-left`, `bottom-right`, `bottom-left` |
 | `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
 | `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
 
-**Channel logos are not implemented yet, and the plan for them is public.** Logos are hosted by third parties named in your playlist, not by this plugin. Before any of it is built you can see exactly what enabling them would cost your privacy: `omarchy-iptv logos` reads the cached playlist and prints which hosts it would contact and how many channels each covers. It makes no request. (`omarchy-iptv logos --fetch` does download them, under every guard below, but nothing displays them yet -- there is no reason to run it.) On the playlist this was measured against the answer was 63 hosts, one of them covering two thirds of the channels -- which is why the eventual setting will be off by default, `https` only, and will never send your playlist's credentials.
+**Channel logos are off by default, and turning them on tells you the cost first.** Logos are hosted by third parties named in your playlist, not by this plugin, so showing them means fetching pictures from whoever the playlist author pointed at. On the list this was measured against that was 63 different hosts, one of them covering two thirds of the channels. Nothing is contacted until you say so: press `g` on the Sources screen and the guide tells you how many hosts it would contact and which one gets the most, counted from your own cached playlist without making a single request. Turning it back off is one keypress and no dialog, and it stops a fetch already in progress. Logos are `https` only, fetched once and cached under `~/.cache/omarchy-iptv/`, never re-fetched while the file is there, and a logo request carries none of your playlist's credentials, headers or query string -- a redirect to a non-`https` host is refused rather than followed. A channel with no logo gets empty space rather than a placeholder box, and the column is not drawn at all on a list that has none. `omarchy-iptv logos` prints the same survey from the command line and makes no request.
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
