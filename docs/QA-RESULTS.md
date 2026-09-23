@@ -6625,3 +6625,57 @@ Three things about its shape, because a guard like this is easy to write badly:
   just diff.
 
 Proven red by moving a pinned version. Python 538 → 540.
+
+## D-PIP-3, 2026-09-23: three dead ends, measured rather than reasoned about
+
+The player window renders at Omarchy's default 0.985 / 0.96 instead of fully
+opaque. The mechanism is now read rather than inferred, out of
+`/usr/share/omarchy/default/hypr/windows.lua`:
+
+```
+o.window(".*", { tag = "+default-opacity" })                        -- everything
+o.window({ tag = "default-opacity" }, { opacity = "0.985 0.96" })   -- dims it
+```
+
+An application opts out with a **rule** in its own `apps/<name>.lua`, which is
+what `davinci-resolve.lua` and `hermes.lua` do. Our class is `omarchy-iptv`, so
+the app id that gives the plugin its window identity is the same one that costs
+it the exemption.
+
+**A plugin-side fix was written, went green, and was reverted.** The plugin
+already drives its own window with `hyprctl` for PiP and writes nothing to
+anyone's config, so dropping the tag from the window it launched looked like a
+clean fix using existing, validated machinery. It was implemented behind the
+same allowlist as every other dispatch (deliberately permitting only the
+removal, never the addition), with five checks and four mutations, all green.
+
+Then the live check:
+
+| | |
+|---|---|
+| dispatch sent | `hl.dsp.window.tag({ window = "address:0x…", tag = "-default-opacity" })` |
+| compositor reply | `ok` |
+| tags before | `['default-opacity*']` |
+| tags after | `['default-opacity*']` |
+| `getprop opaque` | `false` |
+
+It changed nothing. The asterisk is the tell: a rule-applied tag, which a
+dispatch cannot remove. **This is PIP11's lesson arriving in a new place** — rc
+and the word `ok` are not evidence — and the only reason it did not ship is
+that the fix was checked on a real compositor instead of being trusted because
+the tests were green.
+
+Two further levers, both measured:
+
+- `hyprctl setprop <addr> alpha|alphaoverride|alphainactive|opaque 1` — every
+  spelling answers `unknown request`.
+- `hyprctl keyword windowrule "opacity 1.0, class:omarchy-iptv"` — refused:
+  `keyword can't work with non-legacy parsers. Use eval.`
+
+So the only lever is a window rule, and a window rule lives in configuration
+this plugin may not write. The remedy is the one line already in
+`contrib/windows.lua`, which the README points at three times. **Accepted** at
+0.985 / 0.96 for anyone who has not pasted it.
+
+The real fix is upstream: one `apps/omarchy-iptv.lua` in Omarchy, exactly like
+the two that already ship. Not filed.
