@@ -7,15 +7,22 @@ version lives in `manifest.json`.
 
 ### Corrected
 
-- **A claim made in 0.7.3 about small text was wrong, and is withdrawn.** That
-  release said making the small counts and the footer line bold "makes them
-  readable on themes where they were previously below the accessibility
-  threshold". It does not. The bold was verified against a test renderer, where
-  it does help; on a real display it measures the same as the regular weight it
-  replaced. The bold stays — it costs nothing and looks no worse — but on the
-  themes where these captions were hard to read, they still are. We are not
-  leaving it there; the remedy is being chosen with measurements taken on a
-  real screen this time. (F-CAL-3, reopening D-RUNG-14)
+- **What 0.7.3 said about small text was overstated, and for many people it had
+  not taken effect at all.** That release said making the small counts and the
+  footer line bold "makes them readable on themes where they were previously
+  below the accessibility threshold". Measured properly, it helps in some places
+  and cannot help in others. On an ordinary row it does what was claimed — on
+  Tokyo Night the footer line goes from below the readable threshold to above
+  it. On the **highlighted row** it does not and cannot: the highlight tint
+  lifts the background, and no font weight can close the gap that leaves. On Rose Pine the small text was below the threshold before any of this and
+  stays there. So if these captions are hard for you to read, on some themes they
+  still are, and we are not claiming otherwise.
+- **If you updated to 0.7.3 without restarting, you were still running the old
+  interface.** Updating a plugin reloads it, but a plugin that stays resident
+  keeps the already-open windows it had — so a change to the interface does not
+  appear until the shell restarts or you log out and back in. Nothing warned you.
+  This is why the claim above went unchecked for a day: our own verification
+  measured a copy that had never loaded the change either.
 
 ### Fixed
 - **A channel you are watching is no longer shown as failed.** A brief network

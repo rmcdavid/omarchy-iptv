@@ -902,10 +902,12 @@ const CALIB_CLASS_TOLERANCE = {
   "text|live": "abs",
   "text|cage": "abs",
   "caption|live": "captionRel",
-  // Bold 10 px holds model accuracy under cage and does NOT hold it live,
-  // where it behaves exactly like the regular weight it was meant to rescue.
+  // Bold 10 px reaches the composite byte-exact in BOTH environments. The
+  // relaxed relative tolerance that briefly sat on the live half existed only
+  // to accommodate three rows that turned out to be regular weight rendered by
+  // a stale build; with honest rows the live half earns what the cage half has.
   "bold-caption|cage": "abs",
-  "bold-caption|live": "captionRel",
+  "bold-caption|live": "abs",
   "glyph|live": "abs",
   // A solid rule has no stroke coverage to lose, so it reads at model accuracy
   // in both environments. That is what makes it the control.
@@ -1017,39 +1019,78 @@ checkCall("calibration: the CONTROL -- a solid rule reads identically in both en
   // The count is returned so this cannot pass by comparing nothing.
   return [both.length, disagree]
 }, [1, []])
-checkCall("calibration: and TEXT does not -- the same bold caption sites lose this much off the live display", function () {
-  // The number that refuted D-RUNG-14, computed site by site rather than as a
-  // class average, so each entry is one element of one theme under one build
-  // measured twice. Nothing but the environment differs across a pair.
-  const bySite = {}
-  calib.samples.filter(function (sm) { return sm.sizeClass === "bold-caption" }).forEach(function (sm) {
-    const k = sm.theme + " " + sm.site
-    bySite[k] = bySite[k] || {}
-    bySite[k][sm.env] = sm.measured
+checkCall("calibration: the peak-pixel statistic SATURATES, so every full-coverage row equals its model within one LSB", function () {
+  // What the method actually reports, stated as an assertion rather than left
+  // as an assumption. The peak is a MAX over a glyph run, so once any pixel is
+  // fully covered it returns the 8-bit composite exactly. Bold captions and
+  // solid rules reach that; this is the claim their small errors support, and
+  // it is the ONLY claim they support. One LSB of a channel is worth about
+  // 0.06 ratio points on these backgrounds, which is why a figure quoted to
+  // four decimals -- D-RUNG-14 rested on "-0.0007" -- is about a hundred times
+  // finer than the instrument that produced it.
+  return calib.samples.filter(function (sm) {
+    return (sm.sizeClass === "bold-caption" || sm.sizeClass === "solid") && calibError(sm) > 0.06
+  }).map(calibReport)
+}, [])
+checkCall("calibration: the two environments have never been validly compared, and the fixture says so in numbers", function () {
+  // F-CAL-3 asserted live and cage rasterise text differently. That is NOT
+  // established and neither is its opposite: the statistic above is blind by
+  // construction to hinting, subpixel positioning and scale. What can be said
+  // is that where a size class HAS been measured in both, the two agree inside
+  // the fixture's own rounding bound -- which is weak evidence of nothing much,
+  // and is reported as such. The earlier "live loses nearly EIGHT TIMES what
+  // cage loses" was a composition artefact: `live` was 15/24 regular captions
+  // and `cage` was 16/22 longest-string text rows, two populations that barely
+  // overlap. Comparing only classes present in BOTH is the honest form.
+  const byClass = {}
+  calib.samples.forEach(function (sm) {
+    const k = sm.sizeClass
+    byClass[k] = byClass[k] || { live: [], cage: [] }
+    byClass[k][sm.env].push(sm.measured - calibPredicted(sm))
   })
-  return Object.keys(bySite).sort().filter(function (k) {
-    return bySite[k].live !== undefined && bySite[k].cage !== undefined
-  }).map(function (k) { return [k, round2(bySite[k].cage - bySite[k].live)] })
-}, [
-  ["catppuccin footer status", 0.54],
-  ["catppuccin group count", 0.79],
-  ["catppuccin sources count", 0.73],
-])
-checkCall("calibration: live bold 10 px is no better than live regular 10 px, which is what D-RUNG-14 claimed it fixed", function () {
-  // D-RUNG-14's claim was that bold recovers the caption shortfall. On the
-  // display the user actually has, the same site at the same rung measures the
-  // same either way. Both figures come from the fixture, so the claim cannot be
-  // restated in prose without this going red.
-  function liveAt(cls, site) {
-    return calib.samples.filter(function (sm) {
-      return sm.env === "live" && sm.sizeClass === cls && sm.theme === "catppuccin" &&
-        sm.surface === "row" && sm.alpha === 0.7 && sm.site === site
-    })[0]
-  }
-  const regular = liveAt("caption", "group count")
-  const bold = liveAt("bold-caption", "group count")
-  return [round2(regular.measured), round2(bold.measured), Math.abs(bold.measured - regular.measured) < 0.02]
-}, [5.45, 5.45, true])
+  function mean(a) { return a.reduce(function (x, y) { return x + y }, 0) / a.length }
+  return Object.keys(byClass).sort().filter(function (k) {
+    return byClass[k].live.length && byClass[k].cage.length
+  }).map(function (k) {
+    return [k, Math.round((mean(byClass[k].live) - mean(byClass[k].cage)) * 1000) / 1000]
+  })
+}, [["bold-caption", 0.018], ["solid", -0.033], ["text", -0.035]])
+// All three are inside CALIB_ROUNDING_BOUND (0.05) and an order of magnitude
+// inside tolerance.abs. That is the whole like-for-like evidence there is.
+
+// ---- the provenance rules F-CAL-3's own remedy failed to install -----------
+//
+// F-CAL-3 recorded the ENVIRONMENT per row and called the job done. Its three
+// new rows then carried a correct-looking env and were still wrong, because the
+// variable that actually differed was which BUILD the rendering process had
+// loaded. A name nobody checks is not provenance (CLAUDE.md rule 13), so both
+// of these are calls.
+const BUILDS_WITHOUT_BOLD = ["<=0.7.2 (no bold)", "unknown"]
+checkCall("calibration: every row records the build that rendered it", function () {
+  return calib.samples.filter(function (sm) { return typeof sm.build !== "string" || !sm.build }).map(calibLabel)
+}, [])
+checkCall("calibration: a bold row may not come from a build that has no bold in it", function () {
+  // Red against the three rows added on the morning of 2026-09-22, which were
+  // 0.7.2 renders recorded as live bold. `keepLoaded: true` kept the pre-bold
+  // overlay mounted across the hot reload, so the file on disk had the bold and
+  // the running component did not.
+  return calib.samples.filter(function (sm) {
+    return sm.sizeClass === "bold-caption" && BUILDS_WITHOUT_BOLD.indexOf(sm.build) !== -1
+  }).map(function (sm) { return calibLabel(sm) + " <- " + sm.build })
+}, [])
+checkCall("calibration: where a row records the background it measured, that background must BE the surface it names", function () {
+  // `surface` decides which fill the prediction uses, and it was a bare label
+  // for the life of this fixture. Today's tokyo-night group count is why: it
+  // reads as a card row and was rendered on the CURSOR fill, a 0.43 difference
+  // in the model. A row that records what it actually saw can be checked.
+  return calib.samples.filter(function (sm) { return sm.bgMeasured }).filter(function (sm) {
+    const theme = menuTokens.themes.filter(function (t) { return t.name === sm.theme })[0]
+    const surf = menuSurface(theme)
+    const want = sm.surface === "cursor" ? surf.cursorFill : surf.rowFill
+    const got = rgbOf(sm.bgMeasured)
+    return Math.abs(got[0] - want[0]) + Math.abs(got[1] - want[1]) + Math.abs(got[2] - want[2]) > 4
+  }).map(function (sm) { return calibLabel(sm) + " measured " + sm.bgMeasured })
+}, [])
 checkCall("calibration: bold was verified live on the one theme that never failed, and these are the themes still owed a live measurement", function () {
   // The second half of F-CAL-3, and the sharper half. The live bold pass ran on
   // catppuccin, whose 0.7 caption rung already measured 5.45 -- above 4.5
@@ -1065,7 +1106,11 @@ checkCall("calibration: bold was verified live on the one theme that never faile
     return sm.env === "live" && sm.sizeClass === "bold-caption"
   }).forEach(function (sm) { haveBold[sm.theme] = true })
   return Object.keys(fails).sort().filter(function (t) { return !haveBold[t] })
-}, ["rose-pine", "tokyo-night"])
+}, ["rose-pine"])
+// rose-pine came off nothing: it MODELS 3.3446 on the card and 3.1402 on the
+// cursor, both under 4.5 before a pixel is drawn, so no font weight can rescue
+// it and a measurement would only confirm the arithmetic. tokyo-night left this
+// list by being measured, which is the check doing its job.
 
 // The optimism invariant, RESTATED 2026-09-22 rather than widened, because a
 // real measurement broke it and the reason is understood.
@@ -1102,11 +1147,13 @@ checkCall("calibration: and the model is still OPTIMISTIC on average IN EACH ENV
     const mean = rows.reduce(function (acc, sm) { return acc + (sm.measured - calibPredicted(sm)) }, 0) / rows.length
     return [env, rows.length, mean < 0, Math.round(mean * 1000) / 1000]
   })
-}, [["live", 24, true, -0.376], ["cage", 22, true, -0.048]])
-// Those two means are F-CAL-3 in one line. The live rendering loses nearly
-// EIGHT TIMES what cage loses against the same arithmetic, -0.376 against
-// -0.048, which is why a cage figure cannot stand in for a live one and why
-// the pooled mean this replaced (-0.199) described no rendering that exists.
+}, [["live", 24, true, -0.289], ["cage", 22, true, -0.048]])
+// These two means are NOT a measurement of the two environments, and the gloss
+// that once stood here saying they were is withdrawn. They are confounded with
+// size class: `live` is mostly regular 10 px captions, `cage` is mostly
+// longest-string text rows. The like-for-like comparison is the check above.
+// They are still worth asserting -- each population must stay optimistic, or a
+// target set against it is unsafe -- but only that.
 checkCall("calibration: the refuted claim, restated as a number so it cannot come back", function () {
   // The claim was 1.25. What the fixture shows: the worst absolute delta is
   // 0.79, an order of magnitude under the withdrawn figure. Since F-CAL-3 it
@@ -1120,7 +1167,7 @@ checkCall("calibration: the refuted claim, restated as a number so it cannot com
     return Math.max(w, (model - sm.measured) / model * 100)
   }, 0)
   return [round2(worst.err), worst.sample.sizeClass, worst.sample.env, Math.round(worstRelPct * 10) / 10, round2(worst.err) < 1.25]
-}, [0.79, "bold-caption", "live", 12.7, true])
+}, [0.79, "caption", "live", 12.7, true])
 checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pass reported as its peak", function () {
   // Within a hundredth; the claim is that the old pass measured the 0.8 glyph
   // and not the 0.52 rung, not a figure to the second decimal. The dim rung it

@@ -6157,3 +6157,135 @@ back to 1470 / 0.
 - `docs/CONTRAST-RULING.md`'s calibrated-target derivation gains a clause: a
   target may not be set against rows from an environment the user does not
   have.
+
+## F-CAL-3 withdrawn 2026-09-22: it was never the environment, it was the build
+
+Live pass on the user's own session, authorised. The user's theme was never
+switched: the dev harness renders whatever theme `$HOME` points at
+(`Color.qml:17` reads `Quickshell.env("HOME")`), so tokyo-night was produced
+under a scratch HOME with a symlink, in `--window layer` mode, which is the
+production window type. Snapshot before and after: `shell.json`, `state.json`,
+the cache and `theme.name` all sha256-identical at the end. No keystroke was
+sent, `hyprlock` was checked first, and every frame was taken by `grim` to
+**stdout** and parsed in memory, so no capture of the desktop was ever written
+to disk.
+
+### The finding
+
+**F-CAL-3 said the live display rasterises 10 px text worse than headless cage.
+It does not. The live pass was measuring a build the shell had never loaded.**
+
+`manifest.json` sets `keepLoaded: true`, so this plugin's overlay stays mounted
+across a hot reload. `omarchy plugin update` ends in
+`omarchy-shell shell rescanPlugins`, which is a reload and not a restart. The
+0.7.3 update landed at 14:58:02 **inside** the boot the live pass ran in, and
+the already-mounted overlay kept its pre-bold component.
+
+Proven from the journal rather than argued, using the fact that the same
+warning moves line number between releases:
+
+| boot | `Guide.qml[NNNN` seen in shell warnings |
+|---|---|
+| Sep 20 14:05 → Sep 22 16:45 (the pass) | `[2670` x93, `[2676` x211, **`[2823` x0** |
+| Sep 22 16:52 → now | **`[2823` x13** |
+
+`[2676` is 0.7.1's lead-slot `MouseArea`, `[2670` is 0.7.2's, and line 2823 of
+installed 0.7.3 is `MouseArea {`. The pass never once rendered 0.7.3. It
+measured regular weight and recorded it as bold — which is exactly why the
+numbers equalled the regular-weight values to two decimals, the observation
+F-CAL-3 built its whole diagnosis on.
+
+Re-measured on the user's own shell after the reboot that finally loaded 0.7.3,
+the same site reads **6.2377** where the pass recorded 5.6956.
+
+### The second error, which is mine
+
+My first conclusion from that was "cage and live render identically". An
+adversarial pass refuted it, and it was right to.
+
+**The peak-pixel statistic saturates.** It takes the single most distant pixel
+from the modal background over a whole glyph run — a MAX. Once any one pixel is
+fully covered it returns the 8-bit arithmetic composite exactly. Every measured
+peak in this fixture is the floor or ceiling rounding of that one number:
+
+| | |
+|---|---|
+| catppuccin exact 0.7 over `#1e1e2e` | (152.5, 158.8, 184.6) |
+| measured peaks | `#989fb8` = (152,159,184), `#999fb9` = (153,159,185) |
+| 1 LSB of green | **0.0535 ratio points** |
+
+So the instrument's resolution is about 0.05, and D-RUNG-14's cage verification
+rested on "-0.0007" — roughly a hundred times finer than the thing that
+produced it. Worse, a max is blind by construction to hinting, subpixel
+positioning and scale, which are precisely the mechanisms F-CAL-3 named. It
+cannot show the environments differ and it cannot show they agree. **No valid
+cross-environment comparison of the same glyphs has ever been made here, in
+either direction**, and none is claimed now.
+
+What the statistic *does* support is a saturation claim: a peak equal to the
+composite byte-exact means that run reached full coverage somewhere. The
+quantity a reader actually experiences is the coverage *distribution*, and
+nothing in this project has ever measured it.
+
+### tokyo-night, the measurement that was asked for
+
+The theme D-RUNG-14 was actually about, bold, on the live display:
+
+| site | surface | model | measured | AA 4.5 |
+|---|---|---|---|---|
+| footer status | card fill | 4.6433 | **4.6410** | **passes** |
+| group count | **cursor fill** | 4.2157 | **4.1893** | **fails** |
+| (regular weight, 2026-09-21) | card fill | 4.6433 | 4.25 | fails |
+
+So bold does what was claimed **on an ordinary row** — 4.25 to 4.6410, under AA
+to over it — and **cannot** do it on the selected row, where the tint lifts the
+background and the arithmetic ceiling is 4.2157 before any glyph is drawn. On
+rose-pine the rung models 3.3446 card / 3.1402 cursor: under AA at any weight.
+
+Two cautions recorded rather than glossed. The tokyo margin is **0.1410**,
+smaller than the fixture's own 0.15 tolerance. And `Model.js` sets
+`SECTION_HEADER_FLOOR = 4.65` *citing this defect*, so the shipping code already
+grades 4.6433 a fail for this size class one file away; that needs settling.
+
+One measured value from this pass is deliberately **discarded**: a 4.7093 read
+in the groups column. `#7f85a3` is brighter per channel than the 0.7 composite
+ceiling `#7e84a1`, and a 0.7 stroke cannot exceed its own composite, so it is an
+unidentified site and not a caption. Its band was 17 px, not 10.
+
+### What changed, and what F-CAL-4 installs
+
+The three rows added that morning are removed, not relabelled — their surface
+was never recorded either, so nothing about them is worth keeping. `env` alone
+was provenance recorded as a NAME with nothing checking it, the same shape as
+CLAUDE.md rule 13. It is now a call:
+
+- every row records the **build** that rendered it;
+- a **bold row on a build known to lack the bold is refused** — red against the
+  exact rows committed that morning;
+- a row that records the background it measured must have a background that
+  **is** the surface it names — red when the tokyo cursor-row count is
+  mislabelled as a card row, a 0.43 error in the model;
+- the saturation limit is asserted, not assumed;
+- the per-environment optimism means keep their assertion but lose their gloss:
+  the old "live loses nearly EIGHT TIMES what cage loses" was a composition
+  artefact, `live` being 15/24 regular captions against `cage` 16/22
+  longest-string text rows. Like-for-like, restricted to classes measured in
+  both, the differences are -0.009 to -0.035, all inside the fixture's own
+  rounding bound.
+
+Node 1470 → **1473**; every new check proven red by mutation.
+
+### D-HOST-1, filed from this
+
+`omarchy plugin update` makes an interface change invisible until the shell
+restarts, and says nothing. A user who updates keeps running the old UI — here,
+for a change made for accessibility. Recorded in `CHANGELOG.md` so users are
+told to restart. Not yet raised upstream and not yet reproduced deliberately.
+
+### The process rule adopted
+
+**A live pass confirms the loaded build before it reads a pixel.** One
+`journalctl` line matching a version-distinctive source line number does it, and
+it is free. Every artefact this pass could have checked looked correct — right
+file, right `manifest.json` version, update command reporting success — and all
+of them were consistent with measuring the wrong thing.

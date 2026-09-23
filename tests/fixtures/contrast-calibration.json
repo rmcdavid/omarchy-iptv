@@ -19,6 +19,7 @@
       "alpha": 0.52,
       "sizeClass": "text",
       "env": "live",
+      "build": "unknown",
       "measured": 3.4,
       "captures": 2
     },
@@ -28,6 +29,7 @@
       "alpha": 0.52,
       "sizeClass": "text",
       "env": "live",
+      "build": "unknown",
       "measured": 3.42,
       "captures": 2
     },
@@ -37,6 +39,7 @@
       "alpha": 1.0,
       "sizeClass": "text",
       "env": "live",
+      "build": "unknown",
       "measured": 10.78,
       "captures": 2
     },
@@ -47,6 +50,7 @@
       "site": "group count",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 2.96,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -57,6 +61,7 @@
       "alpha": 0.86,
       "sizeClass": "glyph",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 4.75,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -68,6 +73,7 @@
       "site": "group count",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 4.12,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -79,6 +85,7 @@
       "site": "group count",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 5.45,
       "captures": 2,
       "capturedAt": "2026-09-21"
@@ -89,6 +96,7 @@
       "alpha": 0.86,
       "sizeClass": "glyph",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 8.69,
       "captures": 3,
       "capturedAt": "2026-09-21"
@@ -100,6 +108,7 @@
       "site": "scope label",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 2.16,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -111,6 +120,7 @@
       "site": "scope label",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 2.87,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -122,6 +132,7 @@
       "site": "scope label",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 3.67,
       "captures": 2,
       "capturedAt": "2026-09-21"
@@ -133,6 +144,7 @@
       "site": "footer status",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 3.05,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -144,6 +156,7 @@
       "site": "footer status",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 4.25,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -155,6 +168,7 @@
       "site": "footer status",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 5.7,
       "captures": 2,
       "capturedAt": "2026-09-21"
@@ -166,6 +180,7 @@
       "site": "footer verbs",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 3.15,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -177,6 +192,7 @@
       "site": "footer verbs",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 4.3,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -188,6 +204,7 @@
       "site": "footer verbs",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 5.7,
       "captures": 2,
       "capturedAt": "2026-09-21"
@@ -199,6 +216,7 @@
       "site": "sources count",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 2.96,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -210,6 +228,7 @@
       "site": "sources count",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 4.12,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -221,6 +240,7 @@
       "site": "sources count",
       "sizeClass": "caption",
       "env": "live",
+      "build": "<=0.7.2 (no bold)",
       "measured": 5.46,
       "captures": 2,
       "capturedAt": "2026-09-21"
@@ -232,6 +252,7 @@
       "site": "group count",
       "sizeClass": "bold-caption",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 6.2377,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -243,6 +264,7 @@
       "site": "footer status",
       "sizeClass": "bold-caption",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 6.2377,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -254,6 +276,7 @@
       "site": "uk-ent count",
       "sizeClass": "bold-caption",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 6.1841,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -265,6 +288,7 @@
       "site": "sources count",
       "sizeClass": "bold-caption",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 6.1841,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -276,6 +300,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 9.3223,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -287,6 +312,7 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 3.5794,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -298,6 +324,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 11.3001,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -309,6 +336,7 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 3.9369,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -320,6 +348,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 5.9471,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -331,6 +360,7 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 2.1787,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -342,6 +372,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 6.6237,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -353,6 +384,7 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 2.2567,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -364,6 +396,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 6.9868,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -375,6 +408,7 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 2.8888,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -386,6 +420,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 8.0693,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -397,6 +432,7 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 3.056,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -408,6 +444,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 6.2524,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -419,6 +456,7 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 2.2325,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -430,6 +468,7 @@
       "site": "harness row 17, 89 chars, elided",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 7.0289,
       "captures": 1,
       "capturedAt": "2026-09-22"
@@ -441,40 +480,8 @@
       "site": "harness row 17 detail, group + EPG now/next",
       "sizeClass": "text",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 2.3085,
-      "captures": 1,
-      "capturedAt": "2026-09-22"
-    },
-    {
-      "theme": "catppuccin",
-      "surface": "row",
-      "alpha": 0.7,
-      "site": "group count",
-      "sizeClass": "bold-caption",
-      "env": "live",
-      "measured": 5.4475,
-      "captures": 1,
-      "capturedAt": "2026-09-22"
-    },
-    {
-      "theme": "catppuccin",
-      "surface": "row",
-      "alpha": 0.7,
-      "site": "sources count",
-      "sizeClass": "bold-caption",
-      "env": "live",
-      "measured": 5.459,
-      "captures": 1,
-      "capturedAt": "2026-09-22"
-    },
-    {
-      "theme": "catppuccin",
-      "surface": "row",
-      "alpha": 0.7,
-      "site": "footer status",
-      "sizeClass": "bold-caption",
-      "env": "live",
-      "measured": 5.6956,
       "captures": 1,
       "capturedAt": "2026-09-22"
     },
@@ -485,6 +492,7 @@
       "site": "Sources cursor mark, 2 px solid rule",
       "sizeClass": "solid",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 9.3561,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -496,6 +504,7 @@
       "site": "Sources cursor mark, 2 px solid rule",
       "sizeClass": "solid",
       "env": "cage",
+      "build": "dev harness (repo, bold present)",
       "measured": 5.9772,
       "captures": 1,
       "capturedAt": "2026-09-21"
@@ -507,10 +516,52 @@
       "site": "guide cursor mark, 2 px solid rule",
       "sizeClass": "solid",
       "env": "live",
+      "build": "dev harness (repo, bold present)",
       "measured": 9.3561,
+      "captures": 1,
+      "capturedAt": "2026-09-22"
+    },
+    {
+      "theme": "catppuccin",
+      "surface": "row",
+      "alpha": 0.7,
+      "site": "footer status",
+      "sizeClass": "bold-caption",
+      "env": "live",
+      "build": "0.7.3 (installed, confirmed loaded)",
+      "measured": 6.2377,
+      "bgMeasured": "#1e1e2e",
+      "captures": 1,
+      "capturedAt": "2026-09-22"
+    },
+    {
+      "theme": "tokyo-night",
+      "surface": "row",
+      "alpha": 0.7,
+      "site": "footer status",
+      "sizeClass": "bold-caption",
+      "env": "live",
+      "build": "dev harness (repo, bold present)",
+      "measured": 4.641,
+      "bgMeasured": "#1a1b26",
+      "captures": 1,
+      "capturedAt": "2026-09-22"
+    },
+    {
+      "theme": "tokyo-night",
+      "surface": "cursor",
+      "alpha": 0.7,
+      "site": "group count, cursor row",
+      "sizeClass": "bold-caption",
+      "env": "live",
+      "build": "dev harness (repo, bold present)",
+      "measured": 4.1893,
+      "bgMeasured": "#262734",
       "captures": 1,
       "capturedAt": "2026-09-22"
     }
   ],
-  "envNote": "F-CAL-3: every row records the ENVIRONMENT it was measured in, because the two do not render text alike and a fixture that mixes them silently cannot be compared across. 'live' is the user's real Hyprland session; 'cage' is a nested headless cage compositor running the dev harness. The difference is confined to GLYPH RASTERISATION and that is measured, not assumed: the 'solid' rows are a 2 px rule drawn at the text token and they read IDENTICALLY in both environments (catppuccin 9.3561 in each), so colour and compositing agree. Text does not: the four bold captions read 6.2377 under cage, model accuracy, and 5.4475 to 5.6956 live on the same theme and the same code -- the regular-weight values. A tolerance is therefore drawn per (sizeClass, env) pair and never per class alone, and a pair with no rows is REFUSED rather than inheriting one it never earned. The load-bearing rule: a design decision may only be certified against LIVE rows, because cage is a test convenience and nobody looks at it. D-RUNG-14 was certified against cage rows alone and was wrong."
+  "envNote": "Every row records the environment that rendered it, 'live' (the user's real session) or 'cage' (a nested headless cage compositor running the dev harness). Provenance per row is right regardless of whether the two differ -- and whether they differ is UNKNOWN, see methodLimitNote. The claim that once stood here, that the difference is confined to glyph rasterisation and is measured rather than assumed, is withdrawn: it rested on three rows that turned out to be a different BUILD, not a different environment, and on a statistic that cannot resolve the question. Tolerance is drawn per (sizeClass, env) pair and an unlisted pair is refused, which is still the right shape -- a class that has earned a tolerance in one environment has not automatically earned it in the other -- but the pairs now hold the SAME tolerance wherever the evidence does not distinguish them. The rule that survives untouched: a design decision may only be certified against live rows, because cage is a test convenience and nobody looks at it.",
+  "buildNote": "Every row records the BUILD that rendered it, and this field exists because `env` was not enough. F-CAL-3 was filed as a difference between headless cage and the live display. It was not: the live pass measured a shell that had never loaded the build it believed it was measuring. `manifest.json` sets `keepLoaded: true`, so the overlay stays mounted across a hot reload and `omarchy plugin update` -- which ends in `rescanPlugins`, not a restart -- left the pre-bold component instantiated. Proven from the journal rather than argued: the boot the pass ran in logs warnings at Guide.qml[2670 and [2676, the 0.7.1/0.7.2 line numbers, and NEVER at [2823, which is where 0.7.3's MouseArea sits and where the current shell's warnings land. Three rows recorded that morning as live bold-caption were regular-weight 0.7.2 renders and have been removed, not relabelled: their surface was never recorded either, so nothing about them is worth keeping. A bold-caption row on a build known to lack the bold is now refused by a check.",
+  "methodLimitNote": "WHAT THIS METHOD CAN AND CANNOT SEE. The peak-pixel statistic takes the single most distant pixel from the modal background over a whole glyph run. That is a MAX, so it saturates: as soon as ONE pixel is fully covered it returns the 8-bit arithmetic composite exactly, and every measured peak here is the floor or ceiling rounding of that one number. Two consequences the earlier passes missed. First, the resolution is one least-significant bit of a channel -- about 0.05 ratio points on these backgrounds -- so a figure quoted to four decimals, like D-RUNG-14's '-0.0007', is about a hundred times finer than the instrument. Second, the statistic is a THRESHOLD DETECTOR for 'did a stem land on the pixel grid', and is blind by construction to hinting, subpixel positioning and scale. It therefore cannot establish that two renderings differ, and equally cannot establish that they agree. No valid cross-environment comparison of the same glyphs has ever been made here, in EITHER direction. What the statistic does support is a saturation claim: a peak that equals the composite byte-exact means that run reached full coverage somewhere. The quantity a reader actually experiences is the coverage DISTRIBUTION, which nothing here has measured."
 }

@@ -688,26 +688,35 @@ the channel name lives in the tooltip. Same three glyphs.
   was under 4.5:1 on 8 of 23 themes against the fill it sits on, floor 2.80.
 - Captions at 10 px (`Style.font.caption`) that carry information -- the group
   entry count, the Sources pinned count, the footer status line and the footer
-  hints -- are **bold** (D-RUNG-14). The bold ships and stays: it costs
-  nothing, it keeps secondary text secondary where raising the opacity rung
-  would not, and under a headless renderer it does lift these captions to model
-  accuracy. What it does NOT do is fix the defect it was chosen for.
-  **The claim that bold buys the shortfall back is WITHDRAWN** (F-CAL-3). On
-  the display the user actually has, the same four sites measure 5.4475 to
-  5.6956 against a model of 6.2384 -- the regular-weight values to two
-  decimals -- so bold recovers nothing anyone can see. The 2026-09-21
-  verification was run under headless cage, where 10 px text rasterises
-  differently; the control proves the difference is glyph coverage and nothing
-  else, since a solid 2 px rule reads 9.3561 in both environments.
-  And the live pass that later measured bold ran on **catppuccin, the one
-  theme that never failed** -- its 0.7 caption rung already measured 5.45,
-  above 4.5 before any change. The themes that do fail the rung live,
-  rose-pine and tokyo-night, have never been measured bold at all. So the
-  0.7 caption rung is still under 4.5:1 on a real screen on those themes and
-  the remedy is unchosen: D-RUNG-14 is reopened. Every figure here is
-  asserted from `tests/fixtures/contrast-calibration.json` by the F-CAL-3
+  hints -- are **bold** (D-RUNG-14). What bold buys is **site-dependent**, and
+  both previous versions of this paragraph were wrong: the first claimed it
+  recovered the shortfall everywhere, verified only under a headless renderer;
+  the second withdrew that entirely, on a pass that turned out to be measuring a
+  build the shell had never loaded (F-CAL-3 withdrawn, F-CAL-4).
+  Measured on the real display against a confirmed build:
+  - **On the card fill it works.** tokyo-night footer status reads 4.6410
+    against a model of 4.6433, the composite byte-exact, where regular weight
+    at the same site measured 4.25. Under AA to over it.
+  - **On the cursor fill it cannot.** The selected tint lifts the background, so
+    the rung models 4.2157 there before a glyph is drawn; bold measures 4.1893,
+    which is model accuracy and still fails. No font weight reaches 4.5 from
+    there -- only the rung or the tint can.
+  - **On rose-pine nothing reaches it**: 3.3446 card, 3.1402 cursor, both under
+    AA at any weight.
+  So the bold ships and stays, and the 0.7 rung is still an open question on the
+  cursor row and on rose-pine. Two cautions that belong here rather than in a
+  footnote: the tokyo margin is 0.1410, **smaller than the calibration
+  fixture's own 0.15 tolerance**, and `Model.js` sets
+  `SECTION_HEADER_FLOOR = 4.65` citing this same defect, so the shipping code
+  grades 4.6433 a fail for this size class one file away. Every figure above is
+  asserted from `tests/fixtures/contrast-calibration.json` by the calibration
   block of `tests/Model.test.js`, including which themes are still owed a
-  measurement, so this paragraph cannot drift from the fixture.
+  measurement.
+  One limit stated plainly, because it bounds every number here: the measurement
+  is a peak-pixel statistic, which saturates once one pixel of a run is fully
+  covered. It says a stroke reached full coverage. It does not say what fraction
+  of the run did, which is what a reader experiences, and nothing here measures
+  that.
 - Row `MouseArea`: `hoverEnabled: true`, `cursorShape: Qt.PointingHandCursor`; click = play and close (Enter); click on the lead slot = toggle favorite only.
 - No color animation on the cursor; the clipboard has none, and 10k-row lists must stay cheap.
 

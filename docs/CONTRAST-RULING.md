@@ -393,19 +393,30 @@ non-text rule at 5.29:1) that no opacity arithmetic can produce.
    the samples actually show: the error is proportional to alpha, so a
    translucent target needs more margin than a full-opacity one, and no target
    should be set in an alpha region the fixture has never sampled.
-   **Amended again by F-CAL-3, 2026-09-22, and this one is not about alpha.**
-   A target may not be set against rows from an environment the user does not
-   have. Every fixture row now records an `env`, `live` or `cage`, and the
-   tolerance is drawn per `(sizeClass, env)` pair rather than per class, because
-   the two environments do not rasterise text alike: against the same
-   arithmetic the live session loses **-0.376** on average and headless cage
-   loses **-0.048**, nearly eight times less. The pooled mean this replaced,
-   -0.199, described no rendering that exists. A class measured only under cage
-   has earned no tolerance at all for the live display and cannot certify a
-   design decision, however precise its cage figure was -- D-RUNG-14 was
-   certified exactly that way and was wrong. The difference is confined to
-   glyph coverage, which is measured and not assumed: a solid 2 px rule at the
-   text token reads identically in both.
+   **Amended again 2026-09-22, and the first version of this amendment was
+   itself wrong.** It said the live display and headless cage rasterise text
+   differently and that tolerance must therefore be drawn per environment, on
+   the strength of a -0.376 against -0.048 split. That split was confounded with
+   size class, and the rows underneath it were a different BUILD, not a different
+   environment (F-CAL-3 withdrawn, F-CAL-4). What stands:
+   - A row records the **build** that rendered it, not only the environment. The
+     variable that broke this was which component the process had loaded, and a
+     correct-looking `env` did not catch it.
+   - A target may still only be certified against **live** rows: cage is a test
+     convenience and nobody looks at it.
+   - Whether the two environments differ is **UNKNOWN**, in either direction. The
+     peak-pixel statistic is a MAX over a glyph run, so it saturates to the 8-bit
+     composite as soon as one pixel is fully covered. Its resolution is one LSB,
+     about 0.05 ratio points on these backgrounds, and it is blind by
+     construction to hinting, subpixel positioning and scale -- the very
+     mechanisms an environment difference would act through. Any figure quoted
+     finer than 0.05 from this method is spurious precision; D-RUNG-14 once
+     rested on -0.0007.
+   - Therefore **no target may be set on a margin under about 0.15**, the
+     fixture's own tolerance, and a decision that needs finer resolution needs a
+     different instrument: the coverage distribution over the run, not its
+     maximum.
+
 2. **One arithmetic, called by both sides.** The WCAG formula currently lives
    only in `tests/Model.test.js:669-693`, which was fine while nothing shipped a
    decision made with it. Two of these changes do. `relativeLuminance`,
