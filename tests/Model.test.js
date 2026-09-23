@@ -815,6 +815,10 @@ checkCall("rowMeta: the slot carries the notice exactly when the row has no deta
 // (tests/fixtures/menu-contrast.json), because a ratio measured on one theme
 // is not evidence about the next one. WCAG 2.1 relative luminance; the row
 // fills are the composites Color.qml builds from the same three tokens.
+function manifestVersionForTest() {
+  return JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "..", "manifest.json"), "utf8")).version
+}
+const SEP_FOR_TEST = Model.footerStatus({ configured: true, count: 5, playingName: "x" }).replace(/^.*x/, "").replace(/s stop$/, "")
 const menuTokens = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/menu-contrast.json"), "utf8"))
 function rgbOf(value) {
   const h = String(value).replace("#", "")
@@ -1512,6 +1516,69 @@ checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventor
   "color: root.selectedText",
   "color: root.selectedText"
 ])
+// ---- D-HOST-1: the running build is not always the installed one ----------
+checkCall("D-HOST-1: the version compiled into the build equals the one in manifest.json", function () {
+  // If these ever disagree in a shipped artifact, every install shows the
+  // restart notice forever. The release gate refuses that at build time; this
+  // is the same join asserted from the other side, so a bump that touches one
+  // file and not the other goes red here first.
+  const manifest = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "..", "manifest.json"), "utf8"))
+  return [Model.PLUGIN_VERSION, manifest.version, Model.PLUGIN_VERSION === manifest.version]
+}, [manifestVersionForTest(), manifestVersionForTest(), true])
+checkCall("D-HOST-1: staleBuild answers only when it KNOWS, because a notice nobody can act on is worse than none", function () {
+  return [
+    Model.staleBuild("0.7.3", "0.7.4"),   // updated on disk, old component mounted
+    Model.staleBuild("0.7.4", "0.7.4"),   // agreed: not stale
+    Model.staleBuild("", "0.7.4"),        // we do not know what we are
+    Model.staleBuild("0.7.4", ""),        // manifest unreadable or mid-write
+    Model.staleBuild(null, undefined),
+  ]
+}, [true, false, false, false, false])
+checkCall("D-HOST-1: manifestVersion survives a file being read while it is rewritten", function () {
+  // `omarchy plugin update` rewrites the directory under a running process, so
+  // a half-written manifest is an ordinary thing for the FileView to see, not
+  // an error. It must answer "" rather than throw into a QML binding.
+  return [Model.manifestVersion('{"version": "1.2.3"}'),
+          Model.manifestVersion('{"vers'),
+          Model.manifestVersion("{}"),
+          Model.manifestVersion(null),
+          Model.manifestVersion("")]
+}, ["1.2.3", "", "", "", ""])
+checkCall("D-HOST-1: the notice sits below a real warning and above the plain counts", function () {
+  const base = { configured: true, count: 5 }
+  function f(extra) {
+    const o = {}
+    for (const k in base) o[k] = base[k]
+    for (const k in extra) o[k] = extra[k]
+    return Model.footerStatus(o)
+  }
+  return [
+    f({ staleBuild: true }),
+    f({ staleBuild: false }),
+    f({ staleBuild: true, warning: "Provider unreachable" }),
+    f({ staleBuild: true, transient: "Copied" }),
+    f({ staleBuild: true, playingName: "BBC One" }).indexOf("BBC One") !== -1,
+  ]
+}, [
+  "Updated" + SEP_FOR_TEST + "restart the shell to see the new version",
+  "5 channels",
+  "Provider unreachable",
+  "Copied",
+  true,
+])
+checkCall("D-HOST-1: the runtime reads its OWN directory, and the guide passes the answer on", function () {
+  // Two names joined by nothing but spelling, so they are inventoried. The
+  // manifest path must resolve against the RUNNING component (Qt.resolvedUrl),
+  // because the whole point is to compare what is loaded against what is on
+  // disk beside it.
+  return [
+    qmlSites(/Qt\.resolvedUrl\("manifest\.json"\)/).length,
+    qmlSites(/Model\.staleBuild\(Model\.PLUGIN_VERSION/).length,
+    qmlSites(/Model\.manifestVersion\(/).length,
+    qmlSites(/staleBuild: root\.serviceReady && root\.service\.staleBuild === true/).length,
+  ]
+}, [1, 1, 1, 1])
+
 // ---- D-RUNG-17: the MIX search had the same defect in its fallback ---------
 const CURSOR_INK_SHIPPED = [
   "retropc #cc9900",

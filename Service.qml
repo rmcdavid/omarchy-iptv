@@ -47,6 +47,16 @@ Item {
   readonly property string runtimeDir: (Quickshell.env("XDG_RUNTIME_DIR") || cacheDir) + "/omarchy-iptv"
   readonly property string socketPath: runtimeDir + "/mpv.sock"
   readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("bin/omarchy-iptv").toString().replace(/^file:\/\//, ""))
+  // D-HOST-1. Qt.resolvedUrl resolves against the QML that is RUNNING, so this
+  // is the directory the loaded component came from -- which is exactly the
+  // directory `omarchy plugin update` has just rewritten underneath it.
+  readonly property string manifestPath: decodeURIComponent(Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, ""))
+  // The version on DISK. Model.PLUGIN_VERSION is the version compiled into the
+  // component that is running. They agree at release time (the gate proves it),
+  // so a disagreement here means a hot reload left an older component mounted
+  // and the user is looking at an interface the update was supposed to replace.
+  property string onDiskVersion: ""
+  readonly property bool staleBuild: Model.staleBuild(Model.PLUGIN_VERSION, onDiskVersion)
 
   // ---- timing constants, in one place (UX.md 5.9)
   readonly property int refreshDebounceMs: 300
@@ -3055,6 +3065,19 @@ Item {
   // The four cache views follow the active source's directory (D5). Content
   // is only ever applied from onLoaded / onLoadFailed (R1: after a path
   // change the view still reports the previous file until then).
+  // D-HOST-1. Read once at load and re-read when the directory changes, which
+  // is precisely the moment an update lands. printErrors stays off: a missing
+  // manifest is not a user-facing error, it just means we cannot tell, and
+  // staleBuild answers false for an empty version rather than guessing.
+  FileView {
+    id: manifestFile
+    path: root.manifestPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.onDiskVersion = Model.manifestVersion(text())
+    onLoadFailed: root.onDiskVersion = ""
+  }
+
   FileView {
     id: channelsFile
     path: root.activeCacheDir === "" ? "" : root.activeCacheDir + "/channels.json"

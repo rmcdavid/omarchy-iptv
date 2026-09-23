@@ -3,6 +3,19 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+### Fixed
+
+- **The guide now tells you when an update has not taken effect yet.** Updating
+  the plugin reloads it, but a plugin that keeps its windows open keeps the
+  version it was already running — so the files change and the interface does
+  not, until the shell restarts. Nothing told you. The footer now reads
+  "Updated · restart the shell to see the new version" whenever the running
+  interface is older than what is installed. It never covers a more urgent
+  message. The underlying behaviour is the shell's rather than ours; this is a
+  notice, not a repair.
+
 ## 0.7.4 (2026-09-23)
 
 ### Changed

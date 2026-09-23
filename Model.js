@@ -56,6 +56,47 @@ var UNGROUPED = "Ungrouped"
 // know, so an older build drops it and a newer one reads its absence.
 var STATE_VERSION = 2
 
+// ---- D-HOST-1: the build that is RUNNING, not the one on disk -------------
+//
+// `omarchy plugin update` fetches, fast-forwards and calls
+// `omarchy-shell shell rescanPlugins`, which is a hot reload rather than a
+// restart. This plugin sets `keepLoaded: true` so its overlay survives a
+// reload -- and an already-mounted overlay keeps the component it was built
+// from. So the files on disk update and the running interface does not, with
+// nothing to tell the user.
+//
+// That is not a hypothetical: the 0.7.3 update landed at 14:58 inside a boot
+// that had started two days earlier, and the shell rendered the pre-update
+// Guide.qml for the rest of that boot's life. It cost a day of contrast work,
+// because a verification pass measured a component the shell had never loaded
+// (F-CAL-3, F-CAL-4). A user gets the quieter version of the same thing: they
+// update, and keep the old interface.
+//
+// This constant travels WITH the loaded QML. The version in manifest.json
+// travels with the directory. When they disagree, the running build is stale.
+// The release gate proves the two agree when a version is cut (dev branch), so
+// a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
+var PLUGIN_VERSION = "0.7.4"
+
+// Both arguments are strings; anything unparseable answers false, because a
+// notice nobody can act on is worse than no notice. Never throws: this runs in
+// a QML binding, and a binding that raises leaves the footer undefined.
+// Parse the version out of a manifest.json the runtime read from disk. Never
+// throws and never returns undefined: this feeds a QML binding, and JSON that
+// is mid-write during an update is a normal thing to see, not an error.
+function manifestVersion(text) {
+  try {
+    var m = JSON.parse(str(text))
+    return m && typeof m.version === "string" ? m.version : ""
+  } catch (e) { return "" }
+}
+
+function staleBuild(loaded, onDisk) {
+  var a = str(loaded), b = str(onDisk)
+  if (a === "" || b === "") return false
+  return a !== b
+}
+
 // Column / scope ids (UX.md 2.2, 2.7). Real groups are "g:<group name>".
 var SCOPE_RECENT = "recent"
 var SCOPE_FAVORITES = "favorites"
@@ -5032,6 +5073,10 @@ function footerStatus(opts) {
   if (footerDegraded(o)) return footerCounts(o)
   if (o.epgPending) return "Guide data loading" + ELLIPSIS
   if (str(o.warning) !== "") return str(o.warning)
+  // D-HOST-1. Below a provider warning, which is more urgent, and above the
+  // plain counts, which are what the footer shows most of the time -- so this
+  // is seen without ever displacing something that needs acting on first.
+  if (o.staleBuild === true) return "Updated" + SEP + "restart the shell to see the new version"
   return footerCounts(o)
 }
 
@@ -6784,6 +6829,9 @@ if (typeof module !== "undefined") {
     formHints: formHints,
     // ---- sources (M2-01)
     STATE_VERSION: STATE_VERSION,
+    PLUGIN_VERSION: PLUGIN_VERSION,
+    staleBuild: staleBuild,
+    manifestVersion: manifestVersion,
     CACHE_LAYOUT: CACHE_LAYOUT,
     MAX_SOURCES: MAX_SOURCES,
     MAX_SOURCE_URL: MAX_SOURCE_URL,

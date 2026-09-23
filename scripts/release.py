@@ -146,6 +146,22 @@ def check(root, out=sys.stdout):
                     '%s loads %r at runtime and it is not on the allowlist'
                     % (src, ref))
 
+    # D-HOST-1. Model.PLUGIN_VERSION travels with the LOADED QML; the version
+    # in manifest.json travels with the DIRECTORY. The plugin compares them at
+    # runtime to notice that a hot reload left an older component mounted, and
+    # tells the user to restart. That comparison is only meaningful if the two
+    # agree at release time, so this proves it -- otherwise every install would
+    # show the notice permanently, or none ever would.
+    if 'manifest.json' in have and 'Model.js' in have:
+        actual = json.loads(read(root, 'manifest.json')).get('version')
+        m = re.search(r'var\s+PLUGIN_VERSION\s*=\s*[\'"]([^\'"]+)[\'"]', read(root, 'Model.js'))
+        if not m:
+            problems.append('Model.js declares no PLUGIN_VERSION; D-HOST-1\'s stale-build notice cannot work')
+        elif m.group(1) != actual:
+            problems.append(
+                'Model.PLUGIN_VERSION is %s but manifest.json says %s; every install would show the '
+                'restart notice forever' % (m.group(1), actual))
+
     # Every manifest entry point must ship.
     if 'manifest.json' in have:
         manifest = json.loads(read(root, 'manifest.json'))

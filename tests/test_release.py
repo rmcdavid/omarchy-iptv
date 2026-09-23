@@ -56,6 +56,11 @@ class ReleaseCase(unittest.TestCase):
                    '"service": "Service.qml"}}\n')
         self.write('Service.qml', 'import "Model.js" as Model\n'
                    'x: Qt.resolvedUrl("bin/omarchy-iptv")\n')
+        # D-HOST-1: the runtime compares this against manifest.json to notice a
+        # hot reload that left an older component mounted, so the check demands
+        # it and the double must carry it. A double more forgiving than the
+        # real tree is what rule 10 forbids.
+        self.write('Model.js', 'var PLUGIN_VERSION = "0.9.9"\n')
         self.write('README.md', 'Copy `contrib/bindings.lua`. See the dev branch: '
                    'https://example.invalid/tree/dev/docs/UX.md\n')
         self.git('add', '-A')
@@ -109,16 +114,16 @@ class ReleaseCase(unittest.TestCase):
         self.assertEqual(new, self.git('rev-parse', 'v0.9.9^{commit}').strip())
 
     def test_the_artifact_carries_dev_content_not_stale_main_content(self):
-        self.write('Model.js', 'new model\n')
+        self.write('Model.js', 'new model\nvar PLUGIN_VERSION = "0.9.9"\n')
         self.commit_all()
         self.build()
         blob = self.git('show', 'main:Model.js')
-        self.assertEqual('new model\n', blob)
+        self.assertEqual('new model\nvar PLUGIN_VERSION = "0.9.9"\n', blob)
 
     # -- refusals --------------------------------------------------------
 
     def test_a_dirty_tree_is_refused(self):
-        self.write('Model.js', 'uncommitted\n')
+        self.write('Model.js', 'uncommitted\nvar PLUGIN_VERSION = "0.9.9"\n')
         with self.assertRaisesRegex(release.ReleaseError, 'dirty'):
             self.build()
 
@@ -137,6 +142,12 @@ class ReleaseCase(unittest.TestCase):
         self.build()
         # bump the version so the tag does not collide, change nothing else
         self.write('manifest.json', self.git('show', 'dev:manifest.json')
+                   .replace('0.9.9', '1.0.0'))
+        # D-HOST-1: a real release bumps BOTH, and the check refuses a tree
+        # where they disagree -- otherwise every install shows the restart
+        # notice forever. Bumping only the manifest here would be testing a
+        # release that could not ship.
+        self.write('Model.js', self.git('show', 'dev:Model.js')
                    .replace('0.9.9', '1.0.0'))
         self.commit_all()
         # manifest.json IS on the allowlist, so this is a real change; make
@@ -191,7 +202,8 @@ class ReleaseCase(unittest.TestCase):
     def test_a_shipped_source_that_cites_a_dev_path_is_a_problem(self):
         """D-REL-2: 0.7.1 shipped 70 comments naming CLAUDE.md, docs/, tests/
         or scripts/ -- citations to files that do not exist in an install."""
-        self.write('Model.js', '// see docs/UX.md section 3 and CLAUDE.md rule 12\n')
+        self.write('Model.js', '// see docs/UX.md section 3 and CLAUDE.md rule 12\n'
+                   'var PLUGIN_VERSION = "0.9.9"\n')
         self.write('bin/omarchy-iptv', '#!/usr/bin/env python3\n# pinned by tests/fixtures/x.json\n')
         self.commit_all()
         problems = release.check(self.dir, out=io.StringIO())
@@ -199,7 +211,8 @@ class ReleaseCase(unittest.TestCase):
         self.assertTrue(any("bin/omarchy-iptv:2 names 'tests/fixtures/x.json'" in p for p in problems), problems)
 
     def test_a_shipped_source_naming_the_rule_and_the_branch_is_fine(self):
-        self.write('Model.js', '// engineering rule 12 (dev branch); UX.md section 3 on the dev branch\n')
+        self.write('Model.js', '// engineering rule 12 (dev branch); UX.md section 3 on the dev branch\n'
+                   'var PLUGIN_VERSION = "0.9.9"\n')
         self.commit_all()
         self.assertEqual([], release.check(self.dir, out=io.StringIO()))
 

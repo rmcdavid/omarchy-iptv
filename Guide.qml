@@ -563,6 +563,10 @@ Item {
     refreshing: root.serviceReady && root.service.refreshing,
     epgPending: root.serviceReady && root.service.epgPending,
     warning: root.warningText,
+    // D-HOST-1: the running component is older than the files it was loaded
+    // from, which means an update landed and a hot reload did not replace it.
+    // Sits below a provider warning and above the plain counts.
+    staleBuild: root.serviceReady && root.service.staleBuild === true,
     count: root.surface.channelCount,
     lastUpdated: root.serviceReady ? root.service.lastUpdated : "",
     stale: root.serviceStatus === "cached",
