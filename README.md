@@ -120,6 +120,7 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | search | Up / Down, PgUp / PgDn, Home / End | move the cursor |
 | search | Left / Right | previous / next group in the column |
 | search | Enter | play and close; Esc clears the query, then closes |
+| search | Ctrl+S | save this search into Favorites: its channels join your starred ones, and the confirmation says how many matched |
 | search | Tab or Shift+Tab | switch to list mode (query stays) |
 | list | j / k, h / l | move the cursor / change group |
 | list | Enter | play, close, focus the player |

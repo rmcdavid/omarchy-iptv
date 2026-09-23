@@ -282,6 +282,7 @@ x).
 | `PgDn` / `PgUp` | Move the cursor by (visible rows - 1); clamped, no wrap. |
 | `End` / `Home` | Last / first channel row. |
 | `Enter` | Play the cursor row, close the guide, focus mpv. If the row is already playing: do not reload; just close and focus mpv. |
+| `Ctrl+S` (search mode) | Save the current query into Favorites. A MODIFIED key by necessity: `handleSearchKey` routes every bare printable character into the query, so a letter cannot be a command here without breaking typing. The transient carries the ROW COUNT for the terms as typed (`Saved baton rouge - 4 channels`), because the failure mode is a term that matches far more than the user meant; `no tv` saves 75 rows on the list this was designed against. Refusals are spoken too -- already saved, at the cap, nothing to save -- so the keystroke never silently does nothing. |
 | `Space` | Play the cursor row and keep the guide open (preview / zapping). The row gains the playing glyph and bold name; the footer updates. |
 | `f` / `F` | Toggle favorite on the cursor row. In Favorites the row leaves the list; the cursor stays at the same index (clamped). |
 | `x` / `X` / `Delete` | Remove the cursor row from Recent (in Recent) or unfavorite it (in Favorites). No-op elsewhere. Parity with the clipboard's delete. |
