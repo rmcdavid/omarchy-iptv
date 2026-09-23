@@ -436,6 +436,21 @@ non-text rule at 5.29:1) that no opacity arithmetic can produce.
    branch, so nothing tested them. An unreachable branch is an untested one, and
    in a file this heavily asserted that is where the next one will be too.
 
+4. **A contrast figure here is the MAXIMUM of a distribution, and must be read
+   as one.** F-CAL-5, 2026-09-23. The peak-pixel method saturates: it returns
+   the specified composite as soon as one pixel of a run reaches full coverage.
+   Measured as a distribution for the first time, a caption whose headline
+   number is 4.71 has a median of 3.94 and puts 9 per cent of its ink above 4.5,
+   where full-opacity text puts 52 per cent. This does not make the caption a
+   WCAG failure -- SC 1.4.3 is defined on the specified colours and it passes --
+   but it does mean **no figure in this document describes what a reader sees**,
+   and none should be defended as though it did. Two rules follow:
+   - Never quote a contrast figure finer than about 0.05, one least-significant
+     bit of a channel. The instrument cannot resolve it.
+   - When the goal is legibility rather than compliance, reach for size or
+     weight before opacity. Opacity moves the endpoint of the distribution;
+     size and weight move the whole of it.
+
 2. **One arithmetic, called by both sides.** The WCAG formula currently lives
    only in `tests/Model.test.js:669-693`, which was fine while nothing shipped a
    decision made with it. Two of these changes do. `relativeLuminance`,

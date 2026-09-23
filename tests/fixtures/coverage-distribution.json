@@ -1,0 +1,17 @@
+{
+  "note": "F-CAL-5. What a glyph run actually renders, as a DISTRIBUTION rather than a maximum. Every contrast figure this project has ever quoted came from the peak-pixel method, which takes the single most contrasting pixel in a run and therefore saturates: once one pixel is fully covered it returns the 8-bit arithmetic composite and says nothing about the other several thousand. These rows solve the per-pixel coverage instead -- each pixel of an antialiased glyph is ink over background at some alpha, so its own contrast is recoverable -- and report the distribution weighted by ink mass.",
+  "readingNote": "This does NOT say these sites fail WCAG. SC 1.4.3 is defined on the SPECIFIED colours, and by that definition a caption whose composite computes 4.71 passes; the rung decisions taken against it were taken correctly. What it says is narrower and still important: the headline number describes the specified composite and must never be read as describing the rendered stroke. At 10 px the two differ by about 0.8 ratio points at the median, and the peak sits in the extreme tail of its own distribution.",
+  "controlNote": "The full-opacity rows are the control, and they are what make the caption rows meaningful. Every antialiased glyph has partial-coverage edges, so a low above-AA fraction could have been pure geometry. It is not: full-opacity text puts 52 per cent of its ink mass above 4.5 where a caption at the AA line puts 9 to 19 per cent. The metric separates the two by a factor of three to six.",
+  "method": "grim to stdout, parsed in memory, never written to disk. Modal colour of the run taken as the background and the peak pixel as the fully-covered ink; per-pixel alpha by least squares over the three channels against that basis; pixels under 0.02 coverage discarded as background. Percentiles are weighted by ink mass (alpha x pixels), not by pixel count.",
+  "capturedAt": "2026-09-23",
+  "env": "live",
+  "build": "c665d1c (dev harness, layer mode, on the live display)",
+  "theme": "tokyo-night",
+  "samples": [
+    { "site": "channel name", "rung": 1.0, "surface": "row", "peak": 7.9888, "p50": 4.61, "p90": 7.12, "inkAboveAA": 0.534, "inkedPixels": 603 },
+    { "site": "channel name, second row", "rung": 1.0, "surface": "row", "peak": 7.9062, "p50": 4.96, "p90": 6.91, "inkAboveAA": 0.517, "inkedPixels": 442 },
+    { "site": "group count, selected row", "rung": 0.76, "surface": "cursor", "peak": 4.6489, "p50": 3.8032, "p90": 4.6379, "inkAboveAA": 0.1852, "inkedPixels": 94 },
+    { "site": "footer status", "rung": 0.71, "surface": "row", "peak": 4.7093, "p50": 3.9365, "p90": 4.4854, "inkAboveAA": 0.0898, "inkedPixels": 898 },
+    { "site": "detail line, the D-RUNG-2 dim rung", "rung": 0.52, "surface": "row", "peak": 3.0868, "p50": 2.26, "p90": 2.87, "inkAboveAA": 0.0, "inkedPixels": 705 }
+  ]
+}

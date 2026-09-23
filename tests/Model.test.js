@@ -1516,6 +1516,40 @@ checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventor
   "color: root.selectedText",
   "color: root.selectedText"
 ])
+// ---- F-CAL-5: the peak is the tail of a distribution nobody had measured ---
+const cov = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/coverage-distribution.json"), "utf8"))
+checkCall("F-CAL-5: the peak OVERSTATES every run it measures, and by how much at each rung", function () {
+  // The peak-pixel method is a MAX. This is the distance between it and the
+  // median of the same run, which is the number every contrast figure in this
+  // project has been quoted without. If any row ever shows a peak at or below
+  // its own median the instrument has changed meaning and every reading needs
+  // redoing.
+  return cov.samples.map(function (s) {
+    return [s.rung, round2(s.peak - s.p50), s.peak > s.p50]
+  })
+}, [[1, 3.38, true], [1, 2.95, true], [0.76, 0.85, true], [0.71, 0.77, true], [0.52, 0.83, true]])
+checkCall("F-CAL-5: and the control is what makes that mean something -- this is not antialiasing geometry", function () {
+  // Every antialiased glyph has partial-coverage edges, so a low above-AA
+  // fraction could have been a property of glyphs rather than of our rungs.
+  // The full-opacity control settles it: it puts three to six times more of
+  // its ink mass above the threshold than a caption sitting at the line does.
+  function mean(rows) {
+    return rows.reduce(function (a, s) { return a + s.inkAboveAA }, 0) / rows.length
+  }
+  const full = cov.samples.filter(function (s) { return s.rung === 1 })
+  const caption = cov.samples.filter(function (s) { return s.rung > 0.6 && s.rung < 1 })
+  return [full.length, caption.length,
+          Math.round(mean(full) * 1000) / 1000,
+          Math.round(mean(caption) * 1000) / 1000,
+          mean(full) > mean(caption) * 3]
+}, [2, 2, 0.526, 0.138, true])
+checkCall("F-CAL-5: the dim rung D-RUNG-2 accepted puts NONE of its ink above the threshold", function () {
+  // D-RUNG-2 was refused with numbers, and this is what those numbers meant on
+  // a real screen. Recorded so the acceptance is a measured cost rather than a
+  // remembered one.
+  const dim = cov.samples.filter(function (s) { return s.rung === 0.52 })[0]
+  return [dim.inkAboveAA, round2(dim.p50), dim.inkAboveAA === 0]
+}, [0, 2.26, true])
 // ---- D-HOST-1: the running build is not always the installed one ----------
 checkCall("D-HOST-1: the version compiled into the build equals the one in manifest.json", function () {
   // If these ever disagree in a shipped artifact, every install shows the

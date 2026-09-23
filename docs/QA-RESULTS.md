@@ -6518,3 +6518,70 @@ their build, and the background they actually measured — the schema F-CAL-4
 installed. Adding them turned the "themes still owed a live bold measurement"
 check red, which is that check working: it listed rose-pine and tokyo-night,
 then tokyo-night, and now neither.
+
+## Coverage distribution, 2026-09-23: the peak was the tail all along
+
+Live pass, harness in layer mode on the real display, tokyo-night from a
+scratch `HOME`. Build confirmed before reading a pixel (`c665d1c`, clean tree).
+State, cache, settings and theme sha256-identical after; every frame to `grim`'s
+stdout and parsed in memory.
+
+### Why
+
+Every contrast figure in this project — the calibration fixture, D-RUNG-2's
+refusal, D-RUNG-14's fix, yesterday's verification — came from the peak-pixel
+method. It takes the single most contrasting pixel in a glyph run. That is a
+**max**: it saturates the moment one pixel reaches full coverage, and says
+nothing about the other several thousand. A reader does not read one pixel.
+
+So: solve the per-pixel coverage instead. Each pixel of an antialiased glyph is
+ink over background at some alpha, recoverable by least squares against the
+(background, fully-covered ink) basis. Then report the distribution of per-pixel
+contrast, weighted by ink mass.
+
+### What it found
+
+| site | rung | peak | p50 | p90 | ink above 4.5 |
+|---|---|---|---|---|---|
+| channel name | 1.00 | 7.9888 | 4.61 | 7.12 | **53.4%** |
+| channel name, 2nd row | 1.00 | 7.9062 | 4.96 | 6.91 | **51.7%** |
+| group count, selected row | 0.76 | 4.6489 | 3.8032 | 4.6379 | **18.5%** |
+| footer status | 0.71 | 4.7093 | 3.9365 | 4.4854 | **9.0%** |
+| detail line (D-RUNG-2) | 0.52 | 3.0868 | 2.26 | 2.87 | **0.0%** |
+
+**The control is the load-bearing row.** Every antialiased glyph has
+partial-coverage edges, so a low above-AA fraction could have been geometry
+rather than anything about our rungs. It is not: full-opacity text puts 52 per
+cent of its ink above the threshold where a caption sitting at the line puts 9
+to 19. The metric separates them by three to six times. Without that control
+this table would have been another confidently over-read statistic, which is
+the mistake this same document records twice already.
+
+### What it does not say
+
+**These sites do not fail WCAG.** SC 1.4.3 is defined on the *specified*
+colours. A caption whose composite computes 4.71 passes by that definition, and
+every rung decision taken against it — including yesterday's — was taken
+correctly. Nothing here reopens them.
+
+What it says is narrower and still worth having: the headline number describes
+the specified composite and must never be read as describing the rendered
+stroke. At 10 px the two differ by about **0.8 ratio points at the median**, and
+the peak sits in the extreme tail of its own distribution.
+
+### The consequence, recorded rather than acted on
+
+If the goal is **compliance**, the rung is the lever and the work is done.
+
+If the goal is **legibility**, the rung is the weakest lever available. Opacity
+moves the endpoint of the distribution; size and weight move the whole
+distribution. That is visible in the table: the 0.76 rung and the 0.71 rung
+differ by 9 points of above-AA ink, while full opacity differs from both by
+more than thirty. A product decision to make these captions genuinely
+comfortable would reach for `Style.font.caption` before it reached for another
+hundredth of alpha.
+
+Filed as F-CAL-5 and left open, because it is a standing property of the
+instrument rather than something to fix. The instrument is
+`scripts/qa-coverage.py` and five rows are pinned in
+`tests/fixtures/coverage-distribution.json` with three checks over them.
