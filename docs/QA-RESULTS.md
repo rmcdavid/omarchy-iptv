@@ -7219,3 +7219,30 @@ optimisation to slip in. Recorded as the costed option.
 Two proposed remedies, both refused on measurement, and the fix that actually
 worked was neither: precomputing a fold that had been missing since M0, which
 took the worst case from 212 ms to 64 ms.
+
+## Listing check, 2026-09-23
+
+The marketplace validates default-branch HEAD, so the substantive question is
+not "is the badge current" but "is what a new user clones installable". Tested
+against a fresh clone of the public repository rather than the working tree:
+
+| | |
+|---|---|
+| default branch | `main` |
+| HEAD | `e445010 release: 0.7.6` |
+| tracked files | 13 |
+| `manifest.json` | 0.7.6 |
+| `omarchy plugin validate .` | **exit 0** |
+| agent instructions, `docs/`, `tests/`, `scripts/` | **none present** |
+
+So the artifact is correct at the tip: a clone gets the thirteen-file install
+and nothing else, and it validates.
+
+Also checked in passing and needing no action: **D-REL-1** — the helper's
+`VERSION` constant, once stale at `0.2.0` while the manifest said otherwise —
+now reads from `manifest.json`, so `--version` and the outbound `User-Agent`
+both say 0.7.6. Fixed in 0.7.2 and still correct.
+
+What this does **not** establish is the state of any listing badge, which is
+outside this repository. `omarchy plugin update` never consults the
+marketplace, so the badge gates discovery rather than delivery.
