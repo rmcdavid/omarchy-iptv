@@ -2088,6 +2088,54 @@ function savedSearchNotice(result, query, count) {
   return "Saved " + shown + SEP + formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
 }
 
+// Why is this channel in Favourites? Returns "star", the saved search that put
+// it there, or null.
+//
+// This exists because 0.7.6 shipped saved rows into Favourites with no way to
+// take them out. `x` there calls the favourite toggle, and a saved row is not
+// starred -- so the one key that looks like "remove this" ADDED a star, and
+// pressing it again removed the star and left the row, because the search still
+// matched. A dead end in both directions (D-SAVE-1).
+function favoriteOrigin(state, channel) {
+  var st = state || emptyState()
+  if (!channel) return null
+  if (isFavorite(st, channelId(channel))) return { kind: "star", query: "" }
+  var saved = asList(st.savedSearches)
+  for (var i = 0; i < saved.length; i++) {
+    var terms = savedSearchTerms(saved[i] && saved[i].query)
+    if (terms.length > 0 && savedSearchHit(channel, terms)) {
+      return { kind: "saved", query: str(saved[i].query) }
+    }
+  }
+  return null
+}
+
+// What `x` should say it did. Starred first, deliberately: a row that is BOTH
+// starred and saved loses the star first, because the star is the narrower and
+// more deliberate of the two and removing the search would take other rows with
+// it. A second `x` then removes the search.
+function favoriteRemovalNotice(origin, count) {
+  var o = origin || {}
+  if (o.kind === "star") return "Removed from Favorites"
+  if (o.kind === "saved") {
+    return "Forgot " + savedSearchTerms(o.query).join(" ") + SEP +
+      formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
+  }
+  return ""
+}
+
+// How many Favourites rows come from saved searches rather than stars. Shown in
+// the footer so the list is explicable: otherwise Favourites fills with
+// channels the user never starred and nothing says why.
+function savedSearchFooter(state, channels) {
+  var st = state || emptyState()
+  var saved = asList(st.savedSearches)
+  if (saved.length === 0) return ""
+  var rows = savedSearchChannels(asList(channels), saved).length
+  return formatCount(saved.length) + (saved.length === 1 ? " saved search" : " saved searches") +
+    SEP + formatCount(rows) + (rows === 1 ? " channel" : " channels")
+}
+
 // Add a saved search, or report why not. Pure: returns the next state and a
 // verdict, never mutates. The verdict is what the confirmation says, so a
 // refusal is visible in the moment rather than silently doing nothing.
@@ -5261,6 +5309,9 @@ function footerStatus(opts) {
   if (footerDegraded(o)) return footerCounts(o)
   if (o.epgPending) return "Guide data loading" + ELLIPSIS
   if (str(o.warning) !== "") return str(o.warning)
+  // D-SAVE-1: below a warning, above the plain counts, and only in Favourites
+  // (the caller passes "" everywhere else).
+  if (str(o.savedSearches) !== "") return str(o.savedSearches)
   // D-HOST-1. Below a provider warning, which is more urgent, and above the
   // plain counts, which are what the footer shows most of the time -- so this
   // is seen without ever displacing something that needs acting on first.
@@ -6996,6 +7047,9 @@ if (typeof module !== "undefined") {
     // directly, not only through parseState.
     playedRecord: playedRecord,
     savedSearchNotice: savedSearchNotice,
+    savedSearchFooter: savedSearchFooter,
+    favoriteRemovalNotice: favoriteRemovalNotice,
+    favoriteOrigin: favoriteOrigin,
     withoutSavedSearch: withoutSavedSearch,
     withSavedSearch: withSavedSearch,
     savedSearchChannels: savedSearchChannels,

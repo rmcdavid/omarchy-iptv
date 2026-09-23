@@ -7138,3 +7138,51 @@ This was found by the **saved-search** fixture, which carried `at: "12.9"` for
 its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
+
+## D-SAVE-1, 2026-09-23: the removal key that added things
+
+Filed against my own change, the day it shipped in 0.7.6.
+
+Saved searches put matching channels into Favourites beside the user's starred
+ones. `x` in Favourites called the favourite toggle for every row. A saved row
+is not starred — so `x` **added a star**; press it again and the star goes and
+the row **stays**, because the search still matches it.
+
+A dead end in both directions, on the one key whose entire meaning is removal.
+And nothing showed which searches were saved: Favourites just filled with
+channels the user never starred. `Service.forgetSearch` existed and nothing
+called it.
+
+### The fix
+
+`x` branches on *why* the row is there:
+
+| row | `x` does |
+|---|---|
+| starred | unstars, as before |
+| saved | forgets the search, naming it and the count it took |
+| both | removes the **star** first; a second `x` forgets the search |
+
+The star goes first because it is the narrower and more deliberate of the two,
+and forgetting the search would take other rows with it. That progression is
+asserted at **3 → 3 → 0** rows rather than described.
+
+The footer in Favourites now reads `2 saved searches · 9 channels`, below a
+provider warning and above the plain counts.
+
+### Two mutations survived the first attempt, for one reason
+
+Both of my wiring checks pinned the **pieces** instead of the **seam**:
+
+- Reverting `x` to the 0.7.6 behaviour stayed green, because the check asserted
+  the `favoriteOrigin` *lookup* was present — and the mutation left the lookup
+  and deleted the branch beneath it.
+- Deleting the footer rung from `footerStatus` stayed green, because the test
+  called `savedSearchFooter` directly. A composer being right does not mean the
+  ladder shows it.
+
+Repointed at the branch and at the ladder; both now red. That is the same
+lesson as the de-duplication case two commits ago: a check that can only see
+the ingredients cannot see the dish.
+
+Node 1526 → **1533**.

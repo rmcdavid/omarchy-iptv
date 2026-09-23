@@ -3,6 +3,19 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+### Fixed
+
+- **You can take a saved search back out again.** 0.7.6 let you save a search
+  into Favourites but gave you no way to undo it: pressing `x` on one of those
+  channels added a star instead of removing it, and pressing `x` again took the
+  star off and left the channel there. Now `x` removes whatever put the row
+  there — the star if you starred it, the saved search otherwise, and it tells
+  you which search it forgot and how many channels went with it. Favourites also
+  says how much of the list is saved searches rather than stars, so a list full
+  of channels you never starred explains itself.
+
 ## 0.7.6 (2026-09-23)
 
 ### Added

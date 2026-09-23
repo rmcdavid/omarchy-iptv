@@ -1781,6 +1781,86 @@ checkCall("saved searches: the guide binds a MODIFIED key, so bare letters still
           qmlSites(/Model\.savedSearchCount\(root\.service\.channels, root\.query\)/).length]
 }, [1, 1, 1, 1])
 
+// ---- D-SAVE-1: 0.7.6 shipped rows into Favourites that could not leave -----
+checkCall("D-SAVE-1: `x` on a SAVED row forgets the search; on a STARRED row it unstars", function () {
+  // The defect: removeAt in Favourites called the favourite toggle for both
+  // kinds of row. A saved row is not starred, so it ADDED a star, and a second
+  // press removed the star and left the row because the search still matched.
+  const ch = savedChannels()
+  const starred = Model.cloneState(Model.emptyState(), { favorites: [Model.channelId(ch[7])] })
+  const saved = Model.withSavedSearch(Model.emptyState(), "baton rouge", 1).state
+  const both = Model.cloneState(saved, { favorites: [Model.channelId(ch[0])] })
+  return [
+    Model.favoriteOrigin(starred, ch[7]).kind,
+    Model.favoriteOrigin(saved, ch[0]).kind,
+    Model.favoriteOrigin(both, ch[0]).kind,
+    Model.favoriteOrigin(saved, ch[7]),
+  ]
+}, ["star", "saved", "star", null])
+checkCall("D-SAVE-1: forgetting the search actually empties the rows it put there", function () {
+  // The round trip the defect made impossible: a saved row, removed, is gone.
+  const ch = savedChannels()
+  const saved = Model.withSavedSearch(Model.emptyState(), "baton rouge", 1).state
+  const before = Model.channelsForScope(ch, Model.SCOPE_FAVORITES, saved).length
+  const origin = Model.favoriteOrigin(saved, ch[0])
+  const after = Model.channelsForScope(ch, Model.SCOPE_FAVORITES,
+                                       Model.withoutSavedSearch(saved, origin.query))
+  return [before, after.length]
+}, [3, 0])
+checkCall("D-SAVE-1: a row that is both keeps its place after the star goes, then leaves with the search", function () {
+  // The progressive case, asserted rather than described: `x` once removes the
+  // star and the row REMAINS because the search still matches it; `x` again
+  // removes the search and the row goes.
+  const ch = savedChannels()
+  const saved = Model.withSavedSearch(Model.emptyState(), "baton rouge", 1).state
+  const both = Model.cloneState(saved, { favorites: [Model.channelId(ch[0])] })
+  const afterUnstar = Model.withFavorites(both, [])
+  const afterForget = Model.withoutSavedSearch(afterUnstar, "baton rouge")
+  return [Model.channelsForScope(ch, Model.SCOPE_FAVORITES, both).length,
+          Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterUnstar).length,
+          Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterForget).length]
+}, [3, 3, 0])
+checkCall("D-SAVE-1: the footer explains Favourites, and says nothing when there is nothing to explain", function () {
+  const ch = savedChannels()
+  const saved = Model.withSavedSearch(Model.emptyState(), "baton rouge", 1).state
+  const two = Model.withSavedSearch(saved, "bbc", 2).state
+  return [Model.savedSearchFooter(Model.emptyState(), ch),
+          Model.savedSearchFooter(saved, ch),
+          Model.savedSearchFooter(two, ch)]
+}, ["", "1 saved search" + SEP_FOR_TEST + "3 channels", "2 saved searches" + SEP_FOR_TEST + "5 channels"])
+checkCall("D-SAVE-1: the removal notice names what it forgot and how much it took", function () {
+  return [Model.favoriteRemovalNotice({ kind: "star" }, 0),
+          Model.favoriteRemovalNotice({ kind: "saved", query: "BATON Rouge" }, 3),
+          Model.favoriteRemovalNotice({ kind: "saved", query: "bbc" }, 1),
+          Model.favoriteRemovalNotice(null, 0)]
+}, ["Removed from Favorites",
+    "Forgot baton rouge" + SEP_FOR_TEST + "3 channels",
+    "Forgot bbc" + SEP_FOR_TEST + "1 channel", ""])
+checkCall("D-SAVE-1: the guide BRANCHES on the origin rather than toggling the star for everything", function () {
+  // The first version of this check asserted the favoriteOrigin call was
+  // present, which stayed green when the branch beneath it was deleted and `x`
+  // went back to toggling the star for every row -- the exact 0.7.6 defect. It
+  // is the branch that must be pinned, not the lookup.
+  return [qmlSites(/if \(origin\.kind === "star"\) \{ root\.toggleFavoriteAt\(index\); return \}/).length,
+          qmlSites(/root\.service\.forgetSearch\(origin\.query\)/).length,
+          qmlSites(/Model\.favoriteRemovalNotice\(/).length,
+          qmlSites(/root\.effectiveScope === Model\.SCOPE_FAVORITES && root\.serviceReady/).length]
+}, [1, 1, 1, 1])
+checkCall("D-SAVE-1: the footer LADDER carries it, not just the composer", function () {
+  // Same lesson: savedSearchFooter being right does not mean footerStatus
+  // shows it. Asserted through the ladder, with the precedence that matters.
+  const base = { configured: true, count: 5 }
+  function f(extra) {
+    const o = {}
+    for (const k in base) o[k] = base[k]
+    for (const k in extra) o[k] = extra[k]
+    return Model.footerStatus(o)
+  }
+  return [f({ savedSearches: "1 saved search" + SEP_FOR_TEST + "3 channels" }),
+          f({ savedSearches: "" }),
+          f({ savedSearches: "x", warning: "Provider unreachable" })]
+}, ["1 saved search" + SEP_FOR_TEST + "3 channels", "5 channels", "Provider unreachable"])
+
 // ---- F-PERF-1: the fold the ranker needed and nobody precomputed -----------
 checkCall("F-PERF-1: the precomputed nameKey and the per-call fallback produce the SAME results", function () {
   // This is the assertion the optimisation rests on. `filterChannels` keeps
