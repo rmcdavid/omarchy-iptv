@@ -166,6 +166,30 @@ ShellRoot {
   //
   // URL-free by construction: a buffer, a label, channel names, a scope id
   // and a query. Nothing here ever holds a playlist URL.
+  // The result ListView is not exposed by the guide, so it is found by id
+  // through the object tree. Harness-only: nothing shipped depends on it, and
+  // if the id ever changes this returns without laying out and the number it
+  // measures is visibly wrong rather than quietly optimistic.
+  function layoutRows(g) {
+    var found = harness.findById(g, "resultList", 0)
+    if (found && typeof found.forceLayout === "function") found.forceLayout()
+    return found !== null
+  }
+
+  function findById(node, wanted, depth) {
+    if (!node || depth > 12) return null
+    try {
+      if (String(node.objectName) === wanted) return node
+    } catch (e) {}
+    var kids = node.children
+    if (!kids) return null
+    for (var i = 0; i < kids.length; i++) {
+      var hit = harness.findById(kids[i], wanted, depth + 1)
+      if (hit) return hit
+    }
+    return null
+  }
+
   function numberSnapshot(g) {
     if (!g || g.numberEntry === undefined || g.numberEntry === null) {
       return { ok: false, error: "no_verb", active: null, buffer: null, kind: null, label: null,
@@ -486,6 +510,27 @@ ShellRoot {
     target: "harness"
 
     function open(payload: string): string { fakeShell.summon(harness.pluginId, payload); return "ok" }
+    // PERF-01 / M2-04. Times the guide's own open path, in-engine, so the
+    // number is not a round trip through the socket and a shell. The guide is
+    // closed first so every call measures a real open, and the list is forced
+    // to lay out (forceLayout) before the clock stops: without that the
+    // delegates -- which is where the logo Images live -- are created after
+    // the measurement and the budget measures nothing.
+    function openMs(times: int): string {
+      var g = guideLoader.item
+      if (!g) return "{}"
+      var n = times > 0 ? times : 5
+      var out = []
+      for (var i = 0; i < n; i++) {
+        fakeShell.hide(harness.pluginId)
+        var t0 = Date.now()
+        fakeShell.summon(harness.pluginId, "{}")
+        harness.layoutRows(g)
+        out.push(Date.now() - t0)
+      }
+      return JSON.stringify({ ms: out, rows: g.currentRows.length,
+                              logoColumn: g.logoColumn, showLogos: g.showLogos })
+    }
     function close(): string { fakeShell.hide(harness.pluginId); return "ok" }
     // The theme tokens the guide paints with, as THIS shell resolved them, so
     // a headless capture is checked against the running value rather than a
@@ -656,6 +701,19 @@ ShellRoot {
       return s ? JSON.stringify(s.buildXtreamSource({ server: server, username: username, password: password })) : "{}"
     }
     function sources(): string { var s = serviceLoader.item; return s ? JSON.stringify(s.sources) : "[]" }
+    // M2-04. Drives the REAL Sources key path (handleSourcesLetter) rather
+    // than calling the toggle directly, so a scenario exercises the same
+    // dispatch a keystroke would: `g` must reach toggleLogos through the
+    // letter table, not around it.
+    function sourcesKey(text: string): string {
+      var g = guideLoader.item
+      if (!g) return "no"
+      if (text === "enter") { g.openSources(); return "ok" }
+      if (text === "confirm") { g.confirmLogos(); return "ok" }
+      if (text === "cancel") { g.cancelRemove(); return "ok" }
+      g.handleSourcesLetter(text)
+      return "ok"
+    }
     function activeCache(): string { var s = serviceLoader.item; return s ? s.activeCacheDir : "" }
     // The edit form's view of a record with the URLs masked (the raw
     // playlistUrl / epgUrl fields are dropped so nothing leaks into the terminal).
@@ -724,7 +782,17 @@ ShellRoot {
           hasNumbers: g.hasNumbers === undefined ? null : g.hasNumbers,
           channelOrder: g.serviceReady && g.service.channelOrder !== undefined ? String(g.service.channelOrder) : null,
           numberEntry: harness.numberSnapshot(g),
-          numberWidth: g.numberWidth === undefined ? null : g.numberWidth
+          numberWidth: g.numberWidth === undefined ? null : g.numberWidth,
+          // M2-04 logos: the column and its width, so a scenario can read
+          // whether the slot is reserved without a screenshot, plus what the
+          // consent screen WOULD say (it is composed from a survey that
+          // contacts nothing, so reading it here contacts nothing either).
+          showLogos: g.showLogos === undefined ? null : g.showLogos,
+          logoColumn: g.logoColumn === undefined ? null : g.logoColumn,
+          logoWidth: g.logoWidth === undefined ? null : g.logoWidth,
+          logoDir: g.logoDir === undefined ? "" : String(g.logoDir),
+          confirmKind: g.confirmKind === undefined ? "" : String(g.confirmKind),
+          confirmMessage: g.confirmMessage === undefined ? "" : String(g.confirmMessage)
         }
       }
       if (s) {

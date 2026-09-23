@@ -34,6 +34,7 @@
       "channelOrder": "playlist",
       "numberEntryMs": 2000,
       "barShowChannelNumber": true,
+      "showLogos": false,
       "pipCorner": "top-right",
       "pipSizePercent": 30,
       "pipMargin": 16
@@ -106,6 +107,12 @@
         "type": "boolean",
         "label": "Show the channel number in the bar",
         "defaultValue": true
+      },
+      {
+        "key": "showLogos",
+        "type": "boolean",
+        "label": "Show channel logos (off by default: fetches from the hosts the playlist names)",
+        "defaultValue": false
       },
       {
         "key": "pipCorner",

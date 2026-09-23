@@ -1155,7 +1155,10 @@ TestCase {
     compare(s.sourceCursor, 1)
     compare(Model.sourcesRowKind(2, 2), "add")
     compare(Model.sourcesRowKind(3, 2), "xtream")
-    compare(Model.footerHints({ mode: "sources", cursorKind: "source" }).length, 7)
+    // M2-04 added `g logos`, whose LABEL is the direction the key will go.
+    compare(Model.footerHints({ mode: "sources", cursorKind: "source" }).length, 8)
+    compare(Model.footerHints({ mode: "sources", cursorKind: "source" })[6], ["g", "logos on"])
+    compare(Model.footerHints({ mode: "sources", cursorKind: "source", showLogos: true })[6], ["g", "logos off"])
     var back = Model.onEscape(s).state
     compare(back.mode, "list")
     compare(back.scopeId, "g:UK")

@@ -3,6 +3,30 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+### Added
+
+- **Channel logos, off by default.** Playlists often name a logo for each
+  channel, and showing them means fetching pictures from whoever the playlist
+  author pointed at — on one real list, sixty-three different companies, one of
+  which would see two thirds of the channels you have. So it is off until you
+  turn it on, and before you turn it on the guide tells you the actual number:
+  press `g` on the Sources screen and it says how many hosts it would contact
+  and which one gets the most, counted from your own playlist without
+  contacting anybody. Turning it back off takes one keypress and no dialog.
+  Logos are fetched once, cached, never refetched, and a logo request carries
+  none of your subscription credentials. Channels without a logo get empty
+  space rather than a placeholder box, and the column disappears entirely on a
+  list that has none.
+
+### Fixed
+
+- **The Favourites count said 0 on a list with channels in it.** If you had
+  saved a search, the scope ring counted only the channels you had starred
+  while the list itself also held everything the search matched — so it read
+  "Favorites 0" over a screen you had no reason to open.
+
 ## 0.7.8 (2026-09-23)
 
 ### Fixed

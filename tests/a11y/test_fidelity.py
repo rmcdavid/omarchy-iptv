@@ -174,7 +174,7 @@ class DroppedDeclaration(unittest.TestCase):
         # Through the block's own closing brace, so the copy still parses and
         # the guard has to notice the loss rather than the syntax.
         end = copy.index("\n", copy.index("        }\n", copy.index(
-            "onConfirmed: root.confirmRemove()")))
+            "onConfirmed: root.confirmKind ===")))
         copy = copy[:start] + copy[end + 1:]
         found = fidelity.check_pair(source(), copy)
         self.assertIn("L3", layers(found))

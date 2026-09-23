@@ -124,6 +124,21 @@ Item {
   readonly property string channelOrder: settings.channelOrder
   readonly property int numberEntryMs: settings.numberEntryMs
   readonly property bool barShowChannelNumber: settings.barShowChannelNumber
+  // ---- logos (M2-04, RULING-LOGOS.md (dev branch)). Off by default, and the reader
+  // is Model.optInSetting rather than boolSetting: an unknown value here
+  // would contact third parties, so this one fails closed.
+  readonly property bool showLogos: settings.showLogos
+  // Where the fetched files live, and "" whenever they must not be read:
+  // no active source, or the setting off. The guide binds its column to this,
+  // so turning the setting off empties the column in the same turn rather
+  // than leaving the last playlist's pictures on screen.
+  readonly property string logoDir: (root.showLogos && root.activeCacheDir !== "")
+    ? root.activeCacheDir + "/logos" : ""
+  // What enabling logos would disclose, counted from the cache and contacting
+  // nothing. The guide shows these numbers BEFORE the switch is thrown
+  // (ruling rule 6): a generic "may contact third parties" is not informed
+  // consent when the real answer is countable.
+  function logoSurvey() { return Model.logoSurvey(root.channels) }
   readonly property bool configured: playlistUrl !== ""
   // The EPG URL in force for the active source: the active record's own
   // epgUrl once the history knows the source (an EPG URL belongs to the
@@ -2604,6 +2619,28 @@ Item {
     root.ownWrite = Model.ownWriteFor(root.hostSettings, playlistUrl, epgUrl)
   }
 
+  // M2-04. The logo switch, written through the host the same way the source
+  // URLs are and applied locally in the same turn (D-LIVE-20 / D-LIVE-21: the
+  // host publishes barConfig one write behind, so waiting for the echo means
+  // waiting forever).
+  //
+  // `false` is returned only for a real persist failure. The caller shows the
+  // count BEFORE calling this; nothing here asks again.
+  function setShowLogos(on) {
+    var want = on === true
+    if (root.showLogos === want) return true
+    if (!root.shell || typeof root.shell.updateEntryInline !== "function"
+        || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
+      console.warn("omarchy-iptv: no writable bar entry for the logo setting")
+      return false
+    }
+    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId),
+                                { showLogos: want, id: root.pluginId })
+    root.shell.updateEntryInline(root.pluginId, entry)
+    root.ownWrite = Model.ownWriteOf(root.hostSettings, { showLogos: want })
+    return true
+  }
+
   function beginSwitch() {
     root.switchStartedAt = Date.now()
     root.switching = true
@@ -3130,6 +3167,11 @@ Item {
     onLoaded: {
       root.applyChannels(text())
       root.finishSwitch()
+      // M2-04. A refreshed playlist can name logos the cache has never seen,
+      // and a switch to another source has a logo directory of its own. The
+      // fetch is a no-op when the setting is off, so this costs nothing to
+      // anyone who has not opted in.
+      root.fetchLogos()
     }
     onLoadFailed: {
       root.applyChannels("")
@@ -3588,6 +3630,50 @@ Item {
       root.runNextCacheJob()
     }
   }
+
+  // ---- logos (M2-04). ONE process, and it only ever runs after the user has
+  // read the host count and said yes. It is started from the settings change
+  // and after a refresh, never from the guide opening: a fetch on open would
+  // contact sixty-three hosts every time the guide is summoned.
+  Process {
+    id: logoFetchProc
+    stdout: StdioCollector { waitForEnd: true }
+  }
+  Connections {
+    target: logoFetchProc
+    function onExited(exitCode, exitStatus) {
+      // Nothing is reported to the user on success: the pictures appearing is
+      // the report. A failure is not an error either -- a logo host being
+      // down is not a reason to interrupt someone watching television -- so
+      // it is logged and the rows keep their blank slots.
+      if (exitCode !== 0) console.log("[iptv] logo fetch exited", exitCode)
+      // The names now on disk. The guide points an Image at a file only when
+      // it is in here: Qt logs "Cannot open" for every attempt at a missing
+      // one, so a dead logo host would otherwise fill the journal on every
+      // scroll.
+      root.logoHave = Model.logoHaveSet(Model.logoNamesFrom(logoFetchProc.stdout.text))
+      root.logoFetchSeq += 1
+    }
+  }
+  // Bumped when a fetch finishes, so the guide's Image sources can be asked
+  // to reload: a file that was missing when the row was built is on disk now.
+  property int logoFetchSeq: 0
+  // { <file name>: true } for every logo the last fetch found on disk, cached
+  // ones included. Empty means "nothing fetched yet", and every slot stays
+  // blank until the fetch answers.
+  property var logoHave: ({})
+
+  function fetchLogos() {
+    // Guarded three times over, because this is the one function in the
+    // plugin that contacts hosts the user did not choose: the setting must be
+    // on, a source must be active, and a fetch must not already be running.
+    if (!root.showLogos || root.activeCacheDir === "" || logoFetchProc.running) return false
+    logoFetchProc.command = Model.logoFetchArgv(root.helperPath, root.activeCacheDir)
+    logoFetchProc.running = true
+    return true
+  }
+
+  onShowLogosChanged: if (root.showLogos) root.fetchLogos()
 
   Process {
     id: whichProc

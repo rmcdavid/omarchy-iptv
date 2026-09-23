@@ -1,0 +1,338 @@
+{
+  "note": "Shared by tests/Model.test.js (Model.logoSurvey) and tests/test_logos.py (logo_survey). `expect` is the agreed answer, reviewed by hand: both implementations are checked against it, never against each other, so they cannot drift together. Case 7 is the one that matters most -- a logo URL carrying userinfo is REFUSED and its host is not named, because fetch_logo refuses it and because the consent text is a sink under CLAUDE.md rule 5.",
+  "cases": [
+    {
+      "name": "empty list",
+      "channels": [],
+      "expect": {
+        "channels": 0,
+        "withLogo": 0,
+        "wouldContact": 0,
+        "refused": 0,
+        "hostCount": 0,
+        "hosts": [],
+        "schemes": {}
+      }
+    },
+    {
+      "name": "nothing carries a logo",
+      "channels": [
+        {
+          "name": "A"
+        },
+        {
+          "name": "B",
+          "logo": ""
+        },
+        {
+          "name": "C",
+          "logo": null
+        }
+      ],
+      "expect": {
+        "channels": 3,
+        "withLogo": 0,
+        "wouldContact": 0,
+        "refused": 0,
+        "hostCount": 0,
+        "hosts": [],
+        "schemes": {}
+      }
+    },
+    {
+      "name": "the ruling's own shape: one busy host and a long tail",
+      "channels": [
+        {
+          "name": "i0",
+          "logo": "https://i.imgur.com/0.png"
+        },
+        {
+          "name": "i1",
+          "logo": "https://i.imgur.com/1.png"
+        },
+        {
+          "name": "i2",
+          "logo": "https://i.imgur.com/2.png"
+        },
+        {
+          "name": "i3",
+          "logo": "https://i.imgur.com/3.png"
+        },
+        {
+          "name": "i4",
+          "logo": "https://i.imgur.com/4.png"
+        },
+        {
+          "name": "i5",
+          "logo": "https://i.imgur.com/5.png"
+        },
+        {
+          "name": "i6",
+          "logo": "https://i.imgur.com/6.png"
+        },
+        {
+          "name": "i7",
+          "logo": "https://i.imgur.com/7.png"
+        },
+        {
+          "name": "i8",
+          "logo": "https://i.imgur.com/8.png"
+        },
+        {
+          "name": "w0",
+          "logo": "https://upload.wikimedia.org/0.png"
+        },
+        {
+          "name": "w1",
+          "logo": "https://upload.wikimedia.org/1.png"
+        },
+        {
+          "name": "w2",
+          "logo": "https://upload.wikimedia.org/2.png"
+        },
+        {
+          "name": "w3",
+          "logo": "https://upload.wikimedia.org/3.png"
+        },
+        {
+          "name": "p0",
+          "logo": "https://images.pluto.tv/0.png"
+        },
+        {
+          "name": "p1",
+          "logo": "https://images.pluto.tv/1.png"
+        },
+        {
+          "name": "bare"
+        }
+      ],
+      "expect": {
+        "channels": 16,
+        "withLogo": 15,
+        "wouldContact": 15,
+        "refused": 0,
+        "hostCount": 3,
+        "hosts": [
+          {
+            "host": "i.imgur.com",
+            "channels": 9
+          },
+          {
+            "host": "upload.wikimedia.org",
+            "channels": 4
+          },
+          {
+            "host": "images.pluto.tv",
+            "channels": 2
+          }
+        ],
+        "schemes": {
+          "https": 15
+        }
+      }
+    },
+    {
+      "name": "http is counted and never contacted",
+      "channels": [
+        {
+          "logo": "http://cleartext.test/a.png"
+        },
+        {
+          "logo": "https://fine.test/b.png"
+        },
+        {
+          "logo": "ftp://odd.test/c.png"
+        }
+      ],
+      "expect": {
+        "channels": 3,
+        "withLogo": 3,
+        "wouldContact": 1,
+        "refused": 2,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "fine.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "http": 1,
+          "https": 1,
+          "ftp": 1
+        }
+      }
+    },
+    {
+      "name": "a host with no host",
+      "channels": [
+        {
+          "logo": "https:///no-host.png"
+        },
+        {
+          "logo": "https://ok.test/y.png"
+        }
+      ],
+      "expect": {
+        "channels": 2,
+        "withLogo": 2,
+        "wouldContact": 1,
+        "refused": 1,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "ok.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 2
+        }
+      }
+    },
+    {
+      "name": "case and port are part of the host answer",
+      "channels": [
+        {
+          "logo": "https://I.IMGUR.com/a.png"
+        },
+        {
+          "logo": "https://i.imgur.com/b.png"
+        },
+        {
+          "logo": "https://i.imgur.com:443/c.png"
+        }
+      ],
+      "expect": {
+        "channels": 3,
+        "withLogo": 3,
+        "wouldContact": 3,
+        "refused": 0,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "i.imgur.com",
+            "channels": 3
+          }
+        ],
+        "schemes": {
+          "https": 3
+        }
+      }
+    },
+    {
+      "name": "query and fragment are not the host",
+      "channels": [
+        {
+          "logo": "https://x.test/a.png?token=SECRET"
+        },
+        {
+          "logo": "https://x.test/b.png#frag"
+        }
+      ],
+      "expect": {
+        "channels": 2,
+        "withLogo": 2,
+        "wouldContact": 2,
+        "refused": 0,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "x.test",
+            "channels": 2
+          }
+        ],
+        "schemes": {
+          "https": 2
+        }
+      }
+    },
+    {
+      "name": "userinfo belongs to the host half",
+      "channels": [
+        {
+          "logo": "https://user:pass@provider.test/logo.png"
+        }
+      ],
+      "expect": {
+        "channels": 1,
+        "withLogo": 1,
+        "wouldContact": 0,
+        "refused": 1,
+        "hostCount": 0,
+        "hosts": [],
+        "schemes": {
+          "https": 1
+        }
+      }
+    },
+    {
+      "name": "junk rows are skipped without throwing",
+      "channels": [
+        null,
+        "a string",
+        7,
+        {
+          "logo": 5
+        },
+        {
+          "logo": "https://ok.test/z.png"
+        }
+      ],
+      "expect": {
+        "channels": 5,
+        "withLogo": 1,
+        "wouldContact": 1,
+        "refused": 0,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "ok.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 1
+        }
+      }
+    },
+    {
+      "name": "ties between equal hosts break by name",
+      "channels": [
+        {
+          "logo": "https://zeta.test/1.png"
+        },
+        {
+          "logo": "https://alpha.test/1.png"
+        },
+        {
+          "logo": "https://mid.test/1.png"
+        }
+      ],
+      "expect": {
+        "channels": 3,
+        "withLogo": 3,
+        "wouldContact": 3,
+        "refused": 0,
+        "hostCount": 3,
+        "hosts": [
+          {
+            "host": "alpha.test",
+            "channels": 1
+          },
+          {
+            "host": "mid.test",
+            "channels": 1
+          },
+          {
+            "host": "zeta.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 3
+        }
+      }
+    }
+  ]
+}

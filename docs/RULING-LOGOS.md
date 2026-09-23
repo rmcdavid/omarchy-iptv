@@ -87,9 +87,114 @@ the source text, that `fetch_logo` never reaches `Authorization`, `base64`,
 `split_userinfo` or `read_http_source` -- a plain substring search matched this
 file's own explanation of why it must not.
 
-**Not built: the guide half.** No setting exists yet, and rows do not render
-logos. Adding the setting before the rendering would put a switch in the
-interface that does nothing, so neither ships until both do.
+## The guide half, built 2026-09-23
+
+Setting and rendering shipped together, as this document required.
+
+**The setting** is `showLogos`, declared in the manifest, defaulting to
+`false`, and read by `Model.optInSetting` rather than `Model.boolSetting`.
+That distinction is the ruling's first line in code. `boolSetting` is
+"anything but `false` and the string `"false"` means on", which is right for
+`showChannelName` -- a junk value in a hand-edited `shell.json` leaves a label
+visible. Applied here the same rule would let `showLogos: 0`,
+`showLogos: "no"` and `showLogos: null` each contact sixty-three hosts. A
+privacy switch whose unknown values mean ON is not off by default; it is off
+by default only for people whose config file happens to be well formed.
+`optInSetting` accepts `true` and `"true"` and nothing else.
+
+**The consent** is `g` on the Sources screen. The footer hint reads `g logos
+on` or `g logos off`, naming the direction, so nobody has to press it to find
+out -- and finding out means contacting third parties. Turning it ON opens a
+confirm screen carrying the count (rule 6); turning it OFF is immediate,
+because it discloses nothing and a dialog in front of the safe direction
+teaches people to dismiss dialogs. The confirm button says **Turn on**, not
+OK: the dialog is a disclosure notice, and OK on a disclosure notice is how
+people agree to things they have not read.
+
+Measured live on a 100-channel fixture at the provider's 27 per cent:
+
+```
+Turning logos on will contact 1 host, the busiest being logos.example.test (27 channels).
+27 of 100 channels carry a logo. Each one is fetched once and cached.
+No credentials are ever sent with a logo request.
+```
+
+**The row** puts the logo after the star and before the name: a picture is a
+stronger signal than a word, so it must not sit where the eye is looking for
+the name, and the star stays at the left edge where a favourite is findable by
+running down the column. A channel with no logo gets **blank space, never a
+drawn placeholder** -- the codebase already settled this for the channel
+number ("a placeholder in a column reads as a value; the absence is the
+information"), and at 27 per cent coverage the other choice is a list of empty
+boxes. The column itself is absent when no row on screen offers a logo, the
+same rule the number column follows.
+
+Verified live at both extremes the ruling demands: 27 per cent front-loaded
+and 98 per cent even, both `logoColumn: true`, `logoWidth: 22`.
+
+## Three things the build changed about the fetch
+
+**The extension is gone.** Files are named `fnv1a32(url)` and nothing else.
+The guide has to turn a channel's logo URL into a file name, and with an
+extension implied by the content type it would have had to read an index --
+a second source of truth and a JSON parse inside the 150 ms open budget.
+Measured on Qt 6.11.2 first: QML's `Image` loads a local file by CONTENT, not
+by name. An extension-less PNG, GIF and JPEG all reach `Image.Ready` at their
+true size, and so does a PNG named `.txt`. The extension was never a gate.
+
+**The magic bytes are checked.** Since the extension gated nothing, the
+server's `Content-Type` was the only thing standing between a payload and
+Qt's decoders -- and a file whose bytes are SVG renders as SVG whatever it is
+called, through a much larger surface than a bitmap decoder. `write_logo` now
+refuses bytes that do not begin the way the claimed type says, before anything
+touches the disk.
+
+**A cached logo is not fetched again.** The service runs a fetch whenever the
+channel cache loads, so without this the shell re-downloaded every logo on
+every start: 1,445 requests to sixty-three third parties per launch, which is
+precisely the disclosure this ruling exists to bound. Measured after the fix,
+10,000 channels with every logo cached: `fetched=0 cached=9820 failed=0`, zero
+hosts contacted, 0.49 s.
+
+## Two defects the build found, both live
+
+**The consent text was a credential sink.** The survey reported the host of
+`https://user:pass@provider.test/logo.png` as `user:pass@provider.test` -- so
+the dialog the user reads before consenting would have printed their password,
+and it promised a fetch that `fetch_logo` refuses anyway. Caught by the shared
+fixture on its first run, before the screen was ever drawn. Userinfo now makes
+the answer "" and counts as refused, in both implementations. The port is
+stripped too: the sentence counts PARTIES, and `cdn.test` and `cdn.test:8443`
+are one party.
+
+**A missing logo file filled the journal.** Pointing a QML `Image` at a file
+that is not there is not a blank slot: Qt logs `Cannot open` for every
+attempt, so one dead logo host produces a warning per row per scroll. Seen
+live with 27 URLs and 26 files. The helper's fetch now reports the names ON
+DISK (hashes only, no URLs -- that stdout is a sink too) and a row draws an
+`Image` only for a name in that set. Re-measured with one file deliberately
+missing and the whole list scrolled: **0 warnings**.
+
+## Open budget
+
+150 ms with a 10,000 channel cache. Measured in the harness, seven opens each,
+the list forced to lay out before the clock stops:
+
+| | ms |
+|---|---|
+| logos off (the default) | 68, 16, 20, 20, 14, 14, 14 |
+| logos on, 10,000 logos cached | 26, 37, 22, 21, 20, 12, 12 |
+
+The list instantiates only its visible delegates plus `cacheBuffer`, so the
+column costs about twenty image loads and not ten thousand; each is
+`asynchronous`, with `sourceSize` capped at twice the slot so a 256 KB image is
+not decoded at full size to be drawn at 22 px.
+
+## Still not built
+
+The fetch is best-effort and reports nothing to the user: the pictures
+appearing is the report. Whether a persistent failure deserves a notice is
+open, and it is a product question, not an implementation one.
 
 ## What is NOT ruled here
 

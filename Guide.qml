@@ -53,7 +53,10 @@ Item {
   readonly property bool guideMode: searchMode || listMode
   readonly property bool inSources: mode === "sources"
   readonly property bool formActive: mode === "sourceEdit" || mode === "sourceXtream"
-  readonly property bool confirmOpen: mode === "confirmRemove"
+  // Both confirm screens share the host's ConfirmDialog; `confirmKind` is what
+  // the message, the button and the Enter handler branch on.
+  readonly property bool confirmOpen: mode === "confirmRemove" || mode === "confirmLogos"
+  readonly property string confirmKind: mode === "confirmLogos" ? "logos" : "remove"
   // The PanelKeyCatcher is live in the two list-like modes only; search
   // mode, the forms and the confirm dialog block it (UX-SOURCES 2).
   readonly property bool catcherLive: listMode || inSources
@@ -196,6 +199,12 @@ Item {
     buttonSave: "Save",
     buttonCancel: "Cancel",
     buttonRemove: "Remove",
+    // M2-04. The confirm button names the ACTION, not "OK": the dialog it
+    // sits under is a disclosure notice, and "OK" on a disclosure notice is
+    // how people agree to things they have not read.
+    buttonTurnOn: "Turn on",
+    logosOn: "Channel logos on" + Model.SEP + "fetching now",
+    logosOff: "Channel logos off",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
     rowXtream: "Add Xtream login",
@@ -312,6 +321,31 @@ Item {
   property int footerHeight: Math.max(Style.space(20), Style.font.caption + Style.space(6))
   property int leadWidth: Style.space(24)
   property int trailWidth: Style.space(20)
+  // ---- logos (M2-04, RULING-LOGOS.md (dev branch))
+  //
+  // Off unless the user has opted in, and read through the service so that
+  // turning the setting off empties the column in the same turn.
+  readonly property bool showLogos: root.serviceReady && root.service.showLogos === true
+  readonly property string logoDir: root.serviceReady && root.service.logoDir !== undefined
+    ? String(root.service.logoDir) : ""
+  // A file that was missing when a row was built is on disk after a fetch.
+  // Binding the source through this makes the row re-evaluate then, and only
+  // then; it is an integer on the service that the fetch bumps once.
+  readonly property int logoSeq: root.serviceReady && root.service.logoFetchSeq !== undefined
+    ? root.service.logoFetchSeq : 0
+  // The file names the last fetch reported on disk. A row draws an Image only
+  // for a name in here; see Model.logoSlot for why a missing file is not a
+  // harmless blank.
+  readonly property var logoHave: root.serviceReady && root.service.logoHave !== undefined
+    ? root.service.logoHave : ({})
+  // The same rule the channel-number column follows (M2-03 4.2): zero width
+  // on a list that has none, so those rows draw exactly as they did before
+  // the feature existed. Asked of the rows ON SCREEN, so a group holding no
+  // logos does not reserve a column for them, and asked of the logo URL
+  // rather than the fetched file, so the column does not appear and disappear
+  // underneath the user while the fetch runs.
+  readonly property bool logoColumn: Model.logoColumnShown(root.currentRows, root.showLogos, root.logoDir)
+  readonly property int logoWidth: root.logoColumn ? Style.space(22) : 0
   // Measured on `windowContent`, the item that fills whichever window is
   // hosting the guide (its size is the window's). The window itself lives
   // inside a Component now, out of this scope; see `windowLoader`.
@@ -415,6 +449,14 @@ Item {
     return root.headerTitle
   }
   readonly property string confirmMessage: {
+    if (root.confirmKind === "logos") {
+      // Ruling rule 6: the user is told the NUMBER before they choose. The
+      // survey reads the cache and contacts nothing, so this costs one pass
+      // over the channel list and no requests.
+      return Model.confirmLogosMessage(
+        root.serviceReady && typeof root.service.logoSurvey === "function"
+          ? root.service.logoSurvey() : {})
+    }
     var view = root.sourceAt(root.sourceCursor)
     return view ? Model.confirmRemoveMessage(view.label, view.active) : ""
   }
@@ -618,6 +660,9 @@ Item {
       hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null,
       // M2-05 section 5: `p pip` only where it can do something.
       pipAvailable: root.pipAvailable,
+      // M2-04: the hint names the direction the key will go, so nobody has to
+      // press it to find out -- and finding out means contacting third parties.
+      showLogos: root.showLogos,
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
       // on screen. `scope` and `group` are the same five characters.
@@ -1326,6 +1371,7 @@ Item {
     else if (t === Model.SOURCE_KEYS.xtream) root.openXtreamForm()
     else if (t === Model.SOURCE_KEYS.edit) root.openEditForm()
     else if (t === Model.SOURCE_KEYS.remove) root.startRemove()
+    else if (t === Model.SOURCE_KEYS.logos) root.toggleLogos()
     // h / l / Tab / "/" / r / s / f / digits: ignored here (UX-SOURCES 8 #20, #27)
   }
 
@@ -1720,6 +1766,38 @@ Item {
 
   function cancelRemove() {
     root.setGuide(Model.withMode(root.guide, "sources"))
+    root.refocus()
+  }
+
+  // ---- logos (M2-04, RULING-LOGOS.md (dev branch))
+
+  // `g` in Sources. ON goes through the consent screen, which states the host
+  // count; OFF is immediate, because turning it off discloses nothing and a
+  // dialog in front of the safe direction teaches people to dismiss dialogs.
+  function toggleLogos() {
+    if (!root.inSources) return
+    if (!root.serviceReady || typeof root.service.setShowLogos !== "function") {
+      root.showTransient(Model.sourceErrorMessage("not_ready"))
+      return
+    }
+    if (root.showLogos) {
+      if (root.service.setShowLogos(false)) root.showTransient(root.copy.logosOff)
+      else root.showTransient(Model.sourceErrorMessage("persist_failed"))
+      return
+    }
+    removeDialog.selectedIndex = 0
+    root.setGuide(Model.startLogosConsent(root.guide, false))
+    root.refocus()
+  }
+
+  function confirmLogos() {
+    root.setGuide(Model.withMode(root.guide, "sources"))
+    if (root.serviceReady && typeof root.service.setShowLogos === "function"
+        && root.service.setShowLogos(true)) {
+      root.showTransient(root.copy.logosOn)
+    } else {
+      root.showTransient(Model.sourceErrorMessage("persist_failed"))
+    }
     root.refocus()
   }
 
@@ -2198,7 +2276,7 @@ Item {
           z: 10
           message: root.confirmMessage
           cancelText: root.copy.buttonCancel
-          confirmText: root.copy.buttonRemove
+          confirmText: root.confirmKind === "logos" ? root.copy.buttonTurnOn : root.copy.buttonRemove
           background: root.background
           foreground: root.foreground
           scrim: root.scrim
@@ -2215,7 +2293,7 @@ Item {
           Accessible.role: Accessible.Dialog
           Accessible.name: root.confirmMessage
           onCanceled: root.cancelRemove()
-          onConfirmed: root.confirmRemove()
+          onConfirmed: root.confirmKind === "logos" ? root.confirmLogos() : root.confirmRemove()
         }
       }
 
@@ -2598,6 +2676,12 @@ Item {
 
               ListView {
                 id: resultList
+                // Inert at runtime, and the only way the performance budget
+                // can be measured: `id` is compile-time and does not reach the
+                // object tree, so a harness timing the open cannot force the
+                // row delegates to lay out before it stops the clock -- and
+                // the delegates are where the work is.
+                objectName: "resultList"
                 anchors.fill: parent
                 // Integer model over root.currentRows: setting the count is
                 // O(1) for any scope size and only the visible delegates
@@ -2822,9 +2906,62 @@ Item {
                       verticalAlignment: Text.AlignVCenter
                     }
 
+                    // logo slot (M2-04). After the star and before the name:
+                    // a picture is a stronger signal than a word, so it must
+                    // not sit where the eye is looking for the name, and the
+                    // star has to stay at the left edge where a favourite is
+                    // findable by running down the column.
+                    //
+                    // A channel with no logo gets BLANK SPACE, never a drawn
+                    // placeholder. This codebase already settled that for the
+                    // number column -- "a placeholder in a column reads as a
+                    // value; the absence is the information" -- and at the
+                    // 27 per cent coverage of the provider list the other
+                    // choice is a list of empty boxes. The ruling requires
+                    // the design to work at 27 per cent AND at 98.
+                    Image {
+                      id: logoImage
+                      visible: root.logoWidth > 0
+                      width: root.logoWidth
+                      height: root.logoWidth
+                      anchors.left: lead.right
+                      anchors.leftMargin: root.logoWidth > 0 ? Style.spacing.labelGap : 0
+                      anchors.verticalCenter: lead.verticalCenter
+                      // OPEN BUDGET (150 ms with a 10,000 channel cache).
+                      // The list instantiates only the visible delegates plus
+                      // its cacheBuffer, so this is ~20 decodes and not
+                      // 10,000 -- but each one must also stay off the UI
+                      // thread and must not decode a 256 KB image to draw it
+                      // at 22 px.
+                      asynchronous: true
+                      cache: true
+                      sourceSize.width: root.logoWidth * 2
+                      sourceSize.height: root.logoWidth * 2
+                      fillMode: Image.PreserveAspectFit
+                      mipmap: true
+                      // `logoSeq` is in the expression so a finished fetch
+                      // re-evaluates it: the file may exist now.
+                      source: {
+                        var slot = Model.logoSlot({ enabled: root.showLogos, channel: row.channel,
+                                                    logoDir: root.logoDir, have: root.logoHave })
+                        return (root.logoSeq >= 0 && slot.kind === "image") ? "file://" + slot.path : ""
+                      }
+                      // A logo that is missing, half-written or not an image
+                      // leaves the slot blank rather than drawing Qt's broken
+                      // -image glyph. The fetch is best-effort by design: a
+                      // host being down is not a reason to mark up the list.
+                      opacity: status === Image.Ready ? 1 : 0
+                      // The picture is decoration. The name is already the
+                      // accessible name of the row, and a screen reader
+                      // announcing "image" before every channel would be
+                      // noise, not information (UX 7.2).
+                      Accessible.ignored: true
+                    }
+
                     Text {
                       id: nameText
-                      anchors.left: lead.right
+                      anchors.left: logoImage.visible ? logoImage.right : lead.right
+                      anchors.leftMargin: logoImage.visible ? Style.spacing.labelGap : 0
                       anchors.right: trail.left
                       anchors.rightMargin: Style.space(6)
                       anchors.top: parent.top

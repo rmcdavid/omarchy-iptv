@@ -2155,6 +2155,28 @@ LOGO_SCHEMES = ("https",)
 LOGO_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
 
+def logo_host(netloc: str) -> str:
+    """The host a logo URL would disclose to, or "" when it discloses to none.
+
+    The PORT is not part of the answer. The question the survey exists to
+    answer is how many parties learn which channels this user has, and
+    `cdn.test` and `cdn.test:8443` are one party; counting them separately
+    inflates the only number in the consent sentence.
+
+    Userinfo makes the answer "": fetch_logo refuses such a URL outright, so
+    the host is never contacted, and naming it would print the credentials in
+    the consent text. Mirrored by Model.splitLogoUrl.
+    """
+    text = (netloc or "").strip().lower()
+    if "@" in text:
+        return ""
+    if text.startswith("["):
+        # IPv6 literal: the bracketed half is the host, any :port follows it.
+        close = text.find("]")
+        return text[: close + 1] if close != -1 else ""
+    return text.split(":", 1)[0]
+
+
 def logo_survey(channels: Any) -> dict[str, Any]:
     """Who enabling logos would contact, counted from the cache.
 
@@ -2179,8 +2201,15 @@ def logo_survey(channels: Any) -> dict[str, Any]:
             # Counted, never contacted: rule 3 of the ruling is https only.
             refused += 1
             continue
-        host = (parsed.netloc or "").lower()
+        host = logo_host(parsed.netloc or "")
         if not host:
+            # No host at all, or userinfo. fetch_logo refuses a URL carrying
+            # userinfo rather than stripping it, so a survey that counted one
+            # as contactable would promise a fetch that cannot happen -- and
+            # would print `user:pass@provider.test` into the consent text the
+            # user is reading. The credential-sink rule (engineering rule 5): every sink redacts to scheme
+            # and host, and the consent dialog is a sink. Caught by
+            # the shared logo-survey fixture (dev branch) before it was ever drawn.
             refused += 1
             continue
         hosts[host] = hosts.get(host, 0) + 1
@@ -2247,17 +2276,56 @@ def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
     return data, ctype
 
 
-LOGO_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg",
-                   "image/webp": ".webp", "image/gif": ".gif"}
+# The first bytes each allowed type must begin with. The content type is the
+# SERVER's claim about bytes we are about to store and hand to an image
+# decoder, and nothing so far has checked the claim against the payload.
+#
+# Measured on Qt 6.11.2 before this was written: QML's Image loads a local
+# file by CONTENT, not by name. An extension-less PNG, GIF and JPEG all reach
+# Image.Ready at their true size, and so does a PNG named `.txt`. So the
+# extension the cache used to append was never a gate -- a file whose bytes
+# are SVG renders as SVG whatever it is called, and Qt's SVG renderer is a
+# larger surface than a bitmap decoder.
+#
+# Checking the magic is the gate the extension only looked like. It is done
+# here rather than at write time so a mismatch is refused BEFORE anything
+# touches the disk.
+LOGO_MAGIC = {
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/gif": (b"GIF87a", b"GIF89a"),
+    # RIFF....WEBP: the size sits between the two, so both halves are checked.
+    "image/webp": (b"RIFF",),
+}
+
+
+def logo_bytes_match_type(data: bytes, ctype: str) -> bool:
+    """Do these bytes actually begin the way `ctype` says they do?"""
+    prefixes = LOGO_MAGIC.get(ctype)
+    if not prefixes:
+        return False
+    if ctype == "image/webp":
+        return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    return any(data.startswith(prefix) for prefix in prefixes)
 
 
 def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
-    """Write one logo 0600 into a 0700 directory. Returns the file name."""
-    extension = LOGO_EXTENSIONS.get(ctype)
-    if extension is None:
+    """Write one logo 0600 into a 0700 directory. Returns the file name.
+
+    The name is the fnv1a32 of the URL and NOTHING else. It used to carry an
+    extension implied by the content type, which cost a second source of
+    truth: the guide would have had to read an index to turn a channel's logo
+    URL into a file name, and that index is a parse inside the 150 ms open
+    budget. Qt names nothing from the extension anyway (see LOGO_MAGIC), so
+    dropping it removes a file the guide would have had to read and takes
+    nothing away.
+    """
+    if ctype not in LOGO_TYPES:
         raise HelperError("logo_type", "refused an unlisted content type")
+    if not logo_bytes_match_type(data, ctype):
+        raise HelperError("logo_bytes", "refused bytes that are not %s" % ctype)
     ensure_private_dir(logo_dir)
-    name = logo_filename(url) + extension
+    name = logo_filename(url)
     path = os.path.join(logo_dir, name)
     write_bytes_atomic(path, data)
     return name
@@ -2274,9 +2342,10 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # ruling's first line) and this flag is off by default here, so nothing
     # contacts anyone because a command was run without reading it.
     logo_dir = os.path.join(directory, "logos")
-    fetched, refused, failed = 0, 0, 0
+    fetched, cached, refused, failed = 0, 0, 0, 0
     reasons: dict[str, int] = {}
     seen: set[str] = set()
+    names: list[str] = []
     for channel in channels:
         if fetched >= MAX_LOGO_FILES:
             break
@@ -2284,20 +2353,40 @@ def cmd_logos(args: argparse.Namespace) -> int:
         if not isinstance(url, str) or not url or url in seen:
             continue
         seen.add(url)
+        # Already on disk: no request. Without this the shell re-downloaded
+        # every logo on every start, because the service runs a fetch whenever
+        # the channel cache loads -- 1,445 requests to sixty-three third
+        # parties per launch, which is precisely the disclosure the ruling
+        # exists to bound. The file name is a pure function of the URL, so
+        # "have we got this one" is a stat and not a lookup.
+        name = logo_filename(url)
+        if os.path.exists(os.path.join(logo_dir, name)):
+            cached += 1
+            names.append(name)
+            continue
         try:
             data, ctype = fetch_logo(url, args.timeout)
-            write_logo(logo_dir, url, data, ctype)
+            names.append(write_logo(logo_dir, url, data, ctype))
             fetched += 1
         except HelperError as error:
             # Hosts and codes only, never the URL (rule 5).
             reasons[error.code] = reasons.get(error.code, 0) + 1
-            if error.code in ("logo_scheme", "logo_userinfo", "logo_type", "logo_too_large"):
+            if error.code in ("logo_scheme", "logo_userinfo", "logo_type",
+                              "logo_bytes", "logo_too_large"):
                 refused += 1
             else:
                 failed += 1
+    # `names` is what is ON DISK now, and it is the whole reason this command
+    # reports anything at all: the guide points an Image at a file only when
+    # that file is in this list. Pointing at a missing one is not merely a
+    # blank slot -- Qt logs "Cannot open" for every attempt, so one dead logo
+    # host fills the user's journal every time the row scrolls into view.
+    # Seen live 2026-09-23 before this existed.
+    #
+    # It carries no URLs, only their hashes, so it is safe on stdout.
     emit(dict(survey, ok=True, kind="logos", action="fetch", fetched=fetched,
-              refusedOnPolicy=refused, failed=failed, reasons=reasons,
-              cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES))
+              cached=cached, refusedOnPolicy=refused, failed=failed, reasons=reasons,
+              names=names, cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES))
     return 0
 
 

@@ -1820,6 +1820,153 @@ checkCall("D-SAVE-1: a row that is both keeps its place after the star goes, the
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterUnstar).length,
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterForget).length]
 }, [3, 3, 0])
+// ------------------------------------------------------------ logos (M2-04)
+//
+// The survey the consent sentence is composed from, checked against
+// tests/fixtures/logo-survey.json -- the same file tests/test_logos.py runs
+// against the python mirror. Neither implementation is the oracle; the
+// fixture is. The fixture found a real defect on its first run: a logo URL
+// carrying userinfo used to be reported as a host the plugin would contact,
+// which both promised a fetch that fetch_logo refuses and put the credentials
+// into the consent text.
+const logoFixture = JSON.parse(require("fs").readFileSync(
+  require("path").join(__dirname, "fixtures/logo-survey.json"), "utf8"))
+
+checkCall("M2-04: every shared logo-survey case matches the agreed answer", function () {
+  const keys = ["channels", "withLogo", "wouldContact", "refused", "hostCount", "hosts", "schemes"]
+  const bad = []
+  logoFixture.cases.forEach(function (c) {
+    const got = Model.logoSurvey(c.channels)
+    keys.forEach(function (k) {
+      if (JSON.stringify(got[k]) !== JSON.stringify(c.expect[k])) {
+        bad.push(c.name + "/" + k + " got " + JSON.stringify(got[k])
+                 + " want " + JSON.stringify(c.expect[k]))
+      }
+    })
+  })
+  return [logoFixture.cases.length, bad]
+}, [10, []])
+
+checkCall("M2-04: userinfo never reaches the consent text", function () {
+  // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
+  // the list, the same way the accessibility bus was.
+  const survey = Model.logoSurvey([{ logo: "https://user:pass@provider.test/logo.png" }])
+  const text = Model.logoConsentLines(survey).join(" ")
+  return [survey.hosts.length, survey.refused, survey.wouldContact,
+          /pass|user@|provider\.test/.test(text)]
+}, [0, 1, 0, false])
+
+checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
+  // boolSetting is "anything but false means on", which would let
+  // `showLogos: 0` contact sixty-three hosts. optInSetting is the opposite.
+  const vals = [undefined, null, 0, 1, "", "no", "yes", "0", "false", false, "true", true]
+  return vals.map(function (v) { return Model.optInSetting(v) })
+}, [false, false, false, false, false, false, false, false, false, false, true, true])
+
+checkCall("M2-04: and the setting reader is wired to it, not to boolSetting", function () {
+  // The seam: settingsFrom is what the service and the guide read. A junk
+  // value here is the whole defect, so it is asserted THROUGH settingsFrom
+  // rather than on optInSetting alone.
+  return [Model.settingsFrom({}).showLogos,
+          Model.settingsFrom({ showLogos: 0 }).showLogos,
+          Model.settingsFrom({ showLogos: "yes" }).showLogos,
+          Model.settingsFrom({ showLogos: "true" }).showLogos,
+          Model.settingsFrom({ showLogos: true }).showLogos]
+}, [false, false, false, true, true])
+
+checkCall("M2-04: the cached file is named from the URL alone, with no index to read", function () {
+  const dir = "/c/sources/ab/logos"
+  const a = { logo: "https://i.imgur.com/a.png?token=SECRET" }
+  const path = Model.logoFile(a, dir)
+  return [path.indexOf("SECRET") === -1, path.indexOf(".png") === -1,
+          path === Model.logoFile(a, dir + "/"),
+          path === Model.logoFile({ logo: a.logo }, dir),
+          Model.logoFile({ logo: "https://i.imgur.com/b.png" }, dir) !== path]
+}, [true, true, true, true, true])
+
+checkCall("M2-04: a logo the fetch would refuse is never named either", function () {
+  const dir = "/c/logos"
+  return [Model.logoFile({ logo: "http://cleartext.test/a.png" }, dir),
+          Model.logoFile({ logo: "https://user:pass@p.test/a.png" }, dir),
+          Model.logoFile({ logo: "https:///no-host.png" }, dir),
+          Model.logoFile({ logo: "" }, dir),
+          Model.logoFile({ name: "none" }, dir),
+          Model.logoFile({ logo: "https://ok.test/a.png" }, "")]
+}, ["", "", "", "", "", ""])
+
+checkCall("M2-04: the slot says off, blank or image, and nothing else", function () {
+  // `image` requires the file to be one the fetch reported ON DISK. Found
+  // live: pointing a QML Image at a missing file is not a blank slot, it is a
+  // "Cannot open" in the journal for every attempt, so one dead logo host
+  // fills the log on every scroll.
+  const dir = "/c/logos"
+  const has = { logo: "https://ok.test/a.png" }
+  const none = { name: "plain" }
+  const name = Model.logoFile(has, dir).split("/").pop()
+  const have = Model.logoHaveSet([name])
+  return [Model.logoSlot({ enabled: false, channel: has, logoDir: dir, have: have }).kind,
+          Model.logoSlot({ enabled: true, channel: none, logoDir: dir, have: have }).kind,
+          Model.logoSlot({ enabled: true, channel: has, logoDir: dir, have: have }).kind,
+          // the file is not there: blank, and NOT an Image pointed at nothing
+          Model.logoSlot({ enabled: true, channel: has, logoDir: dir, have: {} }).kind,
+          // nothing fetched yet: blank, never a guess
+          Model.logoSlot({ enabled: true, channel: has, logoDir: dir }).kind,
+          Model.logoSlot({}).kind]
+}, ["off", "blank", "image", "blank", "blank", "off"])
+
+checkCall("M2-04: the fetch report is read defensively, and names carry no URLs", function () {
+  const good = JSON.stringify({ ok: true, kind: "logos", names: ["ab12cd34", "ff00ff00"] })
+  return [Model.logoNamesFrom(good),
+          Model.logoNamesFrom("not json"),
+          Model.logoNamesFrom(""),
+          Model.logoNamesFrom(JSON.stringify({ ok: true })),
+          Model.logoNamesFrom(JSON.stringify({ names: ["ok", "", 7, null] })),
+          Model.logoHaveSet(["a", "b"]).a,
+          Model.logoHaveSet(["a"]).zzz === undefined]
+}, [["ab12cd34", "ff00ff00"], [], [], [], ["ok"], true, true])
+
+checkCall("M2-04: the column appears at 98 per cent coverage and at 27, and not at 0", function () {
+  // The ruling's two extremes, which the row design has to satisfy BOTH of:
+  // the provider list is 27 per cent and the configured list is 98. The
+  // column is present for either, absent when the playlist offers none, and
+  // absent when the setting is off however many logos there are.
+  const dir = "/c/logos"
+  function list(n, fraction) {
+    const out = []
+    for (let i = 0; i < n; i++) {
+      out.push(i < Math.round(n * fraction)
+        ? { name: "c" + i, logo: "https://h.test/" + i + ".png" }
+        : { name: "c" + i })
+    }
+    return out
+  }
+  return [Model.logoColumnShown(list(100, 0.98), true, dir),
+          Model.logoColumnShown(list(100, 0.27), true, dir),
+          Model.logoColumnShown(list(100, 0.01), true, dir),
+          Model.logoColumnShown(list(100, 0), true, dir),
+          Model.logoColumnShown(list(100, 0.98), false, dir),
+          // Every logo http: offered by the playlist, refused by the policy,
+          // so there is nothing to draw and no column.
+          Model.logoColumnShown([{ logo: "http://x.test/a.png" }], true, dir)]
+}, [true, true, true, false, false, false])
+
+checkCall("M2-04: the consent sentence counts parties, and names the busiest", function () {
+  const rows = []
+  for (let i = 0; i < 999; i++) rows.push({ logo: "https://i.imgur.com/" + i + ".png" })
+  for (let i = 0; i < 170; i++) rows.push({ logo: "https://upload.wikimedia.org/" + i + ".png" })
+  for (let i = 0; i < 2; i++) rows.push({ logo: "http://cleartext.test/" + i + ".png" })
+  for (let i = 0; i < 300; i++) rows.push({ name: "plain " + i })
+  return Model.logoConsentLines(Model.logoSurvey(rows))
+}, ["Turning logos on will contact 2 hosts, the busiest being i.imgur.com (999 channels).",
+    "1,171 of 1,471 channels carry a logo. Each one is fetched once and cached.",
+    "2 logos are not https and will be skipped.",
+    "No credentials are ever sent with a logo request."])
+
+checkCall("M2-04: a playlist with no logos says so instead of counting to zero", function () {
+  return Model.logoConsentLines(Model.logoSurvey([{ name: "a" }, { name: "b" }]))
+}, ["No channel in this playlist offers a logo.",
+    "Turning this on would contact nobody, and change nothing on screen."])
+
 checkCall("D-SAVE-2: the Favourites COUNT equals the Favourites ROWS, in every combination", function () {
   // Found by a live pass, not by the suite. countFavorites counted
   // st.favorites alone while channelsForScope returned the stars PLUS every
@@ -3031,8 +3178,8 @@ check("clampInt parses and clamps", [Model.clampInt("15", 60, 5, 1440), Model.cl
 // The whole settings object, pinned: a new key is only ever added here on
 // purpose. M2-03 7.1 added three; M2-05 section 6 adds the last three.
 check("settingsFrom applies R2 clamps and trims", Model.settingsFrom(Model.findBarEntry(barConfig, "io.github.rmcdavid.iptv")),
-  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
-check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
+  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, showLogos: false, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
+check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, showLogos: false, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
 check("settingsFrom null", Model.settingsFrom(null).refreshMinutes, 360)
 check("clampSetting refreshMinutes range", [Model.clampSetting("refreshMinutes", 5), Model.clampSetting("refreshMinutes", 99999), Model.clampSetting("refreshMinutes", "abc")], [15, 1440, 360])
 check("clampSetting barLabelMaxWidth range", [Model.clampSetting("barLabelMaxWidth", 10), Model.clampSetting("barLabelMaxWidth", 601)], [60, 600])
@@ -3849,9 +3996,22 @@ const ELL = "\u2026"
 check("LIMITS are the canonical caps", Model.LIMITS, { url: 2048, label: 64, server: 512, user: 256, pass: 256, sources: 50 })
 check("architecture constant names agree with LIMITS", [Model.MAX_SOURCE_URL, Model.MAX_LABEL, Model.MAX_XTREAM_SERVER, Model.MAX_XTREAM_FIELD, Model.MAX_SOURCES, Model.STATE_VERSION, Model.CACHE_LAYOUT, Model.SOURCES_DIR], [2048, 64, 512, 256, 50, 2, 2, "sources"])
 check("MASK and the clear params", [Model.MASK, Model.MASK_CLEAR_PARAMS], ["****", ["type", "output"]])
-check("SOURCE_KEYS table", Model.SOURCE_KEYS, { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" })
+check("SOURCE_KEYS table", Model.SOURCE_KEYS, { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" })
 check("Sources glyphs are supplementary-plane Nerd Font codepoints", ["sources", "check", "eye", "eyeOff", "plus", "key", "pencil", "closeCircle"].map(k => Model.GLYPHS[k].codePointAt(0).toString(16)), ["f0411", "f012c", "f0208", "f0209", "f0415", "f0306", "f03eb", "f0159"])
-check("guide modes", Model.GUIDE_MODES, ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove"])
+check("guide modes", Model.GUIDE_MODES, ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos"])
+
+checkCall("M2-04: only turning logos ON is confirmed, and only from Sources", function () {
+  // Turning them off discloses nothing. A dialog in front of the safe
+  // direction teaches people to dismiss dialogs, so there is not one.
+  const src = Model.withMode(Model.guideState(Model.SCOPE_ALL), "sources")
+  const list = Model.withMode(Model.guideState(Model.SCOPE_ALL), "list")
+  return [Model.startLogosConsent(src, false).mode,
+          Model.startLogosConsent(src, true).mode,
+          Model.startLogosConsent(list, false).mode,
+          // Esc from the consent screen goes back to Sources, not out
+          Model.onEscape(Model.startLogosConsent(src, false)).state.mode,
+          Model.onEscape(Model.startLogosConsent(src, false)).close]
+}, ["confirmLogos", "sources", "list", "sources", false])
 
 // ---- sanitizeInput (ARCHITECTURE-SOURCES 3.1 / 6.1) ----
 check("sanitizeInput strips CR LF TAB and C1, trims space and NBSP", Model.sanitizeInput("\u00a0 http://h.test/a\r\nb\tc\u0085 \u00a0", 100), "http://h.test/abc")
@@ -4724,7 +4884,38 @@ check("validateUrlForm null-safe", Model.validateUrlForm(null, null, null).error
 // ---- footer (UX-SOURCES 5.3) ----
 check("footerStatus prefixes the active label with 2+ sources only", [Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS Tvheadend", sourceCount: 2 }), Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", activeLabel: "NAS", sourceCount: 1 }), Model.footerStatus({ configured: true, count: 84, lastUpdated: "09:12", stale: true, activeLabel: "NAS", sourceCount: 3 })], ["NAS Tvheadend" + SEP + "84 channels" + SEP + "updated 09:12", "84 channels" + SEP + "updated 09:12", "NAS" + SEP + "84 channels" + SEP + "cached 09:12" + SEP + "offline"])
 check("footerStatus transient and playing beat the prefix", [Model.footerStatus({ count: 5, transient: "Switched to NAS", activeLabel: "NAS", sourceCount: 2 }), Model.footerStatus({ count: 5, playingName: "Arte", activeLabel: "NAS", sourceCount: 2 })], ["Switched to NAS", Model.GLYPHS.play + " Arte" + SEP + "s stop"])
-check("footerHints sources: source row / action row", [Model.footerHints({ mode: "sources", cursorKind: "source" }), Model.footerHints({ mode: "sources", cursorKind: "add" }), Model.footerHints({ mode: "sources", cursorKind: "xtream" }).length], [[["j/k", "move"], ["Enter", "switch"], ["a", "add"], ["c", "Xtream"], ["e", "edit"], ["x", "remove"], ["Esc", "back"]], [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]], 3])
+check("footerHints sources: source row / action row", [Model.footerHints({ mode: "sources", cursorKind: "source" }), Model.footerHints({ mode: "sources", cursorKind: "add" }), Model.footerHints({ mode: "sources", cursorKind: "xtream" }).length], [[["j/k", "move"], ["Enter", "switch"], ["a", "add"], ["c", "Xtream"], ["e", "edit"], ["x", "remove"], ["g", "logos on"], ["Esc", "back"]], [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]], 3])
+checkCall("M2-04: the logos hint says which way the key will go", function () {
+  // A hint that always reads "logos" leaves the user pressing it to find out,
+  // and finding out means contacting sixty-three hosts.
+  function hint(showLogos) {
+    const pairs = Model.footerHints({ mode: "sources", cursorKind: "source", showLogos: showLogos })
+    return pairs.filter(function (p) { return p[0] === Model.SOURCE_KEYS.logos })[0][1]
+  }
+  return [hint(false), hint(true), hint(undefined)]
+}, ["logos on", "logos off", "logos on"])
+
+checkCall("M2-04: the own-write override covers the keys the write carried, not two named ones", function () {
+  // Before M2-04 this compared host.playlistUrl and host.epgUrl by name. A
+  // third writable key would have been held in force while the host changed
+  // it underneath, which is the opposite of what the override is for.
+  const host = { playlistUrl: "p", epgUrl: "e", showLogos: false, maxRecents: 10 }
+  const w = Model.ownWriteOf(host, { showLogos: true })
+  return [
+    Model.settingsWithOwnWrite(host, w).showLogos,
+    // untouched keys still come from the host
+    Model.settingsWithOwnWrite(host, w).playlistUrl,
+    // the host changing the key we wrote drops the override, so external
+    // changes win
+    Model.ownWriteInForce({ playlistUrl: "p", epgUrl: "e", showLogos: true }, w),
+    // the host changing something else does NOT drop it: it is not ours
+    Model.ownWriteInForce({ playlistUrl: "p", epgUrl: "e", showLogos: false, maxRecents: 20 }, w),
+    // and the URL pair keeps working exactly as it did
+    Model.settingsWithOwnWrite(host, Model.ownWriteFor(host, "p2", "e2")).playlistUrl,
+    Model.ownWriteInForce({ playlistUrl: "changed", epgUrl: "e" }, Model.ownWriteFor(host, "p2", "e2"))
+  ]
+}, [true, "p", false, true, "p2", false])
+
 check("footerHints confirmRemove", Model.footerHints({ mode: "confirmRemove" }), [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]])
 check("footerHints error empty state adds o sources when sources exist", [Model.footerHints({ empty: "error", sourcesExist: true }), Model.footerHints({ empty: "error", sourcesExist: false }), Model.footerHints({ empty: "loading", sourcesExist: true })], [[["r", "retry"], ["o", "sources"], ["Esc", "close"]], [["r", "retry"], ["Esc", "close"]], [["Esc", "close"]]])
 check("footerHints form: plain / masked / revealed / button / xtream / fetching", [
