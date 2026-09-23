@@ -1550,6 +1550,42 @@ checkCall("F-CAL-5: the dim rung D-RUNG-2 accepted puts NONE of its ink above th
   const dim = cov.samples.filter(function (s) { return s.rung === 0.52 })[0]
   return [dim.inkAboveAA, round2(dim.p50), dim.inkAboveAA === 0]
 }, [0, 2.26, true])
+// ---- D-STATE-1: one record shape, two readers, one fixture -----------------
+const playedFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/played-records.json"), "utf8"))
+checkCall("D-STATE-1: every `at` vector reads the same here as it does in the helper", function () {
+  // Driven through parseState rather than by calling playedRecord directly,
+  // because the seam is what the guide actually runs and because JSON is what
+  // both readers are handed. The helper runs the same file.
+  return playedFixture.at.filter(function (row) {
+    const got = Model.parseState(JSON.stringify({ lastPlayed: { id: "x", name: "X", at: row.in } })).lastPlayed
+    return !got || got.at !== row.want
+  }).map(function (row) {
+    const got = Model.parseState(JSON.stringify({ lastPlayed: { id: "x", name: "X", at: row.in } })).lastPlayed
+    return JSON.stringify(row.in) + " -> " + (got ? got.at : null) + ", wanted " + row.want
+  })
+}, [])
+checkCall("D-STATE-1: and the whole-record vectors, including what is not a record at all", function () {
+  return playedFixture.records.filter(function (row) {
+    return JSON.stringify(Model.playedRecord(row.in)) !== JSON.stringify(row.want)
+  }).map(function (row) { return JSON.stringify(row.in) })
+}, [])
+checkCall("D-STATE-1: the SOURCE record keys carry the same coercion, which is where it also lived", function () {
+  // Filed against the played record; it was never only there. addedAt,
+  // lastUsed, fetchedAt, channelCount and groupCount all read through the same
+  // rule, and the helper disagreed on all five.
+  return playedFixture.nonNegative.filter(function (row) {
+    const parsed = Model.parseState(JSON.stringify({ version: 2, sources: [
+      { key: "11111111", url: "http://x.test/a.m3u", addedAt: row.in }] })).sources[0]
+    return !parsed || parsed.addedAt !== row.want
+  }).map(function (row) { return JSON.stringify(row.in) })
+}, [])
+checkCall("D-STATE-1: truncation is toward ZERO, which is what python's int() does", function () {
+  // Math.floor would read -3.7 as -4 and disagree with the helper on every
+  // negative. The comment on playedRecord says this; the fixture pins it.
+  const at = function (v) { return Model.playedRecord({ id: "x", at: v }).at }
+  return [at(-3.7), at("-3.7"), at(3.7), at("3.7")]
+}, [-3, -3, 3, 3])
+
 // ---- saved searches --------------------------------------------------------
 const savedFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/saved-searches.json"), "utf8"))
 function savedChannels() {

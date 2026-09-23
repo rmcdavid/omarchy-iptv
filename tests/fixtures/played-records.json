@@ -1,0 +1,176 @@
+{
+  "comment": [
+    "D-STATE-1. One `{id, name, at}` record -- the shape `recents[]`,",
+    "`lastPlayed` and `session` all share -- run by BOTH tests/Model.test.js",
+    "(Model.playedRecord, through parseState) and tests/test_state.py",
+    "(normalize_played). A rule implemented in two languages gets one fixture.",
+    "",
+    "This file exists because the two DID disagree. Model.js coerces with",
+    "Math.trunc(Number(x)), which parses the whole JavaScript numeric grammar;",
+    "the helper used int(x), which accepts only a plain integer literal and",
+    "raises on everything else, falling through to 0. Same bytes, two answers.",
+    "",
+    "Found by the saved-search fixture, which included `at: \"12.9\"` for its own",
+    "key and went red on a key it was not written for -- the shared-fixture rule",
+    "working on a rule nobody had applied it to yet.",
+    "",
+    "The agreed answer is Model.js's, for two reasons. It is the reader the",
+    "guide runs, so it is what the user's screen already reflects; and it is the",
+    "more tolerant of the two, so adopting it cannot turn a value that used to",
+    "be read into one that is not."
+  ],
+  "atComment": "Every vector is `at` on an otherwise valid record. `want` is what BOTH readers must return.",
+  "at": [
+    {
+      "in": 7,
+      "want": 7,
+      "why": "integer, the shape both writers actually emit"
+    },
+    {
+      "in": "7",
+      "want": 7,
+      "why": "string integer, agreed before this fix"
+    },
+    {
+      "in": "0012",
+      "want": 12,
+      "why": "leading zeros are not octal in either reader"
+    },
+    {
+      "in": " 7 ",
+      "want": 7,
+      "why": "surrounding whitespace, agreed before this fix"
+    },
+    {
+      "in": 12.9,
+      "want": 12,
+      "why": "float truncates toward zero, agreed before this fix"
+    },
+    {
+      "in": -3.7,
+      "want": -3,
+      "why": "negative float truncates TOWARD ZERO, not down"
+    },
+    {
+      "in": "12.9",
+      "want": 12,
+      "why": "D-STATE-1: JS read 12, the helper raised and stored 0"
+    },
+    {
+      "in": "-3.7",
+      "want": -3,
+      "why": "D-STATE-1: JS read -3, the helper raised and stored 0"
+    },
+    {
+      "in": "1e3",
+      "want": 1000,
+      "why": "D-STATE-1: exponent notation, JS read 1000, the helper 0"
+    },
+    {
+      "in": "abc",
+      "want": 0,
+      "why": "not a number at all"
+    },
+    {
+      "in": "7abc",
+      "want": 0,
+      "why": "a number with a tail is NOT 7 in either reader"
+    },
+    {
+      "in": "",
+      "want": 0,
+      "why": "empty"
+    },
+    {
+      "in": null,
+      "want": 0,
+      "why": "null"
+    },
+    {
+      "in": true,
+      "want": 1,
+      "why": "boolean, agreed before this fix and pinned so it stays agreed"
+    }
+  ],
+  "recordComment": "Whole-record vectors: a record without an id is not a record, on both sides.",
+  "records": [
+    {
+      "in": {
+        "id": "t:bbc1.uk",
+        "name": "BBC One HD",
+        "at": 10
+      },
+      "want": {
+        "id": "t:bbc1.uk",
+        "name": "BBC One HD",
+        "at": 10
+      }
+    },
+    {
+      "in": {
+        "id": "x"
+      },
+      "want": {
+        "id": "x",
+        "name": "",
+        "at": 0
+      }
+    },
+    {
+      "in": {
+        "name": "no id",
+        "at": 5
+      },
+      "want": null
+    },
+    {
+      "in": {
+        "id": "",
+        "at": 5
+      },
+      "want": null
+    },
+    {
+      "in": null,
+      "want": null
+    }
+  ],
+  "nonNegativeComment": "D-STATE-1 was filed against the played record alone and was never only there. `non_negative_int` / the JS source-record reader carry the SAME coercion on five more keys -- addedAt, lastUsed, fetchedAt, channelCount, groupCount -- and had the same disagreement. Same vectors, then clamped at zero.",
+  "nonNegative": [
+    {
+      "in": 7,
+      "want": 7,
+      "why": "integer"
+    },
+    {
+      "in": "12.9",
+      "want": 12,
+      "why": "D-STATE-1 again: JS read 12, the helper 0"
+    },
+    {
+      "in": "1e3",
+      "want": 1000,
+      "why": "D-STATE-1 again: exponent"
+    },
+    {
+      "in": -5,
+      "want": 0,
+      "why": "clamped at zero, which is the only difference from `at`"
+    },
+    {
+      "in": "-3.7",
+      "want": 0,
+      "why": "negative after truncation is still clamped"
+    },
+    {
+      "in": "abc",
+      "want": 0,
+      "why": "not a number"
+    },
+    {
+      "in": null,
+      "want": 0,
+      "why": "missing"
+    }
+  ]
+}

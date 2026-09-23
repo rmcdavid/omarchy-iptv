@@ -7078,3 +7078,63 @@ budget. That is a separate piece of work with its own design, not a product
 call. And most of the distance was already covered today: that worst case went
 from **212 ms to 64 ms** when the fold the ranker needed was finally
 precomputed.
+
+## D-STATE-1, 2026-09-23: it was two functions and five more keys
+
+Filed as "one line plus a vector in the played-record fixture". It was neither
+one line nor one function.
+
+### The divergence
+
+`Model.js` coerces with `Math.trunc(Number(x))`, which parses the whole
+JavaScript numeric grammar. The helper used `int(x)`, which accepts only a
+plain integer literal and **raises** on everything else, falling through to 0.
+
+| `at` | Model.js | helper (before) |
+|---|---|---|
+| `"12.9"` | 12 | **0** |
+| `"-3.7"` | -3 | **0** |
+| `"1e3"` | 1000 | **0** |
+| `7`, `"7"`, `" 7 "`, `"0012"`, `12.9`, `-3.7`, `"abc"`, `"7abc"`, `""`, `null`, `true` | agreed | agreed |
+
+### It was not only `normalize_played`
+
+`non_negative_int` carried the identical `int(x)`, so the same disagreement ran
+on every source record's `addedAt`, `lastUsed`, `fetchedAt`, `channelCount` and
+`groupCount`. And a third caller, `normalize_saved_search`, had been handed the
+correct form by hand a few hours earlier — which is precisely how a rule ends up
+implemented three times and correct twice.
+
+So the fix is **one `coerce_int` with three callers**, not three copies of an
+idiom. A check asserts that `int(float(` appears exactly once in the helper and
+that all three callers route through it, so a fourth cannot reintroduce the
+split by writing `int()` out of habit.
+
+### Which answer is right, and why that was not a coin flip
+
+`Model.js`'s. It is the reader the guide runs, so it is what the user's screen
+already reflects; and it is the more tolerant of the two, so adopting it cannot
+turn a value that used to be read into one that is not.
+
+### Verification
+
+`tests/fixtures/played-records.json` is run by both suites: 14 `at` vectors, 5
+whole-record vectors, 7 non-negative vectors, with every divergent case named as
+such. Proven red first against the shipped helper —
+
+```
+AssertionError: 0 != 12 : at='12.9': D-STATE-1: JS read 12, the helper raised and stored 0
+```
+
+— and three mutations each caught, including restoring `int()`.
+`Model.playedRecord` is now exported so the fixture calls the rule directly
+rather than only through `parseState`.
+
+Node 1522 → **1526**, python 543 → 545.
+
+### The part worth keeping
+
+This was found by the **saved-search** fixture, which carried `at: "12.9"` for
+its own new key and went red on a key it was not written for. The rule that one
+rule in two languages gets one fixture paid off on a rule nobody had applied it
+to yet.

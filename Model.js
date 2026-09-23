@@ -6992,6 +6992,9 @@ if (typeof module !== "undefined") {
     CAPTION_REGULAR_SHORTFALL: CAPTION_REGULAR_SHORTFALL,
     captionAlpha: captionAlpha,
     savedSearchRecord: savedSearchRecord,
+    // D-STATE-1: exported so the shared fixture can call the record rule
+    // directly, not only through parseState.
+    playedRecord: playedRecord,
     savedSearchNotice: savedSearchNotice,
     withoutSavedSearch: withoutSavedSearch,
     withSavedSearch: withSavedSearch,

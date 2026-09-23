@@ -283,6 +283,46 @@ class SessionKeyTest(unittest.TestCase):
         kept = helper.normalize_state({"savedSearches": dupes})["savedSearches"]
         self.assertEqual([r["query"] for r in kept], ["BBC One", "bbc two"])
 
+    def test_played_records_run_the_shared_fixture(self):
+        """D-STATE-1. The same file tests/Model.test.js runs.
+
+        `recents[]`, `lastPlayed` and `session` share one record shape and two
+        implementations. They disagreed on any `at` that is numeric but not a
+        plain integer literal: Model.js coerces with Math.trunc(Number(x)) and
+        parses the whole JavaScript numeric grammar, while this reader used
+        int(x), which raises on "12.9" and fell through to 0.
+        """
+        import json, os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "played-records.json")
+        with open(path, encoding="utf-8") as fh:
+            fixture = json.load(fh)
+        for row in fixture["at"]:
+            got = helper.normalize_played({"id": "x", "name": "X", "at": row["in"]})
+            self.assertIsNotNone(got, repr(row["in"]))
+            self.assertEqual(got["at"], row["want"], "at=%r: %s" % (row["in"], row["why"]))
+        for row in fixture["records"]:
+            self.assertEqual(helper.normalize_played(row["in"]), row["want"], repr(row["in"]))
+        # The same coercion on the source-record keys, which is where D-STATE-1
+        # turned out to live as well.
+        for row in fixture["nonNegative"]:
+            self.assertEqual(helper.non_negative_int(row["in"]), row["want"],
+                             "non_negative_int(%r): %s" % (row["in"], row["why"]))
+
+    def test_one_coercion_serves_every_caller(self):
+        """Three readers wrote `int()` independently and two of them were wrong.
+
+        The guard against a fourth is that there is now one function. If a
+        caller stops routing through it, this goes red rather than the
+        divergence being discovered years later by an unrelated fixture.
+        """
+        import inspect
+        source = inspect.getsource(helper)
+        self.assertEqual(source.count("int(float("), 1,
+                         "coerce_int should be the only place that parses a number this way")
+        for name in ("normalize_played", "non_negative_int", "normalize_saved_search"):
+            body = inspect.getsource(getattr(helper, name))
+            self.assertIn("coerce_int", body, "%s must route through coerce_int" % name)
+
     def test_the_key_order_matches_the_document_the_service_writes(self):
         # Both sides emit version, cacheLayout, favorites, recents, lastPlayed,
         # session, sources, savedSearches - so a diff of two state files stays
