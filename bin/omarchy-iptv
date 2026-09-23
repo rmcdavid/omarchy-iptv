@@ -2118,14 +2118,14 @@ class MpvIpc:
 
 # ---- M2-04 logos: the survey that contacts nothing -------------------------
 #
-# Ruling rule 6 (docs/RULING-LOGOS.md, dev branch): a generic "logos may contact
+# Ruling rule 6 (the logo privacy ruling, dev branch): a generic "logos may contact
 # third parties" is not informed consent when the real answer is countable. On
 # the list this was measured against, turning logos on would contact 63 hosts
 # and hand i.imgur.com alone a request pattern covering two thirds of the
 # channels. So the number is produced BEFORE the choice, by reading the cache
 # and making no request at all.
 #
-# Output carries HOSTS and never URLs (CLAUDE.md rule 5). A logo URL can carry a
+# Output carries HOSTS and never URLs (engineering rule 5, dev branch). A logo URL can carry a
 # provider path and, on a provider whose logos sit beside its playlist, a query
 # string; the host is the whole of what a user needs to judge the disclosure.
 LOGO_SCHEMES = ("https",)
