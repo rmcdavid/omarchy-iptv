@@ -929,6 +929,20 @@ Item {
     root.rebuildDisplay()
   }
 
+  // Ctrl+S in search mode. The confirmation carries the ROW COUNT for the terms
+  // as typed, because the failure mode this feature has is a term that matches
+  // far more than the user meant -- `no tv` saves 75 rows on the list this was
+  // designed against, since `tv` matches nearly everything. Showing the number
+  // at the moment of saving makes that visible then, instead of discovered
+  // later as a Favourites list full of strangers.
+  function saveCurrentSearch() {
+    if (!root.serviceReady) return
+    var count = Model.savedSearchCount(root.service.channels, root.query)
+    var result = root.service.saveSearch(root.query)
+    root.showTransient(Model.savedSearchNotice(result, root.query, count))
+    root.rebuildDisplay()
+  }
+
   // x / Delete: remove from Recent, or unfavorite in Favorites; no-op elsewhere.
   function removeAt(index) {
     var channel = root.rowAt(index)
@@ -1242,6 +1256,10 @@ Item {
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.activate(false); return true }
     if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { root.switchMode(); return true }
     if (root.handleSharedKey(event)) return true
+    // Save the current search into Favourites. A MODIFIED key by necessity:
+    // every bare printable character below goes into the query verbatim, so a
+    // letter cannot be a command here without breaking typing.
+    if (event.key === Qt.Key_S && event.modifiers === Qt.ControlModifier) { root.saveCurrentSearch(); return true }
     if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return false
     if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
       root.setQuery(root.query + event.text)

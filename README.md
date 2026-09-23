@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.5. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.7.6. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
@@ -90,11 +90,14 @@ Two places they can escape that, both worth knowing:
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
 | `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
+
 | `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
 | `pipCorner` | string | `top-right` | which corner the picture-in-picture box sits in: `top-right`, `top-left`, `bottom-right`, `bottom-left` |
 | `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
 | `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
+
+**Channel logos are not implemented yet, and the plan for them is public.** Logos are hosted by third parties named in your playlist, not by this plugin. Before any of it is built you can see exactly what enabling them would cost your privacy: `omarchy-iptv logos` reads the cached playlist and prints which hosts it would contact and how many channels each covers. It makes no request. On the playlist this was measured against the answer was 63 hosts, one of them covering two thirds of the channels -- which is why the eventual setting will be off by default, `https` only, and will never send your playlist's credentials.
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
@@ -120,6 +123,7 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | search | Up / Down, PgUp / PgDn, Home / End | move the cursor |
 | search | Left / Right | previous / next group in the column |
 | search | Enter | play and close; Esc clears the query, then closes |
+| search | Ctrl+S | save this search into Favorites: its channels join your starred ones, and the confirmation says how many matched |
 | search | Tab or Shift+Tab | switch to list mode (query stays) |
 | list | j / k, h / l | move the cursor / change group |
 | list | Enter | play, close, focus the player |

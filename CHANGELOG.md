@@ -3,6 +3,19 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.6 (2026-09-23)
+
+### Added
+
+- **Save a search.** After a search that found the right channels, press
+  `Ctrl+S` and those channels join Favourites. It saves the *words*, not a list
+  of channels, so it keeps working when your provider renumbers everything and
+  it picks up channels they add later. The confirmation tells you how many
+  channels it matched — `Saved baton rouge - 4 channels` — so a term that
+  quietly matches half your list is obvious at the moment you save it rather
+  than a surprise in Favourites afterwards. Channels you starred yourself stay
+  first and keep their order.
+
 ## 0.7.5 (2026-09-23)
 
 ### Fixed

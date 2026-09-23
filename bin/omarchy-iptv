@@ -2116,6 +2116,76 @@ class MpvIpc:
         return True, reply.get("data")
 
 
+# ---- M2-04 logos: the survey that contacts nothing -------------------------
+#
+# Ruling rule 6 (the logo privacy ruling, dev branch): a generic "logos may contact
+# third parties" is not informed consent when the real answer is countable. On
+# the list this was measured against, turning logos on would contact 63 hosts
+# and hand i.imgur.com alone a request pattern covering two thirds of the
+# channels. So the number is produced BEFORE the choice, by reading the cache
+# and making no request at all.
+#
+# Output carries HOSTS and never URLs (engineering rule 5, dev branch). A logo URL can carry a
+# provider path and, on a provider whose logos sit beside its playlist, a query
+# string; the host is the whole of what a user needs to judge the disclosure.
+LOGO_SCHEMES = ("https",)
+LOGO_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
+
+
+def logo_survey(channels: Any) -> dict[str, Any]:
+    """Who enabling logos would contact, counted from the cache.
+
+    Pure: no network, no filesystem beyond what the caller already read.
+    """
+    rows = channels if isinstance(channels, list) else []
+    hosts: dict[str, int] = {}
+    schemes: dict[str, int] = {}
+    with_logo = 0
+    refused = 0
+    for channel in rows:
+        if not isinstance(channel, dict):
+            continue
+        raw = channel.get("logo")
+        if not isinstance(raw, str) or not raw:
+            continue
+        with_logo += 1
+        parsed = urllib.parse.urlsplit(raw)
+        scheme = (parsed.scheme or "").lower()
+        schemes[scheme] = schemes.get(scheme, 0) + 1
+        if scheme not in LOGO_SCHEMES:
+            # Counted, never contacted: rule 3 of the ruling is https only.
+            refused += 1
+            continue
+        host = (parsed.netloc or "").lower()
+        if not host:
+            refused += 1
+            continue
+        hosts[host] = hosts.get(host, 0) + 1
+    ordered = sorted(hosts.items(), key=lambda pair: (-pair[1], pair[0]))
+    return {
+        "channels": len(rows),
+        "withLogo": with_logo,
+        "wouldContact": sum(hosts.values()),
+        "refused": refused,
+        "hostCount": len(ordered),
+        "hosts": [{"host": h, "channels": n} for h, n in ordered],
+        "schemes": schemes,
+        "allowedSchemes": list(LOGO_SCHEMES),
+        "allowedTypes": list(LOGO_TYPES),
+    }
+
+
+def cmd_logos(args: argparse.Namespace) -> int:
+    directory = cache_dir(args.cache_dir)
+    channels = load_channels(directory)
+    survey = logo_survey(channels)
+    # --survey is the only mode today; the fetch is M2-04-03 and is not written.
+    # The flag exists so that adding the fetch later cannot silently turn this
+    # command into one that makes requests.
+    emit(dict(survey, ok=True, kind="logos", action="survey"))
+    return 0
+
+
 def load_channels(directory: str) -> list[dict[str, Any]]:
     document = read_json(os.path.join(directory, CHANNELS_FILE))
     if not isinstance(document, dict) or not isinstance(document.get("channels"), list):
@@ -3843,24 +3913,84 @@ def cmd_cache(args: argparse.Namespace) -> int:
 # replaces `url` / `epgUrl` by their hosts: stdout must never carry a URL.
 
 def default_state() -> dict[str, Any]:
-    return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": []}
+    return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None,
+            "session": None, "sources": [], "savedSearches": []}
+
+
+# Must match Model.js MAX_SAVED_SEARCHES / MAX_SAVED_TERMS / MAX_SAVED_QUERY and
+# savedSearchTerms / savedSearchRecord. One shared fixture runs both.
+MAX_SAVED_SEARCHES = 20
+MAX_SAVED_TERMS = 8
+MAX_SAVED_QUERY = 64
+
+
+def saved_search_terms(query: Any) -> list[str]:
+    text = normalize_text(str(query or "")[:MAX_SAVED_QUERY])
+    if not text:
+        return []
+    return text.split(" ")[:MAX_SAVED_TERMS]
+
+
+def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    query = str(entry.get("query") or "")[:MAX_SAVED_QUERY]
+    if not saved_search_terms(query):
+        return None
+    # float() then int(), NOT int() alone, and the shared fixture is what
+    # forced it: Model.js does Math.trunc(Number(x)), which reads "12.9" as 12,
+    # while int("12.9") raises and this reader would have stored 0. The vector
+    # is in the fixture precisely so the two cannot drift apart again.
+    #
+    # normalize_played above still has the int()-alone form and therefore still
+    # disagrees with playedRecord on that input. Filed as D-STATE-1 rather than
+    # changed here: it is a pre-existing divergence on a different key and it
+    # is not this feature's to move.
+    return {"query": query, "at": coerce_int(entry.get("at"))}
 
 
 def normalize_played(entry: Any) -> dict[str, Any] | None:
     if not isinstance(entry, dict) or not entry.get("id"):
         return None
+    return {"id": str(entry["id"]), "name": str(entry.get("name") or ""),
+            "at": coerce_int(entry.get("at"))}
+
+
+def coerce_int(value: Any) -> int:
+    """D-STATE-1. Mirror Model.js's `Math.trunc(Number(x)) || 0` exactly.
+
+    This used to be `int(x)`, which accepts only a plain integer literal and
+    RAISES on everything else -- so `"12.9"` stored 0 where the guide read 12,
+    and `"1e3"` stored 0 where the guide read 1000. Same bytes, two answers, on
+    `recents[].at`, `lastPlayed.at` and `session.at`.
+
+    float() first is what buys the whole JavaScript numeric grammar: decimals,
+    exponents and surrounding whitespace all parse, a trailing tail does not
+    (`"7abc"` is 0 in both), and int() then truncates TOWARD ZERO rather than
+    down, which is what Math.trunc does and why `-3.7` is -3 and not -4.
+
+    Found by the saved-search fixture, which carried `at: "12.9"` for its own
+    key and went red on a key it was not written for.
+    """
     try:
-        at = int(entry.get("at") or 0)
+        return int(float(value or 0))
     except (TypeError, ValueError):
-        at = 0
-    return {"id": str(entry["id"]), "name": str(entry.get("name") or ""), "at": at}
+        return 0
 
 
 def non_negative_int(value: Any) -> int:
-    try:
-        number = int(value or 0)
-    except (TypeError, ValueError):
-        return 0
+    """The same coercion, then clamped at zero.
+
+    D-STATE-1 was filed against normalize_played alone. It was never only
+    there: this function had the identical `int(x)` and therefore the identical
+    disagreement, on five more keys -- `addedAt`, `lastUsed`, `fetchedAt`,
+    `channelCount` and `groupCount` on every source record. Model.js reads
+    "12.9" as 12 and "1e3" as 1000 for all of them; this read 0.
+
+    One coercion with two callers, so a third caller cannot reintroduce the
+    split by writing `int()` again out of habit.
+    """
+    number = coerce_int(value)
     return number if number > 0 else 0
 
 
@@ -3931,6 +4061,25 @@ def normalize_state(raw: Any) -> dict[str, Any]:
             entry = normalize_played(item)
             if entry is not None:
                 state["recents"].append(entry)
+    # Saved searches. This writer rebuilds from default_state() and copies only
+    # keys it knows, so an un-taught copy ERASES the key -- proven live before
+    # this was added: one `state favorite add` through the real CLI dropped it,
+    # exit 0, "ok": true, no warning. Mirrors Model.parseState, including the
+    # de-duplication on the FOLDED terms rather than the raw string.
+    saved = raw.get("savedSearches")
+    if isinstance(saved, list):
+        seen_terms = set()
+        for item in saved:
+            if len(state["savedSearches"]) >= MAX_SAVED_SEARCHES:
+                break
+            record = normalize_saved_search(item)
+            if record is None:
+                continue
+            sig = " ".join(saved_search_terms(record["query"]))
+            if sig in seen_terms:
+                continue
+            seen_terms.add(sig)
+            state["savedSearches"].append(record)
     state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
     # What the player was last asked to play (4.6, section 8). Same record as
     # lastPlayed, different lifetime: the service clears it when the player
@@ -4228,6 +4377,12 @@ def build_parser() -> argparse.ArgumentParser:
     orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")
     orphan.add_argument("--grace", type=float, default=DEFAULT_ORPHAN_GRACE, help="seconds to let a successor shell claim the player (default %.1f)" % DEFAULT_ORPHAN_GRACE)
     player.set_defaults(func=cmd_player)
+
+    logos = sub.add_parser("logos", help="report which hosts enabling logos would contact (makes no request)")
+    logos.add_argument("--cache-dir", default=None)
+    logos.add_argument("--survey", action="store_true", default=True,
+                       help="the only mode: read the cache and contact nothing")
+    logos.set_defaults(func=cmd_logos)
 
     state = sub.add_parser("state", help="inspect or edit state.json")
     state.add_argument("--state-dir", default=None, help="default: $XDG_STATE_HOME/omarchy-iptv")
