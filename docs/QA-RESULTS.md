@@ -7139,6 +7139,111 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## F-PERF-1 overturned, 2026-09-23: the residual was the fixture
+
+The single-character residual this row has carried all day does not exist. It
+was an artifact of the bench's own channel list, and the UX change it argued
+for would have cost a real feature to fix nothing.
+
+### What the bench was measuring
+
+Both F-PERF-1 measurements built their 10,000 channels **by hand**, inside the
+bench:
+
+```js
+var c = { name: name, group: group, url: "http://127.0.0.1/" + i }
+c.searchKey = M.searchKey(name, group)
+c.nameKey = M.normalizeText(name)
+```
+
+Four fields. The helper writes six unconditionally, and one of the two missing
+is `id`.
+
+`Model.channelId` returns `channel.id` when the channel has one and otherwise
+hashes the URL with `fnv1a32`. `filterChannels` calls it **once per matching
+row**, to sort favourites first inside a rank tier. So on a query matching
+6,877 of 10,000 the bench hashed 6,877 URLs per keystroke — work the shipped
+code has never done, because `assign_ids` has run on every parse since the
+first commit and every cache this plugin has ever written carries `id` on every
+channel.
+
+### The measurement, on the bytes the helper writes
+
+QML engine, Qt 6.11.2, the real 10,000-channel cache, 50 iterations:
+
+| query | as the helper writes it | with `id`/`tvgId` stripped | matches |
+|---|---|---|---|
+| `a` | **26.52 ms** | 95.28 ms | 6,877 |
+| `e` | **27.22 ms** | 91.28 ms | 6,677 |
+| `s` | **26.42 ms** | 87.76 ms | 6,171 |
+| `t` | **25.82 ms** | 79.38 ms | 5,589 |
+| `news` | 13.24 ms | 22.00 ms | 812 |
+| `sky sports` | 10.56 ms | 10.44 ms | 0 |
+
+**3.6x.** Every single-character query is inside the 30 ms keystroke budget.
+There is no over-budget case, so there is nothing for the proposed remedy to
+remove.
+
+Where the time went, profiled stage by stage on the stripped list:
+
+| | ms |
+|---|---|
+| bare property reads | 1.94 |
+| + `matchRank` over all 10,000 | 17.68 |
+| + `channelId` on every match | **61.88** |
+| `filterChannels` end to end | 70.52 |
+
+44 ms of the 70 was one function call that production never makes.
+
+### The product decision, and it is now a non-decision
+
+The board proposed **not filtering on a single character**: a one-character
+search returns 6,877 rows and is useless to the reader as well as slow. That
+was recorded as the product owner's call.
+
+**Not taken, and the premise is withdrawn.** It is not slow. Making the guide
+ignore the first keystroke on a 10,000-channel list — and only on a large list,
+or the same change makes a 20-channel list unsearchable by initial — would have
+been a real loss of function paid to a number that came from a test fixture.
+
+### One thing hoisting did not buy, recorded so it is not tried again
+
+Before the fixture was suspected, the obvious candidate was `matchRank`
+allocating three strings per matching row, two of them loop-invariant
+(`tokens.join(" ")` and `" " + phrase`). Hoisting both into `filterChannels`
+and passing them down: `a` 68.58 → 61.64 ms, **1.11x**. Real but nowhere near
+enough, and it costs `matchRank` a fourth parameter. Not built.
+
+### The rule this breaks, and the half of it that was missing
+
+CLAUDE.md rule 10: *a test double must never be more forgiving than the real
+thing.* This double was **harsher**, which the rule does not name.
+
+For a correctness test, harsher is merely wasteful. For a **measurement** it is
+worse than forgiving: a forgiving double hides a defect, a harsh one *invents*
+one — and an invented defect gets paid for in product. This one was one commit
+away from removing a feature.
+
+### What makes it a call instead of a description
+
+`scripts/qa-filter-bench.py` replaces the hand-built list. It generates a
+playlist with `scripts/gen-playlist.py`, parses it with `bin/omarchy-iptv`, and
+measures **that**, so the fixture is the helper's output by construction. It
+refuses to run on a channel list missing any unconditional field, naming the
+field and the row count. `--strip id` reproduces the old number on demand,
+labelled as not being the product.
+
+`tests/test_filter_bench_fixture.py` imports the bench's own field tuples and
+its own refusal predicate and runs them against a real parse, so the join
+between bench and helper is a call. It earned its keep on the first run by
+rejecting my own list: the parser writes `headers`, which I did not know about.
+
+Four mutations, all red: the helper dropping `assign_ids` (1), the helper
+dropping `nameKey` (3), the bench forgetting `id` is unconditional (3), the
+refusal predicate never firing (2).
+
+Python 559 → **565**.
+
 ## D-SAVE-2, 2026-09-23: the scope ring said the scope was empty
 
 Found on a live pass against 0.7.8, not by the suite.
