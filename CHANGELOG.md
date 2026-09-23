@@ -3,6 +3,27 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.5 (2026-09-23)
+
+### Fixed
+
+- **Typing in the guide is much faster on big channel lists.** Searching a
+  10,000-channel list was doing work on every keystroke that it only needed to
+  do once, which made typing lag noticeably. Measured in the shell's own
+  JavaScript engine, a search went from about 165 ms per keystroke to about
+  11 ms; the worst case, a single letter that matches thousands of channels,
+  went from 212 ms to 64 ms. Nothing about what you see changes — the same
+  channels in the same order. The speed-up arrives when the playlist next
+  refreshes. Small lists were always fast and are unaffected.
+- **The guide now tells you when an update has not taken effect yet.** Updating
+  the plugin reloads it, but a plugin that keeps its windows open keeps the
+  version it was already running — so the files change and the interface does
+  not, until the shell restarts. Nothing told you. The footer now reads
+  "Updated · restart the shell to see the new version" whenever the running
+  interface is older than what is installed. It never covers a more urgent
+  message. The underlying behaviour is the shell's rather than ours; this is a
+  notice, not a repair.
+
 ## 0.7.4 (2026-09-23)
 
 ### Changed
