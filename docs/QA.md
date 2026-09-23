@@ -413,8 +413,13 @@ Inputs: `https://iptv-org.github.io/iptv/index.m3u` (11,041 entries, 2.5 MB)
 and, offline, `scripts/gen-playlist.py --channels 10000 --groups 120 --seed 1
 --epg-ids 0.6 --out /tmp/omarchy-iptv-qa/gen-10k.m3u --xmltv
 /tmp/omarchy-iptv-qa/gen-10k.xml.gz --hours 24` (deterministic: m3u sha256
-`0aa5acc24b38b73b2b2bff9ce859e1122b854084bb3525969210fae612156f7a`, 1,841,211
-bytes, 10,000 channels, 1,068 group strings; XMLTV 41.3 MB inflated, 5,840
+`63061a85cd2183f67a0b009c6f8cb9891b59af2c54bdf0db5ad1fb8ff18c50fe`, 1,844,026
+bytes, 10,000 channels, 120 group strings;
+RE-PINNED 2026-09-23: the previous hash `0aa5acc2...` at 1,841,211 bytes predates
+M2-03, which made the generator emit `tvg-chno` on every entry. Determinism was
+re-verified rather than assumed -- two runs with the same flags are byte-identical
+-- so the old hash was stale, not a regression, and anyone re-running this gate
+against it would have started by chasing a fixture that was fine; XMLTV 41.3 MB inflated, 5,840
 channels, 266,474 programmes). Never commit generated files.
 
 Baseline measured on the scaffold helper (2026-09-12, this machine): `playlist`

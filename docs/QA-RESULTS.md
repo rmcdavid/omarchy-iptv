@@ -6725,3 +6725,76 @@ impossible.
 |---|---|
 | `type sky` into a fresh shell | `typed 'sky' (attempt 1)`, `queryLive` reads `sky` |
 | `type impossible` with no shell running | both attempts reported, `type FAILED: … this is not the first-keystroke race`, exit **1** |
+
+## Performance re-verification, 2026-09-23
+
+Today's work added to the guide's open path — four theme-scoped `captionAlpha`
+properties and a new `FileView` over `manifest.json` — so the budget was
+re-measured rather than assumed. Harness on the live display, build confirmed
+before measuring, state sha256-identical after.
+
+### PERF-01, helper `playlist` on 10,000 channels — **passes**
+
+| run | `durationMs` | wall |
+|---|---|---|
+| 1 | 578 | 0.738 s |
+| 2 | 560 | 0.715 s |
+| 3 | 572 | 0.734 s |
+
+Inside the architecture's 1.5 s and CLAUDE.md's stricter 1 s. RSS 42 MB.
+`channels.json` 2,613,772 bytes, over the ~2 MB line for the reason QA.md
+already records — the synthetic profile fills `tvgName`, `logo` and `chno`.
+
+**The fixture hash in QA.md was stale and is re-pinned.** It read
+`0aa5acc2…` at 1,841,211 bytes; the generator now produces
+`63061a85…` at 1,844,026. Determinism was re-verified rather than assumed —
+two runs with the same flags are byte-identical — and the cause is M2-03, which
+made the generator emit `tvg-chno` on all 10,000 entries. Stale, not a
+regression; but anyone re-running this gate would have begun by chasing a
+fixture that was fine.
+
+### PERF-02, overlay open on the 10k cache — **passes**
+
+| | |
+|---|---|
+| opens | 134 (cold), 74, 72, 72, 73, 74 ms |
+| IPC baseline | 54 / 54 / 54 / 55 / 55 ms |
+| open work | **≈ 20 ms** against a 150 ms budget |
+
+Faster than the ~64 ms recorded on the earlier pass. Today's additions cost
+nothing measurable: both alpha properties are `readonly` and theme-scoped, and
+the manifest read is one small file at load.
+
+### PERF-03, the filter — **F-PERF-1, and it is a documentation defect**
+
+Calling the shipping `Model.filterChannels` over the same 10,000-channel cache,
+JIT warmed, 50 iterations per query:
+
+| query | per call | rows | total |
+|---|---|---|---|
+| `a` | **30.124 ms** | 200 | 6,877 |
+| `news` | 25.019 ms | 200 | 812 |
+| `alpha news` | 23.682 ms | 33 | 33 |
+| `zz` | 23.408 ms | 0 | 0 |
+| `sky sports` | 23.711 ms | 0 | 0 |
+
+The keystroke-to-redraw budget is 30 ms. The worst case spends **all of it in
+the filter**, before any redraw work exists.
+
+`docs/ARCHITECTURE.md` row 4 reasons that "Scanning 10k short strings is a few
+ms in the QML JS engine; the cost that hurts is `ListModel.append`". On this
+measurement it is the other way round: `sky sports` matches **nothing** and
+still costs 23.7 ms, so the cost is the scan, not materialization.
+
+Two caveats kept attached to the number. This is node, not the QML JS engine —
+though V8 is generally the faster of the two, so the shipped figure is likely
+worse rather than better. And the budget covers more than the filter, so the
+filter consuming it is the finding rather than proof the budget is blown; the
+40 ms coalescing window is what has been absorbing this.
+
+**Not a regression.** Nothing measured today made it slower, and the two
+budgets either side of it pass comfortably on the same build. What is wrong is
+the reasoning in the architecture, and the remedy — a prefix index, or an
+incremental filter that narrows the previous result when the query only grew —
+is real work that should not be started on a node number. Re-measure in the QML
+engine first.
