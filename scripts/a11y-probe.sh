@@ -19,8 +19,17 @@
 # session, which the rest of the gate does not. The FIDELITY half has no such
 # needs and IS in the gate; see tests/a11y/test_fidelity.py.
 #
-# A RED RUN IS THE EXPECTED RESULT. Compare against the recorded baseline in
-# docs/QA-A11Y.md rather than against zero.
+# THE BASELINE IS A SET, NOT A COUNT, AND THIS SCRIPT GRADES AGAINST IT. Three
+# checks fail on shipping code and all three are filed defects; a run matching
+# exactly that set exits 0. Anything else -- a new failure, or a recorded one
+# that started passing -- exits 1 and names it.
+#
+# It did not always. 0.7.8 added one unguarded service call to Guide.open(),
+# the fake service here has no such method, open() threw, and every guide
+# scenario graded a guide that never finished opening: 3 failures became 31
+# and shipped that way, because "compare against the baseline in
+# docs/QA-A11Y.md" is a step a person performs and therefore a step a person
+# skips.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
@@ -64,9 +73,9 @@ rc=$?
 
 printf '\n'
 if (( rc )); then
-  echo "a11y-probe: RED. Compare against the baseline in docs/QA-A11Y.md;"
-  echo "the recorded failures are real defects, not harness noise."
+  echo "a11y-probe: OFF BASELINE. Something changed that this harness can see;"
+  echo "the lines above name it. Do not read a run in this state as evidence."
 else
-  echo "a11y-probe: every check passed."
+  echo "a11y-probe: on baseline -- exactly the recorded failures and nothing else."
 fi
 exit $rc

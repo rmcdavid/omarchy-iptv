@@ -2232,8 +2232,53 @@ checkCall("D-HOST-2: the manifest is re-read from its PATH when the guide opens"
   // silent through the 0.7.5 -> 0.7.7 update it was built to catch.
   return [qmlSites(/function recheckBuild\(\)/).length,
           qmlSites(/manifestFile\.reload\(\)/).length,
-          qmlSites(/if \(root\.serviceReady\) root\.service\.recheckBuild\(\)/).length]
+          // D-A11Y-8: the call is GUARDED ON THE FUNCTION, and this pins that
+          // spelling rather than the bare one it shipped with. `serviceReady`
+          // says a service object is attached, not that it has this method.
+          qmlSites(/typeof root\.service\.recheckBuild === "function"\) root\.service\.recheckBuild\(\)/).length]
 }, [1, 1, 1])
+
+checkCall("D-A11Y-8: every service call inside open() is guarded on the FUNCTION", function () {
+  // Not a blanket rule: the guide calls the service unguarded in seven places
+  // and they are all user-triggered actions (play, stop, refresh, favourite,
+  // the two removals, the save), where a throw loses one keypress.
+  //
+  // `open()` is different, and that difference is the whole defect. It
+  // composes the entire surface, so a throw there loses ALL of it: 0.7.8
+  // added `if (root.serviceReady) root.service.recheckBuild()` and against
+  // any service without that method every statement below it stopped running.
+  // The guide never finished opening, for a release, and the only thing that
+  // could see it was outside the gate.
+  //
+  // So the invariant is scoped to where it earns its keep. Parsed, not
+  // grepped: the body of `function open(` up to the next `function `, and
+  // every `root.service.X(` in it must have a typeof guard for that same X.
+  const lines = qmlLines().map(function (l) { return l.text })
+  let start = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*function open\(/.test(lines[i])) { start = i; break }
+  }
+  if (start === -1) return ["open() not found"]
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\s*function /.test(lines[i])) { end = i; break }
+  }
+  const body = lines.slice(start, end)
+  const text = body.join("\n")
+  const unguarded = []
+  body.forEach(function (line) {
+    if (/^\s*\/\//.test(line)) return
+    const m = line.match(/root\.service\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g) || []
+    m.forEach(function (hit) {
+      const name = hit.replace(/root\.service\./, "").replace(/\s*\($/, "")
+      if (text.indexOf('typeof root.service.' + name + ' === "function"') === -1) {
+        unguarded.push(name)
+      }
+    })
+  })
+  // The body must be found and non-trivial, or this passes on nothing.
+  return [body.length > 20, unguarded]
+}, [true, []])
 checkCall("D-HOST-1: the runtime reads its OWN directory, and the guide passes the answer on", function () {
   // Two names joined by nothing but spelling, so they are inventoried. The
   // manifest path must resolve against the RUNNING component (Qt.resolvedUrl),

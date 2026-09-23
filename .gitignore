@@ -9,3 +9,9 @@ node_modules/
 
 # Claude Code agent worktrees live inside the repo
 .claude/
+
+# tests/a11y run artifacts. The harness writes its child's log and its
+# mutation bookkeeping next to itself; both are outputs of a run, like the
+# generated tree, and neither belongs in the repo.
+tests/a11y/*.log
+tests/a11y/lane2_*.json

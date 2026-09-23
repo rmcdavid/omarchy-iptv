@@ -173,6 +173,81 @@ def pick(nodes, role, name):
     return [n for n in nodes if n["role"] == role and n["name"] == name]
 
 
+# ---- open item 3: cardinality, and name AND value on the SAME node.
+#
+# `pick` returns a list and every caller tested it for truthiness, so two nodes
+# carrying one name passed exactly as one did. A screen reader reads a
+# duplicated label as two things to choose between, which is the failure the
+# markup exists to prevent, and a swapped label passes both halves of a
+# role-and-name check as long as SOMETHING still carries the string.
+def exactly_one(nodes, role, name):
+    """The node, or None -- and None when there is more than one."""
+    hits = pick(nodes, role, name)
+    return hits[0] if len(hits) == 1 else None
+
+
+def check_one(cid, nodes, role, name, label, value=None):
+    """Role, name, cardinality and (when ruled) the Value, on ONE node."""
+    hits = pick(nodes, role, name)
+    if len(hits) != 1:
+        check(cid, False, label,
+              "expected exactly one %s named %r, found %d" % (role, name, len(hits)))
+        return None
+    node = hits[0]
+    if value is not None and node.get("text") != value:
+        check(cid, False, label,
+              "the one %s named %r publishes value %r, ruled %r"
+              % (role, name, node.get("text"), value))
+        return node
+    check(cid, True, label, "one %s, name %r%s"
+          % (role, name, "" if value is None else ", value %r" % value))
+    return node
+
+
+# ---- open item 2: a second, LITERAL witness beside every self-oracled check.
+#
+# `model_says()` shells out to the repo's Model.js and the tree instantiates a
+# byte-identical copy of that same file, so those checks are `Model.f(x) ==
+# Model.f(x)` in two processes. They prove the JOIN -- that the string became a
+# node -- which the 17 unit assertions never did, and they can never disagree
+# about the WORDS. Measured: rewriting Model.js so the bar said "nothing on"
+# and "tv broke" left the whole run at its exact documented baseline.
+#
+# These literals come from the ruled table, docs/UX.md 7.1 and M2-03 8.1. They
+# are the second witness, and `check_ruled` fails if the bus and the table
+# disagree OR if the composer and the table do.
+RULED = {
+    # docs/UX.md 7.1 "Bar widget"
+    "bar.idle": "IPTV, idle",
+    "bar.playing": "IPTV, playing channel 101, BBC One HD",
+    "bar.error": "IPTV, playlist error",
+    # docs/UX.md 7.1 "Channel row": `, row N of M` appended last. The row at
+    # :953 states the delivered form as `Channel 7, row 8 of 10,000`.
+    "row.query": "BBC One HD, row 1 of 1",
+    "row.scale": "Channel 0, row 1 of 10,000",
+    # docs/UX.md 7.1 "Group entry", thousands separated
+    "group.scale": "All, 10,000 channels",
+}
+
+
+def check_ruled(cid, key, heard, composed, label):
+    """The bus, the composer and the ruled table must all say one thing.
+
+    Three ways to be red, and they are distinguished in the detail, because a
+    composer that drifts from the table is a different defect from a string
+    that never reached the bus.
+    """
+    ruled = RULED[key]
+    if composed != ruled:
+        check(cid, False, label,
+              "Model.js composes %r, docs/UX.md 7.1 rules %r -- the composer "
+              "and the table have drifted and the self-oracled check cannot "
+              "see it" % (composed, ruled))
+        return
+    check(cid, heard == ruled, label,
+          "heard %r, the ruled table says %r" % (heard, ruled))
+
+
 def with_role(nodes, role):
     return [n for n in nodes if n["role"] == role]
 
@@ -225,6 +300,15 @@ def check_bar():
         check("L2-BAR-02-" + state, heard == expected,
               "bar (%s): what the user hears is Model.barAccessibleName" % state,
               "heard %r, Model.js says %r" % (heard, expected))
+        # Open item 2. The check above is Model.f() == Model.f(); this one
+        # brings the ruled table in as a second witness, so rewriting the
+        # composer cannot leave the run green.
+        check_ruled("L2-BAR-02-" + state + "-LIT", "bar." + state, heard, expected,
+                    "bar (%s): and the words are the ones docs/UX.md 7.1 rules" % state)
+        # Open item 3: one button, that name, on one node -- a duplicate label
+        # is two things for a reader to choose between.
+        check_one("L2-BAR-04-" + state, nodes, "push button", RULED["bar." + state],
+                  "bar (%s): exactly one node carries the ruled name" % state)
 
         # M2-03 8.1: the number is spoken as "channel 101", never a bare
         # digit string a reader would run together with the name.
@@ -371,6 +455,14 @@ def check_query():
           "query: the matching row is announced with its place in the filtered list",
           "expected %r, rows heard: %r"
           % (expected_row, [n["name"] for n in with_role(nodes, "list item")]))
+    heard_row = exactly_one(nodes, "list item", expected_row)
+    check_ruled("L2-Q-04-LIT", "row.query", heard_row["name"] if heard_row else None,
+                expected_row,
+                "query: and the row's words are the ones docs/UX.md 7.1 rules")
+    # Open item 3. One row carries it: the filtered set holds one channel, so
+    # two nodes with this name would mean the list rendered it twice.
+    check_one("L2-Q-06", nodes, "list item", RULED["row.query"],
+              "query: exactly one list item carries the surviving row's name")
 
     # The no-match state, which is the one a user cannot see coming.
     empty, erb = guide("querynomatch")
@@ -399,6 +491,12 @@ def check_scale():
     check("L2-SC-02", pick(nodes, "list item", expected_group),
           "10,000 channels: the group entry counts in words, thousands separated",
           "expected %r" % expected_group)
+    heard_group = exactly_one(nodes, "list item", expected_group)
+    check_ruled("L2-SC-02-LIT", "group.scale",
+                heard_group["name"] if heard_group else None, expected_group,
+                "10,000 channels: and the count is worded as docs/UX.md 7.1 rules")
+    check_one("L2-SC-05", nodes, "list item", RULED["group.scale"],
+              "10,000 channels: exactly one node is the All group entry")
 
     expected_row = model_says(
         'M.rowAccessibleName({name:"Channel 0", rowIndex:0, rowCount:10000})')
@@ -406,6 +504,12 @@ def check_scale():
           "10,000 channels: a row still carries 'row N of 10,000', the only "
           "position an AT can get from a virtualised list",
           "expected %r" % expected_row)
+    heard_first = exactly_one(nodes, "list item", expected_row)
+    check_ruled("L2-SC-03-LIT", "row.scale",
+                heard_first["name"] if heard_first else None, expected_row,
+                "10,000 channels: and the position is worded as docs/UX.md 7.1 rules")
+    check_one("L2-SC-06", nodes, "list item", RULED["row.scale"],
+              "10,000 channels: exactly one node is row 1, however many are realised")
 
     rows = [n for n in with_role(nodes, "list item") if ", row " in (n["name"] or "")]
     check("L2-SC-04", 0 < len(rows) < 10000,
@@ -543,7 +647,43 @@ def main():
         print("  FAIL %-16s %s" % (r["id"], r["label"]))
         if r["detail"]:
             print("       %s" % r["detail"])
-    return 1 if failures else 0
+
+    # The baseline is a SET, and the run is graded against it here rather than
+    # by a human comparing counts with a document.
+    #
+    # That comparison is what failed. 0.7.8 added one unguarded
+    # `root.service.recheckBuild()` to Guide.open(); the fake service here has
+    # no such method, so open() threw and every statement below it never ran.
+    # The run went from 3 failures to 31, every guide scenario fell below its
+    # own node-count floor, and it stayed that way through a release --
+    # because nobody ran this, and because "compare against the baseline in
+    # docs/QA-A11Y.md" is a step a person performs and therefore a step a
+    # person skips. A machine does it now.
+    ids = sorted(r["id"] for r in failures)
+    if ids == sorted(BASELINE):
+        print("\nbaseline: exactly the %d recorded failures, and nothing else."
+              % len(BASELINE))
+        return 0
+    unexpected = [i for i in ids if i not in BASELINE]
+    fixed = [i for i in BASELINE if i not in ids]
+    print("\nOFF BASELINE.")
+    if unexpected:
+        print("  NEW failures, not in the recorded baseline: %s" % ", ".join(unexpected))
+    if fixed:
+        print("  recorded failures that now PASS: %s" % ", ".join(fixed))
+        print("  if that is the fix, update BASELINE here and the table in docs/QA-A11Y.md")
+    return 1
+
+
+# The failures shipping code is known to produce, by id. Every one is a filed
+# defect, not harness noise:
+#   L2-XT-05 / L2-XT-06  D-A11Y-1, the Xtream server and username publishing
+#                        provider credentials as their accessible Value
+#   L2-XT-11             the eye buttons all publish checked=true on a form
+#                        where no field can be masked at all
+# A run that matches this set exactly is GREEN, because that is what "no
+# regression" means for a harness whose baseline is deliberately red.
+BASELINE = ["L2-XT-05", "L2-XT-06", "L2-XT-11"]
 
 
 if __name__ == "__main__":

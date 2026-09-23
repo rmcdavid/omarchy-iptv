@@ -706,7 +706,21 @@ Item {
     // update replaces that file, so the FileView's watcher never fires and the
     // stale-build notice stayed silent through the exact update it exists for.
     // Here, because opening is when the notice would be read.
-    if (root.serviceReady) root.service.recheckBuild()
+    //
+    // Guarded on the FUNCTION, not on serviceReady. This file's own rule, two
+    // lines into its header, is that every service access is guarded so the
+    // guide still loads against a service that lacks it -- and this call
+    // skipped it. `serviceReady` says a service object is attached, not that
+    // it has this method, so against any service without one `open()` THREW
+    // here and every statement below never ran.
+    //
+    // That is not hypothetical. 0.7.8 shipped it, and the accessibility bus
+    // harness -- whose fake service has no `recheckBuild` -- has been grading
+    // a guide that never finished opening ever since: 31 failures against a
+    // recorded baseline of 3, every scenario below its own node-count floor.
+    // Nothing caught it because that harness is deliberately outside
+    // the gate, so a guide that cannot open was a green commit.
+    if (root.serviceReady && typeof root.service.recheckBuild === "function") root.service.recheckBuild()
     root.disarmPointer()
     // GS9 / R-C: the shape is decided here, before the card is composed, and
     // then held while it is open. rebuildGroups() re-measures both halves when

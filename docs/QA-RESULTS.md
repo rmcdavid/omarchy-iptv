@@ -7139,6 +7139,119 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-A11Y-8, 2026-09-23: one unguarded call disabled 28 assertions for a release
+
+Found while starting work on the harness's open items 2, 3 and 10. The first
+step was a baseline run, and the baseline was not the baseline.
+
+```
+72 checks, 31 failures
+```
+
+against a recorded baseline of **3**. Every guide scenario carried its own
+refusal:
+
+```
+GAVE UP waiting for marker 'PROBE_READBACK_FINAL' after 67 polls / 10.1s
+30 nodes, floor 50 -- below the floor means the scenario is grading a guide
+that never laid out, and every PASS below it is worthless
+```
+
+The harness was saying, correctly and in its own words, that the run was
+invalid. Reproduced identically at the `release: 0.7.8` commit in a clean
+worktree, so not a regression from the day's work.
+
+### The cause
+
+```
+GuideProbe.qml:714: TypeError: Property 'recheckBuild' of object
+QObject_QML_2 is not a function
+```
+
+`Guide.qml:709`, added in 0.7.8 for D-HOST-2:
+
+```qml
+if (root.serviceReady) root.service.recheckBuild()
+```
+
+`open()` throws there against any service without that method, and **every
+statement below it never runs** — the disarm, the group rebuild, the whole
+composition. The guide never finishes opening.
+
+Guide.qml's own header, two lines in, states the rule this breaks:
+
+> Every service access for the Sources API is guarded so the guide still loads
+> against a service that lacks it.
+
+`serviceReady` says a service object is attached, not that it has this method.
+Every other service call in the file spells it `typeof root.service.X ===
+"function"`. This one did not.
+
+### What it cost, and why nobody saw it
+
+28 real accessibility assertions stopped being answered and started failing for
+an unrelated reason, through a release. Nothing caught it because:
+
+- the bus harness is deliberately outside `scripts/check.sh` (PLAN-NEXT
+  decision 9), so a guide that cannot open was a green commit; and
+- the instruction for reading it was *"compare against the baseline in
+  docs/QA-A11Y.md"* — a step a person performs, and therefore a step a person
+  skips.
+
+The fake service here is a test double that is **harsher** than the real one:
+it lacks a method the shipping service has. CLAUDE.md rule 10 only forbids a
+double being more forgiving. This one earned its keep by being stricter — it
+caught an unguarded access the real service can never expose.
+
+### The fix, and the second fix
+
+The call is guarded. And the baseline is now a **set, graded by the machine**:
+`check_bus.py` holds `BASELINE = ["L2-XT-05", "L2-XT-06", "L2-XT-11"]`, exits 0
+when the failures are exactly those, and exits 1 naming any new failure *or any
+recorded one that started passing*. Proven by restoring the unguarded call:
+**37 failures, exit 1, OFF BASELINE**; and with it guarded, **3 failures, exit
+0, on baseline**.
+
+A deliberately-red baseline was the stated reason this harness could not be
+gated. A pinned set removes that reason for everything except the display
+requirement.
+
+### Open items 2, 3 and 10, closed in the same pass
+
+**Item 2, the second literal witness.** Six checks asked `Model.f(x) ==
+Model.f(x)` in two processes: `model_says()` shells out to the repo's
+`Model.js` and the tree instantiates a byte-identical copy. `RULED` now carries
+the literal strings from docs/UX.md 7.1 and M2-03 8.1, and `check_ruled` is red
+three ways — the bus disagreeing with the table, the composer disagreeing with
+the table, or both.
+
+Proven on the exact mutations this document recorded as invisible:
+
+| mutation of `Model.js` | before | now |
+|---|---|---|
+| the bar says `nothing on` | 0 new failures | `L2-BAR-02-idle-LIT`, `L2-BAR-04-idle` |
+| the bar says `tv broke` | 0 new failures | `L2-BAR-02-error-LIT`, `L2-BAR-04-error` |
+| the thousands separator removed | 0 new failures | `L2-SC-02-LIT`, `L2-SC-05` |
+
+**Item 3, cardinality and value on one node.** `pick()` returned a list and
+every caller tested it for truthiness, so two nodes carrying one name passed
+exactly as one did — and a reader hears a duplicated label as two things to
+choose between. `exactly_one()` and `check_one()` assert role, name,
+cardinality and, where the table rules one, the Value, on a single node.
+
+**Item 10, the omitted `L2-FIDELITY`.** Settled by running `mutate_bus.py`
+rather than by correcting a list, because a list a human keeps in step with a
+suite is the rule 13 failure this project keeps paying for. Its own output is
+the record: `L2-FIDELITY` is in the newly-red set of **every** mutation that
+edits a file inside the tree, and **all 23 mutations are killed**. One gap the
+run exposes: the two `BarWidget.qml` mutations do not turn it red, because that
+file's sha256 is checked at build time and nothing re-checks it during the run.
+Both are still killed by 8 and 11 checks, so it is a gap in that layer's
+coverage, not in detection.
+
+72 checks → **84**, and the baseline is unchanged at the same three filed
+failures.
+
 ## D-ID-2 re-opened and re-caused, 2026-09-23
 
 Revisited to confirm or withdraw the acceptance. The harm is real; the cause
