@@ -6882,3 +6882,44 @@ that grew.
 scanning every channel. The 40 ms coalescing window absorbs it in practice.
 Removing it is a **product decision** — an approximate count — not an
 optimisation, so it is not taken here.
+
+## D-PIP-3, the fourth dead end: the title route the roadmap flagged
+
+My earlier pass measured three levers and concluded "the only lever is a window
+rule". `docs/ROADMAP-PROPOSED.md` had already flagged a fourth, and I had not
+tested it. It is worth recording that the miss was mine and the lead was good.
+
+`/usr/share/omarchy/default/hypr/apps/pip.lua`:
+
+```lua
+o.window({ title = "(Picture.?in.?[Pp]icture)" }, { tag = "+pip" })
+o.window({ tag = "pip" }, { tag = "-default-opacity", opacity = "1 1",
+                            float = true, pin = true, size = { 600, 338 }, ... })
+```
+
+Omarchy exempts by **title**, and the helper already writes the window title
+over IPC on every channel change. One line, in principle.
+
+The rule is live: `windows.lua:22` does `require("default.hypr.apps")`, and the
+dim at `:25` is deliberately applied *after* apps have had their chance to opt
+out. So the mechanism exists and is loaded.
+
+**It never fires for us, tested both ways.**
+
+| | title | tags | floating | size |
+|---|---|---|---|---|
+| runtime change over the mpv socket | `Harness Live Picture in Picture` | `['default-opacity*']` | false | 650×718 |
+| probe mpv launched with the title already set | `Probe Picture in Picture` | `['default-opacity*']` | false | 645×718 |
+
+No `pip` tag in either case, `default-opacity` still present, `opaque` still
+false — and in the launch case none of the rule's other effects applied either
+(pip.lua would have forced float, pin and 600×338).
+
+The likeliest mechanism is that a Wayland toplevel maps before its title is
+set, so the rule evaluates against a title that does not yet match. The result
+is empirical and does not depend on that explanation being right.
+
+So the conclusion stands, now on four measured levers rather than three. What
+was wrong was the word **only** — "the only lever is a window rule" was written
+while a title-matching window rule sat unexamined in this repository's own
+roadmap.
