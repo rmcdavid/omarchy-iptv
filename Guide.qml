@@ -657,6 +657,11 @@ Item {
     root.switchPendingLeave = false
     root.sourcesNotice = ""
     root.opened = true
+    // D-HOST-2: ask the service to re-read its manifest from the PATH. An
+    // update replaces that file, so the FileView's watcher never fires and the
+    // stale-build notice stayed silent through the exact update it exists for.
+    // Here, because opening is when the notice would be read.
+    if (root.serviceReady) root.service.recheckBuild()
     root.disarmPointer()
     // GS9 / R-C: the shape is decided here, before the card is composed, and
     // then held while it is open. rebuildGroups() re-measures both halves when

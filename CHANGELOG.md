@@ -3,6 +3,19 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.8 (2026-09-23)
+
+### Fixed
+
+- **The "restart the shell" notice now actually appears.** 0.7.4 added a line
+  telling you when an update had not taken effect yet. It never once showed,
+  including through the updates it was written for: updating replaces the file
+  it was watching rather than editing it, so the watch never fired and the
+  plugin went on believing it was the version it had started as. It now
+  re-reads that file whenever you open the guide, which is the moment the line
+  would be read. Verified by watching it appear, rather than by reasoning that
+  it should.
+
 ## 0.7.7 (2026-09-23)
 
 ### Fixed
