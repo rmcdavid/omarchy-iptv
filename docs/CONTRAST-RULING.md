@@ -417,6 +417,25 @@ non-text rule at 5.29:1) that no opacity arithmetic can produce.
      different instrument: the coverage distribution over the run, not its
      maximum.
 
+3. **Contrast is not monotonic in the parameter, and nothing may assume it is.**
+   D-RUNG-16 and D-RUNG-17, 2026-09-23. `colorOver` and `colorMix` interpolate
+   in gamma space and `relativeLuminance` is convex, so a blend sits below the
+   line between its endpoints and the contrast curve can peak in the interior:
+   `#c50236` over `#20f91e` reads 4.3973 at 0.70, **4.7318 at 0.83** and 4.2580
+   at 1.00. Two consequences, and both were live in this codebase in three
+   places:
+   - **Never short-circuit on the endpoint.** "If full opacity cannot clear the
+     target, nothing can" returns a failing answer with a passing one two steps
+     away.
+   - **Never fall back to the endpoint.** It is an arbitrary pick and can be the
+     worst option available. Fall back to the parameter that maximises contrast.
+   Search for a target with `alphaForContrast` or `mixForContrast` and do not
+   write a third copy of either loop -- the bug outlived its own discovery by a
+   day precisely because the search existed twice and only the newer copy was
+   audited. And note WHY it survived: no installed theme can reach either
+   branch, so nothing tested them. An unreachable branch is an untested one, and
+   in a file this heavily asserted that is where the next one will be too.
+
 2. **One arithmetic, called by both sides.** The WCAG formula currently lives
    only in `tests/Model.test.js:669-693`, which was fine while nothing shipped a
    decision made with it. Two of these changes do. `relativeLuminance`,

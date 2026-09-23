@@ -4511,13 +4511,32 @@ var WCAG_AA_TEXT = 4.5
 var CURSOR_INK_TARGET = 4.7
 
 // Both inputs and the fill are [r, g, b] in 0-255. Returns [r, g, b].
+// The mix-search sibling of alphaForContrast, and it carried the same defect
+// in its FALLBACK (D-RUNG-17). Returns the LEAST mixed colour that clears
+// `target` against `fill`; when nothing clears it, returns the mix that
+// MAXIMISES contrast rather than the far endpoint.
+//
+// colorMix interpolates in gamma space and relativeLuminance is convex, so the
+// contrast of a mix against a third colour is not monotonic in the mix
+// fraction. Handing back `toward` on failure therefore picks an arbitrary
+// point, not the best one: over a deterministic 20,000-pair sweep a better mix
+// existed on 57.7 per cent of the fallbacks, worst case 1.0273 returned where
+// 4.5722 was available one step in. No installed theme reaches the fallback,
+// which is why it went unnoticed -- the same reason D-RUNG-16 did.
+function mixForContrast(from, toward, fill, target) {
+  var best = contrastRatio(from, fill), bestMix = from.slice ? from.slice(0) : from
+  for (var step = 1; step <= 100; step++) {
+    var mixed = colorMix(from, toward, step / 100)
+    var c = contrastRatio(mixed, fill)
+    if (c >= target) return mixed
+    if (c > best) { best = c; bestMix = mixed }
+  }
+  return bestMix
+}
+
 function cursorInk(accent, text, fill) {
   if (contrastRatio(accent, fill) >= CURSOR_INK_TARGET) return accent.slice ? accent.slice(0) : accent
-  for (var step = 1; step <= 100; step++) {
-    var mixed = colorMix(accent, text, step / 100)
-    if (contrastRatio(mixed, fill) >= CURSOR_INK_TARGET) return mixed
-  }
-  return text.slice ? text.slice(0) : text
+  return mixForContrast(accent, text, fill, CURSOR_INK_TARGET)
 }
 
 // The QML seam. A QML `color` exposes r, g and b as 0-1 floats, and a binding
@@ -4624,19 +4643,51 @@ var SECTION_HEADER_FLOOR = 4.65
 
 // Both inputs are QML colours or [r, g, b]. Returns the opacity to draw the
 // section header at, over `background`.
+// ---- one alpha search, called by every rung that picks one ----------------
+//
+// D-RUNG-16. This exists because the search was written twice and the SECOND
+// copy was audited while the first kept the bug both were born with.
+//
+// The bug is an assumption that looks free: that contrast rises with alpha, so
+// "if full opacity cannot clear the target, nothing can". It does not rise
+// monotonically. colorOver blends in GAMMA space and relativeLuminance's
+// transfer is convex, so a blend's luminance sits below the straight line
+// between its endpoints; when the channels move in opposite directions the
+// contrast curve PEAKS IN THE INTERIOR. Measured on #c50236 over #20f91e:
+// 0.70 -> 4.3973, 0.83 -> 4.7318, 1.00 -> 4.2580. A short circuit on the
+// full-opacity value therefore returns a FAILING rung while a passing one sits
+// two steps away, and the fallback "return 1" picks the WORST rung available
+// rather than the best.
+//
+// Neither branch could bite the 23 installed themes -- the minimum
+// full-opacity contrast across all 46 surfaces is 5.9384, 28 per cent above
+// the floor, and a 10,000-step scan finds no non-monotonic surface among them.
+// That is exactly why it survived: an unreachable branch is an untested one.
+//
+// Returns the LOWEST alpha in [fromStep/100, 1] whose composite clears
+// `target`. When nothing clears it, returns the alpha that MAXIMISES contrast,
+// which the counterexample above shows is not always 1.
+function alphaForContrast(fg, bg, target, fromStep) {
+  var best = -1, bestAt = 1
+  for (var step = fromStep; step <= 100; step++) {
+    var a = step / 100
+    var c = contrastRatio(colorOver(fg, bg, a), bg)
+    if (c >= target) return a
+    if (c > best) { best = c; bestAt = a }
+  }
+  return bestAt
+}
+
 function sectionHeaderAlpha(foreground, background) {
   var fg = qmlRgb(foreground), bg = qmlRgb(background)
-  var full = contrastRatio(fg, bg)
-  var target = Math.max(SECTION_HEADER_FLOOR, full / SECTION_HEADER_SEPARATION)
-  // A theme whose BODY text is already at or under the target has no dimming
-  // to give: full opacity is the honest answer, not a rung that reads as a
-  // defect somewhere else.
-  if (full <= target) return 1
-  for (var step = 1; step <= 100; step++) {
-    var a = step / 100
-    if (contrastRatio(colorOver(fg, bg, a), bg) >= target) return a
-  }
-  return 1
+  // SECTION_HEADER_SEPARATION is a CEILING on dimming, not a guaranteed
+  // minimum: dim as far as the separation allows, but never below the floor.
+  var target = Math.max(SECTION_HEADER_FLOOR, contrastRatio(fg, bg) / SECTION_HEADER_SEPARATION)
+  // A theme whose body text is at or under the target has no dimming to give,
+  // and alphaForContrast says so by returning its most legible rung -- which
+  // is 1 wherever contrast really is monotonic, so every installed theme gets
+  // back byte-identically what the short circuit used to hand it.
+  return alphaForContrast(fg, bg, target, 1)
 }
 
 // ---- D-RUNG-14, the caption rung, chosen per SURFACE ----------------------
@@ -4695,17 +4746,9 @@ function captionAlpha(foreground, fill, floor) {
   // FAILING rung while a passing one existed two steps away. It also happened
   // to be dead against all 46 installed surfaces, so no test reached it -- an
   // untested branch that could only ever be wrong.
-  var best = 1, bestAt = CAPTION_BASE, seen = false
-  for (var step = Math.round(CAPTION_BASE * 100) + 1; step <= 100; step++) {
-    var a = step / 100
-    var c = contrastRatio(colorOver(fg, bg, a), bg)
-    if (c >= want) return a
-    if (!seen || c > best) { best = c; bestAt = a; seen = true }
-  }
-  // Nothing clears the floor on this fill. Return the MOST legible rung there
-  // is rather than full opacity, which the counterexample above shows can be
-  // the worst of them. The shortfall is the theme's; a check names it.
-  return bestAt
+  // One search, shared with sectionHeaderAlpha (D-RUNG-16). A second copy of
+  // this loop is how the non-monotonicity bug outlived its own discovery.
+  return alphaForContrast(fg, bg, want, Math.round(CAPTION_BASE * 100) + 1)
 }
 
 var TEXT_DIM = 0.52
@@ -6715,6 +6758,8 @@ if (typeof module !== "undefined") {
     CAPTION_FLOOR_REGULAR: CAPTION_FLOOR_REGULAR,
     CAPTION_REGULAR_SHORTFALL: CAPTION_REGULAR_SHORTFALL,
     captionAlpha: captionAlpha,
+    alphaForContrast: alphaForContrast,
+    mixForContrast: mixForContrast,
     relativeLuminance: relativeLuminance,
     contrastRatio: contrastRatio,
     colorOver: colorOver,

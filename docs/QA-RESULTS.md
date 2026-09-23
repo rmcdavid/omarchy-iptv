@@ -6398,3 +6398,82 @@ the mutation was run. A call-site inventory now holds the arguments.
 **Not verified on a screen, and deliberately not claimed.** F-CAL-4 is one day
 old. A live confirmation on a build confirmed loaded is owed before D-RUNG-14
 reads "verified".
+
+## D-RUNG-16 and D-RUNG-17, 2026-09-23: one assumption, three copies
+
+Repo-only, display untouched. Both defects are the same assumption in different
+clothes, and the second was found by asking whether the third search in the
+family shared it.
+
+### The assumption
+
+That contrast rises with the parameter. It does not. `colorOver` and `colorMix`
+both interpolate in **gamma** space and `relativeLuminance`'s transfer is
+**convex**, so a blend's luminance sits below the straight line between its
+endpoints. When the channels move in opposite directions the contrast curve
+peaks in the **interior**.
+
+Measured on `#c50236` over `#20f91e`:
+
+| alpha | 0.70 | 0.77 | 0.83 | 0.90 | 1.00 |
+|---|---|---|---|---|---|
+| contrast | 4.3973 | 4.6588 | **4.7318** | 4.6364 | 4.2580 |
+
+Any code that reads "if the endpoint cannot clear the target, nothing can"
+therefore returns a failing answer with a passing one two steps away. And any
+fallback that hands back the endpoint picks the **worst** option, not the best.
+
+### Where it lived
+
+| | short circuit | bad fallback | reached by an installed theme? |
+|---|---|---|---|
+| `captionAlpha` | yes (fixed 2026-09-23) | yes (fixed) | no |
+| `sectionHeaderAlpha` (D-RUNG-16) | yes | yes | no |
+| `cursorInk` (D-RUNG-17) | no | **yes** | no |
+
+`cursorInk` is the worst of the three and was the last to be looked at. Over a
+deterministic 20,000-pair sweep, when it fell back a better mix existed
+**57.7 per cent** of the time; the worst case returned **1.0273** where
+**4.5722** was available one step in. An order of magnitude worse than
+D-RUNG-16.
+
+None of the three can be reached by any of the 23 installed themes. That is the
+whole reason all three survived: the minimum full-opacity contrast across the 46
+caption surfaces is 5.9384, 28 per cent above the floor. **An unreachable branch
+is an untested one**, and two of these were sitting in functions whose other
+lines are covered by dozens of assertions.
+
+### The fix
+
+One search each, shared rather than copied: `alphaForContrast` for the opacity
+rungs and `mixForContrast` for the ink mix. `sectionHeaderAlpha` and
+`captionAlpha` both call the first, asserted by **result** over all 23 themes
+rather than by a comment — a private copy that behaved differently turns that
+check red. Both fall back to the parameter that maximises contrast.
+`mixForContrast` seeds its running best with the *unmixed* colour, which makes
+it beat even the sweep that found the defect: on the worst pair it returns 4.64
+where the sweep's best mix was 4.5722.
+
+**Proven invisible.** Both rungs on both surfaces, and the cursor ink, are
+byte-identical on all 23 installed themes before and after, pinned by value.
+Node 1485 → **1493**; seven mutations, each red, including each function
+restored exactly as it shipped.
+
+### What it did to a pin, which is the part worth keeping
+
+Fixing `cursorInk` turned a D-RUNG-13 check red — the one asserting the *unsafe*
+three-argument seam stays unsafe. Nothing about the seam had changed. The pin
+had recorded the exact wrong answer that path produced, *"collapses to the text
+token on 23 of 23"*, as though that were the property. It was a symptom of one
+fallback.
+
+Restated, and it came out sharper than before. The missing argument can only
+change the answer on a theme whose accent needs mixing at all; on the other 15
+both paths hand back the untouched accent. So the check now derives two sets
+independently — the themes that mix, and the themes the unsafe path gets wrong —
+and asserts they are **the same set**. They are, all 8 of them. A count would
+have been weaker.
+
+The general lesson is the one CLAUDE.md rule 14 is about, one level up: a test
+can pin the right thing for the wrong reason, and you find out when an unrelated
+correct change makes it fail.

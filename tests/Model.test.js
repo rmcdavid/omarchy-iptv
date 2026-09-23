@@ -1341,16 +1341,36 @@ checkCall("D-RUNG-13: the UNSAFE path is still unsafe, and pinned so nobody rest
   // Called with THREE arguments -- no surface to composite over -- qmlFill
   // keeps the old behaviour rather than throwing, because a QML binding that
   // raises leaves the guide's cursor ink undefined. That fall-back is exactly
-  // how this defect survived, so the guard is here instead: three arguments
-  // still collapse to the text token on 23 of 23, and the inventory below
-  // asserts the shipping binding passes four.
-  return menuTokens.themes.filter(function (t) {
+  // how this defect survived, so the guard is here instead, and the inventory
+  // below asserts the shipping binding passes four.
+  //
+  // RESTATED under D-RUNG-17. This used to assert the exact wrong answer the
+  // unsafe path produced -- "collapses to the text token on 23 of 23" -- and
+  // that went red when cursorInk's fallback stopped returning the far endpoint
+  // and started returning the most contrasting mix. Nothing about the seam had
+  // changed; the pin had simply recorded a SYMPTOM of one implementation as if
+  // it were the property. The property is that three arguments give you an ink
+  // that is not the intended one, on every theme, and that is what is asserted
+  // now. It survives any future change to what the fallback happens to pick.
+  // And the property is sharper than "they differ somewhere". The missing
+  // argument can only change the answer on a theme whose accent needs mixing
+  // at all -- on the other 15 the accent clears the target either way and both
+  // paths hand back the untouched accent. So the two sets must be THE SAME
+  // SET, derived independently: the themes that mix, and the themes the unsafe
+  // path gets wrong. That is a stronger statement than a count and it is what
+  // goes red if the seam is ever made safe by accident.
+  const mixes = menuTokens.themes.filter(function (t) {
     const s = cursorSurface(t)
-    const hex = Model.cursorInkHex(hostColor(s.accent), hostColor(s.text),
-                                   hostColor(s.text, menuTokens.selectedBackgroundAlpha))
-    return hex !== Model.hexOf(s.text)
-  }).map(function (t) { return t.name })
-}, [])
+    return Model.cursorInkMix(s.accent, s.text, s.fill) > 0
+  }).map(function (t) { return t.name }).sort()
+  const wrong = menuTokens.themes.filter(function (t) {
+    const s = cursorSurface(t)
+    const unsafe = Model.cursorInkHex(hostColor(s.accent), hostColor(s.text),
+                                      hostColor(s.text, menuTokens.selectedBackgroundAlpha))
+    return unsafe !== Model.hexOf(Model.cursorInk(s.accent, s.text, s.fill))
+  }).map(function (t) { return t.name }).sort()
+  return [mixes.length, mixes.join(",") === wrong.join(","), wrong.join(",")]
+}, [8, true, "catppuccin-latte,lupine,miasma,nord,osaka-jade,rose-pine,solitude,white"])
 checkCall("D-RUNG-13: the mechanism, asserted at the one line that drops it", function () {
   // qmlRgb reads r, g and b and never a, so an alpha-carrying token arrives as
   // its own undimmed colour. Pinned separately from the symptom above so the
@@ -1489,6 +1509,181 @@ checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventor
   "color: root.selectedText",
   "color: root.selectedText"
 ])
+// ---- D-RUNG-17: the MIX search had the same defect in its fallback ---------
+const CURSOR_INK_SHIPPED = [
+  "retropc #cc9900",
+  "catppuccin #89b4fa",
+  "catppuccin-latte #2e5ec4",
+  "ethereal #7d82d9",
+  "everforest #7fbbb3",
+  "flexoki-light #205ea6",
+  "gruvbox #7daea3",
+  "hackerman #82fb9c",
+  "kanagawa #dcd7ba",
+  "last-horizon #b59790",
+  "lumon #8bc9eb",
+  "lupine #305dd5",
+  "matte-black #e68e0d",
+  "miasma #979d75",
+  "nord #9bb3cd",
+  "osaka-jade #649d7b",
+  "retro-82 #faa968",
+  "ristretto #f38d70",
+  "rose-pine #576684",
+  "solitude #858c91",
+  "tokyo-night #7aa2f7",
+  "vantablack #8d8d8d",
+  "white #666666",
+]
+checkCall("D-RUNG-17: when no mix clears the target, cursorInk takes the most contrasting one, not the far endpoint", function () {
+  // The old fallback returned `text`. colorMix interpolates in gamma space and
+  // relativeLuminance is convex, so contrast against a third colour is not
+  // monotonic in the mix fraction and the endpoint is an arbitrary pick. This
+  // is the worst pair a deterministic 20,000-pair sweep found: the shipped
+  // function handed back 1.0273 where 4.5722 was available ONE STEP in.
+  const accent = [140, 201, 74], text = [83, 36, 172], fill = [129, 25, 105]
+  const got = Model.cursorInk(accent, text, fill)
+  // 4.64 and not the 4.5722 the sweep reported as "best": the sweep only
+  // looked at mixes 0.01 upward, and the most contrasting option here is the
+  // UNMIXED accent. mixForContrast seeds its running best with that, so it
+  // beats the sweep that found the defect. Still short of the 4.7 target --
+  // this pair is genuinely hopeless -- which is the case the fallback is for.
+  return [round2(contrast(text, fill)), round2(contrast(got, fill)),
+          contrast(got, fill) > contrast(text, fill)]
+}, [1.03, 4.64, true])
+checkCall("D-RUNG-17: and over a deterministic sweep it never hands back a mix when a better one exists", function () {
+  // The property rather than the instance. Seeded so a red run is repeatable.
+  var seed = 20260923
+  function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 }
+  function pick() { return [Math.floor(rnd() * 256), Math.floor(rnd() * 256), Math.floor(rnd() * 256)] }
+  var worse = 0, fellBack = 0
+  for (var i = 0; i < 4000; i++) {
+    var accent = pick(), text = pick(), fill = pick()
+    var got = Model.cursorInk(accent, text, fill)
+    var gotC = contrast(got, fill)
+    if (gotC >= Model.CURSOR_INK_TARGET) continue
+    fellBack++
+    for (var st = 0; st <= 100; st++) {
+      if (contrast(Model.colorMix(accent, text, st / 100), fill) > gotC + 1e-9) { worse++; break }
+    }
+  }
+  return [worse, fellBack > 500]
+}, [0, true])
+checkCall("D-RUNG-17: the shipping ink is byte-identical on all 23 themes -- this fix is invisible here", function () {
+  // The fallback is unreachable for every installed theme, which is exactly
+  // why it survived. Pinned so the fix cannot have moved anything on screen.
+  return menuTokens.themes.map(function (t) {
+    const x = cursorSurface(t)
+    return t.name + " " + Model.hexOf(Model.cursorInk(x.accent, x.text, x.fill))
+  }).filter(function (row) {
+    return CURSOR_INK_SHIPPED.indexOf(row) === -1
+  })
+}, [])
+
+// ---- D-RUNG-16: one alpha search, and it does not assume monotonicity ------
+checkCall("D-RUNG-16: sectionHeaderAlpha carried the same non-monotonicity bug, on a pair that exposes it", function () {
+  // Red against the shipped function, which short-circuited on the
+  // full-opacity value and returned 1 -- rendering 4.2580, BELOW its own
+  // target, with 0.77 available. The pair is adversarial rather than installed
+  // on purpose: the branch was unreachable for all 23 themes, which is exactly
+  // why it survived a year and its own sibling's audit.
+  const fg = rgbOf("#c50236"), bg = rgbOf("#20f91e")
+  const target = Math.max(Model.SECTION_HEADER_FLOOR, contrast(fg, bg) / Model.SECTION_HEADER_SEPARATION)
+  const a = Model.sectionHeaderAlpha(fg, bg)
+  return [round2(contrast(fg, bg)), round2(target),
+          round2(contrast(composite(fg, bg, a), bg)) >= round2(target),
+          contrast(composite(fg, bg, a), bg) > contrast(fg, bg)]
+}, [4.26, 4.65, true, true])
+checkCall("D-RUNG-16: and when NOTHING clears the target, the fallback is the most legible rung, not full opacity", function () {
+  // The old fallback returned 1. On a non-monotonic pair that is the WORST
+  // rung available, so the guard and the fallback failed the same way twice.
+  const fg = rgbOf("#c50236"), bg = rgbOf("#20f91e")
+  const a = Model.alphaForContrast(fg, bg, 99, 1)   // 99 is unreachable by design
+  const atA = contrast(composite(fg, bg, a), bg)
+  const atOne = contrast(fg, bg)
+  return [a < 1, round2(atA), round2(atOne), atA > atOne]
+}, [true, 4.73, 4.26, true])
+checkCall("D-RUNG-16: both rungs call ONE search, so a third copy of the loop cannot diverge quietly", function () {
+  // CLAUDE.md rule 12. The bug outlived its own discovery because the search
+  // existed twice and only the newer copy was audited. This asserts the
+  // delegation by RESULT over every installed surface: a private copy that
+  // behaved differently turns this red.
+  return menuTokens.themes.filter(function (t) {
+    const x = menuSurface(t)
+    const shTarget = Math.max(Model.SECTION_HEADER_FLOOR, contrast(x.text, x.rowFill) / Model.SECTION_HEADER_SEPARATION)
+    const shOk = Model.sectionHeaderAlpha(x.text, x.rowFill) === Model.alphaForContrast(x.text, x.rowFill, shTarget, 1)
+    const capOk = Model.captionAlpha(x.text, x.cursorFill) === (
+      contrast(composite(x.text, x.cursorFill, Model.CAPTION_BASE), x.cursorFill) >= Model.CAPTION_FLOOR
+        ? Model.CAPTION_BASE
+        : Model.alphaForContrast(x.text, x.cursorFill, Model.CAPTION_FLOOR, Math.round(Model.CAPTION_BASE * 100) + 1))
+    return !(shOk && capOk)
+  }).map(function (t) { return t.name })
+}, [])
+checkCall("D-RUNG-16: the search never returns a failing alpha when a passing one exists, over a deterministic sweep", function () {
+  // The property, stated directly and checked over pairs chosen to break it
+  // rather than over the installed themes, which cannot. A seeded LCG so the
+  // sweep is reproducible: Math.random would make a red run unrepeatable.
+  var seed = 20260923
+  function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 }
+  var pair = function () { return [Math.floor(rnd() * 256), Math.floor(rnd() * 256), Math.floor(rnd() * 256)] }
+  var broken = 0, exercised = 0
+  for (var i = 0; i < 4000; i++) {
+    var fg = pair(), bg = pair()
+    var target = 4.65
+    var a = Model.alphaForContrast(fg, bg, target, 1)
+    var got = contrast(composite(fg, bg, a), bg)
+    if (got >= target) continue
+    // It reported failure -- so no alpha on the grid may clear the target.
+    var exists = false
+    for (var stp = 1; stp <= 100 && !exists; stp++) {
+      if (contrast(composite(fg, bg, stp / 100), bg) >= target) exists = true
+    }
+    exercised++
+    if (exists) broken++
+  }
+  return [broken, exercised > 1000]
+}, [0, true])
+checkCall("D-RUNG-16: and the refactor moved NOTHING on any installed theme", function () {
+  // The whole fix must be invisible on this machine. Both rungs, both
+  // surfaces, all 23 themes, pinned as one string so a drift names itself.
+  // Pinned by VALUE, not filtered for obvious garbage: the first version of
+  // this check only looked for NaN, which is a check that cannot go red for
+  // the thing it was written to catch.
+  // Columns: theme, sectionHeader on card, on cursor, caption on card, on cursor.
+  return menuTokens.themes.map(function (t) {
+    const x = menuSurface(t)
+    return [t.name,
+            Model.sectionHeaderAlpha(x.text, x.rowFill),
+            Model.sectionHeaderAlpha(x.text, x.cursorFill),
+            Model.captionAlpha(x.text, x.rowFill),
+            Model.captionAlpha(x.text, x.cursorFill)].join(" ")
+  })
+}, [
+  "retropc 0.7 0.68 0.7 0.7",
+  "catppuccin 0.68 0.65 0.7 0.7",
+  "catppuccin-latte 0.83 0.87 0.83 0.87",
+  "ethereal 0.71 0.69 0.7 0.7",
+  "everforest 0.73 0.81 0.73 0.81",
+  "flexoki-light 0.79 0.77 0.7 0.7",
+  "gruvbox 0.69 0.76 0.7 0.76",
+  "hackerman 0.72 0.69 0.7 0.7",
+  "kanagawa 0.68 0.65 0.7 0.7",
+  "last-horizon 0.72 0.7 0.7 0.7",
+  "lumon 0.68 0.65 0.7 0.7",
+  "lupine 0.8 0.78 0.7 0.7",
+  "matte-black 0.69 0.67 0.7 0.7",
+  "miasma 0.66 0.72 0.7 0.72",
+  "nord 0.64 0.71 0.7 0.71",
+  "osaka-jade 0.67 0.69 0.7 0.7",
+  "retro-82 0.7 0.67 0.7 0.7",
+  "ristretto 0.67 0.64 0.7 0.7",
+  "rose-pine 0.85 0.89 0.85 0.89",
+  "solitude 0.69 0.67 0.7 0.7",
+  "tokyo-night 0.71 0.76 0.71 0.76",
+  "vantablack 0.74 0.71 0.7 0.7",
+  "white 0.77 0.75 0.7 0.7",
+])
+
 // ---- D-RUNG-14, second half: the rung follows the fill --------------------
 //
 // Every figure below is computed by CALLING Model.captionAlpha over the 23
