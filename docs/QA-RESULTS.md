@@ -6289,3 +6289,112 @@ told to restart. Not yet raised upstream and not yet reproduced deliberately.
 it is free. Every artefact this pass could have checked looked correct — right
 file, right `manifest.json` version, update command reporting success — and all
 of them were consistent with measuring the wrong thing.
+
+## The caption rung, 2026-09-23: it follows the fill now
+
+Repo-only. The display was never touched; every figure is computed by calling
+`Model.captionAlpha` over the 23 installed theme token sets in
+`tests/fixtures/menu-contrast.json`.
+
+### What changed
+
+The 10 px caption rung was a constant, 0.7, chosen against the card. On the
+selected row it is a different rendering: `Color.menu.selectedBackground` is
+`Util.alpha(menu.text, 0.08)` composited over the card, so the fill moves
+*toward* the ink. tokyo-night models 4.6433 on the card and 4.2157 on the
+selection — one side of 4.5 each — and no font weight recovers that. Bold
+measures 4.1893 there: model accuracy **and** a failure, because the ceiling is
+in the arithmetic, not in the glyph.
+
+So the rung became an output of the fill, the same shape `sectionHeaderAlpha`
+already used for D-RUNG-9. On all four raised *card* surfaces the new function
+returns byte-identically what `sectionHeaderAlpha` already shipped (rose-pine
+0.85, catppuccin-latte 0.83, everforest 0.73, tokyo-night 0.71), which also
+closes the inconsistency where `SECTION_HEADER_FLOOR = 4.65` graded the caption
+rung's own 4.6433 a fail one file away.
+
+| | flat 0.7 | rung per fill |
+|---|---|---|
+| theme surfaces under 4.5 | 6 cursor, 3 card | **0** |
+| theme surfaces under the 4.65 floor | 7 cursor, 4 card | **0** |
+| surfaces whose appearance changes | — | 11 of 46, across 7 themes |
+| worst alpha | 0.70 | 0.89 (rose-pine selection) |
+
+### The cost, priced before it was accepted
+
+Raising the count to clear AA lands it almost exactly level with its own group
+label, because the label is `cursorInk`, clamped to `CURSOR_INK_TARGET` 4.7 on
+that same fill. Both then target ~4.7.
+
+| theme | L* step, label vs count | |
+|---|---|---|
+| catppuccin-latte | 10.20 | → **0.15** |
+| rose-pine | 11.36 | → **0.38** |
+| tokyo-night | 10.03 | → 6.83 |
+| gruvbox | 5.23 | → 2.04 |
+
+A 4.55 floor was priced as a middle option and rejected: it moves the worst step
+only to 0.63, so the collision is structural rather than a matter of margin.
+**Accepted by the product owner**, on two grounds recorded here. Hierarchy on
+that row is carried by size (10 px against 12 px), weight (bold against
+regular), position and hue rather than by lightness. And 9 of 23 themes already
+read the count *louder* than the label at the flat rung — D-RUNG-15's residue —
+so the separation this protects did not exist on 40 per cent of themes anyway.
+No theme is **newly** inverted; that is asserted, not assumed.
+
+### Three defects in the first cut, none found by me
+
+An adversarial pass over the diff found all three. Recording that plainly,
+because the pattern is the point: each was a place I asserted something instead
+of calling it.
+
+1. **The Sources pinned count was left on the card rung**, excused by a comment
+   saying `Style.hoverFillFor` was "host-injected and not modellable here".
+   False, and one look settles it: `Style.qml` returns
+   `Util.alpha(hoverStateColor(...), hoverFillAlpha)` — an ordinary
+   alpha-carrying colour, exactly the shape `qmlFill` exists for, used one line
+   above. The default template even gives hover the same colour and alpha as the
+   selection. While hovered, that caption drew the card rung on a cursor fill and
+   was under 4.5 on the same six themes the change was written to repair.
+2. **Contrast is not monotonic in alpha.** `colorOver` blends in gamma space and
+   the luminance transfer is convex, so when channels move in opposite
+   directions the curve peaks in the interior. On `#c50236` over `#20f91e`:
+   0.70 → 4.3973, 0.83 → 4.7318, **1.00 → 4.2580**. The short circuit
+   "if full opacity cannot clear the floor, return 1" therefore returned a
+   failing rung with a passing one two steps away — and was dead against all 46
+   installed surfaces, so no test reached the only branch that could be wrong.
+   Now removed, with the fallback returning the alpha that *maximises* contrast.
+3. **The two deliberately-regular prose sites were handed the BOLD floor.**
+   Regular 10 px renders 11–13 per cent below the model and bold does not
+   (F-CAL-1, 15 live rows), so 4.65 renders about 4.09 at regular weight. They
+   now draw `CAPTION_FLOOR_REGULAR`, 4.5 grossed up by that shortfall = 5.2941;
+   every theme reaches it, 6 need a raise, worst 0.91.
+
+A fourth was a false statement in the gate file itself — "the ONLY site that can
+land on a selection fill" — which is what let (1) through. Three further texts
+sit on tinted fills at the 0.52 **dim** rung (channel row meta and detail line,
+Sources row meta). Their exclusion is D-RUNG-2's standing refusal, not an
+oversight, and is now a check rather than a sentence.
+
+### D-RUNG-16, filed from this
+
+`sectionHeaderAlpha` still carries defect (2) — the same short circuit, on the
+same reasoning. Latent rather than live: the minimum full-opacity contrast over
+all 46 installed surfaces is 5.9384, 28 per cent above the floor, and a
+10,000-step scan finds no non-monotonic surface among them. Not fixed here
+because it changes section-header rendering and this change had a different
+brief.
+
+### Verification
+
+Node 1473 → **1485**. Seven new checks, each proven red by mutation, including
+against the behaviour that shipped (`captionAlpha` pinned to the base rung turns
+five red) and against the D-RUNG-13 trap (handing the binding an uncomposited
+selection fill). That last mutation passed the first time it was run — the
+arithmetic check caught the fill but nothing observed the *binding* — which is
+D-RUNG-13's exact failure a second time in the same seam, caught only because
+the mutation was run. A call-site inventory now holds the arguments.
+
+**Not verified on a screen, and deliberately not claimed.** F-CAL-4 is one day
+old. A live confirmation on a build confirmed loaded is owed before D-RUNG-14
+reads "verified".

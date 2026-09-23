@@ -688,35 +688,35 @@ the channel name lives in the tooltip. Same three glyphs.
   was under 4.5:1 on 8 of 23 themes against the fill it sits on, floor 2.80.
 - Captions at 10 px (`Style.font.caption`) that carry information -- the group
   entry count, the Sources pinned count, the footer status line and the footer
-  hints -- are **bold** (D-RUNG-14). What bold buys is **site-dependent**, and
-  both previous versions of this paragraph were wrong: the first claimed it
-  recovered the shortfall everywhere, verified only under a headless renderer;
-  the second withdrew that entirely, on a pass that turned out to be measuring a
-  build the shell had never loaded (F-CAL-3 withdrawn, F-CAL-4).
-  Measured on the real display against a confirmed build:
-  - **On the card fill it works.** tokyo-night footer status reads 4.6410
-    against a model of 4.6433, the composite byte-exact, where regular weight
-    at the same site measured 4.25. Under AA to over it.
-  - **On the cursor fill it cannot.** The selected tint lifts the background, so
-    the rung models 4.2157 there before a glyph is drawn; bold measures 4.1893,
-    which is model accuracy and still fails. No font weight reaches 4.5 from
-    there -- only the rung or the tint can.
-  - **On rose-pine nothing reaches it**: 3.3446 card, 3.1402 cursor, both under
-    AA at any weight.
-  So the bold ships and stays, and the 0.7 rung is still an open question on the
-  cursor row and on rose-pine. Two cautions that belong here rather than in a
-  footnote: the tokyo margin is 0.1410, **smaller than the calibration
-  fixture's own 0.15 tolerance**, and `Model.js` sets
-  `SECTION_HEADER_FLOOR = 4.65` citing this same defect, so the shipping code
-  grades 4.6433 a fail for this size class one file away. Every figure above is
-  asserted from `tests/fixtures/contrast-calibration.json` by the calibration
-  block of `tests/Model.test.js`, including which themes are still owed a
-  measurement.
-  One limit stated plainly, because it bounds every number here: the measurement
-  is a peak-pixel statistic, which saturates once one pixel of a run is fully
-  covered. It says a stroke reached full coverage. It does not say what fraction
-  of the run did, which is what a reader experiences, and nothing here measures
-  that.
+  hints -- are **bold**, and their opacity rung is an **output of the surface
+  they land on**, not the constant 0.7 it used to be (D-RUNG-14,
+  `Model.captionAlpha`). Both halves are needed and neither is sufficient:
+  - Bold answers the RENDERING shortfall. 10 px regular lands 11 to 13 per cent
+    below the contrast model; bold renders at model accuracy, confirmed on the
+    real display once the measurement was no longer taken against a stale build
+    (F-CAL-4). Prose captions ship regular on purpose and draw a floor grossed
+    up by that shortfall instead (`CAPTION_FLOOR_REGULAR`, 5.2941).
+  - The per-surface rung answers the ARITHMETIC one. `selectedBackground` is
+    `Util.alpha(menu.text, 0.08)` over the card, so the selected row's fill
+    moves toward the ink: tokyo-night models 4.6433 on the card and 4.2157 on
+    the selection. No weight recovers that -- bold measures 4.1893 there, model
+    accuracy and a failure -- because the ceiling is in the arithmetic.
+  The rung is raised **only** where 0.7 does not clear the floor, so 16 of 23
+  themes render byte-identically to before; 11 of 46 theme surfaces rise, worst
+  0.89. Result: 0 of 46 under the 4.65 floor, against 6 of 23 under 4.5 on the
+  selection before. On the card the function returns byte-identically what
+  `sectionHeaderAlpha` already shipped, which is also what closed the old
+  inconsistency where that floor graded the caption rung's own value a fail.
+- **The accepted cost, on the selected group row only.** Raising the count to
+  clear AA puts it level with its own label, since the label is `cursorInk`
+  clamped to 4.7 on that same fill. The CIE L* step between them falls from
+  10.20 to 0.15 on catppuccin-latte and 11.36 to 0.38 on rose-pine. Hierarchy
+  there is then carried by size (10 px against 12 px), weight, position and hue
+  rather than by lightness. Ruled acceptable by the product owner: a 4.55 floor
+  was priced and moves the worst step only to 0.63, so the collision is
+  structural; and 9 of 23 themes already read the count louder than the label at
+  the old flat rung, so the separation being spent was largely notional. No
+  theme is newly inverted, and that is asserted rather than assumed.
 - Row `MouseArea`: `hoverEnabled: true`, `cursorShape: Qt.PointingHandCursor`; click = play and close (Enter); click on the lead slot = toggle favorite only.
 - No color animation on the cursor; the clipboard has none, and 10k-row lists must stay cheap.
 

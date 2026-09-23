@@ -1489,6 +1489,203 @@ checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventor
   "color: root.selectedText",
   "color: root.selectedText"
 ])
+// ---- D-RUNG-14, second half: the rung follows the fill --------------------
+//
+// Every figure below is computed by CALLING Model.captionAlpha over the 23
+// installed theme token sets, never by reading a number off a document.
+function capSurfaces() {
+  return menuTokens.themes.reduce(function (acc, t) {
+    const s = menuSurface(t)
+    return acc.concat([
+      { theme: t.name, surface: "card", fill: s.rowFill, text: s.text },
+      { theme: t.name, surface: "cursor", fill: s.cursorFill, text: s.text },
+    ])
+  }, [])
+}
+function capRatio(x, alpha) { return contrast(composite(x.text, x.fill, alpha), x.fill) }
+checkCall("D-RUNG-14: at the FLAT 0.7 rung, this many theme surfaces are under AA -- the defect, as a number", function () {
+  // The before state, kept so the fix has something to be a fix OF. The cursor
+  // side is twice as bad as the card side and that is the whole point: it is
+  // the same rung rendering differently because the fill moved.
+  const at07 = capSurfaces().filter(function (x) { return capRatio(x, Model.CAPTION_BASE) < 4.5 })
+  return [at07.filter(function (x) { return x.surface === "cursor" }).length,
+          at07.filter(function (x) { return x.surface === "card" }).length]
+}, [6, 3])
+checkCall("D-RUNG-14: with the rung chosen per fill, NO theme surface is under the floor", function () {
+  return capSurfaces().filter(function (x) {
+    return capRatio(x, Model.captionAlpha(x.text, x.fill)) < Model.CAPTION_FLOOR
+  }).map(function (x) { return x.theme + " " + x.surface })
+}, [])
+checkCall("D-RUNG-14: and it is SURGICAL -- the rung is raised only where 0.7 does not clear the floor", function () {
+  // The cost of this fix, stated as the number of surfaces whose appearance
+  // changes at all. If this grows, hierarchy is being spent somewhere it was
+  // not needed, and that is a regression even though every ratio still passes.
+  const all = capSurfaces()
+  const raised = all.filter(function (x) { return Model.captionAlpha(x.text, x.fill) > Model.CAPTION_BASE })
+  const themes = {}
+  raised.forEach(function (x) { themes[x.theme] = true })
+  return [raised.length, all.length, Object.keys(themes).length]
+}, [11, 46, 7])
+checkCall("D-RUNG-14: no caption reaches full opacity", function () {
+  const maxA = capSurfaces().reduce(function (m, x) {
+    return Math.max(m, Model.captionAlpha(x.text, x.fill))
+  }, 0)
+  return [round2(maxA), maxA < 1]
+}, [0.89, true])
+checkCall("D-RUNG-14: the hierarchy cost on the SELECTED row, measured against the ink that actually paints", function () {
+  // The first version of this check divided by contrast(menu.text, fill) and
+  // reported a comfortable 1.275. That was the wrong comparator: on a selected
+  // group row the label is NOT menu.text, it is cursorInk (Guide.qml:2371),
+  // clamped to CURSOR_INK_TARGET 4.7. Measured against what paints, raising the
+  // count to the floor puts it almost exactly level with its own label, because
+  // both are then targeting ~4.7 on the same fill. That is the real price and
+  // it is recorded as a number rather than described.
+  //
+  // The one thing this MUST hold is that the change inverts nothing that was
+  // not already inverted: 9 of 23 selected rows read the count louder than the
+  // label at the old flat rung too (D-RUNG-15's residue), and this must not
+  // make a tenth.
+  var invertedBefore = 0, invertedAfter = 0, worstAfter = 99, newlyInverted = []
+  menuTokens.themes.forEach(function (t) {
+    const x = menuSurface(t)
+    const ink = Model.cursorInk(rgbOf(t.accent), x.text, x.cursorFill)
+    const label = contrast(ink, x.cursorFill)
+    const before = label / contrast(composite(x.text, x.cursorFill, Model.CAPTION_BASE), x.cursorFill)
+    const a = Model.captionAlpha(x.text, x.cursorFill)
+    const after = label / contrast(composite(x.text, x.cursorFill, a), x.cursorFill)
+    if (before < 1) invertedBefore++
+    if (after < 1) invertedAfter++
+    if (before >= 1 && after < 1) newlyInverted.push(t.name)
+    worstAfter = Math.min(worstAfter, after)
+  })
+  return [invertedBefore, invertedAfter, newlyInverted, Math.round(worstAfter * 1000) / 1000]
+}, [9, 9, [], 0.594])
+// 0.594 is vantablack and it is UNCHANGED by this diff -- it read that way at
+// the flat rung too. The number that belongs to this change is the worst among
+// the surfaces it actually raised, which is 1.004 (nord): the count ends level
+// with its own label rather than below it. In CIE L* the step between the two
+// falls from 10.20 to 0.15 on catppuccin-latte and 11.36 to 0.38 on rose-pine.
+// That is the price of AA on this surface and it is the product owner's call,
+// not a defect: no rung clears 4.5 on the cursor fill without landing beside
+// cursorInk's own 4.7 clamp, and a 4.55 floor only moves the worst step to
+// 0.63. Recorded here so the decision is visible where the arithmetic is.
+checkCall("D-RUNG-14: the selected fill must be COMPOSITED before it is measured against (D-RUNG-13's trap, again)", function () {
+  // `Color.menu.selectedBackground` is `Util.alpha(menu.text, 0.08)`: its r, g
+  // and b ARE the text's. Hand it over uncomposited and every theme measures
+  // the text against itself, contrast 1.0, and captionAlpha runs to full
+  // opacity on 23 of 23 -- silently, and looking like a deliberate choice.
+  // That is exactly how D-RUNG-13 shipped for the life of a feature, so it is
+  // asserted here rather than trusted to a comment on the binding.
+  // Asserted on the RENDERED contrast rather than on the returned alpha,
+  // because the alpha a hopeless surface falls back to is an implementation
+  // choice and the ratio is the thing that is actually wrong: text over itself
+  // is 1.0 at every rung.
+  const raw = menuTokens.themes.filter(function (t) {
+    const x = menuSurface(t)
+    return contrast(composite(x.text, x.text, Model.captionAlpha(x.text, x.text)), x.text) < 1.01
+  }).length
+  const composited = menuTokens.themes.filter(function (t) {
+    const x = menuSurface(t)
+    return contrast(composite(x.text, x.cursorFill, Model.captionAlpha(x.text, x.cursorFill)), x.cursorFill) >= Model.CAPTION_FLOOR
+  }).length
+  return [raw, composited, menuTokens.themes.length]
+}, [23, 23, 23])
+checkCall("D-RUNG-14: contrast is NOT monotonic in alpha, and captionAlpha must not assume it is", function () {
+  // The guard this replaced read "if full opacity cannot clear the floor,
+  // return 1". colorOver blends in gamma space and the luminance transfer is
+  // convex, so when the channels move in opposite directions the curve peaks in
+  // the INTERIOR. This pair is the counterexample, and it was found by an
+  // adversarial pass rather than by the suite: the old branch was dead against
+  // all 46 installed surfaces, so no test reached the only branch that could
+  // return a failing rung.
+  const fg = rgbOf("#c50236"), fill = rgbOf("#20f91e")
+  const curve = [0.7, 0.83, 1].map(function (a) { return round2(contrast(composite(fg, fill, a), fill)) })
+  const a = Model.captionAlpha(fg, fill)
+  return [curve, curve[2] < curve[1], round2(contrast(composite(fg, fill, a), fill)) >= Model.CAPTION_FLOOR]
+}, [[4.4, 4.73, 4.26], true, true])
+checkCall("D-RUNG-14: a REGULAR caption draws a higher floor than a bold one, because it does not render at model accuracy", function () {
+  // Two of the five sites ship unbolded on purpose (prose, not labels). 10 px
+  // regular lands 11 to 13 per cent below the model (F-CAL-1, 15 live rows), so
+  // the bold floor of 4.65 would render about 4.09 there -- under AA. The
+  // regular floor is that shortfall grossed up, and every installed theme can
+  // reach it: 6 need a raise, the worst at 0.91.
+  const under = menuTokens.themes.filter(function (t) {
+    const x = menuSurface(t)
+    const a = Model.captionAlpha(x.text, x.rowFill, Model.CAPTION_FLOOR_REGULAR)
+    return contrast(composite(x.text, x.rowFill, a), x.rowFill) < Model.CAPTION_FLOOR_REGULAR
+  }).map(function (t) { return t.name })
+  const raised = menuTokens.themes.filter(function (t) {
+    const x = menuSurface(t)
+    return Model.captionAlpha(x.text, x.rowFill, Model.CAPTION_FLOOR_REGULAR) > Model.CAPTION_BASE
+  })
+  const maxA = raised.reduce(function (m, t) {
+    const x = menuSurface(t)
+    return Math.max(m, Model.captionAlpha(x.text, x.rowFill, Model.CAPTION_FLOOR_REGULAR))
+  }, 0)
+  return [round2(Model.CAPTION_FLOOR_REGULAR), under, raised.length, round2(maxA),
+          Model.CAPTION_FLOOR_REGULAR > Model.CAPTION_FLOOR]
+}, [5.29, [], 6, 0.91, true])
+checkCall("D-RUNG-14: the HOVER fill is the same construction as the selection, so the Sources count is covered by the cursor arithmetic", function () {
+  // Style.hoverFillFor returns Util.alpha(hoverStateColor(...), hoverFillAlpha)
+  // and the shipped default template sets hover-cursor-color to the foreground
+  // at alpha 0.08 -- the same colour and alpha it gives selected-background. So
+  // modelling the hover surface AS the selected surface is exact for every
+  // default-templated theme, which is all 23 installed ones. A theme that
+  // overrides the hover tokens is outside this fixture's reach and is stated as
+  // such rather than silently assumed away; the call-site inventory below is
+  // what holds the binding to compositing it at all.
+  return menuTokens.themes.filter(function (t) {
+    const x = menuSurface(t)
+    return contrast(composite(x.text, x.cursorFill, Model.captionAlpha(x.text, x.cursorFill)), x.cursorFill) < Model.CAPTION_FLOOR
+  }).map(function (t) { return t.name })
+}, [])
+checkCall("D-RUNG-14: the OTHER text on tinted fills, and the rung each draws -- the exclusions, as a call", function () {
+  // Three further texts sit on a selection or hover fill and were NOT given a
+  // per-surface rung: the channel row meta and detail line, and the Sources row
+  // meta. All three draw the 0.52 DIM rung, not the 0.7 caption rung, and all
+  // three are under 4.5 on about 20 of 23 themes -- on the CARD as well as on
+  // the selection, which is the point. That is D-RUNG-2, refused by the product
+  // owner (docs/CONTRAST-RULING.md), and the selection fill costs it a median
+  // 0.22 on top. So their exclusion is a standing decision and not an
+  // oversight, and this check is what makes the difference checkable: if one of
+  // them ever moves to the caption rung it appears here and must be dealt with.
+  const lines = qmlLines()
+  return lines.filter(function (l) { return /^\s*opacity: 0\.52\s*$/.test(l.text) })
+    .map(function (l) { return l.file + ":" + "0.52" }).length
+}, 4)
+checkCall("D-RUNG-14: every captionAlpha call site in the shipped QML, with its arguments, by inventory", function () {
+  // The check above proves the ARITHMETIC refuses an uncomposited fill. It does
+  // not observe the BINDING, and a mutation that dropped qmlFill from the
+  // cursor property left the whole suite green -- which is D-RUNG-13's exact
+  // failure a second time, in the same seam, caught only because the mutation
+  // was run. So the call sites are inventoried with their arguments: losing the
+  // composite, or pointing a site at the wrong surface, changes a string here.
+  return qmlSites(/Model\.captionAlpha\(/).map(function (t) {
+    return t.replace(/^readonly property real /, "").replace(/\s+/g, " ")
+  })
+}, [
+  "captionAlphaOnCard: Model.captionAlpha(Color.menu.text, Color.menu.background)",
+  // qmlFill is load-bearing on both tinted surfaces: selectedBackground and the
+  // hover fill are BOTH Util.alpha(menu.text, 0.08), so uncomposited each
+  // measures the text against itself, contrast 1.0 at every rung.
+  "captionAlphaOnCursor: Model.captionAlpha(Color.menu.text, Model.qmlFill(Color.menu.selectedBackground, Color.menu.background))",
+  "captionAlphaOnHover: Model.captionAlpha(Color.menu.text, Model.qmlFill(Style.hoverFillFor(Color.menu.text, Color.accent), Color.menu.background))",
+  // The third argument is the whole regular-weight correction; losing it puts
+  // the prose back on the bold floor, which renders under AA.
+  "captionAlphaProse: Model.captionAlpha(Color.menu.text, Color.menu.background, Model.CAPTION_FLOOR_REGULAR)",
+])
+checkCall("D-RUNG-14: the caption floor and the section-header floor are the same number, and now agree on tokyo-night", function () {
+  // They were one file apart and disagreed: SECTION_HEADER_FLOOR is 4.65 while
+  // the caption rung shipped a value of 4.6433 on tokyo-night, so the project
+  // held two thresholds for one size class. Both now answer to 4.65 and both
+  // return 0.71 on that theme -- the inconsistency is closed by arithmetic
+  // rather than by choosing which document was right.
+  const tn = menuTokens.themes.filter(function (t) { return t.name === "tokyo-night" })[0]
+  const s = menuSurface(tn)
+  return [Model.CAPTION_FLOOR, Model.SECTION_HEADER_FLOOR,
+          Model.captionAlpha(s.text, s.rowFill),
+          Model.sectionHeaderAlpha(s.text, s.rowFill)]
+}, [4.65, 4.65, 0.71, 0.71])
 checkCall("D-RUNG-14: every 10 px caption, with its rung and its weight, by inventory", function () {
   // The whole of D-RUNG-14's fix is four `font.bold: true` lines. Deleting all
   // four left the suite at 1445 checks and 0 failures, while the board said
@@ -1496,11 +1693,21 @@ checkCall("D-RUNG-14: every 10 px caption, with its rung and its weight, by inve
   // one file whose gates have twice been walked past. So the caption sites are
   // inventoried the same way the ink sites are.
   //
-  // WHY BOLD AND NOT A HIGHER RUNG: 10 px REGULAR renders 11 to 13 per cent
-  // below the contrast model (F-CAL-1), which puts these sites at 4.12:1 on
-  // tokyo-night where the model says 4.64; 10 px BOLD renders at model
-  // accuracy. Bold therefore recovers the shortfall without touching the
-  // opacity rung, which is what keeps secondary text secondary.
+  // WHY BOLD AND ALSO A HIGHER RUNG. The original answer was bold alone, on the
+  // reasoning that 10 px regular renders 11 to 13 per cent below the model
+  // while bold renders at model accuracy. Bold does hold model accuracy --
+  // confirmed on the real display once the measurement was no longer taken
+  // against a stale build (F-CAL-4) -- but that was never sufficient, because
+  // on the SELECTED row the ceiling is in the arithmetic rather than in the
+  // glyph. `Color.menu.selectedBackground` moves the fill toward the ink, so
+  // tokyo-night models 4.2157 there against 4.6433 on the card, and bold
+  // measures 4.1893: model accuracy AND a failure. No weight reaches 4.5 from
+  // a 4.2157 ceiling.
+  //
+  // So the rung became an OUTPUT of the fill (Model.captionAlpha) and the
+  // bold stayed. The rung is what keeps a caption secondary, which is why it
+  // is raised only where 0.7 does not clear the floor: 16 of 23 themes get
+  // 0.7 back byte-identical on both surfaces.
   //
   // The two deliberately-regular 0.7 sites are in the list on purpose: the
   // Xtream prose and the first-run terminal caption share the rung, were never
@@ -1520,14 +1727,20 @@ checkCall("D-RUNG-14: every 10 px caption, with its rung and its weight, by inve
     })
 }, [
   "opacity: 0.52 | regular",                                 // header scope label
-  "opacity: 0.7 | font.bold: true",                          // group entry count
-  "opacity: 0.7 | font.bold: true",                          // Sources pinned count
+  // The only site at the CAPTION rung that lands on a selection fill. That
+  // qualifier is load-bearing and an earlier version of this comment left it
+  // out, saying "the ONLY site that can land on a selection fill" -- which is
+  // false three times over and is exactly what let the hover site below slip
+  // through. The check beneath this inventory enumerates the others.
+  "opacity: groupRow.selected ? root.captionAlphaOnCursor : root.captionAlphaOnCard | font.bold: true",
+  // Takes a hover fill, which lifts the surface exactly as the selection does.
+  "opacity: pinnedMouse.containsMouse ? root.captionAlphaOnHover : root.captionAlphaOnCard | font.bold: true",
   "opacity: Model.rowNoticeEmphasis(row.failedAt) | regular", // row meta / failure notice
   "opacity: 0.52 | regular",                                 // the no-match chip
   "opacity: 0.52 | regular",                                 // Sources row meta
-  "opacity: 0.7 | regular",                                  // Xtream prose, left regular
-  "opacity: 0.7 | regular",                                  // first-run terminal caption, left regular
-  "opacity: 0.7 | font.bold: true",                          // footer status line
+  "opacity: root.captionAlphaProse | regular",               // Xtream prose, left regular
+  "opacity: root.captionAlphaProse | regular",               // first-run terminal caption, left regular
+  "opacity: root.captionAlphaOnCard | font.bold: true",      // footer status line
   "opacity: 1 | font.bold: true"                             // footer hints (dimmed via verbColor, not opacity)
 ])
 checkCall("PO ruling 2026-09-21: the CURSOR MARKS, by inventory -- every list with a cursor has one, and none of them inks", function () {

@@ -4639,6 +4639,75 @@ function sectionHeaderAlpha(foreground, background) {
   return 1
 }
 
+// ---- D-RUNG-14, the caption rung, chosen per SURFACE ----------------------
+//
+// A caption is drawn at 0.7 so it reads as secondary. That rung was picked
+// against the card, and the same rung on the SELECTED row is a different
+// rendering: `Color.menu.selectedBackground` is the text colour at 0.08 over
+// the card, so the fill moves TOWARD the ink and the caption loses contrast it
+// never agreed to lose. Measured on tokyo-night, 4.6433 on the card and 4.2157
+// on the selection -- one side of 4.5 each. No font weight recovers that; bold
+// measures 4.1893 there, which is model accuracy and still a failure, because
+// the ceiling is in the arithmetic and not in the glyph.
+//
+// So the rung is an OUTPUT, not a constant: hold the rendered contrast at the
+// floor and let alpha be whatever that costs on the fill the element is
+// actually on. The same shape as sectionHeaderAlpha above, for the same reason.
+//
+// This raises NOTHING on 16 of 23 themes -- they clear the floor at 0.7 on both
+// surfaces and get 0.7 byte-identical. The other 7 rise to between 0.71 and
+// 0.89, and the worst case is rose-pine, which was never close: 3.1402.
+var CAPTION_BASE = 0.7
+// 4.50 plus the calibration fixture's `tolerance.abs`, the same derivation as
+// SECTION_HEADER_FLOOR and deliberately the same number. They are separate
+// constants because they answer to separate evidence and either may move alone.
+// This one is the floor for a BOLD caption, which renders at model accuracy.
+var CAPTION_FLOOR = 4.65
+// A REGULAR 10 px caption does not render at model accuracy: it lands 11 to 13
+// per cent below the model, which is why the calibration fixture gives the
+// caption class a RELATIVE tolerance instead of the absolute one (F-CAL-1,
+// measured live on 15 rows). A model value of 4.65 therefore renders about
+// 4.09 at regular weight -- under AA. So a regular caption needs its floor
+// grossed up by that shortfall rather than sharing the bold one. Two of the
+// five caption sites are deliberately regular (prose, not labels), and giving
+// them the bold floor would have shipped a number that looks verified and is
+// not.
+var CAPTION_REGULAR_SHORTFALL = 0.15
+var CAPTION_FLOOR_REGULAR = 4.5 / (1 - CAPTION_REGULAR_SHORTFALL)
+
+// `fill` is the composited surface the caption lands on -- pass the result of
+// qmlFill for an alpha-carrying QML colour, never the alpha colour itself.
+// `floor` defaults to the bold floor; pass CAPTION_FLOOR_REGULAR for a site
+// that ships at regular weight.
+function captionAlpha(foreground, fill, floor) {
+  var fg = qmlRgb(foreground), bg = qmlRgb(fill)
+  var want = typeof floor === "number" ? floor : CAPTION_FLOOR
+  // Never dim BELOW the base rung, and never raise where the base already
+  // clears the floor: the rung is what keeps a caption secondary, and spending
+  // hierarchy on a surface that did not need it is the cost this avoids.
+  if (contrastRatio(colorOver(fg, bg, CAPTION_BASE), bg) >= want) return CAPTION_BASE
+  // NO short circuit on the full-opacity value, and that is load-bearing.
+  // Contrast is NOT monotonic in alpha: colorOver blends in gamma space and the
+  // luminance transfer is convex, so when the channels move in opposite
+  // directions the curve PEAKS in the interior. Measured on #c50236 over
+  // #20f91e: 0.70 -> 4.3973, 0.83 -> 4.7318, 1.00 -> 4.2580. A guard that read
+  // "if full opacity cannot clear the floor, return 1" therefore returned a
+  // FAILING rung while a passing one existed two steps away. It also happened
+  // to be dead against all 46 installed surfaces, so no test reached it -- an
+  // untested branch that could only ever be wrong.
+  var best = 1, bestAt = CAPTION_BASE, seen = false
+  for (var step = Math.round(CAPTION_BASE * 100) + 1; step <= 100; step++) {
+    var a = step / 100
+    var c = contrastRatio(colorOver(fg, bg, a), bg)
+    if (c >= want) return a
+    if (!seen || c > best) { best = c; bestAt = a; seen = true }
+  }
+  // Nothing clears the floor on this fill. Return the MOST legible rung there
+  // is rather than full opacity, which the counterexample above shows can be
+  // the worst of them. The shortfall is the theme's; a check names it.
+  return bestAt
+}
+
 var TEXT_DIM = 0.52
 var TEXT_FULL = 1
 // D-RUNG-3 and D-RUNG-5, the bar's idle glyph. It is the one element of this
@@ -6641,6 +6710,11 @@ if (typeof module !== "undefined") {
     sectionHeaderAlpha: sectionHeaderAlpha,
     SECTION_HEADER_SEPARATION: SECTION_HEADER_SEPARATION,
     SECTION_HEADER_FLOOR: SECTION_HEADER_FLOOR,
+    CAPTION_BASE: CAPTION_BASE,
+    CAPTION_FLOOR: CAPTION_FLOOR,
+    CAPTION_FLOOR_REGULAR: CAPTION_FLOOR_REGULAR,
+    CAPTION_REGULAR_SHORTFALL: CAPTION_REGULAR_SHORTFALL,
+    captionAlpha: captionAlpha,
     relativeLuminance: relativeLuminance,
     contrastRatio: contrastRatio,
     colorOver: colorOver,

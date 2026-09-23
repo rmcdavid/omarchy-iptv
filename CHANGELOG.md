@@ -5,6 +5,21 @@ version lives in `manifest.json`.
 
 ## Unreleased
 
+### Changed
+
+- **Small text stays readable on the highlighted row.** The counts beside group
+  names, and the small text in a few other places, were drawn at a fixed
+  transparency chosen against the panel background. On the highlighted row the
+  background is lighter, so the same setting left that text below the readable
+  contrast threshold on six of the twenty-three themes — worst on Rose Pine and
+  Catppuccin Latte. The transparency is now worked out from whichever background
+  the text actually sits on, so it clears the threshold everywhere. On most
+  themes nothing changes at all: sixteen of the twenty-three render exactly as
+  before. Where it does change, the count on a highlighted row is now close in
+  brightness to the group name beside it — it is still smaller and bolder, but
+  the two no longer differ much in lightness. That is a deliberate trade for
+  making it readable.
+
 ### Corrected
 
 - **What 0.7.3 said about small text was overstated, and for many people it had
