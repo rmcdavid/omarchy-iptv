@@ -1300,6 +1300,17 @@ Item {
       // (`playing` alone cannot distinguish a birth edge from an attached
       // socket), and the session failure marks the guide paints red.
       failedAt: root.failedAt,
+      // D-HOST-2. The stale-build notice has never been observed to fire, and
+      // the only way anyone tried to observe it was by measuring the pixel
+      // width of a footer line. That is not an instrument. These three make it
+      // a value: what the RUNNING component believes it is, what is on disk
+      // beside it, and the verdict the footer reads. Version strings carry no
+      // credential and no path, so this adds nothing to the redaction surface.
+      build: {
+        running: Model.PLUGIN_VERSION,
+        onDisk: root.onDiskVersion,
+        stale: root.staleBuild
+      },
       player: {
         up: root.playerUp,
         pending: root.playerPending,

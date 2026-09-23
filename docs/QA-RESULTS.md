@@ -7298,3 +7298,35 @@ D-HOST-1 shipped on unit tests with no observation, which is precisely what rule
 Expose `onDiskVersion` and `staleBuild` over the status IPC. Then the question
 is answered by reading a value instead of inferring it from the pixel width of a
 footer, and the harness can assert it without a screen at all.
+
+## D-HOST-2 verified 2026-09-23: the instrument was the problem
+
+The notice had never been observed to fire. Two attempts had failed, and both
+of them measured the **pixel width of a footer line** — which cannot tell "the
+fix failed" from "the harness does not exercise this path". That is not an
+instrument, and replacing it was the whole fix.
+
+`statusSummary` now carries `build: {running, onDisk, stale}`: what the loaded
+component believes it is, what is on disk beside it, and the verdict. With the
+question readable as a value, the two halves separate in one pass:
+
+| step | `onDisk` | `stale` |
+|---|---|---|
+| baseline | 0.7.7 | false |
+| after replacing `manifest.json` (inode 170886 → 171018) | 0.7.7 | **false** |
+| after closing and reopening the guide | **9.9.9** | **true** |
+
+So the `watchChanges` watcher **does not fire on a replace** — proven directly
+rather than inferred from inode numbers — and `recheckBuild` works.
+
+And the footer closes the loop end to end. With `stale` true it measures
+**300 px**, against 162 px showing the counts, which is the predicted width of
+the 50-character notice. **The notice has now been seen.**
+
+Three findings from one measurement, where two rounds of pixel-reading produced
+none. The lesson is not about file watchers: when an observation cannot
+distinguish two explanations, the next move is a better instrument, not another
+run of the same one.
+
+Version strings carry no credential and no path, so the new field adds nothing
+to the redaction surface.

@@ -1951,6 +1951,16 @@ checkCall("D-HOST-1: the notice sits below a real warning and above the plain co
   "Copied",
   true,
 ])
+checkCall("D-HOST-2: the status IPC carries the build state, so this is a VALUE and not a pixel width", function () {
+  // The only attempt to observe the notice before this measured the width of a
+  // footer line. That is not an instrument. These three make the question
+  // readable: what the running component believes it is, what is on disk beside
+  // it, and the verdict. Version strings carry no credential and no path, so
+  // this adds nothing to the redaction surface.
+  return [qmlSites(/running: Model\.PLUGIN_VERSION/).length,
+          qmlSites(/onDisk: root\.onDiskVersion/).length,
+          qmlSites(/stale: root\.staleBuild/).length]
+}, [1, 1, 1])
 checkCall("D-HOST-2: the manifest is re-read from its PATH when the guide opens", function () {
   // The watcher is not what makes this work, and D-HOST-2 is the proof: an
   // update REPLACES the file -- measured, a git fast-forward took manifest.json
