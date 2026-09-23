@@ -89,13 +89,15 @@ Two places they can escape that, both worth knowing:
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
-| `showLogos` | boolean | `false` | **off by default.** Channel logos are hosted by third parties named in your playlist, not by this plugin. Run `omarchy-iptv logos` to see exactly which hosts your playlist would contact and how many channels each covers -- it reads the cache and makes no request. Logo requests are `https` only and never carry your playlist's credentials or headers |
 | `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
+
 | `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
 | `pipCorner` | string | `top-right` | which corner the picture-in-picture box sits in: `top-right`, `top-left`, `bottom-right`, `bottom-left` |
 | `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
 | `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
+
+**Channel logos are not implemented yet, and the plan for them is public.** Logos are hosted by third parties named in your playlist, not by this plugin. Before any of it is built you can see exactly what enabling them would cost your privacy: `omarchy-iptv logos` reads the cached playlist and prints which hosts it would contact and how many channels each covers. It makes no request. On the playlist this was measured against the answer was 63 hosts, one of them covering two thirds of the channels -- which is why the eventual setting will be off by default, `https` only, and will never send your playlist's credentials.
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
