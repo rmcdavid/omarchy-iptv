@@ -7049,3 +7049,32 @@ ways. Renamed so the two orderings disagree, and it goes red.
 **What is not built:** the fetch itself, the row design at both coverage
 extremes, and the open-budget guard -- M2-04-03 through M2-04-07, unchanged by
 this ruling except that the row now has two coverage cases to satisfy.
+
+## F-PERF-1's residual, 2026-09-23: the proposed remedy does not exist
+
+The residual was filed as a product decision: `a` costs 64 ms in the QML engine
+because `total` must be exact for the "First 200 of N" footer, so make the count
+approximate. Measured before deciding:
+
+| | node, 10,000 channels |
+|---|---|
+| full scan, counting | 3.53 ms |
+| full scan, **not** counting | 3.29 ms |
+| **the exact total costs** | **0.24 ms** |
+| stop after 200 matches | 0.09 ms |
+
+So the count is not the cost — it is about 7 per cent of the scan, roughly 2 ms
+in the QML engine. The scan is the cost, and **the scan cannot be skipped while
+the ranking is correct**: `filterChannels` ranks, a rank-0 match can be the last
+channel in the list, and the best 200 are unknowable without seeing all 10,000.
+
+An early exit would be fast and would rank wrong. So the trade this residual
+proposed is not available: it would cost honesty in the footer and buy 7 per
+cent.
+
+**Not taken.** The real remedy is a prefix index over `searchKey`, turning the
+scan into a lookup for the single-character case that is the only one still over
+budget. That is a separate piece of work with its own design, not a product
+call. And most of the distance was already covered today: that worst case went
+from **212 ms to 64 ms** when the fold the ranker needed was finally
+precomputed.
