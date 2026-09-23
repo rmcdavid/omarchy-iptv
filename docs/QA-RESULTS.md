@@ -6477,3 +6477,44 @@ have been weaker.
 The general lesson is the one CLAUDE.md rule 14 is about, one level up: a test
 can pin the right thing for the wrong reason, and you find out when an unrelated
 correct change makes it fail.
+
+## Live pass 2026-09-23: D-RUNG-14 on screen, on a confirmed build
+
+The first measurement in this project taken under the rule F-CAL-4 produced:
+**confirm the loaded build before reading a pixel.** Here that was the repo at
+`f252467` with a clean tree, the harness log naming that root, and both
+`captionAlpha` bindings present in the file it loads. The measurement then
+confirms it a second time and better — a value that moved by 0.46 could not have
+come from the old code.
+
+The user's theme was never switched: each theme was rendered from a scratch
+`HOME`, in `--window layer` mode, which is the production window type. State,
+cache, settings and `theme.name` all sha256-identical at the end. Every frame
+went to `grim`'s **stdout** and was parsed in memory, so no capture of the
+desktop was written to disk.
+
+| theme | site | surface | before | after | AA 4.5 |
+|---|---|---|---|---|---|
+| tokyo-night | count, selected row | cursor | 4.1893 | **4.6489** | passes |
+| tokyo-night | footer status | card | 4.6410 | **4.7093** | passes |
+| rose-pine | count, selected row | cursor | 3.14 *(model)* | **4.6508** | passes |
+| rose-pine | footer status | card | 3.05 *(live, 09-21)* | **4.6167** | passes |
+
+The count on the selected row is the site no font weight could fix — bold
+measured 4.1893 there on 2026-09-22, model accuracy and a failure, because the
+ceiling was in the arithmetic. It now measures 4.6489.
+
+**Stated honestly rather than rounded up.** All four land marginally *under* the
+4.65 floor, by 0.0011 to 0.0445. That is at or inside this method's resolution —
+one least-significant bit of a channel, about 0.05 ratio points — so the
+measurement cannot distinguish just-under from just-over at the floor, and no
+claim is made that it does. What it distinguishes easily is the **move**: 0.46 on
+tokyo-night and 1.51 on rose-pine, ten to thirty times the resolution. Against
+the fill Qt actually paints rather than the computed one, tokyo-night's count
+models 4.6935 and measures 4.6489.
+
+The four rows are now in the calibration fixture carrying their environment,
+their build, and the background they actually measured — the schema F-CAL-4
+installed. Adding them turned the "themes still owed a live bold measurement"
+check red, which is that check working: it listed rose-pine and tokyo-night,
+then tokyo-night, and now neither.

@@ -1054,7 +1054,7 @@ checkCall("calibration: the two environments have never been validly compared, a
   }).map(function (k) {
     return [k, Math.round((mean(byClass[k].live) - mean(byClass[k].cage)) * 1000) / 1000]
   })
-}, [["bold-caption", 0.018], ["solid", -0.033], ["text", -0.035]])
+}, [["bold-caption", 0.005], ["solid", -0.033], ["text", -0.035]])
 // All three are inside CALIB_ROUNDING_BOUND (0.05) and an order of magnitude
 // inside tolerance.abs. That is the whole like-for-like evidence there is.
 
@@ -1106,11 +1106,14 @@ checkCall("calibration: bold was verified live on the one theme that never faile
     return sm.env === "live" && sm.sizeClass === "bold-caption"
   }).forEach(function (sm) { haveBold[sm.theme] = true })
   return Object.keys(fails).sort().filter(function (t) { return !haveBold[t] })
-}, ["rose-pine"])
-// rose-pine came off nothing: it MODELS 3.3446 on the card and 3.1402 on the
-// cursor, both under 4.5 before a pixel is drawn, so no font weight can rescue
-// it and a measurement would only confirm the arithmetic. tokyo-night left this
-// list by being measured, which is the check doing its job.
+}, [])
+// EMPTY, and that is the result rather than the absence of one. This check
+// listed rose-pine and tokyo-night, then tokyo-night alone, and now neither:
+// both were measured on screen on 2026-09-23, on a build confirmed loaded.
+// It went red on each measurement and forced this line to be rewritten, which
+// is the whole point of deriving the list from the rows instead of writing it
+// in prose (CLAUDE.md rule 13). It stays here so a NEW failing theme -- a new
+// install, a changed token set -- puts itself back on the list.
 
 // The optimism invariant, RESTATED 2026-09-22 rather than widened, because a
 // real measurement broke it and the reason is understood.
@@ -1147,7 +1150,7 @@ checkCall("calibration: and the model is still OPTIMISTIC on average IN EACH ENV
     const mean = rows.reduce(function (acc, sm) { return acc + (sm.measured - calibPredicted(sm)) }, 0) / rows.length
     return [env, rows.length, mean < 0, Math.round(mean * 1000) / 1000]
   })
-}, [["live", 24, true, -0.289], ["cage", 22, true, -0.048]])
+}, [["live", 28, true, -0.253], ["cage", 22, true, -0.048]])
 // These two means are NOT a measurement of the two environments, and the gloss
 // that once stood here saying they were is withdrawn. They are confounded with
 // size class: `live` is mostly regular 10 px captions, `cage` is mostly

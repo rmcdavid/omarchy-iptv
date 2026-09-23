@@ -559,9 +559,62 @@
       "bgMeasured": "#262734",
       "captures": 1,
       "capturedAt": "2026-09-22"
+    },
+    {
+      "theme": "tokyo-night",
+      "surface": "cursor",
+      "alpha": 0.76,
+      "site": "group count, selected row",
+      "sizeClass": "bold-caption",
+      "env": "live",
+      "build": "f252467 (dev harness, captionAlpha confirmed in the loaded tree)",
+      "measured": 4.6489,
+      "bgMeasured": "#262734",
+      "captures": 1,
+      "capturedAt": "2026-09-23"
+    },
+    {
+      "theme": "tokyo-night",
+      "surface": "row",
+      "alpha": 0.71,
+      "site": "footer status",
+      "sizeClass": "bold-caption",
+      "env": "live",
+      "build": "f252467 (dev harness, captionAlpha confirmed in the loaded tree)",
+      "measured": 4.7093,
+      "bgMeasured": "#1a1b26",
+      "captures": 1,
+      "capturedAt": "2026-09-23"
+    },
+    {
+      "theme": "rose-pine",
+      "surface": "cursor",
+      "alpha": 0.89,
+      "site": "group count, selected row",
+      "sizeClass": "bold-caption",
+      "env": "live",
+      "build": "f252467 (dev harness, captionAlpha confirmed in the loaded tree)",
+      "measured": 4.6508,
+      "bgMeasured": "#ede8e4",
+      "captures": 1,
+      "capturedAt": "2026-09-23"
+    },
+    {
+      "theme": "rose-pine",
+      "surface": "row",
+      "alpha": 0.85,
+      "site": "footer status",
+      "sizeClass": "bold-caption",
+      "env": "live",
+      "build": "f252467 (dev harness, captionAlpha confirmed in the loaded tree)",
+      "measured": 4.6167,
+      "bgMeasured": "#faf4ed",
+      "captures": 1,
+      "capturedAt": "2026-09-23"
     }
   ],
   "envNote": "Every row records the environment that rendered it, 'live' (the user's real session) or 'cage' (a nested headless cage compositor running the dev harness). Provenance per row is right regardless of whether the two differ -- and whether they differ is UNKNOWN, see methodLimitNote. The claim that once stood here, that the difference is confined to glyph rasterisation and is measured rather than assumed, is withdrawn: it rested on three rows that turned out to be a different BUILD, not a different environment, and on a statistic that cannot resolve the question. Tolerance is drawn per (sizeClass, env) pair and an unlisted pair is refused, which is still the right shape -- a class that has earned a tolerance in one environment has not automatically earned it in the other -- but the pairs now hold the SAME tolerance wherever the evidence does not distinguish them. The rule that survives untouched: a design decision may only be certified against live rows, because cage is a test convenience and nobody looks at it.",
   "buildNote": "Every row records the BUILD that rendered it, and this field exists because `env` was not enough. F-CAL-3 was filed as a difference between headless cage and the live display. It was not: the live pass measured a shell that had never loaded the build it believed it was measuring. `manifest.json` sets `keepLoaded: true`, so the overlay stays mounted across a hot reload and `omarchy plugin update` -- which ends in `rescanPlugins`, not a restart -- left the pre-bold component instantiated. Proven from the journal rather than argued: the boot the pass ran in logs warnings at Guide.qml[2670 and [2676, the 0.7.1/0.7.2 line numbers, and NEVER at [2823, which is where 0.7.3's MouseArea sits and where the current shell's warnings land. Three rows recorded that morning as live bold-caption were regular-weight 0.7.2 renders and have been removed, not relabelled: their surface was never recorded either, so nothing about them is worth keeping. A bold-caption row on a build known to lack the bold is now refused by a check.",
-  "methodLimitNote": "WHAT THIS METHOD CAN AND CANNOT SEE. The peak-pixel statistic takes the single most distant pixel from the modal background over a whole glyph run. That is a MAX, so it saturates: as soon as ONE pixel is fully covered it returns the 8-bit arithmetic composite exactly, and every measured peak here is the floor or ceiling rounding of that one number. Two consequences the earlier passes missed. First, the resolution is one least-significant bit of a channel -- about 0.05 ratio points on these backgrounds -- so a figure quoted to four decimals, like D-RUNG-14's '-0.0007', is about a hundred times finer than the instrument. Second, the statistic is a THRESHOLD DETECTOR for 'did a stem land on the pixel grid', and is blind by construction to hinting, subpixel positioning and scale. It therefore cannot establish that two renderings differ, and equally cannot establish that they agree. No valid cross-environment comparison of the same glyphs has ever been made here, in EITHER direction. What the statistic does support is a saturation claim: a peak that equals the composite byte-exact means that run reached full coverage somewhere. The quantity a reader actually experiences is the coverage DISTRIBUTION, which nothing here has measured."
+  "methodLimitNote": "WHAT THIS METHOD CAN AND CANNOT SEE. The peak-pixel statistic takes the single most distant pixel from the modal background over a whole glyph run. That is a MAX, so it saturates: as soon as ONE pixel is fully covered it returns the 8-bit arithmetic composite exactly, and every measured peak here is the floor or ceiling rounding of that one number. Two consequences the earlier passes missed. First, the resolution is one least-significant bit of a channel -- about 0.05 ratio points on these backgrounds -- so a figure quoted to four decimals, like D-RUNG-14's '-0.0007', is about a hundred times finer than the instrument. Second, the statistic is a THRESHOLD DETECTOR for 'did a stem land on the pixel grid', and is blind by construction to hinting, subpixel positioning and scale. It therefore cannot establish that two renderings differ, and equally cannot establish that they agree. No valid cross-environment comparison of the same glyphs has ever been made here, in EITHER direction. What the statistic does support is a saturation claim: a peak that equals the composite byte-exact means that run reached full coverage somewhere. The quantity a reader actually experiences is the coverage DISTRIBUTION, which nothing here has measured.",
+  "rungNote": "Rows captured from 2026-09-23 carry an `alpha` that is no longer the fixed 0.7 caption rung: D-RUNG-14 made the rung an output of the fill (Model.captionAlpha), so each row records the alpha that theme and surface actually resolved to. The four rows of that date are the on-screen verification of that change, taken on a build confirmed loaded before a pixel was read -- the process rule F-CAL-4 produced. They are the first rows in this fixture to be measured under that rule."
 }
