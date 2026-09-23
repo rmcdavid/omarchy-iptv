@@ -101,6 +101,59 @@ class Baseline(unittest.TestCase):
         self.assertTrue(any("T99-stale" in f.summary for f in found))
 
 
+    def test_a_rule_that_LEGITIMISES_an_accessibility_edit_is_red(self):
+        """Poison the table itself, which nothing did before.
+
+        The existing rule test catches a rule that stopped firing. The
+        dangerous direction is the other one: a rule that DOES fire and
+        declares an edit to an accessibility declaration as legitimate. That is
+        how the guard would be talked into grading a copy whose markup the
+        transform rewrote -- the exact failure it exists to prevent, arrived at
+        through the table rather than through the transform.
+
+        L1 is what must refuse it: no line a rule touches may contain
+        `Accessible.` at all, whatever else the rule says about itself.
+        """
+        line = None
+        for candidate in source().split("\n"):
+            if "Accessible.role:" in candidate:
+                line = candidate
+                break
+        self.assertIsNotNone(line, "the shipping guide declares no Accessible.role")
+        edited = line.replace("Accessible.role:", "Accessible.ignored: true //")
+        rules = list(fidelity.TRANSFORM_RULES) + [{
+            "id": "T98-poison",
+            "why": "a rule that claims editing a declaration is a legitimate transform",
+            "before": [line],
+            "after": [edited],
+        }]
+        # The copy is made to ACTUALLY carry the edit, which is the case that
+        # matters. With a rule that merely fails to fire, L2 catches it as a
+        # stale rule and L1 is never reached -- so a table poisoned in step
+        # with the copy would slip past the weaker layer. Here the copy and the
+        # table agree with each other and only L1 disagrees with both.
+        poisoned_copy = generated().replace(line, edited, 1)
+        self.assertIn(edited, poisoned_copy, "the copy must really carry the edit")
+        found = fidelity.check_pair(source(), poisoned_copy, rules=rules)
+        self.assertIn("L1", layers(found), "a rule touching an Accessible line must be refused")
+
+    def test_the_table_cannot_permit_a_rule_that_matches_many_lines(self):
+        """A rule broad enough to match repeatedly is a wildcard in disguise.
+
+        `apply_transform` refuses a rule that does not match exactly once, so a
+        table entry cannot be widened into one that quietly covers edits nobody
+        declared.
+        """
+        rules = list(fidelity.TRANSFORM_RULES) + [{
+            "id": "T97-wildcard",
+            "why": "a rule whose before-block occurs many times over",
+            "before": ["    }"],
+            "after": ["    }"],
+        }]
+        with self.assertRaises(Exception):
+            fidelity.apply_transform(source(), rules=rules)
+
+
 class DroppedDeclaration(unittest.TestCase):
     """The failure the whole guard exists for: the transform loses a
     declaration and the harness grades a copy that never had it."""
