@@ -700,6 +700,23 @@ Item {
     return Model.isFavorite(root.userState, id)
   }
 
+  // Save the current search into Favourites. Returns the verdict the guide
+  // shows, so a refusal (empty, already saved, at the cap) is visible in the
+  // moment rather than being a keystroke that appears to do nothing.
+  function saveSearch(query) {
+    var result = Model.withSavedSearch(root.userState, query, Math.floor(Date.now() / 1000))
+    if (result.added) {
+      root.userState = result.state
+      root.saveState()
+    }
+    return { added: result.added, reason: result.reason }
+  }
+
+  function forgetSearch(query) {
+    root.userState = Model.withoutSavedSearch(root.userState, query)
+    root.saveState()
+  }
+
   function removeRecent(id) {
     root.userState = Model.removeRecent(root.userState, id)
     root.saveState()

@@ -3843,7 +3843,44 @@ def cmd_cache(args: argparse.Namespace) -> int:
 # replaces `url` / `epgUrl` by their hosts: stdout must never carry a URL.
 
 def default_state() -> dict[str, Any]:
-    return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": []}
+    return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None,
+            "session": None, "sources": [], "savedSearches": []}
+
+
+# Must match Model.js MAX_SAVED_SEARCHES / MAX_SAVED_TERMS / MAX_SAVED_QUERY and
+# savedSearchTerms / savedSearchRecord. One shared fixture runs both.
+MAX_SAVED_SEARCHES = 20
+MAX_SAVED_TERMS = 8
+MAX_SAVED_QUERY = 64
+
+
+def saved_search_terms(query: Any) -> list[str]:
+    text = normalize_text(str(query or "")[:MAX_SAVED_QUERY])
+    if not text:
+        return []
+    return text.split(" ")[:MAX_SAVED_TERMS]
+
+
+def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    query = str(entry.get("query") or "")[:MAX_SAVED_QUERY]
+    if not saved_search_terms(query):
+        return None
+    # float() then int(), NOT int() alone, and the shared fixture is what
+    # forced it: Model.js does Math.trunc(Number(x)), which reads "12.9" as 12,
+    # while int("12.9") raises and this reader would have stored 0. The vector
+    # is in the fixture precisely so the two cannot drift apart again.
+    #
+    # normalize_played above still has the int()-alone form and therefore still
+    # disagrees with playedRecord on that input. Filed as D-STATE-1 rather than
+    # changed here: it is a pre-existing divergence on a different key and it
+    # is not this feature's to move.
+    try:
+        at = int(float(entry.get("at") or 0))
+    except (TypeError, ValueError):
+        at = 0
+    return {"query": query, "at": at}
 
 
 def normalize_played(entry: Any) -> dict[str, Any] | None:
@@ -3931,6 +3968,25 @@ def normalize_state(raw: Any) -> dict[str, Any]:
             entry = normalize_played(item)
             if entry is not None:
                 state["recents"].append(entry)
+    # Saved searches. This writer rebuilds from default_state() and copies only
+    # keys it knows, so an un-taught copy ERASES the key -- proven live before
+    # this was added: one `state favorite add` through the real CLI dropped it,
+    # exit 0, "ok": true, no warning. Mirrors Model.parseState, including the
+    # de-duplication on the FOLDED terms rather than the raw string.
+    saved = raw.get("savedSearches")
+    if isinstance(saved, list):
+        seen_terms = set()
+        for item in saved:
+            if len(state["savedSearches"]) >= MAX_SAVED_SEARCHES:
+                break
+            record = normalize_saved_search(item)
+            if record is None:
+                continue
+            sig = " ".join(saved_search_terms(record["query"]))
+            if sig in seen_terms:
+                continue
+            seen_terms.add(sig)
+            state["savedSearches"].append(record)
     state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
     # What the player was last asked to play (4.6, section 8). Same record as
     # lastPlayed, different lifetime: the service clears it when the player

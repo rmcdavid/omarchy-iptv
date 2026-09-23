@@ -21,7 +21,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
 # cache layout marker and the source history, plus the optional nullable
 # `session` of the detached player (ARCHITECTURE-PLAYER.md section 8), which
 # is additive and does NOT bump the version.
-EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": []}
+EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [], "savedSearches": []}
 
 
 def v2(**patch):
@@ -247,10 +247,50 @@ class SessionKeyTest(unittest.TestCase):
         self.assertIsNone(payload["state"]["session"])
         self.assertIsNone(json.loads(self.path.read_text(encoding="utf-8"))["session"])
 
+    def test_saved_searches_survive_a_write_by_this_writer(self):
+        """Ruling: every state writer is a whitelist, and there are THREE.
+
+        normalize_state here rebuilds from default_state() and copies only the
+        keys it knows. Model.parseState is a second, independent whitelist in a
+        second language. Model.cloneState is a third, and it rebuilds the
+        document field by field too. Before this key was taught to all three,
+        one `state favorite add` through the real CLI erased it -- exit 0,
+        "ok": true, no warning -- which is exactly the trap the roadmap
+        predicted and which was reproduced live before the fix.
+        """
+        doc = dict(helper.default_state())
+        doc["savedSearches"] = [{"query": "baton rouge", "at": 1790000000}]
+        state = helper.normalize_state(doc)
+        self.assertEqual(state["savedSearches"], [{"query": "baton rouge", "at": 1790000000}])
+
+    def test_saved_searches_run_the_shared_fixture(self):
+        """The same file tests/Model.test.js runs, so neither implementation
+        can change the folding or the bounds while believing it agrees."""
+        import json, os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "saved-searches.json")
+        with open(path, encoding="utf-8") as fh:
+            fixture = json.load(fh)
+        for row in fixture["terms"]:
+            self.assertEqual(helper.saved_search_terms(row["query"]), row["terms"], row["query"])
+        for row in fixture["records"]:
+            self.assertEqual(helper.normalize_saved_search(row["in"]), row["out"], repr(row["in"]))
+
+    def test_saved_searches_are_bounded_and_de_duplicated_on_the_folded_terms(self):
+        many = [{"query": "term%d" % i, "at": 0} for i in range(helper.MAX_SAVED_SEARCHES + 10)]
+        self.assertEqual(len(helper.normalize_state({"savedSearches": many})["savedSearches"]),
+                         helper.MAX_SAVED_SEARCHES)
+        dupes = [{"query": "BBC One", "at": 1}, {"query": "  bbc   one  ", "at": 2}, {"query": "bbc two", "at": 3}]
+        kept = helper.normalize_state({"savedSearches": dupes})["savedSearches"]
+        self.assertEqual([r["query"] for r in kept], ["BBC One", "bbc two"])
+
     def test_the_key_order_matches_the_document_the_service_writes(self):
         # Both sides emit version, cacheLayout, favorites, recents, lastPlayed,
-        # session, sources - so a diff of two state files stays readable.
-        self.assertEqual(list(helper.default_state()), ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session", "sources"])
+        # session, sources, savedSearches - so a diff of two state files stays
+        # readable. The order is asserted and not just the set, because the two
+        # writers are in different languages and a key appended in one place and
+        # inserted in the other makes every diff noisy.
+        self.assertEqual(list(helper.default_state()),
+                         ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session", "sources", "savedSearches"])
 
 
 if __name__ == "__main__":

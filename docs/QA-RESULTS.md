@@ -6923,3 +6923,75 @@ So the conclusion stands, now on four measured levers rather than three. What
 was wrong was the word **only** — "the only lever is a window rule" was written
 while a title-matching window rule sat unexamined in this repository's own
 roadmap.
+
+## Saved searches, 2026-09-23 (roadmap phase 4), and D-STATE-1 found on the way
+
+Built to the roadmap's redirect, not to the original proposal: **save a search
+into Favourites, do not mint a fifth scope.** Favourites is already in
+`scopeSurface`, `launchScope` and the zap ring, so none of the three paths that
+fail silently on an unknown scope id is touched.
+
+### The four binding constraints, each discharged
+
+**1. Not `filterChannels` as the membership oracle.** It is ranked and capped.
+A separate predicate shares `matchRank` — so a saved search contains exactly the
+rows the search showed — but not the cap and not the slot arithmetic. Asserted
+on a list big enough to cross the cap: a term matching 250 channels saves 250
+and reports 250, where `filterChannels` returns 200 rows against a total of 250.
+
+**2. Bounded.** `MAX_SAVED_SEARCHES` 20, `MAX_SAVED_TERMS` 8, `MAX_SAVED_QUERY`
+64, on the `MAX_SOURCES` / `MAX_LABEL` precedent. The performance argument for
+this feature was stated "for ten terms" and that bound did not exist.
+
+**3. Teach the whitelists — and there are THREE, not two.** The roadmap named
+`normalize_state` and `Model.parseState`. `Model.cloneState` is a third: it
+rebuilds the document field by field, and `Service.qml` clones state to write a
+source record, so editing a source would have erased every saved search.
+
+The trap was reproduced live before the fix, exactly as predicted: a state file
+carrying the key, then one `state favorite add` through the real CLI —
+
+```
+after:  savedSearches present: False   exit 0   "ok": true   no warning
+```
+
+— and `parseState` dropped it too. After teaching all three, both survive.
+
+**4. Acceptance by calling the evaluator.** The roadmap's numbers (`baton
+rouge` 4, the union 7, `no tv` 75) came from a 3,335-channel provider list that
+cannot live here because it carries credentials. The properties they pin are
+reproduced on a fixture whose counts are exact by construction.
+
+### Two things the fixture caught that I had wrong
+
+**The de-duplication was unreachable.** My first fixture had no channel matching
+two saved searches, and the mutation removing `seen` stayed green. Worse, once
+added, the overlap case still passed — because one iteration per channel with a
+`break` on the first match already pushes each row once. `seen` only earns its
+place when the **playlist lists the same channel twice**, which real playlists
+do. The fixture now repeats a channel, and removing `seen` turns five checks red.
+
+**The count disagreed with the rows.** With that duplicate present,
+`savedSearchCount` said 4 where `savedSearchChannels` returned 3 — the
+confirmation would have promised one more row than Favourites gained. Both now
+de-duplicate by id, and a check pins them equal.
+
+### D-STATE-1
+
+The shared fixture included `at: "12.9"` and went red immediately: `Model`'s
+`Math.trunc(Number(x))` reads it as **12**, the helper's `int(x)` **raises** and
+falls through to **0**. Same bytes, two answers — and on `recents[].at`,
+`lastPlayed.at` and `session.at`, keys this feature never touched.
+
+`normalize_saved_search` was made to agree (`int(float(x))`) because a new
+divergence must not ship. The old key is filed as D-STATE-1 rather than changed:
+it is a separate change with its own round-trip proof owed, and nothing writes a
+decimal string today.
+
+### Verification
+
+Node 1512 → **1522**, python 543. Seven mutations, each red: drop the
+de-duplication, reverse the playlist order, put saved rows before the user's
+stars, build the set with `filterChannels`, drop the count from the
+confirmation, bind a bare letter instead of a modified key, and forget the key
+in the helper's whitelist.

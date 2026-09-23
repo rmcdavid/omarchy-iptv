@@ -1631,6 +1631,20 @@ function channelsForScope(channels, scopeId, state) {
   if (id === SCOPE_FAVORITES) {
     index = indexById(list)
     for (i = 0; i < st.favorites.length; i++) if (index[st.favorites[i]]) out.push(index[st.favorites[i]])
+    // Saved searches land HERE rather than in a fifth scope. Favourites is
+    // already in scopeSurface, launchScope and the zap ring, so none of the
+    // three paths that fail silently on an unknown scope id is touched.
+    //
+    // Explicitly starred channels keep their exact order and come first: they
+    // are the most deliberate thing the user did, and this must be
+    // element-for-element what it was when nothing is saved. The saved rows
+    // follow in playlist order, de-duplicated against the stars.
+    var saved = savedSearchChannels(list, st.savedSearches)
+    if (saved.length > 0) {
+      var starred = {}
+      for (i = 0; i < out.length; i++) starred[channelId(out[i])] = true
+      for (i = 0; i < saved.length; i++) if (!starred[channelId(saved[i])]) out.push(saved[i])
+    }
     return out
   }
   if (id === SCOPE_RECENT) {
@@ -1962,8 +1976,161 @@ function nextInGroup(list, currentId, delta) {
 
 // ------------------------------------------------------------ state
 
+// ---- saved searches (roadmap phase 4) --------------------------------------
+//
+// A saved search is a QUERY, not a list of ids, and the reason is measured: on
+// the provider list 1 of 3,335 channel ids survives a password rotation and
+// 3,335 of 3,335 names do. A term also picks up channels the provider adds
+// later and works across bouquets that spell the same brand differently.
+//
+// The saved rows land in FAVOURITES rather than in a fifth scope. Favourites is
+// already in scopeSurface, launchScope and the zap ring, so none of the three
+// silent-failure paths a new scope id would touch is touched here.
+//
+// Bounds exist because the whole performance argument for this feature was
+// stated "for ten terms", and that bound did not exist in the design. These
+// follow the MAX_SOURCES 50 / MAX_LABEL 64 precedent.
+var MAX_SAVED_SEARCHES = 20
+var MAX_SAVED_TERMS = 8
+var MAX_SAVED_QUERY = 64
+
+// The membership predicate, deliberately NOT filterChannels.
+//
+// filterChannels is the RANKED, CAPPED display function: `pluto` returns rows
+// 200 against total 2227, so a saved set built on it would have rows and a
+// count that disagree by an order of magnitude. Worse, its slot arithmetic is
+// `rank * 2 + (fav ? 0 : 1)`, so a saved set would silently REORDER when you
+// favourited something inside it -- and these rows land in Favourites, so that
+// is not hypothetical.
+//
+// It shares matchRank, so a saved search contains exactly the rows the search
+// showed. What it does not share is the cap and the ordering.
+function savedSearchTerms(query) {
+  var toks = tokenize(str(query).slice(0, MAX_SAVED_QUERY))
+  return toks.slice(0, MAX_SAVED_TERMS)
+}
+
+function savedSearchHit(channel, tokens) {
+  if (!channel || tokens.length === 0) return false
+  var key = typeof channel.searchKey === "string" ? channel.searchKey : searchKey(channel.name, channel.group)
+  var nameKey = typeof channel.nameKey === "string" ? channel.nameKey : normalizeText(channel.name)
+  return matchRank(key, tokens, nameKey) >= 0
+}
+
+// How many rows the terms AS TYPED would save. Shown in the confirmation so a
+// bad term is visible in the moment: `baton rouge` shows 4 and `no tv` shows 75,
+// because `tv` matches nearly everything.
+function savedSearchCount(channels, query) {
+  var tokens = savedSearchTerms(query)
+  if (tokens.length === 0) return 0
+  // Counted the way the rows are COLLECTED, by unique id: a playlist that
+  // lists the same channel twice would otherwise have the confirmation promise
+  // one more row than Favourites actually gains. Found by putting a real
+  // duplicate in the fixture.
+  var list = asList(channels)
+  var seen = {}
+  var n = 0
+  for (var i = 0; i < list.length; i++) {
+    if (!savedSearchHit(list[i], tokens)) continue
+    var id = channelId(list[i])
+    if (seen[id]) continue
+    seen[id] = true
+    n++
+  }
+  return n
+}
+
+// Every channel matched by ANY saved search, de-duplicated, in PLAYLIST ORDER.
+//
+// Playlist order and not match order: the rows join the user's starred
+// channels in Favourites, and a list whose order depends on which saved search
+// happened to match first would reshuffle whenever one was added or removed.
+// First occurrence wins.
+function savedSearchChannels(channels, saved) {
+  var list = asList(channels)
+  var terms = []
+  var records = asList(saved)
+  for (var s = 0; s < records.length && terms.length < MAX_SAVED_SEARCHES; s++) {
+    var t = savedSearchTerms(records[s] && records[s].query)
+    if (t.length > 0) terms.push(t)
+  }
+  if (terms.length === 0) return []
+  var out = []
+  var seen = {}
+  for (var i = 0; i < list.length; i++) {
+    var channel = list[i]
+    if (!channel) continue
+    for (var k = 0; k < terms.length; k++) {
+      if (!savedSearchHit(channel, terms[k])) continue
+      var id = channelId(channel)
+      if (seen[id]) break
+      seen[id] = true
+      out.push(channel)
+      break
+    }
+  }
+  return out
+}
+
+// What the confirmation says. Composed here rather than in QML so a test can
+// call it (rule 12), and so the COUNT is never optional: the whole reason this
+// feature shows a number is that a term can quietly save far more than the
+// user meant.
+function savedSearchNotice(result, query, count) {
+  var r = result || {}
+  var terms = savedSearchTerms(query)
+  var shown = terms.join(" ")
+  if (!r.added) {
+    if (r.reason === "duplicate") return "Already saved: " + shown
+    if (r.reason === "full") return "Saved searches full (" + MAX_SAVED_SEARCHES + ")"
+    return "Nothing to save"
+  }
+  return "Saved " + shown + SEP + formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
+}
+
+// Add a saved search, or report why not. Pure: returns the next state and a
+// verdict, never mutates. The verdict is what the confirmation says, so a
+// refusal is visible in the moment rather than silently doing nothing.
+function withSavedSearch(state, query, at) {
+  var st = state || emptyState()
+  var terms = savedSearchTerms(query)
+  var list = asList(st.savedSearches).slice()
+  if (terms.length === 0) return { state: st, added: false, reason: "empty" }
+  var sig = terms.join(" ")
+  for (var i = 0; i < list.length; i++) {
+    if (savedSearchTerms(list[i] && list[i].query).join(" ") === sig) {
+      return { state: st, added: false, reason: "duplicate" }
+    }
+  }
+  if (list.length >= MAX_SAVED_SEARCHES) return { state: st, added: false, reason: "full" }
+  var rec = savedSearchRecord({ query: query, at: at })
+  if (!rec) return { state: st, added: false, reason: "empty" }
+  list.push(rec)
+  return { state: cloneState(st, { savedSearches: list }), added: true, reason: "" }
+}
+
+// Remove one, matched on the FOLDED terms so the caller does not have to know
+// how the stored string was spelled.
+function withoutSavedSearch(state, query) {
+  var st = state || emptyState()
+  var sig = savedSearchTerms(query).join(" ")
+  if (sig === "") return st
+  var kept = asList(st.savedSearches).filter(function (r) {
+    return savedSearchTerms(r && r.query).join(" ") !== sig
+  })
+  return cloneState(st, { savedSearches: kept })
+}
+
+// One stored record. A query that tokenizes to nothing is not a saved search.
+function savedSearchRecord(entry) {
+  if (!entry || typeof entry !== "object") return null
+  var query = str(entry.query).slice(0, MAX_SAVED_QUERY)
+  if (savedSearchTerms(query).length === 0) return null
+  return { query: query, at: Math.trunc(Number(entry.at)) || 0 }
+}
+
 function emptyState() {
-  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [] }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [] }
 }
 
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
@@ -1988,7 +2155,13 @@ function cloneState(state, patch) {
     recents: asList(st.recents).slice(),
     lastPlayed: st.lastPlayed || null,
     session: st.session || null,
-    sources: asList(st.sources).slice()
+    sources: asList(st.sources).slice(),
+    // A THIRD whitelist, and it erases exactly like the other two did. This
+    // rebuilds the document field by field, so a key it does not name is gone
+    // -- and Service.qml clones state to write a source record, which would
+    // have wiped every saved search on the next source edit. The roadmap
+    // warned about two whitelists; there are three.
+    savedSearches: asList(st.savedSearches).slice()
   }
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
@@ -2036,6 +2209,21 @@ function parseState(text) {
     if (entry) state.recents.push(entry)
   }
   state.lastPlayed = playedRecord(parsed.lastPlayed)
+  // Saved searches. Additive and optional, on the same precedent as `session`
+  // below: both readers whitelist the keys they know, so a file without this
+  // reads as [] and an older build drops it rather than failing. De-duplicated
+  // on the folded terms, not on the raw string, so `BBC ` and `bbc` are one
+  // saved search and not two.
+  var saves = asList(parsed.savedSearches)
+  var seenTerms = {}
+  for (var v = 0; v < saves.length && state.savedSearches.length < MAX_SAVED_SEARCHES; v++) {
+    var rec2 = savedSearchRecord(saves[v])
+    if (!rec2) continue
+    var sig = savedSearchTerms(rec2.query).join(" ")
+    if (seenTerms[sig]) continue
+    seenTerms[sig] = true
+    state.savedSearches.push(rec2)
+  }
   // The detached player's session record (ARCHITECTURE-PLAYER.md 4.6 and
   // section 8): optional, nullable, and no version bump - STATE_VERSION
   // stays 2 because both readers whitelist the keys they know, so a file
@@ -6803,6 +6991,17 @@ if (typeof module !== "undefined") {
     CAPTION_FLOOR_REGULAR: CAPTION_FLOOR_REGULAR,
     CAPTION_REGULAR_SHORTFALL: CAPTION_REGULAR_SHORTFALL,
     captionAlpha: captionAlpha,
+    savedSearchRecord: savedSearchRecord,
+    savedSearchNotice: savedSearchNotice,
+    withoutSavedSearch: withoutSavedSearch,
+    withSavedSearch: withSavedSearch,
+    savedSearchChannels: savedSearchChannels,
+    savedSearchCount: savedSearchCount,
+    savedSearchHit: savedSearchHit,
+    savedSearchTerms: savedSearchTerms,
+    MAX_SAVED_QUERY: MAX_SAVED_QUERY,
+    MAX_SAVED_TERMS: MAX_SAVED_TERMS,
+    MAX_SAVED_SEARCHES: MAX_SAVED_SEARCHES,
     alphaForContrast: alphaForContrast,
     mixForContrast: mixForContrast,
     relativeLuminance: relativeLuminance,

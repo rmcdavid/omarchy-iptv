@@ -1,0 +1,280 @@
+{
+  "comment": [
+    "Saved searches, run by BOTH tests/Model.test.js and tests/test_state.py.",
+    "A rule implemented in two languages gets one fixture (CLAUDE.md).",
+    "",
+    "The roadmap's acceptance numbers -- `baton rouge` exactly 4, the two-term",
+    "union exactly 7 covering five of five, `no tv` exactly 75 -- were measured",
+    "on a 3,335-channel PROVIDER list that is not in this repository and cannot",
+    "be, because it carries subscription credentials. The properties those",
+    "numbers were chosen to pin are reproduced here on a list whose counts are",
+    "known exactly by construction: a single term, a two-term union that",
+    "OVERLAPS so de-duplication is load-bearing, a term that explodes, a term",
+    "that matches nothing, and an ordering that is not match order."
+  ],
+  "termComment": "savedSearchTerms / saved_search_terms: fold, split, cap at MAX_SAVED_TERMS, truncate the raw query at MAX_SAVED_QUERY first.",
+  "terms": [
+    {
+      "query": "baton rouge",
+      "terms": [
+        "baton",
+        "rouge"
+      ]
+    },
+    {
+      "query": "  BATON   Rouge  ",
+      "terms": [
+        "baton",
+        "rouge"
+      ]
+    },
+    {
+      "query": "Tele-Quebec",
+      "terms": [
+        "tele",
+        "quebec"
+      ]
+    },
+    {
+      "query": "",
+      "terms": []
+    },
+    {
+      "query": "   ",
+      "terms": []
+    },
+    {
+      "query": "a b c d e f g h i j",
+      "terms": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "g",
+        "h"
+      ],
+      "why": "ten words, capped at MAX_SAVED_TERMS 8"
+    }
+  ],
+  "recordComment": "savedSearchRecord / normalize_saved_search: a query that folds to nothing is not a saved search; `at` truncates toward zero on both sides.",
+  "records": [
+    {
+      "in": {
+        "query": "baton rouge",
+        "at": 1790000000
+      },
+      "out": {
+        "query": "baton rouge",
+        "at": 1790000000
+      }
+    },
+    {
+      "in": {
+        "query": "bbc",
+        "at": "12.9"
+      },
+      "out": {
+        "query": "bbc",
+        "at": 12
+      }
+    },
+    {
+      "in": {
+        "query": "bbc"
+      },
+      "out": {
+        "query": "bbc",
+        "at": 0
+      }
+    },
+    {
+      "in": {
+        "query": "   "
+      },
+      "out": null
+    },
+    {
+      "in": {
+        "query": ""
+      },
+      "out": null
+    },
+    {
+      "in": null,
+      "out": null
+    },
+    {
+      "in": {
+        "at": 5
+      },
+      "out": null
+    }
+  ],
+  "channelsComment": "Playlist order is the order below. Counts are exact by construction. The LAST entry repeats the first: real playlists list the same channel twice, and without it the `seen` de-duplication in savedSearchChannels is unreachable -- one iteration per channel with a break on the first matching term already pushes each row once, so a mutation removing `seen` stayed green.",
+  "channels": [
+    {
+      "name": "WBRZ Baton Rouge",
+      "group": "US Local"
+    },
+    {
+      "name": "WAFB Baton Rouge",
+      "group": "US Local"
+    },
+    {
+      "name": "New Orleans WWL",
+      "group": "US Local"
+    },
+    {
+      "name": "New Orleans WDSU",
+      "group": "US Local"
+    },
+    {
+      "name": "Baton Rouge Sports Net",
+      "group": "US Sports"
+    },
+    {
+      "name": "BBC One HD",
+      "group": "UK"
+    },
+    {
+      "name": "BBC Two HD",
+      "group": "UK"
+    },
+    {
+      "name": "Sky Sports Main Event",
+      "group": "UK Sports"
+    },
+    {
+      "name": "Tele Quebec",
+      "group": "CA"
+    },
+    {
+      "name": "Rouge FM New Orleans",
+      "group": "CA"
+    },
+    {
+      "name": "WBRZ Baton Rouge",
+      "group": "US Local"
+    }
+  ],
+  "caseComment": "Each case names the EXACT channel names it must return, in the exact order.",
+  "cases": [
+    {
+      "why": "one term, the roadmap's `baton rouge` shape",
+      "queries": [
+        "baton rouge"
+      ],
+      "expect": [
+        "WBRZ Baton Rouge",
+        "WAFB Baton Rouge",
+        "Baton Rouge Sports Net"
+      ]
+    },
+    {
+      "why": "two saved searches whose results are DISJOINT: the union is simply both, in playlist order rather than in the order the searches were saved",
+      "queries": [
+        "baton rouge",
+        "new orleans"
+      ],
+      "expect": [
+        "WBRZ Baton Rouge",
+        "WAFB Baton Rouge",
+        "New Orleans WWL",
+        "New Orleans WDSU",
+        "Baton Rouge Sports Net",
+        "Rouge FM New Orleans"
+      ]
+    },
+    {
+      "why": "OVERLAP: 'Rouge FM New Orleans' matches both `rouge` and `orleans`, so it must appear ONCE. Without this case the de-duplication is never exercised and a mutation removing it stays green.",
+      "queries": [
+        "rouge",
+        "orleans"
+      ],
+      "expect": [
+        "WBRZ Baton Rouge",
+        "WAFB Baton Rouge",
+        "New Orleans WWL",
+        "New Orleans WDSU",
+        "Baton Rouge Sports Net",
+        "Rouge FM New Orleans"
+      ]
+    },
+    {
+      "why": "term order must not change the result, so the same pair reversed returns the same rows in the same PLAYLIST order",
+      "queries": [
+        "new orleans",
+        "baton rouge"
+      ],
+      "expect": [
+        "WBRZ Baton Rouge",
+        "WAFB Baton Rouge",
+        "New Orleans WWL",
+        "New Orleans WDSU",
+        "Baton Rouge Sports Net",
+        "Rouge FM New Orleans"
+      ]
+    },
+    {
+      "why": "the explosion case: a term that matches far more than the user meant, which is why the confirmation shows the count",
+      "queries": [
+        "us"
+      ],
+      "expect": [
+        "WBRZ Baton Rouge",
+        "WAFB Baton Rouge",
+        "New Orleans WWL",
+        "New Orleans WDSU",
+        "Baton Rouge Sports Net"
+      ]
+    },
+    {
+      "why": "a term that matches nothing returns nothing rather than everything",
+      "queries": [
+        "zzzz"
+      ],
+      "expect": []
+    },
+    {
+      "why": "no saved searches at all is empty, never the whole list",
+      "queries": [],
+      "expect": []
+    },
+    {
+      "why": "a query that folds to nothing is not a saved search and must not match everything",
+      "queries": [
+        "   "
+      ],
+      "expect": []
+    }
+  ],
+  "countComment": "savedSearchCount is what the confirmation shows for the terms AS TYPED, before saving.",
+  "counts": [
+    {
+      "query": "baton rouge",
+      "count": 3
+    },
+    {
+      "query": "new orleans",
+      "count": 3
+    },
+    {
+      "query": "us",
+      "count": 5
+    },
+    {
+      "query": "bbc",
+      "count": 2
+    },
+    {
+      "query": "zzzz",
+      "count": 0
+    },
+    {
+      "query": "",
+      "count": 0
+    }
+  ]
+}

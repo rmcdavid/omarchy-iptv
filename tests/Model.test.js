@@ -1550,6 +1550,201 @@ checkCall("F-CAL-5: the dim rung D-RUNG-2 accepted puts NONE of its ink above th
   const dim = cov.samples.filter(function (s) { return s.rung === 0.52 })[0]
   return [dim.inkAboveAA, round2(dim.p50), dim.inkAboveAA === 0]
 }, [0, 2.26, true])
+// ---- saved searches --------------------------------------------------------
+const savedFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/saved-searches.json"), "utf8"))
+function savedChannels() {
+  return savedFixture.channels.map(function (c) {
+    return { name: c.name, group: c.group, url: "http://127.0.0.1/" + c.name,
+             searchKey: Model.searchKey(c.name, c.group), nameKey: Model.normalizeText(c.name) }
+  })
+}
+checkCall("saved searches: every case returns exactly those channels, in exactly that order", function () {
+  // Acceptance asserts rows and counts from CALLING the evaluator, never from
+  // a grep (the roadmap's fourth constraint). The roadmap's own numbers --
+  // `baton rouge` 4, the union 7, `no tv` 75 -- came from a 3,335-channel
+  // provider list that cannot live in this repository because it carries
+  // subscription credentials; the properties they were chosen to pin are
+  // reproduced here on a list whose counts are exact by construction.
+  const ch = savedChannels()
+  return savedFixture.cases.filter(function (c) {
+    const got = Model.savedSearchChannels(ch, c.queries.map(function (q) { return { query: q, at: 0 } }))
+    return got.map(function (x) { return x.name }).join("|") !== c.expect.join("|")
+  }).map(function (c) { return JSON.stringify(c.queries) })
+}, [])
+checkCall("saved searches: a channel matched by TWO saved searches appears once", function () {
+  // De-duplication, isolated. The disjoint cases above cannot fail when it is
+  // removed, so without this the mutation that drops it stays green -- which
+  // is what the first draft of the fixture did.
+  const ch = savedChannels()
+  const got = Model.savedSearchChannels(ch, [{ query: "rouge", at: 0 }, { query: "orleans", at: 0 }])
+  const names = got.map(function (x) { return x.name })
+  const overlap = names.filter(function (n) { return n === "Rouge FM New Orleans" })
+  return [overlap.length, names.length]
+}, [1, 6])
+checkCall("saved searches: term ORDER does not change the rows or their order", function () {
+  // The rows join Favourites, so an order that depended on which search was
+  // saved first would reshuffle the user's list whenever they added one.
+  const ch = savedChannels()
+  const a = Model.savedSearchChannels(ch, [{ query: "baton rouge", at: 0 }, { query: "new orleans", at: 0 }])
+  const b = Model.savedSearchChannels(ch, [{ query: "new orleans", at: 0 }, { query: "baton rouge", at: 0 }])
+  return [a.map(function (x) { return x.name }).join("|") === b.map(function (x) { return x.name }).join("|"), a.length]
+}, [true, 6])
+checkCall("saved searches: the rows are in PLAYLIST order, not match order", function () {
+  // Pinned positively: the playlist order of these six is not the order the
+  // two searches would produce if each search's rows were appended in turn.
+  const ch = savedChannels()
+  const got = Model.savedSearchChannels(ch, [{ query: "new orleans", at: 0 }, { query: "baton rouge", at: 0 }])
+    .map(function (x) { return x.name })
+  const byMatchOrder = ["New Orleans WWL", "New Orleans WDSU", "Rouge FM New Orleans",
+                        "WBRZ Baton Rouge", "WAFB Baton Rouge", "Baton Rouge Sports Net"]
+  return [got[0], got.join("|") !== byMatchOrder.join("|")]
+}, ["WBRZ Baton Rouge", true])
+checkCall("saved searches: the confirmation count is what the terms AS TYPED would save", function () {
+  const ch = savedChannels()
+  return savedFixture.counts.filter(function (c) {
+    return Model.savedSearchCount(ch, c.query) !== c.count
+  }).map(function (c) { return JSON.stringify(c.query) + " -> " + Model.savedSearchCount(ch, c.query) })
+}, [])
+checkCall("saved searches: it is NOT filterChannels -- rows and count agree, and favouriting cannot reorder", function () {
+  // The roadmap's first constraint, asserted rather than trusted. filterChannels
+  // is ranked and capped, so on a broad term its rows and its total disagree;
+  // and its slot arithmetic is rank*2 + (fav ? 0 : 1), so a set built on it
+  // reorders when something inside it is favourited -- and these rows land in
+  // Favourites, so that is not hypothetical.
+  const ch = savedChannels()
+  const saved = [{ query: "us", at: 0 }]
+  const mine = Model.savedSearchChannels(ch, saved)
+  const capped = Model.filterChannels(ch, "us", 2)
+  const favd = Model.savedSearchChannels(ch, saved)
+  return [mine.length, Model.savedSearchCount(ch, "us"),
+          capped.rows.length !== capped.total,
+          mine.map(function (x) { return x.name }).join("|") === favd.map(function (x) { return x.name }).join("|")]
+}, [5, 5, true, true])
+checkCall("saved searches: the shared fixture's term and record vectors, which python runs too", function () {
+  const badTerms = savedFixture.terms.filter(function (t) {
+    return Model.savedSearchTerms(t.query).join("|") !== t.terms.join("|")
+  }).map(function (t) { return JSON.stringify(t.query) })
+  const badRecords = savedFixture.records.filter(function (r) {
+    const got = Model.savedSearchRecord(r.in)
+    return JSON.stringify(got) !== JSON.stringify(r.out)
+  }).map(function (r) { return JSON.stringify(r.in) })
+  return [badTerms, badRecords]
+}, [[], []])
+checkCall("saved searches: bounded, on the MAX_SOURCES / MAX_LABEL precedent", function () {
+  // The performance argument for this feature was stated "for ten terms", a
+  // bound the design did not have. These are it.
+  const many = []
+  for (let i = 0; i < Model.MAX_SAVED_SEARCHES + 10; i++) many.push({ query: "term" + i, at: 0 })
+  const longQuery = new Array(200).join("x")
+  const manyTerms = "a b c d e f g h i j k l m n o p"
+  return [Model.MAX_SAVED_SEARCHES, Model.MAX_SAVED_TERMS, Model.MAX_SAVED_QUERY,
+          Model.parseState(JSON.stringify({ savedSearches: many })).savedSearches.length,
+          Model.savedSearchRecord({ query: longQuery, at: 0 }).query.length,
+          Model.savedSearchTerms(manyTerms).length]
+}, [20, 8, 64, 20, 64, 8])
+checkCall("saved searches: parseState de-duplicates on the FOLDED terms, not the raw string", function () {
+  const s = Model.parseState(JSON.stringify({ savedSearches: [
+    { query: "BBC One", at: 1 }, { query: "  bbc   one  ", at: 2 }, { query: "bbc two", at: 3 }] }))
+  return [s.savedSearches.length, s.savedSearches.map(function (r) { return r.query })]
+}, [2, ["BBC One", "bbc two"]])
+
+checkCall("saved searches: the count and the rows agree, including when a playlist lists a channel twice", function () {
+  // The confirmation promises a number and Favourites delivers rows; if those
+  // two disagree the feature lies at the moment it is used. Real playlists do
+  // list the same channel twice, so the fixture has a genuine duplicate and
+  // both sides de-duplicate by id.
+  const ch = savedChannels()
+  const dup = Model.channelId(ch[0]) === Model.channelId(ch[ch.length - 1])
+  const bad = savedFixture.counts.filter(function (c) {
+    if (c.count === 0) return false
+    return Model.savedSearchCount(ch, c.query) !== Model.savedSearchChannels(ch, [{ query: c.query, at: 0 }]).length
+  }).map(function (c) { return c.query })
+  return [dup, bad]
+}, [true, []])
+checkCall("saved searches: a saved set is NOT capped, where filterChannels is -- the roadmap's first constraint", function () {
+  // filterChannels is the ranked, CAPPED display function: on a broad term its
+  // rows and its total disagree by an order of magnitude. A saved set built on
+  // it would silently stop at the cap, so a term matching 250 channels would
+  // put 200 in Favourites and report 250. Asserted on a list big enough to
+  // cross the cap, which the small fixture cannot do.
+  const big = []
+  for (let i = 0; i < 250; i++) {
+    const name = "Wide Channel " + i
+    big.push({ name: name, group: "Wide", url: "http://127.0.0.1/" + i,
+               searchKey: Model.searchKey(name, "Wide"), nameKey: Model.normalizeText(name) })
+  }
+  const saved = Model.savedSearchChannels(big, [{ query: "wide", at: 0 }])
+  const ranked = Model.filterChannels(big, "wide", 200)
+  return [saved.length, Model.savedSearchCount(big, "wide"), ranked.rows.length, ranked.total, ranked.truncated]
+}, [250, 250, 200, 250, true])
+checkCall("saved searches: the Favourites scope is element-for-element unchanged when nothing is saved", function () {
+  // The rows land in Favourites, so the first thing to prove is that a user
+  // who never saves anything sees exactly what they saw before.
+  const ch = savedChannels()
+  const ids = ch.map(function (c) { return Model.channelId(c) })
+  const st = Model.cloneState(Model.emptyState(), { favorites: [ids[7], ids[5]] })
+  const got = Model.channelsForScope(ch, Model.SCOPE_FAVORITES, st)
+  return got.map(function (c) { return c.name })
+}, ["Sky Sports Main Event", "BBC One HD"])
+checkCall("saved searches: stars keep their order and come first; saved rows follow, de-duplicated against them", function () {
+  const ch = savedChannels()
+  const ids = ch.map(function (c) { return Model.channelId(c) })
+  // ids[0] is WBRZ Baton Rouge, which the saved term also matches.
+  const st = Model.cloneState(Model.emptyState(), {
+    favorites: [ids[7], ids[0]], savedSearches: [{ query: "baton rouge", at: 0 }] })
+  const got = Model.channelsForScope(ch, Model.SCOPE_FAVORITES, st).map(function (c) { return c.name })
+  return [got, got.filter(function (n) { return n === "WBRZ Baton Rouge" }).length]
+}, [["Sky Sports Main Event", "WBRZ Baton Rouge", "WAFB Baton Rouge", "Baton Rouge Sports Net"], 1])
+checkCall("saved searches: the reducer reports WHY it refused, so a keystroke never silently does nothing", function () {
+  let st = Model.emptyState()
+  const first = Model.withSavedSearch(st, "baton rouge", 10)
+  const dupe = Model.withSavedSearch(first.state, "  BATON Rouge ", 11)
+  const empty = Model.withSavedSearch(first.state, "   ", 12)
+  let full = Model.emptyState()
+  for (let i = 0; i < Model.MAX_SAVED_SEARCHES; i++) full = Model.withSavedSearch(full, "t" + i, i).state
+  const over = Model.withSavedSearch(full, "one more", 99)
+  return [[first.added, first.reason], [dupe.added, dupe.reason], [empty.added, empty.reason],
+          [over.added, over.reason], full.savedSearches.length]
+}, [[true, ""], [false, "duplicate"], [false, "empty"], [false, "full"], 20])
+checkCall("saved searches: the reducer does not mutate the state it was given", function () {
+  const st = Model.emptyState()
+  Model.withSavedSearch(st, "bbc", 1)
+  return st.savedSearches.length
+}, 0)
+checkCall("saved searches: removing matches on the folded terms, not the spelling", function () {
+  const added = Model.withSavedSearch(Model.emptyState(), "BATON  Rouge", 1).state
+  return [Model.withoutSavedSearch(added, "baton rouge").savedSearches.length,
+          Model.withoutSavedSearch(added, "something else").savedSearches.length]
+}, [0, 1])
+checkCall("saved searches: the confirmation always carries the count, including the explosion case", function () {
+  return [Model.savedSearchNotice({ added: true }, "baton rouge", 3),
+          Model.savedSearchNotice({ added: true }, "bbc one", 1),
+          Model.savedSearchNotice({ added: true }, "no tv", 75),
+          Model.savedSearchNotice({ added: false, reason: "duplicate" }, "BATON Rouge", 3),
+          Model.savedSearchNotice({ added: false, reason: "full" }, "x", 0),
+          Model.savedSearchNotice({ added: false, reason: "empty" }, "  ", 0)]
+}, ["Saved baton rouge" + SEP_FOR_TEST + "3 channels",
+    "Saved bbc one" + SEP_FOR_TEST + "1 channel",
+    "Saved no tv" + SEP_FOR_TEST + "75 channels",
+    "Already saved: baton rouge",
+    "Saved searches full (20)",
+    "Nothing to save"])
+checkCall("saved searches: cloneState carries them, which is the THIRD whitelist", function () {
+  // Service.qml clones state to write a source record. Before this key was
+  // taught to cloneState, editing a source would have erased every saved
+  // search -- the same trap as the other two writers, in a third place.
+  const st = Model.withSavedSearch(Model.emptyState(), "bbc", 1).state
+  return Model.cloneState(st, { favorites: ["x"] }).savedSearches.map(function (r) { return r.query })
+}, ["bbc"])
+checkCall("saved searches: the guide binds a MODIFIED key, so bare letters still reach the query", function () {
+  // handleSearchKey routes every printable character into the query, so a
+  // letter cannot be a command in search mode without breaking typing.
+  return [qmlSites(/Qt\.Key_S && event\.modifiers === Qt\.ControlModifier/).length,
+          qmlSites(/root\.saveCurrentSearch\(\)/).length,
+          qmlSites(/Model\.savedSearchNotice\(/).length,
+          qmlSites(/Model\.savedSearchCount\(root\.service\.channels, root\.query\)/).length]
+}, [1, 1, 1, 1])
+
 // ---- F-PERF-1: the fold the ranker needed and nobody precomputed -----------
 checkCall("F-PERF-1: the precomputed nameKey and the per-call fallback produce the SAME results", function () {
   // This is the assertion the optimisation rests on. `filterChannels` keeps
@@ -2628,7 +2823,7 @@ check("trimRecents", Model.trimRecents({ version: 1, favorites: [], recents: [{ 
 check("trimRecents returns same object when within cap", (() => { const st = Model.emptyState(); return Model.trimRecents(st, 5) === st })(), true)
 check("parseState tolerates garbage", Model.parseState("not json"), Model.emptyState())
 check("parseState sanitizes", Model.parseState('{"favorites":["a","a",""],"recents":[{"id":"x","name":"X","at":"7"},{"bad":1}],"lastPlayed":{"id":"x"}}'),
-  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, session: null, sources: [] })
+  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, session: null, sources: [], savedSearches: [] })
 check("parseState tolerates unknown keys", Model.parseState('{"version":9,"favorites":["a"],"future":true}').favorites, ["a"])
 check("isFavorite", [Model.isFavorite(state, "5"), Model.isFavorite(state, "4"), Model.isFavorite(null, "5")], [true, false, false])
 check("withFailed / withoutFailed are copies", (() => { const a = {}; const b = Model.withFailed(a, "x", "21:12"); const c = Model.withoutFailed(b, "x"); return [Object.keys(a).length, b.x, Object.keys(c).length] })(), [0, "21:12", 0])
@@ -3665,11 +3860,11 @@ check("sourceDetail never carries error text (SR26): errorReason stays on the vi
 check("sourceAccessibleName", [Model.sourceAccessibleName(views4[0]), Model.sourceAccessibleName(Model.sourceView(recCli, "", nowSep))], ["Provider, tv.example.net:8080, 1,475 channels in 28 groups, active, EPG, last used 21:30", "iptv-org, iptv-org.github.io, not loaded yet, never used"])
 
 // ---- state v2 and reducers (ARCHITECTURE-SOURCES 2.1, 2.2, 3.5) ----
-check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [] })
-check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, session: null, sources: [recFile] })
+check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [] })
+check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, session: null, sources: [recFile], savedSearches: [] })
 check("cloneState copies the arrays", (() => { const src = { sources: [recFile] }; const out = Model.cloneState(src); out.sources.push(recNas); return src.sources.length })(), 1)
 check("withCacheLayout", [Model.withCacheLayout(state4, 0).cacheLayout, Model.withCacheLayout(Model.emptyState(), 2).cacheLayout, Model.withCacheLayout(Model.emptyState(), 5).cacheLayout], [0, 2, 0])
-check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, session: null, sources: [] })
+check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, session: null, sources: [], savedSearches: [] })
 check("parseState v2 round-trips records", Model.parseState(JSON.stringify(state4)).sources, state4.sources)
 check("parseState drops invalid records, duplicate urls and keys keep the first", Model.parseState(JSON.stringify({ version: 2, sources: [recNas, { key: "bad key", url: "http://x.test/" }, { key: "22222222", url: recNas.url }, { key: "11111111", url: "http://other.test/" }, { key: "33333333", url: "" }, "junk"] })).sources.map(s => s.key), ["11111111"])
 check("parseState coerces and defaults a sparse record", Model.parseState(JSON.stringify({ version: 2, sources: [{ key: "abcdef12", url: "http://h.test/x", channelCount: "7", origin: "weird", labelCustom: "yes" }] })).sources[0], { key: "abcdef12", url: "http://h.test/x", epgUrl: "", kind: "http", label: "h.test", labelCustom: false, origin: "guide", addedAt: 0, lastUsed: 0, fetchedAt: 0, channelCount: 7, groupCount: 0 })

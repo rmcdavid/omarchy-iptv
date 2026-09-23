@@ -1086,7 +1086,7 @@ TestCase {
   }
 
   function test_stateV2AndReducers() {
-    compare(Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [] })
+    compare(Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [] })
     var v1 = Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[],"lastPlayed":null}')
     compare(v1.version, 2)
     compare(v1.favorites, ["t:bbc1.uk"])
