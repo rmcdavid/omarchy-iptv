@@ -7139,6 +7139,69 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-SAVE-2, 2026-09-23: the scope ring said the scope was empty
+
+Found on a live pass against 0.7.8, not by the suite.
+
+Seed a saved search and open the guide. The scope ring reads **`Favorites 0`**
+over a scope holding three channels. The rows are there; the label says there
+is nothing to look at, so there is no reason to press right.
+
+### The cause
+
+Two implementations of one question.
+
+| | reads |
+|---|---|
+| `channelsForScope(list, SCOPE_FAVORITES, st)` | the stars **plus** every channel a saved search matches |
+| `countFavorites(list, st)` | `st.favorites` alone |
+
+`countFavorites` predates saved searches by a year and was never revisited when
+`channelsForScope` grew the second source. It is the count `scopeSurface`
+publishes, so the ring and the rows have disagreed since 0.7.6 shipped.
+
+### The fix
+
+`countFavorites` is the length of what `channelsForScope` returns. One call, so
+they cannot drift again:
+
+```js
+function countFavorites(list, st) {
+  return channelsForScope(list, SCOPE_FAVORITES, st).length
+}
+```
+
+### Why the suite was green
+
+Both halves were tested. Rows were asserted, counts were asserted, and
+**nothing compared them** — so each was right about its own question and the
+pair was wrong. The new check is the comparison itself, across five
+combinations:
+
+| state | rows | count |
+|---|---|---|
+| nothing | 0 | 0 |
+| a saved search only | 3 | 3 |
+| a star only | 1 | 1 |
+| both, disjoint | 4 | 4 |
+| a star **inside** the saved set | 3 | 3 |
+
+The last row is the one that makes the assertion more than an identity: the
+star must not be counted twice.
+
+Mutation: restore the old body (count `st.favorites` against the index) and the
+check goes red on four of the five.
+
+Live confirmation, harness seeded with `savedSearches: ["bbc"]` against a
+fixture containing three BBC channels — before `favorites=0`, after
+`favorites=3`, with `rows: 3` on both sides.
+
+That is the third divergence in one day closed by making two implementations
+into one call. The pattern is worth naming: wherever a **count** and a **list**
+are computed separately, the count is a cache of the list with no invalidation.
+
+Node 1533 → **1536**.
+
 ## D-SAVE-1, 2026-09-23: the removal key that added things
 
 Filed against my own change, the day it shipped in 0.7.6.

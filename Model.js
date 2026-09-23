@@ -1565,11 +1565,18 @@ function scopeName(scopeId) {
   return id
 }
 
+// D-SAVE-2: the COUNT is the length of the ROWS, by calling the same function.
+//
+// This counted `st.favorites` alone, while channelsForScope returns the stars
+// PLUS every channel a saved search matched. So the scope ring read
+// "Favorites 0" on a scope holding three channels -- a scope the user has no
+// reason to open, because the label says there is nothing in it.
+//
+// Found by a live pass and not by the suite: rows and count were each tested,
+// and nothing compared them. That is the third time today one divergence has
+// been fixed by making two things one call instead of two implementations.
 function countFavorites(list, st) {
-  var index = indexById(list)
-  var n = 0
-  for (var f = 0; f < st.favorites.length; f++) if (index[st.favorites[f]]) n++
-  return n
+  return channelsForScope(list, SCOPE_FAVORITES, st).length
 }
 
 function countRecents(list, st) {

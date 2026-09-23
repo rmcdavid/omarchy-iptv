@@ -1820,6 +1820,30 @@ checkCall("D-SAVE-1: a row that is both keeps its place after the star goes, the
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterUnstar).length,
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterForget).length]
 }, [3, 3, 0])
+checkCall("D-SAVE-2: the Favourites COUNT equals the Favourites ROWS, in every combination", function () {
+  // Found by a live pass, not by the suite. countFavorites counted
+  // st.favorites alone while channelsForScope returned the stars PLUS every
+  // channel a saved search matched, so the scope ring read "Favorites 0" on a
+  // scope holding three channels -- a scope nobody would open, because the
+  // label said it was empty.
+  //
+  // Rows and count were each tested and nothing compared them. This compares
+  // them, which is the only assertion that could have caught it.
+  const ch = savedChannels()
+  const ids = ch.map(function (c) { return Model.channelId(c) })
+  const none = Model.emptyState()
+  const saved = Model.withSavedSearch(none, "baton rouge", 1).state
+  const starred = Model.cloneState(none, { favorites: [ids[7]] })
+  const both = Model.cloneState(saved, { favorites: [ids[7]] })
+  const overlap = Model.cloneState(saved, { favorites: [ids[0]] })
+  return [none, saved, starred, both, overlap].map(function (st) {
+    const rows = Model.channelsForScope(ch, Model.SCOPE_FAVORITES, st).length
+    const entry = Model.scopeSurface(ch, st).entries.filter(function (e) {
+      return e.id === Model.SCOPE_FAVORITES
+    })[0]
+    return rows === entry.count ? rows : "DIVERGE rows=" + rows + " count=" + entry.count
+  })
+}, [0, 3, 1, 4, 3])
 checkCall("D-SAVE-1: the footer explains Favourites, and says nothing when there is nothing to explain", function () {
   const ch = savedChannels()
   const saved = Model.withSavedSearch(Model.emptyState(), "baton rouge", 1).state
