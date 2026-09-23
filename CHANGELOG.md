@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## Unreleased
+## 0.7.9 (2026-09-23)
 
 ### Added
 
@@ -15,10 +15,13 @@ version lives in `manifest.json`.
   press `g` on the Sources screen and it says how many hosts it would contact
   and which one gets the most, counted from your own playlist without
   contacting anybody. Turning it back off takes one keypress and no dialog.
-  Logos are fetched once, cached, never refetched, and a logo request carries
-  none of your subscription credentials. Channels without a logo get empty
-  space rather than a placeholder box, and the column disappears entirely on a
-  list that has none.
+  Logos are `https` only — a redirect to anything else is refused rather than
+  followed — fetched once, cached, never refetched, and a logo request carries
+  none of your subscription credentials. Switching logos back off stops a
+  download already in progress, and removing a source deletes its cached logos
+  with the rest of its cache. Channels without a logo get empty space rather
+  than a placeholder box, and the column disappears entirely on a list that has
+  none.
 
 ### Fixed
 
