@@ -25,6 +25,7 @@ from helper_loader import load_helper
 
 helper = load_helper()
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 HELPER = helper_loader.HELPER
 
 
@@ -517,6 +518,84 @@ class PlaylistCommandRemapTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.default_path))
         self.assertEqual(os.listdir(self.state), [])
         self.assertEqual(os.listdir(self.default_state), [])
+
+class DId2SequenceTest(unittest.TestCase):
+    """D-ID-2, and the two writers must agree about it (D-ID-3's lesson).
+
+    The board recorded the cause as a survivor inheriting a favourite that
+    meant the row which went away. Run against the shipping functions that
+    does not happen: the remap is keyed by the OLD id, which is url-derived
+    and names the exact row.
+
+    The harm needs three steps and no remap at all. A star made while the name
+    is UNIQUE is name-keyed; a collision then orphans it; the collision later
+    resolves onto a DIFFERENT row and the orphan comes back to life pointing
+    somewhere else. The favourite never moves -- it starts resolving to
+    another channel.
+
+    So the open question the board records, how often provider names churn, is
+    the wrong one. The frequency decides nothing: the mechanism is that ONE
+    saved key cannot identify a channel, which is D-ID-4's finding, and
+    D-ID-4's fix closes this one too.
+    """
+
+    @staticmethod
+    def assigned(rows):
+        helper.assign_ids(rows)
+        return rows
+
+    @staticmethod
+    def ch(name, url, tvg=None):
+        row = {"name": name, "url": url, "group": "G"}
+        if tvg:
+            row["tvgId"] = tvg
+        return row
+
+    def test_the_orphaned_name_key_comes_back_on_another_row(self):
+        t0 = self.assigned([self.ch("ESPN", "http://p/A"), self.ch("BBC", "http://p/C")])
+        starred = t0[0]["id"]
+        self.assertTrue(starred.startswith("n:"), starred)
+
+        t1 = self.assigned([self.ch("ESPN", "http://p/A"), self.ch("ESPN", "http://p/B"),
+                            self.ch("BBC", "http://p/C")])
+        self.assertEqual([c["id"][:2] for c in t1[:2]], ["u:", "u:"],
+                         "a shared name refuses the key for both")
+        self.assertNotIn(starred, [c["id"] for c in t1], "the star is orphaned here")
+
+        t2 = self.assigned([self.ch("ESPN", "http://p/B"), self.ch("BBC", "http://p/C")])
+        self.assertEqual(t2[0]["id"], starred,
+                         "the survivor takes the key the removed row's star still holds")
+        self.assertEqual(t2[0]["url"], "http://p/B",
+                         "and it is the channel the user did NOT star")
+
+    def test_both_writers_agree_on_every_step(self):
+        """Model.js and the helper must produce the same ids, step for step."""
+        import json
+        import subprocess
+        script = (
+            'const M=require("./Model.js");'
+            'const a=r=>{const v=M.channelIds(r);r.forEach((c,i)=>c.id=v[i]);return r};'
+            'const c=(n,u)=>({name:n,url:u,group:"G"});'
+            'console.log(JSON.stringify(['
+            '  a([c("ESPN","http://p/A"),c("BBC","http://p/C")]).map(x=>x.id),'
+            '  a([c("ESPN","http://p/A"),c("ESPN","http://p/B"),c("BBC","http://p/C")]).map(x=>x.id),'
+            '  a([c("ESPN","http://p/B"),c("BBC","http://p/C")]).map(x=>x.id)]))')
+        js = json.loads(subprocess.run(["node", "-e", script], capture_output=True,
+                                       text=True, cwd=str(ROOT)).stdout)
+        py = [[c["id"] for c in self.assigned(rows)] for rows in (
+            [self.ch("ESPN", "http://p/A"), self.ch("BBC", "http://p/C")],
+            [self.ch("ESPN", "http://p/A"), self.ch("ESPN", "http://p/B"), self.ch("BBC", "http://p/C")],
+            [self.ch("ESPN", "http://p/B"), self.ch("BBC", "http://p/C")])]
+        self.assertEqual(py, js, "the two writers disagree; D-ID-3 was exactly this class")
+
+    def test_a_tvg_keyed_row_cannot_reach_this(self):
+        """The population bound: a distinct tvg-id never consults the name."""
+        t0 = self.assigned([self.ch("ESPN", "http://p/A", "espn.a"), self.ch("BBC", "http://p/C")])
+        self.assertEqual(t0[0]["id"], "t:espn.a")
+        t2 = self.assigned([self.ch("ESPN", "http://p/B", "espn.b"), self.ch("BBC", "http://p/C")])
+        self.assertNotIn(t0[0]["id"], [c["id"] for c in t2],
+                         "a t: key is never handed to another row")
+
 
 
 if __name__ == "__main__":

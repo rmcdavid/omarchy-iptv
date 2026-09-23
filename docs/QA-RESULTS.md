@@ -7139,6 +7139,100 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-ID-2 re-opened and re-caused, 2026-09-23
+
+Revisited to confirm or withdraw the acceptance. The harm is real; the cause
+on the board is not, and correcting it changes what the fix is and retires the
+open question.
+
+### The filed cause does not reproduce
+
+The board records: *a provider removes one member of a colliding pair, the
+survivor becomes the unique holder and inherits the key, along with any
+favourite that meant the row which went away.*
+
+Run against the shipping functions, with `id` assigned the way `assign_ids`
+writes it on every parse:
+
+| colliding pair, star on B | moved | the star resolves to |
+|---|---|---|
+| provider removes A | 1 | **B** — the row it meant |
+| provider removes B | 0 | nothing, orphaned |
+
+Neither is a wrong channel. The remap is keyed by the **old** id, which is
+url-derived and names the exact row, so it cannot hand a reference to a
+different one.
+
+(The first attempt at this measurement said both cases orphan, because the
+fixture channels carried no `id` and `Model.channelId` fell through to hashing
+the URL — answering about scheme 1. The same fixture mistake that cost
+F-PERF-1 a 3.6x measurement, made again four hours later in a different file.)
+
+### What does reproduce needs three steps, and no remap at all
+
+| | list | the star `n:c3066d6f` |
+|---|---|---|
+| t0 | ESPN@A, BBC | made here — the name is **unique**, so it is name-keyed |
+| t1 | ESPN@A, **ESPN@B**, BBC | both lose the key; the star **orphans**, `moved 0` |
+| t2 | **ESPN@B**, BBC | B takes the key back; the star **resolves to B** |
+
+The user starred A. A is gone. The star now plays B, and **the stored id never
+changed** — it is the same string at t0 and t2. Nothing moved it. An orphaned
+name key simply came back to life on a different row.
+
+The middle step is the mechanism, and it is the step the board's version
+leaves out: the star has to be made while the name is unique. A star made
+*during* the collision is url-keyed and is never at risk.
+
+Both writers agree at every step, checked by running `Model.channelIds` and
+`helper.assign_ids` over the same three lists — D-ID-3 was exactly the class of
+defect where they do not.
+
+### This retires the open question and merges the fix
+
+The board's open question is how often provider names churn, to be settled by
+keeping dated playlists and re-measuring in a month. **That question decides
+nothing.** The frequency is not what makes the star wrong; the mechanism is
+that one saved key cannot identify a channel, and a key that stops resolving
+is kept rather than cleaned up, so it lies in wait.
+
+That is D-ID-4's finding, already accepted and already costed:
+
+> a favourite should carry the channel's name-key AND url-key, matching on the
+> url-key first (which tells HD/SD twins apart) and falling back to the
+> name-key (which survives a credential rotation)
+
+Match on the url key first and t2 finds nothing: A's URL is gone, so the star
+orphans instead of relocating. **D-ID-2 and D-ID-4 have one fix.**
+
+### The population, measured rather than assumed
+
+Only a `n:` keyed reference can reach this, and a row is only `n:` keyed when
+its tvg-id is absent or duplicated. On the maintainer's own state file, read
+without modification:
+
+```
+saved channel references by key kind: {'t': 8}
+name-keyed references, the only ones this defect can reach: 0 of 8
+```
+
+**Zero.** Consistent with D-ID-4's measurement that all 1,471 tvg-ids on the
+configured list are present and distinct.
+
+### Acceptance confirmed, on different grounds
+
+Still accepted, and no longer waiting on a month of data. It waits on the
+state schema change D-ID-4 already records, and the thing to do in the
+meantime is nothing rather than measure churn.
+
+Three node checks and three python tests, including one proving a `t:` keyed
+reference cannot reach it at all. Six mutations, all red: never refusing a
+colliding name (15 node), removing the name substitution entirely (29),
+keying the remap by the new id (25), dropping the tvg-id branch (4 node / 7
+python), and the helper alone dropping its refusal (20 python).
+
+Node 1550 → **1553**, python 579 → **582**.
+
 ## F-PERF-1 overturned, 2026-09-23: the residual was the fixture
 
 The single-character residual this row has carried all day does not exist. It

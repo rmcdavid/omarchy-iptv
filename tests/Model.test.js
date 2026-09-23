@@ -1820,6 +1820,98 @@ checkCall("D-SAVE-1: a row that is both keeps its place after the star goes, the
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterUnstar).length,
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterForget).length]
 }, [3, 3, 0])
+// ---- D-ID-2: the wrong channel, and it is not the one that was filed ----
+//
+// The board recorded the cause as: a provider removes one member of a
+// colliding pair, the survivor inherits the name key "along with any
+// favourite that meant the row which went away". Run against the shipping
+// functions that does not happen, in either direction -- the remap is keyed
+// by the OLD id, which is url-derived and names the exact row.
+//
+// The harm is real but it needs THREE steps and no remap at all, and the
+// middle one is the whole mechanism: the star has to be made while the name
+// is UNIQUE, so it is name-keyed; a collision then appears and ORPHANS it;
+// the collision later resolves onto a DIFFERENT row and the orphaned key
+// comes back to life pointing somewhere else. Nothing moves the favourite.
+// It simply starts resolving to another channel.
+//
+// This matters for what the fix is. The board says the open question is how
+// often provider names churn, to be answered by keeping dated playlists for a
+// month. It is the wrong question: the frequency does not decide anything,
+// because the mechanism is that ONE saved key cannot identify a channel --
+// which is D-ID-4's finding, and D-ID-4's fix (store the name key AND the url
+// key, match on the url key first) closes this one too.
+//
+// Every channel here carries `id`, the way bin/omarchy-iptv assign_ids writes
+// it on every parse. Without that the singular channelId falls through to
+// hashing the URL and every resolution below is answered about scheme 1
+// instead -- the same fixture mistake that cost F-PERF-1 a 3.6x measurement.
+function idAssigned(rows) {
+  const ids = Model.channelIds(rows)
+  rows.forEach(function (c, i) { c.id = ids[i] })
+  return rows
+}
+function espn(url) { return { name: "ESPN", url: url, group: "G" } }
+function bbc() { return { name: "BBC", url: "http://p/C", group: "G" } }
+function resolves(state, list) {
+  const hit = Model.indexById(list)[state.favorites[0]]
+  return hit ? hit.url : ""
+}
+
+checkCall("D-ID-2: the cause as FILED does not reproduce, in either direction", function () {
+  // A colliding pair, the star on B. Remove either one and the star follows
+  // the row it meant or orphans; it never lands on the other channel.
+  const before = idAssigned([espn("http://p/A"), espn("http://p/B"), bbc()])
+  const state = Model.cloneState(Model.emptyState(), { favorites: [before[1].id] })
+  const keepB = idAssigned([espn("http://p/B"), bbc()])
+  const keepA = idAssigned([espn("http://p/A"), bbc()])
+  const outB = Model.remapStateIds(state, Model.channelIdRemap(keepB))
+  const outA = Model.remapStateIds(state, Model.channelIdRemap(keepA))
+  return [outB.moved, resolves(outB.state, keepB),
+          outA.moved, resolves(outA.state, keepA)]
+  // remove A: the star follows B, the row it meant. remove B: orphaned, and
+  // NOT relocated onto A.
+}, [1, "http://p/B", 0, ""])
+
+checkCall("D-ID-2: the sequence that DOES produce a silent wrong channel", function () {
+  // t0 the name is unique, so the star is name-keyed.
+  const t0 = idAssigned([espn("http://p/A"), bbc()])
+  let state = Model.cloneState(Model.emptyState(), { favorites: [t0[0].id] })
+  const at0 = resolves(state, t0)
+  // t1 a second channel takes the same name. Both lose the key and the star
+  // orphans -- with moved 0, so nothing is written and nothing is noticed.
+  const t1 = idAssigned([espn("http://p/A"), espn("http://p/B"), bbc()])
+  const o1 = Model.remapStateIds(state, Model.channelIdRemap(t1))
+  state = o1.state
+  const at1 = resolves(state, t1)
+  // t2 the row the user starred is the one removed. The survivor takes the
+  // name key back, and the orphan comes back to life on the WRONG row.
+  const t2 = idAssigned([espn("http://p/B"), bbc()])
+  const o2 = Model.remapStateIds(state, Model.channelIdRemap(t2))
+  state = o2.state
+  return [at0, o1.moved, at1, o2.moved, resolves(state, t2),
+          // and the star's id never changed: it is the same string throughout
+          state.favorites[0] === t0[0].id]
+}, ["http://p/A", 0, "", 0, "http://p/B", true])
+
+checkCall("D-ID-2: a `t:` keyed reference cannot reach this at all", function () {
+  // Which is the whole population bound. On a playlist whose tvg-ids are
+  // present and distinct every row is `t:`-keyed, the name is never consulted,
+  // and no sequence of additions or removals can move a saved reference onto
+  // another channel. Measured on the maintainer's own state: 8 of 8 saved
+  // references are `t:`.
+  function tv(name, url, tvg) { return { name: name, url: url, group: "G", tvgId: tvg } }
+  const t0 = idAssigned([tv("ESPN", "http://p/A", "espn.a"), bbc()])
+  let state = Model.cloneState(Model.emptyState(), { favorites: [t0[0].id] })
+  const t1 = idAssigned([tv("ESPN", "http://p/A", "espn.a"), tv("ESPN", "http://p/B", "espn.b"), bbc()])
+  state = Model.remapStateIds(state, Model.channelIdRemap(t1)).state
+  const at1 = resolves(state, t1)
+  const t2 = idAssigned([tv("ESPN", "http://p/B", "espn.b"), bbc()])
+  state = Model.remapStateIds(state, Model.channelIdRemap(t2)).state
+  return [t0[0].id, at1, resolves(state, t2)]
+  // still on A at t1; orphaned at t2 because A is gone -- never on B.
+}, ["t:espn.a", "http://p/A", ""])
+
 // ------------------------------------------------------------ logos (M2-04)
 //
 // The survey the consent sentence is composed from, checked against
