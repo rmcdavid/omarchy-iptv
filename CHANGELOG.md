@@ -7,6 +7,14 @@ version lives in `manifest.json`.
 
 ### Fixed
 
+- **Typing in the guide is much faster on big channel lists.** Searching a
+  10,000-channel list was doing work on every keystroke that it only needed to
+  do once, which made typing lag noticeably. Measured in the shell's own
+  JavaScript engine, a search went from about 165 ms per keystroke to about
+  11 ms; the worst case, a single letter that matches thousands of channels,
+  went from 212 ms to 64 ms. Nothing about what you see changes — the same
+  channels in the same order. The speed-up arrives when the playlist next
+  refreshes. Small lists were always fast and are unaffected.
 - **The guide now tells you when an update has not taken effect yet.** Updating
   the plugin reloads it, but a plugin that keeps its windows open keeps the
   version it was already running — so the files change and the interface does

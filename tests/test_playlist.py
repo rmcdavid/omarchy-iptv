@@ -88,6 +88,14 @@ class ParseM3uTest(unittest.TestCase):
         self.assertEqual(channels[0]["logo"], "http://logos.example.test/bbc1.png")
         self.assertEqual(channels[0]["url"], "http://stream.example.test/live/bbc1.m3u8")
         self.assertEqual(channels[0]["searchKey"], "bbc one hd uk")
+        # F-PERF-1. The ranker needs the name folded on its own, to rank a name
+        # match above a group match. That fold was never precomputed, so the
+        # guide did it per channel per keystroke: 165 ms for a 10,000-channel
+        # list in the QML engine against a 30 ms budget, where the ranker
+        # itself is a few ms. It is emitted here now, beside the key that has
+        # been precomputed for exactly this reason since M0.
+        self.assertEqual(channels[0]["nameKey"], "bbc one hd")
+        self.assertEqual(channels[0]["nameKey"], helper.normalize_text("BBC One HD"))
         self.assertEqual(channels[0]["id"], "t:bbc1.uk")
         # Id scheme 2: a row with no tvg-id and a name nothing else in the
         # playlist shares is keyed by the NAME, not by its stream URL, so the
@@ -188,6 +196,8 @@ class RulingsTest(unittest.TestCase):
         self.assertEqual(channel["group"], "Animation")
         self.assertEqual(channel["groups"], ["Animation", "Kids", "Religious"])
         self.assertEqual(channel["searchKey"], "toon time animation kids religious")
+        # The NAME fold only: no group words, whichever groups the channel is in.
+        self.assertEqual(channel["nameKey"], "toon time")
 
     def test_single_group_has_no_groups_field(self):
         text = '#EXTM3U\n#EXTINF:-1 group-title="News",CNN\nhttp://x.test/a\n#EXTINF:-1,Plain\nhttp://x.test/b\n'

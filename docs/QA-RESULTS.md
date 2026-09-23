@@ -6798,3 +6798,87 @@ the reasoning in the architecture, and the remedy — a prefix index, or an
 incremental filter that narrows the previous result when the query only grew —
 is real work that should not be started on a node number. Re-measure in the QML
 engine first.
+
+## F-PERF-1, 2026-09-23: measured in the QML engine, and it was one line
+
+The row said not to choose a remedy on a node number. It was right to.
+
+### The QML engine is about seven times slower than node
+
+`qmltestrunner`, Qt 6.11.2, 10,000 channels, 50 iterations, JIT warmed:
+
+| query | node | **QML engine** | budget |
+|---|---|---|---|
+| `a` | 30.09 ms | **212.18 ms** | 30 ms |
+| `news` | 25.02 ms | **159.88 ms** | 30 ms |
+| `alpha news` | 23.68 ms | **165.06 ms** | 30 ms |
+| `zz` | 23.41 ms | **165.36 ms** | 30 ms |
+| `sky sports` | 23.71 ms | **166.54 ms** | 30 ms |
+
+So the defect was five to seven times over budget, not marginal, and the
+architecture's "a few ms in the QML JS engine" was out by roughly **fifty
+times**.
+
+### The cause was not the ranker
+
+Profiling the node path first, because it is cheap:
+
+| | |
+|---|---|
+| `filterChannels` whole | 30.09 ms |
+| `matchRank` over all 10,000, alone | **2.89 ms** |
+| `channelId` over all, alone | 0.57 ms |
+| bare property reads | 0.36 ms |
+
+Twenty-seven milliseconds unaccounted for, in a loop whose own work is three.
+The line:
+
+```js
+var nameKey = typeof channel.nameKey === "string" ? channel.nameKey : normalizeText(channel.name)
+```
+
+`searchKey` has been precomputed since M0 *precisely* so the guide never folds
+10,000 strings per keystroke. The ranker needs a **second** fold — the name
+alone, to rank a name match above a group match — and that one was never added.
+`nameKey` was present on **0 of 10,000** channels, so the fallback ran every
+time.
+
+### The fix, and what it cost
+
+The helper now emits `nameKey` beside `searchKey`.
+
+| query | QML before | QML after | |
+|---|---|---|---|
+| `a` | 212.18 ms | **64.44 ms** | 3.3× |
+| `news` | 159.88 ms | **19.60 ms** | 8.2× |
+| `alpha news` | 165.06 ms | **11.08 ms** | 14.9× |
+| `zz` | 165.36 ms | **11.14 ms** | 14.8× |
+| `sky sports` | 166.54 ms | **11.10 ms** | 15.0× |
+
+The two implementations of the fold were already proven identical by the 14
+shared vectors in `channel-ids.json` that both suites run, so this adds no
+agreement risk. The reader **keeps its fallback**, so a cache written before
+this still works and is merely slower until the next refresh — and a check
+proves the precomputed path and the fallback produce identical rows and counts,
+because ranking one way on a fresh cache and another way on an old one would be
+far worse than being slow. A mutation handing the ranker the wrong fold turns
+six checks red.
+
+Costs, all measured:
+
+| | |
+|---|---|
+| `channels.json` at 10k | 2,613,772 → 2,928,310 (+12%) |
+| helper `playlist` | 572 → 632 ms (budget 1000) |
+| **guide open** | **71–74 ms, unchanged** |
+
+That last row was checked rather than assumed, since the guide parses the file
+that grew.
+
+### The residual, stated rather than rounded away
+
+`a` is still **64 ms** against a 30 ms budget. The cause is structural:
+`total` must be exact for the "First 200 of N" footer, and an exact total means
+scanning every channel. The 40 ms coalescing window absorbs it in practice.
+Removing it is a **product decision** — an approximate count — not an
+optimisation, so it is not taken here.

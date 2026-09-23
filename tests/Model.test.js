@@ -1550,6 +1550,46 @@ checkCall("F-CAL-5: the dim rung D-RUNG-2 accepted puts NONE of its ink above th
   const dim = cov.samples.filter(function (s) { return s.rung === 0.52 })[0]
   return [dim.inkAboveAA, round2(dim.p50), dim.inkAboveAA === 0]
 }, [0, 2.26, true])
+// ---- F-PERF-1: the fold the ranker needed and nobody precomputed -----------
+checkCall("F-PERF-1: the precomputed nameKey and the per-call fallback produce the SAME results", function () {
+  // This is the assertion the optimisation rests on. `filterChannels` keeps
+  // its fallback for caches written before the key existed, so the two paths
+  // must be indistinguishable in output -- otherwise the guide would rank one
+  // way on a fresh cache and another way on an old one, which is far worse
+  // than being slow. Driven over the shared fold vectors, so the cases are the
+  // ones both implementations already agree on, plus the ranking cases that
+  // actually discriminate name from group.
+  const names = idFixture.folds.map(function (f) { return f.name })
+    .concat(["BBC One HD", "USA: AMC+", "Sky Sports Main Event", "Alpha News 7"])
+  const bare = names.map(function (n, i) {
+    return { name: n, group: i % 2 ? "News" : "Sport", url: "http://127.0.0.1/" + i,
+             searchKey: Model.searchKey(n, i % 2 ? "News" : "Sport") }
+  })
+  const keyed = bare.map(function (c) {
+    const o = {}
+    for (const k in c) o[k] = c[k]
+    o.nameKey = Model.normalizeText(c.name)
+    return o
+  })
+  const differ = []
+  const queries = ["a", "news", "sport", "bbc", "amc", "sky", "zz", "one hd", "alpha news"]
+  queries.forEach(function (q) {
+    const x = Model.filterChannels(bare, q, 200)
+    const y = Model.filterChannels(keyed, q, 200)
+    if (x.total !== y.total || x.rows.length !== y.rows.length) { differ.push(q + ": counts"); return }
+    for (let i = 0; i < x.rows.length; i++) {
+      if (x.rows[i].name !== y.rows[i].name) { differ.push(q + ": order at " + i); return }
+    }
+  })
+  return [queries.length, differ]
+}, [9, []])
+checkCall("F-PERF-1: nameKey is the NAME fold alone, never the search key", function () {
+  // The two are different folds and conflating them would silently break
+  // ranking: searchKey carries the group words, nameKey must not, or every
+  // group match would rank as a name match.
+  const n = "BBC One HD", g = "UK: News"
+  return [Model.normalizeText(n), Model.searchKey(n, g), Model.normalizeText(n) !== Model.searchKey(n, g)]
+}, ["bbc one hd", "bbc one hd uk news", true])
 // ---- D-HOST-1: the running build is not always the installed one ----------
 checkCall("D-HOST-1: the version compiled into the build equals the one in manifest.json", function () {
   // If these ever disagree in a shipped artifact, every install shows the
