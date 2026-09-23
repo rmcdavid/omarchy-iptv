@@ -6995,3 +6995,57 @@ de-duplication, reverse the playlist order, put saved rows before the user's
 stars, build the set with `filterChannels`, drop the count from the
 confirmation, bind a bare letter instead of a modified key, and forget the key
 in the helper's whitelist.
+
+## M2-04 logos, 2026-09-23: the ruling, made against measured data
+
+Delegated by the product owner. The measurement changed the answer twice.
+
+**The roadmap's coverage finding does not generalise.** It reframed the design
+around a cliff -- 27 per cent coverage, deciles 99, 67, 38, 14, 3, 0, 0, 0, 0, 0
+-- measured on a 3,335-channel provider list. On the list actually configured
+here: **98 per cent**, deciles 98, 99, 99, 99, 97, 99, 100, 98, 97, 95. No
+cliff. So the placeholder problem belongs to one provider's data and the row
+design has to satisfy both extremes, not one.
+
+**The measurement that actually decides it had never been taken.** Nobody had
+counted the hosts:
+
+| | |
+|---|---|
+| distinct logo hosts | **63** |
+| `i.imgur.com` | 999 channels |
+| `upload.wikimedia.org` | 170 |
+| schemes | `https` on 1,445 of 1,445 |
+
+Turning logos on tells sixty-three third parties which channels this user has,
+and hands one of them a request pattern covering two thirds of the list. That is
+a larger disclosure than this plugin makes anywhere else, to hosts neither we
+nor the user chose.
+
+### The ruling, in `docs/RULING-LOGOS.md`
+
+Off by default; only hosts the playlist itself names; `https` only (free on this
+data, and cleartext otherwise); **never the playlist's credentials or headers**;
+content-type allowlist, byte caps, per-source 0700/0600; and the part this
+ruling adds rather than approves -- **the user is told the number before they
+choose**, because a generic warning is not informed consent when the answer is
+countable.
+
+### Shipped: `omarchy-iptv logos`
+
+Reads the cache, contacts nothing, reports hosts and counts. On the real cache:
+1,471 channels, 1,445 with logos, 63 hosts, 0 refused. On the 10k synthetic:
+5,053 logos, **0 would be contacted and 5,053 refused**, because the generator
+emits `http://` and the ruling is https-only -- the rule biting visibly rather
+than silently.
+
+Output carries hosts and never URLs (rule 5); a token in a logo query string
+does not survive into it, which is asserted.
+
+Six tests, four mutations. One initially survived: ordering hosts alphabetically
+instead of by reach, because the test's host names sorted the same way both
+ways. Renamed so the two orderings disagree, and it goes red.
+
+**What is not built:** the fetch itself, the row design at both coverage
+extremes, and the open-budget guard -- M2-04-03 through M2-04-07, unchanged by
+this ruling except that the row now has two coverage cases to satisfy.

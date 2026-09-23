@@ -89,6 +89,7 @@ Two places they can escape that, both worth knowing:
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
+| `showLogos` | boolean | `false` | **off by default.** Channel logos are hosted by third parties named in your playlist, not by this plugin. Run `omarchy-iptv logos` to see exactly which hosts your playlist would contact and how many channels each covers -- it reads the cache and makes no request. Logo requests are `https` only and never carry your playlist's credentials or headers |
 | `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
 | `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
