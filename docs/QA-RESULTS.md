@@ -7186,3 +7186,36 @@ lesson as the de-duplication case two commits ago: a check that can only see
 the ingredients cannot see the dish.
 
 Node 1526 → **1533**.
+
+## F-PERF-1: the prefix index priced, 2026-09-23
+
+The second remedy this defect proposed that does not survive measurement.
+
+`matchRank` matches by **substring**, not by prefix, so an index has to be over
+character presence, and the most it can do is hand the ranker a narrowed
+candidate set. Measured over the 10,000-channel cache:
+
+| query | candidates an index could offer | real matches | reduction | current cost |
+|---|---|---|---|---|
+| `a` | 8,202 | 6,877 | **18%** | 64 ms |
+| `news` | 1,278 | 812 | 87% | 20 ms |
+| `zz` | 299 | 0 | 97% | 11 ms |
+| `sky sports` | 235 | 0 | 98% | 11 ms |
+
+**The index helps exactly the queries that are already inside budget, and
+barely touches the only one that is not.** `a` would go from about 64 ms to
+about 53 ms and stay over 30.
+
+The reason is the query, not the index: `a` matches 69 per cent of the list,
+and nothing narrows a query that broad.
+
+**Not built.** What would remove the case is not filtering on a single
+character at all — a one-character search on a 10,000-channel list returns
+6,877 rows and is useless to the reader as well as slow. But that is a UX
+change with its own surprise, since the list would stay unfiltered until the
+second keystroke, and it is the product owner's call rather than an
+optimisation to slip in. Recorded as the costed option.
+
+Two proposed remedies, both refused on measurement, and the fix that actually
+worked was neither: precomputing a fold that had been missing since M0, which
+took the worst case from 212 ms to 64 ms.
