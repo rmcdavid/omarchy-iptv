@@ -1561,8 +1561,34 @@ def source_key(url: str) -> str:
     return hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
 
 
+# The last epoch second that still fits ten digits: 2286-11-20T17:46:39Z.
+#
+# Ten digits is not a formatting preference, it is the record format's
+# CONTRACT. The readers slice [0:10], [11:21] and [22:] rather than splitting,
+# because bisect over fixed-width prefixes is what buys the 10,000-channel
+# budget (see EPG_RECORD_SEP). But "%010d" sets a MINIMUM width and not a
+# maximum, so a larger timestamp pushed the title into the number field and
+# produced a line no JSON parser would accept -- and epg-now.json is written by
+# concatenation, so ONE such programme cost every channel of that source its
+# guide data, silently, while the helper exited 0 reporting ok:true. An
+# eleven-digit stop was quieter and worse: valid JSON carrying a truncated
+# stop, so the row showed as having nothing on.
+#
+# Feeds really do carry these. `99991231235959` is a common "runs forever"
+# sentinel for 24/7 streams, and it is twelve digits.
+#
+# Clamping here makes the function total and keeps the invariant at the one
+# place records are made, rather than asking three readers to defend against
+# input their own format forbids.
+EPG_MAX_EPOCH = 9999999999
+
+
 def encode_record(start: int, stop: int, title: str) -> str:
-    """See EPG_RECORD_SEP. `start`/`stop` are non-negative epoch seconds."""
+    """See EPG_RECORD_SEP. `start`/`stop` are clamped into the ten-digit range
+    the record format requires; a stop past 2286 means "runs forever" and is
+    truthfully represented by the furthest instant the format can hold."""
+    start = 0 if start < 0 else min(start, EPG_MAX_EPOCH)
+    stop = 0 if stop < 0 else min(stop, EPG_MAX_EPOCH)
     return "%010d %010d %s" % (start, stop, json.dumps(title, ensure_ascii=False))
 
 
@@ -2284,6 +2310,10 @@ MPV_ARG_RE = re.compile(r"^--[a-z0-9][a-z0-9-]*(=.*)?$")
 MPV_RESERVED = frozenset((
     "--input-ipc-server", "--wayland-app-id", "--title", "--force-media-title",
     "--idle", "--input-ipc-client", "--script", "--scripts", "--config-dir",
+    # D-SINK-2: --script is mpv's ALIAS for --scripts-append, so naming only
+    # the alias reserved nothing. Matching is by base name now (see
+    # filter_mpv_args), and --include loads a config that can set any of these.
+    "--include",
     "--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit",
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
     "--term-status-msg", "--screenshot-template",
@@ -2319,8 +2349,15 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
     for token in tokens or []:
         text = str(token)
         name = text.split("=", 1)[0]
-        no_form = name.startswith("--no-") and ("--" + name[5:]) in MPV_RESERVED
-        if not MPV_ARG_RE.match(text) or name in MPV_RESERVED or no_form:
+        # D-SINK-2: the BASE name decides. `mpv_option_base` was defined
+        # fifteen lines below this filter and never used by it, so
+        # `--scripts-append` -- which mpv's own --list-options calls the
+        # option that `--script` is an ALIAS for -- was accepted here and by
+        # the JavaScript mirror.
+        base = mpv_option_base(name)
+        bare = "--" + name[5:] if name.startswith("--no-") else ""
+        no_form = bool(bare) and (bare in MPV_RESERVED or mpv_option_base(bare) in MPV_RESERVED)
+        if not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form:
             rejected.append(text)
         else:
             args.append(text)
@@ -3235,6 +3272,29 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                 return {"state": "playing", "reason": ""}
             elif event == "end-file" and mine:
                 verdict = ended_verdict(message)
+                why = str(message.get("reason") or "")
+                # `ended_verdict` is the POST-MORTEM reducer (4.8): it answers
+                # "why did the player end", for a player that has ended. Here
+                # the connection is still open and mpv is still running, so two
+                # of its answers mean something different and must not be taken
+                # at face value.
+                if verdict["kind"] == "ignored":
+                    # D-PLY-13. "redirect" is mpv resolving an .m3u8 master,
+                    # which is the commonest shape in IPTV. The load has NOT
+                    # ended, so returning here stopped the watch before the
+                    # resolved stream could fail -- and an expired subscription
+                    # failing at exactly that moment is what this watch exists
+                    # for. Keep draining.
+                    continue
+                if verdict["kind"] == "failed" and why == "stop":
+                    # D-PLY-12. After the fact, "stop" can only mean "a load we
+                    # issued was replaced AND THEN the process died", so the
+                    # reducer calls it a failure. On a LIVE connection it cannot
+                    # mean that: it means another IPC client replaced our entry,
+                    # which is a zap. Reporting failure here put a "did not
+                    # play" notification on screen for a channel the user had
+                    # deliberately just left, and marked it failed in the guide.
+                    return {"state": "unknown", "reason": ""}
                 if verdict["kind"] == "failed":
                     # The log line says what actually went wrong; mpv's own
                     # file_error is a generic "loading failed". Both are

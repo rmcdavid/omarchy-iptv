@@ -3,6 +3,76 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.4 (2026-09-23)
+
+### Changed
+
+- **Small text stays readable on the highlighted row.** The counts beside group
+  names, and the small text in a few other places, were drawn at a fixed
+  transparency chosen against the panel background. On the highlighted row the
+  background is lighter, so the same setting left that text below the readable
+  contrast threshold on six of the twenty-three themes — worst on Rose Pine and
+  Catppuccin Latte. The transparency is now worked out from whichever background
+  the text actually sits on, so it clears the threshold everywhere. On most
+  themes nothing changes at all: sixteen of the twenty-three render exactly as
+  before. Where it does change, the count on a highlighted row is now close in
+  brightness to the group name beside it — it is still smaller and bolder, but
+  the two no longer differ much in lightness. That is a deliberate trade for
+  making it readable.
+
+### Corrected
+
+- **What 0.7.3 said about small text was overstated, and for many people it had
+  not taken effect at all.** That release said making the small counts and the
+  footer line bold "makes them readable on themes where they were previously
+  below the accessibility threshold". Measured properly, it helps in some places
+  and cannot help in others. On an ordinary row it does what was claimed — on
+  Tokyo Night the footer line goes from below the readable threshold to above
+  it. On the **highlighted row** it does not and cannot: the highlight tint
+  lifts the background, and no font weight can close the gap that leaves. On Rose Pine the small text was below the threshold before any of this and
+  stays there. So if these captions are hard for you to read, on some themes they
+  still are, and we are not claiming otherwise.
+- **If you updated to 0.7.3 without restarting, you were still running the old
+  interface.** Updating a plugin reloads it, but a plugin that stays resident
+  keeps the already-open windows it had — so a change to the interface does not
+  appear until the shell restarts or you log out and back in. Nothing warned you.
+  This is why the claim above went unchecked for a day: our own verification
+  measured a copy that had never loaded the change either.
+
+### Fixed
+- **A channel you are watching is no longer shown as failed.** A brief network
+  hiccup while a channel was opening could mark it as failed, and the mark
+  stayed even after the channel recovered and played normally — so the guide
+  showed "Failed · Space to retry" for something you were watching, and hid the
+  playing marker while it did. The mark now clears as soon as the player
+  confirms it is playing that channel. (D-PLY-14)
+- **Zapping quickly no longer marks the channel you left as broken.** If you
+  pressed Enter on one channel and then another before the first had opened,
+  the first was reported as a failed stream — a "did not play" message for a
+  channel you had simply moved on from. (D-PLY-12)
+- **A stream that fails while resolving is now reported.** Many providers hand
+  out a playlist that points at the real stream; if that second step failed —
+  an expired subscription, most often — the guide said nothing at all. (D-PLY-13)
+- **A single "runs forever" programme no longer wipes the whole guide.** Some
+  providers mark a 24/7 stream as ending in the year 9999. One such entry was
+  enough to corrupt the cached guide data for *every* channel on that source,
+  so Now/Next simply vanished everywhere — with nothing reported, and
+  refreshing rebuilt the same broken file. A subtler version of the same fault
+  made a long-running programme look like it had finished years ago. (D-EPG-1)
+- **Section labels are readable on every theme.** The headings above the group
+  list and beside each form field were dimmed by a method that darkens rather
+  than fades, which on light themes made them *darker* than the text they sit
+  above -- so the heading came out bolder than the body instead of quieter.
+  On three themes they were also simply too faint to read comfortably. They
+  now fade toward the background, by an amount chosen per theme so a heading
+  stays about as much quieter than the body text as it always looked.
+  (D-RUNG-9)
+- **Clicking a channel's number no longer toggles its favourite.** The
+  favourite hit target was meant to start at the star slot, but the position
+  it was given was rejected at build time and silently fell back to the row's
+  left edge, so on a playlist with channel numbers the number column sat
+  inside it. (D-CHNO-6)
+
 ## 0.7.3 (2026-09-22)
 
 Selection you can actually see, and a favorites bug whose fix the last two

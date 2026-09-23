@@ -250,6 +250,36 @@ Item {
   // accent against the text colour and fell through to the text token on 23 of
   // 23 themes for the life of the feature.
   readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)
+
+  // D-RUNG-14: the caption rung is an OUTPUT, chosen per SURFACE. 0.7 was
+  // picked against the card; on the SELECTED row the fill moves toward the ink,
+  // so the identical rung renders differently -- tokyo-night measures 4.6433 on
+  // the card and 4.2157 on the selection, one side of 4.5 each. Weight cannot
+  // recover that: bold measures 4.1893 there, model accuracy AND a failure,
+  // because the ceiling is in the arithmetic rather than in the glyph.
+  //
+  // The fourth-argument trap of cursorInk applies here exactly:
+  // `Color.menu.selectedBackground` is `Util.alpha(menu.text, 0.08)`, whose r,
+  // g and b ARE the text's, so it must be composited before anything is
+  // measured against it (D-RUNG-13). That is what qmlFill is for.
+  //
+  // Both evaluate once per theme, never per row. 16 of 23 themes get 0.7 back
+  // byte-identical on both surfaces.
+  readonly property real captionAlphaOnCard: Model.captionAlpha(Color.menu.text, Color.menu.background)
+  readonly property real captionAlphaOnCursor: Model.captionAlpha(Color.menu.text, Model.qmlFill(Color.menu.selectedBackground, Color.menu.background))
+  // The Sources row's HOVER fill. An earlier version of this change skipped the
+  // site with a comment saying Style.hoverFillFor was host-injected and "not
+  // modellable here". That was simply false, and checking took one look:
+  // Style.qml returns `Util.alpha(hoverStateColor(...), hoverFillAlpha)`, an
+  // ordinary alpha-carrying QML colour, which is exactly the shape qmlFill
+  // exists to composite. The default theme template even gives it the same
+  // colour and alpha as the selection (foreground at 0.08). A comment asserting
+  // something convenient about the host, unchecked, is how D-RUNG-13 shipped.
+  readonly property real captionAlphaOnHover: Model.captionAlpha(Color.menu.text, Model.qmlFill(Style.hoverFillFor(Color.menu.text, Color.accent), Color.menu.background))
+  // REGULAR-weight captions need a higher floor than bold ones, because 10 px
+  // regular renders 11 to 13 per cent below the model and bold does not
+  // (F-CAL-1). Same arithmetic, grossed-up target.
+  readonly property real captionAlphaProse: Model.captionAlpha(Color.menu.text, Color.menu.background, Model.CAPTION_FLOOR_REGULAR)
   property color accent: Color.accent
   property color urgent: Color.urgent
   readonly property int cornerRadius: Style.cornerRadius
@@ -2318,6 +2348,15 @@ Item {
                     anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
                     text: groupRow.label
                     foreground: root.foreground
+                    // D-RUNG-9: the host dims this with Qt.darker, which dims
+                    // toward BLACK -- under 4.5:1 on three themes and INVERTED
+                    // (bolder than the body text it sits under) on five light
+                    // ones. Overriding `color` dims toward the background
+                    // instead, at an alpha that holds the separation near 1.93x
+                    // rather than at one fixed rung, so the header still reads
+                    // as dimmed on all 23 themes instead of only clearing a
+                    // threshold. Arithmetic in Model.js (rule 12).
+                    color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
                     fontFamily: root.fontFamily
                   }
 
@@ -2358,7 +2397,10 @@ Item {
                       text: Model.formatCount(groupRow.count)
                       color: root.foreground
                       // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
-                      opacity: 0.7
+                      // D-RUNG-14: and 0.7 is under it on the SELECTED row in 6
+                      // of 23, because this Text is a child of the selection
+                      // fill above. The rung follows the fill it is actually on.
+                      opacity: groupRow.selected ? root.captionAlphaOnCursor : root.captionAlphaOnCard
                       // D-RUNG-14 (PO ruling 2026-09-21): bold, not a
                       // higher rung. 10 px REGULAR text renders 11 to 13 per
                       // cent below the contrast model (F-CAL-1), which puts
@@ -2458,7 +2500,10 @@ Item {
                   text: Model.formatCount(root.sourceCount)
                   color: root.foreground
                   // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
-                  opacity: 0.7
+                  // D-RUNG-14: this row takes a hover fill, which lifts the
+                  // surface exactly as the selection does, so the rung follows
+                  // whichever it is actually on.
+                  opacity: pinnedMouse.containsMouse ? root.captionAlphaOnHover : root.captionAlphaOnCard
                   // D-RUNG-14 (PO ruling 2026-09-21): bold, not a
                   // higher rung. 10 px REGULAR text renders 11 to 13 per
                   // cent below the contrast model (F-CAL-1), which puts
@@ -2817,12 +2862,27 @@ Item {
                   }
 
                   // Lead-slot hit target (UX 7.3): toggles favorite without
-                  // playing. M2-03 4.2: anchored to `lead`, not to the row's
-                  // left edge, or a click on the number column would toggle
-                  // the favorite. UX 7.3's Style.space(28) minimum stands.
+                  // playing. M2-03 4.2: it starts at the LEAD slot's left
+                  // edge, not the row's, or a click on the number column would
+                  // toggle the favorite. UX 7.3's Style.space(28) minimum stands.
+                  //
+                  // D-CHNO-6. This was `anchors.left: lead.left`, and Qt
+                  // refused it on every row it ever drew: `lead` is a
+                  // grandchild of this delegate and this MouseArea is a child,
+                  // so they are uncle and nephew, not parent or sibling. The
+                  // anchor was dropped, `x` fell back to 0, and the target
+                  // therefore started at the row's left edge -- covering the
+                  // number column, which is the one thing the anchor existed
+                  // to prevent. So the warning was not cosmetic: on a numbered
+                  // playlist a click on a channel's NUMBER toggled its
+                  // favorite.
+                  //
+                  // Binding `x` crosses the generation that anchors may not.
+                  // It is written as rowContent's own offset plus lead's
+                  // offset within it, rather than the algebraically equal
+                  // `lead.x`, so it still tracks a change to either margin.
                   MouseArea {
-                    anchors.left: lead.left
-                    anchors.leftMargin: -Style.space(12)
+                    x: rowContent.x + lead.x - Style.space(12)
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: Math.max(Style.space(28), Style.space(12) + root.leadWidth)
@@ -3400,6 +3460,10 @@ Item {
                   width: root.narrow ? parent.width : formColumn.labelWidth
                   text: root.fieldLabelText(fieldRow.fieldId)
                   foreground: root.foreground
+                  // D-RUNG-9, same override as the GROUPS header. It matters
+                  // more here: these are form field labels, read while typing
+                  // a provider login, not ambient orientation.
+                  color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
                   fontFamily: root.fontFamily
                   elide: Text.ElideRight
                 }
@@ -3583,7 +3647,10 @@ Item {
               textFormat: Text.PlainText
               text: root.copy.xtreamProse
               color: root.foreground
-              opacity: 0.7
+              // D-RUNG-14: card rung at the REGULAR floor -- these ship
+              // unbolded on purpose, and regular 10 px does not render at
+              // model accuracy the way bold does.
+              opacity: root.captionAlphaProse
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               wrapMode: Text.WordWrap
@@ -3639,7 +3706,10 @@ Item {
               textFormat: Text.PlainText
               text: root.copy.firstRunTerminal
               color: root.foreground
-              opacity: 0.7
+              // D-RUNG-14: card rung at the REGULAR floor -- these ship
+              // unbolded on purpose, and regular 10 px does not render at
+              // model accuracy the way bold does.
+              opacity: root.captionAlphaProse
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               horizontalAlignment: Text.AlignHCenter
@@ -3669,7 +3739,10 @@ Item {
             text: root.footerStatusText
             color: root.foreground
             // A1 (PO ruling SG2): 0.45 was under 4.5:1 in 23 of 23 themes.
-            opacity: 0.7
+            // D-RUNG-14: the footer never sits on a selection fill, so this is
+            // the card rung -- which is 0.7 on 19 of 23 themes and higher only
+            // where 0.7 does not clear the floor.
+            opacity: root.captionAlphaOnCard
             // D-RUNG-14 (PO ruling 2026-09-21): bold, not a
             // higher rung. 10 px REGULAR text renders 11 to 13 per
             // cent below the contrast model (F-CAL-1), which puts

@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.3. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.7.4. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
@@ -29,8 +29,19 @@ The plugin ships no content. Bring a playlist you are entitled to use.
 
 ```bash
 omarchy plugin add https://github.com/rmcdavid/omarchy-iptv.git --enable
+```
+
+Then click the TV icon that appears in your bar — left click opens the guide —
+and it starts on a form that asks for your playlist. **Add a paid
+provider there, not on the command line.** The form masks what you type, and
+nothing you enter reaches your shell history. `Add Xtream login` takes the
+server, username and password as separate fields.
+
+If you want to point it at a free, public playlist to try it out, that has no
+credentials in it and a command line is fine:
+
+```bash
 omarchy bar set io.github.rmcdavid.iptv playlistUrl "https://iptv-org.github.io/iptv/countries/us.m3u"
-omarchy bar set io.github.rmcdavid.iptv epgUrl "https://example.test/xmltv.php?username=U&password=P"
 ```
 
 The plugin id is `io.github.rmcdavid.iptv`. Enabling it places the bar widget
@@ -52,8 +63,21 @@ Settings live inline on the widget's entry in `~/.config/omarchy/shell.json`
 (mode 0600) and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
 The guide, the bar widget, and the service all read that one entry. Playlist
 URLs from paid providers embed credentials: they stay in that file and in the
-channel cache, both readable only by you, and are never shown or logged
-beyond their host name.
+channel cache, both readable only by you, and are never shown or logged beyond
+their host name.
+
+Two places they can escape that, both worth knowing:
+
+- **Your shell history.** Setting a credentialed URL with `omarchy bar set`
+  writes the whole thing into `~/.bash_history` or `~/.zsh_history`, where it
+  stays until you remove it. Use the in-app form instead — that is what it is
+  for. If you have already done it, `history -d` the line and check the file.
+- **The process list, briefly.** When the plugin fetches your playlist it
+  passes the URL to its helper as a command-line argument, so for the few
+  hundred milliseconds that fetch runs another account on the same machine
+  could read it from `/proc`. On a single-user machine this is nothing; on a
+  shared one it is worth knowing. Nothing else on the plugin's side writes the
+  URL anywhere but the two 0600 files above.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -210,6 +234,15 @@ and no prefix is guessed.
 
 `omarchy bar set ... playlistUrl` still works and shows up in the Sources
 list as well; the two stay in sync. Up to 50 sources are kept.
+
+One caveat if you keep **two lists from the same provider** — a full one and a
+filtered one, say. Favourites are shared across sources on purpose, and a
+channel is normally recognised by the id its provider gives it. When a playlist
+does not give its channels ids, the plugin has to recognise them by name
+instead, and a channel whose name is unique in one of your two lists but shared
+in the other (an HD and an SD version, typically) can lose its star from one of
+them when you switch. Star it again on the list you are using. Playlists that
+carry channel ids — most do — are not affected at all.
 
 ## Playback notes
 

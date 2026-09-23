@@ -152,8 +152,21 @@ var MPV_RESERVED = {
   "--force-media-title": true,
   "--idle": true,
   "--input-ipc-client": true,
+  // D-SINK-2. `--script` is not the option: mpv's own `--list-options` calls it
+  // "alias for --scripts-append". So reserving it and not `--scripts-append`
+  // reserved the alias and left the real option open, and a pasted
+  // `--scripts-append=/tmp/x.lua` ran arbitrary Lua inside the player, which
+  // can read `path` -- the credentialed stream URL. The reserved set is now
+  // matched against the option's BASE name (mpvOptionBase strips -append,
+  // -add, -set, -pre, -clr, -del, -remove, -toggle), so every spelling of a
+  // list option is covered by naming it once.
   "--script": true,
   "--scripts": true,
+  // NOT --script-opts: ruling PO-10 / D-PLY-5 keeps it a HANDOFF option,
+  // allowed with a warning, and the suite holds that line. Base-name matching
+  // still covers its spellings, so --script-opts-append warns like --script-opts
+  // rather than slipping through unwarned.
+  "--include": true,              // loads a config file, which can set any of these
   "--config-dir": true,
   "--log-file": true,             // 0644, forced -v -v, writes the URL per failed load
   "--dump-stats": true,           // on-disk file carrying the command line
@@ -2259,6 +2272,31 @@ function withFailed(failed, id, clock) {
   return out
 }
 
+// D-PLY-14. A failure mark says "this channel would not play". A healthy
+// player whose OWN STASH says it is playing that channel is proof to the
+// contrary, so the mark is dropped.
+//
+// Without this the mark outlives the failure, because the only other place
+// that clears one runs when a play STARTS, not when one succeeds: a transient
+// error during first load marked a channel, the stream then recovered, and the
+// guide showed a channel the user was watching as "Failed HH:MM - Space to
+// retry", with the alert glyph and WITHOUT the playing glyph, because the
+// failure state displaces the playing state. Seen on the real display
+// 2026-09-22 with mpv reporting h264 and 33.9 s of cache at the time.
+//
+// Only "agree" clears, and that is deliberately the strictest verdict
+// reconcileVerdict gives: the player is up, on our source, and on the exact
+// channel the guide names. "unknown" (stopping, nothing playing, or the
+// player's record says playing false) and "diverged" both leave the mark
+// alone, so a channel that really did fail keeps its mark.
+function failedAfterHealthy(failed, verdictState, nowPlaying) {
+  var src = failed && typeof failed === "object" ? failed : {}
+  if (str(verdictState) !== "agree" || !nowPlaying) return src
+  var id = str(nowPlaying.id)
+  if (id === "" || src[id] === undefined) return src
+  return withoutFailed(src, id)
+}
+
 function withoutFailed(failed, id) {
   var out = {}
   var src = failed && typeof failed === "object" ? failed : {}
@@ -2713,7 +2751,12 @@ function splitMpvArgs(text) {
     if (token === "") continue
     var ok = /^--[a-z0-9][a-z0-9-]*(=.*)?$/.test(token)
     var name = token.indexOf("=") === -1 ? token : token.substring(0, token.indexOf("="))
-    if (!ok || MPV_RESERVED[name] === true || name.indexOf("--no-") === 0 && MPV_RESERVED["--" + name.substring(5)] === true) rejected.push(token)
+    // The BASE name decides (D-SINK-2): `--scripts-append` sets the same
+    // option `--scripts` does, and reserving one spelling reserved nothing.
+    var base = mpvOptionBase(name)
+    if (!ok || MPV_RESERVED[name] === true || MPV_RESERVED[base] === true
+        || name.indexOf("--no-") === 0 && (MPV_RESERVED["--" + name.substring(5)] === true
+                                           || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)) rejected.push(token)
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvArgWarnings(args) }
@@ -4185,8 +4228,15 @@ function hostOf(url) {
 // Replace every `scheme://...` in free text by its host alone (R12, D-QA-01):
 // userinfo, port, path and query are gone. Applied at every sink that can
 // carry mpv or helper output (notifications, lastError, console, tooltips).
+// D-SINK-1. The userinfo group used to be `(?:[^@\/\s]*@)?`, which cannot span
+// a SECOND `@` -- while the host group happily accepted one. A provider whose
+// password contains an un-encoded `@` therefore had its password TAIL survive
+// into the host position and out through a desktop notification. RFC 3986 puts
+// userinfo before the LAST `@` of the authority, so the group now runs to it
+// and the host excludes `@` entirely. Both changes are needed: either alone
+// still leaks.
 function redactUrls(text) {
-  return str(text).replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^@\/\s]*@)?([^\/\s?#:]*)[^\s]*/gi, function(all, host) {
+  return str(text).replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^\/\s]*@)?([^\/\s?#:@]*)[^\s]*/gi, function(all, host) {
     return host !== "" ? host : "[url]"
   })
 }
@@ -4461,13 +4511,32 @@ var WCAG_AA_TEXT = 4.5
 var CURSOR_INK_TARGET = 4.7
 
 // Both inputs and the fill are [r, g, b] in 0-255. Returns [r, g, b].
+// The mix-search sibling of alphaForContrast, and it carried the same defect
+// in its FALLBACK (D-RUNG-17). Returns the LEAST mixed colour that clears
+// `target` against `fill`; when nothing clears it, returns the mix that
+// MAXIMISES contrast rather than the far endpoint.
+//
+// colorMix interpolates in gamma space and relativeLuminance is convex, so the
+// contrast of a mix against a third colour is not monotonic in the mix
+// fraction. Handing back `toward` on failure therefore picks an arbitrary
+// point, not the best one: over a deterministic 20,000-pair sweep a better mix
+// existed on 57.7 per cent of the fallbacks, worst case 1.0273 returned where
+// 4.5722 was available one step in. No installed theme reaches the fallback,
+// which is why it went unnoticed -- the same reason D-RUNG-16 did.
+function mixForContrast(from, toward, fill, target) {
+  var best = contrastRatio(from, fill), bestMix = from.slice ? from.slice(0) : from
+  for (var step = 1; step <= 100; step++) {
+    var mixed = colorMix(from, toward, step / 100)
+    var c = contrastRatio(mixed, fill)
+    if (c >= target) return mixed
+    if (c > best) { best = c; bestMix = mixed }
+  }
+  return bestMix
+}
+
 function cursorInk(accent, text, fill) {
   if (contrastRatio(accent, fill) >= CURSOR_INK_TARGET) return accent.slice ? accent.slice(0) : accent
-  for (var step = 1; step <= 100; step++) {
-    var mixed = colorMix(accent, text, step / 100)
-    if (contrastRatio(mixed, fill) >= CURSOR_INK_TARGET) return mixed
-  }
-  return text.slice ? text.slice(0) : text
+  return mixForContrast(accent, text, fill, CURSOR_INK_TARGET)
 }
 
 // The QML seam. A QML `color` exposes r, g and b as 0-1 floats, and a binding
@@ -4540,6 +4609,146 @@ function cursorInkMix(accent, text, fill) {
     if (contrastRatio(colorMix(accent, text, step / 100), fill) >= CURSOR_INK_TARGET) return step / 100
   }
   return 1
+}
+
+// D-RUNG-9. The host's section header dims with `Qt.darker(foreground, 1.4)`,
+// which divides the ink's HSV value -- it dims toward BLACK. That is the exact
+// operation D-RUNG-3 and D-RUNG-5 removed from the bar, and it fails the same
+// two ways: on three themes the 10 px bold label lands under 4.5:1
+// (everforest 3.8017, gruvbox 4.2533, tokyo-night 4.2788), and on five LIGHT
+// themes it moves the ink AWAY from a pale background, so the "dimmed" header
+// comes out bolder than the body text it is meant to sit under -- rose-pine
+// 9.79 against 6.66, and on `white` an exact tie at 21.00 against 21.00,
+// because darkening pure black is a no-op.
+//
+// So the guide overrides `color` at its two call sites and dims toward the
+// BACKGROUND instead, which is ordinary alpha compositing and cannot invert.
+//
+// The alpha is not a constant, and that is the point. A single rung -- the
+// bar's 0.86, say -- clears every threshold but lifts the 18 dark themes by
+// 2.05 to 4.86 ratio points and collapses the header's separation from body
+// text from about 1.94x to 1.32x: the header stops reading as dimmed on every
+// theme this machine ships, to fix three. Spending a signal that works
+// everywhere to buy one that works in a few places is the trade D-RUNG-13
+// already refused on the cursor row.
+//
+// Instead: hold the SEPARATION roughly constant and let the alpha vary, with a
+// hard floor so the fix cannot undo itself. Same shape as `cursorInk` -- walk
+// until a target is met and stop at the first value that does.
+var SECTION_HEADER_SEPARATION = 1.93
+// 4.50 plus the calibration fixture's own `tolerance.abs`, because a 10 px
+// BOLD caption renders at model accuracy (D-RUNG-14, measured) and so a target
+// of 4.65 really does land above the line rather than on it.
+var SECTION_HEADER_FLOOR = 4.65
+
+// Both inputs are QML colours or [r, g, b]. Returns the opacity to draw the
+// section header at, over `background`.
+// ---- one alpha search, called by every rung that picks one ----------------
+//
+// D-RUNG-16. This exists because the search was written twice and the SECOND
+// copy was audited while the first kept the bug both were born with.
+//
+// The bug is an assumption that looks free: that contrast rises with alpha, so
+// "if full opacity cannot clear the target, nothing can". It does not rise
+// monotonically. colorOver blends in GAMMA space and relativeLuminance's
+// transfer is convex, so a blend's luminance sits below the straight line
+// between its endpoints; when the channels move in opposite directions the
+// contrast curve PEAKS IN THE INTERIOR. Measured on #c50236 over #20f91e:
+// 0.70 -> 4.3973, 0.83 -> 4.7318, 1.00 -> 4.2580. A short circuit on the
+// full-opacity value therefore returns a FAILING rung while a passing one sits
+// two steps away, and the fallback "return 1" picks the WORST rung available
+// rather than the best.
+//
+// Neither branch could bite the 23 installed themes -- the minimum
+// full-opacity contrast across all 46 surfaces is 5.9384, 28 per cent above
+// the floor, and a 10,000-step scan finds no non-monotonic surface among them.
+// That is exactly why it survived: an unreachable branch is an untested one.
+//
+// Returns the LOWEST alpha in [fromStep/100, 1] whose composite clears
+// `target`. When nothing clears it, returns the alpha that MAXIMISES contrast,
+// which the counterexample above shows is not always 1.
+function alphaForContrast(fg, bg, target, fromStep) {
+  var best = -1, bestAt = 1
+  for (var step = fromStep; step <= 100; step++) {
+    var a = step / 100
+    var c = contrastRatio(colorOver(fg, bg, a), bg)
+    if (c >= target) return a
+    if (c > best) { best = c; bestAt = a }
+  }
+  return bestAt
+}
+
+function sectionHeaderAlpha(foreground, background) {
+  var fg = qmlRgb(foreground), bg = qmlRgb(background)
+  // SECTION_HEADER_SEPARATION is a CEILING on dimming, not a guaranteed
+  // minimum: dim as far as the separation allows, but never below the floor.
+  var target = Math.max(SECTION_HEADER_FLOOR, contrastRatio(fg, bg) / SECTION_HEADER_SEPARATION)
+  // A theme whose body text is at or under the target has no dimming to give,
+  // and alphaForContrast says so by returning its most legible rung -- which
+  // is 1 wherever contrast really is monotonic, so every installed theme gets
+  // back byte-identically what the short circuit used to hand it.
+  return alphaForContrast(fg, bg, target, 1)
+}
+
+// ---- D-RUNG-14, the caption rung, chosen per SURFACE ----------------------
+//
+// A caption is drawn at 0.7 so it reads as secondary. That rung was picked
+// against the card, and the same rung on the SELECTED row is a different
+// rendering: `Color.menu.selectedBackground` is the text colour at 0.08 over
+// the card, so the fill moves TOWARD the ink and the caption loses contrast it
+// never agreed to lose. Measured on tokyo-night, 4.6433 on the card and 4.2157
+// on the selection -- one side of 4.5 each. No font weight recovers that; bold
+// measures 4.1893 there, which is model accuracy and still a failure, because
+// the ceiling is in the arithmetic and not in the glyph.
+//
+// So the rung is an OUTPUT, not a constant: hold the rendered contrast at the
+// floor and let alpha be whatever that costs on the fill the element is
+// actually on. The same shape as sectionHeaderAlpha above, for the same reason.
+//
+// This raises NOTHING on 16 of 23 themes -- they clear the floor at 0.7 on both
+// surfaces and get 0.7 byte-identical. The other 7 rise to between 0.71 and
+// 0.89, and the worst case is rose-pine, which was never close: 3.1402.
+var CAPTION_BASE = 0.7
+// 4.50 plus the calibration fixture's `tolerance.abs`, the same derivation as
+// SECTION_HEADER_FLOOR and deliberately the same number. They are separate
+// constants because they answer to separate evidence and either may move alone.
+// This one is the floor for a BOLD caption, which renders at model accuracy.
+var CAPTION_FLOOR = 4.65
+// A REGULAR 10 px caption does not render at model accuracy: it lands 11 to 13
+// per cent below the model, which is why the calibration fixture gives the
+// caption class a RELATIVE tolerance instead of the absolute one (F-CAL-1,
+// measured live on 15 rows). A model value of 4.65 therefore renders about
+// 4.09 at regular weight -- under AA. So a regular caption needs its floor
+// grossed up by that shortfall rather than sharing the bold one. Two of the
+// five caption sites are deliberately regular (prose, not labels), and giving
+// them the bold floor would have shipped a number that looks verified and is
+// not.
+var CAPTION_REGULAR_SHORTFALL = 0.15
+var CAPTION_FLOOR_REGULAR = 4.5 / (1 - CAPTION_REGULAR_SHORTFALL)
+
+// `fill` is the composited surface the caption lands on -- pass the result of
+// qmlFill for an alpha-carrying QML colour, never the alpha colour itself.
+// `floor` defaults to the bold floor; pass CAPTION_FLOOR_REGULAR for a site
+// that ships at regular weight.
+function captionAlpha(foreground, fill, floor) {
+  var fg = qmlRgb(foreground), bg = qmlRgb(fill)
+  var want = typeof floor === "number" ? floor : CAPTION_FLOOR
+  // Never dim BELOW the base rung, and never raise where the base already
+  // clears the floor: the rung is what keeps a caption secondary, and spending
+  // hierarchy on a surface that did not need it is the cost this avoids.
+  if (contrastRatio(colorOver(fg, bg, CAPTION_BASE), bg) >= want) return CAPTION_BASE
+  // NO short circuit on the full-opacity value, and that is load-bearing.
+  // Contrast is NOT monotonic in alpha: colorOver blends in gamma space and the
+  // luminance transfer is convex, so when the channels move in opposite
+  // directions the curve PEAKS in the interior. Measured on #c50236 over
+  // #20f91e: 0.70 -> 4.3973, 0.83 -> 4.7318, 1.00 -> 4.2580. A guard that read
+  // "if full opacity cannot clear the floor, return 1" therefore returned a
+  // FAILING rung while a passing one existed two steps away. It also happened
+  // to be dead against all 46 installed surfaces, so no test reached it -- an
+  // untested branch that could only ever be wrong.
+  // One search, shared with sectionHeaderAlpha (D-RUNG-16). A second copy of
+  // this loop is how the non-monotonicity bug outlived its own discovery.
+  return alphaForContrast(fg, bg, want, Math.round(CAPTION_BASE * 100) + 1)
 }
 
 var TEXT_DIM = 0.52
@@ -6399,6 +6608,7 @@ if (typeof module !== "undefined") {
     trimRecents: trimRecents,
     withFailed: withFailed,
     withoutFailed: withoutFailed,
+    failedAfterHealthy: failedAfterHealthy,
     parseJsonObject: parseJsonObject,
     parseChannels: parseChannels,
     parseEpgNow: parseEpgNow,
@@ -6540,6 +6750,16 @@ if (typeof module !== "undefined") {
     qmlRgb: qmlRgb,
     hexOf: hexOf,
     cursorInkMix: cursorInkMix,
+    sectionHeaderAlpha: sectionHeaderAlpha,
+    SECTION_HEADER_SEPARATION: SECTION_HEADER_SEPARATION,
+    SECTION_HEADER_FLOOR: SECTION_HEADER_FLOOR,
+    CAPTION_BASE: CAPTION_BASE,
+    CAPTION_FLOOR: CAPTION_FLOOR,
+    CAPTION_FLOOR_REGULAR: CAPTION_FLOOR_REGULAR,
+    CAPTION_REGULAR_SHORTFALL: CAPTION_REGULAR_SHORTFALL,
+    captionAlpha: captionAlpha,
+    alphaForContrast: alphaForContrast,
+    mixForContrast: mixForContrast,
     relativeLuminance: relativeLuminance,
     contrastRatio: contrastRatio,
     colorOver: colorOver,
