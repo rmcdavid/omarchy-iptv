@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.6. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.7.7. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
@@ -97,7 +97,7 @@ Two places they can escape that, both worth knowing:
 | `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
 | `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
 
-**Channel logos are not implemented yet, and the plan for them is public.** Logos are hosted by third parties named in your playlist, not by this plugin. Before any of it is built you can see exactly what enabling them would cost your privacy: `omarchy-iptv logos` reads the cached playlist and prints which hosts it would contact and how many channels each covers. It makes no request. On the playlist this was measured against the answer was 63 hosts, one of them covering two thirds of the channels -- which is why the eventual setting will be off by default, `https` only, and will never send your playlist's credentials.
+**Channel logos are not implemented yet, and the plan for them is public.** Logos are hosted by third parties named in your playlist, not by this plugin. Before any of it is built you can see exactly what enabling them would cost your privacy: `omarchy-iptv logos` reads the cached playlist and prints which hosts it would contact and how many channels each covers. It makes no request. (`omarchy-iptv logos --fetch` does download them, under every guard below, but nothing displays them yet -- there is no reason to run it.) On the playlist this was measured against the answer was 63 hosts, one of them covering two thirds of the channels -- which is why the eventual setting will be off by default, `https` only, and will never send your playlist's credentials.
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your

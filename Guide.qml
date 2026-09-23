@@ -563,6 +563,11 @@ Item {
     refreshing: root.serviceReady && root.service.refreshing,
     epgPending: root.serviceReady && root.service.epgPending,
     warning: root.warningText,
+    // D-SAVE-1: in Favourites, say how much of the list is saved searches
+    // rather than stars. Without it the list fills with channels the user
+    // never starred and nothing on screen explains why.
+    savedSearches: root.effectiveScope === Model.SCOPE_FAVORITES && root.serviceReady
+      ? Model.savedSearchFooter(root.service.userState, root.service.channels) : "",
     // D-HOST-1: the running component is older than the files it was loaded
     // from, which means an update landed and a hot reload did not replace it.
     // Sits below a provider warning and above the plain counts.
@@ -952,7 +957,24 @@ Item {
       root.showTransient(root.copy.transientRecentRemoved)
       root.rebuildDisplay()
     } else if (root.effectiveScope === Model.SCOPE_FAVORITES) {
-      root.toggleFavoriteAt(index)
+      // D-SAVE-1. Favourites holds two kinds of row since saved searches
+      // landed: channels the user starred, and channels a saved search
+      // matched. `x` used to call the favourite toggle for both -- so on a
+      // saved row, which is not starred, it ADDED a star, and a second press
+      // removed the star and left the row, because the search still matched.
+      // The one key that means "remove this" could not remove it, in either
+      // direction.
+      //
+      // A row that is BOTH loses the star first: the star is the narrower and
+      // more deliberate of the two, and forgetting the search would take other
+      // rows with it. A second `x` then forgets the search.
+      var origin = Model.favoriteOrigin(root.service.userState, channel)
+      if (!origin) return
+      if (origin.kind === "star") { root.toggleFavoriteAt(index); return }
+      var count = Model.savedSearchCount(root.service.channels, origin.query)
+      root.service.forgetSearch(origin.query)
+      root.showTransient(Model.favoriteRemovalNotice(origin, count))
+      root.rebuildDisplay()
     }
   }
 
