@@ -2042,6 +2042,53 @@ checkCall("M2-04: the column appears at 98 per cent coverage and at 27, and not 
           Model.logoColumnShown([{ logo: "http://x.test/a.png" }], true, dir)]
 }, [true, true, true, false, false, false])
 
+checkCall("D-LOGO-2: a settings write states every owned key, so neither writer reverts the other", function () {
+  // The entry is composed from `barConfig`, which the host publishes ONE
+  // WRITE BEHIND. A write naming only its own key carried the PREVIOUS value
+  // of the others back to disk: turn logos off, then edit a source URL, and
+  // `showLogos: true` was written again -- the setting came back on by
+  // itself and the fetch resumed.
+  const effective = { playlistUrl: "p", epgUrl: "e", showLogos: false, maxRecents: 10 }
+  const urlWrite = Model.ownedEntryPatch(effective, { playlistUrl: "p2", epgUrl: "e2" })
+  const logoWrite = Model.ownedEntryPatch(effective, { showLogos: true })
+  return [
+    // the URL write carries the CURRENT showLogos, not a stale one
+    urlWrite.showLogos, urlWrite.playlistUrl, urlWrite.epgUrl,
+    // the logo write carries the CURRENT urls
+    logoWrite.showLogos, logoWrite.playlistUrl, logoWrite.epgUrl,
+    // and neither invents a key it does not own
+    Object.keys(urlWrite).sort().join(","),
+    Model.OWNED_SETTINGS.join(",")
+  ]
+}, [false, "p2", "e2", true, "p", "e", "epgUrl,playlistUrl,showLogos", "playlistUrl,epgUrl,showLogos"])
+
+checkCall("D-LOGO-2: the whole round trip -- off, then an unrelated write, stays off", function () {
+  // The defect as a sequence, through the same functions the service calls.
+  const host = { playlistUrl: "p", epgUrl: "e", showLogos: true }
+  // 1. the user turns logos OFF
+  const offPatch = Model.ownedEntryPatch(Model.settingsWithOwnWrite(host, null), { showLogos: false })
+  const own = Model.ownWriteOf(host, offPatch)
+  const afterOff = Model.settingsWithOwnWrite(host, own)
+  // 2. the host has not echoed yet, so barConfig still says true -- and the
+  //    user now edits a source URL
+  const urlPatch = Model.ownedEntryPatch(afterOff, { playlistUrl: "p2" })
+  return [afterOff.showLogos, urlPatch.showLogos, urlPatch.playlistUrl,
+          // what the OLD code wrote: the stale host value
+          Model.findBarEntry({ layout: { left: [{ id: "x", showLogos: true }] } }, "x").showLogos]
+}, [false, false, "p2", true])
+
+checkCall("D-LOGO-6: all-http logos say so, instead of claiming there are none", function () {
+  const allHttp = Model.logoConsentLines(Model.logoSurvey(
+    [{ logo: "http://p.test/a.png" }, { logo: "http://p.test/b.png" }]))
+  const none = Model.logoConsentLines(Model.logoSurvey([{ name: "a" }, { name: "b" }]))
+  return [allHttp[0], none[0], allHttp[0] === none[0]]
+}, ["2 channels offer a logo, and none of them can be used.",
+    "No channel in this playlist offers a logo.", false])
+
+checkCall("D-LOGO-6: and the ordinary sentence still agrees with itself on one channel", function () {
+  return Model.logoConsentLines(Model.logoSurvey([{ logo: "https://h.test/a.png" }]))[1]
+}, "1 of 1 channel carries a logo. Each one is fetched once and cached.")
+
 checkCall("M2-04: the consent sentence counts parties, and names the busiest", function () {
   const rows = []
   for (let i = 0; i < 999; i++) rows.push({ logo: "https://i.imgur.com/" + i + ".png" })

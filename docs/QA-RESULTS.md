@@ -7139,6 +7139,137 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## 0.7.9 preflight, 2026-09-23: seven defects in the feature shipped that morning
+
+The cut was called and did not happen. An adversarial review of the five
+candidate commits -- five reviewers by dimension, then two independent
+refuters per finding, one on mechanism and one on whether it reaches a real
+user -- produced 14 raw findings, of which **8 survived both verifiers**.
+Seven were in M2-04, the logos feature committed hours earlier with eleven
+mutation proofs and a live pass at both coverage extremes.
+
+That is the lesson worth keeping: **eleven green mutations and a live pass
+did not find any of these.** Mutation proofs verify that a check can see the
+decision it was written for. They say nothing about decisions nobody wrote a
+check for, and every one of these was such a decision.
+
+### D-LOGO-1 (blocker): the https rule held for one hop
+
+`fetch_logo` checked the scheme of the URL it was handed and then called the
+bare `urllib.request.urlopen`, whose default opener follows a 302 to `http://`
+and to `ftp://`. So an https logo could redirect the fetch into cleartext, to
+a host the consent dialog never counted -- and an ftp target would even pass
+the content-type gate, because urllib synthesizes `Content-Type` for an FTP
+response from the filename.
+
+`make_opener` has existed for this exact class since S-06, and its own comment
+says *"urllib's default happily follows a 302 to ftp://"*. `fetch_logo` did not
+use it. It avoided `read_http_source` deliberately, to keep `Authorization`
+off a logo request -- correct -- and in doing so dropped the redirect guard
+with it.
+
+Fixed with `logo_opener`, the narrower sibling: https on **every** hop,
+userinfo refused on every hop, and the FTP, file and data handlers removed from
+the opener entirely. Cross-host https redirects are still allowed and that
+residual is stated in the docstring rather than rounded away.
+
+**Why no test saw it:** every test in `tests/test_logos.py` monkeypatched
+`helper.fetch_logo` with a double, so the one function that touches the
+network was never executed. Now there are seven that run against a real
+`http.server` on 127.0.0.1.
+
+And the first version of those tests was itself wrong in the familiar way:
+they called `logo_opener()` directly, so **the mutation restoring the bare
+`urlopen` stayed green across all of them.** They proved the guard works and
+never that `fetch_logo` uses it. Repointed at the seam by narrowing
+`LOGO_SCHEMES` for the call, so the local server is an acceptable first hop and
+the redirect is refused as the second; that mutation is now red. Third time
+today a check pinned the piece instead of the seam.
+
+### D-LOGO-2 (blocker): turning logos off did not stay off
+
+Both settings writers compose the bar entry from `barConfig`, which the host
+publishes **one write behind** -- the contract this project already documents
+and already has a rule about. A write naming only its own keys therefore
+carried the previous value of every other key back to disk.
+
+| | |
+|---|---|
+| turn logos off | `showLogos: false` written |
+| then edit a source URL | `persistActive` rebuilds from a `barConfig` that still says `true`, and writes `showLogos: true` |
+
+The setting came back on by itself and the fetch resumed. The same hole
+existed in the other direction: `setShowLogos` named `showLogos` alone and
+wrote the stale playlist and EPG URLs back with it.
+
+Fixed by `Model.ownedEntryPatch`: every write states all three keys the plugin
+owns, at their current **effective** values. Both writers become idempotent and
+neither can revert the other.
+
+### D-LOGO-3 (major): off did not stop a fetch already running
+
+`onShowLogosChanged` started a fetch on the on-edge and did nothing on the
+off-edge, and nothing ever signalled `logoFetchProc`. On a 1,445-channel list
+the switch the user just threw went on contacting third parties for minutes.
+Now the off-edge signals the process and clears the `have` set in the same
+turn, so the rows blank immediately.
+
+### D-LOGO-4 (major): a removed source kept its logos forever
+
+`logos/` is the first **subdirectory** this plugin has ever created under
+`sources/<key>/`, and `clear_source_dir` could not delete one:
+`remove_regular` returns `False` for a directory, so `logos` always landed in
+`kept`, the `if not kept: os.rmdir(path)` never fired, and `cache prune`
+classified the whole source key as kept rather than removed -- on that run and
+on every later one.
+
+So removing a source, or merely editing its URL (which re-keys the directory),
+left up to `MAX_LOGO_FILES` x `MAX_LOGO_BYTES` on disk permanently, named by
+`fnv1a32` of the logo URLs -- which, against the public playlist, re-identifies
+the channels that source carried. `cache_epg_clear`'s own docstring promises
+*"removing a source deletes its whole cache directory"*; it had become false.
+
+Fixed with `CACHE_SUBDIRS` and `remove_cache_subdir`, which is deliberately
+**one level deep and not `rmtree`**: a nested directory or anything unexpected
+is left and reported rather than followed, and a symlink is unlinked rather
+than traversed. Both are asserted, including that a symlink's target outside
+the cache survives.
+
+### D-LOGO-5 (minor): the column moved the name and nothing else
+
+`nameText` was re-anchored to the logo; `detailText` and the EPG progress
+track were not, so a two-line row drew the channel name indented past the logo
+with the programme title flush underneath it. The 22 px image also overhung
+`nameText.bottom` by about 3 px onto the detail text. All three now share one
+left edge, and the image is bounded by the name line's height.
+
+### D-LOGO-6 (minor): "no channel offers a logo" when every channel did
+
+`logoConsentLines` branched on `hostCount === 0`, but a non-https logo lands in
+`refused` rather than `hosts`. A playlist whose logo URLs are all `http` has
+`withLogo > 0`, `refused > 0` and `hostCount === 0`, so the dialog told the
+user their playlist offers no logos while every channel offered one and the
+policy was declining all of them. Two different answers now.
+
+### D-LOGO-7 (major): the README said the feature did not exist
+
+`README.md` is on the allowlist, so `omarchy plugin add` puts it in every
+user's plugin directory. It still read **"Channel logos are not implemented
+yet"** and *"nothing displays them yet -- there is no reason to run it"*, in
+the release whose headline is that feature. The settings table was also missing
+its row. Both corrected.
+
+### What this changes about how the day went
+
+Five items were closed before this review, each with mutation proofs, and the
+review found seven defects in one of them. The proofs were not wrong -- they
+were answering a narrower question than anyone was reading them as answering.
+A mutation proof says *this check can see this decision*. It does not say the
+decisions were enumerated, and enumerating them is what an adversarial reader
+does that the author cannot.
+
+Node 1554 -> **1558**, python 582 -> **596**.
+
 ## D-A11Y-8, 2026-09-23: one unguarded call disabled 28 assertions for a release
 
 Found while starting work on the harness's open items 2, 3 and 10. The first

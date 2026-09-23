@@ -190,6 +190,40 @@ column costs about twenty image loads and not ten thousand; each is
 `asynchronous`, with `sourceSize` capped at twice the slot so a 256 KB image is
 not decoded at full size to be drawn at 22 px.
 
+## Seven defects the 0.7.9 preflight found, all in this feature
+
+The guide half was committed with eleven mutation proofs and a live pass at
+both coverage extremes. An adversarial review of the release candidate found
+**seven defects in it anyway**, two of them blockers, and the release was held.
+
+Two broke this ruling directly:
+
+- **Rule 3 held for one hop only.** `fetch_logo` validated the scheme it was
+  handed and then used urllib's default opener, which follows a 302 to
+  `http://` or `ftp://`. The consent sentence rule 6 composes is a promise
+  about which hosts are contacted, and a redirect broke it silently.
+  `logo_opener` now enforces https and refuses userinfo on every hop.
+- **Rule 1's switch did not stay thrown.** Turning logos off, then editing a
+  source URL, wrote `showLogos: true` back to disk, because the bar entry is
+  composed from a `barConfig` the host publishes one write behind. Off by
+  default means nothing if off does not persist.
+
+One was a privacy defect this ruling did not anticipate at all: **a removed
+source kept its logo cache forever**, with filenames that re-identify the
+channels that source carried. The ruling reasoned carefully about what
+fetching logos discloses and not at all about what the cache leaves behind
+when the user withdraws consent. Add that to the list of things a feature
+like this has to answer: not only *who is contacted* but *what survives the
+user changing their mind*.
+
+The rest are in `docs/QA-RESULTS.md`.
+
+The honest reading of this is not that the mutation proofs were wrong. They
+were answering a narrower question than they were being read as answering: a
+mutation proof says a check can see the decision it was written for, and says
+nothing about decisions nobody wrote a check for. Enumerating those is what an
+adversarial reader does and the author cannot.
+
 ## Still not built
 
 The fetch is best-effort and reports nothing to the user: the pictures

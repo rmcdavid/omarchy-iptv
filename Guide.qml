@@ -2937,7 +2937,10 @@ Item {
                       id: logoImage
                       visible: root.logoWidth > 0
                       width: root.logoWidth
-                      height: root.logoWidth
+                      // D-LOGO-5: bounded by the name line's own height, so a
+                      // 22 px square cannot overhang into the detail text
+                      // below it on a two-line row.
+                      height: Math.min(root.logoWidth, lead.height)
                       anchors.left: lead.right
                       anchors.leftMargin: root.logoWidth > 0 ? Style.spacing.labelGap : 0
                       anchors.verticalCenter: lead.verticalCenter
@@ -2993,7 +2996,13 @@ Item {
                     Text {
                       id: detailText
                       visible: root.rowsHaveDetail
-                      anchors.left: lead.right
+                      // D-LOGO-5: the logo column moved the NAME and left the
+                      // detail line and the progress bar at the old left edge,
+                      // so a two-line row printed the name indented past the
+                      // logo and the programme title flush under it. All three
+                      // share one left edge or none of them do.
+                      anchors.left: logoImage.visible ? logoImage.right : lead.right
+                      anchors.leftMargin: logoImage.visible ? Style.spacing.labelGap : 0
                       anchors.right: parent.right
                       anchors.top: nameText.bottom
                       textFormat: Text.PlainText
@@ -3014,7 +3023,9 @@ Item {
                     Rectangle {
                       id: track
                       visible: root.rowsHaveDetail && row.showProgress
-                      anchors.left: lead.right
+                      // D-LOGO-5, same left edge as the name and the detail.
+                      anchors.left: logoImage.visible ? logoImage.right : lead.right
+                      anchors.leftMargin: logoImage.visible ? Style.spacing.labelGap : 0
                       anchors.right: meta.visible ? meta.left : parent.right
                       anchors.bottom: parent.bottom
                       height: Style.space(2)

@@ -2242,6 +2242,71 @@ def logo_filename(url: str) -> str:
     return fnv1a32(url)
 
 
+def logo_opener(host: str) -> Any:
+    """An opener that enforces the https rule on EVERY hop, not just the first.
+
+    D-LOGO-1. `fetch_logo` checked the scheme of the URL it was handed and then
+    called the bare `urllib.request.urlopen`, which uses the module-global
+    default opener -- and urllib's default redirect handler happily follows a
+    302 to `http://` or `ftp://`. So an https logo could redirect the fetch
+    into cleartext, or onto an unauthenticated FTP connection, and an ftp
+    target would even pass the content-type gate because urllib synthesizes
+    Content-Type for an FTP response from the filename.
+
+    That breaks two things this feature is built on: RULING-LOGOS.md (dev
+    branch) rule 3, https only, which this function's own docstring claims;
+    and the consent sentence, which tells the user how many hosts will be
+    contacted and names the busiest.
+
+    `make_opener` already exists for this class of bug (S-06) but is one step
+    too permissive here: it allows http as well as https, which is right for a
+    playlist and wrong for a logo. This is the narrower sibling.
+
+    RESIDUAL, stated rather than rounded away: a redirect to a different HTTPS
+    host is allowed, and the consent count does not cover it. Refusing every
+    cross-host redirect would break ordinary CDN behaviour, and the disclosure
+    is to a party the named host chose rather than one this plugin invented.
+    It is transient, carries no credentials, and is reasoned about here rather
+    than left implicit.
+    """
+    import urllib.request
+
+    class LogoRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+            parsed = urllib.parse.urlsplit(newurl)
+            if parsed.scheme.lower() not in LOGO_SCHEMES:
+                try:
+                    fp.close()
+                except OSError:
+                    pass
+                raise HelperError("logo_redirect",
+                                  "a logo from %s redirected to '%s', which is not https"
+                                  % (host, parsed.scheme.lower() or "no scheme"))
+            if "@" in parsed.netloc:
+                try:
+                    fp.close()
+                except OSError:
+                    pass
+                raise HelperError("logo_redirect",
+                                  "a logo from %s redirected to a URL carrying userinfo" % host)
+            new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None:
+                # Nothing sets these on a logo request; removed anyway so a
+                # future caller cannot reintroduce the leak by adding a header.
+                for name in ("Authorization", "Cookie"):
+                    new.remove_header(name)
+            return new
+
+    # No FTPHandler: build_opener adds the defaults, and the redirect guard
+    # already refuses an ftp target, but a handler that cannot be reached is
+    # one fewer thing to reason about.
+    opener = urllib.request.build_opener(LogoRedirectHandler())
+    opener.handlers = [h for h in opener.handlers
+                       if h.__class__.__name__ not in ("FTPHandler", "CacheFTPHandler",
+                                                       "FileHandler", "DataHandler")]
+    return opener
+
+
 def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
     """Fetch one logo under the ruling's guards. Returns (bytes, content type).
 
@@ -2262,7 +2327,7 @@ def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
     host = parsed.netloc.lower()
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with logo_opener(host).open(request, timeout=timeout) as response:
             ctype = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ctype not in LOGO_TYPES:
                 raise HelperError("logo_type", "refused %s from %s" % (ctype or "an unnamed type", host))
@@ -2371,8 +2436,8 @@ def cmd_logos(args: argparse.Namespace) -> int:
         except HelperError as error:
             # Hosts and codes only, never the URL (rule 5).
             reasons[error.code] = reasons.get(error.code, 0) + 1
-            if error.code in ("logo_scheme", "logo_userinfo", "logo_type",
-                              "logo_bytes", "logo_too_large"):
+            if error.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
+                              "logo_type", "logo_bytes", "logo_too_large"):
                 refused += 1
             else:
                 failed += 1
@@ -3966,6 +4031,42 @@ def remove_regular(path: str) -> bool:
     return True
 
 
+# Subdirectories this plugin creates inside sources/<key>/ and is therefore
+# responsible for deleting. M2-04's `logos/` is the first one that has ever
+# existed, and it exposed that clear_source_dir could not remove a directory
+# at all: remove_regular returns False for one, so it always landed in `kept`,
+# the `if not kept` rmdir never fired, and `cache prune` classified the whole
+# source key as kept rather than removed. A removed source left up to
+# MAX_LOGO_FILES * MAX_LOGO_BYTES on disk permanently, and no later prune
+# could ever collect it -- with filenames that are fnv1a32 of the logo URLs,
+# so the leftovers identify the channels that source carried (D-LOGO-4).
+CACHE_SUBDIRS = ("logos",)
+
+
+def remove_cache_subdir(path: str) -> bool:
+    """Delete one of OUR cache subdirectories. False when it is not there.
+
+    Deliberately not shutil.rmtree and deliberately not recursive: this
+    removes regular files one level down and then the directory itself, so a
+    nested directory, a symlink to somewhere else, or anything unexpected is
+    LEFT and reported rather than followed. A cache cleaner that recurses is
+    one bug away from deleting something it does not own.
+    """
+    try:
+        names = sorted(os.listdir(path))
+    except FileNotFoundError:
+        return False
+    except NotADirectoryError:
+        return False
+    for name in names:
+        remove_regular(os.path.join(path, name))
+    try:
+        os.rmdir(path)
+    except OSError:
+        return False
+    return True
+
+
 def clear_source_dir(path: str) -> tuple[list[str], list[str]]:
     """Delete the known cache files inside `path` and rmdir it when nothing
     else is left. -> (removed names, kept names)."""
@@ -3976,7 +4077,10 @@ def clear_source_dir(path: str) -> tuple[list[str], list[str]]:
     except FileNotFoundError:
         return removed, kept
     for name in names:
-        if (name in CACHE_FILES or is_temp_name(name)) and remove_regular(os.path.join(path, name)):
+        full = os.path.join(path, name)
+        if name in CACHE_SUBDIRS and remove_cache_subdir(full):
+            removed.append(name)
+        elif (name in CACHE_FILES or is_temp_name(name)) and remove_regular(full):
             removed.append(name)
         else:
             kept.append(name)

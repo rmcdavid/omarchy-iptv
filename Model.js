@@ -3017,7 +3017,22 @@ function logoConsentLines(survey) {
   var s = survey && typeof survey === "object" ? survey : {}
   var hostCount = Math.max(0, Math.floor(Number(s.hostCount) || 0))
   var contact = Math.max(0, Math.floor(Number(s.wouldContact) || 0))
+  var withLogoEarly = Math.max(0, Math.floor(Number(s.withLogo) || 0))
+  var refusedEarly = Math.max(0, Math.floor(Number(s.refused) || 0))
   if (hostCount === 0 || contact === 0) {
+    // D-LOGO-6. These are two different answers and the dialog used to give
+    // the first for both. A playlist whose logo URLs are ALL http has
+    // withLogo > 0, refused > 0 and hostCount 0 -- every channel offers a
+    // logo and the policy is declining every one of them. Telling that user
+    // "no channel offers a logo" sends them away believing their provider
+    // supplies none.
+    if (withLogoEarly > 0) {
+      return [formatCount(withLogoEarly) + (withLogoEarly === 1 ? " channel offers a logo" : " channels offer a logo")
+              + ", and none of them can be used.",
+              "Every one is either not https or has no host, so nothing would be fetched"
+              + " and nothing would be contacted.",
+              "No credentials are ever sent with a logo request."]
+    }
     return ["No channel in this playlist offers a logo.",
             "Turning this on would contact nobody, and change nothing on screen."]
   }
@@ -3031,7 +3046,8 @@ function logoConsentLines(survey) {
   var lines = [lead + ".",
                formatCount(withLogo) + " of "
                + pluralChannels(Math.max(0, Math.floor(Number(s.channels) || 0)))
-               + " carry a logo. Each one is fetched once and cached."]
+               + (withLogo === 1 ? " carries" : " carry")
+               + " a logo. Each one is fetched once and cached."]
   var refused = Math.max(0, Math.floor(Number(s.refused) || 0))
   if (refused > 0) {
     lines.push(formatCount(refused) + (refused === 1 ? " logo is" : " logos are")
@@ -3205,6 +3221,36 @@ function ownWriteOf(hostSettings, values) {
     value[key] = values[key]
   }
   return { base: base, value: value }
+}
+
+// Every key this plugin owns inside the host's bar entry.
+//
+// D-LOGO-2, and the reason all of them are always stated. The entry handed to
+// `updateEntryInline` is composed from `barConfig`, which the host publishes
+// ONE WRITE BEHIND (see the last section of OMARCHY-PLUGIN-CONTRACT.md (dev
+// branch)). A write that mentions only its own key therefore carries the
+// PREVIOUS value of every other key back to disk -- so turning logos off and
+// then editing a source URL wrote `showLogos: true` again, the setting came
+// back on by itself, and the fetch resumed. The same hole existed in the
+// other direction.
+//
+// Stating all three on every write makes both writers idempotent and makes
+// neither able to revert the other. It is cheap because there are three.
+var OWNED_SETTINGS = ["playlistUrl", "epgUrl", "showLogos"]
+
+// The patch for a settings write: every owned key, at the value it should
+// hold AFTER this write. `effective` is what the plugin currently acts on
+// (settings, i.e. the host's values with any own-write already laid over
+// them), and `overrides` is what this particular write is changing.
+function ownedEntryPatch(effective, overrides) {
+  var eff = effective || {}
+  var ov = overrides || {}
+  var out = {}
+  for (var i = 0; i < OWNED_SETTINGS.length; i++) {
+    var key = OWNED_SETTINGS[i]
+    out[key] = Object.prototype.hasOwnProperty.call(ov, key) ? ov[key] : eff[key]
+  }
+  return out
 }
 
 // The URL pair, which is what every caller before M2-04 writes.
@@ -7237,6 +7283,8 @@ if (typeof module !== "undefined") {
     clampSetting: clampSetting,
     settingsFrom: settingsFrom,
     ownWriteOf: ownWriteOf,
+    ownedEntryPatch: ownedEntryPatch,
+    OWNED_SETTINGS: OWNED_SETTINGS,
     confirmLogosMessage: confirmLogosMessage,
     logoFetchArgv: logoFetchArgv,
     optInSetting: optInSetting,

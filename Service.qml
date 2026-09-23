@@ -2604,9 +2604,16 @@ Item {
       root.sourcesPersistFailed("persist_failed")
       return false
     }
-    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), { playlistUrl: playlistUrl, epgUrl: epgUrl, id: root.pluginId })
+    // D-LOGO-2: every key the plugin owns is stated, at its current effective
+    // value, because the entry is composed from a `barConfig` the host
+    // publishes one write behind. Naming only the URLs wrote the PREVIOUS
+    // `showLogos` back to disk, so turning logos off and then editing a
+    // source turned them on again.
+    var patch = Model.ownedEntryPatch(root.settings, { playlistUrl: playlistUrl, epgUrl: epgUrl })
+    patch.id = root.pluginId
+    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch)
     root.shell.updateEntryInline(root.pluginId, entry)
-    root.applyOwnWrite(playlistUrl, epgUrl)
+    root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, { playlistUrl: playlistUrl, epgUrl: epgUrl }))
     return true
   }
 
@@ -2634,10 +2641,13 @@ Item {
       console.warn("omarchy-iptv: no writable bar entry for the logo setting")
       return false
     }
-    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId),
-                                { showLogos: want, id: root.pluginId })
+    // D-LOGO-2, the other direction: this used to name showLogos alone and
+    // wrote the one-write-behind playlist and EPG URLs back with it.
+    var patch = Model.ownedEntryPatch(root.settings, { showLogos: want })
+    patch.id = root.pluginId
+    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch)
     root.shell.updateEntryInline(root.pluginId, entry)
-    root.ownWrite = Model.ownWriteOf(root.hostSettings, { showLogos: want })
+    root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, { showLogos: want }))
     return true
   }
 
@@ -3673,7 +3683,19 @@ Item {
     return true
   }
 
-  onShowLogosChanged: if (root.showLogos) root.fetchLogos()
+  // D-LOGO-3. Turning it ON starts a fetch; turning it OFF must STOP the one
+  // already running, or the switch the user just threw goes on contacting
+  // third parties for as long as the fetch takes -- which on a 1,445-channel
+  // list is minutes. The `have` set is cleared in the same turn so the rows
+  // blank immediately rather than after the process dies.
+  onShowLogosChanged: {
+    if (root.showLogos) {
+      root.fetchLogos()
+    } else {
+      root.logoHave = ({})
+      if (logoFetchProc.running) logoFetchProc.signal(15)
+    }
+  }
 
   Process {
     id: whichProc

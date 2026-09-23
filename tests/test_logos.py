@@ -391,6 +391,285 @@ class LogoFetchCacheTest(unittest.TestCase):
         self.assertEqual(len(report["names"]), 3)
         self.assertNotIn(helper.logo_filename("https://h.test/2.png"), report["names"])
 
+class LogoRedirectTest(unittest.TestCase):
+    """The real network function, over a real local server.
+
+    D-LOGO-1. Every other test in this file monkeypatches `helper.fetch_logo`
+    with a double, so the one thing that talks to the network was never
+    exercised and its redirect behaviour was never observed. That is how a
+    bare `urllib.request.urlopen` -- which follows a 302 to http:// and to
+    ftp:// -- survived review: the tests could not see it.
+
+    These run against 127.0.0.1 only and never leave the machine.
+    """
+
+    @staticmethod
+    def serve(handler_cls):
+        import http.server
+        import threading
+        srv = http.server.HTTPServer(("127.0.0.1", 0), handler_cls)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        return srv, thread
+
+    @staticmethod
+    def stop(srv, thread):
+        srv.shutdown()
+        srv.server_close()
+        thread.join(timeout=5)
+
+    def redirector(self, target):
+        """A server that 302s every request to `target`."""
+        import http.server
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", target)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        return outer.serve(H)
+
+    def test_a_redirect_to_http_is_refused(self):
+        """The headline case: an https logo must not end up in cleartext."""
+        srv, thread = self.redirector("http://127.0.0.1:9/a.png")
+        try:
+            url = "http://127.0.0.1:%d/a.png" % srv.server_address[1]
+            # The initial scheme gate would refuse a plain-http URL before the
+            # redirect ever ran, so the guard under test is reached by calling
+            # the opener directly with the same host argument fetch_logo uses.
+            import urllib.request
+            request = urllib.request.Request(url, headers={"User-Agent": helper.USER_AGENT})
+            with self.assertRaises(helper.HelperError) as caught:
+                helper.logo_opener("127.0.0.1").open(request, timeout=5)
+            self.assertEqual(caught.exception.code, "logo_redirect")
+            self.assertIn("not https", str(caught.exception))
+        finally:
+            self.stop(srv, thread)
+
+    def test_a_redirect_to_ftp_is_refused(self):
+        srv, thread = self.redirector("ftp://127.0.0.1/a.png")
+        try:
+            import urllib.request
+            url = "http://127.0.0.1:%d/a.png" % srv.server_address[1]
+            request = urllib.request.Request(url, headers={"User-Agent": helper.USER_AGENT})
+            with self.assertRaises(helper.HelperError) as caught:
+                helper.logo_opener("127.0.0.1").open(request, timeout=5)
+            self.assertEqual(caught.exception.code, "logo_redirect")
+        finally:
+            self.stop(srv, thread)
+
+    def test_a_redirect_to_userinfo_is_refused(self):
+        srv, thread = self.redirector("https://user:pass@127.0.0.1/a.png")
+        try:
+            import urllib.request
+            url = "http://127.0.0.1:%d/a.png" % srv.server_address[1]
+            request = urllib.request.Request(url, headers={"User-Agent": helper.USER_AGENT})
+            with self.assertRaises(helper.HelperError) as caught:
+                helper.logo_opener("127.0.0.1").open(request, timeout=5)
+            self.assertEqual(caught.exception.code, "logo_redirect")
+            blob = str(caught.exception)
+            self.assertNotIn("pass", blob)
+            self.assertNotIn("user:", blob)
+        finally:
+            self.stop(srv, thread)
+
+    def test_fetch_logo_ITSELF_refuses_the_redirect(self):
+        """Through the shipping function, not around it.
+
+        The first version of these tests called `logo_opener()` directly, and
+        a mutation restoring the bare `urllib.request.urlopen` inside
+        `fetch_logo` stayed GREEN across all of them: they proved the guard
+        works and never that fetch_logo uses it. That is the same
+        piece-not-seam failure that cost D-SAVE-1 two mutations.
+
+        The initial-URL gate would refuse a local http address before any
+        redirect ran, so LOGO_SCHEMES is narrowed to ("http",) for the call:
+        the local server is then acceptable as the FIRST hop and the https
+        target is refused as the SECOND. Which scheme plays which role does
+        not matter -- what is asserted is that the redirect is checked at all,
+        from inside fetch_logo.
+        """
+        srv, thread = self.redirector("https://elsewhere.test/a.png")
+        original = helper.LOGO_SCHEMES
+        try:
+            helper.LOGO_SCHEMES = ("http",)
+            url = "http://127.0.0.1:%d/a.png" % srv.server_address[1]
+            with self.assertRaises(helper.HelperError) as caught:
+                helper.fetch_logo(url, 5)
+            self.assertEqual(caught.exception.code, "logo_redirect")
+        finally:
+            helper.LOGO_SCHEMES = original
+            self.stop(srv, thread)
+
+    def test_fetch_logo_ITSELF_still_completes_a_plain_fetch(self):
+        """The other half: the seam test must not pass by breaking everything."""
+        import http.server
+        png = SAMPLE["image/png"]
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(png)))
+                self.end_headers()
+                self.wfile.write(png)
+
+            def log_message(self, *a):
+                pass
+
+        srv, thread = self.serve(H)
+        original = helper.LOGO_SCHEMES
+        try:
+            helper.LOGO_SCHEMES = ("http",)
+            url = "http://127.0.0.1:%d/a.png" % srv.server_address[1]
+            data, ctype = helper.fetch_logo(url, 5)
+            self.assertEqual(ctype, "image/png")
+            self.assertEqual(data, png)
+        finally:
+            helper.LOGO_SCHEMES = original
+            self.stop(srv, thread)
+
+    def test_the_stock_opener_would_have_followed_all_three(self):
+        """The counter-measurement: this is what the code did before.
+
+        Without it the three tests above could pass against a urllib that
+        simply refuses those targets itself, and would be proving nothing.
+        """
+        import urllib.request
+        stock = urllib.request.HTTPRedirectHandler()
+        for target in ("http://elsewhere.test/a.png",
+                       "ftp://elsewhere.test/a.png",
+                       "https://user:pass@elsewhere.test/a.png"):
+            req = urllib.request.Request("https://cdn.test/a.png")
+            new = stock.redirect_request(req, None, 302, "Found", {}, target)
+            self.assertIsNotNone(
+                new, "urllib's default would refuse %s by itself, so the guard "
+                     "under test is untested" % target)
+
+    def test_the_opener_carries_no_ftp_or_file_handler(self):
+        handlers = {h.__class__.__name__ for h in helper.logo_opener("h.test").handlers}
+        for gone in ("FTPHandler", "CacheFTPHandler", "FileHandler", "DataHandler"):
+            self.assertNotIn(gone, handlers)
+
+    def test_a_plain_https_fetch_still_works_end_to_end(self):
+        """The guard must not break the ordinary case."""
+        import http.server
+        import urllib.request
+        png = SAMPLE["image/png"]
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(png)))
+                self.end_headers()
+                self.wfile.write(png)
+
+            def log_message(self, *a):
+                pass
+
+        srv, thread = self.serve(H)
+        try:
+            url = "http://127.0.0.1:%d/a.png" % srv.server_address[1]
+            request = urllib.request.Request(url, headers={"User-Agent": helper.USER_AGENT})
+            with helper.logo_opener("127.0.0.1").open(request, timeout=5) as r:
+                self.assertEqual(r.headers.get("Content-Type"), "image/png")
+                self.assertEqual(r.read(), png)
+        finally:
+            self.stop(srv, thread)
+
+    def test_one_https_hop_to_another_https_host_is_allowed_and_recorded(self):
+        """The stated residual: cross-host https redirects are permitted."""
+        import urllib.request
+        handler = None
+        for h in helper.logo_opener("cdn.test").handlers:
+            if h.__class__.__name__ == "LogoRedirectHandler":
+                handler = h
+        self.assertIsNotNone(handler, "the guard is not installed")
+        req = urllib.request.Request("https://cdn.test/a.png")
+        new = handler.redirect_request(req, None, 302, "Found", {},
+                                       "https://other.test/a.png")
+        self.assertIsNotNone(new, "an https-to-https redirect must still work")
+
+class LogoCacheRemovalTest(unittest.TestCase):
+    """D-LOGO-4: removing a source must take its logos with it.
+
+    `logos/` is the first SUBDIRECTORY this plugin has ever created under
+    sources/<key>/. `remove_regular` returns False for a directory, so it
+    always landed in `kept`, the `if not kept: os.rmdir(path)` never fired,
+    and `cache prune` classified the whole source key as kept rather than
+    removed -- on that run and every later one. Up to MAX_LOGO_FILES files
+    survived a source the user explicitly removed, named by fnv1a32 of the
+    logo URLs, which re-identifies the channels that source carried.
+    """
+
+    def source_dir(self):
+        import os, tempfile
+        root = tempfile.mkdtemp()
+        d = os.path.join(root, "sources", "abcd1234")
+        os.makedirs(os.path.join(d, "logos"), exist_ok=True)
+        with open(os.path.join(d, helper.CHANNELS_FILE), "w") as fh:
+            fh.write("{}")
+        for i in range(5):
+            with open(os.path.join(d, "logos", "%08x" % i), "wb") as fh:
+                fh.write(SAMPLE["image/png"])
+        return root, d
+
+    def test_clearing_a_source_removes_the_logo_directory(self):
+        import os
+        root, d = self.source_dir()
+        removed, kept = helper.clear_source_dir(d)
+        self.assertIn("logos", removed)
+        self.assertEqual(kept, [], "nothing may be left behind")
+        self.assertFalse(os.path.exists(d), "the source directory itself must go")
+
+    def test_a_pruned_key_is_reported_removed_and_is_gone(self):
+        import os
+        root, d = self.source_dir()
+        cache = os.path.join(root)
+        report = helper.cache_prune(cache, [], None, 0)
+        self.assertIn("abcd1234", report.get("removed", []),
+                      "an orphaned key holding logos must be collected: %r" % report)
+        self.assertFalse(os.path.exists(d))
+
+    def test_a_directory_we_do_not_own_is_kept_rather_than_followed(self):
+        """A cache cleaner that recurses is one bug from deleting elsewhere."""
+        import os
+        root, d = self.source_dir()
+        os.makedirs(os.path.join(d, "somebody-elses"), exist_ok=True)
+        removed, kept = helper.clear_source_dir(d)
+        self.assertIn("logos", removed)
+        self.assertIn("somebody-elses", kept)
+        self.assertTrue(os.path.exists(d), "an unknown directory keeps the source dir alive")
+
+    def test_a_nested_directory_inside_logos_is_left_and_reported(self):
+        import os
+        root, d = self.source_dir()
+        os.makedirs(os.path.join(d, "logos", "nested"), exist_ok=True)
+        removed, kept = helper.clear_source_dir(d)
+        self.assertNotIn("logos", removed)
+        self.assertIn("logos", kept)
+        self.assertTrue(os.path.exists(os.path.join(d, "logos", "nested")),
+                        "removal is one level deep and never recurses")
+
+    def test_a_symlink_inside_logos_is_unlinked_not_followed(self):
+        import os, tempfile
+        root, d = self.source_dir()
+        outside = os.path.join(tempfile.mkdtemp(), "precious")
+        with open(outside, "w") as fh:
+            fh.write("do not delete me")
+        os.symlink(outside, os.path.join(d, "logos", "link"))
+        removed, kept = helper.clear_source_dir(d)
+        self.assertIn("logos", removed)
+        self.assertTrue(os.path.exists(outside), "the symlink target must survive")
+        with open(outside) as fh:
+            self.assertEqual(fh.read(), "do not delete me")
+
 
 
 if __name__ == "__main__":
