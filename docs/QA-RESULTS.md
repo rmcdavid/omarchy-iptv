@@ -6585,3 +6585,43 @@ Filed as F-CAL-5 and left open, because it is a standing property of the
 instrument rather than something to fix. The instrument is
 `scripts/qa-coverage.py` and five rows are pinned in
 `tests/fixtures/coverage-distribution.json` with three checks over them.
+
+## D-A11Y-1, 2026-09-23: the deferral now has an expiry date
+
+The masking is **still refused**. Ruling AX2 stands, and this pass did not
+reopen it: the one-line edit was measured to break the Xtream login outright, a
+proper fix is five `Model.js` sites plus a UX regression, and live risk is zero
+while nothing is published at all.
+
+What was missing was not the fix. It was the **trigger**.
+
+The refusal rests on a premise — that no Quickshell window publishes an AT-SPI
+tree (D-GS-3, quickshell#1144). That premise appeared as a comment in
+`tests/a11y/fidelity.py`, in `tests/a11y/qmlscan.py` and in
+`scripts/a11y-probe.sh`, and as an assertion in **none of them**. Two things
+joined by a name with nothing verifying the join — CLAUDE.md rule 13 — and on
+the other side of this particular join are provider credentials on the session
+bus. A routine `pacman -Syu` could have made a revealed playlist URL, and the
+never-maskable Xtream server and username, readable by every listener, with
+nothing anywhere going red.
+
+`tests/test_a11y_premise.py` pins the platform the premise was measured on —
+quickshell 0.3.1-1, qt6-base 6.11.2-3, at-spi2-core 2.60.6-1, from
+`docs/ACCESSIBILITY-INVESTIGATION.md` section 6 — and fails the gate when any
+of them moves.
+
+Three things about its shape, because a guard like this is easy to write badly:
+
+- **It does not claim to detect the upstream fix.** It detects that the
+  evidence has expired. That is cheap, honest, and fires at exactly the right
+  moment: a version change is when the recorded measurement stops describing
+  this machine.
+- **It skips rather than passes** where the versions cannot be read. A machine
+  without `pacman` is not evidence that the premise holds, and a guard that
+  passes having learned nothing is the kind this one replaces.
+- **Its failure message carries the whole instruction** — what becomes live,
+  what to re-run, and an explicit "do not simply update the versions". A guard
+  that fires years later at someone who has never heard of AX2 has to teach, not
+  just diff.
+
+Proven red by moving a pinned version. Python 538 → 540.

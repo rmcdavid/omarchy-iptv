@@ -1,0 +1,14 @@
+{
+  "note": "D-A11Y-1's deferral rests on a MEASUREMENT, and a measurement has a platform. This file records that platform so the deferral cannot outlive its own evidence.",
+  "premise": "No window Quickshell creates publishes an AT-SPI tree, so nothing the guide declares reaches a screen reader.",
+  "upstream": "quickshell#1144",
+  "measuredIn": "docs/ACCESSIBILITY-INVESTIGATION.md section 6",
+  "whyItMatters": "D-A11Y-1 is deferred under ruling AX2, which REFUSED masking the accessible Value of the Sources form fields on the grounds that live risk is zero while nothing is published at all. That is true and it is CONDITIONAL. The moment a Quickshell or Qt update makes a PanelWindow publish, the deferral stops being free: a revealed playlist or EPG URL, and the never-maskable Xtream server and username, publish their credentials to any listener on the session bus. Nothing would have noticed. The premise was a comment in three files and an assertion in none, which is the exact shape CLAUDE.md rule 13 is about -- two things joined by a NAME, where nothing verifies the join.",
+  "notADetector": "This does NOT detect that quickshell#1144 is fixed. It detects that the EVIDENCE HAS EXPIRED, which is the honest and cheap thing to detect. A version change is the event after which the measurement no longer describes this machine, so it is the right moment to re-measure rather than to keep deferring.",
+  "onRed": "Re-run scripts/a11y-probe.sh (it needs a graphical session and its baseline is deliberately red -- compare against docs/QA-A11Y.md). If a PanelWindow now publishes, D-A11Y-1 is LIVE and the field values must be masked before anything ships. If it still publishes nothing, update the versions below and say where it was re-measured.",
+  "platform": {
+    "quickshell": "0.3.1-1",
+    "qt6-base": "6.11.2-3",
+    "at-spi2-core": "2.60.6-1"
+  }
+}

@@ -12,6 +12,11 @@ the shipping guide. Nothing checked that. A harness grading a drifted copy is
 a subtler version of the grep it was built to replace: green, and about the
 wrong file.
 
+That premise -- that a PanelWindow publishes nothing -- was a comment here and
+in two other files, and an assertion in none. It is now one:
+tests/test_a11y_premise.py goes red when the platform it was measured on stops
+being the platform installed, because D-A11Y-1's deferral rests on it.
+
 Why a hash cannot do it
 -----------------------
 The copy is DELIBERATELY different. The question is not "is it the same file"
