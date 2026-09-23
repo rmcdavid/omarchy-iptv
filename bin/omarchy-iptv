@@ -1389,6 +1389,29 @@ def write_text_atomic(path: str, text: str) -> None:
         raise
 
 
+def write_bytes_atomic(path: str, data: bytes) -> None:
+    """The binary sibling of write_text_atomic, same 0700 / 0600 discipline.
+
+    Added for logos (M2-04), which are the first non-text thing this helper
+    writes into the cache.
+    """
+    directory = os.path.dirname(path)
+    ensure_private_dir(directory)
+    tmp = os.path.join(directory, ".tmp-%s-%s" % (os.path.basename(path), os.urandom(4).hex()))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_json_atomic(path: str, payload: Any) -> None:
     # json.dumps (one-shot C encoder) is several times faster than json.dump.
     write_text_atomic(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -2175,14 +2198,106 @@ def logo_survey(channels: Any) -> dict[str, Any]:
     }
 
 
+MAX_LOGO_BYTES = 256 * 1024
+MAX_LOGO_FILES = 5000
+
+
+def logo_filename(url: str) -> str:
+    """A name derived from the URL, never FROM the URL.
+
+    The provider's path never reaches the filesystem: it can carry a channel
+    name, a subscriber id or a query string, and a path from an untrusted
+    string is also how a traversal gets written outside the cache. fnv1a32 of
+    the URL plus the extension implied by the content type at write time.
+    """
+    return fnv1a32(url)
+
+
+def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
+    """Fetch one logo under the ruling's guards. Returns (bytes, content type).
+
+    Deliberately NOT read_http_source. That path sends an Authorization header
+    whenever the URL carries userinfo, which is right for a playlist and is the
+    one thing a logo request must never do: a provider whose logos sit beside
+    its playlist would receive the subscription credentials as a side effect of
+    a picture. This sends no credentials, follows no userinfo, and refuses
+    anything that is not https.
+    """
+    import urllib.error
+    import urllib.request
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme.lower() not in LOGO_SCHEMES:
+        raise HelperError("logo_scheme", "refused a non-https logo host")
+    if "@" in parsed.netloc:
+        raise HelperError("logo_userinfo", "refused a logo URL carrying userinfo")
+    host = parsed.netloc.lower()
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            ctype = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype not in LOGO_TYPES:
+                raise HelperError("logo_type", "refused %s from %s" % (ctype or "an unnamed type", host))
+            data = response.read(MAX_LOGO_BYTES + 1)
+    except HelperError:
+        raise
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        raise HelperError("logo_fetch", "could not fetch a logo from %s: %s" % (host, error.__class__.__name__))
+    if len(data) > MAX_LOGO_BYTES:
+        raise HelperError("logo_too_large", "a logo from %s exceeds %d KB" % (host, MAX_LOGO_BYTES // 1024))
+    return data, ctype
+
+
+LOGO_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg",
+                   "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
+    """Write one logo 0600 into a 0700 directory. Returns the file name."""
+    extension = LOGO_EXTENSIONS.get(ctype)
+    if extension is None:
+        raise HelperError("logo_type", "refused an unlisted content type")
+    ensure_private_dir(logo_dir)
+    name = logo_filename(url) + extension
+    path = os.path.join(logo_dir, name)
+    write_bytes_atomic(path, data)
+    return name
+
+
 def cmd_logos(args: argparse.Namespace) -> int:
     directory = cache_dir(args.cache_dir)
     channels = load_channels(directory)
     survey = logo_survey(channels)
-    # --survey is the only mode today; the fetch is M2-04-03 and is not written.
-    # The flag exists so that adding the fetch later cannot silently turn this
-    # command into one that makes requests.
-    emit(dict(survey, ok=True, kind="logos", action="survey"))
+    if not args.fetch:
+        emit(dict(survey, ok=True, kind="logos", action="survey"))
+        return 0
+    # The fetch is opt-in twice over: the setting is off by default (the
+    # ruling's first line) and this flag is off by default here, so nothing
+    # contacts anyone because a command was run without reading it.
+    logo_dir = os.path.join(directory, "logos")
+    fetched, refused, failed = 0, 0, 0
+    reasons: dict[str, int] = {}
+    seen: set[str] = set()
+    for channel in channels:
+        if fetched >= MAX_LOGO_FILES:
+            break
+        url = channel.get("logo") if isinstance(channel, dict) else None
+        if not isinstance(url, str) or not url or url in seen:
+            continue
+        seen.add(url)
+        try:
+            data, ctype = fetch_logo(url, args.timeout)
+            write_logo(logo_dir, url, data, ctype)
+            fetched += 1
+        except HelperError as error:
+            # Hosts and codes only, never the URL (rule 5).
+            reasons[error.code] = reasons.get(error.code, 0) + 1
+            if error.code in ("logo_scheme", "logo_userinfo", "logo_type", "logo_too_large"):
+                refused += 1
+            else:
+                failed += 1
+    emit(dict(survey, ok=True, kind="logos", action="fetch", fetched=fetched,
+              refusedOnPolicy=refused, failed=failed, reasons=reasons,
+              cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES))
     return 0
 
 
@@ -4381,7 +4496,10 @@ def build_parser() -> argparse.ArgumentParser:
     logos = sub.add_parser("logos", help="report which hosts enabling logos would contact (makes no request)")
     logos.add_argument("--cache-dir", default=None)
     logos.add_argument("--survey", action="store_true", default=True,
-                       help="the only mode: read the cache and contact nothing")
+                       help="default: read the cache and contact nothing")
+    logos.add_argument("--fetch", action="store_true",
+                       help="download the logos (contacts the hosts --survey lists)")
+    logos.add_argument("--timeout", type=float, default=10.0)
     logos.set_defaults(func=cmd_logos)
 
     state = sub.add_parser("state", help="inspect or edit state.json")

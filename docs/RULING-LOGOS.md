@@ -68,6 +68,29 @@ Rule 6 is the part this ruling adds to the plan rather than merely approving.
 It is implemented as `omarchy-iptv logos --survey`, which reads the cache and
 contacts nothing.
 
+## Built so far (2026-09-23)
+
+`omarchy-iptv logos` surveys, and `--fetch` downloads under every guard above.
+The fetch is deliberately **not** `read_http_source`: that path turns userinfo
+into an `Authorization` header, which is correct for a playlist and is the one
+thing a logo request must never do. `fetch_logo` refuses a URL carrying
+userinfo rather than stripping it, refuses anything that is not `https`,
+refuses a content type outside the allowlist, and caps each file at 256 KB.
+
+Files are named by `fnv1a32` of the URL, never from its path: a provider path
+can carry a channel name, a subscriber id or a token, and a path built from an
+untrusted string is also how a traversal escapes the cache. Written 0600 into a
+0700 `logos/` directory beside the rest of that source's cache.
+
+Fourteen tests. The one worth naming asserts, over the parsed AST rather than
+the source text, that `fetch_logo` never reaches `Authorization`, `base64`,
+`split_userinfo` or `read_http_source` -- a plain substring search matched this
+file's own explanation of why it must not.
+
+**Not built: the guide half.** No setting exists yet, and rows do not render
+logos. Adding the setting before the rendering would put a switch in the
+interface that does nothing, so neither ships until both do.
+
 ## What is NOT ruled here
 
 The fetch itself, the row design at both coverage extremes, and the open-budget
