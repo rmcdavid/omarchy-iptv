@@ -6679,3 +6679,49 @@ this plugin may not write. The remedy is the one line already in
 
 The real fix is upstream: one `apps/omarchy-iptv.lua` in Omarchy, exactly like
 the two that already ship. Not filed.
+
+## F-HARNESS-1, 2026-09-23: the prescribed rule could not be followed
+
+The defect: under the harness's floating-window mode the first `wtype`
+keystroke into a fresh shell is intermittently swallowed — 1 fresh shell in 4
+during verification, where `sky` arrived as `ky` — and a row-count assertion
+cannot tell the two apart, so the loss reads as a pass.
+
+The row prescribed a rule: *assert the exact query string read back over IPC,
+never the row count*. **No IPC verb read it back.**
+
+`numberState` does carry a field called `query`, which is presumably why the
+rule looked satisfiable when it was written. That field is the *pre-entry
+snapshot* — the one Esc and Backspace restore. Measured on a live shell with
+the search set to `sky`:
+
+```
+query: ''        cursorName: 'Sky Sports Main Event'
+```
+
+Empty, while the cursor sits on the match. Any scenario that followed the rule
+would have compared against the wrong string and passed regardless.
+
+### What changed
+
+- **`queryLive` added** to the harness snapshot, named the way `cursorIndexLive`
+  beside it already is. The live text can now actually be read.
+- **`run.sh key` primes a fresh shell once** — a Shift press and release, which
+  reaches the surface so whatever is not ready becomes ready, and which cannot
+  change any state in the guide. Keyed to the pid file `start` rewrites, so a
+  new shell primes again and a long scenario does not pay for it per keystroke.
+- **`run.sh type <text>` types and proves it arrived**, retrying once and
+  failing loudly on the second miss. The compensation now lives in the harness
+  instead of in prose every scenario author has to remember and apply.
+
+That last point is the general one. A rule joined to its callers by nothing is
+the same shape as every other defect this repository has filed under rule 13;
+the difference here is that the rule was not merely unenforced, it was
+impossible.
+
+### Verified live
+
+| | |
+|---|---|
+| `type sky` into a fresh shell | `typed 'sky' (attempt 1)`, `queryLive` reads `sky` |
+| `type impossible` with no shell running | both attempts reported, `type FAILED: … this is not the first-keystroke race`, exit **1** |

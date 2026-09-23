@@ -5,6 +5,7 @@
 #   run.sh ipc <fn> [args...]        call the running harness (IpcHandler target "harness")
 #   run.sh shot [name]               screenshot the focused output into the scratch dir
 #   run.sh key <wtype args...>       send keys to the focused surface (wtype)
+#   run.sh type <text>               type text and PROVE it arrived (F-HARNESS-1)
 #   run.sh clean                     wipe the scratch dirs (cache, state, runtime)
 #   run.sh scenario                  scripted Sources verification (sources-scenario.sh)
 #   run.sh player-scenario           scripted detached-player verification (player-scenario.sh)
@@ -249,7 +250,51 @@ case $cmd in
     ;;
   key)
     shift
+    # F-HARNESS-1. The FIRST wtype keystroke into a fresh shell is
+    # intermittently swallowed -- 1 fresh shell in 4 during verification, where
+    # `sky` arrived as `ky`. A row-count assertion cannot tell the two apart
+    # (both filter 20 rows to 3), so the loss reads as a pass.
+    #
+    # The board's rule for this was prose every scenario author had to remember
+    # and apply, which is a rule joined to its callers by nothing. It is handled
+    # HERE instead, once, so a scenario cannot get it wrong by forgetting.
+    #
+    # The primer is a Shift press and release with no other key: it reaches the
+    # surface, so whatever is not ready yet becomes ready, and it cannot change
+    # any state in the guide. It runs once per shell, keyed to the pid file that
+    # `start` rewrites, so a fresh shell primes again and a long scenario does
+    # not pay for it on every keystroke.
+    primed="$SCRATCH/primed$INSTANCE"
+    if [[ ! -f $primed || $(cat "$primed" 2>/dev/null) != $(cat "$(qs_pidfile)" 2>/dev/null) ]]; then
+      wtype -M shift -m shift 2>/dev/null || true
+      cat "$(qs_pidfile)" 2>/dev/null >"$primed" || true
+    fi
     exec wtype "$@"
+    ;;
+  type)
+    # F-HARNESS-1, the other half. Types TEXT and then proves it arrived, by
+    # reading the query back over IPC rather than counting rows. One retry: the
+    # loss is a first-keystroke race, so a reset and a resend clears it, and a
+    # second failure is a real defect that must not be retried into silence.
+    shift
+    want=${1:-}
+    if [[ -z $want ]]; then echo "[run.sh] type needs text" >&2; exit 2; fi
+    for attempt in 1 2; do
+      "$0" key -- "$want"
+      sleep 0.25
+      got=$("$0" ipc numberState 2>/dev/null | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("queryLive",""))
+except Exception: print("<unreadable>")' | tr -d '\n')
+      if [[ $got == "$want" ]]; then
+        echo "[run.sh] typed '$want' (attempt $attempt)"
+        exit 0
+      fi
+      echo "[run.sh] type: sent '$want', surface holds '$got' -- resetting and retrying" >&2
+      "$0" ipc query "" >/dev/null 2>&1 || true
+      sleep 0.15
+    done
+    echo "[run.sh] type FAILED: '$want' did not arrive after two attempts; this is not the first-keystroke race" >&2
+    exit 1
     ;;
   clean)
     rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"

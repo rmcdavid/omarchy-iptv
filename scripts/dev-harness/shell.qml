@@ -170,7 +170,8 @@ ShellRoot {
     if (!g || g.numberEntry === undefined || g.numberEntry === null) {
       return { ok: false, error: "no_verb", active: null, buffer: null, kind: null, label: null,
                targetName: null, matches: null, ordinal: null, scopeId: null, cursorIndex: null,
-               query: null, resume: null, cursorId: null, hasNumbers: null, cursorName: null, transient: null }
+               query: null, resume: null, cursorId: null, hasNumbers: null, cursorName: null, transient: null,
+               queryLive: null }
     }
     var e = g.numberEntry
     var r = g.numberResolution === undefined || g.numberResolution === null ? {} : g.numberResolution
@@ -196,6 +197,13 @@ ShellRoot {
       hasNumbers: g.hasNumbers === undefined ? null : g.hasNumbers,
       numberWidth: g.numberWidth === undefined ? null : g.numberWidth,
       cursorIndexLive: g.cursorIndex,
+      // F-HARNESS-1. `query` above is the PRE-ENTRY snapshot, the one Esc and
+      // Backspace restore. Nothing exposed the LIVE search text, which made the
+      // board's own rule for this defect -- "assert the exact query string read
+      // back over IPC, never the row count" -- unimplementable: there was no
+      // verb to read it back with. Named the way `cursorIndexLive` already is,
+      // for the same reason.
+      queryLive: String(g.query === undefined ? "" : g.query),
       cursorName: row === null ? "" : String(row.name),
       cursorChno: row === null ? "" : String(row.chnoLabel === undefined ? "" : row.chnoLabel),
       transient: g.transientText === undefined ? null : String(g.transientText)
