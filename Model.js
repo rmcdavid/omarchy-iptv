@@ -1985,14 +1985,106 @@ function zapRing(channels, state, nowPlaying) {
 
 // Wrap-around neighbour inside an ordered list.
 function nextInGroup(list, currentId, delta) {
+  return zapStep(list, currentId, delta, null).channel
+}
+
+// The zap walk, with the dead ones stepped over.
+//
+// One wheel flick calls zap up to three times (BarWidget handleWheel), and on
+// a list where roughly one in eight channels is dead that flick can hand the
+// user two black screens and two failure toasts. Stepping past a channel
+// already KNOWN to be dead is the correctness half of the failure memory:
+// there is no point tuning to something we watched fail an hour ago.
+//
+// Three rules, and each one is a refusal of an obvious mistake:
+//
+// 1. BOUNDED. At most `max` channels are skipped. A 14-day mark on a mostly
+//    dead group would otherwise make that group unreachable by wheel for a
+//    fortnight, which is a worse failure than the one being avoided.
+// 2. NEVER EMPTY-HANDED. If every candidate is marked, the immediate
+//    neighbour is returned anyway. Zap must always move.
+// 3. IT REPORTS. `skipped` is returned so the caller can say so. Silently
+//    walking past rows the user can see would be the guide lying about
+//    state, which UX principle 4 forbids -- the point is to save a keypress,
+//    not to hide the list.
+//
+// `failed` is the { id: at } map; absent or empty, this is the old behaviour
+// exactly, which is also what a fresh source gets on day one.
+// Where a channel sits in the rows on screen, or -1. Lifted here rather than
+// looped in QML so it is unit-testable (engineering rule 12).
+function rowIndexOfId(rows, id) {
+  var list = asList(rows)
+  var want = str(id)
+  if (want === "") return -1
+  for (var i = 0; i < list.length; i++) if (channelId(list[i]) === want) return i
+  return -1
+}
+
+// ---- keep my place (UX.md 1.3: "a failed stream must not cost more than one
+// gesture to move past", and failure "must not clear the user's place in the
+// list"). Both were written at M0 and neither was implemented: `open()`
+// rebuilds from `initialScope` every time, so a failed play cost the query,
+// the scope AND the cursor. With no favourites that lands the user on All,
+// row 0, empty search, in a 1,462-row list.
+//
+// The restore is deliberately NARROW. It applies only when the guide was
+// closed by PLAYING something and that something then failed. A normal reopen
+// -- hotkey, bar click, an hour later -- still starts fresh, because coming
+// back to a stale search you have finished with is its own annoyance and the
+// product's promise is "open, three keystrokes, watching".
+function placeToRestore(mark, failedId, nowSec) {
+  var m = mark && typeof mark === "object" ? mark : null
+  if (!m) return null
+  if (str(m.id) === "" || str(m.id) !== str(failedId)) return null
+  // A mark older than the window is stale: the user has moved on, and
+  // restoring a search from yesterday would be a surprise, not a courtesy.
+  var at = Math.floor(Number(m.at) || 0)
+  var now = Math.floor(Number(nowSec) || 0)
+  if (at > 0 && now > 0 && now - at > PLACE_TTL_SEC) return null
+  return { query: str(m.query), scopeId: str(m.scopeId), id: str(m.id) }
+}
+
+// Long enough to cover a first-load failure and the user's reaction, short
+// enough that it is never a surprise.
+var PLACE_TTL_SEC = 180
+
+function placeMark(guideState, channelId, nowSec) {
+  var g = guideState || {}
+  return { query: str(g.query), scopeId: str(g.scopeId), id: str(channelId),
+           at: Math.floor(Number(nowSec) || 0) }
+}
+
+// What the guide says after a zap stepped over something. Empty when nothing
+// was skipped, so the ordinary zap stays silent.
+function zapSkipNotice(skipped) {
+  var n = Math.max(0, Math.floor(Number(skipped) || 0))
+  if (n <= 0) return ""
+  return "Skipped " + formatCount(n) + (n === 1 ? " dead channel" : " dead channels")
+}
+
+function zapStep(list, currentId, delta, failed, maxSkip) {
   var rows = asList(list)
-  if (rows.length === 0) return null
+  if (rows.length === 0) return { channel: null, skipped: 0 }
   var step = delta < 0 ? -1 : 1
   var at = -1
   for (var i = 0; i < rows.length; i++) if (channelId(rows[i]) === currentId) { at = i; break }
-  if (at === -1) return rows[0]
-  return rows[(at + step + rows.length) % rows.length]
+  if (at === -1) return { channel: rows[0], skipped: 0 }
+  var marks = failed && typeof failed === "object" ? failed : {}
+  var first = rows[(at + step + rows.length) % rows.length]
+  var max = Math.max(0, Math.floor(Number(maxSkip)))
+  if (!isFinite(max) || max <= 0) max = ZAP_MAX_SKIP
+  var probe = at
+  for (var n = 0; n <= max; n++) {
+    probe = (probe + step + rows.length) % rows.length
+    if (probe === at) break
+    var candidate = rows[probe]
+    if (marks[channelId(candidate)] === undefined) return { channel: candidate, skipped: n }
+  }
+  // Everything in reach is marked: go to the neighbour anyway (rule 2).
+  return { channel: first, skipped: 0 }
 }
+
+var ZAP_MAX_SKIP = 20
 
 // ------------------------------------------------------------ state
 
@@ -7441,6 +7533,13 @@ if (typeof module !== "undefined") {
     launchScope: launchScope,
     zapRing: zapRing,
     nextInGroup: nextInGroup,
+    zapStep: zapStep,
+    zapSkipNotice: zapSkipNotice,
+    rowIndexOfId: rowIndexOfId,
+    placeMark: placeMark,
+    placeToRestore: placeToRestore,
+    PLACE_TTL_SEC: PLACE_TTL_SEC,
+    ZAP_MAX_SKIP: ZAP_MAX_SKIP,
     emptyState: emptyState,
     parseState: parseState,
     isFavorite: isFavorite,

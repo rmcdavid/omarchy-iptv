@@ -1820,6 +1820,136 @@ checkCall("D-SAVE-1: a row that is both keeps its place after the star goes, the
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterUnstar).length,
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterForget).length]
 }, [3, 3, 0])
+// ---- dead channels stop costing you anything (2026-09-24) ----
+// Two halves of one story: zapping steps past what is known dead, and a
+// failed play hands the guide back where it was. Both are UX.md 1.3, written
+// at M0 and unimplemented until now.
+
+checkCall("zap: steps past the dead, bounded, never empty-handed, and reports", function () {
+  function ch(n) { return { id: "t:" + n, name: n, url: "http://x/" + n } }
+  const ring = [ch("a"), ch("b"), ch("c"), ch("d"), ch("e")]
+  const allDead = { "t:a": 1, "t:b": 1, "t:c": 1, "t:d": 1, "t:e": 1 }
+  const two = Model.zapStep(ring, "t:a", 1, { "t:b": 1, "t:c": 1 })
+  return [
+    // no marks at all is the old behaviour exactly, which is also day one
+    Model.zapStep(ring, "t:a", 1, null).channel.name,
+    Model.nextInGroup(ring, "t:a", 1).name,
+    // two dead in the way
+    two.channel.name, two.skipped,
+    // backwards
+    Model.zapStep(ring, "t:a", -1, { "t:e": 1 }).channel.name,
+    // EVERYTHING marked: zap must still move, and must not claim a skip
+    Model.zapStep(ring, "t:a", 1, allDead).channel.name,
+    Model.zapStep(ring, "t:a", 1, allDead).skipped,
+    // bounded: a mostly dead ring must not become unreachable
+    Model.zapStep(ring, "t:a", 1, { "t:b": 1, "t:c": 1, "t:d": 1 }, 1).channel.name
+  ]
+}, ["b", "b", "d", 2, "d", "b", 0, "b"])
+
+checkCall("D-DEAD-1: an EMPTY channel set is not the same as NO channel set", function () {
+  // Found live. prunedFailed distinguishes "here are the channels, this mark
+  // names none of them" (drop it) from "no channels loaded yet, cannot tell"
+  // (keep it) -- and the caller passed knownIdSet([]), which is {}, an EMPTY
+  // OBJECT AND THEREFORE TRUTHY. So on any cold start where failed.json
+  // loaded before channels.json, every mark was silently dropped.
+  //
+  // The unit test passed throughout, because it tested the function with null
+  // rather than the caller with what the caller actually sent. Piece, not
+  // seam -- for the fourth time in two days.
+  const rows = [{ id: "t:a", at: 1790300000 }]
+  return [
+    // no channels: cannot tell, so keep
+    Model.prunedFailed(rows, 1790300100, null).length,
+    // channels loaded and this id is not among them: drop
+    Model.prunedFailed(rows, 1790300100, Model.knownIdSet([{ id: "t:other", url: "http://x" }])).length,
+    // the trap: an empty set is a REAL answer -- nothing is known -- so it drops
+    Model.prunedFailed(rows, 1790300100, Model.knownIdSet([])).length,
+    // and knownIdSet([]) really is truthy, which is why the call site had to choose
+    !!Model.knownIdSet([])
+  ]
+}, [1, 0, 0, true])
+
+checkCall("D-DEAD-1: the service picks null when it has no channels, and re-prunes when they land", function () {
+  // The seam. Pinned as a call-site inventory because the choice lives in QML.
+  const lines = qmlLines().map(function (l) { return l.text })
+  const src = lines.join("\n")
+  return [
+    // the guard: null when empty, the real set otherwise
+    /root\.channels\.length > 0 \? Model\.knownIdSet\(root\.channels\) : null/.test(src),
+    // and a re-prune when the channels arrive, whichever file won the race
+    /onChannelsChanged: root\.pruneFailed\(\)/.test(src),
+    // no caller may hand knownIdSet straight through again
+    src.split("\n").filter(function (l) {
+      return /Model\.prunedFailed\(/.test(l) && /Model\.knownIdSet\(root\.channels\)/.test(l)
+    }).length
+  ]
+}, [true, true, 0])
+
+checkCall("zap: the skip is REPORTED, because walking past rows silently is lying", function () {
+  return [Model.zapSkipNotice(0), Model.zapSkipNotice(1), Model.zapSkipNotice(3)]
+}, ["", "Skipped 1 dead channel", "Skipped 3 dead channels"])
+
+checkCall("keep my place: only after a failure, only that channel, only briefly", function () {
+  // Narrow on purpose. A normal reopen still starts fresh, because coming
+  // back to a search you finished with is its own annoyance and the promise
+  // is "open, three keystrokes, watching".
+  const now = 1790300000
+  const mark = Model.placeMark({ query: "abc news", scopeId: "g:UK | NEWS" }, "t:a", now)
+  return [
+    JSON.stringify(Model.placeToRestore(mark, "t:a", now + 5)),
+    // a DIFFERENT channel failed: not our business
+    Model.placeToRestore(mark, "t:zz", now + 5),
+    // nothing failed at all: a plain reopen starts fresh
+    Model.placeToRestore(mark, "", now + 5),
+    // stale: the user has moved on
+    Model.placeToRestore(mark, "t:a", now + Model.PLACE_TTL_SEC + 1),
+    Model.placeToRestore(null, "t:a", now)
+  ]
+}, ['{"query":"abc news","scopeId":"g:UK | NEWS","id":"t:a"}', null, null, null, null])
+
+checkCall("keep my place: the restored cursor is not clobbered one line later", function () {
+  // Found on a live pass, not by the suite. rebuildDisplay() put the cursor
+  // on the row after the dead channel and the NEXT line in open() overwrote
+  // it with cursorFor(rows, playingId) -- which is 0, because nothing is
+  // playing, because the play just failed. The whole feature, undone one
+  // line after it worked.
+  //
+  // This pins the SEAM rather than the piece: that the assignment is guarded,
+  // and that the guard is read BEFORE the rebuild that consumes it.
+  const lines = qmlLines().map(function (l) { return l.text })
+  let openAt = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*function open\(/.test(lines[i])) { openAt = i; break }
+  }
+  let end = lines.length
+  for (let i = openAt + 1; i < lines.length; i++) {
+    if (/^\s*function /.test(lines[i])) { end = i; break }
+  }
+  const body = lines.slice(openAt, end)
+  const readAt = body.findIndex(function (l) { return /var restoring = root\.restoreCursorTo !== ""/.test(l) })
+  const rebuildAt = body.findIndex(function (l) { return /root\.rebuildDisplay\(\)/.test(l) })
+  const guardAt = body.findIndex(function (l) { return /if \(!restoring\) root\.cursorIndex = Model\.cursorFor/.test(l) })
+  return [readAt !== -1, rebuildAt !== -1, guardAt !== -1,
+          // the flag must be read BEFORE the rebuild consumes it
+          readAt !== -1 && rebuildAt !== -1 && readAt < rebuildAt,
+          // and the guarded assignment must come after the rebuild
+          guardAt !== -1 && rebuildAt !== -1 && guardAt > rebuildAt,
+          // and there must be no UNGUARDED cursorFor assignment left in open()
+          body.filter(function (l) {
+            return /root\.cursorIndex = Model\.cursorFor/.test(l) && !/if \(!restoring\)/.test(l)
+          }).length]
+}, [true, true, true, true, true, 0])
+
+checkCall("keep my place: the cursor lands on the row AFTER the dead one", function () {
+  function ch(n) { return { id: "t:" + n, name: n, url: "http://x/" + n } }
+  const rows = [ch("a"), ch("b"), ch("c")]
+  const at = Model.rowIndexOfId(rows, "t:b")
+  return [at, Math.min(at + 1, rows.length - 1),
+          // the last row has nowhere after it, so it stays put
+          Math.min(Model.rowIndexOfId(rows, "t:c") + 1, rows.length - 1),
+          Model.rowIndexOfId(rows, "t:gone")]
+}, [1, 2, 2, -1])
+
 // ---- dead-channel memory (PO 2026-09-24, amending R8 / R11 / UX ruling 9) ----
 const failedFixture = JSON.parse(require("fs").readFileSync(
   require("path").join(__dirname, "fixtures/failed-marks.json"), "utf8"))

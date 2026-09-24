@@ -7,6 +7,16 @@ version lives in `manifest.json`.
 
 ### Added
 
+- **Dead channels stop costing you anything.** Two things. First, if a stream
+  fails, the guide now comes back exactly where you left it — same search, same
+  group, and the cursor already sitting on the next channel down, with the dead
+  one marked. Before this, a failed channel threw away everything you had
+  typed and dropped you at the top of the full list. Second, zapping with the
+  bar wheel or the next/previous keys steps *past* channels it already knows
+  are dead, so one flick no longer hands you two black screens. It tells you
+  when it skipped something, it never skips more than twenty in a row, and if
+  everything nearby is marked it still moves.
+
 - **You can pause live TV.** Press `c` in the guide, or bind a key to it and
   press that from anywhere while you are watching. The picture freezes, and
   when you come back it carries on from the moment you stopped — you are then

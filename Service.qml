@@ -398,6 +398,11 @@ Item {
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
   // this keeps the user's toast count at one.
   property string notifiedFailureId: ""
+  // The channel of the most recent failure. The guide reads it to decide
+  // whether an open is "come back after a dead stream" or a fresh start
+  // (UX 1.3). Distinct from `failedAt`, which is every mark ever: this is
+  // the ONE that just happened, and a new play clears it.
+  property string lastFailedId: ""
   // Warnings of the last successful playlist load (D-LIVE-18), URL-free;
   // the guide shows them until the next successful load without warnings.
   // A failed refresh keeps them: the cache in use is still that load's.
@@ -596,6 +601,9 @@ Item {
     // A new play is never paused: the flag belongs to the stream that was
     // playing, and carrying it over would show a pause nobody asked for.
     root.paused = false
+    // A new play puts the last failure behind us: the next guide open is a
+    // fresh start, not a come-back.
+    root.lastFailedId = ""
     if (root.failedAt[key] !== undefined) {
       root.failedAt = Model.withoutFailed(root.failedAt, key)
       root.persistFailed("clear", key)
@@ -773,12 +781,23 @@ Item {
   }
 
   // Zap ring (UX 3.4): the list the channel was launched from.
+  // Zapping steps PAST channels already known to be dead. One wheel flick
+  // calls this up to three times, so on a list where roughly one in eight is
+  // dead a single flick could hand the user two black screens and two failure
+  // toasts. Bounded, never empty-handed, and it reports what it skipped --
+  // see Model.zapStep for why each of those is a refusal of a mistake.
+  //
+  // `zapSkipped` is what the last zap stepped over, so the bar and the guide
+  // can say so rather than silently walking past rows the user can see.
+  property int zapSkipped: 0
+
   function zap(delta) {
     if (!root.nowPlaying) return false
     var ring = Model.zapRing(root.channels, root.userState, root.nowPlaying)
-    var next = Model.nextInGroup(ring, root.nowPlaying.id, delta)
-    if (!next) return false
-    return root.play(Model.channelId(next), true, root.nowPlaying.launchedFrom)
+    var hop = Model.zapStep(ring, root.nowPlaying.id, delta, root.failedAt)
+    if (!hop.channel) return false
+    root.zapSkipped = hop.skipped
+    return root.play(Model.channelId(hop.channel), true, root.nowPlaying.launchedFrom)
   }
 
   // The channel a typed number resolves to, or null (M2-03 3.2). Exact match
@@ -2475,6 +2494,7 @@ Item {
       // its own write to come back.
       root.failedAt = Model.withFailed(root.failedAt, id, Math.floor(Date.now() / 1000))
       root.persistFailed("mark", id)
+      root.lastFailedId = id
     }
     root.notify("streamFailed", { name: String(target.name || ""), reason: reason })
   }
@@ -2722,10 +2742,32 @@ Item {
   // TTL, and any id the current playlist does not have -- which is what makes
   // an id rotation, a provider reshuffle and a removed channel all self-heal
   // instead of leaving marks that name nothing.
+  // The raw list as it came off disk. Kept because the prune needs the CHANNELS
+  // to decide what is stale, and the two files load independently -- on a cold
+  // start failed.json can arrive first.
+  property var failedRaw: []
+
   function applyFailed(text) {
-    root.failedAt = Model.failedIndex(
-      Model.prunedFailed(Model.parseFailed(text), root.nowSec, Model.knownIdSet(root.channels)))
+    root.failedRaw = Model.parseFailed(text)
+    root.pruneFailed()
   }
+
+  // D-ZAP-1, found live: this used to pass `Model.knownIdSet(root.channels)`
+  // straight through. With no channels loaded yet that is `{}` -- an EMPTY
+  // object, which is truthy -- so every mark was dropped as "not in the
+  // playlist" and the marks silently vanished on every cold start.
+  //
+  // `prunedFailed` already distinguishes "no channels, cannot tell" from "here
+  // are the channels": it takes null for the first. The bug was entirely at
+  // this call site, and the unit test passed because it tested the function
+  // with null rather than the caller with what the caller actually sends.
+  function pruneFailed() {
+    var known = root.channels.length > 0 ? Model.knownIdSet(root.channels) : null
+    root.failedAt = Model.failedIndex(Model.prunedFailed(root.failedRaw, root.nowSec, known))
+  }
+
+  // Re-prune when the channels arrive, whichever file won the race.
+  onChannelsChanged: root.pruneFailed()
 
   // Pause or resume what is playing. Returns false when there is nothing to
   // pause, so a caller can say so rather than appearing to work.

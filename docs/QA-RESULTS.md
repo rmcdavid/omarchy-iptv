@@ -7139,6 +7139,66 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-DEAD-1, 2026-09-24: an empty set is not an absent one
+
+Found live within hours of shipping the feature it breaks, while verifying
+something else entirely.
+
+### The defect
+
+Every failure mark vanished on a cold start, whenever `failed.json` happened
+to load before `channels.json`.
+
+`applyFailed` passed `Model.knownIdSet(root.channels)` straight into
+`prunedFailed`. With no channels loaded yet that evaluates to `{}` -- an
+**empty object, and therefore truthy** -- so the prune read it as *"here are
+all the channels, and this mark names none of them"* and dropped every mark,
+silently.
+
+`prunedFailed` already distinguishes the two cases and says so in its own
+comment: `null` means *no channels, cannot tell, keep everything*, and a real
+set means *these are the channels, drop what is not among them*. The function
+was right. The bug was entirely at the call site.
+
+### Why the suite did not catch it
+
+There is a test for exactly this, and it passed the whole time:
+
+```
+test_no_channels_json_means_cannot_tell_and_must_not_wipe
+```
+
+It calls `prune_failed(rows, now, None)` -- the FUNCTION, with `None`. The
+caller does not send `None`; it sends `knownIdSet([])`. The test proved the
+function honours a contract the caller was not keeping.
+
+That is the fourth time in two days a check has pinned the piece rather than
+the seam: D-SAVE-1's two surviving mutations, the redirect guard tested
+through `logo_opener` instead of `fetch_logo`, the restored cursor asserted in
+`rebuildDisplay` while `open()` overwrote it, and now this. The pattern is
+specific enough to name: **a test that calls the function with the argument
+the function documents, rather than the argument the caller actually
+constructs, proves nothing about the caller.**
+
+### Why the first live pass missed it
+
+It is a race, and the race went the other way. The two `FileView`s load
+independently; when the earlier verification ran, `channels.json` had already
+arrived, so `knownIdSet` was populated and the marks survived. The board row
+for that pass says "verified live", and it was -- of one of the two orderings.
+
+It surfaced only because the zap skip silently did nothing, and `failedAt`
+turned out to be `{}` on an install whose `failed.json` held two marks.
+
+### The fix
+
+The raw list is kept as it came off disk; the prune chooses `null` when there
+are no channels; and `onChannelsChanged` re-prunes when they arrive, whichever
+file won the race. Two mutations red: restoring the straight-through call, and
+removing the re-prune.
+
+Node 1573 -> **1576**.
+
 ## D-SINK-4, 2026-09-23: the stream URL is on the session bus
 
 Rule 5's sink list gains a fourth entry it has never had, and this one was

@@ -61,7 +61,8 @@ the guide from opening.
 - **Zapping.** Users switch channels in bursts: 3-6 switches in 30 seconds
   until something sticks. Each switch must be one gesture (Enter, Space, or
   a bar scroll tick), and a failed stream must not cost more than one
-  gesture to move past.
+  gesture to move past. **Implemented 2026-09-24** (M2-12): zapping steps
+  past channels already known dead, bounded and reported.
 - **Browsing by group.** Provider lists are only navigable by group; nobody
   scrolls 8k rows. The group context must stay visible while browsing, and
   switching group must not require leaving the list.
@@ -77,7 +78,10 @@ the guide from opening.
   favorites; the last 10 played channels is enough.
 - **Dead streams are normal.** Public lists rot. Failure must be reported
   in-context (which channel, when) and must not clear the user's place in
-  the list.
+  the list. **Implemented 2026-09-24** (M2-12): the guide is handed back
+  with the same query and scope, cursor on the row after the dead one.
+  Narrow by design -- only when that channel is the one that failed, and
+  only within three minutes, so an ordinary reopen still starts fresh.
 - **Huge lists.** 10k channels and 300 groups are the M3U norm, not the
   exception. Every list is virtualized and search results are bounded.
 

@@ -47,6 +47,16 @@ Item {
   // ---- guide state (R8). `guide` is the pure state machine object from
   // Model.js; replaced on every transition so bindings notice.
   property var guide: Model.guideState(Model.SCOPE_ALL)
+  // Where the user was when the guide closed to play something, so a FAILED
+  // play can put them back. Narrow on purpose: see Model.placeToRestore.
+  property var placeMark: null
+  // The channel whose row the cursor should land after, once the rows for the
+  // restored query exist. Consumed by rebuildDisplay.
+  property string restoreCursorTo: ""
+  // The most recent failure the service reported, which is what decides
+  // whether an open is a "come back" or a fresh start.
+  readonly property string lastFailedId: root.serviceReady && root.service.lastFailedId !== undefined
+    ? String(root.service.lastFailedId) : ""
   readonly property string mode: guide.mode
   readonly property bool searchMode: mode === "search"
   readonly property bool listMode: mode === "list"
@@ -692,6 +702,17 @@ Item {
     var channels = root.serviceReady ? root.service.channels : []
     var userState = root.serviceReady ? root.service.userState : null
     var next = Model.guideState(Model.initialScope(channels, userState))
+    // UX 1.3 / 2.4, unimplemented since M0: a failed stream must not cost the
+    // user their place. If the channel we closed to play is the one that
+    // failed, come back exactly where we were -- same query, same scope --
+    // with the cursor on the row after the dead one.
+    var back = Model.placeToRestore(root.placeMark, root.lastFailedId, root.nowSec)
+    if (back) {
+      if (back.scopeId !== "") next = Model.withScope(next, back.scopeId)
+      if (back.query !== "") next = Model.withQuery(next, back.query)
+      root.restoreCursorTo = back.id
+    }
+    root.placeMark = null
     if (typeof payload.scope === "string" && payload.scope !== "") next = Model.withScope(next, payload.scope)
     else if (typeof payload.group === "string" && payload.group !== "") next = Model.withScope(next, Model.groupScopeId(payload.group))
     if (typeof payload.query === "string" && payload.query !== "") next = Model.withQuery(next, payload.query)
@@ -733,8 +754,16 @@ Item {
     // early on `groupsDirty`, so this call is what takes a fresh reading of
     // guide data that landed while the guide was closed.
     root.measureEpgRows()
+    // `restoring` is read BEFORE the rebuild, because the rebuild is what
+    // consumes it.
+    var restoring = root.restoreCursorTo !== ""
     root.rebuildDisplay()
-    root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
+    // UX 1.3: when we are handing the user back their place, the cursor the
+    // rebuild just put on the row after the dead one is the answer. Without
+    // this guard the next line overwrote it with cursorFor(), which is 0 when
+    // nothing is playing -- and nothing is playing, because the play failed.
+    // That is the whole feature, undone one line after it worked.
+    if (!restoring) root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
     root.scrollToCursor()
     root.refocus()
   }
@@ -853,6 +882,16 @@ Item {
     root.truncated = result.truncated
     root.currentRows = result.rows
     root.rowCount = result.rows.length
+
+    // UX 1.3: after a failed stream the cursor lands on the row AFTER the dead
+    // one, so "try the next one" is one keypress. Consumed once -- the rows
+    // for the restored query only exist here, which is why it waits until now
+    // rather than being set in open().
+    if (root.restoreCursorTo !== "") {
+      var want = Model.rowIndexOfId(result.rows, root.restoreCursorTo)
+      if (want >= 0) root.cursorIndex = Math.min(want + 1, result.rows.length - 1)
+      root.restoreCursorTo = ""
+    }
 
     if (root.rowCount === 0) root.cursorIndex = 0
     else if (root.cursorIndex >= root.rowCount) root.cursorIndex = root.rowCount - 1
@@ -986,6 +1025,10 @@ Item {
       root.rebuildDisplay()
       return
     }
+    // UX 1.3: a failed stream must not clear the user's place. Remember it
+    // HERE, at the one moment the guide closes to play something, so a
+    // failure can hand it back. A successful play never uses this.
+    root.placeMark = Model.placeMark(root.guide, Model.channelId(channel), root.nowSec)
     root.dismiss()
     root.service.play(Model.channelId(channel), false, from)
   }

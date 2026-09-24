@@ -820,6 +820,11 @@ ShellRoot {
           // PAUSE LIVE TV: what the bar and the guide actually say, so a
           // scenario can observe the state rather than infer it.
           paused: s2 && s2.paused !== undefined ? s2.paused : null,
+          // keep-my-place diagnostics: which failure the guide can see, and
+          // whether the cursor restore is still pending or was consumed.
+          lastFailedId: g.lastFailedId === undefined ? null : String(g.lastFailedId),
+          restoreCursorTo: g.restoreCursorTo === undefined ? null : String(g.restoreCursorTo),
+          placeMark: g.placeMark === undefined || g.placeMark === null ? null : JSON.stringify(g.placeMark),
           pauseHint: (function () {
             var pairs = Model.footerHints({ mode: "list", playing: g.playingId !== "",
                                             paused: s2 && s2.paused === true })
