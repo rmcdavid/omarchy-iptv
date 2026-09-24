@@ -2662,6 +2662,12 @@ MPV_ARG_RE = re.compile(r"^--[a-z0-9][a-z0-9-]*(=.*)?$")
 MPV_RESERVED = frozenset((
     "--input-ipc-server", "--wayland-app-id", "--title", "--force-media-title",
     "--idle", "--input-ipc-client", "--script", "--scripts", "--config-dir",
+    # D-SINK-4: reserved rather than merely defaulted off. `--load-scripts=no`
+    # is in the base argv, but user mpv_args are concatenated AFTER it, so a
+    # pasted `--load-scripts=yes` would win and put the credentialed stream
+    # URL back on the session bus via mpv-mpris. Unlike --ytdl (PO-5) this one
+    # guards a credential and has no legitimate counter-position.
+    "--load-scripts",
     # D-SINK-2: --script is mpv's ALIAS for --scripts-append, so naming only
     # the alias reserved nothing. Matching is by base name now (see
     # filter_mpv_args), and --include loads a config that can set any of these.
@@ -2825,6 +2831,14 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
         "--force-media-title=IPTV",
         "--msg-level=all=error",
         "--ytdl=no",
+        # D-SINK-4. mpv autoloads every script in its system directory, which
+        # here includes mpv-mpris; it publishes `xesam:url` -- the stream URL,
+        # credentials and all -- on the session bus for as long as a channel
+        # plays. Measured on the real bus. mpv-mpris has no configuration
+        # surface, so keeping it and not leaking is not available, and this
+        # plugin loads no script of its own. Cost: Omarchy's media widget
+        # stops showing the channel, which the bar widget already shows.
+        "--load-scripts=no",
         "--screenshot-dir=%s" % where["screenshots"],
         "--watch-later-dir=%s" % where["watchLater"],
         "--gpu-shader-cache-dir=%s" % where["shaderCache"],

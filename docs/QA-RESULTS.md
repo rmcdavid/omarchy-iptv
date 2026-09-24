@@ -7221,8 +7221,60 @@ is not reliably detectable. A is the one consistent with how this project
 ruled on logos: close it, state the cost, and let the setting come later if
 anyone misses the widget.
 
-**NOT FIXED PENDING A RULING.** The measurement is here; the choice is the
-product owner's.
+### The ruling: option A, and reserved as well as defaulted
+
+Delegated to me by the product owner, 2026-09-24. **`--load-scripts=no`,
+always, and `--load-scripts` joins `MPV_RESERVED`.**
+
+Three things decided it.
+
+**There is no option D.** `strings` on `mpris.so` shows no script-opts of any
+kind: it reads `media-title` and `path` and publishes `xesam:url`
+unconditionally. Keeping the script and not leaking is not available, so the
+choice really is binary and there is no clever middle.
+
+**What is lost is redundant, not unique.** Omarchy's media widget would stop
+showing the channel -- but this plugin's own bar widget already shows the
+playing channel name (`BarWidget.qml:46`). The loss is a duplicate label. A
+duplicate label is not worth a credential on the session bus, and that
+asymmetry is what makes this an easy call rather than a close one.
+
+**A setting would have been the wrong shape.** The logos setting offers a real
+trade: disclosure to hosts you can count, in exchange for a feature you can
+see. This would offer credentials on the bus in exchange for a second copy of
+a label you already have. Wrapping that in a switch implies a trade worth
+weighing, and it is not one.
+
+The reservation is the half that is easy to miss. `buildMpvArgv` ends
+`argv.concat(asList(p.extraArgs))`, so user `mpvArgs` land AFTER the base argv
+and a pasted `--load-scripts=yes` would win. Defaulting alone would have
+produced a fix-shaped thing. That is D-SINK-2's lesson exactly -- an option
+defaulted rather than reserved is one the user can undo without knowing what
+it was for -- and unlike `--ytdl`, which PO-5 deliberately leaves
+re-enablable, this one guards a credential and has no legitimate
+counter-position.
+
+### Verified after the fix, on the real bus
+
+Built from the shipping `Model.buildMpvArgv`, played against the same local
+fixture:
+
+```
+time-pos      4.4
+video-format  h264
+path          http://someuser:<SECRET>@127.0.0.1:51885/test.ts
+mpris names   0
+```
+
+Playing normally, mpv still knows the credentialed path internally as it must,
+and nothing is on the bus. `busctl --user list | grep -c mpris` returns 0
+where it returned 1.
+
+One incidental finding from the measurement, worth keeping: the first attempt
+put mpv's IPC socket under the session scratchpad and mpv answered `Could not
+create IPC socket` -- that path is over the 108-byte `sun_path` limit. It did
+not affect the leak reading (mpv-mpris needs no IPC socket, and the metadata
+read succeeded), but it is a real trap for anyone testing the player by hand.
 
 ## 0.7.9 preflight, 2026-09-23: seven defects in the feature shipped that morning
 

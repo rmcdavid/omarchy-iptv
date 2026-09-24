@@ -111,6 +111,20 @@ requests and raise the batch.
      `omarchy bar set`, which writes it into their shell history permanently.
      A transient exposure reasoned about is not a licence for a durable one
      nobody costed. Prefer the in-app form, which reaches neither.
+   - The **MPRIS session bus**, via a script this project does not ship and
+     did not know was loaded (D-SINK-4). mpv autoloads every script in its
+     system directory; on this distribution that includes `mpv-mpris`, which
+     publishes `xesam:url` -- the stream URL, credentials and all -- to every
+     process on the session bus for as long as a channel plays. Measured on
+     the real bus with a synthetic credential, not reasoned about.
+     `--force-media-title` guards the TITLE, which reads `IPTV`; there is no
+     equivalent option for the URL and mpv-mpris has no configuration surface,
+     so the only lever is `--load-scripts=no`. It is RESERVED as well as
+     defaulted, because user `mpvArgs` are concatenated after the base argv
+     and a pasted `--load-scripts=yes` would silently reopen it.
+     The lesson generalises past this one option: **a sink can be opened by
+     software you did not write and did not choose to run.** The sink list had
+     only ever been audited over code in this repository.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under

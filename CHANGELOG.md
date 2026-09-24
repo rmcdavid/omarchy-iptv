@@ -3,6 +3,19 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+### Fixed
+
+- **The channel you are watching no longer puts your provider password on the
+  desktop's message bus.** mpv loads a small add-on that publishes what is
+  playing, so other programs can show it — and what it publishes includes the
+  full stream address, which on a paid playlist contains your username and
+  password. Any program you run could read it, for as long as a channel was
+  playing. The add-on is now switched off. The cost is that Omarchy's own media
+  widget no longer shows the channel; the IPTV widget in your bar always did
+  and still does.
+
 ## 0.7.9 (2026-09-23)
 
 ### Added

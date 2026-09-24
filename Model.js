@@ -203,6 +203,18 @@ var MPV_RESERVED = {
   // list option is covered by naming it once.
   "--script": true,
   "--scripts": true,
+  // D-SINK-4. Reserved, not merely defaulted off, and the distinction is the
+  // whole fix. `--load-scripts=no` is in the base argv, but user mpvArgs are
+  // concatenated AFTER it (buildMpvArgv's last line), so a pasted
+  // `--load-scripts=yes` would win and silently put the credentialed stream
+  // URL back on the session bus. That is the shape of D-SINK-2 again: an
+  // option defaulted rather than reserved is an option the user can undo
+  // without knowing what it was for.
+  //
+  // Unlike `--ytdl`, which is deliberately left re-enablable (PO-5) because
+  // it trades speed for reach, this one guards a credential and has no
+  // legitimate counter-position.
+  "--load-scripts": true,
   // NOT --script-opts: ruling PO-10 / D-PLY-5 keeps it a HANDOFF option,
   // allowed with a warning, and the suite holds that line. Base-name matching
   // still covers its spellings, so --script-opts-append warns like --script-opts
@@ -3478,6 +3490,24 @@ function buildMpvArgv(params) {
     // every dead URL (seconds of delay and noise per failed zap). User
     // mpvArgs come later, so `--ytdl=yes` can re-enable it (PO-5).
     "--ytdl=no",
+    // D-SINK-4. mpv autoloads every script in its system directory, and on
+    // this distribution that includes mpv-mpris, which publishes `xesam:url`
+    // -- the stream URL, credentials and all -- to every process on the
+    // session bus for as long as a channel plays. Measured on the real bus
+    // with a synthetic credential; `--force-media-title` guards the TITLE and
+    // there is no equivalent option for the URL.
+    //
+    // mpv-mpris has no configuration surface at all (no script-opts; it reads
+    // `path` and publishes it), so keeping it and not leaking is not
+    // available. This plugin loads no script of its own, and `--script` /
+    // `--scripts` / `--config-dir` are already reserved, so nothing here
+    // depends on autoload.
+    //
+    // The cost, stated rather than hidden: Omarchy's own media widget reads
+    // MPRIS and will stop showing the channel. That display is redundant --
+    // this plugin's bar widget already shows the playing channel name -- and
+    // a duplicate label is not worth a credential on the bus.
+    "--load-scripts=no",
     // PO-11: the two directories mpv's own key bindings write into, named
     // rather than inherited. `--screenshot-dir` is deliberately NOT reserved
     // - user tokens land after these, so anyone who wants their screenshots

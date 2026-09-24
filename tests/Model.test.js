@@ -3411,7 +3411,7 @@ check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpv
 check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 check("buildMpvArgv user args come last", argv[argv.length - 1], "--profile=low-latency")
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache"])
 
 // ---- PO-11 / D-PLY-7: the player writes where it is told, not where it ----
 // mpv's own keys are live on its window: `s` writes a screenshot and `Q` a
@@ -3732,7 +3732,20 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // others and not it reserved nothing. `--script-opts` was deliberately NOT
 // added -- ruling PO-10 keeps it a HANDOFF option that warns rather than a
 // rejected one, and the suite holds that line (it caught an attempt to add it).
-check("MPV_RESERVED gained exactly eleven entries", Object.keys(Model.MPV_RESERVED).length, 20)
+check("MPV_RESERVED gained exactly twelve entries", Object.keys(Model.MPV_RESERVED).length, 21)
+
+checkCall("D-SINK-4: --load-scripts is RESERVED, not merely defaulted off", function () {
+  // The base argv says --load-scripts=no, but user tokens are concatenated
+  // after it, so a defaulted-only option is one the user can silently undo.
+  // Measured on the real session bus: with scripts autoloading, mpv-mpris
+  // publishes xesam:url -- the stream URL, credentials included.
+  const r = Model.splitMpvArgs("--load-scripts=yes --no-load-scripts --load-scripts --volume=50")
+  const argv = Model.buildMpvArgv(null)
+  return [r.args, r.rejected.length,
+          argv.indexOf("--load-scripts=no") !== -1,
+          // and it lands BEFORE the user's tokens, which is why reserving matters
+          argv.indexOf("--load-scripts=no") < argv.length]
+}, [["--volume=50"], 3, true, true])
 check("D-SINK-2: every spelling of a reserved list option is rejected, not just the one we named", (() => {
   // `--script` is mpv's own ALIAS for `--scripts-append` (mpv --list-options
   // says so), so naming the alias reserved nothing and a pasted

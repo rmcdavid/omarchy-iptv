@@ -1914,9 +1914,14 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(names, set(self.fixture["mpvReserved"]))
         # D-SINK-2 made it twenty: `--include` loads a config file, and a config
         # file can set every other option on this list, so reserving the others
-        # and not it reserved nothing.
-        self.assertEqual(len(names), 20)
+        # and not it reserved nothing. D-SINK-4 made it twenty-one:
+        # `--load-scripts=no` is in the base argv, but user tokens land after
+        # it, so defaulting alone leaves a pasted `--load-scripts=yes` free to
+        # put the credentialed stream URL back on the session bus via
+        # mpv-mpris. Measured on the real bus before it was reserved.
+        self.assertEqual(len(names), 21)
         self.assertIn("--include", names)
+        self.assertIn("--load-scripts", names)
         self.assertNotIn("--ytdl", names)          # PO-5
         # NOT reserved, deliberately: ruling PO-10 / D-PLY-5 keeps --script-opts
         # a HANDOFF option that warns. This line is what caught an attempt to
