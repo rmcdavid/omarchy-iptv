@@ -43,9 +43,12 @@ version lives in `manifest.json`.
   playing, so other programs can show it — and what it publishes includes the
   full stream address, which on a paid playlist contains your username and
   password. Any program you run could read it, for as long as a channel was
-  playing. The add-on is now switched off. The cost is that Omarchy's own media
-  widget no longer shows the channel; the IPTV widget in your bar always did
-  and still does.
+  playing. The plugin's mpv no longer loads **any** automatically-loaded mpv
+  script, which is what that add-on is. Two costs, both worth knowing: Omarchy's
+  own media widget no longer shows the channel (the IPTV widget in your bar
+  always did and still does), and if you have your own mpv scripts installed
+  system-wide or in your mpv config, the plugin's player will not load those
+  either. Your own mpv, run any other way, is untouched.
 
 ## 0.7.9 (2026-09-23)
 

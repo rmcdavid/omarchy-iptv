@@ -84,7 +84,7 @@ Two places they can escape that, both worth knowing:
 | `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist |
 | `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe` |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus |
 
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
@@ -134,6 +134,7 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | list | s | stop playback |
 | list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
+| list | c | pause or resume the live stream. Not rewind: live streams cannot be wound back, so there is no returning to something that already happened, and the pause lasts about five minutes before the buffer fills. Bind a key to `omarchy-shell io.github.rmcdavid.iptv pause` to reach it while the guide is closed |
 | list | p | picture in picture: shrink the player into a corner, or put it back |
 | list | r | refresh playlist and EPG now |
 | list | / or Tab | back to search mode; Esc clears the query, then closes |
@@ -167,6 +168,15 @@ omarchy-shell io.github.rmcdavid.iptv status              # JSON
 ```
 
 ## Picture in picture
+
+Press `c` in the guide's list mode to pause live TV, and `c` again to carry
+on from where you stopped -- you are then watching a little behind live. The
+bar shows a paused glyph and says so in its tooltip. This is not rewind: live
+streams cannot be wound back, so there is no returning to something that has
+already happened, and the pause lasts roughly five minutes before mpv's buffer
+fills. Because you usually want this while watching rather than while
+browsing, it is also on the plugin's IPC as `pause`; `contrib/bindings.lua`
+carries a global keybinding example.
 
 Press `p` in the guide's list mode while something is playing. The player
 window floats, shrinks to a corner box sized from your monitor, and is pinned

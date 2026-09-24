@@ -238,6 +238,7 @@ class PlayTest(MpvTestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload, {"ok": True, "kind": "play", "id": "t:espn.us", "name": "ESPN"})
         self.assertEqual(server.commands, [
+            ["set_property", "pause", False],
             ["set_property", "title", "$>ESPN"],
             ["set_property", "force-media-title", "ESPN"],
             ["set_property", "user-agent", "VLC/3.0.20"],
@@ -254,6 +255,7 @@ class PlayTest(MpvTestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload["name"], "BBC One HD")
         self.assertEqual(server.commands, [
+            ["set_property", "pause", False],
             ["set_property", "title", "$>BBC One HD"],
             ["set_property", "force-media-title", "BBC One HD"],
             ["get_property", "option-info/user-agent/default-value"],
@@ -351,8 +353,8 @@ class PlayTest(MpvTestCase):
         code, payload, _, _ = self.play("--id", "t:tq.ca")
         self.assertEqual(code, 0)
         self.assertEqual(payload["name"], "T\u00e9l\u00e9 Qu\u00e9bec")
-        self.assertEqual(server.commands[0], ["set_property", "title", "$>T\u00e9l\u00e9 Qu\u00e9bec"])
-        self.assertEqual(server.commands[1], ["set_property", "force-media-title", "T\u00e9l\u00e9 Qu\u00e9bec"])
+        self.assertIn(["set_property", "title", "$>T\u00e9l\u00e9 Qu\u00e9bec"], server.commands)
+        self.assertIn(["set_property", "force-media-title", "T\u00e9l\u00e9 Qu\u00e9bec"], server.commands)
 
     def test_title_is_sent_with_the_raw_marker_so_mpv_never_expands_it(self):
         # S-01: mpv expands ${property} in `title`; "$>" keeps the rest literal.
@@ -363,9 +365,9 @@ class PlayTest(MpvTestCase):
         code, payload, stdout, stderr = self.play("--id", "t:x.test")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload["name"], "${path} ${options/input-ipc-server}")
-        self.assertEqual(server.commands[0], ["set_property", "title", helper.MPV_RAW_PREFIX + "${path} ${options/input-ipc-server}"])
+        self.assertIn(["set_property", "title", helper.MPV_RAW_PREFIX + "${path} ${options/input-ipc-server}"], server.commands)
         self.assertEqual(helper.MPV_RAW_PREFIX, "$>")
-        self.assertEqual(server.commands[1], ["set_property", "force-media-title", "${path} ${options/input-ipc-server}"])
+        self.assertIn(["set_property", "force-media-title", "${path} ${options/input-ipc-server}"], server.commands)
         self.assertEqual(sum(1 for c in server.commands if c[:2] == ["set_property", "title"]), 1)
         self.assertNotIn("user:pw", stdout + stderr)
 

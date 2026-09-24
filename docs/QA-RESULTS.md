@@ -7139,6 +7139,82 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## 0.7.10 preflight, 2026-09-24: four defects, and two of them were claims
+
+The second release running that the preflight stopped. Thirteen raw findings,
+and the four that mattered were all **things I had built and not connected**.
+
+### D-PAUSE-1 (blocker): pause survived a channel change
+
+`play()` set `root.paused = false` on the assumption that a new play is never
+paused. False for the one long-lived mpv this plugin drives: `pause` is a
+global property and mpv resets nothing across a `loadfile` by default. So a zap
+issued while paused loaded the new channel **into a paused player**, while the
+service had already flipped its own flag — and every sink then lied in chorus:
+`barGlyph` returned the playing glyph, the tooltip said "Playing", the
+accessible name said "playing", and the footer offered `c pause`.
+
+Recovery was worse than nothing: with the flag false, the first `c` sent
+`--state on`, the helper found `was == want` and changed nothing, so the first
+press only relabelled the bar and the picture stayed frozen.
+
+Fixed in `apply_channel`, atomic with the load, rather than in the shell —
+the shell's flag is optimistic and a refused clear would leave the two
+disagreeing. Verified live: paused, zapped, `pause False` and time advancing.
+
+### D-ZAP-2 (blocker): the changelog promised a message nothing showed
+
+The dead-channel entry said *"It tells you when it skipped something"*.
+Nothing told anyone. `Model.zapSkipNotice` had one caller in the whole tree —
+a unit test. `Service.zapSkipped` was written and read by nobody. No
+notification, no transient, no footer text.
+
+The skipping itself was real and bounded; only the promised reporting was
+absent. `CHANGELOG.md` is on the allowlist, so that sentence would have
+shipped into every install and onto the release page.
+
+This is rule 14 in its purest form: a unit test proving the string composes,
+and nothing proving it becomes a message. Now the service raises a signal and
+the guide renders it, pinned by a call-site check with both halves asserted
+and two mutations red.
+
+### D-SINK-4 follow-up (major): the changelog understated what was turned off
+
+The entry said the cost was Omarchy's media widget. The mechanism is
+`--load-scripts=no`, which switches off **every** autoloaded mpv script,
+including the user's own in `~/.config/mpv/scripts/`. And there is no way
+back: `--load-scripts` is reserved, so `--load-scripts=yes` in `mpvArgs` is
+silently dropped.
+
+The security decision stands. The account of its cost did not, and that is the
+only account the user gets. Corrected in the changelog and in the README's
+settings table.
+
+### D-PAUSE-2 (minor): "Nothing is playing" when the player was busy
+
+`togglePause` returned `false` both when nothing was playing and when the
+control slot was occupied — and the slot is occupied for ~150 ms by the health
+tick every 10 s. So a press at the wrong moment flashed "Nothing is playing"
+next to a bar reading "Playing 101 BBC One". It returns a reason now.
+
+### And one the fix itself introduced
+
+`persistFailed` used to SIGTERM its own in-flight write and start another,
+which loses the write it killed — and the two calls that collide are exactly
+the common pair: a play clearing a mark while the previous failure is still
+being written. Replaced with a one-deep queue that collapses to the last
+request per id, because replaying a mark after a clear would write the mark
+back.
+
+### What is worth keeping
+
+Four findings, and **three of them were the same mistake**: a mechanism built,
+tested in isolation, and never wired to anything a user meets. The skip notice,
+the pause flag's relationship to mpv, and the busy/idle distinction were each
+correct in the part that had a test and wrong in the part that did not.
+
+Node 1576 → **1577**, python 605.
+
 ## D-DEAD-1, 2026-09-24: an empty set is not an absent one
 
 Found live within hours of shipping the feature it breaks, while verifying

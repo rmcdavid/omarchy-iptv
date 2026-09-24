@@ -216,6 +216,7 @@ Item {
     logosOn: "Channel logos on" + Model.SEP + "fetching now",
     logosOff: "Channel logos off",
     pauseNothing: "Nothing is playing",
+    pauseBusy: "The player is busy" + Model.SEP + "try again",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
     rowXtream: "Add Xtream login",
@@ -1842,7 +1843,9 @@ Item {
   // doing nothing silently.
   function togglePause() {
     if (!root.serviceReady || typeof root.service.togglePause !== "function") return
-    if (!root.service.togglePause()) root.showTransient(root.copy.pauseNothing)
+    var why = root.service.togglePause()
+    if (why === "busy") root.showTransient(root.copy.pauseBusy)
+    else if (why !== "") root.showTransient(root.copy.pauseNothing)
   }
 
   function toggleLogos() {
@@ -2114,6 +2117,10 @@ Item {
     target: root.service
     // The Sources signals (SR3) may not exist on the service yet.
     ignoreUnknownSignals: true
+    // A zap that stepped over dead channels says so. Skipping rows the user
+    // can see without telling them would be the guide lying about state
+    // (UX principle 4).
+    function onZapSkippedDead(text) { root.showTransient(text) }
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     // UX 6.1: a manual refresh ends with `Refreshed - N channels` in the

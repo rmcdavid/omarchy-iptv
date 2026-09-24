@@ -790,6 +790,10 @@ Item {
   // `zapSkipped` is what the last zap stepped over, so the bar and the guide
   // can say so rather than silently walking past rows the user can see.
   property int zapSkipped: 0
+  // Raised when a zap stepped over something, with the words to show. The
+  // guide renders it; the bar has no transient surface, so a wheel zap is
+  // reported the next time the guide is opened via the row's own mark.
+  signal zapSkippedDead(string text)
 
   function zap(delta) {
     if (!root.nowPlaying) return false
@@ -797,6 +801,11 @@ Item {
     var hop = Model.zapStep(ring, root.nowPlaying.id, delta, root.failedAt)
     if (!hop.channel) return false
     root.zapSkipped = hop.skipped
+    // Say so. Skipping rows the user can see without telling them would be
+    // the guide lying about state (UX principle 4) -- and an unwired notice
+    // is exactly what the 0.7.10 preflight caught: the composer existed, the
+    // property was set, and nothing ever read either of them.
+    if (hop.skipped > 0) root.zapSkippedDead(Model.zapSkipNotice(hop.skipped))
     return root.play(Model.channelId(hop.channel), true, root.nowPlaying.launchedFrom)
   }
 
@@ -2727,13 +2736,44 @@ Item {
   // in-memory map is already correct, and a failed write costs a mark, not a
   // wrong one.
   Process { id: failedProc }
+  Connections {
+    target: failedProc
+    // Drain the queue. Without this a second mark raised while the first was
+    // still being written would sit there for ever -- which is how the kill
+    // this replaced came to exist.
+    function onExited(exitCode, exitStatus) {
+      if (root.failedQueue.length === 0) return
+      var q = root.failedQueue.slice()
+      var next = q.shift()
+      root.failedQueue = q
+      root.runFailedJob(next)
+    }
+  }
+
+  // A one-deep queue rather than a kill. This used to SIGTERM its own
+  // in-flight write and start another, which loses the write it killed --
+  // and the two calls that collide are exactly the common pair: a play
+  // clearing a mark while the previous failure is still being written.
+  property var failedQueue: []
 
   function persistFailed(action, id) {
     if (root.activeCacheDir === "" || str(id) === "") return false
-    if (failedProc.running) failedProc.signal(15)
-    failedProc.command = Model.failedArgv(root.helperPath, action, id, root.activeCacheDir)
-    failedProc.running = true
+    var job = { action: action, id: str(id), dir: root.activeCacheDir }
+    if (failedProc.running) {
+      // Collapse to the LAST request per id: a clear after a mark is the
+      // truth, and replaying both in order would write the mark back.
+      var q = root.failedQueue.filter(function (j) { return j.id !== job.id })
+      q.push(job)
+      root.failedQueue = q
+      return true
+    }
+    root.runFailedJob(job)
     return true
+  }
+
+  function runFailedJob(job) {
+    failedProc.command = Model.failedArgv(root.helperPath, job.action, job.id, job.dir)
+    failedProc.running = true
   }
 
   function str(v) { return v === undefined || v === null ? "" : String(v) }
@@ -2775,12 +2815,16 @@ Item {
   // The local flip is applied at once and the helper confirms it on the next
   // health tick: the bar must not wait a process launch to show the state the
   // user just asked for (rule 9). A refusal corrects it within a tick.
+  // -> "" on success, else a reason. Two different failures used to share one
+  // `false` and the guide said "Nothing is playing" for both, including when
+  // something WAS playing and the helper slot was merely busy. A message that
+  // is wrong about why is worse than no message.
   function togglePause() {
-    if (!root.nowPlaying) return false
+    if (!root.nowPlaying) return "idle"
     var want = !root.paused
-    if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return false
+    if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return "busy"
     root.paused = want
-    return true
+    return ""
   }
 
   function beginSwitch() {
@@ -4154,7 +4198,9 @@ Item {
     // guide closed -- rather than while browsing. contrib/bindings.lua shows
     // the global binding.
     function pause(): string {
-      return root.togglePause() ? (root.paused ? "paused" : "playing") : "nothing playing"
+      var why = root.togglePause()
+      if (why === "") return root.paused ? "paused" : "playing"
+      return why === "busy" ? "busy" : "nothing playing"
     }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }

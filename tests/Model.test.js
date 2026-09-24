@@ -1889,6 +1889,25 @@ checkCall("zap: the skip is REPORTED, because walking past rows silently is lyin
   return [Model.zapSkipNotice(0), Model.zapSkipNotice(1), Model.zapSkipNotice(3)]
 }, ["", "Skipped 1 dead channel", "Skipped 3 dead channels"])
 
+checkCall("zap: the skip notice is WIRED, not merely composed", function () {
+  // The 0.7.10 preflight caught this: zapSkipNotice existed, zapSkipped was
+  // set, the changelog promised the user would be told -- and NOTHING read
+  // either of them. A composer nobody calls is a claim, not a feature.
+  //
+  // Pinned as a call-site inventory because the wiring lives in QML: the
+  // service must raise it, and the guide must render it.
+  const src = qmlLines().map(function (l) { return l.text }).join("\n")
+  return [
+    // the service composes the words and raises them
+    /root\.zapSkippedDead\(Model\.zapSkipNotice\(hop\.skipped\)\)/.test(src),
+    /signal zapSkippedDead\(string text\)/.test(src),
+    // and the guide actually shows them
+    /function onZapSkippedDead\(text\) \{ root\.showTransient\(text\) \}/.test(src),
+    // guarded, so an ordinary zap stays silent
+    /if \(hop\.skipped > 0\) root\.zapSkippedDead/.test(src)
+  ]
+}, [true, true, true, true])
+
 checkCall("keep my place: only after a failure, only that channel, only briefly", function () {
   // Narrow on purpose. A normal reopen still starts fresh, because coming
   // back to a search you finished with is its own annoyance and the promise

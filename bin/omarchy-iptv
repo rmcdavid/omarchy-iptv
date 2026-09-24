@@ -3568,6 +3568,13 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     which is requirement 7's clearing mechanism) -> the stash -> loadfile ->
     the stash again with the entry id -> the owner claim.
     """
+    # PAUSE LIVE TV: mpv keeps `pause` across a loadfile, so tuning a new
+    # channel while paused would load it PAUSED while every surface said
+    # playing -- a black screen the user has no reason to suspect. Cleared
+    # here rather than in the shell, because it must be atomic with the load:
+    # the shell's own flag is optimistic and a refused clear would leave the
+    # two disagreeing. Found by the 0.7.10 preflight, not by the suite.
+    client.try_command("set_property", "pause", False)
     for prop, value in (("title", MPV_RAW_PREFIX + target["name"]), ("force-media-title", target["name"])):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:

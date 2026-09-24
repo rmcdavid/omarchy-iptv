@@ -774,8 +774,14 @@ class IdempotenceTest(PlayerTestCase):
         self.assertEqual(names[1], ["request_log_messages", "error"])
         order = [command[0] for command in server.commands]
         self.assertLess(order.index("request_log_messages"), order.index("loadfile"))
-        self.assertEqual([command[:2] for command in server.commands if command[0] == "set_property"][:2],
-                         [["set_property", "title"], ["set_property", "force-media-title"]])
+        # PAUSE LIVE TV: `pause` is cleared FIRST, before the title, because
+        # mpv keeps it across a loadfile and a zap issued while paused would
+        # otherwise load the new channel paused. The title pair keeps its
+        # relative order behind it.
+        sets = [command[:2] for command in server.commands if command[0] == "set_property"]
+        self.assertEqual(sets[:3], [["set_property", "pause"],
+                                    ["set_property", "title"],
+                                    ["set_property", "force-media-title"]])
         self.assertEqual(server.user_data["omarchy-iptv"]["entryId"], 1)
 
     def test_two_starts_in_a_row_spawn_once(self):
