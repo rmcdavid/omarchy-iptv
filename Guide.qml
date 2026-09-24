@@ -47,6 +47,16 @@ Item {
   // ---- guide state (R8). `guide` is the pure state machine object from
   // Model.js; replaced on every transition so bindings notice.
   property var guide: Model.guideState(Model.SCOPE_ALL)
+  // Where the user was when the guide closed to play something, so a FAILED
+  // play can put them back. Narrow on purpose: see Model.placeToRestore.
+  property var placeMark: null
+  // The channel whose row the cursor should land after, once the rows for the
+  // restored query exist. Consumed by rebuildDisplay.
+  property string restoreCursorTo: ""
+  // The most recent failure the service reported, which is what decides
+  // whether an open is a "come back" or a fresh start.
+  readonly property string lastFailedId: root.serviceReady && root.service.lastFailedId !== undefined
+    ? String(root.service.lastFailedId) : ""
   readonly property string mode: guide.mode
   readonly property bool searchMode: mode === "search"
   readonly property bool listMode: mode === "list"
@@ -205,6 +215,8 @@ Item {
     buttonTurnOn: "Turn on",
     logosOn: "Channel logos on" + Model.SEP + "fetching now",
     logosOff: "Channel logos off",
+    pauseNothing: "Nothing is playing",
+    pauseBusy: "The player is busy" + Model.SEP + "try again",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
     rowXtream: "Add Xtream login",
@@ -663,6 +675,10 @@ Item {
       // M2-04: the hint names the direction the key will go, so nobody has to
       // press it to find out -- and finding out means contacting third parties.
       showLogos: root.showLogos,
+      // PAUSE LIVE TV: the hint appears only while something is playing, and
+      // names the direction the key will go.
+      playing: root.playingId !== "",
+      paused: root.serviceReady && root.service.paused === true,
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
       // on screen. `scope` and `group` are the same five characters.
@@ -687,6 +703,17 @@ Item {
     var channels = root.serviceReady ? root.service.channels : []
     var userState = root.serviceReady ? root.service.userState : null
     var next = Model.guideState(Model.initialScope(channels, userState))
+    // UX 1.3 / 2.4, unimplemented since M0: a failed stream must not cost the
+    // user their place. If the channel we closed to play is the one that
+    // failed, come back exactly where we were -- same query, same scope --
+    // with the cursor on the row after the dead one.
+    var back = Model.placeToRestore(root.placeMark, root.lastFailedId, root.nowSec)
+    if (back) {
+      if (back.scopeId !== "") next = Model.withScope(next, back.scopeId)
+      if (back.query !== "") next = Model.withQuery(next, back.query)
+      root.restoreCursorTo = back.id
+    }
+    root.placeMark = null
     if (typeof payload.scope === "string" && payload.scope !== "") next = Model.withScope(next, payload.scope)
     else if (typeof payload.group === "string" && payload.group !== "") next = Model.withScope(next, Model.groupScopeId(payload.group))
     if (typeof payload.query === "string" && payload.query !== "") next = Model.withQuery(next, payload.query)
@@ -728,8 +755,16 @@ Item {
     // early on `groupsDirty`, so this call is what takes a fresh reading of
     // guide data that landed while the guide was closed.
     root.measureEpgRows()
+    // `restoring` is read BEFORE the rebuild, because the rebuild is what
+    // consumes it.
+    var restoring = root.restoreCursorTo !== ""
     root.rebuildDisplay()
-    root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
+    // UX 1.3: when we are handing the user back their place, the cursor the
+    // rebuild just put on the row after the dead one is the answer. Without
+    // this guard the next line overwrote it with cursorFor(), which is 0 when
+    // nothing is playing -- and nothing is playing, because the play failed.
+    // That is the whole feature, undone one line after it worked.
+    if (!restoring) root.cursorIndex = Model.cursorFor(root.currentRows, root.playingId)
     root.scrollToCursor()
     root.refocus()
   }
@@ -848,6 +883,16 @@ Item {
     root.truncated = result.truncated
     root.currentRows = result.rows
     root.rowCount = result.rows.length
+
+    // UX 1.3: after a failed stream the cursor lands on the row AFTER the dead
+    // one, so "try the next one" is one keypress. Consumed once -- the rows
+    // for the restored query only exist here, which is why it waits until now
+    // rather than being set in open().
+    if (root.restoreCursorTo !== "") {
+      var want = Model.rowIndexOfId(result.rows, root.restoreCursorTo)
+      if (want >= 0) root.cursorIndex = Math.min(want + 1, result.rows.length - 1)
+      root.restoreCursorTo = ""
+    }
 
     if (root.rowCount === 0) root.cursorIndex = 0
     else if (root.cursorIndex >= root.rowCount) root.cursorIndex = root.rowCount - 1
@@ -981,6 +1026,10 @@ Item {
       root.rebuildDisplay()
       return
     }
+    // UX 1.3: a failed stream must not clear the user's place. Remember it
+    // HERE, at the one moment the guide closes to play something, so a
+    // failure can hand it back. A successful play never uses this.
+    root.placeMark = Model.placeMark(root.guide, Model.channelId(channel), root.nowSec)
     root.dismiss()
     root.service.play(Model.channelId(channel), false, from)
   }
@@ -1367,6 +1416,7 @@ Item {
     else if (action === "stop") root.stopPlayback()
     else if (action === "refresh") root.refresh()
     else if (action === "pip") root.togglePip()
+    else if (action === "pause") root.togglePause()
     else if (action === "sources") root.openSources()
     else if (action === "search") {
       root.swallowKey = true
@@ -1788,6 +1838,16 @@ Item {
   // `g` in Sources. ON goes through the consent screen, which states the host
   // count; OFF is immediate, because turning it off discloses nothing and a
   // dialog in front of the safe direction teaches people to dismiss dialogs.
+  // PAUSE LIVE TV. Guarded on the function like every other service access in
+  // this file, and it says so when there is nothing to pause rather than
+  // doing nothing silently.
+  function togglePause() {
+    if (!root.serviceReady || typeof root.service.togglePause !== "function") return
+    var why = root.service.togglePause()
+    if (why === "busy") root.showTransient(root.copy.pauseBusy)
+    else if (why !== "") root.showTransient(root.copy.pauseNothing)
+  }
+
   function toggleLogos() {
     if (!root.inSources) return
     if (!root.serviceReady || typeof root.service.setShowLogos !== "function") {
@@ -2057,6 +2117,10 @@ Item {
     target: root.service
     // The Sources signals (SR3) may not exist on the service yet.
     ignoreUnknownSignals: true
+    // A zap that stepped over dead channels says so. Skipping rows the user
+    // can see without telling them would be the guide lying about state
+    // (UX principle 4).
+    function onZapSkippedDead(text) { root.showTransient(text) }
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     // UX 6.1: a manual refresh ends with `Refreshed - N channels` in the
@@ -2726,7 +2790,21 @@ Item {
                     scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows })
                   readonly property bool favorite: row.channelId !== "" && root.favoriteSet[row.channelId] === true
                   readonly property bool playing: row.channelId !== "" && row.channelId === root.playingId
-                  readonly property string failedAt: row.channelId !== "" && root.failedMap[row.channelId] ? String(root.failedMap[row.channelId]) : ""
+                  // PO 2026-09-24. The stored value is now an EPOCH, not the
+                  // "HH:MM" it used to be, because a display string is
+                  // meaningless the day after it is written. It is formatted
+                  // HERE, at the boundary, so every sink below it -- rowDetail,
+                  // rowMeta, rowFailedMeta, rowNoticeEmphasis and
+                  // rowAccessibleName -- keeps taking the string it always
+                  // took and none of them changes.
+                  //
+                  // `failedWhen` returns "" for a zero or unparseable stamp, so
+                  // the `!== ""` tests those sinks already make still hold.
+                  // A bare truthiness test on the epoch would not: epoch 0 is
+                  // falsy where "00:00" was truthy, which is a silent midnight
+                  // bug.
+                  readonly property string failedAt: row.channelId !== ""
+                    ? Model.failedWhen(root.failedMap[row.channelId], root.nowSec) : ""
                   readonly property var epg: Model.epgFields(row.tvgId !== "" ? root.epgMap[row.tvgId] : null, root.nowSec)
                   readonly property string nowTitle: row.epg.nowTitle
                   readonly property string nextTitle: row.epg.nextTitle

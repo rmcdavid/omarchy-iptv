@@ -3,6 +3,53 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.7.10 (2026-09-24)
+
+### Added
+
+- **Dead channels stop costing you anything.** Two things. First, if a stream
+  fails, the guide now comes back exactly where you left it — same search, same
+  group, and the cursor already sitting on the next channel down, with the dead
+  one marked. Before this, a failed channel threw away everything you had
+  typed and dropped you at the top of the full list. Second, zapping with the
+  bar wheel or the next/previous keys steps *past* channels it already knows
+  are dead, so one flick no longer hands you two black screens. It tells you
+  when it skipped something, it never skips more than twenty in a row, and if
+  everything nearby is marked it still moves.
+
+- **You can pause live TV.** Press `c` in the guide, or bind a key to it and
+  press that from anywhere while you are watching. The picture freezes, and
+  when you come back it carries on from the moment you stopped — you are then
+  watching a little behind live, which is the point. The bar shows a paused
+  glyph and says so in its tooltip. It is not rewind: live streams cannot be
+  wound back, so there is no returning to something that already happened, and
+  you can stay paused for roughly five minutes before the buffer fills.
+  `contrib/bindings.lua` has the global keybinding example.
+
+- **The guide remembers which channels did not work.** A channel that fails to
+  play keeps a mark on its row — the time it failed if that was today, the date
+  if it was earlier — and the mark now survives restarting the shell, which it
+  never used to. On a large free playlist a fair number of channels are simply
+  dead, and until now the only way to find out was to press Enter and wait. The
+  mark disappears the moment the channel plays again, and also when it is a
+  fortnight old, when the channel leaves your playlist, or when you remove the
+  source it came from, so a stale mark cannot follow you around. It is stored
+  with that source's cache rather than with your favourites.
+
+### Fixed
+
+- **The channel you are watching no longer puts your provider password on the
+  desktop's message bus.** mpv loads a small add-on that publishes what is
+  playing, so other programs can show it — and what it publishes includes the
+  full stream address, which on a paid playlist contains your username and
+  password. Any program you run could read it, for as long as a channel was
+  playing. The plugin's mpv no longer loads **any** automatically-loaded mpv
+  script, which is what that add-on is. Two costs, both worth knowing: Omarchy's
+  own media widget no longer shows the channel (the IPTV widget in your bar
+  always did and still does), and if you have your own mpv scripts installed
+  system-wide or in your mpv config, the plugin's player will not load those
+  either. Your own mpv, run any other way, is untouched.
+
 ## 0.7.9 (2026-09-23)
 
 ### Added

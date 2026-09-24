@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.7.9"
+var PLUGIN_VERSION = "0.7.10"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -114,6 +114,7 @@ var GLYPHS = {
   tv: "\udb81\udd02",        // U+F0502 nf-md-television        idle / not configured
   tvPlay: "\udb81\udd67",    // U+F0567 nf-md-television_play   playing (bar)
   tvOff: "\udb81\udd03",     // U+F0503 nf-md-television_off    playlist error / stream failed
+  tvPause: "\udb83\udfd1", // U+F0FD1 nf-md-television_pause  paused (bar); R7 forbids colour alone, and fc-query confirms this codepoint is in the installed font
   star: "\udb81\udcce",      // U+F04CE nf-md-star              favorite
   play: "\udb81\udc0a",      // U+F040A nf-md-play              playing row / footer
   alert: "\udb80\udc26",     // U+F0026 nf-md-alert             failed / banner
@@ -203,6 +204,18 @@ var MPV_RESERVED = {
   // list option is covered by naming it once.
   "--script": true,
   "--scripts": true,
+  // D-SINK-4. Reserved, not merely defaulted off, and the distinction is the
+  // whole fix. `--load-scripts=no` is in the base argv, but user mpvArgs are
+  // concatenated AFTER it (buildMpvArgv's last line), so a pasted
+  // `--load-scripts=yes` would win and silently put the credentialed stream
+  // URL back on the session bus. That is the shape of D-SINK-2 again: an
+  // option defaulted rather than reserved is an option the user can undo
+  // without knowing what it was for.
+  //
+  // Unlike `--ytdl`, which is deliberately left re-enablable (PO-5) because
+  // it trades speed for reach, this one guards a credential and has no
+  // legitimate counter-position.
+  "--load-scripts": true,
   // NOT --script-opts: ruling PO-10 / D-PLY-5 keeps it a HANDOFF option,
   // allowed with a warning, and the suite holds that line. Base-name matching
   // still covers its spellings, so --script-opts-append warns like --script-opts
@@ -1972,14 +1985,106 @@ function zapRing(channels, state, nowPlaying) {
 
 // Wrap-around neighbour inside an ordered list.
 function nextInGroup(list, currentId, delta) {
+  return zapStep(list, currentId, delta, null).channel
+}
+
+// The zap walk, with the dead ones stepped over.
+//
+// One wheel flick calls zap up to three times (BarWidget handleWheel), and on
+// a list where roughly one in eight channels is dead that flick can hand the
+// user two black screens and two failure toasts. Stepping past a channel
+// already KNOWN to be dead is the correctness half of the failure memory:
+// there is no point tuning to something we watched fail an hour ago.
+//
+// Three rules, and each one is a refusal of an obvious mistake:
+//
+// 1. BOUNDED. At most `max` channels are skipped. A 14-day mark on a mostly
+//    dead group would otherwise make that group unreachable by wheel for a
+//    fortnight, which is a worse failure than the one being avoided.
+// 2. NEVER EMPTY-HANDED. If every candidate is marked, the immediate
+//    neighbour is returned anyway. Zap must always move.
+// 3. IT REPORTS. `skipped` is returned so the caller can say so. Silently
+//    walking past rows the user can see would be the guide lying about
+//    state, which UX principle 4 forbids -- the point is to save a keypress,
+//    not to hide the list.
+//
+// `failed` is the { id: at } map; absent or empty, this is the old behaviour
+// exactly, which is also what a fresh source gets on day one.
+// Where a channel sits in the rows on screen, or -1. Lifted here rather than
+// looped in QML so it is unit-testable (engineering rule 12).
+function rowIndexOfId(rows, id) {
+  var list = asList(rows)
+  var want = str(id)
+  if (want === "") return -1
+  for (var i = 0; i < list.length; i++) if (channelId(list[i]) === want) return i
+  return -1
+}
+
+// ---- keep my place (UX.md 1.3: "a failed stream must not cost more than one
+// gesture to move past", and failure "must not clear the user's place in the
+// list"). Both were written at M0 and neither was implemented: `open()`
+// rebuilds from `initialScope` every time, so a failed play cost the query,
+// the scope AND the cursor. With no favourites that lands the user on All,
+// row 0, empty search, in a 1,462-row list.
+//
+// The restore is deliberately NARROW. It applies only when the guide was
+// closed by PLAYING something and that something then failed. A normal reopen
+// -- hotkey, bar click, an hour later -- still starts fresh, because coming
+// back to a stale search you have finished with is its own annoyance and the
+// product's promise is "open, three keystrokes, watching".
+function placeToRestore(mark, failedId, nowSec) {
+  var m = mark && typeof mark === "object" ? mark : null
+  if (!m) return null
+  if (str(m.id) === "" || str(m.id) !== str(failedId)) return null
+  // A mark older than the window is stale: the user has moved on, and
+  // restoring a search from yesterday would be a surprise, not a courtesy.
+  var at = Math.floor(Number(m.at) || 0)
+  var now = Math.floor(Number(nowSec) || 0)
+  if (at > 0 && now > 0 && now - at > PLACE_TTL_SEC) return null
+  return { query: str(m.query), scopeId: str(m.scopeId), id: str(m.id) }
+}
+
+// Long enough to cover a first-load failure and the user's reaction, short
+// enough that it is never a surprise.
+var PLACE_TTL_SEC = 180
+
+function placeMark(guideState, channelId, nowSec) {
+  var g = guideState || {}
+  return { query: str(g.query), scopeId: str(g.scopeId), id: str(channelId),
+           at: Math.floor(Number(nowSec) || 0) }
+}
+
+// What the guide says after a zap stepped over something. Empty when nothing
+// was skipped, so the ordinary zap stays silent.
+function zapSkipNotice(skipped) {
+  var n = Math.max(0, Math.floor(Number(skipped) || 0))
+  if (n <= 0) return ""
+  return "Skipped " + formatCount(n) + (n === 1 ? " dead channel" : " dead channels")
+}
+
+function zapStep(list, currentId, delta, failed, maxSkip) {
   var rows = asList(list)
-  if (rows.length === 0) return null
+  if (rows.length === 0) return { channel: null, skipped: 0 }
   var step = delta < 0 ? -1 : 1
   var at = -1
   for (var i = 0; i < rows.length; i++) if (channelId(rows[i]) === currentId) { at = i; break }
-  if (at === -1) return rows[0]
-  return rows[(at + step + rows.length) % rows.length]
+  if (at === -1) return { channel: rows[0], skipped: 0 }
+  var marks = failed && typeof failed === "object" ? failed : {}
+  var first = rows[(at + step + rows.length) % rows.length]
+  var max = Math.max(0, Math.floor(Number(maxSkip)))
+  if (!isFinite(max) || max <= 0) max = ZAP_MAX_SKIP
+  var probe = at
+  for (var n = 0; n <= max; n++) {
+    probe = (probe + step + rows.length) % rows.length
+    if (probe === at) break
+    var candidate = rows[probe]
+    if (marks[channelId(candidate)] === undefined) return { channel: candidate, skipped: n }
+  }
+  // Everything in reach is marked: go to the neighbour anyway (rule 2).
+  return { channel: first, skipped: 0 }
 }
+
+var ZAP_MAX_SKIP = 20
 
 // ------------------------------------------------------------ state
 
@@ -2548,11 +2653,137 @@ function trimRecents(state, max) {
 }
 
 // Session-only failure memory (R11): { id: "HH:MM" }. New objects every time.
-function withFailed(failed, id, clock) {
+// ---- dead-channel memory (PO 2026-09-24, amending R8 / R11 / UX ruling 9)
+//
+// A failure mark now SURVIVES a restart. Three decisions decide the rest, and
+// each of them is the answer to something a design review broke:
+//
+// 1. IT IS NOT IN state.json. Channel ids are global across sources
+//    (ARCHITECTURE-SOURCES D14), so a state-level map would mark a DIFFERENT
+//    provider's working channel with a failure earned on this one. And a map
+//    keyed by channel id falls inside D-ID-1's id-rotation blast radius --
+//    which that defect's row records as excluded precisely BECAUSE this was
+//    session-only. Storing it per source keeps that exclusion true, for a
+//    better reason: the marks live with the cache whose ids they name.
+//
+// 2. IT IS AN ARRAY, newest first, not a map. The savedSearches precedent
+//    chose an array for deterministic eviction order, and a `{id: at}` object
+//    has no iteration contract to evict by across two languages.
+//
+// 3. THE VALUE IS AN EPOCH, not the "HH:MM" it used to be. A display string is
+//    meaningless the day after it is written. Rendering is `failedNoticeAt`,
+//    below, which says the clock for today and the date for anything older so
+//    the row never implies a week-old observation is current.
+//
+// A mark is dropped four ways: the channel plays, it ages out, its id leaves
+// the playlist, or its source is removed. `prunedFailed` does the middle two;
+// the rest is the existing withoutFailed / failedAfterHealthy path.
+var MAX_FAILED = 300
+var FAILED_TTL_SEC = 14 * 24 * 3600
+
+// Read a failed.json document into the in-memory list. Deliberately takes no
+// clock: a parser that ages entries out is clock-dependent, which makes the
+// shared fixtures untestable. Aging is `prunedFailed`, at a named call site.
+function parseFailed(text) {
+  var doc = parseJsonObject(text)
+  if (!doc) return []
+  return normalizeFailed(doc.failed)
+}
+
+function normalizeFailed(list) {
+  var rows = asList(list)
+  var out = []
+  var seen = {}
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i]
+    if (!r || typeof r !== "object") continue
+    var id = str(r.id)
+    var at = Math.floor(Number(r.at))
+    if (id === "" || !isFinite(at) || at <= 0) continue
+    if (seen[id] === true) continue
+    seen[id] = true
+    out.push({ id: id, at: at })
+    if (out.length >= MAX_FAILED) break
+  }
+  return out
+}
+
+// The two drops that need context: too old, and no longer in the playlist.
+//
+// `knownIds` is the id set of the CURRENT channels.json. Dropping a mark whose
+// channel is gone is what makes this self-healing: an id rotation, a provider
+// reshuffle and a removed channel all produce marks that name nothing, and all
+// three are cleaned up here rather than by a migration nobody would maintain.
+// Passing no set at all skips that half, so a caller without channels loaded
+// yet cannot wipe the file.
+function prunedFailed(list, nowSec, knownIds) {
+  var now = Math.floor(Number(nowSec) || 0)
+  var rows = normalizeFailed(list)
+  var out = []
+  for (var i = 0; i < rows.length; i++) {
+    if (now > 0 && rows[i].at < now - FAILED_TTL_SEC) continue
+    if (knownIds && knownIds[rows[i].id] !== true) continue
+    out.push(rows[i])
+  }
+  return out
+}
+
+// { id: true } for prunedFailed, from whatever channel list the caller holds.
+function knownIdSet(channels) {
+  var list = asList(channels)
+  var out = {}
+  for (var i = 0; i < list.length; i++) {
+    var id = channelId(list[i])
+    if (id !== "") out[id] = true
+  }
+  return out
+}
+
+// The list as the guide wants it: { id: at } for O(1) row lookup. The ROW
+// still asks by id, so this is the shape the render path keeps.
+function failedIndex(list) {
+  var rows = normalizeFailed(list)
+  var out = {}
+  for (var i = 0; i < rows.length; i++) out[rows[i].id] = rows[i].at
+  return out
+}
+
+function failedDocument(list) {
+  return { version: 1, failed: normalizeFailed(list) }
+}
+
+// What the row says. `Failed 21:05` for today, `Failed 8 Sep` for older, and
+// the year when it is not this one -- the formatLastUsed idiom, so the guide
+// has one voice for "a time in the past".
+//
+// Never "Dead" or "Broken": the mark is a record of one observation, not a
+// claim about the channel now, and a week-old failure said in the present
+// tense would be a lie the user cannot check.
+function failedWhen(atSec, nowSec) {
+  var at = Math.floor(Number(atSec) || 0)
+  if (at <= 0) return ""
+  var d = new Date(at * 1000)
+  var now = Number(nowSec) > 0 ? new Date(Number(nowSec) * 1000) : new Date()
+  if (sameDay(d, now)) return formatClock(at)
+  var yesterday = new Date(now.getTime())
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (sameDay(d, yesterday)) return "yesterday"
+  var text = d.getDate() + " " + MONTHS[d.getMonth()]
+  if (d.getFullYear() !== now.getFullYear()) text += " " + d.getFullYear()
+  return text
+}
+
+// PO 2026-09-24: the value is an EPOCH now, and it is stored as the NUMBER it
+// is. It used to be str()'d, which was right while the value was the display
+// string "HH:MM" and is wrong for a stamp -- `failedIndex` produces numbers
+// from the file, so a str() here would make the same map hold numbers from
+// disk and strings from this turn, and the two would format identically right
+// up until something compared them.
+function withFailed(failed, id, at) {
   var out = {}
   var src = failed && typeof failed === "object" ? failed : {}
   for (var k in src) out[k] = src[k]
-  if (str(id) !== "") out[str(id)] = str(clock)
+  if (str(id) !== "") out[str(id)] = typeof at === "number" ? at : str(at)
   return out
 }
 
@@ -3478,6 +3709,24 @@ function buildMpvArgv(params) {
     // every dead URL (seconds of delay and noise per failed zap). User
     // mpvArgs come later, so `--ytdl=yes` can re-enable it (PO-5).
     "--ytdl=no",
+    // D-SINK-4. mpv autoloads every script in its system directory, and on
+    // this distribution that includes mpv-mpris, which publishes `xesam:url`
+    // -- the stream URL, credentials and all -- to every process on the
+    // session bus for as long as a channel plays. Measured on the real bus
+    // with a synthetic credential; `--force-media-title` guards the TITLE and
+    // there is no equivalent option for the URL.
+    //
+    // mpv-mpris has no configuration surface at all (no script-opts; it reads
+    // `path` and publishes it), so keeping it and not leaking is not
+    // available. This plugin loads no script of its own, and `--script` /
+    // `--scripts` / `--config-dir` are already reserved, so nothing here
+    // depends on autoload.
+    //
+    // The cost, stated rather than hidden: Omarchy's own media widget reads
+    // MPRIS and will stop showing the channel. That display is redundant --
+    // this plugin's bar widget already shows the playing channel name -- and
+    // a duplicate label is not worth a credential on the bus.
+    "--load-scripts=no",
     // PO-11: the two directories mpv's own key bindings write into, named
     // rather than inherited. `--screenshot-dir` is deliberately NOT reserved
     // - user tokens land after these, so anyone who wants their screenshots
@@ -3535,6 +3784,14 @@ function playlistProbeArgv(helperPath, url, cacheDir) {
 // are downloaded. `--fetch` is what turns the helper's default survey into a
 // download, so a command built without it contacts nobody -- the opt-in is
 // spelled twice, once in the setting and once here.
+// The dead-channel mark, written by the helper so the file lands 0600 inside
+// the 0700 source directory -- the same reason logo writes go through it.
+// argv items, never shell text: a channel id is playlist-derived.
+function failedArgv(helperPath, action, id, cacheDir) {
+  var verb = str(action) === "clear" ? "clear" : "mark"
+  return helperArgv(helperPath, ["failed", verb, "--id", str(id), "--cache-dir", str(cacheDir)])
+}
+
 function logoFetchArgv(helperPath, cacheDir) {
   return helperArgv(helperPath, ["logos", "--fetch", "--cache-dir", str(cacheDir)])
 }
@@ -3594,6 +3851,22 @@ function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, fro
   var rung = str(from)
   if (rung === "quit" || rung === "term" || rung === "kill") argv = argv.concat(["--from", rung])
   return argv
+}
+
+// PAUSE LIVE TV (2026-09-24). Not rewind, and the naming matters: measured
+// across 22 live channels from 21 providers, 21 paused and resumed correctly
+// and exactly ONE reported itself seekable, so there is no going back to
+// before the keypress. mpv keeps filling its cache while paused, so resuming
+// continues from the moment it was pressed and the viewer is then behind
+// live. The bound is mpv's default 150 MiB demuxer cache: 315 s measured on a
+// ~3.8 Mbps stream, less on a fatter one.
+//
+// `state` is "on", "off" or "toggle"; anything else is a toggle, because a
+// key that means "pause" must never be able to mean "start playing".
+function playerPauseArgv(socket, state) {
+  var want = str(state)
+  if (want !== "on" && want !== "off") want = "toggle"
+  return ["player", "pause", "--socket", str(socket), "--state", want]
 }
 
 // `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
@@ -4784,6 +5057,10 @@ function listLetterAction(text) {
   if (t === "s" || t === "S") return "stop"
   if (t === "r" || t === "R") return "refresh"
   if (t === "p" || t === "P") return "pip"
+  // PAUSE LIVE TV. The action is offered unconditionally here and gated at
+  // the call site on something playing, the same way `pip` is: the table says
+  // what a letter MEANS, not whether it can act right now.
+  if (t === PAUSE_KEY || t === PAUSE_KEY.toUpperCase()) return "pause"
   if (t === "/") return "search"
   if (t.toLowerCase() === SOURCE_KEYS.open) return "sources"
   return ""
@@ -5510,6 +5787,9 @@ function noMatchesTitle(query, scopeId) {
 // R7: glyph per state, never color-only.
 function barGlyph(opts) {
   var o = opts || {}
+  // PAUSE LIVE TV. R7 is that a bar state is never carried by colour alone,
+  // so a paused stream gets its own glyph rather than the playing one dimmed.
+  if (o.playing && o.paused) return GLYPHS.tvPause
   if (o.playing) return GLYPHS.tvPlay
   if (o.error) return GLYPHS.tvOff
   return GLYPHS.tv
@@ -5528,7 +5808,7 @@ function barTooltip(opts) {
   var line = ""
   // M2-03 6.4: the number joins the tooltip whenever the playing channel has
   // one, including on a vertical bar where the label itself is glyph-only.
-  if (o.playing && str(o.name) !== "") line = "Playing " + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
+  if (o.playing && str(o.name) !== "") line = (o.paused ? "Paused " : "Playing ") + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
   else if (o.refreshing) line = "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
   else if (!o.configured) line = "IPTV" + SEP + "no playlist configured"
   else if (o.error) line = "IPTV" + SEP + "playlist error, open the guide"
@@ -5538,7 +5818,10 @@ function barTooltip(opts) {
 
 function barAccessibleName(opts) {
   var o = opts || {}
-  if (o.playing && str(o.name) !== "") return "IPTV, playing " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
+  // PAUSE LIVE TV. The glyph and the tooltip both changed for paused; the
+  // accessible name has to as well, or the one user who cannot see the glyph
+  // is the one user not told. That asymmetry is exactly the D-GS-3 shape.
+  if (o.playing && str(o.name) !== "") return "IPTV, " + (o.paused ? "paused" : "playing") + " " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
   if (o.error) return "IPTV, playlist error"
   return "IPTV, idle"
 }
@@ -5694,6 +5977,10 @@ function footerHints(opts) {
       return [["0-9", "digits"], [CHNO_ENTRY_SEP, "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]]
     }
     var list = [["j/k", "move"], ["h/l", scopeVerb(o)], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // PAUSE LIVE TV. Only while something is playing -- a pause key on an
+    // idle guide has nothing to act on and would be a hint that lies. Names
+    // the direction, so nobody presses it to find out which way it goes.
+    if (o.playing === true) list.push([PAUSE_KEY, o.paused === true ? "resume" : "pause"])
     // M2-05 section 5. Gated the way `0-9` is: a machine with no Hyprland
     // never advertises a key that can only answer "picture in picture needs
     // Hyprland". An absent flag shows it, so a service that predates PiP is
@@ -5773,6 +6060,11 @@ var MASK_CLEAR_PARAMS = ["type", "output"]
 var LIMITS = { url: MAX_SOURCE_URL, label: MAX_LABEL, server: MAX_XTREAM_SERVER, user: MAX_XTREAM_FIELD, pass: MAX_XTREAM_FIELD, sources: MAX_SOURCES }
 // The keys of the Sources screens, next to the hint table so the two cannot
 // drift (UX-SOURCES 4.8). Guide.qml never spells a key.
+// PAUSE LIVE TV. `c` for "cease", because p is picture-in-picture, s is stop
+// and Space is preview -- the three keys a pause would naturally want are all
+// taken by things a viewer also does often.
+var PAUSE_KEY = "c"
+
 var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
 var SOURCE_KEY_RE = /^[0-9a-f]{8}(-[0-9]{1,3})?$/
 var SOURCE_ORIGINS = ["guide", "xtream", "cli", "migrated"]
@@ -7241,6 +7533,13 @@ if (typeof module !== "undefined") {
     launchScope: launchScope,
     zapRing: zapRing,
     nextInGroup: nextInGroup,
+    zapStep: zapStep,
+    zapSkipNotice: zapSkipNotice,
+    rowIndexOfId: rowIndexOfId,
+    placeMark: placeMark,
+    placeToRestore: placeToRestore,
+    PLACE_TTL_SEC: PLACE_TTL_SEC,
+    ZAP_MAX_SKIP: ZAP_MAX_SKIP,
     emptyState: emptyState,
     parseState: parseState,
     isFavorite: isFavorite,
@@ -7282,11 +7581,21 @@ if (typeof module !== "undefined") {
     clampInt: clampInt,
     clampSetting: clampSetting,
     settingsFrom: settingsFrom,
+    parseFailed: parseFailed,
+    normalizeFailed: normalizeFailed,
+    prunedFailed: prunedFailed,
+    knownIdSet: knownIdSet,
+    failedIndex: failedIndex,
+    failedDocument: failedDocument,
+    failedWhen: failedWhen,
+    MAX_FAILED: MAX_FAILED,
+    FAILED_TTL_SEC: FAILED_TTL_SEC,
     ownWriteOf: ownWriteOf,
     ownedEntryPatch: ownedEntryPatch,
     OWNED_SETTINGS: OWNED_SETTINGS,
     confirmLogosMessage: confirmLogosMessage,
     logoFetchArgv: logoFetchArgv,
+    failedArgv: failedArgv,
     optInSetting: optInSetting,
     logoSurvey: logoSurvey,
     logoConsentLines: logoConsentLines,
@@ -7323,6 +7632,7 @@ if (typeof module !== "undefined") {
     playerStopArgv: playerStopArgv,
     playerRestartArgv: playerRestartArgv,
     playerProbeArgv: playerProbeArgv,
+    playerPauseArgv: playerPauseArgv,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
     playFork: playFork,
     zapArgs: zapArgs,
@@ -7480,6 +7790,7 @@ if (typeof module !== "undefined") {
     MASK_CLEAR_PARAMS: MASK_CLEAR_PARAMS,
     LIMITS: LIMITS,
     SOURCE_KEYS: SOURCE_KEYS,
+    PAUSE_KEY: PAUSE_KEY,
     SOURCE_KEY_RE: SOURCE_KEY_RE,
     GUIDE_MODES: GUIDE_MODES,
     sanitizeInput: sanitizeInput,

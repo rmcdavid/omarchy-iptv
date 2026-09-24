@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.9. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.7.10. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, and picture in picture; the two most recent releases went to the
 guide at real provider scale, and to search accuracy and readable contrast.
@@ -84,7 +84,7 @@ Two places they can escape that, both worth knowing:
 | `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist |
 | `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe` |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus |
 
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
@@ -134,6 +134,7 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | list | s | stop playback |
 | list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
+| list | c | pause or resume the live stream. Not rewind: live streams cannot be wound back, so there is no returning to something that already happened, and the pause lasts about five minutes before the buffer fills. Bind a key to `omarchy-shell io.github.rmcdavid.iptv pause` to reach it while the guide is closed |
 | list | p | picture in picture: shrink the player into a corner, or put it back |
 | list | r | refresh playlist and EPG now |
 | list | / or Tab | back to search mode; Esc clears the query, then closes |
@@ -167,6 +168,15 @@ omarchy-shell io.github.rmcdavid.iptv status              # JSON
 ```
 
 ## Picture in picture
+
+Press `c` in the guide's list mode to pause live TV, and `c` again to carry
+on from where you stopped -- you are then watching a little behind live. The
+bar shows a paused glyph and says so in its tooltip. This is not rewind: live
+streams cannot be wound back, so there is no returning to something that has
+already happened, and the pause lasts roughly five minutes before mpv's buffer
+fills. Because you usually want this while watching rather than while
+browsing, it is also on the plugin's IPC as `pause`; `contrib/bindings.lua`
+carries a global keybinding example.
 
 Press `p` in the guide's list mode while something is playing. The player
 window floats, shrinks to a corner box sized from your monitor, and is pinned
@@ -333,7 +343,16 @@ itself unavailable rather than half working.
   (safe to delete; rebuilt on refresh). A 0.1.0 single cache is migrated on
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
-  played, and the Sources history including their URLs (mode 0600)
+  played, your saved searches, the player session record, and the Sources
+  history including their URLs (mode 0600). Channels that failed to play are
+  **not** kept here: they belong to the source that carried them, and live in
+  that source's cache directory below
+- `~/.cache/omarchy-iptv/sources/<source>/failed.json` : which channels of
+  that source failed to play, and when (mode 0600). This is what lets the
+  guide tell you a channel did not work last time instead of making you press
+  Enter to find out. A mark is dropped when the channel plays again, when it
+  is a fortnight old, when the channel leaves your playlist, and when you
+  remove the source
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is

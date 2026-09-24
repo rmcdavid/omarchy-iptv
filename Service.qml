@@ -294,7 +294,26 @@ Item {
   property bool playerPending: false        // a start we issued is not observable yet
   readonly property bool playerUp: (root.playerSocket !== null && root.playerSocket.connected) || root.playerPending
   readonly property bool playing: playerUp && nowPlaying !== null
-  property var failedAt: ({})               // session-only { id: "HH:MM" } (R11)
+  // PO 2026-09-24, amending R8 / R11 and UX ruling 9: the mark now SURVIVES a
+  // restart. { id: <epoch> }, loaded from the ACTIVE SOURCE's cache rather
+  // than state.json -- channel ids are global across sources, so a
+  // state-level map would mark another provider's working channel, and it
+  // would fall inside D-ID-1's id-rotation blast radius, which that defect
+  // records as excluded precisely because this used to be session-only.
+  // Per source, that exclusion stays true.
+  // PAUSE LIVE TV (2026-09-24). What the player last told us. The health tick
+  // already asks mpv for `pause` every few seconds, so this costs no new
+  // traffic -- it was being read and thrown away.
+  //
+  // Not rewind: the streams are not seekable (1 of 22 measured), so there is
+  // no going back before the keypress. Bounded by mpv's 150 MiB cache, about
+  // five minutes on a typical stream.
+  property bool paused: false
+  property var failedAt: ({})
+  // The file behind it. Loaded on every source switch, so the marks a source
+  // carries arrive with its channels and leave with it.
+  readonly property string failedPath: root.activeCacheDir === ""
+    ? "" : root.activeCacheDir + "/failed.json"
   // PO-3 lost a race and is waiting for state.json (see markDeadSession()):
   // the probe answered "no player" before the state FileView loaded, so the
   // verdict has to be re-run from applyUserState() once there is a file to
@@ -379,6 +398,11 @@ Item {
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
   // this keeps the user's toast count at one.
   property string notifiedFailureId: ""
+  // The channel of the most recent failure. The guide reads it to decide
+  // whether an open is "come back after a dead stream" or a fresh start
+  // (UX 1.3). Distinct from `failedAt`, which is every mark ever: this is
+  // the ONE that just happened, and a new play clears it.
+  property string lastFailedId: ""
   // Warnings of the last successful playlist load (D-LIVE-18), URL-free;
   // the guide shows them until the next successful load without warnings.
   // A failed refresh keeps them: the cache in use is still that load's.
@@ -574,7 +598,16 @@ Item {
     playRetryTimer.stop()
     root.healthFailures = 0
     root.lastError = ""
-    root.failedAt = Model.withoutFailed(root.failedAt, key)
+    // A new play is never paused: the flag belongs to the stream that was
+    // playing, and carrying it over would show a pause nobody asked for.
+    root.paused = false
+    // A new play puts the last failure behind us: the next guide open is a
+    // fresh start, not a come-back.
+    root.lastFailedId = ""
+    if (root.failedAt[key] !== undefined) {
+      root.failedAt = Model.withoutFailed(root.failedAt, key)
+      root.persistFailed("clear", key)
+    }
     root.notifiedFailureId = ""
     // A play cancels a pending stop-confirmation: the player that is coming
     // up is wanted, whatever the one before it did.
@@ -748,12 +781,32 @@ Item {
   }
 
   // Zap ring (UX 3.4): the list the channel was launched from.
+  // Zapping steps PAST channels already known to be dead. One wheel flick
+  // calls this up to three times, so on a list where roughly one in eight is
+  // dead a single flick could hand the user two black screens and two failure
+  // toasts. Bounded, never empty-handed, and it reports what it skipped --
+  // see Model.zapStep for why each of those is a refusal of a mistake.
+  //
+  // `zapSkipped` is what the last zap stepped over, so the bar and the guide
+  // can say so rather than silently walking past rows the user can see.
+  property int zapSkipped: 0
+  // Raised when a zap stepped over something, with the words to show. The
+  // guide renders it; the bar has no transient surface, so a wheel zap is
+  // reported the next time the guide is opened via the row's own mark.
+  signal zapSkippedDead(string text)
+
   function zap(delta) {
     if (!root.nowPlaying) return false
     var ring = Model.zapRing(root.channels, root.userState, root.nowPlaying)
-    var next = Model.nextInGroup(ring, root.nowPlaying.id, delta)
-    if (!next) return false
-    return root.play(Model.channelId(next), true, root.nowPlaying.launchedFrom)
+    var hop = Model.zapStep(ring, root.nowPlaying.id, delta, root.failedAt)
+    if (!hop.channel) return false
+    root.zapSkipped = hop.skipped
+    // Say so. Skipping rows the user can see without telling them would be
+    // the guide lying about state (UX principle 4) -- and an unwired notice
+    // is exactly what the 0.7.10 preflight caught: the composer existed, the
+    // property was set, and nothing ever read either of them.
+    if (hop.skipped > 0) root.zapSkippedDead(Model.zapSkipNotice(hop.skipped))
+    return root.play(Model.channelId(hop.channel), true, root.nowPlaying.launchedFrom)
   }
 
   // The channel a typed number resolves to, or null (M2-03 3.2). Exact match
@@ -1321,6 +1374,7 @@ Item {
       // a value: what the RUNNING component believes it is, what is on disk
       // beside it, and the verdict the footer reads. Version strings carry no
       // credential and no path, so this adds nothing to the redaction surface.
+      paused: root.paused,
       build: {
         running: Model.PLUGIN_VERSION,
         onDisk: root.onDiskVersion,
@@ -1772,18 +1826,35 @@ Item {
     var kind = root.controlKind
     root.controlKind = ""
     var status = Model.parseHelperStatus(text, kind)
+    if (kind === "pause") {
+      // The helper is authoritative: the optimistic flip is corrected here if
+      // the player refused, or if there was no player to ask.
+      if (status.ok === true && status.running === true && status.paused !== undefined
+          && status.paused !== null) {
+        root.paused = status.paused === true
+      } else if (status.ok === true && status.running !== true) {
+        root.paused = false
+      }
+      return
+    }
     if (kind === "status") {
       var code = status.error ? String(status.error.code) : ""
       if (Model.statusHealthy(status)) {
         root.healthFailures = 0
+        if (status.paused !== undefined && status.paused !== null) root.paused = status.paused === true
         // D-PLY-14: a healthy player that its own stash says is on this exact
         // channel is proof the channel plays, so any failure mark it still
         // carries is stale and goes. The only other clear runs when a play
         // STARTS, so without this a transient first-load error left a channel
         // the user was watching showing "Failed - Space to retry".
+        var beforeHealthy = root.failedAt
         root.failedAt = Model.failedAfterHealthy(root.failedAt,
                                                  root.checkPlayerChannel(status),
                                                  root.nowPlaying)
+        // D-PLY-14 clears in memory; the mark is durable now, so the clear
+        // has to reach the file too or it returns at the next guide open.
+        if (root.failedAt !== beforeHealthy && root.nowPlaying)
+          root.persistFailed("clear", String(root.nowPlaying.id || ""))
       } else if (code === "not_implemented" || code === "no_output") {
         // The helper cannot tell (stub or crash): neither healthy nor a
         // strike, so a missing subcommand never reaps a working player.
@@ -2424,7 +2495,16 @@ Item {
     if (id !== "" && root.notifiedFailureId === id) return
     root.notifiedFailureId = id
     root.lastError = reason
-    if (id !== "") root.failedAt = Model.withFailed(root.failedAt, id, Model.formatClock(Math.floor(Date.now() / 1000)))
+    if (id !== "") {
+      // Applied locally at once and persisted in the same turn. The local
+      // apply is not an optimisation: the file is reloaded asynchronously, so
+      // waiting for it would leave the row unmarked for as long as a process
+      // launch takes -- and engineering rule 9 is that a plugin never waits for
+      // its own write to come back.
+      root.failedAt = Model.withFailed(root.failedAt, id, Math.floor(Date.now() / 1000))
+      root.persistFailed("mark", id)
+      root.lastFailedId = id
+    }
     root.notify("streamFailed", { name: String(target.name || ""), reason: reason })
   }
 
@@ -2649,6 +2729,102 @@ Item {
     root.shell.updateEntryInline(root.pluginId, entry)
     root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, { showLogos: want }))
     return true
+  }
+
+  // One process per mark or clear, which is affordable because a failure is
+  // rare -- not per keystroke, per zap or per tick. Fire and forget: the
+  // in-memory map is already correct, and a failed write costs a mark, not a
+  // wrong one.
+  Process { id: failedProc }
+  Connections {
+    target: failedProc
+    // Drain the queue. Without this a second mark raised while the first was
+    // still being written would sit there for ever -- which is how the kill
+    // this replaced came to exist.
+    function onExited(exitCode, exitStatus) {
+      if (root.failedQueue.length === 0) return
+      var q = root.failedQueue.slice()
+      var next = q.shift()
+      root.failedQueue = q
+      root.runFailedJob(next)
+    }
+  }
+
+  // A one-deep queue rather than a kill. This used to SIGTERM its own
+  // in-flight write and start another, which loses the write it killed --
+  // and the two calls that collide are exactly the common pair: a play
+  // clearing a mark while the previous failure is still being written.
+  property var failedQueue: []
+
+  function persistFailed(action, id) {
+    if (root.activeCacheDir === "" || str(id) === "") return false
+    var job = { action: action, id: str(id), dir: root.activeCacheDir }
+    if (failedProc.running) {
+      // Collapse to the LAST request per id: a clear after a mark is the
+      // truth, and replaying both in order would write the mark back.
+      var q = root.failedQueue.filter(function (j) { return j.id !== job.id })
+      q.push(job)
+      root.failedQueue = q
+      return true
+    }
+    root.runFailedJob(job)
+    return true
+  }
+
+  function runFailedJob(job) {
+    failedProc.command = Model.failedArgv(root.helperPath, job.action, job.id, job.dir)
+    failedProc.running = true
+  }
+
+  function str(v) { return v === undefined || v === null ? "" : String(v) }
+
+  // The marks of the source whose channels are loaded. Pruned on arrival: the
+  // TTL, and any id the current playlist does not have -- which is what makes
+  // an id rotation, a provider reshuffle and a removed channel all self-heal
+  // instead of leaving marks that name nothing.
+  // The raw list as it came off disk. Kept because the prune needs the CHANNELS
+  // to decide what is stale, and the two files load independently -- on a cold
+  // start failed.json can arrive first.
+  property var failedRaw: []
+
+  function applyFailed(text) {
+    root.failedRaw = Model.parseFailed(text)
+    root.pruneFailed()
+  }
+
+  // D-ZAP-1, found live: this used to pass `Model.knownIdSet(root.channels)`
+  // straight through. With no channels loaded yet that is `{}` -- an EMPTY
+  // object, which is truthy -- so every mark was dropped as "not in the
+  // playlist" and the marks silently vanished on every cold start.
+  //
+  // `prunedFailed` already distinguishes "no channels, cannot tell" from "here
+  // are the channels": it takes null for the first. The bug was entirely at
+  // this call site, and the unit test passed because it tested the function
+  // with null rather than the caller with what the caller actually sends.
+  function pruneFailed() {
+    var known = root.channels.length > 0 ? Model.knownIdSet(root.channels) : null
+    root.failedAt = Model.failedIndex(Model.prunedFailed(root.failedRaw, root.nowSec, known))
+  }
+
+  // Re-prune when the channels arrive, whichever file won the race.
+  onChannelsChanged: root.pruneFailed()
+
+  // Pause or resume what is playing. Returns false when there is nothing to
+  // pause, so a caller can say so rather than appearing to work.
+  //
+  // The local flip is applied at once and the helper confirms it on the next
+  // health tick: the bar must not wait a process launch to show the state the
+  // user just asked for (rule 9). A refusal corrects it within a tick.
+  // -> "" on success, else a reason. Two different failures used to share one
+  // `false` and the guide said "Nothing is playing" for both, including when
+  // something WAS playing and the helper slot was merely busy. A message that
+  // is wrong about why is worse than no message.
+  function togglePause() {
+    if (!root.nowPlaying) return "idle"
+    var want = !root.paused
+    if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return "busy"
+    root.paused = want
+    return ""
   }
 
   function beginSwitch() {
@@ -3187,6 +3363,16 @@ Item {
       root.applyChannels("")
       root.finishSwitch()
     }
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: failedFile
+    path: root.failedPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyFailed(text())
+    onLoadFailed: root.applyFailed("")
     onFileChanged: reload()
   }
 
@@ -4007,6 +4193,15 @@ Item {
     // `reason` is the last failure code (dispatch_failed, no_window,
     // ambiguous, timeout, ...) and "" after a success.
     function pip(mode: string): string { return JSON.stringify(root.requestPip(mode)) }
+    // PAUSE LIVE TV. An IPC verb rather than only a guide key, because this is
+    // the first action in the product you want while WATCHING -- with the
+    // guide closed -- rather than while browsing. contrib/bindings.lua shows
+    // the global binding.
+    function pause(): string {
+      var why = root.togglePause()
+      if (why === "") return root.paused ? "paused" : "playing"
+      return why === "busy" ? "busy" : "nothing playing"
+    }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }

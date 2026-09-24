@@ -44,6 +44,9 @@ BarWidget {
   readonly property bool serviceReady: service !== null
   readonly property bool playing: serviceReady && service.playing === true
   readonly property string nowPlayingName: playing && service.nowPlaying ? String(service.nowPlaying.name || "") : ""
+  // PAUSE LIVE TV: the glyph, the tooltip and the accessible name all branch
+  // on it, so it is read once here.
+  readonly property bool paused: playing && service.paused === true
   // The service derives this from the loaded cache. Guarded for `undefined`
   // because the harness runs this widget against a pre-change service too,
   // and an undefined read must never invent a value (engineering rule 10 (dev branch)).
@@ -56,7 +59,7 @@ BarWidget {
   // like nowPlayingChno above: a service that predates PiP reports nothing,
   // and an undefined read must never invent a value (engineering rule 10 (dev branch)).
   readonly property bool pipOn: serviceReady && service.pipOn === true
-  readonly property string glyph: Model.barGlyph({ playing: root.playing, error: root.hasError })
+  readonly property string glyph: Model.barGlyph({ playing: root.playing, error: root.hasError, paused: root.paused })
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""
   // Vertical bars stay glyph-only (UX 8 #12); the number is in the tooltip.
   readonly property bool showNumber: !root.vertical && root.showChannelNumber && root.nowPlayingChno !== ""
@@ -80,7 +83,7 @@ BarWidget {
     chno: root.nowPlayingChno,
     error: root.hasError,
     refreshing: root.refreshing,
-    pip: root.pipOn
+    pip: root.pipOn, paused: root.paused
   })
 
   Behavior on glyphColor {
@@ -132,7 +135,7 @@ BarWidget {
   // M2-03 8.1: the number is spoken as "channel 101", never as a bare digit
   // string.
   Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
-                                             chno: root.nowPlayingChno, error: root.hasError })
+                                             chno: root.nowPlayingChno, error: root.hasError, paused: root.paused })
 
   // Mirrors WidgetButton: registered click targets keep receiving clicks
   // while a bar popup (KeyboardPanel) is open.
