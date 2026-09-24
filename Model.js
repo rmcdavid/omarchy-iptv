@@ -2560,11 +2560,137 @@ function trimRecents(state, max) {
 }
 
 // Session-only failure memory (R11): { id: "HH:MM" }. New objects every time.
-function withFailed(failed, id, clock) {
+// ---- dead-channel memory (PO 2026-09-24, amending R8 / R11 / UX ruling 9)
+//
+// A failure mark now SURVIVES a restart. Three decisions decide the rest, and
+// each of them is the answer to something a design review broke:
+//
+// 1. IT IS NOT IN state.json. Channel ids are global across sources
+//    (ARCHITECTURE-SOURCES D14), so a state-level map would mark a DIFFERENT
+//    provider's working channel with a failure earned on this one. And a map
+//    keyed by channel id falls inside D-ID-1's id-rotation blast radius --
+//    which that defect's row records as excluded precisely BECAUSE this was
+//    session-only. Storing it per source keeps that exclusion true, for a
+//    better reason: the marks live with the cache whose ids they name.
+//
+// 2. IT IS AN ARRAY, newest first, not a map. The savedSearches precedent
+//    chose an array for deterministic eviction order, and a `{id: at}` object
+//    has no iteration contract to evict by across two languages.
+//
+// 3. THE VALUE IS AN EPOCH, not the "HH:MM" it used to be. A display string is
+//    meaningless the day after it is written. Rendering is `failedNoticeAt`,
+//    below, which says the clock for today and the date for anything older so
+//    the row never implies a week-old observation is current.
+//
+// A mark is dropped four ways: the channel plays, it ages out, its id leaves
+// the playlist, or its source is removed. `prunedFailed` does the middle two;
+// the rest is the existing withoutFailed / failedAfterHealthy path.
+var MAX_FAILED = 300
+var FAILED_TTL_SEC = 14 * 24 * 3600
+
+// Read a failed.json document into the in-memory list. Deliberately takes no
+// clock: a parser that ages entries out is clock-dependent, which makes the
+// shared fixtures untestable. Aging is `prunedFailed`, at a named call site.
+function parseFailed(text) {
+  var doc = parseJsonObject(text)
+  if (!doc) return []
+  return normalizeFailed(doc.failed)
+}
+
+function normalizeFailed(list) {
+  var rows = asList(list)
+  var out = []
+  var seen = {}
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i]
+    if (!r || typeof r !== "object") continue
+    var id = str(r.id)
+    var at = Math.floor(Number(r.at))
+    if (id === "" || !isFinite(at) || at <= 0) continue
+    if (seen[id] === true) continue
+    seen[id] = true
+    out.push({ id: id, at: at })
+    if (out.length >= MAX_FAILED) break
+  }
+  return out
+}
+
+// The two drops that need context: too old, and no longer in the playlist.
+//
+// `knownIds` is the id set of the CURRENT channels.json. Dropping a mark whose
+// channel is gone is what makes this self-healing: an id rotation, a provider
+// reshuffle and a removed channel all produce marks that name nothing, and all
+// three are cleaned up here rather than by a migration nobody would maintain.
+// Passing no set at all skips that half, so a caller without channels loaded
+// yet cannot wipe the file.
+function prunedFailed(list, nowSec, knownIds) {
+  var now = Math.floor(Number(nowSec) || 0)
+  var rows = normalizeFailed(list)
+  var out = []
+  for (var i = 0; i < rows.length; i++) {
+    if (now > 0 && rows[i].at < now - FAILED_TTL_SEC) continue
+    if (knownIds && knownIds[rows[i].id] !== true) continue
+    out.push(rows[i])
+  }
+  return out
+}
+
+// { id: true } for prunedFailed, from whatever channel list the caller holds.
+function knownIdSet(channels) {
+  var list = asList(channels)
+  var out = {}
+  for (var i = 0; i < list.length; i++) {
+    var id = channelId(list[i])
+    if (id !== "") out[id] = true
+  }
+  return out
+}
+
+// The list as the guide wants it: { id: at } for O(1) row lookup. The ROW
+// still asks by id, so this is the shape the render path keeps.
+function failedIndex(list) {
+  var rows = normalizeFailed(list)
+  var out = {}
+  for (var i = 0; i < rows.length; i++) out[rows[i].id] = rows[i].at
+  return out
+}
+
+function failedDocument(list) {
+  return { version: 1, failed: normalizeFailed(list) }
+}
+
+// What the row says. `Failed 21:05` for today, `Failed 8 Sep` for older, and
+// the year when it is not this one -- the formatLastUsed idiom, so the guide
+// has one voice for "a time in the past".
+//
+// Never "Dead" or "Broken": the mark is a record of one observation, not a
+// claim about the channel now, and a week-old failure said in the present
+// tense would be a lie the user cannot check.
+function failedWhen(atSec, nowSec) {
+  var at = Math.floor(Number(atSec) || 0)
+  if (at <= 0) return ""
+  var d = new Date(at * 1000)
+  var now = Number(nowSec) > 0 ? new Date(Number(nowSec) * 1000) : new Date()
+  if (sameDay(d, now)) return formatClock(at)
+  var yesterday = new Date(now.getTime())
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (sameDay(d, yesterday)) return "yesterday"
+  var text = d.getDate() + " " + MONTHS[d.getMonth()]
+  if (d.getFullYear() !== now.getFullYear()) text += " " + d.getFullYear()
+  return text
+}
+
+// PO 2026-09-24: the value is an EPOCH now, and it is stored as the NUMBER it
+// is. It used to be str()'d, which was right while the value was the display
+// string "HH:MM" and is wrong for a stamp -- `failedIndex` produces numbers
+// from the file, so a str() here would make the same map hold numbers from
+// disk and strings from this turn, and the two would format identically right
+// up until something compared them.
+function withFailed(failed, id, at) {
   var out = {}
   var src = failed && typeof failed === "object" ? failed : {}
   for (var k in src) out[k] = src[k]
-  if (str(id) !== "") out[str(id)] = str(clock)
+  if (str(id) !== "") out[str(id)] = typeof at === "number" ? at : str(at)
   return out
 }
 
@@ -3565,6 +3691,14 @@ function playlistProbeArgv(helperPath, url, cacheDir) {
 // are downloaded. `--fetch` is what turns the helper's default survey into a
 // download, so a command built without it contacts nobody -- the opt-in is
 // spelled twice, once in the setting and once here.
+// The dead-channel mark, written by the helper so the file lands 0600 inside
+// the 0700 source directory -- the same reason logo writes go through it.
+// argv items, never shell text: a channel id is playlist-derived.
+function failedArgv(helperPath, action, id, cacheDir) {
+  var verb = str(action) === "clear" ? "clear" : "mark"
+  return helperArgv(helperPath, ["failed", verb, "--id", str(id), "--cache-dir", str(cacheDir)])
+}
+
 function logoFetchArgv(helperPath, cacheDir) {
   return helperArgv(helperPath, ["logos", "--fetch", "--cache-dir", str(cacheDir)])
 }
@@ -7312,11 +7446,21 @@ if (typeof module !== "undefined") {
     clampInt: clampInt,
     clampSetting: clampSetting,
     settingsFrom: settingsFrom,
+    parseFailed: parseFailed,
+    normalizeFailed: normalizeFailed,
+    prunedFailed: prunedFailed,
+    knownIdSet: knownIdSet,
+    failedIndex: failedIndex,
+    failedDocument: failedDocument,
+    failedWhen: failedWhen,
+    MAX_FAILED: MAX_FAILED,
+    FAILED_TTL_SEC: FAILED_TTL_SEC,
     ownWriteOf: ownWriteOf,
     ownedEntryPatch: ownedEntryPatch,
     OWNED_SETTINGS: OWNED_SETTINGS,
     confirmLogosMessage: confirmLogosMessage,
     logoFetchArgv: logoFetchArgv,
+    failedArgv: failedArgv,
     optInSetting: optInSetting,
     logoSurvey: logoSurvey,
     logoConsentLines: logoConsentLines,

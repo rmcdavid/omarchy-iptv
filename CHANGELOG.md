@@ -5,6 +5,18 @@ version lives in `manifest.json`.
 
 ## Unreleased
 
+### Added
+
+- **The guide remembers which channels did not work.** A channel that fails to
+  play keeps a mark on its row — the time it failed if that was today, the date
+  if it was earlier — and the mark now survives restarting the shell, which it
+  never used to. On a large free playlist a fair number of channels are simply
+  dead, and until now the only way to find out was to press Enter and wait. The
+  mark disappears the moment the channel plays again, and also when it is a
+  fortnight old, when the channel leaves your playlist, or when you remove the
+  source it came from, so a stale mark cannot follow you around. It is stored
+  with that source's cache rather than with your favourites.
+
 ### Fixed
 
 - **The channel you are watching no longer puts your provider password on the

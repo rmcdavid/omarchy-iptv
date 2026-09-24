@@ -1080,7 +1080,7 @@ keyboard focus of an overlay already ends on Esc).
 | 6 | Default sort | Playlist order everywhere except Favorites (order added) and Recent (most recent first). No alphabetizing. |
 | 7 | Result cap | 200 rows with a footer hint. |
 | 8 | Recent size and timing | 10 entries; added on the play command, not on playback success, so a retry is one keystroke away. |
-| 9 | Dead-stream memory | Session-only: a failed channel shows the alert glyph and `Failed HH:MM` until the next successful play of that channel or shell restart. Nothing persisted. |
+| 9 | Dead-stream memory | **AMENDED 2026-09-24 by the product owner: the mark now survives a restart.** A failed channel shows the alert glyph and the time it failed -- `Failed HH:MM` for a failure today, a date for an older one, so the row never implies a week-old observation is current. It is dropped when the channel next plays, when it ages out, when its id leaves the playlist, and when its source is removed. Stored in that source's cache, never in `state.json`. Original ruling: Session-only ... Nothing persisted. |
 | 10 | Zap ring for bar scroll | The list the channel was launched from (Favorites, a group, All, or the result's group). Recent is never a ring. |
 | 11 | Bar label: marquee or elide? | Elide right at `Style.space(barLabelMaxWidth)`, default 180; full name in the tooltip. A marquee under live TV is distracting. |
 | 12 | Vertical bar | Icon only; tooltip carries the name. (First-class vertical layout is M2 per PRODUCT.md.) |

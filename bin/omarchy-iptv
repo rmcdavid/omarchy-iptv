@@ -122,7 +122,12 @@ STATE_FILE = "state.json"
 # collision); it is validated before it ever becomes a path component.
 SOURCES_DIR = "sources"
 SOURCE_KEY_RE = re.compile(r"^[0-9a-f]{8}(-[0-9]{1,3})?$")
-CACHE_FILES = (CHANNELS_FILE, PLAYLIST_STATUS_FILE, EPG_NOW_FILE, EPG_STATUS_FILE, EPG_WINDOW_FILE)
+FAILED_FILE = "failed.json"
+# FAILED_FILE is in this tuple deliberately: it is what makes a removed
+# source take its failure marks with it, which is D-LOGO-4's lesson applied
+# before the defect rather than after it.
+CACHE_FILES = (CHANNELS_FILE, PLAYLIST_STATUS_FILE, EPG_NOW_FILE, EPG_STATUS_FILE, EPG_WINDOW_FILE,
+               FAILED_FILE)
 EPG_CACHE_FILES = (EPG_WINDOW_FILE, EPG_NOW_FILE, EPG_STATUS_FILE)
 TEMP_PREFIX = ".tmp-"
 DEFAULT_EPG_MAX_AGE = 86400
@@ -2394,6 +2399,91 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
     path = os.path.join(logo_dir, name)
     write_bytes_atomic(path, data)
     return name
+
+
+# ---- dead-channel memory (PO 2026-09-24, amending R8 / R11 / UX ruling 9)
+#
+# Mirror of Model.normalizeFailed / prunedFailed. Must match Model.js.
+# The marks live in the SOURCE CACHE, never in state.json: channel ids are
+# global across sources, so a state-level map would mark another provider's
+# working channel, and it would fall inside D-ID-1's id-rotation blast radius
+# which that defect records as excluded precisely because this was
+# session-only. Per source, it stays excluded.
+MAX_FAILED = 300
+FAILED_TTL_SEC = 14 * 24 * 3600
+
+
+def normalize_failed(rows: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        cid = row.get("id")
+        at = coerce_int(row.get("at"))
+        if not isinstance(cid, str) or not cid or at is None or at <= 0:
+            continue
+        if cid in seen:
+            continue
+        seen.add(cid)
+        out.append({"id": cid, "at": at})
+        if len(out) >= MAX_FAILED:
+            break
+    return out
+
+
+def prune_failed(rows: Any, now: int, known: set[str] | None) -> list[dict[str, Any]]:
+    """Drop what aged out and what the playlist no longer has.
+
+    The second half is what makes this self-healing: an id rotation, a
+    provider reshuffle and a removed channel all leave marks naming nothing,
+    and all three are cleaned up here instead of by a migration. `known` of
+    None skips it, so a caller without channels cannot wipe the file.
+    """
+    out = []
+    for row in normalize_failed(rows):
+        if now > 0 and row["at"] < now - FAILED_TTL_SEC:
+            continue
+        if known is not None and row["id"] not in known:
+            continue
+        out.append(row)
+    return out
+
+
+def read_failed(directory: str) -> list[dict[str, Any]]:
+    doc = read_json(os.path.join(directory, FAILED_FILE))
+    return normalize_failed(doc.get("failed") if isinstance(doc, dict) else None)
+
+
+def known_channel_ids(directory: str) -> set[str] | None:
+    """The current playlist's ids, or None when there is no cache to ask."""
+    doc = read_json(os.path.join(directory, CHANNELS_FILE))
+    if not isinstance(doc, dict) or not isinstance(doc.get("channels"), list):
+        return None
+    return {c["id"] for c in doc["channels"] if isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"]}
+
+
+def cmd_failed(args: argparse.Namespace) -> int:
+    """mark / clear / list the failure marks of one source's cache."""
+    directory = cache_dir(args.cache_dir)
+    now = int(args.now) if args.now else int(time.time())
+    rows = read_failed(directory)
+    if args.action == "mark":
+        cid = (args.id or "").strip()
+        if not cid:
+            raise HelperError("bad_id", "a channel id is required")
+        rows = [r for r in rows if r["id"] != cid]
+        rows.insert(0, {"id": cid, "at": now})
+    elif args.action == "clear":
+        cid = (args.id or "").strip()
+        rows = [] if not cid else [r for r in rows if r["id"] != cid]
+    # `list` falls through: pruning and emitting is the whole of it.
+    rows = prune_failed(rows, now, known_channel_ids(directory))
+    if args.action in ("mark", "clear"):
+        ensure_private_dir(directory)
+        write_json_atomic(os.path.join(directory, FAILED_FILE), {"version": 1, "failed": rows})
+    emit({"ok": True, "kind": "failed", "action": args.action, "count": len(rows), "failed": rows})
+    return 0
 
 
 def cmd_logos(args: argparse.Namespace) -> int:
@@ -4708,6 +4798,13 @@ def build_parser() -> argparse.ArgumentParser:
                        help="download the logos (contacts the hosts --survey lists)")
     logos.add_argument("--timeout", type=float, default=10.0)
     logos.set_defaults(func=cmd_logos)
+
+    failed = sub.add_parser("failed", help="the dead-channel marks of one source's cache")
+    failed.add_argument("action", choices=("mark", "clear", "list"))
+    failed.add_argument("--id", default=None, help="channel id; omitted with `clear`, clears all")
+    failed.add_argument("--cache-dir", default=None)
+    failed.add_argument("--now", type=int, default=None, help="epoch override, for tests")
+    failed.set_defaults(func=cmd_failed)
 
     state = sub.add_parser("state", help="inspect or edit state.json")
     state.add_argument("--state-dir", default=None, help="default: $XDG_STATE_HOME/omarchy-iptv")

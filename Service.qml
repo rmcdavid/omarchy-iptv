@@ -294,7 +294,18 @@ Item {
   property bool playerPending: false        // a start we issued is not observable yet
   readonly property bool playerUp: (root.playerSocket !== null && root.playerSocket.connected) || root.playerPending
   readonly property bool playing: playerUp && nowPlaying !== null
-  property var failedAt: ({})               // session-only { id: "HH:MM" } (R11)
+  // PO 2026-09-24, amending R8 / R11 and UX ruling 9: the mark now SURVIVES a
+  // restart. { id: <epoch> }, loaded from the ACTIVE SOURCE's cache rather
+  // than state.json -- channel ids are global across sources, so a
+  // state-level map would mark another provider's working channel, and it
+  // would fall inside D-ID-1's id-rotation blast radius, which that defect
+  // records as excluded precisely because this used to be session-only.
+  // Per source, that exclusion stays true.
+  property var failedAt: ({})
+  // The file behind it. Loaded on every source switch, so the marks a source
+  // carries arrive with its channels and leave with it.
+  readonly property string failedPath: root.activeCacheDir === ""
+    ? "" : root.activeCacheDir + "/failed.json"
   // PO-3 lost a race and is waiting for state.json (see markDeadSession()):
   // the probe answered "no player" before the state FileView loaded, so the
   // verdict has to be re-run from applyUserState() once there is a file to
@@ -574,7 +585,10 @@ Item {
     playRetryTimer.stop()
     root.healthFailures = 0
     root.lastError = ""
-    root.failedAt = Model.withoutFailed(root.failedAt, key)
+    if (root.failedAt[key] !== undefined) {
+      root.failedAt = Model.withoutFailed(root.failedAt, key)
+      root.persistFailed("clear", key)
+    }
     root.notifiedFailureId = ""
     // A play cancels a pending stop-confirmation: the player that is coming
     // up is wanted, whatever the one before it did.
@@ -1781,9 +1795,14 @@ Item {
         // carries is stale and goes. The only other clear runs when a play
         // STARTS, so without this a transient first-load error left a channel
         // the user was watching showing "Failed - Space to retry".
+        var beforeHealthy = root.failedAt
         root.failedAt = Model.failedAfterHealthy(root.failedAt,
                                                  root.checkPlayerChannel(status),
                                                  root.nowPlaying)
+        // D-PLY-14 clears in memory; the mark is durable now, so the clear
+        // has to reach the file too or it returns at the next guide open.
+        if (root.failedAt !== beforeHealthy && root.nowPlaying)
+          root.persistFailed("clear", String(root.nowPlaying.id || ""))
       } else if (code === "not_implemented" || code === "no_output") {
         // The helper cannot tell (stub or crash): neither healthy nor a
         // strike, so a missing subcommand never reaps a working player.
@@ -2424,7 +2443,15 @@ Item {
     if (id !== "" && root.notifiedFailureId === id) return
     root.notifiedFailureId = id
     root.lastError = reason
-    if (id !== "") root.failedAt = Model.withFailed(root.failedAt, id, Model.formatClock(Math.floor(Date.now() / 1000)))
+    if (id !== "") {
+      // Applied locally at once and persisted in the same turn. The local
+      // apply is not an optimisation: the file is reloaded asynchronously, so
+      // waiting for it would leave the row unmarked for as long as a process
+      // launch takes -- and engineering rule 9 is that a plugin never waits for
+      // its own write to come back.
+      root.failedAt = Model.withFailed(root.failedAt, id, Math.floor(Date.now() / 1000))
+      root.persistFailed("mark", id)
+    }
     root.notify("streamFailed", { name: String(target.name || ""), reason: reason })
   }
 
@@ -2649,6 +2676,31 @@ Item {
     root.shell.updateEntryInline(root.pluginId, entry)
     root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, { showLogos: want }))
     return true
+  }
+
+  // One process per mark or clear, which is affordable because a failure is
+  // rare -- not per keystroke, per zap or per tick. Fire and forget: the
+  // in-memory map is already correct, and a failed write costs a mark, not a
+  // wrong one.
+  Process { id: failedProc }
+
+  function persistFailed(action, id) {
+    if (root.activeCacheDir === "" || str(id) === "") return false
+    if (failedProc.running) failedProc.signal(15)
+    failedProc.command = Model.failedArgv(root.helperPath, action, id, root.activeCacheDir)
+    failedProc.running = true
+    return true
+  }
+
+  function str(v) { return v === undefined || v === null ? "" : String(v) }
+
+  // The marks of the source whose channels are loaded. Pruned on arrival: the
+  // TTL, and any id the current playlist does not have -- which is what makes
+  // an id rotation, a provider reshuffle and a removed channel all self-heal
+  // instead of leaving marks that name nothing.
+  function applyFailed(text) {
+    root.failedAt = Model.failedIndex(
+      Model.prunedFailed(Model.parseFailed(text), root.nowSec, Model.knownIdSet(root.channels)))
   }
 
   function beginSwitch() {
@@ -3187,6 +3239,16 @@ Item {
       root.applyChannels("")
       root.finishSwitch()
     }
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: failedFile
+    path: root.failedPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyFailed(text())
+    onLoadFailed: root.applyFailed("")
     onFileChanged: reload()
   }
 

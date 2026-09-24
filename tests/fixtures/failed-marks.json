@@ -1,0 +1,84 @@
+{
+  "note": "Shared by tests/Model.test.js (Model.normalizeFailed) and tests/test_state.py (normalize_failed). `expect` is the agreed answer: both implementations check against IT, never against each other.",
+  "cases": [
+    {
+      "name": "empty and junk are dropped, not carried",
+      "failed": [
+        null,
+        "x",
+        7,
+        {},
+        {
+          "id": ""
+        },
+        {
+          "id": "t:a"
+        },
+        {
+          "id": "t:b",
+          "at": 0
+        },
+        {
+          "id": "t:c",
+          "at": "1790300000"
+        }
+      ],
+      "expect": [
+        {
+          "id": "t:c",
+          "at": 1790300000
+        }
+      ]
+    },
+    {
+      "name": "duplicates keep the first, which is the newest after an unshift",
+      "failed": [
+        {
+          "id": "t:a",
+          "at": 1790300000
+        },
+        {
+          "id": "t:a",
+          "at": 1790200000
+        }
+      ],
+      "expect": [
+        {
+          "id": "t:a",
+          "at": 1790300000
+        }
+      ]
+    },
+    {
+      "name": "the ruling's own shape",
+      "failed": [
+        {
+          "id": "t:one",
+          "at": 1790300000
+        },
+        {
+          "id": "n:two",
+          "at": 1790299000
+        },
+        {
+          "id": "u:three",
+          "at": 1790298000
+        }
+      ],
+      "expect": [
+        {
+          "id": "t:one",
+          "at": 1790300000
+        },
+        {
+          "id": "n:two",
+          "at": 1790299000
+        },
+        {
+          "id": "u:three",
+          "at": 1790298000
+        }
+      ]
+    }
+  ]
+}

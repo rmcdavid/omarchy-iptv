@@ -499,7 +499,7 @@ and `player start` now return. A null or unrecognised entry id never suppresses
 a notification - it only degrades which channel is named. Nothing else about the
 notification path changes: `Model.notifyArgv` (`Model.js:1295`, with its S-04
 leading-dash and typographic-quote rules), `NOTIFY_IDS.streamFailed = 74011`,
-`Model.withFailed` and the session-only `failedAt` map are untouched.
+`Model.withFailed` is untouched in shape; the `failedAt` map stopped being session-only on 2026-09-24 (R11 as amended) and now persists in the source cache.
 
 ### 4.9 The stop ladder
 

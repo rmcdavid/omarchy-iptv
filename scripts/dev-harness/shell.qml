@@ -764,6 +764,20 @@ ShellRoot {
           rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, bannerKind: g.bannerKind, bannerText: g.bannerText,
           scopeLabel: g.scopeLabelText, footer: g.footerStatusText, warning: g.warningText, narrow: g.narrow, showColumn: g.showColumn,
           cursorName: g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0 ? g.currentRows[g.cursorIndex].name : "",
+          // The cursor row's DETAIL line, composed the way the delegate
+          // composes it. Without this a scenario can prove a failure mark
+          // reached the service and never that the row says so, which is the
+          // grep-shaped acceptance rule 14 exists to forbid.
+          cursorDetail: (function () {
+            if (!(g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0)) return ""
+            var c = g.currentRows[g.cursorIndex]
+            var id = Model.channelId(c)
+            return Model.rowDetail({
+              showGroup: Model.rowShowsGroup({ scopeIsGroup: g.scopeIsGroup, groupsNarrow: g.groupAxis.narrows }),
+              group: Model.primaryGroup(c),
+              failedAt: Model.failedWhen(g.failedMap[id], g.nowSec),
+              nowTitle: "", nextTitle: "" })
+          })(),
           scopes: g.scopeList.map(function(e) { return e.id + "=" + e.count }),
           // Sources screens (SR31): mode transitions, the cursor and the form
           // with masked values and lengths.

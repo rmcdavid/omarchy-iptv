@@ -288,7 +288,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | R8 model fields the guide binds (`failedAt`, `epgFraction` 30 s tick, guide state) | TC-PLAY-05, TC-EPG-02, TC-EPG-08, TC-UI-03 |
 | R9 service actions and IPC verbs (`toggle play stop next previous refresh status`) | 5.8 IPC checks, TC-BAR-09, D-QA-04 |
 | R10 mpv attached to the service (dies with the shell) | TC-PLAY-11, TC-INST-08 |
-| R11 stream failure: notification, session-only `failedAt`, alert glyph | TC-PLAY-05, TC-FAV-07 |
+| R11 stream failure: notification, **persisted** `failedAt` (amended 2026-09-24), alert glyph | TC-PLAY-05, TC-FAV-07 |
 | R12 manual refresh notifies, timer only on failure; never render URLs beyond scheme+host | TC-BAR-08, TC-RFR-01, TC-RFR-02, TC-RFR-03, SEC-07, TC-CFG-13 |
 | R13 no animation, no `screen` set (focused monitor) | TC-UI-08, TC-A11Y-04 |
 

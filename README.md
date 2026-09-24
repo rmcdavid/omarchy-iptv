@@ -333,7 +333,16 @@ itself unavailable rather than half working.
   (safe to delete; rebuilt on refresh). A 0.1.0 single cache is migrated on
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
-  played, and the Sources history including their URLs (mode 0600)
+  played, your saved searches, the player session record, and the Sources
+  history including their URLs (mode 0600). Channels that failed to play are
+  **not** kept here: they belong to the source that carried them, and live in
+  that source's cache directory below
+- `~/.cache/omarchy-iptv/sources/<source>/failed.json` : which channels of
+  that source failed to play, and when (mode 0600). This is what lets the
+  guide tell you a channel did not work last time instead of making you press
+  Enter to find out. A mark is dropped when the channel plays again, when it
+  is a fortnight old, when the channel leaves your playlist, and when you
+  remove the source
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is

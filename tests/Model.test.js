@@ -1820,6 +1820,85 @@ checkCall("D-SAVE-1: a row that is both keeps its place after the star goes, the
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterUnstar).length,
           Model.channelsForScope(ch, Model.SCOPE_FAVORITES, afterForget).length]
 }, [3, 3, 0])
+// ---- dead-channel memory (PO 2026-09-24, amending R8 / R11 / UX ruling 9) ----
+const failedFixture = JSON.parse(require("fs").readFileSync(
+  require("path").join(__dirname, "fixtures/failed-marks.json"), "utf8"))
+
+checkCall("dead channels: every shared normalize case matches the agreed answer", function () {
+  const bad = []
+  failedFixture.cases.forEach(function (c) {
+    const got = Model.normalizeFailed(c.failed)
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) bad.push(c.name)
+  })
+  return [failedFixture.cases.length, bad]
+}, [3, []])
+
+checkCall("dead channels: the mark is DROPPED when its channel leaves the playlist", function () {
+  // The whole reason this lives in the source cache rather than state.json.
+  // An id rotation, a provider reshuffle and a removed channel all leave
+  // marks naming nothing; all three are cleaned up here rather than by a
+  // migration, which is what keeps D-ID-1's id-rotation exclusion true.
+  const now = 1790300000
+  const rows = [{ id: "t:here", at: now - 60 }, { id: "t:gone", at: now - 60 }]
+  const known = Model.knownIdSet([{ id: "t:here", name: "A", url: "http://x/1" }])
+  return [Model.prunedFailed(rows, now, known).map(function (r) { return r.id }),
+          // no channel set at all means "cannot tell yet", and must NOT wipe
+          Model.prunedFailed(rows, now, null).length]
+}, [["t:here"], 2])
+
+checkCall("dead channels: a mark ages out, and the boundary is not off by one", function () {
+  const now = 1790300000
+  const ttl = Model.FAILED_TTL_SEC
+  const rows = [{ id: "t:fresh", at: now - 60 },
+                { id: "t:edge", at: now - ttl },
+                { id: "t:old", at: now - ttl - 1 }]
+  return [Model.prunedFailed(rows, now, null).map(function (r) { return r.id }),
+          // no clock means do not age: a caller without a clock must not wipe
+          Model.prunedFailed(rows, 0, null).length]
+}, [["t:fresh", "t:edge"], 3])
+
+checkCall("dead channels: the row says a CLOCK for today and a DATE for older", function () {
+  // A week-old observation rendered as a bare clock would read as current,
+  // which is the one thing persistence must not do.
+  const now = Math.floor(Date.parse("2026-09-24T21:00:00") / 1000)
+  return [Model.failedWhen(now - 600, now),
+          Model.failedWhen(now - 26 * 3600, now),
+          Model.failedWhen(now - 16 * 24 * 3600, now),
+          Model.failedWhen(now - 400 * 24 * 3600, now),
+          Model.failedWhen(0, now),
+          Model.failedWhen("nonsense", now)]
+}, ["20:50", "yesterday", "8 Sep", "20 Aug 2025", "", ""])
+
+checkCall("dead channels: the whole render path still works off the formatted string", function () {
+  // The epoch is formatted at the guide boundary so rowDetail, rowMeta,
+  // rowFailedMeta, rowNoticeEmphasis and rowAccessibleName keep taking the
+  // string they always took. A bare truthiness test on the epoch would be a
+  // silent midnight bug -- 0 is falsy where "00:00" was truthy.
+  const now = Math.floor(Date.parse("2026-09-24T21:00:00") / 1000)
+  const today = Model.failedWhen(now - 600, now)
+  const old = Model.failedWhen(now - 16 * 24 * 3600, now)
+  return [Model.rowFailedMeta(today), Model.rowFailedMeta(old),
+          Model.rowNoticeEmphasis(today), Model.rowNoticeEmphasis(""),
+          Model.rowDetail({ failedAt: Model.failedWhen(0, now) }),
+          // the measured width is 29 characters; the date form must not exceed it
+          Model.rowFailedMeta(old).length <= Model.rowFailedMeta("07:12").length]
+}, ["Failed 20:50" + Model.SEP + "Space to retry", "Failed 8 Sep" + Model.SEP + "Space to retry", 1, 0.52, "", true])
+
+checkCall("dead channels: the mark is written by argv, never shell text", function () {
+  const a = Model.failedArgv("/p/bin/omarchy-iptv", "mark", "t:x; rm -rf /", "/c/sources/ab")
+  return [a.indexOf("t:x; rm -rf /") !== -1, a.length,
+          Model.failedArgv("/p/b", "nonsense", "t:x", "/c")[3]]
+}, [true, 8, "mark"])
+
+checkCall("dead channels: withFailed keeps an epoch a NUMBER", function () {
+  // failedIndex produces numbers from the file. If this str()'d, one map
+  // would hold numbers from disk and strings from this turn, and they would
+  // format identically right up until something compared them.
+  return [Model.withFailed({}, "t:a", 1790300000)["t:a"],
+          Model.withFailed({}, "x", "21:12").x,
+          Model.failedIndex([{ id: "t:a", at: 1790300000 }])["t:a"]]
+}, [1790300000, "21:12", 1790300000])
+
 // ---- D-ID-2: the wrong channel, and it is not the one that was filed ----
 //
 // The board recorded the cause as: a provider removes one member of a

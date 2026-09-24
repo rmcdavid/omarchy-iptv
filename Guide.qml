@@ -2726,7 +2726,21 @@ Item {
                     scopeIsGroup: root.scopeIsGroup, groupsNarrow: root.groupAxis.narrows })
                   readonly property bool favorite: row.channelId !== "" && root.favoriteSet[row.channelId] === true
                   readonly property bool playing: row.channelId !== "" && row.channelId === root.playingId
-                  readonly property string failedAt: row.channelId !== "" && root.failedMap[row.channelId] ? String(root.failedMap[row.channelId]) : ""
+                  // PO 2026-09-24. The stored value is now an EPOCH, not the
+                  // "HH:MM" it used to be, because a display string is
+                  // meaningless the day after it is written. It is formatted
+                  // HERE, at the boundary, so every sink below it -- rowDetail,
+                  // rowMeta, rowFailedMeta, rowNoticeEmphasis and
+                  // rowAccessibleName -- keeps taking the string it always
+                  // took and none of them changes.
+                  //
+                  // `failedWhen` returns "" for a zero or unparseable stamp, so
+                  // the `!== ""` tests those sinks already make still hold.
+                  // A bare truthiness test on the epoch would not: epoch 0 is
+                  // falsy where "00:00" was truthy, which is a silent midnight
+                  // bug.
+                  readonly property string failedAt: row.channelId !== ""
+                    ? Model.failedWhen(root.failedMap[row.channelId], root.nowSec) : ""
                   readonly property var epg: Model.epgFields(row.tvgId !== "" ? root.epgMap[row.tvgId] : null, root.nowSec)
                   readonly property string nowTitle: row.epg.nowTitle
                   readonly property string nextTitle: row.epg.nextTitle
