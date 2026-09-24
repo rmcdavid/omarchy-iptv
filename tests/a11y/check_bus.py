@@ -221,6 +221,10 @@ RULED = {
     "bar.idle": "IPTV, idle",
     "bar.playing": "IPTV, playing channel 101, BBC One HD",
     "bar.error": "IPTV, playlist error",
+    # PAUSE LIVE TV 2026-09-24: the glyph and tooltip both change for paused,
+    # so the announced name must too, or the one user who cannot see the glyph
+    # is the one user not told.
+    "bar.paused": "IPTV, paused channel 101, BBC One HD",
     # docs/UX.md 7.1 "Channel row": `, row N of M` appended last. The row at
     # :953 states the delivered form as `Channel 7, row 8 of 10,000`.
     "row.query": "BBC One HD, row 1 of 1",

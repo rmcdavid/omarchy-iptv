@@ -205,6 +205,7 @@ Item {
     buttonTurnOn: "Turn on",
     logosOn: "Channel logos on" + Model.SEP + "fetching now",
     logosOff: "Channel logos off",
+    pauseNothing: "Nothing is playing",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
     rowXtream: "Add Xtream login",
@@ -663,6 +664,10 @@ Item {
       // M2-04: the hint names the direction the key will go, so nobody has to
       // press it to find out -- and finding out means contacting third parties.
       showLogos: root.showLogos,
+      // PAUSE LIVE TV: the hint appears only while something is playing, and
+      // names the direction the key will go.
+      playing: root.playingId !== "",
+      paused: root.serviceReady && root.service.paused === true,
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
       // on screen. `scope` and `group` are the same five characters.
@@ -1367,6 +1372,7 @@ Item {
     else if (action === "stop") root.stopPlayback()
     else if (action === "refresh") root.refresh()
     else if (action === "pip") root.togglePip()
+    else if (action === "pause") root.togglePause()
     else if (action === "sources") root.openSources()
     else if (action === "search") {
       root.swallowKey = true
@@ -1788,6 +1794,14 @@ Item {
   // `g` in Sources. ON goes through the consent screen, which states the host
   // count; OFF is immediate, because turning it off discloses nothing and a
   // dialog in front of the safe direction teaches people to dismiss dialogs.
+  // PAUSE LIVE TV. Guarded on the function like every other service access in
+  // this file, and it says so when there is nothing to pause rather than
+  // doing nothing silently.
+  function togglePause() {
+    if (!root.serviceReady || typeof root.service.togglePause !== "function") return
+    if (!root.service.togglePause()) root.showTransient(root.copy.pauseNothing)
+  }
+
   function toggleLogos() {
     if (!root.inSources) return
     if (!root.serviceReady || typeof root.service.setShowLogos !== "function") {

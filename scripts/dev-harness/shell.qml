@@ -705,6 +705,15 @@ ShellRoot {
     // than calling the toggle directly, so a scenario exercises the same
     // dispatch a keystroke would: `g` must reach toggleLogos through the
     // letter table, not around it.
+    // Drives the REAL list-mode key path (handleListLetter -> the Model
+    // letter table -> the guide action), so a scenario exercises the same
+    // dispatch a keystroke would rather than calling the action directly.
+    function listKey(text: string): string {
+      var g = guideLoader.item
+      if (!g) return "no"
+      g.handleListLetter(text)
+      return "ok"
+    }
     function sourcesKey(text: string): string {
       var g = guideLoader.item
       if (!g) return "no"
@@ -757,6 +766,7 @@ ShellRoot {
       var g = guideLoader.item
       var s = serviceLoader.item
       var out = { guide: null, service: null }
+      var s2 = serviceLoader.item
       if (g) {
         out.guide = {
           opened: g.opened, mode: g.mode, query: g.query, scopeId: g.scopeId, effectiveScope: g.effectiveScope,
@@ -806,7 +816,16 @@ ShellRoot {
           logoWidth: g.logoWidth === undefined ? null : g.logoWidth,
           logoDir: g.logoDir === undefined ? "" : String(g.logoDir),
           confirmKind: g.confirmKind === undefined ? "" : String(g.confirmKind),
-          confirmMessage: g.confirmMessage === undefined ? "" : String(g.confirmMessage)
+          confirmMessage: g.confirmMessage === undefined ? "" : String(g.confirmMessage),
+          // PAUSE LIVE TV: what the bar and the guide actually say, so a
+          // scenario can observe the state rather than infer it.
+          paused: s2 && s2.paused !== undefined ? s2.paused : null,
+          pauseHint: (function () {
+            var pairs = Model.footerHints({ mode: "list", playing: g.playingId !== "",
+                                            paused: s2 && s2.paused === true })
+            var hit = pairs.filter(function (p) { return p[0] === Model.PAUSE_KEY })
+            return hit.length ? hit[0][1] : ""
+          })()
         }
       }
       if (s) {

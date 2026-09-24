@@ -252,7 +252,15 @@ Two modes, one visible at a time in the header and the footer:
 
 - **Search mode** -- the header shows the query with a caret-less style
   exactly like the clipboard manager. Printable keys edit the query.
-- **List mode** -- vim keys and single-letter commands are live.
+- **List mode** -- vim keys and single-letter commands are live. `c` pauses
+  or resumes the live stream (2026-09-24). It is offered only while something
+  is playing, and the footer names the direction so nobody presses it to find
+  out. It is **not rewind**: live streams are not seekable -- measured, 1 of
+  22 channels across 21 providers reported itself so -- and the pause is
+  bounded by mpv's buffer at roughly five minutes on a typical stream. The
+  same action is on the plugin's IPC as `pause`, because it is the first
+  thing in this product you want while WATCHING rather than browsing, and the
+  guide is closed then; `contrib/bindings.lua` carries the global example.
 
 **The guide opens in search mode with an empty query.** This is the
 behavior every other Omarchy overlay has (menu, clipboard, emojis): open,
@@ -826,7 +834,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 |---|---|
 | Search mode | `Enter play - Up/Down move - Left/Right group - Tab keys - Esc close` |
 | Search mode, query non-empty | `Enter play - Up/Down move - Left/Right narrow - Tab keys - Esc clear` |
-| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - r refresh - / search - o sources` |
+| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - c pause - r refresh - / search - o sources` |
 | Empty states | `r retry - o sources - Esc close` (not configured, error; `r retry` is dropped when the configured value is invalid and `o sources` only when a source history exists); `Esc close` (loading). Since v0.2.0 the not-configured state is the Sources first-run form, see `UX-SOURCES.md` 1.2 and 5.3, which is authoritative for these hints |
 
 Key names and verbs both render at opacity 0.7 (ruling SG2). **They used to

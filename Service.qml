@@ -301,6 +301,14 @@ Item {
   // would fall inside D-ID-1's id-rotation blast radius, which that defect
   // records as excluded precisely because this used to be session-only.
   // Per source, that exclusion stays true.
+  // PAUSE LIVE TV (2026-09-24). What the player last told us. The health tick
+  // already asks mpv for `pause` every few seconds, so this costs no new
+  // traffic -- it was being read and thrown away.
+  //
+  // Not rewind: the streams are not seekable (1 of 22 measured), so there is
+  // no going back before the keypress. Bounded by mpv's 150 MiB cache, about
+  // five minutes on a typical stream.
+  property bool paused: false
   property var failedAt: ({})
   // The file behind it. Loaded on every source switch, so the marks a source
   // carries arrive with its channels and leave with it.
@@ -585,6 +593,9 @@ Item {
     playRetryTimer.stop()
     root.healthFailures = 0
     root.lastError = ""
+    // A new play is never paused: the flag belongs to the stream that was
+    // playing, and carrying it over would show a pause nobody asked for.
+    root.paused = false
     if (root.failedAt[key] !== undefined) {
       root.failedAt = Model.withoutFailed(root.failedAt, key)
       root.persistFailed("clear", key)
@@ -1335,6 +1346,7 @@ Item {
       // a value: what the RUNNING component believes it is, what is on disk
       // beside it, and the verdict the footer reads. Version strings carry no
       // credential and no path, so this adds nothing to the redaction surface.
+      paused: root.paused,
       build: {
         running: Model.PLUGIN_VERSION,
         onDisk: root.onDiskVersion,
@@ -1786,10 +1798,22 @@ Item {
     var kind = root.controlKind
     root.controlKind = ""
     var status = Model.parseHelperStatus(text, kind)
+    if (kind === "pause") {
+      // The helper is authoritative: the optimistic flip is corrected here if
+      // the player refused, or if there was no player to ask.
+      if (status.ok === true && status.running === true && status.paused !== undefined
+          && status.paused !== null) {
+        root.paused = status.paused === true
+      } else if (status.ok === true && status.running !== true) {
+        root.paused = false
+      }
+      return
+    }
     if (kind === "status") {
       var code = status.error ? String(status.error.code) : ""
       if (Model.statusHealthy(status)) {
         root.healthFailures = 0
+        if (status.paused !== undefined && status.paused !== null) root.paused = status.paused === true
         // D-PLY-14: a healthy player that its own stash says is on this exact
         // channel is proof the channel plays, so any failure mark it still
         // carries is stale and goes. The only other clear runs when a play
@@ -2701,6 +2725,20 @@ Item {
   function applyFailed(text) {
     root.failedAt = Model.failedIndex(
       Model.prunedFailed(Model.parseFailed(text), root.nowSec, Model.knownIdSet(root.channels)))
+  }
+
+  // Pause or resume what is playing. Returns false when there is nothing to
+  // pause, so a caller can say so rather than appearing to work.
+  //
+  // The local flip is applied at once and the helper confirms it on the next
+  // health tick: the bar must not wait a process launch to show the state the
+  // user just asked for (rule 9). A refusal corrects it within a tick.
+  function togglePause() {
+    if (!root.nowPlaying) return false
+    var want = !root.paused
+    if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return false
+    root.paused = want
+    return true
   }
 
   function beginSwitch() {
@@ -4069,6 +4107,13 @@ Item {
     // `reason` is the last failure code (dispatch_failed, no_window,
     // ambiguous, timeout, ...) and "" after a success.
     function pip(mode: string): string { return JSON.stringify(root.requestPip(mode)) }
+    // PAUSE LIVE TV. An IPC verb rather than only a guide key, because this is
+    // the first action in the product you want while WATCHING -- with the
+    // guide closed -- rather than while browsing. contrib/bindings.lua shows
+    // the global binding.
+    function pause(): string {
+      return root.togglePause() ? (root.paused ? "paused" : "playing") : "nothing playing"
+    }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }

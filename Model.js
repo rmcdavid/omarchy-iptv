@@ -114,6 +114,7 @@ var GLYPHS = {
   tv: "\udb81\udd02",        // U+F0502 nf-md-television        idle / not configured
   tvPlay: "\udb81\udd67",    // U+F0567 nf-md-television_play   playing (bar)
   tvOff: "\udb81\udd03",     // U+F0503 nf-md-television_off    playlist error / stream failed
+  tvPause: "\udb83\udfd1", // U+F0FD1 nf-md-television_pause  paused (bar); R7 forbids colour alone, and fc-query confirms this codepoint is in the installed font
   star: "\udb81\udcce",      // U+F04CE nf-md-star              favorite
   play: "\udb81\udc0a",      // U+F040A nf-md-play              playing row / footer
   alert: "\udb80\udc26",     // U+F0026 nf-md-alert             failed / banner
@@ -3760,6 +3761,22 @@ function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, fro
   return argv
 }
 
+// PAUSE LIVE TV (2026-09-24). Not rewind, and the naming matters: measured
+// across 22 live channels from 21 providers, 21 paused and resumed correctly
+// and exactly ONE reported itself seekable, so there is no going back to
+// before the keypress. mpv keeps filling its cache while paused, so resuming
+// continues from the moment it was pressed and the viewer is then behind
+// live. The bound is mpv's default 150 MiB demuxer cache: 315 s measured on a
+// ~3.8 Mbps stream, less on a fatter one.
+//
+// `state` is "on", "off" or "toggle"; anything else is a toggle, because a
+// key that means "pause" must never be able to mean "start playing".
+function playerPauseArgv(socket, state) {
+  var want = str(state)
+  if (want !== "on" && want !== "off") want = "toggle"
+  return ["player", "pause", "--socket", str(socket), "--state", want]
+}
+
 // `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
 // probe is read-only.
 function playerProbeArgv(socket, ownerPid) {
@@ -4948,6 +4965,10 @@ function listLetterAction(text) {
   if (t === "s" || t === "S") return "stop"
   if (t === "r" || t === "R") return "refresh"
   if (t === "p" || t === "P") return "pip"
+  // PAUSE LIVE TV. The action is offered unconditionally here and gated at
+  // the call site on something playing, the same way `pip` is: the table says
+  // what a letter MEANS, not whether it can act right now.
+  if (t === PAUSE_KEY || t === PAUSE_KEY.toUpperCase()) return "pause"
   if (t === "/") return "search"
   if (t.toLowerCase() === SOURCE_KEYS.open) return "sources"
   return ""
@@ -5674,6 +5695,9 @@ function noMatchesTitle(query, scopeId) {
 // R7: glyph per state, never color-only.
 function barGlyph(opts) {
   var o = opts || {}
+  // PAUSE LIVE TV. R7 is that a bar state is never carried by colour alone,
+  // so a paused stream gets its own glyph rather than the playing one dimmed.
+  if (o.playing && o.paused) return GLYPHS.tvPause
   if (o.playing) return GLYPHS.tvPlay
   if (o.error) return GLYPHS.tvOff
   return GLYPHS.tv
@@ -5692,7 +5716,7 @@ function barTooltip(opts) {
   var line = ""
   // M2-03 6.4: the number joins the tooltip whenever the playing channel has
   // one, including on a vertical bar where the label itself is glyph-only.
-  if (o.playing && str(o.name) !== "") line = "Playing " + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
+  if (o.playing && str(o.name) !== "") line = (o.paused ? "Paused " : "Playing ") + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
   else if (o.refreshing) line = "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
   else if (!o.configured) line = "IPTV" + SEP + "no playlist configured"
   else if (o.error) line = "IPTV" + SEP + "playlist error, open the guide"
@@ -5702,7 +5726,10 @@ function barTooltip(opts) {
 
 function barAccessibleName(opts) {
   var o = opts || {}
-  if (o.playing && str(o.name) !== "") return "IPTV, playing " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
+  // PAUSE LIVE TV. The glyph and the tooltip both changed for paused; the
+  // accessible name has to as well, or the one user who cannot see the glyph
+  // is the one user not told. That asymmetry is exactly the D-GS-3 shape.
+  if (o.playing && str(o.name) !== "") return "IPTV, " + (o.paused ? "paused" : "playing") + " " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
   if (o.error) return "IPTV, playlist error"
   return "IPTV, idle"
 }
@@ -5858,6 +5885,10 @@ function footerHints(opts) {
       return [["0-9", "digits"], [CHNO_ENTRY_SEP, "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]]
     }
     var list = [["j/k", "move"], ["h/l", scopeVerb(o)], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // PAUSE LIVE TV. Only while something is playing -- a pause key on an
+    // idle guide has nothing to act on and would be a hint that lies. Names
+    // the direction, so nobody presses it to find out which way it goes.
+    if (o.playing === true) list.push([PAUSE_KEY, o.paused === true ? "resume" : "pause"])
     // M2-05 section 5. Gated the way `0-9` is: a machine with no Hyprland
     // never advertises a key that can only answer "picture in picture needs
     // Hyprland". An absent flag shows it, so a service that predates PiP is
@@ -5937,6 +5968,11 @@ var MASK_CLEAR_PARAMS = ["type", "output"]
 var LIMITS = { url: MAX_SOURCE_URL, label: MAX_LABEL, server: MAX_XTREAM_SERVER, user: MAX_XTREAM_FIELD, pass: MAX_XTREAM_FIELD, sources: MAX_SOURCES }
 // The keys of the Sources screens, next to the hint table so the two cannot
 // drift (UX-SOURCES 4.8). Guide.qml never spells a key.
+// PAUSE LIVE TV. `c` for "cease", because p is picture-in-picture, s is stop
+// and Space is preview -- the three keys a pause would naturally want are all
+// taken by things a viewer also does often.
+var PAUSE_KEY = "c"
+
 var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
 var SOURCE_KEY_RE = /^[0-9a-f]{8}(-[0-9]{1,3})?$/
 var SOURCE_ORIGINS = ["guide", "xtream", "cli", "migrated"]
@@ -7497,6 +7533,7 @@ if (typeof module !== "undefined") {
     playerStopArgv: playerStopArgv,
     playerRestartArgv: playerRestartArgv,
     playerProbeArgv: playerProbeArgv,
+    playerPauseArgv: playerPauseArgv,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
     playFork: playFork,
     zapArgs: zapArgs,
@@ -7654,6 +7691,7 @@ if (typeof module !== "undefined") {
     MASK_CLEAR_PARAMS: MASK_CLEAR_PARAMS,
     LIMITS: LIMITS,
     SOURCE_KEYS: SOURCE_KEYS,
+    PAUSE_KEY: PAUSE_KEY,
     SOURCE_KEY_RE: SOURCE_KEY_RE,
     GUIDE_MODES: GUIDE_MODES,
     sanitizeInput: sanitizeInput,

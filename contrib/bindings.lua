@@ -7,6 +7,14 @@ o.bind("SUPER + SHIFT + T", "IPTV", "omarchy-shell shell toggle io.github.rmcdav
 -- o.bind("SUPER + SHIFT + PERIOD", "IPTV next channel", "omarchy-shell io.github.rmcdavid.iptv next")
 -- o.bind("SUPER + SHIFT + COMMA", "IPTV previous channel", "omarchy-shell io.github.rmcdavid.iptv previous")
 
+-- PAUSE LIVE TV. This is the one worth binding globally: it is the first
+-- action in this plugin you want while WATCHING rather than while browsing,
+-- and the guide is closed then. `c` does it inside the guide.
+-- It pauses and resumes; it cannot rewind, because live streams are not
+-- seekable. You can stay paused for roughly five minutes before mpv's buffer
+-- fills, less on a high-bitrate channel.
+-- o.bind("SUPER + SHIFT + C", "IPTV pause", "omarchy-shell io.github.rmcdavid.iptv pause")
+
 -- Optional: picture in picture from anywhere, not just from the guide (where
 -- it is `p` in list mode). Stock Omarchy already binds SUPER + O to float and
 -- pin whatever window has focus, so if you only want this once in a while you

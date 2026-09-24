@@ -6368,8 +6368,45 @@ check("4.10: the two refusals the guide answers by itself, before anything is di
 // Guide.qml, where no test could reach it. The guide now dispatches on the
 // answer, so `p` is exercised for real here.
 check("the list-mode letters, including the new one",
-  ["f", "F", "s", "S", "r", "R", "p", "P", "/", "o", "O", "a", "x", "", "pp", "1", null, undefined].map(function (t) { return Model.listLetterAction(t) }),
-  ["favorite", "favorite", "stop", "stop", "refresh", "refresh", "pip", "pip", "search", "sources", "sources", "", "", "", "", "", "", ""])
+  ["f", "F", "s", "S", "r", "R", "p", "P", "c", "C", "/", "o", "O", "a", "x", "", "pp", "1", null, undefined].map(function (t) { return Model.listLetterAction(t) }),
+  ["favorite", "favorite", "stop", "stop", "refresh", "refresh", "pip", "pip", "pause", "pause", "search", "sources", "sources", "", "", "", "", "", "", ""])
+
+checkCall("pause: the hint appears only while playing, and names the direction", function () {
+  // A pause hint on an idle guide has nothing to act on and would be a hint
+  // that lies. The key is in the table unconditionally -- the table says what
+  // a letter MEANS -- and the HINT is what is gated.
+  function keys(o) { return Model.footerHints(o).map(function (p) { return p[0] + " " + p[1] }).join(" ") }
+  return [keys({ mode: "list" }).indexOf("c ") !== -1,
+          keys({ mode: "list", playing: true }).indexOf("c pause") !== -1,
+          keys({ mode: "list", playing: true, paused: true }).indexOf("c resume") !== -1,
+          Model.PAUSE_KEY]
+}, [false, true, true, "c"])
+
+checkCall("pause: the BAR shows it three ways, because R7 forbids colour alone", function () {
+  // Found by mutation: the glyph branch and the announced name both had no
+  // test, so removing either stayed green. A paused stream that looks
+  // identical to a playing one is the whole feature failing quietly.
+  const playing = { playing: true, name: "BBC One HD", chno: "101" }
+  const paused = { playing: true, paused: true, name: "BBC One HD", chno: "101" }
+  return [
+    Model.barGlyph(playing) !== Model.barGlyph(paused),
+    Model.GLYPHS.tvPause.codePointAt(0).toString(16).toUpperCase(),
+    Model.barTooltip(Object.assign({ configured: true }, paused)),
+    // the screen reader is told too: the one user who cannot see the glyph
+    // must not be the one user not told (the D-GS-3 shape)
+    Model.barAccessibleName(paused),
+    Model.barAccessibleName(playing)
+  ]
+}, [true, "F0FD1", "Paused 101" + Model.SEP + "BBC One HD",
+    "IPTV, paused channel 101, BBC One HD", "IPTV, playing channel 101, BBC One HD"])
+
+checkCall("pause: the argv is a toggle unless told otherwise, and never 'start'", function () {
+  // A key that means pause must never be able to mean "begin playing".
+  return [Model.playerPauseArgv("/run/s.sock"),
+          Model.playerPauseArgv("/run/s.sock", "on").slice(-1)[0],
+          Model.playerPauseArgv("/run/s.sock", "off").slice(-1)[0],
+          Model.playerPauseArgv("/run/s.sock", "start").slice(-1)[0]]
+}, [["player", "pause", "--socket", "/run/s.sock", "--state", "toggle"], "on", "off", "toggle"])
 check("section 5: the bar tooltip gains ONE line when PiP is on, and the glyph is untouched", [
   Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: true }),
   Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: false }),

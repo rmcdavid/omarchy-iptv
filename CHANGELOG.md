@@ -7,6 +7,15 @@ version lives in `manifest.json`.
 
 ### Added
 
+- **You can pause live TV.** Press `c` in the guide, or bind a key to it and
+  press that from anywhere while you are watching. The picture freezes, and
+  when you come back it carries on from the moment you stopped — you are then
+  watching a little behind live, which is the point. The bar shows a paused
+  glyph and says so in its tooltip. It is not rewind: live streams cannot be
+  wound back, so there is no returning to something that already happened, and
+  you can stay paused for roughly five minutes before the buffer fills.
+  `contrib/bindings.lua` has the global keybinding example.
+
 - **The guide remembers which channels did not work.** A channel that fails to
   play keeps a mark on its row — the time it failed if that was today, the date
   if it was earlier — and the mark now survives restarting the shell, which it
