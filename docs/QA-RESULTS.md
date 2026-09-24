@@ -7139,6 +7139,91 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-SINK-4, 2026-09-23: the stream URL is on the session bus
+
+Rule 5's sink list gains a fourth entry it has never had, and this one was
+never ours: it is a side effect of an mpv script the distribution autoloads.
+
+### Measured, not reasoned
+
+`mpv-mpris 1.2-2` is installed, and `/etc/mpv/scripts/mpris.so` symlinks it
+into mpv's system autoload directory. The plugin's spawn argv passes neither
+`--load-scripts=no` nor `--no-config` -- `grep` across `Model.js` and
+`bin/omarchy-iptv` returns zero hits for both -- so every mpv this plugin
+starts loads it.
+
+Run headless against a local fixture with a **synthetic** credential
+(`http://someuser:SECRETTOKEN9@127.0.0.1:<port>/test.ts`), using the plugin's
+own argv shape with `--vo=null --ao=null`:
+
+```
+$ busctl --user list | grep mpris
+org.mpris.MediaPlayer2.mpv   1312309  mpv  ricky  :1.1350
+
+$ gdbus call --session --dest org.mpris.MediaPlayer2.mpv \
+    --object-path /org/mpris/MediaPlayer2 \
+    --method org.freedesktop.DBus.Properties.Get \
+    org.mpris.MediaPlayer2.Player Metadata
+
+({'xesam:url': <'http://someuser:SECRETTOKEN9@127.0.0.1:50473/test.ts'>,
+  'mpris:trackid': <objectpath '/0'>,
+  'xesam:title': <'IPTV'>,
+  'mpris:length': <int64 19400000>},)
+```
+
+**The credential is published verbatim.** Any process on the user's session
+bus can read the full stream URL of whatever is playing, for as long as it
+plays.
+
+Note what is NOT leaking, because it shows the shape of the gap:
+`xesam:title` reads `IPTV`, so `--force-media-title` is doing its job. The
+title had a guard. The URL has no equivalent option, and nobody looked.
+
+### Why the existing reasoning did not cover it
+
+`docs/ARCHITECTURE.md` section 6 reasons carefully about the composed playlist
+URL being visible in `/proc/<pid>/cmdline` during a fetch, and accepts it as a
+transient residual. That analysis is about **our** argv. This is a different
+exposure with a different lifetime: it is published by a third-party script,
+on a bus, for the whole time a channel is playing, and it survives on the bus
+rather than in a file only the same user can read.
+
+It is also not reachable by the plugin's own redaction: `Model.redactUrls`
+guards what WE print. Nothing the plugin renders is at fault here.
+
+### The fix, and the trade, both measured
+
+`--load-scripts=no` closes it:
+
+```
+$ busctl --user list | grep -c mpris
+0
+```
+
+The cost is real and should not be hidden. `/usr/share/omarchy/shell/plugins/services/media/`
+reads MPRIS, and `MediaModel.js:112` falls back
+`trackTitle || identity || desktopEntry` -- so today Omarchy's own media widget
+shows the playing channel for free, because the helper pushes the channel name
+into `media-title` over IPC (`bin/omarchy-iptv:2584`). Passing
+`--load-scripts=no` takes that away.
+
+So the options are a product decision, not an implementation one:
+
+| | closes the leak | keeps the media widget |
+|---|---|---|
+| A. `--load-scripts=no` always | yes | no |
+| B. a setting, defaulting closed | yes by default | only if the user opts in |
+| C. `--load-scripts=no` only when the URL carries userinfo or a token-shaped query | for the lists that have something to leak | on free lists |
+
+C is the narrow one and is tempting, but it makes a widget appear and
+disappear depending on which source is active, and a token in a query string
+is not reliably detectable. A is the one consistent with how this project
+ruled on logos: close it, state the cost, and let the setting come later if
+anyone misses the widget.
+
+**NOT FIXED PENDING A RULING.** The measurement is here; the choice is the
+product owner's.
+
 ## 0.7.9 preflight, 2026-09-23: seven defects in the feature shipped that morning
 
 The cut was called and did not happen. An adversarial review of the five
