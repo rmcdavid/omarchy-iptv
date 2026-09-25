@@ -83,7 +83,7 @@ Left blank. The nine categories and thirteen tags cover this.
 
 ## Preview asset
 
-`preview.png` in the repository root, 960x620, the guide mid-search.
+`preview.png` in the repository root, 960x620, the guide mid-search. Retaken 2026-09-24 with channel logos enabled, so the asset shows the feature rather than the text-only list. Note the honesty caveat that comes with it: logos are OFF by default, so the preview shows an opted-in state. One row in the shot has no logo, which is the shipped design -- a channel without one gets blank space, never a placeholder box.
 
 It was cropped to the card's own border, verified by checking that all four
 edges of the crop are the border colour, so no desktop, no terminal, no window
