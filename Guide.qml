@@ -367,6 +367,12 @@ Item {
   // also make the wall and search mutually exclusive, and the guide opens in
   // search mode, so a wall you cannot type into is a wall nobody reaches.
   property bool wallView: false
+  // Whichever view is on screen. Every site that used to name `resultList`
+  // by id goes through here: the scroll, the page size, the header's overflow
+  // test and the two scroll-edge fades. Naming the list by id at six sites
+  // was fine while there was one view and is a defect the moment there are
+  // two -- the header would report the list's overflow while the wall is up.
+  readonly property var liveView: root.wallView ? channelWall : resultList
   // The tile's resting plate. 92 per cent of the real corpus carries
   // transparency and the ink runs both ways -- 42 per cent light, 22 per cent
   // dark over a 199-file sample -- so no plate colour makes every logo
@@ -609,7 +615,7 @@ Item {
   // `contentHeight` and not `contentY`: the former changes only when the row
   // set or the row height does, the latter on every frame of a wheel flick,
   // and string formatting does not belong there.
-  readonly property bool listOverflows: resultList.contentHeight > resultList.height
+  readonly property bool listOverflows: root.liveView.contentHeight > root.liveView.height
   readonly property string scopeLabelText: root.hasChannels
     ? Model.scopeLabel(root.scopeId, root.query, root.resultTotal,
         { index: root.cursorIndex, rows: root.rowCount, overflows: root.listOverflows })
@@ -699,6 +705,8 @@ Item {
       // PAUSE LIVE TV: the hint appears only while something is playing, and
       // names the direction the key will go.
       playing: root.playingId !== "",
+      // M2-13: h/l names what it does in the view that is actually up.
+      wall: root.wallView,
       paused: root.serviceReady && root.service.paused === true,
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
@@ -967,9 +975,12 @@ Item {
   }
 
   function scrollToCursor() {
-    if (root.rowCount <= 0 || resultList.height <= 0) return
-    resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
-    root.reveal(resultList, root.cursorIndex, root.rowCount, root.rowReach)
+    var view = root.liveView
+    if (root.rowCount <= 0 || view.height <= 0) return
+    view.positionViewAtIndex(root.cursorIndex, GridView.Contain)
+    // The wall reveals by a whole tile; the list by its own peek.
+    root.reveal(view, root.cursorIndex, root.rowCount,
+                root.wallView ? root.wallGeom.cellHeight : root.rowReach)
   }
 
   // M2-09 D5. `Contain` alone parks the cursor row flush with the viewport
@@ -1001,6 +1012,15 @@ Item {
     root.scrollToCursor()
   }
 
+  // A vertical step on the wall. Separate from moveCursorBy because the unit
+  // is a ROW, not a place in the sequence, and Model.wallStep owns the edges.
+  function moveWallCursorBy(rows) {
+    if (root.rowCount === 0) return
+    root.disarmPointer()
+    root.cursorIndex = Model.wallStep(root.cursorIndex, rows, root.rowCount, root.wallGeom.columns)
+    root.scrollToCursor()
+  }
+
   function selectAbsolute(index) {
     if (root.rowCount === 0) return
     root.disarmPointer()
@@ -1009,6 +1029,13 @@ Item {
   }
 
   function pageSize() {
+    // On the wall a page is ROWS of tiles, and wallStep takes rows, so the
+    // same "one unit of overlap" convention holds in both views.
+    if (root.wallView) {
+      var cell = root.wallGeom.cellHeight
+      if (cell <= 0) return 1
+      return Math.max(1, Math.floor(channelWall.height / cell) - 1)
+    }
     return Math.max(1, Math.floor(resultList.height / (root.rowHeight + root.rowSpacing)) - 1)
   }
 
@@ -2319,6 +2346,17 @@ Item {
               return
             }
             root.endNumberEntry(true)
+            // On the wall h/l move the cursor horizontally and j/k move a
+            // whole row. There is no group facet to carry, which is what
+            // hiding the group column bought: PanelKeyCatcher collapses the
+            // arrows onto hjkl (it matches Key_Left without checking
+            // modifiers), so a view needing BOTH a cursor axis and a facet
+            // axis has no key left to express the second one.
+            if (root.wallView) {
+              if (dy !== 0) root.moveWallCursorBy(dy)
+              else if (dx !== 0) root.moveCursorBy(dx, true)
+              return
+            }
             if (dy !== 0) root.moveCursorBy(dy, true)
             else if (dx !== 0) root.moveScopeBy(dx)
           }
@@ -3410,8 +3448,8 @@ Item {
                 anchors.top: parent.top
                 height: Math.min(Style.space(28), parent.height / 2)
                 visible: opacity > 0
-                opacity: resultList.contentHeight > resultList.height
-                  ? Math.max(0, Math.min(1, (resultList.contentY - resultList.originY) / height))
+                opacity: root.liveView.contentHeight > root.liveView.height
+                  ? Math.max(0, Math.min(1, (root.liveView.contentY - root.liveView.originY) / height))
                   : 0
                 gradient: Gradient {
                   GradientStop { position: 0; color: root.background }
@@ -3425,8 +3463,8 @@ Item {
                 anchors.bottom: parent.bottom
                 height: Math.min(Style.space(28), parent.height / 2)
                 visible: opacity > 0
-                opacity: resultList.contentHeight > resultList.height
-                  ? Math.max(0, Math.min(1, (resultList.originY + resultList.contentHeight - resultList.height - resultList.contentY) / height))
+                opacity: root.liveView.contentHeight > root.liveView.height
+                  ? Math.max(0, Math.min(1, (root.liveView.originY + root.liveView.contentHeight - root.liveView.height - root.liveView.contentY) / height))
                   : 0
                 gradient: Gradient {
                   GradientStop { position: 0; color: Util.alpha(root.background, 0) }

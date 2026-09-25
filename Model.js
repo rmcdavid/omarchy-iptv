@@ -3389,6 +3389,40 @@ function wallGeometry(opts) {
   }
 }
 
+// One vertical step on the wall: down or up a whole row, keeping the column.
+//
+// `dir` is in ROWS, so a page is the same function with a bigger dir. The
+// horizontal step is not here on purpose -- it is `moveCursor(index, +-1)`
+// unchanged, because moving left and right across a grid laid out in reading
+// order IS moving one place through the flat sequence, and giving it a second
+// implementation is how two of them drift apart.
+//
+// The edges are the whole content of this function. A last row is usually
+// PARTIAL, so the column under the cursor may not exist down there:
+//   * down, and a row exists below: the nearest item in it, which is the last
+//     item when the column is past the end of a partial row. "Down" always
+//     moves down if there is anything below, which is what a person expects
+//     and what leaving the cursor put would violate.
+//   * down, already in the last row: stay. There is nothing below.
+//   * up, past the top: the same column in the first row, so a page-up from
+//     row 3 of 3 lands under the cursor rather than at index 0.
+//   * up, already in the first row: stay.
+function wallStep(index, dir, count, columns) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  if (n === 0) return 0
+  var cols = Math.max(1, Math.floor(Number(columns) || 0))
+  var at = Math.max(0, Math.min(n - 1, Math.floor(Number(index) || 0)))
+  var d = Math.floor(Number(dir) || 0)
+  if (d === 0) return at
+  var target = at + d * cols
+  if (target >= 0 && target < n) return target
+  if (d > 0) {
+    var lastRowStart = Math.floor((n - 1) / cols) * cols
+    return at < lastRowStart ? n - 1 : at
+  }
+  return at < cols ? at : at % cols
+}
+
 // The lookup `logoSlot` wants, from the `names` array the helper prints.
 function logoHaveSet(names) {
   var list = asList(names)
@@ -6050,7 +6084,13 @@ function footerHints(opts) {
     if (o.numberEntry && o.numberEntry.active === true) {
       return [["0-9", "digits"], [CHNO_ENTRY_SEP, "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]]
     }
-    var list = [["j/k", "move"], ["h/l", scopeVerb(o)], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // M2-13: on the wall h/l move the cursor across a row instead of ringing
+    // the scope, because the wall hides the group column. A hint that still
+    // said "group" would name an axis the view does not have -- the same
+    // mistake M2-09 D6 fixed for the list, in the other direction.
+    var list = o.wall === true
+      ? [["j/k", "row"], ["h/l", "move"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+      : [["j/k", "move"], ["h/l", scopeVerb(o)], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
     // PAUSE LIVE TV. Only while something is playing -- a pause key on an
     // idle guide has nothing to act on and would be a hint that lies. Names
     // the direction, so nobody presses it to find out which way it goes.
@@ -7679,6 +7719,7 @@ if (typeof module !== "undefined") {
     logoNamesFrom: logoNamesFrom,
     logoStreamName: logoStreamName,
     wallGeometry: wallGeometry,
+    wallStep: wallStep,
     WALL_MAX_COLUMNS: WALL_MAX_COLUMNS,
     WALL_PLATE_ASPECT: WALL_PLATE_ASPECT,
     logoColumnShown: logoColumnShown,

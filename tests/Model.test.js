@@ -6511,6 +6511,53 @@ check("a narrow card still hides the column in either view",
             Model.guideSurface(Object.assign({}, base, { wall: true })).showColumn]
   })(), [false, false])
 
+// ---- M2-13: the wall's vertical step, which is all edges ----
+check("a whole row down and up, in the middle of a full grid",
+  [Model.wallStep(0, 1, 10, 4), Model.wallStep(4, 1, 10, 4), Model.wallStep(4, -1, 10, 4)], [4, 8, 0])
+check("down from a column the PARTIAL last row does not have lands on the last item",
+  Model.wallStep(6, 1, 10, 4), 9)
+check("down from a column the partial last row DOES have keeps the column",
+  Model.wallStep(5, 1, 10, 4), 9)
+check("down from inside the last row stays: there is nothing below",
+  [Model.wallStep(8, 1, 10, 4), Model.wallStep(9, 1, 10, 4)], [8, 9])
+check("up from the first row stays, and does not fall to index 0",
+  [Model.wallStep(2, -1, 10, 4), Model.wallStep(0, -1, 10, 4)], [2, 0])
+check("a page is the same function with a bigger dir, and clamps both ways",
+  [Model.wallStep(1, 3, 12, 4), Model.wallStep(11, -3, 12, 4)], [11, 3])
+check("one column makes it an ordinary list step",
+  [Model.wallStep(0, 1, 4, 1), Model.wallStep(3, 1, 4, 1), Model.wallStep(3, -1, 4, 1)], [1, 3, 2])
+check("more columns than items: one row, so nothing moves vertically",
+  [Model.wallStep(0, 1, 3, 4), Model.wallStep(2, 1, 3, 4), Model.wallStep(2, -1, 3, 4)], [0, 2, 2])
+check("an empty list answers 0 rather than a negative index or NaN",
+  [Model.wallStep(0, 1, 0, 4), Model.wallStep(5, -1, 0, 4)], [0, 0])
+check("a single item has nowhere to go in either direction",
+  [Model.wallStep(0, 1, 1, 4), Model.wallStep(0, -1, 1, 4)], [0, 0])
+check("an out-of-range index is clamped before it steps",
+  [Model.wallStep(99, 1, 10, 4), Model.wallStep(-5, 1, 10, 4)], [9, 4])
+check("junk columns and junk dir cannot produce a junk index",
+  [Model.wallStep(4, 1, 10, 0), Model.wallStep(4, 0, 10, 4), Model.wallStep(4, 1, 10, "x")], [5, 4, 5])
+check("every step from every index lands in range, at every column count",
+  (function () {
+    var bad = []
+    for (var cols = 1; cols <= 6; cols++) {
+      for (var n = 0; n <= 13; n++) {
+        for (var i = 0; i < Math.max(1, n); i++) {
+          [-3, -1, 1, 3].forEach(function (d) {
+            var r = Model.wallStep(i, d, n, cols)
+            if (n === 0) { if (r !== 0) bad.push([i, d, n, cols, r]) }
+            else if (!(r >= 0 && r < n)) bad.push([i, d, n, cols, r])
+          })
+        }
+      }
+    }
+    return bad
+  })(), [])
+check("the footer names what h/l actually does in the view that is up",
+  (function () {
+    var base = { mode: "list", query: "", empty: "", playing: false, pipAvailable: false, hasNumbers: false }
+    return [Model.footerHints(base)[1], Model.footerHints(Object.assign({}, base, { wall: true }))[1]]
+  })(), [["h/l", "group"], ["h/l", "move"]])
+
 check("pipSnapshotClear says off and nothing else", Model.pipSnapshotClear(), { active: false, v: 1 })
 check("pipParseSnapshot: what comes back out of the player, re-validated", [
   Model.pipParseSnapshot(pipSnapFloating).at.join(","),
