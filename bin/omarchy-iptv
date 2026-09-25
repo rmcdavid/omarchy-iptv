@@ -2518,11 +2518,24 @@ def cmd_logos(args: argparse.Namespace) -> int:
         if os.path.exists(os.path.join(logo_dir, name)):
             cached += 1
             names.append(name)
+            emit({"ok": True, "kind": "logo", "name": name})
             continue
         try:
             data, ctype = fetch_logo(url, args.timeout)
             names.append(write_logo(logo_dir, url, data, ctype))
             fetched += 1
+            # D-LOGO-8: announce each file AS IT LANDS, not only in the summary.
+            # The shell gates a row on knowing the file is there, and the
+            # summary arrives at the END -- so on a first enable the user
+            # accepted a 63-host disclosure and then watched nothing happen for
+            # a quarter of an hour while the logos they were waiting for were
+            # already on disk. Measured: 355 files down, 10 of the 10 channels
+            # visible in the guide cached, every row still blank.
+            #
+            # One line per file, newline-delimited, and the summary object is
+            # still the last line. A reader that wants only the summary reads
+            # the last line; nothing else about the contract changes.
+            emit({"ok": True, "kind": "logo", "name": names[-1]})
         except HelperError as error:
             # Hosts and codes only, never the URL (rule 5).
             reasons[error.code] = reasons.get(error.code, 0) + 1

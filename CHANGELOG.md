@@ -3,6 +3,18 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+### Fixed
+
+- **Channel logos now appear as they download, not all at once at the end.**
+  Switching logos on starts a fetch that can take twenty minutes on a large
+  playlist, and until now nothing at all changed on screen for that whole time
+  — even for channels whose logo had already been saved. You turned a feature
+  on, agreed to the disclosure, and the guide looked exactly the same, then
+  every picture arrived together. Logos now show up in small batches while the
+  download runs, so the first ones are visible within a few seconds.
+
 ## 0.7.10 (2026-09-24)
 
 ### Added

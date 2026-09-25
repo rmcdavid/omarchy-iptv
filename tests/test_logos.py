@@ -332,7 +332,12 @@ class LogoFetchCacheTest(unittest.TestCase):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 helper.cmd_logos(args)
-            return json.loads(out.getvalue())
+            # D-LOGO-8: --fetch now streams one line per logo as it lands and
+            # the summary object LAST. Read the last line; the progress lines
+            # are asserted separately.
+            lines = [l for l in out.getvalue().splitlines() if l.strip()]
+            self.progress = [json.loads(l) for l in lines[:-1]]
+            return json.loads(lines[-1])
         finally:
             helper.fetch_logo = real
 
@@ -669,6 +674,87 @@ class LogoCacheRemovalTest(unittest.TestCase):
         self.assertTrue(os.path.exists(outside), "the symlink target must survive")
         with open(outside) as fh:
             self.assertEqual(fh.read(), "do not delete me")
+
+class LogoStreamTest(unittest.TestCase):
+    """D-LOGO-8: the names arrive AS THE FILES LAND, not only at the end.
+
+    The shell gates a row on knowing the file is there, and it learned that
+    from the summary -- which is the LAST thing a 1,436-file fetch prints. So
+    a first enable showed nothing for a quarter of an hour while the logos the
+    user was looking at were already on disk. Measured on the live install:
+    355 files down, 10 of the 10 channels visible in the guide cached, every
+    row still blank.
+    """
+
+    def run_fetch(self, tmp, urls, fetcher):
+        import argparse, contextlib, io, os
+        cache = os.path.join(tmp, "cache")
+        os.makedirs(cache, exist_ok=True)
+        with open(os.path.join(cache, "channels.json"), "w") as fh:
+            json.dump({"channels": [{"id": "c%d" % i, "name": "C%d" % i, "group": "G",
+                                     "url": "http://127.0.0.1/%d" % i, "logo": u}
+                                    for i, u in enumerate(urls)]}, fh)
+        args = argparse.Namespace(cache_dir=cache, fetch=True, survey=False, timeout=1)
+        real = helper.fetch_logo
+        helper.fetch_logo = fetcher
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                helper.cmd_logos(args)
+            return [json.loads(l) for l in out.getvalue().splitlines() if l.strip()]
+        finally:
+            helper.fetch_logo = real
+
+    def png(self, url, timeout):
+        return SAMPLE["image/png"], "image/png"
+
+    def test_one_line_per_logo_as_it_lands_and_the_summary_last(self):
+        import tempfile
+        urls = ["https://h.test/%d.png" % i for i in range(4)]
+        lines = self.run_fetch(tempfile.mkdtemp(), urls, self.png)
+        progress = [l for l in lines if l.get("kind") == "logo"]
+        self.assertEqual(len(progress), 4, "one line per file")
+        self.assertEqual(lines[-1]["kind"], "logos", "the summary is still LAST")
+        # every streamed name is a name the summary also reports
+        self.assertEqual(sorted(p["name"] for p in progress), sorted(lines[-1]["names"]))
+
+    def test_a_cached_logo_is_announced_too(self):
+        """A second run writes nothing and must still tell the shell what is there."""
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        urls = ["https://h.test/%d.png" % i for i in range(3)]
+        self.run_fetch(tmp, urls, self.png)
+        lines = self.run_fetch(tmp, urls, self.png)
+        self.assertEqual(lines[-1]["cached"], 3)
+        self.assertEqual(lines[-1]["fetched"], 0)
+        self.assertEqual(len([l for l in lines if l.get("kind") == "logo"]), 3,
+                         "a cached run announces every file, or the shell learns nothing")
+
+    def test_a_failed_logo_is_not_announced(self):
+        """The shell must never be told a file is there when it is not."""
+        import tempfile
+
+        def flaky(url, timeout):
+            if url.endswith("1.png"):
+                raise helper.HelperError("logo_fetch", "could not fetch a logo from h.test")
+            return SAMPLE["image/png"], "image/png"
+
+        lines = self.run_fetch(tempfile.mkdtemp(),
+                               ["https://h.test/%d.png" % i for i in range(3)], flaky)
+        progress = [l for l in lines if l.get("kind") == "logo"]
+        self.assertEqual(len(progress), 2)
+        self.assertNotIn(helper.logo_filename("https://h.test/1.png"),
+                         [p["name"] for p in progress])
+
+    def test_the_progress_lines_carry_no_url(self):
+        """Hashes only: this stream is a sink, and rule 5 covers every sink."""
+        import tempfile
+        lines = self.run_fetch(tempfile.mkdtemp(),
+                               ["https://h.test/a.png?token=SECRET"], self.png)
+        blob = json.dumps([l for l in lines if l.get("kind") == "logo"])
+        self.assertNotIn("SECRET", blob)
+        self.assertNotIn("h.test", blob)
+        self.assertNotIn("/", blob)
 
 
 

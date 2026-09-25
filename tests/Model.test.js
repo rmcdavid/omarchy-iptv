@@ -2234,6 +2234,53 @@ checkCall("M2-04: the slot says off, blank or image, and nothing else", function
           Model.logoSlot({}).kind]
 }, ["off", "blank", "image", "blank", "blank", "off"])
 
+checkCall("D-LOGO-8: the stream is read a line at a time, and junk costs one logo", function () {
+  // The shell gates a row on knowing the file is there and learned that from
+  // the SUMMARY, which is the last thing a 1,436-file fetch prints -- so a
+  // first enable showed nothing for a quarter of an hour while the logos the
+  // user was looking at were already on disk.
+  const progress = JSON.stringify({ ok: true, kind: "logo", name: "ab12cd34" })
+  const summary = JSON.stringify({ ok: true, kind: "logos", names: ["ab12cd34", "ff00ff00"] })
+  return [
+    Model.logoStreamName(progress),
+    // the summary is NOT a progress line: the caller handles it separately,
+    // and treating it as one would add a name of ""
+    Model.logoStreamName(summary),
+    // A line of some OTHER kind that happens to carry a name must not be
+    // mistaken for a logo. Gating on "has a kind" instead of "kind is logo"
+    // passed the summary check above purely because summaries have no name.
+    Model.logoStreamName(JSON.stringify({ ok: true, kind: "status", name: "notalogo" })),
+    Model.logoStreamName("half a line {"),
+    Model.logoStreamName(""),
+    Model.logoStreamName(null),
+    // and the summary still parses through the path that reads it
+    Model.logoNamesFrom(summary).length
+  ]
+}, ["ab12cd34", "", "", "", "", "", 2])
+
+checkCall("D-LOGO-8: the service reads the stream, batches it, and the summary wins", function () {
+  // Pinned as a call-site inventory because the wiring is QML. Three things
+  // have to hold together or the fix is decorative: the process is parsed by
+  // line, each name is batched rather than rebuilding the map 1,436 times,
+  // and the summary REPLACES the set so a file that went away is not claimed.
+  const src = qmlLines().map(function (l) { return l.text }).join("\n")
+  return [
+    /stdout: SplitParser \{/.test(src),
+    /onRead: function \(line\) \{ root\.onLogoLine\(line\) \}/.test(src),
+    // batched through a timer, not applied per line. Asserted on the SEAM:
+    // the timer exists by exact id, the per-line path restarts it, and the
+    // per-line path does NOT touch logoHave itself -- renaming the timer is
+    // what an earlier version of this check let through.
+    /\bid: logoFlushTimer\b/.test(src),
+    /logoFlushTimer\.restart\(\)/.test(src),
+    /root\.logoPending\.push\(name\)/.test(src),
+    // the summary replaces rather than adds
+    /root\.logoHave = Model\.logoHaveSet\(names\)/.test(src),
+    // and nothing reads the old collected-at-exit text any more
+    src.indexOf("logoFetchProc.stdout.text") === -1
+  ]
+}, [true, true, true, true, true, true, true])
+
 checkCall("M2-04: the fetch report is read defensively, and names carry no URLs", function () {
   const good = JSON.stringify({ ok: true, kind: "logos", names: ["ab12cd34", "ff00ff00"] })
   return [Model.logoNamesFrom(good),

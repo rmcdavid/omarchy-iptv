@@ -3370,6 +3370,23 @@ function logoColumnShown(rows, enabled, logoDir) {
   return false
 }
 
+// D-LOGO-8. One name off the fetch's progress stream, or "" for any line that
+// is not one -- including the summary object, which the caller handles
+// separately. Defensive on purpose: this parses a line at a time from a
+// long-running process, and a malformed one must cost that logo, not the run.
+function logoStreamName(line) {
+  var text = str(line).replace(/^\s+|\s+$/g, "")
+  if (text === "") return ""
+  try {
+    var doc = JSON.parse(text)
+    if (!doc || typeof doc !== "object") return ""
+    if (str(doc.kind) !== "logo") return ""
+    return str(doc.name)
+  } catch (e) {
+    return ""
+  }
+}
+
 // What the helper's fetch reported, parsed defensively. Anything unreadable
 // answers "no names", which leaves every slot blank -- the failure direction
 // that draws nothing rather than the one that logs on every scroll.
@@ -7603,6 +7620,7 @@ if (typeof module !== "undefined") {
     logoSlot: logoSlot,
     logoHaveSet: logoHaveSet,
     logoNamesFrom: logoNamesFrom,
+    logoStreamName: logoStreamName,
     logoColumnShown: logoColumnShown,
     splitLogoUrl: splitLogoUrl,
     ownWriteInForce: ownWriteInForce,

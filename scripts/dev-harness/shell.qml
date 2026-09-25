@@ -820,6 +820,9 @@ ShellRoot {
           // PAUSE LIVE TV: what the bar and the guide actually say, so a
           // scenario can observe the state rather than infer it.
           paused: s2 && s2.paused !== undefined ? s2.paused : null,
+          // D-LOGO-8: how many logos the shell knows are on disk RIGHT NOW.
+          // The defect was that this stayed 0 until the fetch exited.
+          logoCount: s2 && s2.logoHave ? Object.keys(s2.logoHave).length : null,
           // keep-my-place diagnostics: which failure the guide can see, and
           // whether the cursor restore is still pending or was consumed.
           lastFailedId: g.lastFailedId === undefined ? null : String(g.lastFailedId),

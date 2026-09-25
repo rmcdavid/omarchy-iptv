@@ -7165,8 +7165,58 @@ Three candidate fixes, none costed yet:
 - the row attempts the file while a fetch is IN PROGRESS, accepting the log
   noise for that window only, and uses the strict set afterwards.
 
-Not fixed. Filed with the measurement so the next person has the number rather
-than the impression.
+### Fixed the same day: names stream as the files land
+
+Took the first candidate. The helper already printed one JSON object per line
+and the service already ignored all of them until exit, so the change is
+small on both sides:
+
+- `bin/omarchy-iptv logos --fetch` emits `{"ok":true,"kind":"logo","name":"<hash>"}`
+  as each file is written, and for each file it finds already cached. The
+  summary object is still the last line, so every existing reader is unaffected.
+  Failures emit nothing -- a name only appears once a file exists to point at.
+- `Model.logoStreamName(line)` parses one line and returns the name, or `""`
+  for the summary, for a non-logo object, for junk. Pure, so it is tested for
+  real from node rather than mirrored.
+- `Service.qml` reads that stdout with a `SplitParser` on `"\n"` and batches
+  into `logoHave` behind a 250 ms `logoFlushTimer`, so a thousand files do not
+  become a thousand model resets. `onExited` now only flushes what is left.
+
+**Counter-proof, which is the part that matters.** A test that watches the new
+code stream is not evidence; the question is whether the same scenario is red
+on the code that shipped the bug. So the scenario was run twice against the
+same fixture -- 20 logos that resolve and cache, plus 5 pointed at an
+unroutable `10.255.255.1` so the fetch stays alive and cannot race to exit --
+once against a worktree checked out at pre-fix HEAD via
+`OMARCHY_IPTV_PLUGIN_ROOT`, once against the fix. The harness reports
+`logoCount` = `Object.keys(service.logoHave).length`:
+
+```
+                +5s   +10s   +15s   +20s    fetch alive
+  pre-fix HEAD    0      0      0      0     yes
+  with the fix   20     20     20     20     yes
+```
+
+The first row is the defect, reproduced. The 20 in the second row are on screen
+about four seconds in.
+
+Seven mutations were run against the new assertions. Two survived and were
+real gaps in the tests, not in the code:
+
+- **M5**: loosening `logoStreamName` to return `doc.name` for *any* object with
+  one, dropping the `kind === "logo"` check. Green -- because no assertion fed
+  it a non-logo object carrying a `name`. Added `{"kind":"status","name":"notalogo"}`;
+  now red.
+- **M7**: the call-site inventory matched the timer id with a bare substring, so
+  renaming `logoFlushTimer` to `logoFlushTimerX` still matched. Anchored to
+  `\bid: logoFlushTimer\b`; now red.
+
+That is the same class as the five other seam defects this milestone: the
+assertion was written against the shape the function documents rather than the
+shape the caller produces. It is cheap to find by mutation and apparently
+impossible to find by reading.
+
+Gate after: node 1579 checks, python 609 tests, `check.sh` green.
 
 ## 0.7.10 preflight, 2026-09-24: four defects, and two of them were claims
 
