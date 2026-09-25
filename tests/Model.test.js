@@ -3061,7 +3061,11 @@ checkCall("PO ruling 2026-09-21: the CURSOR MARKS, by inventory -- every list wi
   const lines = qmlLines()
   const out = []
   lines.forEach(function (l, i) {
-    if (!/^\s*visible:.*hasCursor\s*$/.test(l.text)) return
+    // M2-13: the wall's tile names its cursor `tile.current`, not
+    // `hasCursor`. Widened rather than left alone, because a cursor mark this
+    // gate cannot see is a cursor mark the ruling does not actually govern --
+    // which is this gate's own stated failure mode two comments down.
+    if (!/^\s*visible:.*(hasCursor|tile\.current)\s*$/.test(l.text)) return
     let open = -1
     for (let j = i; j >= 0 && j > i - 14; j--) {
       if (/^\s*Rectangle\s*\{\s*$/.test(lines[j].text) && lines[j].file === l.file) { open = j; break }
@@ -3074,13 +3078,22 @@ checkCall("PO ruling 2026-09-21: the CURSOR MARKS, by inventory -- every list wi
   })
   return out
 }, [
+  "Guide.qml: width: Style.space(2); height: Math.round(parent.height * 0.62); radius: width / 2; color: root.foreground; visible: tile.current",
   "Guide.qml: width: Style.space(2); height: Math.round(parent.height * 0.62); radius: width / 2; color: root.foreground; visible: row.hasCursor",
   "Guide.qml: width: Style.space(2); height: Math.round(parent.height * 0.62); radius: width / 2; color: root.foreground; visible: srow.hasCursor"
 ])
 checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirection included", function () {
-  // After the PO ruling of 2026-09-21 the ink has exactly TWO consumers and
-  // both mean ACTIVE: the selected group label, and the ConfirmDialog's
+  // After the PO ruling of 2026-09-21 the ink had exactly TWO consumers and
+  // both meant ACTIVE: the selected group label, and the ConfirmDialog's
   // selected button (which the host also uses for the dialog card's border).
+  //
+  // M2-13 adds a THIRD, deliberately, and this gate is why it is deliberate:
+  // the channel wall's selected tile caption. It is the same PAIRING as the
+  // group label one line above it -- `cursorInk` over `selectedBackground` --
+  // rather than a new colour question, so it inherits that site's contrast
+  // answer instead of opening another. The alternative considered and
+  // rejected was the raw accent, which is under 4.5:1 in most themes and is
+  // the whole reason this family exists.
   //
   // The inventory still follows `primaryColor`, because that indirection is
   // what once hid SIX sites: the ink was read at five places and forwarded to
@@ -3098,6 +3111,7 @@ checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirecti
   "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
   "selectedText: root.cursorInk",
   "color: groupRow.selected ? root.cursorInk : root.foreground",
+  "color: tile.current ? root.cursorInk : root.foreground",
   "readonly property color primaryColor: root.foreground",
   "color: row.primaryColor",
   "color: row.primaryColor",
@@ -6429,6 +6443,74 @@ check("pipSnapshotFor of a floating window keeps the rectangle to put back",
   { active: true, at: [300, 300], size: [900, 500], floating: true, pinned: true, monitor: 0, workspace: 1, v: 1 })
 check("a window whose rectangle cannot be read is recorded as tiled, so the restore degrades instead of moving it to 0,0",
   Model.pipSnapshotFor({ ok: true, floating: true, pinned: false, at: null, size: null, monitor: 0, workspaceId: 1 }).floating, false)
+// ---------------------------------------------------------- M2-13 the wall
+//
+// The column cap is the design decision, not an implementation detail:
+// hiding the group column frees ~200 px and the choice is to spend it on
+// bigger tiles rather than a fifth column, which measured 139 ms against a
+// 150 ms budget. These pin that the cap holds and that the view and the
+// cursor arithmetic can never disagree about the column count.
+check("wallGeometry caps the columns instead of deriving them from width",
+  Model.wallGeometry({ width: 924, gap: 8, caption: 22 }).columns, 4)
+check("a much wider card still gets the cap, and bigger tiles",
+  (function () { var g = Model.wallGeometry({ width: 1600, gap: 8, caption: 22 })
+    return [g.columns, g.tileWidth > 300] })(), [4, true])
+check("hiding the group column is what buys the bigger tile: 705 -> 924",
+  (function () {
+    var withCol = Model.wallGeometry({ width: 705, gap: 8, caption: 22 })
+    var without = Model.wallGeometry({ width: 924, gap: 8, caption: 22 })
+    return [withCol.columns, without.columns, without.tileWidth > withCol.tileWidth * 1.3]
+  })(), [4, 4, true])
+check("a narrow card drops columns rather than shrinking below the floor",
+  [Model.wallGeometry({ width: 400, gap: 8, caption: 22 }).columns,
+   Model.wallGeometry({ width: 240, gap: 8, caption: 22 }).columns], [3, 2])
+check("a width that cannot hold one tile answers zeros, not a division",
+  Model.wallGeometry({ width: 40, gap: 8, caption: 22 }),
+  { columns: 0, cellWidth: 0, cellHeight: 0, tileWidth: 0, plateHeight: 0, gridWidth: 0 })
+check("zero and junk widths answer zeros too",
+  [Model.wallGeometry({ width: 0 }).columns, Model.wallGeometry({}).columns,
+   Model.wallGeometry({ width: "wide" }).columns], [0, 0, 0])
+// GridView derives floor(width / cellWidth) internally, and
+// floor(w / floor(w / n)) is not always n -- at w=10, n=4 it is 5. The view is
+// given gridWidth for exactly this reason, so assert the property over a
+// sweep rather than at one convenient width.
+check("the view's own column derivation agrees with ours at every width",
+  (function () {
+    var bad = []
+    for (var w = 120; w <= 1600; w++) {
+      var g = Model.wallGeometry({ width: w, gap: 8, caption: 22 })
+      if (g.columns === 0) continue
+      if (Math.floor(g.gridWidth / g.cellWidth) !== g.columns) bad.push(w)
+    }
+    return bad
+  })(), [])
+check("the grid never asks for more width than it was given",
+  (function () {
+    var over = []
+    for (var w = 120; w <= 1600; w++) {
+      var g = Model.wallGeometry({ width: w, gap: 8, caption: 22 })
+      if (g.gridWidth > w) over.push(w)
+    }
+    return over
+  })(), [])
+check("the plate is 16:9 and the cell carries the caption and the gap",
+  (function () {
+    var g = Model.wallGeometry({ width: 924, gap: 8, caption: 22 })
+    return [g.plateHeight, g.cellHeight - g.plateHeight]
+  })(), [Math.round(223 / (16 / 9)), 30])
+check("guideSurface hides the group column in the wall and shows it in the list",
+  (function () {
+    var base = { serviceReady: true, configured: true, channelCount: 9, rowCount: 9, query: "", scopeId: "all", sources: 1 }
+    return [Model.guideSurface(base).showColumn,
+            Model.guideSurface(Object.assign({}, base, { wall: true })).showColumn]
+  })(), [true, false])
+check("a narrow card still hides the column in either view",
+  (function () {
+    var base = { serviceReady: true, configured: true, channelCount: 9, rowCount: 9, query: "", scopeId: "all", sources: 1, narrow: true }
+    return [Model.guideSurface(base).showColumn,
+            Model.guideSurface(Object.assign({}, base, { wall: true })).showColumn]
+  })(), [false, false])
+
 check("pipSnapshotClear says off and nothing else", Model.pipSnapshotClear(), { active: false, v: 1 })
 check("pipParseSnapshot: what comes back out of the player, re-validated", [
   Model.pipParseSnapshot(pipSnapFloating).at.join(","),

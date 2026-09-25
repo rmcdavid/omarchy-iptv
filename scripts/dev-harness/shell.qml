@@ -213,7 +213,7 @@ ShellRoot {
   // Every objectName that can be the guide's channel view, newest first.
   // A name that is not on this list cannot be measured, and openMs says so by
   // reporting view:"" rather than by returning a number for it.
-  readonly property var channelViews: ["resultList"]
+  readonly property var channelViews: ["channelWall", "resultList"]
 
   function findById(node, wanted, depth) {
     if (!node || depth > 12) return null
@@ -577,6 +577,14 @@ ShellRoot {
                               realised: forced === "" ? -1 : harness.realisedCount(g, forced) })
     }
     function close(): string { fakeShell.hide(harness.pluginId); return "ok" }
+    // M2-13. Drives the channel wall so a scenario can measure it. The guide
+    // owns the flag; this only sets it, exactly as a key press will.
+    function wall(on: string): string {
+      var g = guideLoader.item
+      if (!g) return "no-guide"
+      g.wallView = (on === "true" || on === "1" || on === "on")
+      return String(g.wallView)
+    }
     // The theme tokens the guide paints with, as THIS shell resolved them, so
     // a headless capture is checked against the running value rather than a
     // number copied from a theme file; and which window the loaded guide
@@ -868,6 +876,13 @@ ShellRoot {
           // D-LOGO-8: how many logos the shell knows are on disk RIGHT NOW.
           // The defect was that this stayed 0 until the fetch exited.
           logoCount: s2 && s2.logoHave ? Object.keys(s2.logoHave).length : null,
+          // M2-13. The view and the geometry it derived, so a scenario can
+          // assert the column cap held rather than infer it from a picture.
+          wallView: g.wallView === undefined ? null : g.wallView,
+          wallColumns: g.wallGeom === undefined ? null : g.wallGeom.columns,
+          wallCell: g.wallGeom === undefined ? null
+            : (g.wallGeom.cellWidth + "x" + g.wallGeom.cellHeight),
+          showColumn: g.showColumn === undefined ? null : g.showColumn,
           // keep-my-place diagnostics: which failure the guide can see, and
           // whether the cursor restore is still pending or was consumed.
           lastFailedId: g.lastFailedId === undefined ? null : String(g.lastFailedId),

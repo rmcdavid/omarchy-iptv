@@ -3335,6 +3335,60 @@ function logoSlot(opts) {
   return o.have[name] === true ? { kind: "image", path: path } : { kind: "blank", path: "" }
 }
 
+// ------------------------------------------------------------ channel wall
+//
+// M2-13. The wall presents the same rows as a grid of tiles. The arithmetic
+// is here rather than in the view because it is pure, fiddly at the edges,
+// and a node test can reach it (engineering rule 12 (dev branch)).
+//
+// COLUMNS ARE CAPPED, NOT DERIVED, and that is the whole design. Hiding the
+// group column in the wall frees ~200 px of the 924 px card. Spending it on a
+// fifth column costs +40 per cent realised delegates and measured 139 ms
+// against a 150 ms budget; spending it on bigger tiles keeps the delegate
+// count and the paint time where the list's already are, and takes the tile
+// from ~170 px to ~225 px. Bigger is what the corpus needs: a contact sheet
+// over the 1,380 real cached logos showed 32 runs of three or more adjacent
+// channels sharing one logo file -- the largest 28 consecutive NBC affiliates,
+// then Fox 14, PBS 11 -- where the CAPTION is the only thing that tells two
+// tiles apart. The wall is navigated by name more often than by picture.
+var WALL_MAX_COLUMNS = 4
+// 16:9 for the picture area. The corpus median aspect is 1.98 and the spread
+// is 0.31 to 13.62, so no plate shape fits the logos; PreserveAspectFit
+// inside a 16:9 plate letterboxes the tall ones and pillarboxes the wide ones
+// without cropping either.
+var WALL_PLATE_ASPECT = 16 / 9
+
+// The grid's geometry for an available width. Returns zeros for a width that
+// cannot hold a tile, so a view bound to this draws nothing rather than
+// dividing by zero.
+//
+// `gridWidth` is returned, and the view MUST be given it, because GridView
+// derives its own column count as floor(width / cellWidth) and
+// floor(w / floor(w / n)) is not always n -- at w=10, n=4 it is 5. Handing it
+// an exact multiple removes the disagreement instead of hoping about it.
+function wallGeometry(opts) {
+  var o = opts || {}
+  var width = Math.floor(Number(o.width) || 0)
+  var gap = Math.max(0, Math.floor(Number(o.gap) || 0))
+  var caption = Math.max(0, Math.floor(Number(o.caption) || 0))
+  var minCell = Math.max(1, Math.floor(Number(o.minCell) || 120))
+  var maxColumns = Math.max(1, Math.floor(Number(o.maxColumns) || WALL_MAX_COLUMNS))
+  var zero = { columns: 0, cellWidth: 0, cellHeight: 0, tileWidth: 0, plateHeight: 0, gridWidth: 0 }
+  if (width < minCell) return zero
+  var columns = Math.min(maxColumns, Math.max(1, Math.floor(width / minCell)))
+  var cellWidth = Math.floor(width / columns)
+  var tileWidth = Math.max(1, cellWidth - gap)
+  var plateHeight = Math.max(1, Math.round(tileWidth / WALL_PLATE_ASPECT))
+  return {
+    columns: columns,
+    cellWidth: cellWidth,
+    cellHeight: plateHeight + caption + gap,
+    tileWidth: tileWidth,
+    plateHeight: plateHeight,
+    gridWidth: columns * cellWidth
+  }
+}
+
 // The lookup `logoSlot` wants, from the `names` array the helper prints.
 function logoHaveSet(names) {
   var list = asList(names)
@@ -5883,7 +5937,10 @@ function guideSurface(opts) {
     channelCount: count,
     hasChannels: has,
     showList: has,
-    showColumn: has && o.narrow !== true,
+    // M2-13: the wall hides the group column, which is what frees the width
+    // for bigger tiles and what lets h/l be horizontal cursor movement instead
+    // of a group facet. Decided here so one function owns the answer.
+    showColumn: has && o.narrow !== true && o.wall !== true,
     setup: empty === "unconfigured",
     savedSources: empty === "unconfigured" ? Math.max(0, Math.floor(Number(o.sources) || 0)) : 0
   }
@@ -7621,6 +7678,9 @@ if (typeof module !== "undefined") {
     logoHaveSet: logoHaveSet,
     logoNamesFrom: logoNamesFrom,
     logoStreamName: logoStreamName,
+    wallGeometry: wallGeometry,
+    WALL_MAX_COLUMNS: WALL_MAX_COLUMNS,
+    WALL_PLATE_ASPECT: WALL_PLATE_ASPECT,
     logoColumnShown: logoColumnShown,
     splitLogoUrl: splitLogoUrl,
     ownWriteInForce: ownWriteInForce,

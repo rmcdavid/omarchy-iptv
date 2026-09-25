@@ -358,6 +358,26 @@ Item {
   // underneath the user while the fetch runs.
   readonly property bool logoColumn: Model.logoColumnShown(root.currentRows, root.showLogos, root.logoDir)
   readonly property int logoWidth: root.logoColumn ? Style.space(22) : 0
+  // ---- channel wall (M2-13). The same rows, presented as tiles.
+  //
+  // A presentation flag, deliberately NOT a member of GUIDE_MODES: the wall
+  // holds the same content and the same actions as the list, and an eighth
+  // mode would fork every mode-dependent branch -- footer hints, escape,
+  // letter actions, the accessible name -- for a change of shape. It would
+  // also make the wall and search mutually exclusive, and the guide opens in
+  // search mode, so a wall you cannot type into is a wall nobody reaches.
+  property bool wallView: false
+  // The tile's resting plate. 92 per cent of the real corpus carries
+  // transparency and the ink runs both ways -- 42 per cent light, 22 per cent
+  // dark over a 199-file sample -- so no plate colour makes every logo
+  // visible. This is the guide's own normal fill, the same surface a resting
+  // row sits on, which keeps the wall inside the theme rather than inventing
+  // a backdrop that is right for one half of the corpus and wrong for the
+  // other. Per-logo ink classification is the real answer and is deferred.
+  readonly property color tilePlate: Style.normalFill
+  readonly property var wallGeom: Model.wallGeometry({
+    width: listHost.width, gap: root.rowSpacing,
+    caption: Style.font.bodySmall + Style.space(6) })
   // Measured on `windowContent`, the item that fills whichever window is
   // hosting the guide (its size is the window's). The window itself lives
   // inside a Component now, out of this scope; see `windowLoader`.
@@ -555,7 +575,8 @@ Item {
     query: root.query,
     scopeId: root.scopeId,
     narrow: root.narrow,
-    sources: root.sourceCount
+    sources: root.sourceCount,
+    wall: root.wallView
   })
 
   // Empty-state kind: "" while rows exist.
@@ -2752,8 +2773,141 @@ Item {
               height: parent.height
               clip: true
 
+              // ---- the channel wall (M2-13, UX 2.4b)
+              //
+              // Same integer model as the list, same cursor, same rows. The
+              // width is Model.wallGeometry's `gridWidth` and not `parent.width`
+              // on purpose: GridView derives its own column count as
+              // floor(width / cellWidth), and floor(w / floor(w / n)) is not
+              // always n, so the view and the arithmetic that drives the cursor
+              // would disagree about how many columns there are. An exact
+              // multiple removes the disagreement.
+              GridView {
+                id: channelWall
+                // The harness resolves the channel view by objectName to force
+                // a layout before it stops the open clock. A view that is not
+                // on that list cannot be measured, and openMs reports view:""
+                // rather than a number for it.
+                objectName: "channelWall"
+                visible: root.wallView
+                width: Math.min(parent.width, root.wallGeom.gridWidth)
+                height: parent.height
+                anchors.horizontalCenter: parent.horizontalCenter
+                model: root.rowCount
+                clip: true
+                cellWidth: root.wallGeom.cellWidth
+                cellHeight: root.wallGeom.cellHeight
+                boundsBehavior: Flickable.StopAtBounds
+                // One cell ROW, not the list's `rowHeight * 4`. On a grid that
+                // constant buys whole extra rows: cellHeight * 4 measured 37
+                // realised delegates at 149-152 ms against a 150 ms budget,
+                // where one cell row is 25 delegates at 106 ms. Written as the
+                // tile height so it cannot be read as the list's multiple.
+                cacheBuffer: root.wallGeom.plateHeight
+                Accessible.role: Accessible.List
+                Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
+
+                delegate: Item {
+                  id: tile
+                  required property int index
+                  readonly property var channel: tile.index < root.rowCount ? (root.currentRows[tile.index] || null) : null
+                  readonly property string channelId: tile.channel ? Model.channelId(tile.channel) : ""
+                  readonly property string name: tile.channel ? String(tile.channel.name || "") : ""
+                  readonly property bool current: tile.index === root.cursorIndex
+
+                  width: root.wallGeom.cellWidth
+                  height: root.wallGeom.cellHeight
+
+                  BorderSurface {
+                    id: plate
+                    width: root.wallGeom.tileWidth
+                    height: root.wallGeom.plateHeight
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    // The same two properties the row delegate uses at
+                    // Guide.qml:2964, so the wall's selection is the theme's
+                    // selection and not a second opinion about it.
+                    borderSpec: tile.current ? root.selectedBorderSpec : root.noBorderSpec
+                    color: tile.current ? root.selectedBackground : root.tilePlate
+
+                    // The cursor MARK, per the PO ruling of 2026-09-21: every
+                    // list with a cursor carries one, and none of them inks
+                    // the content. On a 52 px row the selected fill alone
+                    // reads; on a 230 px tile the same 8 per cent alpha is
+                    // spread over twenty times the area and disappears, which
+                    // is exactly what the first screenshot of this view
+                    // showed. Same geometry as the row's, along the leading
+                    // edge of the plate.
+                    Rectangle {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(3)
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(2)
+                      height: Math.round(parent.height * 0.62)
+                      radius: width / 2
+                      color: root.foreground
+                      visible: tile.current
+                    }
+
+                    Image {
+                      anchors.centerIn: parent
+                      width: Math.round(parent.width * 0.86)
+                      height: Math.round(parent.height * 0.80)
+                      asynchronous: true
+                      cache: true
+                      // 1x the drawn width, not the list's blind `* 2`. At a
+                      // 22 px row slot doubling is cheap; at a 223 px tile it is
+                      // four times the bytes for pixels nothing displays.
+                      sourceSize.width: Math.round(width)
+                      sourceSize.height: Math.round(height)
+                      fillMode: Image.PreserveAspectFit
+                      mipmap: true
+                      source: {
+                        var slot = Model.logoSlot({ enabled: root.showLogos, channel: tile.channel,
+                                                    logoDir: root.logoDir, have: root.logoHave })
+                        return (root.logoSeq >= 0 && slot.kind === "image") ? "file://" + slot.path : ""
+                      }
+                      opacity: status === Image.Ready ? 1 : 0
+                      // The name below is the tile's accessible name; a reader
+                      // announcing "image" before every channel is noise, not
+                      // information (UX 7.2). Same reasoning as the row slot.
+                      Accessible.ignored: true
+                    }
+                  }
+
+                  // The caption is not decoration. A contact sheet over the
+                  // real corpus found 32 runs of three or more adjacent
+                  // channels sharing one logo file, the largest 28 consecutive
+                  // NBC affiliates, where the name is the only thing that tells
+                  // two tiles apart. With captions hidden those runs carry no
+                  // information at all.
+                  Text {
+                    anchors.top: plate.bottom
+                    anchors.topMargin: Style.space(3)
+                    width: root.wallGeom.tileWidth
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: tile.name
+                    // `cursorInk` and not the accent: on a cursor fill the
+                    // raw accent is under 4.5:1 in most themes, which is the
+                    // whole D-RUNG family. The group column picks its selected
+                    // ink the same way at Guide.qml:2611.
+                    color: tile.current ? root.cursorInk : root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignHCenter
+                    Accessible.ignored: true
+                  }
+
+                  Accessible.role: Accessible.ListItem
+                  Accessible.name: Model.rowAccessibleName({
+                    name: tile.name, rowIndex: tile.index, rowCount: root.rowCount })
+                }
+              }
+
               ListView {
                 id: resultList
+                visible: !root.wallView
                 // Inert at runtime, and the only way the performance budget
                 // can be measured: `id` is compile-time and does not reach the
                 // object tree, so a harness timing the open cannot force the
