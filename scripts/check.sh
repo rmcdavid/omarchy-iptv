@@ -119,11 +119,19 @@ fail=0
 # run by node and by python, and BOTH assert its row counts before using it
 # (`channel-ids fixture loaded`, `test_fixture_is_not_empty`), so deleting a
 # vector is red on an assertion rather than on arithmetic here.
+#
+# Re-levelled 2026-09-25 on a clean 44b27df. The floors had drifted: node was
+# 1427 against 1579 actual and python 531 against 635, so 152 node checks and
+# 104 python tests could have been deleted in silence -- in a file whose own
+# rule two paragraphs up is that the margin is deliberately zero. a11y was 32
+# against 34. The drift is what happens when a floor is raised only when
+# somebody remembers; the numbers below are the measured counts at that
+# commit, with zero margin again, which is the whole point of them.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1427}
-PY_TESTS_MIN=${PY_TESTS_MIN:-531}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1579}
+PY_TESTS_MIN=${PY_TESTS_MIN:-635}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
-A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-32}
+A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
 # The M2-05 picture-in-picture preflight: 34 seams (integration added the
