@@ -7144,6 +7144,73 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## M2-13, 2026-09-25: the channel wall, and what was not measured (F-WALL-1)
+
+The feature shipped in four commits behind a fixed instrument and a
+re-levelled gate. This is the record of what is verified, what is argued, and
+what nobody has looked at -- written with the feature rather than after it,
+because the gap between those three is invisible to `check.sh`.
+
+### The premise was tested before the code, and it changed the design
+
+Five role lanes planned this and four adversarial lenses attacked the plan.
+The lens that mattered found that every lane had measured the corpus and none
+had rendered it: the whole plan rested on "a grid of these files is more
+scannable than a list of names", and nobody had looked. So a contact sheet was
+built over the 1,380 real cached logos in playlist order, at three cell
+geometries, on both plate colours, with and without captions. Looking at it
+changed three things:
+
+- **32 runs of three or more adjacent channels share one logo file**, the
+  largest 28 consecutive NBC affiliates, then Fox 14 and PBS 11; 148 channels
+  sit inside a run of four or more. At four columns that is seven identical
+  rows. For those channels the wall is strictly WORSE than the list unless the
+  caption carries it, which is why the caption is specified as load-bearing in
+  UX 2.4b rather than as decoration.
+- **Captions off, the ABC block is fourteen identical tiles** carrying no
+  information at all. Any pure-poster version of this feature is dead.
+- **No plate colour works.** 92 per cent of the corpus carries transparency and
+  the ink runs both ways: 42 per cent light, 22 per cent dark, over a 199-file
+  decode. A&E is black-on-transparent and vanishes on the dark plate; several
+  wash out on the light one. The tile uses the guide's own normal fill and the
+  real answer -- classifying each logo's ink at fetch time, which the helper
+  could do in stdlib since it already opens every file -- is deferred.
+
+### What the gates caught, which is the part worth keeping
+
+Two existing guards went red on this work and both were extended deliberately
+rather than loosened:
+
+- **D-RUNG-13's cursor-ink inventory** flagged the selected caption. It is the
+  same pairing as the group label (`cursorInk` over `selectedBackground`), so
+  it inherits that site's contrast answer; the raw accent was rejected for
+  being under 4.5:1 in most themes.
+- **The cursor-mark ruling did NOT catch the missing tile mark**, because its
+  gate matches `visible:.*hasCursor` and the tile names its cursor
+  `tile.current`. That is the gate's own documented failure mode, two comments
+  below the line that does the matching. Widened to see both and proven red by
+  removing the mark. What found it was not the gate: it was looking at the
+  first screenshot and seeing no selection, because an 8-per-cent-alpha fill
+  reads on a 52 px row and disappears over a 230 px tile.
+
+Seven footer inventories and one qmltestrunner index also went red, all
+updated by hand. They exist to make adding a key a decision.
+
+### What is NOT verified, stated plainly
+
+- **The 150 ms budget has never been taken with the wall presenting against a
+  10,000-channel cache.** Every number in UX 2.4b -- 25 realised delegates at
+  106 ms for four columns, 35 at 139 ms for five, 37 at 149-152 ms if the
+  list's `cacheBuffer` is copied -- comes from a review's measurements on
+  probes, not from a run of this build. The instrument was fixed first for
+  exactly this reading and the reading has not been taken.
+- **No a11y scenario walks the tree with the wall presenting.** Its three 7.1
+  rows are DECLARED and COMPOSED, never OBSERVED.
+- **`Ctrl+G` has not been checked against a global binding.**
+
+That list is the content of F-WALL-1, and the reason it is a row rather than a
+sentence here is that a sentence in a results file is what rule 13 is about.
+
 ## The class, 2026-09-25: a titled finding now needs an id, and a check says so
 
 Two sweeps in two days filed six findings that had been sitting in one

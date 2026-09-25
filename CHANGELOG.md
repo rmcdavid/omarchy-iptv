@@ -3,9 +3,21 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## Unreleased
+## 0.8.0 (2026-09-25)
 
 ### Added
+
+- **Your channels, as a wall of pictures.** Press `Ctrl+G` in the guide and the
+  list becomes a grid of tiles — the picture your playlist gives each channel,
+  with the name underneath. Press it again for the list. Everything works the
+  same in both: type to search and the wall filters with you, Enter plays,
+  `f` favourites, and your place is kept when you flip. On the wall `j`/`k`
+  move a whole row and `h`/`l` move one tile. Channels your playlist gives no
+  picture for get the plugin's own television mark and their name, so the wall
+  is useful before you have turned logos on at all — and on playlists where
+  most channels have none. The group column is hidden on the wall, which is
+  what makes room for tiles big enough to read; to change group, flip back to
+  the list. The guide always opens in the list.
 
 - **You can get the logo disk space back.** Turning channel logos off has
   always stopped the downloading and hidden the pictures, but the files stayed

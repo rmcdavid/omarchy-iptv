@@ -190,6 +190,34 @@ for this list (EPG configured, or a mixed list such as Recent / Favorites /
 All / search results where the group name is meaningful). Inside a single
 group with no EPG configured, rows are single-line. Row heights are in 5.2.
 
+### 2.4b What a tile shows (the channel wall)
+
+`Ctrl+G` presents the same rows as a grid of tiles. It is a **presentation of
+the list, not a mode**: same rows, same cursor, same scope, same actions, and
+search filters it live. It is not a member of `GUIDE_MODES`.
+
+| Part | Rule |
+|---|---|
+| Columns | **Capped at four**, never derived from width. Hiding the group column frees ~200 px of the 924 px card and that width is spent on BIGGER TILES, not a fifth column: five columns measured 139 ms against the 150 ms open budget where four is 25 realised delegates at 106 ms. The tile goes from ~170 px to ~225 px. Below four columns' worth of width the count drops rather than the tile shrinking past its floor. |
+| Picture | The channel's cached logo, `PreserveAspectFit` inside a 16:9 plate. The corpus median aspect is 1.98 with a spread of 0.31 to 13.62, so no plate shape fits the logos; fitting inside letterboxes the tall ones and pillarboxes the wide ones without cropping either. |
+| No picture | The plugin's own television mark (`GLYPHS.tv`), dimmed. **This inverts 2.4's rule for the row deliberately.** In the 22 px row column a placeholder reads as a value, so the absence is the information -- correct there, because the name sits beside it. On a tile the tile IS the row, so an empty tile reads as a missing channel rather than as a channel with no picture. 82 of 1,462 channels on the reference list have no cached file, and on a 27-per-cent-coverage playlist the empty reading is the majority case. With logos OFF every tile is the mark, which is what makes the wall usable on a default install. |
+| Name | Always, under the plate, elided right. **The caption is not decoration.** A contact sheet over the 1,380 real cached logos found 32 runs of three or more adjacent channels sharing one logo file -- the largest 28 consecutive NBC affiliates, then Fox 14 and PBS 11, with 148 channels inside a run of four or more. In those runs the name is the only thing that tells two tiles apart; with captions hidden they carry no information at all. |
+| Cursor | The selected plate takes the selection fill and border, AND carries the cursor mark of the 2026-09-21 ruling. The mark is not optional here: the selection fill is 8 per cent alpha, which reads on a 52 px row and disappears over a 230 px tile. Measured by looking at the first build of this view. |
+| Group column | **Hidden.** That is what frees the width, and it is also what lets `h`/`l` be horizontal cursor movement: `PanelKeyCatcher` matches `Key_Left` without checking modifiers and collapses the arrows onto `hjkl`, so a view needing both a cursor axis and a facet axis has no key left to express the second. Changing group means flipping back to the list; search works in both views and is the primary narrowing verb. |
+
+Keys on the wall: `j`/`k` move a whole row keeping the column, `h`/`l` move one
+tile through the flat sequence with wrap, `PgUp`/`PgDn` move a page of rows.
+Down from a column the partial last row does not have lands on the last item;
+up past the top keeps the column. Everything else is 3.1 unchanged.
+
+**Not a plate colour the theme picks.** 92 per cent of the real corpus carries
+transparency and its ink runs both ways -- 42 per cent light and 22 per cent
+dark over a 199-file sample -- so no single plate makes every logo visible. The
+tile uses the guide's own normal fill, the surface a resting row already sits
+on. Per-logo ink classification at fetch time is the real answer and is
+deferred, not solved. **MEASURED-ONCE**, 2026-09-25, against the reference
+cache.
+
 ### 2.5 Sort rules
 
 | List | Order |
@@ -301,6 +329,7 @@ x).
 | `s` / `S` | Stop playback. No confirmation. Footer shows `Stopped`. |
 | `r` / `R` | Refresh playlist and EPG now. Footer shows `Refreshing...` then the result; a desktop notification reports the outcome (6.4). |
 | `/` | Enter search mode (query preserved). |
+| `Ctrl+G` | Flip between the channel list and the **channel wall** (2.4b). A MODIFIED key by necessity, for the same reason `Ctrl+S` is: it is handled in `handleSharedKey`, which serves search mode too, and the guide OPENS in search mode where every bare printable character is query text. A bare letter would be unreachable on the screen the user starts on. The cursor is shared, so the place survives the flip. In memory only: the guide opens in the list every time. |
 | `Tab` / `Shift+Tab` | Enter search mode (same as `/`; PanelKeyCatcher emits `tabRequested`). |
 | `Esc` | If a committed query is active: clear it and stay in list mode. Otherwise close the guide. |
 | `0`-`9` | Reserved for channel numbers (M2). Ignored in M1. |
@@ -317,6 +346,7 @@ x).
 | `Right` / `Left` | Next / previous group column entry (search facet, 2.7). |
 | `PgDn` / `PgUp` / `Home` / `End` | Same as list mode (there is no caret, so these are free). |
 | `Enter` | Play the cursor row (result 0 by default), close the guide, focus mpv. |
+| `Ctrl+G` | Flip between the list and the wall, exactly as in list mode (3.1). Listed in BOTH tables on purpose: a key that exists in only one of them is the bug, and this is the table for the screen the guide actually opens on. |
 | `Tab` / `Shift+Tab` | Commit the query and switch to list mode; the filtered list stays. |
 | `Esc` | If the query is non-empty: clear it (stay in search mode). If empty: close the guide. Identical to the clipboard. |
 
@@ -960,6 +990,9 @@ marker until something observes it.
 | Group entry | `Accessible.selected` = is the selected entry | -- | **OBSERVED-ONCE.** The prototype asserted the `selected` state on exactly the selected entry. No landed scenario does, so nothing today would notice the binding being lost |
 | Channel list | `Accessible.List` | `Channels in <scope>` | **OBSERVED** (scale scenario, as `Channels in All`); scope text **COMPOSED** (`Model.scopeName`). No scenario yet walks the tree with a group or Favorites scope, so the `<scope>` substitution itself is COMPOSED, not OBSERVED |
 | Channel row | `Accessible.ListItem` | `<name>` (+ `Channel <n>, ` prefix when numbered, M2-03 section 11) | **OBSERVED** (query, scale scenarios) |
+| Channel wall (2.4b) | `Accessible.List` | `Channels in <scope>` | **DECLARED, NOT OBSERVED.** The same role and name the list carries, so an AT is told the same thing about the same rows in either view. No landed scenario walks the tree with the wall presenting; `tests/a11y/host_guide.qml` instantiates the guide in its default view |
+| Wall tile | `Accessible.ListItem` | `<name>, row N of M` (`Model.rowAccessibleName`, the row's own composer) | **COMPOSED, NOT OBSERVED.** Deliberately identical to the row's name rather than a tile-specific one: the wall is a presentation of the same rows, and an AT that is told "row N of M" in one view and something else in the other has been told the cursor moved when it did not. Qt Quick exposes no table or position interface for `GridView` (investigation 4.6(d)), so `row N of M` in the NAME is the only carrier available and the reading it gives is a flat sequence, not a grid position -- which is exactly what `h`/`l` traverse |
+| Wall tile picture | -- | -- | `Accessible.ignored`, both the image and the mark. Same reasoning as the row's logo slot (7.2): the name already carries the channel, and announcing "image" before every tile is noise. Not a security control -- the investigation measured that an unannotated `Image` does not reach the tree at all |
 | Channel row | -- | suffixes `, favorite`, `, playing`, `, now <programme> until <HH:MM>`, `, failed` | `, favorite` **OBSERVED-ONCE** (the prototype asked `Model.rowAccessibleName` for a favourite row's name and then required that exact string on the bus). `, playing`, `, now ... until <HH:MM>` and `, failed` are **COMPOSED only** (`Model.rowAccessibleName`, 5 node assertions): no scenario fixture sets a playing, a now/next or a failed row, so three of the four states a user most needs to hear are string builders with a promise attached. A suffix becomes OBSERVED when a filed run populates it, and not before |
 | Channel row | `Accessible.focused` = hasCursor | -- | **OBSERVED-ONCE.** Prototype only. No landed scenario asserts the `focused` state, and it is the one state a screen-reader user navigating rows depends on most |
 | Channel row | -- | `, row N of M` appended last, after `, failed` | **PROMISED AND DELIVERED.** This row previously read "never promised here and never delivered" and both clauses were false, which is rule 13 drift inside the table written to end rule 13 drift. Promised at `docs/UX-GUIDE-AT-SCALE.md:768` and `:865` (ruling D5); delivered at `Model.js:4213-4215` (`rowAccessibleName({name:'Channel 7', rowIndex:7, rowCount:10000})` returns `Channel 7, row 8 of 10,000`); wired at `Guide.qml:2452`; asserted in `tests/Model.test.js`. The real caveat, which survives: `rowCount` is what the LIST holds, so under a query it is the capped 200 the header counts against, not the true match total, which stays in the footer |
