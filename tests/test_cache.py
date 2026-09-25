@@ -179,6 +179,21 @@ class RemoveTest(CacheTestCase):
         self.assertEqual(payload["error"]["code"], "bad_key")
         self.assertEqual(self.names(self.sources / OTHER), sorted(FILES))
 
+    def test_a_symlinked_subdirectory_is_refused_never_followed(self):
+        """D-LOGO-10, through the verb that has shipped with the hole since
+        D-LOGO-4 introduced CACHE_SUBDIRS: `cache remove` cleared the contents
+        of a symlinked logos/ target too."""
+        victim = pathlib.Path(self.tmp.name) / "victim"
+        victim.mkdir()
+        (victim / "important.txt").write_text("precious", encoding="utf-8")
+        self.seed(self.sources / KEY)
+        os.symlink(victim, self.sources / KEY / "logos")
+        code, payload, _ = self.cache_cmd("remove", "--key", KEY)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.names(victim), ["important.txt"])
+        self.assertIn("logos", payload["kept"])
+        self.assertTrue((self.sources / KEY / "logos").is_symlink())
+
     def test_symlinked_files_are_unlinked_not_followed(self):
         target = pathlib.Path(self.tmp.name) / "outside.json"
         target.write_text("precious", encoding="utf-8")
@@ -265,6 +280,251 @@ class EpgClearTest(CacheTestCase):
         self.assertEqual((code, payload["removed"]), (0, ["epg-now.json"]))
         self.assertEqual(target.read_text(encoding="utf-8"), "precious")
         self.assertEqual(self.names(self.sources / OTHER), [])
+
+
+class LogosClearTest(CacheTestCase):
+    """D-LOGO-9. The twin of epg-clear, filed for the reason GS11 gave for that
+    one: the part of the cache an input produced has to be reclaimable when the
+    user withdraws the input. Turning showLogos off stopped the fetch and
+    blanked the rows and reclaimed nothing -- measured on a live install at
+    1,173 files and 40.9 MB, 99 per cent of that source's whole cache, against
+    a documented ceiling of 1.28 GB per source that no prune could ever collect
+    because prune only clears keys that are NOT kept. The source stays, so the
+    playlist half of the cache and the directory are untouched."""
+
+    LOGOS = ("1a2b3c4d", "5e6f7a8b", "9c0d1e2f")
+    KEPT = ("channels.json", "playlist-status.json")
+
+    def seed_logos(self, key=KEY, names=LOGOS, size=100):
+        directory = self.sources / key / "logos"
+        directory.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (directory / name).write_bytes(b"x" * size)
+        return directory
+
+    def test_removes_the_logos_and_keeps_the_source(self):
+        self.seed(self.sources / KEY)
+        self.seed_logos()
+        self.seed(self.sources / OTHER)
+        self.seed_logos(OTHER)
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "kind": "cache", "action": "logos-clear",
+                                   "key": KEY, "removed": True, "files": 3,
+                                   "bytes": 300, "kept": 0})
+        self.assertEqual(self.names(self.sources / KEY), sorted(FILES))
+        self.assertFalse((self.sources / KEY / "logos").exists())
+        # the other source keeps every one of its own
+        self.assertEqual(self.names(self.sources / OTHER / "logos"), sorted(self.LOGOS))
+
+    def test_the_playlist_half_and_the_directory_survive(self):
+        self.seed(self.sources / KEY, self.KEPT)
+        self.seed_logos()
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        self.assertEqual((code, payload["removed"]), (0, True))
+        self.assertEqual(self.names(self.sources / KEY), sorted(self.KEPT))
+        self.assertTrue((self.sources / KEY).is_dir())
+
+    def test_clearing_logos_that_were_never_fetched_is_not_an_error(self):
+        self.seed(self.sources / KEY, self.KEPT)
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        self.assertEqual(code, 0)
+        self.assertEqual((payload["removed"], payload["files"], payload["bytes"]), (False, 0, 0))
+        self.assertEqual(self.names(self.sources / KEY), sorted(self.KEPT))
+        # and again on a source that has no directory at all
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", OTHER)
+        self.assertEqual((code, payload["removed"], payload["files"]), (0, False, 0))
+
+    def test_running_it_twice_changes_nothing_the_second_time(self):
+        self.seed(self.sources / KEY)
+        self.seed_logos()
+        first = self.cache_cmd("logos-clear", "--key", KEY)[1]
+        second = self.cache_cmd("logos-clear", "--key", KEY)[1]
+        self.assertEqual((first["removed"], first["files"]), (True, 3))
+        self.assertEqual((second["removed"], second["files"], second["bytes"]), (False, 0, 0))
+        self.assertEqual(self.names(self.sources / KEY), sorted(FILES))
+
+    def test_files_that_are_not_ours_are_not_touched(self):
+        self.seed(self.sources / KEY)
+        self.seed_logos()
+        (self.sources / KEY / "notes.txt").write_text("mine", encoding="utf-8")
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        self.assertEqual(payload["files"], 3)
+        self.assertEqual(self.names(self.sources / KEY), sorted(["notes.txt", *FILES]))
+
+    def test_a_nested_directory_is_left_and_reported_never_descended_into(self):
+        self.seed(self.sources / KEY, self.KEPT)
+        logos = self.seed_logos()
+        (logos / "nested").mkdir()
+        (logos / "nested" / "deep.bin").write_bytes(b"y" * 999)
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        # the three regular files went; the directory did not, so the rmdir
+        # failed and `removed` says so rather than claiming success
+        self.assertEqual((code, payload["removed"]), (0, False))
+        self.assertEqual((payload["files"], payload["bytes"], payload["kept"]), (3, 300, 1))
+        self.assertEqual(self.names(logos), ["nested"])
+        self.assertTrue((logos / "nested" / "deep.bin").exists())
+
+    def test_a_symlink_is_unlinked_never_followed_and_adds_no_bytes(self):
+        target = pathlib.Path(self.tmp.name) / "outside.bin"
+        target.write_bytes(b"z" * 9999)
+        self.seed(self.sources / KEY, self.KEPT)
+        logos = self.seed_logos(names=("1a2b3c4d",))
+        os.symlink(target, logos / "cccccccc")
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        self.assertEqual((code, payload["removed"]), (0, True))
+        # 100 bytes from the one real file. NOT 10099: a link to a big file
+        # must never be reported as space this verb freed.
+        self.assertEqual((payload["files"], payload["bytes"]), (1, 100))
+        self.assertEqual(target.read_bytes(), b"z" * 9999)
+        self.assertFalse(logos.exists())
+
+    def test_a_symlinked_logos_directory_is_refused_never_followed(self):
+        """D-LOGO-10. source_dir has refused a symlinked KEY directory since
+        the beginning; the guard never reached one level down. os.listdir
+        follows a link, so this deleted the contents of whatever it pointed
+        at -- and reported `removed: false` while doing it."""
+        victim = pathlib.Path(self.tmp.name) / "victim"
+        victim.mkdir()
+        (victim / "important.txt").write_text("precious", encoding="utf-8")
+        (victim / "also.txt").write_text("precious", encoding="utf-8")
+        self.seed(self.sources / KEY, self.KEPT)
+        os.symlink(victim, self.sources / KEY / "logos")
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.names(victim), ["also.txt", "important.txt"])
+        # nothing was freed, and the payload must not pretend otherwise
+        self.assertEqual((payload["removed"], payload["files"], payload["bytes"]),
+                         (False, 0, 0))
+        self.assertTrue((self.sources / KEY / "logos").is_symlink())
+
+    def test_no_name_based_check_is_consulted_so_there_is_no_window_to_race(self):
+        """D-LOGO-10, second round. The first fix was `if os.path.islink(path):
+        return False`, and a check on a NAME followed by an operation on the
+        same NAME is two resolutions of that name. Racing the second one --
+        swapping the directory for a symlink between them -- deleted two files
+        outside the cache while the payload reported `removed: false`.
+
+        The fix was structural: O_DIRECTORY|O_NOFOLLOW refuses a link AT OPEN
+        and yields a handle on the inode that was checked, and every lstat,
+        unlink and rmdir is dir_fd-relative to that handle. So this asserts the
+        property that makes the race impossible: no name-based link check is
+        consulted on the logos path at all. It goes red the moment someone
+        reintroduces a check-then-use pair.
+
+        If a future implementation legitimately calls islink AFTER opening,
+        this test is wrong rather than the code -- but it should have to be
+        argued, which is the point."""
+        self.seed(self.sources / KEY, self.KEPT)
+        self.seed_logos()
+        target = str(self.sources / KEY / "logos")
+        seen = []
+        real = os.path.islink
+
+        def watched(path):
+            if str(path) == target:
+                seen.append(str(path))
+            return real(path)
+
+        os.path.islink = watched
+        try:
+            code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        finally:
+            os.path.islink = real
+        self.assertEqual((code, payload["removed"], payload["files"]), (0, True, 3))
+        self.assertEqual(seen, [], "a name-based link check reopened the TOCTOU window")
+
+    def test_the_swap_lands_between_the_open_and_the_unlinks_and_misses(self):
+        """D-LOGO-10, the operation half. The structural test above proves
+        there is no name-based CHECK to race; this proves the OPERATIONS are
+        anchored too. The swap is injected after the directory has been opened
+        and listed -- the exact window a path-based unlink would resolve
+        through -- and the deletions must still land on the inode that was
+        opened, not on whatever the name now points at.
+
+        Reverting `os.unlink(entry, dir_fd=fd)` to `os.unlink(os.path.join(
+        path, entry))` makes this test empty the victim directory."""
+        victim = pathlib.Path(self.tmp.name) / "victim"
+        victim.mkdir()
+        for name in ("taxes.pdf", "thesis.odt"):
+            (victim / name).write_text("precious", encoding="utf-8")
+        self.seed(self.sources / KEY, self.KEPT)
+        logos = self.seed_logos()
+
+        real_listdir = os.listdir
+        seen = []
+        swapped = []
+
+        def racing_listdir(target):
+            out = real_listdir(target)
+            # The logos directory is listed through a handle twice: once by
+            # subdir_census to measure it, then by remove_cache_subdir to
+            # delete it. Fire on the SECOND -- after the removal has opened
+            # the inode, before it unlinks -- which is the window a path-based
+            # unlink would resolve through. Firing on the first only proves
+            # the open refuses a link, which the test above already covers.
+            if isinstance(target, int) and sorted(out) == sorted(self.LOGOS):
+                seen.append(True)
+                if len(seen) == 2 and not swapped:
+                    swapped.append(True)
+                    os.rename(logos, str(logos) + ".moved")
+                    os.symlink(victim, logos)
+            return out
+
+        os.listdir = racing_listdir
+        try:
+            code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        finally:
+            os.listdir = real_listdir
+
+        self.assertTrue(swapped, "the injection never fired; the test proves nothing")
+        self.assertEqual(code, 0)
+        # the victim is untouched: the unlinks went to the inode that was
+        # opened, not to whatever the name pointed at by the time they ran
+        self.assertEqual(sorted(p.name for p in victim.iterdir()),
+                         ["taxes.pdf", "thesis.odt"])
+        # and the real logo files DID go, from the directory that was opened,
+        # which is now reachable only under its renamed path
+        self.assertEqual(sorted(p.name for p in pathlib.Path(str(logos) + ".moved").iterdir()), [])
+        self.assertEqual(payload["files"], 3)
+
+    def test_bad_keys_are_refused_and_nothing_is_deleted(self):
+        self.seed(self.sources / KEY)
+        self.seed_logos()
+        for bad in ("../x", "abc", "d5977d8a/..", "D5977D8A", "", "sources", "..", "d5977d8a/../" + KEY):
+            code, payload, stderr = self.cache_cmd("logos-clear", "--key", bad)
+            self.assertEqual(code, 1, bad)
+            self.assertEqual(payload["error"]["code"], "bad_key", bad)
+            self.assertEqual(payload["action"], "logos-clear", bad)
+            self.assertNotIn(self.tmp.name, json.dumps(payload) + stderr, bad)
+        self.assertEqual(self.names(self.sources / KEY / "logos"), sorted(self.LOGOS))
+
+    def test_a_symlinked_key_directory_is_refused(self):
+        victim = pathlib.Path(self.tmp.name) / "victim"
+        (victim / "logos").mkdir(parents=True)
+        (victim / "logos" / "1a2b3c4d").write_bytes(b"x" * 100)
+        self.sources.mkdir(parents=True)
+        os.symlink(victim, self.sources / KEY)
+        code, payload, _ = self.cache_cmd("logos-clear", "--key", KEY)
+        self.assertEqual((code, payload["error"]["code"]), (1, "bad_key"))
+        self.assertEqual(self.names(victim / "logos"), ["1a2b3c4d"])
+
+    def test_the_payload_carries_counts_and_never_a_filename(self):
+        """Rule 5. A logo filename is the fnv1a32 of its URL, so the listing
+        epg-clear can safely emit would here re-identify the channels the user
+        just stopped consenting to fetch -- the exposure D-LOGO-4 found in the
+        leftovers, which there is no reason to recreate on stdout."""
+        self.seed(self.sources / KEY, self.KEPT)
+        self.seed_logos()
+        code, payload, stderr = self.cache_cmd("logos-clear", "--key", KEY)
+        blob = json.dumps(payload) + stderr
+        for name in self.LOGOS:
+            self.assertNotIn(name, blob)
+        self.assertNotIn(self.tmp.name, blob)    # nor any path
+        # "logos" appears only as the action name, never as a path component
+        self.assertNotIn("/logos", blob)
+        self.assertEqual(sorted(payload),
+                         ["action", "bytes", "files", "kept", "key", "kind", "ok", "removed"])
 
 
 class PruneTest(CacheTestCase):

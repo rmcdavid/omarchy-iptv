@@ -7139,6 +7139,123 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-LOGO-10, 2026-09-24: the cache cleaner followed a symlinked directory
+
+Found while implementing D-LOGO-9's verb, by testing the guarantee that
+`remove_cache_subdir`'s own docstring makes rather than assuming it.
+
+`source_dir` has refused a symlinked KEY directory since the beginning. The
+guard never reached one level down. `os.listdir` follows a link, so every
+caller of `remove_cache_subdir` cleared the contents of whatever the link
+pointed at:
+
+```
+  logos -> /.../victim                    (a directory outside the cache)
+  victim before: important.txt important2.txt
+  $ omarchy-iptv cache logos-clear --key d5977d8a
+  {"ok": true, ..., "removed": false, "files": 2, "bytes": 19, "kept": 0}
+  victim after :
+  *** FOLLOWED THE SYMLINK AND DELETED FILES OUTSIDE THE CACHE ***
+```
+
+Note `"removed": false` in that payload. It deleted two files it did not own
+and reported that it had removed nothing.
+
+`cache remove` does it too, and has since D-LOGO-4 introduced `CACHE_SUBDIRS`
+and this function two milestones ago. `cache prune` reaches the same code. So
+the hole is older than the verb that found it, and the verb only found it
+because building it meant reading the primitive's promises closely enough to
+test them.
+
+**Scope, honestly.** Not remote and not cross-user: `sources/<key>/` is 0700,
+so the link has to be placed by the user or by something already running as
+them. The realistic case is not an attacker, it is a user who symlinks the
+logo directory to another disk to save space -- exactly the user this feature's
+40 MB would push into doing that -- and then loses the contents of the target
+the next time a source is removed.
+
+**Fixed in the shared primitive**, not in the new caller, so `remove` and
+`prune` are covered by the same change:
+
+- `remove_cache_subdir` returns `False` for a link, matching how `source_dir`
+  has always treated a symlinked key directory.
+- `subdir_census` measures nothing through one either. Counting a target that
+  cannot be freed would report space that was never reclaimed.
+- A link is reported as removing nothing rather than raising, because the
+  caller is a queued background job and leaving a thing we do not own alone is
+  the safe answer.
+
+Two tests, one per verb. Red against the pre-fix helper, green against the fix:
+
+```
+  AGAINST THE PRE-FIX HELPER          AGAINST THE FIX
+  logos-clear  FAILED (failures=1)    logos-clear  OK
+  remove       FAILED (failures=1)    remove       OK
+```
+
+### Second round, 2026-09-25: the review reproduced it THROUGH the fix
+
+The adversarial review before commit did not accept the guard. It injected a
+swap inside the guard's own window and got the deletion to follow the link
+anyway -- which is correct, because `if os.path.islink(path): return False`
+is a check on a NAME followed by an operation on the same NAME, and those are
+two different resolutions of that name.
+
+Measured, one window at a time, against the guarded code:
+
+```
+                            payload                      victim directory
+  swap in census window     files 2, bytes 16 "freed"    intact
+  swap in removal window    removed: false               *** EMPTIED ***
+```
+
+Both are wrong and the first is its own small lesson: the code reported
+freeing sixteen bytes it had never touched.
+
+Fixed structurally, not by narrowing the window:
+
+- `O_DIRECTORY | O_NOFOLLOW` refuses a symlink AT OPEN, atomically, and hands
+  back a handle on the inode that was checked;
+- every `lstat` and every `unlink` is `dir_fd=` relative to that handle;
+- the final `rmdir` is relative to a handle on the PARENT, opened the same way.
+
+Nothing re-walks a path, so there is no check to race. The residual is a
+same-uid race on a 0700 directory, where the attacker already holds every one
+of the user's rights -- closed anyway, because deletion code is a bad place to
+reason about how much access is enough.
+
+Two more tests, each proved by mutation:
+
+- one asserts that **no name-based link check is consulted at all** on that
+  path, which goes red the moment someone reintroduces a check-then-use pair;
+- one **injects the swap between the open and the unlinks** -- the exact window
+  a path-based unlink resolves through -- and asserts the victim survives while
+  the real files still go. Reverting `os.unlink(entry, dir_fd=fd)` to
+  `os.unlink(os.path.join(path, entry))` turns it red.
+
+Getting that second test right took three attempts, each a fresh instance of
+the seam mistake this milestone keeps producing. The first injected at
+`os.path.islink`, which the new code does not call, so the swap never fired and
+the test passed while proving nothing. The second fired on the census's listdir
+rather than the removal's, so the open correctly refused and again the
+interesting path never ran. Only the third lands in the window it names. A test
+whose injection never fires is indistinguishable from a test that passes, which
+is why it asserts `swapped` before it asserts anything else.
+
+10 of 11 mutations killed. The survivor is `rmdir(name, dir_fd=parent_fd)`
+reverted to `rmdir(path)`: both resolve the same name in the same parent, so
+they differ only if a parent COMPONENT is swapped, and `rmdir` removes only
+empty directories. The anchored form is kept for consistency and because it
+costs nothing, and it is recorded here as undistinguished by any test rather
+than left to look verified.
+
+While here, a docstring that was making a promise the code did not keep in the
+other direction: `remove_cache_subdir` said a symlink INSIDE the directory was
+"LEFT and reported rather than followed". It is unlinked -- never followed, so
+the load-bearing half was always true, but it is not left, as `remove_regular`
+has always said in its own docstring. `cache_logos_clear` was written against
+that wording, which is how the discrepancy surfaced.
+
 ## D-LOGO-9, 2026-09-24: off stops the fetch and reclaims nothing
 
 Found by looking at the disk after turning logos off on the live install, which
@@ -7251,6 +7368,86 @@ offer, or should leave it to a command. Automatic is the strongest answer to
 the consent argument and the most surprising to a user who is toggling the
 column off for a minute; the ON path already has a consent screen, so a
 symmetric OFF prompt has precedent. Raised, not decided.
+
+### Fixed the same day: `cache logos-clear --key K`
+
+Built to the costing above, as the twin of `cache_epg_clear`.
+
+```
+  $ omarchy-iptv cache --cache-dir <dir> logos-clear --key d5977d8a
+  {"ok": true, "kind": "cache", "action": "logos-clear",
+   "key": "d5977d8a", "removed": true, "files": 3, "bytes": 300, "kept": 0}
+```
+
+Decisions worth recording, because each one is a place the obvious thing was
+wrong:
+
+- **Counts, never names.** `cache_epg_clear` returns the list of files it
+  deleted and that is safe, because they are three fixed names. A logo
+  filename is the `fnv1a32` of its URL, so the same listing would re-identify
+  the channels the user just stopped consenting to fetch -- the exposure
+  D-LOGO-4 found in the leftovers, which there is no reason to recreate on
+  stdout (rule 5). A test asserts no filename and no path reaches the payload
+  or stderr.
+- **The directory name is a constant now.** `LOGO_SUBDIR` is defined once and
+  used by the fetch that writes the directory and the verb that deletes it. A
+  rename reaching one and not the other would either strand the files forever
+  or delete a directory nobody meant.
+- **`files` and `bytes` are the before-counts, not before-minus-after.** The
+  difference was written first, as the more careful-looking expression. A
+  mutation proved it can never differ: `remove_cache_subdir` unlinks every
+  regular entry or raises, so the after-counts are always zero. Code that no
+  test can make matter is not defensive, it is noise. The second census stays,
+  for `kept`, which genuinely can vary.
+- **A symlink measured through would lie**, which is how D-LOGO-10 was found.
+
+Ten tests. Every one proved by mutation -- ten mutations run against the
+shipping function, ten killed:
+
+```
+  M1  never actually delete                  killed
+  M2  clear the SOURCE dir, not logos/       killed
+  M3  follow symlinks when measuring         killed
+  M4  count every entry as a regular file    killed
+  M5  always claim success                   killed
+  M6  never report leftovers                 killed
+  M7  drop the key guard                     killed
+  M8  D-LOGO-10 guard off (removal)          killed
+  M9  D-LOGO-10 guard off (census)           killed
+  M10 report bytes for links too             killed
+```
+
+An earlier run of this campaign had an eleventh that SURVIVED -- replacing the
+before-minus-after difference with the plain before-count -- and that survival
+is what produced the third decision above. The mutation did not find a missing
+test; it found an expression that could not matter.
+
+README amended in the same change. The sentence D-LOGO-9 quoted against it,
+which enumerated what turning logos off does and stopped at the network, now
+says the pictures stay, why they stay, and the command that reclaims them.
+
+And then the review caught the same defect one file over. The first draft of
+that README sentence spelled the command `omarchy-iptv cache logos-clear`, and
+the helper is **not on PATH** -- there is no wrapper anywhere, and the plugin
+resolves it absolutely. I found and fixed that one myself before the review ran
+and then wrote the identical unrunnable spelling into CHANGELOG.md, which is
+also on the release allowlist and also ships. The review reproduced it: exit
+127, `command not found`.
+
+Worth recording precisely because the project had already graded this exact
+defect. `docs/QA-PLAYER.md` PLY-WEAK-05, verified 2026-09-14, states that
+`omarchy-iptv` is not on PATH and calls the README form a P2 documentation
+defect. It was filed in prose, was given no id and no row on the board, and so
+nothing stopped the same mistake reappearing in a different shipped file eleven
+days later -- twice in one change. That is rule 13's failure mode with a
+concrete cost attached, and it is the second time in two days this milestone
+has paid it. Both shipped files now use the full
+`python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv`
+form, and a sweep confirms zero bare invocations remain in either.
+
+Still open, and deliberately: whether the OFF edge should clear automatically,
+offer, or stay manual. The verb is the mechanism, not the policy.
+
 
 ## D-LOGO-8, 2026-09-24: the feature looks broken for twenty minutes
 

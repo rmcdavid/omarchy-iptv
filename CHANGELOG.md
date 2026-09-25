@@ -5,7 +5,28 @@ version lives in `manifest.json`.
 
 ## Unreleased
 
+### Added
+
+- **You can get the logo disk space back.** Turning channel logos off has
+  always stopped the downloading and hidden the pictures, but the files stayed
+  on disk — on a large playlist that is tens of megabytes, and nothing could
+  reclaim it short of deleting the whole source and its channel list with it.
+  There is now a command that deletes one source's logos and nothing else.
+  Run the plugin's helper by path — it is not on your `PATH`:
+  `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv cache logos-clear --key <key>`,
+  with `ls ~/.cache/omarchy-iptv/sources/` to find the key. Your channel list,
+  guide data and settings are untouched.
+  Turning logos off still keeps the files, on purpose — a cache you might want
+  again in a minute should not be thrown away by a toggle.
+
 ### Fixed
+
+- **Clearing a cache could delete files outside it.** If the logo directory for
+  a source was a symbolic link pointing somewhere else — something you would do
+  to keep the pictures on a different disk — then removing that source, or
+  pruning old ones, deleted whatever was on the far end of the link instead of
+  just the link. Now it leaves it alone. This needed you to have made that link
+  yourself; nothing outside your account could cause it.
 
 - **Channel logos now appear as they download, not all at once at the end.**
   Switching logos on starts a fetch that can take twenty minutes on a large

@@ -129,6 +129,11 @@ FAILED_FILE = "failed.json"
 CACHE_FILES = (CHANNELS_FILE, PLAYLIST_STATUS_FILE, EPG_NOW_FILE, EPG_STATUS_FILE, EPG_WINDOW_FILE,
                FAILED_FILE)
 EPG_CACHE_FILES = (EPG_WINDOW_FILE, EPG_NOW_FILE, EPG_STATUS_FILE)
+# The one subdirectory a source owns. Named here rather than spelled in
+# three places, because `cache logos-clear` deletes what `logos --fetch`
+# writes and a rename that reached one and not the other would either
+# strand the files forever or delete a directory nobody meant.
+LOGO_SUBDIR = "logos"
 TEMP_PREFIX = ".tmp-"
 DEFAULT_EPG_MAX_AGE = 86400
 # Channel id schemes (ARCHITECTURE.md decision 6). Scheme 1 shipped from 0.1
@@ -2496,7 +2501,7 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # The fetch is opt-in twice over: the setting is off by default (the
     # ruling's first line) and this flag is off by default here, so nothing
     # contacts anyone because a command was run without reading it.
-    logo_dir = os.path.join(directory, "logos")
+    logo_dir = os.path.join(directory, LOGO_SUBDIR)
     fetched, cached, refused, failed = 0, 0, 0, 0
     reasons: dict[str, int] = {}
     seen: set[str] = set()
@@ -4217,31 +4222,87 @@ def remove_regular(path: str) -> bool:
 # MAX_LOGO_FILES * MAX_LOGO_BYTES on disk permanently, and no later prune
 # could ever collect it -- with filenames that are fnv1a32 of the logo URLs,
 # so the leftovers identify the channels that source carried (D-LOGO-4).
-CACHE_SUBDIRS = ("logos",)
+CACHE_SUBDIRS = (LOGO_SUBDIR,)
 
 
 def remove_cache_subdir(path: str) -> bool:
     """Delete one of OUR cache subdirectories. False when it is not there.
 
     Deliberately not shutil.rmtree and deliberately not recursive: this
-    removes regular files one level down and then the directory itself, so a
-    nested directory, a symlink to somewhere else, or anything unexpected is
-    LEFT and reported rather than followed. A cache cleaner that recurses is
-    one bug away from deleting something it does not own.
+    removes names one level down and then the directory itself, so a nested
+    directory is LEFT and reported rather than descended into, and the rmdir
+    then fails and returns False. A symlink is unlinked, never followed, so
+    whatever it points at is untouched. A cache cleaner that recurses is one
+    bug away from deleting something it does not own.
+
+    (This paragraph used to say a symlink INSIDE was LEFT. It is not --
+    remove_regular unlinks it, as its own docstring says. The load-bearing
+    guarantee, never followed, was always true of the entries; the wording was
+    not, and cache_logos_clear was written against it.)
+
+    D-LOGO-10: the directory ITSELF being a symlink was a different matter and
+    was not guarded at all. os.listdir follows it, so every caller -- `cache
+    remove` and `cache prune` since D-LOGO-4 shipped this function, and
+    `cache logos-clear` the moment it was written against it -- deleted the
+    contents of whatever it pointed at. source_dir has refused a symlinked KEY
+    directory since the beginning; the guard simply never reached one level
+    down to the subdirectory.
+
+    The first fix for that was `if os.path.islink(path): return False`, and it
+    was not enough. A check on a NAME followed by an operation on the same NAME
+    is two different resolutions of that name, and anything that swaps the
+    directory for a link in between gets the deletion to follow it anyway --
+    demonstrated, with the payload still reporting `removed: false` while two
+    files outside the cache went. So nothing here re-walks a path:
+
+      * `O_DIRECTORY | O_NOFOLLOW` refuses a symlink AT OPEN, atomically, and
+        yields a handle on the inode that was checked;
+      * every lstat and every unlink is `dir_fd=` relative to that handle, so
+        they cannot be redirected by anything that happens to the name after;
+      * the final rmdir is relative to a handle on the PARENT, opened the same
+        way, so the empty-directory removal cannot be redirected either.
+
+    The residual is a same-uid race on a 0700 directory, where the attacker
+    already has every one of the user's own rights; this closes it regardless
+    because deletion code should not be the place we reason about how much
+    access is enough. A link is reported as removing nothing rather than as an
+    error, because the caller is a queued background job and the safe answer is
+    to leave a thing we do not own alone.
     """
-    try:
-        names = sorted(os.listdir(path))
-    except FileNotFoundError:
+    trimmed = path.rstrip(os.sep) or path
+    parent, name = os.path.split(trimmed)
+    if not name or name in (os.curdir, os.pardir):
         return False
-    except NotADirectoryError:
-        return False
-    for name in names:
-        remove_regular(os.path.join(path, name))
     try:
-        os.rmdir(path)
+        parent_fd = os.open(parent or os.curdir, os.O_RDONLY | os.O_DIRECTORY)
     except OSError:
         return False
-    return True
+    try:
+        try:
+            # O_NOFOLLOW makes a symlinked directory raise ELOOP here rather
+            # than resolving, which is the whole D-LOGO-10 guarantee.
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        except OSError:
+            return False
+        try:
+            entries = sorted(os.listdir(fd))
+            for entry in entries:
+                try:
+                    mode = os.lstat(entry, dir_fd=fd).st_mode
+                except FileNotFoundError:
+                    continue
+                if stat.S_ISDIR(mode):
+                    continue
+                os.unlink(entry, dir_fd=fd)
+        finally:
+            os.close(fd)
+        try:
+            os.rmdir(name, dir_fd=parent_fd)
+        except OSError:
+            return False
+        return True
+    finally:
+        os.close(parent_fd)
 
 
 def clear_source_dir(path: str) -> tuple[list[str], list[str]]:
@@ -4319,6 +4380,90 @@ def cache_epg_clear(directory: str, key: str) -> dict[str, Any]:
     return {"key": key, "removed": sorted(removed)}
 
 
+def subdir_census(path: str) -> tuple[int, int, int]:
+    """(regular files, bytes, other entries) one level inside `path`.
+
+    Measured with lstat and never followed: a symlink counts as an `other`
+    and contributes no bytes, so a link to a 4 GB file cannot be reported as
+    space this verb freed. Missing directory is (0, 0, 0), which is what
+    makes logos-clear idempotent rather than an error.
+    """
+    files = 0
+    size = 0
+    other = 0
+    # D-LOGO-10. Opened the same way removal opens it, for the same reason:
+    # O_NOFOLLOW refuses a symlinked directory atomically, and measuring
+    # through one would report bytes that were not freed and cannot be.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return (0, 0, 0)
+    try:
+        try:
+            names = sorted(os.listdir(fd))
+        except OSError:
+            return (0, 0, 0)
+        for name in names:
+            try:
+                st = os.lstat(name, dir_fd=fd)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                files += 1
+                size += st.st_size
+            else:
+                other += 1
+        return (files, size, other)
+    finally:
+        os.close(fd)
+
+
+def cache_logos_clear(directory: str, key: str) -> dict[str, Any]:
+    """Delete one source's logo cache, keeping the source itself (D-LOGO-9).
+
+    The twin of cache_epg_clear, and filed for the same reason GS11 gave for
+    that one: the part of the cache an input produced has to be reclaimable
+    when the user withdraws the input. Turning showLogos off stops the fetch
+    and blanks the rows, and until this verb existed it reclaimed nothing --
+    with a documented ceiling of MAX_LOGO_FILES * MAX_LOGO_BYTES, 1.28 GB for
+    a single source, that no prune could ever collect, because prune only
+    clears keys that are NOT kept.
+
+    The playlist half of the cache is untouched: the source is still there,
+    only its pictures are gone. Deletion is remove_cache_subdir's, so it is
+    one level deep and non-recursive by construction: a nested directory is
+    left, counted in `kept`, and makes `removed` false; a symlink is unlinked
+    without being followed, so its target survives and contributes no bytes.
+    `files` and `bytes` count regular files only.
+
+    Idempotent: clearing logos that were never fetched removes nothing and
+    still succeeds.
+
+    The payload carries COUNTS, never names. A logo filename is the fnv1a32
+    of its URL, so the listing cache_epg_clear can safely emit would here
+    re-identify the channels the user just stopped consenting to fetch -- the
+    exposure D-LOGO-4 found in the leftovers themselves, which there is no
+    reason to recreate on stdout (rule 5).
+    """
+    path = os.path.join(source_dir(directory, key), LOGO_SUBDIR)
+    before = subdir_census(path)
+    removed = remove_cache_subdir(path)
+    after = subdir_census(path)
+    # `files` and `bytes` are the BEFORE counts, not before-minus-after, and
+    # deliberately so: remove_cache_subdir unlinks every regular entry or
+    # raises, so after[0] and after[1] are always zero and a subtraction is a
+    # difference no test can ever make differ. The second census is still
+    # taken, for `kept` -- the entries that are genuinely still there, which
+    # is the number that can vary.
+    return {
+        "key": key,
+        "removed": removed,
+        "files": before[0],
+        "bytes": before[1],
+        "kept": after[0] + after[2],
+    }
+
+
 def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age: float) -> dict[str, Any]:
     """Delete every sources/<key> not in `keep`; age the EPG files of kept,
     non-active keys older than `epg_max_age` seconds. The `active` key is
@@ -4371,6 +4516,8 @@ def cmd_cache(args: argparse.Namespace) -> int:
             payload = cache_remove(directory, args.key)
         elif action == "epg-clear":
             payload = cache_epg_clear(directory, args.key)
+        elif action == "logos-clear":
+            payload = cache_logos_clear(directory, args.key)
         else:
             payload = cache_prune(directory, list(args.keep or []), args.active or None, args.epg_max_age)
         result: dict[str, Any] = {"ok": True, "kind": "cache", "action": action}
@@ -4925,6 +5072,8 @@ def build_parser() -> argparse.ArgumentParser:
     remove_dir.add_argument("--key", required=True, help="source key")
     epg_clear = cache_actions.add_parser("epg-clear", parents=[cache_common], help="delete one source's EPG files, keeping the source's playlist cache and directory")
     epg_clear.add_argument("--key", required=True, help="source key")
+    logos_clear = cache_actions.add_parser("logos-clear", parents=[cache_common], help="delete one source's cached logos, keeping the source's playlist cache and directory")
+    logos_clear.add_argument("--key", required=True, help="source key")
     prune = cache_actions.add_parser("prune", parents=[cache_common], help="delete the directories of keys not listed; age the EPG files of inactive ones")
     prune.add_argument("--keep", nargs="*", default=[], help="keys to keep (every key in the history)")
     prune.add_argument("--active", default="", help="the active key: its EPG files are never aged")
