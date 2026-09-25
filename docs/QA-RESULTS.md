@@ -7139,6 +7139,119 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-LOGO-9, 2026-09-24: off stops the fetch and reclaims nothing
+
+Found by looking at the disk after turning logos off on the live install, which
+is a thing nobody had done before because nobody had turned them on before.
+
+Turning logos off works. It stops a fetch already running and blanks the rows
+in the same turn (D-LOGO-3), and it stays off across a settings edit (D-LOGO-2).
+What it does not do is give back a single byte, and nothing else will either.
+
+Measured immediately after the setting went false:
+
+```
+  1,173 files    40.9 MB   ~/.cache/omarchy-iptv/sources/d5977d8a/logos/
+                  468 KB   channels.json
+                  4.0 KB   playlist-status.json
+  -> logos are 99% of that source's entire cache
+```
+
+The ceiling is worse than the sample. `MAX_LOGO_FILES` is 5000 and
+`MAX_LOGO_BYTES` is 256 KB, so the documented worst case is **1.28 GB for one
+source**, and on this playlist only 1,173 of the 1,436 referenced logos ever
+landed -- the full set would have been larger still.
+
+### Nothing collects it
+
+`clear_source_dir` is the only thing that deletes `logos/`, and it is reached
+from exactly two places: `cache remove --key` and `cache prune`. Prune calls it
+only for a key that is NOT in the keep set:
+
+```python
+if name not in keep_set:
+    _, kept = clear_source_dir(entry.path)
+    ...
+    continue
+if name == active:
+    continue
+# kept, non-active keys: EPG_CACHE_FILES ageing only
+```
+
+So a source the user still has can never lose its logos, whatever `showLogos`
+says. There is no eviction even for a logo whose channel has left the playlist:
+`cmd_logos` stats the file, counts it as cached, and keeps it. The `logos` verb
+has no clear action at all -- only `--survey`, `--fetch`, `--timeout`.
+
+The only reclamation is deleting the source, which takes `channels.json` with
+it. 468 KB of data the user needs is hostage to 40.9 MB they no longer want.
+
+### The twin of this was filed, fixed, and the lesson written down
+
+`cache epg-clear --key K` exists. It deletes one source's three EPG files and
+explicitly keeps the playlist half, `failed.json`, `logos/` and the directory.
+It exists because the EPG version of this gap was filed as D-GS-4 and ruled on
+as GS11. Logos never got the equivalent, one parser away from a `failed`
+subcommand that does have `mark | clear | list`.
+
+And the lesson was already written. `docs/RULING-LOGOS.md`, writing up
+D-LOGO-4:
+
+> The ruling reasoned carefully about what fetching logos discloses and not at
+> all about what the cache leaves behind when the user withdraws consent. Add
+> that to the list of things a feature like this has to answer: not only *who
+> is contacted* but *what survives the user changing their mind*.
+
+That is this defect, in prose, two milestones early. It carried no id, so
+nothing enforced it and nobody acted on it. CLAUDE.md rule 13 says an id only a
+human is expected to copy is an id that stops being copied; this is the prior
+case, where there was no id to copy at all. It has one now.
+
+### Why it is not only housekeeping
+
+Two things lift it above disk hygiene.
+
+**What survives identifies what was withdrawn.** Logo filenames are the
+`fnv1a32` of the logo URL, so the residue re-identifies the channels the user
+just stopped consenting to fetch. That is the same privacy shape as D-LOGO-4,
+which was P2 and was fixed only for the source-removal path; the setting path
+was never covered.
+
+**The shipped README says the reverse is complete.** `README.md` is on the
+release allowlist, so this reaches every install:
+
+> Turning it back off is one keypress and no dialog, and it stops a fetch
+> already in progress.
+
+It enumerates what reversing consent does and stops at the network. The same
+boundary is in the M2-04 acceptance checklist, which does look at the disk --
+but only on the ON side, where it asks for 0600 files under a 0700 directory
+within the cap. The OFF line asks only for zero requests. Every gate this
+feature has ever been graded against stops where the network stops.
+
+### Costed, not fixed
+
+Roughly 30 lines, no new primitive and no new security surface:
+
+- `cache_logos_clear(directory, key)` beside `cache_epg_clear`, which is that
+  function's shape with `remove_cache_subdir(os.path.join(path, "logos"))`
+  substituted. Idempotent for free, because `remove_cache_subdir` returns
+  `False` on `FileNotFoundError`, and the traversal guard is inherited because
+  `source_dir` already runs `check_source_key`. Iterating `CACHE_SUBDIRS`
+  rather than naming `"logos"` keeps the constant single-source.
+- One `add_parser("logos-clear", ...)` beside the `epg-clear` block, and one
+  explicit `elif` in `cmd_cache` -- explicit because the else-branch falls
+  through to `cache_prune`.
+- Zero service plumbing: `queueCacheJob(["logos-clear", "--key", key], null)`
+  is the same one-liner as the two existing `epg-clear` call sites.
+
+What is NOT costed, because it is a product decision rather than an
+engineering one: whether turning logos off should clear automatically, should
+offer, or should leave it to a command. Automatic is the strongest answer to
+the consent argument and the most surprising to a user who is toggling the
+column off for a minute; the ON path already has a consent screen, so a
+symmetric OFF prompt has precedent. Raised, not decided.
+
 ## D-LOGO-8, 2026-09-24: the feature looks broken for twenty minutes
 
 Observed while taking `preview.png` on the live install, which is the first
