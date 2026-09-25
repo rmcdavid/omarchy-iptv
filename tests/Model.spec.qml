@@ -1512,10 +1512,14 @@ TestCase {
     compare(Model.chnoStatus("none", "205", "", 0, 0, true), "No channel 205")
     compare(Model.chnoStatus("noNumbers", "", "", 0, 0, false), "No channel numbers in this playlist")
     // M2-05 section 5 inserts `p pip` after `s stop`, so the digits hint
-    // moved one along and both lists grew by one.
-    compare(Model.footerHints({ mode: "list", hasNumbers: true })[9][0], "0-9")
-    compare(Model.footerHints({ mode: "list" }).length, 10)
-    compare(Model.footerHints({ mode: "list", hasNumbers: true }).length, 11)
+    // moved one along and both lists grew by one. M2-13 then inserts the
+    // view toggle between `/ search` and `o sources`, moving the digits hint
+    // one further and growing both lists again -- asserted by INDEX here on
+    // purpose, so a key added anywhere ahead of the digits is caught rather
+    // than absorbed.
+    compare(Model.footerHints({ mode: "list", hasNumbers: true })[10][0], "0-9")
+    compare(Model.footerHints({ mode: "list" }).length, 11)
+    compare(Model.footerHints({ mode: "list", hasNumbers: true }).length, 12)
     compare(Model.footerHints({ mode: "list", hasNumbers: true, numberEntry: { active: true } }).length, 5)
     compare(Model.rowAccessibleName({ name: "BBC One HD", chno: "101" }), "Channel 101, BBC One HD")
     compare(Model.rowAccessibleName({ name: "The One Show", chno: "" }), "The One Show")

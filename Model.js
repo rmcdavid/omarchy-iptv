@@ -3351,6 +3351,9 @@ function logoSlot(opts) {
 // channels sharing one logo file -- the largest 28 consecutive NBC affiliates,
 // then Fox 14, PBS 11 -- where the CAPTION is the only thing that tells two
 // tiles apart. The wall is navigated by name more often than by picture.
+// The key that flips the two views. Modified by necessity: the guide opens in
+// search mode, where a bare printable character is query text.
+var WALL_KEY = "Ctrl+G"
 var WALL_MAX_COLUMNS = 4
 // 16:9 for the picture area. The corpus median aspect is 1.98 and the spread
 // is 0.31 to 13.62, so no plate shape fits the logos; PreserveAspectFit
@@ -3387,6 +3390,32 @@ function wallGeometry(opts) {
     plateHeight: plateHeight,
     gridWidth: columns * cellWidth
   }
+}
+
+// What a tile draws in its picture area: "image" with a path, or "mark" for
+// the plugin's own television glyph.
+//
+// This INVERTS logoColumnShown's rule on purpose, and the inversion is the
+// decision. In the 22 px row column a placeholder reads as a value, so the
+// absence is the information -- correct there, because the name sits beside
+// it and carries the row. On the wall the tile IS the row, so an empty tile
+// does not read as "this channel has no picture", it reads as a missing
+// channel. Measured on the configured list: 82 of 1,462 channels have no
+// cached file, and on the provider list the roadmap measured, coverage is
+// 27 per cent, so the empty-tile reading is the majority case there.
+//
+// The mark is the glyph the bar already shows when idle, not a shipped image.
+// A font glyph takes the theme's foreground token, so it renders at the
+// theme's own contrast on every theme -- which the logos themselves cannot
+// do: 92 per cent of the real corpus carries transparency and its ink runs
+// both ways, 42 per cent light and 22 per cent dark over a 199-file sample,
+// so no plate colour makes all of them visible. The one thing on the tile
+// that can never vanish is the one we draw ourselves.
+function wallTile(opts) {
+  var o = opts || {}
+  var slot = logoSlot(o)
+  if (slot.kind === "image") return { kind: "image", path: slot.path, glyph: "" }
+  return { kind: "mark", path: "", glyph: GLYPHS.tv }
 }
 
 // One vertical step on the wall: down or up a whole row, keeping the column.
@@ -6101,16 +6130,35 @@ function footerHints(opts) {
     // not silently stripped of the hint.
     if (o.pipAvailable !== false) list.push(["p", "pip"])
     list.push(["r", "refresh"], ["/", "search"])
+    // M2-13: after the action verbs and beside `/ search`, because both keys
+    // change what you are LOOKING at rather than acting on the cursor -- and
+    // because the footer elides from the left on a narrow card, so Enter,
+    // Space, f and s must not be pushed off by a view toggle. Names the view
+    // it will go TO, not the one you are in, so the key need not be pressed
+    // to find out: the same rule the logos hint follows on Sources.
+    list.push([WALL_KEY, o.wall === true ? "list" : "wall"])
     // Gated on the playlist actually having numbers, so an unnumbered source
     // gains no clutter and never advertises a key that does nothing.
     if (o.hasNumbers === true) list.push(["0-9", "channel"])
     list.push([SOURCE_KEYS.open, "sources"])
     return list
   }
+  // M2-13. Search mode gets the toggle too, and this is not symmetry for its
+  // own sake: the guide OPENS in search mode, the key is handled there
+  // (handleSharedKey serves both modes), and a key that works on the screen
+  // the user starts on and is advertised only on the other one is a feature
+  // nobody finds. It sits before Tab/Esc for the same elide reason as above.
+  // On the wall Left/Right moves the cursor, so it stops naming an axis the
+  // view does not have.
+  var wall = o.wall === true
   if (str(o.query) !== "") {
-    return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]]
+    return [["Enter", "play"], ["Up/Down", wall ? "row" : "move"],
+            ["Left/Right", wall ? "move" : "narrow"],
+            [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "clear"]]
   }
-  return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", scopeVerb(o)], ["Tab", "keys"], ["Esc", "close"]]
+  return [["Enter", "play"], ["Up/Down", wall ? "row" : "move"],
+          ["Left/Right", wall ? "move" : scopeVerb(o)],
+          [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "close"]]
 }
 
 // M2-09 D6. The h/l ring still does something real on a one-group playlist --
@@ -7720,6 +7768,8 @@ if (typeof module !== "undefined") {
     logoStreamName: logoStreamName,
     wallGeometry: wallGeometry,
     wallStep: wallStep,
+    wallTile: wallTile,
+    WALL_KEY: WALL_KEY,
     WALL_MAX_COLUMNS: WALL_MAX_COLUMNS,
     WALL_PLATE_ASPECT: WALL_PLATE_ASPECT,
     logoColumnShown: logoColumnShown,

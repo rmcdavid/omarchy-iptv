@@ -213,6 +213,8 @@ Item {
     // sits under is a disclosure notice, and "OK" on a disclosure notice is
     // how people agree to things they have not read.
     buttonTurnOn: "Turn on",
+    wallOn: "Channel wall",
+    wallOff: "Channel list",
     logosOn: "Channel logos on" + Model.SEP + "fetching now",
     logosOff: "Channel logos off",
     pauseNothing: "Nothing is playing",
@@ -1014,6 +1016,21 @@ Item {
 
   // A vertical step on the wall. Separate from moveCursorBy because the unit
   // is a ROW, not a place in the sequence, and Model.wallStep owns the edges.
+  // M2-13. In memory for v1, deliberately. A fourth OWNED_SETTINGS key would
+  // put a presentation toggle through the barConfig write-behind path, and
+  // ownedEntryPatch emits EVERY owned key on every write -- which is
+  // D-LOGO-2's fix and is cheap only because there are three -- so flipping
+  // the view would carry the credentialed playlist URL into shell.json each
+  // time. If it ever persists it goes to state.json beside favourites and
+  // recents, not to the bar entry.
+  function toggleWall() {
+    root.wallView = !root.wallView
+    // The cursor is shared, so the place survives the flip; the new view has
+    // to be told to show it.
+    root.scrollToCursor()
+    root.showTransient(root.wallView ? root.copy.wallOn : root.copy.wallOff)
+  }
+
   function moveWallCursorBy(rows) {
     if (root.rowCount === 0) return
     root.disarmPointer()
@@ -1415,8 +1432,24 @@ Item {
     // precedent. Anything the buffer does not own commits it first.
     if (root.listMode && root.handleNumberKey(event)) return true
     if (root.listMode && root.numberEntryActive) root.endNumberEntry(true)
-    if (event.key === Qt.Key_PageUp) { root.moveCursorBy(-root.pageSize(), false); return true }
-    if (event.key === Qt.Key_PageDown) { root.moveCursorBy(root.pageSize(), false); return true }
+    // M2-13. A MODIFIED key by necessity, exactly as `Ctrl+S` above says of
+    // itself: this is handled for BOTH modes, and the guide opens in search
+    // mode where every bare printable character goes into the query verbatim.
+    // A bare `v` would be unreachable on the screen the user actually starts
+    // on, which is the same reason the save-search key is modified.
+    if (event.key === Qt.Key_G && event.modifiers === Qt.ControlModifier) { root.toggleWall(); return true }
+    // A page is rows of tiles on the wall and rows of text in the list;
+    // pageSize() already answers in the right unit for whichever is up.
+    if (event.key === Qt.Key_PageUp) {
+      if (root.wallView) root.moveWallCursorBy(-root.pageSize())
+      else root.moveCursorBy(-root.pageSize(), false)
+      return true
+    }
+    if (event.key === Qt.Key_PageDown) {
+      if (root.wallView) root.moveWallCursorBy(root.pageSize())
+      else root.moveCursorBy(root.pageSize(), false)
+      return true
+    }
     if (event.key === Qt.Key_Home) {
       // UX 8 #22: Home with a query active in list mode jumps the column to All.
       if (root.listMode && root.hasQuery && root.effectiveScope !== Model.SCOPE_ALL) root.setScope(Model.SCOPE_ALL)
@@ -2887,10 +2920,20 @@ Item {
                       visible: tile.current
                     }
 
+                    // One function decides what the picture area holds, so
+                    // the image and the mark can never both be drawn or both
+                    // be absent. `logoSeq` is in the expression so a finished
+                    // fetch re-evaluates it: the file may exist now.
+                    readonly property var art: root.logoSeq >= 0
+                      ? Model.wallTile({ enabled: root.showLogos, channel: tile.channel,
+                                         logoDir: root.logoDir, have: root.logoHave })
+                      : ({ kind: "mark", path: "", glyph: "" })
+
                     Image {
                       anchors.centerIn: parent
                       width: Math.round(parent.width * 0.86)
                       height: Math.round(parent.height * 0.80)
+                      visible: plate.art.kind === "image"
                       asynchronous: true
                       cache: true
                       // 1x the drawn width, not the list's blind `* 2`. At a
@@ -2900,15 +2943,32 @@ Item {
                       sourceSize.height: Math.round(height)
                       fillMode: Image.PreserveAspectFit
                       mipmap: true
-                      source: {
-                        var slot = Model.logoSlot({ enabled: root.showLogos, channel: tile.channel,
-                                                    logoDir: root.logoDir, have: root.logoHave })
-                        return (root.logoSeq >= 0 && slot.kind === "image") ? "file://" + slot.path : ""
-                      }
+                      source: plate.art.kind === "image" ? "file://" + plate.art.path : ""
                       opacity: status === Image.Ready ? 1 : 0
                       // The name below is the tile's accessible name; a reader
                       // announcing "image" before every channel is noise, not
                       // information (UX 7.2). Same reasoning as the row slot.
+                      Accessible.ignored: true
+                    }
+
+                    // The plugin's own mark, for a channel the playlist gives
+                    // no usable picture for -- 82 of 1,462 on this list, and
+                    // the majority on a 27-per-cent-coverage one. Dimmed, so
+                    // it reads as "no picture" rather than as content, and it
+                    // is the ONE thing on a tile that cannot vanish into the
+                    // plate: it takes the theme's foreground, where 64 per
+                    // cent of the real logos are light or dark ink on
+                    // transparency and one of those halves always loses.
+                    Text {
+                      anchors.centerIn: parent
+                      visible: plate.art.kind === "mark"
+                      text: plate.art.glyph
+                      color: root.foreground
+                      opacity: 0.38
+                      // The same family every other glyph in this file uses
+                      // (the banner at :2539, the favourite star at :3162).
+                      font.family: root.fontFamily
+                      font.pixelSize: Math.round(parent.height * 0.42)
                       Accessible.ignored: true
                     }
                   }

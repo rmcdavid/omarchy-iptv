@@ -4316,9 +4316,9 @@ check("footerStatus blank when not configured", [Model.footerStatus({ configured
 check("footerStatus blank without channels (loading / error)", [Model.footerStatus({ configured: true, count: 0, refreshing: true }), Model.footerStatus({ configured: true, count: 0, lastUpdated: "12:40" })], ["", ""])
 // D-LIVE-02: epg-now.json is stale once validUntil has passed or is missing.
 check("epgNowStale", [Model.epgNowStale({ validUntil: 200 }, 100), Model.epgNowStale({ validUntil: 100 }, 100), Model.epgNowStale({}, 100), Model.epgNowStale(null, 100), Model.epgNowStale({ validUntil: "x" }, 1)], [false, true, true, true, true])
-check("footerHints search", Model.footerHints({ mode: "search", query: "" }).map(h => h[0]), ["Enter", "Up/Down", "Left/Right", "Tab", "Esc"])
-check("footerHints search with query says clear/narrow", Model.footerHints({ mode: "search", query: "x" }).slice(2), [["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]])
-check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s p r / o")
+check("footerHints search", Model.footerHints({ mode: "search", query: "" }).map(h => h[0]), ["Enter", "Up/Down", "Left/Right", "Ctrl+G", "Tab", "Esc"])
+check("footerHints search with query says clear/narrow", Model.footerHints({ mode: "search", query: "x" }).slice(2), [["Left/Right", "narrow"], ["Ctrl+G", "wall"], ["Tab", "keys"], ["Esc", "clear"]])
+check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s p r / Ctrl+G o")
 check("footerHints empty states (UX-SOURCES 5.3: r retry)", [Model.footerHints({ empty: "error" }), Model.footerHints({ empty: "loading" })], [[["r", "retry"], ["Esc", "close"]], [["Esc", "close"]]])
 
 // ---- player shutdown ladder (D-LIVE-17) ----
@@ -5879,11 +5879,14 @@ check("CN6.2: the (n of m) suffix appears only when m > 1", [Model.chnoStatus("e
 check("CN6.2: a commit with no name still reads as a channel", Model.chnoStatus("prefix", "10", "", 1, 1, true), "Channel 10")
 
 const hintsBase = { mode: "list", query: "" }
-const shippedList = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["o", "sources"]]
+// M2-13 inserts the view toggle between `/ search` and `o sources`: both
+// change what you are looking at, and the footer elides from the LEFT on a
+// narrow card, so the action verbs must stay ahead of it.
+const shippedList = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["Ctrl+G", "wall"], ["o", "sources"]]
 check("CN6.3: an unnumbered playlist gains no hint at all", Model.footerHints(hintsBase), shippedList)
-check("CN6.3: hasNumbers inserts 0-9 channel between / search and o sources", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true })), [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["0-9", "channel"], ["o", "sources"]])
+check("CN6.3: hasNumbers inserts 0-9 channel between / search and o sources", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true })), [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["Ctrl+G", "wall"], ["0-9", "channel"], ["o", "sources"]])
 check("CN6.3: while typing, the hint line is the entry line and nothing else", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true, numberEntry: liveEntry })), [["0-9", "digits"], [".", "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]])
-check("CN6.3: search mode, sources and the empty states are untouched", [Model.footerHints({ mode: "search", query: "", hasNumbers: true }), Model.footerHints({ mode: "search", query: "sky", hasNumbers: true }), Model.footerHints({ mode: "list", empty: "loading", hasNumbers: true })], [[["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "group"], ["Tab", "keys"], ["Esc", "close"]], [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]], [["Esc", "close"]]])
+check("CN6.3: search mode, sources and the empty states are untouched", [Model.footerHints({ mode: "search", query: "", hasNumbers: true }), Model.footerHints({ mode: "search", query: "sky", hasNumbers: true }), Model.footerHints({ mode: "list", empty: "loading", hasNumbers: true })], [[["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "group"], ["Ctrl+G", "wall"], ["Tab", "keys"], ["Esc", "close"]], [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Ctrl+G", "wall"], ["Tab", "keys"], ["Esc", "clear"]], [["Esc", "close"]]])
 
 check("CN8.1: a numbered row announces its number first", [Model.rowAccessibleName({ name: "Sky Sports Main Event", chno: "101", favorite: true, playing: true }), Model.rowAccessibleName({ name: "Al Jazeera English", chno: "" }), Model.rowAccessibleName({ name: "Al Jazeera English" })], ["Channel 101, Sky Sports Main Event, favorite, playing", "Al Jazeera English", "Al Jazeera English"])
 check("CN6.4: the bar tooltip and accessible name carry the number when there is one", [Model.barTooltip({ playing: true, name: "Sky Sports Main Event", chno: "101" }), Model.barTooltip({ playing: true, name: "Sky Sports Main Event" }), Model.barAccessibleName({ playing: true, name: "Sky Sports Main Event", chno: "101" }), Model.barAccessibleName({ playing: true, name: "Sky Sports Main Event" })], ["Playing 101" + Model.SEP + "Sky Sports Main Event", "Playing Sky Sports Main Event", "IPTV, playing channel 101, Sky Sports Main Event", "IPTV, playing Sky Sports Main Event"])
@@ -6511,6 +6514,63 @@ check("a narrow card still hides the column in either view",
             Model.guideSurface(Object.assign({}, base, { wall: true })).showColumn]
   })(), [false, false])
 
+// ---- M2-13: the toggle key ----
+check("the footer names the view the key goes TO, not the one you are in",
+  (function () {
+    var b = { mode: "list", query: "", empty: "", playing: false, pipAvailable: false, hasNumbers: false }
+    var pick = function (o) { return Model.footerHints(o).filter(function (p) { return p[0] === Model.WALL_KEY })[0] }
+    return [pick(b), pick(Object.assign({}, b, { wall: true }))]
+  })(), [["Ctrl+G", "wall"], ["Ctrl+G", "list"]])
+check("the key is modified, because a bare letter is query text in search mode",
+  [Model.WALL_KEY.indexOf("Ctrl+") === 0, Model.WALL_KEY.length > 1], [true, true])
+check("the hint is present in both views and never duplicated",
+  (function () {
+    var b = { mode: "list", query: "", empty: "", playing: false, pipAvailable: false, hasNumbers: false }
+    return [Model.footerHints(b).filter(function (p) { return p[0] === Model.WALL_KEY }).length,
+            Model.footerHints(Object.assign({}, b, { wall: true })).filter(function (p) { return p[0] === Model.WALL_KEY }).length]
+  })(), [1, 1])
+
+// ---- M2-13: the tile's picture area ----
+// The rule is the INVERSE of logoColumnShown's, deliberately: in the 22px row
+// column the absence is the information, on a tile the absence reads as a
+// missing channel. 82 of 1,462 on the configured list have no cached file.
+check("a channel with a cached file draws the picture",
+  (function () {
+    var ch = { logo: "https://h.test/a.png" }
+    var have = {}; have[Model.logoFile(ch, "/d").split("/").pop()] = true
+    var t = Model.wallTile({ enabled: true, channel: ch, logoDir: "/d", have: have })
+    return [t.kind, t.path, t.glyph]
+  })(), ["image", "/d/" + Model.logoFile({ logo: "https://h.test/a.png" }, "/d").split("/").pop(), ""])
+check("a channel whose logo has not landed draws the mark, not a hole",
+  Model.wallTile({ enabled: true, channel: { logo: "https://h.test/a.png" }, logoDir: "/d", have: {} }).kind, "mark")
+check("a channel with no logo url at all draws the mark",
+  Model.wallTile({ enabled: true, channel: {}, logoDir: "/d", have: {} }).kind, "mark")
+check("with logos OFF every tile is the mark, so the wall works on a default install",
+  (function () {
+    var ch = { logo: "https://h.test/a.png" }
+    var have = {}; have[Model.logoFile(ch, "/d").split("/").pop()] = true
+    return Model.wallTile({ enabled: false, channel: ch, logoDir: "/d", have: have }).kind
+  })(), "mark")
+check("the mark is the plugin's own television glyph, the one the bar shows idle",
+  Model.wallTile({ enabled: true, channel: {}, logoDir: "/d", have: {} }).glyph, Model.GLYPHS.tv)
+check("a tile is never both, and never neither",
+  (function () {
+    var ch = { logo: "https://h.test/a.png" }
+    var have = {}; have[Model.logoFile(ch, "/d").split("/").pop()] = true
+    var cases = [
+      Model.wallTile({ enabled: true, channel: ch, logoDir: "/d", have: have }),
+      Model.wallTile({ enabled: true, channel: ch, logoDir: "/d", have: {} }),
+      Model.wallTile({ enabled: false, channel: ch, logoDir: "/d", have: have }),
+      Model.wallTile({ enabled: true, channel: null, logoDir: "/d", have: {} }),
+      Model.wallTile({})
+    ]
+    return cases.filter(function (t) {
+      var image = t.kind === "image" && t.path !== "" && t.glyph === ""
+      var mark = t.kind === "mark" && t.path === "" && t.glyph !== ""
+      return !(image || mark)
+    })
+  })(), [])
+
 // ---- M2-13: the wall's vertical step, which is all edges ----
 check("a whole row down and up, in the middle of a full grid",
   [Model.wallStep(0, 1, 10, 4), Model.wallStep(4, 1, 10, 4), Model.wallStep(4, -1, 10, 4)], [4, 8, 0])
@@ -6752,10 +6812,10 @@ check("section 5: `p pip` joins the list-mode hints, and is hidden where PiP can
   Model.footerHints({ mode: "list", pipAvailable: false }).map(function (h) { return h[0] }).join(" "),
   Model.footerHints({ mode: "search", pipAvailable: true }).map(function (h) { return h[0] }).join(" ")
 ], [
-  "j/k h/l Enter Space f s p r / o",
-  "j/k h/l Enter Space f s p r / o",
-  "j/k h/l Enter Space f s r / o",
-  "Enter Up/Down Left/Right Tab Esc"
+  "j/k h/l Enter Space f s p r / Ctrl+G o",
+  "j/k h/l Enter Space f s p r / Ctrl+G o",
+  "j/k h/l Enter Space f s r / Ctrl+G o",
+  "Enter Up/Down Left/Right Ctrl+G Tab Esc"
 ])
 
 // ---- 11. the whole round trip, as the service will run it
