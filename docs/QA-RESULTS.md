@@ -7144,6 +7144,53 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-PERF-1, 2026-09-25: the budget instrument, used for the first time
+
+F-WALL-1 recorded that the 150 ms open budget had never been taken with the
+wall presenting at 10,000 channels. Taking it is what found this.
+
+The instrument was repaired earlier the same day so it could say WHICH view it
+measured, and the first real use of that field answered `view:""` -- it had
+forced nothing at all. `qa_openms` refused the number as vacuous, which is
+exactly the outcome that predicate was written for, on its first live run.
+
+### Three defects, found by pulling the thread (all D-PERF-1)
+
+1. **`findById` followed only `children`** (D-PERF-1). The guide declares its window
+   inside a Loader, and a Window's content hangs off `contentItem`; the
+   Loader's subtree hangs off `item`. A 40-deep children walk from the guide
+   item finds NEITHER channel view. The dates settle it: `windowLoader`
+   landed 2026-09-21 (be7fc3c) and the lookup was written 2026-09-23
+   (2e486da), after it. **It has never resolved.**
+2. **`layoutView` forced the first name it resolved, not the visible one** (D-PERF-1).
+   Both views exist at all times; only one is presenting. With the guide in
+   list view it forced `channelWall` and reported one realised delegate.
+   Caught by reading a number that made no sense.
+3. **`realisedCount` counted with `hasOwnProperty("index")`** (D-PERF-1), which is false
+   for a QML declared property. It reported 4 realised rows for a list that
+   has thirteen.
+
+### What is still broken, and it is the substance
+
+`openMs` calls `forceLayout` synchronously in the same turn as the summon, so
+the view has not been laid out when it looks: 4 realised delegates for the
+list and 1 for the wall at 10,000 channels. A bounded synchronous poll cannot
+fix this, because blocking the event loop is precisely what prevents the
+delegates from being created. An instrument that measures an open INCLUDING
+delegate creation has to be asynchronous -- start, settle, query -- and that
+is a design change rather than a patch. It is not attempted here.
+
+### The consequence, said plainly
+
+Every open-budget figure recorded since 2026-09-23, M2-04's logo numbers
+among them, was taken with no delegates laid out. Rule 7's 150 ms budget has
+never been verified against the thing the rule is about.
+
+The raw numbers at 10,000 channels, for the record and with that caveat
+attached: 14 ms median, 28 ms max, on both the list and the wall. Inside 150
+ms with room to spare -- but it is the cost of the summon, not of the open,
+and it must not be quoted as the latter.
+
 ## M2-13, 2026-09-25: the channel wall, and what was not measured (F-WALL-1)
 
 The feature shipped in four commits behind a fixed instrument and a

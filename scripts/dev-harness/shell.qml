@@ -182,13 +182,21 @@ ShellRoot {
   // A budget instrument that cannot say what it measured is not an
   // instrument. openMs now puts the answer in its payload and a run that
   // names the wrong view is void rather than fast.
+  // The view that is PRESENTING, not the first name on the list. Both views
+  // exist in the object tree at all times -- only one is visible -- so a
+  // lookup that takes the first name it resolves measures the hidden one,
+  // which has no delegates and therefore no work. Caught by using it: with
+  // the guide in list view it forced `channelWall` and reported one realised
+  // delegate, and one delegate is what an empty view looks like.
   function layoutView(g, names) {
     for (var i = 0; i < names.length; i++) {
       var found = harness.findById(g, names[i], 0)
-      if (found && typeof found.forceLayout === "function") {
-        found.forceLayout()
-        return names[i]
-      }
+      if (!found || typeof found.forceLayout !== "function") continue
+      var shown = true
+      try { shown = found.visible !== false } catch (e) {}
+      if (!shown) continue
+      found.forceLayout()
+      return names[i]
     }
     return ""
   }
@@ -203,9 +211,12 @@ ShellRoot {
     var kids = v.contentItem.children
     var n = 0
     for (var i = 0; i < kids.length; i++) {
-      // contentItem carries non-delegate children (highlight, header); a
-      // delegate is counted by the property every channel delegate declares.
-      if (kids[i] && kids[i].hasOwnProperty("index")) n++
+      // contentItem carries non-delegate children (highlight, header). A
+      // delegate is counted by a property BOTH channel delegates declare.
+      // `hasOwnProperty("index")` was the first attempt and undercounts
+      // badly -- a QML declared property is not a JS own-property, so it
+      // reported 4 realised rows for a list that had thirteen.
+      try { if (kids[i] && kids[i].channelId !== undefined) n++ } catch (e) {}
     }
     return n
   }
@@ -215,15 +226,34 @@ ShellRoot {
   // reporting view:"" rather than by returning a number for it.
   readonly property var channelViews: ["channelWall", "resultList"]
 
+  // Find a named object under `node`.
+  //
+  // It must follow THREE links, not one, and following only `children` is why
+  // this returned null for the whole life of the open-budget instrument. The
+  // guide declares its window inside a Loader (`windowLoader`), and a Window
+  // is not a child Item of the thing that loaded it: its content hangs off
+  // `contentItem`, and the Loader's own subtree hangs off `item`. A walk that
+  // knows only `children` stops at the Loader and reports "not found" for
+  // every row and tile in the guide. Measured 2026-09-25: a 40-deep children
+  // walk from the guide item finds neither channel view.
+  //
+  // The depth had to rise with the hops. 12 was chosen against a flat tree
+  // and the real path from the guide item to a delegate is longer than that
+  // once the window and the loader are in it.
   function findById(node, wanted, depth) {
-    if (!node || depth > 12) return null
+    if (!node || depth > 40) return null
     try {
       if (String(node.objectName) === wanted) return node
     } catch (e) {}
-    var kids = node.children
-    if (!kids) return null
-    for (var i = 0; i < kids.length; i++) {
-      var hit = harness.findById(kids[i], wanted, depth + 1)
+    var next = []
+    try { if (node.item) next.push(node.item) } catch (e) {}
+    try { if (node.contentItem) next.push(node.contentItem) } catch (e) {}
+    try {
+      var kids = node.children
+      if (kids) for (var i = 0; i < kids.length; i++) next.push(kids[i])
+    } catch (e) {}
+    for (var k = 0; k < next.length; k++) {
+      var hit = harness.findById(next[k], wanted, depth + 1)
       if (hit) return hit
     }
     return null
