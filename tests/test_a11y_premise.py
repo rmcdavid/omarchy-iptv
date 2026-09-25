@@ -3,10 +3,15 @@
 Ruling AX2 refused masking the accessible Value of the Sources form fields
 because live risk is zero while no Quickshell window publishes an
 accessibility tree at all (D-GS-3, quickshell#1144). That reasoning is sound
-and it is CONDITIONAL. If an update makes a PanelWindow publish, a revealed
-playlist or EPG URL -- and the Xtream server and username, which are not
-maskable at all -- publish their credentials to every listener on the session
-bus, and the refusal silently stops being safe.
+and it is CONDITIONAL. As of 2026-09-25 the cause is confirmed fixed upstream
+at quickshell-mirror/quickshell@916a0dd and is NOT in any release, so the
+premise still holds -- but its expiry is now a known commit rather than an
+unknown date (investigation section 10).
+
+If an update makes a PanelWindow publish, a revealed playlist or EPG URL -- and
+the Xtream server and username, which are not maskable at all -- publish their
+credentials to every listener on the session bus, and the refusal silently stops
+being safe.
 
 The premise was a comment in three files and an assertion in none: two things
 joined by a name, with nothing verifying the join (CLAUDE.md rule 13).
@@ -59,6 +64,13 @@ class A11yPremiseCase(unittest.TestCase):
             self.assertTrue(str(self.fixture[key]).strip(), key)
         self.assertIn('D-A11Y-1', self.fixture['whyItMatters'])
         self.assertIn('a11y-probe.sh', self.fixture['onRed'])
+        # The trigger became precise on 2026-09-25: the fix is a known commit
+        # in an unreleased Quickshell (investigation section 10). A guard that
+        # fires saying only "versions moved" makes the reader re-derive that
+        # page; one that names the commit does not. Asserted here because a
+        # fixture value nothing checks is a comment.
+        self.assertIn('916a0dd', self.fixture['upstream'])
+        self.assertIn('916a0dd', self.fixture['onRed'])
 
     def test_the_platform_the_premise_was_measured_on_is_still_the_one_here(self):
         stale = []

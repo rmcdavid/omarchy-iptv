@@ -370,8 +370,11 @@ destroyed. Hidden *screens* do stay in the tree as `invisible+offscreen` nodes.
 
 1. Which bus connection QA read during the live pass. Not recorded, not
    recoverable read-only. This decides the whole case.
-2. Whether a Quickshell `PanelWindow`'s backing window is enumerated by
-   `QAccessibleApplication`, and what window flags Quickshell sets on it.
+2. ~~Whether a Quickshell `PanelWindow`'s backing window is enumerated by
+   `QAccessibleApplication`, and what window flags Quickshell sets on it.~~
+   **ANSWERED 2026-09-25 (section 10): neither.** The backing window and its
+   flags were never the question; the accessibility hooks were destroyed
+   before any window was created.
 3. Why the GTK ATK bridge registered in the shell process at all, given that
    five probes which loaded the same libraries did not register.
 4. Whether an AT announces on `object:state-changed:focused` for a ListItem
@@ -452,6 +455,12 @@ narrow, and whether Quickshell's backing windows trip it is still unproven.
 `_backingWindow` is `undefined` in Quickshell 0.3.1, so it cannot be read from
 QML; establishing that is a job for someone with the Quickshell source, which is
 why the upstream report asks rather than asserts.
+
+**Superseded 2026-09-25 (section 10).** Asking rather than asserting was the
+right call: the `Qt::Popup` filter is real, narrow, and **not** what broke this.
+The cause is in Quickshell's process launch, before any window exists. This
+subsection is kept as written because a ruled-out mechanism that was measured is
+worth more on the record than a deleted one.
 
 ## 7. Ownership
 
@@ -547,7 +556,7 @@ announcement that was proven as a string and never as a node - on day one.
 
 ## 9. Upstream drafts
 
-**FILED 2026-09-15.** Report A is https://github.com/omacom/omarchy/issues/12009. Report B is https://github.com/quickshell-mirror/quickshell/issues/1144, filed with the
+**FILED 2026-09-15. Report B closed 2026-09-21 with no comment; see section 10 for what it was closed for.** Report A is https://github.com/omacom/omarchy/issues/12009. Report B is https://github.com/quickshell-mirror/quickshell/issues/1144, filed with the
 broadened scope established in section 6 and with the mechanism recorded
 honestly as not established. Report C remains held, unfiled, for the reason
 given below. The drafts are kept here as written so the filed text can be
@@ -729,3 +738,66 @@ active before accessibility is called done?**
 Recommendation: **yes, and make it an explicit gate.** A cursor jump produced on
 the order of 40 tree events in a probe, and the guide opens on 10,000 channels.
 Nobody has measured what a live bridge costs us.
+
+
+---
+
+## 10. Upstream resolution (2026-09-25): confirmed, fixed, unreleased
+
+Report B (`quickshell-mirror/quickshell#1144`) was **closed on 2026-09-21 with
+zero comments**, so nothing on this side learned why. The answer arrived on
+2026-09-24 as a comment on Report A from a third party who reproduced the defect
+independently, and every claim in it was verified here against the GitHub API
+before being written down, because a mail notification is a claim and not a
+source.
+
+### 10.1 What was verified, and how
+
+| Claim | Verdict |
+|---|---|
+| Reproduced on quickshell 0.3.1, qt6-base 6.11.2, at-spi2-core 2.60.7 | Consistent with section 6. This machine is 0.3.1-1 / 6.11.2-3 / 2.60.6-1 |
+| "publishes no AT-SPI tree for **any** window type" | **Independently confirms section 6.2 point 3**, the counterintuitive half that both earlier investigations got wrong by probing only layer-shell surfaces |
+| Fixed at `quickshell-mirror/quickshell@916a0dd` | **Real.** `916a0dd90cf2`, authored 2026-08-28 |
+| From `quickshell-mirror/quickshell#1006` | **Unverified.** That number 404s on the GitHub mirror; quickshell develops on its own forge, so it is almost certainly a reference there. Recorded as unconfirmed rather than repeated as fact |
+| "not in a release yet" | **Confirmed.** Latest release is v0.3.1, published 2026-08-21. The fix postdates it by a week |
+
+### 10.2 The mechanism, from the commit itself
+
+```
+launch: avoid creating multiple QApplications
+
+Accessibility hooks created by QQuick module init are destroyed by the
+QApplication destructor and not recreated by a new QApplication.
+```
+
+That is this defect, named by its author, and it explains every measurement in
+section 6 at once -- including the two that section 4.5's `Qt::Popup` hypothesis
+could not. A `FloatingWindow` is an ordinary xdg-toplevel and published nothing;
+a nine-line config with none of our code reproduced it; the Qt root reported
+`ChildCount 0` rather than a wrong count. All three follow from hooks that were
+torn down at launch, before any window is created. Window type was never
+relevant, which is exactly why probing window types could not find it.
+
+Note the dates: the fix landed **2026-08-28, eighteen days before Report B was
+filed**. The investigation was not wasted -- it produced the reproduction, the
+broadened scope, and the tripwire -- but the cause had been fixed in master the
+whole time, and no released build carried it. An issue closed with no comment
+looks identical to an issue closed as wontfix.
+
+### 10.3 What this changes here: the trigger, not the code
+
+Nothing in this repository changes today. `quickshell 0.3.1-1` is still
+installed, `tests/test_a11y_premise.py` is green, and everything the guide
+declares is still inert.
+
+What changes is that the tripwire's trigger is now **precise**. It was "any of
+three package versions moved, so the evidence has expired" -- correct, honest,
+and blunt. It is now also "and the thing to look for in the new build is
+`916a0dd`, first release after v0.3.1". The fixture carries the commit so the
+person reading the failure does not have to re-derive this page.
+
+The work queued behind the trigger is unchanged and still refused under ruling
+AX2: **D-A11Y-1**, the Sources form publishing provider credentials as its
+accessible Value. When a release carries this commit, that stops being latent in
+the same instant the guide starts being readable. Both halves of that sentence
+arrive together, which is the whole reason the tripwire exists.
