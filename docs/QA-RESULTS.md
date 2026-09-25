@@ -7139,6 +7139,97 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-REL-3, 2026-09-25: filed eleven days late, after it shipped and recurred
+
+The defect is small and the record of it is the point.
+
+`omarchy-iptv` is on nobody's PATH. The helper lives in the plugin
+directory, nothing installs a wrapper, and the plugin resolves it absolutely.
+So any shipped prose that says "run `omarchy-iptv <something>`" is an
+instruction that exits 127 on every install.
+
+### The timeline, from the commits
+
+```
+  2026-09-14  21487f7   README bullet 6 gains "run `omarchy-iptv player stop`"
+  2026-09-14  QA-PLAYER PLY-WEAK-05 verifies `command -v` exits 1; grades it P2
+  2026-09-14  8f9447e   the sentence is corrected to the full path form
+                        -- no id, no board row, never shipped in a release
+  2026-09-23  c1f8a16   README line 101 gains "`omarchy-iptv logos` prints..."
+  2026-09-23  v0.7.6    ...and it ships. And in v0.7.7, .8, .9, .10 -- main today
+  2026-09-25  582d439   found while documenting D-LOGO-9, fixed in the README --
+                        and written again, bare, into CHANGELOG.md in the SAME
+                        change. Caught by the pre-commit review, whose refuters
+                        found PLY-WEAK-05 and named this as rule 13's failure
+  2026-09-25  this      D-REL-3, and a check
+```
+
+The QA row did its job on 2026-09-14: it verified the claim against the real
+system, graded it, and the instance it found was corrected within hours. What
+it did not do was give the lesson an identifier that anything enforced.
+`PLY-WEAK-05` is a test-plan id; `scripts/check-defect-ledger.py` sees only
+`D-` and `F-`, so the row was invisible to the one check that joins findings
+to the board. Nine days later a different author, on a different feature, in
+a different paragraph, made the same mistake, and it shipped in five
+consecutive releases. Two days after that the author who found the recurrence
+made it a third time, in a second file, while fixing the first.
+
+### The check
+
+Rule 13 says an id only a human is expected to copy is an id that will stop
+being copied, and this one was never copied at all. So the filing carries a
+check, and the check is in the release gate rather than the docs, because the
+sink is the artifact:
+
+- `scripts/release.py check` scans README.md and CHANGELOG.md -- the two prose
+  files on the allowlist -- for `omarchy-iptv <subcommand>` not reached
+  through a path. A `/` before the name is a path, `=` is an option value
+  such as `--wayland-app-id=omarchy-iptv`, a bare name with nothing after it
+  is the window class.
+- The subcommand list is read from the helper's own `add_parser` calls, not
+  copied into the check, so a new verb is covered the day it exists and the
+  list cannot drift (a copy would be rule 13's failure inside the fix for it).
+- The scan is whole-text, not per-line. README prose wraps at eighty columns,
+  and `omarchy-iptv` at the end of one line with `player stop` at the start of
+  the next is one instruction to a reader and nothing to a per-line grep. A
+  test carries the wrapped form.
+- It reports `file:line`, the offending text, and the runnable spelling.
+
+Proved the way rule 11 asks. Five new tests in `tests/test_release.py`, run
+against `release.py` as it was before the check:
+
+```
+  pre-lint   Ran 5 tests   FAILED (failures=2, errors=2)
+  with lint  Ran 5 tests   OK          whole file: 23 tests OK
+```
+
+The fifth is the negative control -- the path form, the window class, the
+app-id, the cache path and "the same helper's `logos` subcommand" are all
+fine -- and is green on both, as a negative control should be.
+
+Then the shipping scan over what actually shipped, which is the only thing
+that proves a lint on prose catches the prose:
+
+```
+  21487f7   README    1 hit   164: omarchy-iptv player
+  8f9447e   README    0
+  v0.7.6    README    1 hit   100: omarchy-iptv logos
+  v0.7.10   README    1 hit   101: omarchy-iptv logos      <- main today
+  dev HEAD  README    0
+  dev HEAD  CHANGELOG 0
+```
+
+It catches every instance that ever existed and passes the tree that fixed
+them. `main` carries the v0.7.10 instance until the next release.
+
+### What is still prose-only
+
+`docs/QA-PLAYER.md` section 11 lists ten documentation findings from the same
+pass. Item 3 is this one. Items 1 and 2 carry `[corrected 8f9447e]`
+annotations elsewhere in the file; items 4, 5, 6, 9 and 10 have no
+annotation, no id and no board row, and this filing does not touch them. They
+are named here so the count is on the record rather than in someone's memory.
+
 ## D-LOGO-10, 2026-09-24: the cache cleaner followed a symlinked directory
 
 Found while implementing D-LOGO-9's verb, by testing the guarantee that

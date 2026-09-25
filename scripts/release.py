@@ -92,6 +92,43 @@ README_DEV_REF = re.compile(
 # citation to nothing. The helper's --help text was one of them.
 SHIPPED_SOURCES = RUNTIME_SOURCES + ('bin/omarchy-iptv',)
 
+# Nor may shipped PROSE hand the user a command that does not exist. The
+# helper lives in the plugin directory and is on nobody's PATH, so a bare
+# `omarchy-iptv <subcommand>` in the README or the CHANGELOG is an
+# instruction that exits 127 on every install. It was verified on 2026-09-14
+# (QA-PLAYER.md PLY-WEAK-05), fixed in place the same day, given no id and no
+# board row, and reappeared in two more shipped files within eleven days --
+# once in README.md, shipped from v0.7.6, and once in CHANGELOG.md, caught by
+# review the day before it would have (D-REL-3). The subcommand names are
+# read from the helper's own parser so this list cannot drift from it.
+SHIPPED_PROSE = ('README.md', 'CHANGELOG.md')
+HELPER_SUBCOMMAND = re.compile(r'sub\.add_parser\("([a-z-]+)"')
+HELPER_PATH_FORM = ('python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/'
+                    'bin/omarchy-iptv')
+
+
+def helper_subcommands(helper_source):
+    return sorted(set(HELPER_SUBCOMMAND.findall(helper_source)))
+
+
+def bare_helper_invocations(text, subcommands):
+    """(line, matched text) for every `omarchy-iptv <subcommand>` that is not
+    reached through a path. A `/` before the name is a path, `=` is an option
+    value such as --wayland-app-id=omarchy-iptv, and a word or dot character
+    is part of some other name. A bare name with no subcommand after it, such
+    as the window class, is a name and not an instruction."""
+    if not subcommands:
+        return []
+    pattern = re.compile(
+        r'(?<![\w./=~-])omarchy-iptv\s+(?:%s)\b'
+        % '|'.join(re.escape(sub) for sub in subcommands))
+    # Scanned as one text, not line by line: README prose wraps at eighty
+    # columns, and `omarchy-iptv` at the end of one line with `player stop`
+    # at the start of the next is the same instruction to a reader and
+    # invisible to a per-line scan. The reported line is where the name is.
+    return [(text.count('\n', 0, m.start()) + 1, ' '.join(m.group(0).split()))
+            for m in pattern.finditer(text)]
+
 
 class ReleaseError(Exception):
     pass
@@ -190,6 +227,17 @@ def check(root, out=sys.stdout):
                 problems.append(
                     'README.md says Status: v%s but manifest.json says %s'
                     % (stated.group(1), actual))
+
+    # Shipped prose may not tell the user to run what they cannot.
+    subcommands = (helper_subcommands(read(root, 'bin/omarchy-iptv'))
+                   if 'bin/omarchy-iptv' in have else [])
+    for doc in SHIPPED_PROSE:
+        if doc not in have:
+            continue
+        for n, hit in bare_helper_invocations(read(root, doc), subcommands):
+            problems.append(
+                '%s:%d tells the user to run %r, and omarchy-iptv is not on '
+                'PATH; spell it %s (D-REL-3)' % (doc, n, hit, HELPER_PATH_FORM))
 
     # Shipped sources may not cite what does not ship, even in a comment.
     for src in SHIPPED_SOURCES:

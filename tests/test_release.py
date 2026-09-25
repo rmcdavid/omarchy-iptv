@@ -186,6 +186,76 @@ class ReleaseCase(unittest.TestCase):
         self.commit_all()
         self.assertEqual([], release.check(self.dir, out=io.StringIO()))
 
+    # -- D-REL-3: shipped prose may not run the helper bare ---------------
+
+    HELPER_WITH_PARSER = ('sub.add_parser("player")\nsub.add_parser("logos")\n'
+                          'sub.add_parser("cache")\n')
+
+    def test_shipped_prose_that_runs_the_helper_bare_is_a_problem(self):
+        """PLY-WEAK-05, verified 2026-09-14: the README told the user to run
+        `omarchy-iptv player stop`, and omarchy-iptv is on nobody's PATH."""
+        self.write('bin/omarchy-iptv', self.HELPER_WITH_PARSER)
+        self.write('README.md', 'If one is left behind, run `omarchy-iptv player stop`.\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("README.md:1 tells the user to run 'omarchy-iptv player'" in p
+                            and 'not on PATH' in p for p in problems), problems)
+
+    def test_the_changelog_ships_too_and_is_scanned_too(self):
+        """The third instance, 2026-09-25: fixed in the README and written
+        again into the CHANGELOG in the same change."""
+        self.write('bin/omarchy-iptv', self.HELPER_WITH_PARSER)
+        self.write('CHANGELOG.md', '- Run `omarchy-iptv cache logos-clear --key <key>`.\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('CHANGELOG.md:1' in p and 'D-REL-3' in p for p in problems), problems)
+
+    def test_the_path_form_and_the_names_that_are_not_commands_are_fine(self):
+        self.write('bin/omarchy-iptv', self.HELPER_WITH_PARSER)
+        self.write('README.md',
+                   'Run `python3 ~/.config/omarchy/plugins/x/bin/omarchy-iptv player stop`.\n'
+                   'One mpv window, class `omarchy-iptv`, titled with the channel name.\n'
+                   "pkill -f -- '^mpv .*--wayland-app-id=omarchy-iptv'\n"
+                   'Cached under `~/.cache/omarchy-iptv/sources/<key>/logos/`.\n'
+                   "The same helper's `logos` subcommand prints that survey.\n")
+        self.commit_all()
+        self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+
+    def test_the_subcommand_list_comes_from_the_helper_not_from_a_copy(self):
+        """A helper that declares no parser makes the scan inert rather than
+        wrong; one that declares `frobnicate` makes `omarchy-iptv frobnicate`
+        a problem without anyone editing the check."""
+        self.assertEqual([], release.bare_helper_invocations('run omarchy-iptv player stop', []))
+        self.write('bin/omarchy-iptv', 'sub.add_parser("frobnicate")\n')
+        self.write('README.md', 'Try `omarchy-iptv frobnicate` and `omarchy-iptv player stop`.\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("'omarchy-iptv frobnicate'" in p for p in problems), problems)
+        self.assertFalse(any("'omarchy-iptv player'" in p for p in problems), problems)
+
+    def test_the_scan_catches_every_line_that_actually_shipped(self):
+        """The three real instances, verbatim, against the real helper's
+        parser. README bullet 6 at 05a0d3a~1 (2026-09-14, PLY-WEAK-05);
+        README line 101 as shipped in v0.7.6 through v0.7.10; and the
+        CHANGELOG line written on 2026-09-25 and caught before it shipped."""
+        with open(os.path.join(ROOT, 'bin', 'omarchy-iptv'), encoding='utf-8') as fh:
+            subs = release.helper_subcommands(fh.read())
+        self.assertIn('player', subs)
+        self.assertIn('logos', subs)
+        shipped = (
+            # README.md:164 at 21487f7
+            "  longer guaranteed to stop with it; run `omarchy-iptv player stop`, or log",
+            # README.md:100 as shipped in v0.7.6
+            'can see exactly what enabling them would cost your privacy: `omarchy-iptv logos` reads the cached playlist and prints which hosts it would contact and',
+            # CHANGELOG.md, 2026-09-25, before review
+            "  `omarchy-iptv cache logos-clear --key <key>`, with `ls ~/.cache/omarchy-iptv/sources/`",
+        )
+        for line in shipped:
+            self.assertEqual(1, len(release.bare_helper_invocations(line, subs)), line)
+        # and the wrapped form a per-line scan cannot see
+        wrapped = "if one is left behind, run `omarchy-iptv\n  player stop`, or log out."
+        self.assertEqual([(1, 'omarchy-iptv player')], release.bare_helper_invocations(wrapped, subs))
+
     def test_a_readme_version_that_disagrees_with_the_manifest_is_a_problem(self):
         """The artifact shipped once saying Status: v0.7.0 beside a 0.7.1 manifest."""
         self.write('README.md', 'Status: v0.9.8. Copy `contrib/bindings.lua`.\n')
