@@ -48,6 +48,30 @@ CELL = re.compile(r'(?<!\\)\|')
 LEDGER_FILE = 'docs/STATUS.md'
 LEDGER_HEADING = '## Defects'
 
+# ---- titled findings must carry an id ----------------------------------
+#
+# The join above only works for text that already has an id. A finding
+# written into a QA document as a numbered item with a bold title and a
+# severity in prose -- "3. **PO-2's escape hatch is not a runnable
+# command.** ... Suggested: P2" -- has everything a defect has except the
+# one thing this check can see. docs/QA-PLAYER.md section 11 held ten of
+# those for eleven days. One recurred twice in shipped files before anyone
+# noticed (D-REL-3); three had been fixed within the hour and read as open;
+# one was half done and read as done (D-PLY-17). So: under a heading that
+# calls its contents findings, defects, problems, gaps, contradictions,
+# issues or weaknesses, every numbered item that opens with a bold title is
+# a finding and must name a D- or F- id. An untitled item is a remark or a
+# step and is not held to it. A heading that says "no defect ids" or "not
+# defects" is declaring its list out of scope, visibly, on the line a reader
+# sees first; SECURITY-REVIEW.md's hardening list already did.
+FINDING_HEADING = re.compile(
+    r'^(#{2,4})\s+(.*)$')
+FINDING_WORDS = re.compile(
+    r'\b(?:finding|defect|problem|gap|contradiction|issue|weakness)(?:es|s)?\b'
+    r'|\bfound while\b', re.I)
+FINDING_EXEMPT = re.compile(r'\bno defect ids\b|\bnot defects\b', re.I)
+TITLED_ITEM = re.compile(r'^\s{0,3}(\d+)\.\s+\*\*(.+?)\*\*')
+
 # A state cell must actually say something. These are the words the board
 # already uses; the point is to reject an empty cell, a dash, or a "?" that
 # reads as tracked when it is not.
@@ -67,6 +91,46 @@ def tracked_markdown(root):
 def read(root, rel):
     with io.open(os.path.join(root, rel), encoding='utf-8') as fh:
         return fh.read()
+
+
+def titled_findings_without_id(text):
+    """(line number, heading, title) for every bold-titled numbered item
+    under a findings-style heading that names no D-/F- id anywhere in the
+    item, continuation lines included. Pure, so the shipping decision can
+    be called from a test against the documents as they were."""
+    lines = text.split('\n')
+    found = []
+    i = 0
+    while i < len(lines):
+        m = FINDING_HEADING.match(lines[i])
+        if not m or not FINDING_WORDS.search(m.group(2)) \
+                or FINDING_EXEMPT.search(m.group(2)):
+            i += 1
+            continue
+        level, heading = len(m.group(1)), m.group(2).strip()
+        j = i + 1
+        item = None  # (line, title, text)
+        def close():
+            if item and not ID.search(item[2]):
+                found.append((item[0], heading, item[1]))
+        while j < len(lines) and not re.match(r'^#{1,%d}\s' % level, lines[j]):
+            t = TITLED_ITEM.match(lines[j])
+            if t:
+                close()
+                item = [j + 1, t.group(2), lines[j]]
+            elif re.match(r'^\s{0,3}\d+\.\s', lines[j]):
+                close()
+                item = None          # an untitled item ends the titled one
+            elif item is not None and lines[j].strip():
+                item[2] += '\n' + lines[j]
+            elif item is not None and not lines[j].strip():
+                # a blank line ends the item; a later id does not rescue it
+                close()
+                item = None
+            j += 1
+        close()
+        i = j
+    return found
 
 
 def split_ledger(text):
@@ -175,6 +239,16 @@ def main(argv=None):
         print('defect ledger check scanned no markdown files at all '
               '(is this a git checkout?)')
         return 1
+
+    # ---- a titled finding with no id is invisible to everything above ---
+    titled = 0
+    for rel in tracked_markdown(root):
+        for line, heading, title in titled_findings_without_id(read(root, rel)):
+            titled += 1
+            problems.append(
+                '%s:%d "%s" under "%s" is a titled finding with no D-/F- id; '
+                'file it, cite the row that already covers it, or say '
+                '"not defects" in the heading' % (rel, line, title[:50], heading[:40]))
     if not mentions and not declared:
         print('defect ledger check found no defect ids anywhere, which means '
               'it is not looking where it thinks it is looking')

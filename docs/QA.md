@@ -71,7 +71,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-INST-05 | disable removes the widget and its settings; re-enable starts clean | M 5.10 (before remove) | after `omarchy plugin disable`, the bar entry (and inline `playlistUrl`) is gone from shell.json, widget gone, `omarchy-shell shell toggle io.github.rmcdavid.iptv` is a no-op, mpv (attached Process) exits; after `enable` the guide shows the not-configured state. Expected host behaviour; README must say settings are lost on disable |
 | TC-INST-06 | `omarchy plugin remove --yes` leaves only cache, state, runtime dirs | M 5.10 | `find ~ -path '*omarchy-iptv*'` lists only `~/.cache/omarchy-iptv`, `~/.local/state/omarchy-iptv`, `/run/user/1000/omarchy-iptv`; shell.json identical to the pre-install snapshot |
 | TC-INST-07 | nothing written inside the plugin directory at runtime | M 5.7 | `find <plugindir> -newer <plugindir>/manifest.json -not -path '*/.git/*'` prints nothing after a full session |
-| TC-INST-08 | `omarchy restart shell` round trip | M 5.4 US5 step 6 | widget back, settings intact, favorites and recents intact, mpv gone (R10, documented) |
+| TC-INST-08 | `omarchy restart shell` round trip | M 5.4 US5 step 6 | widget back, settings intact, favorites and recents intact, **mpv keeps playing: same pid, same window** (R10 withdrawn by M2-02; observed PLY-RST-01; corrected 2026-09-25, D-QA-19) |
 | TC-INST-09 | `keepLoaded` survives `rescanPlugins` | M 5.4 US3 step 7 | `omarchy-shell shell rescanPlugins` while playing: mpv keeps playing, bar label unchanged |
 | TC-INST-10 | README uninstall section matches reality | M 5.10 | README commands produce TC-INST-06 result verbatim |
 
@@ -134,10 +134,10 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-PLAY-05 | dead stream (R11, UX 6.4) | M 5.4 US3 step 5 | notification `Stream failed` / `<name> did not play` (plus ` - <mpv reason>` when known), glyph U+F0503, urgency normal, `-r` id reused; row trail U+F0026 and detail `Failed HH:MM - Space to retry`; cursor stays; bar back to idle glyph |
 | TC-PLAY-06 | `s` stops (UX 3.1) | M 5.4 US3 step 6 | footer `Stopped` for 3 s then the count; mpv exits; no notification; bar idle |
 | TC-PLAY-07 | user quits mpv (`q`) | M 5.4 US3 step 6 | bar idle, cues clear, no notification (exit 0) |
-| TC-PLAY-08 | per-channel headers reach mpv as argv | M 5.4 US3 step 8 with `gen-dead.m3u` (2 % entries carry `#EXTVLCOPT`) or `qa-headers.m3u`; A `Model.test.js` (`headerArgs`, `buildMpvArgv`) | `ps -o args=` shows `--user-agent=...`, `--referrer=...`, URL after `--` |
+| TC-PLAY-08 | per-channel headers reach mpv over the socket, never argv | M 5.4 US3 step 8 with `gen-dead.m3u` (2 % entries carry `#EXTVLCOPT`) or `qa-headers.m3u`; A `Model.test.js` (`headerArgs`) | `ps -o args=` shows **no** `--user-agent=`, **no** `--referrer=` and **no** URL; the header values reach mpv only as IPC options (observed PLY-SEC-04; the pre-M2-02 expectation of headers on argv is inverted by S-03; corrected 2026-09-25, D-QA-19) |
 | TC-PLAY-09 | hung mpv reaped by the health check (decision 12), optional | M 5.4 US3 step 9 | `kill -STOP <mpv>`: after two failed `status` polls (10 s each) the console logs `mpv unresponsive, restarting player` and mpv is SIGTERMed; the relaunch follows once mpv actually exits (send `kill -CONT` after a SIGSTOP test, mpv traps SIGTERM) |
 | TC-PLAY-10 | zapping bursts (UX 1.2) | M 5.4 US3 step 4 | Space three times within 2 s ends on the third channel; no dropped zap, no second mpv |
-| TC-PLAY-11 | mpv dies with the shell (R10) | M 5.4 US5 step 6 | documented limitation, README states it; recorded, not a defect |
+| TC-PLAY-11 | mpv survives `omarchy restart shell` (R10 withdrawn) | M 5.4 US5 step 6 | same pid, same window, still playing after the restart; the successor shell adopts it (observed PLY-RST-01, PLY-WEAK-03; corrected 2026-09-25, D-QA-19) |
 | TC-PLAY-12 | zap in under two seconds of interaction (PRODUCT) | M 5.4 US3 step 1 | open + 3 letters + Enter to first frame under 2 s (stopwatch) |
 | TC-PLAY-13 | mpv missing notification `mpv not found` / `Install mpv to play channels.` (critical) | M not runnable here (mpv is an Omarchy dependency); verify by code review of the exit-code path | recorded `not run` |
 | TC-PLAY-14 | guide over fullscreen mpv (UX 7.5) | M 5.4 US3 step 10 | overlay draws above; Esc returns; mpv neither paused nor muted |
@@ -287,7 +287,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | R7 bar glyphs per state, label elision, wheel steps | TC-BAR-01..05, TC-BAR-09, TC-BAR-10, TC-CFG-10 |
 | R8 model fields the guide binds (`failedAt`, `epgFraction` 30 s tick, guide state) | TC-PLAY-05, TC-EPG-02, TC-EPG-08, TC-UI-03 |
 | R9 service actions and IPC verbs (`toggle play stop next previous refresh status`) | 5.8 IPC checks, TC-BAR-09, D-QA-04 |
-| R10 mpv attached to the service (dies with the shell) | TC-PLAY-11, TC-INST-08 |
+| R10 mpv attached to the service (dies with the shell) -- **withdrawn by M2-02, the player is detached** | TC-PLAY-11, TC-INST-08 (both inverted 2026-09-25, D-QA-19) |
 | R11 stream failure: notification, **persisted** `failedAt` (amended 2026-09-24), alert glyph | TC-PLAY-05, TC-FAV-07 |
 | R12 manual refresh notifies, timer only on failure; never render URLs beyond scheme+host | TC-BAR-08, TC-RFR-01, TC-RFR-02, TC-RFR-03, SEC-07, TC-CFG-13 |
 | R13 no animation, no `screen` set (focused monitor) | TC-UI-08, TC-A11Y-04 |
@@ -390,7 +390,7 @@ output is empty unless stated.
 | SEC-03 | 8.2 header injection with CR/LF | A* `qa-headers.m3u` (`cr.test`, `kodicrlf.test`); A `Model.test.js` (`headerArgs` drops values containing `\r`/`\n`); M TC-PLAY-08 | `channels.json` values contain no CR/LF (bare CR -> space, `%0D%0A` -> spaces); mpv argv shows one `--user-agent=` item |
 | SEC-04 | 8.2 header names validated | A* `qa-headers.m3u` (`Bad%0AName` dropped, warning `dropped header with unsafe name for ...`) | as stated |
 | SEC-05 | 8.3 stream scheme allow-list | A* `qa-schemes.m3u` | allowed: http https rtsp udp rtp rtmp rtmps mms mmsh srt, uppercase scheme, padded line, option-looking suffix inside the line; dropped and counted: file, bare path, `~`, relative, ftp, plugin, javascript, data, `--script=`, `--`, edl, mf, av, lavf, fd, memory, ytdl, smb, dvd, null, protocol-relative; `http://` with no host must be dropped too (D-QA-07) |
-| SEC-06 | 8.2 URL after `--`, option-looking lines never reach mpv | A `Model.test.js` (`buildMpvArgv url after --`); M `ps -o args= -p $(pgrep -f wayland-app-id=omarchy-iptv)` | last two argv items are `--` and the URL |
+| SEC-06 | 8.2 no URL on any command line; option-looking lines never reach mpv | A `tests/test_player.py` argv tests against `tests/fixtures/player-argv.json`; M `ps -o args= -p $(pgrep -f wayland-app-id=omarchy-iptv)` | every mpv argv token after index 0 begins with `--`, there is no trailing `--` and no URL anywhere on the command line (observed PLY-SEC-01; the pre-M2-02 expectation of `--` then the URL is inverted by S-03; corrected 2026-09-25, D-QA-19) |
 | SEC-07 | 8.7, R12 URL redaction at every sink | A: enumerate sinks with `grep -nE 'console\.(log|warn|error|info)|notify\(|showTooltip|tooltipText|statusLine|lastError|stderr|stdout|emit\(|sys\.stderr' Service.qml Guide.qml BarWidget.qml bin/omarchy-iptv` and check each argument cannot carry a URL (current sinks: `Service.qml` `notify()` body from `mpvStderrTail` [D-QA-01], `lastError` -> `Guide.statusLine` and IPC `status` [D-QA-01, D-QA-15], `console.warn("omarchy-iptv playlist:", stderr)` (helper stderr carries host only, but local paths [D-QA-12]), `BarWidget.tooltip` (`error.message`), channel `name` [D-QA-02]); M 5.9: `grep -nE '(https?|rtsp|rtmp)://[^ ]*[@?]|password=|username=' journal.txt qs-log.txt` and the notification history (`omarchy-shell notifications showHistory`) after TC-PLAY-05 with a credentialed dead URL from `qa-attrs.m3u` (`http://user:secret@stream.example.test/...`) | no match anywhere |
 | SEC-08 | 8.4 local source path rules | A* `tests/test_helper.py`: `/proc/self/environ` -> `unsafe_path`, `/dev/zero` -> `too_large` (reads at most 64 MB + 1), `/sys/...` -> `unsafe_path`; M `omarchy bar set ... playlistUrl /proc/self/environ` | error rendered, no traceback, no hang |
 | SEC-09 | 8.4 symlink to a forbidden path | A* `ln -s /proc/self/environ $tmp/list.m3u` -> `unsafe_path` (realpath check) | as stated |
@@ -718,7 +718,7 @@ codepoints for `...`, quotes and the middle dot).
    duplicate). `omarchy bar set io.github.rmcdavid.iptv maxRecents 3 --json`,
    play four channels: Recent shows three; reset to `10 --json` [TC-FAV-06,
    TC-CFG-11].
-6. `omarchy restart shell`: mpv exits (R10, expected), the widget comes back,
+6. `omarchy restart shell`: mpv keeps playing, same pid (R10 withdrawn; corrected 2026-09-25, D-QA-19), the widget comes back,
    favorites and recents are intact, `playlistUrl` intact [TC-FAV-08,
    TC-INST-08, TC-PLAY-11].
 7. `omarchy-shell io.github.rmcdavid.iptv stop`; `printf 'garbage' >

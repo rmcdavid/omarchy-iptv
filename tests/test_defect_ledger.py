@@ -250,6 +250,73 @@ class LedgerCase(unittest.TestCase):
                    'The pass filed D-AAA-1, D-AAA-2 and D-A11Y-1.\n')
         self.assertRed(r'D-A11Y-1 is filed in docs/QA-RESULTS\.md but has no row')
 
+    # -- a titled finding with no id (D-REL-3's class) ---------------------
+
+    FINDINGS_DOC = (
+        '## 11. Contradictions and gaps found while planning\n\n'
+        '1. **The README tells the user to run a command that is not on PATH.**\n'
+        '   Suggested: P2 documentation.\n'
+        '2. **CHANGELOG has no 0.3.0 section.** Filed as D-AAA-2.\n'
+        '3. Step three of a procedure, not a finding, so no id is owed.\n'
+    )
+
+    def test_a_titled_finding_with_no_id_is_red(self):
+        self.good_ledger()
+        self.write('docs/QA-X.md', self.FINDINGS_DOC)
+        out = self.assertRed(r'docs/QA-X\.md:3 "The README tells the user to run a command.*is a titled finding with no D-/F- id')
+        self.assertNotIn('CHANGELOG has no', out)          # item 2 cites one
+        self.assertNotIn('Step three', out)                # untitled: a remark
+
+    def test_the_id_may_sit_on_a_continuation_line(self):
+        self.good_ledger()
+        self.write('docs/QA-X.md', self.FINDINGS_DOC.replace(
+            '   Suggested: P2 documentation.\n',
+            '   Suggested: P2 documentation. **Filed as D-AAA-1 (2026-09-25).**\n'))
+        self.assertGreen()
+
+    def test_a_blank_line_ends_the_item_so_a_later_id_does_not_rescue_it(self):
+        self.good_ledger()
+        self.write('docs/QA-X.md', self.FINDINGS_DOC.replace(
+            '   Suggested: P2 documentation.\n',
+            '   Suggested: P2 documentation.\n\n   See D-AAA-1.\n'))
+        self.assertRed(r'is a titled finding with no D-/F- id')
+
+    def test_a_heading_that_declares_no_defect_ids_is_exempt(self):
+        self.good_ledger()
+        self.write('docs/QA-X.md', self.FINDINGS_DOC.replace(
+            '## 11. Contradictions and gaps found while planning',
+            '## Hardening (non-blocking, no defect ids)'))
+        self.assertGreen()
+        self.write('docs/QA-Y.md', self.FINDINGS_DOC.replace(
+            '## 11. Contradictions and gaps found while planning',
+            '## The three problems, stated plainly (not defects)'))
+        self.assertGreen()
+
+    def test_a_heading_that_does_not_name_findings_is_not_scanned(self):
+        self.good_ledger()
+        self.write('docs/QA-X.md', self.FINDINGS_DOC.replace(
+            '## 11. Contradictions and gaps found while planning',
+            '## 9. Live runbook'))
+        self.assertGreen()
+
+    def test_the_scan_stops_at_the_next_heading_of_the_same_level(self):
+        self.good_ledger()
+        self.write('docs/QA-X.md',
+                   '## Findings\n\n1. **A real one.** Filed as D-AAA-1.\n\n'
+                   '## Runbook\n\n1. **Bold step title**, no id owed here.\n')
+        self.assertGreen()
+
+    def test_every_heading_vocabulary_word_triggers_the_scan(self):
+        self.good_ledger()
+        for word in ('Findings', 'Defects', 'Problems', 'Gaps', 'Contradictions',
+                     'Issues', 'Weaknesses', 'Things found while planning'):
+            self.write('docs/QA-X.md', self.FINDINGS_DOC.replace(
+                '## 11. Contradictions and gaps found while planning', '## ' + word))
+            with self.subTest(word=word):
+                # "Weaknesses" was the one that slipped: the first regex
+                # allowed one optional "s" and this plural takes "es".
+                self.assertRed(r'titled finding with no D-/F- id')
+
     def test_a_finding_id_is_tracked_exactly_like_a_defect_id(self):
         """F- and D- are the same obligation.
 

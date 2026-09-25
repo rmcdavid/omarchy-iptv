@@ -2942,12 +2942,12 @@ instant `stop` was issued.
 2. **The rate is 10 of 20, not 1 of 8.** The `weak repro` wording on
    `docs/STATUS.md:146` under-states it and should be corrected when D-PLY-11
    is dispositioned. The severity is still bounded by CL6.
-3. **CL3 is half-landed.** The witness exists; nothing asserts on it, and it
+3. **CL3 is half-landed** (filed as D-PLY-9; both asks landed at 490fd4e and d76b649 the same day). The witness exists; nothing asserts on it, and it
    cannot discriminate against `396a69a` by construction. Wave three should
    point `player-scenario.sh:402`/`:416` at the intent counter measured in D4,
    and correct the sentence in `docs/STATUS.md:144` that implies the repaired
    check now covers the property.
-4. **Do not write teardown-proportionality down as a fact.** The windowed
+4. **Do not write teardown-proportionality down as a fact** (ruled CL12 within the hour, carried on D-PLY-8; the last sentence still stating it as fact, in QA-PLAYER.md section 14, was corrected on 2026-09-25). The windowed
    measurement in D2 contradicts it. The plan's own instruction to trust only
    the ordering and the magnitude is the right one.
 5. The interface-clear budget in PLY-PERF-02 has no instrument fine enough to
@@ -3319,19 +3319,19 @@ ruling.
    nothing. Either print something that does differ (the entry id, or the
    stash's `verb`) or drop the parenthetical. Not a functional defect - the
    stand-down itself works, 5/5.
-2. **F2 (new, minor, same class as CL10).**
+2. **F2 (new, minor, same class as CL10; filed as D-CL-2, fixed at 4be6931 eighteen minutes after this pass closed).**
    `PLY-H18 the shell never relabelled itself from the player (CL5)` passes on
    both trees and is not labelled a regression guard, contrary to the runner's
    own stated rule and contrary to how PLY-H17's three such checks are handled.
    One string in `scripts/qa-player-scenarios.sh`.
-3. **F3.** CL12's recorded socket-residue range (15-37 ms) has an optimistic
+3. **F3** (carried on D-PLY-8; both corrections REPLACED the range with 9.6-24.7 instead of widening it, dropping the 36.9 ms point D2 run 1 recorded -- re-widened to 9.6-36.9 on 2026-09-25). CL12's recorded socket-residue range (15-37 ms) has an optimistic
    floor; this pass measured 9.6-24.7 ms on the same class of player. Record the
    wider range. The ordering and the conclusion are unaffected.
-4. **F4, recorded not filed.** The CL5 repair costs one extra `loadfile` on the
+4. **F4, recorded not filed** (filed after all as F-PLY-4 on 2026-09-25: the design document could not say so where it describes the repair, because it never recorded that the repair shipped; amended). The CL5 repair costs one extra `loadfile` on the
    cold burst path: entry id 3 in 12 of 20 runs where wave two read 2 in 18.
    That is the correct trade and it is cheap, but it is a real behaviour change
    and the design document should say so where it describes the repair.
-5. **F5, recorded not filed.** The repair can still be in flight six seconds
+5. **F5, recorded not filed; carried on the board inside D-PLY-11.** The repair can still be in flight six seconds
    after a cold burst - seen once, in the rig's shakedown run, converged by
    t+20 s. Wave two's divergences never converged at all. If anyone wants the
    invariant stated as a latency rather than as "within one health tick", that
@@ -6356,6 +6356,8 @@ of calling it.
    above. The default template even gives hover the same colour and alpha as the
    selection. While hovered, that caption drew the card rung on a cursor fill and
    was under 4.5 on the same six themes the change was written to repair.
+(D-RUNG-14: caught in review of 1141e17 and never committed, so no tag ever
+carried it; v0.7.4 shipped fixed.)
 2. **Contrast is not monotonic in alpha.** `colorOver` blends in gamma space and
    the luminance transfer is convex, so when channels move in opposite
    directions the curve peaks in the interior. On `#c50236` over `#20f91e`:
@@ -6364,6 +6366,9 @@ of calling it.
    failing rung with a passing one two steps away — and was dead against all 46
    installed surfaces, so no test reached the only branch that could be wrong.
    Now removed, with the fallback returning the alpha that *maximises* contrast.
+(Recorded under D-RUNG-14, whose change this was and whose test pins the
+counterexample; removed before 1141e17 landed, so no commit or tag carried
+it. The copy that DID ship, in `sectionHeaderAlpha`, is D-RUNG-16.)
 3. **The two deliberately-regular prose sites were handed the BOLD floor.**
    Regular 10 px renders 11–13 per cent below the model and bold does not
    (F-CAL-1, 15 live rows), so 4.65 renders about 4.09 at regular weight. They
@@ -7138,6 +7143,123 @@ This was found by the **saved-search** fixture, which carried `at: "12.9"` for
 its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
+
+## The class, 2026-09-25: a titled finding now needs an id, and a check says so
+
+Two sweeps in two days filed six findings that had been sitting in one
+document with no id, and the record of each ends the same way: the ledger
+check was green throughout, because a test-plan section number is not a
+defect id. This entry is the fix for the class, and the last sweep of what
+the fix turned up.
+
+### The rule
+
+A finding gets its `D-` or `F-` id on the day it is written. `F-` when it is
+a finding rather than a defect; the checker treats them alike. A list that is
+genuinely not findings says so on the heading -- "(not defects)" or "no
+defect ids" -- so the exemption is on the line a reader sees first, not in a
+script. Written into CLAUDE.md rule 13, which is where the next author reads
+it.
+
+### The check
+
+`scripts/check-defect-ledger.py` gained one pass, `titled_findings_without_id`:
+under any heading that names findings, defects, problems, gaps,
+contradictions, issues or weaknesses, every numbered item that opens with a
+bold title must carry an id somewhere in the item, continuation lines
+included. An untitled item is a remark or a step and is not held to it. A
+blank line ends the item, so an id in a later paragraph does not rescue one.
+
+The vocabulary is a name-based join and says so in its own comment: a
+heading that calls its list "things that are wrong" is not caught. The
+survey that shaped it found the section this whole class came from was
+titled "Contradictions and gaps found while planning" -- neither "findings"
+nor "defects", which is why the first draft of the regex would have missed
+the one section it was written for. Hence "gaps", "contradictions" and
+"found while".
+
+The function is pure, so it was called on the documents as they were (rule
+12), and the numbers track the filings exactly:
+
+```
+  582d439   section 11 before any id       10 titled findings without id
+  5b8b088   after D-REL-3                   9
+  5e9110d   after the five                  4
+  this tree, before the sweep below         4   (items 1, 2, 7, 8)
+```
+
+Seven tests. Against the checker before the pass: 7 run, 10 failures (the
+vocabulary test is eight subtests). Against it: 26 of 26. One of the seven
+found a real hole on its first run: "Weaknesses" did not trigger, because
+the regex allowed one optional "s" and that plural takes "es". The test now
+names the word.
+
+Across the whole tree the pass found fifteen titled findings without an id
+under seven headings. Three were a design brief's problem statement
+(`docs/M2-09-GUIDE-AT-SCALE.md`), which now says "(not defects)" on its
+heading. The other twelve are the sweep below.
+
+### The twelve
+
+Each investigated by one read-only agent from the commits, then attacked by
+two refuters told to break the state. Eight verdicts unanimous, four
+contested; in every contested case the dissent changed the row.
+
+```
+  item                          disposition                       id
+  QA-PLAYER s11 item 1          fixed 8f9447e, shipped v0.3.0     D-PLY-18  new
+  QA-PLAYER s11 item 2          README fixed; ARCH-P open 11 d    D-PLY-19  new, corrected today
+  QA-PLAYER s11 item 7          settled; pointers added           F-PLY-3   new
+  QA-PLAYER s11 item 8          OPEN: six QA.md rows stale        D-QA-19   new, corrected today
+  QA-RESULTS D6 item 3          fixed 490fd4e / d76b649           D-PLY-9   cite
+  QA-RESULTS D6 item 4          ruled CL12; one sentence stale    D-PLY-8   cite, corrected today
+  QA-RESULTS L6 item 2 (F2)     fixed 4be6931                     D-CL-2    new
+  QA-RESULTS L6 item 3 (F3)     over-corrected; re-widened        D-PLY-8   cite, corrected today
+  QA-RESULTS L6 item 4 (F4)     design doc never said; amended    F-PLY-4   new
+  QA-RESULTS L6 item 5 (F5)     recorded by choice                D-PLY-11  cite
+  QA-RESULTS first-cut item 1   never committed                   D-RUNG-14 cite
+  QA-RESULTS first-cut item 2   never committed                   D-RUNG-14 cite
+```
+
+Six new rows, six citations of rows that already existed -- which is its own
+finding: half of the "unfiled" findings had been on the board all along under
+an id the prose never copied. The join existed in one direction only.
+
+What the sweep found that was actually wrong today, as opposed to merely
+unlabelled:
+
+- **Six rows of the main test plan asserted a withdrawn ruling** (D-QA-19).
+  `docs/QA.md` still said mpv dies with the shell, headers ride on argv, and
+  the URL is the last argv item -- the pre-M2-02 world -- eleven days after
+  the detached player shipped, because the budget for the edit lived in a
+  design-doc section under no task's acceptance. A verbatim re-run would have
+  graded the shipped design as three failures. Corrected, each row citing
+  the PLY row that observed the behaviour it now expects.
+- **ARCH-P section 6 named `--force-media-title` as a per-zap residual**
+  (D-PLY-19) for eleven days after section 4.11 of the same document fixed
+  it to a constant. The discharge of "item 2" closed it on the README half.
+- **Two corrections replaced a range instead of widening it** (F3, on
+  D-PLY-8): asked to record 9.6-24.7 alongside 15-37, both edits wrote
+  9.6-24.7 and dropped the 36.9 ms point the same document holds. Re-widened.
+- **One sentence in QA-PLAYER section 14 still stated teardown
+  proportionality as fact** (D6 item 4), in a paragraph labelled corrected,
+  after the ruling that said not to.
+- **ARCH-P section 17 still said D-PLY-11 was open** and its repair functions
+  "wired to nothing" (F-PLY-4), two hours after the repair shipped, eleven
+  days on. Amended with what the board row already says, cost included.
+
+And what the findings themselves got wrong, because a finding is a claim
+too: item 1 framed a false README sentence as a two-way conflict with a
+ruling that only restated the code; item 2 buried its second half in a
+parenthetical with no ask, so the discharge closed the half with the ask;
+item 8 attributed the missing edit to a task whose acceptance never owned
+it; D6 item 4 quoted the cleanup plan as endorsing "ordering and magnitude"
+when the plan's word was "proportionality"; F2's bare label collides with an
+unrelated F2 in the cleanup plan's own findings table.
+
+After the twelve: `titled_findings_without_id` reports 0 across every
+tracked document, and the ledger check is green on the live tree -- which is
+the only proof that matters for a check on prose.
 
 ## Sweep, 2026-09-25: the five section 11 findings that had no id
 

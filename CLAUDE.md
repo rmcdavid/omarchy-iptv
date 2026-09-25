@@ -166,6 +166,23 @@ requests and raise the batch.
    When you invent a new cross-document id -- a ruling, a scenario, a defect
    -- either point an existing check at it or write one. An id that only a
    human is expected to copy is an id that will eventually stop being copied.
+   The join has a second failure mode, and it cost more: a finding with NO id
+   at all. A QA plan listed ten numbered, bold-titled, severity-graded
+   findings under "Contradictions and gaps found while planning" on
+   2026-09-14, and because a test-plan section number is not a defect id the
+   checker never saw them. Three were fixed within the hour and read as open
+   for eleven days; one was half done and read as done; one recurred in two
+   shipped files before anyone noticed (D-REL-3). So: **a finding gets its
+   `D-` or `F-` id on the day it is written**, `F-` when it is a finding
+   rather than a defect (the checker treats them alike). The checker enforces
+   the part it can see: under any heading that names findings, defects,
+   problems, gaps, contradictions, issues or weaknesses, every numbered item
+   that opens with a bold title must carry an id. A list that is genuinely
+   not findings says so ON THE HEADING -- "(not defects)" or "no defect ids"
+   -- so the exemption is visible on the line a reader sees first, not
+   buried in a script. Do not route around the check by dropping the bold
+   title; an untitled item is a remark, and a finding written as a remark is
+   the same defect with worse odds.
 14. An acceptance criterion may not be a grep for the string the
    implementation was written to contain. Verify by calling the shipping logic
    or by observing the real sink. A rule that can be verified by neither is

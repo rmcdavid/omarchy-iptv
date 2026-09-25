@@ -179,7 +179,7 @@ Depth for this area is in section 2; the rows below are the contract.
 | PLY-FAIL-03 | exactly one toast when both detectors fire | H PLY-H02; L 9.8 step 1 | `player start`'s first-load window and socket EOF are two independent detectors of the same dead stream; `notifiedFailureId` keeps the user's toast count at exactly **one** per play. `omarchy-shell notifications showHistory` gains one line, not two |
 | PLY-FAIL-04 | a zap is not a failure | A `tests/Model.test.js` router block (`routePlayerEvent`, `endedVerdict`); H PLY-H09 | a zap emits `end-file{reason:"stop"}` immediately followed by `start-file` for the new entry, on one pid, window intact: **no** notification, no `failedAt` entry, `currentEntryId` moves, `lastEndFile` is cleared by the `start-file` |
 | PLY-FAIL-05 | `redirect` is never terminal | A `endedVerdict` vectors in `tests/fixtures/player-argv.json` | an intermediate `.m3u8` master resolution gives `reason:"redirect"` and is ignored; this fires on the masters IPTV uses most, so a false toast here would be constant |
-| PLY-FAIL-06 | a clean end stays silent (PO-4) | A `endedVerdict` vectors; H PLY-H09 | `end-file{reason:"eof"}` -> silent stop, bar idle, cues cleared, **no** notification, `state.json.session` cleared so no PO-3 mark follows. Zero behaviour change from v0.2.0's exit-0 silence. **Note the README contradiction in section 11 item 1** |
+| PLY-FAIL-06 | a clean end stays silent (PO-4) | A `endedVerdict` vectors; H PLY-H09 | `end-file{reason:"eof"}` -> silent stop, bar idle, cues cleared, **no** notification, `state.json.session` cleared so no PO-3 mark follows. Zero behaviour change from v0.2.0's exit-0 silence. **Note the README contradiction in section 11 item 1** -- README corrected at 8f9447e, D-PLY-18 |
 | PLY-FAIL-07 | the user presses `q` in mpv | A `endedVerdict` vectors; L 9.8 step 2 | `reason:"quit"` -> silent; bar idle; cues clear; no notification |
 | PLY-FAIL-08 | a crash or SIGKILL with no `end-file` | H PLY-H09; L 9.8 step 3 | `kill -9` the player while attached: socket EOF within 2-3 ms (SPIKE Q4), no `end-file` at all (SPIKE C9: a trailing partial line is dropped at EOF), verdict = stream failure with the generic reason `Model.PLAYER_GENERIC_FAILURE`; one toast naming the channel; `failedAt` set |
 | PLY-FAIL-09 | a failure that arrives after the user zapped away | A router vectors; H PLY-H09 | `end-file{error}` for entry 1 arriving after a zap to entry 2: `entryOwners[1]` names the **right** channel in the toast and marks the right row in `failedAt`; `start-file` for entry 2 has already cleared `lastEndFile` |
@@ -329,7 +329,7 @@ unless stated.
 | PO-1 | `--idle=once`, gated on probe PA-0(a) | PLY-SEC-01 (the token is on argv), PLY-FAIL-06 (exit on clean end), PLY-FAIL-02 (exit on error end - SPIKE T7 saw real mpv exit 1 ms after an error `end-file`), PLY-FAIL-04 (a `loadfile ... replace` during playback must **not** exit mpv - PA-0(a), lane PA's half of the gate, re-proven here end to end), PLY-LIFE-01 |
 | PO-2 | accept best-effort teardown; do NOT stop on service destruction; the owner-claim check plus a documented `player stop` is the contract; PLY-WEAK-01 is the acceptance gate | PLY-WEAK-01, 02, **03**, 04, 05, PLY-HELP-06, PLY-RST-17 |
 | PO-3 | mark the channel failed silently on reattach and show it in the guide; no stale toast | PLY-WEAK-06, 07, 08, 09, PLY-RST-03, PLY-MODEL-05, PLY-SEC-12 |
-| PO-4 | keep a clean end silent, zero behaviour change | PLY-FAIL-06, PLY-FAIL-07, PLY-WEAK-09. **See section 11 item 1: the README contradicts this ruling** |
+| PO-4 | keep a clean end silent, zero behaviour change | PLY-FAIL-06, PLY-FAIL-07, PLY-WEAK-09. **See section 11 item 1: the README contradicted this ruling until 8f9447e (D-PLY-18)** |
 | PO-5 | keep `--ytdl` unreserved, add the README sentence naming the cost; the ten reserved additions land regardless | PLY-SEC-13, PLY-SEC-14 |
 | PO-6 | implement the stderr pipe for the launch window | PLY-LIFE-06, PLY-LIFE-07, PLY-FAIL-01. Specifically: a bad user `mpvArg` that kills mpv before it binds must produce **redacted text**, not a bare generic "player did not start" - verify `warnings` / the reported reason names the option |
 | PO-7 | `M2-02` means the detached player everywhere; no `M2-09` row | A read of `docs/STATUS.md`: the stale `M2-02 Multiple playlists` row is retired as superseded by M2-01, the `PLAN-M2.md` task ids `M2-02-00..05` are untouched, and no `M2-09` exists. Recorded in the pass, not a test case |
@@ -369,7 +369,7 @@ order, at `363ce9c`.
 | P1b "Switching channels reuses it." | PLY-FAIL-04, PLY-PERF-03, TC-PLAY-02 (re-run) |
 | P2 "Playback survives `omarchy restart shell`." | **PLY-RST-01** |
 | P2b "The player runs on its own and the guide reattaches to it, so a restart, a theme change or installing another plugin all leave what you are watching alone." | PLY-RST-01, PLY-RST-19, PLY-LIFE-14 |
-| P3 "A stream that fails **or ends** shows a desktop notification naming the channel" | PLY-FAIL-02 (fails: toast), PLY-FAIL-06 (ends: **silent**, per PO-4). **Contradiction, section 11 item 1** |
+| P3 "A stream that fails **or ends** shows a desktop notification naming the channel" | PLY-FAIL-02 (fails: toast), PLY-FAIL-06 (ends: **silent**, per PO-4). **Contradiction, section 11 item 1; corrected at 8f9447e, D-PLY-18** |
 | P3b "the guide marks the row until the channel plays again." | PLY-FAIL-02, PLY-FAIL-12 |
 | P4 "Stop clears the bar and guide immediately." | PLY-STOP-01, PLY-PERF-02 |
 | P4b "If mpv ignores the quit request it is terminated, and if it ignores that too it is killed, within about four seconds." | PLY-STOP-03, PLY-PERF-02. **The ladder settles at 4.5 s, section 11 item 4** |
@@ -1434,7 +1434,9 @@ pass a case against stale copy.
    PO-4 rules the opposite for the "ends" half: "Keep a clean end silent. Zero
    behavior change." Either the README sentence loses "or ends", or PO-4 is
    revisited. Until it is settled, PLY-FAIL-06 has two mutually exclusive
-   expected results. Suggested: P3 documentation, fix the README.
+   expected results. Suggested: P3 documentation, fix the README. **Filed as
+   D-PLY-18 (2026-09-25): fixed at 8f9447e the same day, shipped v0.3.0; the
+   wrong sentence had shipped in v0.2.0 and v0.2.1. See the board.**
 2. **README `Playback notes` bullet 5 overstates the `ps` guarantee.** "so
    `ps` shows nothing about what you are watching" is contradicted by ARCH-P
    section 6's own disclosed residual (`--id` on the helper's argv is a
@@ -1445,7 +1447,10 @@ pass a case against stale copy.
    the *nothing* claim is not. Suggested: P2 documentation, reword to "no
    stream URL, header or credential". (ARCH-P section 6 also names
    `--force-media-title` as part of that residual, which is stale: section
-   4.11 fixes it to the constant `IPTV`.)
+   4.11 fixes it to the constant `IPTV`.) **Filed as D-PLY-19 (2026-09-25):
+   the README half was fixed at 8f9447e and never shipped wrong; the
+   parenthetical half sat in ARCH-P section 6 for eleven days and is corrected
+   today. See the board.**
 3. **PO-2's escape hatch is not a runnable command.** The README tells the
    user to run `omarchy-iptv player stop`; verified read-only on 2026-09-14,
    `omarchy-iptv` is not on `PATH` and there is no wrapper in `/usr/bin` or
@@ -1477,14 +1482,21 @@ pass a case against stale copy.
    every stop became a silent no-op once any other launcher pushed the
    sequence ahead - including the `player stop` the README tells users to
    run). The document itself says so; this plan tests the corrected behaviour
-   at PLY-STOP-07 and flags it here so nobody reads 4.9 as current.
+   at PLY-STOP-07 and flags it here so nobody reads 4.9 as current. **Filed
+   as F-PLY-3 (2026-09-25), settled: the behaviour was fixed at 3ffabda and
+   4.9 and 4.10 now open with a pointer to section 14, which is what this
+   flag asked for. The README no longer says `player stop`; it says `pkill`
+   (PO-9), and the un-runnable spelling is D-REL-3.**
 8. **ARCH-P section 8's docs edits may not have landed.** It budgets
    inverting `QA.md` TC-PLAY-11 and rewriting TC-PLAY-08 and SEC-06 at
    `M2-02-04`. At `363ce9c` those rows still carry the pre-M2-02
    expectations, so the section 7.1 re-run will read three "failures" that are
    really stale expectations. This plan marks all three **inverted /
    rewritten**; confirm the QA.md edits land with the RC or the pass records
-   them against this file instead.
+   them against this file instead. **Filed as D-QA-19 (2026-09-25): they never
+   landed. Six QA.md rows still asserted withdrawn ruling R10 and the pre-S-03
+   argv shape eleven days later; corrected today, each citing the PLY row that
+   observed the real behaviour. See the board.**
 9. **CHANGELOG has no 0.3.0 section.** The PO's non-optional addition requires
    both weakened requirements in the release notes, and `CHANGELOG.md` at
    `363ce9c` stops at 0.2.1. PLY-WEAK-10's second half cannot pass until it
@@ -1695,7 +1707,10 @@ found by running the plan; each is edited in place above and marked
    `find_player` goes blind EARLIER than everything else, not later. The
    blocking guard is `socket_is_dead()`: on SIGKILL the IPC listener is still
    bound for 2.71-5.75 ms after the command line empties, and that window is
-   teardown-proportional (0.35 ms at ~10 MB, 113 ms at 1500 MB), while the
+   9.6-36.9 ms on a real windowed player (whether it scales with teardown size
+   is DISPUTED between two measurements and is not recorded as fact: ruling
+   CL12, carried on D-PLY-8; this sentence said "teardown-proportional" for
+   eleven days after the ruling), while the
    settle's connect lands 4.2-8.3 ms after the kill. A future lane reading the
    old sentence would "fix" the finder with `os.kill(pid,0)` or bare
    `/proc/<pid>` existence, which makes the ladder report `running:true` after

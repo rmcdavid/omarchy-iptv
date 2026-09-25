@@ -28,7 +28,7 @@ names begin with the same bracketed token, and hundreds more share one of two
 other prefixes. Two thirds of the rows open with identical text. The row is
 built to show a name, and the name's first third is the same on most rows.
 
-## The three problems, stated plainly
+## The three problems, stated plainly (not defects: a design brief's motivation)
 
 1. **A group is not reliably a narrowing step.** When there is one group, the
    column is a fifth of the card doing nothing and duplicates the All entry.

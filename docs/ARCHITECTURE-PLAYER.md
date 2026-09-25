@@ -503,6 +503,12 @@ leading-dash and typographic-quote rules), `NOTIFY_IDS.streamFailed = 74011`,
 
 ### 4.9 The stop ladder
 
+> **Amended by section 14** (F-PLY-3): a detached stop cannot observe a
+> `superseded` refusal, so the stop-settle timer probes and re-issues past
+> the recorded sequence (`Service.qml` `stopSettleTimer`; harness P10). Read
+> 4.9 with that in hand; 4.9.1 was edited in place after section 14 existed
+> and carried no such pointer, which is the risk this line retires.
+
 The UI contract is unchanged: `stop()` still clears `pendingPlayId`,
 `wantFocus`, the timers and `nowPlaying` synchronously
 (`Service.qml:345-355`) so the bar and the guide drop the channel on the
@@ -613,6 +619,11 @@ which takes the lock briefly and simply does not unlink when it cannot get it
 holds no lock of its own would lengthen the very exposure being closed.
 
 ### 4.10 Ordering: the intent sequence number
+
+> **Amended by section 14** (F-PLY-3): the sequence rule below is stated
+> without the correction that a detached stop cannot see the refusal it
+> triggers; section 14 records it and PLY-STOP-07 tests the corrected
+> behaviour.
 
 `flock` grants are not FIFO on Linux and two `execDetached` spawns are not
 guaranteed to start in issue order, so a `stop` then a `play` can execute as
@@ -818,11 +829,17 @@ Nothing channel-specific remains. The other three argv:
 (`Model.js:245-251`) - a hash or a provider-assigned id, never the URL. The URL
 is resolved from `channels.json` (0600) **by the helper itself** and travels only
 over the 0600 socket, so it never crosses a process boundary in either
-direction. Residual, disclosed rather than hidden: `--id` and
-`--force-media-title` are a per-zap record of *what* the user is watching,
-readable by other local accounts through `/proc/<pid>/cmdline` (0444, `/proc`
-mounted without `hidepid` here). That is unchanged from today and is not a
-credential; it is noted in SECURITY-REVIEW.md rather than left implied.
+direction. Residual, disclosed rather than hidden: `--id` on the helper's
+argv is a per-zap record of *what* the user is watching, and `Model.notifyArgv`
+puts the channel name on `omarchy-notification-send`'s argv on each failure;
+both are readable by other local accounts through `/proc/<pid>/cmdline` (0444,
+`/proc` mounted without `hidepid` here) for the life of those short-lived
+processes, and neither is a credential. **[corrected 2026-09-25, D-PLY-19]**
+This paragraph named `--force-media-title` as part of that residual for
+eleven days after section 4.11 fixed it to the constant `IPTV`; the launch argv
+carries `--force-media-title=IPTV` and the option is reserved, so it reveals
+nothing, and the channel title reaches the player only over IPC. The README's
+Playback notes and CHANGELOG 0.3.0 name both real residuals.
 
 **Files.** New artifacts, complete list:
 
@@ -1387,6 +1404,15 @@ option: `--vo=null` compiles no shaders, so the display lane confirms it by
 watching `~/.cache/mpv` stay empty across a containment cycle.
 
 **CL8 - the two unlocked settle call sites are locked.** See the end of 4.9.1.
+
+> **Amended 2026-09-25** (F-PLY-4): the paragraph below predates the fix by
+> two hours and was never revisited. D-PLY-11 is verified fixed at merge
+> 739c229 (the helper stand-down) with the CL5 shell-side re-apply; the board
+> row carries the live confirmation (0 divergences in 20 cold concurrent
+> bursts at d76b649) and QA-RESULTS L1/L2 the evidence, including the cost
+> this document never recorded: one extra `loadfile` on the cold concurrent
+> burst path, entry id 3 in 12 of 20 runs where the pre-fix tree read 2 in 18.
+> A correct and cheap trade, and a behaviour change, so it is written here.
 
 **D-PLY-11 is still open, and section 4.10 is not the answer to it.** The
 proposed cause was refuted and its replacement is a hypothesis, so this round
