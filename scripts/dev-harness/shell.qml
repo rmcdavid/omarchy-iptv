@@ -166,15 +166,54 @@ ShellRoot {
   //
   // URL-free by construction: a buffer, a label, channel names, a scope id
   // and a query. Nothing here ever holds a playlist URL.
-  // The result ListView is not exposed by the guide, so it is found by id
-  // through the object tree. Harness-only: nothing shipped depends on it, and
-  // if the id ever changes this returns without laying out and the number it
-  // measures is visibly wrong rather than quietly optimistic.
-  function layoutRows(g) {
-    var found = harness.findById(g, "resultList", 0)
-    if (found && typeof found.forceLayout === "function") found.forceLayout()
-    return found !== null
+  // The channel view is not exposed by the guide, so it is found by
+  // objectName through the object tree. Harness-only: nothing shipped depends
+  // on it.
+  //
+  // Takes a LIST of names and returns WHICH ONE it forced, or "" for none.
+  // It used to resolve the single literal "resultList" and return a bool, and
+  // the comment here claimed that a changed id would make the number
+  // "visibly wrong rather than quietly optimistic". That was false in two
+  // ways at once. The only caller discarded the return, so nothing was
+  // visible; and the moment the guide can present a second view, a run with
+  // that view on screen force-lays-out nothing, creates no delegates, and
+  // reports a fast, plausible number for an empty screen -- which is the
+  // quietly optimistic failure the sentence promised could not happen.
+  // A budget instrument that cannot say what it measured is not an
+  // instrument. openMs now puts the answer in its payload and a run that
+  // names the wrong view is void rather than fast.
+  function layoutView(g, names) {
+    for (var i = 0; i < names.length; i++) {
+      var found = harness.findById(g, names[i], 0)
+      if (found && typeof found.forceLayout === "function") {
+        found.forceLayout()
+        return names[i]
+      }
+    }
+    return ""
   }
+
+  // How many delegates the view actually instantiated, which is the quantity
+  // the grid work is budgeted in: on a list this is rows, on a grid it is
+  // columns x rows and it grows with the column count, so a paint time
+  // without it cannot be compared with another paint time.
+  function realisedCount(g, name) {
+    var v = harness.findById(g, name, 0)
+    if (!v || !v.contentItem || !v.contentItem.children) return -1
+    var kids = v.contentItem.children
+    var n = 0
+    for (var i = 0; i < kids.length; i++) {
+      // contentItem carries non-delegate children (highlight, header); a
+      // delegate is counted by the property every channel delegate declares.
+      if (kids[i] && kids[i].hasOwnProperty("index")) n++
+    }
+    return n
+  }
+
+  // Every objectName that can be the guide's channel view, newest first.
+  // A name that is not on this list cannot be measured, and openMs says so by
+  // reporting view:"" rather than by returning a number for it.
+  readonly property var channelViews: ["resultList"]
 
   function findById(node, wanted, depth) {
     if (!node || depth > 12) return null
@@ -521,15 +560,21 @@ ShellRoot {
       if (!g) return "{}"
       var n = times > 0 ? times : 5
       var out = []
+      var forced = ""
       for (var i = 0; i < n; i++) {
         fakeShell.hide(harness.pluginId)
         var t0 = Date.now()
         fakeShell.summon(harness.pluginId, "{}")
-        harness.layoutRows(g)
+        // The return is USED. Discarding it is what made the old instrument
+        // blind: `view` below is the only thing that says the number belongs
+        // to the screen the caller thinks it measured.
+        forced = harness.layoutView(g, harness.channelViews)
         out.push(Date.now() - t0)
       }
       return JSON.stringify({ ms: out, rows: g.currentRows.length,
-                              logoColumn: g.logoColumn, showLogos: g.showLogos })
+                              logoColumn: g.logoColumn, showLogos: g.showLogos,
+                              view: forced,
+                              realised: forced === "" ? -1 : harness.realisedCount(g, forced) })
     }
     function close(): string { fakeShell.hide(harness.pluginId); return "ok" }
     // The theme tokens the guide paints with, as THIS shell resolved them, so

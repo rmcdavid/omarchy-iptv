@@ -635,12 +635,53 @@ is "and asks run.sh to serve one, detached so a restart can be tested" \
 is "no scenario here plays a dead URL and then asserts about the player" \
    "$(qa_count 'ipc play "t:(bbc|itv|sky|dw|arte|zdf|kids|expired)' "$PS5")" "0"
 
+section "qa_openms: the open-budget number, and the payload that could not fail"
+
+# The condition that used to make this check pass silently, driven for real.
+# Before 2026-09-25 openMs resolved the literal objectName "resultList",
+# DISCARDED the result, and emitted a payload with no field naming what it had
+# forced. With a second channel view on screen it would have laid out nothing
+# and reported a fast number for an empty grid. So the old payload -- byte for
+# byte what the instrument used to print -- must be VACUOUS here, never a pass.
+OLD_PAYLOAD='{"ms":[91,88,90],"rows":1462,"logoColumn":true,"showLogos":true}'
+NEW_PAYLOAD='{"ms":[91,88,90],"rows":1462,"logoColumn":true,"showLogos":true,"view":"resultList","realised":13}'
+WRONG_VIEW='{"ms":[12,11,12],"rows":1462,"view":"channelWall","realised":0}'
+NOTHING_FORCED='{"ms":[12,11],"rows":1462,"view":"","realised":-1}'
+
+qa_openms "resultList" "$OLD_PAYLOAD" >/dev/null 2>&1
+is "the pre-2026-09-25 payload is VACUOUS, not a number" "$?" "2"
+
+qa_openms "resultList" "$NEW_PAYLOAD" >/dev/null 2>&1
+is "a payload that names the view it forced is a pass" "$?" "0"
+is "and it yields the timings and the realised delegate count" \
+   "$(qa_openms 'resultList' "$NEW_PAYLOAD")" "91,88,90 13"
+
+qa_openms "resultList" "$WRONG_VIEW" >/dev/null 2>&1
+is "a real number for the WRONG screen is a failure, not a pass" "$?" "1"
+
+qa_openms "resultList" "$NOTHING_FORCED" >/dev/null 2>&1
+is "forcing nothing is vacuous even though the ms array is populated" "$?" "2"
+
+qa_openms "resultList" 'not json' >/dev/null 2>&1
+is "unreadable output is vacuous" "$?" "2"
+
+# And the instrument itself: the two properties the predicate rests on.
+SH="$ROOT/scripts/dev-harness/shell.qml"
+is "layoutView returns WHICH view it forced, not a bool" \
+   "$(qa_count 'return names\[i\]' "$SH")" "1"
+is "and openMs USES that return rather than discarding it" \
+   "$(qa_count 'forced = harness.layoutView' "$SH")" "1"
+is "the old single-literal lookup is gone" \
+   "$(qa_count 'findById\(g, "resultList", 0\)' "$SH")" "0"
+is "the payload carries the view it measured" \
+   "$(qa_count 'view: forced' "$SH")" "1"
+
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=155
+EXPECTED=165
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

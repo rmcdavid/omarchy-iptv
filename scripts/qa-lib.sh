@@ -246,6 +246,52 @@ qa_json_normalized() {
 # examined. Status 1 when the directory is not there - A2's `find $PLUGIN_DIR
 # -newer ...` printed nothing for a directory that did not exist, and "no
 # writes inside the plugin directory" read as proven.
+# qa_openms <expected-view> <openMs-json>
+# The guide's open-budget number, or a refusal. Prints "<ms-csv> <realised>"
+# on 0; prints nothing and answers 1 or 2 otherwise.
+#
+# WHY THIS IS A PREDICATE AND NOT AN ARITHMETIC. `openMs` force-lays-out the
+# channel view before it stops the clock, because the delegates are where the
+# work is. Until 2026-09-25 it resolved the single literal objectName
+# "resultList", and its ONLY caller -- a person reading the JSON -- had no way
+# to know whether that resolution succeeded, because the return value was
+# discarded and the payload never said. The comment above it asserted the
+# opposite: that a changed id would be "visibly wrong rather than quietly
+# optimistic". With a second channel view on the way, a run with that view on
+# screen would have laid out nothing, created no delegates, and reported a
+# fast, plausible number for an empty screen. That is the shape this whole
+# file exists to stop: a measurement that cannot fail.
+#
+# So: a payload with no `view` field is VACUOUS (2), not a number -- that is
+# the old instrument's exact payload and it must never be accepted again. A
+# payload naming a DIFFERENT view than the caller expected is a failure (1),
+# because the number is real but it is not the number that was asked for.
+qa_openms() {
+  python3 -c '
+import json, sys
+want, raw = sys.argv[1], sys.argv[2]
+try:
+    d = json.loads(raw)
+except Exception:
+    raise SystemExit(2)
+if not isinstance(d, dict) or "ms" not in d:
+    raise SystemExit(2)
+# No `view` key at all is the pre-2026-09-25 instrument. It cannot say what it
+# measured, so it did not measure anything we can use.
+if "view" not in d:
+    raise SystemExit(2)
+view = str(d.get("view") or "")
+if view == "":
+    raise SystemExit(2)          # nothing was forced: no delegates, no number
+if want and view != want:
+    raise SystemExit(1)          # a real number, for the wrong screen
+ms = d.get("ms")
+if not isinstance(ms, list) or not ms:
+    raise SystemExit(2)
+print("%s %s" % (",".join(str(x) for x in ms), d.get("realised", -1)))
+' "$1" "$2" 2>/dev/null
+}
+
 qa_tree_count() {
   local dir=$1
   shift
