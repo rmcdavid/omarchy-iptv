@@ -355,8 +355,9 @@ itself unavailable rather than half working.
   remove the source
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
-- `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is
-  running, a small lock file used to guarantee only one player exists, and
+- `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket (`mpv.sock`)
+  while it is running, a small lock file (`player.lock`, one line, no
+  address) used to guarantee only one player exists, and
   two directories that exist only until you log out -- `shader-cache` for
   mpv's compiled shaders and ICC profiles, and `watch-later` for its resume
   records. Both would otherwise land in `~/.cache/mpv/` and

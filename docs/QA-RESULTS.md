@@ -7139,6 +7139,86 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## Sweep, 2026-09-25: the five section 11 findings that had no id
+
+D-REL-3 was one of ten documentation findings in `docs/QA-PLAYER.md`
+section 11, and the only one that recurred. This sweep gives the other five
+that were still prose-only an id, a board row and a truthful state. Each was
+investigated by one read-only agent from the commits and the files, then two
+refuters were told to break the state verdict. Four verdicts were unanimous;
+one was contested, and the dissent is what the row says.
+
+```
+  item  id        state                          fixed by     first tag
+  4     F-PLY-1   settled, not a defect          --           --
+  5     D-PLY-15  verified fixed                 8f9447e      v0.3.0
+  6     F-PLY-2   settled, not a defect          8f9447e      (never shipped)
+  9     D-PLY-16  verified fixed                 8f9447e      v0.3.0
+  10    D-PLY-17  fixed (fixture); open (scenarios)  396a69a  ships nowhere
+```
+
+Three of the five were fixed by the same commit, 8f9447e, twenty-four minutes
+after the plan that filed them, and the plan's section 14 item 11 says so.
+What none of them got was the annotation on their own row -- PLY-SEC-08 and
+its F1 cell still said `player.lock` was missing, PLY-WEAK-10 still said the
+release-notes half was open and pointed at the wrong item number, six 8.1
+rows still said "to add" for scenarios that have existed since 2026-09-14.
+A fix recorded in a later paragraph of the same document, and not on the row
+that raised the finding, reads as open to anyone who stops at the row.
+
+### What the investigation corrected in the findings themselves
+
+- **Item 4** never described a conflict. "About four seconds" is the SIGKILL
+  instant, 4.0 s; the 4.5 s is a ceiling on the process being gone, ruled so
+  by CL1. What the finding called "harmless" on the day it was written was
+  sitting beside a real two-second miss -- the quit rung spending its whole
+  IPC timeout outside its grace -- which was filed as D-PLY-6 and fixed at
+  e35b775. The finding looked at the right numbers and the wrong event.
+- **Item 5** was true, and then a filename grep said it was still true. The
+  README documents the lock by description, and PLY-SEC-08's own method is a
+  read of the section, which finds it. That surface premise handed to this
+  sweep was a rule-14 false negative of my own making. The README now names
+  both files, so a grep and a user's `ls` agree with the prose.
+- **Item 6** overstated the spread: "PO-3, the brief and ARCH-P" is one
+  document twice and a lane brief not in the repository. UX.md, the visual
+  authority, specified the glyph on the day the ruling was written. There
+  was never a conflict to settle, only a stale sentence, reworded eighty-five
+  seconds after the plan landed. Filed as F- rather than D-, because the
+  finding said "not a defect" and was right.
+- **Item 9** was accurate and outlived its fix by eleven days on paper. Its
+  row's "section 11 item 10" pointed at the fixtures directory, not the
+  CHANGELOG, an off-by-one that stood since the plan landed.
+- **Item 10** is two claims wearing one number. Its own last sentence scopes
+  it to section 13 item 7: the fixture directory AND six harness scenarios
+  with their pre-fix failure evidence. The directory was authored the same
+  day and is exercised for real by PLY-H17/H18. The six scenarios exist and
+  assert nothing -- zero assertions against twenty-one in H17/H18, the runner
+  prints as much, five of the six were only ever dry-run, and ruling CL7
+  deferred the conversion to "next round" with nothing tracking it. Section
+  14 item 11 closed both halves with the word "authored". One refuter
+  accepted "fixed"; the other named the misclassification exactly, and the
+  row carries both states rather than the comfortable one.
+
+### The pattern, once more
+
+Five findings, one document, one author, eleven days. Three were fixed
+within the hour and read as open for eleven days. One was settled by a
+ruling and read as open. One was half done and read as done. None of that
+was visible to `check-defect-ledger.py`, because a test-plan id is not a
+defect id. The fix for the class is not in this commit and does not exist
+yet: the checker joins `D-` and `F-` ids to the board, and section 11 items
+are joined to nothing. That is recorded here rather than solved, because the
+right shape -- whether numbered findings in a test plan should carry ids at
+birth, or be filed as `F-` rows on the day -- is a process decision.
+
+Repaired in the same change, all in `docs/QA-PLAYER.md` unless noted: the
+five "Filed as" pointers; PLY-SEC-08, F1 and PLY-WEAK-10 annotated
+`[corrected 8f9447e]`; PLY-WEAK-09's "still showing red"; the PO-3 quote at
+section 3, now the current wording; three wrong cross-references ("section
+10" for sections 11 and 13); 8.0's `stream.m3u8` for the fixture's
+`stream.ts`; six 8.1 "to add" cells; and `tests/fixtures/qa-player/README.md`,
+which said 120 s for a generator that makes 900.
+
 ## D-REL-3, 2026-09-25: filed eleven days late, after it shipped and recurred
 
 The defect is small and the record of it is the point.

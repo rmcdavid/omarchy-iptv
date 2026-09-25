@@ -94,7 +94,7 @@ discover -s tests` 247 tests OK (41 of them `tests/test_player.py`).
   pass records both counts.
 - Fixtures: `tests/fixtures/qa-player/` (section 8.0). It does **not exist at
   `363ce9c`** - it is lane PC's to author and is a precondition of the pass
-  (section 10 item 7). Nothing in this plan touches `~/.config`,
+  (section 13 item 7). Nothing in this plan touches `~/.config`,
   `/usr/share/omarchy`, `~/.cache/omarchy-iptv` or `~/.local/state/omarchy-iptv`
   except the live-shell runbook (section 9), which the lead runs on purpose,
   with the snapshot first and the byte-for-byte restore proof last.
@@ -220,8 +220,8 @@ Tested as specified, not as regressions. Detail in section 3.
 | PLY-WEAK-06 | PO-3: a failure with no shell attached is marked silently on reattach | L 9.8 step 4 | **The procedure, exactly.** 1. Play a channel; confirm `state.json` has a `session` record naming it (`jq .session`). 2. `omarchy-shell shell kill` / `pkill -f 'quickshell -n -p /usr/share/omarchy/shell'` so no shell is attached; confirm 0 quickshell, mpv still alive. 3. `kill -9 <mpv pid>` - the failure now happens with nobody listening. 4. Bring the shell back (`omarchy-launch-shell`). 5. Expect: `player probe` reports `running:false`; `deadSessionVerdict` marks that channel in `failedAt` and clears `session`; `status` shows `failedAt:{"<id>":"HH:MM"}`, `nowPlaying null`, `playing false`; the guide row carries U+F0026 and `Failed HH:MM - Space to retry`; **`omarchy-shell notifications showHistory` gains ZERO lines** - no `Stream failed` toast, at all. 6. `jq .session ~/.local/state/omarchy-iptv/state.json` is `null` and the file is still `0600` |
 | PLY-WEAK-07 | PO-3: no session record, no mark | A `tests/Model.test.js` `deadSessionVerdict` block; L 9.8 step 5 | `probe running:false` with `session` null -> `mark:false`, `write:false`, the same state object returned; no spurious `failedAt` entry, no state write, no toast. Covers a shell start after a clean stop and a first-ever start |
 | PLY-WEAK-08 | PO-3: the two arrivals race in either order | A `deadSessionVerdict` block | the probe answers in ~130 ms while `state.json` loads whenever its `FileView` does. With `stateLoaded !== true` the verdict is `pending`, with `write:false` and no mark, and the caller re-runs it from the state handler. **Deciding on an unloaded state would read the empty default, lose the mark, and could put an empty state over the user's file** - prove the file is byte-identical after a start where the probe won the race |
-| PLY-WEAK-09 | PO-3: a clean stop clears the record so no false mark follows | H PLY-H07; L 9.8 step 5 | stop, then restart the shell: `session` is null, no channel is marked, `failedAt` stays empty. Same for a clean `eof` (PO-4 path). **[inverted 2026-09-24]** `failedAt` is no longer empty by construction -- marks persist now -- so what is asserted is that the STOP introduced none. The P2 inverts with it and matters more, not less: this is the only scenario watching for a mark that outlives its truth, so the P2 is now a mark that should have aged out, or whose channel has left the playlist, still showing red |
-| PLY-WEAK-10 | both weakenings are stated to the user in plain language | A read of `README.md` and `CHANGELOG.md` | README `Playback notes` bullet 6 states both, in the same plain language as the existing limitations (present at `363ce9c`); the 0.3.0 CHANGELOG section states both under `Known limitations`. **At `363ce9c` there is no 0.3.0 section, so the release-notes half is open** (section 11 item 10). This is the PO's own non-optional addition in ARCH-P section 12 |
+| PLY-WEAK-09 | PO-3: a clean stop clears the record so no false mark follows | H PLY-H07; L 9.8 step 5 | stop, then restart the shell: `session` is null, no channel is marked, `failedAt` stays empty. Same for a clean `eof` (PO-4 path). **[inverted 2026-09-24]** `failedAt` is no longer empty by construction -- marks persist now -- so what is asserted is that the STOP introduced none. The P2 inverts with it and matters more, not less: this is the only scenario watching for a mark that outlives its truth, so the P2 is now a mark that should have aged out, or whose channel has left the playlist, still marked failed (there is no red: F-PLY-2) |
+| PLY-WEAK-10 | both weakenings are stated to the user in plain language | A read of `README.md` and `CHANGELOG.md` | README `Playback notes` bullet 6 states both, in the same plain language as the existing limitations (present at `363ce9c`); the 0.3.0 CHANGELOG section states both under `Known limitations`. **At `363ce9c` there is no 0.3.0 section, so the release-notes half is open** (section 11 item 9, not 10 as this cell said for eleven days). **[corrected 8f9447e]** the 0.3.0 section carries both under Known limitations (`CHANGELOG.md` 0.3.0, PO-2 and PO-3 sentences), shipped in v0.3.0; D-PLY-16. This is the PO's own non-optional addition in ARCH-P section 12 |
 
 #### Security and privacy (ARCH-P section 6, SECURITY-REVIEW S-03, PLAN gate G4, CLAUDE.md rules 2 and 5)
 
@@ -237,7 +237,7 @@ unless stated.
 | PLY-SEC-05 | the disclosed residual: what a command line DOES say | L 9.3 step 5 | Record, do not file. `--id t:<tvg-id>` on the helper's argv is a per-zap record of *what* is being watched, readable through `/proc/<pid>/cmdline` (0444, `/proc` mounted without `hidepid`), for the ~130 ms the helper lives. Separately, `Model.notifyArgv` puts the **channel name** on `omarchy-notification-send`'s argv on every failure. **[corrected 8f9447e]** README `Playback notes` bullet 5 no longer claims "`ps` shows nothing about what you are watching"; it now names **exactly these two** and says neither exposes credentials. So this row became a **verification of a narrowed claim**, not a contradiction: prove the two named exposures are the only ones, and that no address, credential or header value joins them. Measure: how many sweep samples catch an `--id`, how many catch the notifier, and whether the window title (which names the channel for the whole play, not for milliseconds) is the larger exposure. **The sweep must exclude the QA driver's own shell processes**, whose argv carries the needles in the grep patterns themselves |
 | PLY-SEC-06 | the sweep holds with a hand-started player present | L 9.5 step 6 then 9.3 step 4 | with the foreign `--wayland-app-id=omarchy-iptv` player of PLY-RST-11 running, our sweep is unchanged; the foreign player's own argv is the user's business and is excluded from the count by socket path, not by app-id |
 | PLY-SEC-07 | every new artifact on disk: mode and content | L 9.3 step 6 | complete list, nothing else may appear. `$XDG_RUNTIME_DIR/omarchy-iptv/` `700`; `mpv.sock` `600` (srw-------, created 0600 by mpv itself under `umask 0022`); `player.lock` `600`, contents exactly one line `{"schema": 1, "seq": N, "verb": "start\|stop\|restart", "at": <epoch>}` with no URL (**[corrected 8f9447e]** the helper's `json.dumps` default puts a space after each `:` and `,`; compare the fields, not the byte spelling); `~/.local/state/omarchy-iptv/state.json` `600` with `session` = `{id,name,at}` and no URL. Command: `find "$XDG_RUNTIME_DIR/omarchy-iptv" ~/.local/state/omarchy-iptv -exec stat -c '%a %n' {} + \| grep -vE '^(700\|600) '` returns nothing, and `grep -rlE '://\|qa-secret\|qa-token-XYZ' "$XDG_RUNTIME_DIR/omarchy-iptv"` returns nothing. **[corrected b16b479]** the list grew by two documented directories when D-PLY-7 was fixed: `$XDG_RUNTIME_DIR/omarchy-iptv/watch-later/` `700` holding resume files at `600` (the name is an MD5, the content carries no address), and `~/.local/state/omarchy-iptv/screenshots/` `700` holding screenshots at `600`. Both verified. **No `player.json`, no log file outside those, no systemd unit, no drop-in.** A `mpv.sock` left behind by a wedged stop is D-PLY-8, and is still `600`, so this row's `find` check passes either way. One artifact the player creates is **outside** this list entirely: `~/.cache/mpv/shader_*` (`600`, content-free) - D-PLY-10 |
-| PLY-SEC-08 | `player.lock` is documented | A read of `README.md` `Files it writes` | the section lists `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` but **not** `player.lock` at `363ce9c` (section 11 item 5). P3 documentation |
+| PLY-SEC-08 | `player.lock` is documented | A read of `README.md` `Files it writes` | the section lists `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` but **not** `player.lock` at `363ce9c` (section 11 item 5). P3 documentation. **[corrected 8f9447e]** the lock is described ("a small lock file used to guarantee only one player exists") from 8f9447e and named from 2026-09-25 (D-PLY-15) |
 | PLY-SEC-09 | the journal | L 9.3 step 7 | `journalctl --user -t omarchy-shell --since "$(cat $E/started-at)" \| grep omarchy-iptv \| grep -cE '://\|password=\|username=\|qa-secret\|qa-token-XYZ\|qa-ua-SENTINEL'` is `0`. This matters here because `omarchy-launch-shell` runs `systemd-cat -t omarchy-shell -- quickshell`, making the shell's stdout and stderr a persistent, group-readable stream. mpv's own stdio is `/dev/null` from before `execvp`, so **nothing of mpv's reaches the journal at all** - prove it with `journalctl --user --since ... \| grep -c 'mpv\['` = 0 |
 | PLY-SEC-10 | the shell console | L 9.3 step 7 | `qs log -p /usr/share/omarchy/shell --tail 800 \| grep -cE '://\|qa-secret\|qa-token-XYZ'` on `omarchy-iptv` lines is `0`; helper stderr reaches the console only through `console.warn(Model.redactUrls(...))` |
 | PLY-SEC-11 | the IPC `status` output | L 9.3 step 7 | `omarchy-shell io.github.rmcdavid.iptv status \| grep -cE '://\|password=\|username='` is `0`. `statusSummary()` is URL-free by construction; the additive `player:{up,pending,attached,wanted,stopping,seq,entryId}` block is booleans and ints; `failedAt` is ids and `HH:MM` |
@@ -384,7 +384,7 @@ order, at `363ce9c`.
 | P7 "Channel names are shown verbatim except that leading dashes are stripped and mpv property expansion is disabled for the window title." | PLY-SEC-18, PLY-SEC-12 (S-04 leading-dash rule in `notifyArgv`) |
 | L1 "Playlists are capped at 50,000 channels and 2,000 groups ..." | not touched by this milestone; re-run TC-RFR/TC-BRW cap rows only if the fix lane touches parsing (section 7) |
 | L2 "Downloads (playlist and EPG) must finish within 60 seconds; redirects ..." | not touched by this milestone; skip (section 7) |
-| F1 `Files it writes`: "`$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` : mpv IPC socket while playing" | PLY-SEC-07. **`player.lock` is missing from this list; PLY-SEC-08, section 11 item 5** |
+| F1 `Files it writes`: "`$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock` : mpv IPC socket while playing" | PLY-SEC-07. **`player.lock` is missing from this list; PLY-SEC-08, section 11 item 5** -- **[corrected 8f9447e]**, D-PLY-15 |
 | U1 `Uninstall` block | PLY-WEAK-05. **PO-2's contract puts `player stop` here and it is absent; section 11 item 3** |
 
 ### 1.6 Failure modes (ARCH-P section 7) -> test cases
@@ -611,8 +611,10 @@ activation file under `/usr/share/dbus-1/services/`, so `busctl` answers
 shell is down**.
 
 PO-3 rules option (a): mark the channel failed silently on reattach, using
-`state.json.session` for the name, and show it in the guide. The red row
-carries the information, and the guide is where the user goes next anyway.
+`state.json.session` for the name, and show it in the guide. The guide's
+failed marking carries the information, and the guide is where the user goes
+next anyway. (Quoted as reworded at 8f9447e; the ruling said "red row" for
+its first eighty-five seconds, F-PLY-2.)
 
 **The procedure (PLY-WEAK-06), executable step by step.** Run it on the live
 shell, from section 9.8 step 4. `$H` is the installed helper path,
@@ -660,7 +662,7 @@ U+F0026 in the trail slot at the row's own `primaryColor` with opacity 0.8 -
 **it is not a red row**. The brief and the ruling both say "red"; the
 implementation marks with a glyph and a detail line, consistent with every
 other failed-row case since TC-PLAY-05. Settle the wording before the pass
-(section 10 item 6) rather than filing a cosmetic defect against a ruling.
+(section 11 item 6) rather than filing a cosmetic defect against a ruling.
 
 The ordering half (PLY-WEAK-08) is the part most likely to be wrong and
 invisible. The probe answers in ~130 ms; `state.json` arrives whenever its
@@ -739,7 +741,7 @@ provider list for the sweep.
 #EXTINF:-1 tvg-id="qa.sentinel" group-title="QA",QA Sentinel Channel
 #EXTVLCOPT:http-user-agent=qa-ua-SENTINEL
 #EXTVLCOPT:http-referrer=http://qa-ref-SENTINEL.test/
-http://qa-user:qa-secret@127.0.0.1:8791/live/qa-token-XYZ/stream.m3u8
+http://qa-user:qa-secret@127.0.0.1:8791/live/qa-token-XYZ/stream.ts
 ```
 
 Needle set, used verbatim in every grep below:
@@ -972,12 +974,12 @@ tree itself: `qa-player-scenarios.sh run cold --apply`.
 | PLY-H08 | two services, one runtime dir: adopt, never spawn (script P8, `--instance`) | shipped | PLY-RST-04 |
 | PLY-H09 | zap, clean end and hard kill: `stop`+`start-file` raises nothing, `eof` is silent, `kill -9` with no `end-file` gives the generic failure (script P5 zap half, extend) | shipped, extend | PLY-FAIL-04, 05, 06, 08, 09, 10, PLY-SOCK-09 |
 | PLY-H10 | superseded stop: a lock sequence pushed ahead does not turn every later stop into a silent no-op (script P10) | shipped | PLY-STOP-07 |
-| PLY-H11 | **new.** restart at 0/100/300/600 ms after a zap | to add | PLY-RST-02 |
-| PLY-H12 | **new.** restart inside the 3 s first-load window on a dead channel; count notifications before and after | to add | PLY-RST-03 |
-| PLY-H13 | **new.** unlink the socket file under a live attached player; prove the connection survives, then prove the recovery path | to add | PLY-RST-06 |
-| PLY-H14 | **new.** `rm -rf` the scratch runtime dir while playing; prove respawn into a fresh 0700 dir and the `playSeq` reset | to add | PLY-RST-08 |
-| PLY-H15 | **new.** a stub mpv that never binds, and a PATH-shadowed missing mpv; plus a shell killed mid-cold-start | to add | PLY-LIFE-06, 07, PLY-RST-14 |
-| PLY-H16 | **new.** the channel id disappears from `channels.json` between shells | to add | PLY-RST-16 |
+| PLY-H11 | **new.** restart at 0/100/300/600 ms after a zap | in `scripts/qa-player-scenarios.sh`, asserting nothing (D-PLY-17) | PLY-RST-02 |
+| PLY-H12 | **new.** restart inside the 3 s first-load window on a dead channel; count notifications before and after | in `scripts/qa-player-scenarios.sh`, asserting nothing (D-PLY-17) | PLY-RST-03 |
+| PLY-H13 | **new.** unlink the socket file under a live attached player; prove the connection survives, then prove the recovery path | in `scripts/qa-player-scenarios.sh`, asserting nothing (D-PLY-17) | PLY-RST-06 |
+| PLY-H14 | **new.** `rm -rf` the scratch runtime dir while playing; prove respawn into a fresh 0700 dir and the `playSeq` reset | in `scripts/qa-player-scenarios.sh`, asserting nothing (D-PLY-17) | PLY-RST-08 |
+| PLY-H15 | **new.** a stub mpv that never binds, and a PATH-shadowed missing mpv; plus a shell killed mid-cold-start | in `scripts/qa-player-scenarios.sh`, asserting nothing (D-PLY-17) | PLY-LIFE-06, 07, PLY-RST-14 |
+| PLY-H16 | **new.** the channel id disappears from `channels.json` between shells | in `scripts/qa-player-scenarios.sh`, asserting nothing (D-PLY-17) | PLY-RST-16 |
 | PLY-H17 | **new, written and run.** a cold start that is no longer the newest intent stands down. No display: a stub mpv holds the start at the handshake `probe_client` already waits on, the channel change lands, the start is released. **11 assertions, 11/11 here, 6 fail against `a939fd7`** | in `scripts/qa-player-scenarios.sh` | PLY-LIFE-16 |
 | PLY-H18 | **new, written and run.** phase A (no display): `status` carries the player's own record, so the health tick has something to compare. Phase B (`--with-display`): the divergence converges within one health tick and `nowPlaying` is never relabelled. **Phase A 7 assertions, 7/7 here, 4 fail against `a939fd7`**; phase B is the display lane's | in `scripts/qa-player-scenarios.sh` | PLY-LIFE-17 |
 
@@ -1457,16 +1459,19 @@ pass a case against stale copy.
    ARCH-P 10's own `PLAYER-LIVE-05` says "within ~4.5 s". Harmless, but
    PLY-PERF-02's budget has to be one or the other. Suggested: P3, say "about
    four and a half seconds" or keep the budget at 4.5 s and leave the prose.
+   **Filed as F-PLY-1 (2026-09-25), settled, not a defect; see the board.**
 5. **`player.lock` is undocumented.** README `Files it writes` lists the
    socket but not the lock, although ARCH-P 6 lists it as one of exactly two
-   new artifacts. Suggested: P3, one line.
+   new artifacts. Suggested: P3, one line. **Filed as D-PLY-15 (2026-09-25),
+   fixed at 8f9447e the same day; see the board.**
 6. **"A red row" is not what the guide draws.** PO-3, the brief and ARCH-P all
    say the channel is marked with a red row. `Model.rowDetail` emits
    `Failed HH:MM` + `Space to retry` and `Guide.qml` draws U+F0026 in the
    trail slot at the row's own `primaryColor`, opacity 0.8 - consistent with
    every failed-row case since TC-PLAY-05, and not red. Settle the wording so
    PLY-WEAK-06 is not recorded as a fail against a colour nobody implemented.
-   Not a defect; a plan expectation to confirm.
+   Not a defect; a plan expectation to confirm. **Filed as F-PLY-2
+   (2026-09-25), settled at 8f9447e; see the board.**
 7. **ARCH-P sections 4.9 and 4.10 are wrong as written.** Section 14 records
    the correction (a detached stop cannot observe a `superseded` refusal, and
    every stop became a silent no-op once any other launcher pushed the
@@ -1483,10 +1488,13 @@ pass a case against stale copy.
 9. **CHANGELOG has no 0.3.0 section.** The PO's non-optional addition requires
    both weakened requirements in the release notes, and `CHANGELOG.md` at
    `363ce9c` stops at 0.2.1. PLY-WEAK-10's second half cannot pass until it
-   exists. Release-gate item, not a code defect.
+   exists. Release-gate item, not a code defect. **Filed as D-PLY-16
+   (2026-09-25), fixed at 8f9447e the same day, shipped in v0.3.0.**
 10. **`tests/fixtures/qa-player/` does not exist**, although `PLAN-M2.md`
     section 5 assigns it to lane PC alongside this document and several `A*`
-    rows depend on it. Section 10 item 7 of the questions below.
+    rows depend on it. Section 13 item 7 of the questions below. **Filed as
+    D-PLY-17 (2026-09-25): the directory exists since 396a69a; the six
+    scenarios it was to carry still assert nothing. See the board.**
 
 ## 12. Defect template
 
