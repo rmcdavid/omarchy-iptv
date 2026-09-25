@@ -7139,6 +7139,35 @@ its own new key and went red on a key it was not written for. The rule that one
 rule in two languages gets one fixture paid off on a rule nobody had applied it
 to yet.
 
+## D-LOGO-8, 2026-09-24: the feature looks broken for twenty minutes
+
+Observed while taking `preview.png` on the live install, which is the first
+time logos have ever been switched on here.
+
+Turning them on starts a fetch of 1,436 files from 63 hosts. `logoHave` -- the
+set a row must be in before it draws anything -- is populated **only** in
+`logoFetchProc.onExited`. So for the whole length of that fetch the user has
+switched a feature on, accepted the disclosure, and sees nothing change.
+
+Measured mid-fetch: 355 logo files on disk, **10 of the 10 channels visible in
+the guide had theirs cached**, and every row was still blank.
+
+The gate itself is right. It exists because pointing a QML `Image` at a file
+that is not there makes Qt log `Cannot open` once per row per scroll, which a
+dead logo host turns into journal spam. The mistake is gating on a set that
+only arrives at the end of a twenty-minute job.
+
+Three candidate fixes, none costed yet:
+
+- the helper emits names as it writes them and the service reads stdout as it
+  streams rather than at exit;
+- the service re-reads the directory on a timer while a fetch is running;
+- the row attempts the file while a fetch is IN PROGRESS, accepting the log
+  noise for that window only, and uses the strict set afterwards.
+
+Not fixed. Filed with the measurement so the next person has the number rather
+than the impression.
+
 ## 0.7.10 preflight, 2026-09-24: four defects, and two of them were claims
 
 The second release running that the preflight stopped. Thirteen raw findings,
