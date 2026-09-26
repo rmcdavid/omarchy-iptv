@@ -6514,6 +6514,42 @@ check("a narrow card still hides the column in either view",
             Model.guideSurface(Object.assign({}, base, { wall: true })).showColumn]
   })(), [false, false])
 
+// ---- M2-13 preflight: the footer must describe the keys that EXIST ----
+//
+// The 0.8.0 preflight blocked on this: the wall's footer promised "Up/Down
+// row, Left/Right move" while `handleSearchKey` routed the arrows itself,
+// bypassing the wall branch in onMoveRequested -- so in the mode the guide
+// OPENS in, Up/Down moved one tile and Left/Right silently changed a group
+// facet whose column the wall hides. Nothing tested it because the footer and
+// the handler are joined by a name, not by a call.
+//
+// A node test cannot press a key into QML, so this asserts the join the only
+// way it can from here: the four arrow handlers in handleSearchKey must each
+// branch on wallView, and the branch must call the wall's mover for the
+// vertical pair and the flat mover for the horizontal one. It is an inventory
+// over the shipping file, and it goes red if either half is removed.
+checkCall("the search-mode arrows branch on the view, as the footer claims", function () {
+  const body = guideSource.slice(guideSource.indexOf("function handleSearchKey"))
+  const seg = body.slice(0, body.indexOf("\n  }"))
+  return ["Down", "Up", "Right", "Left"].map(function (k) {
+    const i = seg.indexOf("Qt.Key_" + k + ")")
+    if (i < 0) return k + ": no handler"
+    // Bounded at the NEXT arm, not by a character count. A fixed window bled
+    // into the following handler, so reverting one arm still found
+    // `wallView` in its neighbour and the mutation survived. Caught by
+    // running the mutation rather than by trusting the assertion.
+    const rest = seg.slice(i + 1)
+    const nextArm = rest.indexOf("event.key === Qt.Key_")
+    const arm = nextArm < 0 ? rest : rest.slice(0, nextArm)
+    if (arm.indexOf("root.wallView") < 0) return k + ": does not branch on the view"
+    if (k === "Down" || k === "Up") {
+      return arm.indexOf("moveWallCursorBy") >= 0 ? k + ": wall row" : k + ": wrong wall mover"
+    }
+    return arm.indexOf("moveCursorBy") >= 0 && arm.indexOf("moveScopeBy") >= 0
+      ? k + ": wall tile, list scope" : k + ": wrong wall mover"
+  })
+}, ["Down: wall row", "Up: wall row", "Right: wall tile, list scope", "Left: wall tile, list scope"])
+
 // ---- M2-13: the toggle key ----
 check("the footer names the view the key goes TO, not the one you are in",
   (function () {

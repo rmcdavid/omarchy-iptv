@@ -17,7 +17,9 @@ version lives in `manifest.json`.
   is useful before you have turned logos on at all — and on playlists where
   most channels have none. The group column is hidden on the wall, which is
   what makes room for tiles big enough to read; to change group, flip back to
-  the list. The guide always opens in the list.
+  the list. The guide remembers which of the two you were in until the shell
+  restarts, and starts in the list until you first press the key, so nothing
+  changes for you unless you ask for it.
 
 - **You can get the logo disk space back.** Turning channel logos off has
   always stopped the downloading and hidden the pictures, but the files stayed

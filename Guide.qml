@@ -1016,7 +1016,11 @@ Item {
 
   // A vertical step on the wall. Separate from moveCursorBy because the unit
   // is a ROW, not a place in the sequence, and Model.wallStep owns the edges.
-  // M2-13. In memory for v1, deliberately. A fourth OWNED_SETTINGS key would
+  // M2-13. In memory for v1, deliberately -- and "in memory" means the SHELL
+  // SESSION, not the open: manifest keepLoaded is true, so this item survives
+  // every close and the view the user chose is still set when they summon the
+  // guide again. That is the intended behaviour and the CHANGELOG said the
+  // opposite until a preflight caught it. A fourth OWNED_SETTINGS key would
   // put a presentation toggle through the barConfig write-behind path, and
   // ownedEntryPatch emits EVERY owned key on every write -- which is
   // D-LOGO-2's fix and is cheap only because there are three -- so flipping
@@ -1465,10 +1469,28 @@ Item {
   function handleSearchKey(event) {
     if (event.key === Qt.Key_Escape) { root.handleEscape(); return true }
     if (Util.editsFilter(event, root.query)) { root.setQuery(Util.editedFilter(event, root.query)); return true }
-    if (event.key === Qt.Key_Down) { root.moveCursorBy(1, true); return true }
-    if (event.key === Qt.Key_Up) { root.moveCursorBy(-1, true); return true }
-    if (event.key === Qt.Key_Right) { root.moveScopeBy(1); return true }
-    if (event.key === Qt.Key_Left) { root.moveScopeBy(-1); return true }
+    // M2-13. Search mode routes the arrows ITSELF rather than through
+    // PanelKeyCatcher's onMoveRequested, so the wall branch there does not
+    // reach here and this has to make the same choice. Without it the guide
+    // OPENS in a mode where Up/Down moved one tile instead of one row and
+    // Left/Right changed a group facet whose column the wall has hidden --
+    // an invisible scope change, under a footer that said "move".
+    if (event.key === Qt.Key_Down) {
+      if (root.wallView) root.moveWallCursorBy(1); else root.moveCursorBy(1, true)
+      return true
+    }
+    if (event.key === Qt.Key_Up) {
+      if (root.wallView) root.moveWallCursorBy(-1); else root.moveCursorBy(-1, true)
+      return true
+    }
+    if (event.key === Qt.Key_Right) {
+      if (root.wallView) root.moveCursorBy(1, true); else root.moveScopeBy(1)
+      return true
+    }
+    if (event.key === Qt.Key_Left) {
+      if (root.wallView) root.moveCursorBy(-1, true); else root.moveScopeBy(-1)
+      return true
+    }
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.activate(false); return true }
     if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { root.switchMode(); return true }
     if (root.handleSharedKey(event)) return true
@@ -2875,8 +2897,18 @@ Item {
                 // where one cell row is 25 delegates at 106 ms. Written as the
                 // tile height so it cannot be read as the list's multiple.
                 cacheBuffer: root.wallGeom.plateHeight
+                // The same one-liner the list carries. scrollToCursor returns
+                // early while the view has no height, and on a reopen that is
+                // always true when it is called: the layer surface is mapped
+                // after open() returns. Without this the wall reopens with the
+                // cursor off screen.
+                onHeightChanged: root.scrollToCursor()
                 Accessible.role: Accessible.List
                 Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
+                // Both views exist at all times and carry the SAME role and
+                // the SAME name, so without this a reader is offered two
+                // identical channel lists and the hidden one is indexed.
+                Accessible.ignored: !visible
 
                 delegate: Item {
                   id: tile
@@ -2885,6 +2917,16 @@ Item {
                   readonly property string channelId: tile.channel ? Model.channelId(tile.channel) : ""
                   readonly property string name: tile.channel ? String(tile.channel.name || "") : ""
                   readonly property bool current: tile.index === root.cursorIndex
+                  // The four facts a ROW carries that a picture cannot. The
+                  // wall dropped all of them in its first build, including the
+                  // persistent failed mark, which is 0.7.10's headline -- a
+                  // channel the guide knows is dead looked identical to a live
+                  // one. Resolved exactly as the row resolves them.
+                  readonly property bool favorite: tile.channelId !== "" && root.favoriteSet[tile.channelId] === true
+                  readonly property bool playing: tile.channelId !== "" && tile.channelId === root.playingId
+                  readonly property string chno: tile.channel && typeof tile.channel.chnoLabel === "string" ? tile.channel.chnoLabel : ""
+                  readonly property string failedAt: tile.channelId !== ""
+                    ? Model.failedWhen(root.failedMap[tile.channelId], root.nowSec) : ""
 
                   width: root.wallGeom.cellWidth
                   height: root.wallGeom.cellHeight
@@ -2900,6 +2942,35 @@ Item {
                     // selection and not a second opinion about it.
                     borderSpec: tile.current ? root.selectedBorderSpec : root.noBorderSpec
                     color: tile.current ? root.selectedBackground : root.tilePlate
+
+                    // The row's decorations, in the plate's corners so they
+                    // never compete with the caption for width. Same glyphs
+                    // and same meanings as the row (UX 5.5); a wall that
+                    // showed none of them would make a dead channel and a
+                    // favourite look like any other picture.
+                    Text {
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      anchors.margins: Style.space(4)
+                      text: (tile.playing ? Model.GLYPHS.play : "") + (tile.favorite ? Model.GLYPHS.star : "")
+                      visible: text !== ""
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                      Accessible.ignored: true
+                    }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      anchors.margins: Style.space(4)
+                      text: tile.failedAt !== "" ? Model.GLYPHS.alert : ""
+                      visible: text !== ""
+                      color: root.foreground
+                      opacity: 0.8
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                      Accessible.ignored: true
+                    }
 
                     // The cursor MARK, per the PO ruling of 2026-09-21: every
                     // list with a cursor carries one, and none of them inks
@@ -2998,8 +3069,14 @@ Item {
                   }
 
                   Accessible.role: Accessible.ListItem
+                  // The row's own composer, with the row's own arguments. The
+                  // first build passed only the name, so a reader on the wall
+                  // was told strictly less than the same channel told it in
+                  // the list -- and never that the channel had failed.
                   Accessible.name: Model.rowAccessibleName({
-                    name: tile.name, rowIndex: tile.index, rowCount: root.rowCount })
+                    name: tile.name, chno: tile.chno, favorite: tile.favorite,
+                    playing: tile.playing, failedAt: tile.failedAt,
+                    rowIndex: tile.index, rowCount: root.rowCount })
                 }
               }
 
@@ -3023,6 +3100,7 @@ Item {
                 cacheBuffer: root.rowHeight * 4
                 Accessible.role: Accessible.List
                 Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
+                Accessible.ignored: !visible
                 onHeightChanged: root.scrollToCursor()
 
                 delegate: BorderSurface {
