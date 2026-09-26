@@ -21,16 +21,33 @@ told, then the reason.
 
 1. **Hiding removes a group from browsing. It never removes something the
    user chose by hand.** Hidden groups leave All, the GROUPS section, search
-   from All, saved searches, the wall and the zap ring's All. A starred
+   from All, saved searches and the wall. A starred
    channel, a recent, and a channel reached by its number still work and
    still show, because each of those is a thing the user did on purpose.
    Channel numbers do not shift: they come from the playlist's `tvg-chno`
    (M2-03), not from position.
+   Two corrections from the 0.9.0 preflight. First, this said "the zap
+   ring's All", which names a path that does not exist: `launchScope`
+   resolves every non-Favourites launch to the channel's own group, so the
+   ring is never All and hiding changes nothing about it. Second, the
+   sentence about numbers was a statement of intent, not of fact -- All
+   stopped holding those channels and the jump landed nowhere, naming and
+   then playing a channel the user had not asked for. `Model.numberJumpScope`
+   sends the jump to the group's own scope, which is what decision 2
+   already licenses, and a node check calls it.
 2. **A hidden group is moved, not lost.** The column gains a HIDDEN section
    under GROUPS listing every hidden group that exists in the current
    source, dimmed. Selecting one shows its channels (the user asked for it by
    name), and the same key unhides it there. A user can always see what they
    hid and get it back with the keys they already know.
+   **On the channel wall there is no column**, which the 0.9.0 preflight
+   found: hiding works there, and the notice saying where the group went
+   would have named a surface the wall does not draw and a key (`h`/`l`)
+   that moves the cursor there rather than the scope. So on the wall the
+   notice names `Ctrl+G`, the key back to the view that has the column.
+   Refusing `x` on the wall was the alternative and is worse: the wall is a
+   full browsing view, and a key that works in one view and not its twin is
+   the kind of thing this project files defects about.
 3. **The key is `x`, extended.** UX 3.1 already has `x` meaning "remove the
    cursor row from THIS list": a recent in Recent, a star in Favorites, no-op
    elsewhere. The no-op becomes "hide the cursor row's group" in All and in a

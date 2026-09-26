@@ -8951,3 +8951,75 @@ Gate at the end: 1642 node, 647 python, 68 qml, validate clean.
 
 Defects: D-TRK-1 (P2, fixed), D-PLY-20 (P4, fixed), F-M3-1 (P3, open).
 
+## 0.9.0 preflight, 2026-09-26: eight lenses, two refuters, one critic
+
+Run before the cut, on `dev` at f88910f, as a workflow: eight probe agents
+(README against code, CHANGELOG against code, hidden-group seams, picker
+seams, rule-5 sinks, the helper, release mechanics, dev docs and visual
+rules), then two independent refuters per finding on different lenses (is it
+REAL; does it MATTER for the shipped artifact), then a completeness critic
+over the whole diff asking what the eight had missed. 107 agents, read-only:
+no edits, no harness, no display.
+
+49 raw findings, 39 survived both refuters, 10 refuted. The critic added 5
+the probes had missed, including two of the three most serious. Of the 39,
+four were the version bump not yet being done (expected, not defects) and
+sixteen were minors. **Thirteen became filed defects. Every single one was a
+seam -- two pieces each correct alone -- which is the same shape as all four
+0.8.0 blockers.**
+
+| Filed | What the lens actually did |
+|---|---|
+| D-CHNO-3 (P1) | Called `buildChnoIndex` and `channelsForScope` on one state and compared the answers, then read `applyNumberResolution`, `setScope` and `activate` at their line numbers to follow the consequence to Enter |
+| D-SAVE-3 (P2) | Called `savedSearchFooter` and `channelsForScope` on the same state, then ran both against `65978e4:Model.js` to prove it a regression rather than an old bug |
+| D-TRK-2 (P2) | Grepped every `nowPlaying` assignment in Service.qml (thirteen sites), then called `trackPanelMessage("idle")` to see what the panel would say |
+| D-TRK-3, D-TRK-4, D-HIDE-1, D-PLY-21 | Read the QML at the cited lines and called the Model functions that feed them |
+| D-TRK-5 | Reasoned from this repository's OWN comment about `pause` four lines above the loadfile, which says mpv keeps it across a file change; then the fix was measured on a real player |
+| D-PLY-22 | Ran `helper.main` with a superscript two and read the exit code, the payload and stderr |
+| D-REL-4, F-M3-2 | Read `release.py` and `check.sh` and compared the floors against the counts the gate prints |
+| F-M3-3 | Compared the shipped comment against mpv's documentation of which track-list fields come from the file |
+| F-M3-4 | `git log -S` on the CLAUDE.md sentence, against the two decisions-log rows that contradict it |
+
+### What the preflight did NOT catch, and what did
+
+Two repairs were themselves wrong, and the live scenario caught both:
+
+1. The first fix for D-TRK-2 re-asked on `nowPlaying`, which is assigned
+   before the helper runs, so the panel reported the OLD channel's selection
+   as the new one's. The scenario's P3 went red. Moved to the play reply.
+2. The first two drafts of the scenario's own P section were VACUOUS: they
+   changed channel with `zap`, and the ring is the playing channel's own
+   group, which held one member, so no `loadfile` happened and "the tracks
+   did not change" passed for a reason with nothing to do with the test. The
+   third draft names the channel id. **A check that passes because nothing
+   happened is the failure mode rule 11 exists for, and it took two goes to
+   see it here.**
+
+### Verification of the repairs
+
+| | Before | After |
+|---|---|---|
+| node checks | 1642 | 1646 |
+| python tests | 647 | 656 |
+| `m3-scenario.sh` | 30 checks | 37 checks, 37/37 on this tree |
+| `m3-scenario.sh --baseline f88910f` | -- | 34 passed, 5 failed (P2b, P2c, P3 and two setups: the defects) |
+
+Seven node checks and four python tests were added, each run against the
+code that shipped the defect: `numberJumpScope` forced to All (1 red),
+`savedSearchFooter` unfiltered (1), `hideNotice` ignoring the wall (1),
+`parseTracks` scrubbing only `title` (1), no `aid`/`sid` reset (player 1,
+mpv 3), `isdigit` without `isascii` (1), `lang`/`codec` unredacted (1). The
+`aid`/`sid` reset is also pinned in the two `apply_channel` ordering tests,
+which assert it lands before the `loadfile`.
+
+Gate at the end: 1646 node, 656 python, 68 qml, a11y 34, validate clean,
+`release.py check` clean.
+
+### The one thing not fixed
+
+F-M3-4 is a contradiction between CLAUDE.md and two product-owner decisions
+about whether `main` may move while a marketplace verification request is
+open. It blocks the push, not the build, and CLAUDE.md's own rule is that a
+conflict is raised as a numbered decision request rather than resolved by
+whoever noticed it. Raised.
+

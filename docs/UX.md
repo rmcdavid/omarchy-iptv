@@ -293,11 +293,25 @@ selected entry is Recent, Favorites, or All.**
 ### 2.8 Hidden groups (M3-01)
 
 A group the user hides leaves browsing and nothing else. Gone from: All, the
-GROUPS section, search from All, saved searches, the channel wall, the zap
-ring's All. Untouched: a starred channel, a recent, a channel reached by its
-number, because each of those is a thing the user did on purpose
-(PLAN-M3 decision 1). Channel numbers do not shift, because they come from
-the playlist's `tvg-chno` and not from position (M2-03).
+GROUPS section, search from All, saved searches, the channel wall. Untouched:
+a starred channel, a recent, a channel reached by its number, because each of
+those is a thing the user did on purpose (PLAN-M3 decision 1). Channel
+numbers do not shift, because they come from the playlist's `tvg-chno` and
+not from position (M2-03).
+
+The **zap ring is not listed either way**, and that is not an omission. The
+ring is never "All": `launchScope` resolves every launch that is not
+Favourites to the playing channel's OWN group, and `zapRing` reads that
+group's scope, which returns the group whole whether it is hidden or not. So
+hiding the group of the channel you are watching does not change what the
+wheel does, which is right -- you are watching it. An earlier draft of this
+paragraph and of PLAN-M3 decision 1 both said "the zap ring's All", naming a
+code path that does not exist; the 0.9.0 preflight caught it in both.
+
+A number typed in the guide reaches a hidden group's channel by jumping to
+that group's scope rather than to All (`Model.numberJumpScope`). Before that
+the jump landed nowhere: the cursor did not move, the footer named whatever
+row it had been reset onto, and Enter played THAT.
 
 The group is moved, not lost: it appears under a HIDDEN header at the bottom
 of the column, dimmed to the caption rung, and `h`/`l` reach it like any
@@ -320,12 +334,25 @@ Subtitles an `Off` row first. The selected track carries the check glyph
 title, else language name, else `Track N`; a caption at the right carries
 what the label dropped -- language when a title won, codec, `forced`,
 `external`. `j`/`k` step over the headers and wrap; the cursor opens on the
-selected audio track. Enter selects. Text on the cursor row is the plain
-foreground on the selection fill, as on the channel rows (5.4).
+selected audio track and is scrolled into view, because the rows scroll --
+a stream with eight audio tracks and ten subtitles is ordinary on the rows
+this feature exists for, and a fixed column clipped everything past about
+twelve of them while the cursor walked on into the clipped ones. Enter
+selects. Text on the cursor row is the plain foreground on the selection
+fill, as on the channel rows (5.4). The header above does not change: the
+picker is over the list, so the query line and the scope label stay exactly
+where they were.
 
 Every row is what the player answered, never what was asked: the helper
 selects first and then lists, so the panel after Enter shows what mpv did
-(PLAN-M3 decision 5). While the question is out the one line under the
+(PLAN-M3 decision 5). A channel change under an open picker is the same
+rule one level up: the panel asks again about the new channel rather than
+going blank, and it asks on the play REPLY, because `nowPlaying` changes
+before the helper has loaded anything and asking sooner reports the old
+channel's selection as the new one's. The selection itself does not follow
+the channel -- the helper resets `aid` and `sid` beside the pause reset,
+since mpv keeps all three across a loadfile and a track number means
+something different on every stream. While the question is out the one line under the
 title reads `Asking the player…`; a player that does not answer reads `The
 player did not answer`; with nothing playing the key says `Nothing is
 playing` in the footer and opens nothing. Nothing is remembered across
