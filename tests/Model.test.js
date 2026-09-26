@@ -3026,10 +3026,6 @@ checkCall("D-RUNG-14: every 10 px caption, with its rung and its weight, by inve
       return (pick(/^\s*opacity:/) || "opacity: 1") + " | " + (pick(/^\s*font\.bold:/) || "regular")
     })
 }, [
-  // M3-02: the track picker's detail column, on the same rung and weight as
-  // the group column's count. It sits on the same fill, under the same
-  // cursor, at the same size, and it is drawn before the header in the file.
-  "opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard | font.bold: true",
   "opacity: 0.52 | regular",                                 // header scope label
   // The only site at the CAPTION rung that lands on a selection fill. That
   // qualifier is load-bearing and an earlier version of this comment left it
@@ -3045,7 +3041,12 @@ checkCall("D-RUNG-14: every 10 px caption, with its rung and its weight, by inve
   "opacity: root.captionAlphaProse | regular",               // Xtream prose, left regular
   "opacity: root.captionAlphaProse | regular",               // first-run terminal caption, left regular
   "opacity: root.captionAlphaOnCard | font.bold: true",      // footer status line
-  "opacity: 1 | font.bold: true"                             // footer hints (dimmed via verbColor, not opacity)
+  "opacity: 1 | font.bold: true",  // footer hints (dimmed via verbColor, not opacity)
+  // M3-02: the track picker's detail column, on the same rung and weight as
+  // the group column's count. It sits on the same fill, under the same
+  // cursor, at the same size. LAST because the panel is the last child of
+  // the card, which is what makes it paint over the list (D-TRK-1).
+  "opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard | font.bold: true"
 ])
 checkCall("PO ruling 2026-09-21: the CURSOR MARKS, by inventory -- every list with a cursor has one, and none of them inks", function () {
   // The mark is the whole reason the cursor row's text can stay at the plain

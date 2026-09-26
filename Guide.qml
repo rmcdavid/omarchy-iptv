@@ -2574,160 +2574,6 @@ Item {
           onConfirmed: root.confirmKind === "logos" ? root.confirmLogos() : root.confirmRemove()
         }
 
-        // M3-02: the audio and subtitle picker (UX 2.9). A panel over the
-        // list rather than a screen: the list stays where it was under the
-        // scrim, and Esc, `t` or the scrim returns to it. Text on the cursor
-        // row is the plain foreground on the selection fill, as on the
-        // channel rows (UX 5.4: no accent on the cursor); the header rung
-        // and the caption rung are the column's.
-        Item {
-          id: trackPanel
-          anchors.fill: parent
-          visible: root.inTracks
-          z: 10
-          Accessible.ignored: !visible
-
-          Rectangle {
-            anchors.fill: parent
-            color: root.scrim
-            MouseArea { anchors.fill: parent; onClicked: root.closeTracks() }
-          }
-
-          BorderSurface {
-            id: trackCard
-            anchors.centerIn: parent
-            width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
-            height: Math.min(parent.height - root.contentMargin * 2, trackColumn.implicitHeight + root.contentMargin * 2)
-            radius: root.cornerRadius
-            color: root.background
-            borderSpec: root.borderSpec
-            padding: root.contentMargin
-            clip: true
-            Accessible.role: Accessible.Dialog
-            Accessible.name: root.copy.tracksTitle
-            MouseArea { anchors.fill: parent; onClicked: {} }
-
-            Column {
-              id: trackColumn
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.top: parent.top
-              anchors.margins: root.contentMargin
-              spacing: Style.space(4)
-
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width
-                text: root.copy.tracksTitle
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-                elide: Text.ElideRight
-              }
-
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width
-                visible: root.trackMessage !== ""
-                text: root.trackMessage
-                color: root.foreground
-                opacity: root.captionAlphaOnCard
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
-              }
-
-              Repeater {
-                model: root.trackRows
-                delegate: Item {
-                  id: trackRow
-                  required property int index
-                  required property var modelData
-                  readonly property bool isHeader: modelData.kind === "header"
-                  readonly property bool choosable: modelData.kind === "track"
-                  readonly property bool current: choosable && index === root.trackCursor
-                  width: trackColumn.width
-                  height: isHeader ? root.groupEntryHeight + Style.space(6) : root.groupEntryHeight
-                  Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
-                  Accessible.name: Model.trackAccessibleName(root.trackRows, index)
-                  Accessible.selected: current
-
-                  PanelSectionHeader {
-                    visible: trackRow.isHeader
-                    anchors.left: parent.left
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
-                    text: trackRow.modelData.label
-                    foreground: root.foreground
-                    color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
-                    fontFamily: root.fontFamily
-                  }
-
-                  Rectangle {
-                    visible: !trackRow.isHeader
-                    anchors.fill: parent
-                    radius: root.cornerRadius
-                    color: trackRow.current ? root.selectedBackground : "transparent"
-
-                    Text {
-                      id: trackMark
-                      textFormat: Text.PlainText
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.space(10)
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: Style.space(16)
-                      text: trackRow.modelData.selected ? Model.GLYPHS.check : ""
-                      color: root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                    }
-
-                    Text {
-                      textFormat: Text.PlainText
-                      anchors.left: trackMark.right
-                      anchors.right: trackDetail.left
-                      anchors.leftMargin: Style.space(6)
-                      anchors.rightMargin: Style.space(6)
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: trackRow.modelData.label
-                      color: root.foreground
-                      opacity: trackRow.choosable ? 1 : root.captionAlphaOnCard
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                      elide: Text.ElideRight
-                    }
-
-                    Text {
-                      id: trackDetail
-                      textFormat: Text.PlainText
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.space(10)
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: trackRow.modelData.detail
-                      color: root.foreground
-                      opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard
-                      font.bold: true
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      horizontalAlignment: Text.AlignRight
-                    }
-
-                    MouseArea {
-                      anchors.fill: parent
-                      enabled: trackRow.choosable
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: {
-                        root.guide = Model.withTrackCursor(root.guide, trackRow.index)
-                        root.selectTrackAt(trackRow.index)
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
       }
 
       Column {
@@ -4666,6 +4512,167 @@ Item {
           }
         }
       }
+
+      // M3-02: the audio and subtitle picker (UX 2.9). A panel over the
+      // list rather than a screen: the list stays where it was under the
+      // scrim, and Esc, `t` or the scrim returns to it. It is the LAST
+      // child of the card so it paints over `layout`; a first draft put it
+      // beside the key catcher, where the list, a later sibling, painted
+      // over it -- seen on a real screen in the first live run, not by any
+      // gate, which is exactly the kind of thing rule 14 says a gate cannot
+      // see. Text on the cursor
+      // row is the plain foreground on the selection fill, as on the
+      // channel rows (UX 5.4: no accent on the cursor); the header rung
+      // and the caption rung are the column's.
+      Item {
+        id: trackPanel
+        anchors.fill: parent
+        visible: root.inTracks
+        z: 10
+        Accessible.ignored: !visible
+
+        Rectangle {
+          anchors.fill: parent
+          color: root.scrim
+          MouseArea { anchors.fill: parent; onClicked: root.closeTracks() }
+        }
+
+        BorderSurface {
+          id: trackCard
+          anchors.centerIn: parent
+          width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
+          height: Math.min(parent.height - root.contentMargin * 2, trackColumn.implicitHeight + root.contentMargin * 2)
+          radius: root.cornerRadius
+          color: root.background
+          borderSpec: root.borderSpec
+          padding: root.contentMargin
+          clip: true
+          Accessible.role: Accessible.Dialog
+          Accessible.name: root.copy.tracksTitle
+          MouseArea { anchors.fill: parent; onClicked: {} }
+
+          Column {
+            id: trackColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: root.contentMargin
+            spacing: Style.space(4)
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.copy.tracksTitle
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              elide: Text.ElideRight
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              visible: root.trackMessage !== ""
+              text: root.trackMessage
+              color: root.foreground
+              opacity: root.captionAlphaOnCard
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+
+            Repeater {
+              model: root.trackRows
+              delegate: Item {
+                id: trackRow
+                required property int index
+                required property var modelData
+                readonly property bool isHeader: modelData.kind === "header"
+                readonly property bool choosable: modelData.kind === "track"
+                readonly property bool current: choosable && index === root.trackCursor
+                width: trackColumn.width
+                height: isHeader ? root.groupEntryHeight + Style.space(6) : root.groupEntryHeight
+                Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
+                Accessible.name: Model.trackAccessibleName(root.trackRows, index)
+                Accessible.selected: current
+
+                PanelSectionHeader {
+                  visible: trackRow.isHeader
+                  anchors.left: parent.left
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
+                  text: trackRow.modelData.label
+                  foreground: root.foreground
+                  color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
+                  fontFamily: root.fontFamily
+                }
+
+                Rectangle {
+                  visible: !trackRow.isHeader
+                  anchors.fill: parent
+                  radius: root.cornerRadius
+                  color: trackRow.current ? root.selectedBackground : "transparent"
+
+                  Text {
+                    id: trackMark
+                    textFormat: Text.PlainText
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(16)
+                    text: trackRow.modelData.selected ? Model.GLYPHS.check : ""
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    anchors.left: trackMark.right
+                    anchors.right: trackDetail.left
+                    anchors.leftMargin: Style.space(6)
+                    anchors.rightMargin: Style.space(6)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: trackRow.modelData.label
+                    color: root.foreground
+                    opacity: trackRow.choosable ? 1 : root.captionAlphaOnCard
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    id: trackDetail
+                    textFormat: Text.PlainText
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: trackRow.modelData.detail
+                    color: root.foreground
+                    opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard
+                    font.bold: true
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    horizontalAlignment: Text.AlignRight
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    enabled: trackRow.choosable
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                      root.guide = Model.withTrackCursor(root.guide, trackRow.index)
+                      root.selectTrackAt(trackRow.index)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
     }
   }
 }
