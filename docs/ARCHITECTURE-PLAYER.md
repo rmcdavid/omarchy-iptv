@@ -242,7 +242,17 @@ player restart --socket S --cache-dir C --id ID --seq N [--scope] [--since]
                [--mpv-arg TOKEN]... [--from term]
 player probe   --socket S [--owner-pid PID] [--ipc-timeout 2.0]
 player orphan-check --socket S --owner-pid PID [--grace 6.0]
+player tracks  --socket S [--audio ID|no] [--sub ID|no] [--ipc-timeout 2.0]
 ```
+
+`player tracks` (M3-02) lists mpv's `track-list` and, given a selection,
+sets `aid` / `sid` FIRST and lists after, so one reply carries the player's
+answer to the request (PLAN-M3 decision 5). The list is a sink (rule 5, dev
+branch): `external-filename` is a path or URL and `title` is whoever muxed
+the stream, so the reply is a whitelist of fields -- `id`, `type`,
+`selected`, `lang`, `title`, `codec`, `default`, `forced`, `external` -- with
+`title` through `redact_urls`, and `external-filename` never emitted.
+Side-effect-free like `pause`: no player, no spawn, `running: false`.
 
 User `mpvArgs` tokens travel as **repeated `--mpv-arg TOKEN`**
 (`action="append"`), never as a positional list - that sidesteps argparse

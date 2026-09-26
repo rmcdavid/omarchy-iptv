@@ -8905,3 +8905,49 @@ run of the same one.
 
 Version strings carry no credential and no path, so the new field adds nothing
 to the redaction surface.
+
+## M3 live pass 2026-09-26: hidden groups (M3-01) and the track picker (M3-02)
+
+Lead-run, on `dev` at 5c37177 plus the paint-order fix (D-TRK-1), through
+`scripts/dev-harness/m3-scenario.sh` against a REAL mpv 0.41 playing a
+generated 90 s file with two audio tracks (eng, titled "English
+commentary"; spa) and one srt subtitle, served from 127.0.0.1:8765 by the
+harness. No provider stream, no network, no URL printed.
+
+| Run | Invocation | Result |
+|---|---|---|
+| 1 | foreground, `--shots` | 30 passed, 0 failed. The screenshot showed the picker painted UNDER the list rows: D-TRK-1, fixed before run 2 |
+| 2 | backgrounded by the tool harness after a gate run, `--shots` | **17 passed, 14 failed, which fourteen unknown** (F-M3-1). The keystrokes `tjt` were found in the foreground application's input box afterwards |
+| 3 | foreground, no shots | 30 passed, 0 failed |
+| 4 | foreground, `--shots` | 30 passed, 0 failed; `m3-tracks.png` shows the list covered |
+| baseline | `--baseline v0.8.0` | 7 passed, 23 failed. The seven assert an absence and hold on both trees: H1, H2c, H5a, H5b, H6b, T5a, T5d |
+
+What the thirty checks observed, in the order the scenario runs them:
+the column lists three groups and nothing hidden; `x` on a row in Religious
+moves the group under HIDDEN, All 4 -> 2, the footer says `Hid Religious ·
+2 channels · under HIDDEN in the column`, and the scope stays on the group
+with its two rows; All is two rows; a search for `faith` from All finds
+nothing; `state.json` carries `["Religious"]`; the hidden group is still a
+scope with its rows; `x` there brings it back and says `Showing Religious`;
+a real `x` through PanelKeyCatcher hides, a second real `x` unhides. Then
+`player tracks` against the real player lists `audio1*, audio2, sub1` with
+the title and no `external-filename` field; `t` opens the picker on
+exactly those rows with the cursor on the selected audio track, named
+`English commentary, English, aac, audio, selected, 1 of 4`; `j` then Enter
+switches to Spanish and the panel shows `audio2*` -- and so does the
+player, asked separately; the cursor stays on what was chosen; two more
+`j` step past Off to the subtitle, Enter turns it on and Off stops being
+marked, Off turns it off; a real Esc closes to the list, a real `t`
+reopens on the selected track, a real `j` steps over the header to Off, a
+real `t` closes; stop clears the rows and `t` while idle says `Nothing is
+playing`.
+
+Numbers filed with the board rows: 13 + 13 single-decision mutations red in
+node, 1 in python; 10,000 channels: `channelsForScope(all)` 0.00 ms with
+nothing hidden (the same array), 2.50 ms with two groups hidden;
+`scopeSurface` 5.18 -> 9.32 ms; `filterChannels` over the hidden All with a
+query 33.2 ms, which is the existing search cost and not this feature's.
+Gate at the end: 1642 node, 647 python, 68 qml, validate clean.
+
+Defects: D-TRK-1 (P2, fixed), D-PLY-20 (P4, fixed), F-M3-1 (P3, open).
+

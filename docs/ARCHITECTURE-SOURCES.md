@@ -125,6 +125,7 @@ under ~/.config or /usr/share/omarchy was modified.
 | `version` | 2 | `Model.STATE_VERSION`; readers accept 1 (migrate) and 2; unknown -> empty state (existing rule). |
 | `cacheLayout` | 0 or 2 | 2 once `cache migrate` has run (section 2.3). 0 (or missing) means "legacy files may still sit in `<cacheDir>/`". |
 | `favorites`, `recents`, `lastPlayed` | unchanged | Exactly the v1 shapes (ARCHITECTURE.md section 5). |
+| `hiddenGroups` | array of strings, max 200 | M3-01 (0.9.0). Group names, trimmed, de-duplicated, first occurrence wins; additive and optional like `savedSearches` and `session`, no version bump. Read by `Model.hiddenGroupList` and `normalize_hidden_groups` against one fixture. Taught to all three whitelists (`parseState`, `cloneState`, `normalize_state`) on the day it was added. |
 | `sources[]` | array, max 50 | Ordered by `addedAt`; the UI sorts by `lastUsed` desc [UX-ASSUMPTION]. |
 | `key` | string | `^[0-9a-f]{8}(-[0-9]{1,3})?$`, unique in the array; the cache directory name. |
 | `url` | string, 1-2048 | Normalized playlist URL (section 3.1); unique in the array; **the identity**. Carries provider credentials; the file is 0600 (README note, same class as shell.json). |
@@ -211,7 +212,7 @@ names only, like `read_local_source`).
 
 ### 2.4 `state` subcommand in v2
 
-- `default_state()` -> `{"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": null, "sources": []}`.
+- `default_state()` -> `{"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": null, "sources": []}` -- plus, since they were added, `"session": null`, `"savedSearches": []` and `"hiddenGroups": []`, in that order (a python test pins the key order against what the service writes).
   `state init` therefore creates a v2 file on fresh installs (`init_state_file`, `bin/omarchy-iptv:1579-1598`).
 - Every `state` action prints `state` through `public_state()`: each source
   record is emitted with `url` and `epgUrl` replaced by `host` (`source_host`)
@@ -380,7 +381,7 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 
 | Function | Returns |
 |---|---|
-| `emptyState()` | `{version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: []}` |
+| `emptyState()` | `{version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: []}` plus `session: null`, `savedSearches: []`, `hiddenGroups: []` |
 | `parseState(text)` | v1 or v2 text -> v2 object (section 2.2), records validated |
 | `cloneState(st, patch)` | new state with `patch` keys replacing; used by every existing reducer |
 | `withCacheLayout(st, n)` | `cacheLayout` set |

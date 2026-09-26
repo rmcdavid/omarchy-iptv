@@ -139,6 +139,10 @@ Order, top to bottom:
 4. **GROUPS** section header (PanelSectionHeader style), then one entry per
    `group-title` in playlist order (first appearance). Channels with no
    group land in a synthetic last group named `Ungrouped`.
+5. **HIDDEN** section header, then one entry per hidden group that exists in
+   this source, in playlist order, at the caption rung (M3-01, 2.8). Present
+   only while at least one such group exists. The GROUPS section above it
+   lists the VISIBLE groups only, and All counts them only.
 
 Each entry shows its name (elided) and a right-aligned count.
 
@@ -286,6 +290,47 @@ selected entry is Recent, Favorites, or All.**
 
 ---
 
+### 2.8 Hidden groups (M3-01)
+
+A group the user hides leaves browsing and nothing else. Gone from: All, the
+GROUPS section, search from All, saved searches, the channel wall, the zap
+ring's All. Untouched: a starred channel, a recent, a channel reached by its
+number, because each of those is a thing the user did on purpose
+(PLAN-M3 decision 1). Channel numbers do not shift, because they come from
+the playlist's `tvg-chno` and not from position (M2-03).
+
+The group is moved, not lost: it appears under a HIDDEN header at the bottom
+of the column, dimmed to the caption rung, and `h`/`l` reach it like any
+other entry. Selecting it shows its channels -- the user asked for them by
+name -- and `x` there brings the group back (decision 2). The list is group
+NAMES, global across sources, capped at 200 (decision 4).
+
+The footer says what happened and where the group went: `Hid Religious ·
+117 channels · under HIDDEN in the column`, and `Showing Religious · 117
+channels` on the way back. The name is scrubbed like every other sink.
+
+### 2.9 Audio and subtitles (M3-02)
+
+`t` in list mode, while something plays, opens a panel over the list: the
+list stays where it was under the scrim, and Esc, `t` or a click on the
+scrim returns to it. Two sections, Audio and Subtitles, headed like the
+column; under each, one row per track the player reported, and under
+Subtitles an `Off` row first. The selected track carries the check glyph
+(`GLYPHS.check`); `Off` carries it when no subtitle is selected. A row reads
+title, else language name, else `Track N`; a caption at the right carries
+what the label dropped -- language when a title won, codec, `forced`,
+`external`. `j`/`k` step over the headers and wrap; the cursor opens on the
+selected audio track. Enter selects. Text on the cursor row is the plain
+foreground on the selection fill, as on the channel rows (5.4).
+
+Every row is what the player answered, never what was asked: the helper
+selects first and then lists, so the panel after Enter shows what mpv did
+(PLAN-M3 decision 5). While the question is out the one line under the
+title reads `Asking the player…`; a player that does not answer reads `The
+player did not answer`; with nothing playing the key says `Nothing is
+playing` in the footer and opens nothing. Nothing is remembered across
+channels or restarts in this milestone.
+
 ## 3. Keyboard map
 
 Two modes, one visible at a time in the header and the footer:
@@ -333,8 +378,9 @@ x).
 | `Ctrl+S` (search mode) | Save the current query into Favorites. A MODIFIED key by necessity: `handleSearchKey` routes every bare printable character into the query, so a letter cannot be a command here without breaking typing. The transient carries the ROW COUNT for the terms as typed (`Saved baton rouge - 4 channels`), because the failure mode is a term that matches far more than the user meant; `no tv` saves 75 rows on the list this was designed against. Refusals are spoken too -- already saved, at the cap, nothing to save -- so the keystroke never silently does nothing. |
 | `Space` | Play the cursor row and keep the guide open (preview / zapping). The row gains the playing glyph and bold name; the footer updates. |
 | `f` / `F` | Toggle favorite on the cursor row. In Favorites the row leaves the list; the cursor stays at the same index (clamped). |
-| `x` / `X` / `Delete` | Remove the cursor row from Recent (in Recent) or unfavorite it (in Favorites). No-op elsewhere. Parity with the clipboard's delete. |
+| `x` / `X` / `Delete` | Remove the cursor row from Recent (in Recent) or unfavorite it (in Favorites). **Everywhere else (M3-01): hide the group the cursor row is in, and in a hidden group, bring it back.** One key, one meaning -- take this away from here -- and the footer names the target before the press: `x hide group` / `x unhide`, from the same table the handler dispatches on (`Model.hideAction`). Silent in Recent and Favorites, where the key keeps its older meaning. Parity with the clipboard's delete. |
 | `s` / `S` | Stop playback. No confirmation. Footer shows `Stopped`. |
+| `t` / `T` | Open the audio and subtitle picker (2.9). Only while something plays; otherwise the footer says `Nothing is playing`. Hinted `t tracks` under the same gate. Inside the picker `j`/`k` move, `Enter` selects, `Esc` or `t` closes; Home/End jump to the first/last track; PgUp/PgDn, Tab and Delete do nothing there and do not reach the list underneath. |
 | `r` / `R` | Refresh playlist and EPG now. Footer shows `Refreshing...` then the result; a desktop notification reports the outcome (6.4). |
 | `/` | Enter search mode (query preserved). |
 | `Ctrl+G` | Flip between the channel list and the **channel wall** (2.4b). A MODIFIED key by necessity, for the same reason `Ctrl+S` is: it is handled in `handleSharedKey`, which serves search mode too, and the guide OPENS in search mode where every bare printable character is query text. A bare letter would be unreachable on the screen the user starts on. The cursor is shared, so the place survives the flip. **The view persists for the life of the shell session, not per open**: `keepLoaded: true` means the guide item is never destroyed between summons, and `open()` does not reset `wallView`. That is deliberate as of 2026-09-25 -- a view the user chose should be there when they come back, and resetting it every open would make the key feel broken -- but it was DOCUMENTED as the opposite first, and a preflight caught the shipped CHANGELOG saying so. It is not written to disk: a fresh shell starts in the list, so an existing user sees no change until they press the key. |
@@ -1001,6 +1047,10 @@ marker until something observes it.
 | Channel wall (2.4b) | `Accessible.List` | `Channels in <scope>` | **DECLARED, NOT OBSERVED.** The same role and name the list carries, so an AT is told the same thing about the same rows in either view. No landed scenario walks the tree with the wall presenting; `tests/a11y/host_guide.qml` instantiates the guide in its default view |
 | Wall tile | `Accessible.ListItem` | The row's own composer, `Model.rowAccessibleName`, with the row's arguments MINUS the EPG pair: `Channel <n>, ` prefix when numbered, then the name, then `, favorite` / `, playing` / `, failed` as they apply, then `, row N of M`. `nowTitle` and `until` are deliberately not passed -- the tile draws no EPG, and announcing a programme the tile does not show would describe a different surface | **COMPOSED, NOT OBSERVED.** Deliberately identical to the row's name rather than a tile-specific one: the wall is a presentation of the same rows, and an AT that is told "row N of M" in one view and something else in the other has been told the cursor moved when it did not. Qt Quick exposes no table or position interface for `GridView` (investigation 4.6(d)), so `row N of M` in the NAME is the only carrier available and the reading it gives is a flat sequence, not a grid position -- which is exactly what `h`/`l` traverse |
 | Wall tile picture | -- | -- | `Accessible.ignored`, both the image and the mark. Same reasoning as the row's logo slot (7.2): the name already carries the channel, and announcing "image" before every tile is noise. Not a security control -- the investigation measured that an unannotated `Image` does not reach the tree at all |
+| Group column entry, hidden (2.8) | `Accessible.ListItem` | `Model.scopeEntryAccessibleName`: `<name>, <n> channels, hidden` | **COMPOSED, NOT OBSERVED.** The dimming that tells a sighted user the entry is hidden is not on the bus, so the word is in the name. Same composer as every other column entry, so the three shapes (header, entry, hidden entry) are one function a test calls |
+| Track picker (2.9) | `Accessible.Dialog` | `Audio and subtitles` | **DECLARED, NOT OBSERVED.** `Accessible.ignored` while closed, like the wall while it does not present |
+| Track picker header | `Accessible.Heading` | `Audio` / `Subtitles` | **COMPOSED, NOT OBSERVED.** `Model.trackAccessibleName` returns the header's label for a header row |
+| Track picker row | `Accessible.ListItem` | `Model.trackAccessibleName`: `<label>, <detail parts>, audio|subtitles, selected, N of M` -- position over the CHOOSABLE rows, not the drawn ones, because a header is not a choice | **COMPOSED, NOT OBSERVED.** The title and detail are scrubbed twice before they reach this name (PLAN-M3 decision 6): the helper redacts and drops `external-filename`, `Model.parseTracks` scrubs again |
 | Channel row | -- | suffixes `, favorite`, `, playing`, `, now <programme> until <HH:MM>`, `, failed` | `, favorite` **OBSERVED-ONCE** (the prototype asked `Model.rowAccessibleName` for a favourite row's name and then required that exact string on the bus). `, playing`, `, now ... until <HH:MM>` and `, failed` are **COMPOSED only** (`Model.rowAccessibleName`, 5 node assertions): no scenario fixture sets a playing, a now/next or a failed row, so three of the four states a user most needs to hear are string builders with a promise attached. A suffix becomes OBSERVED when a filed run populates it, and not before |
 | Channel row | `Accessible.focused` = hasCursor | -- | **OBSERVED-ONCE.** Prototype only. No landed scenario asserts the `focused` state, and it is the one state a screen-reader user navigating rows depends on most |
 | Channel row | -- | `, row N of M` appended last, after `, failed` | **PROMISED AND DELIVERED.** This row previously read "never promised here and never delivered" and both clauses were false, which is rule 13 drift inside the table written to end rule 13 drift. Promised at `docs/UX-GUIDE-AT-SCALE.md:768` and `:865` (ruling D5); delivered at `Model.js:4213-4215` (`rowAccessibleName({name:'Channel 7', rowIndex:7, rowCount:10000})` returns `Channel 7, row 8 of 10,000`); wired at `Guide.qml:2452`; asserted in `tests/Model.test.js`. The real caveat, which survives: `rowCount` is what the LIST holds, so under a query it is the capped 200 the header counts against, not the true match total, which stays in the footer |

@@ -892,6 +892,22 @@ entry added in 5.3, and delete `/tmp/omarchy-iptv-qa` once the report is
 filed. `omarchy plugin remove` on a git checkout deletes it outright (no
 backup); a non-git folder would be moved to `.<id>.bak.<stamp>` instead.
 
+### 5.11 M3: hidden groups and the track picker (`scripts/dev-harness/m3-scenario.sh`)
+
+Thirty checks over the harness IPC and real keys, against a REAL mpv playing
+a generated 90 s file with two audio tracks (eng, titled; spa) and one srt
+subtitle, served from 127.0.0.1. H1-H6 hide a group, watch it move under
+HIDDEN, search past it, read it back from `state.json`, unhide it, and
+repeat the hide with a real `x` through PanelKeyCatcher. T1-T6 ask the
+player with the helper's own verb, open the picker with `t`, switch audio
+and subtitles and confirm each switch on the real player by asking it
+separately, drive Esc / t / j as real keys, and prove a stop clears the
+rows. `--baseline v0.8.0` runs the same checks against that tree: 7 pass
+(regression guards asserting an absence: H1, H2c, H5a, H5b, H6b, T5a, T5d)
+and 23 fail. `--shots` writes `m3-hidden.png` and `m3-tracks.png` to the
+scratch shots directory. Holds the display; the overlay must have keyboard
+focus for the six real-key checks (see QA-RESULTS, M3 live pass).
+
 ## 6. Defect reporting
 
 Template (one row in `docs/STATUS.md` "Defects", details in the handoff note):
