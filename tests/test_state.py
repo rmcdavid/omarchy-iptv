@@ -21,7 +21,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
 # cache layout marker and the source history, plus the optional nullable
 # `session` of the detached player (ARCHITECTURE-PLAYER.md section 8), which
 # is additive and does NOT bump the version.
-EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [], "savedSearches": []}
+EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [], "savedSearches": [], "hiddenGroups": []}
 
 
 def v2(**patch):
@@ -263,6 +263,40 @@ class SessionKeyTest(unittest.TestCase):
         state = helper.normalize_state(doc)
         self.assertEqual(state["savedSearches"], [{"query": "baton rouge", "at": 1790000000}])
 
+    def test_hidden_groups_survive_a_write_by_this_writer(self):
+        """M3-01, the fourth key taught to this whitelist -- on the day it was
+        added, not after a live erase. The shape is the savedSearches test's."""
+        doc = dict(helper.default_state())
+        doc["hiddenGroups"] = ["Religious", "Undefined"]
+        state = helper.normalize_state(doc)
+        self.assertEqual(state["hiddenGroups"], ["Religious", "Undefined"])
+
+    def test_hidden_groups_survive_the_real_cli_writer(self):
+        """Through main(), not normalize_state: the erase savedSearches suffered
+        was exit 0, "ok": true, from exactly this verb."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        doc = dict(helper.default_state())
+        doc["hiddenGroups"] = ["Religious"]
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        code, payload, _ = self.state("favorite", "add", "t:x")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["hiddenGroups"], ["Religious"])
+
+    def test_hidden_groups_run_the_shared_fixture(self):
+        """tests/fixtures/hidden-groups.json, the same file Model.test.js runs,
+        through normalize_hidden_groups AND through normalize_state."""
+        import json as _json, os as _os
+        path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "fixtures", "hidden-groups.json")
+        with open(path, encoding="utf-8") as fh:
+            fixture = _json.load(fh)
+        self.assertEqual(fixture["cap"], helper.MAX_HIDDEN_GROUPS)
+        for case in fixture["parse"]:
+            self.assertEqual(helper.normalize_hidden_groups(case["raw"]), case["list"], case["name"])
+            self.assertEqual(helper.normalize_state({"hiddenGroups": case["raw"]})["hiddenGroups"], case["list"], case["name"])
+        many = ["G%d" % i for i in range(fixture["cap"] + 1)]
+        self.assertEqual(len(helper.normalize_hidden_groups(many)), fixture["cap"])
+        self.assertEqual(helper.normalize_hidden_groups(many)[-1], "G%d" % (fixture["cap"] - 1))
+
     def test_saved_searches_run_the_shared_fixture(self):
         """The same file tests/Model.test.js runs, so neither implementation
         can change the folding or the bounds while believing it agrees."""
@@ -330,7 +364,7 @@ class SessionKeyTest(unittest.TestCase):
         # writers are in different languages and a key appended in one place and
         # inserted in the other makes every diff noisy.
         self.assertEqual(list(helper.default_state()),
-                         ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session", "sources", "savedSearches"])
+                         ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session", "sources", "savedSearches", "hiddenGroups"])
 
 
 if __name__ == "__main__":

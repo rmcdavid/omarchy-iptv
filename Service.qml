@@ -748,6 +748,16 @@ Item {
     return Model.isFavorite(root.userState, id)
   }
 
+  // M3-01: hide or unhide a group by name. Returns whether it is hidden
+  // NOW, or null when the reducer refused (the cap) and nothing was written.
+  function toggleHiddenGroup(name) {
+    var next = Model.toggleHiddenGroup(root.userState, name)
+    if (next === root.userState) return null
+    root.userState = next
+    root.saveState()
+    return Model.isGroupHidden(root.userState, name)
+  }
+
   // Save the current search into Favourites. Returns the verdict the guide
   // shows, so a refusal (empty, already saved, at the cap) is visible in the
   // moment rather than being a keystroke that appears to do nothing.

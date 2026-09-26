@@ -3606,7 +3606,7 @@ check("trimRecents", Model.trimRecents({ version: 1, favorites: [], recents: [{ 
 check("trimRecents returns same object when within cap", (() => { const st = Model.emptyState(); return Model.trimRecents(st, 5) === st })(), true)
 check("parseState tolerates garbage", Model.parseState("not json"), Model.emptyState())
 check("parseState sanitizes", Model.parseState('{"favorites":["a","a",""],"recents":[{"id":"x","name":"X","at":"7"},{"bad":1}],"lastPlayed":{"id":"x"}}'),
-  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, session: null, sources: [], savedSearches: [] })
+  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, session: null, sources: [], savedSearches: [], hiddenGroups: [] })
 check("parseState tolerates unknown keys", Model.parseState('{"version":9,"favorites":["a"],"future":true}').favorites, ["a"])
 check("isFavorite", [Model.isFavorite(state, "5"), Model.isFavorite(state, "4"), Model.isFavorite(null, "5")], [true, false, false])
 check("withFailed / withoutFailed are copies", (() => { const a = {}; const b = Model.withFailed(a, "x", "21:12"); const c = Model.withoutFailed(b, "x"); return [Object.keys(a).length, b.x, Object.keys(c).length] })(), [0, "21:12", 0])
@@ -4669,11 +4669,11 @@ check("sourceDetail never carries error text (SR26): errorReason stays on the vi
 check("sourceAccessibleName", [Model.sourceAccessibleName(views4[0]), Model.sourceAccessibleName(Model.sourceView(recCli, "", nowSep))], ["Provider, tv.example.net:8080, 1,475 channels in 28 groups, active, EPG, last used 21:30", "iptv-org, iptv-org.github.io, not loaded yet, never used"])
 
 // ---- state v2 and reducers (ARCHITECTURE-SOURCES 2.1, 2.2, 3.5) ----
-check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [] })
-check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, session: null, sources: [recFile], savedSearches: [] })
+check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] })
+check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, session: null, sources: [recFile], savedSearches: [], hiddenGroups: [] })
 check("cloneState copies the arrays", (() => { const src = { sources: [recFile] }; const out = Model.cloneState(src); out.sources.push(recNas); return src.sources.length })(), 1)
 check("withCacheLayout", [Model.withCacheLayout(state4, 0).cacheLayout, Model.withCacheLayout(Model.emptyState(), 2).cacheLayout, Model.withCacheLayout(Model.emptyState(), 5).cacheLayout], [0, 2, 0])
-check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, session: null, sources: [], savedSearches: [] })
+check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] })
 check("parseState v2 round-trips records", Model.parseState(JSON.stringify(state4)).sources, state4.sources)
 check("parseState drops invalid records, duplicate urls and keys keep the first", Model.parseState(JSON.stringify({ version: 2, sources: [recNas, { key: "bad key", url: "http://x.test/" }, { key: "22222222", url: recNas.url }, { key: "11111111", url: "http://other.test/" }, { key: "33333333", url: "" }, "junk"] })).sources.map(s => s.key), ["11111111"])
 check("parseState coerces and defaults a sparse record", Model.parseState(JSON.stringify({ version: 2, sources: [{ key: "abcdef12", url: "http://h.test/x", channelCount: "7", origin: "weird", labelCustom: "yes" }] })).sources[0], { key: "abcdef12", url: "http://h.test/x", epgUrl: "", kind: "http", label: "h.test", labelCustom: false, origin: "guide", addedAt: 0, lastUsed: 0, fetchedAt: 0, channelCount: 7, groupCount: 0 })
@@ -7033,6 +7033,162 @@ check("one window class: the app-id the player is launched with is the class PiP
     finds: Model.pipFindWindow([{ "class": Model.PIP_CLASS, pid: 7, address: "0x1", at: [0, 0], size: [2, 2], floating: false, pinned: false, monitor: 0, workspace: { id: 1 }, tags: [] }], 7).ok
   }
 })(), { flag: "--wayland-app-id=omarchy-iptv", fromConstant: true, fixture: [], finds: true })
+
+
+// ---------------------------------------------------------------- M3-01 hidden groups
+//
+// PLAN-M3 section 1. Every assertion here CALLS the shipping path: the
+// reader (parseState), the scope filter (channelsForScope), the column
+// (scopeSurface), search (filterChannels over channelsForScope) and the key
+// table (hideAction / footerHints). None greps, none mirrors.
+const hiddenFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/hidden-groups.json"), "utf8"))
+function hiddenState(names) { return Model.parseState(JSON.stringify({ hiddenGroups: names })) }
+function ids(list) { return list.map(function (c) { return Model.channelId(c) }) }
+
+checkCall("hidden groups: the shared fixture's parse cases, through hiddenGroupList AND through parseState", function () {
+  return hiddenFixture.parse.filter(function (c) {
+    const direct = Model.hiddenGroupList(c.raw)
+    const read = Model.parseState(JSON.stringify({ hiddenGroups: c.raw })).hiddenGroups
+    return JSON.stringify(direct) !== JSON.stringify(c.list) || JSON.stringify(read) !== JSON.stringify(c.list)
+  }).map(function (c) { return c.name })
+}, [])
+checkCall("hidden groups: the cap is the fixture's number, is the constant, and drops the 201st name", function () {
+  const many = []
+  for (let i = 0; i < hiddenFixture.cap + 1; i++) many.push("G" + i)
+  const list = Model.hiddenGroupList(many)
+  return [Model.MAX_HIDDEN_GROUPS, list.length, list[list.length - 1]]
+}, [hiddenFixture.cap, hiddenFixture.cap, "G" + (hiddenFixture.cap - 1)])
+checkCall("hidden groups: the shared fixture's browse cases, through channelsForScope, scopeSurface and filterChannels", function () {
+  return hiddenFixture.browse.map(function (c) {
+    const st = hiddenState(c.hidden)
+    const all = Model.channelsForScope(c.channels, Model.SCOPE_ALL, st)
+    const entries = Model.scopeSurface(c.channels, st).entries
+    const groups = entries.filter(function (e) { return e.kind === "group" }).map(function (e) { return e.label })
+    const hidden = entries.filter(function (e) { return e.kind === "hidden" })
+    const out = { name: c.name, bad: [] }
+    if (ids(all).join("|") !== c.all.join("|")) out.bad.push("all=" + ids(all).join("|"))
+    if ((all === c.channels) !== c.sameArray) out.bad.push("sameArray=" + (all === c.channels))
+    if (groups.join("|") !== c.groups.join("|")) out.bad.push("groups=" + groups.join("|"))
+    if (hidden.map(function (e) { return e.label }).join("|") !== c.hiddenEntries.join("|")) out.bad.push("hidden=" + hidden.map(function (e) { return e.label }).join("|"))
+    if (c.hiddenCounts && hidden.map(function (e) { return e.count }).join("|") !== c.hiddenCounts.join("|")) out.bad.push("counts=" + hidden.map(function (e) { return e.count }).join("|"))
+    // The HIDDEN header exists exactly when a hidden entry does.
+    const header = entries.filter(function (e) { return e.kind === "header" && e.label === "HIDDEN" }).length
+    if (header !== (hidden.length > 0 ? 1 : 0)) out.bad.push("header=" + header)
+    // The All count in the column is the length of All's rows (D-SAVE-2's rule, again).
+    const allEntry = entries.filter(function (e) { return e.kind === "all" })[0]
+    if (allEntry.count !== all.length) out.bad.push("allCount=" + allEntry.count)
+    if (c.group) {
+      const rows = Model.channelsForScope(c.channels, Model.groupScopeId(c.group), st)
+      if (ids(rows).join("|") !== c.groupRows.join("|")) out.bad.push("groupRows=" + ids(rows).join("|"))
+      const fromAll = Model.filterChannels(all, c.search, 50, [], null).rows
+      const inGroup = Model.filterChannels(rows, c.search, 50, [], null).rows
+      if (ids(fromAll).join("|") !== c.searchFromAll.join("|")) out.bad.push("searchFromAll=" + ids(fromAll).join("|"))
+      if (ids(inGroup).join("|") !== c.searchInGroup.join("|")) out.bad.push("searchInGroup=" + ids(inGroup).join("|"))
+    }
+    return out
+  }).filter(function (r) { return r.bad.length > 0 })
+}, [])
+checkCall("hidden groups: a star in a hidden group still shows in Favorites; a saved search does not see the group", function () {
+  // Decision 1, both halves, on one state. The star is a thing the user did
+  // by hand; the saved search is a search.
+  const ch = [{ id: "a", name: "Alpha", group: "News", url: "http://h/a" },
+              { id: "b", name: "Bravo", group: "Religious", url: "http://h/b" },
+              { id: "c", name: "Bravo Two", group: "Religious", url: "http://h/c" }]
+  let st = hiddenState(["Religious"])
+  st = Model.withFavorites(st, ["b"])
+  st = Model.cloneState(st, { savedSearches: [{ query: "bravo", at: 0 }] })
+  return ids(Model.channelsForScope(ch, Model.SCOPE_FAVORITES, st))
+}, ["b"])
+checkCall("hidden groups: toggle hides, toggles back, and a no-op returns the SAME state object", function () {
+  const st = hiddenState(["Undefined"])
+  const hid = Model.toggleHiddenGroup(st, "Religious")
+  const back = Model.toggleHiddenGroup(hid, "Religious")
+  const full = hiddenState((function () { const m = []; for (let i = 0; i < Model.MAX_HIDDEN_GROUPS; i++) m.push("G" + i); return m })())
+  return [hid.hiddenGroups, back.hiddenGroups, Model.toggleHiddenGroup(st, "") === st, Model.toggleHiddenGroup(st, "   ") === st,
+          Model.toggleHiddenGroup(full, "One more") === full, Model.toggleHiddenGroup(full, "G3").hiddenGroups.length]
+}, [["Undefined", "Religious"], ["Undefined"], true, true, true, Model.MAX_HIDDEN_GROUPS - 1])
+checkCall("hidden groups: the fourth whitelist -- every reducer carries hiddenGroups through", function () {
+  // The savedSearches lesson, applied on the day the key is added rather
+  // than after a live erase. Each reducer rebuilds the document; each must
+  // keep a key it did not touch.
+  const st = Model.cloneState(hiddenState(["Religious"]), { favorites: ["a"], savedSearches: [{ query: "x", at: 0 }] })
+  const after = [Model.withFavorites(st, ["b"]), Model.removeRecent(st, "a"), Model.trimRecents(st, 5),
+                 Model.withCacheLayout(st, 0), Model.toggleHiddenGroup(st, "Undefined"),
+                 Model.parseState(JSON.stringify(st))]
+  return after.map(function (s) { return s.hiddenGroups.indexOf("Religious") !== -1 && s.savedSearches.length === 1 })
+}, [true, true, true, true, true, true])
+checkCall("hidden groups: the x table -- Recent and Favorites keep their meaning, elsewhere the unit is the group", function () {
+  const st = hiddenState(["Religious"])
+  const news = { id: "a", name: "Alpha", group: "News", url: "http://h/a" }
+  const rel = { id: "b", name: "Bravo", group: "Religious", url: "http://h/b" }
+  return [
+    Model.hideAction({ scopeId: Model.SCOPE_RECENT, query: "", channel: news, state: st }).action,
+    Model.hideAction({ scopeId: Model.SCOPE_FAVORITES, query: "", channel: news, state: st }).action,
+    // A query from Favorites searches All (UX 2.7), so the row is All's and the unit is its group.
+    Model.hideAction({ scopeId: Model.SCOPE_FAVORITES, query: "alpha", channel: news, state: st }).action,
+    Model.hideAction({ scopeId: Model.SCOPE_ALL, query: "", channel: news, state: st }),
+    Model.hideAction({ scopeId: Model.SCOPE_ALL, query: "", channel: rel, state: st }),
+    Model.hideAction({ scopeId: Model.groupScopeId("Religious"), query: "", channel: rel, state: st }).action,
+    Model.hideAction({ scopeId: Model.SCOPE_ALL, query: "", channel: null, state: st }).action
+  ]
+}, ["recent", "favorite", "hide", { action: "hide", group: "News" }, { action: "unhide", group: "Religious" }, "unhide", "none"])
+checkCall("hidden groups: the footer's x verb comes from the table, and is silent where x keeps its old meaning", function () {
+  const st = hiddenState(["Religious"])
+  const news = { id: "a", name: "Alpha", group: "News", url: "http://h/a" }
+  const rel = { id: "b", name: "Bravo", group: "Religious", url: "http://h/b" }
+  function xHint(o) {
+    const pairs = Model.footerHints(o).filter(function (p) { return p[0] === "x" })
+    return pairs.length === 0 ? "" : pairs[0][1]
+  }
+  return [
+    xHint({ mode: "list", scopeId: Model.SCOPE_ALL, query: "", channel: news, state: st }),
+    xHint({ mode: "list", scopeId: Model.SCOPE_ALL, query: "", channel: rel, state: st }),
+    xHint({ mode: "list", scopeId: Model.groupScopeId("Religious"), query: "", channel: rel, state: st }),
+    xHint({ mode: "list", scopeId: Model.SCOPE_RECENT, query: "", channel: news, state: st }),
+    xHint({ mode: "list", scopeId: Model.SCOPE_FAVORITES, query: "", channel: news, state: st }),
+    xHint({ mode: "list", scopeId: Model.SCOPE_ALL, query: "", channel: null, state: st }),
+    // The wall shows the same rows, so the same key does the same thing there.
+    xHint({ mode: "list", wall: true, scopeId: Model.SCOPE_ALL, query: "", channel: news, state: st }),
+    // Search mode types x; no hint.
+    xHint({ mode: "search", query: "al", scopeId: Model.SCOPE_ALL, channel: news, state: st })
+  ]
+}, ["hide group", "unhide", "unhide", "", "", "", "hide group", ""])
+checkCall("hidden groups: the narrowing axis is judged over the visible groups", function () {
+  // Two groups, one hidden: choosing the survivor no longer narrows All, so
+  // the GROUPS header goes, while the HIDDEN section stays so the group can
+  // be brought back.
+  const ch = [{ id: "a", name: "Alpha", group: "News", url: "http://h/a" },
+              { id: "b", name: "Bravo", group: "Religious", url: "http://h/b" }]
+  const surface = Model.scopeSurface(ch, hiddenState(["Religious"]))
+  return [surface.axis.narrows, surface.axis.count, surface.axis.hidden,
+          surface.entries.map(function (e) { return e.kind + ":" + e.label }).join(" ")]
+}, [false, 1, 1, "favorites:Favorites all:All header:HIDDEN hidden:Religious"])
+checkCall("hidden groups: the hidden entry is reachable by h/l and is a real scope", function () {
+  const ch = [{ id: "a", name: "Alpha", group: "News", url: "http://h/a" },
+              { id: "b", name: "Bravo", group: "Religious", url: "http://h/b" },
+              { id: "c", name: "Charlie", group: "Movies", url: "http://h/c" }]
+  const st = hiddenState(["Religious"])
+  const entries = Model.scopeSurface(ch, st).entries
+  // Walk the ring from All until it comes back; the hidden id must be on it.
+  const seen = []
+  let id = Model.SCOPE_ALL
+  for (let i = 0; i < entries.length + 1; i++) { id = Model.moveScope(entries, id, 1); if (id === Model.SCOPE_ALL) break; seen.push(id) }
+  return [seen.indexOf(Model.groupScopeId("Religious")) !== -1, Model.scopeName(Model.groupScopeId("Religious")),
+          Model.scopeIndex(entries, Model.groupScopeId("Religious")) !== -1]
+}, [true, "Religious", true])
+
+checkCall("hidden groups: the notice names the group, the rows and where they went; a URL in a group name is scrubbed", function () {
+  return [Model.hideNotice(true, "Religious", 117), Model.hideNotice(false, "Religious", 1),
+          Model.hideNotice(null, "Religious", 3),
+          Model.hideNotice(true, "see http://user:pw@host.example/x", 2).indexOf("pw") === -1]
+}, ["Hid Religious" + Model.SEP + "117 channels" + Model.SEP + "under HIDDEN in the column",
+    "Showing Religious" + Model.SEP + "1 channel",
+    "Cannot hide more groups" + Model.SEP + Model.MAX_HIDDEN_GROUPS + " is the most", true])
+check("hidden groups: the column entry's accessible name says hidden, because the dimming is not on the bus",
+  [Model.scopeEntryAccessibleName({ label: "Religious", count: 117, kind: "hidden" }),
+   Model.scopeEntryAccessibleName({ label: "Religious", count: 117, kind: "group" }),
+   Model.scopeEntryAccessibleName({ label: "HIDDEN", count: 0, kind: "header" })],
+  ["Religious, 117 channels, hidden", "Religious, 117 channels", "HIDDEN"])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

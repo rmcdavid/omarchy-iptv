@@ -1,0 +1,294 @@
+{
+  "comment": [
+    "Hidden groups (M3-01), run by BOTH tests/Model.test.js and tests/test_state.py.",
+    "A rule implemented in two languages gets one fixture (engineering rule, dev branch).",
+    "",
+    "`parse` cases: the raw JSON value of state.json's `hiddenGroups` and the list",
+    "both readers must produce. `cap` pins MAX_HIDDEN_GROUPS by generating a list",
+    "one longer than it in the test, so the number lives in the sources and here.",
+    "",
+    "`browse` cases are JavaScript only: python has no scope logic. Each is a",
+    "channel list, a hidden list, and what All / a group / search must return,",
+    "asserted through channelsForScope and filterChannels -- the real path.",
+    "`groups` is the GROUPS section, which exists only when two or more groups are VISIBLE (GS3): a lone survivor lists no section."
+  ],
+  "cap": 200,
+  "parse": [
+    {
+      "name": "absent reads as nothing",
+      "raw": null,
+      "list": []
+    },
+    {
+      "name": "a string is not a list",
+      "raw": "Religious",
+      "list": []
+    },
+    {
+      "name": "an object is not a list",
+      "raw": {
+        "Religious": true
+      },
+      "list": []
+    },
+    {
+      "name": "plain names in order",
+      "raw": [
+        "Religious",
+        "Undefined"
+      ],
+      "list": [
+        "Religious",
+        "Undefined"
+      ]
+    },
+    {
+      "name": "whitespace is trimmed",
+      "raw": [
+        "  Religious\t",
+        "Undefined "
+      ],
+      "list": [
+        "Religious",
+        "Undefined"
+      ]
+    },
+    {
+      "name": "empty and blank are dropped",
+      "raw": [
+        "",
+        "   ",
+        "Religious"
+      ],
+      "list": [
+        "Religious"
+      ]
+    },
+    {
+      "name": "first occurrence wins",
+      "raw": [
+        "Religious",
+        "Undefined",
+        "Religious"
+      ],
+      "list": [
+        "Religious",
+        "Undefined"
+      ]
+    },
+    {
+      "name": "trimmed duplicates are duplicates",
+      "raw": [
+        "Religious",
+        " Religious"
+      ],
+      "list": [
+        "Religious"
+      ]
+    },
+    {
+      "name": "case is not folded (a group name is exact)",
+      "raw": [
+        "Religious",
+        "religious"
+      ],
+      "list": [
+        "Religious",
+        "religious"
+      ]
+    },
+    {
+      "name": "non-strings are dropped, not stringified",
+      "raw": [
+        7,
+        null,
+        true,
+        [
+          "Religious"
+        ],
+        "Movies"
+      ],
+      "list": [
+        "Movies"
+      ]
+    },
+    {
+      "name": "Ungrouped is a name like any other",
+      "raw": [
+        "Ungrouped"
+      ],
+      "list": [
+        "Ungrouped"
+      ]
+    }
+  ],
+  "browse": [
+    {
+      "name": "nothing hidden: All is the list itself",
+      "channels": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "group": "News",
+          "url": "http://h/a"
+        },
+        {
+          "id": "b",
+          "name": "Bravo",
+          "group": "Religious",
+          "url": "http://h/b"
+        }
+      ],
+      "hidden": [],
+      "all": [
+        "a",
+        "b"
+      ],
+      "groups": [
+        "News",
+        "Religious"
+      ],
+      "hiddenEntries": [],
+      "sameArray": true
+    },
+    {
+      "name": "one hidden group leaves All, keeps its own scope",
+      "channels": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "group": "News",
+          "url": "http://h/a"
+        },
+        {
+          "id": "b",
+          "name": "Bravo",
+          "group": "Religious",
+          "url": "http://h/b"
+        },
+        {
+          "id": "c",
+          "name": "Charlie",
+          "group": "Movies",
+          "url": "http://h/c"
+        },
+        {
+          "id": "d",
+          "name": "Delta",
+          "group": "Religious",
+          "url": "http://h/d"
+        }
+      ],
+      "hidden": [
+        "Religious"
+      ],
+      "all": [
+        "a",
+        "c"
+      ],
+      "groups": [
+        "News",
+        "Movies"
+      ],
+      "hiddenEntries": [
+        "Religious"
+      ],
+      "hiddenCounts": [
+        2
+      ],
+      "group": "Religious",
+      "groupRows": [
+        "b",
+        "d"
+      ],
+      "search": "Bravo",
+      "searchFromAll": [],
+      "searchInGroup": [
+        "b"
+      ],
+      "sameArray": false
+    },
+    {
+      "name": "a hidden name absent from this source shows no entry and hides nothing",
+      "channels": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "group": "News",
+          "url": "http://h/a"
+        }
+      ],
+      "hidden": [
+        "Religious"
+      ],
+      "all": [
+        "a"
+      ],
+      "groups": [],
+      "hiddenEntries": [],
+      "sameArray": false
+    },
+    {
+      "name": "the primary group decides: a second group after ; does not hide",
+      "channels": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "group": "News;Religious",
+          "url": "http://h/a"
+        },
+        {
+          "id": "b",
+          "name": "Bravo",
+          "group": "Religious;News",
+          "url": "http://h/b"
+        }
+      ],
+      "hidden": [
+        "Religious"
+      ],
+      "all": [
+        "a"
+      ],
+      "groups": [],
+      "hiddenEntries": [
+        "Religious"
+      ],
+      "hiddenCounts": [
+        1
+      ],
+      "sameArray": false
+    },
+    {
+      "name": "hiding Ungrouped hides the channels with no group",
+      "channels": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "group": "",
+          "url": "http://h/a"
+        },
+        {
+          "id": "b",
+          "name": "Bravo",
+          "group": "News",
+          "url": "http://h/b"
+        }
+      ],
+      "hidden": [
+        "Ungrouped"
+      ],
+      "all": [
+        "b"
+      ],
+      "groups": [],
+      "hiddenEntries": [
+        "Ungrouped"
+      ],
+      "hiddenCounts": [
+        1
+      ],
+      "sameArray": false
+    }
+  ]
+}

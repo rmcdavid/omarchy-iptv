@@ -102,6 +102,9 @@ var SCOPE_RECENT = "recent"
 var SCOPE_FAVORITES = "favorites"
 var SCOPE_ALL = "all"
 var GROUP_SCOPE_PREFIX = "g:"
+// M3-01 (PLAN-M3 decision 4): hidden groups are names, global, capped.
+// Mirrored by MAX_HIDDEN_GROUPS in bin/omarchy-iptv; one fixture pins both.
+var MAX_HIDDEN_GROUPS = 200
 
 // Typographic characters Omarchy uses (UX.md preamble table).
 var ELLIPSIS = "\u2026"
@@ -1621,14 +1624,29 @@ function scopeSurface(channels, state) {
   var recents = countRecents(list, st)
   if (recents > 0) out.push({ id: SCOPE_RECENT, label: RECENT_GROUP, kind: "recent", count: recents })
   out.push({ id: SCOPE_FAVORITES, label: FAVORITES_GROUP, kind: "favorites", count: countFavorites(list, st) })
-  out.push({ id: SCOPE_ALL, label: "All", kind: "all", count: list.length })
-  var groups = groupChannels(list)
+  var browsable = browsableChannels(list, st)
+  out.push({ id: SCOPE_ALL, label: "All", kind: "all", count: browsable.length })
+  var all = groupChannels(list)
+  // M3-01. One groupChannels pass over the FULL list, split by name: the
+  // hidden groups keep their counts and their playlist order, they just
+  // move under a HIDDEN header (decision 2). The narrowing axis is judged
+  // over the visible groups only, because All now equals the visible set.
+  var hidden = hiddenGroupSet(st)
+  var groups = []
+  var gone = []
+  for (var g = 0; g < all.length; g++) (hidden[all[g].name] === true ? gone : groups).push(all[g])
   var narrows = groups.length >= 2
-  var axis = { count: groups.length, narrows: narrows, soleGroup: groups.length === 1 ? groups[0].name : "" }
+  var axis = { count: groups.length, narrows: narrows, soleGroup: groups.length === 1 ? groups[0].name : "", hidden: gone.length }
   if (narrows) {
     out.push({ id: "", label: "GROUPS", kind: "header", count: 0 })
     for (var i = 0; i < groups.length; i++) {
       out.push({ id: groupScopeId(groups[i].name), label: groups[i].name, kind: "group", count: groups[i].count })
+    }
+  }
+  if (gone.length > 0) {
+    out.push({ id: "", label: "HIDDEN", kind: "header", count: 0 })
+    for (var h = 0; h < gone.length; h++) {
+      out.push({ id: groupScopeId(gone[h].name), label: gone[h].name, kind: "hidden", count: gone[h].count })
     }
   }
   return { entries: out, axis: axis }
@@ -1645,7 +1663,10 @@ function scopeEntries(channels, state) {
 function channelsForScope(channels, scopeId, state) {
   var list = asList(channels)
   var id = str(scopeId)
-  if (id === SCOPE_ALL || id === "") return list
+  // M3-01: All is what the user browses, so hidden groups are gone from it.
+  // A group scope, hidden or not, still returns the group: the user reached
+  // it by name from the HIDDEN section (decision 2).
+  if (id === SCOPE_ALL || id === "") return browsableChannels(list, state)
   var st = state || emptyState()
   var index, out = [], i
   if (id === SCOPE_FAVORITES) {
@@ -1659,7 +1680,9 @@ function channelsForScope(channels, scopeId, state) {
     // are the most deliberate thing the user did, and this must be
     // element-for-element what it was when nothing is saved. The saved rows
     // follow in playlist order, de-duplicated against the stars.
-    var saved = savedSearchChannels(list, st.savedSearches)
+    // M3-01: a saved search is a search, and search from All does not see
+    // a hidden group (decision 1). The stars above are untouched.
+    var saved = savedSearchChannels(browsableChannels(list, st), st.savedSearches)
     if (saved.length > 0) {
       var starred = {}
       for (i = 0; i < out.length; i++) starred[channelId(out[i])] = true
@@ -2236,6 +2259,29 @@ function favoriteRemovalNotice(origin, count) {
   return ""
 }
 
+// M3-01: what the footer says after `x` hid or unhid a group. `hidden` is
+// the state AFTER the press as the service reports it (null: refused at the
+// cap). The group name is playlist text, so it goes through scrubUrls like
+// every other sink (rule 5). Says where the group went, because a user who
+// hid 117 rows by one keypress deserves to be told how to get them back.
+function hideNotice(hidden, group, count) {
+  var name = scrubUrls(str(group))
+  var n = formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
+  if (hidden === null || hidden === undefined) return "Cannot hide more groups" + SEP + MAX_HIDDEN_GROUPS + " is the most"
+  if (hidden === true) return "Hid " + name + SEP + n + SEP + "under HIDDEN in the column"
+  return "Showing " + name + SEP + n
+}
+
+// The group column entry's accessible name (UX 7.1). A hidden entry says
+// so, because the dimming that tells a sighted user is not on the bus.
+function scopeEntryAccessibleName(entry) {
+  var e = entry || {}
+  var label = str(e.label)
+  if (e.kind === "header") return label
+  var name = label + ", " + pluralChannels(e.count)
+  return e.kind === "hidden" ? name + ", hidden" : name
+}
+
 // How many Favourites rows come from saved searches rather than stars. Shown in
 // the footer so the list is explicable: otherwise Favourites fills with
 // channels the user never starred and nothing says why.
@@ -2290,7 +2336,7 @@ function savedSearchRecord(entry) {
 }
 
 function emptyState() {
-  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [] }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] }
 }
 
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
@@ -2321,7 +2367,11 @@ function cloneState(state, patch) {
     // -- and Service.qml clones state to write a source record, which would
     // have wiped every saved search on the next source edit. The roadmap
     // warned about two whitelists; there are three.
-    savedSearches: asList(st.savedSearches).slice()
+    savedSearches: asList(st.savedSearches).slice(),
+    // M3-01. The fourth key this whitelist had to be taught, and the test
+    // that proves it is the same shape as the savedSearches one: a state
+    // that carries it goes through every reducer and comes out with it.
+    hiddenGroups: asList(st.hiddenGroups).slice()
   }
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
@@ -2363,6 +2413,9 @@ function parseState(text) {
       if (id !== "" && state.favorites.indexOf(id) === -1) state.favorites.push(id)
     }
   }
+  // M3-01. Additive and optional like savedSearches below: a file without
+  // it reads as [], an older build drops it, STATE_VERSION stays 2.
+  state.hiddenGroups = hiddenGroupList(parsed.hiddenGroups)
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -2632,6 +2685,100 @@ function sessionAfterOutcome(state, outcome, deadPending, consumed) {
 
 function withFavorites(state, favorites) {
   return cloneState(state, { favorites: asList(favorites).slice() })
+}
+
+// ---- hidden groups (M3-01, PLAN-M3 section 1)
+//
+// A hidden group leaves browsing -- All, GROUPS, search from All, saved
+// searches, the wall, the ring -- and nothing else. A star, a recent and a
+// channel number are things the user did on purpose and keep working
+// (decision 1). The list is group NAMES, global across sources (decision 4).
+
+// The one reader both languages agree on (python: normalize_hidden_groups):
+// strings only, trimmed, non-empty, first occurrence wins, capped.
+function hiddenGroupList(raw) {
+  var list = asList(raw)
+  var out = []
+  var seen = {}
+  for (var i = 0; i < list.length && out.length < MAX_HIDDEN_GROUPS; i++) {
+    if (typeof list[i] !== "string") continue
+    var name = list[i].replace(/^\s+|\s+$/g, "")
+    if (name === "" || seen[name] === true) continue
+    seen[name] = true
+    out.push(name)
+  }
+  return out
+}
+
+function hiddenGroupSet(state) {
+  var st = state || emptyState()
+  var list = asList(st.hiddenGroups)
+  var out = {}
+  for (var i = 0; i < list.length; i++) if (typeof list[i] === "string" && list[i] !== "") out[list[i]] = true
+  return out
+}
+
+function isGroupHidden(state, name) {
+  var key = str(name)
+  return key !== "" && hiddenGroupSet(state)[key] === true
+}
+
+// Hide when shown, show when hidden. An unknown or empty name is a no-op
+// that returns the SAME state, so a caller comparing by reference can tell
+// "nothing changed" from "changed" without a second call.
+function toggleHiddenGroup(state, name) {
+  var st = state || emptyState()
+  var key = str(name).replace(/^\s+|\s+$/g, "")
+  if (key === "") return st
+  var list = hiddenGroupList(st.hiddenGroups)
+  var at = list.indexOf(key)
+  if (at !== -1) list.splice(at, 1)
+  else if (list.length >= MAX_HIDDEN_GROUPS) return st
+  else list.push(key)
+  return cloneState(st, { hiddenGroups: list })
+}
+
+// The channels a user browses: the list minus every hidden group. With
+// nothing hidden this is the SAME array, not a copy, because
+// channelsForScope(all) used to return the list itself and callers may
+// compare by identity; a filter that always copied would change that
+// silently. Costs one primaryGroup per channel only when something is
+// hidden -- measured at 10,000 channels in QA-RESULTS M3-01.
+function browsableChannels(channels, state) {
+  var list = asList(channels)
+  var hidden = hiddenGroupSet(state)
+  var any = false
+  for (var k in hidden) { any = true; break }
+  if (!any) return list
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i]) continue
+    if (hidden[primaryGroup(list[i])] !== true) out.push(list[i])
+  }
+  return out
+}
+
+// What `x` does on the cursor row (UX 3.1, extended by PLAN-M3 decision 3).
+// One table: the key handler dispatches on `action` and the footer derives
+// its verb from the same call, so the hint cannot promise a removal the
+// handler does not make. Recent and Favorites keep their existing meaning;
+// everywhere else the unit of removal is the row's group.
+function hideAction(opts) {
+  var o = opts || {}
+  var scope = effectiveScope(o.scopeId, o.query)
+  if (scope === SCOPE_RECENT) return { action: "recent", group: "" }
+  if (scope === SCOPE_FAVORITES) return { action: "favorite", group: "" }
+  if (!o.channel) return { action: "none", group: "" }
+  var group = primaryGroup(o.channel)
+  return { action: isGroupHidden(o.state, group) ? "unhide" : "hide", group: group }
+}
+
+// The footer's word for `x`, from the same table. "" means no hint.
+function hideVerb(opts) {
+  var act = hideAction(opts).action
+  if (act === "hide") return "hide group"
+  if (act === "unhide") return "unhide"
+  return ""
 }
 
 function removeRecent(state, id) {
@@ -6163,6 +6310,11 @@ function footerHints(opts) {
     // what the 0.8.0 preflight blocked on.
     var list = [["j/k", arrowVerb(o, "v")], ["h/l", arrowVerb(o, "h")],
                 ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // M3-01: `x` is hinted only where it hides or unhides, and the verb
+    // comes from hideAction, the table the key dispatches on. In Recent and
+    // Favorites the key keeps its older meaning and its older silence.
+    var hide = hideVerb(o)
+    if (hide !== "") list.push(["x", hide])
     // PAUSE LIVE TV. Only while something is playing -- a pause key on an
     // idle guide has nothing to act on and would be a hint that lies. Names
     // the direction, so nobody presses it to find out which way it goes.
@@ -7717,6 +7869,16 @@ if (typeof module !== "undefined") {
     scopeEntries: scopeEntries,
     channelsForScope: channelsForScope,
     channelsInGroup: channelsInGroup,
+    MAX_HIDDEN_GROUPS: MAX_HIDDEN_GROUPS,
+    hiddenGroupList: hiddenGroupList,
+    hiddenGroupSet: hiddenGroupSet,
+    isGroupHidden: isGroupHidden,
+    toggleHiddenGroup: toggleHiddenGroup,
+    browsableChannels: browsableChannels,
+    hideAction: hideAction,
+    hideVerb: hideVerb,
+    hideNotice: hideNotice,
+    scopeEntryAccessibleName: scopeEntryAccessibleName,
     effectiveScope: effectiveScope,
     moveScope: moveScope,
     scopeIndex: scopeIndex,

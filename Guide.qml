@@ -713,7 +713,11 @@ Item {
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
       // on screen. `scope` and `group` are the same five characters.
-      groupsNarrow: root.groupAxis.narrows })
+      groupsNarrow: root.groupAxis.narrows,
+      // M3-01: `x hide group` / `x unhide` is decided by the same table the
+      // key dispatches on, from the cursor row and the current scope.
+      scopeId: root.scopeId, channel: root.rowAt(root.cursorIndex),
+      state: root.serviceReady ? root.service.userState : null })
     var out = []
     for (var i = 0; i < pairs.length; i++) {
       out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
@@ -1141,14 +1145,26 @@ Item {
   }
 
   // x / Delete: remove from Recent, or unfavorite in Favorites; no-op elsewhere.
+  // `x`: what it removes depends on the list it is pressed in, and the
+  // table that decides is Model.hideAction -- the same call the footer
+  // derives its verb from, so the hint and the handler cannot disagree
+  // (M3-01, PLAN-M3 decision 3).
   function removeAt(index) {
     var channel = root.rowAt(index)
     if (!channel || !root.serviceReady) return
-    if (root.effectiveScope === Model.SCOPE_RECENT) {
+    var act = Model.hideAction({ scopeId: root.scopeId, query: root.query, channel: channel, state: root.service.userState })
+    if (act.action === "recent") {
       root.service.removeRecent(Model.channelId(channel))
       root.showTransient(root.copy.transientRecentRemoved)
       root.rebuildDisplay()
-    } else if (root.effectiveScope === Model.SCOPE_FAVORITES) {
+    } else if (act.action === "hide" || act.action === "unhide") {
+      // Count BEFORE the toggle, from the group scope, so the notice names
+      // the rows that just left (or came back) rather than what is left.
+      var groupRows = Model.channelsForScope(root.service.channels, Model.groupScopeId(act.group), root.service.userState).length
+      var hidden = typeof root.service.toggleHiddenGroup === "function" ? root.service.toggleHiddenGroup(act.group) : null
+      root.showTransient(Model.hideNotice(hidden, act.group, groupRows))
+      if (hidden !== null) root.rebuildDisplay()
+    } else if (act.action === "favorite") {
       // D-SAVE-1. Favourites holds two kinds of row since saved searches
       // landed: channels the user starred, and channels a saved search
       // matched. `x` used to call the favourite toggle for both -- so on a
@@ -2644,12 +2660,15 @@ Item {
                   required property string kind
 
                   readonly property bool isHeader: kind === "header"
+                  // M3-01: a hidden group's entry is dimmed, not gone, so the
+                  // user can see what they hid and reach it with h/l.
+                  readonly property bool isHidden: kind === "hidden"
                   readonly property bool selected: !isHeader && scopeId === root.scopeId
 
                   width: ListView.view.width
                   height: isHeader ? root.groupEntryHeight + Style.space(10) : root.groupEntryHeight
                   Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
-                  Accessible.name: isHeader ? label : label + ", " + Model.pluralChannels(count)
+                  Accessible.name: Model.scopeEntryAccessibleName({ label: label, count: count, kind: kind })
                   Accessible.selected: selected
 
                   PanelSectionHeader {
@@ -2695,6 +2714,11 @@ Item {
                       // never been pointed at it: 0 of 23 under 4.5, floor
                       // 4.70, and the accent survives untouched on 15 themes.
                       color: groupRow.selected ? root.cursorInk : root.foreground
+                      // M3-01: hidden entries sit at the secondary rung the
+                      // count column already uses on this card (D-RUNG-14),
+                      // and come back to full ink under the cursor, where
+                      // the entry is active and the fill is different.
+                      opacity: groupRow.isHidden && !groupRow.selected ? root.captionAlphaOnCard : 1
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       elide: Text.ElideRight
