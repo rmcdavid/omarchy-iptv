@@ -3087,13 +3087,17 @@ checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirecti
   // both meant ACTIVE: the selected group label, and the ConfirmDialog's
   // selected button (which the host also uses for the dialog card's border).
   //
-  // M2-13 adds a THIRD, deliberately, and this gate is why it is deliberate:
-  // the channel wall's selected tile caption. It is the same PAIRING as the
-  // group label one line above it -- `cursorInk` over `selectedBackground` --
-  // rather than a new colour question, so it inherits that site's contrast
-  // answer instead of opening another. The alternative considered and
-  // rejected was the raw accent, which is under 4.5:1 in most themes and is
-  // the whole reason this family exists.
+  // M2-13 added a THIRD and then REMOVED it, and the round trip is worth
+  // keeping. The channel wall's selected tile caption was inked with
+  // `cursorInk`, justified here by the group label one line above. That was
+  // the wrong precedent: the group label is a SELECTED entry, which means
+  // ACTIVE, and the tile caption marks the CURSOR. UX 5.4 says the accent
+  // means active and never cursor "with no exceptions", and `cursorInk` is
+  // the calibrated accent. The 0.8.0 preflight caught it. The tile caption
+  // takes the foreground now, exactly as the row's name does, and the cursor
+  // is carried by the selection fill and the cursor mark. So the ink still
+  // has two consumers, and this gate is what made removing it a decision
+  // rather than a preference.
   //
   // The inventory still follows `primaryColor`, because that indirection is
   // what once hid SIX sites: the ink was read at five places and forwarded to
@@ -3111,7 +3115,6 @@ checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirecti
   "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
   "selectedText: root.cursorInk",
   "color: groupRow.selected ? root.cursorInk : root.foreground",
-  "color: tile.current ? root.cursorInk : root.foreground",
   "readonly property color primaryColor: root.foreground",
   "color: row.primaryColor",
   "color: row.primaryColor",
@@ -6596,25 +6599,32 @@ checkCall("the shipped README key table describes movements the table really mak
     const t = Model.arrowAction({ axis: axis, delta: 1, wall: true }).target
     return t === "row" ? "row" : (t === "cursor" ? "tile" : "group")
   }
+  // Every wall row is graded on its OWN axis, and a row naming both axes is
+  // an error rather than a row to guess at. The first version of this check
+  // skipped the horizontal half of any row that also named a vertical key
+  // (`if (horizontal && !vertical)`), which silently left the one README row
+  // it most needed to grade ungraded -- and substring-scanned the whole
+  // sentence, so swapping the two halves passed. The table rows are split
+  // per axis now so each claim has exactly one answer to be checked against.
   rows.filter(function (r) { return /channel wall|On the wall/.test(r) }).forEach(function (r) {
     const vertical = /Up \/ Down|j \/ k/.test(r)
     const horizontal = /Left \/ Right|h \/ l/.test(r)
-    // the sentence after "wall" is what it claims those keys do there
     const claim = r.slice(r.search(/channel wall|On the wall/))
-    if (vertical) {
-      const says = /whole row|a row/.test(claim) ? "row" : (/one tile|a tile/.test(claim) ? "tile" : "unclear")
-      out.push("vertical says " + says + ", table says " + verb("v"))
-    }
-    if (horizontal && !vertical) {
-      const says = /one tile|a tile/.test(claim) ? "tile" : (/group/.test(claim) ? "group" : "unclear")
-      out.push("horizontal says " + says + ", table says " + verb("h"))
-    }
+    if (vertical && horizontal) { out.push("a row names both axes: " + r.slice(0, 40)); return }
+    if (!vertical && !horizontal) return
+    const axis = vertical ? "v" : "h"
+    const says = /whole row|a row/.test(claim) ? "row"
+      : (/one tile|a tile/.test(claim) ? "tile" : (/group/.test(claim) ? "group" : "unclear"))
+    out.push((vertical ? "vertical" : "horizontal") + " says " + says + ", table says " + verb(axis))
   })
   return out
 }, ["Ctrl+G: documented",
+    // search mode: Up/Down and Left/Right, one row each
     "vertical says row, table says row",
     "horizontal says tile, table says tile",
-    "vertical says row, table says row"])
+    // list mode: j/k and h/l, now one row each so both halves are graded
+    "vertical says row, table says row",
+    "horizontal says tile, table says tile"])
 
 checkCall("both key paths dispatch on the table and neither moves anything itself", function () {
   var body = guideSource.slice(guideSource.indexOf("function handleSearchKey"))

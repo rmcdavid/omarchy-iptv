@@ -3049,11 +3049,16 @@ Item {
                     width: root.wallGeom.tileWidth
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: tile.name
-                    // `cursorInk` and not the accent: on a cursor fill the
-                    // raw accent is under 4.5:1 in most themes, which is the
-                    // whole D-RUNG family. The group column picks its selected
-                    // ink the same way at Guide.qml:2611.
-                    color: tile.current ? root.cursorInk : root.foreground
+                    // The foreground, cursor or not -- the same choice the
+                    // row's name makes. UX 5.4 is explicit that the accent
+                    // means ACTIVE and never CURSOR, "with no exceptions", and
+                    // `cursorInk` IS the calibrated accent. The first build of
+                    // this tile inked the caption with it and justified that
+                    // by the group column, which is a SELECTED entry (active)
+                    // and not a cursor -- the wrong precedent. The cursor is
+                    // carried by the selection fill and the cursor mark, as
+                    // it is on a row.
+                    color: root.foreground
                     font.family: Style.font.family
                     font.pixelSize: Style.font.bodySmall
                     elide: Text.ElideRight

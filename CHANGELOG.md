@@ -7,19 +7,22 @@ version lives in `manifest.json`.
 
 ### Added
 
-- **Your channels, as a wall of pictures.** Press `Ctrl+G` in the guide and the
-  list becomes a grid of tiles — the picture your playlist gives each channel,
-  with the name underneath. Press it again for the list. Everything works the
-  same in both: type to search and the wall filters with you, Enter plays,
-  `f` favourites, and your place is kept when you flip. On the wall `j`/`k`
-  move a whole row and `h`/`l` move one tile. Channels your playlist gives no
-  picture for get the plugin's own television mark and their name, so the wall
-  is useful before you have turned logos on at all — and on playlists where
-  most channels have none. The group column is hidden on the wall, which is
-  what makes room for tiles big enough to read; to change group, flip back to
-  the list. The guide remembers which of the two you were in until the shell
-  restarts, and starts in the list until you first press the key, so nothing
-  changes for you unless you ask for it.
+- **Your channels, as a wall of tiles.** Press `Ctrl+G` in the guide and the
+  list becomes a grid: about twice as many channels on screen, each with its
+  name, and — once you have turned channel logos on — the picture your
+  playlist gives it. Channel logos are off by default, so out of the box every
+  tile carries the plugin's own television mark and the channel name, which is
+  already a faster way to scan a long list. Press `Ctrl+G` again for the list.
+  Everything works the same in both: type to search and the wall filters with
+  you, Enter plays, `f` favourites, and your place is kept when you flip. On
+  the wall `j`/`k` move a whole row and `h`/`l` move one tile. Channels your
+  playlist gives no picture for get the same mark, so a playlist where most
+  channels have none still gives you a usable wall rather than a screen of
+  holes. The group column is hidden on the wall, which is what makes room for
+  tiles big enough to read; to change group, flip back to the list. The guide
+  remembers which of the two you were in until the shell restarts, and starts
+  in the list until you first press the key, so nothing changes for you unless
+  you ask for it.
 
 - **You can get the logo disk space back.** Turning channel logos off has
   always stopped the downloading and hidden the pictures, but the files stayed

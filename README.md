@@ -6,7 +6,8 @@ theme-native channel guide, type to find a channel, Enter plays it in mpv.
 Status: v0.8.0 Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, and a channel wall that shows your channels as a
-grid of their own logos; the releases before this one went to the guide at
+grid of tiles -- their logos if you have turned those on, their names either
+way; the releases before this one went to the guide at
 real provider scale, and to search accuracy and readable contrast.
 `CHANGELOG.md` has the release notes.
 
@@ -127,8 +128,9 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | search | Enter | play and close; Esc clears the query, then closes |
 | search | Ctrl+S | save this search into Favorites: its channels join your starred ones, and the confirmation says how many matched |
 | search | Tab or Shift+Tab | switch to list mode (query stays) |
-| list | j / k, h / l | in the list: move the cursor / change group. On the channel wall: move a whole row / move one tile |
-| both | Ctrl+G | switch between the channel list and the channel wall, a grid of channel logos |
+| list | j / k | move the cursor. On the channel wall: move a whole row of tiles |
+| list | h / l | change group. On the channel wall there is no group column, and they move the cursor one tile |
+| both | Ctrl+G | switch between the channel list and the channel wall: a grid of tiles showing each channel's name, and its logo if channel logos are on. Works either way -- logos are off by default and the wall does not need them |
 | list | Enter | play, close, focus the player |
 | list | Space | play and keep the guide open (zap while watching) |
 | list | f | toggle favorite |
