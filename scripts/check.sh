@@ -127,9 +127,18 @@ fail=0
 # against 34. The drift is what happens when a floor is raised only when
 # somebody remembers; the numbers below are the measured counts at that
 # commit, with zero margin again, which is the whole point of them.
+#
+# Re-levelled again 2026-09-26 for 0.9.0, and THE DRIFT HAD ALREADY REOPENED
+# at the cut one day later: 0.8.0 shipped from 65978e4 running 1620 node and
+# 637 python against these same 1579/635. So the answer is not "remember
+# harder" -- it is that the re-level belongs in the version-bump commit, the
+# one step every release performs, and that is now where it is. Raising a
+# floor only when somebody remembers is what left 63 node checks and 12
+# python tests -- the whole of M3 -- deletable in silence when this release
+# came to be cut. Measured counts on this tree, zero margin again.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1579}
-PY_TESTS_MIN=${PY_TESTS_MIN:-635}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1646}
+PY_TESTS_MIN=${PY_TESTS_MIN:-656}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

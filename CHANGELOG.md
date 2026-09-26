@@ -10,22 +10,29 @@ Two things that make a long list less hostile.
 ### Added
 
 - **Hide groups you never want to see.** In the guide's list mode, `x` on
-  a channel hides the group it belongs to. The group leaves All, the group
+  a channel hides the group it belongs to -- except in Recent and Favorites,
+  where `x` keeps the meaning it always had (remove the recent, unfavorite
+  the row). The group leaves All, the group
   list and search, and sits dimmed under a HIDDEN section at the bottom of
   the column; go there and press `x` again to bring it back. Your
   favorites, your recents and channel numbers still reach a hidden group's
   channels, because those are things you chose by hand. Hidden groups are
   remembered by name, across sources and restarts.
-- **Audio and subtitle picker.** `t` while a channel plays opens a small
-  panel over the list with the stream's audio tracks and subtitles; `j`/`k`
-  move, `Enter` selects, `Esc` closes. The panel shows what the player is
-  actually using, not what was asked. Nothing is remembered across channels.
+- **Audio and subtitle picker.** `t` in list mode, while a channel plays,
+  opens a small panel over the list with the stream's audio tracks and
+  subtitles; `j`/`k` move, `Enter` selects, `Esc` closes. The panel shows
+  what the player is actually using, not what was asked, and it follows you
+  when you change channel. The choice itself does not: a new channel starts
+  on its own default track, because a track number means something
+  different on every stream.
 
 ### Fixed
 
-- A refused pause used to reach the shell as an internal error with a
-  traceback on the helper's stderr; it is now a named status like every
-  other player verb.
+- A stream that refused to pause left the bar saying `Paused` over a channel
+  that was still playing, for up to ten seconds, and reported the refusal to
+  the log as an internal error with a traceback. The refusal is now a named
+  status, and the shell asks the player what is true instead of believing
+  its own optimism.
 
 ## 0.8.0 (2026-09-25)
 

@@ -137,7 +137,7 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
 | list | c | pause or resume the live stream. Not rewind: live streams cannot be wound back, so there is no returning to something that already happened, and the pause lasts about five minutes before the buffer fills. Bind a key to `omarchy-shell io.github.rmcdavid.iptv pause` to reach it while the guide is closed |
-| list | t | while something plays: choose the audio track and the subtitles. A small panel lists what the stream carries; `j`/`k` move, `Enter` selects, `Esc` closes |
+| list | t | while something plays: choose the audio track and the subtitles. A small panel lists what the stream carries; `j`/`k` move, `Enter` selects, `Esc` closes. List mode only -- in search mode `t` is just a letter you are typing |
 | list | p | picture in picture: shrink the player into a corner, or put it back |
 | list | r | refresh playlist and EPG now |
 | list | / or Tab | back to search mode; Esc clears the query, then closes |
@@ -271,8 +271,11 @@ carry channel ids — most do — are not affected at all.
 - One mpv window, class `omarchy-iptv`, titled with the channel name.
   Switching channels reuses it.
 - Streams that carry more than one audio language, or subtitles, can be
-  switched from the guide: `t` while the channel plays. The choice is not
-  remembered across channels or restarts.
+  switched from the guide: `t` in list mode while the channel plays. The
+  choice lasts as long as the channel does: changing channel goes back to
+  whatever the new stream says is its own default, because a track number
+  means something different on every stream. Remembering a preferred
+  *language* is a different feature and is not here yet.
 - Playback survives `omarchy restart shell`. The player runs on its own and
   the guide reattaches to it, so a restart, a theme change or installing
   another plugin all leave what you are watching alone.
@@ -353,8 +356,8 @@ itself unavailable rather than half working.
   (safe to delete; rebuilt on refresh). A 0.1.0 single cache is migrated on
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
-  played, your saved searches, the player session record, and the Sources
-  history including their URLs (mode 0600). Channels that failed to play are
+  played, your saved searches, the groups you have hidden, the player
+  session record, and the Sources history including their URLs (mode 0600). Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
 - `~/.cache/omarchy-iptv/sources/<source>/failed.json` : which channels of

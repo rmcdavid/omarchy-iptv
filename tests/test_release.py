@@ -12,6 +12,7 @@ test_the_artifact_holds_exactly_what_the_plugin_needs fails.
 
 import importlib.util
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -34,6 +35,8 @@ def must_ship():
         'contrib/bindings.lua', 'contrib/omarchy-menu.jsonc', 'contrib/windows.lua',
     }
 
+
+TODAY = '2026-09-26'
 
 MUST_NOT_SHIP = ('CLAUDE.md', 'docs/PRODUCT.md', 'tests/test_x.py',
                  'scripts/check.sh', '.gitignore')
@@ -63,6 +66,10 @@ class ReleaseCase(unittest.TestCase):
         self.write('Model.js', 'var PLUGIN_VERSION = "0.9.9"\n')
         self.write('README.md', 'Copy `contrib/bindings.lua`. See the dev branch: '
                    'https://example.invalid/tree/dev/docs/UX.md\n')
+        # The cut requires a heading naming this version and dated the day of
+        # the build, so the double carries one (rule 10: a double that ships
+        # what the real tree cannot is the forgiving kind).
+        self.write('CHANGELOG.md', '# Changelog\n\n## 0.9.9 (%s)\n\n- a thing\n' % TODAY)
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'before the split')
         self.git('checkout', '-q', '-b', 'dev')
@@ -85,7 +92,7 @@ class ReleaseCase(unittest.TestCase):
 
     def build(self):
         return release.build(self.dir, gate_already_green=True, validate=False,
-                             tag=True, out=io.StringIO())
+                             tag=True, out=io.StringIO(), today=TODAY)
 
     def main_tree(self):
         return set(p for p in self.git('ls-tree', '-r', '--name-only', '-z',
@@ -149,6 +156,11 @@ class ReleaseCase(unittest.TestCase):
         # release that could not ship.
         self.write('Model.js', self.git('show', 'dev:Model.js')
                    .replace('0.9.9', '1.0.0'))
+        # And the release notes, because the cut now requires the heading to
+        # name the version being shipped and to be dated the day it ships.
+        # Bumping the manifest alone here would be testing a release that
+        # could not ship, for the second reason in as many comments.
+        self.write('CHANGELOG.md', '# Changelog\n\n## 1.0.0 (%s)\n\n- a thing\n' % TODAY)
         self.commit_all()
         # manifest.json IS on the allowlist, so this is a real change; make
         # the no-change case for real by building twice at the same content
@@ -313,3 +325,64 @@ class ReleaseCase(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ChangelogHeadingTest(unittest.TestCase):
+    """The join the 0.8.0 cut did not have.
+
+    `build` reads the version from manifest.json alone, so nothing tied the
+    changelog heading to it: 0.8.0 shipped a section dated the day before the
+    release, and a cut made without editing the heading would ship an
+    artifact whose own changelog says "(unreleased)".
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def write(self, version, heading):
+        with io.open(os.path.join(self.root, 'manifest.json'), 'w', encoding='utf-8') as fh:
+            fh.write(json.dumps({"version": version}))
+        with io.open(os.path.join(self.root, 'CHANGELOG.md'), 'w', encoding='utf-8') as fh:
+            fh.write("# Changelog\n\n%s\n\nthings\n" % heading)
+
+    def test_the_cut_refuses_an_unreleased_heading(self):
+        self.write("0.9.0", "## 0.9.0 (unreleased)")
+        problems = release.changelog_problems(self.root, strict=True, today="2026-09-26")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("dated", problems[0])
+        # Silent outside the cut, which is how a release is drafted.
+        self.assertEqual(release.changelog_problems(self.root, strict=False), [])
+
+    def test_the_cut_refuses_a_heading_for_another_version(self):
+        self.write("0.9.0", "## 0.8.0 (2026-09-25)")
+        problems = release.changelog_problems(self.root, strict=True, today="2026-09-26")
+        self.assertTrue(any("wrong release notes" in p for p in problems), problems)
+
+    def test_the_cut_refuses_yesterdays_date(self):
+        """0.8.0's own symptom: the heading was written on the 25th and the
+        build run on the 26th, so the shipped artifact is dated a day before
+        it exists. Nothing compared the two."""
+        self.write("0.9.0", "## 0.9.0 (2026-09-25)")
+        problems = release.changelog_problems(self.root, strict=True, today="2026-09-26")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("date the section on", problems[0])
+
+    def test_a_dated_heading_for_this_version_passes_both_ways(self):
+        self.write("0.9.0", "## 0.9.0 (2026-09-26)")
+        self.assertEqual(release.changelog_problems(self.root, strict=True, today="2026-09-26"), [])
+        self.assertEqual(release.changelog_problems(self.root, strict=False), [])
+
+    def test_a_draft_ahead_of_the_manifest_is_normal_outside_the_cut(self):
+        self.write("0.8.0", "## 0.9.0 (unreleased)")
+        self.assertEqual(release.changelog_problems(self.root, strict=False), [])
+        self.assertTrue(release.changelog_problems(self.root, strict=True, today="2026-09-26"))
+
+    def test_a_missing_heading_is_reported_rather_than_ignored(self):
+        with io.open(os.path.join(self.root, 'manifest.json'), 'w', encoding='utf-8') as fh:
+            fh.write(json.dumps({"version": "0.9.0"}))
+        with io.open(os.path.join(self.root, 'CHANGELOG.md'), 'w', encoding='utf-8') as fh:
+            fh.write("# Changelog\n\nno sections yet\n")
+        self.assertTrue(release.changelog_problems(self.root, strict=True, today="2026-09-26"))
+

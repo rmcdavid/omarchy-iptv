@@ -32,6 +32,7 @@ Python 3 standard library only. Every subprocess is an argv list.
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -102,6 +103,16 @@ SHIPPED_SOURCES = RUNTIME_SOURCES + ('bin/omarchy-iptv',)
 # review the day before it would have (D-REL-3). The subcommand names are
 # read from the helper's own parser so this list cannot drift from it.
 SHIPPED_PROSE = ('README.md', 'CHANGELOG.md')
+# The CHANGELOG's top heading, which must agree with manifest.json at the
+# moment of the cut. `build` reads the version from the manifest alone, so
+# nothing tied the two together: 0.8.0 shipped a changelog dated the day
+# before the release, and a cut made without editing the heading would ship
+# an artifact whose own changelog says "(unreleased)". Found by the 0.9.0
+# preflight, which also found that the same unguarded step produced the
+# 0.8.0 date.
+CHANGELOG_HEADING = re.compile(r'^## +([0-9]+\.[0-9]+\.[0-9]+) +\((.+?)\)\s*$', re.M)
+ISO_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
 HELPER_SUBCOMMAND = re.compile(r'sub\.add_parser\("([a-z-]+)"')
 HELPER_PATH_FORM = ('python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/'
                     'bin/omarchy-iptv')
@@ -154,6 +165,45 @@ def read(root, rel):
 
 
 # ---------------------------------------------------------------- check ----
+
+def changelog_problems(root, strict, today=None):
+    """The top CHANGELOG heading against manifest.json, at the cut.
+
+    Only `build` calls this. `check` is about the allowlist being whole, and
+    it runs against synthetic trees in the tests that carry no release
+    sections at all.
+
+    At the cut the heading must name THIS version and carry TODAY's date.
+    Requiring the date rather than merely a date is the point: 0.8.0 shipped
+    a section dated 2026-09-25 and was cut on the 26th, because the heading
+    was written on one day and the build run on the next, and nothing
+    compared them. A heading still saying "(unreleased)" fails the same
+    check, which is the other half of the same unguarded step.
+    """
+    problems = []
+    try:
+        version = json.loads(read(root, 'manifest.json'))['version']
+        text = read(root, 'CHANGELOG.md')
+    except Exception as error:               # unreadable is someone else's problem
+        return ['could not read manifest.json / CHANGELOG.md: %s' % error]
+    m = CHANGELOG_HEADING.search(text)
+    if not m:
+        return ['CHANGELOG.md has no "## <version> (<date>)" heading']
+    heading, when = m.group(1), m.group(2).strip()
+    if not strict:
+        return problems
+    if heading != version:
+        problems.append('CHANGELOG.md leads with %s but manifest.json says %s; '
+                        'the artifact would carry the wrong release notes' % (heading, version))
+    stamp = today or datetime.date.today().isoformat()
+    if not ISO_DATE.match(when):
+        problems.append('CHANGELOG.md %s is dated %r; a released section is dated YYYY-MM-DD '
+                        '(today is %s)' % (heading, when, stamp))
+    elif when != stamp:
+        problems.append('CHANGELOG.md %s is dated %s and the cut is %s; date the section on '
+                        'the day it ships' % (heading, when, stamp))
+    return problems
+
 
 def check(root, out=sys.stdout):
     """Prove the allowlist is whole. Returns a list of problems."""
@@ -324,13 +374,14 @@ def validate_tree(root, tree):
 
 
 def build(root, gate_already_green=False, validate=True, tag=True,
-          trailers=(), out=sys.stdout):
+          trailers=(), out=sys.stdout, today=None):
     if git(root, 'status', '--porcelain').strip():
         raise ReleaseError('the working tree is dirty; commit or stash first')
     if current_branch(root) != DEV_BRANCH:
         raise ReleaseError('releases are cut from %r, and this is %r'
                            % (DEV_BRANCH, current_branch(root)))
     problems = check(root, out=out)
+    problems.extend(changelog_problems(root, strict=True, today=today))
     if problems:
         raise ReleaseError('the allowlist is not whole:\n  ' + '\n  '.join(problems))
     if not gate_already_green:
