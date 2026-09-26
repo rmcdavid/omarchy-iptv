@@ -5,6 +5,8 @@ version lives in `manifest.json`.
 
 ## 0.8.0 (2026-09-25)
 
+The channel wall.
+
 ### Added
 
 - **Your channels, as a wall of tiles.** Press `Ctrl+G` in the guide and the
