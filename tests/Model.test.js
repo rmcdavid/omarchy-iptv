@@ -3026,6 +3026,10 @@ checkCall("D-RUNG-14: every 10 px caption, with its rung and its weight, by inve
       return (pick(/^\s*opacity:/) || "opacity: 1") + " | " + (pick(/^\s*font\.bold:/) || "regular")
     })
 }, [
+  // M3-02: the track picker's detail column, on the same rung and weight as
+  // the group column's count. It sits on the same fill, under the same
+  // cursor, at the same size, and it is drawn before the header in the file.
+  "opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard | font.bold: true",
   "opacity: 0.52 | regular",                                 // header scope label
   // The only site at the CAPTION rung that lands on a selection fill. That
   // qualifier is load-bearing and an earlier version of this comment left it
@@ -3367,11 +3371,13 @@ checkCall("D-RUNG-9: and it still READS as dimmed, which is what a fixed rung wo
 checkCall("D-RUNG-9: the floor and the separation are pinned, so neither can be relaxed to fit", function () {
   return [Model.SECTION_HEADER_FLOOR, Model.SECTION_HEADER_SEPARATION]
 }, [4.65, 1.93])
-checkCall("D-RUNG-9: and the guide really asks for it, at BOTH call sites", function () {
+checkCall("D-RUNG-9: and the guide really asks for it, at EVERY call site", function () {
   // Rule 14: the arithmetic above is worth nothing if the QML still takes the
-  // host default. Both PanelSectionHeader instances must override `color`.
-  return qmlSites(/Model\.sectionHeaderAlpha/).length
-}, 2)
+  // host default. Every PanelSectionHeader instance must override `color`:
+  // the group column's, the Sources screen's and (M3-02) the track picker's.
+  // Counted against the instances, not against a number someone remembers.
+  return [qmlSites(/Model\.sectionHeaderAlpha/).length, qmlSites(/PanelSectionHeader \{/).length]
+}, [3, 3])
 
 checkCall("D-RUNG-5: the idle glyph is no longer BOLDER than the active one anywhere", function () {
   // The defect, as a user would see it, and confirmed on a real screen:
@@ -3573,7 +3579,7 @@ check("onEscape null", Model.onEscape(null).close, true)
 check("moveCursor wraps", [Model.moveCursor(0, -1, 5, true), Model.moveCursor(4, 1, 5, true), Model.moveCursor(2, 1, 5, true)], [4, 0, 3])
 check("moveCursor page clamps", [Model.moveCursor(1, -10, 5, false), Model.moveCursor(1, 10, 5, false)], [0, 4])
 check("moveCursor empty list", Model.moveCursor(3, 1, 0, true), 0)
-check("copy is defensive on garbage state", Model.withMode({ mode: "weird", query: 5 }, "list"), { mode: "list", query: "5", scopeId: "all", restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0 })
+check("copy is defensive on garbage state", Model.withMode({ mode: "weird", query: 5 }, "list"), { mode: "list", query: "5", scopeId: "all", restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0, trackCursor: 0 })
 
 // ---- zap ring ----
 check("launchScope from Favorites is Favorites", Model.launchScope("favorites", "", { group: "UK" }), "favorites")
@@ -4487,7 +4493,7 @@ check("architecture constant names agree with LIMITS", [Model.MAX_SOURCE_URL, Mo
 check("MASK and the clear params", [Model.MASK, Model.MASK_CLEAR_PARAMS], ["****", ["type", "output"]])
 check("SOURCE_KEYS table", Model.SOURCE_KEYS, { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" })
 check("Sources glyphs are supplementary-plane Nerd Font codepoints", ["sources", "check", "eye", "eyeOff", "plus", "key", "pencil", "closeCircle"].map(k => Model.GLYPHS[k].codePointAt(0).toString(16)), ["f0411", "f012c", "f0208", "f0209", "f0415", "f0306", "f03eb", "f0159"])
-check("guide modes", Model.GUIDE_MODES, ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos"])
+check("guide modes", Model.GUIDE_MODES, ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos", "tracks"])
 
 checkCall("M2-04: only turning logos ON is confirmed, and only from Sources", function () {
   // Turning them off discloses nothing. A dialog in front of the safe
@@ -5277,7 +5283,7 @@ check("entryWith null-safe", Model.entryWith(null, { playlistUrl: "x" }), { play
 check("cacheStale", [Model.cacheStale(null, 360, 1000), Model.cacheStale({ ok: false, fetchedAt: 900 }, 360, 1000), Model.cacheStale({ ok: true }, 360, 1000), Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 15 * 60), Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 15 * 60 - 1), Model.cacheStale({ ok: true, fetchedAt: 1000 }, 5, 1000 + 14 * 60)], [true, true, true, true, false, false])
 
 // ---- guide state machine: forms and Sources (UX-SOURCES 1.9, 2.3, 7.3) ----
-check("guideState gains returnMode, form, sourceCursor", Model.guideState("all"), { mode: "search", query: "", scopeId: "all", restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0 })
+check("guideState gains returnMode, form, sourceCursor", Model.guideState("all"), { mode: "search", query: "", scopeId: "all", restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0, trackCursor: 0 })
 check("withMode accepts the new modes and falls back to search", ["sources", "sourceEdit", "sourceXtream", "confirmRemove", "junk"].map(m => Model.withMode(Model.guideState("all"), m).mode), ["sources", "sourceEdit", "sourceXtream", "confirmRemove", "search"])
 check("toggleMode is a no-op outside search / list", Model.toggleMode(Model.withMode(Model.guideState("all"), "sources")).mode, "sources")
 const fr = Model.openFirstRun(Model.guideState("all"))
@@ -7189,6 +7195,102 @@ check("hidden groups: the column entry's accessible name says hidden, because th
    Model.scopeEntryAccessibleName({ label: "Religious", count: 117, kind: "group" }),
    Model.scopeEntryAccessibleName({ label: "HIDDEN", count: 0, kind: "header" })],
   ["Religious, 117 channels, hidden", "Religious, 117 channels", "HIDDEN"])
+
+
+// ---------------------------------------------------------------- M3-02 audio and subtitle picker
+//
+// PLAN-M3 decision 5 and 6. The helper is tested over the socket in python;
+// this is the guide's half: the argv it sends, the second sink guard, the
+// rows, the cursor, the mode and the footer. Every check calls the function
+// the panel binds to.
+const TRACKS_STATUS = { ok: true, kind: "player.tracks", running: true, changed: false, tracks: [
+  { id: 1, type: "audio", selected: true, lang: "eng", title: "", codec: "aac", "default": true, forced: false, external: false },
+  { id: 2, type: "audio", selected: false, lang: "spa", title: "Comentario http://user:pw@x.example/y", codec: "aac", "default": false, forced: false, external: true },
+  { id: 1, type: "sub", selected: false, lang: "eng", title: "", codec: "subrip", "default": false, forced: true, external: false },
+  { id: 1, type: "video", selected: true, codec: "h264" },
+  { id: "x", type: "sub" }, { id: true, type: "audio" }, null, "row"
+] }
+function tracksOf() { return Model.parseTracks(TRACKS_STATUS) }
+
+check("tracks argv: a plain list, an audio choice, a subtitle off, and every malformed choice becomes a plain list",
+  [Model.playerTracksArgv("/run/s.sock"),
+   Model.playerTracksArgv("/run/s.sock", { type: "audio", id: 2 }).slice(-2),
+   Model.playerTracksArgv("/run/s.sock", { type: "sub", id: "no" }).slice(-2),
+   Model.playerTracksArgv("/run/s.sock", { type: "sub", id: "7" }).slice(-2),
+   Model.playerTracksArgv("/run/s.sock", { type: "audio", id: "two" }).length,
+   Model.playerTracksArgv("/run/s.sock", { type: "audio", id: -1 }).length,
+   Model.playerTracksArgv("/run/s.sock", { type: "audio", id: 1.5 }).length,
+   Model.playerTracksArgv("/run/s.sock", { type: "audio", id: true }).length,
+   Model.playerTracksArgv("/run/s.sock", { type: "video", id: 1 }).length,
+   Model.playerTracksArgv("/run/s.sock", { type: "audio" }).length],
+  [["player", "tracks", "--socket", "/run/s.sock"], ["--audio", "2"], ["--sub", "no"], ["--sub", "7"], 4, 4, 4, 4, 4, 4])
+checkCall("tracks: parseTracks keeps audio and sub with integer ids, defaults every field, and scrubs a URL in a title", function () {
+  const t = tracksOf()
+  return [t.length, t.map(function (x) { return x.type + x.id }), t[1].title, t[1].title.indexOf("pw") === -1,
+          t[0].dflt, t[2].forced, t[1].external, Model.parseTracks(null).length, Model.parseTracks({ tracks: "x" }).length]
+}, [3, ["audio1", "audio2", "sub1"], "Comentario x.example", true, true, true, true, 0, 0])
+check("tracks: labels -- title wins, then the language name, then the id; the detail carries what the label dropped",
+  [Model.trackLabel({ id: 1, lang: "eng", title: "" }), Model.trackLabel({ id: 3, lang: "xyz", title: "" }),
+   Model.trackLabel({ id: 4, lang: "", title: "" }), Model.trackLabel({ id: 5, lang: "spa", title: "Director's commentary" }),
+   Model.trackDetail({ id: 5, lang: "spa", title: "Commentary", codec: "aac", forced: true, external: true }),
+   Model.trackDetail({ id: 1, lang: "eng", title: "", codec: "aac" }),
+   Model.trackLanguage("GER"), Model.trackLanguage("und"), Model.trackLanguage(" fre ")],
+  ["English", "XYZ", "Track 4", "Director's commentary",
+   "Spanish" + Model.SEP + "aac" + Model.SEP + "forced" + Model.SEP + "external", "aac", "German", "", "French"])
+checkCall("tracks: the rows -- a header per kind, Off for subtitles selected exactly when no subtitle is", function () {
+  const rows = Model.trackRows(tracksOf())
+  const shape = rows.map(function (r) { return r.kind + ":" + r.label + (r.selected ? "*" : "") })
+  const subOn = Model.trackRows([{ id: 1, type: "sub", selected: true, lang: "eng", title: "", codec: "" }])
+  const none = Model.trackRows([])
+  return [shape, subOn.map(function (r) { return r.label + (r.selected ? "*" : "") }),
+          none.map(function (r) { return r.kind + ":" + r.label + (r.selected ? "*" : "") })]
+}, [["header:Audio", "track:English*", "track:Comentario x.example", "header:Subtitles", "track:Off*", "track:English"],
+    ["Audio", "None reported", "Subtitles", "Off", "English*"],
+    ["header:Audio", "empty:None reported", "header:Subtitles", "track:Off*"]])
+checkCall("tracks: the cursor opens on the selected audio track, else the first choosable row, else nowhere", function () {
+  const rows = Model.trackRows(tracksOf())
+  const unselected = Model.trackRows([{ id: 1, type: "audio", selected: false, lang: "eng", title: "", codec: "" }])
+  // The selected track is NOT the first one here, so "selected" and "first"
+  // give different answers: the first draft of this check had them equal
+  // and survived the mutation that ignores the selection (rule 11).
+  const second = Model.trackRows([{ id: 1, type: "audio", selected: false, lang: "eng", title: "", codec: "" },
+                                  { id: 2, type: "audio", selected: true, lang: "spa", title: "", codec: "" }])
+  return [Model.trackCursorHome(rows), Model.trackCursorHome(unselected), Model.trackCursorHome(second),
+          Model.trackCursorHome(Model.trackRows([])),
+          Model.trackCursorHome([{ kind: "header" }, { kind: "empty" }]), Model.trackCursorHome([])]
+}, [1, 1, 2, 3, -1, -1])
+checkCall("tracks: j/k step over headers and empty rows, wrap at both ends, and enter from nowhere at the near end", function () {
+  const rows = Model.trackRows(tracksOf())   // choosable at 1, 2, 4, 5
+  return [Model.moveTrackCursor(rows, 1, 1), Model.moveTrackCursor(rows, 2, 1), Model.moveTrackCursor(rows, 5, 1),
+          Model.moveTrackCursor(rows, 1, -1), Model.moveTrackCursor(rows, 4, -1),
+          Model.moveTrackCursor(rows, -1, 1), Model.moveTrackCursor(rows, -1, -1), Model.moveTrackCursor(rows, 3, 1),
+          Model.moveTrackCursor([{ kind: "header" }], 0, 1)]
+}, [2, 4, 1, 5, 2, 1, 5, 4, -1])
+checkCall("tracks: what a row is called on the bus -- headers by name, rows by label, detail, kind, selection and position over choosable rows", function () {
+  const rows = Model.trackRows(tracksOf())
+  return [Model.trackAccessibleName(rows, 0), Model.trackAccessibleName(rows, 1), Model.trackAccessibleName(rows, 2),
+          Model.trackAccessibleName(rows, 4), Model.trackAccessibleName(rows, 5), Model.trackAccessibleName(rows, 9)]
+}, ["Audio", "English, aac, audio, selected, 1 of 4", "Comentario x.example, Spanish, aac, external, audio, 2 of 4",
+    "Off, subtitles, selected, 3 of 4", "English, subrip, forced, subtitles, 4 of 4", ""])
+check("tracks: the one line under the title, per service state",
+  ["asking", "failed", "idle", "ready", ""].map(function (s) { return Model.trackPanelMessage(s, []) }),
+  ["Asking the player" + Model.ELLIPSIS, "The player did not answer", "Nothing is playing", "", ""])
+checkCall("tracks: the mode -- opens from list only, closes to list, Esc closes it, Tab does nothing, the cursor is carried", function () {
+  const list = Model.withMode(Model.guideState("all"), "list")
+  const opened = Model.openTracks(list)
+  const fromSearch = Model.openTracks(Model.guideState("all"))
+  const moved = Model.withTrackCursor(opened, 4)
+  return [opened.mode, opened.trackCursor, fromSearch.mode, Model.closeTracks(moved).mode, Model.closeTracks(list).mode,
+          Model.onEscape(moved).state.mode, Model.onEscape(moved).close, Model.toggleMode(moved).mode,
+          Model.copyGuide(moved).trackCursor, Model.withTrackCursor(opened, -3).trackCursor, Model.withTrackCursor(opened, "2.7").trackCursor]
+}, ["tracks", 0, "search", "list", "list", "list", false, "tracks", 4, 0, 2])
+checkCall("tracks: the key and the footer -- t opens it only while something plays, and the picker's own footer is three pairs", function () {
+  function has(o, key) { return Model.footerHints(o).some(function (p) { return p[0] === key }) }
+  return [Model.listLetterAction("t"), Model.listLetterAction("T"), Model.TRACKS_KEY,
+          has({ mode: "list", playing: true }, "t"), has({ mode: "list", playing: false }, "t"), has({ mode: "list" }, "t"),
+          has({ mode: "list", playing: true, wall: true }, "t"), has({ mode: "search", query: "x", playing: true }, "t"),
+          Model.footerHints({ mode: "tracks", playing: true })]
+}, ["tracks", "tracks", "t", true, false, false, true, false, [["j/k", "move"], ["Enter", "select"], ["Esc", "back"]]])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

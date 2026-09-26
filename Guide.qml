@@ -67,9 +67,22 @@ Item {
   // the message, the button and the Enter handler branch on.
   readonly property bool confirmOpen: mode === "confirmRemove" || mode === "confirmLogos"
   readonly property string confirmKind: mode === "confirmLogos" ? "logos" : "remove"
-  // The PanelKeyCatcher is live in the two list-like modes only; search
-  // mode, the forms and the confirm dialog block it (UX-SOURCES 2).
-  readonly property bool catcherLive: listMode || inSources
+  // M3-02: the audio and subtitle picker is a mode over the list (UX 2.9).
+  // Its rows are what the player last answered, built by Model.trackRows;
+  // its cursor is the guide state's own, so the whole surface is one node
+  // can test.
+  readonly property bool inTracks: mode === "tracks"
+  readonly property int trackCursor: guide.trackCursor
+  readonly property var trackRows: root.inTracks && root.serviceReady ? Model.trackRows(root.service.tracks) : []
+  readonly property string trackMessage: root.inTracks ? Model.trackPanelMessage(root.serviceReady ? root.service.tracksState : "idle", root.trackRows) : ""
+  // Leaving the picker by any door (Esc, `t`, the scrim, a dismiss) drops a
+  // request still queued behind another control, so no reply lands on a
+  // panel that is gone.
+  onInTracksChanged: if (!root.inTracks && root.serviceReady && typeof root.service.cancelTracks === "function") root.service.cancelTracks()
+  // The PanelKeyCatcher is live in the list-like modes only; search
+  // mode, the forms and the confirm dialog block it (UX-SOURCES 2). The
+  // picker is list-like: j/k, Enter and Esc, nothing typed.
+  readonly property bool catcherLive: listMode || inSources || inTracks
   readonly property string query: guide.query
   readonly property string scopeId: guide.scopeId
   readonly property string effectiveScope: Model.effectiveScope(scopeId, query)
@@ -218,6 +231,7 @@ Item {
     logosOn: "Channel logos on" + Model.SEP + "fetching now",
     logosOff: "Channel logos off",
     pauseNothing: "Nothing is playing",
+    tracksTitle: "Audio and subtitles",
     pauseBusy: "The player is busy" + Model.SEP + "try again",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
@@ -1448,6 +1462,14 @@ Item {
   // Keys both modes share and PanelKeyCatcher does not consume:
   // PgUp/PgDn, Home/End, Delete. In Sources they drive the source cursor.
   function handleSharedKey(event) {
+    // M3-02: Home/End jump over the picker's choosable rows; the page keys
+    // and Delete have nothing to do there and are swallowed rather than
+    // reaching the list underneath.
+    if (root.inTracks) {
+      if (event.key === Qt.Key_Home) { root.guide = Model.withTrackCursor(root.guide, Model.moveTrackCursor(root.trackRows, -1, 1)); return true }
+      if (event.key === Qt.Key_End) { root.guide = Model.withTrackCursor(root.guide, Model.moveTrackCursor(root.trackRows, -1, -1)); return true }
+      return event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown || event.key === Qt.Key_Delete
+    }
     if (root.inSources) {
       if (event.key === Qt.Key_PageUp) { root.moveSourceCursorBy(-root.sourcePageSize(), false); return true }
       if (event.key === Qt.Key_PageDown) { root.moveSourceCursorBy(root.sourcePageSize(), false); return true }
@@ -1534,6 +1556,7 @@ Item {
     else if (action === "refresh") root.refresh()
     else if (action === "pip") root.togglePip()
     else if (action === "pause") root.togglePause()
+    else if (action === "tracks") root.openTracks()
     else if (action === "sources") root.openSources()
     else if (action === "search") {
       root.swallowKey = true
@@ -1965,6 +1988,50 @@ Item {
     else if (why !== "") root.showTransient(root.copy.pauseNothing)
   }
 
+  // ---- M3-02: the track picker (PLAN-M3 decision 5). It asks the player
+  // and shows what the player answers; nothing here remembers a choice.
+  function openTracks() {
+    if (!root.listMode || !root.serviceReady) return
+    if (root.playingId === "" || typeof root.service.requestTracks !== "function") { root.showTransient(root.copy.pauseNothing); return }
+    root.setGuide(Model.openTracks(root.guide))
+    root.askTracks(null)
+    root.refocus()
+  }
+
+  function closeTracks() {
+    if (!root.inTracks) return
+    root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
+  }
+
+  function askTracks(select) {
+    var why = root.service.requestTracks(select)
+    if (why === "idle") root.showTransient(root.copy.pauseNothing)
+  }
+
+  function moveTrackCursorBy(delta) {
+    var next = Model.moveTrackCursor(root.trackRows, root.trackCursor, delta)
+    if (next >= 0) root.guide = Model.withTrackCursor(root.guide, next)
+  }
+
+  function selectTrackAt(index) {
+    var row = root.trackRows[index]
+    if (!row || row.kind !== "track") return
+    root.askTracks({ type: row.type, id: row.id })
+  }
+
+  // A reply landed. The panel opens before the list arrives, so the cursor
+  // may be on nothing: put it on the selected audio track, or the first row
+  // that can be chosen. A cursor already on a choosable row stays put, so a
+  // selection does not jump the cursor away from what was just chosen.
+  function settleTrackCursor() {
+    if (!root.inTracks || !root.serviceReady) return
+    var rows = Model.trackRows(root.service.tracks)
+    var cur = rows[root.trackCursor]
+    if (cur && cur.kind === "track") return
+    var home = Model.trackCursorHome(rows)
+    if (home >= 0) root.guide = Model.withTrackCursor(root.guide, home)
+  }
+
   function toggleLogos() {
     if (!root.inSources) return
     if (!root.serviceReady || typeof root.service.setShowLogos !== "function") {
@@ -2240,6 +2307,7 @@ Item {
     function onZapSkippedDead(text) { root.showTransient(text) }
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
+    function onTracksChanged() { root.settleTrackCursor() }
     // UX 6.1: a manual refresh ends with `Refreshed - N channels` in the
     // status slot for the transient window (D-LIVE-05).
     function onPlaylistRefreshed(channelCount, manual) {
@@ -2410,6 +2478,10 @@ Item {
           // doing their own job, so j/k, Tab and x never act on a half-typed
           // number and never leave one live behind them.
           onMoveRequested: function(dx, dy) {
+            if (root.inTracks) {
+              if (dy !== 0) root.moveTrackCursorBy(dy)
+              return
+            }
             if (root.inSources) {
               if (dy !== 0) root.moveSourceCursorBy(dy, true)
               return
@@ -2428,6 +2500,7 @@ Item {
           onActivateRequested: {
             var enter = root.enterPending
             root.enterPending = false
+            if (root.inTracks) { root.selectTrackAt(root.trackCursor); return }
             if (root.inSources) { root.activateSourceRow(root.sourceCursor, !enter); return }
             // CN1: Enter and Space keep exactly the meanings UX 3.1 gives
             // them. The buffer commits first and then they play what the
@@ -2442,16 +2515,20 @@ Item {
           }
           onCloseRequested: root.handleEscape()
           onDeleteRequested: {
+            if (root.inTracks) return
             if (root.inSources) { root.startRemove(); return }
             root.endNumberEntry(true)
             root.removeAt(root.cursorIndex)
           }
           onTabRequested: function(direction) {
-            if (root.inSources) return
+            if (root.inSources || root.inTracks) return
             root.endNumberEntry(true)
             root.switchMode()
           }
           onTextKey: function(text) {
+            // M3-02: `t` closes the picker it opened; every other letter is
+            // nothing there, and must not reach the list underneath.
+            if (root.inTracks) { if (Model.listLetterAction(text) === "tracks") root.closeTracks(); return }
             if (root.inSources) { root.handleSourcesLetter(text); return }
             // Backspace and Delete both have a one-character event.text
             // ("\b", "\u007f") and reach this handler, so without the
@@ -2495,6 +2572,161 @@ Item {
           Accessible.name: root.confirmMessage
           onCanceled: root.cancelRemove()
           onConfirmed: root.confirmKind === "logos" ? root.confirmLogos() : root.confirmRemove()
+        }
+
+        // M3-02: the audio and subtitle picker (UX 2.9). A panel over the
+        // list rather than a screen: the list stays where it was under the
+        // scrim, and Esc, `t` or the scrim returns to it. Text on the cursor
+        // row is the plain foreground on the selection fill, as on the
+        // channel rows (UX 5.4: no accent on the cursor); the header rung
+        // and the caption rung are the column's.
+        Item {
+          id: trackPanel
+          anchors.fill: parent
+          visible: root.inTracks
+          z: 10
+          Accessible.ignored: !visible
+
+          Rectangle {
+            anchors.fill: parent
+            color: root.scrim
+            MouseArea { anchors.fill: parent; onClicked: root.closeTracks() }
+          }
+
+          BorderSurface {
+            id: trackCard
+            anchors.centerIn: parent
+            width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
+            height: Math.min(parent.height - root.contentMargin * 2, trackColumn.implicitHeight + root.contentMargin * 2)
+            radius: root.cornerRadius
+            color: root.background
+            borderSpec: root.borderSpec
+            padding: root.contentMargin
+            clip: true
+            Accessible.role: Accessible.Dialog
+            Accessible.name: root.copy.tracksTitle
+            MouseArea { anchors.fill: parent; onClicked: {} }
+
+            Column {
+              id: trackColumn
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.margins: root.contentMargin
+              spacing: Style.space(4)
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                text: root.copy.tracksTitle
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                elide: Text.ElideRight
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: root.trackMessage !== ""
+                text: root.trackMessage
+                color: root.foreground
+                opacity: root.captionAlphaOnCard
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
+
+              Repeater {
+                model: root.trackRows
+                delegate: Item {
+                  id: trackRow
+                  required property int index
+                  required property var modelData
+                  readonly property bool isHeader: modelData.kind === "header"
+                  readonly property bool choosable: modelData.kind === "track"
+                  readonly property bool current: choosable && index === root.trackCursor
+                  width: trackColumn.width
+                  height: isHeader ? root.groupEntryHeight + Style.space(6) : root.groupEntryHeight
+                  Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
+                  Accessible.name: Model.trackAccessibleName(root.trackRows, index)
+                  Accessible.selected: current
+
+                  PanelSectionHeader {
+                    visible: trackRow.isHeader
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
+                    text: trackRow.modelData.label
+                    foreground: root.foreground
+                    color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
+                    fontFamily: root.fontFamily
+                  }
+
+                  Rectangle {
+                    visible: !trackRow.isHeader
+                    anchors.fill: parent
+                    radius: root.cornerRadius
+                    color: trackRow.current ? root.selectedBackground : "transparent"
+
+                    Text {
+                      id: trackMark
+                      textFormat: Text.PlainText
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(10)
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(16)
+                      text: trackRow.modelData.selected ? Model.GLYPHS.check : ""
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                    }
+
+                    Text {
+                      textFormat: Text.PlainText
+                      anchors.left: trackMark.right
+                      anchors.right: trackDetail.left
+                      anchors.leftMargin: Style.space(6)
+                      anchors.rightMargin: Style.space(6)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: trackRow.modelData.label
+                      color: root.foreground
+                      opacity: trackRow.choosable ? 1 : root.captionAlphaOnCard
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      id: trackDetail
+                      textFormat: Text.PlainText
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(10)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: trackRow.modelData.detail
+                      color: root.foreground
+                      opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard
+                      font.bold: true
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      horizontalAlignment: Text.AlignRight
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      enabled: trackRow.choosable
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        root.guide = Model.withTrackCursor(root.guide, trackRow.index)
+                        root.selectTrackAt(trackRow.index)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -2627,7 +2859,8 @@ Item {
             id: guideRow
             anchors.fill: parent
             spacing: 0
-            visible: root.guideMode
+            // M3-02: the picker is a panel OVER the list, not a screen.
+            visible: root.guideMode || root.inTracks
 
             // Group column (UX 2.2 / 2.3)
             Item {

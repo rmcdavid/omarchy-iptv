@@ -2784,7 +2784,7 @@ MPV_RESERVED = frozenset((
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
     "--term-status-msg", "--screenshot-template",
 ))
-PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause")
+PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks")
 # Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
 # are not direct streams - but each one puts the credentialed stream address
@@ -4145,6 +4145,112 @@ def player_pause(args: argparse.Namespace) -> int:
         payload["changed"] = True
         emit(payload)
         return EXIT_OK
+    except HelperError as error:
+        # D-PLY-20: the code `pause_refused` was raised here and caught by
+        # nothing, so the service received `internal` and stderr a traceback.
+        emit(error_payload("player.pause", error))
+        return EXIT_ERROR
+    finally:
+        client.close()
+
+
+# ---- M3-02: audio and subtitle tracks ---------------------------------------
+#
+# mpv's `track-list` is a sink (rule 5, dev branch). Two of its fields carry
+# text this plugin does not control: `external-filename`, a path or URL for
+# an external track, and `title`, written by whoever muxed the stream. So
+# what leaves this process is a WHITELIST of fields, never the entry, with
+# the title through redact_urls. `external-filename` is not on the list and
+# is not redacted -- it is dropped, because nothing in the picker needs it.
+TRACK_TYPES = ("audio", "sub")
+TRACK_FIELDS = ("id", "type", "selected", "lang", "title", "codec", "default", "forced", "external")
+
+
+def track_rows(data: Any) -> list[dict[str, Any]]:
+    """The picker's rows from a raw track-list: audio and sub only, ints for
+    ids, strings for text, bools for flags, in the order mpv listed them.
+    Anything malformed is dropped rather than raising: a picker with one
+    strange row missing beats no picker."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(data, list):
+        return rows
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("type")
+        ident = entry.get("id")
+        if kind not in TRACK_TYPES or isinstance(ident, bool) or not isinstance(ident, int):
+            continue
+        rows.append({
+            "id": ident,
+            "type": kind,
+            "selected": entry.get("selected") is True,
+            "lang": entry.get("lang") if isinstance(entry.get("lang"), str) else "",
+            "title": redact_urls(entry.get("title")) if isinstance(entry.get("title"), str) else "",
+            "codec": entry.get("codec") if isinstance(entry.get("codec"), str) else "",
+            "default": entry.get("default") is True,
+            "forced": entry.get("forced") is True,
+            "external": entry.get("external") is True,
+        })
+    return rows
+
+
+def track_choice(text: str | None) -> int | str | None:
+    """`--audio 2` / `--sub no`: an mpv track id or the word `no`; None when
+    the option was not given. Anything else is a usage error, raised as a
+    HelperError so it reaches the service as a status and not a traceback."""
+    if text is None:
+        return None
+    value = text.strip().lower()
+    if value == "no":
+        return "no"
+    if value.isdigit():
+        return int(value)
+    raise HelperError("bad_track", "a track is a number or 'no'")
+
+
+def player_tracks(args: argparse.Namespace) -> int:
+    """List the audio and subtitle tracks, after applying a selection if one
+    was asked for. The reply always carries the list AS MPV NOW HAS IT, so
+    the guide shows what the player did rather than what it was asked
+    (PLAN-M3 decision 5). Side-effect-free like `pause`: no player, no spawn,
+    `running: false` and an empty list."""
+    sock = socket_path(args.socket)
+    payload: dict[str, Any] = {"ok": True, "kind": "player.tracks", "running": False,
+                               "tracks": [], "changed": False}
+    try:
+        audio = track_choice(args.audio)
+        sub = track_choice(args.sub)
+    except HelperError as error:
+        emit(error_payload("player.tracks", error))
+        return EXIT_ERROR
+    if not find_player(sock):
+        emit(payload)
+        return EXIT_OK
+    client = probe_client(sock, args.ipc_timeout)
+    if client is None:
+        emit(payload)
+        return EXIT_OK
+    try:
+        payload["running"] = True
+        for prop, want in (("aid", audio), ("sid", sub)):
+            if want is None:
+                continue
+            set_ok, _ = client.try_command("set_property", prop, want)
+            if not set_ok:
+                raise HelperError("track_refused", "the player refused that track")
+            payload["changed"] = True
+        ok, data = client.try_command("get_property", "track-list")
+        payload["tracks"] = track_rows(data) if ok else []
+        emit(payload)
+        return EXIT_OK
+    except HelperError as error:
+        # A status the service can switch on, like every other verb. Without
+        # this the refusal fell through to main() as `internal` with a
+        # traceback on stderr -- which is what `pause` did from 0.7.10 until
+        # the tracks verb was built beside it (D-PLY-20).
+        emit(error_payload("player.tracks", error))
+        return EXIT_ERROR
     finally:
         client.close()
 
@@ -4161,6 +4267,8 @@ def cmd_player(args: argparse.Namespace) -> int:
         return player_probe(args)
     if action == "pause":
         return player_pause(args)
+    if action == "tracks":
+        return player_tracks(args)
     return player_orphan_check(args)
 
 
@@ -5037,6 +5145,11 @@ def build_parser() -> argparse.ArgumentParser:
                                       help="pause, resume or toggle the live stream (not rewind: the streams are not seekable)")
     pause.add_argument("--state", choices=("on", "off", "toggle"), default="toggle")
     pause.set_defaults(func=cmd_player)
+    tracks = player_actions.add_parser("tracks", parents=[player_socket],
+                                       help="list audio and subtitle tracks; with --audio/--sub, select first and then list")
+    tracks.add_argument("--audio", default=None, help="mpv audio track id, or 'no'")
+    tracks.add_argument("--sub", default=None, help="mpv subtitle track id, or 'no'")
+    tracks.set_defaults(func=cmd_player)
 
     orphan = player_actions.add_parser("orphan-check", parents=[player_socket], help="stop the player only if its claiming shell is still alive")
     orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")

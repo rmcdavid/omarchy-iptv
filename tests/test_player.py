@@ -2198,3 +2198,110 @@ class BroadcastAndZap(PlayerTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TracksTest(PlayerTestCase):
+    """M3-02: `player tracks` against FakeMpv on the socket and a real process
+    carrying the token, the same pair every other verb is tested with."""
+
+    TRACK_LIST = [
+        {"id": 1, "type": "video", "selected": True, "codec": "h264"},
+        {"id": 1, "type": "audio", "selected": True, "lang": "eng", "title": "English", "codec": "aac", "default": True},
+        {"id": 2, "type": "audio", "selected": False, "lang": "spa", "codec": "aac",
+         "external": True, "external-filename": "http://user:secret@cdn.example.test/es.aac"},
+        {"id": 1, "type": "sub", "selected": False, "lang": "eng", "title": "see http://sub.example.test/x for more",
+         "codec": "subrip", "forced": True},
+        {"id": "x", "type": "sub"},
+        {"id": True, "type": "audio"},
+        "not a dict",
+    ]
+
+    def tracks(self, *args):
+        return run("player", "tracks", "--socket", self.sock, "--ipc-timeout", "1", *args)
+
+    def playing(self, **kwargs):
+        """A real token-carrying process and a FakeMpv on the socket, with
+        the track list above unless overridden."""
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        self.sleeper()
+        props = {"mpv-version": "mpv 0.41.0", "track-list": self.TRACK_LIST}
+        props.update(kwargs.pop("props", {}))
+        return self.start(props=props, **kwargs)
+
+    def test_without_a_player_it_reports_not_running_and_touches_nothing(self):
+        code, payload, _, _ = self.tracks()
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "kind": "player.tracks", "running": False, "tracks": [], "changed": False})
+        self.assertFalse(os.path.exists(self.sock))
+
+    def test_lists_only_the_whitelisted_fields_of_audio_and_sub_tracks(self):
+        self.playing()
+        code, payload, out, _ = self.tracks()
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["running"])
+        self.assertFalse(payload["changed"])
+        self.assertEqual([(t["type"], t["id"]) for t in payload["tracks"]], [("audio", 1), ("audio", 2), ("sub", 1)])
+        for row in payload["tracks"]:
+            self.assertEqual(sorted(row), sorted(helper.TRACK_FIELDS))
+        # The sink: the external track's filename is not there, in any form,
+        # and the URL inside a title is redacted to its host.
+        self.assertNotIn("external-filename", out)
+        self.assertNotIn("secret", out)
+        self.assertNotIn("cdn.example.test/es.aac", out)
+        self.assertIn("sub.example.test", payload["tracks"][2]["title"])
+        self.assertNotIn("sub.example.test/x", payload["tracks"][2]["title"])
+        self.assertTrue(payload["tracks"][1]["external"])
+        self.assertTrue(payload["tracks"][2]["forced"])
+        self.assertTrue(payload["tracks"][0]["default"])
+        # Nothing was set: a plain list is read-only.
+        self.assertEqual([c for c in self.server.commands if c[0] == "set_property"], [])
+
+    def test_a_selection_is_set_before_the_list_is_read(self):
+        self.playing()
+        code, payload, _, _ = self.tracks("--audio", "2", "--sub", "no")
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["changed"])
+        sets = [c for c in self.server.commands if c[0] == "set_property"]
+        self.assertEqual(sets, [["set_property", "aid", 2], ["set_property", "sid", "no"]])
+        gets = [c for c in self.server.commands if c[0] == "get_property" and c[1] == "track-list"]
+        self.assertEqual(len(gets), 1)
+        self.assertLess(self.server.commands.index(sets[-1]), self.server.commands.index(gets[0]))
+
+    def test_a_refused_selection_is_an_error_not_a_traceback(self):
+        self.playing(refuse=("aid",))
+        code, payload, _, err = self.tracks("--audio", "9")
+        self.assertNotEqual(code, 0)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "track_refused")
+        self.assertNotIn("Traceback", err)
+
+    def test_a_malformed_track_id_never_reaches_the_socket(self):
+        self.playing()
+        code, payload, _, _ = self.tracks("--audio", "two")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(payload["error"]["code"], "bad_track")
+        self.assertEqual(self.server.commands, [])
+
+    def test_track_rows_is_the_whitelist(self):
+        rows = helper.track_rows(self.TRACK_LIST)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(helper.track_rows(None), [])
+        self.assertEqual(helper.track_rows({"id": 1, "type": "audio"}), [])
+        self.assertEqual(helper.track_rows([{"id": 3, "type": "audio"}])[0],
+                         {"id": 3, "type": "audio", "selected": False, "lang": "", "title": "", "codec": "",
+                          "default": False, "forced": False, "external": False})
+        self.assertEqual(helper.track_choice(None), None)
+        self.assertEqual(helper.track_choice(" NO "), "no")
+        self.assertEqual(helper.track_choice("7"), 7)
+        with self.assertRaises(helper.HelperError):
+            helper.track_choice("-1")
+
+    def test_a_refused_pause_is_a_status_too(self):
+        """D-PLY-20, found while building the tracks verb beside it: the code
+        `pause_refused` was raised and caught by nothing, so the service saw
+        `internal`. Same fix, same shape, same proof."""
+        self.playing(props={"pause": False}, refuse=("pause",))
+        code, payload, _, err = run("player", "pause", "--socket", self.sock, "--ipc-timeout", "1", "--state", "on")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(payload["error"]["code"], "pause_refused")
+        self.assertNotIn("Traceback", err)

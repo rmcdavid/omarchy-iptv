@@ -1872,7 +1872,7 @@ function scopeLabel(scopeId, query, count, position) {
 // `sourceXtream` and `confirmRemove` are the Sources screens. `returnMode`
 // remembers where Sources was opened from, `form` holds the open form
 // (section "sources" below), `sourceCursor` is the Sources list cursor.
-var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos"]
+var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos", "tracks"]
 
 function guideMode(mode) {
   var m = str(mode)
@@ -1880,7 +1880,7 @@ function guideMode(mode) {
 }
 
 function guideState(scopeId) {
-  return { mode: "search", query: "", scopeId: str(scopeId) || SCOPE_ALL, restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0 }
+  return { mode: "search", query: "", scopeId: str(scopeId) || SCOPE_ALL, restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0, trackCursor: 0 }
 }
 
 function copyGuide(st) {
@@ -1893,8 +1893,32 @@ function copyGuide(st) {
     cursorIndex: Number(src.cursorIndex) || 0,
     returnMode: str(src.returnMode),
     form: src.form ? copyForm(src.form) : null,
-    sourceCursor: Math.max(0, Math.floor(Number(src.sourceCursor) || 0))
+    sourceCursor: Math.max(0, Math.floor(Number(src.sourceCursor) || 0)),
+    trackCursor: Math.max(0, Math.floor(Number(src.trackCursor) || 0))
   }
+}
+
+// M3-02: the track picker is a mode over the list, opened from list mode
+// only (search mode types `t`) and closed back to it. It never survives a
+// close of the guide: `open()` rebuilds the guide state.
+function openTracks(st) {
+  var cur = copyGuide(st)
+  if (cur.mode !== "list") return cur
+  var next = withMode(cur, "tracks")
+  next.trackCursor = 0
+  return next
+}
+
+function closeTracks(st) {
+  var cur = copyGuide(st)
+  if (cur.mode !== "tracks") return cur
+  return withMode(cur, "list")
+}
+
+function withTrackCursor(st, index) {
+  var next = copyGuide(st)
+  next.trackCursor = Math.max(0, Math.floor(Number(index) || 0))
+  return next
 }
 
 function withQuery(st, query) {
@@ -1959,6 +1983,7 @@ function onEscape(st, opts) {
   var cur = copyGuide(st)
   var out = { state: cur, close: false, cancelProbe: false }
   if (cur.mode === "confirmRemove" || cur.mode === "confirmLogos") { out.state = withMode(cur, "sources"); return out }
+  if (cur.mode === "tracks") { out.state = closeTracks(cur); return out }
   if (cur.mode === "sources") { out.state = closeSources(cur, opts); return out }
   if (cur.mode === "sourceEdit" || cur.mode === "sourceXtream") {
     var f = cur.form
@@ -4181,6 +4206,189 @@ function playerPauseArgv(socket, state) {
   return ["player", "pause", "--socket", str(socket), "--state", want]
 }
 
+// ---- M3-02: audio and subtitle tracks
+//
+// `player tracks` lists; with a selection it selects FIRST and then lists,
+// so one reply carries the player's answer to the request (PLAN-M3
+// decision 5). `select` is { type: "audio" | "sub", id: <mpv id> | "no" }
+// or absent for a plain list. Anything else is a plain list: a malformed
+// selection must not become an argv the helper rejects on the socket's
+// behalf.
+function playerTracksArgv(socket, select) {
+  var argv = ["player", "tracks", "--socket", str(socket)]
+  var sel = select || null
+  if (sel && (sel.type === "audio" || sel.type === "sub")) {
+    var id = trackChoice(sel.id)
+    if (id !== "") argv.push(sel.type === "audio" ? "--audio" : "--sub", id)
+  }
+  return argv
+}
+
+// "no" or a non-negative integer as text; "" for anything else.
+function trackChoice(id) {
+  if (id === "no") return "no"
+  var n = Number(id)
+  if (typeof id === "boolean" || id === null || id === undefined || id === "" || !isFinite(n) || n < 0 || Math.floor(n) !== n) return ""
+  return String(n)
+}
+
+// The helper already whitelists and redacts (rule 5); this is the second
+// sink guard, because the rows reach guide text and an accessible name.
+function parseTracks(status) {
+  var list = status && Array.isArray(status.tracks) ? status.tracks : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var t = list[i]
+    if (!t || typeof t !== "object") continue
+    if (t.type !== "audio" && t.type !== "sub") continue
+    var id = Number(t.id)
+    if (typeof t.id === "boolean" || !isFinite(id) || Math.floor(id) !== id) continue
+    out.push({
+      id: id, type: t.type, selected: t.selected === true,
+      lang: str(t.lang), title: scrubUrls(str(t.title)), codec: str(t.codec),
+      dflt: t["default"] === true, forced: t.forced === true, external: t.external === true
+    })
+  }
+  return out
+}
+
+// ISO 639-2/B and -2/T codes mpv reports for the languages an IPTV list
+// carries in practice. Anything else shows as the code in upper case,
+// which is still more than the player's own OSD gives.
+var LANG_NAMES = {
+  eng: "English", spa: "Spanish", fra: "French", fre: "French", deu: "German", ger: "German",
+  ita: "Italian", por: "Portuguese", nld: "Dutch", dut: "Dutch", rus: "Russian", pol: "Polish",
+  tur: "Turkish", ara: "Arabic", hin: "Hindi", urd: "Urdu", ben: "Bengali", tam: "Tamil",
+  swe: "Swedish", nor: "Norwegian", dan: "Danish", fin: "Finnish", ell: "Greek", gre: "Greek",
+  heb: "Hebrew", jpn: "Japanese", kor: "Korean", zho: "Chinese", chi: "Chinese", tha: "Thai",
+  vie: "Vietnamese", ind: "Indonesian", msa: "Malay", may: "Malay", fas: "Persian", per: "Persian",
+  ukr: "Ukrainian", ces: "Czech", cze: "Czech", hun: "Hungarian", ron: "Romanian", rum: "Romanian",
+  bul: "Bulgarian", srp: "Serbian", hrv: "Croatian", slv: "Slovenian", slk: "Slovak", slo: "Slovak",
+  cat: "Catalan", eus: "Basque", baq: "Basque", glg: "Galician", lat: "Latin", mul: "Multiple",
+  und: "", zxx: ""
+}
+
+function trackLanguage(code) {
+  var key = str(code).toLowerCase().replace(/^\s+|\s+$/g, "")
+  if (key === "") return ""
+  if (LANG_NAMES.hasOwnProperty(key)) return LANG_NAMES[key]
+  return key.toUpperCase()
+}
+
+// What a row says. The title wins when the stream author wrote one, then
+// the language, then the id -- and the id is always there in the detail,
+// because two "English" rows with nothing to tell them apart is the common
+// case on a provider list.
+function trackLabel(t) {
+  var title = cleanName(t.title)
+  if (title !== "") return title
+  var lang = trackLanguage(t.lang)
+  if (lang !== "") return lang
+  return "Track " + t.id
+}
+
+function trackDetail(t) {
+  var parts = []
+  var lang = trackLanguage(t.lang)
+  if (cleanName(t.title) !== "" && lang !== "") parts.push(lang)
+  if (str(t.codec) !== "") parts.push(str(t.codec))
+  if (t.forced === true) parts.push("forced")
+  if (t.external === true) parts.push("external")
+  return parts.join(SEP)
+}
+
+// The picker's rows: a header per kind, the tracks under it, an `Off` row
+// for subtitles that is selected when no subtitle is. A kind with nothing
+// reported shows a row saying so, because an empty section reads as a
+// picker that failed to load.
+function trackRows(tracks) {
+  var list = asList(tracks)
+  var out = []
+  var kinds = [["audio", "Audio"], ["sub", "Subtitles"]]
+  for (var k = 0; k < kinds.length; k++) {
+    var type = kinds[k][0]
+    out.push({ kind: "header", type: type, label: kinds[k][1], detail: "", id: 0, selected: false })
+    var any = false
+    var anySelected = false
+    if (type === "sub") {
+      for (var j = 0; j < list.length; j++) if (list[j].type === "sub" && list[j].selected === true) anySelected = true
+      out.push({ kind: "track", type: "sub", id: "no", label: "Off", detail: "", selected: !anySelected })
+    }
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i]
+      if (t.type !== type) continue
+      any = true
+      out.push({ kind: "track", type: type, id: t.id, label: trackLabel(t), detail: trackDetail(t), selected: t.selected === true })
+    }
+    if (!any && type === "audio") out.push({ kind: "empty", type: type, label: "None reported", detail: "", id: 0, selected: false })
+  }
+  return out
+}
+
+// Where the cursor opens: the selected audio track, else the first row
+// that can be chosen. -1 when nothing can.
+function trackCursorHome(rows) {
+  var list = asList(rows)
+  var first = -1
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].kind !== "track") continue
+    if (first === -1) first = i
+    if (list[i].type === "audio" && list[i].selected === true) return i
+  }
+  return first
+}
+
+// j/k over the rows: headers and empty rows are stepped over, the ends
+// wrap, like the group column (moveScope).
+function moveTrackCursor(rows, index, delta) {
+  var list = asList(rows)
+  var at = []
+  for (var i = 0; i < list.length; i++) if (list[i].kind === "track") at.push(i)
+  if (at.length === 0) return -1
+  var from = Math.floor(Number(index))
+  var cur = at.indexOf(from)
+  if (cur === -1) {
+    // Not on a choosable row (a header, or nowhere yet): the nearest one in
+    // the direction asked, wrapping -- so -1 with +1 is the first row and
+    // -1 with -1 is the last, which is what Home and End send.
+    if (delta < 0) { for (var d = at.length - 1; d >= 0; d--) if (at[d] < from) return at[d]; return at[at.length - 1] }
+    for (var u = 0; u < at.length; u++) if (at[u] > from) return at[u]
+    return at[0]
+  }
+  var step = delta < 0 ? -1 : 1
+  return at[(cur + step + at.length) % at.length]
+}
+
+// The one line under the title. `state` is the service's tracksState.
+function trackPanelMessage(state, rows) {
+  var st = str(state)
+  if (st === "asking") return "Asking the player" + ELLIPSIS
+  if (st === "failed") return "The player did not answer"
+  if (st === "idle") return "Nothing is playing"
+  return ""
+}
+
+// UX 7.1: what a row is called on the bus. Position is over the choosable
+// rows, not the drawn ones, because a header is not a choice.
+function trackAccessibleName(rows, index) {
+  var list = asList(rows)
+  var row = list[index]
+  if (!row) return ""
+  if (row.kind !== "track") return str(row.label)
+  var n = 0, pos = 0
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].kind !== "track") continue
+    n++
+    if (i === index) pos = n
+  }
+  var parts = [str(row.label)]
+  if (str(row.detail) !== "") parts.push(str(row.detail).split(SEP).join(", "))
+  parts.push(row.type === "audio" ? "audio" : "subtitles")
+  if (row.selected === true) parts.push("selected")
+  parts.push(pos + " of " + n)
+  return parts.join(", ")
+}
+
 // `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
 // probe is read-only.
 function playerProbeArgv(socket, ownerPid) {
@@ -5373,6 +5581,9 @@ function listLetterAction(text) {
   // the call site on something playing, the same way `pip` is: the table says
   // what a letter MEANS, not whether it can act right now.
   if (t === PAUSE_KEY || t === PAUSE_KEY.toUpperCase()) return "pause"
+  // M3-02: offered unconditionally here like `pause`, gated at the call
+  // site on something playing.
+  if (t === TRACKS_KEY || t === TRACKS_KEY.toUpperCase()) return "tracks"
   if (t === "/") return "search"
   if (t.toLowerCase() === SOURCE_KEYS.open) return "sources"
   return ""
@@ -6275,6 +6486,7 @@ function footerHints(opts) {
   var o = opts || {}
   var mode = str(o.mode)
   if (mode === "confirmRemove" || mode === "confirmLogos") return [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]]
+  if (mode === "tracks") return [["j/k", "move"], ["Enter", "select"], ["Esc", "back"]]
   if (mode === "sourceEdit" || mode === "sourceXtream") return formHints(o.form)
   if (mode === "sources") {
     if (o.cursorKind === "add" || o.cursorKind === "xtream") return [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]]
@@ -6319,6 +6531,9 @@ function footerHints(opts) {
     // idle guide has nothing to act on and would be a hint that lies. Names
     // the direction, so nobody presses it to find out which way it goes.
     if (o.playing === true) list.push([PAUSE_KEY, o.paused === true ? "resume" : "pause"])
+    // M3-02: gated the same way, for the same reason -- a picker with no
+    // player to ask has nothing to show.
+    if (o.playing === true) list.push([TRACKS_KEY, "tracks"])
     // M2-05 section 5. Gated the way `0-9` is: a machine with no Hyprland
     // never advertises a key that can only answer "picture in picture needs
     // Hyprland". An absent flag shows it, so a service that predates PiP is
@@ -6421,6 +6636,9 @@ var LIMITS = { url: MAX_SOURCE_URL, label: MAX_LABEL, server: MAX_XTREAM_SERVER,
 // and Space is preview -- the three keys a pause would naturally want are all
 // taken by things a viewer also does often.
 var PAUSE_KEY = "c"
+// M3-02: the audio and subtitle picker. A bare letter, because the picker
+// is list-mode only: search mode types it (PLAN-M3 section 2).
+var TRACKS_KEY = "t"
 
 var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
 var SOURCE_KEY_RE = /^[0-9a-f]{8}(-[0-9]{1,3})?$/
@@ -8166,6 +8384,22 @@ if (typeof module !== "undefined") {
     LIMITS: LIMITS,
     SOURCE_KEYS: SOURCE_KEYS,
     PAUSE_KEY: PAUSE_KEY,
+    TRACKS_KEY: TRACKS_KEY,
+    playerTracksArgv: playerTracksArgv,
+    trackChoice: trackChoice,
+    parseTracks: parseTracks,
+    trackLanguage: trackLanguage,
+    trackLabel: trackLabel,
+    trackDetail: trackDetail,
+    trackRows: trackRows,
+    trackCursorHome: trackCursorHome,
+    moveTrackCursor: moveTrackCursor,
+    trackPanelMessage: trackPanelMessage,
+    trackAccessibleName: trackAccessibleName,
+    openTracks: openTracks,
+    copyGuide: copyGuide,
+    closeTracks: closeTracks,
+    withTrackCursor: withTrackCursor,
     SOURCE_KEY_RE: SOURCE_KEY_RE,
     GUIDE_MODES: GUIDE_MODES,
     sanitizeInput: sanitizeInput,

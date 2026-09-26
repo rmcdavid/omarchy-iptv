@@ -309,6 +309,17 @@ Item {
   // no going back before the keypress. Bounded by mpv's 150 MiB cache, about
   // five minutes on a typical stream.
   property bool paused: false
+  // M3-02: the audio and subtitle tracks the player last reported and the
+  // state of the question (idle | asking | ready | failed). `tracksQueued`
+  // is a request that arrived while another control ran: the channel is
+  // one-at-a-time and the panel is open and waiting, so it is issued when
+  // that control returns rather than dropped.
+  property var tracks: []
+  property string tracksState: "idle"
+  property var tracksQueued: null
+  // A new play, a stop, a death: whatever the player reported was about the
+  // stream before this one.
+  onNowPlayingChanged: root.clearTracks()
   property var failedAt: ({})
   // The file behind it. Loaded on every source switch, so the marks a source
   // carries arrive with its channels and leave with it.
@@ -1841,6 +1852,24 @@ Item {
     var kind = root.controlKind
     root.controlKind = ""
     var status = Model.parseHelperStatus(text, kind)
+    // M3-02: a queued tracks request goes out once this handler is done,
+    // whatever this reply was. Deferred rather than inline because the
+    // branches below return early and some issue a control of their own.
+    if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
+    if (kind === "tracks") {
+      // The helper is authoritative (decision 5): the rows are what mpv has
+      // AFTER any selection, never what was asked.
+      if (status.ok === true && status.running === true) {
+        root.tracks = Model.parseTracks(status)
+        root.tracksState = "ready"
+      } else if (status.ok === true) {
+        root.tracks = []
+        root.tracksState = "idle"
+      } else {
+        root.tracksState = "failed"
+      }
+      return
+    }
     if (kind === "pause") {
       // The helper is authoritative: the optimistic flip is corrected here if
       // the player refused, or if there was no player to ask.
@@ -2840,6 +2869,39 @@ Item {
     if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return "busy"
     root.paused = want
     return ""
+  }
+
+  // M3-02 (PLAN-M3 decision 5). Ask the player for its tracks, selecting
+  // one first when `select` is { type, id }. "" when issued, "queued" when
+  // another control holds the channel, "idle" when nothing plays.
+  function requestTracks(select) {
+    if (!root.nowPlaying) {
+      root.clearTracks()
+      return "idle"
+    }
+    root.tracksState = "asking"
+    if (!root.runControl("tracks", Model.playerTracksArgv(root.socketPath, select || null))) {
+      root.tracksQueued = { select: select || null }
+      return "queued"
+    }
+    return ""
+  }
+
+  function cancelTracks() {
+    root.tracksQueued = null
+  }
+
+  function clearTracks() {
+    root.tracks = []
+    root.tracksState = "idle"
+    root.tracksQueued = null
+  }
+
+  function issueQueuedTracks() {
+    var queued = root.tracksQueued
+    if (!queued) return
+    root.tracksQueued = null
+    root.requestTracks(queued.select)
   }
 
   function beginSwitch() {
