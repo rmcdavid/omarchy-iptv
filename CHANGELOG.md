@@ -3,6 +3,58 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.8.0 (2026-09-25)
+
+The channel wall.
+
+### Added
+
+- **Your channels, as a wall of tiles.** Press `Ctrl+G` in the guide and the
+  list becomes a grid: four channels to a row, each tile big enough to
+  recognise across the room, with the channel name under it. Press `Ctrl+G`
+  again for the list. Once you have turned channel logos on, each tile shows
+  the picture your playlist gives that channel; logos are off by default, so
+  out of the box every tile carries the plugin's own television mark and the
+  name. Everything works the same in both views: type to search and the wall
+  filters with you, Enter plays, `f` favourites, and your place is kept when
+  you flip. On the wall `j`/`k` move a whole row and `h`/`l` move one tile.
+  Channels your playlist gives no picture for get the same mark, so a playlist
+  where most channels have none still gives you a usable wall rather than a
+  screen of holes. The group column is hidden on the wall, which is what makes
+  room for the bigger tiles; to change group, flip back to the list. The guide
+  remembers which of the two you were in until the shell restarts, and starts
+  in the list until you first press the key, so nothing changes for you unless
+  you ask for it.
+
+- **You can get the logo disk space back.** Turning channel logos off has
+  always stopped the downloading and hidden the pictures, but the files stayed
+  on disk — on a large playlist that is tens of megabytes, and nothing could
+  reclaim it short of deleting the whole source and its channel list with it.
+  There is now a command that deletes one source's logos and nothing else.
+  Run the plugin's helper by path — it is not on your `PATH`:
+  `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv cache logos-clear --key <key>`,
+  with `ls ~/.cache/omarchy-iptv/sources/` to find the key. Your channel list,
+  guide data and settings are untouched.
+  Turning logos off still keeps the files, on purpose — a cache you might want
+  again in a minute should not be thrown away by a toggle.
+
+### Fixed
+
+- **Clearing a cache could delete files outside it.** If the logo directory for
+  a source was a symbolic link pointing somewhere else — something you would do
+  to keep the pictures on a different disk — then removing that source, or
+  pruning old ones, deleted whatever was on the far end of the link instead of
+  just the link. Now it leaves it alone. This needed you to have made that link
+  yourself; nothing outside your account could cause it.
+
+- **Channel logos now appear as they download, not all at once at the end.**
+  Switching logos on starts a fetch that can take twenty minutes on a large
+  playlist, and until now nothing at all changed on screen for that whole time
+  — even for channels whose logo had already been saved. You turned a feature
+  on, agreed to the disclosure, and the guide looked exactly the same, then
+  every picture arrived together. Logos now show up in small batches while the
+  download runs, so the first ones are visible within a few seconds.
+
 ## 0.7.10 (2026-09-24)
 
 ### Added

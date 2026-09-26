@@ -213,6 +213,8 @@ Item {
     // sits under is a disclosure notice, and "OK" on a disclosure notice is
     // how people agree to things they have not read.
     buttonTurnOn: "Turn on",
+    wallOn: "Channel wall",
+    wallOff: "Channel list",
     logosOn: "Channel logos on" + Model.SEP + "fetching now",
     logosOff: "Channel logos off",
     pauseNothing: "Nothing is playing",
@@ -358,6 +360,32 @@ Item {
   // underneath the user while the fetch runs.
   readonly property bool logoColumn: Model.logoColumnShown(root.currentRows, root.showLogos, root.logoDir)
   readonly property int logoWidth: root.logoColumn ? Style.space(22) : 0
+  // ---- channel wall (M2-13). The same rows, presented as tiles.
+  //
+  // A presentation flag, deliberately NOT a member of GUIDE_MODES: the wall
+  // holds the same content and the same actions as the list, and an eighth
+  // mode would fork every mode-dependent branch -- footer hints, escape,
+  // letter actions, the accessible name -- for a change of shape. It would
+  // also make the wall and search mutually exclusive, and the guide opens in
+  // search mode, so a wall you cannot type into is a wall nobody reaches.
+  property bool wallView: false
+  // Whichever view is on screen. Every site that used to name `resultList`
+  // by id goes through here: the scroll, the page size, the header's overflow
+  // test and the two scroll-edge fades. Naming the list by id at six sites
+  // was fine while there was one view and is a defect the moment there are
+  // two -- the header would report the list's overflow while the wall is up.
+  readonly property var liveView: root.wallView ? channelWall : resultList
+  // The tile's resting plate. 92 per cent of the real corpus carries
+  // transparency and the ink runs both ways -- 42 per cent light, 22 per cent
+  // dark over a 199-file sample -- so no plate colour makes every logo
+  // visible. This is the guide's own normal fill, the same surface a resting
+  // row sits on, which keeps the wall inside the theme rather than inventing
+  // a backdrop that is right for one half of the corpus and wrong for the
+  // other. Per-logo ink classification is the real answer and is deferred.
+  readonly property color tilePlate: Style.normalFill
+  readonly property var wallGeom: Model.wallGeometry({
+    width: listHost.width, gap: root.rowSpacing,
+    caption: Style.font.bodySmall + Style.space(6) })
   // Measured on `windowContent`, the item that fills whichever window is
   // hosting the guide (its size is the window's). The window itself lives
   // inside a Component now, out of this scope; see `windowLoader`.
@@ -555,7 +583,8 @@ Item {
     query: root.query,
     scopeId: root.scopeId,
     narrow: root.narrow,
-    sources: root.sourceCount
+    sources: root.sourceCount,
+    wall: root.wallView
   })
 
   // Empty-state kind: "" while rows exist.
@@ -588,7 +617,7 @@ Item {
   // `contentHeight` and not `contentY`: the former changes only when the row
   // set or the row height does, the latter on every frame of a wheel flick,
   // and string formatting does not belong there.
-  readonly property bool listOverflows: resultList.contentHeight > resultList.height
+  readonly property bool listOverflows: root.liveView.contentHeight > root.liveView.height
   readonly property string scopeLabelText: root.hasChannels
     ? Model.scopeLabel(root.scopeId, root.query, root.resultTotal,
         { index: root.cursorIndex, rows: root.rowCount, overflows: root.listOverflows })
@@ -678,6 +707,8 @@ Item {
       // PAUSE LIVE TV: the hint appears only while something is playing, and
       // names the direction the key will go.
       playing: root.playingId !== "",
+      // M2-13: h/l names what it does in the view that is actually up.
+      wall: root.wallView,
       paused: root.serviceReady && root.service.paused === true,
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
@@ -946,9 +977,12 @@ Item {
   }
 
   function scrollToCursor() {
-    if (root.rowCount <= 0 || resultList.height <= 0) return
-    resultList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
-    root.reveal(resultList, root.cursorIndex, root.rowCount, root.rowReach)
+    var view = root.liveView
+    if (root.rowCount <= 0 || view.height <= 0) return
+    view.positionViewAtIndex(root.cursorIndex, GridView.Contain)
+    // The wall reveals by a whole tile; the list by its own peek.
+    root.reveal(view, root.cursorIndex, root.rowCount,
+                root.wallView ? root.wallGeom.cellHeight : root.rowReach)
   }
 
   // M2-09 D5. `Contain` alone parks the cursor row flush with the viewport
@@ -980,6 +1014,44 @@ Item {
     root.scrollToCursor()
   }
 
+  // The single place an arrow becomes a movement. Both key paths call this,
+  // so they cannot disagree about what a key does -- which is exactly what
+  // the 0.8.0 preflight blocked on. Model.arrowAction owns the decision.
+  function applyArrow(axis, delta) {
+    var act = Model.arrowAction({ axis: axis, delta: delta, wall: root.wallView })
+    if (act.target === "row") root.moveWallCursorBy(act.delta)
+    else if (act.target === "cursor") root.moveCursorBy(act.delta, true)
+    else if (act.target === "scope") root.moveScopeBy(act.delta)
+  }
+
+  // A vertical step on the wall. Separate from moveCursorBy because the unit
+  // is a ROW, not a place in the sequence, and Model.wallStep owns the edges.
+  // M2-13. In memory for v1, deliberately -- and "in memory" means the SHELL
+  // SESSION, not the open: manifest keepLoaded is true, so this item survives
+  // every close and the view the user chose is still set when they summon the
+  // guide again. That is the intended behaviour and the CHANGELOG said the
+  // opposite until a preflight caught it. A fourth OWNED_SETTINGS key would
+  // put a presentation toggle through the barConfig write-behind path, and
+  // ownedEntryPatch emits EVERY owned key on every write -- which is
+  // D-LOGO-2's fix and is cheap only because there are three -- so flipping
+  // the view would carry the credentialed playlist URL into shell.json each
+  // time. If it ever persists it goes to state.json beside favourites and
+  // recents, not to the bar entry.
+  function toggleWall() {
+    root.wallView = !root.wallView
+    // The cursor is shared, so the place survives the flip; the new view has
+    // to be told to show it.
+    root.scrollToCursor()
+    root.showTransient(root.wallView ? root.copy.wallOn : root.copy.wallOff)
+  }
+
+  function moveWallCursorBy(rows) {
+    if (root.rowCount === 0) return
+    root.disarmPointer()
+    root.cursorIndex = Model.wallStep(root.cursorIndex, rows, root.rowCount, root.wallGeom.columns)
+    root.scrollToCursor()
+  }
+
   function selectAbsolute(index) {
     if (root.rowCount === 0) return
     root.disarmPointer()
@@ -988,6 +1060,13 @@ Item {
   }
 
   function pageSize() {
+    // On the wall a page is ROWS of tiles, and wallStep takes rows, so the
+    // same "one unit of overlap" convention holds in both views.
+    if (root.wallView) {
+      var cell = root.wallGeom.cellHeight
+      if (cell <= 0) return 1
+      return Math.max(1, Math.floor(channelWall.height / cell) - 1)
+    }
     return Math.max(1, Math.floor(resultList.height / (root.rowHeight + root.rowSpacing)) - 1)
   }
 
@@ -1367,8 +1446,24 @@ Item {
     // precedent. Anything the buffer does not own commits it first.
     if (root.listMode && root.handleNumberKey(event)) return true
     if (root.listMode && root.numberEntryActive) root.endNumberEntry(true)
-    if (event.key === Qt.Key_PageUp) { root.moveCursorBy(-root.pageSize(), false); return true }
-    if (event.key === Qt.Key_PageDown) { root.moveCursorBy(root.pageSize(), false); return true }
+    // M2-13. A MODIFIED key by necessity, exactly as `Ctrl+S` above says of
+    // itself: this is handled for BOTH modes, and the guide opens in search
+    // mode where every bare printable character goes into the query verbatim.
+    // A bare `v` would be unreachable on the screen the user actually starts
+    // on, which is the same reason the save-search key is modified.
+    if (event.key === Qt.Key_G && event.modifiers === Qt.ControlModifier) { root.toggleWall(); return true }
+    // A page is rows of tiles on the wall and rows of text in the list;
+    // pageSize() already answers in the right unit for whichever is up.
+    if (event.key === Qt.Key_PageUp) {
+      if (root.wallView) root.moveWallCursorBy(-root.pageSize())
+      else root.moveCursorBy(-root.pageSize(), false)
+      return true
+    }
+    if (event.key === Qt.Key_PageDown) {
+      if (root.wallView) root.moveWallCursorBy(root.pageSize())
+      else root.moveCursorBy(root.pageSize(), false)
+      return true
+    }
     if (event.key === Qt.Key_Home) {
       // UX 8 #22: Home with a query active in list mode jumps the column to All.
       if (root.listMode && root.hasQuery && root.effectiveScope !== Model.SCOPE_ALL) root.setScope(Model.SCOPE_ALL)
@@ -1384,10 +1479,16 @@ Item {
   function handleSearchKey(event) {
     if (event.key === Qt.Key_Escape) { root.handleEscape(); return true }
     if (Util.editsFilter(event, root.query)) { root.setQuery(Util.editedFilter(event, root.query)); return true }
-    if (event.key === Qt.Key_Down) { root.moveCursorBy(1, true); return true }
-    if (event.key === Qt.Key_Up) { root.moveCursorBy(-1, true); return true }
-    if (event.key === Qt.Key_Right) { root.moveScopeBy(1); return true }
-    if (event.key === Qt.Key_Left) { root.moveScopeBy(-1); return true }
+    // M2-13. Search mode routes the arrows ITSELF rather than through
+    // PanelKeyCatcher's onMoveRequested, so the wall branch there does not
+    // reach here and this has to make the same choice. Without it the guide
+    // OPENS in a mode where Up/Down moved one tile instead of one row and
+    // Left/Right changed a group facet whose column the wall has hidden --
+    // an invisible scope change, under a footer that said "move".
+    if (event.key === Qt.Key_Down) { root.applyArrow("v", 1); return true }
+    if (event.key === Qt.Key_Up) { root.applyArrow("v", -1); return true }
+    if (event.key === Qt.Key_Right) { root.applyArrow("h", 1); return true }
+    if (event.key === Qt.Key_Left) { root.applyArrow("h", -1); return true }
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.activate(false); return true }
     if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { root.switchMode(); return true }
     if (root.handleSharedKey(event)) return true
@@ -2298,8 +2399,14 @@ Item {
               return
             }
             root.endNumberEntry(true)
-            if (dy !== 0) root.moveCursorBy(dy, true)
-            else if (dx !== 0) root.moveScopeBy(dx)
+            // On the wall h/l move the cursor horizontally and j/k move a
+            // whole row. There is no group facet to carry, which is what
+            // hiding the group column bought: PanelKeyCatcher collapses the
+            // arrows onto hjkl (it matches Key_Left without checking
+            // modifiers), so a view needing BOTH a cursor axis and a facet
+            // axis has no key left to express the second one.
+            if (dy !== 0) root.applyArrow("v", dy)
+            else if (dx !== 0) root.applyArrow("h", dx)
           }
           onReturnRequested: root.enterPending = true
           onActivateRequested: {
@@ -2752,8 +2859,228 @@ Item {
               height: parent.height
               clip: true
 
+              // ---- the channel wall (M2-13, UX 2.4b)
+              //
+              // Same integer model as the list, same cursor, same rows. The
+              // width is Model.wallGeometry's `gridWidth` and not `parent.width`
+              // on purpose: GridView derives its own column count as
+              // floor(width / cellWidth), and floor(w / floor(w / n)) is not
+              // always n, so the view and the arithmetic that drives the cursor
+              // would disagree about how many columns there are. An exact
+              // multiple removes the disagreement.
+              GridView {
+                id: channelWall
+                // The harness resolves the channel view by objectName to force
+                // a layout before it stops the open clock. A view that is not
+                // on that list cannot be measured, and openMs reports view:""
+                // rather than a number for it.
+                objectName: "channelWall"
+                visible: root.wallView
+                width: Math.min(parent.width, root.wallGeom.gridWidth)
+                height: parent.height
+                anchors.horizontalCenter: parent.horizontalCenter
+                model: root.rowCount
+                clip: true
+                cellWidth: root.wallGeom.cellWidth
+                cellHeight: root.wallGeom.cellHeight
+                boundsBehavior: Flickable.StopAtBounds
+                // One cell ROW, not the list's `rowHeight * 4`. On a grid that
+                // constant buys whole extra rows: cellHeight * 4 measured 37
+                // realised delegates at 149-152 ms against a 150 ms budget,
+                // where one cell row is 25 delegates at 106 ms. Written as the
+                // tile height so it cannot be read as the list's multiple.
+                cacheBuffer: root.wallGeom.plateHeight
+                // The same one-liner the list carries. scrollToCursor returns
+                // early while the view has no height, and on a reopen that is
+                // always true when it is called: the layer surface is mapped
+                // after open() returns. Without this the wall reopens with the
+                // cursor off screen.
+                onHeightChanged: root.scrollToCursor()
+                Accessible.role: Accessible.List
+                Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
+                // Both views exist at all times and carry the SAME role and
+                // the SAME name, so without this a reader is offered two
+                // identical channel lists and the hidden one is indexed.
+                Accessible.ignored: !visible
+
+                delegate: Item {
+                  id: tile
+                  required property int index
+                  readonly property var channel: tile.index < root.rowCount ? (root.currentRows[tile.index] || null) : null
+                  readonly property string channelId: tile.channel ? Model.channelId(tile.channel) : ""
+                  readonly property string name: tile.channel ? String(tile.channel.name || "") : ""
+                  readonly property bool current: tile.index === root.cursorIndex
+                  // The four facts a ROW carries that a picture cannot. The
+                  // wall dropped all of them in its first build, including the
+                  // persistent failed mark, which is 0.7.10's headline -- a
+                  // channel the guide knows is dead looked identical to a live
+                  // one. Resolved exactly as the row resolves them.
+                  readonly property bool favorite: tile.channelId !== "" && root.favoriteSet[tile.channelId] === true
+                  readonly property bool playing: tile.channelId !== "" && tile.channelId === root.playingId
+                  readonly property string chno: tile.channel && typeof tile.channel.chnoLabel === "string" ? tile.channel.chnoLabel : ""
+                  readonly property string failedAt: tile.channelId !== ""
+                    ? Model.failedWhen(root.failedMap[tile.channelId], root.nowSec) : ""
+
+                  width: root.wallGeom.cellWidth
+                  height: root.wallGeom.cellHeight
+
+                  BorderSurface {
+                    id: plate
+                    width: root.wallGeom.tileWidth
+                    height: root.wallGeom.plateHeight
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    // The same two properties the row delegate uses at
+                    // Guide.qml:2964, so the wall's selection is the theme's
+                    // selection and not a second opinion about it.
+                    borderSpec: tile.current ? root.selectedBorderSpec : root.noBorderSpec
+                    color: tile.current ? root.selectedBackground : root.tilePlate
+
+                    // The row's decorations, in the plate's corners so they
+                    // never compete with the caption for width. Same glyphs
+                    // and same meanings as the row (UX 5.5); a wall that
+                    // showed none of them would make a dead channel and a
+                    // favourite look like any other picture.
+                    Text {
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      anchors.margins: Style.space(4)
+                      text: (tile.playing ? Model.GLYPHS.play : "") + (tile.favorite ? Model.GLYPHS.star : "")
+                      visible: text !== ""
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                      Accessible.ignored: true
+                    }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      anchors.margins: Style.space(4)
+                      text: tile.failedAt !== "" ? Model.GLYPHS.alert : ""
+                      visible: text !== ""
+                      color: root.foreground
+                      opacity: 0.8
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.icon
+                      Accessible.ignored: true
+                    }
+
+                    // The cursor MARK, per the PO ruling of 2026-09-21: every
+                    // list with a cursor carries one, and none of them inks
+                    // the content. On a 52 px row the selected fill alone
+                    // reads; on a 230 px tile the same 8 per cent alpha is
+                    // spread over twenty times the area and disappears, which
+                    // is exactly what the first screenshot of this view
+                    // showed. Same geometry as the row's, along the leading
+                    // edge of the plate.
+                    Rectangle {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(3)
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(2)
+                      height: Math.round(parent.height * 0.62)
+                      radius: width / 2
+                      color: root.foreground
+                      visible: tile.current
+                    }
+
+                    // One function decides what the picture area holds, so
+                    // the image and the mark can never both be drawn or both
+                    // be absent. `logoSeq` is in the expression so a finished
+                    // fetch re-evaluates it: the file may exist now.
+                    readonly property var art: root.logoSeq >= 0
+                      ? Model.wallTile({ enabled: root.showLogos, channel: tile.channel,
+                                         logoDir: root.logoDir, have: root.logoHave })
+                      : ({ kind: "mark", path: "", glyph: "" })
+
+                    Image {
+                      anchors.centerIn: parent
+                      width: Math.round(parent.width * 0.86)
+                      height: Math.round(parent.height * 0.80)
+                      visible: plate.art.kind === "image"
+                      asynchronous: true
+                      cache: true
+                      // 1x the drawn width, not the list's blind `* 2`. At a
+                      // 22 px row slot doubling is cheap; at a 223 px tile it is
+                      // four times the bytes for pixels nothing displays.
+                      sourceSize.width: Math.round(width)
+                      sourceSize.height: Math.round(height)
+                      fillMode: Image.PreserveAspectFit
+                      mipmap: true
+                      source: plate.art.kind === "image" ? "file://" + plate.art.path : ""
+                      opacity: status === Image.Ready ? 1 : 0
+                      // The name below is the tile's accessible name; a reader
+                      // announcing "image" before every channel is noise, not
+                      // information (UX 7.2). Same reasoning as the row slot.
+                      Accessible.ignored: true
+                    }
+
+                    // The plugin's own mark, for a channel the playlist gives
+                    // no usable picture for -- 82 of 1,462 on this list, and
+                    // the majority on a 27-per-cent-coverage one. Dimmed, so
+                    // it reads as "no picture" rather than as content, and it
+                    // is the ONE thing on a tile that cannot vanish into the
+                    // plate: it takes the theme's foreground, where 64 per
+                    // cent of the real logos are light or dark ink on
+                    // transparency and one of those halves always loses.
+                    Text {
+                      anchors.centerIn: parent
+                      visible: plate.art.kind === "mark"
+                      text: plate.art.glyph
+                      color: root.foreground
+                      opacity: 0.38
+                      // The same family every other glyph in this file uses
+                      // (the banner at :2539, the favourite star at :3162).
+                      font.family: root.fontFamily
+                      font.pixelSize: Math.round(parent.height * 0.42)
+                      Accessible.ignored: true
+                    }
+                  }
+
+                  // The caption is not decoration. A contact sheet over the
+                  // real corpus found 32 runs of three or more adjacent
+                  // channels sharing one logo file, the largest 28 consecutive
+                  // NBC affiliates, where the name is the only thing that tells
+                  // two tiles apart. With captions hidden those runs carry no
+                  // information at all.
+                  Text {
+                    anchors.top: plate.bottom
+                    anchors.topMargin: Style.space(3)
+                    width: root.wallGeom.tileWidth
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: tile.name
+                    // The foreground, cursor or not -- the same choice the
+                    // row's name makes. UX 5.4 is explicit that the accent
+                    // means ACTIVE and never CURSOR, "with no exceptions", and
+                    // `cursorInk` IS the calibrated accent. The first build of
+                    // this tile inked the caption with it and justified that
+                    // by the group column, which is a SELECTED entry (active)
+                    // and not a cursor -- the wrong precedent. The cursor is
+                    // carried by the selection fill and the cursor mark, as
+                    // it is on a row.
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignHCenter
+                    Accessible.ignored: true
+                  }
+
+                  Accessible.role: Accessible.ListItem
+                  // The row's own composer, with the row's own arguments. The
+                  // first build passed only the name, so a reader on the wall
+                  // was told strictly less than the same channel told it in
+                  // the list -- and never that the channel had failed.
+                  Accessible.name: Model.rowAccessibleName({
+                    name: tile.name, chno: tile.chno, favorite: tile.favorite,
+                    playing: tile.playing, failedAt: tile.failedAt,
+                    rowIndex: tile.index, rowCount: root.rowCount })
+                }
+              }
+
               ListView {
                 id: resultList
+                visible: !root.wallView
                 // Inert at runtime, and the only way the performance budget
                 // can be measured: `id` is compile-time and does not reach the
                 // object tree, so a harness timing the open cannot force the
@@ -2771,6 +3098,7 @@ Item {
                 cacheBuffer: root.rowHeight * 4
                 Accessible.role: Accessible.List
                 Accessible.name: root.copy.accessibleChannels + Model.scopeName(root.effectiveScope)
+                Accessible.ignored: !visible
                 onHeightChanged: root.scrollToCursor()
 
                 delegate: BorderSurface {
@@ -3256,8 +3584,8 @@ Item {
                 anchors.top: parent.top
                 height: Math.min(Style.space(28), parent.height / 2)
                 visible: opacity > 0
-                opacity: resultList.contentHeight > resultList.height
-                  ? Math.max(0, Math.min(1, (resultList.contentY - resultList.originY) / height))
+                opacity: root.liveView.contentHeight > root.liveView.height
+                  ? Math.max(0, Math.min(1, (root.liveView.contentY - root.liveView.originY) / height))
                   : 0
                 gradient: Gradient {
                   GradientStop { position: 0; color: root.background }
@@ -3271,8 +3599,8 @@ Item {
                 anchors.bottom: parent.bottom
                 height: Math.min(Style.space(28), parent.height / 2)
                 visible: opacity > 0
-                opacity: resultList.contentHeight > resultList.height
-                  ? Math.max(0, Math.min(1, (resultList.originY + resultList.contentHeight - resultList.height - resultList.contentY) / height))
+                opacity: root.liveView.contentHeight > root.liveView.height
+                  ? Math.max(0, Math.min(1, (root.liveView.originY + root.liveView.contentHeight - root.liveView.height - root.liveView.contentY) / height))
                   : 0
                 gradient: Gradient {
                   GradientStop { position: 0; color: Util.alpha(root.background, 0) }

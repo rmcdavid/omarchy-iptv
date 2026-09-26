@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.7.10"
+var PLUGIN_VERSION = "0.8.0"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -3335,6 +3335,154 @@ function logoSlot(opts) {
   return o.have[name] === true ? { kind: "image", path: path } : { kind: "blank", path: "" }
 }
 
+// ------------------------------------------------------------ channel wall
+//
+// M2-13. The wall presents the same rows as a grid of tiles. The arithmetic
+// is here rather than in the view because it is pure, fiddly at the edges,
+// and a node test can reach it (engineering rule 12 (dev branch)).
+//
+// COLUMNS ARE CAPPED, NOT DERIVED, and that is the whole design. Hiding the
+// group column in the wall frees ~200 px of the 924 px card. Spending it on a
+// fifth column costs +40 per cent realised delegates and measured 139 ms
+// against a 150 ms budget; spending it on bigger tiles keeps the delegate
+// count and the paint time where the list's already are, and takes the tile
+// from ~170 px to ~225 px. Bigger is what the corpus needs: a contact sheet
+// over the 1,380 real cached logos showed 32 runs of three or more adjacent
+// channels sharing one logo file -- the largest 28 consecutive NBC affiliates,
+// then Fox 14, PBS 11 -- where the CAPTION is the only thing that tells two
+// tiles apart. The wall is navigated by name more often than by picture.
+// The key that flips the two views. Modified by necessity: the guide opens in
+// search mode, where a bare printable character is query text.
+var WALL_KEY = "Ctrl+G"
+var WALL_MAX_COLUMNS = 4
+// 16:9 for the picture area. The corpus median aspect is 1.98 and the spread
+// is 0.31 to 13.62, so no plate shape fits the logos; PreserveAspectFit
+// inside a 16:9 plate letterboxes the tall ones and pillarboxes the wide ones
+// without cropping either.
+var WALL_PLATE_ASPECT = 16 / 9
+
+// The grid's geometry for an available width. Returns zeros for a width that
+// cannot hold a tile, so a view bound to this draws nothing rather than
+// dividing by zero.
+//
+// `gridWidth` is returned, and the view MUST be given it, because GridView
+// derives its own column count as floor(width / cellWidth) and
+// floor(w / floor(w / n)) is not always n -- at w=10, n=4 it is 5. Handing it
+// an exact multiple removes the disagreement instead of hoping about it.
+function wallGeometry(opts) {
+  var o = opts || {}
+  var width = Math.floor(Number(o.width) || 0)
+  var gap = Math.max(0, Math.floor(Number(o.gap) || 0))
+  var caption = Math.max(0, Math.floor(Number(o.caption) || 0))
+  var minCell = Math.max(1, Math.floor(Number(o.minCell) || 120))
+  var maxColumns = Math.max(1, Math.floor(Number(o.maxColumns) || WALL_MAX_COLUMNS))
+  var zero = { columns: 0, cellWidth: 0, cellHeight: 0, tileWidth: 0, plateHeight: 0, gridWidth: 0 }
+  if (width < minCell) return zero
+  var columns = Math.min(maxColumns, Math.max(1, Math.floor(width / minCell)))
+  var cellWidth = Math.floor(width / columns)
+  var tileWidth = Math.max(1, cellWidth - gap)
+  var plateHeight = Math.max(1, Math.round(tileWidth / WALL_PLATE_ASPECT))
+  return {
+    columns: columns,
+    cellWidth: cellWidth,
+    cellHeight: plateHeight + caption + gap,
+    tileWidth: tileWidth,
+    plateHeight: plateHeight,
+    gridWidth: columns * cellWidth
+  }
+}
+
+// What a tile draws in its picture area: "image" with a path, or "mark" for
+// the plugin's own television glyph.
+//
+// This INVERTS logoColumnShown's rule on purpose, and the inversion is the
+// decision. In the 22 px row column a placeholder reads as a value, so the
+// absence is the information -- correct there, because the name sits beside
+// it and carries the row. On the wall the tile IS the row, so an empty tile
+// does not read as "this channel has no picture", it reads as a missing
+// channel. Measured on the configured list: 82 of 1,462 channels have no
+// cached file, and on the provider list the roadmap measured, coverage is
+// 27 per cent, so the empty-tile reading is the majority case there.
+//
+// The mark is the glyph the bar already shows when idle, not a shipped image.
+// A font glyph takes the theme's foreground token, so it renders at the
+// theme's own contrast on every theme -- which the logos themselves cannot
+// do: 92 per cent of the real corpus carries transparency and its ink runs
+// both ways, 42 per cent light and 22 per cent dark over a 199-file sample,
+// so no plate colour makes all of them visible. The one thing on the tile
+// that can never vanish is the one we draw ourselves.
+function wallTile(opts) {
+  var o = opts || {}
+  var slot = logoSlot(o)
+  if (slot.kind === "image") return { kind: "image", path: slot.path, glyph: "" }
+  return { kind: "mark", path: "", glyph: GLYPHS.tv }
+}
+
+// What an arrow (or its hjkl twin) does, as a TABLE rather than as four
+// branches repeated in three places.
+//
+// It exists because the 0.8.0 preflight blocked on those three places
+// disagreeing. `handleSearchKey` routes the arrows itself rather than through
+// PanelKeyCatcher's `onMoveRequested`, so a wall branch added to one of them
+// did not reach the other, and the footer -- a third statement of the same
+// fact -- was written against the intent rather than against either. Three
+// statements joined by nothing but a name is the shape engineering rule 13 (dev branch)
+// describes, and the first repair for it was a test that asserted the
+// IDENTIFIERS appeared in each arm. That test went red when an arm was
+// deleted and stayed green when the two arms were SWAPPED, which is rule 14's
+// own definition of a criterion that cannot fail: it checked for the strings
+// the implementation was written to contain.
+//
+// So the decision lives here, once, and every consumer dispatches on it.
+// `target` is what moves: "cursor" is a place in the flat sequence (wrapping),
+// "row" is a whole grid row (clamping, see wallStep), "scope" is the group
+// facet. On the wall there is no facet -- the column is hidden -- so the
+// horizontal axis moves the cursor instead, which is what hiding the column
+// bought.
+function arrowAction(opts) {
+  var o = opts || {}
+  var wall = o.wall === true
+  var axis = str(o.axis)
+  var delta = Math.floor(Number(o.delta) || 0)
+  if (delta === 0 || (axis !== "v" && axis !== "h")) return { target: "none", delta: 0 }
+  if (axis === "v") return { target: wall ? "row" : "cursor", delta: delta }
+  return { target: wall ? "cursor" : "scope", delta: delta }
+}
+
+// One vertical step on the wall: down or up a whole row, keeping the column.
+//
+// `dir` is in ROWS, so a page is the same function with a bigger dir. The
+// horizontal step is not here on purpose -- it is `moveCursor(index, +-1)`
+// unchanged, because moving left and right across a grid laid out in reading
+// order IS moving one place through the flat sequence, and giving it a second
+// implementation is how two of them drift apart.
+//
+// The edges are the whole content of this function. A last row is usually
+// PARTIAL, so the column under the cursor may not exist down there:
+//   * down, and a row exists below: the nearest item in it, which is the last
+//     item when the column is past the end of a partial row. "Down" always
+//     moves down if there is anything below, which is what a person expects
+//     and what leaving the cursor put would violate.
+//   * down, already in the last row: stay. There is nothing below.
+//   * up, past the top: the same column in the first row, so a page-up from
+//     row 3 of 3 lands under the cursor rather than at index 0.
+//   * up, already in the first row: stay.
+function wallStep(index, dir, count, columns) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  if (n === 0) return 0
+  var cols = Math.max(1, Math.floor(Number(columns) || 0))
+  var at = Math.max(0, Math.min(n - 1, Math.floor(Number(index) || 0)))
+  var d = Math.floor(Number(dir) || 0)
+  if (d === 0) return at
+  var target = at + d * cols
+  if (target >= 0 && target < n) return target
+  if (d > 0) {
+    var lastRowStart = Math.floor((n - 1) / cols) * cols
+    return at < lastRowStart ? n - 1 : at
+  }
+  return at < cols ? at : at % cols
+}
+
 // The lookup `logoSlot` wants, from the `names` array the helper prints.
 function logoHaveSet(names) {
   var list = asList(names)
@@ -3368,6 +3516,23 @@ function logoColumnShown(rows, enabled, logoDir) {
     if (logoFile(list[i], logoDir) !== "") return true
   }
   return false
+}
+
+// D-LOGO-8. One name off the fetch's progress stream, or "" for any line that
+// is not one -- including the summary object, which the caller handles
+// separately. Defensive on purpose: this parses a line at a time from a
+// long-running process, and a malformed one must cost that logo, not the run.
+function logoStreamName(line) {
+  var text = str(line).replace(/^\s+|\s+$/g, "")
+  if (text === "") return ""
+  try {
+    var doc = JSON.parse(text)
+    if (!doc || typeof doc !== "object") return ""
+    if (str(doc.kind) !== "logo") return ""
+    return str(doc.name)
+  } catch (e) {
+    return ""
+  }
 }
 
 // What the helper's fetch reported, parsed defensively. Anything unreadable
@@ -5866,7 +6031,10 @@ function guideSurface(opts) {
     channelCount: count,
     hasChannels: has,
     showList: has,
-    showColumn: has && o.narrow !== true,
+    // M2-13: the wall hides the group column, which is what frees the width
+    // for bigger tiles and what lets h/l be horizontal cursor movement instead
+    // of a group facet. Decided here so one function owns the answer.
+    showColumn: has && o.narrow !== true && o.wall !== true,
     setup: empty === "unconfigured",
     savedSources: empty === "unconfigured" ? Math.max(0, Math.floor(Number(o.sources) || 0)) : 0
   }
@@ -5946,6 +6114,16 @@ function footerStatus(opts) {
 // keys and verbs at different opacities. `o.form` is the open form (its
 // focused element decides the set), `o.cursorKind` the Sources row kind,
 // `o.sourcesExist` adds `o sources` to the error empty state.
+// The word for what an arrow does, derived from arrowAction so the footer and
+// the handler cannot disagree. "move" for a place in the sequence, "row" for
+// a whole grid row, and the scope's own verb for the group facet.
+function arrowVerb(o, axis) {
+  var act = arrowAction({ axis: axis, delta: 1, wall: o && o.wall === true })
+  if (act.target === "row") return "row"
+  if (act.target === "cursor") return "move"
+  return scopeVerb(o)
+}
+
 function footerHints(opts) {
   var o = opts || {}
   var mode = str(o.mode)
@@ -5976,7 +6154,15 @@ function footerHints(opts) {
     if (o.numberEntry && o.numberEntry.active === true) {
       return [["0-9", "digits"], [CHNO_ENTRY_SEP, "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]]
     }
-    var list = [["j/k", "move"], ["h/l", scopeVerb(o)], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // M2-13: on the wall h/l move the cursor across a row instead of ringing
+    // the scope, because the wall hides the group column. A hint that still
+    // said "group" would name an axis the view does not have -- the same
+    // mistake M2-09 D6 fixed for the list, in the other direction.
+    // The verbs come from the SAME table the keys dispatch on, so the footer
+    // cannot describe a movement the handler does not make. That drift is
+    // what the 0.8.0 preflight blocked on.
+    var list = [["j/k", arrowVerb(o, "v")], ["h/l", arrowVerb(o, "h")],
+                ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
     // PAUSE LIVE TV. Only while something is playing -- a pause key on an
     // idle guide has nothing to act on and would be a hint that lies. Names
     // the direction, so nobody presses it to find out which way it goes.
@@ -5987,16 +6173,35 @@ function footerHints(opts) {
     // not silently stripped of the hint.
     if (o.pipAvailable !== false) list.push(["p", "pip"])
     list.push(["r", "refresh"], ["/", "search"])
+    // M2-13: after the action verbs and beside `/ search`, because both keys
+    // change what you are LOOKING at rather than acting on the cursor -- and
+    // because the footer elides from the left on a narrow card, so Enter,
+    // Space, f and s must not be pushed off by a view toggle. Names the view
+    // it will go TO, not the one you are in, so the key need not be pressed
+    // to find out: the same rule the logos hint follows on Sources.
+    list.push([WALL_KEY, o.wall === true ? "list" : "wall"])
     // Gated on the playlist actually having numbers, so an unnumbered source
     // gains no clutter and never advertises a key that does nothing.
     if (o.hasNumbers === true) list.push(["0-9", "channel"])
     list.push([SOURCE_KEYS.open, "sources"])
     return list
   }
+  // M2-13. Search mode gets the toggle too, and this is not symmetry for its
+  // own sake: the guide OPENS in search mode, the key is handled there
+  // (handleSharedKey serves both modes), and a key that works on the screen
+  // the user starts on and is advertised only on the other one is a feature
+  // nobody finds. It sits before Tab/Esc for the same elide reason as above.
+  // On the wall Left/Right moves the cursor, so it stops naming an axis the
+  // view does not have.
+  var wall = o.wall === true
   if (str(o.query) !== "") {
-    return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Tab", "keys"], ["Esc", "clear"]]
+    return [["Enter", "play"], ["Up/Down", arrowVerb(o, "v")],
+            ["Left/Right", wall ? arrowVerb(o, "h") : "narrow"],
+            [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "clear"]]
   }
-  return [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", scopeVerb(o)], ["Tab", "keys"], ["Esc", "close"]]
+  return [["Enter", "play"], ["Up/Down", arrowVerb(o, "v")],
+          ["Left/Right", arrowVerb(o, "h")],
+          [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "close"]]
 }
 
 // M2-09 D6. The h/l ring still does something real on a one-group playlist --
@@ -7603,6 +7808,14 @@ if (typeof module !== "undefined") {
     logoSlot: logoSlot,
     logoHaveSet: logoHaveSet,
     logoNamesFrom: logoNamesFrom,
+    logoStreamName: logoStreamName,
+    wallGeometry: wallGeometry,
+    wallStep: wallStep,
+    arrowAction: arrowAction,
+    wallTile: wallTile,
+    WALL_KEY: WALL_KEY,
+    WALL_MAX_COLUMNS: WALL_MAX_COLUMNS,
+    WALL_PLATE_ASPECT: WALL_PLATE_ASPECT,
     logoColumnShown: logoColumnShown,
     splitLogoUrl: splitLogoUrl,
     ownWriteInForce: ownWriteInForce,

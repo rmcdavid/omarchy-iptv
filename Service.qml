@@ -1375,6 +1375,11 @@ Item {
       // beside it, and the verdict the footer reads. Version strings carry no
       // credential and no path, so this adds nothing to the redaction surface.
       paused: root.paused,
+      // D-LOGO-8: how many logos the shell currently knows are on disk. It
+      // exists so the streaming fix can be OBSERVED rather than inferred --
+      // the defect was precisely that this number stayed 0 until the fetch
+      // exited, and nothing outside the guide could see that.
+      logos: Object.keys(root.logoHave).length,
       build: {
         running: Model.PLUGIN_VERSION,
         onDisk: root.onDiskVersion,
@@ -3833,7 +3838,14 @@ Item {
   // contact sixty-three hosts every time the guide is summoned.
   Process {
     id: logoFetchProc
-    stdout: StdioCollector { waitForEnd: true }
+    // D-LOGO-8: read the fetch AS IT RUNS, not at the end. The summary object
+    // arrives last, so waiting for it meant a first enable showed nothing for
+    // a quarter of an hour while the logos the user was looking at were
+    // already on disk. Every line is one name; the last line is the summary.
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function (line) { root.onLogoLine(line) }
+    }
   }
   Connections {
     target: logoFetchProc
@@ -3843,13 +3855,52 @@ Item {
       // down is not a reason to interrupt someone watching television -- so
       // it is logged and the rows keep their blank slots.
       if (exitCode !== 0) console.log("[iptv] logo fetch exited", exitCode)
-      // The names now on disk. The guide points an Image at a file only when
-      // it is in here: Qt logs "Cannot open" for every attempt at a missing
-      // one, so a dead logo host would otherwise fill the journal on every
-      // scroll.
-      root.logoHave = Model.logoHaveSet(Model.logoNamesFrom(logoFetchProc.stdout.text))
+      // Whatever the stream did not deliver, the summary already did; this
+      // just makes sure the last partial batch lands.
+      root.flushLogoNames()
+    }
+  }
+
+  // Names seen on the stream but not yet folded into `logoHave`. A plain
+  // array, mutated in place: nothing binds to it, and rebuilding the map per
+  // line would be O(n squared) over 1,436 lines.
+  property var logoPending: []
+
+  function onLogoLine(line) {
+    var name = Model.logoStreamName(line)
+    if (name !== "") {
+      root.logoPending.push(name)
+      logoFlushTimer.restart()
+      return
+    }
+    // The summary: authoritative, and it replaces rather than adds, so a file
+    // that went away between the stream and the end is not claimed.
+    var names = Model.logoNamesFrom(line)
+    if (names.length > 0) {
+      root.logoPending = []
+      root.logoHave = Model.logoHaveSet(names)
       root.logoFetchSeq += 1
     }
+  }
+
+  // Batched, because every assignment to `logoHave` re-evaluates the source
+  // binding of every visible row. A quarter of a second is far below the eye
+  // and far above the fetch rate.
+  Timer {
+    id: logoFlushTimer
+    interval: 250
+    repeat: false
+    onTriggered: root.flushLogoNames()
+  }
+
+  function flushLogoNames() {
+    if (root.logoPending.length === 0) return
+    var out = {}
+    for (var k in root.logoHave) out[k] = true
+    for (var i = 0; i < root.logoPending.length; i++) out[root.logoPending[i]] = true
+    root.logoPending = []
+    root.logoHave = out
+    root.logoFetchSeq += 1
   }
   // Bumped when a fetch finishes, so the guide's Image sources can be asked
   // to reload: a file that was missing when the row was built is on disk now.

@@ -3,10 +3,12 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.7.10. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.8.0 Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
-tuning, and picture in picture; the two most recent releases went to the
-guide at real provider scale, and to search accuracy and readable contrast.
+tuning, picture in picture, and a channel wall that shows your channels as a
+grid of tiles -- their logos if you have turned those on, their names either
+way; the releases before this one went to the guide at
+real provider scale, and to search accuracy and readable contrast.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -85,12 +87,10 @@ Two places they can escape that, both worth knowing:
 | `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
 | `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus |
-
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
 | `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
-
 | `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
 | `showLogos` | boolean | `false` | show channel logos. Off until you turn it on, because logos are fetched from the third-party hosts your playlist names -- see below |
@@ -98,7 +98,7 @@ Two places they can escape that, both worth knowing:
 | `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
 | `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
 
-**Channel logos are off by default, and turning them on tells you the cost first.** Logos are hosted by third parties named in your playlist, not by this plugin, so showing them means fetching pictures from whoever the playlist author pointed at. On the list this was measured against that was 63 different hosts, one of them covering two thirds of the channels. Nothing is contacted until you say so: press `g` on the Sources screen and the guide tells you how many hosts it would contact and which one gets the most, counted from your own cached playlist without making a single request. Turning it back off is one keypress and no dialog, and it stops a fetch already in progress. Logos are `https` only, fetched once and cached under `~/.cache/omarchy-iptv/`, never re-fetched while the file is there, and a logo request carries none of your playlist's credentials, headers or query string -- a redirect to a non-`https` host is refused rather than followed. A channel with no logo gets empty space rather than a placeholder box, and the column is not drawn at all on a list that has none. `omarchy-iptv logos` prints the same survey from the command line and makes no request.
+**Channel logos are off by default, and turning them on tells you the cost first.** Logos are hosted by third parties named in your playlist, not by this plugin, so showing them means fetching pictures from whoever the playlist author pointed at. On the list this was measured against that was 63 different hosts, one of them covering two thirds of the channels. Nothing is contacted until you say so: press `g` on the Sources screen and the guide tells you how many hosts it would contact and which one gets the most, counted from your own cached playlist without making a single request. Turning it back off is one keypress and no dialog, and it stops a fetch already in progress -- but the pictures it already downloaded stay on disk, because a cache you might want again in a minute should not be thrown away by a toggle. When you do want the space back, `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv cache logos-clear --key <key>` deletes one source's logos and nothing else: its channel list, its guide data and the source itself are untouched. `ls ~/.cache/omarchy-iptv/sources/` names the keys. Logos are `https` only, fetched once and cached under `~/.cache/omarchy-iptv/`, never re-fetched while the file is there, and a logo request carries none of your playlist's credentials, headers or query string -- a redirect to a non-`https` host is refused rather than followed. A channel with no logo gets empty space rather than a placeholder box, and the column is not drawn at all on a list that has none. The same helper's `logos` subcommand prints that survey from the command line and makes no request.
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
@@ -121,12 +121,14 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | Mode | Key | Action |
 |---|---|---|
 | search | letters, digits, space | filter channel name and group |
-| search | Up / Down, PgUp / PgDn, Home / End | move the cursor |
-| search | Left / Right | previous / next group in the column |
+| search | Up / Down, PgUp / PgDn, Home / End | move the cursor. On the channel wall Up / Down move a whole row of tiles |
+| search | Left / Right | in the list: previous / next group in the column. On the channel wall there is no group column, and they move the cursor one tile |
 | search | Enter | play and close; Esc clears the query, then closes |
 | search | Ctrl+S | save this search into Favorites: its channels join your starred ones, and the confirmation says how many matched |
 | search | Tab or Shift+Tab | switch to list mode (query stays) |
-| list | j / k, h / l | move the cursor / change group |
+| list | j / k | move the cursor. On the channel wall: move a whole row of tiles |
+| list | h / l | change group. On the channel wall there is no group column, and they move the cursor one tile |
+| both | Ctrl+G | switch between the channel list and the channel wall: a grid of tiles showing each channel's name, and its logo if channel logos are on. Works either way -- logos are off by default and the wall does not need them |
 | list | Enter | play, close, focus the player |
 | list | Space | play and keep the guide open (zap while watching) |
 | list | f | toggle favorite |
@@ -355,8 +357,9 @@ itself unavailable rather than half working.
   remove the source
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
-- `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket while it is
-  running, a small lock file used to guarantee only one player exists, and
+- `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket (`mpv.sock`)
+  while it is running, a small lock file (`player.lock`, one line, no
+  address) used to guarantee only one player exists, and
   two directories that exist only until you log out -- `shader-cache` for
   mpv's compiled shaders and ICC profiles, and `watch-later` for its resume
   records. Both would otherwise land in `~/.cache/mpv/` and
@@ -370,7 +373,11 @@ Nothing inside the plugin directory is written at runtime.
 
 ## Troubleshooting
 
-- "No playlist configured": run the `omarchy bar set ... playlistUrl` line above.
+- "No playlist configured": the guide opens on a form that asks for your
+  playlist -- paste it there. That form masks what you type and the value
+  never reaches your shell history, which `omarchy bar set` cannot avoid;
+  use the command line only for a free public list you do not mind storing
+  in plain text.
 - The guide's status line shows the helper's own error text (host name only,
   never the URL). To see the same JSON in a terminal:
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`
