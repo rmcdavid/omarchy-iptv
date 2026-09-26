@@ -3418,6 +3418,37 @@ function wallTile(opts) {
   return { kind: "mark", path: "", glyph: GLYPHS.tv }
 }
 
+// What an arrow (or its hjkl twin) does, as a TABLE rather than as four
+// branches repeated in three places.
+//
+// It exists because the 0.8.0 preflight blocked on those three places
+// disagreeing. `handleSearchKey` routes the arrows itself rather than through
+// PanelKeyCatcher's `onMoveRequested`, so a wall branch added to one of them
+// did not reach the other, and the footer -- a third statement of the same
+// fact -- was written against the intent rather than against either. Three
+// statements joined by nothing but a name is the shape engineering rule 13 (dev branch)
+// describes, and the first repair for it was a test that asserted the
+// IDENTIFIERS appeared in each arm. That test went red when an arm was
+// deleted and stayed green when the two arms were SWAPPED, which is rule 14's
+// own definition of a criterion that cannot fail: it checked for the strings
+// the implementation was written to contain.
+//
+// So the decision lives here, once, and every consumer dispatches on it.
+// `target` is what moves: "cursor" is a place in the flat sequence (wrapping),
+// "row" is a whole grid row (clamping, see wallStep), "scope" is the group
+// facet. On the wall there is no facet -- the column is hidden -- so the
+// horizontal axis moves the cursor instead, which is what hiding the column
+// bought.
+function arrowAction(opts) {
+  var o = opts || {}
+  var wall = o.wall === true
+  var axis = str(o.axis)
+  var delta = Math.floor(Number(o.delta) || 0)
+  if (delta === 0 || (axis !== "v" && axis !== "h")) return { target: "none", delta: 0 }
+  if (axis === "v") return { target: wall ? "row" : "cursor", delta: delta }
+  return { target: wall ? "cursor" : "scope", delta: delta }
+}
+
 // One vertical step on the wall: down or up a whole row, keeping the column.
 //
 // `dir` is in ROWS, so a page is the same function with a bigger dir. The
@@ -6083,6 +6114,16 @@ function footerStatus(opts) {
 // keys and verbs at different opacities. `o.form` is the open form (its
 // focused element decides the set), `o.cursorKind` the Sources row kind,
 // `o.sourcesExist` adds `o sources` to the error empty state.
+// The word for what an arrow does, derived from arrowAction so the footer and
+// the handler cannot disagree. "move" for a place in the sequence, "row" for
+// a whole grid row, and the scope's own verb for the group facet.
+function arrowVerb(o, axis) {
+  var act = arrowAction({ axis: axis, delta: 1, wall: o && o.wall === true })
+  if (act.target === "row") return "row"
+  if (act.target === "cursor") return "move"
+  return scopeVerb(o)
+}
+
 function footerHints(opts) {
   var o = opts || {}
   var mode = str(o.mode)
@@ -6117,9 +6158,11 @@ function footerHints(opts) {
     // the scope, because the wall hides the group column. A hint that still
     // said "group" would name an axis the view does not have -- the same
     // mistake M2-09 D6 fixed for the list, in the other direction.
-    var list = o.wall === true
-      ? [["j/k", "row"], ["h/l", "move"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
-      : [["j/k", "move"], ["h/l", scopeVerb(o)], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // The verbs come from the SAME table the keys dispatch on, so the footer
+    // cannot describe a movement the handler does not make. That drift is
+    // what the 0.8.0 preflight blocked on.
+    var list = [["j/k", arrowVerb(o, "v")], ["h/l", arrowVerb(o, "h")],
+                ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
     // PAUSE LIVE TV. Only while something is playing -- a pause key on an
     // idle guide has nothing to act on and would be a hint that lies. Names
     // the direction, so nobody presses it to find out which way it goes.
@@ -6152,12 +6195,12 @@ function footerHints(opts) {
   // view does not have.
   var wall = o.wall === true
   if (str(o.query) !== "") {
-    return [["Enter", "play"], ["Up/Down", wall ? "row" : "move"],
-            ["Left/Right", wall ? "move" : "narrow"],
+    return [["Enter", "play"], ["Up/Down", arrowVerb(o, "v")],
+            ["Left/Right", wall ? arrowVerb(o, "h") : "narrow"],
             [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "clear"]]
   }
-  return [["Enter", "play"], ["Up/Down", wall ? "row" : "move"],
-          ["Left/Right", wall ? "move" : scopeVerb(o)],
+  return [["Enter", "play"], ["Up/Down", arrowVerb(o, "v")],
+          ["Left/Right", arrowVerb(o, "h")],
           [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "close"]]
 }
 
@@ -7768,6 +7811,7 @@ if (typeof module !== "undefined") {
     logoStreamName: logoStreamName,
     wallGeometry: wallGeometry,
     wallStep: wallStep,
+    arrowAction: arrowAction,
     wallTile: wallTile,
     WALL_KEY: WALL_KEY,
     WALL_MAX_COLUMNS: WALL_MAX_COLUMNS,

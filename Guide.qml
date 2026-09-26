@@ -1014,6 +1014,16 @@ Item {
     root.scrollToCursor()
   }
 
+  // The single place an arrow becomes a movement. Both key paths call this,
+  // so they cannot disagree about what a key does -- which is exactly what
+  // the 0.8.0 preflight blocked on. Model.arrowAction owns the decision.
+  function applyArrow(axis, delta) {
+    var act = Model.arrowAction({ axis: axis, delta: delta, wall: root.wallView })
+    if (act.target === "row") root.moveWallCursorBy(act.delta)
+    else if (act.target === "cursor") root.moveCursorBy(act.delta, true)
+    else if (act.target === "scope") root.moveScopeBy(act.delta)
+  }
+
   // A vertical step on the wall. Separate from moveCursorBy because the unit
   // is a ROW, not a place in the sequence, and Model.wallStep owns the edges.
   // M2-13. In memory for v1, deliberately -- and "in memory" means the SHELL
@@ -1475,22 +1485,10 @@ Item {
     // OPENS in a mode where Up/Down moved one tile instead of one row and
     // Left/Right changed a group facet whose column the wall has hidden --
     // an invisible scope change, under a footer that said "move".
-    if (event.key === Qt.Key_Down) {
-      if (root.wallView) root.moveWallCursorBy(1); else root.moveCursorBy(1, true)
-      return true
-    }
-    if (event.key === Qt.Key_Up) {
-      if (root.wallView) root.moveWallCursorBy(-1); else root.moveCursorBy(-1, true)
-      return true
-    }
-    if (event.key === Qt.Key_Right) {
-      if (root.wallView) root.moveCursorBy(1, true); else root.moveScopeBy(1)
-      return true
-    }
-    if (event.key === Qt.Key_Left) {
-      if (root.wallView) root.moveCursorBy(-1, true); else root.moveScopeBy(-1)
-      return true
-    }
+    if (event.key === Qt.Key_Down) { root.applyArrow("v", 1); return true }
+    if (event.key === Qt.Key_Up) { root.applyArrow("v", -1); return true }
+    if (event.key === Qt.Key_Right) { root.applyArrow("h", 1); return true }
+    if (event.key === Qt.Key_Left) { root.applyArrow("h", -1); return true }
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.activate(false); return true }
     if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { root.switchMode(); return true }
     if (root.handleSharedKey(event)) return true
@@ -2407,13 +2405,8 @@ Item {
             // arrows onto hjkl (it matches Key_Left without checking
             // modifiers), so a view needing BOTH a cursor axis and a facet
             // axis has no key left to express the second one.
-            if (root.wallView) {
-              if (dy !== 0) root.moveWallCursorBy(dy)
-              else if (dx !== 0) root.moveCursorBy(dx, true)
-              return
-            }
-            if (dy !== 0) root.moveCursorBy(dy, true)
-            else if (dx !== 0) root.moveScopeBy(dx)
+            if (dy !== 0) root.applyArrow("v", dy)
+            else if (dx !== 0) root.applyArrow("h", dx)
           }
           onReturnRequested: root.enterPending = true
           onActivateRequested: {

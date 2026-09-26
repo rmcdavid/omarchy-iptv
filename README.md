@@ -122,12 +122,13 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | Mode | Key | Action |
 |---|---|---|
 | search | letters, digits, space | filter channel name and group |
-| search | Up / Down, PgUp / PgDn, Home / End | move the cursor |
-| search | Left / Right | previous / next group in the column |
+| search | Up / Down, PgUp / PgDn, Home / End | move the cursor. On the channel wall Up / Down move a whole row of tiles |
+| search | Left / Right | in the list: previous / next group in the column. On the channel wall there is no group column, and they move the cursor one tile |
 | search | Enter | play and close; Esc clears the query, then closes |
 | search | Ctrl+S | save this search into Favorites: its channels join your starred ones, and the confirmation says how many matched |
 | search | Tab or Shift+Tab | switch to list mode (query stays) |
-| list | j / k, h / l | move the cursor / change group |
+| list | j / k, h / l | in the list: move the cursor / change group. On the channel wall: move a whole row / move one tile |
+| both | Ctrl+G | switch between the channel list and the channel wall, a grid of channel logos |
 | list | Enter | play, close, focus the player |
 | list | Space | play and keep the guide open (zap while watching) |
 | list | f | toggle favorite |

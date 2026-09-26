@@ -6514,41 +6514,126 @@ check("a narrow card still hides the column in either view",
             Model.guideSurface(Object.assign({}, base, { wall: true })).showColumn]
   })(), [false, false])
 
-// ---- M2-13 preflight: the footer must describe the keys that EXIST ----
+// ---- M2-13 preflight: the arrows are ONE table, called, not inventoried ----
 //
-// The 0.8.0 preflight blocked on this: the wall's footer promised "Up/Down
-// row, Left/Right move" while `handleSearchKey` routed the arrows itself,
-// bypassing the wall branch in onMoveRequested -- so in the mode the guide
-// OPENS in, Up/Down moved one tile and Left/Right silently changed a group
-// facet whose column the wall hides. Nothing tested it because the footer and
-// the handler are joined by a name, not by a call.
-//
-// A node test cannot press a key into QML, so this asserts the join the only
-// way it can from here: the four arrow handlers in handleSearchKey must each
-// branch on wallView, and the branch must call the wall's mover for the
-// vertical pair and the flat mover for the horizontal one. It is an inventory
-// over the shipping file, and it goes red if either half is removed.
-checkCall("the search-mode arrows branch on the view, as the footer claims", function () {
-  const body = guideSource.slice(guideSource.indexOf("function handleSearchKey"))
-  const seg = body.slice(0, body.indexOf("\n  }"))
-  return ["Down", "Up", "Right", "Left"].map(function (k) {
-    const i = seg.indexOf("Qt.Key_" + k + ")")
-    if (i < 0) return k + ": no handler"
-    // Bounded at the NEXT arm, not by a character count. A fixed window bled
-    // into the following handler, so reverting one arm still found
-    // `wallView` in its neighbour and the mutation survived. Caught by
-    // running the mutation rather than by trusting the assertion.
-    const rest = seg.slice(i + 1)
-    const nextArm = rest.indexOf("event.key === Qt.Key_")
-    const arm = nextArm < 0 ? rest : rest.slice(0, nextArm)
-    if (arm.indexOf("root.wallView") < 0) return k + ": does not branch on the view"
-    if (k === "Down" || k === "Up") {
-      return arm.indexOf("moveWallCursorBy") >= 0 ? k + ": wall row" : k + ": wrong wall mover"
-    }
-    return arm.indexOf("moveCursorBy") >= 0 && arm.indexOf("moveScopeBy") >= 0
-      ? k + ": wall tile, list scope" : k + ": wrong wall mover"
+// The 0.8.0 preflight blocked because three statements of one fact -- the
+// search-mode handler, the catcher's handler, and the footer -- were joined
+// by nothing but a name. The first repair asserted that the right IDENTIFIERS
+// appeared in each arm. It went red when an arm was deleted and stayed GREEN
+// when the two arms were swapped, which is rule 14's own definition of a
+// criterion that cannot fail. The routing is a table in Model.js now and
+// every consumer dispatches on it, so these call the shipping decision.
+check("arrowAction is the one table both key paths and the footer read",
+  (function () {
+    var out = {}
+    var pairs = [["v", 1], ["v", -1], ["h", 1], ["h", -1]]
+    ;[false, true].forEach(function (wall) {
+      pairs.forEach(function (p) {
+        var a = Model.arrowAction({ axis: p[0], delta: p[1], wall: wall })
+        out[(wall ? "wall" : "list") + " " + p[0] + (p[1] > 0 ? "+" : "-")] = a.target + " " + a.delta
+      })
+    })
+    return out
+  })(), {
+    "list v+": "cursor 1",  "list v-": "cursor -1",
+    "list h+": "scope 1",   "list h-": "scope -1",
+    "wall v+": "row 1",     "wall v-": "row -1",
+    "wall h+": "cursor 1",  "wall h-": "cursor -1"
   })
-}, ["Down: wall row", "Up: wall row", "Right: wall tile, list scope", "Left: wall tile, list scope"])
+check("the sign survives the table, in both axes and both views",
+  (function () {
+    var bad = []
+    ;[false, true].forEach(function (wall) {
+      ["v", "h"].forEach(function (axis) {
+        [-3, -1, 1, 3].forEach(function (d) {
+          if (Model.arrowAction({ axis: axis, delta: d, wall: wall }).delta !== d) bad.push([wall, axis, d])
+        })
+      })
+    })
+    return bad
+  })(), [])
+check("a zero delta and an unknown axis move nothing",
+  [Model.arrowAction({ axis: "v", delta: 0, wall: true }).target,
+   Model.arrowAction({ axis: "z", delta: 1, wall: true }).target,
+   Model.arrowAction({}).target], ["none", "none", "none"])
+check("the footer's verb IS the table's answer, in all four states",
+  (function () {
+    var verb = function (wall, axis) {
+      var f = Model.footerHints({ mode: "list", query: "", empty: "", playing: false,
+                                  pipAvailable: false, hasNumbers: false, wall: wall })
+      return f[axis === "v" ? 0 : 1][1]
+    }
+    var want = function (wall, axis) {
+      var t = Model.arrowAction({ axis: axis, delta: 1, wall: wall }).target
+      return t === "row" ? "row" : (t === "cursor" ? "move" : "group")
+    }
+    var bad = []
+    ;[false, true].forEach(function (w) {
+      ["v", "h"].forEach(function (a) { if (verb(w, a) !== want(w, a)) bad.push([w, a, verb(w, a), want(w, a)]) })
+    })
+    return bad
+  })(), [])
+check("and in search mode too, which is the mode the guide opens in",
+  (function () {
+    var f = function (wall) { return Model.footerHints({ mode: "search", query: "", wall: wall }) }
+    return [f(false)[1][1], f(false)[2][1], f(true)[1][1], f(true)[2][1]]
+  })(), ["move", "group", "row", "move"])
+// The README is on the release ALLOWLIST, so its key table reaches every
+// install, and its rows are joined to the handler by nothing but a name --
+// which is how the 0.8.0 preflight found a row this project's own fix had
+// just made FALSE. This asserts the join for the rows that describe the wall:
+// every wall row in the shipped table must name a movement the shipping table
+// actually produces, and the wall's own key must have a row at all.
+checkCall("the shipped README key table describes movements the table really makes", function () {
+  const readme = require("fs").readFileSync(require("path").join(__dirname, "../README.md"), "utf8")
+  const rows = readme.split("\n").filter(function (l) { return /^\| (search|list|both) \|/.test(l) })
+  const out = []
+  // the wall's own key must be documented somewhere in the shipped table
+  out.push(rows.some(function (r) { return r.indexOf(Model.WALL_KEY) >= 0 })
+    ? "Ctrl+G: documented" : "Ctrl+G: MISSING from the shipped key table")
+  // and every row that mentions the wall must agree with arrowAction
+  const verb = function (axis) {
+    const t = Model.arrowAction({ axis: axis, delta: 1, wall: true }).target
+    return t === "row" ? "row" : (t === "cursor" ? "tile" : "group")
+  }
+  rows.filter(function (r) { return /channel wall|On the wall/.test(r) }).forEach(function (r) {
+    const vertical = /Up \/ Down|j \/ k/.test(r)
+    const horizontal = /Left \/ Right|h \/ l/.test(r)
+    // the sentence after "wall" is what it claims those keys do there
+    const claim = r.slice(r.search(/channel wall|On the wall/))
+    if (vertical) {
+      const says = /whole row|a row/.test(claim) ? "row" : (/one tile|a tile/.test(claim) ? "tile" : "unclear")
+      out.push("vertical says " + says + ", table says " + verb("v"))
+    }
+    if (horizontal && !vertical) {
+      const says = /one tile|a tile/.test(claim) ? "tile" : (/group/.test(claim) ? "group" : "unclear")
+      out.push("horizontal says " + says + ", table says " + verb("h"))
+    }
+  })
+  return out
+}, ["Ctrl+G: documented",
+    "vertical says row, table says row",
+    "horizontal says tile, table says tile",
+    "vertical says row, table says row"])
+
+checkCall("both key paths dispatch on the table and neither moves anything itself", function () {
+  var body = guideSource.slice(guideSource.indexOf("function handleSearchKey"))
+  var seg = body.slice(0, body.indexOf("\n  }"))
+  var arms = ["Down", "Up", "Right", "Left"].map(function (k) {
+    var i = seg.indexOf("Qt.Key_" + k + ")")
+    if (i < 0) return k + ": missing"
+    var rest = seg.slice(i + 1)
+    var n = rest.indexOf("event.key === Qt.Key_")
+    var arm = n < 0 ? rest.slice(0, 200) : rest.slice(0, n)
+    if (/move(Wall)?CursorBy|moveScopeBy/.test(arm)) return k + ": moves directly"
+    return /applyArrow\("(v|h)"/.test(arm) ? k + ": dispatches" : k + ": neither"
+  })
+  var catcher = guideSource.slice(guideSource.indexOf("onMoveRequested:"))
+  catcher = catcher.slice(0, catcher.indexOf("onReturnRequested"))
+  arms.push(/applyArrow\("v", dy\)/.test(catcher) && /applyArrow\("h", dx\)/.test(catcher)
+    ? "catcher: dispatches" : "catcher: does not")
+  return arms
+}, ["Down: dispatches", "Up: dispatches", "Right: dispatches", "Left: dispatches", "catcher: dispatches"])
 
 // ---- M2-13: the toggle key ----
 check("the footer names the view the key goes TO, not the one you are in",

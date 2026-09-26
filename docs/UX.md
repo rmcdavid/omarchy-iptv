@@ -203,10 +203,15 @@ search filters it live. It is not a member of `GUIDE_MODES`.
 | No picture | The plugin's own television mark (`GLYPHS.tv`), dimmed. **This inverts 2.4's rule for the row deliberately.** In the 22 px row column a placeholder reads as a value, so the absence is the information -- correct there, because the name sits beside it. On a tile the tile IS the row, so an empty tile reads as a missing channel rather than as a channel with no picture. 82 of 1,462 channels on the reference list have no cached file, and on a 27-per-cent-coverage playlist the empty reading is the majority case. With logos OFF every tile is the mark, which is what makes the wall usable on a default install. |
 | Name | Always, under the plate, elided right. **The caption is not decoration.** A contact sheet over the 1,380 real cached logos found 32 runs of three or more adjacent channels sharing one logo file -- the largest 28 consecutive NBC affiliates, then Fox 14 and PBS 11, with 148 channels inside a run of four or more. In those runs the name is the only thing that tells two tiles apart; with captions hidden they carry no information at all. |
 | Cursor | The selected plate takes the selection fill and border, AND carries the cursor mark of the 2026-09-21 ruling. The mark is not optional here: the selection fill is 8 per cent alpha, which reads on a 52 px row and disappears over a 230 px tile. Measured by looking at the first build of this view. |
+| Decorations | The playing glyph and the favourite star top-right of the plate, the failed-alert glyph top-left, in the theme's foreground. Same glyphs and meanings as the row (5.5). All `Accessible.ignored`: the tile's NAME carries them, composed by the row's own `Model.rowAccessibleName`, so a reader hears what the eye sees and hears it once. The wall diverges from the row in one way, deliberately: the row's single trail slot shows play OR alert and suppresses the alert while playing, where the tile has two corners and can show both. |
 | Group column | **Hidden.** That is what frees the width, and it is also what lets `h`/`l` be horizontal cursor movement: `PanelKeyCatcher` matches `Key_Left` without checking modifiers and collapses the arrows onto `hjkl`, so a view needing both a cursor axis and a facet axis has no key left to express the second. Changing group means flipping back to the list; search works in both views and is the primary narrowing verb. |
 
 Keys on the wall: `j`/`k` move a whole row keeping the column, `h`/`l` move one
 tile through the flat sequence with wrap, `PgUp`/`PgDn` move a page of rows.
+**This amends 3.2's arrow rows as well as 3.1's**, and they say so in place --
+search mode routes the arrows through its own handler, which is what the 0.8.0
+preflight blocked on. All of it is one table, `Model.arrowAction`, which the
+two key paths and the footer all dispatch on, so the three cannot drift.
 Down from a column the partial last row does not have lands on the last item;
 up past the top keeps the column. Everything else is 3.1 unchanged.
 
@@ -342,8 +347,8 @@ x).
 |---|---|
 | printable (incl. space, `/`, digits, `j`,`k`,`h`,`l`,`f`,`r`,`s`,`x`) | Append to the query; re-filter; cursor to result 0. |
 | `Backspace` | Delete one character. `Ctrl+Backspace` deletes a word. `Ctrl+U` clears (all via `Util.editsFilter`). |
-| `Down` / `Up` | Move the channel cursor; wraps. |
-| `Right` / `Left` | Next / previous group column entry (search facet, 2.7). |
+| `Down` / `Up` | **In the list**: move the channel cursor; wraps. **On the wall**: move a whole row, keeping the column, and CLAMP at the edges rather than wrapping (`Model.wallStep`). Both are `Model.arrowAction({axis: "v"})`. |
+| `Right` / `Left` | **In the list**: next / previous group column entry (search facet, 2.7). **On the wall**: move the cursor one tile through the flat sequence, wrapping -- there is no group column to ring. Both are `Model.arrowAction({axis: "h"})`. |
 | `PgDn` / `PgUp` / `Home` / `End` | Same as list mode (there is no caret, so these are free). |
 | `Enter` | Play the cursor row (result 0 by default), close the guide, focus mpv. |
 | `Ctrl+G` | Flip between the list and the wall, exactly as in list mode (3.1). Listed in BOTH tables on purpose: a key that exists in only one of them is the bug, and this is the table for the screen the guide actually opens on. |
