@@ -110,6 +110,12 @@ ShellRoot {
   // throw and never invent a value. `socketAttached` is the observer's real
   // state, `playerUp` what the UI binds - they differ exactly during the
   // birth edge, which is the interesting window.
+  function addTrackState(out, s) {
+    out.tracksState = s.tracksState !== undefined ? s.tracksState : ""
+    out.tracks = (s.tracks || []).map(function(t) { return t.type + t.id + (t.selected ? "*" : "") })
+    out.tracksQueued = s.tracksQueued ? true : false
+  }
+
   function addPlayerState(out, s) {
     out.playerUp = s.playerUp === undefined ? null : s.playerUp
     out.playerPending = s.playerPending === undefined ? null : s.playerPending
@@ -791,6 +797,12 @@ ShellRoot {
     // Drives the REAL list-mode key path (handleListLetter -> the Model
     // letter table -> the guide action), so a scenario exercises the same
     // dispatch a keystroke would rather than calling the action directly.
+    // M3-02: the picker through the functions the catcher calls, for a
+    // scenario that runs without wtype. The key path itself is driven with
+    // real keys in the live half.
+    function trackMove(delta: int): string { if (guideLoader.item) guideLoader.item.moveTrackCursorBy(delta); return "ok" }
+    function trackSelect(): string { if (guideLoader.item) guideLoader.item.selectTrackAt(guideLoader.item.trackCursor); return "ok" }
+    function trackClose(): string { if (guideLoader.item) guideLoader.item.closeTracks(); return "ok" }
     function listKey(text: string): string {
       var g = guideLoader.item
       if (!g) return "no"
@@ -872,6 +884,16 @@ ShellRoot {
               nowTitle: "", nextTitle: "" })
           })(),
           scopes: g.scopeList.map(function(e) { return e.id + "=" + e.count }),
+          // M3-01: the column's kinds, so a scenario can see a group MOVE
+          // under HIDDEN rather than only that All's count dropped.
+          scopeKinds: g.scopeList.map(function(e) { return e.kind + ":" + e.label }),
+          hiddenGroups: s2 && s2.userState ? (s2.userState.hiddenGroups || []) : [],
+          // M3-02: the picker as the panel binds it -- the rows the Repeater
+          // draws, the cursor row, and what the one line under the title says.
+          inTracks: g.inTracks === true, trackCursor: g.trackCursor,
+          trackMessage: g.trackMessage !== undefined ? g.trackMessage : "",
+          trackRows: (g.trackRows || []).map(function(r) { return r.kind + ":" + r.label + (r.selected ? "*" : "") }),
+          trackCursorName: (g.trackRows && g.trackRows[g.trackCursor]) ? Model.trackAccessibleName(g.trackRows, g.trackCursor) : "",
           // Sources screens (SR31): mode transitions, the cursor and the form
           // with masked values and lengths.
           returnMode: g.guide ? String(g.guide.returnMode || "") : "",
@@ -933,6 +955,7 @@ ShellRoot {
         // harness drives a pre-change checkout: that comparison is what
         // makes a scenario evidence rather than a claim (CLAUDE.md rule 10).
         harness.addPlayerState(out.service, s)
+        harness.addTrackState(out.service, s)
         out.service.healthSkips = s.healthSkips
         out.service.activeSourceKey = s.activeSourceKey
         out.service.stateLoaded = s.stateLoaded
