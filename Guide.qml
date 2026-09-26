@@ -486,7 +486,11 @@ Item {
   // empty; the service's wl-paste verb (requestClipboard / clipboardText)
   // is then used and guarded here.
   readonly property bool pasteViaProcess: false
-  readonly property bool headerShowsSearch: guideMode || firstRunHead
+  // M3-02: the picker is a panel OVER the list, so the surface under it does
+  // not change -- including the header. Without `inTracks` here the query
+  // line, the title and the scope label all blanked behind the scrim, which
+  // is the one thing UX 2.9 says the picker does not do.
+  readonly property bool headerShowsSearch: guideMode || inTracks || firstRunHead
   readonly property string headerTitle: {
     if (root.mode === "sourceEdit") return root.form && root.form.sourceId !== "" ? root.copy.editSourceTitle : root.copy.addSourceTitle
     if (root.mode === "sourceXtream") return root.copy.xtreamTitle
@@ -1176,7 +1180,7 @@ Item {
       // the rows that just left (or came back) rather than what is left.
       var groupRows = Model.channelsForScope(root.service.channels, Model.groupScopeId(act.group), root.service.userState).length
       var hidden = typeof root.service.toggleHiddenGroup === "function" ? root.service.toggleHiddenGroup(act.group) : null
-      root.showTransient(Model.hideNotice(hidden, act.group, groupRows))
+      root.showTransient(Model.hideNotice(hidden, act.group, groupRows, root.wallView))
       if (hidden !== null) root.rebuildDisplay()
     } else if (act.action === "favorite") {
       // D-SAVE-1. Favourites holds two kinds of row since saved searches
@@ -1258,6 +1262,15 @@ Item {
   // The guide owns the timer, the cursor and the chip. Every decision below
   // is a Model.js call; there is no number logic in this file.
 
+  // The channel behind an id, from the service's own index (the same map
+  // `play` resolves against), independent of what is on screen.
+  function channelById(id) {
+    var key = String(id || "")
+    if (key === "" || !root.serviceReady || !root.service.channelIndex) return null
+    var found = root.service.channelIndex[key]
+    return found === undefined ? null : found
+  }
+
   function rowIndexOfId(id) {
     var key = String(id || "")
     if (key === "") return -1
@@ -1281,16 +1294,21 @@ Item {
     var id = Model.chnoIdAt(root.chnoIndex, hit.channelIndex)
     var at = root.rowIndexOfId(id)
     if (at < 0) {
-      // Outside the current list: the scope moves to All, clearing a query
-      // that is in the way, exactly as a search from Favorites jumps the
-      // column (UX 2.7). In All the target's numeric neighbours are the
-      // adjacent rows, so j/k right after a jump are channel up and down.
+      // Outside the current list: the scope moves, clearing a query that is
+      // in the way, exactly as a search from Favorites jumps the column
+      // (UX 2.7). WHERE it moves is Model's decision, because All stopped
+      // being the answer when hidden groups landed -- a number resolving
+      // into a hidden group found nothing in All, so the cursor never moved
+      // and the line below named the row it had been reset onto.
       if (root.hasQuery) root.guide = Model.withQuery(root.guide, "")
-      root.setScope(Model.SCOPE_ALL)
+      root.setScope(Model.numberJumpScope(root.channelById(id), root.serviceReady ? root.service.userState : null))
       at = root.rowIndexOfId(id)
     }
     if (at >= 0) root.selectAbsolute(at)
-    var row = root.rowAt(at >= 0 ? at : root.cursorIndex)
+    // Only ever name the row the NUMBER resolved to. Naming the row under
+    // the cursor instead is how an unreachable number came to announce, and
+    // then play, a channel the user had not asked for.
+    var row = at >= 0 ? root.rowAt(at) : null
     root.numberTargetName = row ? String(row.name || "") : ""
   }
 
@@ -2003,6 +2021,21 @@ Item {
     root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
   }
 
+  // A zap while the picker is open (the bar's wheel, an IPC next, Space on
+  // another row) replaces nowPlaying, and what the player reported was about
+  // the stream before it. The panel used to go idle and read "Nothing is
+  // playing" over a channel that was playing, for ever, because nothing
+  // re-asked. Decision 5 says the player is authoritative, so the panel asks
+  // it again about the new channel rather than lying about the old one.
+  // The service re-asks by itself once the play lands (it owns the timing:
+  // nowPlaying changes before the helper has loaded anything). The guide's
+  // only job here is the case the service cannot decide -- nothing is
+  // playing any more, so there is nothing to pick from.
+  function onPlayingChannelChanged() {
+    if (!root.inTracks || !root.serviceReady) return
+    if (root.playingId === "") root.closeTracks()
+  }
+
   function askTracks(select) {
     var why = root.service.requestTracks(select)
     if (why === "idle") root.showTransient(root.copy.pauseNothing)
@@ -2010,7 +2043,18 @@ Item {
 
   function moveTrackCursorBy(delta) {
     var next = Model.moveTrackCursor(root.trackRows, root.trackCursor, delta)
-    if (next >= 0) root.guide = Model.withTrackCursor(root.guide, next)
+    if (next >= 0) {
+      root.guide = Model.withTrackCursor(root.guide, next)
+      root.scrollToTrackCursor()
+    }
+  }
+
+  // The rows scroll now, so the cursor has to be brought into view like the
+  // channel list's is; without this j/k walks it off the bottom of the card.
+  function scrollToTrackCursor() {
+    if (!root.inTracks || !trackList || trackList.height <= 0) return
+    if (root.trackCursor < 0 || root.trackCursor >= root.trackRows.length) return
+    trackList.positionViewAtIndex(root.trackCursor, ListView.Contain)
   }
 
   function selectTrackAt(index) {
@@ -2029,7 +2073,10 @@ Item {
     var cur = rows[root.trackCursor]
     if (cur && cur.kind === "track") return
     var home = Model.trackCursorHome(rows)
-    if (home >= 0) root.guide = Model.withTrackCursor(root.guide, home)
+    if (home >= 0) {
+      root.guide = Model.withTrackCursor(root.guide, home)
+      Qt.callLater(root.scrollToTrackCursor)
+    }
   }
 
   function toggleLogos() {
@@ -2308,6 +2355,7 @@ Item {
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onTracksChanged() { root.settleTrackCursor() }
+    function onNowPlayingChanged() { root.onPlayingChannelChanged() }
     // UX 6.1: a manual refresh ends with `Refreshed - N channels` in the
     // status slot for the transient window (D-LIVE-05).
     function onPlaylistRefreshed(channelCount, manual) {
@@ -4541,7 +4589,12 @@ Item {
           id: trackCard
           anchors.centerIn: parent
           width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
-          height: Math.min(parent.height - root.contentMargin * 2, trackColumn.implicitHeight + root.contentMargin * 2)
+          // The rows scroll, so the card is as tall as it needs to be and no
+          // taller than the space it has. contentHeight is the sum of the
+          // delegate heights and does not depend on the viewport, so this is
+          // not a binding loop.
+          height: Math.min(parent.height - root.contentMargin * 2,
+                           root.contentMargin * 2 + trackHead.height + Style.space(4) + trackList.contentHeight)
           radius: root.cornerRadius
           color: root.background
           borderSpec: root.borderSpec
@@ -4552,7 +4605,7 @@ Item {
           MouseArea { anchors.fill: parent; onClicked: {} }
 
           Column {
-            id: trackColumn
+            id: trackHead
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
@@ -4581,90 +4634,113 @@ Item {
               font.pixelSize: Style.font.bodySmall
               elide: Text.ElideRight
             }
+          }
 
-            Repeater {
-              model: root.trackRows
-              delegate: Item {
-                id: trackRow
-                required property int index
-                required property var modelData
-                readonly property bool isHeader: modelData.kind === "header"
-                readonly property bool choosable: modelData.kind === "track"
-                readonly property bool current: choosable && index === root.trackCursor
-                width: trackColumn.width
-                height: isHeader ? root.groupEntryHeight + Style.space(6) : root.groupEntryHeight
-                Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
-                Accessible.name: Model.trackAccessibleName(root.trackRows, index)
-                Accessible.selected: current
+          // A ListView, not a Column in the card: a stream with eight audio
+          // tracks and ten subtitles is ordinary on the sports and VOD rows
+          // this feature exists for, and a Column clipped everything past
+          // about twelve rows while j/k walked the cursor into the clipped
+          // ones and Enter selected a track nobody could see (0.9.0
+          // preflight). The cursor logic was already right; only the
+          // viewport was missing.
+          ListView {
+            id: trackList
+            objectName: "trackList"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: trackHead.bottom
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: root.contentMargin
+            anchors.rightMargin: root.contentMargin
+            anchors.bottomMargin: root.contentMargin
+            anchors.topMargin: Style.space(4)
+            clip: true
+            spacing: Style.space(4)
+            boundsBehavior: Flickable.StopAtBounds
+            model: root.trackRows
+            Accessible.role: Accessible.List
+            Accessible.name: root.copy.tracksTitle
 
-                PanelSectionHeader {
-                  visible: trackRow.isHeader
+            delegate: Item {
+              id: trackRow
+              required property int index
+              required property var modelData
+              readonly property bool isHeader: modelData.kind === "header"
+              readonly property bool choosable: modelData.kind === "track"
+              readonly property bool current: choosable && index === root.trackCursor
+              width: ListView.view.width
+              height: isHeader ? root.groupEntryHeight + Style.space(6) : root.groupEntryHeight
+              Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
+              Accessible.name: Model.trackAccessibleName(root.trackRows, index)
+              Accessible.selected: current
+
+              PanelSectionHeader {
+                visible: trackRow.isHeader
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
+                text: trackRow.modelData.label
+                foreground: root.foreground
+                color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
+                fontFamily: root.fontFamily
+              }
+
+              Rectangle {
+                visible: !trackRow.isHeader
+                anchors.fill: parent
+                radius: root.cornerRadius
+                color: trackRow.current ? root.selectedBackground : "transparent"
+
+                Text {
+                  id: trackMark
+                  textFormat: Text.PlainText
                   anchors.left: parent.left
-                  anchors.bottom: parent.bottom
-                  anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
-                  text: trackRow.modelData.label
-                  foreground: root.foreground
-                  color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
-                  fontFamily: root.fontFamily
+                  anchors.leftMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(16)
+                  text: trackRow.modelData.selected ? Model.GLYPHS.check : ""
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
                 }
 
-                Rectangle {
-                  visible: !trackRow.isHeader
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.left: trackMark.right
+                  anchors.right: trackDetail.left
+                  anchors.leftMargin: Style.space(6)
+                  anchors.rightMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: trackRow.modelData.label
+                  color: root.foreground
+                  opacity: trackRow.choosable ? 1 : root.captionAlphaOnCard
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  id: trackDetail
+                  textFormat: Text.PlainText
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: trackRow.modelData.detail
+                  color: root.foreground
+                  opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard
+                  font.bold: true
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  horizontalAlignment: Text.AlignRight
+                }
+
+                MouseArea {
                   anchors.fill: parent
-                  radius: root.cornerRadius
-                  color: trackRow.current ? root.selectedBackground : "transparent"
-
-                  Text {
-                    id: trackMark
-                    textFormat: Text.PlainText
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.space(10)
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(16)
-                    text: trackRow.modelData.selected ? Model.GLYPHS.check : ""
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                  }
-
-                  Text {
-                    textFormat: Text.PlainText
-                    anchors.left: trackMark.right
-                    anchors.right: trackDetail.left
-                    anchors.leftMargin: Style.space(6)
-                    anchors.rightMargin: Style.space(6)
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: trackRow.modelData.label
-                    color: root.foreground
-                    opacity: trackRow.choosable ? 1 : root.captionAlphaOnCard
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                    elide: Text.ElideRight
-                  }
-
-                  Text {
-                    id: trackDetail
-                    textFormat: Text.PlainText
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(10)
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: trackRow.modelData.detail
-                    color: root.foreground
-                    opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard
-                    font.bold: true
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    horizontalAlignment: Text.AlignRight
-                  }
-
-                  MouseArea {
-                    anchors.fill: parent
-                    enabled: trackRow.choosable
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                      root.guide = Model.withTrackCursor(root.guide, trackRow.index)
-                      root.selectTrackAt(trackRow.index)
-                    }
+                  enabled: trackRow.choosable
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.guide = Model.withTrackCursor(root.guide, trackRow.index)
+                    root.selectTrackAt(trackRow.index)
                   }
                 }
               }

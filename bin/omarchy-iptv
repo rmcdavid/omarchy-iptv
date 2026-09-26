@@ -3593,6 +3593,19 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # the shell's own flag is optimistic and a refused clear would leave the
     # two disagreeing. Found by the 0.7.10 preflight, not by the suite.
     client.try_command("set_property", "pause", False)
+    # M3-02, and the same mechanism one property over. mpv keeps `aid` and
+    # `sid` across a loadfile exactly as it keeps `pause`, so a user who
+    # picked the Spanish audio on one channel got track 2 of the NEXT
+    # channel -- whatever that happens to be -- with the picker cleared and
+    # nothing on screen saying why. Two shipped sentences promised the
+    # opposite ("the choice is not remembered across channels"), which is
+    # the intent: remembering a LANGUAGE is a separate feature with its own
+    # questions, and remembering a track NUMBER is meaningless across
+    # streams. "auto" is mpv's default: pick the file's own preference.
+    # Found by the 0.9.0 preflight, reasoned from this comment's own
+    # neighbour, then measured on a real player.
+    for prop in ("aid", "sid"):
+        client.try_command("set_property", prop, "auto")
     for prop, value in (("title", MPV_RAW_PREFIX + target["name"]), ("force-media-title", target["name"])):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
@@ -4156,12 +4169,28 @@ def player_pause(args: argparse.Namespace) -> int:
 
 # ---- M3-02: audio and subtitle tracks ---------------------------------------
 #
-# mpv's `track-list` is a sink (rule 5, dev branch). Two of its fields carry
-# text this plugin does not control: `external-filename`, a path or URL for
-# an external track, and `title`, written by whoever muxed the stream. So
-# what leaves this process is a WHITELIST of fields, never the entry, with
-# the title through redact_urls. `external-filename` is not on the list and
-# is not redacted -- it is dropped, because nothing in the picker needs it.
+# mpv's `track-list` is a sink (rule 5, dev branch). FOUR of its fields are
+# free text mpv documents as coming from the file, so none of them is ours:
+#
+#   external-filename  a path or URL for an external track. NOT on the
+#                      whitelist below and never emitted: dropping it beats
+#                      redacting it, because nothing in the picker needs it.
+#   title              written by whoever muxed the stream. Emitted through
+#                      redact_urls, and scrubbed a second time by
+#                      Model.parseTracks before it reaches guide text or an
+#                      accessible name.
+#   lang               "track language as identified by the file" (mpv
+#                      manual). Emitted through redact_urls for the same
+#                      reason as `title`: it is a free string, not the
+#                      three-letter code the format recommends, and the
+#                      guide turns it into a displayed name.
+#   codec              the decoder name mpv resolved. Emitted through
+#                      redact_urls on the same footing.
+#
+# An earlier version of this comment said "two of its fields" and redacted
+# one. That is the completed-audit claim rule 5 exists to stop: the author
+# audited the fields they thought of rather than the ones mpv documents as
+# file-supplied. Counted against the manual by the 0.9.0 preflight.
 TRACK_TYPES = ("audio", "sub")
 TRACK_FIELDS = ("id", "type", "selected", "lang", "title", "codec", "default", "forced", "external")
 
@@ -4185,9 +4214,9 @@ def track_rows(data: Any) -> list[dict[str, Any]]:
             "id": ident,
             "type": kind,
             "selected": entry.get("selected") is True,
-            "lang": entry.get("lang") if isinstance(entry.get("lang"), str) else "",
+            "lang": redact_urls(entry.get("lang")) if isinstance(entry.get("lang"), str) else "",
             "title": redact_urls(entry.get("title")) if isinstance(entry.get("title"), str) else "",
-            "codec": entry.get("codec") if isinstance(entry.get("codec"), str) else "",
+            "codec": redact_urls(entry.get("codec")) if isinstance(entry.get("codec"), str) else "",
             "default": entry.get("default") is True,
             "forced": entry.get("forced") is True,
             "external": entry.get("external") is True,
@@ -4204,7 +4233,13 @@ def track_choice(text: str | None) -> int | str | None:
     value = text.strip().lower()
     if value == "no":
         return "no"
-    if value.isdigit():
+    # isascii() as well as isdigit(): str.isdigit() is True for superscripts
+    # and other Unicode digits that int() then refuses, so the bare isdigit()
+    # let a ValueError escape this function's own contract and come out of
+    # main() as code "internal" with a traceback -- D-PLY-20's exact failure
+    # mode, inside the release that fixes D-PLY-20. Found by the 0.9.0
+    # preflight, measured with "\u00b2".
+    if value.isascii() and value.isdigit():
         return int(value)
     raise HelperError("bad_track", "a track is a number or 'no'")
 

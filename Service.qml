@@ -317,9 +317,29 @@ Item {
   property var tracks: []
   property string tracksState: "idle"
   property var tracksQueued: null
+  // Whether anything is still showing the tracks. Set while the picker is
+  // open, so a channel change knows the difference between "throw the rows
+  // away" and "ask again about the new channel".
+  property bool tracksWanted: false
   // A new play, a stop, a death: whatever the player reported was about the
-  // stream before this one.
-  onNowPlayingChanged: root.clearTracks()
+  // stream before this one. The rows go either way; whether we ask again
+  // depends on whether anyone is looking.
+  //
+  // The re-ask is NOT issued here. nowPlaying is assigned before the helper
+  // runs, so asking now reads the track list of the file still loaded and
+  // reports the OLD channel's selection as the new channel's -- measured on
+  // a real player: aid was 2 before the change and 1 after, while the panel
+  // still said 2. The play REPLY is the first moment the loadfile is done,
+  // so that is where the question goes.
+  onNowPlayingChanged: {
+    if (root.tracksWanted && root.nowPlaying) {
+      root.tracks = []
+      root.tracksState = "asking"
+      root.tracksQueued = null
+    } else {
+      root.clearTracks()
+    }
+  }
   property var failedAt: ({})
   // The file behind it. Loaded on every source switch, so the marks a source
   // carries arrive with its channels and leave with it.
@@ -1856,6 +1876,11 @@ Item {
     // whatever this reply was. Deferred rather than inline because the
     // branches below return early and some issue a control of their own.
     if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
+    // A play or a health status is the first moment after a channel change
+    // at which the player is answering about the NEW file, so an open picker
+    // asks again from here rather than from onNowPlayingChanged.
+    else if ((kind === "play" || kind === "status") && root.tracksWanted
+             && root.tracksState === "asking" && root.tracks.length === 0) Qt.callLater(root.refreshTracks)
     if (kind === "tracks") {
       // The helper is authoritative (decision 5): the rows are what mpv has
       // AFTER any selection, never what was asked.
@@ -1878,6 +1903,17 @@ Item {
         root.paused = status.paused === true
       } else if (status.ok === true && status.running !== true) {
         root.paused = false
+      } else if (status.ok !== true) {
+        // D-PLY-20's other half, found in the 0.9.0 preflight. Both branches
+        // above require ok === true, so the REFUSAL -- the case the comment
+        // above says is corrected here -- fell through and left the
+        // optimistic flip from togglePause standing. That flag is not
+        // internal: it drives the bar's glyph and tooltip and the footer's
+        // resume hint, so the bar read "Paused" over a playing stream until
+        // the ten-second health poll happened to correct it. A refusal
+        // means we do not know, so ask: the `status` branch above is the
+        // one place that learns the truth from the player itself.
+        Qt.callLater(root.askPlayerStatus)
       }
       return
     }
@@ -2879,6 +2915,7 @@ Item {
       root.clearTracks()
       return "idle"
     }
+    root.tracksWanted = true
     root.tracksState = "asking"
     if (!root.runControl("tracks", Model.playerTracksArgv(root.socketPath, select || null))) {
       root.tracksQueued = { select: select || null }
@@ -2887,14 +2924,31 @@ Item {
     return ""
   }
 
+  // One `status` to the player, deferred so it is issued after the reply
+  // that asked for it has finished unwinding (the channel is one at a time).
+  // The `status` branch above is the only place that learns pause, the
+  // channel and the health verdict from the player itself.
+  function askPlayerStatus() {
+    if (root.userStopped || root.stopping || !root.playerUp) return
+    root.runControl("status", ["status", "--socket", root.socketPath])
+  }
+
   function cancelTracks() {
+    root.tracksWanted = false
     root.tracksQueued = null
+  }
+
+  // The channel changed under an open picker and the play has now landed.
+  function refreshTracks() {
+    if (!root.tracksWanted || !root.nowPlaying) return
+    root.requestTracks(null)
   }
 
   function clearTracks() {
     root.tracks = []
     root.tracksState = "idle"
     root.tracksQueued = null
+    root.tracksWanted = false
   }
 
   function issueQueuedTracks() {

@@ -1703,6 +1703,21 @@ function channelsForScope(channels, scopeId, state) {
   return out
 }
 
+// M2-03 + M3-01. Where a number jump lands when the resolved channel is not
+// in the rows on screen. All is the answer it has always been -- in All a
+// channel's numeric neighbours are the adjacent rows, so j/k right after a
+// jump are channel up and down -- but All stopped holding a hidden group's
+// channels, and nothing noticed: the cursor did not move, the status line
+// named whatever row the cursor had been reset onto, and Enter played THAT.
+// Decision 1 says a channel reached by its number still works; decision 2
+// says its group is reachable by name. So the jump goes to the group's own
+// scope, which is what the user would have done by hand.
+function numberJumpScope(channel, state) {
+  if (!channel) return SCOPE_ALL
+  var group = primaryGroup(channel)
+  return isGroupHidden(state, group) ? groupScopeId(group) : SCOPE_ALL
+}
+
 // Legacy name kept for callers that think in group names ("" = all).
 function channelsInGroup(channels, group, state) {
   var name = str(group)
@@ -2289,11 +2304,21 @@ function favoriteRemovalNotice(origin, count) {
 // cap). The group name is playlist text, so it goes through scrubUrls like
 // every other sink (rule 5). Says where the group went, because a user who
 // hid 117 rows by one keypress deserves to be told how to get them back.
-function hideNotice(hidden, group, count) {
+// `wall` is true when the notice is raised from the channel wall, which is
+// the one view with no group column (guideSurface showColumn is false there,
+// because hiding the column is what frees the width). Sending that user to
+// "the column" names a surface they cannot see and a key -- h/l -- that on
+// the wall moves the cursor instead of the scope, so the notice has to name
+// the key that brings the column back. Found in the 0.9.0 preflight: every
+// M3-01 path is live on the wall, and nothing had asked what the notice says
+// once the column it points at is gone.
+function hideNotice(hidden, group, count, wall) {
   var name = scrubUrls(str(group))
   var n = formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
   if (hidden === null || hidden === undefined) return "Cannot hide more groups" + SEP + MAX_HIDDEN_GROUPS + " is the most"
-  if (hidden === true) return "Hid " + name + SEP + n + SEP + "under HIDDEN in the column"
+  if (hidden === true) {
+    return "Hid " + name + SEP + n + SEP + (wall === true ? WALL_KEY + " for the list to unhide" : "under HIDDEN in the column")
+  }
   return "Showing " + name + SEP + n
 }
 
@@ -2314,7 +2339,12 @@ function savedSearchFooter(state, channels) {
   var st = state || emptyState()
   var saved = asList(st.savedSearches)
   if (saved.length === 0) return ""
-  var rows = savedSearchChannels(asList(channels), saved).length
+  // M3-01 regression, found in the 0.9.0 preflight: the ROWS were filtered
+  // through browsableChannels when hidden groups landed (channelsForScope)
+  // and this count was not, so Favourites could say "2 channels" about a
+  // list holding none. That is D-SAVE-2 exactly -- a count and its rows as
+  // two implementations -- so the repair is the same one: ONE call.
+  var rows = savedSearchChannels(browsableChannels(asList(channels), st), saved).length
   return formatCount(saved.length) + (saved.length === 1 ? " saved search" : " saved searches") +
     SEP + formatCount(rows) + (rows === 1 ? " channel" : " channels")
 }
@@ -4245,7 +4275,11 @@ function parseTracks(status) {
     if (typeof t.id === "boolean" || !isFinite(id) || Math.floor(id) !== id) continue
     out.push({
       id: id, type: t.type, selected: t.selected === true,
-      lang: str(t.lang), title: scrubUrls(str(t.title)), codec: str(t.codec),
+      // Every free-text field mpv takes from the file goes through the same
+      // guard, not just the one that was thought of first: the helper
+      // redacts these and this is the second pass, because they reach guide
+      // text and an accessible name (rule 5).
+      lang: scrubUrls(str(t.lang)), title: scrubUrls(str(t.title)), codec: scrubUrls(str(t.codec)),
       dflt: t["default"] === true, forced: t.forced === true, external: t.external === true
     })
   }
@@ -8096,6 +8130,7 @@ if (typeof module !== "undefined") {
     hideAction: hideAction,
     hideVerb: hideVerb,
     hideNotice: hideNotice,
+    numberJumpScope: numberJumpScope,
     scopeEntryAccessibleName: scopeEntryAccessibleName,
     effectiveScope: effectiveScope,
     moveScope: moveScope,

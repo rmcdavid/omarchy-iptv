@@ -65,7 +65,16 @@ except Exception as e: print("NOSTATE")' "$1" "$(ipc state)"; }
 wait_gf() { local i; for ((i=0;i<$3;i++)); do [[ $(gf "$1") == "$2" ]] && return 0; sleep 0.25; done; return 1; }
 wait_sf() { local i; for ((i=0;i<$3;i++)); do [[ $(sf "$1") == "$2" ]] && return 0; sleep 0.25; done; return 1; }
 shot() { (( SHOTS )) && "$RUN" shot "$1" >/dev/null 2>&1; true; }
-cleanup() { "$RUN" reap >/dev/null 2>&1; [[ -n $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"; }
+cleanup() {
+  "$RUN" reap >/dev/null 2>&1
+  # A --baseline run starts its player from the EXPORTED helper, and the reap
+  # above did not always reach it (seen twice: mpv still running after the
+  # run). Stop it by the socket with THIS tree's helper, which is the
+  # designed door -- never by process name, which would reach the user's own
+  # mpv, and never by pattern, which can match the shell running it.
+  python3 "$ROOT/bin/omarchy-iptv" player stop --socket "$SOCK" >/dev/null 2>&1
+  [[ -n $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
+}
 trap cleanup EXIT
 
 if pgrep -x hyprlock >/dev/null; then echo "screen is locked; refusing to type"; exit 2; fi
@@ -171,6 +180,53 @@ ipc stop >/dev/null; sleep 0.8
 [[ $(sf 's["tracksState"]') == '"idle"' && $(sf 's["tracks"]') == '[]' ]] && pass "T6a stop clears the tracks" || fail "T6a" "$(sf 's["tracksState"]') $(sf 's["tracks"]')"
 ipc listKey t >/dev/null; sleep 0.3
 [[ $(gf 'g["inTracks"]') == false && $(gf 'g["footer"]') == *"Nothing is playing"* ]] && pass "T6b t while idle says nothing is playing" || fail "T6b" "$(gf 'g["inTracks"]') $(gf 'g["footer"]')"
+
+# ---- P: the 0.9.0 preflight repairs, each against the defect it fixes.
+#
+# A CHANNEL CHANGE HERE IS `ipc play <id>`, NEVER `zap` and never the cursor.
+# The first draft used zap and both of its checks were VACUOUS: the ring is
+# the playing channel's own group (launchScope), that group had one member,
+# so zap was a no-op, no loadfile happened, and "the tracks did not change"
+# passed for a reason with nothing to do with what was being tested. The
+# second draft moved the cursor and activated, and the channel did not
+# change either. Naming the id removes the question.
+ipc setScope all >/dev/null; sleep 0.3
+ipc move 0 >/dev/null; sleep 0.2
+"$RUN" key x >/dev/null 2>&1; sleep 0.6   # cursor is on Alpha News in All
+hid=$(gf 'g["hiddenGroups"]')
+[[ $hid == '["News"]' ]] && pass "P1a x in All hides the cursor row group" || fail "P1a" "$hid"
+rows=$(gf 'g["rows"]')
+[[ $rows == 3 ]] && pass "P1b All drops to the three remaining channels" || fail "P1b" "$rows"
+ipc setScope "g:News" >/dev/null; sleep 0.3
+ipc remove >/dev/null; sleep 0.5
+hid=$(gf 'g["hiddenGroups"]')
+[[ $hid == '[]' ]] && pass "P1c and unhiding from the HIDDEN entry restores it" || fail "P1c" "$hid"
+
+# P2 the picker survives a channel change instead of claiming nothing plays
+ipc setScope all >/dev/null; sleep 0.3
+ipc play t:alpha >/dev/null
+wait_sf 's["playerUp"]' true 80 || fail "P2-setup" "no player"
+for i in $(seq 1 40); do [[ $(sf 's["nowPlaying"]["id"]') == '"t:alpha"' ]] && break; sleep 0.25; done
+sleep 1.5
+ipc listKey t >/dev/null
+wait_sf 's["tracksState"]' '"ready"' 40 || fail "P2-setup" "tracks not ready"
+ipc play t:charlie >/dev/null
+for i in $(seq 1 40); do [[ $(sf 's["nowPlaying"]["id"]') == '"t:charlie"' ]] && break; sleep 0.25; done
+now=$(sf 's["nowPlaying"]["id"]')
+[[ $now == '"t:charlie"' ]] && pass "P2a the channel really changed under the open picker" || fail "P2a" "$now"
+wait_sf 's["tracksState"]' '"ready"' 60 && pass "P2b the open picker re-asked the player" || fail "P2b" "$(sf 's[\x27tracksState\x27]')"
+msg=$(gf 'g["trackMessage"]'); intr=$(gf 'g["inTracks"]')
+[[ $intr == true && $msg == '""' ]] && pass "P2c the panel stays open and claims nothing false" || fail "P2c" "$intr $msg"
+
+# P3 a channel change resets the track choice (mpv keeps aid/sid otherwise)
+ipc trackMove 1 >/dev/null; sleep 0.3; ipc trackSelect >/dev/null
+wait_sf 's["tracks"]' '["audio1", "audio2*", "sub1"]' 40 || fail "P3-setup" "selection did not take"
+ipc play t:alpha >/dev/null
+for i in $(seq 1 40); do [[ $(sf 's["nowPlaying"]["id"]') == '"t:alpha"' ]] && break; sleep 0.25; done
+wait_sf 's["tracksState"]' '"ready"' 60 || fail "P3-setup" "not ready after the change"
+tr=$(sf 's["tracks"]')
+[[ $tr == '["audio1*", "audio2", "sub1"]' ]] && pass "P3 the track choice did not follow the channel, as the README says" || fail "P3" "$tr"
+"$RUN" key -k Escape >/dev/null 2>&1; sleep 0.3
 
 echo "m3-scenario: $PASS passed, $FAIL failed"
 (( FAIL == 0 ))

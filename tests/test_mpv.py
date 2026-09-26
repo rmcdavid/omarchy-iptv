@@ -239,6 +239,8 @@ class PlayTest(MpvTestCase):
         self.assertEqual(payload, {"ok": True, "kind": "play", "id": "t:espn.us", "name": "ESPN"})
         self.assertEqual(server.commands, [
             ["set_property", "pause", False],
+            ["set_property", "aid", "auto"],
+            ["set_property", "sid", "auto"],
             ["set_property", "title", "$>ESPN"],
             ["set_property", "force-media-title", "ESPN"],
             ["set_property", "user-agent", "VLC/3.0.20"],
@@ -249,6 +251,26 @@ class PlayTest(MpvTestCase):
         self.assertEqual(len(stdout.strip().splitlines()), 1)
         self.assertNotIn("espn.m3u8", stdout + stderr)
 
+    def test_a_channel_change_resets_the_track_selection(self):
+        """M3-02 / 0.9.0 preflight. mpv keeps `aid` and `sid` across a
+        loadfile exactly as it keeps `pause`, so a user who picked the
+        Spanish audio on one channel got track 2 of the NEXT channel --
+        whatever that happens to be -- with the picker cleared and nothing on
+        screen saying why. Two shipped sentences promised the opposite. The
+        reset is atomic with the load for the same reason the pause reset is:
+        the shell's own view is optimistic and cannot be.
+        """
+        server = self.start()
+        code, _, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        sets = [c for c in server.commands if c[0] == "set_property"]
+        self.assertIn(["set_property", "aid", "auto"], sets)
+        self.assertIn(["set_property", "sid", "auto"], sets)
+        # Before the loadfile, or the new channel loads with the old track.
+        load = server.commands.index(["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"])
+        for prop in ("aid", "sid"):
+            self.assertLess(server.commands.index(["set_property", prop, "auto"]), load)
+
     def test_clears_headers_for_a_channel_without_any(self):
         server = self.start(props={"option-info/user-agent/default-value": "mpv-default-ua"})
         code, payload, _, stderr = self.play("--id", "t:bbc1.uk")
@@ -256,6 +278,8 @@ class PlayTest(MpvTestCase):
         self.assertEqual(payload["name"], "BBC One HD")
         self.assertEqual(server.commands, [
             ["set_property", "pause", False],
+            ["set_property", "aid", "auto"],
+            ["set_property", "sid", "auto"],
             ["set_property", "title", "$>BBC One HD"],
             ["set_property", "force-media-title", "BBC One HD"],
             ["get_property", "option-info/user-agent/default-value"],

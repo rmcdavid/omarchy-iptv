@@ -779,7 +779,11 @@ class IdempotenceTest(PlayerTestCase):
         # otherwise load the new channel paused. The title pair keeps its
         # relative order behind it.
         sets = [command[:2] for command in server.commands if command[0] == "set_property"]
-        self.assertEqual(sets[:3], [["set_property", "pause"],
+        # aid/sid join pause as the properties mpv keeps across a loadfile
+        # and that a new channel must not inherit (M3-02).
+        self.assertEqual(sets[:5], [["set_property", "pause"],
+                                    ["set_property", "aid"],
+                                    ["set_property", "sid"],
                                     ["set_property", "title"],
                                     ["set_property", "force-media-title"]])
         self.assertEqual(server.user_data["omarchy-iptv"]["entryId"], 1)
@@ -2295,6 +2299,41 @@ class TracksTest(PlayerTestCase):
         self.assertEqual(helper.track_choice("7"), 7)
         with self.assertRaises(helper.HelperError):
             helper.track_choice("-1")
+
+    def test_a_unicode_digit_int_refuses_is_a_status_not_a_traceback(self):
+        """0.9.0 preflight: str.isdigit() is True for superscripts that int()
+        then refuses, so the bare isdigit() let a ValueError escape
+        track_choice's own contract and come out of main() as code "internal"
+        with a traceback -- D-PLY-20's exact failure mode, inside the release
+        that fixes D-PLY-20."""
+        code, payload, _, err = self.tracks("--audio", "\u00b2")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(payload["error"]["code"], "bad_track")
+        self.assertEqual(payload["kind"], "player.tracks")
+        self.assertNotIn("Traceback", err)
+        with self.assertRaises(helper.HelperError):
+            helper.track_choice("\u00b2")
+        # An Arabic-Indic digit converts, but it is not "an mpv track id" as
+        # typed either, so it takes the same door.
+        with self.assertRaises(helper.HelperError):
+            helper.track_choice("\u0661\u0662")
+
+    def test_every_file_supplied_track_field_is_redacted(self):
+        """Rule 5. The first version of this whitelist redacted `title` alone
+        and its comment said "two of its fields"; mpv documents `lang` and
+        `codec` as coming from the file too."""
+        rows = helper.track_rows([{"id": 1, "type": "audio",
+                                   "title": "t http://u:pw@t.example/a",
+                                   "lang": "l http://u:pw@l.example/b",
+                                   "codec": "c http://u:pw@c.example/d"}])
+        joined = " ".join([rows[0]["title"], rows[0]["lang"], rows[0]["codec"]])
+        self.assertNotIn("pw", joined)
+        for tail in ("/a", "/b", "/d"):
+            self.assertNotIn(tail, joined)
+        # redact_urls keeps scheme://host (the JS scrubUrls drops the scheme;
+        # both satisfy rule 5, and each sink is asserted in its own language).
+        self.assertEqual(rows[0]["lang"], "l http://l.example")
+        self.assertEqual(rows[0]["codec"], "c http://c.example")
 
     def test_a_refused_pause_is_a_status_too(self):
         """D-PLY-20, found while building the tracks verb beside it: the code

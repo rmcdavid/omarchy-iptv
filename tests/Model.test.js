@@ -7293,6 +7293,77 @@ checkCall("tracks: the key and the footer -- t opens it only while something pla
           Model.footerHints({ mode: "tracks", playing: true })]
 }, ["tracks", "tracks", "t", true, false, false, true, false, [["j/k", "move"], ["Enter", "select"], ["Esc", "back"]]])
 
+
+// ------------------------------------------------- 0.9.0 preflight repairs
+//
+// Every check below was written against a defect the preflight found, and
+// each was run against the code as it was before the repair.
+
+checkCall("preflight: a channel number resolving into a hidden group jumps to that group, not to All", function () {
+  // The defect: All stopped holding a hidden group's channels, so the jump
+  // landed nowhere -- the cursor did not move, the status line named the row
+  // it had been reset onto, and Enter played THAT. Decision 1 says a channel
+  // reached by its number still works; decision 2 says its group is
+  // reachable by name, so that is where the jump goes.
+  const st = Model.parseState(JSON.stringify({ hiddenGroups: ["Religious"] }))
+  const hidden = { id: "b", name: "Bravo Faith", group: "Religious", url: "http://h/b" }
+  const shown = { id: "a", name: "Alpha", group: "News", url: "http://h/a" }
+  return [Model.numberJumpScope(hidden, st), Model.numberJumpScope(shown, st),
+          Model.numberJumpScope(hidden, Model.emptyState()), Model.numberJumpScope(null, st),
+          // And the scope it names really holds the channel.
+          Model.channelsForScope([shown, hidden], Model.numberJumpScope(hidden, st), st).map(function (c) { return c.id }),
+          // While All, the old answer, does not -- which is the whole defect.
+          Model.channelsForScope([shown, hidden], Model.SCOPE_ALL, st).map(function (c) { return c.id })]
+}, ["g:Religious", "all", "all", "all", ["b"], ["a"]])
+
+checkCall("preflight: the Favourites footer counts the rows it describes, hidden groups included", function () {
+  // D-SAVE-2's rule, broken again by M3-01: the ROWS were filtered through
+  // browsableChannels and this COUNT was not, so the footer said "2
+  // channels" about a list holding none.
+  const ch = [{ id: "a", name: "Alpha Rel", group: "Religious", url: "http://h/a" },
+              { id: "b", name: "Bravo Rel", group: "Religious", url: "http://h/b" },
+              { id: "c", name: "Charlie Rel", group: "News", url: "http://h/c" }]
+  const saved = [{ query: "rel", at: 0 }]
+  const none = Model.cloneState(Model.emptyState(), { savedSearches: saved })
+  const hid = Model.cloneState(Model.parseState(JSON.stringify({ hiddenGroups: ["Religious"] })), { savedSearches: saved })
+  function rows(st) { return Model.channelsForScope(ch, Model.SCOPE_FAVORITES, st).length }
+  return [Model.savedSearchFooter(none, ch), rows(none),
+          Model.savedSearchFooter(hid, ch), rows(hid),
+          // The footer's number IS the row count, in both states.
+          Model.savedSearchFooter(none, ch).indexOf(String(rows(none)) + " channel") !== -1,
+          Model.savedSearchFooter(hid, ch).indexOf(String(rows(hid)) + " channel") !== -1]
+}, ["1 saved search" + Model.SEP + "3 channels", 3,
+    "1 saved search" + Model.SEP + "1 channel", 1, true, true])
+
+checkCall("preflight: on the wall the hide notice names a key the wall has, because it has no column", function () {
+  // guideSurface hides the group column on the wall, and h/l there move the
+  // cursor rather than the scope -- so "under HIDDEN in the column" named a
+  // surface the user could not see and a key that does not reach it.
+  const wall = Model.hideNotice(true, "Religious", 117, true)
+  const list = Model.hideNotice(true, "Religious", 117, false)
+  return [wall, list, list === Model.hideNotice(true, "Religious", 117),
+          wall.indexOf(Model.WALL_KEY) !== -1, list.indexOf("column") !== -1,
+          // Unhiding and the cap say the same thing in either view: neither
+          // sends the user anywhere.
+          Model.hideNotice(false, "Religious", 117, true) === Model.hideNotice(false, "Religious", 117, false),
+          Model.hideNotice(null, "Religious", 117, true) === Model.hideNotice(null, "Religious", 117, false),
+          // The column is hidden on the wall: the premise, from the shipping function.
+          Model.guideSurface({ groups: 3, wall: true }).showColumn]
+}, ["Hid Religious" + Model.SEP + "117 channels" + Model.SEP + Model.WALL_KEY + " for the list to unhide",
+    "Hid Religious" + Model.SEP + "117 channels" + Model.SEP + "under HIDDEN in the column",
+    true, true, true, true, true, false])
+
+checkCall("preflight: every free-text track field mpv takes from the file is scrubbed, not only the one thought of first", function () {
+  const leaky = { ok: true, running: true, tracks: [{
+    id: 1, type: "audio", selected: false,
+    title: "t http://u:pw@t.example/a", lang: "l http://u:pw@l.example/b", codec: "c http://u:pw@c.example/d",
+  }] }
+  const got = Model.parseTracks(leaky)[0]
+  const joined = [got.title, got.lang, got.codec].join(" ")
+  return [joined.indexOf("pw") === -1, joined.indexOf("/a") === -1, joined.indexOf("/b") === -1, joined.indexOf("/d") === -1,
+          got.lang, got.codec]
+}, [true, true, true, true, "l l.example", "c c.example"])
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")
