@@ -87,12 +87,10 @@ Two places they can escape that, both worth knowing:
 | `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
 | `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus |
-
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
 | `channelOrder` | string | `playlist` | `playlist` keeps the provider's order; `number` sorts by channel number when the playlist has them |
-
 | `numberEntryMs` | integer 400-5000 | `2000` | how long to wait between digits before jumping |
 | `barShowChannelNumber` | boolean | `true` | show the channel number in the bar |
 | `showLogos` | boolean | `false` | show channel logos. Off until you turn it on, because logos are fetched from the third-party hosts your playlist names -- see below |
@@ -375,7 +373,11 @@ Nothing inside the plugin directory is written at runtime.
 
 ## Troubleshooting
 
-- "No playlist configured": run the `omarchy bar set ... playlistUrl` line above.
+- "No playlist configured": the guide opens on a form that asks for your
+  playlist -- paste it there. That form masks what you type and the value
+  never reaches your shell history, which `omarchy bar set` cannot avoid;
+  use the command line only for a free public list you do not mind storing
+  in plain text.
 - The guide's status line shows the helper's own error text (host name only,
   never the URL). To see the same JSON in a terminal:
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`

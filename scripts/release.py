@@ -228,6 +228,24 @@ def check(root, out=sys.stdout):
                     'README.md says Status: v%s but manifest.json says %s'
                     % (stated.group(1), actual))
 
+    # A blank line inside a markdown table splits it, and the halves render as
+    # paragraphs of punctuation. README.md's settings table shipped as THREE
+    # tables for an unknown time -- four rows, then ten lines of pipes -- and
+    # three separate adversarial prose passes read past it, because they were
+    # reading the text and this is a defect in the SHAPE. A user skimming for
+    # a setting sees a broken page and stops.
+    for doc in SHIPPED_PROSE:
+        if doc not in have:
+            continue
+        rows = read(root, doc).split('\n')
+        for n, line in enumerate(rows):
+            if line.strip() or n == 0 or n + 1 >= len(rows):
+                continue
+            if rows[n - 1].startswith('| ') and rows[n + 1].startswith('| '):
+                problems.append(
+                    '%s:%d is a blank line INSIDE a table; it splits the table '
+                    'and the rows below render as text' % (doc, n + 1))
+
     # Shipped prose may not tell the user to run what they cannot.
     subcommands = (helper_subcommands(read(root, 'bin/omarchy-iptv'))
                    if 'bin/omarchy-iptv' in have else [])

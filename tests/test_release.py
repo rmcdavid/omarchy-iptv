@@ -256,6 +256,23 @@ class ReleaseCase(unittest.TestCase):
         wrapped = "if one is left behind, run `omarchy-iptv\n  player stop`, or log out."
         self.assertEqual([(1, 'omarchy-iptv player')], release.bare_helper_invocations(wrapped, subs))
 
+    def test_a_blank_line_inside_a_shipped_table_is_a_problem(self):
+        """README.md's settings table shipped as three tables: two blank lines
+        split fourteen rows into 4 + 4 + 6, and the last ten rendered as
+        paragraphs of pipes. Three adversarial prose passes read past it,
+        because they were reading the text and this is a defect in the shape."""
+        self.write('README.md', 'Settings:\n\n| Key | Type |\n|---|---|\n'
+                                '| `a` | string |\n\n| `b` | string |\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('README.md:6 is a blank line INSIDE a table' in p
+                            for p in problems), problems)
+
+    def test_a_blank_line_after_a_table_ends_it_and_is_fine(self):
+        self.write('README.md', '| Key | Type |\n|---|---|\n| `a` | string |\n\nProse after.\n')
+        self.commit_all()
+        self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+
     def test_a_readme_version_that_disagrees_with_the_manifest_is_a_problem(self):
         """The artifact shipped once saying Status: v0.7.0 beside a 0.7.1 manifest."""
         self.write('README.md', 'Status: v0.9.8. Copy `contrib/bindings.lua`.\n')
