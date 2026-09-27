@@ -3,6 +3,35 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.9.1 (2026-09-27)
+
+Numbers that tell the truth, and a key that was missing from its own table.
+
+### Fixed
+
+- **The saved-search confirmations counted the wrong thing.** Saving a search
+  said how many channels it matched, and forgetting one said the same -- but
+  a channel you had already starred stays in Favorites either way, so both
+  numbers were too big whenever a search overlapped your stars. Both now say
+  how many rows Favorites actually gained or lost.
+- **A channel change made while pausing had to wait.** Zapping while the
+  pause was still being applied could leave the new channel queued for up to
+  ten seconds instead of playing at once.
+- **The audio and subtitle picker kept asking a player that never answered.**
+  It now gives up after two attempts on a channel rather than retrying for as
+  long as the panel is open.
+
+### Documentation
+
+- The Sources key table was missing `g`, which is the only way to reach the
+  channel-logo screen and the count of hosts it would contact -- so a reader
+  who learned that screen from its table could not turn logos on at all.
+- The opening paragraph still described the releases before this one as being
+  about scale, search accuracy and contrast. Those were 0.6.0 and 0.7.0;
+  0.8.0 was the channel wall and 0.7.10 was pause and the dead-channel marks.
+  It also omitted pause and the dead-channel marks from the feature list.
+- The `Ctrl+S` row now says the confirmation reports rows gained, not matches.
+
 ## 0.9.0 (2026-09-27)
 
 Two things that make a long list less hostile.

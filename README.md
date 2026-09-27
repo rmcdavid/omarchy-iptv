@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.9.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.9.1. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV, a guide that remembers which
 channels did not work, a channel wall that shows your channels as a grid of
