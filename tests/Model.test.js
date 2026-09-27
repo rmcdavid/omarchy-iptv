@@ -7502,9 +7502,19 @@ checkCall("preflight pass 4: the picker recovers when the player is seen alive, 
     // ...until the stamp is cleared, which is what the healthy branch does.
     Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "" }),
     // And a healthy status is a thing the service can actually observe.
-    Model.statusHealthy(alive)
+    Model.statusHealthy(alive),
+    // THE STATE THE RECOVERY EDGE CREATES, which no check reached until
+    // now: the health branch clears `askedFor` and leaves `rowsFor` alone,
+    // so this is the only refusal standing between an open picker over a
+    // healthy player and a fresh ask every second health tick, for ever.
+    // The comment on that line used to call it belt-and-braces and note
+    // that the suite stayed green without it -- which was true, and is what
+    // made it an invitation. It is not green without it now.
+    Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "a", askedFor: "" }),
+    // And the edge still does its job for a channel whose rows never arrived.
+    Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "" })
   ]
-}, [false, false, true, true])
+}, [false, false, true, true, false, true])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

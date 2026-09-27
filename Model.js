@@ -4438,22 +4438,28 @@ function moveTrackCursor(rows, index, delta) {
 // helper spawns a second, with the health poll starved behind a permanently
 // busy control channel.
 //
-// `askedFor` is what breaks it: the channel the last ask was ISSUED for,
-// cleared only when the playing channel changes. So each channel is asked
-// about at most once automatically, however the reply comes back, and a
-// channel change still gets its one ask. An explicit ask (opening the
-// picker, choosing a track) does not come through here at all.
+// `askedFor` is what breaks it: the channel the last ask was ISSUED for.
+// It is cleared when the playing channel changes, when the picker closes,
+// and when a health status shows the player alive -- that third one is the
+// recovery edge, added a pass later, and it is why the `rowsFor` guard
+// below is load-bearing rather than the belt-and-braces an earlier version
+// of this comment called it. So: at most one automatic ask per channel per
+// observed-alive edge, not "once per channel" flat. An explicit ask
+// (opening the picker, choosing a track) does not come through here.
 function shouldRefreshTracks(opts) {
   var o = opts || {}
   var playing = str(o.playingId)
   if (o.wanted !== true || playing === "") return false
-  // Belt and braces, and marked as such: every path that sets `rowsFor`
-  // goes through requestTracks, which sets `askedFor` to the same channel
-  // first, so no state the service can currently produce is refused by this
-  // line and not by the one below it. A mutation removing it leaves the
-  // suite green, and rather than inventing a case to justify it, that is
-  // written down here -- it guards a future caller that fills the rows some
-  // other way, and today it is documentation with a `return` in it.
+  // LOAD-BEARING, and the comment that stood here said the opposite. It
+  // argued that every path setting `rowsFor` goes through requestTracks,
+  // which sets `askedFor` first, so this line could refuse nothing the one
+  // below would not -- true when it was written, and made false one pass
+  // later by the recovery edge, which clears `askedFor` and leaves
+  // `rowsFor` alone. In that state this is the only refusal, and without it
+  // an open picker over a healthy player asks again every second health
+  // tick, for ever. The old comment also predicted, correctly, that the
+  // suite stayed green without the line -- so it pre-authorised deleting a
+  // line that had become the bound. The case below now asserts it.
   if (str(o.rowsFor) === playing) return false
   return str(o.askedFor) !== playing
 }

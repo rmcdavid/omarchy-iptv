@@ -66,9 +66,13 @@ one-line copies you make yourself):
 Settings live inline on the widget's entry in `~/.config/omarchy/shell.json`
 (mode 0600) and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
 The guide, the bar widget, and the service all read that one entry. Playlist
-URLs from paid providers embed credentials: they stay in that file and in the
-channel cache, both readable only by you, and are never shown or logged beyond
-their host name.
+and guide-data URLs from paid providers embed credentials, and they rest in
+three files, all mode 0600 and readable only by you: that `shell.json` entry,
+the channel cache, and `~/.local/state/omarchy-iptv/state.json`, which keeps
+the Sources history and each source's URLs. They are never shown or logged
+beyond their host name. Two sentences in this file used to say two files,
+which mattered because the third is the one you might think safe to copy into
+a dotfiles repository.
 
 Two places they can escape that, both worth knowing:
 
@@ -76,12 +80,14 @@ Two places they can escape that, both worth knowing:
   writes the whole thing into `~/.bash_history` or `~/.zsh_history`, where it
   stays until you remove it. Use the in-app form instead — that is what it is
   for. If you have already done it, `history -d` the line and check the file.
-- **The process list, briefly.** When the plugin fetches your playlist it
-  passes the URL to its helper as a command-line argument, so for the few
-  hundred milliseconds that fetch runs another account on the same machine
-  could read it from `/proc`. On a single-user machine this is nothing; on a
-  shared one it is worth knowing. Nothing else on the plugin's side writes the
-  URL anywhere but the two 0600 files above.
+- **The process list, briefly.** When the plugin fetches your playlist, or
+  your guide data, it passes that URL to its helper as a command-line
+  argument, so while the fetch runs another account on the same machine could
+  read it from `/proc`. Both carry your credentials on an Xtream provider:
+  the playlist URL and the `xmltv.php` guide URL are built from the same
+  username and password. On a single-user machine this is nothing; on a
+  shared one it is worth knowing. Nothing else on the plugin's side writes
+  either URL anywhere but the three 0600 files above.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -292,14 +298,15 @@ carry channel ids — most do — are not affected at all.
   down starts a fresh player once it has exited.
 - No stream address, credential or header value ever reaches **the player's**
   command line. The player starts empty and receives all of it over a private
-  socket only you can read. Three things are briefly visible to other local
+  socket only you can read. Four things are briefly visible to other local
   accounts in `ps`: the channel's internal identifier while a change is being
   issued, the channel's name while a failure notification is being sent, and
-  -- the one that matters -- your playlist URL, which on a paid provider
-  carries your username and password, for the few hundred milliseconds a
-  fetch runs. That last one is described under "The process list, briefly"
-  above, and the sentence here used to say "any command line", which was
-  false and contradicted it.
+  -- the two that matter -- your playlist URL and your guide-data URL, each
+  of which on an Xtream provider carries your username and password, while
+  the fetch that uses it runs. The last two are described under "The process
+  list, briefly" above. This sentence has been wrong twice: it said "any
+  command line", which denied all four, and then said "three things", which
+  omitted the guide-data URL. A list that counts itself has to be counted.
 - Two consequences of the player being independent, both deliberate. If you
   remove or disable the plugin while something is playing, the player is no
   longer guaranteed to stop with it. Disabling the plugin does stop it, in

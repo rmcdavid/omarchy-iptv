@@ -9179,3 +9179,57 @@ pass caught a problem in a later one.
 Four passes, 26 defects. Two of pass 4's four were older than this release
 and were found only because one lens was told to stop reading the diff.
 
+## 0.9.0 preflight pass 5, 2026-09-27: the last one, and it found two more credential claims
+
+Two lenses -- the pass-4 repairs (which touched the health-check branch) and
+one more end-to-end read of the shipped prose -- with two refuters each. 22
+agents, 10 raw findings, 9 survived, 2 blockers. Declared in advance as the
+last pass: cut unless a P1, file the rest against 0.9.1.
+
+**Both blockers were false statements about where the user's provider
+password lives, and one of them was created by pass 4's own repair.**
+
+D-SINK-7: pass 4 corrected "No stream address, credential or header value
+ever reaches any command line" (D-SINK-5) to a sentence that said "Three
+things are briefly visible in `ps`" -- and omitted the EPG URL, which for an
+Xtream source is composed from the same username and password and goes on
+the helper's command line on every guide-data fetch. **The sentence was
+wrong absolutely, then wrong by count, in the same release.** A list that
+counts itself has to be counted.
+
+D-SINK-6: the Settings section said credentials rest in two 0600 files. They
+rest in three; the third is `state.json`, which keeps every source's
+credentialed playlist and EPG URLs -- and the README's own "Files it writes"
+section said so, so the artifact contradicted itself. This one predates
+0.9.0 and was found, like D-SINK-5 before it, only by reading the shipped
+files end to end rather than as a diff.
+
+F-M3-7 is the process finding, and it is the sharpest of the five passes.
+Pass 3 added a redundant guard to `shouldRefreshTracks` and documented it
+honestly: belt and braces, and a mutation removing it leaves the suite
+green. Pass 4's recovery edge then created exactly the state pass 3's
+comment said could not arise, making that line the only bound on an open
+picker over a healthy player -- while the comment still described it as dead
+and correctly predicted no test would object. **An honest comment about a
+redundant line became an invitation to delete a load-bearing one, with a
+green gate behind it.** The state now has an assertion; deleting the line
+goes red.
+
+Filed against 0.9.1, not fixed here: the pause branch's missing drain
+(D-PLY-23), the saved-search removal notice counting matched channels rather
+than departed rows, the Sources key table omitting `g`, and a residual where
+a healthy player that never answers a tracks ask is re-asked every second
+health tick while the picker is open.
+
+| | p1 | p2 | p3 | p4 | p5 |
+|---|---|---|---|---|---|
+| node checks | 1646 | 1648 | 1649 | 1651 | 1651 |
+| findings kept | 39 | 37 | 19 | 19 | 9 |
+| blockers | 17 | 6 | 3 | 4 | 2 |
+| live | 37/37 | x2 | x2 | x2 | x2 |
+
+**Five passes, 31 defects, and the shape held to the end: every pass found
+something the pass before it had introduced.** Three of the last six
+blockers were in sentences about credentials, all three found by reading the
+shipped prose end to end, and none of them by reading a diff.
+

@@ -1897,11 +1897,13 @@ Item {
     // whatever this reply was. Deferred rather than inline because the
     // branches below return early and some issue a control of their own.
     if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
-    // Whatever this reply was, an open picker may ask again -- at most once
-    // per channel, which is the whole of Model.shouldRefreshTracks and the
-    // reason it is a function rather than a conjunction here. An earlier
-    // version of this comment described the rule pass 3 removed BECAUSE it
-    // looped, which is how a comment outlives the code beneath it.
+    // Whatever this reply was, an open picker may ask again -- the whole
+    // rule is Model.shouldRefreshTracks, which is a function and not a
+    // conjunction here precisely because two comments in a row described a
+    // rule this code did not have. The last of them said "at most once per
+    // channel", and the same commit that wrote it added the recovery edge
+    // in the healthy-status branch below, which makes it once per channel
+    // per observed-alive edge. Read the function.
     else if (Model.shouldRefreshTracks({
                wanted: root.tracksWanted,
                playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
