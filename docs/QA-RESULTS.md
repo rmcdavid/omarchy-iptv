@@ -9215,11 +9215,32 @@ redundant line became an invitation to delete a load-bearing one, with a
 green gate behind it.** The state now has an assertion; deleting the line
 goes red.
 
-Filed against 0.9.1, not fixed here: the pause branch's missing drain
-(D-PLY-23), the saved-search removal notice counting matched channels rather
-than departed rows, the Sources key table omitting `g`, and a residual where
-a healthy player that never answers a tracks ask is re-asked every second
-health tick while the picker is open.
+Deferred to 0.9.1 rather than fixed here, and **this sentence originally
+named them in prose with no ids, which is the rule 13 failure the ledger
+check cannot see** -- it verifies that ids on the board are written up
+somewhere, not that a written-up finding has an id. They were given ids on
+2026-09-27 when the product owner asked what was still open, which is a
+reader catching what no check could:
+
+- **D-PLY-23** -- the `pause` branch of `handleControlResult` returns without
+  draining a queued play, so a zap issued while a pause reply is in flight
+  waits for the health tick. Same gap the `tracks` branch had and was
+  repaired for.
+- **D-SAVE-6** -- forgetting a saved search reports the channels it matched,
+  not the rows that leave Favourites, so it over-reports whenever a channel
+  is both starred and matched, with the footer beside it saying the other
+  number. The second divergence of D-SAVE-2 inside the call site pass 4
+  created to fix the first.
+- **D-DOC-1** -- the Sources key table omits `g`, the only key that reaches
+  the logo consent screen and its host count.
+- **D-DOC-2** -- the README's opening status paragraph is still aimed at
+  0.7.0, omits pause and the dead-channel marks, and runs two sentences
+  together. It is the first paragraph a marketplace reviewer reads, and
+  0.9.0 edited it twice without re-reading it.
+- **D-TRK-8** -- accepted residual: a healthy player that never answers a
+  tracks ask is re-asked every two health ticks while the picker is open.
+  Bounded, proportionate, and recorded so it is not later mistaken for an
+  oversight.
 
 | | p1 | p2 | p3 | p4 | p5 |
 |---|---|---|---|---|---|
