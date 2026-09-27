@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.9.0"
+var PLUGIN_VERSION = "0.9.1"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -2345,15 +2345,50 @@ function scopeEntryAccessibleName(entry) {
   return e.kind === "hidden" ? name + ", hidden" : name
 }
 
-// How many channels a query will actually put in Favourites, from the list
-// the user can actually see. The guide had this expression twice and the
-// footer had a third version of the same question, which is how a query
-// matching inside a hidden group came to announce "3 channels" over a screen
-// showing one. One function, so a test calls what the guide calls (rule 12):
-// the string-matching check that stood here instead could only ever prove
-// the guide contained a particular expression.
-function savedSearchCountVisible(channels, state, query) {
-  return savedSearchCount(browsableChannels(channels, state), query)
+// THE ONE RULE FOR BOTH SAVED-SEARCH CONFIRMATIONS: the number is the change
+// in Favourites ROWS -- what saving adds, what forgetting takes away. Neither
+// derives it; each asks channelsForScope for the rows with and without the
+// search and subtracts, so there is nothing to keep in step.
+//
+// The number the user sees before the press is the scope column's
+// "Favorites N" (countFavorites), which IS on screen at that moment. The
+// saved-search FOOTER line is not: footerStatus returns the transient eight
+// rungs above it, so the notice replaces that line rather than sitting
+// beside it. Three documents and two shipped comments said "the footer
+// beside it", which was a plausible reconstruction nobody checked against
+// footerStatus -- the divergence was real, the staging was invented.
+//
+// It took four goes. The count was wrong in savedSearchFooter (D-SAVE-2),
+// then in countFavorites, then `savedSearchCountVisible` was written for the
+// two guide sites those repairs had left behind (D-SAVE-4, which fixed the
+// hidden-group half and not the star half), then D-SAVE-6 gave the FORGET
+// site row arithmetic and left the SAVE site on the match count -- so the two
+// confirmations, which had at least agreed with each other, began reporting
+// different numbers for the same search. That is why both live here now and
+// why `savedSearchCountVisible` is gone rather than kept for one caller: a
+// helper whose name promises the Favourites effect and does not deliver it is
+// what the next person reaches for.
+//
+// A match count is NOT this number. A channel the user already starred is
+// matched by the search and stays in Favourites either way, so it is neither
+// an arrival nor a departure.
+function savedSearchRows(channels, state) {
+  return channelsForScope(channels, SCOPE_FAVORITES, state || emptyState()).length
+}
+
+// Rows Favourites GAINS when this search is saved. 0 when the search is
+// refused (already saved, at the cap, empty) or when every match is starred.
+function savedSearchArrivals(channels, state, query, at) {
+  var st = state || emptyState()
+  var result = withSavedSearch(st, query, Math.floor(Number(at) || 0))
+  if (!result || result.added !== true) return 0
+  return Math.max(0, savedSearchRows(channels, result.state) - savedSearchRows(channels, st))
+}
+
+// Rows Favourites LOSES when this search is forgotten.
+function savedSearchDepartures(channels, state, query) {
+  var st = state || emptyState()
+  return Math.max(0, savedSearchRows(channels, st) - savedSearchRows(channels, withoutSavedSearch(st, query)))
 }
 
 // How many Favourites rows come from saved searches rather than stars. Shown in
@@ -4446,10 +4481,26 @@ function moveTrackCursor(rows, index, delta) {
 // of this comment called it. So: at most one automatic ask per channel per
 // observed-alive edge, not "once per channel" flat. An explicit ask
 // (opening the picker, choosing a track) does not come through here.
+// How many times one channel may be re-asked after an observed-alive edge
+// before the picker stops trying. Two, because the case it exists for is a
+// player that came up between the ask and the answer -- one retry covers
+// that, a second covers a slow first load, and a third only repeats.
+var TRACKS_RECOVERY_MAX = 2
+
 function shouldRefreshTracks(opts) {
   var o = opts || {}
   var playing = str(o.playingId)
   if (o.wanted !== true || playing === "") return false
+  // D-TRK-8, which was an ACCEPTED residual until it was asked to be fixed:
+  // a healthy player that never answers gave one ask every two health ticks
+  // for ever, with the caption alternating on that cadence. The COUNTER
+  // lives in the service (`tracksRecoveries`), because only the service sees
+  // the replies; the CAP and this comparison live here so a test can reach
+  // the decision. An earlier version of this comment claimed the bound
+  // avoided new service state, which it does not -- it adds a counter and a
+  // fifth input to this function. What it avoids is another gate spelled out
+  // in QML, which is how both of this release's P1s got past the suite.
+  if (Math.floor(Number(o.recoveries) || 0) >= TRACKS_RECOVERY_MAX) return false
   // LOAD-BEARING, and the comment that stood here said the opposite. It
   // argued that every path setting `rowsFor` goes through requestTracks,
   // which sets `askedFor` first, so this line could refuse nothing the one
@@ -8444,7 +8495,8 @@ if (typeof module !== "undefined") {
     withSavedSearch: withSavedSearch,
     savedSearchChannels: savedSearchChannels,
     savedSearchCount: savedSearchCount,
-    savedSearchCountVisible: savedSearchCountVisible,
+    savedSearchArrivals: savedSearchArrivals,
+    savedSearchDepartures: savedSearchDepartures,
     savedSearchHit: savedSearchHit,
     savedSearchTerms: savedSearchTerms,
     MAX_SAVED_QUERY: MAX_SAVED_QUERY,
@@ -8503,6 +8555,7 @@ if (typeof module !== "undefined") {
     moveTrackCursor: moveTrackCursor,
     trackPanelMessage: trackPanelMessage,
     shouldRefreshTracks: shouldRefreshTracks,
+    TRACKS_RECOVERY_MAX: TRACKS_RECOVERY_MAX,
     trackAccessibleName: trackAccessibleName,
     openTracks: openTracks,
     copyGuide: copyGuide,

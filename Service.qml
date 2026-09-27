@@ -321,6 +321,11 @@ Item {
   // open, so a channel change knows the difference between "throw the rows
   // away" and "ask again about the new channel".
   property bool tracksWanted: false
+  // A `status` that could not be issued because the control channel was
+  // busy. Drained on the next reply, like tracksQueued: the pause refusal
+  // needs an answer from the player and has no other way to get one before
+  // the ten-second health tick.
+  property bool statusQueued: false
   // WHICH channel the rows in `tracks` describe. Freshness used to be
   // inferred from tracksState and tracks.length, and that could not survive
   // a reply in flight across a channel change: the stale reply wrote the old
@@ -340,6 +345,13 @@ Item {
   // Without the stamp at all, the gate re-armed on its own `running: false`
   // reply and spawned helpers until the picker closed (D-TRK-6).
   property string tracksAskedFor: ""
+  // How many times THIS channel has been re-asked after an observed-alive
+  // edge. Reset when the playing channel changes and when the picker closes
+  // (cancelTracks) or the rows are dropped (clearTracks) -- opening the
+  // picker does NOT reset it, because opening runs requestTracks directly
+  // and never consults this. The cap is Model.TRACKS_RECOVERY_MAX, so the
+  // decision stays where a test can reach it (D-TRK-8).
+  property int tracksRecoveries: 0
   // A new play, a stop, a death: whatever the player reported was about the
   // stream before this one. The rows go either way; whether we ask again
   // depends on whether anyone is looking.
@@ -355,6 +367,7 @@ Item {
       root.tracks = []
       root.tracksFor = ""
       root.tracksAskedFor = ""
+      root.tracksRecoveries = 0
       root.tracksState = "asking"
       root.tracksQueued = null
     } else {
@@ -1896,6 +1909,7 @@ Item {
     // M3-02: a queued tracks request goes out once this handler is done,
     // whatever this reply was. Deferred rather than inline because the
     // branches below return early and some issue a control of their own.
+    if (root.statusQueued) Qt.callLater(root.askPlayerStatus)
     if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
     // Whatever this reply was, an open picker may ask again -- the whole
     // rule is Model.shouldRefreshTracks, which is a function and not a
@@ -1908,7 +1922,8 @@ Item {
                wanted: root.tracksWanted,
                playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
                rowsFor: root.tracksFor,
-               askedFor: root.tracksAskedFor })) Qt.callLater(root.refreshTracks)
+               askedFor: root.tracksAskedFor,
+               recoveries: root.tracksRecoveries })) Qt.callLater(root.refreshTracks)
     if (kind === "tracks") {
       // The helper is authoritative (decision 5): the rows are what mpv has
       // AFTER any selection, never what was asked.
@@ -1936,13 +1951,13 @@ Item {
       } else {
         root.tracksState = "failed"
       }
-      // A zap queued behind this reply must not wait for the health tick.
-      // The `pause` branch below returns without draining too and has the
-      // same gap -- a pause CAN be in flight across a zap, so the earlier
-      // version of this comment claiming otherwise was wrong, and it also
-      // said the gap was "filed" when no id had been written. It is
-      // D-PLY-23 now, and it is not repaired here because widening a repair
-      // past what has been tested is what the last three passes each caught.
+      // A zap queued behind this reply must not wait for the health tick:
+      // this branch returns early on two paths (a stale-channel reply and a
+      // failed one), so it owes the drain itself. The `pause` branch does
+      // the same below (D-PLY-23). This comment has been wrong about that
+      // branch twice -- once saying the gap was filed when no id existed,
+      // once saying a pause could never be in flight across a zap -- which
+      // is why it now says only what is true of the branch it sits in.
       root.drainPendingPlay()
       return
     }
@@ -1963,9 +1978,25 @@ Item {
         // resume hint, so the bar read "Paused" over a playing stream until
         // the ten-second health poll happened to correct it. A refusal
         // means we do not know, so ask: the `status` branch above is the
-        // one place that learns the truth from the player itself.
+        // one place that learns the truth from the player itself. QUEUED
+        // rather than issued, because the drain below takes the single
+        // control slot synchronously while this was deferred -- so the ask
+        // was refused by runControl and dropped, and the optimistic flip
+        // stood for a health tick anyway. That is the defect D-PLY-20 was
+        // filed for, reintroduced by D-PLY-23's own repair. Issued here AND
+        // self-queueing: askPlayerStatus re-arms when the channel is busy,
+        // and the next reply drains it. Setting the flag alone would strand
+        // it whenever there was no queued play to produce that next reply.
         Qt.callLater(root.askPlayerStatus)
       }
+      // D-PLY-23. Every branch that returns early owes the queued play its
+      // drain, or a zap issued while this reply was in flight waits for the
+      // ten-second health tick. The `tracks` branch was given this when it
+      // was written; `pause` was left, and the comment there said a pause
+      // could never be in flight across a zap -- which is false, `c` and the
+      // bar wheel are one keystroke apart. Outside the if/else so it runs on
+      // every path, including the refusal that issues a status of its own.
+      root.drainPendingPlay()
       return
     }
     if (kind === "status") {
@@ -2991,8 +3022,10 @@ Item {
   // The `status` branch above is the only place that learns pause, the
   // channel and the health verdict from the player itself.
   function askPlayerStatus() {
-    if (root.userStopped || root.stopping || !root.playerUp) return
-    root.runControl("status", ["status", "--socket", root.socketPath])
+    if (root.userStopped || root.stopping || !root.playerUp) { root.statusQueued = false; return }
+    // Keeps asking until the channel is free. runControl returns false while
+    // another control holds it, and the caller used to discard that.
+    root.statusQueued = !root.runControl("status", ["status", "--socket", root.socketPath])
   }
 
   function cancelTracks() {
@@ -3000,6 +3033,7 @@ Item {
     root.tracksQueued = null
     root.tracksAsking = ""
     root.tracksAskedFor = ""
+    root.tracksRecoveries = 0
   }
 
   // The channel changed under an open picker and the play has now landed.
@@ -3008,7 +3042,9 @@ Item {
           wanted: root.tracksWanted,
           playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
           rowsFor: root.tracksFor,
-          askedFor: root.tracksAskedFor })) return
+          askedFor: root.tracksAskedFor,
+          recoveries: root.tracksRecoveries })) return
+    root.tracksRecoveries += 1
     root.requestTracks(null)
   }
 
@@ -3017,6 +3053,7 @@ Item {
     root.tracksFor = ""
     root.tracksAsking = ""
     root.tracksAskedFor = ""
+    root.tracksRecoveries = 0
     root.tracksState = "idle"
     root.tracksQueued = null
     root.tracksWanted = false
