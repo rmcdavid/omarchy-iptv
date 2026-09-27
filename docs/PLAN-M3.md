@@ -28,8 +28,12 @@ told, then the reason.
    (M2-03), not from position.
    Two corrections from the 0.9.0 preflight. First, this said "the zap
    ring's All", which names a path that does not exist: `launchScope`
-   resolves every non-Favourites launch to the channel's own group, so the
-   ring is never All and hiding changes nothing about it. Second, the
+   resolves every non-Favourites launch to the channel's own group, so a
+   GROUP ring is untouched by hiding. A FAVOURITES ring is not: its
+   saved-search rows are filtered like Favourites itself, so hiding can
+   shrink or empty it -- which is what this decision asks for, and the
+   replacement sentence that said hiding never touches the ring was wrong
+   in the other direction. Second, the
    sentence about numbers was a statement of intent, not of fact -- All
    stopped holding those channels and the jump landed nowhere, naming and
    then playing a channel the user had not asked for. `Model.numberJumpScope`

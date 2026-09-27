@@ -321,6 +321,17 @@ Item {
   // open, so a channel change knows the difference between "throw the rows
   // away" and "ask again about the new channel".
   property bool tracksWanted: false
+  // WHICH channel the rows in `tracks` describe. Freshness used to be
+  // inferred from tracksState and tracks.length, and that could not survive
+  // a reply in flight across a channel change: the stale reply wrote the old
+  // channel's rows and flipped the state to ready, and every later gate then
+  // read as "already answered". The panel showed the previous stream's
+  // tracks with the new one playing, permanently, and Enter sent the old
+  // stream's numbering to the new one. A stamp cannot be fooled that way.
+  property string tracksFor: ""
+  // The channel the in-flight request was issued for, so its reply can be
+  // recognised as stale rather than trusted.
+  property string tracksAsking: ""
   // A new play, a stop, a death: whatever the player reported was about the
   // stream before this one. The rows go either way; whether we ask again
   // depends on whether anyone is looking.
@@ -334,6 +345,7 @@ Item {
   onNowPlayingChanged: {
     if (root.tracksWanted && root.nowPlaying) {
       root.tracks = []
+      root.tracksFor = ""
       root.tracksState = "asking"
       root.tracksQueued = null
     } else {
@@ -1876,23 +1888,40 @@ Item {
     // whatever this reply was. Deferred rather than inline because the
     // branches below return early and some issue a control of their own.
     if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
-    // A play or a health status is the first moment after a channel change
-    // at which the player is answering about the NEW file, so an open picker
-    // asks again from here rather than from onNowPlayingChanged.
-    else if ((kind === "play" || kind === "status") && root.tracksWanted
-             && root.tracksState === "asking" && root.tracks.length === 0) Qt.callLater(root.refreshTracks)
+    // Whatever this reply was, an open picker whose rows do not describe the
+    // channel that is playing asks again. Keyed on the STAMP, not on the
+    // state: a tracks reply in flight across a channel change used to land,
+    // write the old channel's rows and flip the state to ready, after which
+    // every state-shaped gate read as "already answered" for ever.
+    else if (root.tracksWanted && root.nowPlaying
+             && root.tracksFor !== String(root.nowPlaying.id || "")) Qt.callLater(root.refreshTracks)
     if (kind === "tracks") {
       // The helper is authoritative (decision 5): the rows are what mpv has
       // AFTER any selection, never what was asked.
+      // A reply for a channel that is no longer playing describes the wrong
+      // file: drop it and leave the panel asking, so the re-ask above fires.
+      var asked = root.tracksAsking
+      root.tracksAsking = ""
+      var playingId = root.nowPlaying ? String(root.nowPlaying.id || "") : ""
+      if (asked !== "" && asked !== playingId) {
+        root.drainPendingPlay()
+        return
+      }
       if (status.ok === true && status.running === true) {
         root.tracks = Model.parseTracks(status)
+        root.tracksFor = playingId
         root.tracksState = "ready"
       } else if (status.ok === true) {
         root.tracks = []
+        root.tracksFor = ""
         root.tracksState = "idle"
       } else {
         root.tracksState = "failed"
       }
+      // A zap queued behind this reply must not have to wait for the health
+      // tick: every other branch drains, and this one returns before the
+      // shared drain at the end of the function.
+      root.drainPendingPlay()
       return
     }
     if (kind === "pause") {
@@ -2917,6 +2946,7 @@ Item {
     }
     root.tracksWanted = true
     root.tracksState = "asking"
+    root.tracksAsking = String(root.nowPlaying.id || "")
     if (!root.runControl("tracks", Model.playerTracksArgv(root.socketPath, select || null))) {
       root.tracksQueued = { select: select || null }
       return "queued"
@@ -2936,16 +2966,20 @@ Item {
   function cancelTracks() {
     root.tracksWanted = false
     root.tracksQueued = null
+    root.tracksAsking = ""
   }
 
   // The channel changed under an open picker and the play has now landed.
   function refreshTracks() {
     if (!root.tracksWanted || !root.nowPlaying) return
+    if (root.tracksFor === String(root.nowPlaying.id || "")) return
     root.requestTracks(null)
   }
 
   function clearTracks() {
     root.tracks = []
+    root.tracksFor = ""
+    root.tracksAsking = ""
     root.tracksState = "idle"
     root.tracksQueued = null
     root.tracksWanted = false

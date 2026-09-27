@@ -130,15 +130,20 @@ fail=0
 #
 # Re-levelled again 2026-09-26 for 0.9.0, and THE DRIFT HAD ALREADY REOPENED
 # at the cut one day later: 0.8.0 shipped from 65978e4 running 1620 node and
-# 637 python against these same 1579/635. So the answer is not "remember
-# harder" -- it is that the re-level belongs in the version-bump commit, the
-# one step every release performs, and that is now where it is. Raising a
-# floor only when somebody remembers is what left 63 node checks and 12
-# python tests -- the whole of M3 -- deletable in silence when this release
-# came to be cut. Measured counts on this tree, zero margin again.
+# 637 python against these same 1579/635, so 41 node checks and 2 python
+# tests were deletable in silence at that cut. This release reopened it to
+# 63 and 12 -- the whole of M3 -- before anyone looked.
+#
+# A draft of this comment claimed the re-level "belongs in the version-bump
+# commit, and that is now where it is". NOTHING ENFORCES THAT and it was not
+# even true of the commit it appeared in. It is deleted rather than left to
+# be read as a rule: this has now drifted four times, and a fifth will not be
+# prevented by a sentence. The honest statement is the one above -- the
+# numbers below are the measured counts on this tree, with zero margin, and
+# they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1646}
-PY_TESTS_MIN=${PY_TESTS_MIN:-656}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1648}
+PY_TESTS_MIN=${PY_TESTS_MIN:-657}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

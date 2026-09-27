@@ -299,14 +299,20 @@ those is a thing the user did on purpose (PLAN-M3 decision 1). Channel
 numbers do not shift, because they come from the playlist's `tvg-chno` and
 not from position (M2-03).
 
-The **zap ring is not listed either way**, and that is not an omission. The
-ring is never "All": `launchScope` resolves every launch that is not
-Favourites to the playing channel's OWN group, and `zapRing` reads that
-group's scope, which returns the group whole whether it is hidden or not. So
-hiding the group of the channel you are watching does not change what the
-wheel does, which is right -- you are watching it. An earlier draft of this
-paragraph and of PLAN-M3 decision 1 both said "the zap ring's All", naming a
-code path that does not exist; the 0.9.0 preflight caught it in both.
+The **zap ring** is two cases, and an earlier draft of this paragraph got
+both of them wrong in one sentence. The ring is never "All": `launchScope`
+resolves every launch that is not Favourites to the playing channel's OWN
+group, and `zapRing` reads that group's scope, which returns the group whole
+whether it is hidden or not -- so hiding the group of the channel you are
+watching does not change what the wheel does, which is right, you are
+watching it. **But a channel launched from Favourites keeps a Favourites
+ring**, and Favourites' saved-search half IS filtered (decision 1 says
+hidden groups leave saved searches), so hiding a group there removes those
+rows from the ring and can empty it. That is the behaviour decision 1 asks
+for; what was wrong was the sentence claiming hiding never touches the ring
+at all. The first draft said "the zap ring's All", naming a path that does
+not exist, and its replacement generalised over the Favourites case it had
+itself just carved out. Both were caught by a preflight, one pass apart.
 
 A number typed in the guide reaches a hidden group's channel by jumping to
 that group's scope rather than to All (`Model.numberJumpScope`). Before that
@@ -949,7 +955,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 |---|---|
 | Search mode | `Enter play - Up/Down move - Left/Right group - Tab keys - Esc close` |
 | Search mode, query non-empty | `Enter play - Up/Down move - Left/Right narrow - Tab keys - Esc clear` |
-| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - c pause - r refresh - / search - o sources` |
+| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - x hide group - c pause - t tracks - p pip - r refresh - / search - Ctrl+G wall - 0-9 channel - o sources` (the fullest form: `x` is silent in Recent and Favorites, `c`/`t` need something playing, `p` needs Hyprland, `0-9` needs a numbered playlist). **This row has drifted four times** -- it was missing `p`, `Ctrl+G` and `0-9` before this release added `x` and `t` to the footer -- because it is a transcription of `Model.footerHints` and nothing compares the two. Read the function, not this row, if they ever disagree again.
 | Empty states | `r retry - o sources - Esc close` (not configured, error; `r retry` is dropped when the configured value is invalid and `o sources` only when a source history exists); `Esc close` (loading). Since v0.2.0 the not-configured state is the Sources first-run form, see `UX-SOURCES.md` 1.2 and 5.3, which is authoritative for these hints |
 
 Key names and verbs both render at opacity 0.7 (ruling SG2). **They used to

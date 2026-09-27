@@ -7316,42 +7316,78 @@ checkCall("preflight: a channel number resolving into a hidden group jumps to th
           Model.channelsForScope([shown, hidden], Model.SCOPE_ALL, st).map(function (c) { return c.id })]
 }, ["g:Religious", "all", "all", "all", ["b"], ["a"]])
 
-checkCall("preflight: the Favourites footer counts the rows it describes, hidden groups included", function () {
-  // D-SAVE-2's rule, broken again by M3-01: the ROWS were filtered through
-  // browsableChannels and this COUNT was not, so the footer said "2
-  // channels" about a list holding none.
+checkCall("preflight: the Favourites footer counts the saved-search rows it describes, over hidden groups AND over stars", function () {
+  // Two divergences, one release apart. M3-01 filtered the ROWS through
+  // browsableChannels and not this count, so it said "2 channels" about a
+  // list holding none. The first repair fixed that by filtering the count
+  // the same way, which left the SECOND: the rows de-duplicate the saved
+  // matches against the stars and a re-derived count does not, so a channel
+  // both starred and matched was counted as a saved row while sitting in
+  // the list as a star. The state below has BOTH -- a star that the saved
+  // search also matches, and a hidden group -- because the first version of
+  // this check had neither and could not go red on the second divergence.
   const ch = [{ id: "a", name: "Alpha Rel", group: "Religious", url: "http://h/a" },
               { id: "b", name: "Bravo Rel", group: "Religious", url: "http://h/b" },
               { id: "c", name: "Charlie Rel", group: "News", url: "http://h/c" }]
   const saved = [{ query: "rel", at: 0 }]
-  const none = Model.cloneState(Model.emptyState(), { savedSearches: saved })
-  const hid = Model.cloneState(Model.parseState(JSON.stringify({ hiddenGroups: ["Religious"] })), { savedSearches: saved })
-  function rows(st) { return Model.channelsForScope(ch, Model.SCOPE_FAVORITES, st).length }
-  return [Model.savedSearchFooter(none, ch), rows(none),
-          Model.savedSearchFooter(hid, ch), rows(hid),
-          // The footer's number IS the row count, in both states.
-          Model.savedSearchFooter(none, ch).indexOf(String(rows(none)) + " channel") !== -1,
-          Model.savedSearchFooter(hid, ch).indexOf(String(rows(hid)) + " channel") !== -1]
-}, ["1 saved search" + Model.SEP + "3 channels", 3,
-    "1 saved search" + Model.SEP + "1 channel", 1, true, true])
+  function state(hidden, stars) {
+    return Model.cloneState(Model.parseState(JSON.stringify({ hiddenGroups: hidden })),
+                            { savedSearches: saved, favorites: stars })
+  }
+  function saidChannels(st) {
+    const m = /(\d+) channel/.exec(Model.savedSearchFooter(st, ch))
+    return m ? Number(m[1]) : -1
+  }
+  // The truth the footer claims to report: rows that are NOT stars.
+  function fromSaved(st) {
+    const rows = Model.channelsForScope(ch, Model.SCOPE_FAVORITES, st)
+    return rows.filter(function (r) { return st.favorites.indexOf(Model.channelId(r)) === -1 }).length
+  }
+  const cases = [state([], []), state(["Religious"], []), state([], ["a"]),
+                 state(["Religious"], ["a"]), state([], ["a", "b", "c"])]
+  return cases.map(function (st) { return [saidChannels(st), fromSaved(st)] })
+        .filter(function (p) { return p[0] !== p[1] })
+}, [])
 
-checkCall("preflight: on the wall the hide notice names a key the wall has, because it has no column", function () {
-  // guideSurface hides the group column on the wall, and h/l there move the
-  // cursor rather than the scope -- so "under HIDDEN in the column" named a
-  // surface the user could not see and a key that does not reach it.
-  const wall = Model.hideNotice(true, "Religious", 117, true)
-  const list = Model.hideNotice(true, "Religious", 117, false)
-  return [wall, list, list === Model.hideNotice(true, "Religious", 117),
-          wall.indexOf(Model.WALL_KEY) !== -1, list.indexOf("column") !== -1,
-          // Unhiding and the cap say the same thing in either view: neither
-          // sends the user anywhere.
-          Model.hideNotice(false, "Religious", 117, true) === Model.hideNotice(false, "Religious", 117, false),
-          Model.hideNotice(null, "Religious", 117, true) === Model.hideNotice(null, "Religious", 117, false),
-          // The column is hidden on the wall: the premise, from the shipping function.
-          Model.guideSurface({ groups: 3, wall: true }).showColumn]
-}, ["Hid Religious" + Model.SEP + "117 channels" + Model.SEP + Model.WALL_KEY + " for the list to unhide",
-    "Hid Religious" + Model.SEP + "117 channels" + Model.SEP + "under HIDDEN in the column",
-    true, true, true, true, true, false])
+checkCall("preflight: the hide notice sends the user where the view actually has a column, for every view", function () {
+  // The notice names a place to look, and three views draw three different
+  // things. It must agree with guideSurface, which is the function that
+  // decides whether the column exists: showColumn is has && !narrow && !wall.
+  // The first repair keyed on the wall alone and left the narrow card being
+  // told to look at a column it does not draw -- and its check asserted
+  // "the column is hidden on the wall" by calling guideSurface with wall
+  // true, which cannot go red however the notice behaves. This walks the
+  // two functions together instead.
+  // A REAL surface: showColumn is `has && !narrow && !wall`, and `has` needs
+  // a configured service with channels. The first version passed {groups: 3},
+  // which sets no channelCount, so showColumn was false in every view --
+  // false for want of channels, not because of the wall. It agreed with the
+  // notice by accident and could not have disagreed.
+  function surface(v) {
+    return Model.guideSurface({ serviceReady: true, configured: true, channelCount: 120,
+                                rowCount: 12, scopeId: Model.SCOPE_ALL, query: "",
+                                wall: v.wall === true, narrow: v.narrow === true })
+  }
+  const views = [{}, { wall: true }, { narrow: true }, { wall: true, narrow: true }]
+  return views.map(function (v) {
+    const drawn = surface(v).showColumn
+    const notice = Model.hideNotice(true, "Religious", 117, v)
+    const namesColumn = notice.indexOf("in the column") !== -1
+    // Exactly one rule: the notice says "in the column" when, and only when,
+    // the view draws one. Otherwise it names a key that reaches it.
+    const ok = drawn ? namesColumn
+                     : (!namesColumn && (notice.indexOf(Model.WALL_KEY) !== -1 || notice.indexOf("h/l") !== -1))
+    return ok ? null : JSON.stringify(v) + " drawn=" + drawn + " -> " + notice
+  }).filter(Boolean)
+}, [])
+checkCall("preflight: unhiding and the cap say the same thing in every view, because neither sends the user anywhere", function () {
+  const views = [{}, { wall: true }, { narrow: true }]
+  const off = views.map(function (v) { return Model.hideNotice(false, "Religious", 117, v) })
+  const cap = views.map(function (v) { return Model.hideNotice(null, "Religious", 117, v) })
+  return [off.filter(function (t) { return t !== off[0] }).length,
+          cap.filter(function (t) { return t !== cap[0] }).length, off[0], cap[0]]
+}, [0, 0, "Showing Religious" + Model.SEP + "117 channels",
+    "Cannot hide more groups" + Model.SEP + Model.MAX_HIDDEN_GROUPS + " is the most"])
 
 checkCall("preflight: every free-text track field mpv takes from the file is scrubbed, not only the one thought of first", function () {
   const leaky = { ok: true, running: true, tracks: [{
@@ -7363,6 +7399,27 @@ checkCall("preflight: every free-text track field mpv takes from the file is scr
   return [joined.indexOf("pw") === -1, joined.indexOf("/a") === -1, joined.indexOf("/b") === -1, joined.indexOf("/d") === -1,
           got.lang, got.codec]
 }, [true, true, true, true, "l l.example", "c c.example"])
+
+checkCall("preflight pass 2: a Favourites-launched ring loses its saved-search rows to a hide, and a group ring does not", function () {
+  // The claim UX 2.8 makes, as a call. Both halves, because the sentence
+  // this replaces asserted the first half over the second.
+  const ch = [{ id: "a", name: "Alpha Rel", group: "Religious", url: "http://h/a" },
+              { id: "b", name: "Bravo Rel", group: "Religious", url: "http://h/b" },
+              { id: "c", name: "Charlie", group: "News", url: "http://h/c" }]
+  const saved = [{ query: "rel", at: 0 }]
+  function st(hidden) {
+    return Model.cloneState(Model.parseState(JSON.stringify({ hiddenGroups: hidden })), { savedSearches: saved })
+  }
+  const fromFav = { id: "a", group: "Religious", launchedFrom: Model.SCOPE_FAVORITES }
+  const fromGroup = { id: "a", group: "Religious", launchedFrom: Model.groupScopeId("Religious") }
+  return [Model.zapRing(ch, st([]), fromFav).map(function (c) { return c.id }),
+          Model.zapRing(ch, st(["Religious"]), fromFav).map(function (c) { return c.id }),
+          Model.zapRing(ch, st([]), fromGroup).map(function (c) { return c.id }),
+          Model.zapRing(ch, st(["Religious"]), fromGroup).map(function (c) { return c.id }),
+          // launchScope really does resolve a non-Favourites launch to the group.
+          Model.launchScope(Model.SCOPE_ALL, "", ch[0]),
+          Model.launchScope(Model.SCOPE_FAVORITES, "", ch[0])]
+}, [["a", "b"], [], ["a", "b"], ["a", "b"], "g:Religious", "favorites"])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

@@ -142,7 +142,15 @@ ipc setScope all >/dev/null; sleep 0.2
 ipc activate true >/dev/null
 wait_sf 's["playerUp"]' true 80 || fail "T0" "player never came up: $(ipc state | head -c 600)"
 sleep 1.5
-raw=$(python3 "$PLUGIN_ROOT/bin/omarchy-iptv" player tracks --socket "$SOCK" 2>/dev/null | tail -n 1)
+# `playerUp` precedes track-list by 0.5-0.75 s on this fixture (measured), so
+# this polls the helper's own answer instead of sleeping a guessed amount.
+# The first version slept 1.5 s and went red once in four runs.
+raw=""
+for i in $(seq 1 40); do
+  raw=$(python3 "$PLUGIN_ROOT/bin/omarchy-iptv" player tracks --socket "$SOCK" 2>/dev/null | tail -n 1)
+  [[ $(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1]).get("tracks",[])))' "$raw" 2>/dev/null || echo 0) -gt 0 ]] && break
+  sleep 0.25
+done
 ids=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(json.dumps([t["type"]+str(t["id"])+("*" if t["selected"] else "") for t in d["tracks"]]), d["running"])' "$raw" 2>/dev/null)
 [[ $ids == '["audio1*", "audio2", "sub1"] True' ]] && pass "T1a the helper lists the real player's three tracks" || fail "T1a" "$ids"
 [[ $raw != *external-filename* && $raw == *"English commentary"* ]] && pass "T1b the reply carries the title and no filename field" || fail "T1b" "$raw"

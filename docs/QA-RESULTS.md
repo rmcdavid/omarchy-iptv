@@ -8997,22 +8997,23 @@ Two repairs were themselves wrong, and the live scenario caught both:
 
 ### Verification of the repairs
 
-| | Before | After |
-|---|---|---|
-| node checks | 1642 | 1646 |
-| python tests | 647 | 656 |
-| `m3-scenario.sh` | 30 checks | 37 checks, 37/37 on this tree |
-| `m3-scenario.sh --baseline f88910f` | -- | 34 passed, 5 failed (P2b, P2c, P3 and two setups: the defects) |
+| | 0.8.0 (65978e4) | after pass 1 | after pass 2 |
+|---|---|---|---|
+| node checks | 1620 | 1646 | 1648 |
+| python tests | 637 | 656 | 657 |
+| `m3-scenario.sh` | -- | 30 -> 37 checks | 37/37, twice |
+| `m3-scenario.sh --baseline f88910f` | -- | 34 passed, 5 failed | -- |
 
-Seven node checks and four python tests were added, each run against the
-code that shipped the defect: `numberJumpScope` forced to All (1 red),
-`savedSearchFooter` unfiltered (1), `hideNotice` ignoring the wall (1),
-`parseTracks` scrubbing only `title` (1), no `aid`/`sid` reset (player 1,
-mpv 3), `isdigit` without `isascii` (1), `lang`/`codec` unredacted (1). The
-`aid`/`sid` reset is also pinned in the two `apply_channel` ordering tests,
-which assert it lands before the `loadfile`.
+Each new check was run against the code that shipped the defect:
+`numberJumpScope` forced to All (1 red), `savedSearchFooter` unfiltered (1),
+`hideNotice` ignoring the wall (1), `parseTracks` scrubbing only `title` (1),
+no `aid`/`sid` reset (player 1, mpv 3), `isdigit` without `isascii` (1),
+`lang`/`codec` unredacted (1), and for pass 2: the notice keyed on the wall
+alone (1) and the footer re-derived rather than counted (1). The `aid`/`sid`
+reset is also pinned in the two `apply_channel` ordering tests, which assert
+it lands before the `loadfile`.
 
-Gate at the end: 1646 node, 656 python, 68 qml, a11y 34, validate clean,
+Gate at the end: 1648 node, 657 python, 68 qml, a11y 34, validate clean,
 `release.py check` clean.
 
 ### The one thing not fixed
@@ -9022,4 +9023,44 @@ about whether `main` may move while a marketplace verification request is
 open. It blocks the push, not the build, and CLAUDE.md's own rule is that a
 conflict is raised as a numbered decision request rather than resolved by
 whoever noticed it. Raised.
+
+## 0.9.0 preflight pass 2, 2026-09-26: the repairs reviewed as new code
+
+Run over `git diff f88910f..HEAD` -- the thirteen repairs -- on five lenses
+(the repairs as new code with their own seams; every sentence the repairs
+changed; release mechanics; what the repairs broke elsewhere; a second
+completeness critic), two refuters each. 99 agents. 47 raw findings, 37
+survived, 10 refuted.
+
+**The pass existed because of a measured pattern and the pattern held: on
+0.8.0 three of four blockers were introduced by the previous pass's own fix.
+Here, eight of the thirteen repairs seeded a new false claim or an
+incomplete fix. Filed as F-M3-5**, because a pattern observed twice with
+numbers is a finding about how this project works and not an anecdote. The worst was D-TRK-4: the repair restored two of the
+three header elements it had named and then wrote a sentence into UX 2.9 --
+and a comment into a SHIPPED file -- saying all three were restored. Four
+lenses found it independently.
+
+| Repaired again | What pass 1's repair got wrong |
+|---|---|
+| D-TRK-4 | `headerShowsSearch` was given a `tracks` case and `headerRight` was not, so the scope label still blanked. Three documents said otherwise, one of them shipped |
+| D-TRK-3 | The scroll was called from the two cursor movers the author had in mind; `Home` and `End` write the cursor too, and `End` lands on exactly the row that is off the bottom. The scroll is now bound to the cursor, where a sixth writer cannot forget it |
+| D-TRK-2 | Freshness was inferred from `tracksState` and `tracks.length`, which a reply in flight across a channel change defeats: the stale reply wrote the old rows and flipped the state to ready, and every later gate then read as "already answered". The rows now carry the channel they describe (`tracksFor`), and a reply for a channel that is no longer playing is dropped. A zap queued behind a tracks reply was also stranded until the health tick, because that branch returned before `drainPendingPlay` |
+| D-SAVE-3 | "ONE call" was still two implementations: the rows de-duplicate the saved matches against the stars and a re-derived count does not, so a channel both starred and matched was counted as a saved row. It is now literally the row count minus the stars in it, which is the shape `countFavorites` has |
+| D-HIDE-1 | Keyed on the wall, which was the half of the premise its author had looked at. `guideSurface` hides the column when `narrow` OR `wall`, so a narrow card was still being sent to a column it does not draw. The notice now keys on whether the column is drawn |
+| D-REL-4 | `changelog_problems` was tested and `build`'s single call to it was not, so deleting that line left every test green -- a rule 13 name-join inside the repair that exists to stop one. The date check also ran before the tag guard, so a cut re-run the day after a failure reported the date instead of the reason, and a changelog problem was announced as "the allowlist is not whole" |
+| F-M3-2 | The comment claimed the re-level "belongs in the version-bump commit, and that is now where it is". Nothing enforces that and it was not true of the commit it appeared in. Deleted rather than left to be read as a rule: this has drifted four times and a fifth will not be prevented by a sentence |
+| The zap-ring correction | Pass 1 corrected "the zap ring's All" (a path that does not exist) into "hiding never changes the ring", which is false for a Favourites-launched channel: Favourites' saved-search half IS filtered, so hiding can empty that ring. The replacement generalised over the case it had itself just carved out. Now stated as two cases with a node check behind both |
+
+Also found and fixed: UX 6.2's list-mode hint row was four keys behind the
+shipping footer (it had been missing `p`, `Ctrl+G` and `0-9` before this
+release added `x` and `t`), and the row now says so rather than being
+silently corrected a fifth time; the wall check written in pass 1 asserted
+its own premise by calling `guideSurface` with no `channelCount`, so
+`showColumn` was false for want of channels rather than because of the wall
+and the assertion could not go red; and the T1 live check slept a guessed
+1.5 s where `playerUp` precedes `track-list` by 0.5-0.75 s (measured), which
+went red once in four runs and now polls.
+
+Live after the second pass: 37/37, twice.
 

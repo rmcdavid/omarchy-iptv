@@ -73,6 +73,8 @@ Item {
   // can test.
   readonly property bool inTracks: mode === "tracks"
   readonly property int trackCursor: guide.trackCursor
+  // Which channel the rows the cursor sits in belong to (see settleTrackCursor).
+  property string trackRowsFor: ""
   readonly property var trackRows: root.inTracks && root.serviceReady ? Model.trackRows(root.service.tracks) : []
   readonly property string trackMessage: root.inTracks ? Model.trackPanelMessage(root.serviceReady ? root.service.tracksState : "idle", root.trackRows) : ""
   // Leaving the picker by any door (Esc, `t`, the scrim, a dismiss) drops a
@@ -498,7 +500,12 @@ Item {
     return ""
   }
   readonly property string headerRight: {
-    if (root.guideMode) return root.scopeLabelText
+    // M3-02: `tracks` is not a guideMode, and the picker is a panel OVER the
+    // list, so the list's own place indicator stays. Without this the scope
+    // label blanked behind the scrim while the query line beside it did not
+    // -- and the repair that restored the query line wrote a sentence in UX
+    // 2.9 saying both had been restored. Half a repair with a whole claim.
+    if (root.guideMode || root.inTracks) return root.scopeLabelText
     if (root.inSources || root.confirmOpen) return Model.sourcesHeaderCount(root.sourceCount)
     return ""
   }
@@ -1180,7 +1187,8 @@ Item {
       // the rows that just left (or came back) rather than what is left.
       var groupRows = Model.channelsForScope(root.service.channels, Model.groupScopeId(act.group), root.service.userState).length
       var hidden = typeof root.service.toggleHiddenGroup === "function" ? root.service.toggleHiddenGroup(act.group) : null
-      root.showTransient(Model.hideNotice(hidden, act.group, groupRows, root.wallView))
+      root.showTransient(Model.hideNotice(hidden, act.group, groupRows,
+                                          { wall: root.wallView, narrow: root.narrow }))
       if (hidden !== null) root.rebuildDisplay()
     } else if (act.action === "favorite") {
       // D-SAVE-1. Favourites holds two kinds of row since saved searches
@@ -1484,6 +1492,8 @@ Item {
     // and Delete have nothing to do there and are swallowed rather than
     // reaching the list underneath.
     if (root.inTracks) {
+      // Both go through the same table j/k use, and the scroll is on the
+      // cursor binding above, so neither has to remember it.
       if (event.key === Qt.Key_Home) { root.guide = Model.withTrackCursor(root.guide, Model.moveTrackCursor(root.trackRows, -1, 1)); return true }
       if (event.key === Qt.Key_End) { root.guide = Model.withTrackCursor(root.guide, Model.moveTrackCursor(root.trackRows, -1, -1)); return true }
       return event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown || event.key === Qt.Key_Delete
@@ -2043,14 +2053,19 @@ Item {
 
   function moveTrackCursorBy(delta) {
     var next = Model.moveTrackCursor(root.trackRows, root.trackCursor, delta)
-    if (next >= 0) {
-      root.guide = Model.withTrackCursor(root.guide, next)
-      root.scrollToTrackCursor()
-    }
+    if (next >= 0) root.guide = Model.withTrackCursor(root.guide, next)
   }
 
   // The rows scroll now, so the cursor has to be brought into view like the
   // channel list's is; without this j/k walks it off the bottom of the card.
+  //
+  // Bound to the CURSOR rather than called by the movers. The first version
+  // called it from the two movers it had in mind and left Home and End --
+  // and End selects the last row, which on the many-track streams the
+  // ListView exists for is exactly the row off the bottom. A fifth writer
+  // would have forgotten it too. One binding cannot be forgotten.
+  onTrackCursorChanged: root.scrollToTrackCursor()
+
   function scrollToTrackCursor() {
     if (!root.inTracks || !trackList || trackList.height <= 0) return
     if (root.trackCursor < 0 || root.trackCursor >= root.trackRows.length) return
@@ -2067,16 +2082,19 @@ Item {
   // may be on nothing: put it on the selected audio track, or the first row
   // that can be chosen. A cursor already on a choosable row stays put, so a
   // selection does not jump the cursor away from what was just chosen.
+  // A reply landed. The cursor goes home when the rows are a different
+  // channel's -- row 3 of the old stream means nothing on the new one -- and
+  // otherwise stays where the user put it, so selecting a track does not
+  // jump the cursor away from what was just chosen.
   function settleTrackCursor() {
     if (!root.inTracks || !root.serviceReady) return
     var rows = Model.trackRows(root.service.tracks)
     var cur = rows[root.trackCursor]
-    if (cur && cur.kind === "track") return
+    var sameChannel = root.trackRowsFor === root.playingId
+    root.trackRowsFor = root.playingId
+    if (sameChannel && cur && cur.kind === "track") return
     var home = Model.trackCursorHome(rows)
-    if (home >= 0) {
-      root.guide = Model.withTrackCursor(root.guide, home)
-      Qt.callLater(root.scrollToTrackCursor)
-    }
+    if (home >= 0) root.guide = Model.withTrackCursor(root.guide, home)
   }
 
   function toggleLogos() {
@@ -4590,9 +4608,12 @@ Item {
           anchors.centerIn: parent
           width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
           // The rows scroll, so the card is as tall as it needs to be and no
-          // taller than the space it has. contentHeight is the sum of the
-          // delegate heights and does not depend on the viewport, so this is
-          // not a binding loop.
+          // taller than the space it has. A ListView's contentHeight is the
+          // laid-out height of its delegates, which for these fixed-height
+          // rows is independent of the viewport -- so reading it to size the
+          // thing that sizes the viewport terminates. It is NOT a general
+          // guarantee about ListView, which is what an earlier version of
+          // this comment implied.
           height: Math.min(parent.height - root.contentMargin * 2,
                            root.contentMargin * 2 + trackHead.height + Style.space(4) + trackList.contentHeight)
           radius: root.cornerRadius

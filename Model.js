@@ -2304,22 +2304,30 @@ function favoriteRemovalNotice(origin, count) {
 // cap). The group name is playlist text, so it goes through scrubUrls like
 // every other sink (rule 5). Says where the group went, because a user who
 // hid 117 rows by one keypress deserves to be told how to get them back.
-// `wall` is true when the notice is raised from the channel wall, which is
-// the one view with no group column (guideSurface showColumn is false there,
-// because hiding the column is what frees the width). Sending that user to
-// "the column" names a surface they cannot see and a key -- h/l -- that on
-// the wall moves the cursor instead of the scope, so the notice has to name
-// the key that brings the column back. Found in the 0.9.0 preflight: every
-// M3-01 path is live on the wall, and nothing had asked what the notice says
-// once the column it points at is gone.
-function hideNotice(hidden, group, count, wall) {
+// Where the notice sends the user depends on what the view actually draws.
+// `view` is { wall, narrow } -- the same two facts guideSurface uses to
+// decide showColumn, which is `has && !narrow && !wall`.
+//
+//   column drawn   "under HIDDEN in the column"
+//   the wall       Ctrl+G, the key back to the view that has the column
+//   a narrow card  h/l, which still rings the scopes (including the hidden
+//                  entries) even though the column is not drawn
+//
+// The first repair keyed on the wall alone, which was the half of the
+// premise its author had looked at: a narrow card has no column either and
+// was still being told to look at one. Both were found by a preflight, one
+// pass apart, which is the argument for keying on the fact rather than on
+// the view that made you notice it.
+function hideNotice(hidden, group, count, view) {
+  var v = view || {}
   var name = scrubUrls(str(group))
   var n = formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
   if (hidden === null || hidden === undefined) return "Cannot hide more groups" + SEP + MAX_HIDDEN_GROUPS + " is the most"
-  if (hidden === true) {
-    return "Hid " + name + SEP + n + SEP + (wall === true ? WALL_KEY + " for the list to unhide" : "under HIDDEN in the column")
-  }
-  return "Showing " + name + SEP + n
+  if (hidden !== true) return "Showing " + name + SEP + n
+  var where = "under HIDDEN in the column"
+  if (v.wall === true) where = WALL_KEY + " for the list to unhide"
+  else if (v.narrow === true) where = "h/l to reach it under HIDDEN"
+  return "Hid " + name + SEP + n + SEP + where
 }
 
 // The group column entry's accessible name (UX 7.1). A hidden entry says
@@ -2339,12 +2347,20 @@ function savedSearchFooter(state, channels) {
   var st = state || emptyState()
   var saved = asList(st.savedSearches)
   if (saved.length === 0) return ""
-  // M3-01 regression, found in the 0.9.0 preflight: the ROWS were filtered
-  // through browsableChannels when hidden groups landed (channelsForScope)
-  // and this count was not, so Favourites could say "2 channels" about a
-  // list holding none. That is D-SAVE-2 exactly -- a count and its rows as
-  // two implementations -- so the repair is the same one: ONE call.
-  var rows = savedSearchChannels(browsableChannels(asList(channels), st), saved).length
+  // D-SAVE-2's rule, and it took two goes to obey it. The first repair
+  // filtered this expression the way channelsForScope filters, which fixed
+  // the hidden-group divergence and left a second one standing: the rows
+  // de-duplicate the saved matches against the STARS, and a re-derived count
+  // does not, so a channel the user had both starred and matched was counted
+  // as a saved row although it is in the list as a star. Two implementations
+  // agreeing about one input is not one call. This is one call: count the
+  // rows channelsForScope actually returns, and subtract the stars among
+  // them -- which is exactly the shape countFavorites has.
+  var rows = 0
+  var favRows = channelsForScope(channels, SCOPE_FAVORITES, st)
+  var starred = {}
+  for (var f = 0; f < st.favorites.length; f++) starred[str(st.favorites[f])] = true
+  for (var r = 0; r < favRows.length; r++) if (starred[channelId(favRows[r])] !== true) rows++
   return formatCount(saved.length) + (saved.length === 1 ? " saved search" : " saved searches") +
     SEP + formatCount(rows) + (rows === 1 ? " channel" : " channels")
 }

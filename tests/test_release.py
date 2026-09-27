@@ -379,6 +379,22 @@ class ChangelogHeadingTest(unittest.TestCase):
         self.assertEqual(release.changelog_problems(self.root, strict=False), [])
         self.assertTrue(release.changelog_problems(self.root, strict=True, today="2026-09-26"))
 
+    def test_the_cut_itself_refuses_it_and_not_only_the_helper(self):
+        """The join. `changelog_problems` was tested and `build`'s single call
+        to it was not, so deleting that line left every test green -- a rule
+        13 name-join inside the repair that exists to stop one."""
+        case = ReleaseCase('run')
+        case.setUp()
+        self.addCleanup(lambda: shutil.rmtree(case.dir, True))
+        case.write('CHANGELOG.md', '# Changelog\n\n## 0.9.9 (unreleased)\n\n- a thing\n')
+        case.commit_all()
+        with self.assertRaisesRegex(release.ReleaseError, 'release notes'):
+            case.build()
+        # And the same tree cuts once the heading is dated.
+        case.write('CHANGELOG.md', '# Changelog\n\n## 0.9.9 (%s)\n\n- a thing\n' % TODAY)
+        case.commit_all()
+        case.build()
+
     def test_a_missing_heading_is_reported_rather_than_ignored(self):
         with io.open(os.path.join(self.root, 'manifest.json'), 'w', encoding='utf-8') as fh:
             fh.write(json.dumps({"version": "0.9.0"}))

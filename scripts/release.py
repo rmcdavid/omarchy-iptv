@@ -169,9 +169,15 @@ def read(root, rel):
 def changelog_problems(root, strict, today=None):
     """The top CHANGELOG heading against manifest.json, at the cut.
 
-    Only `build` calls this. `check` is about the allowlist being whole, and
-    it runs against synthetic trees in the tests that carry no release
-    sections at all.
+    Only `build` calls this, and it calls it AFTER the tag and no-op guards,
+    so a cut re-run the day after a failure reports the reason it failed
+    rather than today's date. `check` is about the allowlist being whole and
+    runs against synthetic trees carrying no release sections at all, which
+    is why this is not part of it.
+
+    `strict=False` returns nothing. That arm exists so the tests can state
+    that drafting a release -- a heading ahead of the manifest, or an
+    undated one -- is not an error outside the cut.
 
     At the cut the heading must name THIS version and carry TODAY's date.
     Requiring the date rather than merely a date is the point: 0.8.0 shipped
@@ -381,7 +387,6 @@ def build(root, gate_already_green=False, validate=True, tag=True,
         raise ReleaseError('releases are cut from %r, and this is %r'
                            % (DEV_BRANCH, current_branch(root)))
     problems = check(root, out=out)
-    problems.extend(changelog_problems(root, strict=True, today=today))
     if problems:
         raise ReleaseError('the allowlist is not whole:\n  ' + '\n  '.join(problems))
     if not gate_already_green:
@@ -402,6 +407,15 @@ def build(root, gate_already_green=False, validate=True, tag=True,
         if existing:
             raise ReleaseError('tag %s already exists at %s; bump manifest.json '
                                'version first' % (tag_name, existing[:12]))
+
+    # AFTER the tag and version guards above, so a cut re-run the day after a
+    # failure reports the reason it failed rather than the date it is now.
+    # And under its own banner: a changelog problem is not an allowlist
+    # problem, and the releaser reading "the allowlist is not whole" about a
+    # date goes looking in the wrong file.
+    notes = changelog_problems(root, strict=True, today=today)
+    if notes:
+        raise ReleaseError('the release notes do not match this cut:\n  ' + '\n  '.join(notes))
 
     tree = build_tree(root, dev_sha)
     got = tree_paths(root, tree)
