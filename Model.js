@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.8.0"
+var PLUGIN_VERSION = "0.9.0"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -102,6 +102,9 @@ var SCOPE_RECENT = "recent"
 var SCOPE_FAVORITES = "favorites"
 var SCOPE_ALL = "all"
 var GROUP_SCOPE_PREFIX = "g:"
+// M3-01 (PLAN-M3 decision 4): hidden groups are names, global, capped.
+// Mirrored by MAX_HIDDEN_GROUPS in bin/omarchy-iptv; one fixture pins both.
+var MAX_HIDDEN_GROUPS = 200
 
 // Typographic characters Omarchy uses (UX.md preamble table).
 var ELLIPSIS = "\u2026"
@@ -1621,14 +1624,29 @@ function scopeSurface(channels, state) {
   var recents = countRecents(list, st)
   if (recents > 0) out.push({ id: SCOPE_RECENT, label: RECENT_GROUP, kind: "recent", count: recents })
   out.push({ id: SCOPE_FAVORITES, label: FAVORITES_GROUP, kind: "favorites", count: countFavorites(list, st) })
-  out.push({ id: SCOPE_ALL, label: "All", kind: "all", count: list.length })
-  var groups = groupChannels(list)
+  var browsable = browsableChannels(list, st)
+  out.push({ id: SCOPE_ALL, label: "All", kind: "all", count: browsable.length })
+  var all = groupChannels(list)
+  // M3-01. One groupChannels pass over the FULL list, split by name: the
+  // hidden groups keep their counts and their playlist order, they just
+  // move under a HIDDEN header (decision 2). The narrowing axis is judged
+  // over the visible groups only, because All now equals the visible set.
+  var hidden = hiddenGroupSet(st)
+  var groups = []
+  var gone = []
+  for (var g = 0; g < all.length; g++) (hidden[all[g].name] === true ? gone : groups).push(all[g])
   var narrows = groups.length >= 2
-  var axis = { count: groups.length, narrows: narrows, soleGroup: groups.length === 1 ? groups[0].name : "" }
+  var axis = { count: groups.length, narrows: narrows, soleGroup: groups.length === 1 ? groups[0].name : "", hidden: gone.length }
   if (narrows) {
     out.push({ id: "", label: "GROUPS", kind: "header", count: 0 })
     for (var i = 0; i < groups.length; i++) {
       out.push({ id: groupScopeId(groups[i].name), label: groups[i].name, kind: "group", count: groups[i].count })
+    }
+  }
+  if (gone.length > 0) {
+    out.push({ id: "", label: "HIDDEN", kind: "header", count: 0 })
+    for (var h = 0; h < gone.length; h++) {
+      out.push({ id: groupScopeId(gone[h].name), label: gone[h].name, kind: "hidden", count: gone[h].count })
     }
   }
   return { entries: out, axis: axis }
@@ -1645,7 +1663,10 @@ function scopeEntries(channels, state) {
 function channelsForScope(channels, scopeId, state) {
   var list = asList(channels)
   var id = str(scopeId)
-  if (id === SCOPE_ALL || id === "") return list
+  // M3-01: All is what the user browses, so hidden groups are gone from it.
+  // A group scope, hidden or not, still returns the group: the user reached
+  // it by name from the HIDDEN section (decision 2).
+  if (id === SCOPE_ALL || id === "") return browsableChannels(list, state)
   var st = state || emptyState()
   var index, out = [], i
   if (id === SCOPE_FAVORITES) {
@@ -1659,7 +1680,9 @@ function channelsForScope(channels, scopeId, state) {
     // are the most deliberate thing the user did, and this must be
     // element-for-element what it was when nothing is saved. The saved rows
     // follow in playlist order, de-duplicated against the stars.
-    var saved = savedSearchChannels(list, st.savedSearches)
+    // M3-01: a saved search is a search, and search from All does not see
+    // a hidden group (decision 1). The stars above are untouched.
+    var saved = savedSearchChannels(browsableChannels(list, st), st.savedSearches)
     if (saved.length > 0) {
       var starred = {}
       for (i = 0; i < out.length; i++) starred[channelId(out[i])] = true
@@ -1678,6 +1701,21 @@ function channelsForScope(channels, scopeId, state) {
   var name = scopeName(id)
   for (i = 0; i < list.length; i++) if (list[i] && primaryGroup(list[i]) === name) out.push(list[i])
   return out
+}
+
+// M2-03 + M3-01. Where a number jump lands when the resolved channel is not
+// in the rows on screen. All is the answer it has always been -- in All a
+// channel's numeric neighbours are the adjacent rows, so j/k right after a
+// jump are channel up and down -- but All stopped holding a hidden group's
+// channels, and nothing noticed: the cursor did not move, the status line
+// named whatever row the cursor had been reset onto, and Enter played THAT.
+// Decision 1 says a channel reached by its number still works; decision 2
+// says its group is reachable by name. So the jump goes to the group's own
+// scope, which is what the user would have done by hand.
+function numberJumpScope(channel, state) {
+  if (!channel) return SCOPE_ALL
+  var group = primaryGroup(channel)
+  return isGroupHidden(state, group) ? groupScopeId(group) : SCOPE_ALL
 }
 
 // Legacy name kept for callers that think in group names ("" = all).
@@ -1849,7 +1887,7 @@ function scopeLabel(scopeId, query, count, position) {
 // `sourceXtream` and `confirmRemove` are the Sources screens. `returnMode`
 // remembers where Sources was opened from, `form` holds the open form
 // (section "sources" below), `sourceCursor` is the Sources list cursor.
-var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos"]
+var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos", "tracks"]
 
 function guideMode(mode) {
   var m = str(mode)
@@ -1857,7 +1895,7 @@ function guideMode(mode) {
 }
 
 function guideState(scopeId) {
-  return { mode: "search", query: "", scopeId: str(scopeId) || SCOPE_ALL, restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0 }
+  return { mode: "search", query: "", scopeId: str(scopeId) || SCOPE_ALL, restoreScopeId: "", cursorIndex: 0, returnMode: "", form: null, sourceCursor: 0, trackCursor: 0 }
 }
 
 function copyGuide(st) {
@@ -1870,8 +1908,32 @@ function copyGuide(st) {
     cursorIndex: Number(src.cursorIndex) || 0,
     returnMode: str(src.returnMode),
     form: src.form ? copyForm(src.form) : null,
-    sourceCursor: Math.max(0, Math.floor(Number(src.sourceCursor) || 0))
+    sourceCursor: Math.max(0, Math.floor(Number(src.sourceCursor) || 0)),
+    trackCursor: Math.max(0, Math.floor(Number(src.trackCursor) || 0))
   }
+}
+
+// M3-02: the track picker is a mode over the list, opened from list mode
+// only (search mode types `t`) and closed back to it. It never survives a
+// close of the guide: `open()` rebuilds the guide state.
+function openTracks(st) {
+  var cur = copyGuide(st)
+  if (cur.mode !== "list") return cur
+  var next = withMode(cur, "tracks")
+  next.trackCursor = 0
+  return next
+}
+
+function closeTracks(st) {
+  var cur = copyGuide(st)
+  if (cur.mode !== "tracks") return cur
+  return withMode(cur, "list")
+}
+
+function withTrackCursor(st, index) {
+  var next = copyGuide(st)
+  next.trackCursor = Math.max(0, Math.floor(Number(index) || 0))
+  return next
 }
 
 function withQuery(st, query) {
@@ -1936,6 +1998,7 @@ function onEscape(st, opts) {
   var cur = copyGuide(st)
   var out = { state: cur, close: false, cancelProbe: false }
   if (cur.mode === "confirmRemove" || cur.mode === "confirmLogos") { out.state = withMode(cur, "sources"); return out }
+  if (cur.mode === "tracks") { out.state = closeTracks(cur); return out }
   if (cur.mode === "sources") { out.state = closeSources(cur, opts); return out }
   if (cur.mode === "sourceEdit" || cur.mode === "sourceXtream") {
     var f = cur.form
@@ -2236,6 +2299,63 @@ function favoriteRemovalNotice(origin, count) {
   return ""
 }
 
+// M3-01: what the footer says after `x` hid or unhid a group. `hidden` is
+// the state AFTER the press as the service reports it (null: refused at the
+// cap). The group name is playlist text, so it goes through scrubUrls like
+// every other sink (rule 5). Says where the group went, because a user who
+// hid 117 rows by one keypress deserves to be told how to get them back.
+// Where the notice sends the user depends on what the view actually draws.
+// `view` is { wall, narrow } -- the same two facts guideSurface uses to
+// decide showColumn, which is `has && !narrow && !wall`.
+//
+//   column drawn   "under HIDDEN in the column"
+//   the wall       Ctrl+G, the key back to the view that has the column
+//   a narrow card  h/l, which still rings the scopes (including the hidden
+//                  entries) even though the column is not drawn
+//
+// The first repair keyed on the wall alone, which was the half of the
+// premise its author had looked at: a narrow card has no column either and
+// was still being told to look at one. Both were found by a preflight, one
+// pass apart, which is the argument for keying on the fact rather than on
+// the view that made you notice it.
+function hideNotice(hidden, group, count, view) {
+  var v = view || {}
+  var name = scrubUrls(str(group))
+  var n = formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
+  if (hidden === null || hidden === undefined) return "Cannot hide more groups" + SEP + MAX_HIDDEN_GROUPS + " is the most"
+  if (hidden !== true) return "Showing " + name + SEP + n
+  // Four views, not three: a NARROW wall leads to a narrow list, which has
+  // no column either, so naming Ctrl+G alone would send that user to a
+  // second view without the thing they were told to look at. Found one pass
+  // after the narrow case itself, which is what happens when a rule is
+  // extended by the example that prompted it rather than by its own terms.
+  var where = "under HIDDEN in the column"
+  if (v.wall === true) where = v.narrow === true ? WALL_KEY + ", then h/l to reach it" : WALL_KEY + " for the list to unhide"
+  else if (v.narrow === true) where = "h/l to reach it under HIDDEN"
+  return "Hid " + name + SEP + n + SEP + where
+}
+
+// The group column entry's accessible name (UX 7.1). A hidden entry says
+// so, because the dimming that tells a sighted user is not on the bus.
+function scopeEntryAccessibleName(entry) {
+  var e = entry || {}
+  var label = str(e.label)
+  if (e.kind === "header") return label
+  var name = label + ", " + pluralChannels(e.count)
+  return e.kind === "hidden" ? name + ", hidden" : name
+}
+
+// How many channels a query will actually put in Favourites, from the list
+// the user can actually see. The guide had this expression twice and the
+// footer had a third version of the same question, which is how a query
+// matching inside a hidden group came to announce "3 channels" over a screen
+// showing one. One function, so a test calls what the guide calls (rule 12):
+// the string-matching check that stood here instead could only ever prove
+// the guide contained a particular expression.
+function savedSearchCountVisible(channels, state, query) {
+  return savedSearchCount(browsableChannels(channels, state), query)
+}
+
 // How many Favourites rows come from saved searches rather than stars. Shown in
 // the footer so the list is explicable: otherwise Favourites fills with
 // channels the user never starred and nothing says why.
@@ -2243,7 +2363,20 @@ function savedSearchFooter(state, channels) {
   var st = state || emptyState()
   var saved = asList(st.savedSearches)
   if (saved.length === 0) return ""
-  var rows = savedSearchChannels(asList(channels), saved).length
+  // D-SAVE-2's rule, and it took two goes to obey it. The first repair
+  // filtered this expression the way channelsForScope filters, which fixed
+  // the hidden-group divergence and left a second one standing: the rows
+  // de-duplicate the saved matches against the STARS, and a re-derived count
+  // does not, so a channel the user had both starred and matched was counted
+  // as a saved row although it is in the list as a star. Two implementations
+  // agreeing about one input is not one call. This is one call: count the
+  // rows channelsForScope actually returns, and subtract the stars among
+  // them -- which is exactly the shape countFavorites has.
+  var rows = 0
+  var favRows = channelsForScope(channels, SCOPE_FAVORITES, st)
+  var starred = {}
+  for (var f = 0; f < st.favorites.length; f++) starred[str(st.favorites[f])] = true
+  for (var r = 0; r < favRows.length; r++) if (starred[channelId(favRows[r])] !== true) rows++
   return formatCount(saved.length) + (saved.length === 1 ? " saved search" : " saved searches") +
     SEP + formatCount(rows) + (rows === 1 ? " channel" : " channels")
 }
@@ -2290,7 +2423,7 @@ function savedSearchRecord(entry) {
 }
 
 function emptyState() {
-  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [] }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] }
 }
 
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
@@ -2321,7 +2454,11 @@ function cloneState(state, patch) {
     // -- and Service.qml clones state to write a source record, which would
     // have wiped every saved search on the next source edit. The roadmap
     // warned about two whitelists; there are three.
-    savedSearches: asList(st.savedSearches).slice()
+    savedSearches: asList(st.savedSearches).slice(),
+    // M3-01. The fourth key this whitelist had to be taught, and the test
+    // that proves it is the same shape as the savedSearches one: a state
+    // that carries it goes through every reducer and comes out with it.
+    hiddenGroups: asList(st.hiddenGroups).slice()
   }
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
@@ -2363,6 +2500,9 @@ function parseState(text) {
       if (id !== "" && state.favorites.indexOf(id) === -1) state.favorites.push(id)
     }
   }
+  // M3-01. Additive and optional like savedSearches below: a file without
+  // it reads as [], an older build drops it, STATE_VERSION stays 2.
+  state.hiddenGroups = hiddenGroupList(parsed.hiddenGroups)
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -2632,6 +2772,100 @@ function sessionAfterOutcome(state, outcome, deadPending, consumed) {
 
 function withFavorites(state, favorites) {
   return cloneState(state, { favorites: asList(favorites).slice() })
+}
+
+// ---- hidden groups (M3-01, PLAN-M3 section 1)
+//
+// A hidden group leaves browsing -- All, GROUPS, search from All, saved
+// searches, the wall, the ring -- and nothing else. A star, a recent and a
+// channel number are things the user did on purpose and keep working
+// (decision 1). The list is group NAMES, global across sources (decision 4).
+
+// The one reader both languages agree on (python: normalize_hidden_groups):
+// strings only, trimmed, non-empty, first occurrence wins, capped.
+function hiddenGroupList(raw) {
+  var list = asList(raw)
+  var out = []
+  var seen = {}
+  for (var i = 0; i < list.length && out.length < MAX_HIDDEN_GROUPS; i++) {
+    if (typeof list[i] !== "string") continue
+    var name = list[i].replace(/^\s+|\s+$/g, "")
+    if (name === "" || seen[name] === true) continue
+    seen[name] = true
+    out.push(name)
+  }
+  return out
+}
+
+function hiddenGroupSet(state) {
+  var st = state || emptyState()
+  var list = asList(st.hiddenGroups)
+  var out = {}
+  for (var i = 0; i < list.length; i++) if (typeof list[i] === "string" && list[i] !== "") out[list[i]] = true
+  return out
+}
+
+function isGroupHidden(state, name) {
+  var key = str(name)
+  return key !== "" && hiddenGroupSet(state)[key] === true
+}
+
+// Hide when shown, show when hidden. An unknown or empty name is a no-op
+// that returns the SAME state, so a caller comparing by reference can tell
+// "nothing changed" from "changed" without a second call.
+function toggleHiddenGroup(state, name) {
+  var st = state || emptyState()
+  var key = str(name).replace(/^\s+|\s+$/g, "")
+  if (key === "") return st
+  var list = hiddenGroupList(st.hiddenGroups)
+  var at = list.indexOf(key)
+  if (at !== -1) list.splice(at, 1)
+  else if (list.length >= MAX_HIDDEN_GROUPS) return st
+  else list.push(key)
+  return cloneState(st, { hiddenGroups: list })
+}
+
+// The channels a user browses: the list minus every hidden group. With
+// nothing hidden this is the SAME array, not a copy, because
+// channelsForScope(all) used to return the list itself and callers may
+// compare by identity; a filter that always copied would change that
+// silently. Costs one primaryGroup per channel only when something is
+// hidden -- measured at 10,000 channels in QA-RESULTS M3-01.
+function browsableChannels(channels, state) {
+  var list = asList(channels)
+  var hidden = hiddenGroupSet(state)
+  var any = false
+  for (var k in hidden) { any = true; break }
+  if (!any) return list
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i]) continue
+    if (hidden[primaryGroup(list[i])] !== true) out.push(list[i])
+  }
+  return out
+}
+
+// What `x` does on the cursor row (UX 3.1, extended by PLAN-M3 decision 3).
+// One table: the key handler dispatches on `action` and the footer derives
+// its verb from the same call, so the hint cannot promise a removal the
+// handler does not make. Recent and Favorites keep their existing meaning;
+// everywhere else the unit of removal is the row's group.
+function hideAction(opts) {
+  var o = opts || {}
+  var scope = effectiveScope(o.scopeId, o.query)
+  if (scope === SCOPE_RECENT) return { action: "recent", group: "" }
+  if (scope === SCOPE_FAVORITES) return { action: "favorite", group: "" }
+  if (!o.channel) return { action: "none", group: "" }
+  var group = primaryGroup(o.channel)
+  return { action: isGroupHidden(o.state, group) ? "unhide" : "hide", group: group }
+}
+
+// The footer's word for `x`, from the same table. "" means no hint.
+function hideVerb(opts) {
+  var act = hideAction(opts).action
+  if (act === "hide") return "hide group"
+  if (act === "unhide") return "unhide"
+  return ""
 }
 
 function removeRecent(state, id) {
@@ -4034,6 +4268,232 @@ function playerPauseArgv(socket, state) {
   return ["player", "pause", "--socket", str(socket), "--state", want]
 }
 
+// ---- M3-02: audio and subtitle tracks
+//
+// `player tracks` lists; with a selection it selects FIRST and then lists,
+// so one reply carries the player's answer to the request (PLAN-M3
+// decision 5). `select` is { type: "audio" | "sub", id: <mpv id> | "no" }
+// or absent for a plain list. Anything else is a plain list: a malformed
+// selection must not become an argv the helper rejects on the socket's
+// behalf.
+function playerTracksArgv(socket, select) {
+  var argv = ["player", "tracks", "--socket", str(socket)]
+  var sel = select || null
+  if (sel && (sel.type === "audio" || sel.type === "sub")) {
+    var id = trackChoice(sel.id)
+    if (id !== "") argv.push(sel.type === "audio" ? "--audio" : "--sub", id)
+  }
+  return argv
+}
+
+// "no" or a non-negative integer as text; "" for anything else.
+function trackChoice(id) {
+  if (id === "no") return "no"
+  var n = Number(id)
+  if (typeof id === "boolean" || id === null || id === undefined || id === "" || !isFinite(n) || n < 0 || Math.floor(n) !== n) return ""
+  return String(n)
+}
+
+// The helper already whitelists and redacts (rule 5); this is the second
+// sink guard, because the rows reach guide text and an accessible name.
+function parseTracks(status) {
+  var list = status && Array.isArray(status.tracks) ? status.tracks : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var t = list[i]
+    if (!t || typeof t !== "object") continue
+    if (t.type !== "audio" && t.type !== "sub") continue
+    var id = Number(t.id)
+    if (typeof t.id === "boolean" || !isFinite(id) || Math.floor(id) !== id) continue
+    out.push({
+      id: id, type: t.type, selected: t.selected === true,
+      // Every free-text field mpv takes from the file goes through the same
+      // guard, not just the one that was thought of first: the helper
+      // redacts these and this is the second pass, because they reach guide
+      // text and an accessible name (rule 5).
+      lang: scrubUrls(str(t.lang)), title: scrubUrls(str(t.title)), codec: scrubUrls(str(t.codec)),
+      dflt: t["default"] === true, forced: t.forced === true, external: t.external === true
+    })
+  }
+  return out
+}
+
+// ISO 639-2/B and -2/T codes mpv reports for the languages an IPTV list
+// carries in practice. Anything else shows as the code in upper case,
+// which is still more than the player's own OSD gives.
+var LANG_NAMES = {
+  eng: "English", spa: "Spanish", fra: "French", fre: "French", deu: "German", ger: "German",
+  ita: "Italian", por: "Portuguese", nld: "Dutch", dut: "Dutch", rus: "Russian", pol: "Polish",
+  tur: "Turkish", ara: "Arabic", hin: "Hindi", urd: "Urdu", ben: "Bengali", tam: "Tamil",
+  swe: "Swedish", nor: "Norwegian", dan: "Danish", fin: "Finnish", ell: "Greek", gre: "Greek",
+  heb: "Hebrew", jpn: "Japanese", kor: "Korean", zho: "Chinese", chi: "Chinese", tha: "Thai",
+  vie: "Vietnamese", ind: "Indonesian", msa: "Malay", may: "Malay", fas: "Persian", per: "Persian",
+  ukr: "Ukrainian", ces: "Czech", cze: "Czech", hun: "Hungarian", ron: "Romanian", rum: "Romanian",
+  bul: "Bulgarian", srp: "Serbian", hrv: "Croatian", slv: "Slovenian", slk: "Slovak", slo: "Slovak",
+  cat: "Catalan", eus: "Basque", baq: "Basque", glg: "Galician", lat: "Latin", mul: "Multiple",
+  und: "", zxx: ""
+}
+
+function trackLanguage(code) {
+  var key = str(code).toLowerCase().replace(/^\s+|\s+$/g, "")
+  if (key === "") return ""
+  if (LANG_NAMES.hasOwnProperty(key)) return LANG_NAMES[key]
+  return key.toUpperCase()
+}
+
+// What a row says. The title wins when the stream author wrote one, then
+// the language, then the id -- and the id is always there in the detail,
+// because two "English" rows with nothing to tell them apart is the common
+// case on a provider list.
+function trackLabel(t) {
+  var title = cleanName(t.title)
+  if (title !== "") return title
+  var lang = trackLanguage(t.lang)
+  if (lang !== "") return lang
+  return "Track " + t.id
+}
+
+function trackDetail(t) {
+  var parts = []
+  var lang = trackLanguage(t.lang)
+  if (cleanName(t.title) !== "" && lang !== "") parts.push(lang)
+  if (str(t.codec) !== "") parts.push(str(t.codec))
+  if (t.forced === true) parts.push("forced")
+  if (t.external === true) parts.push("external")
+  return parts.join(SEP)
+}
+
+// The picker's rows: a header per kind, the tracks under it, an `Off` row
+// for subtitles that is selected when no subtitle is. A kind with nothing
+// reported shows a row saying so, because an empty section reads as a
+// picker that failed to load.
+function trackRows(tracks) {
+  var list = asList(tracks)
+  var out = []
+  var kinds = [["audio", "Audio"], ["sub", "Subtitles"]]
+  for (var k = 0; k < kinds.length; k++) {
+    var type = kinds[k][0]
+    out.push({ kind: "header", type: type, label: kinds[k][1], detail: "", id: 0, selected: false })
+    var any = false
+    var anySelected = false
+    if (type === "sub") {
+      for (var j = 0; j < list.length; j++) if (list[j].type === "sub" && list[j].selected === true) anySelected = true
+      out.push({ kind: "track", type: "sub", id: "no", label: "Off", detail: "", selected: !anySelected })
+    }
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i]
+      if (t.type !== type) continue
+      any = true
+      out.push({ kind: "track", type: type, id: t.id, label: trackLabel(t), detail: trackDetail(t), selected: t.selected === true })
+    }
+    if (!any && type === "audio") out.push({ kind: "empty", type: type, label: "None reported", detail: "", id: 0, selected: false })
+  }
+  return out
+}
+
+// Where the cursor opens: the selected audio track, else the first row
+// that can be chosen. -1 when nothing can.
+function trackCursorHome(rows) {
+  var list = asList(rows)
+  var first = -1
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].kind !== "track") continue
+    if (first === -1) first = i
+    if (list[i].type === "audio" && list[i].selected === true) return i
+  }
+  return first
+}
+
+// j/k over the rows: headers and empty rows are stepped over, the ends
+// wrap, like the group column (moveScope).
+function moveTrackCursor(rows, index, delta) {
+  var list = asList(rows)
+  var at = []
+  for (var i = 0; i < list.length; i++) if (list[i].kind === "track") at.push(i)
+  if (at.length === 0) return -1
+  var from = Math.floor(Number(index))
+  var cur = at.indexOf(from)
+  if (cur === -1) {
+    // Not on a choosable row (a header, or nowhere yet): the nearest one in
+    // the direction asked, wrapping -- so -1 with +1 is the first row and
+    // -1 with -1 is the last, which is what Home and End send.
+    if (delta < 0) { for (var d = at.length - 1; d >= 0; d--) if (at[d] < from) return at[d]; return at[at.length - 1] }
+    for (var u = 0; u < at.length; u++) if (at[u] > from) return at[u]
+    return at[0]
+  }
+  var step = delta < 0 ? -1 : 1
+  return at[(cur + step + at.length) % at.length]
+}
+
+// Whether an open picker should ask the player about the channel that is
+// playing now. Pure, and in Model.js rather than inline in the service,
+// because the inline version was a self-sustaining loop and no test in the
+// suite could reach it (rule 12).
+//
+// THE LOOP, which shipped past two preflights and a green gate: the gate was
+// "the rows do not describe the playing channel", and the one reply that
+// cannot satisfy it -- `running: false`, which the helper emits whenever the
+// socket does not answer -- is the reply that CLEARS the stamp. So the gate
+// re-armed itself on its own reply: ask, no player, clear, ask, at about six
+// helper spawns a second, with the health poll starved behind a permanently
+// busy control channel.
+//
+// `askedFor` is what breaks it: the channel the last ask was ISSUED for.
+// It is cleared when the playing channel changes, when the picker closes,
+// and when a health status shows the player alive -- that third one is the
+// recovery edge, added a pass later, and it is why the `rowsFor` guard
+// below is load-bearing rather than the belt-and-braces an earlier version
+// of this comment called it. So: at most one automatic ask per channel per
+// observed-alive edge, not "once per channel" flat. An explicit ask
+// (opening the picker, choosing a track) does not come through here.
+function shouldRefreshTracks(opts) {
+  var o = opts || {}
+  var playing = str(o.playingId)
+  if (o.wanted !== true || playing === "") return false
+  // LOAD-BEARING, and the comment that stood here said the opposite. It
+  // argued that every path setting `rowsFor` goes through requestTracks,
+  // which sets `askedFor` first, so this line could refuse nothing the one
+  // below would not -- true when it was written, and made false one pass
+  // later by the recovery edge, which clears `askedFor` and leaves
+  // `rowsFor` alone. In that state this is the only refusal, and without it
+  // an open picker over a healthy player asks again every second health
+  // tick, for ever. The old comment also predicted, correctly, that the
+  // suite stayed green without the line -- so it pre-authorised deleting a
+  // line that had become the bound. The case below now asserts it.
+  if (str(o.rowsFor) === playing) return false
+  return str(o.askedFor) !== playing
+}
+
+// The one line under the title. `state` is the service's tracksState.
+function trackPanelMessage(state, rows) {
+  var st = str(state)
+  if (st === "asking") return "Asking the player" + ELLIPSIS
+  if (st === "failed") return "The player did not answer"
+  if (st === "idle") return "Nothing is playing"
+  return ""
+}
+
+// UX 7.1: what a row is called on the bus. Position is over the choosable
+// rows, not the drawn ones, because a header is not a choice.
+function trackAccessibleName(rows, index) {
+  var list = asList(rows)
+  var row = list[index]
+  if (!row) return ""
+  if (row.kind !== "track") return str(row.label)
+  var n = 0, pos = 0
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].kind !== "track") continue
+    n++
+    if (i === index) pos = n
+  }
+  var parts = [str(row.label)]
+  if (str(row.detail) !== "") parts.push(str(row.detail).split(SEP).join(", "))
+  parts.push(row.type === "audio" ? "audio" : "subtitles")
+  if (row.selected === true) parts.push("selected")
+  parts.push(pos + " of " + n)
+  return parts.join(", ")
+}
+
 // `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
 // probe is read-only.
 function playerProbeArgv(socket, ownerPid) {
@@ -5226,6 +5686,9 @@ function listLetterAction(text) {
   // the call site on something playing, the same way `pip` is: the table says
   // what a letter MEANS, not whether it can act right now.
   if (t === PAUSE_KEY || t === PAUSE_KEY.toUpperCase()) return "pause"
+  // M3-02: offered unconditionally here like `pause`, gated at the call
+  // site on something playing.
+  if (t === TRACKS_KEY || t === TRACKS_KEY.toUpperCase()) return "tracks"
   if (t === "/") return "search"
   if (t.toLowerCase() === SOURCE_KEYS.open) return "sources"
   return ""
@@ -6128,6 +6591,7 @@ function footerHints(opts) {
   var o = opts || {}
   var mode = str(o.mode)
   if (mode === "confirmRemove" || mode === "confirmLogos") return [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]]
+  if (mode === "tracks") return [["j/k", "move"], ["Enter", "select"], ["Esc", "back"]]
   if (mode === "sourceEdit" || mode === "sourceXtream") return formHints(o.form)
   if (mode === "sources") {
     if (o.cursorKind === "add" || o.cursorKind === "xtream") return [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]]
@@ -6163,10 +6627,18 @@ function footerHints(opts) {
     // what the 0.8.0 preflight blocked on.
     var list = [["j/k", arrowVerb(o, "v")], ["h/l", arrowVerb(o, "h")],
                 ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"]]
+    // M3-01: `x` is hinted only where it hides or unhides, and the verb
+    // comes from hideAction, the table the key dispatches on. In Recent and
+    // Favorites the key keeps its older meaning and its older silence.
+    var hide = hideVerb(o)
+    if (hide !== "") list.push(["x", hide])
     // PAUSE LIVE TV. Only while something is playing -- a pause key on an
     // idle guide has nothing to act on and would be a hint that lies. Names
     // the direction, so nobody presses it to find out which way it goes.
     if (o.playing === true) list.push([PAUSE_KEY, o.paused === true ? "resume" : "pause"])
+    // M3-02: gated the same way, for the same reason -- a picker with no
+    // player to ask has nothing to show.
+    if (o.playing === true) list.push([TRACKS_KEY, "tracks"])
     // M2-05 section 5. Gated the way `0-9` is: a machine with no Hyprland
     // never advertises a key that can only answer "picture in picture needs
     // Hyprland". An absent flag shows it, so a service that predates PiP is
@@ -6269,6 +6741,9 @@ var LIMITS = { url: MAX_SOURCE_URL, label: MAX_LABEL, server: MAX_XTREAM_SERVER,
 // and Space is preview -- the three keys a pause would naturally want are all
 // taken by things a viewer also does often.
 var PAUSE_KEY = "c"
+// M3-02: the audio and subtitle picker. A bare letter, because the picker
+// is list-mode only: search mode types it (PLAN-M3 section 2).
+var TRACKS_KEY = "t"
 
 var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
 var SOURCE_KEY_RE = /^[0-9a-f]{8}(-[0-9]{1,3})?$/
@@ -7717,6 +8192,17 @@ if (typeof module !== "undefined") {
     scopeEntries: scopeEntries,
     channelsForScope: channelsForScope,
     channelsInGroup: channelsInGroup,
+    MAX_HIDDEN_GROUPS: MAX_HIDDEN_GROUPS,
+    hiddenGroupList: hiddenGroupList,
+    hiddenGroupSet: hiddenGroupSet,
+    isGroupHidden: isGroupHidden,
+    toggleHiddenGroup: toggleHiddenGroup,
+    browsableChannels: browsableChannels,
+    hideAction: hideAction,
+    hideVerb: hideVerb,
+    hideNotice: hideNotice,
+    numberJumpScope: numberJumpScope,
+    scopeEntryAccessibleName: scopeEntryAccessibleName,
     effectiveScope: effectiveScope,
     moveScope: moveScope,
     scopeIndex: scopeIndex,
@@ -7958,6 +8444,7 @@ if (typeof module !== "undefined") {
     withSavedSearch: withSavedSearch,
     savedSearchChannels: savedSearchChannels,
     savedSearchCount: savedSearchCount,
+    savedSearchCountVisible: savedSearchCountVisible,
     savedSearchHit: savedSearchHit,
     savedSearchTerms: savedSearchTerms,
     MAX_SAVED_QUERY: MAX_SAVED_QUERY,
@@ -8004,6 +8491,23 @@ if (typeof module !== "undefined") {
     LIMITS: LIMITS,
     SOURCE_KEYS: SOURCE_KEYS,
     PAUSE_KEY: PAUSE_KEY,
+    TRACKS_KEY: TRACKS_KEY,
+    playerTracksArgv: playerTracksArgv,
+    trackChoice: trackChoice,
+    parseTracks: parseTracks,
+    trackLanguage: trackLanguage,
+    trackLabel: trackLabel,
+    trackDetail: trackDetail,
+    trackRows: trackRows,
+    trackCursorHome: trackCursorHome,
+    moveTrackCursor: moveTrackCursor,
+    trackPanelMessage: trackPanelMessage,
+    shouldRefreshTracks: shouldRefreshTracks,
+    trackAccessibleName: trackAccessibleName,
+    openTracks: openTracks,
+    copyGuide: copyGuide,
+    closeTracks: closeTracks,
+    withTrackCursor: withTrackCursor,
     SOURCE_KEY_RE: SOURCE_KEY_RE,
     GUIDE_MODES: GUIDE_MODES,
     sanitizeInput: sanitizeInput,

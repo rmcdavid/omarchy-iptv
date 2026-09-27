@@ -2784,7 +2784,7 @@ MPV_RESERVED = frozenset((
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
     "--term-status-msg", "--screenshot-template",
 ))
-PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause")
+PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks")
 # Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
 # are not direct streams - but each one puts the credentialed stream address
@@ -3593,6 +3593,19 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # the shell's own flag is optimistic and a refused clear would leave the
     # two disagreeing. Found by the 0.7.10 preflight, not by the suite.
     client.try_command("set_property", "pause", False)
+    # M3-02, and the same mechanism one property over. mpv keeps `aid` and
+    # `sid` across a loadfile exactly as it keeps `pause`, so a user who
+    # picked the Spanish audio on one channel got track 2 of the NEXT
+    # channel -- whatever that happens to be -- with the picker cleared and
+    # nothing on screen saying why. Two shipped sentences promised the
+    # opposite ("the choice is not remembered across channels"), which is
+    # the intent: remembering a LANGUAGE is a separate feature with its own
+    # questions, and remembering a track NUMBER is meaningless across
+    # streams. "auto" is mpv's default: pick the file's own preference.
+    # Found by the 0.9.0 preflight, reasoned from this comment's own
+    # neighbour, then measured on a real player.
+    for prop in ("aid", "sid"):
+        client.try_command("set_property", prop, "auto")
     for prop, value in (("title", MPV_RAW_PREFIX + target["name"]), ("force-media-title", target["name"])):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
@@ -4145,6 +4158,134 @@ def player_pause(args: argparse.Namespace) -> int:
         payload["changed"] = True
         emit(payload)
         return EXIT_OK
+    except HelperError as error:
+        # D-PLY-20: the code `pause_refused` was raised here and caught by
+        # nothing, so the service received `internal` and stderr a traceback.
+        emit(error_payload("player.pause", error))
+        return EXIT_ERROR
+    finally:
+        client.close()
+
+
+# ---- M3-02: audio and subtitle tracks ---------------------------------------
+#
+# mpv's `track-list` is a sink (rule 5, dev branch). FOUR of its fields are
+# free text mpv documents as coming from the file, so none of them is ours:
+#
+#   external-filename  a path or URL for an external track. NOT on the
+#                      whitelist below and never emitted: dropping it beats
+#                      redacting it, because nothing in the picker needs it.
+#   title              written by whoever muxed the stream. Emitted through
+#                      redact_urls, and scrubbed a second time by
+#                      Model.parseTracks before it reaches guide text or an
+#                      accessible name.
+#   lang               "track language as identified by the file" (mpv
+#                      manual). Emitted through redact_urls for the same
+#                      reason as `title`: it is a free string, not the
+#                      three-letter code the format recommends, and the
+#                      guide turns it into a displayed name.
+#   codec              the decoder name mpv resolved. Emitted through
+#                      redact_urls on the same footing.
+#
+# An earlier version of this comment said "two of its fields" and redacted
+# one. That is the completed-audit claim rule 5 exists to stop: the author
+# audited the fields they thought of rather than the ones mpv documents as
+# file-supplied. Counted against the manual by the 0.9.0 preflight.
+TRACK_TYPES = ("audio", "sub")
+TRACK_FIELDS = ("id", "type", "selected", "lang", "title", "codec", "default", "forced", "external")
+
+
+def track_rows(data: Any) -> list[dict[str, Any]]:
+    """The picker's rows from a raw track-list: audio and sub only, ints for
+    ids, strings for text, bools for flags, in the order mpv listed them.
+    Anything malformed is dropped rather than raising: a picker with one
+    strange row missing beats no picker."""
+    rows: list[dict[str, Any]] = []
+    if not isinstance(data, list):
+        return rows
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("type")
+        ident = entry.get("id")
+        if kind not in TRACK_TYPES or isinstance(ident, bool) or not isinstance(ident, int):
+            continue
+        rows.append({
+            "id": ident,
+            "type": kind,
+            "selected": entry.get("selected") is True,
+            "lang": redact_urls(entry.get("lang")) if isinstance(entry.get("lang"), str) else "",
+            "title": redact_urls(entry.get("title")) if isinstance(entry.get("title"), str) else "",
+            "codec": redact_urls(entry.get("codec")) if isinstance(entry.get("codec"), str) else "",
+            "default": entry.get("default") is True,
+            "forced": entry.get("forced") is True,
+            "external": entry.get("external") is True,
+        })
+    return rows
+
+
+def track_choice(text: str | None) -> int | str | None:
+    """`--audio 2` / `--sub no`: an mpv track id or the word `no`; None when
+    the option was not given. Anything else is a usage error, raised as a
+    HelperError so it reaches the service as a status and not a traceback."""
+    if text is None:
+        return None
+    value = text.strip().lower()
+    if value == "no":
+        return "no"
+    # isascii() as well as isdigit(): str.isdigit() is True for superscripts
+    # and other Unicode digits that int() then refuses, so the bare isdigit()
+    # let a ValueError escape this function's own contract and come out of
+    # main() as code "internal" with a traceback -- D-PLY-20's exact failure
+    # mode, inside the release that fixes D-PLY-20. Found by the 0.9.0
+    # preflight, measured with "\u00b2".
+    if value.isascii() and value.isdigit():
+        return int(value)
+    raise HelperError("bad_track", "a track is a number or 'no'")
+
+
+def player_tracks(args: argparse.Namespace) -> int:
+    """List the audio and subtitle tracks, after applying a selection if one
+    was asked for. The reply always carries the list AS MPV NOW HAS IT, so
+    the guide shows what the player did rather than what it was asked
+    (PLAN-M3 decision 5). Side-effect-free like `pause`: no player, no spawn,
+    `running: false` and an empty list."""
+    sock = socket_path(args.socket)
+    payload: dict[str, Any] = {"ok": True, "kind": "player.tracks", "running": False,
+                               "tracks": [], "changed": False}
+    try:
+        audio = track_choice(args.audio)
+        sub = track_choice(args.sub)
+    except HelperError as error:
+        emit(error_payload("player.tracks", error))
+        return EXIT_ERROR
+    if not find_player(sock):
+        emit(payload)
+        return EXIT_OK
+    client = probe_client(sock, args.ipc_timeout)
+    if client is None:
+        emit(payload)
+        return EXIT_OK
+    try:
+        payload["running"] = True
+        for prop, want in (("aid", audio), ("sid", sub)):
+            if want is None:
+                continue
+            set_ok, _ = client.try_command("set_property", prop, want)
+            if not set_ok:
+                raise HelperError("track_refused", "the player refused that track")
+            payload["changed"] = True
+        ok, data = client.try_command("get_property", "track-list")
+        payload["tracks"] = track_rows(data) if ok else []
+        emit(payload)
+        return EXIT_OK
+    except HelperError as error:
+        # A status the service can switch on, like every other verb. Without
+        # this the refusal fell through to main() as `internal` with a
+        # traceback on stderr -- which is what `pause` did from 0.7.10 until
+        # the tracks verb was built beside it (D-PLY-20).
+        emit(error_payload("player.tracks", error))
+        return EXIT_ERROR
     finally:
         client.close()
 
@@ -4161,6 +4302,8 @@ def cmd_player(args: argparse.Namespace) -> int:
         return player_probe(args)
     if action == "pause":
         return player_pause(args)
+    if action == "tracks":
+        return player_tracks(args)
     return player_orphan_check(args)
 
 
@@ -4546,12 +4689,36 @@ def cmd_cache(args: argparse.Namespace) -> int:
 
 def default_state() -> dict[str, Any]:
     return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None,
-            "session": None, "sources": [], "savedSearches": []}
+            "session": None, "sources": [], "savedSearches": [], "hiddenGroups": []}
 
 
 # Must match Model.js MAX_SAVED_SEARCHES / MAX_SAVED_TERMS / MAX_SAVED_QUERY and
 # savedSearchTerms / savedSearchRecord. One shared fixture runs both.
 MAX_SAVED_SEARCHES = 20
+# Mirror of Model.MAX_HIDDEN_GROUPS (M3-01); the hidden-groups fixture on the
+# dev branch pins both readers to the same list on the same bytes.
+MAX_HIDDEN_GROUPS = 200
+
+
+def normalize_hidden_groups(raw: Any) -> list[str]:
+    """Mirror of Model.hiddenGroupList: strings only, stripped, non-empty,
+    first occurrence wins, capped at MAX_HIDDEN_GROUPS. Anything else --
+    a number, a dict, a non-list -- reads as nothing rather than failing."""
+    out: list[str] = []
+    if not isinstance(raw, list):
+        return out
+    seen: set[str] = set()
+    for item in raw:
+        if len(out) >= MAX_HIDDEN_GROUPS:
+            break
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
 MAX_SAVED_TERMS = 8
 MAX_SAVED_QUERY = 64
 
@@ -4712,6 +4879,10 @@ def normalize_state(raw: Any) -> dict[str, Any]:
                 continue
             seen_terms.add(sig)
             state["savedSearches"].append(record)
+    # Hidden groups (M3-01). Same whitelist trap as savedSearches above: this
+    # writer rebuilds from default_state(), so a key it is not taught is
+    # erased by the next `state favorite add`.
+    state["hiddenGroups"] = normalize_hidden_groups(raw.get("hiddenGroups"))
     state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
     # What the player was last asked to play (4.6, section 8). Same record as
     # lastPlayed, different lifetime: the service clears it when the player
@@ -5009,6 +5180,11 @@ def build_parser() -> argparse.ArgumentParser:
                                       help="pause, resume or toggle the live stream (not rewind: the streams are not seekable)")
     pause.add_argument("--state", choices=("on", "off", "toggle"), default="toggle")
     pause.set_defaults(func=cmd_player)
+    tracks = player_actions.add_parser("tracks", parents=[player_socket],
+                                       help="list audio and subtitle tracks; with --audio/--sub, select first and then list")
+    tracks.add_argument("--audio", default=None, help="mpv audio track id, or 'no'")
+    tracks.add_argument("--sub", default=None, help="mpv subtitle track id, or 'no'")
+    tracks.set_defaults(func=cmd_player)
 
     orphan = player_actions.add_parser("orphan-check", parents=[player_socket], help="stop the player only if its claiming shell is still alive")
     orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")

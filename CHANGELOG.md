@@ -3,6 +3,40 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.9.0 (2026-09-27)
+
+Two things that make a long list less hostile.
+
+### Added
+
+- **Hide groups you never want to see.** In the guide's list mode, `x` on
+  a channel hides the group it belongs to -- except in Recent and Favorites,
+  where `x` keeps the meaning it always had: remove whatever put the row
+  there, which in Favorites is the star if you starred it and the whole
+  saved search otherwise. The group leaves All, the group
+  list and search, and sits dimmed under a HIDDEN section at the bottom of
+  the column; go there and press `x` again to bring it back. Your starred
+  favorites, your recents and channel numbers still reach a hidden group's
+  channels, because those are things you chose one at a time; a saved search
+  does not, because a saved search is a search. Hidden groups are remembered
+  by name, across sources and restarts.
+- **Audio and subtitle picker.** `t` in list mode, while a channel plays,
+  opens a small panel over the list with the stream's audio tracks and
+  subtitles; `j`/`k` move, `Enter` selects, `Esc` closes. The panel shows
+  what the player is actually using, not what was asked, and it follows you
+  when you change channel. The choice itself does not: a new channel starts
+  on its own default track, because a track number means something
+  different on every stream.
+
+### Fixed
+
+- **A refused pause was believed anyway.** A stream that refused to pause
+  left the bar saying `Paused` over a channel
+  that was still playing, for up to ten seconds, and reported the refusal to
+  the log as an internal error with a traceback. The refusal is now a named
+  status, and the shell asks the player what is true instead of believing
+  its own optimism.
+
 ## 0.8.0 (2026-09-25)
 
 The channel wall.

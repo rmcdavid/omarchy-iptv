@@ -3,11 +3,13 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.8.0 Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.9.0 Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
-tuning, picture in picture, and a channel wall that shows your channels as a
+tuning, picture in picture, a channel wall that shows your channels as a
 grid of tiles -- their logos if you have turned those on, their names either
-way; the releases before this one went to the guide at
+way -- hiding the groups you never want to see, and an audio and subtitle
+picker for streams that carry more than one language. The releases before
+this one went to the guide at
 real provider scale, and to search accuracy and readable contrast.
 `CHANGELOG.md` has the release notes.
 
@@ -64,9 +66,13 @@ one-line copies you make yourself):
 Settings live inline on the widget's entry in `~/.config/omarchy/shell.json`
 (mode 0600) and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
 The guide, the bar widget, and the service all read that one entry. Playlist
-URLs from paid providers embed credentials: they stay in that file and in the
-channel cache, both readable only by you, and are never shown or logged beyond
-their host name.
+and guide-data URLs from paid providers embed credentials, and they rest in
+three files, all mode 0600 and readable only by you: that `shell.json` entry,
+the channel cache, and `~/.local/state/omarchy-iptv/state.json`, which keeps
+the Sources history and each source's URLs. They are never shown or logged
+beyond their host name. Two sentences in this file used to say two files,
+which mattered because the third is the one you might think safe to copy into
+a dotfiles repository.
 
 Two places they can escape that, both worth knowing:
 
@@ -74,12 +80,14 @@ Two places they can escape that, both worth knowing:
   writes the whole thing into `~/.bash_history` or `~/.zsh_history`, where it
   stays until you remove it. Use the in-app form instead — that is what it is
   for. If you have already done it, `history -d` the line and check the file.
-- **The process list, briefly.** When the plugin fetches your playlist it
-  passes the URL to its helper as a command-line argument, so for the few
-  hundred milliseconds that fetch runs another account on the same machine
-  could read it from `/proc`. On a single-user machine this is nothing; on a
-  shared one it is worth knowing. Nothing else on the plugin's side writes the
-  URL anywhere but the two 0600 files above.
+- **The process list, briefly.** When the plugin fetches your playlist, or
+  your guide data, it passes that URL to its helper as a command-line
+  argument, so while the fetch runs another account on the same machine could
+  read it from `/proc`. Both carry your credentials on an Xtream provider:
+  the playlist URL and the `xmltv.php` guide URL are built from the same
+  username and password. On a single-user machine this is nothing; on a
+  shared one it is worth knowing. Nothing else on the plugin's side writes
+  either URL anywhere but the three 0600 files above.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -132,17 +140,23 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | list | Enter | play, close, focus the player |
 | list | Space | play and keep the guide open (zap while watching) |
 | list | f | toggle favorite |
-| list | x | remove from Recent, or unfavorite in Favorites |
+| list | x | remove whatever put this row here. In Recent: forget the recent. In Favorites: unfavorite it if you starred it, or -- if a saved search put it there -- forget that whole search, which takes its other rows with it; the confirmation says which search and how many channels. Anywhere else: hide the group this channel is in. Hidden groups move to a HIDDEN section at the bottom of the group column; go there and press `x` again to bring one back |
 | list | s | stop playback |
 | list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
 | list | c | pause or resume the live stream. Not rewind: live streams cannot be wound back, so there is no returning to something that already happened, and the pause lasts about five minutes before the buffer fills. Bind a key to `omarchy-shell io.github.rmcdavid.iptv pause` to reach it while the guide is closed |
+| list | t | while something plays: choose the audio track and the subtitles. A small panel lists what the stream carries; `j`/`k` move, `Enter` selects, `Esc` closes. List mode only -- in search mode `t` is just a letter you are typing |
 | list | p | picture in picture: shrink the player into a corner, or put it back |
 | list | r | refresh playlist and EPG now |
 | list | / or Tab | back to search mode; Esc clears the query, then closes |
 
 Lists: Recent and Favorites are pinned at the top of the group column, then
-All, then every group in playlist order, with Ungrouped last. Browsing with an
+All, then every group in playlist order, with Ungrouped last. A group you hide
+with `x` leaves All, the group list and search, and sits dimmed under HIDDEN at
+the bottom of the column until you bring it back; your starred favorites,
+your recents and channel numbers still reach its channels, because those are
+things you chose one at a time. A saved search does not: a saved search is a
+search, and search does not look inside a hidden group. Browsing with an
 empty query reaches every channel in the list; only search results are capped
 at 200 rows (the footer says `keep typing`). With an EPG configured, rows show
 what is on now, when it ends, and what is next. If a guide-data fetch fails,
@@ -265,6 +279,12 @@ carry channel ids — most do — are not affected at all.
 
 - One mpv window, class `omarchy-iptv`, titled with the channel name.
   Switching channels reuses it.
+- Streams that carry more than one audio language, or subtitles, can be
+  switched from the guide: `t` in list mode while the channel plays. The
+  choice lasts as long as the channel does: changing channel goes back to
+  whatever the new stream says is its own default, because a track number
+  means something different on every stream. Remembering a preferred
+  *language* is a different feature and is not here yet.
 - Playback survives `omarchy restart shell`. The player runs on its own and
   the guide reattaches to it, so a restart, a theme change or installing
   another plugin all leave what you are watching alone.
@@ -276,12 +296,17 @@ carry channel ids — most do — are not affected at all.
   it is terminated, and if it ignores that too it is killed, within about
   four seconds. Playing a channel while the old player is still shutting
   down starts a fresh player once it has exited.
-- No stream address, credential or header value ever reaches any command
-  line. The player starts empty and receives all of it over a private socket
-  only you can read. Two smaller things are briefly visible to other local
+- No stream address, credential or header value ever reaches **the player's**
+  command line. The player starts empty and receives all of it over a private
+  socket only you can read. Four things are briefly visible to other local
   accounts in `ps`: the channel's internal identifier while a change is being
-  issued, and the channel's name while a failure notification is being sent.
-  Neither exposes your provider credentials.
+  issued, the channel's name while a failure notification is being sent, and
+  -- the two that matter -- your playlist URL and your guide-data URL, each
+  of which on an Xtream provider carries your username and password, while
+  the fetch that uses it runs. The last two are described under "The process
+  list, briefly" above. This sentence has been wrong twice: it said "any
+  command line", which denied all four, and then said "three things", which
+  omitted the guide-data URL. A list that counts itself has to be counted.
 - Two consequences of the player being independent, both deliberate. If you
   remove or disable the plugin while something is playing, the player is no
   longer guaranteed to stop with it. Disabling the plugin does stop it, in
@@ -345,8 +370,8 @@ itself unavailable rather than half working.
   (safe to delete; rebuilt on refresh). A 0.1.0 single cache is migrated on
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
-  played, your saved searches, the player session record, and the Sources
-  history including their URLs (mode 0600). Channels that failed to play are
+  played, your saved searches, the groups you have hidden, the player
+  session record, and the Sources history including their URLs (mode 0600). Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
 - `~/.cache/omarchy-iptv/sources/<source>/failed.json` : which channels of

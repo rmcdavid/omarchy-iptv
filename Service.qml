@@ -309,6 +309,58 @@ Item {
   // no going back before the keypress. Bounded by mpv's 150 MiB cache, about
   // five minutes on a typical stream.
   property bool paused: false
+  // M3-02: the audio and subtitle tracks the player last reported and the
+  // state of the question (idle | asking | ready | failed). `tracksQueued`
+  // is a request that arrived while another control ran: the channel is
+  // one-at-a-time and the panel is open and waiting, so it is issued when
+  // that control returns rather than dropped.
+  property var tracks: []
+  property string tracksState: "idle"
+  property var tracksQueued: null
+  // Whether anything is still showing the tracks. Set while the picker is
+  // open, so a channel change knows the difference between "throw the rows
+  // away" and "ask again about the new channel".
+  property bool tracksWanted: false
+  // WHICH channel the rows in `tracks` describe. Freshness used to be
+  // inferred from tracksState and tracks.length, and that could not survive
+  // a reply in flight across a channel change: the stale reply wrote the old
+  // channel's rows and flipped the state to ready, and every later gate then
+  // read as "already answered". The panel showed the previous stream's
+  // tracks with the new one playing, permanently, and Enter sent the old
+  // stream's numbering to the new one. A stamp cannot be fooled that way.
+  property string tracksFor: ""
+  // The channel the in-flight request was issued for, so its reply can be
+  // recognised as stale rather than trusted.
+  property string tracksAsking: ""
+  // The channel the last ask was issued for -- automatic or explicit, since
+  // requestTracks sets it either way. Cleared when the playing channel
+  // changes, when the picker closes, and when a health status shows the
+  // player alive; that last one is the recovery edge, and without it a
+  // single unanswered ask pinned the panel for the rest of the channel.
+  // Without the stamp at all, the gate re-armed on its own `running: false`
+  // reply and spawned helpers until the picker closed (D-TRK-6).
+  property string tracksAskedFor: ""
+  // A new play, a stop, a death: whatever the player reported was about the
+  // stream before this one. The rows go either way; whether we ask again
+  // depends on whether anyone is looking.
+  //
+  // The re-ask is NOT issued here. nowPlaying is assigned before the helper
+  // runs, so asking now reads the track list of the file still loaded and
+  // reports the OLD channel's selection as the new channel's -- measured on
+  // a real player: aid was 2 before the change and 1 after, while the panel
+  // still said 2. The play REPLY is the first moment the loadfile is done,
+  // so that is where the question goes.
+  onNowPlayingChanged: {
+    if (root.tracksWanted && root.nowPlaying) {
+      root.tracks = []
+      root.tracksFor = ""
+      root.tracksAskedFor = ""
+      root.tracksState = "asking"
+      root.tracksQueued = null
+    } else {
+      root.clearTracks()
+    }
+  }
   property var failedAt: ({})
   // The file behind it. Loaded on every source switch, so the marks a source
   // carries arrive with its channels and leave with it.
@@ -746,6 +798,16 @@ Item {
     root.userState = Model.withFavorites(root.userState, Model.toggleFavorite(root.userState.favorites, id))
     root.saveState()
     return Model.isFavorite(root.userState, id)
+  }
+
+  // M3-01: hide or unhide a group by name. Returns whether it is hidden
+  // NOW, or null when the reducer refused (the cap) and nothing was written.
+  function toggleHiddenGroup(name) {
+    var next = Model.toggleHiddenGroup(root.userState, name)
+    if (next === root.userState) return null
+    root.userState = next
+    root.saveState()
+    return Model.isGroupHidden(root.userState, name)
   }
 
   // Save the current search into Favourites. Returns the verdict the guide
@@ -1831,6 +1893,59 @@ Item {
     var kind = root.controlKind
     root.controlKind = ""
     var status = Model.parseHelperStatus(text, kind)
+    // M3-02: a queued tracks request goes out once this handler is done,
+    // whatever this reply was. Deferred rather than inline because the
+    // branches below return early and some issue a control of their own.
+    if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
+    // Whatever this reply was, an open picker may ask again -- the whole
+    // rule is Model.shouldRefreshTracks, which is a function and not a
+    // conjunction here precisely because two comments in a row described a
+    // rule this code did not have. The last of them said "at most once per
+    // channel", and the same commit that wrote it added the recovery edge
+    // in the healthy-status branch below, which makes it once per channel
+    // per observed-alive edge. Read the function.
+    else if (Model.shouldRefreshTracks({
+               wanted: root.tracksWanted,
+               playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
+               rowsFor: root.tracksFor,
+               askedFor: root.tracksAskedFor })) Qt.callLater(root.refreshTracks)
+    if (kind === "tracks") {
+      // The helper is authoritative (decision 5): the rows are what mpv has
+      // AFTER any selection, never what was asked.
+      // A reply for a channel that is no longer playing describes the wrong
+      // file: drop it and leave the panel asking, so the re-ask above fires.
+      var asked = root.tracksAsking
+      root.tracksAsking = ""
+      var playingId = root.nowPlaying ? String(root.nowPlaying.id || "") : ""
+      if (asked !== "" && asked !== playingId) {
+        root.drainPendingPlay()
+        return
+      }
+      if (status.ok === true && status.running === true) {
+        root.tracks = Model.parseTracks(status)
+        root.tracksFor = playingId
+        root.tracksState = "ready"
+      } else if (status.ok === true) {
+        // The helper says no player answered. That is "did not answer", not
+        // "nothing is playing": nowPlaying, the bar and the highlighted row
+        // all still name the channel, and a panel contradicting them is a
+        // panel the user has to decide between.
+        root.tracks = []
+        root.tracksFor = ""
+        root.tracksState = root.nowPlaying ? "failed" : "idle"
+      } else {
+        root.tracksState = "failed"
+      }
+      // A zap queued behind this reply must not wait for the health tick.
+      // The `pause` branch below returns without draining too and has the
+      // same gap -- a pause CAN be in flight across a zap, so the earlier
+      // version of this comment claiming otherwise was wrong, and it also
+      // said the gap was "filed" when no id had been written. It is
+      // D-PLY-23 now, and it is not repaired here because widening a repair
+      // past what has been tested is what the last three passes each caught.
+      root.drainPendingPlay()
+      return
+    }
     if (kind === "pause") {
       // The helper is authoritative: the optimistic flip is corrected here if
       // the player refused, or if there was no player to ask.
@@ -1839,12 +1954,32 @@ Item {
         root.paused = status.paused === true
       } else if (status.ok === true && status.running !== true) {
         root.paused = false
+      } else if (status.ok !== true) {
+        // D-PLY-20's other half, found in the 0.9.0 preflight. Both branches
+        // above require ok === true, so the REFUSAL -- the case the comment
+        // above says is corrected here -- fell through and left the
+        // optimistic flip from togglePause standing. That flag is not
+        // internal: it drives the bar's glyph and tooltip and the footer's
+        // resume hint, so the bar read "Paused" over a playing stream until
+        // the ten-second health poll happened to correct it. A refusal
+        // means we do not know, so ask: the `status` branch above is the
+        // one place that learns the truth from the player itself.
+        Qt.callLater(root.askPlayerStatus)
       }
       return
     }
     if (kind === "status") {
       var code = status.error ? String(status.error.code) : ""
       if (Model.statusHealthy(status)) {
+        // A player observed ALIVE is the one edge on which an open picker
+        // may ask again, and it is what D-TRK-6's bound took away: a single
+        // `running: false` reply -- a cold start inside the socket-bind
+        // window, or a wedge the health poll then restarts -- stamped the
+        // channel as asked and nothing ever unstamped it, so the panel sat
+        // on "the player did not answer" for the rest of that channel.
+        // `statusHealthy` is false for the reply shape that caused the loop,
+        // so this cannot restore it: a dead player still gets one ask.
+        if (root.tracksWanted) root.tracksAskedFor = ""
         root.healthFailures = 0
         if (status.paused !== undefined && status.paused !== null) root.paused = status.paused === true
         // D-PLY-14: a healthy player that its own stash says is on this exact
@@ -2830,6 +2965,68 @@ Item {
     if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return "busy"
     root.paused = want
     return ""
+  }
+
+  // M3-02 (PLAN-M3 decision 5). Ask the player for its tracks, selecting
+  // one first when `select` is { type, id }. "" when issued, "queued" when
+  // another control holds the channel, "idle" when nothing plays.
+  function requestTracks(select) {
+    if (!root.nowPlaying) {
+      root.clearTracks()
+      return "idle"
+    }
+    root.tracksWanted = true
+    root.tracksState = "asking"
+    root.tracksAsking = String(root.nowPlaying.id || "")
+    root.tracksAskedFor = root.tracksAsking
+    if (!root.runControl("tracks", Model.playerTracksArgv(root.socketPath, select || null))) {
+      root.tracksQueued = { select: select || null }
+      return "queued"
+    }
+    return ""
+  }
+
+  // One `status` to the player, deferred so it is issued after the reply
+  // that asked for it has finished unwinding (the channel is one at a time).
+  // The `status` branch above is the only place that learns pause, the
+  // channel and the health verdict from the player itself.
+  function askPlayerStatus() {
+    if (root.userStopped || root.stopping || !root.playerUp) return
+    root.runControl("status", ["status", "--socket", root.socketPath])
+  }
+
+  function cancelTracks() {
+    root.tracksWanted = false
+    root.tracksQueued = null
+    root.tracksAsking = ""
+    root.tracksAskedFor = ""
+  }
+
+  // The channel changed under an open picker and the play has now landed.
+  function refreshTracks() {
+    if (!Model.shouldRefreshTracks({
+          wanted: root.tracksWanted,
+          playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
+          rowsFor: root.tracksFor,
+          askedFor: root.tracksAskedFor })) return
+    root.requestTracks(null)
+  }
+
+  function clearTracks() {
+    root.tracks = []
+    root.tracksFor = ""
+    root.tracksAsking = ""
+    root.tracksAskedFor = ""
+    root.tracksState = "idle"
+    root.tracksQueued = null
+    root.tracksWanted = false
+  }
+
+  function issueQueuedTracks() {
+    var queued = root.tracksQueued
+    if (!queued) return
+    root.tracksQueued = null
+    root.requestTracks(queued.select)
   }
 
   function beginSwitch() {

@@ -67,9 +67,24 @@ Item {
   // the message, the button and the Enter handler branch on.
   readonly property bool confirmOpen: mode === "confirmRemove" || mode === "confirmLogos"
   readonly property string confirmKind: mode === "confirmLogos" ? "logos" : "remove"
-  // The PanelKeyCatcher is live in the two list-like modes only; search
-  // mode, the forms and the confirm dialog block it (UX-SOURCES 2).
-  readonly property bool catcherLive: listMode || inSources
+  // M3-02: the audio and subtitle picker is a mode over the list (UX 2.9).
+  // Its rows are what the player last answered, built by Model.trackRows;
+  // its cursor is the guide state's own, so the whole surface is one node
+  // can test.
+  readonly property bool inTracks: mode === "tracks"
+  readonly property int trackCursor: guide.trackCursor
+  // Which channel the rows the cursor sits in belong to (see settleTrackCursor).
+  property string trackRowsFor: ""
+  readonly property var trackRows: root.inTracks && root.serviceReady ? Model.trackRows(root.service.tracks) : []
+  readonly property string trackMessage: root.inTracks ? Model.trackPanelMessage(root.serviceReady ? root.service.tracksState : "idle", root.trackRows) : ""
+  // Leaving the picker by any door (Esc, `t`, the scrim, a dismiss) drops a
+  // request still queued behind another control, so no reply lands on a
+  // panel that is gone.
+  onInTracksChanged: if (!root.inTracks && root.serviceReady && typeof root.service.cancelTracks === "function") root.service.cancelTracks()
+  // The PanelKeyCatcher is live in the list-like modes only; search
+  // mode, the forms and the confirm dialog block it (UX-SOURCES 2). The
+  // picker is list-like: j/k, Enter and Esc, nothing typed.
+  readonly property bool catcherLive: listMode || inSources || inTracks
   readonly property string query: guide.query
   readonly property string scopeId: guide.scopeId
   readonly property string effectiveScope: Model.effectiveScope(scopeId, query)
@@ -218,6 +233,7 @@ Item {
     logosOn: "Channel logos on" + Model.SEP + "fetching now",
     logosOff: "Channel logos off",
     pauseNothing: "Nothing is playing",
+    tracksTitle: "Audio and subtitles",
     pauseBusy: "The player is busy" + Model.SEP + "try again",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
@@ -472,7 +488,13 @@ Item {
   // empty; the service's wl-paste verb (requestClipboard / clipboardText)
   // is then used and guarded here.
   readonly property bool pasteViaProcess: false
-  readonly property bool headerShowsSearch: guideMode || firstRunHead
+  // M3-02: the picker is a panel OVER the list, so the surface under it does
+  // not change. This flag restores the QUERY LINE and suppresses the title;
+  // the SCOPE LABEL is restored by `headerRight` below. The first version of
+  // this repair set this flag alone and claimed, here and in UX 2.9, that
+  // all three were restored -- so the note is split across the two
+  // properties that actually do it, because the claim was the defect.
+  readonly property bool headerShowsSearch: guideMode || inTracks || firstRunHead
   readonly property string headerTitle: {
     if (root.mode === "sourceEdit") return root.form && root.form.sourceId !== "" ? root.copy.editSourceTitle : root.copy.addSourceTitle
     if (root.mode === "sourceXtream") return root.copy.xtreamTitle
@@ -480,7 +502,12 @@ Item {
     return ""
   }
   readonly property string headerRight: {
-    if (root.guideMode) return root.scopeLabelText
+    // M3-02: `tracks` is not a guideMode, and the picker is a panel OVER the
+    // list, so the list's own place indicator stays. Without this the scope
+    // label blanked behind the scrim while the query line beside it did not
+    // -- and the repair that restored the query line wrote a sentence in UX
+    // 2.9 saying both had been restored. Half a repair with a whole claim.
+    if (root.guideMode || root.inTracks) return root.scopeLabelText
     if (root.inSources || root.confirmOpen) return Model.sourcesHeaderCount(root.sourceCount)
     return ""
   }
@@ -713,7 +740,11 @@ Item {
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
       // on screen. `scope` and `group` are the same five characters.
-      groupsNarrow: root.groupAxis.narrows })
+      groupsNarrow: root.groupAxis.narrows,
+      // M3-01: `x hide group` / `x unhide` is decided by the same table the
+      // key dispatches on, from the cursor row and the current scope.
+      scopeId: root.scopeId, channel: root.rowAt(root.cursorIndex),
+      state: root.serviceReady ? root.service.userState : null })
     var out = []
     for (var i = 0; i < pairs.length; i++) {
       out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
@@ -1134,21 +1165,40 @@ Item {
   // later as a Favourites list full of strangers.
   function saveCurrentSearch() {
     if (!root.serviceReady) return
-    var count = Model.savedSearchCount(root.service.channels, root.query)
+    // The number must describe the rows this search will actually put in
+    // Favourites, and hiding removes a group from search. Third site of the
+    // D-SAVE-2 divergence: the footer and the column entry were repaired by
+    // calling one function and both of these were left deriving it a second
+    // way, so a query matching inside a hidden group said "3 channels" over
+    // a screen showing one.
+    var count = Model.savedSearchCountVisible(root.service.channels, root.service.userState, root.query)
     var result = root.service.saveSearch(root.query)
     root.showTransient(Model.savedSearchNotice(result, root.query, count))
     root.rebuildDisplay()
   }
 
   // x / Delete: remove from Recent, or unfavorite in Favorites; no-op elsewhere.
+  // `x`: what it removes depends on the list it is pressed in, and the
+  // table that decides is Model.hideAction -- the same call the footer
+  // derives its verb from, so the hint and the handler cannot disagree
+  // (M3-01, PLAN-M3 decision 3).
   function removeAt(index) {
     var channel = root.rowAt(index)
     if (!channel || !root.serviceReady) return
-    if (root.effectiveScope === Model.SCOPE_RECENT) {
+    var act = Model.hideAction({ scopeId: root.scopeId, query: root.query, channel: channel, state: root.service.userState })
+    if (act.action === "recent") {
       root.service.removeRecent(Model.channelId(channel))
       root.showTransient(root.copy.transientRecentRemoved)
       root.rebuildDisplay()
-    } else if (root.effectiveScope === Model.SCOPE_FAVORITES) {
+    } else if (act.action === "hide" || act.action === "unhide") {
+      // Count BEFORE the toggle, from the group scope, so the notice names
+      // the rows that just left (or came back) rather than what is left.
+      var groupRows = Model.channelsForScope(root.service.channels, Model.groupScopeId(act.group), root.service.userState).length
+      var hidden = typeof root.service.toggleHiddenGroup === "function" ? root.service.toggleHiddenGroup(act.group) : null
+      root.showTransient(Model.hideNotice(hidden, act.group, groupRows,
+                                          { wall: root.wallView, narrow: root.narrow }))
+      if (hidden !== null) root.rebuildDisplay()
+    } else if (act.action === "favorite") {
       // D-SAVE-1. Favourites holds two kinds of row since saved searches
       // landed: channels the user starred, and channels a saved search
       // matched. `x` used to call the favourite toggle for both -- so on a
@@ -1163,7 +1213,9 @@ Item {
       var origin = Model.favoriteOrigin(root.service.userState, channel)
       if (!origin) return
       if (origin.kind === "star") { root.toggleFavoriteAt(index); return }
-      var count = Model.savedSearchCount(root.service.channels, origin.query)
+      // Same rule as saveCurrentSearch: the number names the rows that go,
+      // and hidden groups are not among them.
+      var count = Model.savedSearchCountVisible(root.service.channels, root.service.userState, origin.query)
       root.service.forgetSearch(origin.query)
       root.showTransient(Model.favoriteRemovalNotice(origin, count))
       root.rebuildDisplay()
@@ -1228,6 +1280,15 @@ Item {
   // The guide owns the timer, the cursor and the chip. Every decision below
   // is a Model.js call; there is no number logic in this file.
 
+  // The channel behind an id, from the service's own index (the same map
+  // `play` resolves against), independent of what is on screen.
+  function channelById(id) {
+    var key = String(id || "")
+    if (key === "" || !root.serviceReady || !root.service.channelIndex) return null
+    var found = root.service.channelIndex[key]
+    return found === undefined ? null : found
+  }
+
   function rowIndexOfId(id) {
     var key = String(id || "")
     if (key === "") return -1
@@ -1251,16 +1312,21 @@ Item {
     var id = Model.chnoIdAt(root.chnoIndex, hit.channelIndex)
     var at = root.rowIndexOfId(id)
     if (at < 0) {
-      // Outside the current list: the scope moves to All, clearing a query
-      // that is in the way, exactly as a search from Favorites jumps the
-      // column (UX 2.7). In All the target's numeric neighbours are the
-      // adjacent rows, so j/k right after a jump are channel up and down.
+      // Outside the current list: the scope moves, clearing a query that is
+      // in the way, exactly as a search from Favorites jumps the column
+      // (UX 2.7). WHERE it moves is Model's decision, because All stopped
+      // being the answer when hidden groups landed -- a number resolving
+      // into a hidden group found nothing in All, so the cursor never moved
+      // and the line below named the row it had been reset onto.
       if (root.hasQuery) root.guide = Model.withQuery(root.guide, "")
-      root.setScope(Model.SCOPE_ALL)
+      root.setScope(Model.numberJumpScope(root.channelById(id), root.serviceReady ? root.service.userState : null))
       at = root.rowIndexOfId(id)
     }
     if (at >= 0) root.selectAbsolute(at)
-    var row = root.rowAt(at >= 0 ? at : root.cursorIndex)
+    // Only ever name the row the NUMBER resolved to. Naming the row under
+    // the cursor instead is how an unreachable number came to announce, and
+    // then play, a channel the user had not asked for.
+    var row = at >= 0 ? root.rowAt(at) : null
     root.numberTargetName = row ? String(row.name || "") : ""
   }
 
@@ -1432,6 +1498,16 @@ Item {
   // Keys both modes share and PanelKeyCatcher does not consume:
   // PgUp/PgDn, Home/End, Delete. In Sources they drive the source cursor.
   function handleSharedKey(event) {
+    // M3-02: Home/End jump over the picker's choosable rows; the page keys
+    // and Delete have nothing to do there and are swallowed rather than
+    // reaching the list underneath.
+    if (root.inTracks) {
+      // Both go through the same table j/k use, and the scroll is on the
+      // cursor binding above, so neither has to remember it.
+      if (event.key === Qt.Key_Home) { root.guide = Model.withTrackCursor(root.guide, Model.moveTrackCursor(root.trackRows, -1, 1)); return true }
+      if (event.key === Qt.Key_End) { root.guide = Model.withTrackCursor(root.guide, Model.moveTrackCursor(root.trackRows, -1, -1)); return true }
+      return event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown || event.key === Qt.Key_Delete
+    }
     if (root.inSources) {
       if (event.key === Qt.Key_PageUp) { root.moveSourceCursorBy(-root.sourcePageSize(), false); return true }
       if (event.key === Qt.Key_PageDown) { root.moveSourceCursorBy(root.sourcePageSize(), false); return true }
@@ -1518,6 +1594,7 @@ Item {
     else if (action === "refresh") root.refresh()
     else if (action === "pip") root.togglePip()
     else if (action === "pause") root.togglePause()
+    else if (action === "tracks") root.openTracks()
     else if (action === "sources") root.openSources()
     else if (action === "search") {
       root.swallowKey = true
@@ -1949,6 +2026,89 @@ Item {
     else if (why !== "") root.showTransient(root.copy.pauseNothing)
   }
 
+  // ---- M3-02: the track picker (PLAN-M3 decision 5). It asks the player
+  // and shows what the player answers; nothing here remembers a choice.
+  function openTracks() {
+    if (!root.listMode || !root.serviceReady) return
+    if (root.playingId === "" || typeof root.service.requestTracks !== "function") { root.showTransient(root.copy.pauseNothing); return }
+    root.setGuide(Model.openTracks(root.guide))
+    root.askTracks(null)
+    root.refocus()
+  }
+
+  function closeTracks() {
+    if (!root.inTracks) return
+    root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
+  }
+
+  // A zap while the picker is open (the bar's wheel, an IPC next, Space on
+  // another row) replaces nowPlaying, and what the player reported was about
+  // the stream before it. The panel used to go idle and read "Nothing is
+  // playing" over a channel that was playing, for ever, because nothing
+  // re-asked. Decision 5 says the player is authoritative, so the panel asks
+  // it again about the new channel rather than lying about the old one.
+  // The service re-asks by itself once the play lands (it owns the timing:
+  // nowPlaying changes before the helper has loaded anything). The guide's
+  // only job here is the case the service cannot decide -- nothing is
+  // playing any more, so there is nothing to pick from.
+  function onPlayingChannelChanged() {
+    if (!root.inTracks || !root.serviceReady) return
+    if (root.playingId === "") root.closeTracks()
+  }
+
+  function askTracks(select) {
+    var why = root.service.requestTracks(select)
+    if (why === "idle") root.showTransient(root.copy.pauseNothing)
+  }
+
+  function moveTrackCursorBy(delta) {
+    var next = Model.moveTrackCursor(root.trackRows, root.trackCursor, delta)
+    if (next >= 0) root.guide = Model.withTrackCursor(root.guide, next)
+  }
+
+  // The rows scroll now, so the cursor has to be brought into view like the
+  // channel list's is; without this j/k walks it off the bottom of the card.
+  //
+  // Bound to the CURSOR rather than called by the movers. The first version
+  // called it from the two movers it had in mind and left Home and End --
+  // and End selects the last row, which on the many-track streams the
+  // ListView exists for is exactly the row off the bottom. A fifth writer
+  // would have forgotten it too. One binding cannot be forgotten.
+  onTrackCursorChanged: root.scrollToTrackCursor()
+
+  function scrollToTrackCursor() {
+    if (!root.inTracks || !trackList || trackList.height <= 0) return
+    if (root.trackCursor < 0 || root.trackCursor >= root.trackRows.length) return
+    trackList.positionViewAtIndex(root.trackCursor, ListView.Contain)
+  }
+
+  function selectTrackAt(index) {
+    var row = root.trackRows[index]
+    if (!row || row.kind !== "track") return
+    root.askTracks({ type: row.type, id: row.id })
+  }
+
+  // A reply landed. The panel opens before the list arrives, so the cursor
+  // may be on nothing: put it on the selected audio track, or the first row
+  // that can be chosen. A cursor already on a choosable row stays put, so a
+  // selection does not jump the cursor away from what was just chosen.
+  // A reply landed. The cursor goes home when the rows are a different
+  // channel's -- row 3 of the old stream means nothing on the new one -- and
+  // otherwise stays where the user put it, so selecting a track does not
+  // jump the cursor away from what was just chosen. The scroll is NOT called
+  // from here: it is bound to the cursor (onTrackCursorChanged), because the
+  // version that called it from the movers it knew about missed Home and End.
+  function settleTrackCursor() {
+    if (!root.inTracks || !root.serviceReady) return
+    var rows = Model.trackRows(root.service.tracks)
+    var cur = rows[root.trackCursor]
+    var sameChannel = root.trackRowsFor === root.playingId
+    root.trackRowsFor = root.playingId
+    if (sameChannel && cur && cur.kind === "track") return
+    var home = Model.trackCursorHome(rows)
+    if (home >= 0) root.guide = Model.withTrackCursor(root.guide, home)
+  }
+
   function toggleLogos() {
     if (!root.inSources) return
     if (!root.serviceReady || typeof root.service.setShowLogos !== "function") {
@@ -2224,6 +2384,8 @@ Item {
     function onZapSkippedDead(text) { root.showTransient(text) }
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
+    function onTracksChanged() { root.settleTrackCursor() }
+    function onNowPlayingChanged() { root.onPlayingChannelChanged() }
     // UX 6.1: a manual refresh ends with `Refreshed - N channels` in the
     // status slot for the transient window (D-LIVE-05).
     function onPlaylistRefreshed(channelCount, manual) {
@@ -2394,6 +2556,10 @@ Item {
           // doing their own job, so j/k, Tab and x never act on a half-typed
           // number and never leave one live behind them.
           onMoveRequested: function(dx, dy) {
+            if (root.inTracks) {
+              if (dy !== 0) root.moveTrackCursorBy(dy)
+              return
+            }
             if (root.inSources) {
               if (dy !== 0) root.moveSourceCursorBy(dy, true)
               return
@@ -2412,6 +2578,7 @@ Item {
           onActivateRequested: {
             var enter = root.enterPending
             root.enterPending = false
+            if (root.inTracks) { root.selectTrackAt(root.trackCursor); return }
             if (root.inSources) { root.activateSourceRow(root.sourceCursor, !enter); return }
             // CN1: Enter and Space keep exactly the meanings UX 3.1 gives
             // them. The buffer commits first and then they play what the
@@ -2426,16 +2593,20 @@ Item {
           }
           onCloseRequested: root.handleEscape()
           onDeleteRequested: {
+            if (root.inTracks) return
             if (root.inSources) { root.startRemove(); return }
             root.endNumberEntry(true)
             root.removeAt(root.cursorIndex)
           }
           onTabRequested: function(direction) {
-            if (root.inSources) return
+            if (root.inSources || root.inTracks) return
             root.endNumberEntry(true)
             root.switchMode()
           }
           onTextKey: function(text) {
+            // M3-02: `t` closes the picker it opened; every other letter is
+            // nothing there, and must not reach the list underneath.
+            if (root.inTracks) { if (Model.listLetterAction(text) === "tracks") root.closeTracks(); return }
             if (root.inSources) { root.handleSourcesLetter(text); return }
             // Backspace and Delete both have a one-character event.text
             // ("\b", "\u007f") and reach this handler, so without the
@@ -2480,6 +2651,7 @@ Item {
           onCanceled: root.cancelRemove()
           onConfirmed: root.confirmKind === "logos" ? root.confirmLogos() : root.confirmRemove()
         }
+
       }
 
       Column {
@@ -2611,7 +2783,8 @@ Item {
             id: guideRow
             anchors.fill: parent
             spacing: 0
-            visible: root.guideMode
+            // M3-02: the picker is a panel OVER the list, not a screen.
+            visible: root.guideMode || root.inTracks
 
             // Group column (UX 2.2 / 2.3)
             Item {
@@ -2644,12 +2817,15 @@ Item {
                   required property string kind
 
                   readonly property bool isHeader: kind === "header"
+                  // M3-01: a hidden group's entry is dimmed, not gone, so the
+                  // user can see what they hid and reach it with h/l.
+                  readonly property bool isHidden: kind === "hidden"
                   readonly property bool selected: !isHeader && scopeId === root.scopeId
 
                   width: ListView.view.width
                   height: isHeader ? root.groupEntryHeight + Style.space(10) : root.groupEntryHeight
                   Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
-                  Accessible.name: isHeader ? label : label + ", " + Model.pluralChannels(count)
+                  Accessible.name: Model.scopeEntryAccessibleName({ label: label, count: count, kind: kind })
                   Accessible.selected: selected
 
                   PanelSectionHeader {
@@ -2695,6 +2871,11 @@ Item {
                       // never been pointed at it: 0 of 23 under 4.5, floor
                       // 4.70, and the accent survives untouched on 15 themes.
                       color: groupRow.selected ? root.cursorInk : root.foreground
+                      // M3-01: hidden entries sit at the secondary rung the
+                      // count column already uses on this card (D-RUNG-14),
+                      // and come back to full ink under the cursor, where
+                      // the entry is active and the fill is different.
+                      opacity: groupRow.isHidden && !groupRow.selected ? root.captionAlphaOnCard : 1
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       elide: Text.ElideRight
@@ -4409,6 +4590,198 @@ Item {
           }
         }
       }
+
+      // M3-02: the audio and subtitle picker (UX 2.9). A panel over the
+      // list rather than a screen: the list stays where it was under the
+      // scrim, and Esc, `t` or the scrim returns to it. It is the LAST
+      // child of the card so it paints over `layout`; a first draft put it
+      // beside the key catcher, where the list, a later sibling, painted
+      // over it -- seen on a real screen in the first live run, not by any
+      // gate, which is exactly the kind of thing rule 14 says a gate cannot
+      // see. Text on the cursor
+      // row is the plain foreground on the selection fill, as on the
+      // channel rows (UX 5.4: no accent on the cursor); the header rung
+      // and the caption rung are the column's.
+      Item {
+        id: trackPanel
+        anchors.fill: parent
+        visible: root.inTracks
+        z: 10
+        Accessible.ignored: !visible
+
+        Rectangle {
+          anchors.fill: parent
+          color: root.scrim
+          MouseArea { anchors.fill: parent; onClicked: root.closeTracks() }
+        }
+
+        BorderSurface {
+          id: trackCard
+          anchors.centerIn: parent
+          width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
+          // The rows scroll, so the card is as tall as it needs to be and no
+          // taller than the space it has. A ListView's contentHeight is the
+          // laid-out height of its delegates, which for these fixed-height
+          // rows is independent of the viewport -- so reading it to size the
+          // thing that sizes the viewport terminates. It is NOT a general
+          // guarantee about ListView, which is what an earlier version of
+          // this comment implied.
+          height: Math.min(parent.height - root.contentMargin * 2,
+                           root.contentMargin * 2 + trackHead.height + Style.space(4) + trackList.contentHeight)
+          radius: root.cornerRadius
+          color: root.background
+          borderSpec: root.borderSpec
+          padding: root.contentMargin
+          clip: true
+          Accessible.role: Accessible.Dialog
+          Accessible.name: root.copy.tracksTitle
+          MouseArea { anchors.fill: parent; onClicked: {} }
+
+          Column {
+            id: trackHead
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: root.contentMargin
+            spacing: Style.space(4)
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.copy.tracksTitle
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              elide: Text.ElideRight
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              visible: root.trackMessage !== ""
+              text: root.trackMessage
+              color: root.foreground
+              opacity: root.captionAlphaOnCard
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+          }
+
+          // A ListView, not a Column in the card: a stream with eight audio
+          // tracks and ten subtitles is ordinary on the sports and VOD rows
+          // this feature exists for, and a Column clipped everything past
+          // about twelve rows while j/k walked the cursor into the clipped
+          // ones and Enter selected a track nobody could see (0.9.0
+          // preflight). The cursor logic was already right; only the
+          // viewport was missing.
+          ListView {
+            id: trackList
+            objectName: "trackList"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: trackHead.bottom
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: root.contentMargin
+            anchors.rightMargin: root.contentMargin
+            anchors.bottomMargin: root.contentMargin
+            anchors.topMargin: Style.space(4)
+            clip: true
+            spacing: Style.space(4)
+            boundsBehavior: Flickable.StopAtBounds
+            model: root.trackRows
+            Accessible.role: Accessible.List
+            Accessible.name: root.copy.tracksTitle
+
+            delegate: Item {
+              id: trackRow
+              required property int index
+              required property var modelData
+              readonly property bool isHeader: modelData.kind === "header"
+              readonly property bool choosable: modelData.kind === "track"
+              readonly property bool current: choosable && index === root.trackCursor
+              width: ListView.view.width
+              height: isHeader ? root.groupEntryHeight + Style.space(6) : root.groupEntryHeight
+              Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
+              Accessible.name: Model.trackAccessibleName(root.trackRows, index)
+              Accessible.selected: current
+
+              PanelSectionHeader {
+                visible: trackRow.isHeader
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: (root.groupEntryHeight - Style.font.caption) / 2
+                text: trackRow.modelData.label
+                foreground: root.foreground
+                color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
+                fontFamily: root.fontFamily
+              }
+
+              Rectangle {
+                visible: !trackRow.isHeader
+                anchors.fill: parent
+                radius: root.cornerRadius
+                color: trackRow.current ? root.selectedBackground : "transparent"
+
+                Text {
+                  id: trackMark
+                  textFormat: Text.PlainText
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(16)
+                  text: trackRow.modelData.selected ? Model.GLYPHS.check : ""
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.left: trackMark.right
+                  anchors.right: trackDetail.left
+                  anchors.leftMargin: Style.space(6)
+                  anchors.rightMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: trackRow.modelData.label
+                  color: root.foreground
+                  opacity: trackRow.choosable ? 1 : root.captionAlphaOnCard
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  id: trackDetail
+                  textFormat: Text.PlainText
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: trackRow.modelData.detail
+                  color: root.foreground
+                  opacity: trackRow.current ? root.captionAlphaOnCursor : root.captionAlphaOnCard
+                  font.bold: true
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  horizontalAlignment: Text.AlignRight
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  enabled: trackRow.choosable
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.guide = Model.withTrackCursor(root.guide, trackRow.index)
+                    root.selectTrackAt(trackRow.index)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
     }
   }
 }
