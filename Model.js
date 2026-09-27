@@ -2345,6 +2345,17 @@ function scopeEntryAccessibleName(entry) {
   return e.kind === "hidden" ? name + ", hidden" : name
 }
 
+// How many channels a query will actually put in Favourites, from the list
+// the user can actually see. The guide had this expression twice and the
+// footer had a third version of the same question, which is how a query
+// matching inside a hidden group came to announce "3 channels" over a screen
+// showing one. One function, so a test calls what the guide calls (rule 12):
+// the string-matching check that stood here instead could only ever prove
+// the guide contained a particular expression.
+function savedSearchCountVisible(channels, state, query) {
+  return savedSearchCount(browsableChannels(channels, state), query)
+}
+
 // How many Favourites rows come from saved searches rather than stars. Shown in
 // the footer so the list is explicable: otherwise Favourites fills with
 // channels the user never starred and nothing says why.
@@ -8427,6 +8438,7 @@ if (typeof module !== "undefined") {
     withSavedSearch: withSavedSearch,
     savedSearchChannels: savedSearchChannels,
     savedSearchCount: savedSearchCount,
+    savedSearchCountVisible: savedSearchCountVisible,
     savedSearchHit: savedSearchHit,
     savedSearchTerms: savedSearchTerms,
     MAX_SAVED_QUERY: MAX_SAVED_QUERY,

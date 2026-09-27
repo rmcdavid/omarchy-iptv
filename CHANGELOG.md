@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.9.0 (2026-09-26)
+## 0.9.0 (2026-09-27)
 
 Two things that make a long list less hostile.
 
@@ -11,8 +11,9 @@ Two things that make a long list less hostile.
 
 - **Hide groups you never want to see.** In the guide's list mode, `x` on
   a channel hides the group it belongs to -- except in Recent and Favorites,
-  where `x` keeps the meaning it always had (remove the recent, unfavorite
-  the row). The group leaves All, the group
+  where `x` keeps the meaning it always had: remove whatever put the row
+  there, which in Favorites is the star if you starred it and the whole
+  saved search otherwise. The group leaves All, the group
   list and search, and sits dimmed under a HIDDEN section at the bottom of
   the column; go there and press `x` again to bring it back. Your starred
   favorites, your recents and channel numbers still reach a hidden group's

@@ -9102,7 +9102,8 @@ descriptions of the wall; `CLAUDE.md` still opened "Released through v0.7.1"
 eleven releases later; the `headerShowsSearch` comment still claimed it had
 restored the scope label, which `headerRight` restores; `settleTrackCursor`
 still implied it owned the scroll; `release.py`'s docstring described a
-guard order the code does not have; and the changelog's Fixed entry had no
+guard order the code did not have (corrected again in pass 4, having been
+recorded as fixed here when it was not); and the changelog's Fixed entry had no
 bold title, alone among eight releases.
 
 One conjunct of `shouldRefreshTracks` -- the `rowsFor` guard -- cannot be
@@ -9122,4 +9123,59 @@ rather than justified with an invented case.
 it had introduced.** The rule that follows is already filed as F-M3-5 and is
 now twice confirmed: a repair pass is never the last pass, and what a repair
 CLAIMS is as likely to be the defect as what it changes.
+
+## 0.9.0 preflight pass 4, 2026-09-27: the pass that existed because of F-M3-5
+
+Three lenses over the pass-3 repairs and the cut, two refuters each. 45
+agents, 21 raw findings, 19 survived, 4 blockers. Run because F-M3-5 -- this
+project's own filed finding -- says a repair pass is never the last pass,
+and pass 3's repairs were the unreviewed code.
+
+**It found four, and two of them had nothing to do with M3.**
+
+D-SINK-5 (P1): the README said "No stream address, credential or header
+value ever reaches any command line". The playlist URL is the credential on
+a paid provider and it goes on the helper's command line for the length of a
+fetch -- which the same README discloses correctly sixty lines earlier. The
+artifact contradicted itself on the claim a security reviewer reads hardest,
+and the false half was the absolute one. Nothing about the two new features;
+it had been shipping since the sentence was written, and four passes of
+reading the diff had not looked at it. **The lens that found it was the one
+told to read the shipped files END TO END rather than as a diff.**
+
+D-SAVE-5 (P2): both shipped files said `x` in Favourites unfavourites the
+row. On a saved-search row it forgets the whole search. CHANGELOG.md's own
+0.7.7 entry documents that correctly, so the 0.9.0 entry contradicted an
+earlier entry in the same file.
+
+D-SAVE-4 (P2): the `Ctrl+S` confirmation counted into hidden groups -- the
+THIRD site of the D-SAVE-2 divergence, after the footer and the column
+entry. The check that should have caught it was a regex for the literal
+expression the guide contained, so it went red when the expression was
+CORRECTED: a rule 14 check inside the suite that enforces rule 14. It calls
+`Model.savedSearchCountVisible` now.
+
+D-TRK-7 (P2): pass 3's bound removed the loop and the self-healing with it.
+One `running: false` reply -- a cold start inside the socket-bind window, or
+a wedge the health poll restarts without touching `nowPlaying` -- stamped the
+channel and nothing unstamped it. The recovery edge is a healthy status,
+which the looping shape is not, so it cannot reopen the storm.
+
+Also: five comments described behaviour their own code no longer has,
+including one claiming a gap was "filed" when no id had been written (now
+D-PLY-23); `MARKETPLACE_FILES_MIN` was the one floor the 0.9.0 re-level
+missed, 30 against 35 printed; and the changelog heading needed re-dating to
+2026-09-27 because the release crossed midnight -- caught by the D-REL-4
+guard written two passes earlier, which is the first time a guard from one
+pass caught a problem in a later one.
+
+| | pass 1 | pass 2 | pass 3 | pass 4 |
+|---|---|---|---|---|
+| node checks | 1646 | 1648 | 1649 | 1651 |
+| findings kept | 39 | 37 | 19 | 19 |
+| blockers | 17 | 6 | 3 | 4 |
+| live | 37/37 | 37/37 x2 | 37/37 x2 | 37/37 x2 |
+
+Four passes, 26 defects. Two of pass 4's four were older than this release
+and were found only because one lens was told to stop reading the diff.
 

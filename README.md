@@ -134,7 +134,7 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | list | Enter | play, close, focus the player |
 | list | Space | play and keep the guide open (zap while watching) |
 | list | f | toggle favorite |
-| list | x | remove from Recent, or unfavorite in Favorites. Anywhere else: hide the group this channel is in. Hidden groups move to a HIDDEN section at the bottom of the group column; go there and press `x` again to bring one back |
+| list | x | remove whatever put this row here. In Recent: forget the recent. In Favorites: unfavorite it if you starred it, or -- if a saved search put it there -- forget that whole search, which takes its other rows with it; the confirmation says which search and how many channels. Anywhere else: hide the group this channel is in. Hidden groups move to a HIDDEN section at the bottom of the group column; go there and press `x` again to bring one back |
 | list | s | stop playback |
 | list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
@@ -290,12 +290,16 @@ carry channel ids — most do — are not affected at all.
   it is terminated, and if it ignores that too it is killed, within about
   four seconds. Playing a channel while the old player is still shutting
   down starts a fresh player once it has exited.
-- No stream address, credential or header value ever reaches any command
-  line. The player starts empty and receives all of it over a private socket
-  only you can read. Two smaller things are briefly visible to other local
+- No stream address, credential or header value ever reaches **the player's**
+  command line. The player starts empty and receives all of it over a private
+  socket only you can read. Three things are briefly visible to other local
   accounts in `ps`: the channel's internal identifier while a change is being
-  issued, and the channel's name while a failure notification is being sent.
-  Neither exposes your provider credentials.
+  issued, the channel's name while a failure notification is being sent, and
+  -- the one that matters -- your playlist URL, which on a paid provider
+  carries your username and password, for the few hundred milliseconds a
+  fetch runs. That last one is described under "The process list, briefly"
+  above, and the sentence here used to say "any command line", which was
+  false and contradicted it.
 - Two consequences of the player being independent, both deliberate. If you
   remove or disable the plugin while something is playing, the player is no
   longer guaranteed to stop with it. Disabling the plugin does stop it, in

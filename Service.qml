@@ -332,10 +332,13 @@ Item {
   // The channel the in-flight request was issued for, so its reply can be
   // recognised as stale rather than trusted.
   property string tracksAsking: ""
-  // The channel the last AUTOMATIC ask was issued for. Cleared only when the
-  // playing channel changes, which is what bounds the re-ask to one per
-  // channel; without it the gate re-armed on its own `running: false` reply
-  // and spawned helpers until the picker closed (Model.shouldRefreshTracks).
+  // The channel the last ask was issued for -- automatic or explicit, since
+  // requestTracks sets it either way. Cleared when the playing channel
+  // changes, when the picker closes, and when a health status shows the
+  // player alive; that last one is the recovery edge, and without it a
+  // single unanswered ask pinned the panel for the rest of the channel.
+  // Without the stamp at all, the gate re-armed on its own `running: false`
+  // reply and spawned helpers until the picker closed (D-TRK-6).
   property string tracksAskedFor: ""
   // A new play, a stop, a death: whatever the player reported was about the
   // stream before this one. The rows go either way; whether we ask again
@@ -1894,11 +1897,11 @@ Item {
     // whatever this reply was. Deferred rather than inline because the
     // branches below return early and some issue a control of their own.
     if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
-    // Whatever this reply was, an open picker whose rows do not describe the
-    // channel that is playing asks again. Keyed on the STAMP, not on the
-    // state: a tracks reply in flight across a channel change used to land,
-    // write the old channel's rows and flip the state to ready, after which
-    // every state-shaped gate read as "already answered" for ever.
+    // Whatever this reply was, an open picker may ask again -- at most once
+    // per channel, which is the whole of Model.shouldRefreshTracks and the
+    // reason it is a function rather than a conjunction here. An earlier
+    // version of this comment described the rule pass 3 removed BECAUSE it
+    // looped, which is how a comment outlives the code beneath it.
     else if (Model.shouldRefreshTracks({
                wanted: root.tracksWanted,
                playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
@@ -1921,19 +1924,23 @@ Item {
         root.tracksFor = playingId
         root.tracksState = "ready"
       } else if (status.ok === true) {
+        // The helper says no player answered. That is "did not answer", not
+        // "nothing is playing": nowPlaying, the bar and the highlighted row
+        // all still name the channel, and a panel contradicting them is a
+        // panel the user has to decide between.
         root.tracks = []
         root.tracksFor = ""
-        root.tracksState = "idle"
+        root.tracksState = root.nowPlaying ? "failed" : "idle"
       } else {
         root.tracksState = "failed"
       }
       // A zap queued behind this reply must not wait for the health tick.
-      // The `pause` branch below returns without draining for the same
-      // reason and has the same gap; it is left alone here because a pause
-      // reply is never in flight across a zap the way a tracks reply is
-      // (the picker asks on open, on every selection and on every channel
-      // change), and widening the repair is how the last two passes each
-      // found a fresh claim. Filed rather than silently half-fixed.
+      // The `pause` branch below returns without draining too and has the
+      // same gap -- a pause CAN be in flight across a zap, so the earlier
+      // version of this comment claiming otherwise was wrong, and it also
+      // said the gap was "filed" when no id had been written. It is
+      // D-PLY-23 now, and it is not repaired here because widening a repair
+      // past what has been tested is what the last three passes each caught.
       root.drainPendingPlay()
       return
     }
@@ -1962,6 +1969,15 @@ Item {
     if (kind === "status") {
       var code = status.error ? String(status.error.code) : ""
       if (Model.statusHealthy(status)) {
+        // A player observed ALIVE is the one edge on which an open picker
+        // may ask again, and it is what D-TRK-6's bound took away: a single
+        // `running: false` reply -- a cold start inside the socket-bind
+        // window, or a wedge the health poll then restarts -- stamped the
+        // channel as asked and nothing ever unstamped it, so the panel sat
+        // on "the player did not answer" for the rest of that channel.
+        // `statusHealthy` is false for the reply shape that caused the loop,
+        // so this cannot restore it: a dead player still gets one ask.
+        if (root.tracksWanted) root.tracksAskedFor = ""
         root.healthFailures = 0
         if (status.paused !== undefined && status.paused !== null) root.paused = status.paused === true
         // D-PLY-14: a healthy player that its own stash says is on this exact

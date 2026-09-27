@@ -1778,8 +1778,29 @@ checkCall("saved searches: the guide binds a MODIFIED key, so bare letters still
   return [qmlSites(/Qt\.Key_S && event\.modifiers === Qt\.ControlModifier/).length,
           qmlSites(/root\.saveCurrentSearch\(\)/).length,
           qmlSites(/Model\.savedSearchNotice\(/).length,
-          qmlSites(/Model\.savedSearchCount\(root\.service\.channels, root\.query\)/).length]
-}, [1, 1, 1, 1])
+          // Both sites that count for a confirmation go through the ONE
+          // function, so the number always describes the rows on screen.
+          // This used to match the literal expression `savedSearchCount(
+          // root.service.channels, root.query)`, which proved only that the
+          // guide contained a string and went red when the expression was
+          // corrected -- a rule 14 check inside the suite that enforces
+          // rule 14. The arithmetic itself is asserted below, by calling it.
+          qmlSites(/Model\.savedSearchCountVisible\(/).length,
+          qmlSites(/Model\.savedSearchCount\(/).length]
+}, [1, 1, 1, 2, 0])
+checkCall("preflight pass 4: the saved-search confirmation counts the rows the user can see", function () {
+  const ch = [{ id: "a", name: "Sport One", group: "Sports", url: "http://h/a" },
+              { id: "b", name: "Sport Two", group: "Religious", url: "http://h/b" },
+              { id: "c", name: "Sport Three", group: "Religious", url: "http://h/c" }]
+  const none = Model.emptyState()
+  const hid = Model.parseState(JSON.stringify({ hiddenGroups: ["Religious"] }))
+  return [Model.savedSearchCountVisible(ch, none, "sport"),
+          Model.savedSearchCountVisible(ch, hid, "sport"),
+          // The rows a search would actually contribute, for comparison.
+          Model.filterChannels(Model.channelsForScope(ch, Model.SCOPE_ALL, hid), "sport", 50, [], null).rows.length,
+          // And the old, divergent answer, which is what shipped.
+          Model.savedSearchCount(ch, "sport")]
+}, [3, 1, 1, 3])
 
 // ---- D-SAVE-1: 0.7.6 shipped rows into Favourites that could not leave -----
 checkCall("D-SAVE-1: `x` on a SAVED row forgets the search; on a STARRED row it unstars", function () {
@@ -3242,7 +3263,12 @@ checkCall("D-PLY-14: and the service really asks, in the HEALTHY branch", functi
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Service.qml"), "utf8")
   const healthy = src.indexOf("Model.statusHealthy(status)")
   const call = src.indexOf("Model.failedAfterHealthy(")
-  return [call > healthy, call - healthy < 700, (src.match(/Model\.failedAfterHealthy\(/g) || []).length]
+  // A character budget rather than a structural check, so it is a proxy and
+  // says so: it went red in 0.9.0 because the healthy branch legitimately
+  // gained the track picker's recovery edge (D-TRK-6), not because the call
+  // moved. Widened once, with the reason, rather than quietly deleted -- a
+  // proxy nobody may adjust is a proxy somebody will delete.
+  return [call > healthy, call - healthy < 1400, (src.match(/Model\.failedAfterHealthy\(/g) || []).length]
 }, [true, true, 1])
 
 // ---- D-ID-4: one provider, two lists, and a favourite that moves ----
@@ -7458,6 +7484,27 @@ checkCall("preflight pass 3: the re-ask is bounded to one per channel, so a play
     Model.shouldRefreshTracks(null)
   ]
 }, [true, false, false, false, true, false, true, false, false, false])
+
+checkCall("preflight pass 4: the picker recovers when the player is seen alive, and only then", function () {
+  // D-TRK-6's bound removed the self-healing with the loop: one unanswered
+  // ask stamped the channel and nothing unstamped it, so a cold start inside
+  // the socket-bind window, or a wedge the health poll then restarts, left
+  // the panel saying the player had not answered for the rest of that
+  // channel. The recovery edge is a HEALTHY status, and the reply shape that
+  // caused the loop is not healthy -- which is why this cannot reopen it.
+  const noPlayer = { ok: true, kind: "player.tracks", running: false, tracks: [] }
+  const alive = { ok: true, kind: "status", running: true, playing: true, mpv: "0.41.0" }
+  return [
+    // The looping reply shape is NOT healthy, so it is not a recovery edge.
+    Model.statusHealthy(noPlayer),
+    // After the stamp, nothing re-asks...
+    Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "a" }),
+    // ...until the stamp is cleared, which is what the healthy branch does.
+    Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "" }),
+    // And a healthy status is a thing the service can actually observe.
+    Model.statusHealthy(alive)
+  ]
+}, [false, false, true, true])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
