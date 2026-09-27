@@ -223,6 +223,14 @@ requests and raise the batch.
   first and restore after.
 - The installed plugin at `~/.config/omarchy/plugins/io.github.rmcdavid.iptv`
   is the user's live install. Do not modify it as a side effect of repo work.
+  **Including by reading it.** Verifying that an install carries a change by
+  importing its helper -- `SourceFileLoader(...).exec_module()` -- writes
+  `bin/__pycache__/` into the plugin directory, which then shows as untracked
+  in the very `git status` the next update depends on. Run the installed
+  helper as a SUBPROCESS, the way the plugin itself does
+  (`python3 <install>/bin/omarchy-iptv <verb>`), which compiles nothing.
+  Done on 2026-09-27 and noticed only because the next update's
+  pre-flight check found the install dirty.
 
 ## Verify before you claim
 
