@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.9.0 (unreleased)
+## 0.9.0 (2026-09-26)
 
 Two things that make a long list less hostile.
 

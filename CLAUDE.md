@@ -37,10 +37,28 @@ Consequences you must respect:
   no force-push, no merge commits, no deletion, no bypass for anyone -- so a
   by-hand `git push origin X:main` that is not a fast-forward is refused
   there, not only by convention here.
-- A release is: bump `manifest.json` and `CHANGELOG.md` on `dev`, green
-  gate, `scripts/release.py build --gate-already-green`, then push `dev`,
-  `main` and the tag. While a marketplace review is open, `main` moves only
-  when the reviewer asks for a new commit.
+- A release is: bump `manifest.json` (and `Model.PLUGIN_VERSION` with it,
+  D-HOST-1), date the top `CHANGELOG.md` heading for the day of the cut,
+  re-level the test floors in `scripts/check.sh` to the counts on the tree,
+  green gate, `scripts/release.py build --gate-already-green`, then push
+  `dev`, `main` and the tag. `build` refuses a heading that names another
+  version or carries another day's date, which is how 0.8.0 came to ship
+  release notes dated the day before it existed (D-REL-4).
+- **A pending marketplace verification request does not hold `main`.** This
+  said the opposite until 2026-09-26: "while a marketplace review is open,
+  `main` moves only when the reviewer asks for a new commit", written on
+  2026-09-20 during the #7374 listing freeze and never revisited, while two
+  product-owner decisions had already overtaken it -- 2026-09-21, "the review
+  freeze on `main` is over; the branch model stands", and 2026-09-25, a
+  pending request blocks nothing because `VERIFICATION.md` says the verified
+  snapshot is unchanged while an update is pending. A moved `main` simply
+  reads as `Update unverified` until a maintainer actions the request.
+  What DOES matter is the opposite discipline, and it is the reason the
+  marketplace never served anything past v0.7.1: four update requests were
+  closed BY US as superseded, each at about a third of the maintainers' only
+  demonstrated turnaround of 3.5 days. So a release files a NEW verification
+  request and never closes an older one. Settled by the product owner on
+  2026-09-26 (F-M3-4).
 
 ## Where the truth lives
 

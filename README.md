@@ -3,11 +3,13 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.8.0 Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.9.0 Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, and a channel wall that shows your channels as a
 grid of tiles -- their logos if you have turned those on, their names either
-way; the releases before this one went to the guide at
+way, hiding the groups you never want to see, and an audio and subtitle
+picker for streams that carry more than one language; the releases before
+this one went to the guide at
 real provider scale, and to search accuracy and readable contrast.
 `CHANGELOG.md` has the release notes.
 
