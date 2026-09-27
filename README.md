@@ -5,10 +5,10 @@ theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
 Status: v0.9.0 Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
-tuning, picture in picture, and a channel wall that shows your channels as a
+tuning, picture in picture, a channel wall that shows your channels as a
 grid of tiles -- their logos if you have turned those on, their names either
-way, hiding the groups you never want to see, and an audio and subtitle
-picker for streams that carry more than one language; the releases before
+way -- hiding the groups you never want to see, and an audio and subtitle
+picker for streams that carry more than one language. The releases before
 this one went to the guide at
 real provider scale, and to search accuracy and readable contrast.
 `CHANGELOG.md` has the release notes.
@@ -147,9 +147,10 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 Lists: Recent and Favorites are pinned at the top of the group column, then
 All, then every group in playlist order, with Ungrouped last. A group you hide
 with `x` leaves All, the group list and search, and sits dimmed under HIDDEN at
-the bottom of the column until you bring it back; your favorites, your recents
-and channel numbers still reach its channels, because those are things you
-chose. Browsing with an
+the bottom of the column until you bring it back; your starred favorites,
+your recents and channel numbers still reach its channels, because those are
+things you chose one at a time. A saved search does not: a saved search is a
+search, and search does not look inside a hidden group. Browsing with an
 empty query reaches every channel in the list; only search results are capped
 at 200 rows (the footer says `keep typing`). With an EPG configured, rows show
 what is on now, when it ends, and what is next. If a guide-data fetch fails,

@@ -9064,3 +9064,62 @@ went red once in four runs and now polls.
 
 Live after the second pass: 37/37, twice.
 
+## 0.9.0 preflight pass 3, 2026-09-26: the last gate, over the artifact as it would ship
+
+Run on the final tree (d1a8216, manifest 0.9.0, changelog dated) across four
+lenses -- the pass-2 repairs as new code, every claim in the shipped files
+read end to end rather than as a diff, the cut simulated, and a hostile
+final critic -- with two refuters each. 50 agents, 23 raw findings, 19
+survived, 3 blockers.
+
+**It found a P1 that two previous passes and a green gate had missed, and
+it was introduced by pass 2.** D-TRK-6: the re-ask gate keyed on "the rows
+do not describe the playing channel", and the helper's `running: false`
+reply -- emitted whenever the socket does not answer -- clears the very
+stamp the gate reads, so the gate re-armed on its own reply and spawned a
+helper about six times a second for as long as the picker stayed open. The
+health poll that would have noticed the dead player shares the control
+channel and was starved by the storm.
+
+Two things made it invisible. First, the decision was an inline conjunction
+in `Service.qml`, so nothing in the suite could reach it -- engineering rule
+12, demonstrated at the cost of a P1. It is now `Model.shouldRefreshTracks`
+with ten cases behind it, and the storm itself is one of them. Second, the
+live scenario never runs with a dead player: every track check there has a
+healthy mpv, so the reply shape that loops never occurs.
+
+The other two blockers: the hide notice's narrow case had been extended by
+the example that prompted it rather than by its own terms, so a narrow WALL
+was still sent to a view with no column (D-HIDE-2); and pass 2 corrected the
+saved-search carve-out in `docs/UX.md` and `docs/PLAN-M3.md` and left the
+same claim standing in `README.md` and `CHANGELOG.md`, the two files that
+ship (F-M3-6). A correction that lands only where the team
+reads it is not a correction.
+
+Also fixed from this pass: the README summary line had absorbed both new
+features into the channel wall's own clause, so the release read as three
+descriptions of the wall; `CLAUDE.md` still opened "Released through v0.7.1"
+eleven releases later; the `headerShowsSearch` comment still claimed it had
+restored the scope label, which `headerRight` restores; `settleTrackCursor`
+still implied it owned the scroll; `release.py`'s docstring described a
+guard order the code does not have; and the changelog's Fixed entry had no
+bold title, alone among eight releases.
+
+One conjunct of `shouldRefreshTracks` -- the `rowsFor` guard -- cannot be
+made to go red, because every path that sets it goes through the function
+that sets `askedFor` first. That is written into the code as a comment
+rather than justified with an invented case.
+
+| | pass 1 | pass 2 | pass 3 |
+|---|---|---|---|
+| node checks | 1646 | 1648 | 1649 |
+| python tests | 656 | 657 | 657 |
+| findings kept | 39 | 37 | 19 |
+| blockers after refutation | 17 (4 of them the un-bumped version) | 6 | 3 |
+| live | 37/37 | 37/37 twice | 37/37 twice |
+
+**Three passes, 21 defects, and every pass found something the one before
+it had introduced.** The rule that follows is already filed as F-M3-5 and is
+now twice confirmed: a repair pass is never the last pass, and what a repair
+CLAIMS is as likely to be the defect as what it changes.
+

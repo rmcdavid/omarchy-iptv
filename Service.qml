@@ -332,6 +332,11 @@ Item {
   // The channel the in-flight request was issued for, so its reply can be
   // recognised as stale rather than trusted.
   property string tracksAsking: ""
+  // The channel the last AUTOMATIC ask was issued for. Cleared only when the
+  // playing channel changes, which is what bounds the re-ask to one per
+  // channel; without it the gate re-armed on its own `running: false` reply
+  // and spawned helpers until the picker closed (Model.shouldRefreshTracks).
+  property string tracksAskedFor: ""
   // A new play, a stop, a death: whatever the player reported was about the
   // stream before this one. The rows go either way; whether we ask again
   // depends on whether anyone is looking.
@@ -346,6 +351,7 @@ Item {
     if (root.tracksWanted && root.nowPlaying) {
       root.tracks = []
       root.tracksFor = ""
+      root.tracksAskedFor = ""
       root.tracksState = "asking"
       root.tracksQueued = null
     } else {
@@ -1893,8 +1899,11 @@ Item {
     // state: a tracks reply in flight across a channel change used to land,
     // write the old channel's rows and flip the state to ready, after which
     // every state-shaped gate read as "already answered" for ever.
-    else if (root.tracksWanted && root.nowPlaying
-             && root.tracksFor !== String(root.nowPlaying.id || "")) Qt.callLater(root.refreshTracks)
+    else if (Model.shouldRefreshTracks({
+               wanted: root.tracksWanted,
+               playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
+               rowsFor: root.tracksFor,
+               askedFor: root.tracksAskedFor })) Qt.callLater(root.refreshTracks)
     if (kind === "tracks") {
       // The helper is authoritative (decision 5): the rows are what mpv has
       // AFTER any selection, never what was asked.
@@ -1918,9 +1927,13 @@ Item {
       } else {
         root.tracksState = "failed"
       }
-      // A zap queued behind this reply must not have to wait for the health
-      // tick: every other branch drains, and this one returns before the
-      // shared drain at the end of the function.
+      // A zap queued behind this reply must not wait for the health tick.
+      // The `pause` branch below returns without draining for the same
+      // reason and has the same gap; it is left alone here because a pause
+      // reply is never in flight across a zap the way a tracks reply is
+      // (the picker asks on open, on every selection and on every channel
+      // change), and widening the repair is how the last two passes each
+      // found a fresh claim. Filed rather than silently half-fixed.
       root.drainPendingPlay()
       return
     }
@@ -2947,6 +2960,7 @@ Item {
     root.tracksWanted = true
     root.tracksState = "asking"
     root.tracksAsking = String(root.nowPlaying.id || "")
+    root.tracksAskedFor = root.tracksAsking
     if (!root.runControl("tracks", Model.playerTracksArgv(root.socketPath, select || null))) {
       root.tracksQueued = { select: select || null }
       return "queued"
@@ -2967,12 +2981,16 @@ Item {
     root.tracksWanted = false
     root.tracksQueued = null
     root.tracksAsking = ""
+    root.tracksAskedFor = ""
   }
 
   // The channel changed under an open picker and the play has now landed.
   function refreshTracks() {
-    if (!root.tracksWanted || !root.nowPlaying) return
-    if (root.tracksFor === String(root.nowPlaying.id || "")) return
+    if (!Model.shouldRefreshTracks({
+          wanted: root.tracksWanted,
+          playingId: root.nowPlaying ? String(root.nowPlaying.id || "") : "",
+          rowsFor: root.tracksFor,
+          askedFor: root.tracksAskedFor })) return
     root.requestTracks(null)
   }
 
@@ -2980,6 +2998,7 @@ Item {
     root.tracks = []
     root.tracksFor = ""
     root.tracksAsking = ""
+    root.tracksAskedFor = ""
     root.tracksState = "idle"
     root.tracksQueued = null
     root.tracksWanted = false

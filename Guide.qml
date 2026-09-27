@@ -489,9 +489,11 @@ Item {
   // is then used and guarded here.
   readonly property bool pasteViaProcess: false
   // M3-02: the picker is a panel OVER the list, so the surface under it does
-  // not change -- including the header. Without `inTracks` here the query
-  // line, the title and the scope label all blanked behind the scrim, which
-  // is the one thing UX 2.9 says the picker does not do.
+  // not change. This flag restores the QUERY LINE and suppresses the title;
+  // the SCOPE LABEL is restored by `headerRight` below. The first version of
+  // this repair set this flag alone and claimed, here and in UX 2.9, that
+  // all three were restored -- so the note is split across the two
+  // properties that actually do it, because the claim was the defect.
   readonly property bool headerShowsSearch: guideMode || inTracks || firstRunHead
   readonly property string headerTitle: {
     if (root.mode === "sourceEdit") return root.form && root.form.sourceId !== "" ? root.copy.editSourceTitle : root.copy.addSourceTitle
@@ -2085,7 +2087,9 @@ Item {
   // A reply landed. The cursor goes home when the rows are a different
   // channel's -- row 3 of the old stream means nothing on the new one -- and
   // otherwise stays where the user put it, so selecting a track does not
-  // jump the cursor away from what was just chosen.
+  // jump the cursor away from what was just chosen. The scroll is NOT called
+  // from here: it is bound to the cursor (onTrackCursorChanged), because the
+  // version that called it from the movers it knew about missed Home and End.
   function settleTrackCursor() {
     if (!root.inTracks || !root.serviceReady) return
     var rows = Model.trackRows(root.service.tracks)

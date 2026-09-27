@@ -2324,8 +2324,13 @@ function hideNotice(hidden, group, count, view) {
   var n = formatCount(count) + (Number(count) === 1 ? " channel" : " channels")
   if (hidden === null || hidden === undefined) return "Cannot hide more groups" + SEP + MAX_HIDDEN_GROUPS + " is the most"
   if (hidden !== true) return "Showing " + name + SEP + n
+  // Four views, not three: a NARROW wall leads to a narrow list, which has
+  // no column either, so naming Ctrl+G alone would send that user to a
+  // second view without the thing they were told to look at. Found one pass
+  // after the narrow case itself, which is what happens when a rule is
+  // extended by the example that prompted it rather than by its own terms.
   var where = "under HIDDEN in the column"
-  if (v.wall === true) where = WALL_KEY + " for the list to unhide"
+  if (v.wall === true) where = v.narrow === true ? WALL_KEY + ", then h/l to reach it" : WALL_KEY + " for the list to unhide"
   else if (v.narrow === true) where = "h/l to reach it under HIDDEN"
   return "Hid " + name + SEP + n + SEP + where
 }
@@ -4407,6 +4412,39 @@ function moveTrackCursor(rows, index, delta) {
   }
   var step = delta < 0 ? -1 : 1
   return at[(cur + step + at.length) % at.length]
+}
+
+// Whether an open picker should ask the player about the channel that is
+// playing now. Pure, and in Model.js rather than inline in the service,
+// because the inline version was a self-sustaining loop and no test in the
+// suite could reach it (rule 12).
+//
+// THE LOOP, which shipped past two preflights and a green gate: the gate was
+// "the rows do not describe the playing channel", and the one reply that
+// cannot satisfy it -- `running: false`, which the helper emits whenever the
+// socket does not answer -- is the reply that CLEARS the stamp. So the gate
+// re-armed itself on its own reply: ask, no player, clear, ask, at about six
+// helper spawns a second, with the health poll starved behind a permanently
+// busy control channel.
+//
+// `askedFor` is what breaks it: the channel the last ask was ISSUED for,
+// cleared only when the playing channel changes. So each channel is asked
+// about at most once automatically, however the reply comes back, and a
+// channel change still gets its one ask. An explicit ask (opening the
+// picker, choosing a track) does not come through here at all.
+function shouldRefreshTracks(opts) {
+  var o = opts || {}
+  var playing = str(o.playingId)
+  if (o.wanted !== true || playing === "") return false
+  // Belt and braces, and marked as such: every path that sets `rowsFor`
+  // goes through requestTracks, which sets `askedFor` to the same channel
+  // first, so no state the service can currently produce is refused by this
+  // line and not by the one below it. A mutation removing it leaves the
+  // suite green, and rather than inventing a case to justify it, that is
+  // written down here -- it guards a future caller that fills the rows some
+  // other way, and today it is documentation with a `return` in it.
+  if (str(o.rowsFor) === playing) return false
+  return str(o.askedFor) !== playing
 }
 
 // The one line under the title. `state` is the service's tracksState.
@@ -8446,6 +8484,7 @@ if (typeof module !== "undefined") {
     trackCursorHome: trackCursorHome,
     moveTrackCursor: moveTrackCursor,
     trackPanelMessage: trackPanelMessage,
+    shouldRefreshTracks: shouldRefreshTracks,
     trackAccessibleName: trackAccessibleName,
     openTracks: openTracks,
     copyGuide: copyGuide,

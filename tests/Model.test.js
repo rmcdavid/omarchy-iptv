@@ -7375,8 +7375,14 @@ checkCall("preflight: the hide notice sends the user where the view actually has
     const namesColumn = notice.indexOf("in the column") !== -1
     // Exactly one rule: the notice says "in the column" when, and only when,
     // the view draws one. Otherwise it names a key that reaches it.
-    const ok = drawn ? namesColumn
-                     : (!namesColumn && (notice.indexOf(Model.WALL_KEY) !== -1 || notice.indexOf("h/l") !== -1))
+    // When the column is not drawn the notice must name a key that REACHES
+    // it from here: Ctrl+G on a wide wall (the list then has a column), h/l
+    // on a narrow list, and BOTH on a narrow wall -- where Ctrl+G alone
+    // lands the user in a second view that has no column either.
+    const reaches = v.wall === true && v.narrow === true
+      ? notice.indexOf(Model.WALL_KEY) !== -1 && notice.indexOf("h/l") !== -1
+      : notice.indexOf(Model.WALL_KEY) !== -1 || notice.indexOf("h/l") !== -1
+    const ok = drawn ? namesColumn : (!namesColumn && reaches)
     return ok ? null : JSON.stringify(v) + " drawn=" + drawn + " -> " + notice
   }).filter(Boolean)
 }, [])
@@ -7420,6 +7426,38 @@ checkCall("preflight pass 2: a Favourites-launched ring loses its saved-search r
           Model.launchScope(Model.SCOPE_ALL, "", ch[0]),
           Model.launchScope(Model.SCOPE_FAVORITES, "", ch[0])]
 }, [["a", "b"], [], ["a", "b"], ["a", "b"], "g:Religious", "favorites"])
+
+checkCall("preflight pass 3: the re-ask is bounded to one per channel, so a player that never answers cannot loop", function () {
+  // THE LOOP, which shipped past two preflights and a green gate because the
+  // decision was an inline conjunction in Service.qml that no test could
+  // reach (rule 12). The gate was "the rows do not describe the playing
+  // channel"; the helper's `running: false` reply -- which it emits whenever
+  // the socket does not answer -- CLEARS the stamp the gate reads, so the
+  // gate re-armed on its own reply and spawned helpers at about six a second
+  // until the picker closed, starving the health poll behind a busy channel.
+  //
+  // The sequence below is that exact storm, replayed: ask, reply says no
+  // player (rowsFor cleared), and the answer must now be "no".
+  const askedOnce = { wanted: true, playingId: "a", rowsFor: "", askedFor: "a" }
+  return [
+    // A picker opening on a channel nothing has been asked about: one ask.
+    Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "" }),
+    // Its reply says the player is not running, clearing rowsFor. NOT again.
+    Model.shouldRefreshTracks(askedOnce),
+    // ...and not on the next reply, or the next, however many arrive.
+    Model.shouldRefreshTracks(askedOnce), Model.shouldRefreshTracks(askedOnce),
+    // A channel change clears askedFor, and that channel gets its one ask.
+    Model.shouldRefreshTracks({ wanted: true, playingId: "b", rowsFor: "", askedFor: "" }),
+    // Rows that already describe the playing channel: nothing to do.
+    Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "a", askedFor: "a" }),
+    // Stale rows from the previous channel, not yet asked: ask.
+    Model.shouldRefreshTracks({ wanted: true, playingId: "b", rowsFor: "a", askedFor: "" }),
+    // The picker is closed, or nothing is playing: never.
+    Model.shouldRefreshTracks({ wanted: false, playingId: "a", rowsFor: "", askedFor: "" }),
+    Model.shouldRefreshTracks({ wanted: true, playingId: "", rowsFor: "", askedFor: "" }),
+    Model.shouldRefreshTracks(null)
+  ]
+}, [true, false, false, false, true, false, true, false, false, false])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
