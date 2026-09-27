@@ -1772,35 +1772,40 @@ checkCall("saved searches: cloneState carries them, which is the THIRD whitelist
   const st = Model.withSavedSearch(Model.emptyState(), "bbc", 1).state
   return Model.cloneState(st, { favorites: ["x"] }).savedSearches.map(function (r) { return r.query })
 }, ["bbc"])
-checkCall("saved searches: the guide binds a MODIFIED key, so bare letters still reach the query", function () {
+checkCall("saved searches: the guide binds a MODIFIED key, and both confirmations use the ONE rule", function () {
   // handleSearchKey routes every printable character into the query, so a
   // letter cannot be a command in search mode without breaking typing.
+  //
+  // The counts: both confirmations report a CHANGE IN FAVOURITES ROWS, in
+  // opposite directions, and neither derives it. An earlier version matched
+  // the literal expression the guide contained, which proved only that a
+  // string was present and went red when the expression was CORRECTED -- a
+  // rule 14 check inside the suite that enforces rule 14. A later version
+  // pinned a third helper at the save site while the forget site had moved
+  // on, so a green check held the two sites in disagreement. This asserts
+  // the shape: one arrivals call, one departures call, and no survivor of
+  // the match-counting helper, which is deleted.
   return [qmlSites(/Qt\.Key_S && event\.modifiers === Qt\.ControlModifier/).length,
           qmlSites(/root\.saveCurrentSearch\(\)/).length,
           qmlSites(/Model\.savedSearchNotice\(/).length,
-          // Both sites that count for a confirmation go through the ONE
-          // function, so the number always describes the rows on screen.
-          // This used to match the literal expression `savedSearchCount(
-          // root.service.channels, root.query)`, which proved only that the
-          // guide contained a string and went red when the expression was
-          // corrected -- a rule 14 check inside the suite that enforces
-          // rule 14. The arithmetic itself is asserted below, by calling it.
-          qmlSites(/Model\.savedSearchCountVisible\(/).length,
+          qmlSites(/Model\.savedSearchArrivals\(/).length,
+          qmlSites(/Model\.savedSearchDepartures\(/).length,
+          qmlSites(/savedSearchCountVisible/).length,
           qmlSites(/Model\.savedSearchCount\(/).length]
-}, [1, 1, 1, 2, 0])
-checkCall("preflight pass 4: the saved-search confirmation counts the rows the user can see", function () {
+}, [1, 1, 1, 1, 1, 0, 0])
+
+checkCall("preflight pass 4: the saved-search confirmation counts what the user can see, not the playlist", function () {
   const ch = [{ id: "a", name: "Sport One", group: "Sports", url: "http://h/a" },
               { id: "b", name: "Sport Two", group: "Religious", url: "http://h/b" },
               { id: "c", name: "Sport Three", group: "Religious", url: "http://h/c" }]
   const none = Model.emptyState()
   const hid = Model.parseState(JSON.stringify({ hiddenGroups: ["Religious"] }))
-  return [Model.savedSearchCountVisible(ch, none, "sport"),
-          Model.savedSearchCountVisible(ch, hid, "sport"),
-          // The rows a search would actually contribute, for comparison.
-          Model.filterChannels(Model.channelsForScope(ch, Model.SCOPE_ALL, hid), "sport", 50, [], null).rows.length,
-          // And the old, divergent answer, which is what shipped.
-          Model.savedSearchCount(ch, "sport")]
-}, [3, 1, 1, 3])
+  return [Model.savedSearchArrivals(ch, none, "sport", 0),
+          // Two of three are in a hidden group, and search cannot see them.
+          Model.savedSearchArrivals(ch, hid, "sport", 0),
+          // And the rows really do arrive, which is what the number claims.
+          Model.channelsForScope(ch, Model.SCOPE_FAVORITES, Model.withSavedSearch(hid, "sport", 0).state).length]
+}, [3, 1, 1])
 
 // ---- D-SAVE-1: 0.7.6 shipped rows into Favourites that could not leave -----
 checkCall("D-SAVE-1: `x` on a SAVED row forgets the search; on a STARRED row it unstars", function () {
@@ -7515,6 +7520,66 @@ checkCall("preflight pass 4: the picker recovers when the player is seen alive, 
     Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "" })
   ]
 }, [false, false, true, true, false, true])
+
+checkCall("D-SAVE-6: both saved-search confirmations report the change in Favourites rows, and agree", function () {
+  // The sum has been wrong four times. The state that separates a right
+  // answer from a wrong one is a channel the user BOTH starred and whose
+  // saved search matches it: it is matched, and it neither arrives nor
+  // departs, because the star holds it either way. Every earlier check of
+  // this sum lacked that overlap, which is why each repair passed while
+  // still being wrong -- and the fourth repair fixed one of the two sites,
+  // so the two confirmations reported different numbers for one search.
+  const ch = [{ id: "a", name: "News One", group: "News", url: "http://h/a" },
+              { id: "b", name: "News Two", group: "News", url: "http://h/b" },
+              { id: "c", name: "News Three", group: "Religious", url: "http://h/c" }]
+  function st(stars, hidden, saved) {
+    return Model.cloneState(Model.parseState(JSON.stringify({ hiddenGroups: hidden || [] })),
+                            { favorites: stars, savedSearches: saved ? [{ query: "news", at: 0 }] : [] })
+  }
+  function rows(state) { return Model.channelsForScope(ch, Model.SCOPE_FAVORITES, state).length }
+  const shapes = [[[], []], [["a"], []], [["a", "b"], []], [[], ["Religious"]],
+                  [["a"], ["Religious"]], [["a", "b", "c"], []]]
+  const bad = []
+  const arrivals = []
+  shapes.forEach(function (sh) {
+    const before = st(sh[0], sh[1], false)
+    const after = st(sh[0], sh[1], true)
+    const change = rows(after) - rows(before)
+    const a = Model.savedSearchArrivals(ch, before, "news", 0)
+    const d = Model.savedSearchDepartures(ch, after, "news")
+    arrivals.push(a)
+    if (a !== change) bad.push("arrivals " + JSON.stringify(sh))
+    if (d !== change) bad.push("departures " + JSON.stringify(sh))
+    if (a !== d) bad.push("disagree " + JSON.stringify(sh))
+  })
+  return [bad, arrivals,
+          // A refused save adds nothing and says so.
+          Model.savedSearchArrivals(ch, st([], [], true), "news", 0),
+          Model.savedSearchArrivals(ch, st([], []), "", 0),
+          // Forgetting a search that is not there takes nothing away.
+          Model.savedSearchDepartures(ch, st([], []), "news")]
+}, [[], [3, 2, 1, 2, 1, 0], 0, 0, 0])
+// The arrivals list above is the measured answer, and the first draft of this
+// check guessed [3,2,1,1,0,0] for it -- wrong on the two hidden-group shapes,
+// because hiding Religious removes ONE match of three, not two. `bad` was
+// empty both times: the three-way agreement is the real assertion and the
+// literals are a second opinion that has to be measured, not predicted.
+
+checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap resets with the channel", function () {
+  function ask(recoveries, playingId) {
+    return Model.shouldRefreshTracks({ wanted: true, playingId: playingId || "a",
+                                       rowsFor: "", askedFor: "", recoveries: recoveries })
+  }
+  return [Model.TRACKS_RECOVERY_MAX, ask(0), ask(1), ask(Model.TRACKS_RECOVERY_MAX),
+          ask(Model.TRACKS_RECOVERY_MAX + 5),
+          // A different channel starts its own count, which is the service
+          // resetting the counter -- asserted here as the contract the
+          // service must keep.
+          ask(0, "b"),
+          // Missing or malformed counts read as none used yet, never as over.
+          Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "" }),
+          Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "", recoveries: "x" })]
+}, [2, true, true, false, false, true, true, true])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

@@ -9153,7 +9153,10 @@ THIRD site of the D-SAVE-2 divergence, after the footer and the column
 entry. The check that should have caught it was a regex for the literal
 expression the guide contained, so it went red when the expression was
 CORRECTED: a rule 14 check inside the suite that enforces rule 14. It calls
-`Model.savedSearchCountVisible` now.
+`Model.savedSearchArrivals` now -- which is not the function that repair
+created. `savedSearchCountVisible` counted matches, was correct at neither
+site once D-SAVE-6 moved the forget site to row arithmetic, and has been
+deleted; both confirmations now report the change in Favourites rows.
 
 D-TRK-7 (P2): pass 3's bound removed the loop and the self-healing with it.
 One `running: false` reply -- a cold start inside the socket-bind window, or
@@ -9228,8 +9231,11 @@ reader catching what no check could:
   repaired for.
 - **D-SAVE-6** -- forgetting a saved search reports the channels it matched,
   not the rows that leave Favourites, so it over-reports whenever a channel
-  is both starred and matched, with the footer beside it saying the other
-  number. The second divergence of D-SAVE-2 inside the call site pass 4
+  is both starred and matched. The number on screen before the press is the
+  scope column's "Favorites N", which really is visible then; a first draft
+  of this entry said the saved-search FOOTER line was beside the notice,
+  which footerStatus disproves -- the transient outranks it, so the notice
+  replaces that line. The divergence was real and the staging was invented. The second divergence of D-SAVE-2 inside the call site pass 4
   created to fix the first.
 - **D-DOC-1** -- the Sources key table omits `g`, the only key that reaches
   the logo consent screen and its host count.
@@ -9253,4 +9259,64 @@ reader catching what no check could:
 something the pass before it had introduced.** Three of the last six
 blockers were in sentences about credentials, all three found by reading the
 shipped prose end to end, and none of them by reading a diff.
+
+## 0.9.1 repair review, 2026-09-27: more claim defects than code defects
+
+Three lenses over the five 0.9.1 repairs (D-SAVE-6, D-TRK-8, D-PLY-23,
+D-DOC-1, D-DOC-2), two refuters each. 47 agents, 23 raw findings, 20
+survived. **Four were code. Sixteen were claims** -- comments, documents or
+tests asserting something the same diff had made untrue.
+
+The two that mattered:
+
+**D-SAVE-7.** The D-SAVE-6 repair gave the FORGET confirmation row
+arithmetic and left the SAVE confirmation counting matches, so the two began
+reporting different numbers for one search -- where before the repair they
+had at least agreed. It also wrote a test comment justifying the split
+("saving asks how many channels the search will contribute" -- the
+contribution is precisely what a match count gets wrong) and widened an
+inventory check that then PINNED the unfixed site. A green gate held the two
+confirmations in disagreement. Fifth time this arithmetic has been wrong.
+Both now report the change in Favourites rows from one rule, and the
+match-counting helper is deleted rather than kept for one caller.
+
+**D-PLY-24.** The D-PLY-23 repair silently dropped the correction D-PLY-20
+was filed for. `drainPendingPlay()` runs synchronously inside the pause
+reply and takes the single control slot; the refusal path's deferred
+`askPlayerStatus` then ran second, was refused because the channel was busy,
+and was discarded -- the return value was never checked. A refused pause
+therefore left the bar wrong for a health tick anyway. `askPlayerStatus`
+re-arms now.
+
+Two claims are worth recording for their shape. The premise "the footer
+beside the notice says the other number" was an invented staging:
+`footerStatus` returns the transient eight rungs above the saved-search
+line, so the notice REPLACES it. The divergence was real; the two numbers
+were never on screen together. It had been copied into two shipped files and
+two documents before anyone called the function. And the tracks-branch
+comment still said the pause branch does not drain, twenty-two lines above
+the drain that this diff added -- while the new pause comment MISQUOTED that
+comment, describing a version of it that no longer existed.
+
+**D-DOC-3.** The D-DOC-2 repair fixed half of the sentence it was filed
+for. The board row named two releases the paragraph mischaracterised, 0.8.0
+and 0.7.10; the repair named 0.8.0 and left 0.7.10 in the wrong bucket --
+while the same edit had just added pause and the dead-channel marks to the
+feature list, which are 0.7.10's own. Half a repair citing the other half.
+
+Also corrected: a helper comment promising an effect it does not deliver; an
+inverted history of which repair created which function; a D-TRK-8 comment
+claiming the bound avoided new service state when the bound IS new service
+state; and a `tracksRecoveries` comment naming a reset site that does not
+exist. One reported minor was refuted by checking it: "Forgot <search> - 0
+channels" is unreachable, because a starred-and-matched row reports origin
+`star` and never takes the forget path.
+
+Gate 1653 node, 657 python. Live 37/37.
+
+**F-M3-8 is the finding this round produces**, and it is stronger than
+F-M3-5's. Across five preflight passes and one repair review, the previous
+round's CLAIMS were a larger defect surface than its code every single time.
+A repair is not reviewed until every sentence it wrote has been read against
+the code it wrote them about.
 

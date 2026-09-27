@@ -1165,13 +1165,13 @@ Item {
   // later as a Favourites list full of strangers.
   function saveCurrentSearch() {
     if (!root.serviceReady) return
-    // The number must describe the rows this search will actually put in
-    // Favourites, and hiding removes a group from search. Third site of the
-    // D-SAVE-2 divergence: the footer and the column entry were repaired by
-    // calling one function and both of these were left deriving it a second
-    // way, so a query matching inside a hidden group said "3 channels" over
-    // a screen showing one.
-    var count = Model.savedSearchCountVisible(root.service.channels, root.service.userState, root.query)
+    // Rows Favourites will GAIN -- the same rule the forget notice uses in
+    // the other direction, so the two confirmations cannot report different
+    // numbers for the same search. They did, for one commit: the repair that
+    // gave the forget site row arithmetic left this one counting matches,
+    // which over-reports every channel the user had already starred.
+    var count = Model.savedSearchArrivals(root.service.channels, root.service.userState, root.query,
+                                          Math.floor(Date.now() / 1000))
     var result = root.service.saveSearch(root.query)
     root.showTransient(Model.savedSearchNotice(result, root.query, count))
     root.rebuildDisplay()
@@ -1213,9 +1213,10 @@ Item {
       var origin = Model.favoriteOrigin(root.service.userState, channel)
       if (!origin) return
       if (origin.kind === "star") { root.toggleFavoriteAt(index); return }
-      // Same rule as saveCurrentSearch: the number names the rows that go,
-      // and hidden groups are not among them.
-      var count = Model.savedSearchCountVisible(root.service.channels, root.service.userState, origin.query)
+      // The rows that actually GO: the list now, minus the list without this
+      // search. A match count over-reports every channel the user also
+      // starred, because those stay (D-SAVE-6).
+      var count = Model.savedSearchDepartures(root.service.channels, root.service.userState, origin.query)
       root.service.forgetSearch(origin.query)
       root.showTransient(Model.favoriteRemovalNotice(origin, count))
       root.rebuildDisplay()

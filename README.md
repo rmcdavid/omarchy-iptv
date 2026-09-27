@@ -3,14 +3,17 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.9.0 Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.9.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
-tuning, picture in picture, a channel wall that shows your channels as a
-grid of tiles -- their logos if you have turned those on, their names either
-way -- hiding the groups you never want to see, and an audio and subtitle
-picker for streams that carry more than one language. The releases before
-this one went to the guide at
-real provider scale, and to search accuracy and readable contrast.
+tuning, picture in picture, pausing live TV, a guide that remembers which
+channels did not work, a channel wall that shows your channels as a grid of
+tiles -- their logos if you have turned those on, their names either way --
+hiding the groups you never want to see, and an audio and subtitle picker
+for streams that carry more than one language. 0.8.0 gave the guide its
+channel wall and 0.7.10 gave it pause and the dead-channel marks; the
+releases that went to real provider scale, search accuracy and readable
+contrast were 0.6.0 and 0.7.0, and the ones between built the Sources
+screen, saved searches and channel logos.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -132,7 +135,7 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | search | Up / Down, PgUp / PgDn, Home / End | move the cursor. On the channel wall Up / Down move a whole row of tiles |
 | search | Left / Right | in the list: previous / next group in the column. On the channel wall there is no group column, and they move the cursor one tile |
 | search | Enter | play and close; Esc clears the query, then closes |
-| search | Ctrl+S | save this search into Favorites: its channels join your starred ones, and the confirmation says how many matched |
+| search | Ctrl+S | save this search into Favorites: its channels join your starred ones, and the confirmation says how many rows Favorites gained -- which is fewer than the search matched if you had already starred some of them |
 | search | Tab or Shift+Tab | switch to list mode (query stays) |
 | list | j / k | move the cursor. On the channel wall: move a whole row of tiles |
 | list | h / l | change group. On the channel wall there is no group column, and they move the cursor one tile |
@@ -255,6 +258,7 @@ own cache, so switching back is instant.
 | `c` | add an Xtream Codes login (server, username, password); the URLs are built for you |
 | `e` | edit label, playlist URL, or EPG URL |
 | `x` | remove the source and its cache (asks first) |
+| `g` | channel logos on or off. Turning them on tells you first how many third-party hosts it would contact, and waits for you to agree |
 | `Esc` | back to the guide |
 
 In a form: `Tab` moves between fields, `Ctrl+V` or `Shift+Insert` pastes,
