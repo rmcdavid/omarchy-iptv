@@ -14,9 +14,10 @@ Exit codes:
   3  reserved (not implemented; no subcommand uses it any more)
 
 Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
-  playlist --url U [--cache-dir D] [--timeout S]
+  playlist [--url U] [--cache-dir D] [--timeout S]      (URL: --url, or $OMARCHY_IPTV_URL)
       fetch + parse M3U -> channels.json, playlist-status.json
   epg [--url U] [--cache-dir D] [--timeout S] [--ttl S] [--force] [--now-only] [--now T]
+                                                          (URL: --url, or $OMARCHY_IPTV_URL)
       XMLTV -> epg-window.txt (private cache), epg-now.json, epg-status.json
   play (--id ID | --url U) [--cache-dir D] [--socket P] [--ipc-timeout S]
       switch the running mpv to a channel over its JSON IPC socket

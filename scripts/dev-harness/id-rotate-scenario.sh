@@ -253,7 +253,7 @@ preflight() {
   # What that calls, and what the helper half still needs (D-ID-1).
   seam "Model.js owns the scheme-1 -> scheme-2 map"             "$PLUGIN_ROOT/Model.js" '^function channelIdRemap\(channels\)' 1
   seam "Model.js owns the state move"                           "$PLUGIN_ROOT/Model.js" '^function remapStateIds\(state, remap\)' 1
-  seam "the active fetch still carries --state-dir"             "$PLUGIN_ROOT/Service.qml" 'Model\.playlistFetchArgv\(root\.helperPath, root\.playlistUrl, root\.activeCacheDir, root\.stateDir\)' 1
+  seam "the active fetch still carries --state-dir"             "$PLUGIN_ROOT/Service.qml" 'Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, root\.stateDir\)' 1
   # The verbs the live half drives.
   seam "the harness answers state()"                            "$HERE/shell.qml" 'function state\(\): string' 1
   seam "the harness refreshes the active source"                "$HERE/shell.qml" 'function refresh\(\): string' 1

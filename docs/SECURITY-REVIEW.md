@@ -55,7 +55,7 @@ os.system|subprocess|execDetached("|eval(|new Function` over the shipped
 files: no hits (only `tests/test_helper.py` uses `subprocess.run` with a
 list). Helper ids passed to `--id` always start with `t:`/`u:`
 (`bin/omarchy-iptv:488-491`), so no id can be parsed as an option; the
-playlist URL is the user's own and follows `--url`.
+playlist URL is the user's own and follows `--url`. **Amended 2026-10-01 (D-SINK-8): when the SHELL runs the helper the URL is no longer on argv at all -- it is passed in `OMARCHY_IPTV_URL`, readable from `/proc` only by the owner -- after a marketplace reviewer read provider credentials from `/proc/<pid>/cmdline` on v0.9.1. `--url` remains for a person at their own shell.**
 
 ### 2. mpv argv and `mpvArgs` filtering -- PASS with S-01
 
