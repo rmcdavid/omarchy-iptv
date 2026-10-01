@@ -179,7 +179,10 @@ class CliContractTest(unittest.TestCase):
             self.assertEqual(payload["error"]["code"], "bad_key")
 
     def test_usage_errors_exit_2_without_json(self):
-        for args in (["playlist"], ["play"], ["play", "--id", "a", "--url", "b"], ["state"], ["state", "favorite", "add"],
+        # A bare `playlist` is no longer a usage error: --url is optional
+        # since D-SINK-8 (the shell passes the URL in $OMARCHY_IPTV_URL), and
+        # neither given is a JSON `bad_url` status (tests/test_url_env.py).
+        for args in (["play"], ["play", "--id", "a", "--url", "b"], ["state"], ["state", "favorite", "add"],
                      ["state", "source"], ["state", "source", "add"], ["cache"], ["cache", "remove"], ["bogus"]):
             code, payload, _ = run(*args)
             self.assertEqual(code, 2, args)
