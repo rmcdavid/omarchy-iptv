@@ -9320,3 +9320,38 @@ round's CLAIMS were a larger defect surface than its code every single time.
 A repair is not reviewed until every sentence it wrote has been read against
 the code it wrote them about.
 
+## Marketplace verification, 2026-10-01: the first external review in this project's history
+
+Three requests were filed 2026-09-26/27 for 0.8.0, 0.9.0 and 0.9.1. State today:
+
+- **#8826 (0.8.0) and #8921 (0.9.0): CLOSED 2026-09-28 by a MAINTAINER**
+  (HANCORE-linux), each with "This request is superseded by #8998 for the
+  current commit; you're welcome to reopen it if needed." **Not by us.** The
+  rule settled 2026-09-26 held -- we closed nothing -- and the maintainer did
+  the tidying, keeping the request that matches the current commit. That is
+  the answer to a question this project has argued with itself about for two
+  weeks: filing a new request and leaving the old one open is fine, because
+  the queue's owner reconciles them.
+- **#8998 (0.9.1): OPEN, `validated`, automated security baseline PASSED** at
+  `dbcbd0f`, and on 2026-10-01 a maintainer posted the first substantive
+  human review this plugin has ever received.
+
+The review is **D-SINK-8**, and it is correct: playlist and EPG refresh pass
+credential-bearing URLs to the helper as `--url` argv, readable by any local
+user from `/proc/<pid>/cmdline` while a fetch runs.
+
+**This project already knew.** It is engineering rule 5's process-argv item,
+filed as D-SINK-3 on 2026-09-22 and disclosed to users in the README. The
+deferral was explicit and conditional, in `docs/ARCHITECTURE.md` section 6:
+an environment variable "would be a real improvement over argv **if this is
+ever revisited**". A security reviewer revisiting it is exactly that
+condition, and the honest reading is that the deferral has expired rather
+than that the finding is a disagreement.
+
+Worth recording about the preflight passes: **five adversarial passes audited
+this sink repeatedly and none proposed fixing it**, because each one checked
+the claims against the code and the code against the documented decision --
+and the documented decision said accepted. An accepted residual is invisible
+to a process that verifies consistency. It took someone outside the project,
+who had not agreed to the premise, to ask why it was accepted at all.
+
