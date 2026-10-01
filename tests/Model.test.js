@@ -1197,13 +1197,15 @@ checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pas
 // This existed inline in Service.qml where nothing could see it, so the review
 // that caught the missing flag caught it by READING. Lifted here so it is
 // asserted (CLAUDE.md rule 12).
-check("D-ID-1 the active fetch carries the state dir", Model.playlistFetchArgv("/h", "http://x", "/c", "/s"),
-  ["python3", "/h", "playlist", "--url", "http://x", "--cache-dir", "/c", "--state-dir", "/s"])
-check("D-ID-1 the probe does NOT, and that absence is the safety property", Model.playlistProbeArgv("/h", "http://x", "/c"),
-  ["python3", "/h", "playlist", "--url", "http://x", "--cache-dir", "/c"])
-check("D-ID-1 the probe can never grow the flag by accident", Model.playlistProbeArgv("/h", "http://x", "/c").indexOf("--state-dir"), -1)
-check("D-ID-1 an empty state dir omits the flag rather than passing a blank", Model.playlistFetchArgv("/h", "http://x", "/c", ""),
-  ["python3", "/h", "playlist", "--url", "http://x", "--cache-dir", "/c"])
+// (The URL left both argvs under D-SINK-8, below; the flag is the whole of
+// what still tells them apart.)
+check("D-ID-1 the active fetch carries the state dir", Model.playlistFetchArgv("/h", "/c", "/s"),
+  ["python3", "/h", "playlist", "--cache-dir", "/c", "--state-dir", "/s"])
+check("D-ID-1 the probe does NOT, and that absence is the safety property", Model.playlistProbeArgv("/h", "/c"),
+  ["python3", "/h", "playlist", "--cache-dir", "/c"])
+check("D-ID-1 the probe can never grow the flag by accident", Model.playlistProbeArgv("/h", "/c").indexOf("--state-dir"), -1)
+check("D-ID-1 an empty state dir omits the flag rather than passing a blank", Model.playlistFetchArgv("/h", "/c", ""),
+  ["python3", "/h", "playlist", "--cache-dir", "/c"])
 checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of its own", function () {
   // The gap the review named: nothing asserted the argv Service constructs.
   // A literal argv here would be invisible to every test again.
@@ -1217,11 +1219,116 @@ checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of 
     // present but handed an empty state dir, which is byte-for-byte the state
     // two reviewers refused. Counting the call was never enough; what matters
     // is the ARGUMENT, so assert the whole call including root.stateDir.
-    (code.match(/Model\.playlistFetchArgv\(root\.helperPath, root\.playlistUrl, root\.activeCacheDir, root\.stateDir\)/g) || []).length,
+    (code.match(/Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, root\.stateDir\)/g) || []).length,
     // And the probe must never be handed one, by any spelling.
     /playlistProbeArgv\([^)]*stateDir/.test(code)
   ]
 }, [1, 1, 0, 1, false])
+
+// ---- D-SINK-8: the URL never rides on argv; it rides in the environment ----
+// A marketplace maintainer read the shipped 0.9.1 and found what D-SINK-3
+// had accepted: the playlist and EPG URLs, credentials and all, handed to the
+// helper as `--url`, readable by every local user in /proc/<pid>/cmdline for
+// as long as the fetch runs. /proc/<pid>/environ is owner-only where cmdline
+// is not, so the URL now travels as OMARCHY_IPTV_URL and the three builders
+// below carry no URL at all. These are proven against 565a982: there the
+// playlist builders took a url argument (so the token reappears) and the
+// other two functions did not exist.
+const CRED_URL = "http://user:s3cret@h.test/get.php?username=u&password=p"
+function argvLeaks(argv) {
+  // What a credentialed URL looks like when it is on a command line, in any
+  // of the spellings the three providers' URL shapes use. The builders take
+  // no URL, so a leak here can only mean one was read from somewhere it
+  // should not be, or a parameter grew back.
+  return argv.filter(function (t) { return /:\/\/|@|username=|password=/.test(String(t)) || t === "--url" })
+}
+checkCall("D-SINK-8 (a) no builder puts a URL, a credential or --url on argv, and each still names the helper and its verb", function () {
+  const fetch = Model.playlistFetchArgv("/h", "/c", "/s")
+  const probe = Model.playlistProbeArgv("/h", "/c")
+  const epg = Model.epgFetchArgv("/h", "/c", false)
+  const now = Model.epgFetchArgv("/h", "/c", true)
+  return [argvLeaks(fetch), argvLeaks(probe), argvLeaks(epg), argvLeaks(now),
+          fetch.slice(0, 3), probe.slice(0, 3), epg.slice(0, 3), now.slice(0, 3)]
+}, [[], [], [], [],
+    ["python3", "/h", "playlist"], ["python3", "/h", "playlist"], ["python3", "/h", "epg"], ["python3", "/h", "epg"]])
+checkCall("D-SINK-8 (a) a URL handed to a builder as a surplus argument goes nowhere", function () {
+  // The parameter that was removed must not grow back at the END of the
+  // list either, which is where a "harmless" extra argument lands. Hand a
+  // credentialed URL past every declared parameter and prove no argv has it.
+  return [argvLeaks(Model.playlistFetchArgv("/h", "/c", "/s", CRED_URL)),
+          argvLeaks(Model.playlistProbeArgv("/h", "/c", CRED_URL)),
+          argvLeaks(Model.epgFetchArgv("/h", "/c", false, CRED_URL))]
+}, [[], [], []])
+checkCall("D-SINK-8 (a) no builder keeps an ignored url parameter: a parameter nobody reads is a trap", function () {
+  return [Model.playlistFetchArgv.length, Model.playlistProbeArgv.length, Model.epgFetchArgv.length, Model.fetchEnvironment.length]
+}, [3, 2, 3, 1])
+// checkCall, not check, for the two below: on 565a982 epgFetchArgv does not
+// exist, and a plain check would throw before the runner saw it and abort
+// the whole before-run, hiding every count after it (rule 11).
+checkCall("D-SINK-8 (a) epgFetchArgv is the inline EPG argv Service.qml used to build, minus the URL", function () {
+  return [Model.epgFetchArgv("/h", "/c", false), Model.epgFetchArgv("/h", "/c", true)]
+}, [["python3", "/h", "epg", "--cache-dir", "/c"], ["python3", "/h", "epg", "--now-only", "--cache-dir", "/c"]])
+checkCall("D-SINK-8 (a) epgFetchArgv treats nowOnly as a flag, not a value: nothing but a truthy value adds it", function () {
+  return [Model.epgFetchArgv("/h", "/c").indexOf("--now-only"), Model.epgFetchArgv("/h", "/c", null).indexOf("--now-only"), Model.epgFetchArgv("/h", "/c", 1).indexOf("--now-only")]
+}, [-1, -1, 3])
+checkCall("D-SINK-8 (b) fetchEnvironment names exactly one variable, OMARCHY_IPTV_URL, and hands it the URL verbatim", function () {
+  const env = Model.fetchEnvironment("http://u:p@h/x")
+  // The name is the contract with the helper, spelled as a literal here on
+  // purpose: a test that read Model.FETCH_URL_ENV would stay green through a
+  // rename that broke every fetch.
+  return [env, Object.keys(env), env.OMARCHY_IPTV_URL, Model.FETCH_URL_ENV]
+}, [{ OMARCHY_IPTV_URL: "http://u:p@h/x" }, ["OMARCHY_IPTV_URL"], "http://u:p@h/x", "OMARCHY_IPTV_URL"])
+checkCall("D-SINK-8 (b) an absent URL is an absent variable, never one set to the string undefined or null", function () {
+  // show() renders `{a: undefined}` and `{}` differently (audit F8), so a key
+  // present with no value fails here rather than reading as empty. The
+  // measured Quickshell facts behind this: a key set to null UNSETS an
+  // inherited variable, and a stray string would be a URL nobody typed.
+  return [Model.fetchEnvironment(""), Model.fetchEnvironment(null), Model.fetchEnvironment(undefined), Model.fetchEnvironment(),
+          Object.keys(Model.fetchEnvironment("")).length]
+}, [{}, {}, {}, {}, 0])
+checkCall("D-SINK-8 (b) fetchEnvironment returns a fresh object each call, so one run cannot mutate the next", function () {
+  const a = Model.fetchEnvironment("http://a/")
+  const b = Model.fetchEnvironment("")
+  a.OMARCHY_IPTV_URL = "poisoned"
+  return [b, Model.fetchEnvironment("") === b]
+}, [{}, false])
+checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at exactly the three fetch sites, immediately before each run, and never spells --url", function () {
+  // Rule 14 by inventory, in the shape of D-RUNG-4: which processes receive
+  // which URL, line content rather than line number. Three sites, not two:
+  // the EPG site covers both the fetch and the --now-only recompute, the
+  // latter handed "" (so {}), because the assignment REPLACES the last value
+  // and a stale URL must not ride into the offline run. "Immediately" is
+  // structural: the next non-comment line after each assignment must be
+  // that same process's `running = true`, and each of the three processes
+  // runs from exactly one place, so no run can start on an older environment.
+  const fs = require("fs"), path = require("path")
+  const code = fs.readFileSync(path.join(__dirname, "..", "Service.qml"), "utf8").split("\n")
+    .filter(function (l) { return !/^\s*\/\//.test(l) })
+  const sites = []
+  code.forEach(function (l, i) {
+    const m = /^\s*(\w+)\.environment = Model\.fetchEnvironment\((.*)\)\s*$/.exec(l)
+    if (m) sites.push({ proc: m[1], arg: m[2], next: String(code[i + 1] || "").trim() })
+  })
+  // Containment, not whole-line equality: the mutant that survived the first
+  // draft was `if (x) playlistProc.running = true` on one line, a second run
+  // site that set no environment and that an equality compare never saw.
+  function runs(proc) {
+    const re = new RegExp("\\b" + proc + "\\.running = true\\b")
+    return code.filter(function (l) { return re.test(l) }).length
+  }
+  return [
+    sites.map(function (s) { return s.proc + " <- " + s.arg }),
+    sites.map(function (s) { return s.next === s.proc + ".running = true" }),
+    sites.map(function (s) { return runs(s.proc) }),
+    // Every environment assignment goes through the builder: an inline
+    // object literal would be a second spelling of the variable name.
+    code.filter(function (l) { return /\.environment = / .test(l) && !/Model\.fetchEnvironment\(/.test(l) }).length,
+    // And no command, on any process, carries the flag the URL used to ride on.
+    code.filter(function (l) { return /"--url"/.test(l) }).length,
+    code.filter(function (l) { return /\.command = /.test(l) && /Url\b|\.url\b/.test(l) }).length
+  ]
+}, [["playlistProc <- root.playlistUrl", "epgProc <- nowOnly ? \"\" : root.activeEpgUrl", "sourceProbeProc <- rec.url"],
+    [true, true, true], [1, 1, 1], 0, 0, 0])
 
 // ---- D-ID-3: the shell adopts the helper's id scheme, or undoes it ----
 // With --state-dir the helper moved state.json onto scheme 2 (`moved N`) and
