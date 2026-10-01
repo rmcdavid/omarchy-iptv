@@ -63,8 +63,10 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
  |    channels  <- FileView channels.json      (watchChanges + explicit reload)       |
  |    epgNow    <- FileView epg-now.json                                              |
  |    userState <-> FileView state.json        (atomicWrites)                         |
- |    playlistProc: python3 bin/omarchy-iptv playlist --url U --cache-dir C           |
- |    epgProc:      python3 bin/omarchy-iptv epg --url E --cache-dir C [--now-only]   |
+ |    playlistProc: python3 bin/omarchy-iptv playlist --cache-dir C                   |
+ |                  with OMARCHY_IPTV_URL=U in its environment, never in argv         |
+ |    epgProc:      python3 bin/omarchy-iptv epg --cache-dir C [--now-only]           |
+ |                  with OMARCHY_IPTV_URL=E in its environment ({} for --now-only)    |
  |    controlProc:  python3 bin/omarchy-iptv play --id I --socket S | stop | status   |
  |    mpvProc:      mpv --input-ipc-server=S --wayland-app-id=omarchy-iptv ... -- URL |
  |    IpcHandler:   omarchy-shell io.github.rmcdavid.iptv play|stop|next|prev|refresh |
@@ -82,10 +84,11 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
 
 1. `Service.playlistUrl` changes, the refresh timer fires, the bar's middle
    click or `Ctrl+R` calls `refreshPlaylist()` -> 300 ms debounce.
-2. `playlistProc` runs the helper (argv only). The helper fetches (20 s
-   timeout, 64 MB cap, gzip tolerated), parses, assigns ids, writes
-   `channels.json` and `playlist-status.json` atomically (temp file + rename,
-   mode 0600, dir 0700) and prints the status JSON.
+2. `playlistProc` runs the helper (argv only; the URL rides in its
+   environment as `OMARCHY_IPTV_URL`, section 6, D-SINK-8). The helper
+   fetches (20 s timeout, 64 MB cap, gzip tolerated), parses, assigns ids,
+   writes `channels.json` and `playlist-status.json` atomically (temp file +
+   rename, mode 0600, dir 0700) and prints the status JSON.
 3. `onExited` calls `channelsFile.reload()` / `playlistStatusFile.reload()`
    explicitly (do not depend on inotify surviving the rename); the
    `watchChanges` bindings additionally catch external edits.
@@ -257,8 +260,12 @@ bar entry, read by the service through `shell.barConfig`.
 | `maxRecents` | integer | 10 | `clampInt(1..50)` |
 
 Credentials caveat: Xtream-style URLs embed username/password. They live in
-`shell.json` (mode 0600) and in the helper's argv for a few hundred
-milliseconds. The helper never logs or prints a URL (errors carry the host
+`shell.json` (mode 0600), in `state.json` (mode 0600; the Sources history
+keeps each source's URLs, D-SINK-6) and, for the life of a fetch, in the
+helper's environment as `OMARCHY_IPTV_URL` -- readable through
+`/proc/<pid>/environ` by the plugin's own uid only. They are not on the
+helper's argv: they were, for a few hundred milliseconds per fetch, until
+D-SINK-8 below. The helper never logs or prints a URL (errors carry the host
 only), `channels.json` stores `sourceHost` rather than the URL, but stream
 URLs inside `channels.json` do contain the credentials (cache dir is 0700,
 files 0600). Documented in the README's settings section.
@@ -274,6 +281,47 @@ world-readable where `/proc/<pid>/environ` is not, so an environment variable
 would be a real improvement over argv if this is ever revisited; it is recorded
 here rather than changed, because moving it touches the helper's interface and
 the transient exposure is the one already accepted.
+
+Closed 2026-10-01 (D-SINK-8). A marketplace maintainer reviewing the shipped
+0.9.1 artifact (omacom/omarchy-plugin-marketplace#8998) reported the argv
+exposure the paragraph above accepts, which is the "if this is ever
+revisited" the amendment was waiting for -- met from outside the project.
+What changed: the service sets the environment variable `OMARCHY_IPTV_URL`
+on the helper process at the three spawns that carry a URL -- the playlist
+fetch, the EPG fetch and the source probe -- by assigning
+`<proc>.environment = Model.fetchEnvironment(<url>)` immediately before
+`running = true`, every time. `fetchEnvironment` returns
+`{ OMARCHY_IPTV_URL: url }` for a non-empty string and `{}` for an empty,
+null or undefined one, and the `epg --now-only` recompute, which carries no
+URL, assigns `{}`. The re-assignment is load-bearing: measured on Quickshell
+0.3.1 / Qt 6.11, `Process.environment` merges with the inherited environment
+(PATH and HOME survive), re-assigning it on the same object replaces the
+previous value, and a null value unsets an inherited variable, so a URL from
+one run cannot persist into a later run that sets `{}`. The argv builders no
+longer take a URL -- `playlistFetchArgv(helperPath, cacheDir, stateDir)`,
+`playlistProbeArgv(helperPath, cacheDir)` and the new
+`epgFetchArgv(helperPath, cacheDir, nowOnly)` in place of the inline EPG
+argv -- and none keeps an ignored `url` parameter, because a parameter
+nobody reads is a trap. The helper's `playlist` and `epg` verbs read `--url`
+when given, else `OMARCHY_IPTV_URL`, once, at the top of the verb, into a
+local used everywhere the argument was; `playlist` with neither is a
+`bad_url` status emitted as JSON, not an argparse usage exit, because the
+service cannot switch on a usage exit. `--url` stays for a human running the
+helper by hand, in their own shell and their own argv. Redaction is
+unchanged: the helper prints neither the variable nor any URL beyond scheme
+and host.
+
+Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on
+an ordinary proc mount; that was the exposure. `/proc/<pid>/environ` is
+readable by the process's own uid (and root) only -- the same boundary as
+the three 0600 files the URL already rests in, so a fetch no longer widens
+it. The alternatives the amendment weighed, a pipe and a temp file, each
+trade the exposure for a different one; an environment variable's own
+residual is inheritance by child processes, and that is nil here because the
+helper's `playlist` and `epg` verbs download with `urllib` and start no
+child, so the URL ends at the helper. That makes the helper's no-subprocess
+shape load-bearing for this sink, which is why engineering rule 5 now says
+so.
 
 ## 7. Error handling, offline behavior, performance
 

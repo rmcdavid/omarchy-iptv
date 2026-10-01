@@ -120,17 +120,35 @@ requests and raise the batch.
      whose Value reads as bullets, and on an `Accessible.ignored` field, so the
      states that look safe leak on the way into themselves.
    - **Process argv**, which was missing from this list while the list itself
-     said to add sinks to it (D-SINK-3). The helper is handed the composed
-     playlist URL as an argument, so it is in `/proc/<pid>/cmdline` -- which is
-     world-readable, unlike `/proc/<pid>/environ` -- for as long as the fetch
-     runs. That much is a KNOWINGLY ACCEPTED residual and is reasoned about in
-     `docs/ARCHITECTURE.md` section 6: it is transient, and the alternatives
-     (a pipe, a temp file) each trade it for a different exposure.
+     said to add sinks to it (D-SINK-3). The helper used to be handed the
+     composed playlist URL as an argument, so it sat in `/proc/<pid>/cmdline`
+     -- which is world-readable, unlike `/proc/<pid>/environ` -- for as long
+     as the fetch ran. That was recorded as a KNOWINGLY ACCEPTED residual in
+     `docs/ARCHITECTURE.md` section 6, transient and reasoned about, with the
+     fix named in the same paragraph and deferred "if this is ever
+     revisited". It was revisited from outside: a marketplace reviewer raised
+     it against the shipped 0.9.1 and the transient exposure was CLOSED on
+     2026-10-01 (D-SINK-8). The URL travels in the environment variable
+     `OMARCHY_IPTV_URL`, set by the service on the helper process at the
+     three spawns that carry one (the playlist fetch, the EPG fetch, the
+     source probe) and read by the helper's `playlist` and `epg` verbs when
+     `--url` is absent; `--url` stays for a human in their own shell.
+     `environ` is readable by the process's own uid only, the same boundary
+     as the 0600 files, and the helper's fetch verbs start no child process,
+     so nothing inherits the variable -- keep it that way. In QML, assign
+     `<proc>.environment = Model.fetchEnvironment(<url>)` immediately before
+     every `running = true`, `{}` included on a run that carries no URL:
+     re-assignment REPLACES the previous value, and that is what keeps a
+     stale URL out of a later run on the same Process object.
      What is NOT accepted, and what the rule missed, is the DURABLE form: the
      README used to instruct the user to set a credentialed URL with
      `omarchy bar set`, which writes it into their shell history permanently.
      A transient exposure reasoned about is not a licence for a durable one
      nobody costed. Prefer the in-app form, which reaches neither.
+     The lesson this episode adds: an accepted residual is invisible to a
+     review process that only checks consistency with the documented
+     decision, and it took someone outside the project to ask why it was
+     accepted.
    - The **MPRIS session bus**, via a script this project does not ship and
      did not know was loaded (D-SINK-4). mpv autoloads every script in its
      system directory; on this distribution that includes `mpv-mpris`, which

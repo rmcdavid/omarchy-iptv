@@ -57,7 +57,7 @@ under ~/.config or /usr/share/omarchy was modified.
 | D10 | Xtream URL construction | build in QML / in helper | **`Model.xtreamUrls` (JS only; the helper never builds Xtream URLs)** | Rules in section 3.4: server normalized to `scheme://host[:port][/base]` (default `http://` when no scheme -- Xtream panels are plain http on :8080 far more often than not; documented), `get.php?username=U&password=P&type=m3u_plus&output=ts` and `xmltv.php?username=U&password=P`, values percent-encoded with the RFC 3986 unreserved set so node, the Qt engine and Python `quote(safe="")` agree. Saved as a normal source (`origin: "xtream"`); the password exists only inside the URL. |
 | D11 | URL validation shared with the helper | duplicate rules / one spec | **One algorithm, `Model.validateSourceUrl` and helper `validate_source_url`, pinned by `tests/fixtures/source-urls.json` read by both suites; `resolve_source` calls the Python one** | The helper's `resolve_source` (`bin/omarchy-iptv:544-558`) already defines the accepted set (`~`/`/` paths, `http(s)://` with a host, `file://`); the JS side mirrors it and both gain the same two additions: a 2,048-character cap (`too_long`) and refusal of control characters (`bad_url`). The guide rejects inline (S8) with the same code the helper would return. |
 | D12 | Masking for display | host only / mask query / mask all | **Lists: label + host (`Model.hostOf`). Edit field: `Model.maskUrl` = `scheme://[***@]host[:port]/path?name=***&...` with every query value masked except `type` and `output`; a reveal key shows the raw URL; paths shown as-is** | M2-SOURCES decision 4. Credentials of Xtream and most providers are query values or userinfo; parameter names and the path let the user recognise the URL. Local paths are the user's own filesystem. |
-| D13 | Length caps | -- | **URL 2,048; label 64; Xtream server 512, username/password 256 each; state `sources` 50 records** | Provider URLs are 100-300 characters; 2,048 is the common practical URL cap and bounds argv and state.json (50 x ~600 B = 30 KB). `TextField.maximumLength` enforces the same numbers in the UI. |
+| D13 | Length caps | -- | **URL 2,048; label 64; Xtream server 512, username/password 256 each; state `sources` 50 records** | Provider URLs are 100-300 characters; 2,048 is the common practical URL cap and bounds the helper's `OMARCHY_IPTV_URL` environment value (it bounded argv until D-SINK-8) and state.json (50 x ~600 B = 30 KB). `TextField.maximumLength` enforces the same numbers in the UI. |
 | D14 | Favorites / recents across sources | per source / global | **Global, keyed by channel id (PRODUCT.md M1, ARCHITECTURE decision 6), unchanged** | `t:<tvg-id>` ids are shared by design (a favorite survives a provider switch when the tvg-id matches); `u:<hash>` ids are source-specific by nature. The guide already filters both lists against the loaded index (`Model.countFavorites`, `channelsForScope`), so entries of another source are invisible, not broken. Recents stay bounded by `maxRecents`; favorites are user-driven. Documented in the README; no per-source scoping in v0.2. |
 | D15 | Helper surface | new `source` subcommand / extend `state` / new `cache` | **Extend `state` (v2 aware, URL-redacted output) and add one `cache` subcommand with `migrate`, `remove`, `prune` actions. No `state source ...` verbs** | Section 5 contracts untouched. The service does every history mutation in QML; the helper only touches the filesystem where QML must not (`rm`, `rename`, mode bits). `state show` must stop printing URLs once records carry them (section 2.4). |
 | D16 | Invalid values set by CLI | run the helper anyway / synthesize | **The service never runs the helper for a `playlistUrl` that fails `validateSourceUrl`; it synthesizes `playlistStatus` from the validation result (like `helperTimeoutStatus`, `Service.qml:422-430`) and leaves `activeCacheDir` empty** | The helper would refuse with the same code; skipping it avoids creating a directory for garbage and keeps the guide's existing error empty state with a reason and no host. Same for `epgUrl` -> `epgStatus`. |
@@ -538,7 +538,11 @@ the playing channel's group is absent (`Model.zapRing` -> `nextInGroup([])`
 collectors, redaction (`Model.redactUrls` on stderr) and 180 s watchdog as
 `playlistProc` (`Service.qml:965-977, 833-846`), so a running refresh of the
 active source never blocks adding another one and vice versa. One probe at a
-time (`busy`). Command: `["python3", helperPath, "playlist", "--url", rec.url, "--cache-dir", sourceCacheDir(cacheDir, key)]`.
+time (`busy`). Command: `Model.playlistProbeArgv(helperPath, sourceCacheDir(cacheDir, key))`,
+with `rec.url` in the process environment as `OMARCHY_IPTV_URL`
+(`sourceProbeProc.environment = Model.fetchEnvironment(rec.url)` immediately
+before `running = true`) and not on the command line -- it rode argv as
+`--url` until D-SINK-8, 2026-10-01.
 On exit:
 
 - `ok`: `userState = withSourceStats(state, key, status)`; when a
@@ -622,7 +626,9 @@ Both paths run the pasted text through `Model.sanitizeInput` and the
    `/proc`, `/sys`, `/dev` are refused in both places; realpath, regular
    file, 64 MB cap stay in `read_local_source`.
 3. No shell anywhere: every process is an argv array (`playlist`, `cache`,
-   `state`, `wl-paste`); the URL follows `--url`; keys follow `--key` /
+   `state`, `wl-paste`); the URL is not an argv item at all but travels in
+   the helper's environment as `OMARCHY_IPTV_URL` (D-SINK-8; `--url` stays
+   for a human running the helper by hand); keys follow `--key` /
    `--keep` and match `^[0-9a-f]{8}(-[0-9]{1,3})?$` before they become a
    path. No `omarchy bar set` subprocess on the normal path (D1 writes
    in-process); the CLI fallback of risk R2 is argv too.

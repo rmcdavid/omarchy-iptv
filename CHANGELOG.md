@@ -3,6 +3,29 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.9.2 (unreleased)
+
+A password that other accounts on the machine could read for as long as a
+fetch ran.
+
+### Fixed
+
+- **Your provider URL was readable from the process list by other accounts on
+  the same machine, for as long as a playlist or guide fetch ran.** On an
+  Xtream provider that URL carries your username and password, and earlier
+  releases handed it to the plugin's helper as a command-line argument, which
+  `/proc` shows to every local account while the process runs. The README
+  disclosed this as a brief exposure and the project had accepted it; a
+  marketplace reviewer (omacom/omarchy-plugin-marketplace#8998) asked why, and
+  the answer was that it did not need to be accepted. The URL now reaches the
+  helper in its environment, as `OMARCHY_IPTV_URL`, which only your own
+  account can read -- for the playlist fetch, the guide-data fetch, and the
+  check the Sources screen makes before it accepts a source. There is nothing
+  to re-enter, and `--url` still works when you run the helper yourself from
+  a terminal
+  (`python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`),
+  in your own shell.
+
 ## 0.9.1 (2026-09-27)
 
 Numbers that tell the truth, and a key that was missing from its own table.

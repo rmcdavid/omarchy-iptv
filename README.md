@@ -77,19 +77,24 @@ beyond their host name. Two sentences in this file used to say two files,
 which mattered because the third is the one you might think safe to copy into
 a dotfiles repository.
 
-Two places they can escape that, both worth knowing:
+One place they can escape that, worth knowing, and one that used to:
 
 - **Your shell history.** Setting a credentialed URL with `omarchy bar set`
   writes the whole thing into `~/.bash_history` or `~/.zsh_history`, where it
   stays until you remove it. Use the in-app form instead — that is what it is
   for. If you have already done it, `history -d` the line and check the file.
-- **The process list, briefly.** When the plugin fetches your playlist, or
-  your guide data, it passes that URL to its helper as a command-line
-  argument, so while the fetch runs another account on the same machine could
-  read it from `/proc`. Both carry your credentials on an Xtream provider:
-  the playlist URL and the `xmltv.php` guide URL are built from the same
-  username and password. On a single-user machine this is nothing; on a
-  shared one it is worth knowing. Nothing else on the plugin's side writes
+- **The process list, no longer.** Earlier releases passed that URL to the
+  helper as a command-line argument when fetching your playlist or your guide
+  data, and a command line is readable by every account on the machine from
+  `/proc` for as long as the process runs. Both URLs carry your credentials
+  on an Xtream provider: the playlist URL and the `xmltv.php` guide URL are
+  built from the same username and password. A marketplace reviewer asked
+  why that was accepted, and it is not any more: the plugin now hands the
+  URL to the helper in its environment, as `OMARCHY_IPTV_URL`, which `/proc`
+  exposes only to your own account, and the helper's command line no longer
+  carries it. That is true of all three fetches that take a URL -- your
+  playlist, your guide data, and the check the Sources screen makes before it
+  accepts a source. Nothing else on the plugin's side writes
   either URL anywhere but the three 0600 files above.
 
 | Key | Type | Default | Meaning |
@@ -302,15 +307,18 @@ carry channel ids — most do — are not affected at all.
   down starts a fresh player once it has exited.
 - No stream address, credential or header value ever reaches **the player's**
   command line. The player starts empty and receives all of it over a private
-  socket only you can read. Four things are briefly visible to other local
+  socket only you can read. Two things are briefly visible to other local
   accounts in `ps`: the channel's internal identifier while a change is being
-  issued, the channel's name while a failure notification is being sent, and
-  -- the two that matter -- your playlist URL and your guide-data URL, each
-  of which on an Xtream provider carries your username and password, while
-  the fetch that uses it runs. The last two are described under "The process
-  list, briefly" above. This sentence has been wrong twice: it said "any
-  command line", which denied all four, and then said "three things", which
-  omitted the guide-data URL. A list that counts itself has to be counted.
+  issued, and the channel's name while a failure notification is being sent.
+  Your playlist URL and your guide-data URL, each of which on an Xtream
+  provider carries your username and password, no longer appear anywhere on
+  a command line the plugin starts: they reach the helper in its
+  environment, which other accounts cannot read, as described under "The
+  process list, no longer" above. This sentence has been wrong twice: it
+  said "any command line", which denied all four things then visible, and
+  then said "three things", which omitted the guide-data URL. A list that
+  counts itself has to be counted; the two items that mattered came off this
+  one because the exposure itself is now closed, not merely disclosed.
 - Two consequences of the player being independent, both deliberate. If you
   remove or disable the plugin while something is playing, the player is no
   longer guaranteed to stop with it. Disabling the plugin does stop it, in
