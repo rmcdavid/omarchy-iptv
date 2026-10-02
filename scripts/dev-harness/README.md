@@ -332,6 +332,35 @@ result. Its preflight runs in `scripts/check.sh` on every commit and scores
 header lists the seams that join the preflight when lane V1 merges, and
 what is deliberately absent because only a real compositor can answer it.
 
+### Text format: a channel name is not a request (D-TEXT-1)
+
+```bash
+scripts/dev-harness/text-scenario.sh                     # holds the display; ~35 s
+scripts/dev-harness/text-scenario.sh --baseline 2d3cee3  # the shipped tree: T3 and T4 go red
+```
+
+The wall caption rendered provider text under Qt's AutoText default, so an
+`<img src="http://...">` in a channel name made the shell GET it (found by
+the marketplace maintainer on #9628; the measurement is in `QA-RESULTS`
+"Marketplace finding at 2d3cee3"). This scenario observes the sink on the
+shipping `Guide.qml`: it runs its own logging server on `127.0.0.1:8767`
+(8765 is `--serve`, 8766 is `argv-scenario.sh`), generates a playlist of 40
+probe names carrying a per-run token in each path plus one plain control,
+starts the harness with the guide closed, opens it in list view, switches
+to the wall through a real `Ctrl+G` (`wtype -M ctrl g -m ctrl`) and reads
+the server's log at each step. T1 and T2 are controls (the count loaded,
+the cursor name still carries the tag); T3 and T4 are the zeros; T5 proves
+the server logs by making a request of its own; T6 reads the harness log.
+Realised-delegate counts come from `ipc openMs 1`, the one verb that
+reports which view it forced, which re-opens the guide once to do so.
+
+Against 2d3cee3 on this screen: 4 passed, 2 failed -- 49 requests for 25
+distinct names after the LIST open alone (`channelWall` has
+`visible: root.wallView` with a live model, so its first page of captions is
+laid out on every open), 70 for 26 after the wall, `User-Agent:
+Mozilla/5.0`, nothing before the first open. The same tree with
+`textFormat: Text.PlainText` on the caption: 6 passed, 0 failed.
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape
