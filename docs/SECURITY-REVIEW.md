@@ -168,6 +168,25 @@ Sinks enumerated and checked:
   `Text.PlainText` (`Guide.qml:656, 674, 718, 793, 809, 914, 929, 949, 966,
   982, 1115, 1128, 1151, 1202`; `BarWidget.qml:173`); the one `StyledText`
   (`Guide.qml:1220`) renders only the plugin's own hint strings.
+  **Amended 2026-10-02 (D-TEXT-1): this bullet is where the review's own
+  SEC pass fell short, and the finding was not this review's -- the
+  marketplace maintainer reported it on omacom/omarchy-plugin-marketplace#9628
+  against the shipped 0.9.2. The sinks enumerated in this section are argv,
+  files, buses and the redaction points, and `Text.PlainText` appears above
+  as a redaction detail, evidenced by a list of line numbers. A `Text` whose
+  `textFormat` is undeclared is a NETWORK sink in its own right: Qt's
+  `AutoText` default reads the string for markup and fetches an `<img src>`
+  at text layout, on creation, visible or not (measured on Qt 6.11.2,
+  QA-RESULTS "Marketplace finding at 2d3cee3, 2026-10-02"). Text layout was
+  on no sink list this review wrote, so when the channel-wall caption
+  landed on 2026-09-25 (ddbc6d6) without the line, a list of line numbers
+  from `f03fef2` could not notice an element that did not yet exist. Closed
+  by `textFormat: Text.PlainText` on the caption, the gate guard
+  `scripts/check-text-format.py`, and the observed scenario
+  `scripts/dev-harness/text-scenario.sh`. Like the MPRIS session bus
+  (D-SINK-4) and the accessibility bus (D-A11Y-1), this sink was found after
+  this review and is outside its enumeration; the MPRIS one was opened by a
+  script mpv autoloads, this one by a Qt default.**
 - IPC `status`: `statusSummary` (`Service.qml:255-271`) carries
   `sourceHost`, `nowPlaying {id,name,group,launchedFrom,since}`,
   `lastError` (redacted) -- no URL (D-QA-15 fixed).

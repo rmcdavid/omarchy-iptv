@@ -3,6 +3,29 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.9.3 (unreleased)
+
+A channel name that could make the shell fetch a picture.
+
+### Fixed
+
+- **A playlist could make the plugin fetch a picture from any address its
+  author chose, with logos off and without asking.** The channel wall draws
+  each channel's name under its tile, and that one caption let a name be
+  read as formatted text: a name carrying an HTML image tag made the shell
+  process request the picture at the address inside the tag, silently, when
+  the guide opened -- not only while the wall was showing, because the
+  wall's first page of tiles is laid out either way. That walks around the
+  logo switch, which exists so that nothing is fetched from a third party
+  until you have seen how many hosts it would contact and agreed. A
+  marketplace reviewer (omacom/omarchy-plugin-marketplace#9628) found it in
+  0.9.2. The caption is now drawn as plain text, like every other string
+  the plugin shows from a playlist, and the release check now refuses any
+  text element that leaves that choice to the default. What it was not: no
+  credential of yours was sent, and nothing from a playlist ran as code --
+  the request carried the address from the tag and a generic browser
+  identification, nothing else of yours.
+
 ## 0.9.2 (2026-10-01)
 
 A password that other accounts on the machine could read for as long as a

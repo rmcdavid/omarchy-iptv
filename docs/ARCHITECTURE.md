@@ -341,6 +341,42 @@ child, so the URL ends at the helper. That makes the helper's no-subprocess
 shape load-bearing for this sink, which is why engineering rule 5 now says
 so.
 
+Closed 2026-10-02 (D-TEXT-1). The same maintainer, reviewing the shipped
+0.9.2 artifact (omacom/omarchy-plugin-marketplace#9628), reported that a
+channel name keeps its markup through the helper and `Model.displayName`
+and reaches the channel-wall caption, where Qt renders it. He was right:
+`parse_extinf` / `make_channel` and `displayName` strip leading dashes and
+whitespace and nothing else, and the caption `Text` (`text: tile.name`,
+inside `channelWall`) declared no `textFormat`, so Qt's `AutoText` default
+applied. Measured on Qt 6.11.2 offscreen against a logging server:
+AutoText resolves to StyledText, and an `<img src="http://...">` anywhere
+in the name is fetched at text layout on creation, with
+`User-Agent: Mozilla/5.0`, silently, visible or not, parented or not; an
+https `src` draws a SYN to port 443 from the QML process; StyledText and
+RichText fetch too, and RichText writes the full URL to stderr on failure;
+`Text.PlainText` is the only format that makes no request. Neither entity
+escaping nor URL redaction closes it: AutoText decodes `&lt;img ...&gt;`
+back into a tag, and `redact_urls` leaves `<img src="http://h">`,
+well-formed and fetchable. The exposure was every guide open, not only the
+wall: `channelWall` is `visible: root.wallView` over a live
+`model: root.rowCount`, and a GridView realises its first page of
+delegates by geometry whether or not it is shown. What that bypassed is
+the consent gate of the logo feature: logos are off by default, and the
+`g` key on the Sources screen counts the third-party hosts and waits for
+agreement before the first fetch -- a tag in a channel name fetched from
+any host the playlist author named, logos off, nobody asked, from the
+`omarchy-shell` process. What changed: the caption declares
+`textFormat: Text.PlainText`; `scripts/check-text-format.py` runs in
+`scripts/check.sh` so that no `Text` ships with its format undeclared
+again; `scripts/dev-harness/text-scenario.sh` opens the guide in list view
+and in wall view over a playlist whose names carry `<img src>` probes and
+asserts the logging server saw nothing, with `--baseline <ref>` to show
+the same checks red against 2d3cee3; the measurement is re-runnable from
+`scripts/dev-harness/spikes/text-autotext-img/`. The rule itself has been
+in section 9 since the scaffold; its acceptance was a grep that could not
+see a missing line (F-TEXT-2), the shape engineering rule 14 had already
+named and refused.
+
 ## 7. Error handling, offline behavior, performance
 
 - Every helper failure produces a status object the guide renders as text
@@ -411,7 +447,19 @@ QML (mirror first-party plugins; see clipboard/emojis, tailscale, dropbox):
 - `Accessible.role` / `Accessible.name` on the bar button, the guide card and
   rows.
 - No `Quickshell.execDetached` with concatenated strings. Argv arrays only.
-- `Text { textFormat: Text.PlainText }` for any user-supplied string.
+- `Text { textFormat: Text.PlainText }` for any string that is not a plugin
+  literal: channel names, group names, EPG titles, hosts, reasons, labels.
+  Why: Qt's default, `Text.AutoText`, reads the string for markup and FETCHES
+  an `<img src>` at text layout, on creation, visible or not (D-TEXT-1,
+  measured on Qt 6.11.2 on 2026-10-02; the wall caption shipped without this
+  line from 0.8.0 through 0.9.2). `scripts/check-text-format.py`, run by
+  `scripts/check.sh` under "text format guard", fails the gate on a `Text`
+  that leaves `textFormat` undeclared; `scripts/dev-harness/text-scenario.sh`
+  observes the sink itself, over a playlist whose names carry `<img src>`
+  probes and a logging server that must record nothing. `Text.StyledText` is
+  allowed only for the plugin's own strings, with
+  `// MARKUP-EXCEPTION: <reason>` on the line directly above the `textFormat`
+  line and a test that what it renders composes from literals.
 - Never mutate service arrays in place: assign new arrays/objects so QML
   bindings notice (`root.userState = Model.withFavorites(...)`). The state
   property is called `userState` because `state` is a QQuickItem property.

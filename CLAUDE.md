@@ -4,7 +4,7 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.9.0; the marketplace's verified
+Quickshell process. Released through v0.9.2; the marketplace's verified
 snapshot is still v0.7.1, which is a different fact and is explained in the
 decisions log.
 
@@ -175,14 +175,70 @@ requests and raise the batch.
      publishes `xesam:url` -- the stream URL, credentials and all -- to every
      process on the session bus for as long as a channel plays. Measured on
      the real bus with a synthetic credential, not reasoned about.
-     `--force-media-title` guards the TITLE, which reads `IPTV`; there is no
-     equivalent option for the URL and mpv-mpris has no configuration surface,
-     so the only lever is `--load-scripts=no`. It is RESERVED as well as
-     defaulted, because user `mpvArgs` are concatenated after the base argv
-     and a pasted `--load-scripts=yes` would silently reopen it.
+     `--force-media-title` guards the TITLE, and the title is a name, never
+     a URL: the launch argv's `IPTV` holds only while the player is idle,
+     and the helper's `apply_channel` sets `title` (`$>`-prefixed, so mpv
+     expands nothing in it, S-01) and `force-media-title` to the channel name
+     on every zap, by design (ARCHITECTURE-PLAYER 4.11 and hard requirements
+     2 and 3). An earlier version of this item said the title "reads
+     `IPTV`", which is true until the first play (D-DOC-4). The URL has no
+     equivalent option and mpv-mpris has no configuration surface, so the
+     only lever is `--load-scripts=no`. It is RESERVED as well as defaulted,
+     because user `mpvArgs` are concatenated after the base argv and a
+     pasted `--load-scripts=yes` would silently reopen it.
      The lesson generalises past this one option: **a sink can be opened by
      software you did not write and did not choose to run.** The sink list had
      only ever been audited over code in this repository.
+   - **Qt text layout** (D-TEXT-1). A `Text` whose `textFormat` is left at
+     the default, `Text.AutoText`, is a NETWORK sink for whatever string it
+     renders: Qt reads the string for markup, and an `<img src="http://...">`
+     in it is fetched. Measured on Qt 6.11.2 offscreen against a logging
+     server, one `Text` per case (QA-RESULTS "Marketplace finding at
+     2d3cee3, 2026-10-02"): AutoText resolves to StyledText and GETs the
+     `src` with `User-Agent: Mozilla/5.0`, silently, whether the tag is
+     first, last or 300 characters in, elided or not, and whether or not the
+     element is visible, sized, on screen or parented into a scene at all --
+     the fetch happens at text layout on creation. An https `src` draws a
+     TCP SYN to port 443 from the QML process (the handshake beyond it was
+     not checked). `Text.StyledText` and `Text.RichText` fetch too, and
+     RichText logs the FULL URL to stderr on failure, a console sink for a
+     provider-controlled URL. `Text.PlainText` is the only stop: no request
+     in four runs, the tag drawn as glyphs. Two things that look like
+     closures are not: entity escaping (AutoText decodes `&lt;img ...&gt;`
+     back into a tag, so escaping is a rendering change, not a sink closure)
+     and URL redaction (the helper's `redact_urls` turns
+     `<img src="http://h/x.png">` into `<img src="http://h">`, still a
+     well-formed, fetchable tag). The element that carried this was the
+     channel-wall caption, the `Text` with `text: tile.name` inside
+     `channelWall`, which declared no format while 42 other `Text`s declared
+     PlainText; and the exposure was every guide open, not the wall:
+     `channelWall` has `visible: root.wallView` over a live
+     `model: root.rowCount`, and a GridView realises delegates by geometry,
+     so the first page of captions is laid out whether or not the user has
+     ever pressed the wall key. Found by the marketplace maintainer on
+     omacom/omarchy-plugin-marketplace#9628 against the shipped 0.9.2.
+     The rule: every `Text` that renders anything but a plugin literal
+     declares `textFormat: Text.PlainText`. `Text.StyledText` is allowed
+     only for the plugin's own strings, with a `// MARKUP-EXCEPTION: <reason>`
+     comment on the line directly above the `textFormat` line and a test
+     that what it renders composes from literals (`footerHints` renders
+     `Model.footerHints`, tested in `tests/Model.test.js` under "F-TEXT-2").
+     `scripts/check-text-format.py`, run by `scripts/check.sh` under the
+     banner "text format guard", enforces the declaration;
+     `scripts/dev-harness/text-scenario.sh` observes the sink itself, checks
+     T1..T6 over a playlist whose names carry `<img src>` probes and a
+     logging server, with `--baseline <ref>` to show the red run against
+     the code before the fix; the measurement is re-runnable from
+     `scripts/dev-harness/spikes/text-autotext-img/`.
+     The lesson (F-TEXT-2): the rule "`Text.PlainText` for any user-supplied
+     string" has been in `docs/ARCHITECTURE.md` since the scaffold
+     (42015dc, 2026-09-12), the caption landed without it (ddbc6d6,
+     2026-09-25), and the rule's acceptance row SRC-SEC-13 was graded by
+     `grep -n 'StyledText\|RichText' Guide.qml`, which cannot see a MISSING
+     line on an element whose default is the unsafe one. That is rule 14's
+     shape exactly -- written down in this file, and still committed,
+     because the grep was never re-graded after rule 14 existed. A check
+     that cannot go red for the failure it guards is not a check.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
