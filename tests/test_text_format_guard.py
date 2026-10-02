@@ -329,6 +329,29 @@ class GuardCase(unittest.TestCase):
         self.assertIn('2 problem(s) in 2 Text block(s)', out)
 
     # (f4) a file with no Text block at all proves nothing, and says so.
+    def test_f8_regex_after_a_keyword_is_a_literal(self):
+        # `return /"/.test(s)` is a regex to JavaScript and was division to
+        # the first tokenizer rule, so its quote masked the Text on the
+        # same line and the file passed with one block too few. Measured
+        # red by emptying REGEX_KEYWORDS.
+        import subprocess, tempfile
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        guard = os.path.join(root, 'scripts', 'check-text-format.py')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'K.qml')
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write('import QtQuick\n'
+                         'Item {\n'
+                         '  function f(s) { return /"/.test(s) } Text { text: x }\n'
+                         '  Text { textFormat: Text.PlainText; text: "a" }\n'
+                         '}\n')
+            run = subprocess.run([sys.executable, guard, path], stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, timeout=60)
+            out = run.stdout.decode('utf-8', 'replace')
+        self.assertEqual(1, run.returncode, out)
+        self.assertIn('K.qml:3', out)
+        self.assertIn('2 Text block', out)
+
     def test_f4_no_text_block_at_all_is_a_failure(self):
         path = self.write('Z.qml', HEAD + '  Rectangle { }\n' + TAIL)
         status, out = run([path])

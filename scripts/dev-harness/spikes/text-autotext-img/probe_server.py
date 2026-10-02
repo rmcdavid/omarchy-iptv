@@ -13,9 +13,11 @@ Log format, one block per request, blocks separated by a blank line:
       ...
 
 The whole header set is kept because the question is not only WHETHER a
-request arrives but WHAT it carries: the CHANGELOG says the fetch carried
-"the address from the tag and a generic browser identification, nothing
-else of yours", and a server that logs only the User-Agent cannot show that.
+request arrives but WHAT it carries: the CHANGELOG used to say the fetch
+carried "the address from the tag and a generic browser identification,
+nothing else of yours" when nothing had logged the other headers, and a
+server that logs only the User-Agent cannot show what else there is. This
+one logs everything, and the CHANGELOG now names the five headers it found.
 Loopback only, so the values logged are the ones Qt sends to a host it was
 told nothing about.
 

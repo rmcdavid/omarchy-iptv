@@ -9651,7 +9651,7 @@ field labels, mpv track titles) and the `ConfirmDialog` message are closed
 by `Text.PlainText` inside host files under `/usr/share/omarchy/shell`,
 outside this repository and its gate; so are the bar tooltip
 (`Bar.qml:1338`) and the active-window title widget
-(`ActiveWindow.qml:34`). The QQC2 `TextField` placeholder (`Guide.qml:4284`)
+(`ActiveWindow.qml:32`). The QQC2 `TextField` placeholder (`Guide.qml:4294`)
 is AutoText with no plugin lever; measured by calling the shipping
 functions, `validateSourceUrl` rejects a tag in an http or Xtream label,
 while a file-kind label is the path's base name and carries whatever the
@@ -9795,7 +9795,7 @@ against the section.
 Six lenses over 8196422..c936f25 (documents, code comments, harness and
 the lead's own write-up, seams, sinks and code, a completeness critic),
 every finding handed to an adversarial verifier: 31 kept, 0 refuted, 15
-agents. Deduplicated, fourteen distinct items; three P2, the rest P3 and
+agents. Deduplicated, fifteen distinct items; three P2, the rest P3 and
 nits. F-M3-8 holds for the ninth round: twenty-two of the thirty-one were
 sentences.
 
@@ -9852,7 +9852,8 @@ once, when our own server is confirmed up and is a child of the script,
 and only that remembered pid is ever killed -- proven with a foreign
 listener on 8767: the old script killed it, the new one leaves it alive;
 the spike's server now logs every header and its comparator checks the
-header names, red when the server drops one (6 lines, exit 1). Measured
+header names, red when the server drops one (six entries on one DIFFERS
+line, exit 1). Measured
 header set of the fetch, identical across the six fetching cases: `Host`,
 `Connection: Keep-Alive`, `Accept-Encoding: zstd, br, gzip, deflate`,
 `Accept-Language: en-US,*`, `User-Agent: Mozilla/5.0`; no cookie, no
@@ -9865,3 +9866,44 @@ red on a host copy with the tooltip's PlainText changed; the README, the
 CHANGELOG, QA-SOURCES, the D-DOC-4 citations and the placeholder sentence
 say what was measured. Python 689 tests (684 -> 689), node 1667, guard 49
 blocks; text-scenario forward 6/6 on the repaired harness.
+
+## Final pass before 0.9.3, 2026-10-02: 26 findings, none refuted, one P2 (F-M3-12)
+
+Four lenses over the review repairs (c936f25..01349bb), ten agents, every
+finding verified: 26 kept, 0 refuted, eleven distinct items. The P2 was
+the lead's own, and it is rule 11's: `tests/test_host_text_format.py`
+pinned the confirm dialog with a bare pattern, the host file has two
+PlainText lines (the message at :72 and the button labels at :109), and
+flipping the MESSAGE to AutoText on a host copy stayed green -- the one
+pin proven red was the tooltip, the only one that carried an anchor. Both
+the contract and rule 5 said the test "goes red when a host update moves
+one of them", and the test reads no line numbers at all. Now every pin is
+anchored on its element (id or the property binding the plugin's string)
+inside a window that cannot cross a brace or another `Text`, the summary
+Text has a pin of its own, and three single flips on a host copy -- the
+message, the summary, the tooltip -- are each a red run; both sentences
+say what the test asserts and that a moved line stays green.
+
+The rest: the README's replacement sentence counted "the one string it
+hands to the shell" where the contract written in the same round counts
+five (D-SINK-7's shape, a list that counts itself); the spike and its
+server quoted the CHANGELOG sentence this same round withdrew, in the
+present tense, as what the CHANGELOG says; the CHANGELOG's "measured"
+sentence named three of the five headers; the guard's regex rule read a
+slash after `return` as division, so `return /"/.test(s)` masked a `Text`
+on its line (keywords and operators are regex positions now, a 21st guard
+test, red with the keyword set emptied; the limitation names `)`, `]`, `}`
+and a leading slash); the repaired cleanup orphaned the script's OWN late
+server on the "did not start" exit, which the next run would then refuse
+as foreign (the child bash handed us is reaped by that pid after a check
+that it is still ours -- that is reaping a child, not reading a listener
+from `$!`); two citations in the finding section (`ActiveWindow.qml:32`,
+`Guide.qml:4294`); "fourteen" where the section lists fifteen; "six
+lines" for six entries on one line; "five kinds of string that carry
+provider data" when field labels are the plugin's own; an "Unbalanced"
+comment describing code that does the opposite.
+
+F-M3-8, tenth round: twenty-one of the twenty-six were sentences, and
+the P2 was a test never seen red. Python 690 (689 -> 690); guard 21
+tests, 49 blocks; the spike re-run matches; text-scenario forward on the
+repaired scripts in the gate record below.

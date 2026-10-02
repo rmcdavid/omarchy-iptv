@@ -7,7 +7,11 @@ contract records. A red here after an Omarchy update is a re-measurement
 request, not a plugin defect.
 
 The host directory comes from OMARCHY_SHELL_DIR so the test can be run
-against a copy with one line changed, which is how it was proven red.
+against a copy with one line changed, which is how it was proven red: the
+tooltip, the confirm-dialog message and the toast summary each flipped to
+AutoText on a copy, one at a time, each a red run. What it does NOT see: a
+declaration moved to another line, so the line numbers the contract's
+table records are for the reader, not for this test.
 """
 import io
 import os
@@ -16,13 +20,24 @@ import unittest
 
 HOST = os.environ.get("OMARCHY_SHELL_DIR", "/usr/share/omarchy/shell")
 
-# (relative file, regex that must match at least once, what it guards)
+# A window of the same element's properties: anything but a closing brace or
+# the start of another Text, so a sibling's declaration can never satisfy a
+# pin (the first version let ConfirmDialog's button-label line stand in for
+# its message line, and flipping the message to AutoText stayed green).
+W = r"(?:(?!\}|Text\s*\{)[\s\S]){0,400}?"
+
+# (relative file, regex that must match at least once, what it guards).
+# Each pin is anchored on the element the contract names, by its id or by
+# the property that binds the plugin's string; a moved line stays green,
+# a changed or removed declaration goes red.
 PINS = [
-    ("Ui/PanelSectionHeader.qml", r"textFormat:\s*Text\.PlainText", "group names, field labels and track titles"),
-    ("Ui/ConfirmDialog.qml", r"textFormat:\s*Text\.PlainText", "the confirm-dialog message"),
-    ("plugins/bar/Bar.qml", r"id:\s*tooltipLabel[\s\S]{0,400}?textFormat:\s*Text\.PlainText", "the bar tooltip"),
-    ("plugins/bar/widgets/ActiveWindow.qml", r"textFormat:\s*Text\.PlainText", "mpv's window title, the channel name after a zap"),
-    ("plugins/notifications/components/NotificationCard.qml", r"text:\s*root\.styledBody[\s\S]{0,200}?textFormat:\s*Text\.StyledText", "a failure toast's body (StyledText, behind the stripper below)"),
+    ("Ui/PanelSectionHeader.qml", r"textFormat:\s*Text\.PlainText", "group names, field labels and track titles (the file's one Text)"),
+    ("Ui/ConfirmDialog.qml", r"id:\s*messageText" + W + r"textFormat:\s*Text\.PlainText", "the confirm-dialog message"),
+    ("Ui/ConfirmDialog.qml", r"textFormat:\s*Text\.PlainText" + W + r"text:\s*modelData", "the confirm-dialog button labels"),
+    ("plugins/bar/Bar.qml", r"id:\s*tooltipLabel" + W + r"textFormat:\s*Text\.PlainText", "the bar tooltip"),
+    ("plugins/bar/widgets/ActiveWindow.qml", r"textFormat:\s*Text\.PlainText" + W + r"text:\s*root\.title", "mpv's window title, the channel name after a zap"),
+    ("plugins/notifications/components/NotificationCard.qml", r"textFormat:\s*Text\.PlainText" + W + r"text:\s*root\.summary", "a failure toast's summary"),
+    ("plugins/notifications/components/NotificationCard.qml", r"text:\s*root\.styledBody" + W + r"textFormat:\s*Text\.StyledText", "a failure toast's body (StyledText, behind the stripper below)"),
     ("plugins/notifications/NotificationLogic.js", r"function stripImageTags\(", "the image-tag stripper the toast body sits behind"),
 ]
 

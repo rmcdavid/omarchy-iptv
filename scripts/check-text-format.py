@@ -72,16 +72,21 @@ must stand alone as an identifier: a `BodyText {` or `Foo.Text {` is some
 other type and is not inspected (and the qualified-import refusal above is
 what keeps `Foo.Text` from being a hiding place).
 
-A regex literal is recognised the way a JavaScript tokenizer does it, by
-what precedes the slash: a `/` that is the first code on its line, or whose
-previous non-blank code character is one of `: = ( , [ { ; ! ? & |`, opens a
-literal; a `/` after anything else (an identifier, a number, `)` or `]`) is
-division. The literal runs to the next unescaped `/` outside a `[...]`
-class, or to the end of the line. Without this, `property var re: /"/` left
-the quote open and masked the rest of its line, so a `Text {` on that line
-was unseen. KNOWN LIMITATION: a slash after `)` is always read as division,
-so a literal in a position such as `if (x) /"/.test(y)` is not recognised
-and its quote masks the rest of that line; no shipped file writes one.
+A regex literal is recognised by what precedes the slash, the way a
+JavaScript tokenizer approximates it: a `/` that is the first code on its
+line, or whose previous non-blank code character is a punctuator or
+operator (`: = ( , [ { ; ! ? & | + - * % < > ^ ~`), or whose previous word
+is one of `return typeof case throw in instanceof void delete do else new
+yield await`, opens a literal; a `/` after anything else (another word, a
+number, `)`, `]` or `}`) is division. The literal runs to the next
+unescaped `/` outside a `[...]` class, or to the end of the line. Without
+this, `property var re: /"/` left the quote open and masked the rest of its
+line, so a `Text {` on that line was unseen. KNOWN LIMITATIONS: a slash
+after `)`, `]` or `}` is always read as division (`if (x) /"/.test(y)`), and
+a `/` that is the first code on a line is always read as a literal (a
+division continued onto the next line); in either case a quote inside
+masks the rest of that line. No shipped file writes one; the tree count is
+the check that none has started to.
 
 Python 3 standard library only. ASCII only.
 """
@@ -103,9 +108,12 @@ QUALIFIED_IMPORT_RE = re.compile(
     r'(?:[ \t]+[0-9][0-9.]*)?[ \t]+as[ \t]+([A-Za-z_][A-Za-z0-9_]*)',
     re.MULTILINE)
 # What may precede a `/` that opens a regex literal: a position where
-# JavaScript cannot be dividing. Anything else (identifier, number, `)`,
-# `]`) makes the slash a division operator.
-REGEX_PRECEDERS = set(':=(,[{;!?&|')
+# JavaScript cannot be dividing -- a punctuator or operator, or one of the
+# keywords a value follows. Anything else (an identifier that is not a
+# keyword, a number, `)`, `]`, `}`) makes the slash a division operator.
+REGEX_PRECEDERS = set(':=(,[{;!?&|+-*%<>^~')
+REGEX_KEYWORDS = set(['return', 'typeof', 'case', 'throw', 'in', 'instanceof',
+                      'void', 'delete', 'do', 'else', 'new', 'yield', 'await'])
 TEXT_FORMAT_RE = re.compile(r'(?<![A-Za-z0-9_.])textFormat\s*:\s*([^\n]*)')
 PLAIN = 'Text.PlainText'
 STYLED = 'Text.StyledText'
@@ -133,19 +141,31 @@ def allowlisted_qml(root):
 
 
 def regex_opens_at(out):
-    """Whether a `/` appended now would open a regex literal, judged by the
-    last non-blank code character already masked on the current line: none
-    (line start) or one of REGEX_PRECEDERS means a literal, anything else
-    means division."""
+    """Whether a `/` appended now would open a regex literal, judged by what
+    precedes it on the current line: nothing (line start), one of
+    REGEX_PRECEDERS, or a whole word in REGEX_KEYWORDS means a literal;
+    any other word, a number, `)`, `]` or `}` means division."""
     j = len(out) - 1
+    word = []
     while j >= 0:
         token = out[j]  # one source character, masked to 1 or 2 chars
         if '\n' in token:
-            return True
+            break
         code = token.strip()
         if code:
-            return code[-1] in REGEX_PRECEDERS
+            last = code[-1]
+            if last.isalnum() or last == '_':
+                word.append(last)
+                j -= 1
+                continue
+            if word:
+                break
+            return last in REGEX_PRECEDERS
+        elif word:
+            break
         j -= 1
+    if word:
+        return ''.join(reversed(word)) in REGEX_KEYWORDS
     return True
 
 
@@ -290,8 +310,9 @@ def text_blocks(masked):
                     segments.append((seg_start, i))
             i += 1
         if depth != 0:
-            # Unbalanced: report it as a block with no properties, so it is a
-            # failure rather than a silent skip.
+            # Unbalanced: treat the tail of the file as the block's own code
+            # so it is still inspected rather than skipped (qmllint refuses
+            # such a file before it could ship).
             segments.append((seg_start, n))
         blocks.append((line_of(masked, m.start()), segments))
     return blocks

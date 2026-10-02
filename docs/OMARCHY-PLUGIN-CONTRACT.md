@@ -227,17 +227,20 @@ both binding declaration orders.
 
 ## Verified host renderers for the strings the plugin hands over (2026-10-02)
 
-The plugin hands the host five kinds of string that carry provider data,
-and each is rendered by a host file the plugin cannot change. Read on
-omarchy 4.0.4 on 2026-10-02 during D-TEXT-1, and pinned by
-`tests/test_host_text_format.py`, which goes red on this machine when a
-host update moves one of them (a red there is a re-measurement, not a
-failure of this plugin):
+The plugin hands the host five kinds of string, most of them carrying
+provider data (field labels are the plugin's own literals), and each is
+rendered by a host file the plugin cannot change. Read on omarchy 4.0.4 on
+2026-10-02 during D-TEXT-1, and pinned by `tests/test_host_text_format.py`,
+which goes red on this machine when a host update changes or removes the
+declaration on one of these elements -- each pin is anchored on the
+element, by id or by the property that binds the plugin's string. A moved
+line stays green: the line numbers below are for the reader, not the test.
+A red there is a re-measurement, not a failure of this plugin:
 
 | string | host file | format |
 |---|---|---|
 | group names, field labels, mpv track titles (`PanelSectionHeader`) | `Ui/PanelSectionHeader.qml:17` | `Text.PlainText` |
-| confirm-dialog message (`ConfirmDialog`) | `Ui/ConfirmDialog.qml:72` and `:109` | `Text.PlainText` |
+| confirm-dialog message, and its button labels (`ConfirmDialog`) | `Ui/ConfirmDialog.qml:72` (message), `:109` (labels) | `Text.PlainText` |
 | the bar widget's tooltip | `plugins/bar/Bar.qml:1338` | `Text.PlainText` |
 | mpv's window title, the channel name after the first zap | `plugins/bar/widgets/ActiveWindow.qml:32` | `Text.PlainText` |
 | a failure toast's summary / body (`omarchy-notification-send`) | `plugins/notifications/components/NotificationCard.qml:166` / `:184` | summary `Text.PlainText`; body `Text.StyledText` behind `NotificationLogic.js` `stripImageTags` |

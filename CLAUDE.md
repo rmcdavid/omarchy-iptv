@@ -243,9 +243,11 @@ requests and raise the batch.
      title, and a failure toast's body -- are rendered by host files under
      `/usr/share/omarchy/shell`, PlainText except the toast body, which is
      StyledText behind the host's own image-tag stripper. Those five files
-     and lines are recorded in `docs/OMARCHY-PLUGIN-CONTRACT.md` and pinned
-     by `tests/test_host_text_format.py`, which goes red on this machine
-     when a host update changes one of them.
+     are recorded in `docs/OMARCHY-PLUGIN-CONTRACT.md` and pinned by
+     `tests/test_host_text_format.py`, which goes red on this machine when
+     a host update changes or removes the declaration on one of those
+     elements; a moved line stays green, so the line numbers in the
+     contract's table are for the reader, not the test.
      `scripts/check-text-format.py`, run by `scripts/check.sh` under the
      banner "text format guard", enforces the declaration;
      `scripts/dev-harness/text-scenario.sh` observes the sink itself, checks

@@ -48,13 +48,15 @@
 #
 # Five headers, in that order, no cookie, no referer, no authorization,
 # nothing from the environment but the locale behind Accept-Language (and
-# the compressors this Qt was built with behind Accept-Encoding). That is
-# the measurement behind the CHANGELOG's "the address from the tag and a
-# generic browser identification, nothing else of yours". The comparator
+# the compressors this Qt was built with behind Accept-Encoding). This
+# measurement replaced the CHANGELOG's first sentence about the request
+# ("... nothing else of yours", withdrawn 2026-10-02 because nothing had
+# logged the other headers); the CHANGELOG now names the five. The comparator
 # holds the NAMES and their order; the values are printed per case so a
 # change in one is seen, not failed. A server patched to drop one header
-# from its log turns the comparator red (six "carried headers" lines, exit
-# 1), which is how the log-to-comparator join was proven on 2026-10-02.
+# from its log turns the comparator red (six "carried headers" entries on
+# the one DIFFERS line, exit 1), which is how the log-to-comparator join
+# was proven on 2026-10-02.
 #
 # What the table says: every format but PlainText fetches, visible or not,
 # elided or not, with `Mozilla/5.0` as the client; AutoText resolves to
@@ -93,8 +95,15 @@ listener_pid() { ss -ltnp 2>/dev/null | awk -v p=":$PORT " '$0 ~ p {print $0}' |
 # Set only once OUR server is confirmed listening; empty until then, so a
 # cleanup on an earlier exit path has no pid to send a signal to.
 SERVER_PID=""
+# OWN_CHILD is the pid bash handed us for the server we started -- our
+# child by construction, used only to stop a late starter of ours, never to
+# find the listener. Every kill checks the pid is still a child of this
+# shell, so a reused pid is never signalled.
+OWN_CHILD=""
+ours() { [[ -n $1 && $(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ') == "$$" ]]; }
 cleanup() {
-  [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null
+  ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
+  ours "$OWN_CHILD" && kill "$OWN_CHILD" 2>/dev/null
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -106,6 +115,7 @@ trap cleanup EXIT
 # and read its log.
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 python3 "$HERE/probe_server.py" "$PORT" "$LOG" >/dev/null 2>&1 &
+OWN_CHILD=$!
 for i in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
 ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "probe server did not start on $PORT"; exit 2; }
 lpid=$(listener_pid)

@@ -118,9 +118,18 @@ probe_distinct() { grep -o -- "/${TOKEN}-[0-9]*\.png" "$REQLOG" 2>/dev/null | so
 # cleanup on an earlier exit path (the port already taken, the server not
 # starting) has no pid to signal and leaves the foreign listener alone.
 SERVER_PID=""
+# The pid bash handed us for the server we started, kept apart from
+# SERVER_PID: it is OUR child by construction (no wrapper in between), so
+# reaping it by this number is not the forbidden "listener from $!" -- it
+# is never used to find the LISTENER, only to stop a child of ours that
+# started too late to be confirmed. Every kill below checks the pid is
+# still a child of this shell first, so a reused pid is never signalled.
+OWN_CHILD=""
+ours() { [[ -n $1 && $(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ') == "$$" ]]; }
 cleanup() {
   "$RUN" reap >/dev/null 2>&1
-  [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null
+  ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
+  ours "$OWN_CHILD" && kill "$OWN_CHILD" 2>/dev/null
   [[ -n $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   rm -rf "$WORK"
 }
@@ -146,7 +155,11 @@ with S(("127.0.0.1", PORT), H) as s:
 PY
 : >"$REQLOG"
 python3 "$WORK/probe_server.py" "$PORT" "$REQLOG" >/dev/null 2>&1 &
+OWN_CHILD=$!
 for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
+# On this exit the trap reaps OWN_CHILD if it is still ours: a server that
+# binds after the 3 s window must not be left holding 8767 for the next run
+# to refuse as foreign.
 ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "probe server did not start"; exit 2; }
 # The listener is ours only if this shell is its parent; a server that lost
 # the port to someone who bound it between the check above and the bind
@@ -237,7 +250,7 @@ fi
 
 # ---- teardown, proven: the shell is gone and the port is free
 "$RUN" reap >/dev/null 2>&1
-kill "$SERVER_PID" 2>/dev/null
+ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
 for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " || break; sleep 0.1; done
 qs_left=$([[ -f "$SCRATCH/qs${OMARCHY_IPTV_HARNESS_INSTANCE:-}.pid" ]] && echo "pidfile present" || echo "no pidfile")
 port_left=$(ss -ltn 2>/dev/null | grep -q ":$PORT " && echo "port $PORT STILL LISTENING" || echo "port $PORT free")

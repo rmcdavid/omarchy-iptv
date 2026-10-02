@@ -23,9 +23,10 @@ A channel name that could make the shell fetch a picture.
   the plugin itself draws from a playlist, and the release check now refuses
   any text element that leaves that choice to the default. What it was not:
   no credential of yours was sent, and nothing from a playlist ran as code.
-  Measured, the request carried the address from the tag, a generic browser
-  identification, and your system language; no cookie, no credential, and
-  nothing from the playlist beyond the tag itself.
+  Measured, the request carried five headers: the address from the tag, a
+  keep-alive flag, the compressions this build of Qt accepts, your system
+  language, and a generic browser identification; no cookie, no credential,
+  and nothing from the playlist beyond the tag itself.
 
 ## 0.9.2 (2026-10-01)
 
