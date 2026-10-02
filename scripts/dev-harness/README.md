@@ -417,3 +417,21 @@ Note: while Lane A's helper `play` / `stop` / `status` subcommands are stubs
 (`not_implemented`, exit 3) the service treats their answers as "unknown"
 (no health failure counted), zapping while mpv runs logs the stub error,
 and stop falls back to SIGTERM after 2 s.
+
+## Spikes under `spikes/`
+
+Measurements a contract rests on, kept so "measured" means "re-runnable".
+None is part of the gate.
+
+- `spikes/process-environment.qml`: how Quickshell's `Process.environment`
+  merges, replaces and unsets (D-SINK-8). `timeout 20 quickshell -p
+  scripts/dev-harness/spikes 2>&1 | grep SPIKE`; needs a Wayland display.
+- `spikes/text-autotext-img/run.sh`: whether laying out a `Text` whose
+  string carries `<img src="http://...">` makes the process GET it, per
+  `textFormat` (D-TEXT-1). Offscreen (`QT_QPA_PLATFORM=offscreen`,
+  qmltestrunner), its own logging server on a free loopback port, nine
+  cases (tag first and last, the caption's elided shape, invisible,
+  PlainText, StyledText, RichText, `<b>` only, entity-escaped), and the
+  run is compared with the table in its header, so a Qt that changes the
+  answer is a red exit rather than a stale comment. On Qt 6.11.2 every
+  format but PlainText fetches, with `Mozilla/5.0` as the client.
