@@ -9369,8 +9369,11 @@ URL in `OMARCHY_IPTV_URL` instead of as a `--url` argv item.
 `Service.qml` assigns it immediately before `running = true` at exactly those
 three sites; the builders carry no URL; the helper's `url_from(args)` reads
 `--url` if given, else the variable, so `--url` still works for a person at
-their own shell. The helper fetches with `urllib` and spawns nothing, so
-nothing inherits the variable.
+their own shell. The fetch verbs download with `urllib` and start no
+child; the helper forks mpv only in `player start`, on a Process the
+service never hands this variable, so nothing inherits it. (A first draft
+of this sentence said the helper "spawns nothing", which the review of
+this fix struck as false; it was re-stated here anyway and struck again.)
 
 Built by three lanes in separate worktrees on disjoint files -- helper;
 model and service; documents -- against a contract the lead fixed first,
@@ -9455,8 +9458,10 @@ already carry that field. Durable, and readable by the journal groups.
 
 ### The fix, and what it does to the proof
 
-`shield_environment()` sets `PR_SET_DUMPABLE 0` through ctypes as the
-helper's first statement, for every verb. Measured from a same-uid reader
+`shield_environment()` sets `PR_SET_DUMPABLE 0` through ctypes before the
+helper imports anything but `sys`, for every verb. (The first version put
+it BELOW seventeen stdlib imports while every sentence about it said "first
+statement"; the final pass before 0.9.2 found and moved it, F-M3-10.) Measured from a same-uid reader
 with no capabilities: a dumpable child's `environ` is readable with the
 credential present; a non-dumpable child's is refused (`Permission
 denied`); its `cmdline` stays readable and carries nothing either way. The
@@ -9472,8 +9477,8 @@ route left, and that route is root-only.
 
 ### The window, measured rather than assumed away
 
-Nothing a child does can make it non-dumpable before its first statement
-runs. The first version of the sweep recorded each helper the first time it
+The window is exec to the shield: the interpreter starting and compiling
+the file. The first version of the sweep recorded each helper the first time it
 was seen -- always inside that window -- and reported the shield absent on a
 tree that had it. It now re-samples every helper on every 50 ms tick and
 records first-seen and first-refused times.
@@ -9482,14 +9487,24 @@ records first-seen and first-refused times.
 |---|---|---|---|
 | S3 helper command lines carrying the credential | 4 | 0 | 0 |
 | environ readable to a same-uid reader at the END of the fetch | 4 of 4 | 4 of 4 | **0 of 4** |
-| S4b readable window after exec, per fetch (ms), two runs | the whole fetch | the whole fetch | **120, 114, 118, 178** and **181, 112, 173, 121** |
+| S4b readable window after exec, per fetch (ms), 50 ms sampling | the whole fetch | the whole fetch | shield below the imports: **120, 114, 118, 178** and **181, 112, 173, 121**; shield above them (final): **118, 120, 120** |
 | every helper verb non-dumpable | 0 | 0 | 8 of 8 |
 
-The window is the interpreter starting and compiling a 5,000-line script,
-and the S4b bound is 400 ms: set from that measurement with margin, stated
-in the scenario, and not to be raised without a new measurement. Every
-shipped sentence that said "for the length of the fetch" now says "from its
-first instruction on" and names the fifth of a second.
+The 50 ms sampling quantises those figures. Polled at 0.2 ms from a
+same-uid reader on an idle machine, the window with the shield above the
+imports is **98-113 ms, median 105, over twelve runs** (2026-10-01, against
+a 172-180 ms total `--version` run). The final pass measured about 125 ms
+with the shield below the imports, 264-634 ms with the cores oversubscribed
+twice over, and about 25 ms for a split stub that shields before compiling
+the body -- which this project has not done, so the figure is the cheap
+position, not the floor. The window is CPU-bound, so the S4b bound is
+RELATIVE: three times an in-run `--version` start-up control plus 60 ms,
+taken under the same load (588 ms against a 176 ms control in the final
+run). The first bound was an absolute 400 ms that would have gone red on a
+busy machine for a reason unrelated to the fix. Every shipped sentence that
+said "for the length of the fetch" now says "before it loads anything else"
+and names about a tenth of a second on an idle machine, longer on a busy
+one.
 
 ### Also corrected from the review
 
@@ -9506,3 +9521,52 @@ omitted `--state-dir`. S6 passed on a mis-named log and now fails on one. The
 Quickshell environment measurement two comments called load-bearing is
 `scripts/dev-harness/spikes/process-environment.qml`, re-runnable.
 
+
+## Final pass before 0.9.2, 2026-10-01: 13 findings, 1 blocker, the lead's own
+
+The last review before the cut read the D-SINK-9 repair the way F-M3-8
+says to: every sentence it wrote against the code it wrote them about.
+Thirteen findings kept, one blocker, and the blocker was the lead's own
+rewrite of a lane's finding (F-M3-10 on the board).
+
+- **The blocker.** The README's by-hand remedy, written in THIS release to
+  replace a `--url <url>` command because a credentialed URL typed at a
+  prompt lands in the shell history for good, was
+  `OMARCHY_IPTV_URL=<url> python3 ... playlist` -- the same URL typed at the
+  same prompt, in the same history. Replaced with `read -rs` into an
+  exported variable, a run without `--url`, and an `unset`, which reaches
+  the history as three credential-free lines; and with the sentence that
+  the guide's form is the way that reaches neither.
+- **"First statement" was a name the code never matched.** `SHIELDED =
+  shield_environment()` sat below seventeen stdlib imports in the helper
+  while every document, the docstring and the STATUS row called it the
+  first statement. Moved to directly after `import sys`, which is the one
+  import it needs, and the window measured again.
+- **"Nothing a child does can shorten it" was false by about five times.**
+  Moving the shield above the imports cut the window by about a fifth, and
+  a split stub that shields before compiling the body reaches about 25 ms.
+  The sentence is gone from CLAUDE.md, ARCHITECTURE, STATUS, the scenario
+  header and this file, replaced by the measured figures under a stated
+  load and the words "the cheap position, not the floor".
+- **The window was measured once, idle, and bounded absolutely.** The
+  S4b bound was 400 ms; under a doubled CPU load the window ran 264-634
+  ms, so the proof would have failed on a busy machine for a reason
+  unrelated to the fix. The bound is now relative to an in-run start-up
+  control taken under the same load.
+- **Numbers and conditions.** "112-181 ms" (shield below the imports, 50 ms
+  sampling) was quoted without either qualifier in four documents and the
+  maintainer reply draft; the README and CHANGELOG named "a fifth of a
+  second" with no load condition. All now carry the sampling and the load.
+- **Smaller.** The shield's `except` tuple lacked `ImportError`, so a
+  Python built without `_ctypes` would have crashed every fetch instead of
+  warning and running unshielded; the D-SINK-8 section of this file still
+  said the helper "spawns nothing" after F-M3-9 had corrected it
+  elsewhere; the sweeper let an ENOENT after a helper exited overwrite a
+  recorded refusal; `ShieldTest` was defined after the `__main__` guard
+  and its fixture server was never closed.
+
+Re-measured after the move, forward and baseline, both on the real
+`/proc`: forward 7 of 7 with windows of 118, 120 and 120 ms at 50 ms
+sampling against a 176 ms control; baseline `dbcbd0f` fails S3 (4 command
+lines carry the credential), S4 (0 of 4 environments refused) and S4b, as
+it must. Sub-millisecond, 98-113 ms over twelve runs. M3 scenario 37 of 37.

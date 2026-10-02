@@ -200,8 +200,6 @@ class EpgUrlEnvTest(unittest.TestCase):
             self.assertNotIn(secret, written)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ShieldTest(unittest.TestCase):
@@ -258,6 +256,7 @@ class ShieldTest(unittest.TestCase):
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hold)
         port = server.server_address[1]
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)   # cleanups run last-first: close after shutdown
         self.addCleanup(server.shutdown)
         cache = tempfile.mkdtemp(prefix="omarchy-iptv-shield-")
         self.addCleanup(shutil.rmtree, cache, True)
@@ -283,3 +282,6 @@ class ShieldTest(unittest.TestCase):
         self.assertTrue(status.get("ok"), status)
         self.assertEqual(status.get("channelCount"), 1)
         self.assertNotIn(needle.encode(), out + err)
+
+if __name__ == "__main__":
+    unittest.main()

@@ -140,12 +140,19 @@ requests and raise the batch.
      (`shield_environment`, D-SINK-9): the same-uid reader then gets EACCES,
      only root reads it, and a crash writes no core (a dumpable crash hands
      its whole environment to systemd-coredump, durably, in the journal).
-     Measured both ways on 2026-10-01. What remains is the interpreter's own
-     start-up, exec to the helper's first statement: measured at 112-181 ms
-     over two runs of four fetches
-     by the argv scenario, readable in that window by same-uid processes
-     only, and not shortenable by anything the child does. State it as a
-     bounded, measured window, never as zero. The fetch verbs start no child process,
+     Measured both ways on 2026-10-01. What remains is the window between
+     exec and the shield, which sits before every import but `sys`: the
+     interpreter starting and compiling a 5,000-line file. It is CPU-bound,
+     so it scales with load -- 98-113 ms idle at sub-millisecond resolution,
+     median 105 over twelve runs (about 125 ms when the shield sat below
+     the stdlib imports, which is where the first version put it while
+     calling it the first statement), 264-634 ms with the cores oversubscribed twice over -- and
+     it is NOT the floor: a split stub that shields before compiling the
+     body reaches about 25 ms. An earlier version of this rule said nothing
+     a child does can shorten it; that was false by about five times.
+     Readable in that window by same-uid processes only. State it as a
+     bounded, measured window under a stated load, never as zero and never
+     as unshortenable. The fetch verbs start no child process,
      so nothing inherits the variable -- the helper forks mpv only in
      `player start`, on a Process the service never hands this environment;
      keep BOTH halves that way. In QML, assign

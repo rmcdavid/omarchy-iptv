@@ -16,9 +16,11 @@
 #   S4  every helper ENVIRONMENT ended REFUSED to this same-uid reader, and
 #       the fetch succeeded anyway -- so the URL arrived by the only route
 #       left, and that route is readable by root alone (D-SINK-9)
-#   S4b the window between exec and the shield -- the interpreter's own
-#       start-up, which nothing a child does can shorten -- is MEASURED,
-#       and bounded
+#   S4b the window between exec and the shield -- the interpreter starting
+#       and compiling the helper, since the shield sits above every import
+#       but sys -- is MEASURED, and bounded against an in-run start-up
+#       control taken under the same load (it is CPU-bound and runs 2-5x
+#       longer on a busy machine; an absolute bound failed there)
 #   S5  at the end, no process on the machine still carries it on a
 #       command line (the one self-inflicted argv, `qs ipc addSource`, has
 #       exited)
@@ -123,8 +125,8 @@ import os, sys, time, json
 needle = os.environ["ARGV_NEEDLE"].encode(); deadline = time.monotonic() + float(sys.argv[1]); out = open(sys.argv[2], "a")
 # Every helper is re-sampled on every tick, not recorded once: the first
 # draft recorded each pid the first time it was seen, which for a process
-# that shields itself at its first statement is ALWAYS the start-up window
-# before that statement, and reported the shield as absent. The record for
+# that shields itself before its imports is ALWAYS the start-up window
+# before the shield, and reported the shield as absent. The record for
 # a pid is rewritten each tick with first-seen / first-refused times, so the
 # window between them is MEASURED and the final state is what is asserted.
 seen = {}
@@ -145,7 +147,12 @@ while time.monotonic() < deadline:
         try:
             with open("/proc/%s/environ" % d, "rb") as f: env = f.read()
         except PermissionError: env = b""; refused = True
-        except OSError: env = b""
+        except OSError:
+            # Gone between the cmdline read and this one: its last real
+            # sample stands. Rewriting it as "not refused" was the first
+            # draft's bug in the other direction (last sample wins, with no
+            # distinction between readable and vanished).
+            continue
         carriers = sorted(set(e.split(b"=", 1)[0].decode("ascii", "replace") for e in env.split(b"\0") if needle in e))
         prev = seen.get(key)
         rec = {"pid": int(d), "verb": argv[2].decode("ascii", "replace"),
@@ -229,10 +236,22 @@ if [[ $(g environ_refused) -eq $(g fetch_runs) && $(g fetch_runs) -ge 2 && $chan
 else
   fail "S4" "environ refused at the end on $(g environ_refused) of $(g fetch_runs) fetch runs (readable ones carried: $(g carriers)), channels=$channels, windows ms=$(g readable_before_shield_ms)"
 fi
-# S4b: the start-up window is the interpreter's, and it is bounded. The bound
-# is set from measurement with margin, not from hope; see the record in
-# QA-RESULTS for the numbers that set it.
-[[ $(g max_window_ms) -ge 0 && $(g max_window_ms) -le 400 ]] && pass "S4b the pre-shield window was $(g max_window_ms) ms, under the 400 ms bound" || fail "S4b" "pre-shield window $(g max_window_ms) ms (windows: $(g readable_before_shield_ms))"
+# S4b: the pre-shield window is CPU-bound -- the interpreter starting, the
+# file compiling, the imports above the shield -- so it scales with load:
+# 117-127 ms idle, 264-634 ms with the cores oversubscribed twice over
+# (measured by the final review). An absolute bound fails on a busy box for
+# a reason unrelated to the fix, which is the wrong failure and invites
+# raising the number. So the bound is RELATIVE: three timed runs of the
+# helper's own `--version`, which pays the identical start-up under the
+# identical load, and the window may be at most three times their median
+# plus one sampling tick. The absolute number is reported, never enforced.
+ctrl_ms=$(for i in 1 2 3; do s=$(date +%s%N); python3 "$HELPER" --version >/dev/null 2>&1; e=$(date +%s%N); echo $(( (e - s) / 1000000 )); done | sort -n | sed -n 2p)
+bound=$(( ctrl_ms * 3 + 60 ))
+if [[ $(g max_window_ms) -ge 0 && $(g max_window_ms) -le $bound ]]; then
+  pass "S4b pre-shield window $(g max_window_ms) ms (per fetch: $(g readable_before_shield_ms), 50 ms sampling) against an in-run start-up control of $ctrl_ms ms: bound $bound"
+else
+  fail "S4b" "pre-shield window $(g max_window_ms) ms against control $ctrl_ms ms (bound $bound); windows: $(g readable_before_shield_ms)"
+fi
 # S5: nothing on the whole machine still carries it on a command line.
 left=$(ARGV_NEEDLE="$NEEDLE" python3 - <<'PY'
 import os

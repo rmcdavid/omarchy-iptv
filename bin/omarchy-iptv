@@ -34,23 +34,7 @@ Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
 """
 from __future__ import annotations
 
-import argparse
-import bisect
-import errno
-import fcntl
-import gzip
-import io
-import json
-import os
-import re
-import select
-import signal
-import stat
 import sys
-import time
-import urllib.parse
-import zlib
-from typing import Any, BinaryIO
 
 
 def shield_environment() -> bool:
@@ -69,12 +53,17 @@ def shield_environment() -> bool:
       durably, readable by the journal groups. The kernel does not dump a
       non-dumpable process at all.
 
-    Called at module level, for every verb, before anything else runs: the
-    only window left is the interpreter's own start-up -- exec to the first
-    statement of this file, which includes compiling it -- and nothing a
-    child can do shortens that. It is measured by the argv scenario on the
-    dev branch rather than assumed away. Harmless to the verbs that carry
-    no URL, and the player verb's mpv is exec'd, which resets the flag.
+    Called at module level, for every verb, before this file imports
+    anything but `sys`: the window left is the interpreter starting and
+    compiling this file, plus the one import above. The final review of
+    D-SINK-9 measured it at about 125 ms idle with the shield below the
+    stdlib imports and 98-113 ms (median 105) with it here, and a split stub
+    that compiled the body only after shielding could reach about 25 ms --
+    so this is the cheap position, not the floor, and no sentence should
+    call it unshortenable. It is measured by the argv scenario on the dev
+    branch rather than assumed away, and it grows under load. Harmless to
+    the verbs that carry no URL, and the player verb's mpv is exec'd, which
+    resets the flag.
     Best effort: where prctl is missing the old boundary applies and nothing
     is worse than before; the failure is reported without any URL. ctypes is
     stdlib (rule 3).
@@ -83,7 +72,7 @@ def shield_environment() -> bool:
         import ctypes
         libc = ctypes.CDLL(None, use_errno=True)
         ok = libc.prctl(4, 0, 0, 0, 0) == 0     # PR_SET_DUMPABLE, 0
-    except (OSError, AttributeError):
+    except (ImportError, OSError, AttributeError):   # no _ctypes, no libc, no prctl
         ok = False
     if not ok:
         sys.stderr.write("omarchy-iptv: could not make this process non-dumpable; "
@@ -92,6 +81,25 @@ def shield_environment() -> bool:
 
 
 SHIELDED = shield_environment()
+
+import argparse
+import bisect
+import errno
+import fcntl
+import gzip
+import io
+import json
+import os
+import re
+import select
+import signal
+import stat
+import time
+import urllib.parse
+import zlib
+from typing import Any, BinaryIO
+
+
 
 # Heavier modules (socket, calendar, hashlib, unicodedata, urllib.request,
 # xml.etree, traceback) are imported where needed so that `play`, `status`
@@ -1517,9 +1525,8 @@ def url_from(args: argparse.Namespace) -> str:
     D-SINK-8. The shell passes the URL in the environment, never on the
     command line: /proc/<pid>/cmdline is world-readable for as long as the
     fetch runs, and /proc/<pid>/environ is refused to everyone but root from
-    this file's first statement on (shield_environment, D-SINK-9). The
-    playlist and epg verbs
-    download with urllib and start no child process -- this helper does fork
+    before this file imports anything but sys (shield_environment, D-SINK-9).
+    The playlist and epg verbs download with urllib and start no child process -- this helper does fork
     mpv, but only in `player start`, on a Process the service never hands
     this variable -- so nothing inherits it. --url stays for a human at their
     own shell, whose argv is their own; an EMPTY --url is treated as absent.

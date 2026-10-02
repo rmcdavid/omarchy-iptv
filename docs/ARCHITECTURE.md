@@ -319,10 +319,14 @@ check against the target: while the target is dumpable that is every
 process running as the same uid, plus root -- which is why the fetch verbs
 call `shield_environment()` (PR_SET_DUMPABLE 0) before reading the variable.
 Non-dumpable, a same-uid reader gets EACCES and only root reads it -- from
-the helper's first statement on; the interpreter's own start-up before that,
-measured at 112-181 ms per fetch over two runs by
-`scripts/dev-harness/argv-scenario.sh`,
-is the window that remains, readable by same-uid processes only -- and the
+before the helper imports anything but `sys`; the window before that is the
+interpreter starting and compiling the file, 98-113 ms idle at
+sub-millisecond resolution (median 105 ms over twelve runs, 2026-10-01) and
+264-634 ms under a doubled CPU load (the final review's measurement; `scripts/dev-harness/argv-scenario.sh` reads it
+at 50 ms sampling and bounds it against an in-run control rather than an
+absolute number), readable by same-uid processes only, and shortenable to
+about 25 ms by a stub that shields before compiling the body, which this
+project has not done -- and the
 kernel writes no core for it either, which closes a second, durable sink:
 `systemd-coredump` stores a dumpable crash's whole environment in the
 journal as `COREDUMP_ENVIRON`, readable by the journal groups. Both

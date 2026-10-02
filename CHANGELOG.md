@@ -19,10 +19,11 @@ fetch ran.
   marketplace reviewer (omacom/omarchy-plugin-marketplace#8998) asked why, and
   the answer was that it did not need to be accepted. The URL now reaches the
   helper in its environment, as `OMARCHY_IPTV_URL`, and the helper makes
-  itself unreadable to everything but root as its first act -- not other
+  that environment unreadable to everything but root before it loads
+  anything else -- not other
   accounts, and not other programs running as you either, except for the
-  fifth of a second it takes to start -- for the playlist fetch, the
-  guide-data fetch, and the
+  tenth of a second or so it takes to start, longer on a busy machine -- for
+  the playlist fetch, the guide-data fetch, and the
   check the Sources screen makes before it accepts a source. There is nothing
   to re-enter. `--url` still works when you run the helper yourself from a
   terminal, for a free list -- but a URL with your username and password in

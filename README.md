@@ -92,11 +92,11 @@ One place they can escape that, worth knowing, and one that used to:
   why that was accepted, and it is not any more: the plugin now hands the
   URL to the helper in its environment, as `OMARCHY_IPTV_URL`, which `/proc`
   then refuses to everyone but root -- not other accounts, and not other
-  programs running as you either -- from its first instruction on. The
-  moment between the helper starting and that instruction, measured at
-  under a fifth of a second, is the only window left, and it is readable by
-  programs running as you alone, never by other accounts. The helper's
-  command line no longer
+  programs running as you either -- before it loads anything else. The
+  moment between the helper starting and that point is the only window
+  left: about a tenth of a second on an idle machine, longer on a busy one,
+  and readable in that moment by programs running as you alone, never by
+  other accounts. The helper's command line no longer
   carries it. That is true of all three fetches that take a URL -- your
   playlist, your guide data, and the check the Sources screen makes before it
   accepts a source. Nothing else on the plugin's side writes
@@ -425,8 +425,13 @@ Nothing inside the plugin directory is written at runtime.
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`.
   Do not do this with a URL that carries your provider username and
   password: typed at a prompt it is written to your shell history for good
-  (see Settings above). Set `OMARCHY_IPTV_URL` for that one command instead
-  of `--url`, which keeps it off the command line -- or just use the guide.
+  (see Settings above), and so is a `OMARCHY_IPTV_URL=... python3 ...`
+  prefix -- an earlier version of this paragraph recommended exactly that,
+  which was the shell-history exposure wearing a different coat. If you must
+  run it by hand with a paid provider, let the shell read the URL without
+  echoing or recording it, then forget it: `read -rs OMARCHY_IPTV_URL &&
+  export OMARCHY_IPTV_URL`, run the command without `--url`, then
+  `unset OMARCHY_IPTV_URL`. Or just use the guide, which is what it is for.
 - Shell console: `qs log -p /usr/share/omarchy/shell --tail 100`.
 - After editing `Service.qml` run `omarchy restart shell` (kept-loaded
   services do not hot-reload).
