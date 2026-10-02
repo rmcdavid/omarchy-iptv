@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.9.3 (unreleased)
+## 0.9.3 (2026-10-02)
 
 A channel name that could make the shell fetch a picture.
 
