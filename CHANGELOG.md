@@ -3,6 +3,34 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.9.2 (2026-10-01)
+
+A password that other accounts on the machine could read for as long as a
+fetch ran.
+
+### Fixed
+
+- **Your provider URL was readable from the process list by other accounts on
+  the same machine, for as long as a playlist or guide fetch ran.** On an
+  Xtream provider that URL carries your username and password, and earlier
+  releases handed it to the plugin's helper as a command-line argument, which
+  `/proc` shows to every local account while the process runs. The README
+  disclosed this as a brief exposure and the project had accepted it; a
+  marketplace reviewer (omacom/omarchy-plugin-marketplace#8998) asked why, and
+  the answer was that it did not need to be accepted. The URL now reaches the
+  helper in its environment, as `OMARCHY_IPTV_URL`, and the helper makes
+  that environment unreadable to everything but root before it loads
+  anything else -- not other accounts, and not other programs running as
+  you either, except for the tenth of a second or so it takes to start,
+  longer on a busy machine -- for the playlist fetch, the guide-data fetch,
+  and the check the Sources screen makes before it accepts a source. There
+  is nothing to re-enter. `--url` still works when you run the helper yourself from a
+  terminal, for a free list -- but a URL with your username and password in
+  it, typed at a prompt, is written to your shell history for good and sits
+  on a world-readable command line while it runs, which is the one escape the
+  README still names. For a paid provider use the in-app form; it reaches
+  neither.
+
 ## 0.9.1 (2026-09-27)
 
 Numbers that tell the truth, and a key that was missing from its own table.

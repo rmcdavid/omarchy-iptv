@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.9.1"
+var PLUGIN_VERSION = "0.9.2"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -4204,14 +4204,64 @@ function helperArgv(helperPath, args) {
 // because a probe runs for every source add, edit, switch and re-check,
 // including ones the user then cancels. Remapping global favourites against a
 // playlist that never became active would be a loss caused by a fix.
-function playlistFetchArgv(helperPath, url, cacheDir, stateDir) {
-  var args = ["playlist", "--url", str(url), "--cache-dir", str(cacheDir)]
+//
+// D-SINK-8. Neither builder carries the URL any more, and there is no url
+// parameter left on either signature: a parameter nobody reads is a trap. A
+// playlist URL carries the provider's credentials, and an argv item sits in
+// /proc/<pid>/cmdline -- world-readable -- for as long as the fetch runs. The
+// URL travels in the helper's environment instead (fetchEnvironment below),
+// which /proc exposes only to the owner. The helper fetches with urllib and
+// starts no child in its fetch verbs (it forks mpv only in `player start`,
+// on a Process that never receives this environment), so moving the URL
+// off argv closes the command-line exposure entirely.
+function playlistFetchArgv(helperPath, cacheDir, stateDir) {
+  var args = ["playlist", "--cache-dir", str(cacheDir)]
   if (str(stateDir) !== "") args = args.concat(["--state-dir", str(stateDir)])
   return helperArgv(helperPath, args)
 }
 
-function playlistProbeArgv(helperPath, url, cacheDir) {
-  return helperArgv(helperPath, ["playlist", "--url", str(url), "--cache-dir", str(cacheDir)])
+function playlistProbeArgv(helperPath, cacheDir) {
+  return helperArgv(helperPath, ["playlist", "--cache-dir", str(cacheDir)])
+}
+
+// The EPG helper run has two shapes. A fetch, whose URL reaches the helper
+// through the environment exactly as the playlist's does (D-SINK-8), and
+// `--now-only`, which recomputes now/next from the cached programme window
+// and contacts nobody. Built here rather than inline in Service.qml for the
+// reason the playlist builders were (D-ID-1): an argv nothing can see is an
+// argv nothing can assert.
+function epgFetchArgv(helperPath, cacheDir, nowOnly) {
+  var args = ["epg"]
+  if (nowOnly) args.push("--now-only")
+  return helperArgv(helperPath, args.concat(["--cache-dir", str(cacheDir)]))
+}
+
+// D-SINK-8. The environment the three URL-carrying helper spawns run with:
+// the playlist fetch, the EPG fetch and the source probe. The helper reads
+// OMARCHY_IPTV_URL when `--url` is absent; `--url` stays for a human running
+// the helper by hand in their own shell. Empty, null and undefined all give
+// {} -- a key present with the string "undefined" would be a fetch of a URL
+// nobody typed.
+//
+// How Quickshell's Process.environment behaves, measured on Quickshell 0.3.1
+// / Qt 6.11 rather than read from the docs, because each fact below decides
+// whether this is a fix or a new leak:
+//   1. It MERGES with the inherited environment. PATH and HOME survive, so
+//      the helper still finds python3 and its XDG directories.
+//   2. Re-assigning it on the same Process object REPLACES the previous
+//      value. A run that assigns {} runs with no URL at all, so a stale URL
+//      from the last fetch cannot ride into the `--now-only` run or into a
+//      probe of a different source.
+//   3. A null value UNSETS an inherited variable, so this function never
+//      emits one: the key is either a non-empty string or absent.
+// Service.qml assigns it immediately before `running = true`, every time.
+var FETCH_URL_ENV = "OMARCHY_IPTV_URL"
+
+function fetchEnvironment(url) {
+  var env = {}
+  var u = str(url)
+  if (u !== "") env[FETCH_URL_ENV] = u
+  return env
 }
 
 // M2-04. The fetch the consent screen authorizes, and the only place logos
@@ -8378,6 +8428,9 @@ if (typeof module !== "undefined") {
     helperArgv: helperArgv,
     playlistFetchArgv: playlistFetchArgv,
     playlistProbeArgv: playlistProbeArgv,
+    epgFetchArgv: epgFetchArgv,
+    FETCH_URL_ENV: FETCH_URL_ENV,
+    fetchEnvironment: fetchEnvironment,
     playerStartArgv: playerStartArgv,
     playerStopArgv: playerStopArgv,
     playerRestartArgv: playerRestartArgv,

@@ -14,9 +14,10 @@ Exit codes:
   3  reserved (not implemented; no subcommand uses it any more)
 
 Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
-  playlist --url U [--cache-dir D] [--timeout S]
+  playlist [--url U] [--cache-dir D] [--state-dir S] [--timeout S]   (URL: --url, or $OMARCHY_IPTV_URL)
       fetch + parse M3U -> channels.json, playlist-status.json
   epg [--url U] [--cache-dir D] [--timeout S] [--ttl S] [--force] [--now-only] [--now T]
+                                                          (URL: --url, or $OMARCHY_IPTV_URL)
       XMLTV -> epg-window.txt (private cache), epg-now.json, epg-status.json
   play (--id ID | --url U) [--cache-dir D] [--socket P] [--ipc-timeout S]
       switch the running mpv to a channel over its JSON IPC socket
@@ -33,6 +34,54 @@ Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
 """
 from __future__ import annotations
 
+import sys
+
+
+def shield_environment() -> bool:
+    """Make this process non-dumpable, as its FIRST act (D-SINK-9).
+
+    Two sinks close at once, both measured on this machine on 2026-10-01:
+
+      /proc/<pid>/environ is mode 0400, but the kernel's open check is a
+      ptrace-read check, which ANY process running as the same uid passes
+      while the target is dumpable -- so "readable only by your account"
+      meant every program the user runs. Non-dumpable, the same reader gets
+      EACCES; only root reads it.
+
+      A crash of a dumpable process hands its whole environment to
+      systemd-coredump, which stores COREDUMP_ENVIRON in the journal --
+      durably, readable by the journal groups. The kernel does not dump a
+      non-dumpable process at all.
+
+    Called at module level, for every verb, before this file imports
+    anything but `sys`: the window left is the interpreter starting and
+    compiling this file, plus the one import above. The final review of
+    D-SINK-9 measured it at about 125 ms idle with the shield below the
+    stdlib imports and 98-113 ms (median 105) with it here, and a split stub
+    that compiled the body only after shielding could reach about 25 ms --
+    so this is the cheap position, not the floor, and no sentence should
+    call it unshortenable. It is measured by the argv scenario on the dev
+    branch rather than assumed away, and it grows under load. Harmless to
+    the verbs that carry no URL, and the player verb's mpv is exec'd, which
+    resets the flag.
+    Best effort: where prctl is missing the old boundary applies and nothing
+    is worse than before; the failure is reported without any URL. ctypes is
+    stdlib (rule 3).
+    """
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        ok = libc.prctl(4, 0, 0, 0, 0) == 0     # PR_SET_DUMPABLE, 0
+    except (ImportError, OSError, AttributeError):   # no _ctypes, no libc, no prctl
+        ok = False
+    if not ok:
+        sys.stderr.write("omarchy-iptv: could not make this process non-dumpable; "
+                         "its environment stays readable to this uid\n")
+    return ok
+
+
+SHIELDED = shield_environment()
+
 import argparse
 import bisect
 import errno
@@ -45,11 +94,12 @@ import re
 import select
 import signal
 import stat
-import sys
 import time
 import urllib.parse
 import zlib
 from typing import Any, BinaryIO
+
+
 
 # Heavier modules (socket, calendar, hashlib, unicodedata, urllib.request,
 # xml.etree, traceback) are imported where needed so that `play`, `status`
@@ -109,6 +159,8 @@ UNGROUPED = "Ungrouped"
 
 CHANNELS_FILE = "channels.json"
 PLAYLIST_STATUS_FILE = "playlist-status.json"
+# D-SINK-8: how the shell hands `playlist` and `epg` their URL (see url_from).
+URL_ENV = "OMARCHY_IPTV_URL"
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
 # Helper-private programme window (not a QML contract). Line 1 is a JSON
@@ -1467,24 +1519,52 @@ def write_status_quietly(path: str, status: dict[str, Any]) -> None:
 
 # ------------------------------------------------------------ playlist
 
+def url_from(args: argparse.Namespace) -> str:
+    """The source URL of a fetch verb: a non-empty --url, else $OMARCHY_IPTV_URL.
+
+    D-SINK-8. The shell passes the URL in the environment, never on the
+    command line: /proc/<pid>/cmdline is world-readable for as long as the
+    fetch runs, and /proc/<pid>/environ is refused to everyone but root from
+    before this file imports anything but sys (shield_environment, D-SINK-9).
+    The playlist and epg verbs download with urllib and start no child process -- this helper does fork
+    mpv, but only in `player start`, on a Process the service never hands
+    this variable -- so nothing inherits it. --url stays for a human at their
+    own shell, whose argv is their own; an EMPTY --url is treated as absent.
+    The value is read once, here, and the URL's host is the only part of it
+    that ever reaches a message (source_host); a LOCAL file's base name is
+    printed on purpose (D12, read_local_source) and carries no credential;
+    log() redacts whatever is left.
+    """
+    explicit = (getattr(args, "url", None) or "").strip()
+    if explicit:
+        return explicit
+    return (os.environ.get(URL_ENV) or "").strip()
+
+
 def cmd_playlist(args: argparse.Namespace) -> int:
     directory = cache_dir(args.cache_dir)
     channels_path = os.path.join(directory, CHANNELS_FILE)
     status_path = os.path.join(directory, PLAYLIST_STATUS_FILE)
     previous = read_json(status_path) or {}
+    url = url_from(args)
     started = time.monotonic()
     try:
-        text = fetch_source(args.url, args.timeout)
+        if not url:
+            # A status the service can switch on, not an argparse usage exit:
+            # the verb has no required argument any more, because the shell
+            # never passes one.
+            raise HelperError("bad_url", "no playlist URL: pass --url or set $%s" % URL_ENV)
+        text = fetch_source(url, args.timeout)
         parsed = parse_m3u(text)
         if not parsed["channels"]:
             if not parsed["isPlaylist"]:
-                raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(args.url))
-            raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % source_host(args.url))
+                raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(url))
+            raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % source_host(url))
         now = int(time.time())
         document = {
             "version": 1,
             "generatedAt": now,
-            "sourceHost": source_host(args.url),
+            "sourceHost": source_host(url),
             "epgUrlHint": parsed["epgUrlHint"],
             "count": len(parsed["channels"]),
             "channels": parsed["channels"],
@@ -1494,7 +1574,7 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         status = {
             "ok": True,
             "kind": "playlist",
-            "sourceHost": source_host(args.url),
+            "sourceHost": source_host(url),
             "fetchedAt": now,
             "durationMs": int((time.monotonic() - started) * 1000),
             "channelCount": len(parsed["channels"]),
@@ -1534,7 +1614,7 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         stale = os.path.isfile(channels_path)
         status = error_payload(
             "playlist", error,
-            sourceHost=source_host(args.url or ""),
+            sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
             fetchedAt=previous.get("fetchedAt") if isinstance(previous, dict) else None,
             stale=stale,
             durationMs=int((time.monotonic() - started) * 1000),
@@ -1932,7 +2012,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
     window_path = os.path.join(directory, EPG_WINDOW_FILE)
     status_path = os.path.join(directory, EPG_STATUS_FILE)
     channels_path = os.path.join(directory, CHANNELS_FILE)
-    url = (args.url or "").strip()
+    url = url_from(args)
     started = time.monotonic()
     window = load_window(window_path)
     previous = read_json(status_path) or {}
@@ -5110,14 +5190,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     playlist = sub.add_parser("playlist", help="fetch and parse the M3U playlist into channels.json")
-    playlist.add_argument("--url", required=True, help="http(s) URL or absolute path (file:// accepted)")
+    playlist.add_argument("--url", default="", help="http(s) URL or absolute path (file:// accepted); defaults to $%s, which is how the shell passes it so that it is not on the command line" % URL_ENV)
     playlist.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
     playlist.add_argument("--state-dir", default=None, help="move saved channel references in this state directory onto the current id scheme; omitted, no state file is read or written at all")
     playlist.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="network timeout in seconds")
     playlist.set_defaults(func=cmd_playlist)
 
     epg = sub.add_parser("epg", help="fetch XMLTV (plain or gzip) and write epg-now.json")
-    epg.add_argument("--url", required=False, default="", help="http(s) URL or absolute path; optional with --now-only")
+    epg.add_argument("--url", default="", help="http(s) URL or absolute path; defaults to $%s, which is how the shell passes it so that it is not on the command line; optional with --now-only" % URL_ENV)
     epg.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
     epg.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="network timeout in seconds")
     epg.add_argument("--ttl", type=float, default=EPG_DEFAULT_TTL, help="seconds before the cached programme window is re-downloaded (default %d)" % EPG_DEFAULT_TTL)

@@ -1868,26 +1868,40 @@ Item {
     // change for exactly that, and they were right: the lane could not land it
     // because Service.qml was not in its ownership, which was my error and not
     // theirs (parallel rule 1 (dev branch), ownership follows the coupling).
-    playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.playlistUrl, root.activeCacheDir, root.stateDir)
+    playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.activeCacheDir, root.stateDir)
+    // D-SINK-8: the URL carries the provider's credentials and goes in the
+    // environment, never on argv, where /proc/<pid>/cmdline shows it to every
+    // local user for the life of the fetch. Assigned immediately before the
+    // run, every run: the assignment REPLACES the previous value (measured on
+    // Quickshell 0.3.1, see Model.fetchEnvironment), so a stale URL cannot
+    // survive a source switch.
+    playlistProc.environment = Model.fetchEnvironment(root.playlistUrl)
     playlistProc.running = true
     playlistWatchdog.restart()
   }
 
-  // `epg --url` fetches (the helper honours its own TTL, decision 5);
-  // `epg --now-only` recomputes now/next from the cached window.
+  // `epg` with a URL in the environment fetches (the helper honours its own
+  // TTL, decision 5); `epg --now-only` recomputes now/next from the cached
+  // window and contacts nobody.
   function runEpgHelper(nowOnly) {
     if (epgProc.running || root.activeCacheDir === "") return
     if (nowOnly) {
       if (!root.epgLoaded) return
       epgProc.nowOnly = true
-      epgProc.command = ["python3", root.helperPath, "epg", "--now-only", "--cache-dir", root.activeCacheDir]
+      epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, true)
     } else {
       if (root.activeEpgUrl === "") return
       root.epgAttempted = true
       epgProc.nowOnly = false
-      epgProc.command = ["python3", root.helperPath, "epg", "--url", root.activeEpgUrl, "--cache-dir", root.activeCacheDir]
+      epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, false)
     }
     root.epgTimedOut = false
+    // D-SINK-8: the EPG URL can carry credentials too, so it travels in the
+    // environment like the playlist's. The `--now-only` run is handed {}
+    // deliberately rather than left alone: the assignment REPLACES the value
+    // the last fetch set (measured, see Model.fetchEnvironment), so the
+    // offline recompute runs with no URL in its environment at all.
+    epgProc.environment = Model.fetchEnvironment(nowOnly ? "" : root.activeEpgUrl)
     epgProc.running = true
     epgWatchdog.restart()
   }
@@ -3114,7 +3128,12 @@ Item {
     // Passing the flag would remap the global favourites against a playlist
     // that never became the active list. The helper touches no state file
     // without the flag, so this is safe by construction.
-    sourceProbeProc.command = Model.playlistProbeArgv(root.helperPath, rec.url, Model.sourceCacheDir(root.cacheDir, dirKey))
+    sourceProbeProc.command = Model.playlistProbeArgv(root.helperPath, Model.sourceCacheDir(root.cacheDir, dirKey))
+    // D-SINK-8: a candidate's URL is as credentialed as the active one, so it
+    // goes in the environment too, assigned immediately before the run so a
+    // re-check of source B never runs with source A's URL (the assignment
+    // replaces, measured; see Model.fetchEnvironment).
+    sourceProbeProc.environment = Model.fetchEnvironment(rec.url)
     sourceProbeProc.running = true
     probeWatchdog.restart()
     return root.sourceResult(true, "ok", "", key)
