@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.9.2 (unreleased)
+## 0.9.2 (2026-10-01)
 
 A password that other accounts on the machine could read for as long as a
 fetch ran.
@@ -20,12 +20,11 @@ fetch ran.
   the answer was that it did not need to be accepted. The URL now reaches the
   helper in its environment, as `OMARCHY_IPTV_URL`, and the helper makes
   that environment unreadable to everything but root before it loads
-  anything else -- not other
-  accounts, and not other programs running as you either, except for the
-  tenth of a second or so it takes to start, longer on a busy machine -- for
-  the playlist fetch, the guide-data fetch, and the
-  check the Sources screen makes before it accepts a source. There is nothing
-  to re-enter. `--url` still works when you run the helper yourself from a
+  anything else -- not other accounts, and not other programs running as
+  you either, except for the tenth of a second or so it takes to start,
+  longer on a busy machine -- for the playlist fetch, the guide-data fetch,
+  and the check the Sources screen makes before it accepts a source. There
+  is nothing to re-enter. `--url` still works when you run the helper yourself from a
   terminal, for a free list -- but a URL with your username and password in
   it, typed at a prompt, is written to your shell history for good and sits
   on a world-readable command line while it runs, which is the one escape the
