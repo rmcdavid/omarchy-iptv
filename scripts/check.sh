@@ -18,6 +18,11 @@
 #  10. release allowlist         (scripts/release.py check: what main ships is
 #                                exactly what the runtime, the manifest and the
 #                                README need, and no agent-instruction file)
+#  11. text format guard         (scripts/check-text-format.py: every Text in
+#                                every shipped .qml declares Text.PlainText,
+#                                or Text.StyledText under a MARKUP-EXCEPTION
+#                                comment -- a missing line is AutoText, which
+#                                fetches an <img> out of a channel name)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -157,6 +162,12 @@ PIP_PREFLIGHT_MIN=${PIP_PREFLIGHT_MIN:-41}
 # floor for the same reason as every other number here -- a scan that reads
 # nothing exits 0 having proved nothing at all.
 MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
+# The text format guard: 49 Text blocks across the three shipped .qml files
+# when this landed (D-TEXT-1). A floor for the same reason again -- the guard
+# derives its file list from the release allowlist, and a list that resolves
+# to nothing would scan nothing and exit 0 if the guard did not refuse that
+# itself; this is the second line of defence, in the gate's own vocabulary.
+TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-49}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -513,6 +524,34 @@ if python3 "$ROOT/scripts/release.py" check >"$release_log" 2>&1; then
   ok "$(head -1 "$release_log")"
 else
   cat "$release_log"; bad "release allowlist"
+fi
+
+step "text format guard (every shipped Text says how it renders)"
+# D-TEXT-1, found by a marketplace reviewer against shipped 2d3cee3: the
+# logo-wall caption bound a provider's channel name to a Text with no
+# textFormat, so Qt's AutoText default rendered the name as markup, and an
+# <img src="http://..."> in a name made the shell process fetch it at
+# creation, visible or not. PlainText is the only stop (measured; StyledText
+# and RichText fetch too). The acceptance row for this was graded by a grep
+# for StyledText|RichText, which cannot see a line nobody wrote (F-TEXT-2),
+# so this is the call that replaces it: every Text block in every shipped
+# .qml, found by a brace-aware scan, must declare Text.PlainText -- or
+# Text.StyledText with a "// MARKUP-EXCEPTION: <reason>" comment directly
+# above it, which today is the footer hint line and nothing else. The file
+# list comes from the release allowlist, so a new shipped .qml is covered the
+# day it ships.
+textfmt_log=$CHECK_TMP/text-format.log
+if python3 "$ROOT/scripts/check-text-format.py" >"$textfmt_log" 2>&1; then
+  textfmt_n=$(grep -oE '^text format guard: [0-9]+ Text block' "$textfmt_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $textfmt_n ]]; then
+    cat "$textfmt_log"; bad "text format guard printed no Text block count at all"
+  elif (( textfmt_n < TEXT_BLOCKS_MIN )); then
+    cat "$textfmt_log"; bad "text format guard checked $textfmt_n Text block(s), expected at least $TEXT_BLOCKS_MIN"
+  else
+    ok "text format guard ($textfmt_n Text blocks checked)"
+  fi
+else
+  cat "$textfmt_log"; bad "text format guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi

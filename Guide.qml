@@ -3128,6 +3128,9 @@ Item {
                       anchors.top: parent.top
                       anchors.margins: Style.space(4)
                       text: (tile.playing ? Model.GLYPHS.play : "") + (tile.favorite ? Model.GLYPHS.star : "")
+                      // Plugin glyphs only; PlainText because every Text
+                      // says so (the text format guard, dev branch; D-TEXT-1).
+                      textFormat: Text.PlainText
                       visible: text !== ""
                       color: root.foreground
                       font.family: root.fontFamily
@@ -3139,6 +3142,9 @@ Item {
                       anchors.top: parent.top
                       anchors.margins: Style.space(4)
                       text: tile.failedAt !== "" ? Model.GLYPHS.alert : ""
+                      // Plugin glyph only; PlainText because every Text
+                      // says so (the text format guard, dev branch; D-TEXT-1).
+                      textFormat: Text.PlainText
                       visible: text !== ""
                       color: root.foreground
                       opacity: 0.8
@@ -3209,6 +3215,9 @@ Item {
                       anchors.centerIn: parent
                       visible: plate.art.kind === "mark"
                       text: plate.art.glyph
+                      // Plugin glyph only; PlainText because every Text
+                      // says so (the text format guard, dev branch; D-TEXT-1).
+                      textFormat: Text.PlainText
                       color: root.foreground
                       opacity: 0.38
                       // The same family every other glyph in this file uses
@@ -3231,6 +3240,17 @@ Item {
                     width: root.wallGeom.tileWidth
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: tile.name
+                    // D-TEXT-1. A channel name is a provider string, and a
+                    // Text with no textFormat renders under AutoText, which
+                    // lays a name holding <img src="http://..."> out as
+                    // markup and makes the shell process fetch the URL at
+                    // creation, visible or not -- this GridView's model is
+                    // live while the wall is hidden. Measured: StyledText
+                    // and RichText fetch too, and escaping or redacting the
+                    // URL does not close it. PlainText is the only stop.
+                    // The text format guard in the gate (dev branch) refuses
+                    // a Text without this line, so none can drop it again.
+                    textFormat: Text.PlainText
                     // The foreground, cursor or not -- the same choice the
                     // row's name makes. UX 5.4 is explicit that the accent
                     // means ACTIVE and never CURSOR, "with no exceptions", and
@@ -3848,6 +3868,9 @@ Item {
             Text {
               width: parent.width
               text: emptyState.glyph
+              // Plugin glyph only; PlainText because every Text says so
+              // (the text format guard, dev branch; D-TEXT-1).
+              textFormat: Text.PlainText
               color: root.selectedText
               opacity: 0.8
               font.family: root.fontFamily
@@ -4201,6 +4224,9 @@ Item {
               visible: root.firstRunHead
               width: parent.width
               text: Model.GLYPHS.tv
+              // Plugin glyph only; PlainText because every Text says so
+              // (the text format guard, dev branch; D-TEXT-1).
+              textFormat: Text.PlainText
               color: root.selectedText
               opacity: 0.8
               font.family: root.fontFamily
@@ -4564,7 +4590,15 @@ Item {
 
           Text {
             id: footerHints
-            // Our own microcopy only (no user strings), so StyledText is safe.
+            // The one Text in the plugin that renders markup: the <font>
+            // tags root.footerHintText wraps around the key/verb pairs of
+            // Model.footerHints. Every pair is a literal in Model.js; no
+            // query, name, label or form value is ever pushed into one.
+            // That is not a comment's word for it: the F-TEXT-2 check in
+            // the node suite (dev branch) drives footerHints over every
+            // branch with an <img> marker in every string input and
+            // asserts the marker never reaches the pairs.
+            // MARKUP-EXCEPTION: own literals only, proven by the F-TEXT-2 node test
             textFormat: Text.StyledText
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
