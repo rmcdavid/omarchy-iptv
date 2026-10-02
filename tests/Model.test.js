@@ -7688,6 +7688,129 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "", recoveries: "x" })]
 }, [2, true, true, false, false, true, true, true])
 
+// ---- F-TEXT-2: the footer hint line is the one Text that renders markup ----
+//
+// Guide.qml's footerHints Text declares Text.StyledText under a
+// MARKUP-EXCEPTION comment (scripts/check-text-format.py refuses it
+// otherwise), on the claim that every key/verb pair Model.footerHints returns
+// is the plugin's own literal and no user or provider string ever reaches
+// one. D-TEXT-1 is what a Text does with a provider string under a markup
+// format -- it fetches the <img> in it -- so that claim is the whole of the
+// exception, and this is the test that holds it. Every branch footerHints and
+// formHints read (mode, empty, retry, sourcesExist, cursorKind, showLogos,
+// wall, playing, paused, pipAvailable, numberEntry, hasNumbers, groupsNarrow,
+// the hide table via scopeId/channel/state, and the form's kind, origin,
+// probing, parent, focus, values and revealed) is driven over a bounded
+// product, and EVERY string-bearing input -- the query, the channel's name
+// and group, the scope id, the form's focus and every form value, and the
+// enum-shaped inputs too so an unknown value cannot fall into a branch that
+// echoes it -- is the marker. The pairs are the real function's output; the
+// composed line is built the way Guide.qml:723 (root.footerHintText) builds
+// it, which is a mirror of three lines of string concatenation because the
+// composer lives in a QML property binding where node cannot call it. The
+// assertion that matters is on the pairs; the composed line proves the
+// mirror adds nothing but <font> tags around them.
+;(function () {
+  var MARKER = "<img src=\"http://x/MARKER.png\">"
+  var states = []
+  function add(o) { states.push(o) }
+  var modes = ["list", "search", "sources", "sourceEdit", "sourceXtream", "tracks",
+               "confirmRemove", "confirmLogos", MARKER, ""]
+  var queries = ["", MARKER]
+  var empties = ["", "loading", "error", MARKER]
+  var hidden = Model.toggleHiddenGroup(Model.emptyState(), MARKER)
+  var channel = { id: MARKER, name: MARKER, group: MARKER + ";" + MARKER, chno: MARKER }
+  // Every mode, with and without a query, in every empty state, in both views.
+  modes.forEach(function (mode) { queries.forEach(function (query) { empties.forEach(function (empty) { [true, false].forEach(function (wall) {
+    add({ mode: mode, query: query, empty: empty, wall: wall, cursorKind: MARKER, form: { kind: MARKER, origin: MARKER, focus: MARKER, values: { label: MARKER, playlist: MARKER, epg: MARKER, server: MARKER, username: MARKER, password: MARKER } },
+          scopeId: MARKER, channel: channel, state: hidden })
+  }) }) }) })
+  // The empty state's own switches.
+  ;[true, false, undefined].forEach(function (retry) { [true, false].forEach(function (sourcesExist) { queries.forEach(function (query) {
+    add({ mode: "list", empty: "error", retry: retry, sourcesExist: sourcesExist, query: query })
+  }) }) })
+  // The list: number entry, playback, pip, numbers, the view, the scope word,
+  // and the hide table in its three shapes (no hint, hide, unhide) on each
+  // of the scopes that decide it.
+  var scopes = [Model.SCOPE_RECENT, Model.SCOPE_FAVORITES, Model.SCOPE_ALL, "", Model.groupScopeId(MARKER), MARKER]
+  ;[null, { active: true }, { active: false }].forEach(function (numberEntry) { [true, false].forEach(function (playing) { [true, false].forEach(function (paused) {
+    [true, false, undefined].forEach(function (pipAvailable) { [true, false].forEach(function (hasNumbers) { [true, false].forEach(function (wall) {
+      [true, false].forEach(function (groupsNarrow) {
+        scopes.forEach(function (scopeId) { [null, channel].forEach(function (ch) { [null, hidden].forEach(function (st) {
+          add({ mode: "list", numberEntry: numberEntry, playing: playing, paused: paused, pipAvailable: pipAvailable,
+                hasNumbers: hasNumbers, wall: wall, groupsNarrow: groupsNarrow, scopeId: scopeId, channel: ch, state: st, query: "" })
+        }) }) })
+      })
+    }) }) })
+  }) }) })
+  // Sources: the cursor kinds and the logos switch.
+  ;["add", "xtream", "source", MARKER, ""].forEach(function (cursorKind) { [true, false].forEach(function (showLogos) {
+    add({ mode: "sources", cursorKind: cursorKind, showLogos: showLogos })
+  }) })
+  // The forms: every branch of formHints, with every value and the focus
+  // itself set to the marker.
+  ;["sourceEdit", "sourceXtream"].forEach(function (mode) { ["m3u", "xtream", MARKER].forEach(function (kind) { ["guide", "firstRun", MARKER].forEach(function (origin) {
+    [true, false].forEach(function (probing) { [true, false].forEach(function (parent) {
+      ["label", "playlist", "epg", "server", "username", "password", "submit", MARKER, ""].forEach(function (focus) {
+        [{}, { label: MARKER, playlist: MARKER, epg: MARKER, server: MARKER, username: MARKER, password: MARKER },
+         { playlist: "http://user:pass@host/get.php", epg: "http://h/" + MARKER }].forEach(function (values) {
+          [null, { playlist: true, epg: true }].forEach(function (revealed) {
+            add({ mode: mode, form: { kind: kind, origin: origin, probing: probing, parent: parent, focus: focus, values: values, revealed: revealed } })
+          })
+        })
+      })
+    }) })
+  }) }) })
+
+  // Guide.qml:723 composes the line from the pairs like this; the colours are
+  // whatever Util.alpha returns and are not what this test is about.
+  function compose(pairs) {
+    var out = []
+    for (var i = 0; i < pairs.length; i++) {
+      out.push("<font color=\"#b3ffffff\">" + pairs[i][0] + "</font> <font color=\"#b3ffffff\">" + pairs[i][1] + "</font>")
+    }
+    return out.join("<font color=\"#b3ffffff\">" + Model.SEP + "</font>")
+  }
+  var leaks = []
+  var shapes = []
+  var composedLeaks = []
+  var pairCount = 0
+  states.forEach(function (o, i) {
+    var pairs = Model.footerHints(o)
+    if (!Array.isArray(pairs) || pairs.length === 0) { shapes.push(i); return }
+    for (var p = 0; p < pairs.length; p++) {
+      pairCount++
+      var pair = pairs[p]
+      if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== "string" || typeof pair[1] !== "string") { shapes.push(i); continue }
+      if (pair[0].indexOf("MARKER") !== -1 || pair[1].indexOf("MARKER") !== -1 || pair[0].indexOf("<") !== -1 || pair[1].indexOf("<") !== -1) leaks.push([i, pair])
+    }
+    var line = compose(pairs)
+    // Strip exactly the tags the composer adds; what is left must hold no
+    // markup at all.
+    var stripped = line.replace(/<\/?font[^>]*>/g, "")
+    if (stripped.indexOf("<") !== -1 || line.indexOf("MARKER") !== -1 || line.indexOf("<img") !== -1) composedLeaks.push([i, line])
+  })
+  // The grid is bounded and its size is asserted, so a branch removed from
+  // the product above is a red check rather than a quieter one.
+  check("F-TEXT-2: the hint grid covers every branch of footerHints and formHints (bounded product)", states.length, 10982)
+  check("F-TEXT-2: every state yields a non-empty list of [key, verb] string pairs", shapes, [])
+  // Reported as a count plus the first three offenders: a red run over ten
+  // thousand states must stay readable.
+  check("F-TEXT-2: no key or verb carries the marker or any '<' in " + pairCount + " pairs over " + states.length + " states",
+        { leaks: leaks.length, first: leaks.slice(0, 3) }, { leaks: 0, first: [] })
+  check("F-TEXT-2: the composed footer line holds nothing but the plugin's own <font> tags around literals",
+        { leaks: composedLeaks.length, first: composedLeaks.slice(0, 3) }, { leaks: 0, first: [] })
+  // A sanity check that the marker reaches the inputs the test claims to
+  // drive: the form branch that reveals a URL and the hide table both
+  // depend on the marker being read, so their verbs must still change.
+  check("F-TEXT-2: the marker is read, not ignored -- the form and hide branches still switch on it", [
+    Model.footerHints({ mode: "sourceEdit", form: { kind: "m3u", focus: "playlist", values: { playlist: "http://u:p@h/" + MARKER } } }).map(function (p) { return p[1] }).indexOf("reveal") !== -1,
+    Model.footerHints({ mode: "list", scopeId: Model.groupScopeId(MARKER), channel: channel, state: hidden }).map(function (p) { return p[1] }).indexOf("unhide") !== -1,
+    Model.footerHints({ mode: "list", scopeId: Model.groupScopeId(MARKER), channel: channel, state: null }).map(function (p) { return p[1] }).indexOf("hide group") !== -1,
+    Model.footerHints({ mode: "search", query: MARKER }).map(function (p) { return p[1] }).indexOf("clear") !== -1
+  ], [true, true, true, true])
+})()
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")
