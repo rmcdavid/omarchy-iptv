@@ -353,8 +353,10 @@ AutoText resolves to StyledText, and an `<img src="http://...">` anywhere
 in the name is fetched at text layout on creation, with
 `User-Agent: Mozilla/5.0`, silently, visible or not, parented or not; an
 https `src` draws a SYN to port 443 from the QML process; StyledText and
-RichText fetch too, and RichText writes the full URL to stderr on failure;
-`Text.PlainText` is the only format that makes no request. Neither entity
+RichText fetch too (a failed transfer's full URL reached stderr once, in a
+scene that also held an https `<img>` toward a non-routable host -- not for
+the RichText 404 alone, bisected); `Text.PlainText` is the only format that
+makes no request. Neither entity
 escaping nor URL redaction closes it: AutoText decodes `&lt;img ...&gt;`
 back into a tag, and `redact_urls` leaves `<img src="http://h">`,
 well-formed and fetchable. The exposure was every guide open, not only the

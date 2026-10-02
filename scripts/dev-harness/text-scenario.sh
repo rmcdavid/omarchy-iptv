@@ -11,17 +11,21 @@
 #
 #   T1  the playlist loaded: the service holds exactly the channels this
 #       run generated (control: a guide over an empty list fetches nothing)
-#   T2  the guide opened in LIST view, resultList realised delegates, and
-#       the cursor row's name still carries the probe tag (control: a name
-#       the parser had stripped would make every zero below vacuous)
+#   T2  the guide opened in LIST view, resultList holds its delegates, the
+#       HIDDEN channelWall already holds a page of captions (the mechanism
+#       behind "every guide open"), and the cursor row's name still carries
+#       the probe tag (control: a name the parser had stripped would make
+#       every zero below vacuous)
 #   T3  after the list open the server logged ZERO requests carrying this
 #       run's token                                            <- the fix
 #   T4  the WALL was reached through the real Ctrl+G key, channelWall
-#       realised delegates (control), and the server STILL logged zero
+#       holds a page of captions (control), and the server STILL logged zero
 #   T5  the server is alive and logging: a request the scenario makes
 #       itself IS in the log, so T3/T4's zero is not a dead server
 #   T6  the harness log carries no "Error transferring" line and no probe
-#       path (Qt prints those only on the RichText path; checked anyway)
+#       path (the first measurement saw that line once, beside an https img
+#       to a non-routable host; it never appears on a 404 alone, so this is
+#       a log check, not a discriminator between trees)
 #
 # Against the shipped tree the proof is the other way round: run with
 # --baseline 2d3cee3 and T3 and T4 MUST fail with request counts above zero.
@@ -39,10 +43,15 @@
 # <token>-<n>.png">Probe <n>`, where the token is unique to this run so a
 # request logged by anything else cannot be mistaken for ours, plus one plain
 # control channel. 40 fills a wall page plus the cacheBuffer row on this
-# screen. Realised-delegate counts come from the harness's own `openMs`
-# instrument, the one verb that reports which view it forced and how many
-# delegates that view holds; it re-opens the guide once to do so, which is
-# one more guide open and changes nothing about what a caption fetches.
+# screen. Realised-delegate counts come from the harness's `realised <view>`
+# verb, which counts the delegates a named view holds RIGHT NOW without
+# re-opening the guide. The first draft read them from `openMs`, which
+# re-opens the guide and reports 1 for the hidden wall (what an empty view
+# looks like), so its control said nothing about the captions a hidden wall
+# had laid out; the baseline's distinct-name counts were the only evidence.
+# Now the control is the count itself: on the list open, resultList holds
+# its page of rows AND the hidden channelWall already holds its page of
+# captions -- which is the mechanism behind "every guide open".
 #
 # Holds the display (starts the harness, sends one real chord). Reaps
 # everything it starts and proves it at the end.
@@ -154,13 +163,11 @@ echo "info: probe requests before the first open: $before_open"
 # ---- LIST view: open, settle, read the view through the instrument
 ipc open '{}' >/dev/null; sleep 1.5
 opened=$(gf 'g["opened"]'); wall=$(gf 'g["wallView"]'); rows=$(gf 'g["rows"]'); cname=$(gf 'g["cursorName"]')
-oms=$(ipc openMs 1)
-view=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("view",""))' "$oms" 2>/dev/null)
-realised=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("realised",-1))' "$oms" 2>/dev/null)
-if [[ $opened == true && $wall == false && $view == resultList && ${realised:--1} -gt 0 && $rows == "$EXPECT_CHANNELS" && $cname == *"<img src="* ]]; then
-  pass "T2 list view open: $rows rows, resultList realised $realised delegates, cursor name carries the probe tag"
+realised=$(ipc realised resultList); hidden_wall=$(ipc realised channelWall)
+if [[ $opened == true && $wall == false && ${realised:--1} -gt 0 && ${hidden_wall:--1} -gt 1 && $rows == "$EXPECT_CHANNELS" && $cname == *"<img src="* ]]; then
+  pass "T2 list view open: $rows rows, resultList holds $realised delegates, the HIDDEN channelWall already holds $hidden_wall captions, cursor name carries the probe tag"
 else
-  fail "T2" "opened=$opened wallView=$wall rows=$rows view=$view realised=$realised cursorName=$(python3 -c 'import sys; print(sys.argv[1][:60])' "$cname")"
+  fail "T2" "opened=$opened wallView=$wall rows=$rows resultList=$realised hiddenWall=$hidden_wall cursorName=$(python3 -c 'import sys; print(sys.argv[1][:60])' "$cname")"
 fi
 sleep 0.5
 list_hits=$(probe_hits)
@@ -179,20 +186,17 @@ if [[ $(gf 'g["wallView"]') != true ]]; then
 fi
 sleep 1.5
 wall=$(gf 'g["wallView"]'); cols=$(gf 'g["wallColumns"]')
-# openMs counts synchronously after its own summon and forceLayout, which
-# on this guide is 4 on the list and 1 on the wall: enough to say the view
-# was forced and held a delegate, not how many captions were laid out. The
-# distinct-name count on a red run is that number (25 on the list open and
-# 26 after the wall on 2d3cee3, this screen).
-oms=$(ipc openMs 1)
-view=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("view",""))' "$oms" 2>/dev/null)
-realised=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("realised",-1))' "$oms" 2>/dev/null)
+# The count as the wall stands, no re-open: a shown wall holds a page of
+# captions, and that number is what T4's zero is measured against. The
+# distinct-name count on a red run (25 on the list open and 26 after the
+# wall on 2d3cee3, this screen) is the same quantity seen from the server.
+realised=$(ipc realised channelWall)
 sleep 0.5
 wall_hits=$(probe_hits)
-if [[ $via == key && $wall == true && ${cols:-0} -gt 0 && $view == channelWall && ${realised:--1} -gt 0 && $wall_hits -eq 0 ]]; then
-  pass "T4 wall via the real Ctrl+G: wallView true, $cols columns, channelWall forced with $realised realised, still zero probe requests"
+if [[ $via == key && $wall == true && ${cols:-0} -gt 0 && ${realised:--1} -gt 1 && $wall_hits -eq 0 ]]; then
+  pass "T4 wall via the real Ctrl+G: wallView true, $cols columns, channelWall holds $realised captions, still zero probe requests"
 else
-  fail "T4" "wall via $via, wallView=$wall columns=$cols view=$view realised=$realised, $wall_hits probe request(s) for $(probe_distinct) distinct names after the wall: $(probe_paths)"
+  fail "T4" "wall via $via, wallView=$wall columns=$cols channelWall=$realised, $wall_hits probe request(s) for $(probe_distinct) distinct names after the wall: $(probe_paths)"
 fi
 ipc close >/dev/null; sleep 0.3
 

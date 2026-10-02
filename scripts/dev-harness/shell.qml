@@ -612,6 +612,17 @@ ShellRoot {
                               view: forced,
                               realised: forced === "" ? -1 : harness.realisedCount(g, forced) })
     }
+    // D-TEXT-1's scenario: how many delegates a named channel view holds
+    // RIGHT NOW, without the re-open openMs performs to time one. openMs
+    // reports 1 for a hidden channelWall (what an empty view looks like), so
+    // a control built on it says nothing about the captions a hidden wall
+    // laid out; this counts the view as it stands. -1 when the guide is not
+    // loaded or the name is not a view.
+    function realised(name: string): string {
+      var g = guideLoader.item
+      if (!g) return "-1"
+      return String(harness.realisedCount(g, name))
+    }
     function close(): string { fakeShell.hide(harness.pluginId); return "ok" }
     // M2-13. Drives the channel wall so a scenario can measure it. The guide
     // owns the flag; this only sets it, exactly as a key press will.

@@ -9603,7 +9603,7 @@ under `qmltestrunner` so contentWidth could be read), identical logs:
 | `<img ... width=16 height=16>` with an https src on non-routable 10.255.255.1 | default | **TCP SYN to :443 from the QML process**, observed with `ss` (handshake and GET beyond the SYN UNCHECKED) |
 | `visible: false`; `opacity: 0`; zero size; positioned at 5000,5000; created by `Component.createObject(null)` and never parented into a scene | default | **GET, every one** -- the fetch happens at text layout on creation |
 | same string | `Text.StyledText` | **GET** -- AutoText resolves to StyledText here (identical metrics) |
-| same string | `Text.RichText` | **GET**, and on failure Qt logs the FULL URL to stderr: a console sink for a provider-controlled URL |
+| same string | `Text.RichText` | **GET**. (This row first said RichText logs the full URL to stderr on failure. Re-measured by the fix lane case by case: zero such lines in every run; the line appeared only while the scene also held the https `<img>` toward 10.255.255.1, and vanished with that one element removed. A console sink under that condition, not a RichText property. Corrected 2026-10-02.) |
 | `BBC <b>One</b>` | default | no fetch, but the tags were CONSUMED (contentWidth 64.6 vs 127.3 for a PlainText twin): a provider can restyle, recolour, resize or hide caption text |
 | entity-escaped `&lt;img ...&gt;` | default | no fetch, but AutoText still decoded it as styled text -- escaping is a rendering change, not a sink closure |
 | same string | **`Text.PlainText`** | **no request in any of four runs**; the tag renders as literal glyphs (contentWidth 351.8) |
@@ -9695,3 +9695,94 @@ measurement above is what grading it should have looked like.
 4. Rule 5 gains the Qt text-layout sink with the measured facts; the
    measurement scene kept under `scripts/dev-harness/spikes/` and re-runnable.
 5. D-DOC-4; CHANGELOG 0.9.3; the reply on #9628; a new verification request.
+
+## D-TEXT-1 fixed, 2026-10-02: PlainText on the caption, and the proof the gate lacked
+
+Three lanes in separate worktrees on disjoint files (fix + guard + tests;
+live proof + spike; documents), integrated by cherry-pick onto `dev`
+(2bd83cb, d71adc8, f9ea56a, 308b3da, 7b9fee5) and finished by the lead.
+
+### The fix, and what the guard found that the sweep's count had not
+
+`textFormat: Text.PlainText` on the caption. The gate guard
+`scripts/check-text-format.py`, run against 8196422 before the edit,
+reported **7 problems in 49 Text blocks across 3 files**: six Texts with no
+`textFormat` (the caption and five that render the plugin's own glyphs) and
+the footer's StyledText without an exception comment. "42 PlainText, one
+StyledText" was true; "one Text without the line" was not, because the
+sweep counted elements that render PROVIDER text and the guard counts every
+Text. All six now declare PlainText -- a glyph Text carries no provider
+string today, and the guard refuses an allowance for "today". The footer
+carries `// MARKUP-EXCEPTION: own literals only, proven by the F-TEXT-2 node
+test`. The guard's 16 tests run it as a subprocess over trees they build;
+five mutations of the guard (accept a StyledText without the comment; let a
+missing line pass; stop masking comments; stop masking strings; stop
+tracking depth) turn 4, 5, 1, 1 and 4 of the 16 red. The first draft of the
+string-masking case stayed green under its mutation because the braces sat
+after the `textFormat` line and only lengthened the block; rewritten to put
+them before it.
+
+### F-TEXT-2: the one StyledText element, proven from literals, and rule 12
+
+`Model.footerHints` driven over a bounded product of **10,982 states,
+77,958 pairs**, every string-bearing input the marker
+`<img src="http://x/MARKER.png">`: no pair carries the marker or a `<`.
+Pushing the query, the focused form value or the group name into a pair
+turns 2, 2 and 3 of the five checks red. The composer was a QML property
+binding (`root.footerHintText`) the test could only mirror; it is now
+`Model.footerHintMarkup(pairs, keyColor, verbColor)`, called by Guide.qml
+and by the test (rule 12), and a composer that appends the marker turns
+exactly the composed-line check red (1 of 1667).
+
+### The live proof, on the shipping Guide.qml
+
+`scripts/dev-harness/text-scenario.sh`: a logging server on 127.0.0.1:8767,
+a generated playlist of 40 names carrying `<img src=".../<token>-<n>.png">`
+plus one control, the harness started with the guide closed, the list
+opened, the wall reached through the real `Ctrl+G`, the log read at each
+step. The harness gained `ipc realised <view>`, which counts the delegates
+a named view holds without re-opening the guide: the first draft read
+`openMs`, which re-opens the guide (so a red run logged 49 requests for 25
+names, the re-open's doubles) and reports 1 for a hidden wall, the number
+its own comment calls "what an empty view looks like".
+
+| | shipped 2d3cee3 (`--baseline`) | integrated tree |
+|---|---|---|
+| T2 after the LIST open: resultList / hidden channelWall delegates | 16 / **25** | 16 / 25 |
+| T3 requests after the list open | **25, for 25 distinct names** (one per hidden caption), `User-Agent: Mozilla/5.0` | **0** |
+| T4 after the real Ctrl+G: channelWall delegates / requests | 21 / **26 for 26 names** | 21 / **0** |
+| T5 the server logs the scenario's own request | yes | yes |
+| T6 harness log: transfer errors, probe paths | none | none |
+| | **4 passed, 2 failed** | **6 passed, 0 failed** |
+
+The 25 requests on the list open are the 25 captions the hidden wall holds,
+one each: "every guide open" is now observed on Guide.qml itself, not on a
+replica. Requests before the first open: 0 in every run.
+
+### A claim corrected by the lane that measured it
+
+The finding's table said RichText "on failure logs the full URL to
+stderr". The spike lane re-ran the cases one at a time: zero such lines in
+every run; the line the first measurement saw appeared only while the scene
+also held the https `<img>` toward 10.255.255.1, and vanished with that one
+element removed. A console sink under that condition, not a RichText
+property. Corrected in the table above, CLAUDE.md, ARCHITECTURE and the
+board before it shipped anywhere; the kept spike at
+`scripts/dev-harness/spikes/text-autotext-img/run.sh` prints the count and
+leaves that case out on purpose, since it sends a packet off loopback.
+Re-run offscreen on Qt 6.11.2: a, b, c (the caption's shape), d
+(invisible), f (StyledText), g (RichText) fetched with `Mozilla/5.0`; e
+(PlainText) and i (entity-escaped) did not; h consumed its `<b>` (64.6 vs
+127.3 for the twin).
+
+### Gate and the other scenarios on the integrated tree
+
+`check.sh` green: node 1667 (floor 1662 -> 1667), python 684 (668 -> 684),
+qml 68, text format guard 49 blocks (new floor 49), release allowlist 13.
+M3 scenario 37/37; argv scenario 7/7 (S4b window 112-121 ms at 50 ms
+sampling against a 181 ms control).
+
+Process note for the next brief: lane A was told to read the finding's
+QA-RESULTS section first and that `docs/*` was must-not-open; it obeyed
+ownership and wrote its comments from the brief. The review reads them
+against the section.

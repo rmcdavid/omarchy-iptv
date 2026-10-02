@@ -3623,6 +3623,22 @@ function logoSlot(opts) {
 // The key that flips the two views. Modified by necessity: the guide opens in
 // search mode, where a bare printable character is query text.
 var WALL_KEY = "Ctrl+G"
+
+// The footer hint line, composed from footerHints' [key, verb] pairs. Lifted
+// out of Guide.qml's property binding (rule 12) so the F-TEXT-2 check in the
+// node suite calls the composer that ships rather than a copy of it: this is
+// the one string the plugin renders under Text.StyledText (the footer's
+// MARKUP-EXCEPTION), so the only markup allowed in it is these font tags
+// around the pairs, and the pairs are literals (D-TEXT-1, F-TEXT-2).
+function footerHintMarkup(pairs, keyColor, verbColor) {
+  var list = asList(pairs)
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var pair = asList(list[i])
+    out.push("<font color=\"" + str(keyColor) + "\">" + str(pair[0]) + "</font> <font color=\"" + str(verbColor) + "\">" + str(pair[1]) + "</font>")
+  }
+  return out.join("<font color=\"" + str(verbColor) + "\">" + SEP + "</font>")
+}
 var WALL_MAX_COLUMNS = 4
 // 16:9 for the picture area. The corpus median aspect is 1.98 and the spread
 // is 0.31 to 13.62, so no plate shape fits the logos; PreserveAspectFit
@@ -8578,6 +8594,7 @@ if (typeof module !== "undefined") {
     guideSurface: guideSurface,
     footerStatus: footerStatus,
     footerHints: footerHints,
+    footerHintMarkup: footerHintMarkup,
     formHints: formHints,
     // ---- sources (M2-01)
     STATE_VERSION: STATE_VERSION,

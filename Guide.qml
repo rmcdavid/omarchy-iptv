@@ -745,11 +745,9 @@ Item {
       // key dispatches on, from the cursor row and the current scope.
       scopeId: root.scopeId, channel: root.rowAt(root.cursorIndex),
       state: root.serviceReady ? root.service.userState : null })
-    var out = []
-    for (var i = 0; i < pairs.length; i++) {
-      out.push("<font color=\"" + root.keyColor + "\">" + pairs[i][0] + "</font> <font color=\"" + root.verbColor + "\">" + pairs[i][1] + "</font>")
-    }
-    return out.join("<font color=\"" + root.verbColor + "\">" + Model.SEP + "</font>")
+    // The composer is Model.footerHintMarkup so the F-TEXT-2 check in the
+    // node suite calls the function that ships (rule 12), not a copy.
+    return Model.footerHintMarkup(pairs, root.keyColor, root.verbColor)
   }
 
   // ------------------------------------------------------------ lifecycle

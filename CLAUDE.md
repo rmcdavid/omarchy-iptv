@@ -200,9 +200,13 @@ requests and raise the batch.
      element is visible, sized, on screen or parented into a scene at all --
      the fetch happens at text layout on creation. An https `src` draws a
      TCP SYN to port 443 from the QML process (the handshake beyond it was
-     not checked). `Text.StyledText` and `Text.RichText` fetch too, and
-     RichText logs the FULL URL to stderr on failure, a console sink for a
-     provider-controlled URL. `Text.PlainText` is the only stop: no request
+     not checked). `Text.StyledText` and `Text.RichText` fetch too. The first
+     measurement saw Qt log a failed transfer's FULL URL to stderr and
+     filed it against RichText; re-measured case by case, the line appears
+     only while the scene also holds an https `<img>` toward a
+     non-routable host, never for a RichText 404 alone -- a console sink
+     that exists under that condition, which the kept spike does not
+     reproduce on purpose. `Text.PlainText` is the only stop: no request
      in four runs, the tag drawn as glyphs. Two things that look like
      closures are not: entity escaping (AutoText decodes `&lt;img ...&gt;`
      back into a tag, so escaping is a rendering change, not a sink closure)

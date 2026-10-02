@@ -7705,11 +7705,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 // and group, the scope id, the form's focus and every form value, and the
 // enum-shaped inputs too so an unknown value cannot fall into a branch that
 // echoes it -- is the marker. The pairs are the real function's output; the
-// composed line is built the way Guide.qml:723 (root.footerHintText) builds
-// it, which is a mirror of three lines of string concatenation because the
-// composer lives in a QML property binding where node cannot call it. The
-// assertion that matters is on the pairs; the composed line proves the
-// mirror adds nothing but <font> tags around them.
+// composed line is built by the shipping composer. The
+// assertion that matters is on the pairs; the composed line is built by
+// Model.footerHintMarkup, the composer Guide.qml's root.footerHintText
+// calls (rule 12: lifted out of the QML binding so node calls the real
+// one), and proves it adds nothing but <font> tags around them.
 ;(function () {
   var MARKER = "<img src=\"http://x/MARKER.png\">"
   var states = []
@@ -7762,15 +7762,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     }) })
   }) }) })
 
-  // Guide.qml:723 composes the line from the pairs like this; the colours are
-  // whatever Util.alpha returns and are not what this test is about.
-  function compose(pairs) {
-    var out = []
-    for (var i = 0; i < pairs.length; i++) {
-      out.push("<font color=\"#b3ffffff\">" + pairs[i][0] + "</font> <font color=\"#b3ffffff\">" + pairs[i][1] + "</font>")
-    }
-    return out.join("<font color=\"#b3ffffff\">" + Model.SEP + "</font>")
-  }
+  // The colours are whatever Util.alpha returns in the guide and are not
+  // what this test is about; the composer is the shipping one.
+  function compose(pairs) { return Model.footerHintMarkup(pairs, "#b3ffffff", "#b3ffffff") }
   var leaks = []
   var shapes = []
   var composedLeaks = []

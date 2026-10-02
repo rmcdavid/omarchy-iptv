@@ -351,8 +351,10 @@ to the wall through a real `Ctrl+G` (`wtype -M ctrl g -m ctrl`) and reads
 the server's log at each step. T1 and T2 are controls (the count loaded,
 the cursor name still carries the tag); T3 and T4 are the zeros; T5 proves
 the server logs by making a request of its own; T6 reads the harness log.
-Realised-delegate counts come from `ipc openMs 1`, the one verb that
-reports which view it forced, which re-opens the guide once to do so.
+Realised-delegate counts come from `ipc realised <view>`, which counts
+the delegates a named view holds right now without re-opening the guide:
+on the list open the hidden `channelWall` already holds a page of
+captions, which is the control T2 asserts.
 
 Against 2d3cee3 on this screen: 4 passed, 2 failed -- 49 requests for 25
 distinct names after the LIST open alone (`channelWall` has
