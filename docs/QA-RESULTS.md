@@ -9570,3 +9570,128 @@ Re-measured after the move, forward and baseline, both on the real
 sampling against a 176 ms control; baseline `dbcbd0f` fails S3 (4 command
 lines carry the credential), S4 (0 of 4 environments refused) and S4b, as
 it must. Sub-millisecond, 98-113 ms over twelve runs. M3 scenario 37 of 37.
+
+## Marketplace finding at 2d3cee3, 2026-10-02: a channel name is a network request (D-TEXT-1)
+
+HANCORE-linux on omacom/omarchy-plugin-marketplace#9628, 2026-10-02 07:34
+UTC, against the 0.9.2 artifact: "playlist channel names preserve markup
+through `bin/omarchy-iptv:800-821` and `Model.js:643-668`, then reach the
+default-AutoText wall caption in `Guide.qml:3228-3248`. A playlist provider
+can therefore cause an external image request by embedding an HTML image in
+a channel name when the wall is displayed ... this is a confirmed
+external-data path, and the remaining review is incomplete." He is right on
+every point, and the exposure is wider than "when the wall is displayed".
+
+### Reproduced by calling the shipping code, then measured on the real sink
+
+The helper's `parse_extinf` + `make_channel` and Model's `displayName`
+(both called, not read) return `<img src="http://127.0.0.1:1/x.png">BBC One`
+unchanged: `clean_name` / `cleanName` strip leading dashes and whitespace
+and nothing else, and no length cap exists on either side.
+
+Qt 6.11.2 (qt6-declarative 6.11.2-1), `QT_QPA_PLATFORM=offscreen`, one
+`Text` per case each with its own probe path, a stdlib HTTP server on
+127.0.0.1 logging every request line; four runs (three under `qml`, one
+under `qmltestrunner` so contentWidth could be read), identical logs:
+
+| case | textFormat | request |
+|---|---|---|
+| tag first: `<img src=".../a.png">BBC One` | default (AutoText) | **GET /a.png**, `User-Agent: Mozilla/5.0` |
+| name first, tag last | default | **GET** |
+| the caption's shape: width-bound, `ElideRight`, `AlignHCenter`, `Accessible.ignored`, inside a GridView delegate | default | **GET** (`truncated: true`) |
+| tag after 300 characters of plain text | default | **GET** -- no "near the start" escape in the heuristic |
+| `<img ... width=16 height=16>` with an https src on non-routable 10.255.255.1 | default | **TCP SYN to :443 from the QML process**, observed with `ss` (handshake and GET beyond the SYN UNCHECKED) |
+| `visible: false`; `opacity: 0`; zero size; positioned at 5000,5000; created by `Component.createObject(null)` and never parented into a scene | default | **GET, every one** -- the fetch happens at text layout on creation |
+| same string | `Text.StyledText` | **GET** -- AutoText resolves to StyledText here (identical metrics) |
+| same string | `Text.RichText` | **GET**, and on failure Qt logs the FULL URL to stderr: a console sink for a provider-controlled URL |
+| `BBC <b>One</b>` | default | no fetch, but the tags were CONSUMED (contentWidth 64.6 vs 127.3 for a PlainText twin): a provider can restyle, recolour, resize or hide caption text |
+| entity-escaped `&lt;img ...&gt;` | default | no fetch, but AutoText still decoded it as styled text -- escaping is a rendering change, not a sink closure |
+| same string | **`Text.PlainText`** | **no request in any of four runs**; the tag renders as literal glyphs (contentWidth 351.8) |
+
+Two transforms that must never be cited as a markup guard, both called:
+the helper's `redact_urls` turns `<img src="http://h/x.png">` into
+`<img src="http://h">`, which is still a well-formed, fetchable tag; the
+JS `redactUrls` leaves `<img src="h.example`, an unterminated tag.
+
+### The exposure is every guide open, not the wall
+
+`channelWall` (`Guide.qml:3054-3069`) is a `GridView` with
+`visible: root.wallView` and `model: root.rowCount`: the model is live
+while the list is the view that shows, `liveView` (`Guide.qml:393`) names
+both as simultaneously existing, and a GridView realises delegates by
+geometry, not by visibility. A replica of that shape with `visible: false`
+realised 24-35 delegates and every caption fetched. So on each open, the
+first page of the current rows plus the `cacheBuffer` row is laid out by
+AutoText captions whether or not the user has ever pressed the wall key.
+`Guide.qml` itself was not run in this pass; the fix's proof must run it
+live through the harness, list view and wall view both.
+
+What that bypasses: the README's own consent gate. "Channel logos are off
+by default, and turning them on tells you the cost first" -- the `g` key
+counts the third-party hosts and waits for agreement (D-LOGO). A tag in a
+channel name makes the shell fetch from any host the provider names, logos
+off, nobody asked, with `Mozilla/5.0` as the client, from the
+`omarchy-shell` process that hosts every plugin and the notification
+daemon. The request's target can be a tracking beacon, a LAN device, or
+anything else that answers a GET.
+
+### The sweep: every other sink, and why this was the only one
+
+Five readers over all three shipped QML files, Model.js, the helper, the
+contrib files and the host components the plugin hands strings to; 15
+verifiers, one adversarial per candidate; a completeness critic; 22 agents,
+680 tool calls. 68 text-like bindings in `Guide.qml`, `BarWidget.qml`,
+`Service.qml`. 42 `Text` elements declare `Text.PlainText`. One declares
+`Text.StyledText` (`footerHints`, `Guide.qml:4568`): `Model.footerHints`
+read in full, every pushed pair a literal or a key constant, so the comment
+"our own microcopy only" holds -- by convention, with no test asserting it.
+Exactly ONE element renders provider-derived text under the AutoText
+default: the caption. Three `PanelSectionHeader` instances (group names,
+field labels, mpv track titles) and the `ConfirmDialog` message are closed
+by `Text.PlainText` inside host files under `/usr/share/omarchy/shell`,
+outside this repository and its gate; so are the bar tooltip
+(`Bar.qml:1338`) and the active-window title widget
+(`ActiveWindow.qml:34`). The QQC2 `TextField` placeholder (`Guide.qml:4284`)
+is AutoText with no plugin lever, and `validateSourceUrl` / `deriveLabel`
+admit no tag there. `contrib/*` carry plugin literals only. The
+notification daemon on this machine is the shell itself (quickshell owns
+`org.freedesktop.Notifications`); it renders the summary PlainText and the
+body StyledText behind its own image-tag stripper, no link activation. The
+accessibility bus carries the raw names (`barAccessibleName` observed with
+the tag in it) but lays out no text and fetches nothing. The EPG path:
+`ElementTree` returns DECODED text, so `&lt;img ...&gt;` in an XMLTV title
+arrives as a live tag inside `EPG_MAX_TITLE`; every EPG sink is PlainText
+today (`Guide.qml:3596`), so it is a rule, not a defect.
+
+One route no reader listed, found by the critic: `bin/omarchy-iptv:3689`
+sets mpv's `title` (`$>`-prefixed, unexpanded) and `force-media-title` to
+the channel name on every zap, by design (ARCHITECTURE-PLAYER rulings 2
+and 3), rendered PlainText by the host's bar; not a markup sink, but
+CLAUDE.md rule 5 says the title "reads `IPTV`", which is true only until
+the first play (D-DOC-4).
+
+### Why the project had the rule and missed the element (F-TEXT-2)
+
+`docs/ARCHITECTURE.md`: "`Text { textFormat: Text.PlainText }` for any
+user-supplied string", in the scaffold commit 42015dc of 2026-09-12. The
+caption landed with the wall, ddbc6d6 of 2026-09-25, without it. The
+acceptance row for the rule, SRC-SEC-13 "no markup rendering of user
+strings", is graded by `grep -n 'StyledText\|RichText' Guide.qml` and
+passed with "one StyledText, 31 PlainText". That grep cannot see a MISSING
+line on an element whose default is the unsafe one; it is the rule 14
+shape exactly -- a check that could not go red for the failure it
+guarded -- and it was never re-graded after rule 14 was written. The
+measurement above is what grading it should have looked like.
+
+### What a complete fix covers (not done; recorded so the ids are whole)
+
+1. `textFormat: Text.PlainText` on the caption, `Guide.qml:3228`.
+2. An observed acceptance that replaces SRC-SEC-13: a harness scenario with
+   a fixture playlist whose names carry `<img src="http://127.0.0.1:<port>/<id>.png">`
+   and a logging server, asserting zero requests across a guide open in list
+   view and in wall view -- red against 2d3cee3, green with the fix.
+3. A gate guard beside it, not instead of it: every `Text` block in shipped
+   QML declares its `textFormat` explicitly.
+4. Rule 5 gains the Qt text-layout sink with the measured facts; the
+   measurement scene kept under `scripts/dev-harness/spikes/` and re-runnable.
+5. D-DOC-4; CHANGELOG 0.9.3; the reply on #9628; a new verification request.
