@@ -368,9 +368,12 @@ the consent gate of the logo feature: logos are off by default, and the
 agreement before the first fetch -- a tag in a channel name fetched from
 any host the playlist author named, logos off, nobody asked, from the
 `omarchy-shell` process. What changed: the caption declares
-`textFormat: Text.PlainText`; `scripts/check-text-format.py` runs in
-`scripts/check.sh` so that no `Text` ships with its format undeclared
-again; `scripts/dev-harness/text-scenario.sh` opens the guide in list view
+`textFormat: Text.PlainText` -- at the sink, not in the two parser
+functions the reviewer named, because a name must display its literal
+characters, a stripper can manufacture a tag out of two halves, and EPG
+titles never pass through the name cleaner; `scripts/check-text-format.py`
+runs in `scripts/check.sh` so that no `Text` or `Label` ships with its
+format undeclared again; `scripts/dev-harness/text-scenario.sh` opens the guide in list view
 and in wall view over a playlist whose names carry `<img src>` probes and
 asserts the logging server saw nothing, with `--baseline <ref>` to show
 the same checks red against 2d3cee3; the measurement is re-runnable from
@@ -449,8 +452,9 @@ QML (mirror first-party plugins; see clipboard/emojis, tailscale, dropbox):
 - `Accessible.role` / `Accessible.name` on the bar button, the guide card and
   rows.
 - No `Quickshell.execDetached` with concatenated strings. Argv arrays only.
-- `Text { textFormat: Text.PlainText }` for any string that is not a plugin
-  literal: channel names, group names, EPG titles, hosts, reasons, labels.
+- `Text { textFormat: Text.PlainText }` on EVERY `Text` and `Label`, the
+  plugin's own glyphs included, and above all on anything from outside:
+  channel names, group names, EPG titles, hosts, reasons, labels.
   Why: Qt's default, `Text.AutoText`, reads the string for markup and FETCHES
   an `<img src>` at text layout, on creation, visible or not (D-TEXT-1,
   measured on Qt 6.11.2 on 2026-10-02; the wall caption shipped without this

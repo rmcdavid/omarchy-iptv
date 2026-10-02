@@ -7704,8 +7704,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 // product, and EVERY string-bearing input -- the query, the channel's name
 // and group, the scope id, the form's focus and every form value, and the
 // enum-shaped inputs too so an unknown value cannot fall into a branch that
-// echoes it -- is the marker. The pairs are the real function's output; the
-// composed line is built by the shipping composer. The
+// echoes it -- is the marker. The pairs are the real function's output. The
 // assertion that matters is on the pairs; the composed line is built by
 // Model.footerHintMarkup, the composer Guide.qml's root.footerHintText
 // calls (rule 12: lifted out of the QML binding so node calls the real

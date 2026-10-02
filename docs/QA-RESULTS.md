@@ -9652,8 +9652,11 @@ by `Text.PlainText` inside host files under `/usr/share/omarchy/shell`,
 outside this repository and its gate; so are the bar tooltip
 (`Bar.qml:1338`) and the active-window title widget
 (`ActiveWindow.qml:34`). The QQC2 `TextField` placeholder (`Guide.qml:4284`)
-is AutoText with no plugin lever, and `validateSourceUrl` / `deriveLabel`
-admit no tag there. `contrib/*` carry plugin literals only. The
+is AutoText with no plugin lever; measured by calling the shipping
+functions, `validateSourceUrl` rejects a tag in an http or Xtream label,
+while a file-kind label is the path's base name and carries whatever the
+user typed -- a user-owned string, rendered AutoText by the placeholder,
+not a provider-controlled one. `contrib/*` carry plugin literals only. The
 notification daemon on this machine is the shell itself (quickshell owns
 `org.freedesktop.Notifications`); it renders the summary PlainText and the
 body StyledText behind its own image-tag stripper, no link activation. The
@@ -9665,8 +9668,8 @@ today (`Guide.qml:3596`), so it is a rule, not a defect.
 
 One route no reader listed, found by the critic: `bin/omarchy-iptv:3689`
 sets mpv's `title` (`$>`-prefixed, unexpanded) and `force-media-title` to
-the channel name on every zap, by design (ARCHITECTURE-PLAYER rulings 2
-and 3), rendered PlainText by the host's bar; not a markup sink, but
+the channel name on every zap, by design (ARCHITECTURE-PLAYER section 5,
+hard requirements 2 and 3, and 4.11), rendered PlainText by the host's bar; not a markup sink, but
 CLAUDE.md rule 5 says the title "reads `IPTV`", which is true only until
 the first play (D-DOC-4).
 
@@ -9786,3 +9789,79 @@ Process note for the next brief: lane A was told to read the finding's
 QA-RESULTS section first and that `docs/*` was must-not-open; it obeyed
 ownership and wrote its comments from the brief. The review reads them
 against the section.
+
+## Review of the D-TEXT-1 round, 2026-10-02: 31 findings, none refuted (F-M3-11)
+
+Six lenses over 8196422..c936f25 (documents, code comments, harness and
+the lead's own write-up, seams, sinks and code, a completeness critic),
+every finding handed to an adversarial verifier: 31 kept, 0 refuted, 15
+agents. Deduplicated, fourteen distinct items; three P2, the rest P3 and
+nits. F-M3-8 holds for the ninth round: twenty-two of the thirty-one were
+sentences.
+
+The three P2. The harness README quoted the first draft's doubled baseline
+counts (49 and 70) for a scenario that no longer re-opens the guide, while
+QA-RESULTS, STATUS and the scenario's own comment said 25 and 26 -- three
+documents, two numbers, the one a user of the harness reads carrying the
+withdrawn one. The guard matched `Text {` only: a QtQuick Controls `Label`
+is a Text subclass with the same AutoText default and a BarWidget copy
+with `Label { text: root.nowPlayingName }` appended passed the gate with
+exit 0 (measured by the reviewer, reproduced by the repair lane). And
+nothing recorded, anywhere a host update would be noticed, that five host
+renderers the plugin hands provider strings to declare PlainText.
+
+Sentences larger than their evidence, the F-M3-9 shape, three times: the
+CHANGELOG's "nothing else of yours" when both probe servers logged only
+method, path and User-Agent (the reviewer logged every header: Host,
+Connection, Accept-Encoding, Accept-Language, User-Agent); the README's
+"every other string the plugin shows from a playlist ... drawn as plain
+text" when the failure toast's body is drawn by the shell as StyledText
+behind its image-tag stripper; and "`validateSourceUrl` / `deriveLabel`
+admit no tag" in the placeholder, false for a file-kind label, which is
+the user's own typed path. Rule 5 stated a narrower rule ("anything but a
+plugin literal") than the guard it names enforces (every Text, literals
+included). The D-DOC-4 row cited "ARCHITECTURE-PLAYER rulings 2 and 3",
+which are PO-2 and PO-3 about teardown and reattach; the title facts are
+section 5's hard requirements 2 and 3. The guard's docstring put all 42
+PlainText Texts "in the same file" (40 in Guide.qml, 2 in BarWidget.qml).
+The spike's header still described the RichText-stderr sentence as what
+QA-RESULTS "records" after the same round had corrected it. Nothing said
+WHY the fix is at the sink and not in the two parser functions the
+maintainer named.
+
+Code: the scenario installed its EXIT trap before the "port already in
+use" check and its cleanup killed whatever pid held the port, so on that
+exit path it would SIGTERM the foreign process it had just declined to
+collide with (the same shape in the spike); a qualified
+`import QtQuick as QQ` would let `QQ.Text` evade the guard silently; a
+regex literal holding a quote masked the rest of its line; the harness's
+`realised` verb returned 0, not -1, for a non-channel view.
+
+### Repaired, and what the repair measured
+
+Two lanes in worktrees plus the lead. Guard: `Label` held to the same
+rule; a qualified QtQuick import refused as a problem; regex literals
+masked by the JavaScript tokenizer rule; the docstring corrected; 20 guard
+tests (was 16), the new ones proven red by reverting each change (1, 1, 1
+and 1 of 20) and the depth mutation now 5 of 20 red. One premise of the
+review did not reproduce: under the depth mutation the OLD 16 were 4 red,
+as the fix round had recorded, not 0; the two added nesting fixtures are
+the ones a depth-blind scanner passes outright, so they were worth
+adding for the right reason. Harness: the server pid is read from `ss`
+once, when our own server is confirmed up and is a child of the script,
+and only that remembered pid is ever killed -- proven with a foreign
+listener on 8767: the old script killed it, the new one leaves it alive;
+the spike's server now logs every header and its comparator checks the
+header names, red when the server drops one (6 lines, exit 1). Measured
+header set of the fetch, identical across the six fetching cases: `Host`,
+`Connection: Keep-Alive`, `Accept-Encoding: zstd, br, gzip, deflate`,
+`Accept-Language: en-US,*`, `User-Agent: Mozilla/5.0`; no cookie, no
+referer, no authorization. The CHANGELOG now says that. `realised` returns
+-1 unless the name is a channel view. Lead: rule 5 and the coding standard
+say the rule as enforced and why the fix is at the sink; the five host
+renderers are recorded in `docs/OMARCHY-PLUGIN-CONTRACT.md` and pinned by
+`tests/test_host_text_format.py`, which passes on this machine and goes
+red on a host copy with the tooltip's PlainText changed; the README, the
+CHANGELOG, QA-SOURCES, the D-DOC-4 citations and the placeholder sentence
+say what was measured. Python 689 tests (684 -> 689), node 1667, guard 49
+blocks; text-scenario forward 6/6 on the repaired harness.

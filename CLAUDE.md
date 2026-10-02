@@ -221,12 +221,31 @@ requests and raise the batch.
      so the first page of captions is laid out whether or not the user has
      ever pressed the wall key. Found by the marketplace maintainer on
      omacom/omarchy-plugin-marketplace#9628 against the shipped 0.9.2.
-     The rule: every `Text` that renders anything but a plugin literal
-     declares `textFormat: Text.PlainText`. `Text.StyledText` is allowed
-     only for the plugin's own strings, with a `// MARKUP-EXCEPTION: <reason>`
+     The rule, as the gate enforces it: EVERY shipped `Text` (and `Label`,
+     a Text subclass with the same default) declares `textFormat`, and
+     declares `Text.PlainText` -- the plugin's own glyph Texts included,
+     because a rule with "unless it looks harmless" in it is the rule the
+     next caption gets written under. `Text.StyledText` is allowed only for
+     the plugin's own strings, with a `// MARKUP-EXCEPTION: <reason>`
      comment on the line directly above the `textFormat` line and a test
      that what it renders composes from literals (`footerHints` renders
-     `Model.footerHints`, tested in `tests/Model.test.js` under "F-TEXT-2").
+     `Model.footerHints` through `Model.footerHintMarkup`, tested in
+     `tests/Model.test.js` under "F-TEXT-2"). The fix is at the SINK and
+     not in the parsers the reviewer named (`clean_name`, `displayName`):
+     a name must display its literal characters, a tag stripper can
+     manufacture a tag out of two halves (the host's own notification code
+     documents that case), and EPG titles never pass through the name
+     cleaner at all. Two surfaces stay outside the guard and are recorded
+     rather than fixed: the QtQuick Controls `TextField` placeholder in the
+     Sources form is AutoText with no plugin lever and renders only strings
+     the user typed; and the strings the plugin hands to the HOST --
+     section headers, the confirm dialog, the bar tooltip, the active-window
+     title, and a failure toast's body -- are rendered by host files under
+     `/usr/share/omarchy/shell`, PlainText except the toast body, which is
+     StyledText behind the host's own image-tag stripper. Those five files
+     and lines are recorded in `docs/OMARCHY-PLUGIN-CONTRACT.md` and pinned
+     by `tests/test_host_text_format.py`, which goes red on this machine
+     when a host update changes one of them.
      `scripts/check-text-format.py`, run by `scripts/check.sh` under the
      banner "text format guard", enforces the declaration;
      `scripts/dev-harness/text-scenario.sh` observes the sink itself, checks

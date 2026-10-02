@@ -20,11 +20,12 @@ A channel name that could make the shell fetch a picture.
   until you have seen how many hosts it would contact and agreed. A
   marketplace reviewer (omacom/omarchy-plugin-marketplace#9628) found it in
   0.9.2. The caption is now drawn as plain text, like every other string
-  the plugin shows from a playlist, and the release check now refuses any
-  text element that leaves that choice to the default. What it was not: no
-  credential of yours was sent, and nothing from a playlist ran as code --
-  the request carried the address from the tag and a generic browser
-  identification, nothing else of yours.
+  the plugin itself draws from a playlist, and the release check now refuses
+  any text element that leaves that choice to the default. What it was not:
+  no credential of yours was sent, and nothing from a playlist ran as code.
+  Measured, the request carried the address from the tag, a generic browser
+  identification, and your system language; no cookie, no credential, and
+  nothing from the playlist beyond the tag itself.
 
 ## 0.9.2 (2026-10-01)
 
