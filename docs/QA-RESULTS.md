@@ -9355,3 +9355,154 @@ and the documented decision said accepted. An accepted residual is invisible
 to a process that verifies consistency. It took someone outside the project,
 who had not agreed to the premise, to ask why it was accepted at all.
 
+## D-SINK-8 fixed, 2026-10-01: the credential leaves the command line, measured on the real `/proc`
+
+The maintainer's finding on #8998 was correct and was this project's own
+accepted residual (D-SINK-3). `docs/ARCHITECTURE.md` section 6 had named the
+fix on 2026-09-22 and deferred it "if this is ever revisited". It was.
+
+### What changed
+
+The playlist fetch, the EPG fetch and the source probe hand the helper its
+URL in `OMARCHY_IPTV_URL` instead of as a `--url` argv item.
+`Model.fetchEnvironment(url)` builds the one-variable environment, and
+`Service.qml` assigns it immediately before `running = true` at exactly those
+three sites; the builders carry no URL; the helper's `url_from(args)` reads
+`--url` if given, else the variable, so `--url` still works for a person at
+their own shell. The helper fetches with `urllib` and spawns nothing, so
+nothing inherits the variable.
+
+Built by three lanes in separate worktrees on disjoint files -- helper;
+model and service; documents -- against a contract the lead fixed first,
+and integrated in one step because the first two are co-requisites: a
+Service that stops sending `--url` against a helper that still requires it
+kills every fetch. One fact in the contract was measured before it was
+written rather than taken from documentation: on Quickshell 0.3.1 / Qt 6.11,
+`Process.environment` MERGES with the inherited environment, re-assigning it
+on the same object replaces the old value, and `null` unsets. All three lanes
+independently found their worktree had been cut from `main` -- the 13-file
+artifact -- rather than `dev`, and reset to 565a982 before touching anything.
+
+### The proof
+
+`scripts/dev-harness/argv-scenario.sh` starts the harness unconfigured, adds
+a source over IPC whose playlist AND guide URLs carry a credential unique to
+the run, serves both from a server that sleeps 2.5 s before answering so each
+helper fetch lives long enough to be seen, and samples `/proc` every 50 ms
+for the helper this harness spawns.
+
+| | shipped v0.9.1 (`dbcbd0f`) | the fix (`0a1910b`) |
+|---|---|---|
+| S1 helper `playlist` runs seen (control) | 2 | 2 |
+| S2 helper `epg` runs seen (control) | 2 | 2 |
+| **S3 helper command lines carrying the credential** | **4** | **0** |
+| **S4 helper environments carrying it as `OMARCHY_IPTV_URL`** | **0** | **4** |
+| S5 anything left on any command line afterwards | 0 | 0 |
+| S6 credential or path in the harness log | none | none |
+
+The four on the shipped artifact are the probe, the playlist fetch and two
+EPG runs, each with the full credentialed URL on a world-readable command
+line. That is the maintainer's finding, reproduced.
+
+### What the instrument got wrong before it was right
+
+Recorded because each is a shape this project has seen before:
+
+1. **The sweeper carried the credential on its own argv.** It took the
+   needle as `sys.argv[1]`, so the first version of a tool hunting for a
+   credential on a command line put one there itself. Both python helpers
+   now take it from their environment.
+2. **It read another lane's processes as the fix working.** The first sweep
+   matched any process whose `argv[1]` ended in `/bin/omarchy-iptv`. Lane A's
+   tests were running concurrently from a worktree, spawning the helper with
+   the same example credential the brief had given them in THEIR
+   environment, and the sweep reported `OMARCHY_IPTV_URL` carrying the
+   credential on a tree that set no such variable. Rule 4b's concurrent-tree
+   trap, in a new form: a measurement that can see processes it did not
+   start. The sweep is pinned to the harness's helper by resolved path and
+   the needle is unique per run.
+3. **The first run saw no fetch at all** -- `addSource` had answered
+   `not_ready` because the scenario waited on `stateLoaded` and the gate also
+   wants `cacheReady` -- and S1/S2 refused to call the empty scan clean.
+   That is what the two controls are for.
+
+Gate at the end: 1662 node (was 1653), 666 python (was 657), 68 qml, a11y
+34, floors re-levelled. 13 node checks red against 565a982, and 7 of the 9
+python tests -- the two `--url`-precedence cases pass on both trees by
+design and were proven by mutation instead; the first draft of this
+sentence said 9 of 9. M3 scenario 37/37 through the changed fetch path.
+
+## D-SINK-8 review and D-SINK-9, 2026-10-01: the route itself, measured
+
+The three-lens review of the D-SINK-8 fix (claims first, then seams, then
+new sinks; 37 agents, 17 raw, 16 kept, 0 blockers) is F-M3-9 on the board:
+fourteen of the sixteen were sentences, three of them the lead's own, and
+F-M3-8 held for the seventh round running. The two code findings were a
+small one -- an explicit empty `--url` fell through to the variable -- and
+D-SINK-9, which is the one that mattered.
+
+### What the sinks lens found
+
+The D-SINK-8 prose said the helper's environment was readable "only by your
+own account". The kernel's open check on `/proc/<pid>/environ` is a
+ptrace-read check, which EVERY process running as the same uid passes while
+the target is dumpable -- "your own account" meant every program the user
+runs. And a crash of a dumpable helper hands its whole environment to
+`systemd-coredump`, which stores it in the journal as `COREDUMP_ENVIRON`:
+on this machine the core handler is systemd-coredump, `RLIMIT_CORE` is
+unlimited for the shell and everything it spawns, and eight journal entries
+already carry that field. Durable, and readable by the journal groups.
+
+### The fix, and what it does to the proof
+
+`shield_environment()` sets `PR_SET_DUMPABLE 0` through ctypes as the
+helper's first statement, for every verb. Measured from a same-uid reader
+with no capabilities: a dumpable child's `environ` is readable with the
+credential present; a non-dumpable child's is refused (`Permission
+denied`); its `cmdline` stays readable and carries nothing either way. The
+kernel does not dump a non-dumpable process, so the journal sink closes
+with it.
+
+The live proof had to change its meaning. S4 used to assert the credential
+was FOUND in the helper's environment; a sweep that can read the environment
+is now the thing the fix forbids. S4 asserts two facts that only mean
+something together: every fetch's environment ended REFUSED to the sweep,
+and the fetch still produced its two channels -- so the URL went by the one
+route left, and that route is root-only.
+
+### The window, measured rather than assumed away
+
+Nothing a child does can make it non-dumpable before its first statement
+runs. The first version of the sweep recorded each helper the first time it
+was seen -- always inside that window -- and reported the shield absent on a
+tree that had it. It now re-samples every helper on every 50 ms tick and
+records first-seen and first-refused times.
+
+| | shipped v0.9.1 | D-SINK-8 only (0a1910b) | with D-SINK-9 |
+|---|---|---|---|
+| S3 helper command lines carrying the credential | 4 | 0 | 0 |
+| environ readable to a same-uid reader at the END of the fetch | 4 of 4 | 4 of 4 | **0 of 4** |
+| S4b readable window after exec, per fetch (ms), two runs | the whole fetch | the whole fetch | **120, 114, 118, 178** and **181, 112, 173, 121** |
+| every helper verb non-dumpable | 0 | 0 | 8 of 8 |
+
+The window is the interpreter starting and compiling a 5,000-line script,
+and the S4b bound is 400 ms: set from that measurement with margin, stated
+in the scenario, and not to be raised without a new measurement. Every
+shipped sentence that said "for the length of the fetch" now says "from its
+first instruction on" and names the fifth of a second.
+
+### Also corrected from the review
+
+The security document of record and the proof's own preamble said the
+reviewer "read credentials from /proc"; he reported, from the code, that
+they could be read. The write-up said 9 of 9 helper tests were red against
+the old tree; 7 were, the two `--url`-precedence cases passing on both trees
+by design. The CHANGELOG handed the user a by-hand `--url <url>` -- the
+durable shell-history exposure, in the release closing the transient one --
+and now names the cost and points at the form. Two shipped comments said the
+helper "spawns nothing"; it forks mpv for `player start`, on a Process the
+service never hands this environment, and now say so. The usage synopsis
+omitted `--state-dir`. S6 passed on a mis-named log and now fails on one. The
+Quickshell environment measurement two comments called load-bearing is
+`scripts/dev-harness/spikes/process-environment.qml`, re-runnable.
+

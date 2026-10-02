@@ -91,7 +91,12 @@ One place they can escape that, worth knowing, and one that used to:
   built from the same username and password. A marketplace reviewer asked
   why that was accepted, and it is not any more: the plugin now hands the
   URL to the helper in its environment, as `OMARCHY_IPTV_URL`, which `/proc`
-  exposes only to your own account, and the helper's command line no longer
+  then refuses to everyone but root -- not other accounts, and not other
+  programs running as you either -- from its first instruction on. The
+  moment between the helper starting and that instruction, measured at
+  under a fifth of a second, is the only window left, and it is readable by
+  programs running as you alone, never by other accounts. The helper's
+  command line no longer
   carries it. That is true of all three fetches that take a URL -- your
   playlist, your guide data, and the check the Sources screen makes before it
   accepts a source. Nothing else on the plugin's side writes
@@ -416,8 +421,12 @@ Nothing inside the plugin directory is written at runtime.
   use the command line only for a free public list you do not mind storing
   in plain text.
 - The guide's status line shows the helper's own error text (host name only,
-  never the URL). To see the same JSON in a terminal:
-  `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`
+  never the URL). To see the same JSON in a terminal, for a free list:
+  `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`.
+  Do not do this with a URL that carries your provider username and
+  password: typed at a prompt it is written to your shell history for good
+  (see Settings above). Set `OMARCHY_IPTV_URL` for that one command instead
+  of `--url`, which keeps it off the command line -- or just use the guide.
 - Shell console: `qs log -p /usr/share/omarchy/shell --tail 100`.
 - After editing `Service.qml` run `omarchy restart shell` (kept-loaded
   services do not hot-reload).

@@ -21,6 +21,7 @@ import calendar
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -201,3 +202,84 @@ class EpgUrlEnvTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShieldTest(unittest.TestCase):
+    """D-SINK-9: a fetch verb makes itself non-dumpable before it reads the
+    URL from its environment, so /proc/<pid>/environ is refused to everyone
+    but root and a crash writes no core. Observed on the real /proc from a
+    same-uid reader, not reasoned about: the first draft of the D-SINK-8
+    docs said "only your own account can read" the environment, and a
+    dumpable process's environ is readable by every program that account
+    runs -- measured, both ways, 2026-10-01."""
+
+    def test_the_shield_makes_the_calling_process_non_dumpable(self):
+        code = (
+            "import sys, ctypes; sys.path.insert(0, %r)\n"
+            "from helper_loader import load_helper\n"
+            "h = load_helper()\n"
+            "libc = ctypes.CDLL(None)\n"
+            "print(libc.prctl(3, 0, 0, 0, 0), int(h.SHIELDED), libc.prctl(3, 0, 0, 0, 0))\n"   # PR_GET_DUMPABLE
+        ) % os.path.dirname(os.path.abspath(__file__))
+        # The shield runs at module level, so LOADING the helper is what makes
+        # the process non-dumpable: before load 1 (read in the subprocess
+        # before the import), after load 0, and SHIELDED records success.
+        code = code.replace("h = load_helper()\n", "before = ctypes.CDLL(None).prctl(3, 0, 0, 0, 0)\nh = load_helper()\n")
+        code = code.replace("print(libc.prctl(3, 0, 0, 0, 0), int(h.SHIELDED), libc.prctl(3, 0, 0, 0, 0))",
+                            "print(before, int(h.SHIELDED), libc.prctl(3, 0, 0, 0, 0))")
+        out = subprocess.run([sys.executable, "-c", code], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr.decode("utf-8", "replace"))
+        self.assertEqual(out.stdout.decode().split(), ["1", "1", "0"])
+
+    def test_a_fetch_verb_refuses_its_environment_to_a_same_uid_reader(self):
+        """The verb, not the function: run `playlist` against a server that
+        holds the request open, read the live process's /proc from this
+        same-uid test, and expect EACCES on environ while cmdline stays
+        readable and carries no URL. Then the fetch must still succeed,
+        which is the proof the URL arrived by the only route left."""
+        import http.server, threading
+        served = threading.Event()
+        release = threading.Event()
+        body = b"#EXTM3U\n#EXTINF:-1 tvg-id=\"a\" group-title=\"G\",Alpha\nhttp://127.0.0.1:1/a\n"
+
+        class Hold(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                served.set()
+                release.wait(10)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hold)
+        port = server.server_address[1]
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        cache = tempfile.mkdtemp(prefix="omarchy-iptv-shield-")
+        self.addCleanup(shutil.rmtree, cache, True)
+        needle = "SYNTH3TIC%d" % os.getpid()
+        env = dict(os.environ)
+        env["OMARCHY_IPTV_URL"] = "http://user:%s@127.0.0.1:%d/p.m3u" % (needle, port)
+        proc = subprocess.Popen([sys.executable, HELPER, "playlist", "--cache-dir", cache],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.assertTrue(served.wait(10), "the helper never asked the server")
+            # Alive, mid-fetch, and we are the same uid with no capabilities.
+            with self.assertRaises(PermissionError):
+                open("/proc/%d/environ" % proc.pid, "rb").read()
+            with open("/proc/%d/cmdline" % proc.pid, "rb") as fh:
+                cmdline = fh.read()
+            self.assertNotIn(needle.encode(), cmdline)
+            self.assertNotIn(b"--url", cmdline)
+        finally:
+            release.set()
+            out, err = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
+        status = json.loads(out.decode().strip().splitlines()[-1])
+        self.assertTrue(status.get("ok"), status)
+        self.assertEqual(status.get("channelCount"), 1)
+        self.assertNotIn(needle.encode(), out + err)

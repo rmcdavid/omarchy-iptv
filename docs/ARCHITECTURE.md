@@ -263,7 +263,8 @@ Credentials caveat: Xtream-style URLs embed username/password. They live in
 `shell.json` (mode 0600), in `state.json` (mode 0600; the Sources history
 keeps each source's URLs, D-SINK-6) and, for the life of a fetch, in the
 helper's environment as `OMARCHY_IPTV_URL` -- readable through
-`/proc/<pid>/environ` by the plugin's own uid only. They are not on the
+`/proc/<pid>/environ` by root only, because the fetch verbs make themselves
+non-dumpable first (D-SINK-9). They are not on the
 helper's argv: they were, for a few hundred milliseconds per fetch, until
 D-SINK-8 below. The helper never logs or prints a URL (errors carry the host
 only), `channels.json` stores `sourceHost` rather than the URL, but stream
@@ -313,9 +314,22 @@ and host.
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on
 an ordinary proc mount; that was the exposure. `/proc/<pid>/environ` is
-readable by the process's own uid (and root) only -- the same boundary as
-the three 0600 files the URL already rests in, so a fetch no longer widens
-it. The alternatives the amendment weighed, a pipe and a temp file, each
+readable, in the kernel's terms, by any process that passes a ptrace-read
+check against the target: while the target is dumpable that is every
+process running as the same uid, plus root -- which is why the fetch verbs
+call `shield_environment()` (PR_SET_DUMPABLE 0) before reading the variable.
+Non-dumpable, a same-uid reader gets EACCES and only root reads it -- from
+the helper's first statement on; the interpreter's own start-up before that,
+measured at 112-181 ms per fetch over two runs by
+`scripts/dev-harness/argv-scenario.sh`,
+is the window that remains, readable by same-uid processes only -- and the
+kernel writes no core for it either, which closes a second, durable sink:
+`systemd-coredump` stores a dumpable crash's whole environment in the
+journal as `COREDUMP_ENVIRON`, readable by the journal groups. Both
+measured on this machine on 2026-10-01 (D-SINK-9). Before the shield the
+boundary was the same one as the three 0600 files the URL already rests in;
+with it, a fetch narrows the boundary rather than widening it. The
+alternatives the amendment weighed, a pipe and a temp file, each
 trade the exposure for a different one; an environment variable's own
 residual is inheritance by child processes, and that is nil here because the
 helper's `playlist` and `epg` verbs download with `urllib` and start no

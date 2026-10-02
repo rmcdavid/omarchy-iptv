@@ -133,9 +133,22 @@ requests and raise the batch.
      three spawns that carry one (the playlist fetch, the EPG fetch, the
      source probe) and read by the helper's `playlist` and `epg` verbs when
      `--url` is absent; `--url` stays for a human in their own shell.
-     `environ` is readable by the process's own uid only, the same boundary
-     as the 0600 files, and the helper's fetch verbs start no child process,
-     so nothing inherits the variable -- keep it that way. In QML, assign
+     `environ` is mode 0400, but the kernel's open check is a ptrace-read
+     check that EVERY process running as the same uid passes while the
+     target is dumpable -- "your own account" meant every program the user
+     runs -- so the fetch verbs make themselves non-dumpable first
+     (`shield_environment`, D-SINK-9): the same-uid reader then gets EACCES,
+     only root reads it, and a crash writes no core (a dumpable crash hands
+     its whole environment to systemd-coredump, durably, in the journal).
+     Measured both ways on 2026-10-01. What remains is the interpreter's own
+     start-up, exec to the helper's first statement: measured at 112-181 ms
+     over two runs of four fetches
+     by the argv scenario, readable in that window by same-uid processes
+     only, and not shortenable by anything the child does. State it as a
+     bounded, measured window, never as zero. The fetch verbs start no child process,
+     so nothing inherits the variable -- the helper forks mpv only in
+     `player start`, on a Process the service never hands this environment;
+     keep BOTH halves that way. In QML, assign
      `<proc>.environment = Model.fetchEnvironment(<url>)` immediately before
      every `running = true`, `{}` included on a run that carries no URL:
      re-assignment REPLACES the previous value, and that is what keeps a

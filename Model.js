@@ -4211,7 +4211,9 @@ function helperArgv(helperPath, args) {
 // /proc/<pid>/cmdline -- world-readable -- for as long as the fetch runs. The
 // URL travels in the helper's environment instead (fetchEnvironment below),
 // which /proc exposes only to the owner. The helper fetches with urllib and
-// spawns nothing, so moving the URL off argv closes the exposure entirely.
+// starts no child in its fetch verbs (it forks mpv only in `player start`,
+// on a Process that never receives this environment), so moving the URL
+// off argv closes the command-line exposure entirely.
 function playlistFetchArgv(helperPath, cacheDir, stateDir) {
   var args = ["playlist", "--cache-dir", str(cacheDir)]
   if (str(stateDir) !== "") args = args.concat(["--state-dir", str(stateDir)])

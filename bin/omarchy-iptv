@@ -14,7 +14,7 @@ Exit codes:
   3  reserved (not implemented; no subcommand uses it any more)
 
 Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
-  playlist [--url U] [--cache-dir D] [--timeout S]      (URL: --url, or $OMARCHY_IPTV_URL)
+  playlist [--url U] [--cache-dir D] [--state-dir S] [--timeout S]   (URL: --url, or $OMARCHY_IPTV_URL)
       fetch + parse M3U -> channels.json, playlist-status.json
   epg [--url U] [--cache-dir D] [--timeout S] [--ttl S] [--force] [--now-only] [--now T]
                                                           (URL: --url, or $OMARCHY_IPTV_URL)
@@ -51,6 +51,47 @@ import time
 import urllib.parse
 import zlib
 from typing import Any, BinaryIO
+
+
+def shield_environment() -> bool:
+    """Make this process non-dumpable, as its FIRST act (D-SINK-9).
+
+    Two sinks close at once, both measured on this machine on 2026-10-01:
+
+      /proc/<pid>/environ is mode 0400, but the kernel's open check is a
+      ptrace-read check, which ANY process running as the same uid passes
+      while the target is dumpable -- so "readable only by your account"
+      meant every program the user runs. Non-dumpable, the same reader gets
+      EACCES; only root reads it.
+
+      A crash of a dumpable process hands its whole environment to
+      systemd-coredump, which stores COREDUMP_ENVIRON in the journal --
+      durably, readable by the journal groups. The kernel does not dump a
+      non-dumpable process at all.
+
+    Called at module level, for every verb, before anything else runs: the
+    only window left is the interpreter's own start-up -- exec to the first
+    statement of this file, which includes compiling it -- and nothing a
+    child can do shortens that. It is measured by the argv scenario on the
+    dev branch rather than assumed away. Harmless to the verbs that carry
+    no URL, and the player verb's mpv is exec'd, which resets the flag.
+    Best effort: where prctl is missing the old boundary applies and nothing
+    is worse than before; the failure is reported without any URL. ctypes is
+    stdlib (rule 3).
+    """
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        ok = libc.prctl(4, 0, 0, 0, 0) == 0     # PR_SET_DUMPABLE, 0
+    except (OSError, AttributeError):
+        ok = False
+    if not ok:
+        sys.stderr.write("omarchy-iptv: could not make this process non-dumpable; "
+                         "its environment stays readable to this uid\n")
+    return ok
+
+
+SHIELDED = shield_environment()
 
 # Heavier modules (socket, calendar, hashlib, unicodedata, urllib.request,
 # xml.etree, traceback) are imported where needed so that `play`, `status`
@@ -1471,15 +1512,21 @@ def write_status_quietly(path: str, status: dict[str, Any]) -> None:
 # ------------------------------------------------------------ playlist
 
 def url_from(args: argparse.Namespace) -> str:
-    """The source URL of a fetch verb: --url when given, else $OMARCHY_IPTV_URL.
+    """The source URL of a fetch verb: a non-empty --url, else $OMARCHY_IPTV_URL.
 
     D-SINK-8. The shell passes the URL in the environment, never on the
     command line: /proc/<pid>/cmdline is world-readable for as long as the
-    fetch runs, /proc/<pid>/environ is not, and this helper fetches with
-    urllib and spawns nothing, so the variable is the whole of the exposure.
-    --url stays for a human at their own shell, whose argv is their own. The
-    value is read once, here, and reaches no sink: every message built from
-    it goes through source_host, and log() redacts whatever is left.
+    fetch runs, and /proc/<pid>/environ is refused to everyone but root from
+    this file's first statement on (shield_environment, D-SINK-9). The
+    playlist and epg verbs
+    download with urllib and start no child process -- this helper does fork
+    mpv, but only in `player start`, on a Process the service never hands
+    this variable -- so nothing inherits it. --url stays for a human at their
+    own shell, whose argv is their own; an EMPTY --url is treated as absent.
+    The value is read once, here, and the URL's host is the only part of it
+    that ever reaches a message (source_host); a LOCAL file's base name is
+    printed on purpose (D12, read_local_source) and carries no credential;
+    log() redacts whatever is left.
     """
     explicit = (getattr(args, "url", None) or "").strip()
     if explicit:

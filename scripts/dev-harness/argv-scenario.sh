@@ -1,31 +1,42 @@
 #!/bin/bash
 # scripts/dev-harness/argv-scenario.sh -- D-SINK-8: the credential-bearing
 # playlist and EPG URLs must not appear on the helper's command line, and
-# must travel in its environment instead. Observed on the real /proc, not
-# reasoned about: a marketplace reviewer read them from /proc/<pid>/cmdline
-# on the shipped v0.9.1 (omacom/omarchy-plugin-marketplace#8998).
+# must travel in its environment instead. A marketplace reviewer reported,
+# from the code, that any local user could read them from /proc/<pid>/cmdline
+# on the shipped v0.9.1 (omacom/omarchy-plugin-marketplace#8998). That was a
+# statement of capability citing line numbers; THIS script is the observation,
+# on the real /proc, in both directions. An earlier version of this header
+# said the reviewer "read them from /proc" -- a claim larger than its
+# evidence, caught by review (F-M3-8's shape, in the proof's own preamble).
 #
 #   S1  the sweep saw at least one helper `playlist` run (control: a scan
 #       that saw nothing proves nothing)
 #   S2  the sweep saw at least one helper `epg` run (control)
 #   S3  NO helper command line carried the credential      <- the fix
-#   S4  at least one helper ENVIRONMENT carried it          <- the route
+#   S4  every helper ENVIRONMENT ended REFUSED to this same-uid reader, and
+#       the fetch succeeded anyway -- so the URL arrived by the only route
+#       left, and that route is readable by root alone (D-SINK-9)
+#   S4b the window between exec and the shield -- the interpreter's own
+#       start-up, which nothing a child does can shorten -- is MEASURED,
+#       and bounded
 #   S5  at the end, no process on the machine still carries it on a
 #       command line (the one self-inflicted argv, `qs ipc addSource`, has
 #       exited)
 #   S6  the harness log carried neither the credential nor the path
 #
 # Against the shipped tree the proof is the other way round: run with
-# --baseline dbcbd0f and S3 MUST fail (hits) and S4 MUST fail (no variable).
+# --baseline dbcbd0f and S3 MUST fail (hits) and S4 MUST fail (every environ
+# readable, and none of them carrying the variable).
 #
 # HOW IT CATCHES A 200 ms PROCESS. The scenario runs its OWN http server on
 # 127.0.0.1:8766 that sleeps before answering, so each helper fetch lives
 # for seconds, and a python sweeper samples /proc every 50 ms for the whole
-# window. Helper processes are identified by argv[1] ending in
-# /bin/omarchy-iptv, which also excludes the two processes that carry the
-# URL by the scenario's own doing: run.sh never sees it (the source is
-# added over IPC after start), and the `qs ipc` client that adds it exits
-# within milliseconds -- S5 checks that it did.
+# window. Helper processes are identified by argv[1] resolving to THIS
+# harness's bin/omarchy-iptv by exact path (HELPER below; a suffix match was
+# the first draft, and it read another lane's processes), which also excludes
+# the two processes that carry the URL by the scenario's own doing: run.sh
+# never sees it (the source is added over IPC after start), and the `qs ipc`
+# client that adds it exits within milliseconds -- S5 checks that it did.
 #
 # Holds the display (starts the harness). Reaps everything it starts.
 set -uo pipefail
@@ -110,7 +121,14 @@ import os, sys, time, json
 # that carried the credential on its own command line would be the leak it
 # is looking for.
 needle = os.environ["ARGV_NEEDLE"].encode(); deadline = time.monotonic() + float(sys.argv[1]); out = open(sys.argv[2], "a")
+# Every helper is re-sampled on every tick, not recorded once: the first
+# draft recorded each pid the first time it was seen, which for a process
+# that shields itself at its first statement is ALWAYS the start-up window
+# before that statement, and reported the shield as absent. The record for
+# a pid is rewritten each tick with first-seen / first-refused times, so the
+# window between them is MEASURED and the final state is what is asserted.
 seen = {}
+t0 = time.monotonic()
 while time.monotonic() < deadline:
     for d in os.listdir("/proc"):
         if not d.isdigit(): continue
@@ -122,17 +140,27 @@ while time.monotonic() < deadline:
         except Exception: helper_here = False
         if not helper_here: continue
         key = (d, argv[2])
-        if key in seen: continue
+        now = round((time.monotonic() - t0) * 1000)
+        refused = False
         try:
             with open("/proc/%s/environ" % d, "rb") as f: env = f.read()
+        except PermissionError: env = b""; refused = True
         except OSError: env = b""
         carriers = sorted(set(e.split(b"=", 1)[0].decode("ascii", "replace") for e in env.split(b"\0") if needle in e))
+        prev = seen.get(key)
         rec = {"pid": int(d), "verb": argv[2].decode("ascii", "replace"),
-               "cmdline_has_needle": needle in b"\0".join(argv),
-               "environ_has_needle": needle in env,
-               "environ_carriers": carriers,
-               "env_var_present": b"OMARCHY_IPTV_URL=" in env}
-        seen[key] = rec; out.write(json.dumps(rec) + "\n"); out.flush()
+               "cmdline_has_needle": (prev or {}).get("cmdline_has_needle", False) or needle in b"\0".join(argv),
+               "environ_has_needle": (prev or {}).get("environ_has_needle", False) or needle in env,
+               "environ_refused": refused,
+               "environ_carriers": sorted(set((prev or {}).get("environ_carriers", []) + carriers)),
+               "env_var_present": (prev or {}).get("env_var_present", False) or b"OMARCHY_IPTV_URL=" in env,
+               "first_seen_ms": (prev or {}).get("first_seen_ms", now),
+               "first_refused_ms": (prev or {}).get("first_refused_ms") if prev and prev.get("first_refused_ms") is not None else (now if refused else None),
+               "samples": (prev or {}).get("samples", 0) + 1}
+        seen[key] = rec
+    out.seek(0); out.truncate()
+    for r in seen.values(): out.write(json.dumps(r) + "\n")
+    out.flush()
     time.sleep(0.05)
 PY
 : >"$SWEEP"
@@ -171,6 +199,15 @@ print(json.dumps({
   "cmdline_hits": sum(1 for r in recs if r["cmdline_has_needle"]),
   "environ_hits": sum(1 for r in recs if r["environ_has_needle"]),
   "intended_route": sum(1 for r in recs if "OMARCHY_IPTV_URL" in r.get("environ_carriers", [])),
+  # Refusals are counted over the FETCH runs, which is what S4 compares them
+  # to. The first draft counted every helper verb -- all of them are shielded
+  # now, at module level -- and reported "8 of 4".
+  "environ_refused": sum(1 for r in pl + ep if r.get("environ_refused")),
+  "all_helper_runs": len(recs),
+  "all_refused": sum(1 for r in recs if r.get("environ_refused")),
+  "fetch_runs": len(pl) + len(ep),
+  "readable_before_shield_ms": [ (r["first_refused_ms"] - r["first_seen_ms"]) if r.get("first_refused_ms") is not None else None for r in pl + ep ],
+  "max_window_ms": max([ (r["first_refused_ms"] - r["first_seen_ms"]) for r in pl + ep if r.get("first_refused_ms") is not None ] or [-1]),
   "carriers": sorted(set(c for r in recs for c in r.get("environ_carriers", []))),
   "env_var_runs": sum(1 for r in recs if r["env_var_present"]),
   "runs": [[r["verb"], r["cmdline_has_needle"], r["environ_has_needle"]] for r in recs]}))
@@ -181,7 +218,21 @@ echo "sweep: $summary"
 [[ $(g playlist_runs) -ge 1 ]] && pass "S1 the sweep saw a helper playlist run ($(g playlist_runs))" || fail "S1" "no playlist run observed; the scan proves nothing"
 [[ $(g epg_runs) -ge 1 ]] && pass "S2 the sweep saw a helper epg run ($(g epg_runs))" || fail "S2" "no epg run observed"
 [[ $(g cmdline_hits) -eq 0 ]] && pass "S3 no helper command line carried the credential" || fail "S3" "$(g cmdline_hits) helper command line(s) carried it -- readable by every local user"
-[[ $(g intended_route) -ge 1 ]] && pass "S4 the credential travelled as OMARCHY_IPTV_URL in the helper's environment ($(g intended_route) run(s))" || fail "S4" "OMARCHY_IPTV_URL never carried it; variables that did: $(g carriers)"
+# S4 is two facts that only mean something together: the environment of
+# every fetch was refused to us (a same-uid reader with no capabilities),
+# AND the fetch produced channels. Refusal alone could be a helper that
+# never ran; success alone could be a URL that arrived on argv (S3 rules
+# that out). Together they say the URL went by a route root alone can read.
+channels=$(sf 's["channels"]')
+if [[ $(g environ_refused) -eq $(g fetch_runs) && $(g fetch_runs) -ge 2 && $channels == 2 ]]; then
+  pass "S4 every fetch's environment ended REFUSED to this uid ($(g environ_refused)/$(g fetch_runs); every helper verb: $(g all_refused)/$(g all_helper_runs)) and the fetch still landed 2 channels"
+else
+  fail "S4" "environ refused at the end on $(g environ_refused) of $(g fetch_runs) fetch runs (readable ones carried: $(g carriers)), channels=$channels, windows ms=$(g readable_before_shield_ms)"
+fi
+# S4b: the start-up window is the interpreter's, and it is bounded. The bound
+# is set from measurement with margin, not from hope; see the record in
+# QA-RESULTS for the numbers that set it.
+[[ $(g max_window_ms) -ge 0 && $(g max_window_ms) -le 400 ]] && pass "S4b the pre-shield window was $(g max_window_ms) ms, under the 400 ms bound" || fail "S4b" "pre-shield window $(g max_window_ms) ms (windows: $(g readable_before_shield_ms))"
 # S5: nothing on the whole machine still carries it on a command line.
 left=$(ARGV_NEEDLE="$NEEDLE" python3 - <<'PY'
 import os
@@ -198,11 +249,14 @@ PY
 )
 [[ $(head -1 <<<"$left") -eq 0 ]] && pass "S5 no process on the machine carries it on a command line now" || fail "S5" "still on a command line:
 $(tail -n +2 <<<"$left")"
-log="$SCRATCH/harness.log"
+# The log is named the way run.sh names it (harness$INSTANCE.log), and a
+# --detach start always creates it, so a missing file is a wrong path and
+# a FAIL -- never "nothing to leak into", which is what the first draft said.
+log="$SCRATCH/harness${OMARCHY_IPTV_HARNESS_INSTANCE:-}.log"
 if [[ -f $log ]]; then
   if grep -qa -- "$NEEDLE" "$log" || grep -qa -- "/p.m3u" "$log"; then fail "S6" "the harness log carries the credential or the path"; else pass "S6 the harness log carries neither the credential nor the path"; fi
 else
-  pass "S6 (no harness log written; nothing to leak into)"
+  fail "S6" "no harness log at $log; the scan has nothing to read and cannot pass"
 fi
 echo "argv-scenario: $PASS passed, $FAIL failed"
 (( FAIL == 0 ))

@@ -18,13 +18,18 @@ fetch ran.
   disclosed this as a brief exposure and the project had accepted it; a
   marketplace reviewer (omacom/omarchy-plugin-marketplace#8998) asked why, and
   the answer was that it did not need to be accepted. The URL now reaches the
-  helper in its environment, as `OMARCHY_IPTV_URL`, which only your own
-  account can read -- for the playlist fetch, the guide-data fetch, and the
+  helper in its environment, as `OMARCHY_IPTV_URL`, and the helper makes
+  itself unreadable to everything but root as its first act -- not other
+  accounts, and not other programs running as you either, except for the
+  fifth of a second it takes to start -- for the playlist fetch, the
+  guide-data fetch, and the
   check the Sources screen makes before it accepts a source. There is nothing
-  to re-enter, and `--url` still works when you run the helper yourself from
-  a terminal
-  (`python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`),
-  in your own shell.
+  to re-enter. `--url` still works when you run the helper yourself from a
+  terminal, for a free list -- but a URL with your username and password in
+  it, typed at a prompt, is written to your shell history for good and sits
+  on a world-readable command line while it runs, which is the one escape the
+  README still names. For a paid provider use the in-app form; it reaches
+  neither.
 
 ## 0.9.1 (2026-09-27)
 
