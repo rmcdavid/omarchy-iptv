@@ -44,17 +44,25 @@
 # request logged by anything else cannot be mistaken for ours, plus one plain
 # control channel. 40 fills a wall page plus the cacheBuffer row on this
 # screen. Realised-delegate counts come from the harness's `realised <view>`
-# verb, which counts the delegates a named view holds RIGHT NOW without
-# re-opening the guide. The first draft read them from `openMs`, which
-# re-opens the guide and reports 1 for the hidden wall (what an empty view
-# looks like), so its control said nothing about the captions a hidden wall
-# had laid out; the baseline's distinct-name counts were the only evidence.
-# Now the control is the count itself: on the list open, resultList holds
-# its page of rows AND the hidden channelWall already holds its page of
-# captions -- which is the mechanism behind "every guide open".
+# verb, which counts the delegates a named channel view holds RIGHT NOW
+# without re-opening the guide (-1 when the guide is not loaded or the name
+# is not a channel view). The first draft read them from `openMs`, which
+# re-opens the guide (so the baseline's log carried every caption twice, 49
+# requests for 25 names) and reports 1 for the hidden wall (what an empty
+# view looks like), so its control said nothing about the captions a hidden
+# wall had laid out. Now the control is the count itself: on the list open,
+# resultList holds its page of rows AND the hidden channelWall already holds
+# its page of captions -- the mechanism behind "every guide open" -- and T2
+# asserts both. Against 2d3cee3 on this screen: resultList 16, hidden wall
+# 25, and the server logged 25 requests for 25 names, one per hidden
+# caption; after the wall (21 shown) 26 for 26.
 #
 # Holds the display (starts the harness, sends one real chord). Reaps
-# everything it starts and proves it at the end.
+# everything it starts and proves it at the end. The server's pid is read
+# from ss ONCE, when our server is confirmed up, and remembered; cleanup
+# kills that pid and never one looked up at cleanup time, so an exit before
+# our server exists (the port taken, the server failing to start) sends no
+# signal to whatever else holds the port.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
@@ -102,13 +110,17 @@ listener_pid() { ss -ltnp 2>/dev/null | awk -v p=":$PORT " '$0 ~ p {print $0}' |
 # different suffix, so the two never count as each other.
 probe_hits() { grep -c -- "/${TOKEN}-[0-9]*\.png" "$REQLOG" 2>/dev/null || true; }
 probe_paths() { grep -o -- "GET /${TOKEN}-[0-9]*\.png UA=[^ ]*" "$REQLOG" 2>/dev/null | head -5 | tr '\n' ';'; }
-# Distinct probe names fetched: a re-open recreates the delegates and
-# fetches again, so the raw count can exceed the 40 names in the playlist.
+# Distinct probe names fetched, beside the raw count: the two agree when
+# each caption fetched once (25 for 25 on 2d3cee3) and part when delegates
+# are recreated, which a re-open would do and this scenario does not.
 probe_distinct() { grep -o -- "/${TOKEN}-[0-9]*\.png" "$REQLOG" 2>/dev/null | sort -u | wc -l; }
+# Set only once OUR server is confirmed listening; empty until then, so a
+# cleanup on an earlier exit path (the port already taken, the server not
+# starting) has no pid to signal and leaves the foreign listener alone.
+SERVER_PID=""
 cleanup() {
   "$RUN" reap >/dev/null 2>&1
-  local lpid; lpid=$(listener_pid)
-  [[ -n $lpid ]] && kill "$lpid" 2>/dev/null
+  [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null
   [[ -n $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   rm -rf "$WORK"
 }
@@ -136,6 +148,12 @@ PY
 python3 "$WORK/probe_server.py" "$PORT" "$REQLOG" >/dev/null 2>&1 &
 for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
 ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "probe server did not start"; exit 2; }
+# The listener is ours only if this shell is its parent; a server that lost
+# the port to someone who bound it between the check above and the bind
+# would leave a foreign pid on the port, and that one is not remembered.
+lpid=$(listener_pid)
+[[ -n $lpid && $(ps -o ppid= -p "$lpid" 2>/dev/null | tr -d ' ') == "$$" ]] || { echo "port $PORT is held by pid ${lpid:-?}, not a child of this run; leaving it alone"; exit 2; }
+SERVER_PID=$lpid
 
 # ---- the playlist: 40 probe names plus one plain control
 {
@@ -219,7 +237,7 @@ fi
 
 # ---- teardown, proven: the shell is gone and the port is free
 "$RUN" reap >/dev/null 2>&1
-lpid=$(listener_pid); [[ -n $lpid ]] && kill "$lpid" 2>/dev/null
+kill "$SERVER_PID" 2>/dev/null
 for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " || break; sleep 0.1; done
 qs_left=$([[ -f "$SCRATCH/qs${OMARCHY_IPTV_HARNESS_INSTANCE:-}.pid" ]] && echo "pidfile present" || echo "no pidfile")
 port_left=$(ss -ltn 2>/dev/null | grep -q ":$PORT " && echo "port $PORT STILL LISTENING" || echo "port $PORT free")

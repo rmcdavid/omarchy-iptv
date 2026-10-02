@@ -349,19 +349,28 @@ probe names carrying a per-run token in each path plus one plain control,
 starts the harness with the guide closed, opens it in list view, switches
 to the wall through a real `Ctrl+G` (`wtype -M ctrl g -m ctrl`) and reads
 the server's log at each step. T1 and T2 are controls (the count loaded,
-the cursor name still carries the tag); T3 and T4 are the zeros; T5 proves
-the server logs by making a request of its own; T6 reads the harness log.
-Realised-delegate counts come from `ipc realised <view>`, which counts
-the delegates a named view holds right now without re-opening the guide:
-on the list open the hidden `channelWall` already holds a page of
-captions, which is the control T2 asserts.
+the delegates each view holds, the cursor name still carrying the tag); T3
+and T4 are the zeros; T5 proves the server logs by making a request of its
+own; T6 reads the harness log.
 
-Against 2d3cee3 on this screen: 4 passed, 2 failed -- 49 requests for 25
-distinct names after the LIST open alone (`channelWall` has
-`visible: root.wallView` with a live model, so its first page of captions is
-laid out on every open), 70 for 26 after the wall, `User-Agent:
-Mozilla/5.0`, nothing before the first open. The same tree with
-`textFormat: Text.PlainText` on the caption: 6 passed, 0 failed.
+The control behind T2 is `ipc realised <view>`, which counts the delegates
+a named channel view holds right now without re-opening the guide (-1 for
+a name that is not a channel view). `channelWall` has `visible:
+root.wallView` with a live model, so its first page of captions is laid
+out on every open, wall showing or not; T2 asserts that on the LIST open
+`resultList` holds its rows AND the hidden `channelWall` already holds
+its captions, and T3's zero is measured against that count. The first
+draft read the counts from `openMs`, which re-opens the guide (doubling
+every request in the baseline's log) and reports 1 for a hidden wall, the
+number its own comment calls what an empty view looks like.
+
+Against 2d3cee3 on this screen: 4 passed, 2 failed -- after the LIST open
+`resultList` held 16 delegates and the hidden `channelWall` 25, and the
+server had logged 25 requests for 25 distinct names, one per hidden
+caption; after the real `Ctrl+G` `channelWall` showed 21 and the log held
+26 for 26; `User-Agent: Mozilla/5.0`; 0 requests before the first open.
+The same tree with `textFormat: Text.PlainText` on the caption: 0 and 0,
+6 passed, 0 failed.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

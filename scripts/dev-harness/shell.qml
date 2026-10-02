@@ -617,10 +617,15 @@ ShellRoot {
     // reports 1 for a hidden channelWall (what an empty view looks like), so
     // a control built on it says nothing about the captions a hidden wall
     // laid out; this counts the view as it stands. -1 when the guide is not
-    // loaded or the name is not a view.
+    // loaded or the name is not one of harness.channelViews: a view that
+    // holds no channel delegates (trackList, say) would otherwise read as 0,
+    // which is a count, and a scenario comparing it with `-gt 1` would take
+    // it for a measured empty view rather than a name it should not have
+    // asked about.
     function realised(name: string): string {
       var g = guideLoader.item
       if (!g) return "-1"
+      if (harness.channelViews.indexOf(name) < 0) return "-1"
       return String(harness.realisedCount(g, name))
     }
     function close(): string { fakeShell.hide(harness.pluginId); return "ok" }
