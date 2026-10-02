@@ -12,6 +12,15 @@ to cover it could only see a format somebody wrote, never a line nobody
 wrote (F-TEXT-2). So the cases that matter most are the MISSING line (a) and
 the shipping file with the fix removed (h): the guard must name exactly the
 element the marketplace reviewer found.
+
+The review of that round added three holes a guard may not have: a Controls
+`Label` (a Text subclass, same AutoText default) passed untouched (f5); a
+qualified `import QtQuick as QQ` let `QQ.Text {` evade silently (f6); and a
+regex literal holding a quote masked the rest of its line (f7). The nesting
+case (f2, f2b) now drives both directions and a non-Text child: the one
+direction it used to drive went red under the depth mutation only through a
+duplicate-line artifact, while the two added fixtures pass a depth-blind
+scanner outright (exit 0), measured 2026-10-02.
 """
 
 import os
@@ -185,8 +194,16 @@ class GuardCase(unittest.TestCase):
         self.assertIn('%s:5:' % path2, out)
         self.assertNotIn('%s:4:' % path2, out)
 
-    # (f2) a nested Text is its own block: the child's line does not satisfy
-    # the parent, and the parent's does not satisfy the child.
+    # (f2) a nested Text is its own block, in both directions: the parent's
+    # line does not satisfy the child (N.qml), and the child's line does not
+    # satisfy the parent (N2.qml). Each half names only the block that is
+    # missing its line. Measured 2026-10-02 under the depth mutation (the
+    # `{` branch does not increment depth): N2.qml and N3.qml (f2b) pass it
+    # outright, exit 0, because the parent's segment runs on into the child
+    # and picks up the child's line -- the silent miss these fixtures exist
+    # to catch. N.qml goes red under it too, but only because the mutated
+    # scan reports the parent's one line twice, an artifact of overlapping
+    # segments rather than the finding.
     def test_f2_nested_text_blocks_are_checked_separately(self):
         body = (HEAD +
                 '  Text {\n'
@@ -199,7 +216,41 @@ class GuardCase(unittest.TestCase):
         status, out = run([path])
         self.assertEqual(status, 1, out)
         self.assertIn('%s:6:' % path, out)
+        self.assertNotIn('%s:4:' % path, out)
         self.assertIn('1 problem(s) in 2 Text block(s)', out)
+        body2 = (HEAD +
+                 '  Text {\n'
+                 '    text: outer\n'
+                 '    Text {\n'
+                 '      textFormat: Text.PlainText\n'
+                 '      text: inner\n'
+                 '    }\n'
+                 '  }\n' + TAIL)
+        path2 = self.write('N2.qml', body2)
+        status, out = run([path2])
+        self.assertEqual(status, 1, out)
+        self.assertIn('%s:4: Text block declares no textFormat' % path2, out)
+        self.assertNotIn('%s:6:' % path2, out)
+        self.assertIn('1 problem(s) in 2 Text block(s)', out)
+
+    # (f2b) a nested child that is NOT a Text (an Item carrying a textFormat
+    # line of its own, meaningless to Qt but syntactically a property) does
+    # not satisfy its Text parent: the line must sit at the parent's own
+    # depth. Only one Text block exists here, so a depth-blind scanner
+    # passes it on the child's line.
+    def test_f2b_non_text_child_line_does_not_satisfy_the_parent(self):
+        body = (HEAD +
+                '  Text {\n'
+                '    text: outer\n'
+                '    Item {\n'
+                '      textFormat: Text.PlainText\n'
+                '    }\n'
+                '  }\n' + TAIL)
+        path = self.write('N3.qml', body)
+        status, out = run([path])
+        self.assertEqual(status, 1, out)
+        self.assertIn('%s:4: Text block declares no textFormat' % path, out)
+        self.assertIn('1 problem(s) in 1 Text block(s)', out)
 
     # (f3) `Text` is an identifier, not a suffix: a BodyText { or a
     # Foo.Text { is some other type and is not a Text block.
@@ -212,6 +263,70 @@ class GuardCase(unittest.TestCase):
         status, out = run([path])
         self.assertEqual(status, 0, out)
         self.assertIn('1 Text block(s)', out)
+
+    # (f5) a QtQuick Controls Label is a Text subclass with the same AutoText
+    # default, so it is held to the same rule and counted as a Text block.
+    # Before the guard matched it, a BarWidget.qml copy with
+    # `Label { text: root.nowPlayingName }` appended passed the gate.
+    def test_f5_label_is_held_to_the_same_rule(self):
+        body = (HEAD + '  Label {\n    text: root.nowPlayingName\n  }\n'
+                + TAIL)
+        path = self.write('L.qml', body)
+        status, out = run([path])
+        self.assertEqual(status, 1, out)
+        self.assertIn('%s:4: Text block declares no textFormat' % path, out)
+        body2 = (HEAD + '  Label {\n    textFormat: Text.PlainText\n'
+                 '    text: root.nowPlayingName\n  }\n' + TAIL)
+        path2 = self.write('L2.qml', body2)
+        status, out = run([path2])
+        self.assertEqual(status, 0, out)
+        self.assertIn('1 Text block(s) in 1 file(s)', out)
+
+    # (f6) a qualified QtQuick import is refused even when every Text in the
+    # file declares PlainText, because `QQ.Text {` is skipped as some other
+    # type and would evade the scan silently. Both the bare module and a
+    # dotted, versioned one. A JavaScript `import "x.js" as X` is not a
+    # QtQuick import and is not refused: every shipped file has one.
+    def test_f6_qualified_qtquick_import_is_refused(self):
+        declared = '  Text {\n    textFormat: Text.PlainText\n  }\n'
+        for imp in ('import QtQuick as QQ',
+                    'import QtQuick.Controls 2.15 as QQC'):
+            body = 'import QtQuick\n%s\n\nItem {\n' % imp + declared + TAIL
+            path = self.write('Q.qml', body)
+            status, out = run([path])
+            self.assertEqual(status, 1, (imp, out))
+            self.assertIn('%s:2: qualified import "%s"'
+                          % (path, imp[len('import '):].replace(' 2.15', '')),
+                          out)
+            self.assertIn('1 problem(s) in 1 Text block(s)', out)
+        body = ('import QtQuick\nimport "Model.js" as Model\n\nItem {\n'
+                + declared + TAIL)
+        path = self.write('Q2.qml', body)
+        status, out = run([path])
+        self.assertEqual(status, 0, out)
+
+    # (f7) a regex literal holding a quote (`/"/`) is masked like a string,
+    # so its quote does not swallow the rest of its line and a Text opener
+    # later on that line is still seen; and a division slash is NOT a
+    # regex, so a Text after `width / 2;` on the same line is seen too. A
+    # scanner that treats no slash as a literal misses the first; one that
+    # treats every slash as a literal misses the second.
+    def test_f7_regex_literal_masks_and_division_does_not(self):
+        body = (HEAD +
+                '  property var re: /"/; Text { text: x }\n' + TAIL)
+        path = self.write('R.qml', body)
+        status, out = run([path])
+        self.assertEqual(status, 1, out)
+        self.assertIn('%s:4: Text block declares no textFormat' % path, out)
+        body2 = (HEAD +
+                 '  Item { width: parent.width / 2; Text { text: y } }\n'
+                 '  property var cls: /[/"]/; Text { text: z }\n' + TAIL)
+        path2 = self.write('R2.qml', body2)
+        status, out = run([path2])
+        self.assertEqual(status, 1, out)
+        self.assertIn('%s:4: Text block declares no textFormat' % path2, out)
+        self.assertIn('%s:5: Text block declares no textFormat' % path2, out)
+        self.assertIn('2 problem(s) in 2 Text block(s)', out)
 
     # (f4) a file with no Text block at all proves nothing, and says so.
     def test_f4_no_text_block_at_all_is_a_failure(self):

@@ -12,9 +12,12 @@ Measured, not reasoned: `Text.StyledText` and `Text.RichText` fetch too, and
 neither escaping nor URL redaction closes it. `Text.PlainText` is the only
 stop.
 
-Forty-two Text elements in the same file already declared PlainText and six
-did not: five that render the plugin's own glyphs, and the caption, the one
-bound to a provider string. It was found by a marketplace reviewer, because
+Across the three shipped QML files, forty-two Text elements already declared
+PlainText (forty in Guide.qml, two in BarWidget.qml), one declared
+StyledText (the footer hint line), and six in Guide.qml declared nothing:
+five that render the plugin's own glyphs, and the caption, the one bound to
+a provider string. That is the 49 blocks the first run of this check
+counted. It was found by a marketplace reviewer, because
 the acceptance row that was supposed to cover this (SRC-SEC-13) was graded
 by a grep for `StyledText|RichText` -- a grep that can see a format somebody
 wrote and cannot see a line nobody wrote (F-TEXT-2, CLAUDE.md rule 14). This
@@ -23,8 +26,9 @@ every shipped QML file and refuses a missing line, not only a wrong one. The
 glyph elements say PlainText now too, because a rule with "unless it looks
 harmless" in it is a rule the next caption is written under.
 
-THE RULE. Inside every `Text {` block, at the block's own depth (a nested
-child is its own block), there must be exactly one `textFormat:` line, and:
+THE RULE. Inside every `Text {` or `Label {` block, at the block's own depth
+(a nested child is its own block), there must be exactly one `textFormat:`
+line, and:
   * `Text.PlainText` passes;
   * `Text.StyledText` passes ONLY when the line directly above it is a
     comment of the form `// MARKUP-EXCEPTION: <reason>` -- the one shipped
@@ -34,6 +38,22 @@ child is its own block), there must be exactly one `textFormat:` line, and:
   * `Text.AutoText`, `Text.RichText`, `Text.MarkdownText`, a bound
     expression, a StyledText without the exception comment, and a missing
     line all fail, each reported as file:line with the reason.
+A QtQuick Controls `Label` is a `Text` subclass and inherits the AutoText
+default, so a `Label {` block is held to the same rule and is counted as a
+Text block in the report ("N Text block(s)" includes the Labels; the gate
+parses that wording). Before this, a Label passed the gate untouched:
+measured on a BarWidget.qml copy with `Label { text: root.nowPlayingName }`
+appended, exit 0.
+
+A QUALIFIED QTQUICK IMPORT IS REFUSED. `import QtQuick as QQ` (or
+`import QtQuick.Controls 2.15 as QQC`) lets the file write `QQ.Text {`,
+which this scan skips as some other type -- silently, which is the one
+failure mode a guard may not have. So any `import QtQuick...  as <Alias>` in
+a scanned file is reported as a problem with the import's line: the scan
+reads unqualified `Text` and `Label` only, and the file must import them
+unqualified. No shipped file uses a qualified QtQuick import today.
+`import "Model.js" as Model` is a JavaScript import, not a QtQuick one, and
+is not refused.
 
 WHAT IT SCANS. With no arguments, the `.qml` entries of ALLOWLIST in
 scripts/release.py -- what main ships -- so a new shipped QML file is covered
@@ -44,11 +64,24 @@ explicit list of QML files, and `--root DIR` points the ALLOWLIST derivation
 at another tree.
 
 HOW IT READS QML. The scan is brace-aware and masks `//` and `/* */`
-comments and the insides of string literals (double-quoted, single-quoted
-and template) before it counts a brace or matches `Text {`, so a `Text {`
-quoted in a comment is not a block and a `{` inside a bound string does not
-unbalance the one that is. `Text` must stand alone as an identifier: a
-`BodyText {` or `Foo.Text {` is some other type and is not inspected.
+comments, the insides of string literals (double-quoted, single-quoted and
+template) and the insides of regular-expression literals before it counts a
+brace or matches `Text {`, so a `Text {` quoted in a comment is not a block
+and a `{` inside a bound string does not unbalance the one that is. `Text`
+must stand alone as an identifier: a `BodyText {` or `Foo.Text {` is some
+other type and is not inspected (and the qualified-import refusal above is
+what keeps `Foo.Text` from being a hiding place).
+
+A regex literal is recognised the way a JavaScript tokenizer does it, by
+what precedes the slash: a `/` that is the first code on its line, or whose
+previous non-blank code character is one of `: = ( , [ { ; ! ? & |`, opens a
+literal; a `/` after anything else (an identifier, a number, `)` or `]`) is
+division. The literal runs to the next unescaped `/` outside a `[...]`
+class, or to the end of the line. Without this, `property var re: /"/` left
+the quote open and masked the rest of its line, so a `Text {` on that line
+was unseen. KNOWN LIMITATION: a slash after `)` is always read as division,
+so a literal in a position such as `if (x) /"/.test(y)` is not recognised
+and its quote masks the rest of that line; no shipped file writes one.
 
 Python 3 standard library only. ASCII only.
 """
@@ -59,7 +92,20 @@ import re
 import sys
 
 EXCEPTION_RE = re.compile(r'^//\s*MARKUP-EXCEPTION:\s*\S')
-TEXT_OPEN_RE = re.compile(r'(?<![A-Za-z0-9_.])Text\s*\{')
+# Text and its Controls subclass Label; both default to AutoText.
+TEXT_OPEN_RE = re.compile(r'(?<![A-Za-z0-9_.])(?:Text|Label)\s*\{')
+# `import QtQuick as QQ`, `import QtQuick.Controls 2.15 as QQC`: a QtQuick
+# module (bare or dotted) with an optional version and an `as` alias. Matched
+# against the masked source, where a JavaScript import's quoted path has
+# been blanked and cannot read as QtQuick.
+QUALIFIED_IMPORT_RE = re.compile(
+    r'^[ \t]*import[ \t]+(QtQuick(?:\.[A-Za-z0-9_]+)*)'
+    r'(?:[ \t]+[0-9][0-9.]*)?[ \t]+as[ \t]+([A-Za-z_][A-Za-z0-9_]*)',
+    re.MULTILINE)
+# What may precede a `/` that opens a regex literal: a position where
+# JavaScript cannot be dividing. Anything else (identifier, number, `)`,
+# `]`) makes the slash a division operator.
+REGEX_PRECEDERS = set(':=(,[{;!?&|')
 TEXT_FORMAT_RE = re.compile(r'(?<![A-Za-z0-9_.])textFormat\s*:\s*([^\n]*)')
 PLAIN = 'Text.PlainText'
 STYLED = 'Text.StyledText'
@@ -86,18 +132,38 @@ def allowlisted_qml(root):
     raise ValueError('%s has no ALLOWLIST assignment' % path)
 
 
-def mask(source):
-    """Return source with comment bodies and string-literal bodies replaced
-    by spaces, newlines kept, so offsets and line numbers still line up.
+def regex_opens_at(out):
+    """Whether a `/` appended now would open a regex literal, judged by the
+    last non-blank code character already masked on the current line: none
+    (line start) or one of REGEX_PRECEDERS means a literal, anything else
+    means division."""
+    j = len(out) - 1
+    while j >= 0:
+        token = out[j]  # one source character, masked to 1 or 2 chars
+        if '\n' in token:
+            return True
+        code = token.strip()
+        if code:
+            return code[-1] in REGEX_PRECEDERS
+        j -= 1
+    return True
 
-    The delimiters themselves survive (a quote stays a quote) so a masked
-    string is still visibly a string; only what is INSIDE them is blanked.
+
+def mask(source):
+    """Return source with comment bodies, string-literal bodies and
+    regex-literal bodies replaced by spaces, newlines kept, so offsets and
+    line numbers still line up.
+
+    The delimiters themselves survive (a quote stays a quote, a slash a
+    slash) so a masked literal is still visibly a literal; only what is
+    INSIDE them is blanked.
     """
     out = []
     i = 0
     n = len(source)
     state = 'code'
     quote = ''
+    in_class = False
     while i < n:
         c = source[i]
         nxt = source[i + 1] if i + 1 < n else ''
@@ -111,6 +177,12 @@ def mask(source):
                 state = 'block'
                 out.append('  ')
                 i += 2
+                continue
+            if c == '/' and regex_opens_at(out):
+                state = 'regex'
+                in_class = False
+                out.append(c)
+                i += 1
                 continue
             if c in ('"', "'", '`'):
                 state = 'string'
@@ -138,6 +210,30 @@ def mask(source):
             out.append('\n' if c == '\n' else ' ')
             i += 1
             continue
+        if state == 'regex':
+            if c == '\\' and nxt not in ('', '\n'):
+                out.append('  ')
+                i += 2
+                continue
+            if c == '\n':
+                # A regex literal cannot span lines; an unterminated one
+                # ends with its line rather than swallowing the file.
+                state = 'code'
+                out.append(c)
+                i += 1
+                continue
+            if c == '[':
+                in_class = True
+            elif c == ']':
+                in_class = False
+            elif c == '/' and not in_class:
+                state = 'code'
+                out.append(c)
+                i += 1
+                continue
+            out.append(' ')
+            i += 1
+            continue
         # string
         if c == '\\' and nxt != '':
             out.append('  ' if nxt != '\n' else ' \n')
@@ -161,10 +257,17 @@ def line_of(text, offset):
     return text.count('\n', 0, offset) + 1
 
 
+def qualified_imports(masked):
+    """Every qualified QtQuick import in the masked source as
+    (line, module, alias)."""
+    return [(line_of(masked, m.start()), m.group(1), m.group(2))
+            for m in QUALIFIED_IMPORT_RE.finditer(masked)]
+
+
 def text_blocks(masked):
-    """Every `Text {` block in the masked source as (open_line, segments),
-    where segments are (start, end) offsets of the block's own-depth code,
-    excluding nested child blocks."""
+    """Every `Text {` or `Label {` block in the masked source as
+    (open_line, segments), where segments are (start, end) offsets of the
+    block's own-depth code, excluding nested child blocks."""
     blocks = []
     for m in TEXT_OPEN_RE.finditer(masked):
         start = m.end()
@@ -202,6 +305,12 @@ def check_file(path):
     masked = mask(source)
     lines = source.split('\n')
     problems = []
+    for line, module, alias in qualified_imports(masked):
+        problems.append((line,
+                         'qualified import "%s as %s" would let a "%s.Text {" '
+                         'or "%s.Label {" evade this guard, which scans '
+                         'unqualified Text and Label only; import it '
+                         'unqualified' % (module, alias, alias, alias)))
     blocks = text_blocks(masked)
     for open_line, segments in blocks:
         found = []
