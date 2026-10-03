@@ -104,9 +104,12 @@ Four repairs to one pipeline, in this order, each independently gradeable:
    (`Name.us@SD` and `Name.us` are the same channel). +153 channels of
    possible id coverage, measured.
 2. **Fall back to a normalised channel name** when no id matches, and only
-   when the normalised name is unique on both sides. 0 -> 232 on the data we
-   have. Precision is the acceptance criterion, not recall: a wrong
-   programme on a channel is worse than a blank row.
+   when the normalised name is unique on both sides. 0 -> 227 measured on the
+   frozen inputs (the proposal said 232 from a research probe that normalises
+   slightly differently from the shipping key; the ceiling on these inputs is
+   229). Precision is the acceptance criterion, not recall: a wrong programme
+   on a channel is worse than a blank row, and the precision half of this
+   criterion has NOT been run -- see the 2026-10-03 review.
 3. **Read the guide URL the playlist declares** (`#EXTM3U url-tvg`) and
    default a source's empty guide URL to it, saying in Sources where it came
    from. `channels.json` already carries `epgUrlHint`, so this is nearly

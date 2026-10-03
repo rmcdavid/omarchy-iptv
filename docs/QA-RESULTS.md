@@ -9972,9 +9972,9 @@ both times: `OMARCHY_IPTV_URL=<frozen guide> bin/omarchy-iptv epg
 |---|---|---|
 | `matched` | **0** | **227** |
 | by id / by feed base / by name | 0 / 0 / 0 | 0 / 0 / **227** |
-| `epg-now.json` | 126 bytes, 0 channels | 76 KiB, 227 channels, each with a description |
-| `epg-window.txt` | 381 bytes | 507 KiB |
-| wall | n/a | 676 ms |
+| `epg-now.json` | 126 bytes, 0 channels | 126 KiB, 227 channels, each with a description |
+| `epg-window.txt` | 381 bytes | 869 KiB |
+| wall | n/a | 676 ms end to end, of which 481 ms is the helper's own work |
 | names indexed / dropped ours / dropped guide's | n/a | 1,443 / 10 / 4 |
 
 Nothing matched by id or by feed base, which is the finding restated: this
@@ -9985,7 +9985,10 @@ guessing between them.
 ### The gap the fixtures could not see (rule 10, found by running it)
 
 The first integrated run returned **126**, not the 232 the D-EPG-2 research
-predicted. The cause: the matcher joined on `normalize_text`, the SEARCH
+predicted. (That 232 was the research's own probe, which normalises slightly
+differently from the shipping key; the reachable ceiling on these inputs is
+229, so 232 was never attainable and the plan's acceptance has been amended
+to say so.) The cause: the matcher joined on `normalize_text`, the SEARCH
 key, which keeps the distribution markers iptv-org writes into names.
 `48 Hours (1080p)` and `48 Hours` are the same stream; `(1080p)` says how it
 is encoded and `[Geo-blocked]` says where it works, and neither is part of
@@ -9993,15 +9996,16 @@ the channel's identity. **1,155 of the 1,453 names carry one.**
 
 | name matching on the real guide | channels |
 |---|---|
-| on `normalize_text`, as the lane built it | 125 |
-| with the markers taken out first | 224 |
+| on `normalize_text`, as the lane built it | 126 |
+| with the markers taken out first | 227 |
 
 So the matcher got its own key, `epg_name_key`, and `normalize_text` was
 deliberately left alone: a user typing "1080" is searching for exactly those
 markers and the four ranking tiers are calibrated on that key. Two keys, two
 jobs. The price is ambiguity -- playlist collisions go from 2 names to 10 --
-and it is paid by the uniqueness rule, which drops them rather than guessing.
-The end-to-end run then read 227.
+and it is paid by the uniqueness rule, which drops **ten of our channels and
+four of the guide's declarations** rather than guessing between them. The
+end-to-end run then read 227.
 
 The fixtures could not catch this because synthetic channel names never say
 `(1080p)`: a test double more forgiving than the real thing, which is the
@@ -10134,3 +10138,51 @@ it on itself: its first commit was red for a literal e-acute in a brand-new
 test file, which the gate could not see until the file was staged. The step
 prints a file count that reads as coverage while excluding exactly the
 population a lane is adding.
+
+## Review of the M4 round, 2026-10-03: 37 findings, none refuted, two blockers (F-M4-1)
+
+Four lenses over the milestone (the matcher, the claims, the sinks and
+interaction, the tests and budgets), thirteen agents, every finding handed to
+an adversarial verifier. **37 kept, 0 refuted.** Both blockers were in the
+lead's own integration, and the pattern holds for the eleventh round running:
+twenty-three of the thirty-seven were sentences.
+
+**Blocker 1, a credential in the panel.** `clean_detail` cuts the text to the
+cap and THEN redacts, so a long description carrying
+`http://user:pw@host/path` could lose the `://` to the cut and keep the
+username, which then reaches the guide and the accessibility bus. Rule 5,
+broken a fifth time, in the release that was about rendering provider text.
+
+**Blocker 2, the headline repair can be reverted whole and the gate stays
+green.** `NameNoiseTest` calls `epg_name_key` directly, so deleting the
+FUNCTION is caught; reverting its two call sites to `normalize_text` is not,
+because no fixture pair needs the marker strip in order to match. The test
+that proves the milestone's own measurement was missing the one case the
+measurement was about.
+
+**The matcher's uniqueness rule is order-dependent.** Guide-side collisions
+are blanked when the second declaration arrives, but a claim the first one
+already won is not revoked, so a guide emitting channel-then-programmes
+blocks instead of DTD order lands an arbitrary schedule on the row while
+`nameDroppedGuide` reports it dropped. Reproduced through the shipping verb
+with the two orderings of the same content. On the frozen real data two of
+the 227 rows sit on double-declared names, so the exposure here is 2 rows if
+that feed ever re-orders.
+
+**Numbers the lead got wrong, found by re-reading the frozen artifacts.** The
+acceptance table's two cache sizes were the DISCARDED 126-match run's: the
+real after-run wrote 126 KiB and 869 KiB, not 76 KiB and 507 KiB. The
+verifier pinned the clock, rebuilt the helper at the integration commit and
+reproduced `epg-now.json` byte for byte, then reproduced the wrong pair by
+reverting `epg_name_key` -- so the attribution is exact rather than inferred.
+The before/after name table said 125 and 224 where the shipping verb produces
+126 and 227. "Playlist collisions go from 2 names to 10" counts channels; the
+names go 1 to 5. The 232 the proposal promised was a research probe's number
+and was never reachable: the ceiling on these inputs is 229.
+
+**And the acceptance criterion half nobody ran.** PLAN-M4 says precision is
+the criterion, not recall. The count moved and the precision check was never
+performed on the 227 pairs. Recorded as unmet rather than quietly dropped.
+
+Repairs are in flight in two lanes; the board rows, the corrected numbers and
+the amended plan are in this commit.
