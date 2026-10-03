@@ -4502,7 +4502,11 @@ check("parsePlayerProbe: a live player, from the shared vector",
   probeFixture.parsed)
 // M5-01: the reattach read. The key is pinned on both sides like `pid`, and a
 // probe without it (an older helper) parses to null rather than to zero.
-check("parsePlayerProbe: `rewind` is read through parseRewind, and absent reads null", [
+// checkCall, not check: a parser that answered null here would throw on
+// `.behindLive` inside a check() argument and abort the whole run with no
+// count line (seen: mutation J12 printed NO COUNT), which is the failure
+// mode checkCall exists to turn into one red line.
+checkCall("parsePlayerProbe: `rewind` is read through parseRewind, and absent reads null", () => [
   probeFixture.keys.indexOf("rewind") >= 0,
   Model.parsePlayerProbe(probeBody).rewind.behindLive,
   (() => { const bare = Object.assign({}, probeFixture.reply); delete bare.rewind; return Model.parsePlayerProbe(JSON.stringify(bare)).rewind })(),

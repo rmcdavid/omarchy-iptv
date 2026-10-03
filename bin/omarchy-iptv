@@ -5439,10 +5439,13 @@ def player_seek(args: argparse.Namespace) -> int:
                 payload["refused"] = False
                 payload["applied"] = round3(after - before)
         payload["rewind"] = rewind_view(after, cache, zero, paused, paused_for_cache, entry_id, _boot_clock())
-        if not payload["refused"]:
-            text = rewind_osd_text(payload)
-            if text:
-                client.try_command("show-text", text, OSD_TEXT_MS)
+        # The composer decides what is said and when (a refused seek and a
+        # missing zero point both compose to ""), so there is ONE guard, the
+        # one the shared fixture pins. A second `if not refused` here was an
+        # equivalent mutant: nothing could tell it from its absence.
+        text = rewind_osd_text(payload)
+        if text:
+            client.try_command("show-text", text, OSD_TEXT_MS)
         emit(payload)
         return EXIT_OK
     except HelperError as error:
