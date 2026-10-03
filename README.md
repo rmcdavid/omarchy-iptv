@@ -5,7 +5,8 @@ theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
 Status: v0.10.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
-tuning, picture in picture, pausing live TV, a guide that remembers which
+tuning, picture in picture, pausing live TV and winding it back a few
+minutes, a guide that remembers which
 channels did not work, a channel wall that shows your channels as a grid of
 tiles -- their logos if you have turned those on, their names either way --
 hiding the groups you never want to see, and an audio and subtitle picker
@@ -60,7 +61,7 @@ Then add the keybinding and, optionally, the menu entry and window rules
 from `contrib/` (the Omarchy installer never runs plugin code, so these are
 one-line copies you make yourself):
 
-- `contrib/bindings.lua` -> `~/.config/hypr/bindings.lua` (`SUPER + SHIFT + T` opens the guide)
+- `contrib/bindings.lua` -> `~/.config/hypr/bindings.lua` (`SUPER + SHIFT + T` opens the guide; commented examples bind rewind, forward and back-to-live on `SUPER + SHIFT + H` / `L` / `R`, and pause, picture in picture and channel up/down on chords that are free on a stock Omarchy)
 - `contrib/omarchy-menu.jsonc` -> `~/.config/omarchy/extensions/omarchy-menu.jsonc` (an `IPTV` row in the Omarchy menu)
 - `contrib/windows.lua` -> `~/.config/hypr/looknfeel.lua` (keep the player opaque, optionally float it)
 
@@ -107,7 +108,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist |
 | `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional. If your playlist names its own guide and you leave this empty, that one is used and the Sources screen says so. Channels are matched by id and, when the ids do not agree, by name -- which is usually what happens, because playlists and guides rarely come from the same place |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
@@ -157,7 +158,10 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | list | s | stop playback |
 | list | `0`-`9` | type a channel number to jump to it. It selects the channel; press Enter to play |
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
-| list | c | pause or resume the live stream. Not rewind: live streams cannot be wound back, so there is no returning to something that already happened, and the pause lasts about five minutes before the buffer fills. Bind a key to `omarchy-shell io.github.rmcdavid.iptv pause` to reach it while the guide is closed |
+| list | c | pause or resume the live stream. The pause lasts until mpv's forward buffer fills, about four and a half minutes on the 4.7 Mbps channel it was measured on, less on a higher bitrate; a long pause also spends the rewind window, see `b`. Bind a key to `omarchy-shell io.github.rmcdavid.iptv pause` to reach it while the guide is closed |
+| list | b | go back ten seconds in what already played. Live TV here is rewindable inside the buffer mpv keeps anyway: how far depends on the channel's bitrate and is shown, never promised -- the bar tooltip says `up to 6:52 back` from the last reading, and when you hit the floor the footer says so instead of silently doing nothing. Offered only while something plays and the player has history to go back into |
+| list | w | forward ten seconds, towards live. Offered only while you are behind live |
+| list | g | back to live. After a deep rewind this lands at the edge of what was buffered and says how far behind that still is; it never reloads the channel on its own, because that would throw the whole window away. Enter on the row is the reload |
 | list | t | while something plays: choose the audio track and the subtitles. A small panel lists what the stream carries; `j`/`k` move, `Enter` selects, `Esc` closes. List mode only -- in search mode `t` is just a letter you are typing |
 | list | i | read what is on: a panel over the list with the programme's name, the channel it is on, when it runs, its category and episode where the guide gives them, the description, and what is on next. `j`/`k` scroll it, `Esc` closes. Needs guide data for that channel |
 | both | ? | every key, in one overlay, built from the same table the hint row is built from -- so a key the plugin learns cannot be missing from the list. `Esc` closes. In search mode it opens on the empty query, where a first-time reader is most likely to press it |
@@ -193,21 +197,52 @@ omarchy-shell io.github.rmcdavid.iptv next                # zap forward
 omarchy-shell io.github.rmcdavid.iptv previous            # zap back
 omarchy-shell io.github.rmcdavid.iptv channel 101         # tune straight to channel 101
 omarchy-shell io.github.rmcdavid.iptv pip toggle          # picture in picture on / off
+omarchy-shell io.github.rmcdavid.iptv pause               # pause / resume live TV
+omarchy-shell io.github.rmcdavid.iptv back 30             # rewind 30 s (default 10); JSON reply
+omarchy-shell io.github.rmcdavid.iptv forward 30          # forward 30 s (default 10); JSON reply
+omarchy-shell io.github.rmcdavid.iptv live                # back to live; JSON reply
 omarchy-shell io.github.rmcdavid.iptv stop
 omarchy-shell io.github.rmcdavid.iptv refresh
 omarchy-shell io.github.rmcdavid.iptv status              # JSON
 ```
 
-## Picture in picture
+## Pause and rewind
 
 Press `c` in the guide's list mode to pause live TV, and `c` again to carry
 on from where you stopped -- you are then watching a little behind live. The
-bar shows a paused glyph and says so in its tooltip. This is not rewind: live
-streams cannot be wound back, so there is no returning to something that has
-already happened, and the pause lasts roughly five minutes before mpv's buffer
-fills. Because you usually want this while watching rather than while
-browsing, it is also on the plugin's IPC as `pause`; `contrib/bindings.lua`
-carries a global keybinding example.
+bar shows a paused glyph and says so in its tooltip. The pause lasts until
+mpv's forward buffer fills: about four and a half minutes on the 4.7 Mbps
+channel it was measured on, less on a higher bitrate.
+
+Press `b` to go back ten seconds in what already played, `w` to come forward
+ten, and `g` to return to live. Live TV is rewindable here because mpv keeps
+a buffer of what it has already shown, on the settings the plugin already
+passes -- nothing is recorded, nothing is written to disk, and the plugin
+does not enlarge anything. How far back that buffer reaches depends on the
+channel's bitrate, so the number is per channel and the guide shows it rather
+than promising it: the bar reads `-1:32` while you are behind live, the
+footer says `1:32 behind live`, and the bar tooltip adds `up to 6:52 back`
+from the last reading. On the public list this was measured against, the
+window on mpv's defaults ran from about two and a half minutes to over
+eighteen, with half the channels above six minutes, and 31 of the 32 channels
+that played rewound the full twenty seconds asked of them; your provider will
+differ. Two things
+worth knowing. A long pause spends the window, at one second of history per
+paused second once the buffer is full, and the number on the bar shows it.
+And when you ask for more than the buffer holds the plugin goes as far as it
+can and says so (`As far back as it goes`); mpv on its own would have done
+nothing in silence. A channel change starts a fresh buffer, so there is no
+rewinding into the previous channel.
+
+Because you usually want all of this while watching rather than while
+browsing, every one of these is also on the plugin's IPC: `pause`, `back
+[seconds]`, `forward [seconds]` and `live`, each replying in JSON so a refusal
+is reported rather than a false success. `contrib/bindings.lua` carries
+commented examples on `SUPER + SHIFT + H` (back), `SUPER + SHIFT + L`
+(forward) and `SUPER + SHIFT + R` (live), with the step as the verb's
+argument.
+
+## Picture in picture
 
 Press `p` in the guide's list mode while something is playing. The player
 window floats, shrinks to a corner box sized from your monitor, and is pinned
@@ -217,7 +252,8 @@ including the exact rectangle if it was floating before.
 
 From outside the guide, `omarchy-shell io.github.rmcdavid.iptv pip toggle`
 (also `pip on` and `pip off`). `contrib/bindings.lua` has a commented line
-that binds it to `SUPER + SHIFT + P`.
+that binds it to `SUPER + SHIFT + I`; an earlier copy suggested
+`SUPER + SHIFT + P`, which stock Omarchy already uses for Google Photos.
 
 Nothing goes into your Hyprland configuration for this. The plugin asks the
 compositor at runtime and writes no file at all.
@@ -347,7 +383,10 @@ carry channel ids — most do — are not affected at all.
   position under `$XDG_RUNTIME_DIR/omarchy-iptv/watch-later/`, which is
   cleared when you log out. Both are readable only by you. Screenshots used
   to land in your home directory readable by anyone on the machine; to put
-  them somewhere else, add `--screenshot-dir=/path` to `mpvArgs`.
+  them somewhere else, add `--screenshot-dir=/path` to `mpvArgs`. mpv's own
+  arrow keys seek inside the same buffer the guide's `b` and `w` use; the
+  bar's behind-live number catches up with them on its next ten-second
+  status read rather than at once.
 
 ## Limits
 

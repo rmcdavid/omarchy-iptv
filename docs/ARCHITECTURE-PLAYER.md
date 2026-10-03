@@ -1435,3 +1435,59 @@ can reach it and are **wired to nothing**; whoever wires them checks them
 against the shipping fork first. Ruling CL4 still stands: `play` does not get
 a sequence number and the lock until refusals are routed, and that needs an
 amendment to 4.3 rather than a workaround.
+
+## 18. Live rewind (M5-01)
+
+The design is `docs/M5-01-LIVE-REWIND.md`, approved on every decision on
+2026-10-03; its sections 2.1-2.7 are the specification and section 9 the
+twelve rulings. The evidence is `docs/SPIKE-LIVE-REWIND.md` sections 1-7 and
+11. This document is not rewritten for it: nothing in sections 4.1-4.14
+changes shape, and the 13-file allowlist is untouched. Three things are
+ADDED, and a reader of the sections they touch should know they exist.
+
+**A third `user-data` sibling node (amends 4.6).** 4.6 says the record lives
+in "two sibling top-level `user-data` nodes"; it is now three.
+`user-data/omarchy-iptv-rewind` holds the behind-live zero point, `(wall0,
+pos0)` taken at the first numeric `time-pos` after each `loadfile`, keyed by
+the `entryId` the stash already captures from the `loadfile` reply. It is a
+SIBLING, not a sub-path of the stash, for the reason 4.6 gives: deep paths
+are unverified and a nested write is a read-modify-write race. A zap changes
+the entry id, so a stale zero point is invalid by construction; a shell
+restart recovers it from the player exactly as pause state is recovered,
+because the player is authoritative. The helper writes it lazily from
+`status`, `pause` or `seek`, whichever first sees a numeric `time-pos` for
+the current entry. "No zero point yet" is `null`, never zero (D-DEAD-1).
+`behindLive` is `(wall - wall0) - (pos - pos0)`, never `cache end -
+time-pos`: after a rewind deeper than the forward quota mpv stops fetching,
+the cache end freezes, and that difference counts DOWN while the real gap
+holds (spike 11.3, measured 300.60-300.64 across thirty ticks).
+
+**A seek verb in the control slot (amends 4.3).** `player seek --socket S
+--by N` (N a signed integer of seconds, negative is back) and `player seek
+--socket S --live`, beside `player pause`, with the same request-id
+discipline and `probe_client`, on `controlProc`. In one run it reads
+`time-pos` and `demuxer-cache-state`, clamps -- a backward target to
+`seekable-ranges[r].start + 2.0`, a forward target and `--live` to the range
+end minus 0.5 s -- issues one ABSOLUTE seek, reads `time-pos` again, and
+replies with the schema in design 2.1. `success` from mpv is not evidence of
+movement: a refused seek replies `success` with `time-pos` unmoved and one
+error-level log line (spike 11.4), so `moved` is the difference of the two
+reads and a request that did not move is reported as refused with the floor
+it hit. The same `rewind` object is added to the `status`, `pause` and
+`probe` replies so the existing ticks carry the numbers without a new
+process. Numbers and booleans only; `path` is never echoed. Like `pause` and
+`tracks` it is side-effect-free: no player, no spawn, `running: false`.
+The service coalesces presses while a seek is in flight, caps the pending
+sum at the last-read `history`, throttles the next run 300 ms from the
+previous reply, and runs `drainPendingPlay()` on every path of the branch
+(the D-PLY-24 lesson).
+
+**A health-count exemption (amends 4.13).** `Model.healthTick`'s busy-skip
+counter exists to restart a helper that never returns, and the 8 s control
+watchdog (`controlTimeoutMs`, 4.3's slot) already terminates that case. A
+slot re-occupied every few hundred milliseconds by a sub-second verb -- a
+held rewind key -- is the benign case the three-strikes counter must not
+punish, so seek runs are exempt: `busy = controlProc.running &&
+controlKind !== "seek"` (D10). The seek itself replied in 0.10 ms and the
+read after it in 0.34 ms against that 8 s watchdog (spike 11.3); the
+exemption is for the slot's occupancy, not its latency.

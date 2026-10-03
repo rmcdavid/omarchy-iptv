@@ -264,6 +264,39 @@ requests and raise the batch.
      shape exactly -- written down in this file, and still committed,
      because the grep was never re-graded after rule 14 existed. A check
      that cannot go red for the failure it guards is not a check.
+   - **The player's on-screen display**, through the `show-text` command
+     (M5-01, owner decision D9, joining this list the day the feature
+     ships). `show-text` PROPERTY-EXPANDS its argument -- a `${path}` in it
+     is drawn on the picture and into any screenshot -- which is the whole
+     reason `--osd-msg1..3` are reserved. So the rule is "nothing
+     provider-controlled goes through it", not "no OSD": the one line the
+     plugin draws after a seek is numbers only, composed by
+     `Model.rewindOsdText` (one argument, the seek reply) and mirrored by
+     `rewind_osd_text` in the helper, with ONE shared fixture,
+     `tests/fixtures/rewind-osd.json`, that both run, asserting equal output
+     and that no output contains `$` anywhere. The helper's seek reply is
+     numbers and booleans alone and never echoes `path`; the existing
+     status reply emits `pathHost` and this one emits nothing of the kind.
+     The user's own `--osd-level=0` turns the line off. On the same day
+     `--demuxer-cache-unlink-files` joins `MPV_RESERVED` in both mirrors
+     (D3; design 2.6): the privacy-relevant switch is not whether mpv
+     caches on disk but whether the file OUTLIVES the process. mpv unlinks
+     its cache file at creation, so by default the bytes die with the
+     player; with that option set to `whendone` or `no` a copy of the stream
+     survives at a path the plugin never listed, which is `--stream-record`'s
+     class, and that option is already reserved. `--cache-on-disk` itself is
+     a user choosing their own disk, the PO-5 shape, and gets the PO-10
+     footer warning rather than a refusal. Nothing else moves: the four
+     standing facts about mpv's directories and handoffs -- the shader and
+     ICC caches contained in the runtime directory but NOT reserved (CL2),
+     `--screenshot-dir` deliberately unreserved, `--watch-later-dir`
+     reserved, and the `--ytdl*` handoffs warned rather than refused
+     (PO-10) -- stay exactly as they are. Rewind inside the default window
+     adds no other sink: the seek crosses the private 0600 socket with no
+     address in it, nothing forks, nothing is written, nothing reaches a
+     bus. Enlarging the window, in RAM or on disk, is refused this round
+     (D2), and the README names the `mpvArgs` lever with its RAM cost
+     rather than pretending the lever does not exist.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under

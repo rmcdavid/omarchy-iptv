@@ -3,6 +3,74 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.11.0 (unreleased)
+
+You can wind live TV back.
+
+### Added
+
+- **Rewind live TV.** Press `b` in the guide to go back ten seconds in what
+  already played, `w` to come forward ten, and `g` to return to live. mpv
+  has been keeping a buffer of what it already showed you since the first
+  release, on the settings this plugin already passes; nobody had asked it
+  to seek inside that buffer, and the property we read to decide whether it
+  could said no on every channel while 31 of the 32 channels that played
+  rewound a full twenty seconds anyway. How far back you can go is per
+  channel, because the buffer is a fixed size in bytes and a channel's
+  bitrate decides how many seconds that holds: on the public list this was
+  measured against it ran from about two and a half minutes to over eighteen,
+  with half the channels above six. The bar shows `-1:32` while you are
+  behind live and the tooltip says how far back you could go, read from the
+  player rather than promised. When you ask for more than there is, it goes
+  as far as it can and says so; mpv on its own would have done nothing in
+  silence.
+- **Pause and rewind are one feature.** `c` and the `pause` verb are
+  unchanged, and they compose with rewind in either order: pause then go
+  back, or go back then pause, and playback carries on from where you left
+  it. A long pause spends the rewind window, at one second of history per
+  paused second once the buffer is full, and the number on the bar shows
+  that happening instead of letting it happen quietly.
+- **Three verbs for keys you bind yourself.** `omarchy-shell
+  io.github.rmcdavid.iptv back 30`, `forward 30` and `live`, each replying
+  in JSON so a refusal is reported rather than a false success. The step is
+  the verb's argument, so there is no setting for it. `contrib/bindings.lua`
+  carries commented examples on `SUPER + SHIFT + H`, `L` and `R`.
+- **A line on the player.** After a seek the player draws one short line,
+  numbers only, so a rewind is visible in fullscreen with the bar hidden.
+  Nothing from the stream goes into it. Your own `--osd-level=0` in
+  `mpvArgs` turns it off.
+
+### What it is not
+
+- Not recording. Nothing is written to disk, nothing is kept after the
+  player stops, and the plugin does not enlarge mpv's buffer: the window you
+  get is the one mpv was already keeping. If you want a longer one,
+  `--demuxer-max-back-bytes` in `mpvArgs` buys it in RAM at a cost the README
+  states per minute; the plugin will not spend that for you.
+- Not catch-up. Changing channel starts a fresh buffer, so there is no
+  rewinding into the channel you just left.
+- Not a re-tune. `g` after a deep rewind lands at the edge of what was
+  buffered and tells you how far behind that still is; it never reloads the
+  channel on its own, because that would throw the whole window away. Enter
+  on the row is the reload, as it always was.
+
+### Fixed
+
+- **The README, the keybinding examples and the pause help all said live
+  streams cannot be wound back.** They were reading a property that does
+  not decide it. Every one of those sentences now describes what rewind is
+  and how far it reaches.
+- **The keybinding examples suggested chords stock Omarchy already uses.**
+  `SUPER + SHIFT + C`, `P` and `COMMA` are Calendar, Google Photos and
+  dismiss-notifications on a stock install, so pasting the example started a
+  silent fight with a webapp launcher. The examples now use chords that are
+  free on a stock Omarchy, checked against its shipped bindings.
+- **Two more mpv options are watched.** `--demuxer-cache-unlink-files` is
+  refused, because turning it off lets a copy of the stream outlive the
+  player at a path nobody listed; `--cache-on-disk` is accepted with a
+  warning in the guide's footer, because it writes the stream to your disk
+  for as long as a channel plays.
+
 ## 0.10.0 (2026-10-03)
 
 The guide data works. It never had.

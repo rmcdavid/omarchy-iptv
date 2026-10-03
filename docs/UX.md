@@ -373,12 +373,27 @@ Two modes, one visible at a time in the header and the footer:
 - **List mode** -- vim keys and single-letter commands are live. `c` pauses
   or resumes the live stream (2026-09-24). It is offered only while something
   is playing, and the footer names the direction so nobody presses it to find
-  out. It is **not rewind**: live streams are not seekable -- measured, 1 of
-  22 channels across 21 providers reported itself so -- and the pause is
-  bounded by mpv's buffer at roughly five minutes on a typical stream. The
-  same action is on the plugin's IPC as `pause`, because it is the first
-  thing in this product you want while WATCHING rather than browsing, and the
-  guide is closed then; `contrib/bindings.lua` carries the global example.
+  out. The pause is bounded by mpv's FORWARD quota alone, 150 MiB over the
+  bitrate: measured 265 s at 4.7 Mbps, the same length with 241 s of history
+  behind the play head as with 10 s (`docs/SPIKE-LIVE-REWIND.md` 11.2).
+  Until 2026-10-03 this paragraph said the pause was **not rewind** because
+  "live streams are not seekable -- measured, 1 of 22 channels across 21
+  providers reported itself so". That was a true reading of the wrong
+  property (F-RWD-1): `seekable` and `partially-seekable` read false on all
+  32 channels that played, and 31 of the 32 rewound 20 s on a relative seek
+  and kept playing, with `demuxer-cache-state.seekable-ranges` non-empty on
+  32 of 32. So pause and rewind are ONE feature (M5-01, D4): `b` / `w` / `g`
+  move inside the same buffer the pause lives in, they compose with `c` in
+  either order (a rewound pause resumes where it paused; a paused rewind
+  moves the frozen picture and resumes from there), and a long pause spends
+  the rewind window at one second of history per paused second once the
+  cache total reaches 200 MiB, down to the 50 MiB the back buffer owns
+  outright (241 s to 93 s on the reference channel). The bar and footer
+  show that number rather than letting it move in silence (4.8, 6.1). The
+  same actions are on the plugin's IPC as `pause`, `back`, `forward` and
+  `live`, because these are the things you want while WATCHING rather than
+  browsing, and the guide is closed then; `contrib/bindings.lua` carries the
+  global examples (3.3).
 
 **The guide opens in search mode with an empty query.** This is the
 behavior every other Omarchy overlay has (menu, clipboard, emojis): open,
@@ -414,6 +429,9 @@ x).
 | `x` / `X` / `Delete` | Remove the cursor row from Recent (in Recent) or unfavorite it (in Favorites). **Everywhere else (M3-01): hide the group the cursor row is in, and in a hidden group, bring it back.** One key, one meaning -- take this away from here -- and the footer names the target before the press: `x hide group` / `x unhide`, from the same table the handler dispatches on (`Model.hideAction`). Silent in Recent and Favorites, where the key keeps its older meaning. Parity with the clipboard's delete. |
 | `s` / `S` | Stop playback. No confirmation. Footer shows `Stopped`. |
 | `t` / `T` | Open the audio and subtitle picker (2.9). Only while something plays; otherwise the footer says `Nothing is playing`. Hinted `t tracks` under the same gate. Inside the picker `j`/`k` move, `Enter` selects, `Esc` or `t` closes; Home/End jump to the first/last track; PgUp/PgDn, Tab and Delete do nothing there and do not reach the list underneath. |
+| `b` / `B` | **Back 10 s** (M5-01, `Model.REWIND_STEP_S`), vim's word-back. One step size, no setting: the first rewindable second arrives about 6 s after a zap and the median window is 411 s, so ten reaches a missed sentence in one to three taps and a held key covers the rest (D7). Gated at the call site like `c`: only while something plays AND the last range read is non-empty, so a press in the first seconds after a zap -- which would land on the first keyframe and move nothing -- is not offered. Presses are coalesced while a seek is in flight and the sum is capped at the history the player last reported, so a run of taps past the floor is never asked for. The helper clamps to the floor plus 2 s; the footer transient says `Back 10 s · 1:32 behind live`, or at the floor `As far back as it goes · 6:52 behind live` -- a clamp is always said, never silent (F-RWD-3). The OSD line on the player says the same in numbers. In search mode `b` is query text, as `c` is. |
+| `w` / `W` | **Forward 10 s**, vim's word-forward, the same step and the same coalescing. Offered only while behind live (`behindLive >= Model.BEHIND_LIVE_SHOW_S`, 2 s), because a hint that does nothing is the lie the footer was redesigned to stop telling. A forward target is clamped to the range end minus 0.5 s. |
+| `g` / `G` | **Back to live**, vim's go-to-end. Offered under the same gate as `w`. Seeks to the cached edge and says what remains: after a rewind deeper than the forward quota (about 265 s at 4.7 Mbps) the fetch has stalled, so `live` lands at the frozen edge and the transient reads `At the edge of the buffer · 0:27 behind live`; otherwise it reads `Live`. It NEVER reloads the channel on its own (D8): discarding six minutes of history on a threshold the viewer never asked for is the one silent action this feature must not take. `Enter` on the playing row remains the reload. |
 | `r` / `R` | Refresh playlist and EPG now. Footer shows `Refreshing...` then the result; a desktop notification reports the outcome (6.4). |
 | `/` | Enter search mode (query preserved). |
 | `Ctrl+G` | Flip between the channel list and the **channel wall** (2.4b). A MODIFIED key by necessity, for the same reason `Ctrl+S` is: it is handled in `handleSharedKey`, which serves search mode too, and the guide OPENS in search mode where every bare printable character is query text. A bare letter would be unreachable on the screen the user starts on. The cursor is shared, so the place survives the flip. **The view persists for the life of the shell session, not per open**: `keepLoaded: true` means the guide item is never destroyed between summons, and `open()` does not reset `wallView`. That is deliberate as of 2026-09-25 -- a view the user chose should be there when they come back, and resetting it every open would make the key feel broken -- but it was DOCUMENTED as the opposite first, and a preflight caught the shipped CHANGELOG saying so. It is not written to disk: a fresh shell starts in the list, so an existing user sees no change until they press the key. |
@@ -445,6 +463,7 @@ IPC verbs the user may bind.
 | Gesture | Action |
 |---|---|
 | `SUPER + SHIFT + T` (user adds to `bindings.lua`) | Toggle the guide: `omarchy-shell shell toggle io.github.rmcdavid.iptv`. |
+| `SUPER + SHIFT + H` / `L` / `R` (suggested, commented in `contrib/bindings.lua`) | `back 10` / `forward 10` / `live` (M5-01). H and L are vim's left and right, R is return to live; all three are free on a stock Omarchy, checked against `/usr/share/omarchy/default/hypr/bindings/` on 2026-10-03, where only H I J K L Q R U V Z remain free of `SUPER + SHIFT + <letter>`. The same file's pause, picture-in-picture and channel up/down examples moved to Z, I, and J / K on the same day (F-RWD-6: the chords they used to suggest, C, P and COMMA, are Calendar, Google Photos and dismiss-notifications on a stock install). |
 | Left click | Open the guide overlay (never a small popup). If it is open, close it. |
 | Right click | Stop playback. |
 | Middle click | Refresh playlist and EPG. |
@@ -453,7 +472,15 @@ IPC verbs the user may bind.
 
 IPC verbs the architect should expose on `IpcHandler { target: "io.github.rmcdavid.iptv" }`
 so users can bind them: `toggle`, `stop`, `next`, `previous`, `refresh`,
-`play(url)`. No default bindings beyond `SUPER + SHIFT + T`.
+`play(url)`, and since M5-01 `back [seconds]`, `forward [seconds]` and
+`live`. The three rewind verbs are words like `pause`, `pip` and `channel`;
+the argument is a POSITIVE integer (no sign has to survive `omarchy-shell
+<id> <verb>`), it is the user's own step size (which removes any case for a
+setting), and omitting it means the guide's ten. Each replies in JSON like
+`channel` and `pip`, so a clamp or a refusal is reported and never a false
+success (CN15). Rewinding is done with the guide CLOSED -- the pause lesson
+-- which is why the verbs, not the keys, are the surface a watcher actually
+uses. No default bindings beyond `SUPER + SHIFT + T`.
 
 ### 3.4 The zap ring
 
@@ -709,8 +736,33 @@ error, not playing (television-off glyph):     [ ó° ]      tooltip: "IPTV 
 refreshing (any state; tooltip only):          [ ó° ]      tooltip: "IPTV - refreshing playlist..."
 ```
 
+**Behind live (M5-01).** The bar is the only plugin surface visible with the
+guide closed, so it carries the rewind readout. A fourth holder after the
+name, OUTSIDE the name's elide budget exactly as the channel number is,
+holds a monospaced `-m:ss` (`Model.clockSpan`, `h:mm:ss` past an hour).
+The leading glyph is the history glyph U+F02DA while playing behind live
+and the television-pause glyph U+F0FD1 while paused; the number is shared
+between the two states. The holder is absent at live and absent while the
+player has not yet said where it is ("no zero point" is `null`, never zero;
+D-DEAD-1). Behind-live counts up only while paused, on the existing 1 Hz
+tick; while playing it holds, so nothing re-renders.
+
+```
+playing at live      [ U+F0567  7 BBC One ]
+playing behind live  [ U+F02DA  7 BBC One  -1:32 ]
+paused at live       [ U+F0FD1  7 BBC One  -0:42 ]      (counting up)
+paused behind live   [ U+F0FD1  7 BBC One  -5:12 ]      (counting up)
+                                |<- elide ->|<-holder->|
+```
+
+The tooltip and the accessible name both carry `Model.playbackStateText`
+(6.3, 7.1); the tooltip adds the window from the last read, `up to 6:52
+back`. On a channel whose window is 7 s the number is `0:07`, not a promise.
+
 Vertical bar (`Style.bar.sizeVertical` wide): icon only, label never shown,
-the channel name lives in the tooltip. Same three glyphs.
+the channel name lives in the tooltip. Same three glyphs, plus the two
+above; the `-m:ss` holder is not drawn on a vertical bar and the number
+lives in the tooltip with the name.
 
 ```
  +----+
@@ -862,7 +914,8 @@ the channel name lives in the tooltip. Same three glyphs.
 | Failed this session (row trail), banner, notifications | ó°¦ | U+F0026 | nf-md-alert |
 | Loading (empty state) | ó° | U+F01D8 | nf-md-dots_horizontal |
 | Refresh (notification glyph) | ó° | U+F0450 | nf-md-refresh |
-| Recent (notification / future use) | ó° | U+F02DA | nf-md-history |
+| Recent (notification); behind live (bar lead glyph, M5-01, 4.8) | ó° | U+F02DA | nf-md-history |
+| Paused (bar lead glyph; already `GLYPHS.tvPause`, confirmed in the installed font by fc-query) | 󰿑 | U+F0FD1 | nf-md-television_pause |
 
 Do not use color to distinguish these; each carries meaning by shape. Bar
 glyph dimming for idle uses `Qt.darker(bar.barForeground, 1.55)` (tailscale
@@ -889,6 +942,13 @@ inactive), never `Color.muted` directly, so it tracks the bar's foreground.
 - Footer: no fill, no border; a single `Row` with the status text on the
   left and hints on the right, both `Style.font.caption`. The hint text
   changes with mode (6.2).
+- Playback state line (M5-01): while something plays, the playing status
+  carries ONE state string from `Model.playbackStateText({paused, behindS})`
+  -- `""` at live, `1:32 behind live` behind it, `paused · 0:42 behind live`
+  while paused -- and the three rewind transients use the 3 s slot `Stopped`
+  uses (6.1). The middle dot is `Model.SEP`; it never appears as a literal in
+  a `.js` file (engineering rule 8). The state line is absent, not `0:00`,
+  until the player has reported a zero point.
 
 ### 5.8 Animation
 
@@ -945,7 +1005,9 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 | Footer status, normal | `1,204 channels - updated 12:40` |
 | Footer status, cached | `1,204 channels - cached 12:40 - offline` |
 | Footer status, playing | `ó° Sky Sports Main Event - s stop` |
+| Footer status, playing behind live (M5-01) | `1:32 behind live`; paused: `paused · 0:42 behind live` (`Model.playbackStateText`; empty at live, absent until the player reports a zero point) |
 | Footer status, transient | `Refreshing...`, `Refreshed - 1,204 channels`, `Stopped`, `Added to Favorites`, `Removed from Favorites`, `Removed from Recent` |
+| Footer status, rewind transient (M5-01, 3 s) | `Back 10 s · 1:32 behind live`; at the floor `As far back as it goes · 6:52 behind live`; on `g` at the edge `Live`, or after a deep rewind `At the edge of the buffer · 0:27 behind live` |
 | Footer status, bounded search | `First 200 of 1,240 - keep typing` |
 | Footer status, EPG pending | `Guide data loading...` |
 
@@ -955,7 +1017,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 |---|---|
 | Search mode | `Enter play - Up/Down move - Left/Right group - Tab keys - Esc close` |
 | Search mode, query non-empty | `Enter play - Up/Down move - Left/Right narrow - Tab keys - Esc clear` |
-| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - x hide group - c pause - t tracks - p pip - r refresh - / search - Ctrl+G wall - 0-9 channel - o sources` (the fullest form: `x` is silent in Recent and Favorites, `c`/`t` need something playing, `p` needs Hyprland, `0-9` needs a numbered playlist). **This row has drifted four times** -- it was missing `p`, `Ctrl+G` and `0-9` before this release added `x` and `t` to the footer -- because it is a transcription of `Model.footerHints` and nothing compares the two. Read the function, not this row, if they ever disagree again.
+| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - x hide group - c pause - b back - w forward - g live - t tracks - p pip - r refresh - / search - Ctrl+G wall - 0-9 channel - o sources` (the fullest form: `x` is silent in Recent and Favorites, `c`/`t` need something playing, `b` needs something playing AND a non-empty range read (`o.playing && o.canRewind`), `w` and `g` need the player to be at least `Model.BEHIND_LIVE_SHOW_S` (2 s) behind live, `p` needs Hyprland, `0-9` needs a numbered playlist). The `?` map picks the three rewind keys up from the same table. **This row has drifted four times** -- it was missing `p`, `Ctrl+G` and `0-9` before this release added `x` and `t` to the footer -- because it is a transcription of `Model.footerHints` and nothing compares the two. Read the function, not this row, if they ever disagree again.
 | Empty states | `r retry - o sources - Esc close` (not configured, error; `r retry` is dropped when the configured value is invalid and `o sources` only when a source history exists); `Esc close` (loading). Since v0.2.0 the not-configured state is the Sources first-run form, see `UX-SOURCES.md` 1.2 and 5.3, which is authoritative for these hints |
 
 Key names and verbs both render at opacity 0.7 (ruling SG2). **They used to
@@ -991,6 +1053,7 @@ Bar tooltips (`bar.showTooltip`):
 | Idle, ready | `IPTV - click to open the guide` |
 | Not configured | `IPTV - no playlist configured` |
 | Playing | `Playing Sky Sports Main Event` (full name, untruncated) |
+| Playing behind live, or paused (M5-01) | the Playing tooltip, then `Model.playbackStateText` (`1:32 behind live` / `paused · 0:42 behind live`), then the window from the last read, `up to 6:52 back`, joined by `Model.SEP`. The window is the player's last `history` reading, never a promise: `up to 0:07 back` on a channel with seven seconds of cache |
 | Error, not playing | `IPTV - playlist error, open the guide` |
 | Refreshing | `IPTV - refreshing playlist...` |
 
@@ -1091,7 +1154,7 @@ marker until something observes it.
 | Banner | -- | *the transition is announced* | **UNVERIFIED.** Nothing calls `Accessible.announce()`; a client that is not already watching the node never learns the banner changed. The double-announce question (GS5) has to be settled first -- investigation section 8 item 4 |
 | Footer status | `Accessible.StaticText` | status text | **OBSERVED** (banner scenario, including the degraded `cached ... offline` wording); text **COMPOSED** (`Model.footerStatus`) |
 | Footer hints | -- | *the key hints beside the status* | **UNVERIFIED**, and deliberately: the hints `Text` carries no `Accessible.*` and M2-03 section 11 declines to give it any. A keyboard-only user hears the status and not the keys that act on it. Recorded as a known gap, not a defect |
-| Bar widget | `Accessible.Button` | `IPTV, idle` / `IPTV, playing <name>` / `IPTV, playlist error` (`IPTV, playing channel <n>, <name>` when numbered) | **OBSERVED** (bar scenarios: exactly one button node per state, the three names distinct, no Private-Use codepoint inside a published name); text **COMPOSED** (`Model.barAccessibleName`) |
+| Bar widget | `Accessible.Button` | `IPTV, idle` / `IPTV, playing <name>` / `IPTV, playlist error` (`IPTV, playing channel <n>, <name>` when numbered); behind live (M5-01) the name gains the state spoken in words, `1 minute 32 seconds behind live`, never the `-m:ss` the eye reads | **OBSERVED** (bar scenarios: exactly one button node per state, the three names distinct, no Private-Use codepoint inside a published name); text **COMPOSED** (`Model.barAccessibleName`). The behind-live form is **UNVERIFIED** until the rewind scenario observes it on the bus (rule 14); nothing provider-controlled is in it, it is a number and four words |
 
 **Declared in the code and absent from this table.** These publish today and
 this document never promised them, which is the same failure in the other
