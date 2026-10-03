@@ -10529,7 +10529,7 @@ Joins settled on the integrated tree, each listed in design section 12:
 
 | Suite | Against the lane commits | After |
 |---|---|---|
-| node, new integration block + two re-pinned vectors | 1821 checks, 6 failures (lane H's Model.js at 61da1cd) | 1821 checks, 0 failures |
+| node, new integration block + two re-pinned vectors | against lane H's Model.js at 61da1cd the run prints the FAIL lines (six at the time, eight with the checks added since) and then ABORTS with a stack trace at the first call of a function that file lacks (`Model.seekTransientText is not a function`); it prints no count line. An earlier version of this cell said "1821 checks, 6 failures", a count the run cannot print -- the review's claims lens caught it | 1821 checks, 0 failures |
 | python `test_rewind.py`, two re-base tests | Ran 49, failures=2 (lane H's helper at 61da1cd) | Ran 49 OK |
 | QML spec, lane S's two cases | 69 passed, 1 failed (line 1904), then 69/1 (line 1910) | 70 passed, 0 failed |
 
@@ -10737,3 +10737,166 @@ reads 3 s apart cost an IPC round trip each and the count is quantised to
 the 1 Hz tick, so the band is now [1.5, 6.5] (red for a number that holds
 and for one that doubles), recorded under F-HARNESS-3. A fifth run on a
 quiet machine follows below once the review has finished.
+
+## M5-01: the review round, second batch, 2026-10-03
+
+Four of the five lenses had reported (seek path 7, sinks 5, claims 10,
+tests and doubles 12) while the verifiers were still running; the findings
+that could be verified by reading the tree were acted on before the
+verdicts, each one re-checked against the code first. Lens five (UX, a11y,
+docs) and the verdicts are recorded in the next section.
+
+### Code
+
+- **F-SINK-12** (sinks lens, pre-existing): the `status` reply's
+  `mediaTitle` went out verbatim. Redacted through `redact_urls`; the new
+  status test with a credentialed URL in the title is red against the
+  helper at HEAD (`AssertionError` on the full URL) and green after.
+- **The transient's refused branch** (claims lens): `seekTransientText`
+  reported a refused `live` as "At the edge of the buffer · m:ss behind
+  live" because the mode/atEdge branch came first. Refused is decided
+  first and says "Nothing moved" with the number; one vector added, three
+  re-pinned.
+- **The tooltip's window line** (tests lens): the check's title said never
+  `up to 0:00 back` while its own vector expected exactly that for 0.4 s of
+  history. The line needs a whole second now; the check says so.
+- **The stub's ordering and filter** (tests lens): the stub moved the
+  position before replying and sent followups from `serve()`, where its
+  self-test could not see the subscription filter -- removing the filter
+  left all 16 cases green. The move is deferred until the reply is written
+  (`_apply`), the filter lives in `dispatch(req, subscribed)`, and two
+  cases pin them: mutant A (filter removed) 1 red, mutant B (move applied
+  inside dispatch) 1 red, 17 cases green.
+- **`rewind_view` with a valid node and a rangeless position** (tests
+  lens, against design 2.2's "never negative"): the formula read -36 on
+  the live-pass tree. No range, no number: `behindLive` is null there.
+- **A vacuous assertion** (tests lens): the usage-error test compared `[]`
+  with `[]` because no player was started; it starts one and asserts the
+  player received nothing.
+
+### Claims corrected
+
+F-RWD-1 closed on the board (fixed by 16f89e0 a day earlier; the commit
+named no id). F-RWD-9's row refined by F-RWD-15. UX 4.8's count-up sentence
+and its "while playing it holds" brought to the tree and to F-RWD-10.
+QA-REWIND section 5's stub facts (no refusal line, immediate echo, 14
+cases) corrected. CHANGELOG and README: "a full twenty seconds" is
+"eighteen to twenty of the twenty asked" (spike: 18.0-19.9). Design 2.5:
+"every sentence ... none composed in QML" now says every COMPOSED
+sentence; "Nothing to rewind yet" is a copy literal. Design 2.6 states
+that the unlink reservation guards the setting surface, not the user's
+own mpv.conf. The node-run cell above that claimed a count the run cannot
+print is rewritten to what it prints. The scenario's recount recipe
+over-counted by one; the floor was right.
+
+### Filed open
+
+- **F-RWD-18**: R14 cannot go red for a missing health exemption; the
+  exemption is UNVERIFIED by the scenario until a 30 s held-key run on a
+  deeper window exists.
+- **F-RWD-19**: the seek queue's decisions are QML-only; the scenario calls
+  the shipping path and observes outcomes, but no unit test drives each
+  decision. A reducer in Model.js (a `seekQueueStep(state, event)` shape,
+not yet written) is the fix; next milestone.
+
+### The mutation inventories the write-ups cited but the tree did not hold
+
+The claims and tests lenses both found that "18 JS and 17 python mutations
+each red" and "ten named stub mutations" had no itemised record in any
+document. The lanes' own ledgers, verbatim from their reports:
+
+**Lane H (helper + Model), each mutation applied alone to the committed
+tree and reverted; baseline node 1810 checks / 1 red (the cross-lane join)
+and python `test_rewind` 47 OK.** J1 SEEK_FLOOR_MARGIN_S 2.0->1.0: 1810
+checks, 7 failures (6 beyond the known: the clamp-constants check and 5
+clampSeek vectors), fixture red on JS drift; J2 `b back` gate drops
+canRewind: 3 failures (2 beyond); J3 listLetterAction forward->"": 2 (1);
+J4 playbackStateText uses "paused " not SEP: 3 (2); J5 coalesceSeek cap
+removed: 2 (1); J6 behindLiveNow count-up removed: 2 (1); J7 rewindOsdText
+drops refused guard: 2 (1); J8 --demuxer-cache-unlink-files removed from
+MPV_RESERVED: 5 (4); J9 mpvDiskName warns on =no: 2 (1); J10
+barAccessibleName drops the span: 2 (1); J11 keyboardMap context
+canRewind:false: 4 (3); J12 parsePlayerProbe rewind:null: first run aborted
+with NO COUNT (fixed in 322c638: checkCall), rerun 1810 checks, 3 failures
+(2 beyond); J13 seekVerbSeconds empty->0: 2 (1); J14 playerSeekArgv
+negates: 2 (1); J15 clockSpan never h:mm:ss: 3 (2); J16 tooltip window line
+removed: 2 (1); J17 barBehindText ignores playing: 2 (1); J18 clamp lets a
+back press move forward: 3 (2). P1 SEEK_MOVED_THRESHOLD_S 0.5->0.0: Ran 47,
+failures=6; P2 SEEK_FLOOR_MARGIN_S 2.0->1.0: failures=4, fixture red on
+python drift; P3 rewind_osd_text drops refused guard: failures=1; P4
+cache_state_view forwards ts-per-stream: failures=2; P5 clamp_seek invents
+a range when none exists: failures=2; P6 zero_point ignores write=False:
+failures=1; P7 rewind_view behindLive None->0.0: failures=2; P8 cmd_status
+rewind: None: Ran 65, errors=1; P9 FakeMpv moves on any target: failures=2;
+P10 pause reply rewind: None: errors=1; P11 mpv_arg_writes_disk warns on
+=no: Ran 65, failures=2; P12 unlink switch dropped from helper
+MPV_RESERVED: Ran 65, failures=2; P13 range_for ignores the position:
+failures=1; P14 player_seek drops the not-moved threshold: failures=1; P15
+player_seek never takes the zero point: failures=9, errors=1; P16 outer
+`if not refused` around show-text removed: Ran 47 OK, EQUIVALENT MUTANT,
+the guard removed in 322c638; P16b show-text never sent: failures=8; P17
+probe writes the zero point: failures=1.
+
+**Lane S (service, guide, bar), against a scratch copy of Model.js carrying
+contract stubs, baseline QML spec 70/0.** M1 LIVE_KEY="l" -> 69/1; M2
+clockSpan drops the hour form -> 69/1; M3 w,g lose the behindLive>=2 gate
+-> 69/1; M4 coalesceSeek loses the history cap -> 69/1; M5
+playbackStateText spells " - " for SEP -> 69/1; M6 listLetterAction stops
+folding "B" -> 69/1; M7 behindLiveNow ignores the pause -> 69/1; M8
+rewindOsdText carries "${time-pos}" -> 69/1; M9 keyboardMap drops
+canRewind/behindLive from its list context -> 69/1; M10 b hinted on an
+empty range -> 69/1.
+
+**Lane Q (the stub), baseline 14 OK.** M-STUB-1 clamp-to-floor instead of
+drop -> failures=2; M-STUB-2 past-the-end lands -> failures=1; M-STUB-3
+pause stops the cache end growing -> failures=1; M-STUB-4 loadfile keeps
+the old timeline -> failures=1; M-STUB-5 negative absolute taken literally
+-> failures=1; M-STUB-6 a string leaf in demuxer-cache-state -> failures=1.
+
+The lead's own, in this document's earlier sections: the integration
+block (six node checks red against lane H's Model.js, the run aborting at
+the first missing function), F-RWD-11 (two python tests red), F-RWD-15
+(M1-M4 and the stub mutant), F-RWD-16 (one test red), F-RWD-17 (R7 on the
+baseline tree, six vectors), and this section's five.
+
+## M5-01: the review round, third batch (the UX lens), 2026-10-03
+
+The fifth lens reported nine findings; the verifiers were still running.
+Two P2s, both about the footer and both verified with the shipping
+functions before anything was changed.
+
+- **F-UX-4** (P2): the fullest playing row behind live is 19 pairs, 213
+  characters; `fitFooterHints` could drop its seven droppable pairs and no
+  more, leaving 129 against the widest card's 107 (the lens derived 107
+  from the Style tokens at the caption size with an offscreen FontMetrics
+  spec). Before M5-01 the irreducible row was 99; the three rewind pairs
+  are the 30. The F-UX-2 fit tests had never fitted the widest shipped
+  row. The three join `FOOTER_DROP_ORDER` last -- behind live they are the
+  keys that act -- so the row reaches 99 again. Three node checks: the
+  fullest row carries the three and does not fit as it stands, fitted to
+  107 it fits with `j/k move` at the head, and the order is the seven then
+  the three. Mutant (the three undroppable): 2 of the 3 red, 1825 checks.
+- **F-UX-5** (P2): composed after the name, the state line was the first
+  casualty of right-elision on an ordinary `(1080p)`-marked name. It leads
+  the line now, before the name; two checks re-pinned; design 2.5 and UX
+  6.1 amended.
+- **F-UX-6** (P3): the guide's `b`/`w`/`g` refused locally ("Nothing to
+  rewind yet") for up to a status tick after a zap while the verbs spawned
+  the helper. "Not yet rewindable" is a verdict only once a range has been
+  read (`rewindKnown`); before that the key falls through to the service.
+- The transient's three rangeless and no-player shapes are pinned ("Nothing
+  moved", "Nothing moved", "Nothing playing" -- the last through the PiP
+  verb's one copy of the sentence).
+- Documents: UX 6.3's tooltip row and the composer sentence at 4.8 (the
+  tooltip's second line carries no "paused"; the accessible name speaks
+  through `spokenSpan`); UX 6.2's list-mode transcription, which had
+  drifted twice, replaced by a pointer to the function and the checks that
+  pin it; UX 6.1 gains the behind-live status rows; the README's rewind
+  section gains the OSD line and `--osd-level=0`, which it had never
+  mentioned. UX 4.8's count-up sentence had already been corrected in the
+  second batch.
+
+Gate on this tree: `./scripts/check.sh` all green (node 1825, python 825,
+spec 70, stub 17, text 61). The scenario's clean run on a quiet machine
+and the verdicts follow.
+

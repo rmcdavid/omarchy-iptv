@@ -61,9 +61,14 @@ HLS stream (docs/QA-REWIND.md section 2):
     the helper forwards (M1: seekable-ranges[].start/end, cache-end,
     reader-pts, cache-duration, fw-bytes, total-bytes, underrun, idle, eof,
     eof-cached, bof-cached). No string leaf, nothing from the stream.
-  * no `log-message` event is emitted for a refusal. mpv writes one
-    error-level line per dropped seek; the stub is stricter, not looser,
-    and a client that needed the line to notice a refusal would be wrong.
+  * what follows the reply to `seek` is what mpv sends next (F-RWD-15): the
+    position moves and the `seek` event goes out AFTER the reply has been
+    written, never before, so a client that reads `time-pos` at once reads
+    the old position the way it can on mpv; a dropped seek is followed by
+    the error-level refusal line, to the connections that subscribed with
+    `request_log_messages` and to no other. (An earlier version of this
+    file emitted no line and moved the position before replying; the review
+    of the integrated tree found both more forgiving than mpv.)
 
 `python3 scripts/qa-stub-mpv.py --self-test` runs the unittest cases that
 pin these, against a fake clock. Each case was seen red by mutating the rule
@@ -194,7 +199,9 @@ class Stub(object):
 
     def seek(self, target, mode):
         """mpv's measured behaviour, reply success in every case. Returns
-        True when time-pos moved (for the self-test; the wire never says)."""
+        True when time-pos moved (for the self-test; the wire never says).
+        Called through plan_seek() from dispatch, which defers the move
+        until the reply has been written (F-RWD-15 ordering)."""
         try:
             delta = float(target)
         except (TypeError, ValueError):
@@ -212,8 +219,15 @@ class Stub(object):
             return False
         if want < floor or want > end:
             return False                        # dropped silently, time-pos carries on
-        self.seek_offset += pos - want
+        self.pending_offset = pos - want
         return True
+
+    def apply_seek(self):
+        """The deferred half of seek(): the position moves now. serve()
+        calls it after writing the reply and before the followups."""
+        with self.lock:
+            self.seek_offset += getattr(self, "pending_offset", 0.0)
+            self.pending_offset = 0.0
 
     def set_pause(self, value):
         want = bool(value)
@@ -314,21 +328,29 @@ class Stub(object):
                 self.hold(first)
                 if (req.get("command") or [None])[0] == "request_log_messages":
                     subscribed = True
-                reply = self.dispatch(req)
+                reply = self.dispatch(req, subscribed)
                 if reply is None:
                     return
                 followup = reply.pop("_followup", [])
+                apply = reply.pop("_apply", None)
                 try:
                     conn.sendall((json.dumps(reply) + "\n").encode("utf-8"))
+                    # mpv's order: the reply says queued; the playloop moves
+                    # the position and sends the event afterwards.
+                    if apply is not None:
+                        apply()
                     for event in followup:
-                        if event.get("event") == "log-message" and not subscribed:
-                            continue
                         conn.sendall((json.dumps(event) + "\n").encode("utf-8"))
                 except OSError:
                     return
                 self.log("REP " + json.dumps(reply))
 
-    def dispatch(self, req):
+    def dispatch(self, req, subscribed=False):
+        """One reply for one request. `subscribed` is whether THIS connection
+        asked for log messages; the refusal line is filtered here, so the
+        self-test can see the filter (a filter in serve() was invisible to
+        it: the review's finding). A seek's move is deferred into `_apply`
+        and its followups into `_followup`, both popped by serve()."""
         rid = req.get("request_id", 0)
         cmd = req.get("command") or []
         out = {"error": "success", "request_id": rid, "data": None}
@@ -356,9 +378,14 @@ class Stub(object):
             # dropped. serve() writes them after the reply, in that order.
             with self.lock:
                 moved = self.seek(cmd[1] if len(cmd) > 1 else None, cmd[2] if len(cmd) > 2 else "relative")
-            out["_followup"] = [{"event": "seek"}] if moved else [
-                {"event": "log-message", "prefix": "cplayer", "level": "error",
-                 "text": "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"}]
+            out["_apply"] = self.apply_seek
+            if moved:
+                out["_followup"] = [{"event": "seek"}]
+            elif subscribed:
+                out["_followup"] = [{"event": "log-message", "prefix": "cplayer", "level": "error",
+                                     "text": "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"}]
+            else:
+                out["_followup"] = []
         elif verb == "quit":
             try:
                 return out
@@ -403,8 +430,12 @@ def self_test():
         def get(self, name):
             return self.stub.get(name)
 
-        def seek(self, target, mode="relative"):
-            return self.stub.dispatch({"command": ["seek", target, mode], "request_id": 7})
+        def seek(self, target, mode="relative", subscribed=True, apply=True):
+            out = self.stub.dispatch({"command": ["seek", target, mode], "request_id": 7}, subscribed)
+            fn = out.pop("_apply", None)
+            if apply and fn is not None:
+                fn()
+            return out
 
         def load_and_play(self, seconds):
             self.stub.dispatch({"command": ["loadfile", "http://127.0.0.1:9/x.m3u8", "replace"], "request_id": 1})
@@ -424,17 +455,26 @@ def self_test():
             self.assertIn("Cannot seek in this stream", out["_followup"][0]["text"])
             self.assertEqual(out["_followup"][0]["level"], "error")
 
-        def test_the_refusal_line_is_the_only_followup_that_needs_a_subscription(self):
-            # serve() filters log-message followups by the connection's own
-            # request_log_messages, as mpv does; the seek event goes to all.
+        def test_the_refusal_line_reaches_only_a_subscribed_connection_and_the_seek_event_reaches_all(self):
+            # dispatch() filters by the connection's own request_log_messages,
+            # as mpv does; the seek event goes to every client.
             self.load_and_play(20.0)
-            landed = self.seek(-5.0)["_followup"]
-            self.assertEqual(len(landed), 1)   # not vacuous: a stub sending nothing passed `all` over []
-            self.assertTrue(all(e["event"] != "log-message" for e in landed))
+            self.assertEqual(self.seek(-5.0, subscribed=False)["_followup"], [{"event": "seek"}])
+            self.assertEqual(self.seek(-5.0, subscribed=True)["_followup"], [{"event": "seek"}])
             self.clock.tick(40.0)
-            dropped = self.seek(1.0, "absolute")["_followup"]
-            self.assertEqual(len(dropped), 1)
-            self.assertTrue(all(e["event"] == "log-message" for e in dropped))
+            self.assertEqual(self.seek(1.0, "absolute", subscribed=False)["_followup"], [])
+            dropped = self.seek(1.0, "absolute", subscribed=True)["_followup"]
+            self.assertEqual([e["event"] for e in dropped], ["log-message"])
+
+        def test_the_position_moves_only_after_the_reply_has_been_written(self):
+            # F-RWD-15's ordering: a read sent at once reads the old position.
+            self.load_and_play(20.0)
+            before = self.get("time-pos")[0]
+            out = self.seek(-5.0, apply=False)
+            self.assertEqual(out["error"], "success")
+            self.assertEqual(self.get("time-pos")[0], before)       # queued, not yet moved
+            self.stub.apply_seek()
+            self.assertEqual(self.get("time-pos")[0], before - 5.0)  # moved after the reply
 
         def test_time_pos_unavailable_until_loadfile_then_wall_clock(self):
             self.assertEqual(self.get("time-pos"), (None, "property unavailable"))

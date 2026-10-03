@@ -221,11 +221,14 @@ passes -- nothing is recorded, nothing is written to disk, and the plugin
 does not enlarge anything. How far back that buffer reaches depends on the
 channel's bitrate, so the number is per channel and the guide shows it rather
 than promising it: the bar reads `-1:32` while you are behind live, the
-footer says `1:32 behind live`, and the bar tooltip adds `up to 6:52 back`
-from the last reading. On the public list this was measured against, the
+footer says `1:32 behind live` ahead of the channel name, and the bar
+tooltip adds `up to 6:52 back` from the last reading. After each seek the
+player itself draws the same number for three seconds, so a rewind is
+visible in fullscreen with the bar hidden; `--osd-level=0` in `mpvArgs`
+turns that line off. On the public list this was measured against, the
 window on mpv's defaults ran from about two and a half minutes to over
 eighteen, with half the channels above six minutes, and 31 of the 32 channels
-that played rewound the full twenty seconds asked of them; your provider will
+that played rewound eighteen to twenty of the twenty seconds asked of them; your provider will
 differ. Two things
 worth knowing. A long pause spends the window, at one second of history per
 paused second once the buffer is full, and the number on the bar shows it.

@@ -744,8 +744,12 @@ The leading glyph is the history glyph U+F02DA while playing behind live
 and the television-pause glyph U+F0FD1 while paused; the number is shared
 between the two states. The holder is absent at live and absent while the
 player has not yet said where it is ("no zero point" is `null`, never zero;
-D-DEAD-1). Behind-live counts up only while paused, on the existing 1 Hz
-tick; while playing it holds, so nothing re-renders.
+D-DEAD-1). Behind-live counts up only while paused, on a 1 Hz timer of its
+own that runs only while paused (the design first said "the existing 1 Hz
+tick"; that tick is 30 s); while playing it holds on a healthy stream, so
+nothing re-renders, and on a stream that stalls it grows by the stall and
+is shown unchanged (F-RWD-10, accepted: a number that hid a stall would be
+the silent failure this feature exists to prevent).
 
 ```
 playing at live      [ U+F0567  7 BBC One ]
@@ -755,9 +759,12 @@ paused behind live   [ U+F0FD1  7 BBC One  -5:12 ]      (counting up)
                                 |<- elide ->|<-holder->|
 ```
 
-The tooltip and the accessible name both carry `Model.playbackStateText`
-(6.3, 7.1); the tooltip adds the window from the last read, `up to 6:52
-back`. On a channel whose window is 7 s the number is `0:07`, not a promise.
+The tooltip's second line is the number without the word "paused" (the
+first line already says Paused -- F-UX-3) plus the window from the last
+read, `up to 6:52 back`, through `Model.barTooltip`; the accessible name
+speaks the same threshold in units through `Model.spokenSpan` ("1 minute 32
+seconds behind live", 7.1). On a channel whose window is 7 s the number is
+`0:07`, not a promise, and under a second of window the line is absent.
 
 Vertical bar (`Style.bar.sizeVertical` wide): icon only, label never shown,
 the channel name lives in the tooltip. Same three glyphs, plus the two
@@ -1005,6 +1012,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 | Footer status, normal | `1,204 channels - updated 12:40` |
 | Footer status, cached | `1,204 channels - cached 12:40 - offline` |
 | Footer status, playing | `ó° Sky Sports Main Event - s stop` |
+| Footer status, playing behind live (M5-01) | `ó° 1:32 behind live - Sky Sports Main Event - s stop`; paused, `ó° paused - 0:42 behind live - Sky Sports Main Event - s stop`. The state LEADS the line: the status elides on the right, and a name can lose its tail where a number cannot (F-UX-5) |
 | Footer status, playing behind live (M5-01) | `1:32 behind live`; paused: `paused · 0:42 behind live` (`Model.playbackStateText`; empty at live, absent until the player reports a zero point) |
 | Footer status, transient | `Refreshing...`, `Refreshed - 1,204 channels`, `Stopped`, `Added to Favorites`, `Removed from Favorites`, `Removed from Recent` |
 | Footer status, rewind transient (M5-01, 3 s) | `Back 10 s · 1:32 behind live`; at the floor `As far back as it goes · 6:52 behind live`; on `g` at the edge `Live`, or after a deep rewind `At the edge of the buffer · 0:27 behind live` |
@@ -1017,7 +1025,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 |---|---|
 | Search mode | `Enter play - Up/Down move - Left/Right group - Tab keys - Esc close` |
 | Search mode, query non-empty | `Enter play - Up/Down move - Left/Right narrow - Tab keys - Esc clear` |
-| List mode | `j/k move - h/l group - Enter play - Space preview - f favorite - s stop - x hide group - c pause - b back - w forward - g live - t tracks - p pip - r refresh - / search - Ctrl+G wall - 0-9 channel - o sources` (the fullest form: `x` is silent in Recent and Favorites, `c`/`t` need something playing, `b` needs something playing AND a non-empty range read (`o.playing && o.canRewind`), `w` and `g` need the player to be at least `Model.BEHIND_LIVE_SHOW_S` (2 s) behind live, `p` needs Hyprland, `0-9` needs a numbered playlist). The `?` map picks the three rewind keys up from the same table. **This row has drifted four times** -- it was missing `p`, `Ctrl+G` and `0-9` before this release added `x` and `t` to the footer -- because it is a transcription of `Model.footerHints` and nothing compares the two. Read the function, not this row, if they ever disagree again.
+| List mode | the fullest row is 19 pairs behind live (`j/k move` first, `? help` last, `i detail` and the three rewind pairs among them) and `Model.footerHints` is the one place it is spelled; `tests/Model.test.js` pins it (the F-UX-4 checks) and `Model.fitFooterHints` drops pairs by `Model.FOOTER_DROP_ORDER` -- `o sources`, `Ctrl+G wall`, `r refresh`, `p pip`, `s stop`, `f favorite`, `Space preview`, then `w forward`, `g live`, `b back` -- until the row fits the card. A transcription here drifted twice (it omitted `i detail` and `? help`), so there is none. |
 | Empty states | `r retry - o sources - Esc close` (not configured, error; `r retry` is dropped when the configured value is invalid and `o sources` only when a source history exists); `Esc close` (loading). Since v0.2.0 the not-configured state is the Sources first-run form, see `UX-SOURCES.md` 1.2 and 5.3, which is authoritative for these hints |
 
 Key names and verbs both render at opacity 0.7 (ruling SG2). **They used to
@@ -1053,7 +1061,7 @@ Bar tooltips (`bar.showTooltip`):
 | Idle, ready | `IPTV - click to open the guide` |
 | Not configured | `IPTV - no playlist configured` |
 | Playing | `Playing Sky Sports Main Event` (full name, untruncated) |
-| Playing behind live, or paused (M5-01) | the Playing tooltip, then `Model.playbackStateText` (`1:32 behind live` / `paused · 0:42 behind live`), then the window from the last read, `up to 6:52 back`, joined by `Model.SEP`. The window is the player's last `history` reading, never a promise: `up to 0:07 back` on a channel with seven seconds of cache |
+| Playing behind live, or paused (M5-01) | the Playing or Paused tooltip, then a second line: the number (`1:32 behind live`; while paused `0:42 behind live`, the word is on the first line -- F-UX-3), then the window from the last read, `up to 6:52 back`, joined by `Model.SEP`. The window is the player's last `history` reading, never a promise: `up to 0:07 back` on a channel with seven seconds of cache |
 | Error, not playing | `IPTV - playlist error, open the guide` |
 | Refreshing | `IPTV - refreshing playlist...` |
 

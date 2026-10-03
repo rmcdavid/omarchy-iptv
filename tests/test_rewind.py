@@ -579,12 +579,16 @@ class SeekVerbTest(RewindPlayerTestCase):
         self.assertNotIn("$", server.osd[0][0])
 
     def test_by_and_live_are_exclusive_and_one_is_required(self):
-        # argparse exits 2 (EXIT_USAGE); in-process that is a SystemExit.
+        # argparse exits 2 (EXIT_USAGE); in-process that is a SystemExit --
+        # and with a player there, usage errors reach it with nothing: no
+        # connection, no command. (The first version asserted this without
+        # starting a player, which compared [] with [], the review found.)
+        server = self.playing()
         for argv in (("--by", "-10", "--live"), (), ("--by", "ten"), ("--by", "-10.5")):
             with self.assertRaises(SystemExit) as raised:
                 self.seek(*argv)
             self.assertEqual(raised.exception.code, 2, argv)
-        self.assertEqual(self.seeks_sent() if self.server else [], [])
+        self.assertEqual(server.commands, [])
 
 
 class RewindInOtherRepliesTest(RewindPlayerTestCase):

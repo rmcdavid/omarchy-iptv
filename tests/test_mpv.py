@@ -500,6 +500,22 @@ class StopTest(MpvTestCase):
 
 
 class StatusTest(MpvTestCase):
+    def test_media_title_is_redacted_like_every_provider_string(self):
+        # F-SINK-12 (review of the M5-01 round, pre-existing since M2-02):
+        # media-title is the channel name the helper set through
+        # --force-media-title, provider text, and it went out on stdout
+        # verbatim. A name that carries a credentialed URL reaches the
+        # sink as scheme and host only, like everything else the helper
+        # prints.
+        props = dict(STATUS_PROPS)
+        props["media-title"] = "Sky One see http://user:s3cret@provider.example.test/live/tok/x.m3u8 now"
+        self.start(props=props)
+        code, payload, stdout, stderr = run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["mediaTitle"], "Sky One see http://provider.example.test now")
+        for secret in ("s3cret", "user:", "/live/", "tok", "x.m3u8"):
+            self.assertNotIn(secret, stdout + stderr)
+
     def test_reports_host_never_path(self):
         self.start(props=STATUS_PROPS)
         code, payload, stdout, stderr = run("status", "--socket", self.sock, "--ipc-timeout", "1")

@@ -3356,7 +3356,12 @@ def cmd_status(args: argparse.Namespace) -> int:
             "ok": True,
             "kind": "status",
             "running": True,
-            "mediaTitle": values["media-title"] if isinstance(values["media-title"], str) else None,
+            # The player's media-title is the channel name the helper set
+            # through --force-media-title: provider text. It reaches stdout,
+            # which is a sink (rule 5), so it is redacted like every other
+            # provider string -- it had gone out verbatim since M2-02 and no
+            # consumer in the shell reads it (F-SINK-12, from the review).
+            "mediaTitle": redact_urls(values["media-title"]) if isinstance(values["media-title"], str) else None,
             "pathHost": (url_host(path_value) or ("local file" if path_value.startswith("/") else "")) if isinstance(path_value, str) and path_value else None,
             "paused": bool(values["pause"]) if values["pause"] is not None else None,
             "idle": bool(values["idle-active"]) if values["idle-active"] is not None else None,
@@ -5366,7 +5371,12 @@ def rewind_view(position: float | None, cache: dict[str, Any], zero: dict[str, A
         return None
     current = range_for(cache.get("seekableRanges") or [], position)
     behind = None
-    if zero is not None:
+    # Only inside a range: with a valid node and a position outside every
+    # range (a stream re-opening, a discontinuity) the formula read -36 on
+    # the live-pass tree, and the invariant the shell relies on is "never
+    # negative, or null" (review finding against design 2.2). No range, no
+    # number.
+    if zero is not None and current is not None:
         behind = round3((wall - float(zero["wall0"])) - (position - float(zero["pos0"])))
     return {
         "position": round3(position),

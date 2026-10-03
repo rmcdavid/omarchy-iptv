@@ -575,7 +575,9 @@ ck "R15 and the replies were real (ok true on the last)" '[[ "$(rf "d[\"ok\"]" "
 # The floor (player-scenario.sh's rule): assert how many assertions ran so a
 # check that stops executing turns the run red instead of shortening it.
 # Recount after adding or removing one:
-#   grep -cE '^(is|ck) ' scripts/dev-harness/rewind-scenario.sh  plus the two R6 blocks.
+#   grep -cE '^(is|ck) ' scripts/dev-harness/rewind-scenario.sh  plus the two R6
+#   blocks, MINUS the floor line itself below (it is an `is` line the grep
+#   counts and the counter has not yet reached): 77 + 2 - 1 = 78.
 EXPECTED_CHECKS=78
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"
 

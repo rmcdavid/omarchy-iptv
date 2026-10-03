@@ -15,7 +15,7 @@ You can wind live TV back.
   release, on the settings this plugin already passes; nobody had asked it
   to seek inside that buffer, and the property we read to decide whether it
   could said no on every channel while 31 of the 32 channels that played
-  rewound a full twenty seconds anyway. How far back you can go is per
+  rewound eighteen to twenty of the twenty asked anyway. How far back you can go is per
   channel, because the buffer is a fixed size in bytes and a channel's
   bitrate decides how many seconds that holds: on the public list this was
   measured against it ran from about two and a half minutes to over eighteen,

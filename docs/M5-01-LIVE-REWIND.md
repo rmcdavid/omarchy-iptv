@@ -233,13 +233,17 @@ paused behind      ⏸ 7 BBC One -5:12        (counting up)
 
 One composer, `Model.playbackStateText({paused, behindS})`, yields `""`,
 `1:32 behind live` or `paused · 0:42 behind live`; the footer status line
-(`Model.footerStatus` takes it as `playbackState` and rides it after the
-name), the bar tooltip (`Model.barTooltip`, `behindS` and `historyS`) and the
+(`Model.footerStatus` takes it as `playbackState` and LEADS the line with
+it, before the name: the status elides on the right, a name can lose its
+tail, a number cannot -- F-UX-5, from the review), the bar tooltip (`Model.barTooltip`, `behindS` and `historyS`) and the
 bar's accessible name (`Model.barAccessibleName`, spoken through
 `Model.spokenSpan`: "1 minute 32 seconds behind live") all call it. The 3 s
 transient is `Model.seekTransientText(reply, fallback)` and the glyph is
 `Model.barGlyph({..., behindLive})`: every sentence and symbol the feature
-shows is a function a test calls (rule 12), none is composed in QML. The tooltip adds the window from the last read:
+COMPOSES is a function a test calls (rule 12), none is composed in QML; the
+one fixed string the guide shows by itself, "Nothing to rewind yet", is a
+copy-table literal like every other transient's, not a composition. The
+tooltip adds the window from the last read:
 `up to 6:52 back`. On a channel whose window is 7 s the number is 0:07, not a
 promise.
 
@@ -271,6 +275,15 @@ a path the plugin never listed, which is `--stream-record`'s class, and that
 option is already reserved. `--cache-on-disk` itself is a user choosing their
 own disk, the PO-5 shape, and gets the PO-10 footer warning: "writes the
 stream to disk while it plays".
+
+The reservation guards the plugin's SETTING surface -- `mpvArgs`, which a
+marketplace listing, a pasted snippet or a host setting could carry -- and
+not the user's own `~/.config/mpv/mpv.conf`, which the plugin's player
+reads as any mpv does. A user who writes `demuxer-cache-unlink-files=no`
+in their own config has chosen it in a file this project never opens
+(CLAUDE.md: `~/.config` belongs to the user), the way they could already
+write `stream-record` there. Raised by the review's sinks lens on
+2026-10-03; stated here rather than changed.
 
 ### 2.7 The sentences that change
 
@@ -458,6 +471,18 @@ files, could not. Each is in the section it amends; this is the list.
    Six node checks were seen red against the helper lane's Model.js.
 5. **The tooltip's window line needs a window**: `up to 0:00 back` in the
    first instant after a zap promised what `b` cannot do.
+8. **F-RWD-16, no zero point without a range** (2.2), from the live pass.
+9. **F-RWD-17, the verb's argument is the size of the step** (2.4), from
+   the review's seek-path lens: `seekBy` had handed the coalescer the
+   press's sign and the 10 s constant for every request, so `back 30` was
+   `back 10`; with it `seekPending` became a real, the coalescer's cap one
+   step below the history at least, the verbs' argument read by
+   `Model.seekVerbSeconds`, a press on a stopping player refused, and a
+   reply after stop() ignored.
+10. **The transient's refused branch precedes the edge branch** (2.5): a
+   refused `live` had said "At the edge of the buffer"; it says "Nothing
+   moved" with the number, and the tooltip's window line needs a whole
+   second (never `up to 0:00 back`).
 7. **F-RWD-15, the read that decides waits for the seek to execute.** The
    reply to mpv's `seek` command means queued; the playloop executes it
    afterwards, and a `time-pos` read sent at once can be answered first and

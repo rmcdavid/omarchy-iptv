@@ -8837,8 +8837,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.footerStatus({ count: 5, playingName: "Arte HD", playbackState: null }),
      Model.footerStatus({ count: 5, playingName: "Arte", playbackState: "1:32 behind live", transient: "Stopped" }),
      Model.footerStatus({ count: 5, playingName: "", playbackState: "1:32 behind live", lastUpdated: "12:40" })],
-    [Model.GLYPHS.play + " Arte HD" + Model.SEP + "1:32 behind live" + Model.SEP + "s stop",
-     Model.GLYPHS.play + " Arte HD" + Model.SEP + "paused" + Model.SEP + "0:42 behind live" + Model.SEP + "s stop",
+    [Model.GLYPHS.play + " 1:32 behind live" + Model.SEP + "Arte HD" + Model.SEP + "s stop",   // the state leads (F-UX-5)
+     Model.GLYPHS.play + " paused" + Model.SEP + "0:42 behind live" + Model.SEP + "Arte HD" + Model.SEP + "s stop",
      Model.GLYPHS.play + " Arte HD" + Model.SEP + "s stop",
      Model.GLYPHS.play + " Arte HD" + Model.SEP + "s stop",
      Model.GLYPHS.play + " Arte HD" + Model.SEP + "s stop",
@@ -8846,7 +8846,23 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      "5 channels" + Model.SEP + "updated 12:40"])
   check("M5-01 integration: the state the footer shows is the composer's own line, so footer, bar and tooltip cannot disagree",
     Model.footerStatus({ count: 5, playingName: "Arte", playbackState: Model.playbackStateText({ paused: true, behindS: 42 }) }),
-    Model.GLYPHS.play + " Arte" + Model.SEP + "paused" + Model.SEP + "0:42 behind live" + Model.SEP + "s stop")
+    Model.GLYPHS.play + " paused" + Model.SEP + "0:42 behind live" + Model.SEP + "Arte" + Model.SEP + "s stop")
+  // F-UX-4: the fullest playing row behind live, at the widest card's budget
+  // (107 characters as the review's UX lens derived it from the Style tokens
+  // at the caption size). Before M5-01 the irreducible row was 99; the three
+  // rewind pairs made it 129 and nothing could be dropped. They are droppable
+  // last, so the row fits again and the previous order is untouched.
+  const fullestBehind = Model.footerHints({ mode: "list", playing: true, canRewind: true, behindLive: 92, hasNumbers: true, sourcesExist: true,
+                                            favorite: true, pipAvailable: true, hasPreview: true, hasDetail: true, hasLogos: true, epgLoaded: true })
+  check("F-UX-4: the fullest row behind live has the three rewind pairs and does not fit the widest card as it stands",
+    [fullestBehind.map(p => p[1]).filter(v => v === "back" || v === "forward" || v === "live").length, Model.footerHintWidth(fullestBehind) > 107], [3, true])
+  check("F-UX-4: fitted to the widest card it fits, and j/k move survives at the head",
+    [Model.footerHintWidth(Model.fitFooterHints(fullestBehind, 107)) <= 107, Model.fitFooterHints(fullestBehind, 107)[0][1]], [true, "move"])
+  check("F-UX-4: the rewind pairs go last -- a budget that keeps them has already dropped the seven before them",
+    [Model.FOOTER_DROP_ORDER.slice(-3), Model.FOOTER_DROP_ORDER.slice(0, 7),
+     Model.fitFooterHints(fullestBehind, 150).map(p => p[1]).filter(v => ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview"].indexOf(v) !== -1).length > 0 ||
+       Model.fitFooterHints(fullestBehind, 150).map(p => p[1]).indexOf("back") !== -1],
+    [["forward", "live", "back"], ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview"], true])
   // 4. The 3 s transient, worded as design 2.5, from a function and not from
   // 25 lines of QML. The replies are the helper's schema (2.1).
   const landed = { ok: true, kind: "seek", running: true, mode: "by", requested: -10, applied: -10, clamped: false, clampedTo: null,
@@ -8871,11 +8887,21 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.seekTransientText(withRewind({ requested: 10, applied: 4, clamped: true, clampedTo: 417.5, atEdge: true }, { behindLive: 0 }), "busy"),
      Model.seekTransientText(withRewind({ requested: -10, applied: 0, refused: true }, { behindLive: 412 }), "busy"),
      Model.seekTransientText(withRewind({ requested: 10, applied: 0, refused: true }, { behindLive: 0.1 }), "busy"),
-     Model.seekTransientText(withRewind({ requested: 10, applied: 0, refused: true }, { behindLive: 30 }), "busy")],
+     Model.seekTransientText(withRewind({ requested: 10, applied: 0, refused: true }, { behindLive: 30 }), "busy"),
+     // a refused `live` did not reach the edge (review finding): the fact, not the edge
+     Model.seekTransientText(withRewind({ mode: "live", requested: 300, applied: 0, refused: true, atEdge: true }, { behindLive: 300 }), "busy"),
+     // the three rangeless / no-player shapes the helper really produces (review, UX lens)
+     Model.seekTransientText({ ok: true, kind: "seek", running: true, mode: "by", requested: -10, applied: 0, refused: true, atFloor: false, atEdge: false,
+                               rewind: { position: 0, floor: null, ceiling: null, history: null, ahead: null, behindLive: null, zeroed: false, paused: false, pausedForCache: false, entryId: 3 } }, "busy"),
+     Model.seekTransientText({ ok: true, kind: "seek", running: true, mode: "live", requested: null, applied: 0, refused: true, atFloor: false, atEdge: false,
+                               rewind: { position: 0, floor: null, ceiling: null, history: null, ahead: null, behindLive: null, zeroed: false, paused: false, pausedForCache: false, entryId: 3 } }, "busy"),
+     Model.seekTransientText({ ok: true, kind: "seek", running: false, mode: "by", requested: -10, applied: 0, refused: true, atFloor: false, atEdge: false, rewind: null }, "busy")],
     ["As far back as it goes" + Model.SEP + "6:52 behind live", "As far back as it goes" + Model.SEP + "6:52 behind live",
      "As far back as it goes" + Model.SEP + "6:52 behind live", "As far back as it goes",
      "Live", "At the edge of the buffer" + Model.SEP + "0:27 behind live", "Live",
-     "As far back as it goes" + Model.SEP + "6:52 behind live", "Live", "At the edge of the buffer" + Model.SEP + "0:30 behind live"])
+     "Nothing moved" + Model.SEP + "6:52 behind live", "Nothing moved", "Nothing moved" + Model.SEP + "0:30 behind live",
+     "Nothing moved" + Model.SEP + "5:00 behind live",
+     "Nothing moved", "Nothing moved", "Nothing playing"])
   check("M5-01 integration: a reply that is not ok is its reason, or the fallback, never a verdict about the floor",
     [Model.seekTransientText({ ok: false, kind: "seek", error: { code: "not_running" } }, "busy"),
      Model.seekTransientText({ ok: false, kind: "seek", code: "nothing_playing", error: { code: "nothing_playing" } }, "busy"),
@@ -8898,11 +8924,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.behindLiveNow({ rewind: rested, nowSec: 1000 })],
     [102.4, 102.4, 92.4, 92.4])
   // 6. The tooltip's window line needs a window.
-  check("M5-01 integration: the tooltip says `up to m:ss back` only once there is a window, never `up to 0:00 back`",
+  check("M5-01 integration: the tooltip says `up to m:ss back` only from a whole second of window, so never `up to 0:00 back`",
     [Model.barTooltip({ playing: true, name: "BBC One", behindS: 0, historyS: 0 }),
-     Model.barTooltip({ playing: true, name: "BBC One", behindS: 0, historyS: 0.4 }).split("\n")[1],
+     Model.barTooltip({ playing: true, name: "BBC One", behindS: 0, historyS: 0.4 }),
+     Model.barTooltip({ playing: true, name: "BBC One", behindS: 0, historyS: 1 }).split("\n")[1],
      Model.barTooltip({ playing: true, name: "BBC One", behindS: 92, historyS: 0 })],
-    ["Playing BBC One", "up to 0:00 back", "Playing BBC One\n1:32 behind live"])
+    ["Playing BBC One", "Playing BBC One", "up to 0:01 back", "Playing BBC One\n1:32 behind live"])
 })()
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")

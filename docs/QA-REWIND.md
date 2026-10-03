@@ -217,12 +217,23 @@ The stub's existing consumer still passes on the changed file:
 phase A, no display) **20 pass, 0 fail**.
 
 What the stub does NOT model, deliberately: the 1-2 s keyframe landing
-above a floor target (the immediate read echoes the target, which is what
-M2 measured 72 of 72; the decoded drift is later), the `log-message` event
-on a refusal (stricter, not looser), underruns, and the 5 s start-up
-before the first `time-pos` (`STUB_STARTUP_S`, default 0 so the existing
-scenarios are not slowed). A service test that needs the start-up gap
-sets the variable.
+above a floor target (the decoded drift after the landing, F-RWD-8),
+underruns, and the 5 s start-up before the first `time-pos`
+(`STUB_STARTUP_S`, default 0 so the existing scenarios are not slowed). A
+service test that needs the start-up gap sets the variable.
+
+**Corrected after integration (2026-10-03).** This section first said the
+stub emits no `log-message` on a refusal and that the immediate read
+echoes the target. Both were overtaken by F-RWD-15: mpv's reply to `seek`
+means queued, the position moves and the `seek` event goes out afterwards,
+and a dropped seek is followed by the error-level refusal line on the
+connections that subscribed. The stub now does exactly that -- the move is
+deferred until the reply has been written, the `seek` event follows a
+landed seek, the refusal line follows a dropped one only on a subscribed
+connection -- and its self-test is 17 cases (14 here, two for the
+followups, one for the ordering), each seen red by a named mutation
+(`docs/QA-RESULTS.md`, the review round). The six mutations in the table
+above were run against the 14-case file.
 
 ## 6. The run on 2d7df1f plus this lane's files (red, as required)
 

@@ -3676,7 +3676,15 @@ var WALL_KEY = "Ctrl+G"
 // unreachable given this list, no mutation could redden them, and dead
 // defence that no test can see is what this project keeps finding in its own
 // instruments. The reachable invariant is asserted instead.
-var FOOTER_DROP_ORDER = ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview"]
+// M5-01 added `b back`, `w forward` and `g live` to the playing row behind
+// live, 30 characters, and the review's UX lens measured the irreducible
+// row at 129 against the widest card's 107: nothing could be dropped any
+// more and `j/k move` elided off the left (F-UX-4). The three are droppable
+// LAST, after everything the previous order gave up, because behind live
+// they are the keys that act; on the widest card today all three go and
+// the row is the pre-M5 nine, with the state line and the `?` map still
+// naming them.
+var FOOTER_DROP_ORDER = ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview", "forward", "live", "back"]
 
 // The rendered width of a hint row, in characters, composed the way
 // footerHintMarkup composes it (the font tags carry no width).
@@ -4858,9 +4866,15 @@ function seekTransientText(reply, fallback) {
     var reason = statusReason(r)
     return reason !== "" ? reason : str(fallback)
   }
+  // Refused by the player -- the seek was issued and nothing moved (spike
+  // 11.4) -- BEFORE the edge and live branches: a refused `live` did not
+  // reach the edge, and saying "At the edge of the buffer" for it was the
+  // review's finding. The sentence is the fact: nothing moved, and how far
+  // behind the viewer still is.
+  // No player behind the socket: the helper says running false and refused.
+  if (r.running === false) return pipStatusText("nothing_playing")
+  if (r.refused === true) return "Nothing moved" + tail
   if (r.mode === "live" || r.atEdge === true) return edgeText
-  // Refused by the player: nothing moved, in whichever direction was asked.
-  if (r.refused === true) return finiteOr(r.requested, 0) > 0 ? edgeText : floorText
   var applied = Math.round(finiteOr(r.applied, 0))
   if (applied < 0) return "Back " + String(-applied) + " s" + tail
   if (applied > 0) return "Forward " + String(applied) + " s" + tail
@@ -7337,10 +7351,10 @@ function barTooltip(opts) {
     var window = finiteOr(o.historyS, 0)
     var extra = []
     if (state !== "") extra.push(state)
-    // Only once there is a window: `b` is hinted on a non-empty range, and
-    // "up to 0:00 back" in the first instant after a zap would promise what
-    // the key cannot do.
-    if (window > 0) extra.push("up to " + clockSpan(window) + " back")
+    // Only once there is a whole second of window: `b` is hinted on a
+    // non-empty range, and "up to 0:00 back" in the first instant after a
+    // zap (clockSpan of 0.4 s) would promise what the key cannot do.
+    if (window >= 1) extra.push("up to " + clockSpan(window) + " back")
     if (extra.length > 0) line += "\n" + extra.join(SEP)
   }
   else if (o.refreshing) line = "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
@@ -7476,9 +7490,13 @@ function footerStatus(opts) {
   // 0:42 behind live` -- rides the playing line after the name, from the
   // same composer the bar reads (playbackStateText). "" at live adds nothing,
   // so the line the footer has shown since M1 is unchanged there.
+  // The state LEADS the line, before the name: the footer status elides on
+  // the right, a channel name can lose its tail and stay useful (the bar's
+  // rule), and a number cannot. Composed after the name it was the first
+  // casualty of a long name (F-UX-5, the review's UX lens).
   if (str(o.playingName) !== "") {
     var state = str(o.playbackState)
-    return GLYPHS.play + " " + str(o.playingName) + (state !== "" ? SEP + state : "") + SEP + "s stop"
+    return GLYPHS.play + " " + (state !== "" ? state + SEP : "") + str(o.playingName) + SEP + "s stop"
   }
   if (o.refreshing) return "Refreshing" + ELLIPSIS
   if (footerDegraded(o)) return footerCounts(o)

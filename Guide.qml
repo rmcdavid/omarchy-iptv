@@ -512,6 +512,12 @@ Item {
   // (something plays and the last range read is non-empty), `behindLiveS` is
   // null until the player has a zero point -- absent, never zero (D-DEAD-1).
   readonly property bool canRewind: serviceReady && service.canRewind === true
+  // Whether the player has said anything about its window yet. "Not yet
+  // rewindable" is a verdict only once a range has been read; before that
+  // (the first seconds after a zap) the key falls through to the service,
+  // which spawns the helper to decide, the way the IPC verbs do (design
+  // 12.1) -- the reply's transient then says what happened.
+  readonly property bool rewindKnown: serviceReady && service.rewind !== undefined && service.rewind !== null
   readonly property var behindLiveS: serviceReady && service.behindLive !== undefined ? service.behindLive : null
   readonly property bool pausedNow: serviceReady && service.paused === true
   // "" at live, `1:32 behind live`, or `paused · 0:42 behind live`. ONE
@@ -2240,7 +2246,7 @@ Item {
   function seekBack() {
     if (!root.serviceReady || typeof root.service.seekBy !== "function") return
     if (root.playingId === "") { root.showTransient(root.copy.pauseNothing); return }
-    if (!root.canRewind) { root.showTransient(root.copy.rewindNotReady); return }
+    if (!root.canRewind && root.rewindKnown) { root.showTransient(root.copy.rewindNotReady); return }
     var reply = root.service.seekBy(-Model.REWIND_STEP_S)
     // The one refusal decided before any process runs: the last reply said
     // the floor is here. Said at once, with the number it was said with.
@@ -2250,14 +2256,14 @@ Item {
   function seekForward() {
     if (!root.serviceReady || typeof root.service.seekBy !== "function") return
     if (root.playingId === "") { root.showTransient(root.copy.pauseNothing); return }
-    if (!root.canRewind) { root.showTransient(root.copy.rewindNotReady); return }
+    if (!root.canRewind && root.rewindKnown) { root.showTransient(root.copy.rewindNotReady); return }
     root.service.seekBy(Model.REWIND_STEP_S)
   }
 
   function seekLive() {
     if (!root.serviceReady || typeof root.service.seekLive !== "function") return
     if (root.playingId === "") { root.showTransient(root.copy.pauseNothing); return }
-    if (!root.canRewind) { root.showTransient(root.copy.rewindNotReady); return }
+    if (!root.canRewind && root.rewindKnown) { root.showTransient(root.copy.rewindNotReady); return }
     root.service.seekLive()
   }
 

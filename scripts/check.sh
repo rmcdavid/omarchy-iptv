@@ -172,8 +172,8 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # to nothing would scan nothing and exit 0 if the guard did not refuse that
 # itself; this is the second line of defence, in the gate's own vocabulary.
 TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
-# The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-16}
+# The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15, 17 with the ordering case the review asked for.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-17}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
