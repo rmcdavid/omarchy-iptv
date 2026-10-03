@@ -929,6 +929,26 @@ ShellRoot {
             var id = c ? String(c.tvgId || "") : ""
             return Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec })
           })(),
+          // The panel's fields as it draws them. The model's `fields` array
+          // was removed when the review found the panel hardcoding the order
+          // in QML and drawing no labels, so the named keys ARE the contract
+          // now; this reads them in the order Model.EPG_DETAIL_FIELDS
+          // declares, which is the order the panel is pinned to.
+          detailFields: (function () {
+            var d = null
+            if (g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0) {
+              var c = g.currentRows[g.cursorIndex]
+              var id = c ? String(c.tvgId || "") : ""
+              d = Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec })
+            }
+            if (!d) return []
+            var out = []
+            for (var i = 0; i < Model.EPG_DETAIL_FIELDS.length; i++) {
+              var key = Model.EPG_DETAIL_FIELDS[i][0]
+              if (d[key] !== undefined && String(d[key]) !== "") out.push(key)
+            }
+            return out
+          })(),
           keyboardMap: (function () {
             var secs = Model.keyboardMap(g.hintOpts !== undefined ? g.hintOpts : {})
             return (secs || []).map(function (s) {

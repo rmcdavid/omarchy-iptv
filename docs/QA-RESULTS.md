@@ -10273,3 +10273,37 @@ the list that cue is gone. The case for deleting it: the panel is already the
 cursor row's panel, and a line that repeats the row is noise. Either way the
 field should not sit there composed, redacted and undrawn, which is what a
 check now pins so it cannot drift while the question is open.
+
+### Verified again after the repairs, 2026-10-03
+
+Frozen acceptance on the repaired tree: **matched 227 of 1,453**, split 0 by
+id, 0 by feed base, 227 by name -- unchanged by every repair, which is the
+point of running it again. All 227 now-programmes carry a description and a
+category; 108 carry an episode, the rest correctly carrying none once dates
+and provider ids stopped being accepted as episode numbers (D-EPG-3).
+
+Live, through the harness on the real guide:
+
+```
+row     Movies - Now: The Ring - Next: The Ring Two
+panel   The Ring | 02:00 - 04:30 | description, category
+next    Next: The Ring Two at 04:30
+map     7 sections
+```
+
+The keyboard map is seven sections rather than six because the review found
+one merged "Panels" section unable to say that Enter selects in the track
+picker and nowhere else. Both panels still open and close on their own keys,
+and the close loop the review found is fixed where it could be observed:
+pressing the help key from search mode opens the map, and pressing it again
+returns to search instead of reopening the map underneath itself.
+
+One instrument change came out of this run. The harness read the panel
+through the model's `fields` array, which the repairs deleted after the
+review found the panel hardcoding its order in QML and drawing no labels, so
+the snapshot reported an empty panel for a panel that was drawing two fields.
+It now reads the named keys in the order `EPG_DETAIL_FIELDS` declares, which
+is the order the panel is pinned to. That is twice in one milestone that the
+instrument, not the product, was the thing reading blank -- F-HARNESS-2 was
+the first.
+
