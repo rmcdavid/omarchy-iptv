@@ -3,6 +3,53 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.10.0 (2026-10-03)
+
+The guide data works. It never had.
+
+### Fixed
+
+- **The programme guide never showed anything, on any playlist, in any
+  release.** If you set a guide URL, the plugin looked for channels whose id
+  matched the guide's exactly, and real playlists and real guides almost
+  never agree on ids: the list this was measured against carries ids from one
+  project and the guide carries the broadcaster's own, so nothing matched and
+  every row stayed blank. The plugin now also matches on the channel's NAME,
+  and ignores the parts of a name that say how a stream is encoded or where
+  it works -- `(1080p)`, `[Geo-blocked]` and the like -- because those are not
+  part of a channel's identity. On the list this was measured against, 1,453
+  channels, the guide went from showing **nothing** to showing **227
+  programmes**. A name is only matched when it is unique on both sides: a
+  programme on the wrong channel is worse than a blank row.
+- **A playlist that declares its own guide is now believed.** M3U files can
+  name their guide data; the plugin parsed that and ignored it. If you have
+  not set a guide URL of your own and your playlist names one, it is used,
+  and the Sources screen says it came from the playlist rather than pretending
+  you typed it.
+- **A guide description could carry a web address past the redaction.** The
+  text was shortened to fit and only then had its addresses stripped, so a
+  cut could leave a fragment behind, including a user name. The same mistake
+  was found and fixed at a second place, where the player's start-up messages
+  were cleaned one chunk at a time.
+
+### Added
+
+- **Press `i` on a channel to read what is on.** A panel over the list with
+  the programme's name, the channel it is on, when it runs, its category and
+  episode where the guide gives them, the description, and what is on next.
+  `Esc` closes it.
+- **Press `?` to see every key.** An overlay listing the whole keyboard, built
+  from the same tables the hint row is built from, so a key the plugin learns
+  cannot go missing from the list.
+
+### Changed
+
+- **The hint row at the bottom now shows what fits.** It was longer than the
+  widest card could draw and was being cut from the LEFT, which meant the
+  first thing to disappear was how to move around. It now drops the least
+  useful hints first, always keeps how to move and how to open the key list,
+  and leaves the rest to `?`.
+
 ## 0.9.3 (2026-10-02)
 
 A channel name that could make the shell fetch a picture.
