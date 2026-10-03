@@ -27,6 +27,16 @@ import "Model.js" as Model
 // Every service access for the Sources API is guarded so the guide still
 // loads against a service that lacks it.
 //
+// M4-02 and M4-04 (PLAN-M4.md (dev branch)): two more panels OVER the
+// list, both built on the M3-02 track-picker idiom rather than on a second
+// panel grammar -- a mode over the list, the card's scrim, a centered
+// BorderSurface, and Esc or the key that opened it to go back. Model.DETAIL_KEY
+// shows what Model.programmeDetail returns for the cursor row; Model.HELP_KEY
+// shows Model.keyboardMap, which is generated from the same tables the footer
+// hints are generated from, so a key added to the product cannot be missing
+// from the map. Neither panel moves the channel cursor, and neither composes a
+// string of its own: every character on screen is one the model returned.
+//
 // Host contract (shell.qml panel loader): `shell`, `manifest` and `service`
 // are injected after load; open(payloadJson)/close()/toggle() are called by
 // summon/hide/toggle. Dismiss through shell.hide(manifest.id) so the host's
@@ -81,10 +91,61 @@ Item {
   // request still queued behind another control, so no reply lands on a
   // panel that is gone.
   onInTracksChanged: if (!root.inTracks && root.serviceReady && typeof root.service.cancelTracks === "function") root.service.cancelTracks()
+  // ---- M4-02 / M4-04: the programme detail panel and the keyboard map.
+  // Two more modes over the list, with the picker's shape above: the list
+  // stays where it was under the scrim and the CHANNEL cursor is never
+  // touched, so Esc puts the user back exactly where they pressed the key.
+  readonly property bool inDetail: mode === "detail"
+  readonly property bool inHelp: mode === "help"
+  readonly property bool inPanel: inDetail || inHelp
+  // Which mode Esc returns to. Root-local, like `trackRowsFor` and
+  // `placeMark`: the map opens from SEARCH mode as well as list mode (see
+  // openHelp), so "back to list" is not enough, and the guide state's own
+  // `returnMode` belongs to Sources -- closeSources clears it, and a panel
+  // that borrowed it would hand Sources an empty one.
+  property string panelReturnMode: "list"
+  // The one argument Model.programmeDetail takes. The lane contract calls it
+  // `row`, and the row THE GUIDE DRAWS is a channel plus the guide entry it
+  // matched: the description, category and episode fields exist only on the
+  // epg-now record (Model.parseEpgNow), so a channel row on its own cannot
+  // answer this question. `entry` is undefined for a channel with no tvg-id
+  // and for one whose id matched nothing, which is 1,453 of 1,453 channels on
+  // the owner's own install until M4-01 lands (D-EPG-2).
+  readonly property var detailRow: {
+    var ch = root.rowAt(root.cursorIndex)
+    if (!ch) return null
+    var id = ch.tvgId !== undefined ? String(ch.tvgId) : ""
+    return { channel: ch, entry: id !== "" ? root.epgMap[id] : null, nowSec: root.nowSec }
+  }
+  // What the open panel renders. Recomputed on the 30 s clock tick as well as
+  // on the cursor, so an open panel follows the programme over a boundary
+  // instead of freezing on what was on air when the key was pressed.
+  //
+  // GATED ON THE PANEL BEING OPEN, which costs a reader one surprise and is
+  // worth it: `detailRow` changes on every cursor move and on every
+  // keystroke in search mode, and performance budget 7 is about exactly those
+  // two. Closed, this binding does no work at all. The consequence is that
+  // openDetail cannot ASK this property whether there is anything to show --
+  // it would always answer null -- so it calls Model.programmeDetail itself;
+  // see there.
+  readonly property var detail: root.inDetail && root.detailRow ? Model.programmeDetail(root.detailRow) : null
+  // A programme that ends while the panel is open leaves nothing to show.
+  // The picker's precedent (onPlayingChannelChanged closes it when the player
+  // stops) rather than an empty card that stays up: the panel is a view of
+  // something, and when the something is gone so is the view.
+  onDetailChanged: if (root.inDetail && !root.detail) root.closePanel()
+  // The sections of Model.keyboardMap, built from the same opts the footer
+  // hints are built from (see hintOpts), so the map describes the keys THIS
+  // screen has rather than a general list.
+  readonly property var keyMapSections: root.inHelp ? Model.keyboardMap(root.hintOpts) : []
+
   // The PanelKeyCatcher is live in the list-like modes only; search
   // mode, the forms and the confirm dialog block it (UX-SOURCES 2). The
-  // picker is list-like: j/k, Enter and Esc, nothing typed.
-  readonly property bool catcherLive: listMode || inSources || inTracks
+  // picker is list-like: j/k, Enter and Esc, nothing typed. So are the two
+  // M4 panels: j/k scroll, Esc leaves, and nothing typed reaches the list
+  // underneath -- which is also what makes Esc work in a map opened from
+  // search mode, where the catcher is otherwise blocked.
+  readonly property bool catcherLive: listMode || inSources || inTracks || inPanel
   readonly property string query: guide.query
   readonly property string scopeId: guide.scopeId
   readonly property string effectiveScope: Model.effectiveScope(scopeId, query)
@@ -234,6 +295,16 @@ Item {
     logosOff: "Channel logos off",
     pauseNothing: "Nothing is playing",
     tracksTitle: "Audio and subtitles",
+    // M4-02 / M4-04. These four are the ONLY strings the two panels draw
+    // that the plugin wrote: the two dialog titles, the two accessible
+    // names, and the transient that says why the detail key did nothing.
+    // Everything else on either panel is a string Model.programmeDetail or
+    // Model.keyboardMap returned. `detailNothing` is the picker's precedent
+    // (`pauseNothing` above): the key says why it declined rather than
+    // opening an empty card.
+    detailTitle: "Programme",
+    detailNothing: "No guide data for this channel",
+    helpTitle: "Keys",
     pauseBusy: "The player is busy" + Model.SEP + "try again",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
@@ -494,7 +565,11 @@ Item {
   // this repair set this flag alone and claimed, here and in UX 2.9, that
   // all three were restored -- so the note is split across the two
   // properties that actually do it, because the claim was the defect.
-  readonly property bool headerShowsSearch: guideMode || inTracks || firstRunHead
+  // M4-02 / M4-04 are panels over the list for the same reason, so the header
+  // they sit under keeps the same two halves (the query line here, the scope
+  // label in `headerRight`). Both are named, because the version of this
+  // repair that set one flag and claimed three is the comment above.
+  readonly property bool headerShowsSearch: guideMode || inTracks || inPanel || firstRunHead
   readonly property string headerTitle: {
     if (root.mode === "sourceEdit") return root.form && root.form.sourceId !== "" ? root.copy.editSourceTitle : root.copy.addSourceTitle
     if (root.mode === "sourceXtream") return root.copy.xtreamTitle
@@ -507,7 +582,7 @@ Item {
     // label blanked behind the scrim while the query line beside it did not
     // -- and the repair that restored the query line wrote a sentence in UX
     // 2.9 saying both had been restored. Half a repair with a whole claim.
-    if (root.guideMode || root.inTracks) return root.scopeLabelText
+    if (root.guideMode || root.inTracks || root.inPanel) return root.scopeLabelText
     if (root.inSources || root.confirmOpen) return Model.sourcesHeaderCount(root.sourceCount)
     return ""
   }
@@ -720,11 +795,16 @@ Item {
   // no longer stand out from the verbs beside them. UX.md (dev branch):756-757 is
   // amended to say so.
   readonly property string verbColor: Util.alpha(root.foreground, 0.7).toString()
-  readonly property string footerHintText: {
+  // M4-04: lifted out of footerHintText's binding so Model.keyboardMap is
+  // handed the SAME options object Model.footerHints is handed. The map is
+  // built from the hint tables, so an option that reaches one and not the
+  // other would let the two disagree about a key -- which is the drift the
+  // interaction document has already recorded four times.
+  readonly property var hintOpts: {
     var empty = ""
     if (root.emptyKind === "loading") empty = "loading"
     else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service") empty = "error"
-    var pairs = Model.footerHints({ mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form,
+    return { mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form,
       hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null,
       // M2-05 section 5: `p pip` only where it can do something.
       pipAvailable: root.pipAvailable,
@@ -744,7 +824,11 @@ Item {
       // M3-01: `x hide group` / `x unhide` is decided by the same table the
       // key dispatches on, from the cursor row and the current scope.
       scopeId: root.scopeId, channel: root.rowAt(root.cursorIndex),
-      state: root.serviceReady ? root.service.userState : null })
+      state: root.serviceReady ? root.service.userState : null }
+  }
+
+  readonly property string footerHintText: {
+    var pairs = Model.footerHints(root.hintOpts)
     // The composer is Model.footerHintMarkup so the F-TEXT-2 check in the
     // node suite calls the function that ships (rule 12), not a copy.
     return Model.footerHintMarkup(pairs, root.keyColor, root.verbColor)
@@ -1475,6 +1559,11 @@ Item {
   // chain -- cancel it, and do not fall through to clearing the query or
   // closing the guide. Model.onEscape is untouched.
   function handleEscape() {
+    // M4-02 / M4-04 first: an open panel closes back to the mode it was
+    // opened from before anything else gets to look at the query. Without
+    // this, Esc on a map opened from search mode with an empty query would
+    // reach Model.onEscape's last branch and DISMISS the whole guide.
+    if (root.inPanel) { root.closePanel(); return }
     if (root.listMode && root.cancelNumberEntry()) return
     root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
   }
@@ -1497,6 +1586,9 @@ Item {
   // Keys both modes share and PanelKeyCatcher does not consume:
   // PgUp/PgDn, Home/End, Delete. In Sources they drive the source cursor.
   function handleSharedKey(event) {
+    // M4-02 / M4-04: in an open panel these keys scroll it, and every one of
+    // them is swallowed either way so none of them acts on the list behind.
+    if (root.inPanel) return root.handlePanelKey(event)
     // M3-02: Home/End jump over the picker's choosable rows; the page keys
     // and Delete have nothing to do there and are swallowed rather than
     // reaching the list underneath.
@@ -1572,6 +1664,11 @@ Item {
     // letter cannot be a command here without breaking typing.
     if (event.key === Qt.Key_S && event.modifiers === Qt.ControlModifier) { root.saveCurrentSearch(); return true }
     if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return false
+    // M4-04: the keyboard map, on the screen the guide OPENS on, and only
+    // while the query is empty -- the reasoning is on openHelp. It sits here,
+    // after the modifier guard and immediately before the branch that would
+    // otherwise append it, so that is the only branch it takes anything from.
+    if (root.query === "" && event.text === Model.HELP_KEY) { root.openHelp(); return true }
     if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
       root.setQuery(root.query + event.text)
       return true
@@ -1594,6 +1691,13 @@ Item {
     else if (action === "pip") root.togglePip()
     else if (action === "pause") root.togglePause()
     else if (action === "tracks") root.openTracks()
+    // M4-02 / M4-04. Dispatched on the answer, like every letter above: the
+    // key that means "detail" and the key that means "help" are
+    // Model.DETAIL_KEY and Model.HELP_KEY, named once in the same table that
+    // Model.keyboardMap reads, so the map cannot describe a letter this
+    // handler does not act on.
+    else if (action === "detail") root.openDetail()
+    else if (action === "help") root.openHelp()
     else if (action === "sources") root.openSources()
     else if (action === "search") {
       root.swallowKey = true
@@ -1792,7 +1896,11 @@ Item {
   // guide behind Sources is unconfigured by then.
   function onConfiguredFlip() {
     if (!root.opened || !root.serviceReady) return
-    if (!root.configured && root.guideMode) root.enterFirstRun()
+    // M4-02 / M4-04: a panel open over the guide counts as being in the
+    // guide here. openFirstRun changes the mode, which hides the panel by its
+    // own `visible` binding; without this the user would sit behind a panel
+    // over an unconfigured guide and never reach the first-run form.
+    if (!root.configured && (root.guideMode || root.inPanel)) root.enterFirstRun()
     else if (root.configured && root.firstRunHead && !root.formProbing) root.leaveToGuide()
   }
 
@@ -2106,6 +2214,113 @@ Item {
     if (sameChannel && cur && cur.kind === "track") return
     var home = Model.trackCursorHome(rows)
     if (home >= 0) root.guide = Model.withTrackCursor(root.guide, home)
+  }
+
+  // ---- M4-02 / M4-04: the two panels over the list.
+  //
+  // `i` is a bare letter, so it is a LIST-MODE key like f, s, r, p, c and t:
+  // in search mode it is query text and there is nothing to be done about
+  // that. The footer advertises it only where it works, which is what every
+  // other bare letter here does.
+  function openDetail() {
+    if (!root.listMode) return
+    // The picker's shape: the key says why it declined rather than opening a
+    // card with nothing in it. Model.programmeDetail is CALLED here, not read
+    // off `root.detail`, because that property is gated on the panel already
+    // being open -- reading it would answer null every time and the key would
+    // never open anything. Same function, same argument, so this guard and
+    // the panel cannot disagree about whether there is something to show.
+    if (!Model.programmeDetail(root.detailRow)) { root.showTransient(root.copy.detailNothing); return }
+    root.panelReturnMode = root.mode
+    root.setGuide(Model.withMode(root.guide, "detail"))
+    // The flickables outlive a close (only `visible` changes), so an open
+    // starts at the top rather than wherever the last one was left.
+    root.setPanelScroll(0)
+    root.refocus()
+  }
+
+  // `?` is the one key in this product that must work on the screen the user
+  // STARTS on, because its whole job is to tell a first-time user what the
+  // other keys are -- and the guide opens in search mode, where every
+  // printable character is query text. The two honest options were "list mode
+  // only, and the footer says so" and "search mode too, while the query is
+  // empty"; this is the second, and it is not a compromise: Model.tokenize
+  // drops `?` entirely, so a query of "?" alone has zero terms and filters
+  // nothing. The keystroke is already a no-op on the results and shows only
+  // as a stray character in the query line, so taking it for the map costs a
+  // user nothing. The moment there is ANY query text the key goes back to
+  // being a character, so someone typing `who?` is unaffected (handleSearchKey).
+  // That is also why this is not a modified key like Ctrl+S or Ctrl+G: those
+  // two had to displace a letter that types, and `?` has nothing to displace
+  // on an empty line.
+  function openHelp() {
+    if (!root.guideMode) return
+    root.panelReturnMode = root.mode
+    root.setGuide(Model.withMode(root.guide, "help"))
+    root.setPanelScroll(0)
+    root.refocus()
+  }
+
+  // Both panels leave to the mode they were opened from. The channel cursor
+  // is untouched by either, so this is a mode change and a re-render, never
+  // applyGuide -- which zeroes cursorIndex and would silently move the user
+  // to the top of the list for having read a description.
+  //
+  // INTEGRATION NOTE (engineering rule 12 (dev branch)): the equivalent
+  // decision for the track picker lives in Model.onEscape's `tracks` branch,
+  // and this one belongs beside it. It is here because Model.js is another lane's file for
+  // this milestone; it is one line of state, it is mirrored in QML where no
+  // node test can reach it, and it should be lifted into Model.onEscape with
+  // the return mode carried in the guide state. Raised as a decision request.
+  function closePanel() {
+    if (!root.inPanel) return
+    root.setGuide(Model.withMode(root.guide, root.panelReturnMode))
+    if (root.guideMode) root.rebuildDisplay()
+    root.refocus()
+  }
+
+  // j/k, the page keys and Home/End scroll the open panel. The CHANNEL cursor
+  // does not move: j/k mean "move the cursor" everywhere else in the guide,
+  // and here there is no cursor to move -- the detail panel has one programme
+  // and the map has no selectable row at all, so the only thing the keys can
+  // honestly do is pan the text. Clamped to the panel's own flickable so a
+  // held key stops at the end instead of ringing.
+  function panelFlickable() {
+    if (root.inDetail) return detailFlick
+    if (root.inHelp) return helpFlick
+    return null
+  }
+
+  function scrollPanelBy(steps) {
+    var flick = root.panelFlickable()
+    if (!flick) return
+    root.setPanelScroll(flick.contentY + steps * root.groupEntryHeight)
+  }
+
+  function scrollPanelPage(pages) {
+    var flick = root.panelFlickable()
+    if (!flick) return
+    root.setPanelScroll(flick.contentY + pages * flick.height)
+  }
+
+  function setPanelScroll(y) {
+    var flick = root.panelFlickable()
+    if (!flick) return
+    var max = Math.max(0, flick.contentHeight - flick.height)
+    flick.contentY = Math.max(0, Math.min(max, y))
+  }
+
+  // Page keys and Home/End in an open panel, the way handleSharedKey gives
+  // the picker Home and End: the keys that mean "move a long way" there mean
+  // "scroll a long way" here, and nothing reaches the list underneath.
+  function handlePanelKey(event) {
+    if (event.key === Qt.Key_PageUp) { root.scrollPanelPage(-1); return true }
+    if (event.key === Qt.Key_PageDown) { root.scrollPanelPage(1); return true }
+    if (event.key === Qt.Key_Home) { root.setPanelScroll(0); return true }
+    if (event.key === Qt.Key_End) { root.setPanelScroll(Number.MAX_VALUE); return true }
+    // Delete removes a Recent entry on the list underneath; it has no meaning
+    // here and must not reach it.
+    return event.key === Qt.Key_Delete
   }
 
   function toggleLogos() {
@@ -2555,6 +2770,12 @@ Item {
           // doing their own job, so j/k, Tab and x never act on a half-typed
           // number and never leave one live behind them.
           onMoveRequested: function(dx, dy) {
+            // M4-02 / M4-04: j/k and Up/Down scroll the open panel; h/l do
+            // nothing rather than ringing the group column behind the scrim.
+            if (root.inPanel) {
+              if (dy !== 0) root.scrollPanelBy(dy)
+              return
+            }
             if (root.inTracks) {
               if (dy !== 0) root.moveTrackCursorBy(dy)
               return
@@ -2577,6 +2798,10 @@ Item {
           onActivateRequested: {
             var enter = root.enterPending
             root.enterPending = false
+            // M4-02 / M4-04: neither panel has anything to activate, and
+            // Enter or Space reaching the list under the scrim would PLAY a
+            // channel from a screen that is only showing text about one.
+            if (root.inPanel) return
             if (root.inTracks) { root.selectTrackAt(root.trackCursor); return }
             if (root.inSources) { root.activateSourceRow(root.sourceCursor, !enter); return }
             // CN1: Enter and Space keep exactly the meanings UX 3.1 gives
@@ -2592,13 +2817,17 @@ Item {
           }
           onCloseRequested: root.handleEscape()
           onDeleteRequested: {
+            // `x` hides a group or removes a Recent entry on the list below.
+            if (root.inPanel) return
             if (root.inTracks) return
             if (root.inSources) { root.startRemove(); return }
             root.endNumberEntry(true)
             root.removeAt(root.cursorIndex)
           }
           onTabRequested: function(direction) {
-            if (root.inSources || root.inTracks) return
+            // Tab would swap the mode UNDER the panel, leaving the panel open
+            // over a surface it was not opened from.
+            if (root.inSources || root.inTracks || root.inPanel) return
             root.endNumberEntry(true)
             root.switchMode()
           }
@@ -2606,6 +2835,17 @@ Item {
             // M3-02: `t` closes the picker it opened; every other letter is
             // nothing there, and must not reach the list underneath.
             if (root.inTracks) { if (Model.listLetterAction(text) === "tracks") root.closeTracks(); return }
+            // M4-02 / M4-04, the same rule: the key that opened a panel
+            // closes it, every other letter is nothing there, and none of
+            // them reaches the list underneath. `inPanel` is not enough on
+            // its own -- `i` must not close the MAP and `?` must not close
+            // the DETAIL -- so each panel answers for its own key.
+            if (root.inPanel) {
+              var panelAction = Model.listLetterAction(text)
+              if (root.inDetail && panelAction === "detail") root.closePanel()
+              else if (root.inHelp && panelAction === "help") root.closePanel()
+              return
+            }
             if (root.inSources) { root.handleSourcesLetter(text); return }
             // Backspace and Delete both have a one-character event.text
             // ("\b", "\u007f") and reach this handler, so without the
@@ -2783,7 +3023,12 @@ Item {
             anchors.fill: parent
             spacing: 0
             // M3-02: the picker is a panel OVER the list, not a screen.
-            visible: root.guideMode || root.inTracks
+            // M4-02 / M4-04 are panels over it too, so the list has to stay
+            // drawn under their scrim. Named here as well as in the two
+            // header bindings, because the omission that blanked the scope
+            // label behind the picker was exactly one of these three being
+            // missed (see headerRight).
+            visible: root.guideMode || root.inTracks || root.inPanel
 
             // Group column (UX 2.2 / 2.3)
             Item {
@@ -3823,7 +4068,11 @@ Item {
             Accessible.name: Model.emptyStateAccessibleName(emptyState.title, emptyState.prose)
             // The Sources screens own the body in their modes; the
             // unconfigured state normally shows as the first-run form.
-            visible: root.emptyKind !== "" && root.guideMode
+            // M4-04: the keyboard map opens over an empty guide too -- it is
+            // exactly what a user with no playlist yet wants to read -- so
+            // the empty state stays drawn under its scrim rather than
+            // vanishing for as long as the map is up.
+            visible: root.emptyKind !== "" && (root.guideMode || root.inPanel)
 
             readonly property string glyph: {
               if (root.emptyKind === "loading") return Model.GLYPHS.loading
@@ -4807,6 +5056,424 @@ Item {
                   onClicked: {
                     root.guide = Model.withTrackCursor(root.guide, trackRow.index)
                     root.selectTrackAt(trackRow.index)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // ---- M4-02: the programme detail panel.
+      //
+      // The track picker's shape, deliberately verbatim rather than a second
+      // panel idiom: a panel OVER the list, a LATE child of the card so it
+      // paints over `layout` (a first draft of the picker sat beside the key
+      // catcher and the list painted over it -- seen on a real screen, not by
+      // any gate), the card's own scrim, a centered BorderSurface as tall as
+      // its content needs and no taller than the space it has, and Esc, the
+      // key that opened it, or the scrim to go back. The width cap is the
+      // picker's number, not a new one; whether a paragraph wants a wider
+      // card than a track list is a UX question and is raised, not decided
+      // here.
+      //
+      // IT WRAPS AND SCROLLS. It does not elide. An XMLTV description is
+      // routinely a paragraph and sometimes several, and eliding it would hide
+      // the one thing this feature exists to show -- what the programme IS.
+      // The short fields above it elide, because a title or a category that
+      // needs two lines is a provider padding a field, not information. So:
+      // a Flickable instead of the picker's ListView (the body is one run of
+      // text, not rows), with j/k, the page keys and Home/End panning it
+      // (scrollPanelBy / handlePanelKey).
+      //
+      // EVERY STRING ON IT IS Model.programmeDetail'S. The panel reads six
+      // optional plain fields -- `title`, `when`, `episode`, `category`,
+      // `description`, `next` -- and draws each exactly as it arrives. No
+      // label is prepended, no two fields are joined, nothing is formatted or
+      // abbreviated here: a line that needs the word "Next" in front of it
+      // arrives with the word in it. That keeps the composing in Model.js
+      // where a node test can call it (rule 12), and it is the only way this
+      // panel can promise it renders nothing of its own invention. A field
+      // the model omits leaves no gap, because Column skips an invisible
+      // child.
+      //
+      // REDACTION (engineering rule 5). A programme description is
+      // provider-controlled text and this is a guide-text sink, so any URL in
+      // it must already be reduced to scheme and host when it arrives:
+      // redacting here would mean composing, so Model.programmeDetail owns
+      // it. Stated as a requirement on the contract, not assumed.
+      //
+      // ACCESSIBILITY, checked against the measured rule rather than assumed,
+      // and stated no further than the measurement goes. Every Text here is
+      // Accessible.StaticText, whose Value on the bus is its Accessible.name
+      // and whose own `text` never reaches the bus at all; nothing here is
+      // declared Accessible.EditableText, so this panel exposes no editable
+      // Value and raises no TextUpdated payload. So the question the sink
+      // rule asks -- can a credential leave by this door -- is answered by
+      // the names, and the names carry XMLTV programme fields: a title, a
+      // clock time, a category, a description, never a URL or any part of
+      // one. The credentialed strings in this plugin exist only in the source
+      // forms. What this does NOT claim is that any of it is audible: D-GS-3
+      // measured that nothing this file declares reaches a screen reader at
+      // all, and these declarations are the same shape as the ones that do
+      // not, not a repair of them.
+      Item {
+        id: detailPanel
+        anchors.fill: parent
+        visible: root.inDetail
+        z: 10
+        Accessible.ignored: !visible
+
+        // Null-safe field read, so a panel mid-close draws empty rather than
+        // throwing inside six bindings. Not a decision: no field is renamed,
+        // defaulted or combined here.
+        readonly property var fields: root.detail ? root.detail : ({})
+        function field(name) {
+          var v = detailPanel.fields[name]
+          return v === undefined || v === null ? "" : String(v)
+        }
+
+        Rectangle {
+          anchors.fill: parent
+          color: root.scrim
+          MouseArea { anchors.fill: parent; onClicked: root.closePanel() }
+        }
+
+        BorderSurface {
+          id: detailCard
+          anchors.centerIn: parent
+          width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
+          // The picker's sizing rule: the body scrolls, so the card is as
+          // tall as it needs to be and no taller than the space it has. The
+          // Column's implicitHeight is the laid-out height of its wrapped
+          // text, which depends on the card's WIDTH and not on its height, so
+          // reading it to size the thing that sizes the viewport terminates.
+          height: Math.min(parent.height - root.contentMargin * 2,
+                           root.contentMargin * 2 + detailHead.height + Style.space(4) + detailBody.implicitHeight)
+          radius: root.cornerRadius
+          color: root.background
+          borderSpec: root.borderSpec
+          padding: root.contentMargin
+          clip: true
+          Accessible.role: Accessible.Dialog
+          Accessible.name: root.copy.detailTitle
+          MouseArea { anchors.fill: parent; onClicked: {} }
+
+          Column {
+            id: detailHead
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: root.contentMargin
+            spacing: Style.space(4)
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.copy.detailTitle
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              elide: Text.ElideRight
+              Accessible.role: Accessible.StaticText
+              Accessible.name: text
+            }
+          }
+
+          Flickable {
+            id: detailFlick
+            objectName: "detailFlick"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: detailHead.bottom
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: root.contentMargin
+            anchors.rightMargin: root.contentMargin
+            anchors.bottomMargin: root.contentMargin
+            anchors.topMargin: Style.space(4)
+            clip: true
+            contentWidth: width
+            contentHeight: detailBody.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+            // No role and no name on the viewport, deliberately. The card
+            // above is the Dialog and each line below is its own StaticText;
+            // a third node carrying the same name as the dialog would give a
+            // reader the title twice and tell them nothing. The picker's
+            // ListView declares Accessible.List because its children really
+            // are list items -- these are not.
+
+            Column {
+              id: detailBody
+              width: detailFlick.width
+              spacing: Style.space(6)
+
+              // The programme title. The body rung at full foreground, as a
+              // channel row's name is: it is the primary content of the card.
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: text !== ""
+                text: detailPanel.field("title")
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+              }
+
+              // `when`, `episode` and `category`: the picker's trackMessage
+              // rung exactly (bodySmall at captionAlphaOnCard), so these
+              // introduce no rung this project has not already measured.
+              // They elide; see the panel's note on why only the description
+              // wraps.
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: text !== ""
+                text: detailPanel.field("when")
+                color: root.foreground
+                opacity: root.captionAlphaOnCard
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: text !== ""
+                text: detailPanel.field("episode")
+                color: root.foreground
+                opacity: root.captionAlphaOnCard
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: text !== ""
+                text: detailPanel.field("category")
+                color: root.foreground
+                opacity: root.captionAlphaOnCard
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+              }
+
+              // The description, and the only element on the panel that
+              // wraps: the whole point of the feature.
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: text !== ""
+                text: detailPanel.field("description")
+                color: root.foreground
+                wrapMode: Text.WordWrap
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+              }
+
+              // What is on next. Last, because it is about a different
+              // programme than the rest of the card.
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: text !== ""
+                text: detailPanel.field("next")
+                color: root.foreground
+                opacity: root.captionAlphaOnCard
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+              }
+            }
+          }
+        }
+      }
+
+      // ---- M4-04: the keyboard map.
+      //
+      // The same panel shape again, for the same reason. Its content is
+      // Model.keyboardMap's: an ordered list of sections, each {title, rows},
+      // each row a [key, meaning] pair, generated from the same tables the
+      // footer hints are generated from and handed the same options object
+      // (root.hintOpts). So this file transcribes nothing. That matters more
+      // here than anywhere else in the guide: the footer hint row IS a
+      // transcription of Model.footerHints, nothing compares the two, and the
+      // interaction document records four separate drifts. A map written out
+      // by hand would be a fifth, and a longer one.
+      //
+      // Two nested Repeaters rather than one flattened model, because
+      // flattening sections into rows is a decision and would have to live in
+      // Model.js to be testable (rule 12). This way the panel holds no logic
+      // at all: it walks the structure the model returned.
+      //
+      // ACCESSIBILITY: the same check as the detail panel. Every Text is
+      // StaticText, nothing is declared editable, and every string here is
+      // one of the plugin's own key names and verbs. Those literals are the
+      // ones the F-TEXT-2 check drives footerHints over -- but F-TEXT-2 is a
+      // check on footerHints and formHints, NOT on keyboardMap, so what is
+      // proven today is the literals and not this caller. Extending that
+      // check over Model.keyboardMap belongs with whoever owns the suite, and
+      // is raised rather than assumed here.
+      Item {
+        id: helpPanel
+        anchors.fill: parent
+        visible: root.inHelp
+        z: 10
+        Accessible.ignored: !visible
+
+        Rectangle {
+          anchors.fill: parent
+          color: root.scrim
+          MouseArea { anchors.fill: parent; onClicked: root.closePanel() }
+        }
+
+        BorderSurface {
+          id: helpCard
+          anchors.centerIn: parent
+          width: Math.min(parent.width - root.contentMargin * 2, Style.space(360))
+          height: Math.min(parent.height - root.contentMargin * 2,
+                           root.contentMargin * 2 + helpHead.height + Style.space(4) + helpBody.implicitHeight)
+          radius: root.cornerRadius
+          color: root.background
+          borderSpec: root.borderSpec
+          padding: root.contentMargin
+          clip: true
+          Accessible.role: Accessible.Dialog
+          Accessible.name: root.copy.helpTitle
+          MouseArea { anchors.fill: parent; onClicked: {} }
+
+          Column {
+            id: helpHead
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: root.contentMargin
+            spacing: Style.space(4)
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.copy.helpTitle
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              elide: Text.ElideRight
+              Accessible.role: Accessible.StaticText
+              Accessible.name: text
+            }
+          }
+
+          Flickable {
+            id: helpFlick
+            objectName: "helpFlick"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: helpHead.bottom
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: root.contentMargin
+            anchors.rightMargin: root.contentMargin
+            anchors.bottomMargin: root.contentMargin
+            anchors.topMargin: Style.space(4)
+            clip: true
+            contentWidth: width
+            contentHeight: helpBody.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+            // No role on the viewport either, and for the extra reason that
+            // Accessible.List would be a lie here: its children are sections
+            // with headings, not list items, and naming a row would mean
+            // composing "key meaning" out of the pair -- which is a string
+            // this panel is not allowed to invent. If a row ever needs a
+            // single spoken name, Model.keyboardMap is where it comes from.
+
+            Column {
+              id: helpBody
+              width: helpFlick.width
+              spacing: Style.space(8)
+
+              Repeater {
+                model: root.keyMapSections
+
+                delegate: Column {
+                  id: mapSection
+                  required property var modelData
+                  width: helpBody.width
+                  spacing: Style.space(2)
+
+                  // The picker's header delegate, token for token, with the
+                  // Heading role the picker puts on the Item wrapping its own
+                  // (there is no wrapper here, so it goes on the header).
+                  PanelSectionHeader {
+                    text: mapSection.modelData.title
+                    foreground: root.foreground
+                    color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
+                    fontFamily: root.fontFamily
+                    Accessible.role: Accessible.Heading
+                    Accessible.name: text
+                  }
+
+                  Repeater {
+                    model: mapSection.modelData.rows
+
+                    delegate: Row {
+                      id: mapRow
+                      required property var modelData
+                      width: mapSection.width
+                      spacing: Style.spacing.md
+
+                      // The key name, at the body rung and full foreground:
+                      // it is the thing a reader is looking FOR, so it is not
+                      // the secondary half of the pair here, unlike the
+                      // footer, where the whole line is secondary (D-RUNG-14
+                      // collapses both halves onto one rung in a 10 px strip).
+                      Text {
+                        id: mapKey
+                        textFormat: Text.PlainText
+                        width: Math.round(mapSection.width * 0.36)
+                        text: mapRow.modelData[0]
+                        color: root.foreground
+                        font.bold: true
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        elide: Text.ElideRight
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                      }
+
+                      // The meaning, on the measured secondary rung
+                      // (captionAlphaOnCard, which Model.captionAlpha raises
+                      // on the themes where 0.7 does not clear 4.5:1) rather
+                      // than on the footer's 0.7 literal.
+                      Text {
+                        textFormat: Text.PlainText
+                        width: mapSection.width - mapKey.width - Style.spacing.md
+                        text: mapRow.modelData[1]
+                        color: root.foreground
+                        opacity: root.captionAlphaOnCard
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        elide: Text.ElideRight
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                      }
+                    }
                   }
                 }
               }
