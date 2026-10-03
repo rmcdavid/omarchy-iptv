@@ -295,9 +295,15 @@ Item {
     logosOff: "Channel logos off",
     pauseNothing: "Nothing is playing",
     tracksTitle: "Audio and subtitles",
-    // M4-02 / M4-04. These four are the ONLY strings the two panels draw
-    // that the plugin wrote: the two dialog titles, the two accessible
-    // names, and the transient that says why the detail key did nothing.
+    // M4-02 / M4-04. These THREE are the ONLY strings the two panels draw
+    // that the plugin wrote: the two dialog titles and the transient that
+    // says why the detail key did nothing. The panels' two accessible names
+    // are not a fourth string -- each REUSES its own dialog title
+    // (`Accessible.name: root.copy.detailTitle` and the same for
+    // `helpTitle`), which is deliberate: a card whose spoken name differed
+    // from its printed one would describe two different panels. An earlier
+    // version of this comment counted the three literals as four by listing
+    // the five roles they fill.
     // Everything else on either panel is a string Model.programmeDetail or
     // Model.keyboardMap returned. `detailNothing` is the picker's precedent
     // (`pauseNothing` above): the key says why it declined rather than
@@ -808,6 +814,26 @@ Item {
       hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null,
       // M2-05 section 5: `p pip` only where it can do something.
       pipAvailable: root.pipAvailable,
+      // M4-02. The flag footerHints gates `i detail` on, and until now the
+      // guide never set it -- so the one key M4-02 added could not be hinted
+      // anywhere, while the hint's own comment said "the footer advertises it
+      // only where it works" and the acceptance passed `hasDetail: true` by
+      // hand, a value no shipping path produced.
+      //
+      // ASKED THE WAY openDetail ASKS IT, and that is the point: the same
+      // function, the same argument, so the footer cannot advertise a key
+      // that would then decline, and cannot stay silent about one that would
+      // work. `root.detail` is no use here -- it is gated on the panel
+      // already being open and would answer null on every closed guide.
+      //
+      // THE COST, measured on node v26.8.1 rather than assumed, because this
+      // recomputes on every cursor move and every keystroke in search mode
+      // (budget 7): programmeDetail is 0.0141 ms on a 300 character
+      // description and 0.6135 ms on the worst input the producer's own cap
+      // can hand it (600 no-space characters carrying "://"). Against an
+      // 11 ms keystroke that is affordable; a cheaper predicate that
+      // duplicated the decision would not be.
+      hasDetail: root.serviceReady && Model.programmeDetail(root.detailRow) !== null,
       // M2-04: the hint names the direction the key will go, so nobody has to
       // press it to find out -- and finding out means contacting third parties.
       showLogos: root.showLogos,
@@ -1410,7 +1436,10 @@ Item {
     // the cursor instead is how an unreachable number came to announce, and
     // then play, a channel the user had not asked for.
     var row = at >= 0 ? root.rowAt(at) : null
-    root.numberTargetName = row ? String(row.name || "") : ""
+    // F-SINK-10: this name reaches the footer status line and the chno
+    // transient, both guide text, so it is redacted where it leaves the
+    // channel record -- the same point the list row and the wall tile do it.
+    root.numberTargetName = row ? Model.sinkText(row.name) : ""
   }
 
   function pushNumberEntry(text) {
@@ -2842,8 +2871,25 @@ Item {
             // the DETAIL -- so each panel answers for its own key.
             if (root.inPanel) {
               var panelAction = Model.listLetterAction(text)
-              if (root.inDetail && panelAction === "detail") root.closePanel()
-              else if (root.inHelp && panelAction === "help") root.closePanel()
+              // SWALLOW IT, for the same reason handleListLetter does when a
+              // letter switches to search mode (`action === "search"`, above):
+              // PanelKeyCatcher's printable fallback does not accept the
+              // event, so the SAME keystroke goes on to keyHost after this
+              // handler returns. Esc never had the problem -- the catcher
+              // accepts Escape -- and `i` never had it either, because
+              // closePanel returns the detail panel to list mode, where
+              // handleSharedKey has no `i` branch. `?` DOES: a map opened
+              // from search mode returns to search mode, where
+              // handleSearchKey takes `?` on an empty query and reopens the
+              // map, so the key that opened it could not close it. Measured
+              // offscreen on Qt 6.11.2 with a reproduction of this exact
+              // catcher/keyHost nesting before and after this line.
+              //
+              // Set HERE and never inside closePanel(): the Esc path calls
+              // closePanel too and does NOT bubble, so swallowing there would
+              // eat the user's next keystroke instead of this one.
+              if (root.inDetail && panelAction === "detail") { root.swallowKey = true; root.closePanel() }
+              else if (root.inHelp && panelAction === "help") { root.swallowKey = true; root.closePanel() }
               return
             }
             if (root.inSources) { root.handleSourcesLetter(text); return }
@@ -3333,7 +3379,10 @@ Item {
                   required property int index
                   readonly property var channel: tile.index < root.rowCount ? (root.currentRows[tile.index] || null) : null
                   readonly property string channelId: tile.channel ? Model.channelId(tile.channel) : ""
-                  readonly property string name: tile.channel ? String(tile.channel.name || "") : ""
+                  // F-SINK-10, the wall's copy of the list row's rule: this
+                  // one string is both the tile's visible label and its
+                  // accessible name, so it is redacted once here.
+                  readonly property string name: tile.channel ? Model.sinkText(tile.channel.name) : ""
                   readonly property bool current: tile.index === root.cursorIndex
                   // The four facts a ROW carries that a picture cannot. The
                   // wall dropped all of them in its first build, including the
@@ -3554,7 +3603,14 @@ Item {
                   // per instantiated delegate, from the service's lookups.
                   readonly property var channel: row.index < root.rowCount ? (root.currentRows[row.index] || null) : null
                   readonly property string channelId: row.channel ? Model.channelId(row.channel) : ""
-                  readonly property string name: row.channel ? String(row.channel.name || "") : ""
+                  // F-SINK-10: the name the row DRAWS and the name it
+                  // SPEAKS are the same string and both are sinks (rule 5
+                  // lists guide text and the accessibility bus). A playlist
+                  // name is provider-written, so it goes through
+                  // Model.sinkText once, here, rather than at each of the two
+                  // sites below -- the visible Text and Model.rowAccessibleName
+                  // (which redacts again for callers that hand it a raw one).
+                  readonly property string name: row.channel ? Model.sinkText(row.channel.name) : ""
                   readonly property string group: row.channel ? Model.primaryGroup(row.channel) : ""
                   readonly property string tvgId: row.channel ? String(row.channel.tvgId || "") : ""
                   // M2-09 D3: not inside the group's own scope, and not when
@@ -5127,9 +5183,14 @@ Item {
         // Null-safe field read, so a panel mid-close draws empty rather than
         // throwing inside six bindings. Not a decision: no field is renamed,
         // defaulted or combined here.
-        readonly property var fields: root.detail ? root.detail : ({})
+        //
+        // Named `record` and not `fields`: Model.programmeDetail used to
+        // return a `fields` ARRAY of its own that nothing here ever read, and
+        // two different `fields` one line apart is how a reader concludes the
+        // panel is driven by that array. It never was; the array is gone.
+        readonly property var record: root.detail ? root.detail : ({})
         function field(name) {
-          var v = detailPanel.fields[name]
+          var v = detailPanel.record[name]
           return v === undefined || v === null ? "" : String(v)
         }
 
