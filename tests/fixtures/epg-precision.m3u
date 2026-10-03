@@ -1,0 +1,73 @@
+#EXTM3U
+# The PRECISION half of M4-01's acceptance criterion (docs/QA-EPG-PRECISION.md).
+#
+# docs/PLAN-M4.md M4-01 repair 2: "Precision is the acceptance criterion, not
+# recall: a wrong programme on a channel is worse than a blank row." The M4
+# round moved `matched` from 0 to 227 on the real inputs and nothing checked
+# that the 227 are right. This fixture is the audit's findings made executable.
+#
+# Every row below is copied VERBATIM from the installed iptv-org US list
+# (name, tvg-id, group), and every stream URL that carries a Pluto channel id
+# carries the one that list really carries for that row. That id is the
+# ORACLE: it is an identifier the matcher never reads, so a pair it confirms
+# was not confirmed by the thing being tested (CLAUDE.md rule 14). The guide
+# side is tests/fixtures/epg-precision.xml, whose channel ids are those same
+# Pluto ids; the expectations are tests/fixtures/epg-precision.json.
+#
+# Append, do not insert: the expectations are keyed by tvg-id but the
+# collision rows depend on their relative order.
+#
+# --- five pairs the oracle CONFIRMS: url id == guide channel id -----------
+#EXTINF:-1 tvg-id="00sReplay.us@SD" group-title="Movies",00s Replay
+https://jmp2.uk/plu-62ba60f059624e000781c436.m3u8
+#EXTINF:-1 tvg-id="70sCinema.us@SD" group-title="Movies",70s Cinema
+https://jmp2.uk/plu-5f4d878d3d19b30007d2e782.m3u8
+#EXTINF:-1 tvg-id="50CentAction.us@SD" group-title="Movies",50 Cent Action (720p)
+https://jmp2.uk/plu-68487fb3f212bedacf5a53e3.m3u8
+#EXTINF:-1 tvg-id="AmericasTestKitchen.us@SD" group-title="Cooking",America's Test Kitchen (720p)
+https://jmp2.uk/plu-5e84f54a82f05300080e6746.m3u8
+#EXTINF:-1 tvg-id="BlazeLive.us@SD" group-title="News",Blaze Live (720p)
+https://jmp2.uk/plu-5e46fba0c43b0d00096e5ac1.m3u8
+#
+# --- F-EPG-7: a country qualifier the key keeps, so these do NOT match ----
+# The oracle says both SHOULD: each row's url names the very guide channel
+# below it. 88 of the 1,453 installed names carry a "(United States)" and
+# 31 of them carry a Pluto id that this guide declares. Stripping any
+# parenthetical would match them, and on the real inputs that loosening
+# creates no cross-channel pair -- measured, not assumed. Pinned as NOT
+# matching so the loosening cannot arrive unnoticed.
+#EXTINF:-1 tvg-id="CSI.us@SD" group-title="Series",CSI (United States)
+https://jmp2.uk/plu-5efbd29e4aa26700076c0d06.m3u8
+#EXTINF:-1 tvg-id="FamilyTies.us@SD" group-title="Series",Family Ties (United States)
+https://jmp2.uk/plu-5f77939a630f530007dde654.m3u8
+#
+# --- D-EPG-5: the one WRONG pair the audit found in the real 227 ----------
+# iptv-org's BloombergTV.us is Bloomberg Television. The guide declares
+# "Bloomberg TV+", whose own <desc> calls it a channel of its own. The
+# matcher's key folds "+" to a space, so the two become one name -- while
+# the project's OWN normalize_id_text keeps "+" and "*" "because they are
+# the difference between two channels rather than noise inside one". This
+# row carries no Pluto id because the installed list really does stream it
+# from an unbranded address, so the oracle cannot judge it; the name rule
+# can, and it says these are two channels.
+#EXTINF:-1 tvg-id="BloombergTV.us@US" group-title="Business",Bloomberg TV (1080p)
+http://stream.example.test/bloomberg.m3u8
+#
+# --- D-EPG-5, the same fold's recall half --------------------------------
+# News12 and News12+ are two channels in four regions. The fold makes their
+# names equal, the uniqueness rule then drops BOTH rather than guess, and
+# the guide declaration below reaches neither. Four regions plus Tennis
+# Channel 2 / Tennis Channel +2 is where the ten channels of
+# nameDroppedPlaylist on the real list come from.
+#EXTINF:-1 tvg-id="News12PlusLongIsland.us@HD" group-title="News",News12+ Long Island (1080p) [Geo-blocked]
+http://stream.example.test/news12plus-li.m3u8
+#EXTINF:-1 tvg-id="News12LongIsland.us@SD" group-title="News",News12 Long Island (1080p) [Geo-blocked]
+http://stream.example.test/news12-li.m3u8
+#
+# --- F-EPG-8: a space is not a marker ------------------------------------
+# The oracle says this row's guide channel is 681109b6..., which this guide
+# declares as "TennisChannel 2" -- one word where the playlist writes two.
+# Neither the shipping key nor the normalize_id_text repair closes that, so
+# it is pinned as not matching and named rather than left to be rediscovered.
+#EXTINF:-1 tvg-id="TennisChannel.us@Plus2" group-title="Sports",Tennis Channel +2 (720p)
+https://jmp2.uk/plu-681109b688b9d85d0938c6ba.m3u8

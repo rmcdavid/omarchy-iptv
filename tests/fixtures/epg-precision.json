@@ -1,0 +1,134 @@
+{
+  "comment": [
+    "Expectations for tests/fixtures/epg-precision.m3u against",
+    "tests/fixtures/epg-precision.xml at now = 1790986500",
+    "(2026-10-03T00:15:00Z). Read by tests/test_epg_match.py; no number here",
+    "is restated in Python.",
+    "",
+    "This is the PRECISION half of M4-01's acceptance criterion, which",
+    "docs/PLAN-M4.md states and the M4 round never ran. The audit is",
+    "docs/QA-EPG-PRECISION.md.",
+    "",
+    "`oracle` is the point of the fixture. Each entry's plutoId is the",
+    "channel id Pluto itself uses: the installed playlist carries it inside",
+    "that row's stream URL and the guide carries it as the channel id. The",
+    "matcher reads neither -- it joins on the name -- so when the programme",
+    "that lands on a row is the programme of the channel whose id that row's",
+    "URL names, two independent identifiers agree and the pair is right for a",
+    "reason the code under test did not supply (CLAUDE.md rule 14). nowTitle",
+    "is unique per entry so the title alone says which guide channel won.",
+    "",
+    "channelTotal 11 = 5 oracle pairs + 1 cross-channel pair + 2 country-",
+    "qualifier rows + 2 News12 rows dropped as ambiguous + 1 Tennis row.",
+    "matched 6 = the 5 oracle pairs plus the cross-channel pair, which is",
+    "the defect: D-EPG-5 is in the matched count, not outside it."
+  ],
+  "now": 1790986500,
+  "status": {
+    "matched": 6,
+    "channelTotal": 11,
+    "matchedById": 0,
+    "matchedByFeed": 0,
+    "matchedByName": 6,
+    "nameIndexed": 9,
+    "nameDroppedPlaylist": 2,
+    "nameDroppedGuide": 0,
+    "epgChannels": 6,
+    "programmeCount": 8,
+    "nowCount": 6
+  },
+  "warnings": [
+    "4 programmes for channels not in the playlist dropped"
+  ],
+  "oracle": [
+    {
+      "tvgId": "00sReplay.us@SD",
+      "plutoId": "62ba60f059624e000781c436",
+      "playlistName": "00s Replay",
+      "guideName": "00s Replay",
+      "nowTitle": "The Ring"
+    },
+    {
+      "tvgId": "70sCinema.us@SD",
+      "plutoId": "5f4d878d3d19b30007d2e782",
+      "playlistName": "70s Cinema",
+      "guideName": "70s Cinema",
+      "nowTitle": "Saturday Night Fever"
+    },
+    {
+      "tvgId": "50CentAction.us@SD",
+      "plutoId": "68487fb3f212bedacf5a53e3",
+      "playlistName": "50 Cent Action (720p)",
+      "guideName": "50 Cent Action",
+      "nowTitle": "Arsenal"
+    },
+    {
+      "tvgId": "AmericasTestKitchen.us@SD",
+      "plutoId": "5e84f54a82f05300080e6746",
+      "playlistName": "America's Test Kitchen (720p)",
+      "guideName": "America's Test Kitchen",
+      "nowTitle": "The Taste Test"
+    },
+    {
+      "tvgId": "BlazeLive.us@SD",
+      "plutoId": "5e46fba0c43b0d00096e5ac1",
+      "playlistName": "Blaze Live (720p)",
+      "guideName": "Blaze Live",
+      "nowTitle": "Stu And Dave Do America"
+    }
+  ],
+  "crossChannel": {
+    "defect": "D-EPG-5",
+    "tvgId": "BloombergTV.us@US",
+    "playlistName": "Bloomberg TV (1080p)",
+    "guideId": "54ff7ba69222cb1c2624c584",
+    "guideName": "Bloomberg TV+",
+    "nowTitle": "Post Credits",
+    "why": [
+      "The matcher's key folds + to a space, so Bloomberg Television and",
+      "Bloomberg TV+ become one name. normalize_id_text, the project's own",
+      "fold, keeps + 'because they are the difference between two channels",
+      "rather than noise inside one' -- so the project already holds the rule",
+      "that says this pair is two channels, and the matcher does not use it.",
+      "This entry asserts TODAY's behaviour. When D-EPG-5 is repaired the",
+      "pair disappears, status.matched becomes 5 and this block moves to",
+      "`unmatched`. The test that reads it says so in its docstring."
+    ]
+  },
+  "unmatched": [
+    {
+      "tvgId": "CSI.us@SD",
+      "finding": "F-EPG-7",
+      "why": "the key keeps '(United States)'; the oracle says 5efbd29e... is the right guide channel"
+    },
+    {
+      "tvgId": "FamilyTies.us@SD",
+      "finding": "F-EPG-7",
+      "why": "the key keeps '(United States)'; the oracle says 5f77939a... is the right guide channel"
+    },
+    {
+      "tvgId": "News12PlusLongIsland.us@HD",
+      "finding": "D-EPG-5",
+      "why": "the + fold makes it collide with News12LongIsland, so both are dropped"
+    },
+    {
+      "tvgId": "News12LongIsland.us@SD",
+      "finding": "D-EPG-5",
+      "why": "the same collision; the guide is offering News12 Long Island and reaches neither"
+    },
+    {
+      "tvgId": "TennisChannel.us@Plus2",
+      "finding": "F-EPG-8",
+      "why": "the guide writes 'TennisChannel 2' as one word; no marker rule closes a missing space"
+    }
+  ],
+  "plusPair": {
+    "defect": "D-EPG-5",
+    "playlistNames": ["Bloomberg TV (1080p)", "Bloomberg TV+"],
+    "note": [
+      "Both names run through epg_name_key and normalize_id_text in the test:",
+      "the first makes them equal, the second does not. The second name is",
+      "the guide's declaration, not a playlist row."
+    ]
+  }
+}

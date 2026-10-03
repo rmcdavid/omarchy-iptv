@@ -95,6 +95,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import unittest
@@ -852,6 +853,188 @@ class OldFixtureTest(unittest.TestCase):
             self.assertEqual(status["matchedByName"], 0)
             self.assertEqual(status["nameIndexed"], 10)
             self.assertEqual(status["nameDroppedPlaylist"], 0)
+
+
+PRECISION_PLAYLIST = str(FIXTURES / "epg-precision.m3u")
+PRECISION_XMLTV = str(FIXTURES / "epg-precision.xml")
+PRECISION = json.loads((FIXTURES / "epg-precision.json").read_text(encoding="utf-8"))
+
+_PLUTO_ID = re.compile(r"[0-9a-f]{24}")
+
+
+class EpgPrecisionTest(unittest.TestCase):
+    """M4-01's OTHER half: are the pairs the matcher accepts the right pairs?
+
+    docs/PLAN-M4.md M4-01 repair 2 says "Precision is the acceptance
+    criterion, not recall: a wrong programme on a channel is worse than a
+    blank row." The M4 round moved `matched` from 0 to 227 on the frozen real
+    inputs and graded nothing about the 227. docs/QA-EPG-PRECISION.md is the
+    audit; this class is the part of it a gate can run.
+
+    The oracle is not the matcher's own output and not a string the matcher
+    contains (CLAUDE.md rule 14). The installed iptv-org list streams its
+    Pluto channels from an address carrying Pluto's own channel id, and the
+    guide declares that same id as its channel id. The matcher reads neither:
+    it joins on the display name. So "the programme on this row is the
+    programme of the channel this row's URL names" is two independent
+    identifiers agreeing, and it goes red the moment a looser key marries two
+    different channels.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.cache = cls.tmp.name
+        code, _, stderr = run("playlist", "--url", PRECISION_PLAYLIST, "--cache-dir", cls.cache)
+        assert code == 0, stderr
+        code, cls.status, stderr = run("epg", "--url", PRECISION_XMLTV,
+                                       "--cache-dir", cls.cache, "--force",
+                                       "--now", str(PRECISION["now"]))
+        assert code == 0, stderr
+        cls.now = read(os.path.join(cls.cache, "epg-now.json"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_the_oracle_is_in_the_fixture_and_not_in_the_matcher(self):
+        """The fixture's own invariant, so a doctored fixture cannot pass.
+
+        Every oracle row's stream URL must carry the Pluto id that the guide
+        uses as that channel's id, the guide must declare it under the name
+        the fixture names, and every expected title must be unique so that a
+        title identifies one guide channel. Read from the two fixture files
+        directly, never from the helper's output.
+        """
+        playlist = pathlib.Path(PRECISION_PLAYLIST).read_text(encoding="utf-8")
+        guide = pathlib.Path(PRECISION_XMLTV).read_text(encoding="utf-8")
+        rows = {}
+        pending = None
+        for line in playlist.splitlines():
+            if line.startswith("#EXTINF:"):
+                match = re.search(r'tvg-id="([^"]*)"', line)
+                pending = match.group(1) if match else None
+            elif pending is not None and line and not line.startswith("#"):
+                rows[pending] = line
+                pending = None
+        declared = dict(re.findall(
+            r'<channel id="([^"]+)">\s*<display-name>([^<]*)</display-name>', guide))
+        self.assertEqual(len(declared), guide.count("<channel id="))
+        titles = []
+        for entry in PRECISION["oracle"]:
+            url = rows[entry["tvgId"]]
+            found = _PLUTO_ID.search(url)
+            self.assertIsNotNone(found, entry["tvgId"])
+            self.assertEqual(found.group(0), entry["plutoId"], entry["tvgId"])
+            self.assertEqual(declared.get(entry["plutoId"]), entry["guideName"],
+                             entry["tvgId"])
+            self.assertNotIn(entry["plutoId"], helper.epg_name_key(entry["playlistName"]))
+            titles.append(entry["nowTitle"])
+        self.assertEqual(len(set(titles)), len(titles))
+
+    def test_each_match_lands_the_programme_of_the_channel_its_url_names(self):
+        """The precision assertion, at the sink the guide reads.
+
+        For every oracle pair, the title in epg-now.json is the title the
+        guide carries for the channel whose id that row's URL names. Equality
+        here means the name join married the two channels an identifier the
+        matcher never saw says are the same one.
+        """
+        for entry in PRECISION["oracle"]:
+            record = self.now["channels"].get(entry["tvgId"])
+            self.assertIsNotNone(record, entry["tvgId"])
+            self.assertEqual(record["now"]["title"], entry["nowTitle"], entry["tvgId"])
+
+    def test_nothing_matched_beyond_the_oracle_and_the_known_wrong_pair(self):
+        """The matched SET, not just its size: a wrong pair is an extra key."""
+        expected = {entry["tvgId"] for entry in PRECISION["oracle"]}
+        expected.add(PRECISION["crossChannel"]["tvgId"])
+        self.assertEqual(set(self.now["channels"]), expected)
+        for entry in PRECISION["unmatched"]:
+            self.assertNotIn(entry["tvgId"], self.now["channels"],
+                             "%s (%s)" % (entry["tvgId"], entry["finding"]))
+
+    def test_the_counts_the_fixture_declares(self):
+        for key, value in PRECISION["status"].items():
+            self.assertEqual(self.status[key], value, key)
+        self.assertEqual(self.status["warnings"], PRECISION["warnings"])
+
+    def test_the_plus_that_separates_two_channels_is_folded_away(self):
+        """D-EPG-5, asserted as it behaves TODAY, which is wrongly.
+
+        This is the one wrong pair the audit of the real 227 found. The
+        matcher's key folds `+` to a space, so iptv-org's Bloomberg Television
+        and the guide's "Bloomberg TV+" become one name and the guide's
+        schedule lands on the other channel's row. The project already owns
+        the rule that separates them -- normalize_id_text keeps `+` and `*`
+        "because they are the difference between two channels rather than
+        noise inside one" -- and the matcher does not use it.
+
+        WHEN D-EPG-5 IS REPAIRED THIS TEST GOES RED, and that is its job: the
+        repair must come here, flip the assertions, move the fixture's
+        `crossChannel` block into `unmatched` and re-level status.matched from
+        6 to 5. docs/QA-EPG-PRECISION.md measures the cost of the repair on
+        the real inputs at one pair, and that pair is this one.
+        """
+        cross = PRECISION["crossChannel"]
+        record = self.now["channels"].get(cross["tvgId"])
+        self.assertIsNotNone(record, "D-EPG-5 no longer reproduces: see the docstring")
+        self.assertEqual(record["now"]["title"], cross["nowTitle"])
+        first, second = PRECISION["plusPair"]["playlistNames"]
+        self.assertEqual(helper.epg_name_key(first), helper.epg_name_key(second))
+        self.assertNotEqual(
+            helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", first)),
+            helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", second)))
+
+    def test_the_same_fold_denies_two_rows_a_guide_that_is_offering_one(self):
+        """D-EPG-5's recall half, which is the cost of the defect, not the fix.
+
+        News12 and News12+ Long Island are two channels. The fold makes their
+        names one, the uniqueness rule then drops BOTH rather than guess, and
+        the guide's "News12 Long Island" declaration reaches neither. On the
+        installed list this is four News 12 regions plus Tennis Channel 2 /
+        Tennis Channel +2: ten channels of nameDroppedPlaylist, every one of
+        them a `+`.
+        """
+        dropped = [entry["tvgId"] for entry in PRECISION["unmatched"]
+                   if entry["finding"] == PRECISION["crossChannel"]["defect"]]
+        self.assertEqual(len(dropped), self.status["nameDroppedPlaylist"])
+        for tvg in dropped:
+            self.assertNotIn(tvg, self.now["channels"])
+        self.assertEqual(self.status["nameDroppedGuide"], 0)
+
+    def test_a_country_qualifier_keeps_an_oracle_pair_apart(self):
+        """F-EPG-7, pinned as it behaves today so a loosening cannot be silent.
+
+        Both rows' URLs name the very guide channel declared beside them, so
+        the oracle says both SHOULD match and neither does: the key keeps
+        "(United States)". 88 of the 1,453 installed names carry one and 31 of
+        those carry a Pluto id this guide declares. Stripping any parenthetical
+        would reach them, and docs/QA-EPG-PRECISION.md measures that loosening
+        on the real inputs rather than guessing at it. If it is ever taken,
+        this test goes red and names the decision.
+        """
+        guide = pathlib.Path(PRECISION_XMLTV).read_text(encoding="utf-8")
+        for entry in PRECISION["unmatched"]:
+            if entry["finding"] != "F-EPG-7":
+                continue
+            self.assertNotIn(entry["tvgId"], self.now["channels"])
+            prefix = entry["why"].split("the oracle says ")[1].split("...")[0]
+            self.assertIn('<channel id="%s' % prefix, guide)
+
+    def test_a_missing_space_is_not_a_distribution_marker(self):
+        """F-EPG-8: the guide writes "TennisChannel 2", the playlist two words.
+
+        The oracle names the pair and no rule in the matcher closes a missing
+        space -- not the shipping key and not the normalize_id_text repair
+        D-EPG-5 asks for. Recorded so the repair is not credited with it.
+        """
+        self.assertNotIn("TennisChannel.us@Plus2", self.now["channels"])
+        self.assertNotEqual(helper.epg_name_key("Tennis Channel +2 (720p)"),
+                            helper.epg_name_key("TennisChannel 2"))
+        self.assertNotEqual(
+            helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", "Tennis Channel +2 (720p)")),
+            helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", "TennisChannel 2")))
 
 
 if __name__ == "__main__":

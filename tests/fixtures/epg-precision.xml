@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<!-- The guide side of tests/fixtures/epg-precision.m3u; expectations are in
+     tests/fixtures/epg-precision.json. Test "now" is 2026-10-03 00:15:00 UTC.
+     ASCII only.
+
+     Channel ids and display-names are copied from the project's own XMLTV
+     asset (https://i.mjh.nz/PlutoTV/us.xml.gz, the frozen 2026-10-03 pull),
+     and so are the programme titles, times and categories, truncated. The id
+     of each channel is Pluto's own, which is what makes it the oracle: the
+     playlist row's stream URL carries the same id, and the matcher never
+     looks at either.
+
+     Two declarations are NOT from that asset and say so on the line:
+     news12longisland.example, because no Pluto channel corresponds to a
+     News 12 regional feed, and it exists only to show that the fold's
+     collision denies the guide a row it is offering. -->
+<tv generator-info-name="omarchy-iptv precision fixture">
+  <channel id="62ba60f059624e000781c436">
+    <display-name>00s Replay</display-name>
+  </channel>
+  <channel id="5f4d878d3d19b30007d2e782">
+    <display-name>70s Cinema</display-name>
+  </channel>
+  <channel id="68487fb3f212bedacf5a53e3">
+    <display-name>50 Cent Action</display-name>
+  </channel>
+  <channel id="5e84f54a82f05300080e6746">
+    <display-name>America's Test Kitchen</display-name>
+  </channel>
+  <channel id="5e46fba0c43b0d00096e5ac1">
+    <display-name>Blaze Live</display-name>
+  </channel>
+  <channel id="5efbd29e4aa26700076c0d06">
+    <display-name>CSI</display-name>
+  </channel>
+  <channel id="5f77939a630f530007dde654">
+    <display-name>Family Ties</display-name>
+  </channel>
+  <channel id="54ff7ba69222cb1c2624c584">
+    <display-name>Bloomberg TV+</display-name>
+  </channel>
+  <channel id="681109b688b9d85d0938c6ba">
+    <display-name>TennisChannel 2</display-name>
+  </channel>
+  <!-- constructed: no Pluto channel is a News 12 regional feed -->
+  <channel id="news12longisland.example">
+    <display-name>News12 Long Island</display-name>
+  </channel>
+
+  <programme start="20261003000000 +0000" stop="20261003023000 +0000" channel="62ba60f059624e000781c436">
+    <title>The Ring</title>
+    <category>Horror</category>
+  </programme>
+  <programme start="20261003023000 +0000" stop="20261003050000 +0000" channel="62ba60f059624e000781c436">
+    <title>The Ring Two</title>
+    <category>Horror</category>
+  </programme>
+  <programme start="20261003000000 +0000" stop="20261003023000 +0000" channel="5f4d878d3d19b30007d2e782">
+    <title>Saturday Night Fever</title>
+    <category>Movie</category>
+  </programme>
+  <programme start="20261002235325 +0000" stop="20261003013819 +0000" channel="68487fb3f212bedacf5a53e3">
+    <title>Arsenal</title>
+    <category>Series</category>
+  </programme>
+  <programme start="20261002235456 +0000" stop="20261003001949 +0000" channel="5e84f54a82f05300080e6746">
+    <title>The Taste Test</title>
+    <category>Series</category>
+  </programme>
+  <programme start="20261003001949 +0000" stop="20261003005102 +0000" channel="5e84f54a82f05300080e6746">
+    <title>America's Test Kitchen</title>
+    <category>Series</category>
+  </programme>
+  <programme start="20261003000000 +0000" stop="20261003010000 +0000" channel="5e46fba0c43b0d00096e5ac1">
+    <title>Stu And Dave Do America</title>
+    <category>Series</category>
+  </programme>
+  <programme start="20261003000000 +0000" stop="20261003010000 +0000" channel="5efbd29e4aa26700076c0d06">
+    <title>CSI</title>
+    <category>Series</category>
+  </programme>
+  <programme start="20261003000000 +0000" stop="20261003003000 +0000" channel="5f77939a630f530007dde654">
+    <title>Family Ties</title>
+    <category>Comedy</category>
+  </programme>
+  <programme start="20261003000000 +0000" stop="20261003010000 +0000" channel="54ff7ba69222cb1c2624c584">
+    <title>Post Credits</title>
+    <category>Series</category>
+    <desc>Bloomberg TV+ is a live 24-hour global business and financial news channel.</desc>
+  </programme>
+  <programme start="20261002203000 +0000" stop="20261003030000 +0000" channel="681109b688b9d85d0938c6ba">
+    <title>Tennis Today</title>
+    <category>Sports</category>
+  </programme>
+  <programme start="20261003000000 +0000" stop="20261003010000 +0000" channel="news12longisland.example">
+    <title>News 12 Long Island Now</title>
+    <category>News</category>
+  </programme>
+</tv>
