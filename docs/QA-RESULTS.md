@@ -10552,3 +10552,84 @@ measurements the helper lane deferred (spawn-to-reply under a held key, the
 zero-point node across `omarchy restart shell`), and the review round. Each
 gets its own section below as it happens.
 
+## M5-01: the rewind scenario on the integrated tree, 2026-10-03
+
+`scripts/dev-harness/rewind-scenario.sh` (lane Q) on the display, against
+the integration commit 0349033, with the owner's shell (pid 2186866) alive
+before and after every run, no mpv or ffmpeg left, port 8771 free. The
+scenario had been seen red on the pre-feature tree by its author: 31 passed,
+48 failed, every red one through a sentinel (QA-REWIND section 6).
+
+### Run 1: 72 passed, 7 failed, 79 assertions, 168 s
+
+| Check | What it said | Cause |
+|---|---|---|
+| R1 (4 lines) | the first `back 10` replied `applied 0, refused true` and carried the pre-seek position, while the socket showed 27.16 -> 17.48 | **F-RWD-15**, product |
+| R3 socket edge | the socket's `ahead` a moment after `live` was above 1.0 | instrument: the cache end moves in 2 s steps on a 2 s-segment stream (F-RWD-12's quantisation, on arrival) |
+| R10, R11 count-up | NODELTA on 11.184 -> 13.215 and 22.427 -> 26.898 | **F-HARNESS-3**, instrument: `qa_delta` is integer-only and the readings are floats; both deltas were inside the band |
+
+### The measurement behind F-RWD-15
+
+Rather than reason from the one R1 reply, the race was measured on its own:
+a scratch probe starting the same local HLS stream and a headless mpv 0.41
+with the plugin's cache flags, three fresh players, four absolute seeks of
+5 s each (the first seek of each player included), reading `time-pos` at
+once after the reply to `seek`, then waiting for the `seek` event, then
+reading again.
+
+| | Count | Timing |
+|---|---|---|
+| immediate read echoed the target | 11 of 12 | read 0.30-0.55 ms after the reply |
+| immediate read echoed the OLD position | 1 of 12 (player 1, seek 2) | read 0.10 ms after the reply, the fastest of the twelve |
+| `seek` event arrived | 12 of 12 | 0.31-0.87 ms after the reply |
+| read after the event echoed the target | 12 of 12 | |
+| `playback-restart` | 12 of 12 | 26-40 ms after the reply |
+
+So the reply to `seek` means queued, the playloop executes it afterwards,
+and a read that reaches mpv before that iteration is answered first. The
+spike's 72 of 72 on real channels (F-RWD-9) were the same race, won every
+time by a slower client. The `seek` event is the ordering mark; a dropped
+seek sends the error-level refusal line instead (31 of 31 in the spike).
+
+### The fix, and the rule 11 counts
+
+`player seek` subscribes with `request_log_messages error`, issues the
+seek, waits up to `SEEK_EVENT_BOUND_S` (0.25 s, three hundred times the
+measured event latency and inside the 300 ms per-press budget) for the
+`seek` event or the refusal line, then reads and applies the 0.5 s
+threshold exactly as before. The outcome decides WHEN to read; the verdict
+stays the read against the threshold. FakeMpv executes a seek `seek_lag_s`
+after answering it, on another thread, sends the `seek` event to every
+connection and the refusal line only to the ones that subscribed (as mpv
+does, which it had not modelled); the verb tests run lagged by default; the
+QA stub sends the same two followups after its reply. Three new helper
+tests and two stub cases.
+
+| Run | `test_rewind.py` SeekVerbTest (24 cases) |
+|---|---|
+| helper as committed in 0349033, lagged fake | 12 failures, 1 error -- every landed-seek test, because the double is no longer more forgiving than mpv |
+| fixed helper | Ran 24 OK (52 in the file, 823 across `tests/`) |
+| M1 refusal line ignored | 1 failure (the refusal pays the bound) |
+| M2 no subscription | 2 failures |
+| M3 bound 0 | 13 failures |
+| M4 `refused` decided by the outcome as well as the threshold | 0 failures: EQUIVALENT MUTANT, a dropped seek leaves the position where it was; the clause was removed |
+| stub mutant, no followup after a seek | 2 of 16 self-test cases red (the second case was vacuous on the first try, `all` over an empty list, and now asserts the count) |
+
+F-HARNESS-3: a float `fdelta` for the two count-up checks; R3's socket read
+allows a segment plus the margin and prints the value.
+
+### Run 2: 79 passed, 0 failed, 79 assertions, 166 s
+
+Every check green, including the ones the design's section 10 had left to
+the integrated tree: R12, the zero point and `behindLive` recovered across
+`run.sh restart-shell` by the new shell from the player; R13, twenty held
+`b` presses through `wtype` became 3 helper runs and the position reflected
+the capped sum (30.9 s behind on a 30 s window); R14, no health strike, the
+same player pid; R15, spawn-to-reply median 220 ms (runs 220 227 217 220
+219) within the 300 ms budget, 22 ms above run 1's 198 with the event wait
+in the path. R3's socket-side `ahead` read 2.08 s, inside a segment.
+
+### Still not done
+
+The bounded live pass on the owner's own channels, the OSD line observed
+on screen (SPIKE 12.3 is the only observation), and the review round.

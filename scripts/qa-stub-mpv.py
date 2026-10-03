@@ -293,6 +293,7 @@ class Stub(object):
             self.clients += 1
             first = self.clients == 1
         buf = b""
+        subscribed = False   # request_log_messages on THIS connection (mpv is per client)
         while True:
             try:
                 chunk = conn.recv(65536)
@@ -311,11 +312,18 @@ class Stub(object):
                     continue
                 self.log("REQ " + line.decode("utf-8", "replace"))
                 self.hold(first)
+                if (req.get("command") or [None])[0] == "request_log_messages":
+                    subscribed = True
                 reply = self.dispatch(req)
                 if reply is None:
                     return
+                followup = reply.pop("_followup", [])
                 try:
                     conn.sendall((json.dumps(reply) + "\n").encode("utf-8"))
+                    for event in followup:
+                        if event.get("event") == "log-message" and not subscribed:
+                            continue
+                        conn.sendall((json.dumps(event) + "\n").encode("utf-8"))
                 except OSError:
                     return
                 self.log("REP " + json.dumps(reply))
@@ -342,8 +350,15 @@ class Stub(object):
             out["data"] = self.loadfile(cmd[1])
         elif verb == "seek":
             # Success whether or not anything moved: that is what mpv says.
+            # What follows the reply is what mpv sends next (F-RWD-15): the
+            # `seek` event to every client when it executed, the error-level
+            # refusal line to the clients that subscribed when it was
+            # dropped. serve() writes them after the reply, in that order.
             with self.lock:
-                self.seek(cmd[1] if len(cmd) > 1 else None, cmd[2] if len(cmd) > 2 else "relative")
+                moved = self.seek(cmd[1] if len(cmd) > 1 else None, cmd[2] if len(cmd) > 2 else "relative")
+            out["_followup"] = [{"event": "seek"}] if moved else [
+                {"event": "log-message", "prefix": "cplayer", "level": "error",
+                 "text": "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"}]
         elif verb == "quit":
             try:
                 return out
@@ -394,6 +409,32 @@ def self_test():
         def load_and_play(self, seconds):
             self.stub.dispatch({"command": ["loadfile", "http://127.0.0.1:9/x.m3u8", "replace"], "request_id": 1})
             self.clock.tick(seconds)
+
+        def test_a_landed_seek_is_followed_by_the_seek_event_and_a_dropped_one_by_the_refusal_line(self):
+            # F-RWD-15: the reply says success either way; what mpv sends
+            # NEXT is how a client tells them apart without a timed read.
+            self.load_and_play(20.0)
+            out = self.seek(-5.0)
+            self.assertEqual(out["error"], "success")
+            self.assertEqual(out["_followup"], [{"event": "seek"}])
+            self.clock.tick(40.0)   # the start is evicted: window 30
+            out = self.seek(1.0, "absolute")
+            self.assertEqual(out["error"], "success")
+            self.assertEqual([e["event"] for e in out["_followup"]], ["log-message"])
+            self.assertIn("Cannot seek in this stream", out["_followup"][0]["text"])
+            self.assertEqual(out["_followup"][0]["level"], "error")
+
+        def test_the_refusal_line_is_the_only_followup_that_needs_a_subscription(self):
+            # serve() filters log-message followups by the connection's own
+            # request_log_messages, as mpv does; the seek event goes to all.
+            self.load_and_play(20.0)
+            landed = self.seek(-5.0)["_followup"]
+            self.assertEqual(len(landed), 1)   # not vacuous: a stub sending nothing passed `all` over []
+            self.assertTrue(all(e["event"] != "log-message" for e in landed))
+            self.clock.tick(40.0)
+            dropped = self.seek(1.0, "absolute")["_followup"]
+            self.assertEqual(len(dropped), 1)
+            self.assertTrue(all(e["event"] == "log-message" for e in dropped))
 
         def test_time_pos_unavailable_until_loadfile_then_wall_clock(self):
             self.assertEqual(self.get("time-pos"), (None, "property unavailable"))

@@ -226,6 +226,11 @@ sets the variable.
 
 ## 6. The run on 2d7df1f plus this lane's files (red, as required)
 
+The runs on the integrated tree -- 72/7 on the first, the two defects that
+run found (F-RWD-15 in the helper, F-HARNESS-3 in this scenario) and 79/0
+after them -- are in `docs/QA-RESULTS.md`, "the rewind scenario on the
+integrated tree".
+
 Third and final run of the finished runner, 2026-10-03, display held,
 `pgrep -x quickshell` 2186866 before and after, `pgrep -xc mpv` and
 `pgrep -xc ffmpeg` 0 after, port 8771 free, nothing left under `/tmp`.

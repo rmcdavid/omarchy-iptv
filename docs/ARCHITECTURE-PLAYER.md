@@ -1480,7 +1480,11 @@ replies with the schema in design 2.1. `success` from mpv is not evidence of
 movement: a refused seek replies `success` with `time-pos` unmoved and one
 error-level log line (spike 11.4), so `moved` is the difference of the two
 reads and a request that did not move is reported as refused with the floor
-it hit. The same `rewind` object is added to the `status`, `pause` and
+it hit. The second read waits for mpv to say the seek ran: the reply to
+`seek` means queued, and a read sent at once can be answered before the
+playloop executes it (F-RWD-15, 1 of 12 on a local stream), so the verb
+subscribes to error-level log messages first and waits, bounded at 250 ms,
+for the `seek` event or the refusal line before reading. The same `rewind` object is added to the `status`, `pause` and
 `probe` replies so the existing ticks carry the numbers without a new
 process. Numbers and booleans only; `path` is never echoed. Like `pause` and
 `tracks` it is side-effect-free: no player, no spawn, `running: false`.

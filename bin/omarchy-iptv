@@ -5094,6 +5094,19 @@ def player_tracks(args: argparse.Namespace) -> int:
 SEEK_FLOOR_MARGIN_S = 2.0        # a target at the floor lands 1-2 s above it; below it is dropped
 SEEK_EDGE_MARGIN_S = 0.5         # the edge target, inside the range
 SEEK_MOVED_THRESHOLD_S = 0.5     # 0.467 above the refused max, 1.5 below the smallest request (12.2)
+# How long `player seek` waits, after mpv's reply to the seek command, for
+# the `seek` event (the seek executed) or the refusal log line (it was
+# dropped) before reading `time-pos`. The reply to `seek` is sent when the
+# seek is QUEUED, and the playloop executes it afterwards, so a read sent
+# at once can be answered first and echo the old position: measured on
+# 2026-10-03 on a local HLS stream, 1 of 12 immediate reads (the fastest,
+# 0.10 ms after the reply) read the old position while the event arrived
+# 0.31-0.87 ms after the reply on all 12 and the read after it was exact on
+# all 12 (F-RWD-15). The bound is 300 times that latency and inside the
+# 300 ms per-press budget; only a seek that is neither executed nor refused
+# within it pays the whole bound, and then the read and the threshold decide.
+SEEK_EVENT_BOUND_S = 0.25
+SEEK_REFUSAL_TEXT = "Cannot seek in this stream"
 BEHIND_LIVE_SHOW_S = 2           # mirrors Model.BEHIND_LIVE_SHOW_S (12.4: fifty-fold margin)
 OSD_TEXT_MS = 3000               # the show-text duration M3 measured
 # The twelve leaves forwarded out of `demuxer-cache-state` (12.1), as
@@ -5393,11 +5406,34 @@ def read_rewind(client: MpvIpc, stash: Any = None, paused: Any = None, write: bo
     return rewind_view(position, cache, zero, paused, paused_for_cache, entry_id, wall)
 
 
+def await_seek_outcome(client: MpvIpc, deadline: float) -> str | None:
+    """After the reply to `seek`: "landed" when the `seek` event arrives
+    (mpv executed it), "refused" when the error-level refusal line arrives
+    (mpv dropped it), None when neither did by `deadline`. The caller must
+    have subscribed with `request_log_messages error`. The line's text is
+    matched, never printed: it is mpv's own sentence, but the rule for this
+    sink is nothing from the player reaches stdout unexamined."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        events = client.drain_events(deadline)
+        if events is None:
+            return None
+        for event in events:
+            name = event.get("event")
+            if name == "seek":
+                return "landed"
+            if name == "log-message" and SEEK_REFUSAL_TEXT in str(event.get("text", "")):
+                return "refused"
+
+
 def player_seek(args: argparse.Namespace) -> int:
     """`player seek --by N` (signed seconds, negative is back) or `--live`.
 
     One run: read time-pos and the cache state, clamp (clamp_seek), issue ONE
-    absolute seek, read time-pos again, decide moved or refused by the
+    absolute seek, wait for the `seek` event or the refusal line (bounded,
+    F-RWD-15), read time-pos again, decide moved or refused by the
     not-moved threshold, take the zero point if none exists, put one
     numbers-only line on the OSD when the request was honoured, and reply.
     Side-effect-free when no player is there, like `pause`.
@@ -5455,7 +5491,18 @@ def player_seek(args: argparse.Namespace) -> int:
         elif not plan["issue"]:
             payload["refused"] = False
         else:
+            # The reply to `seek` means queued, not executed (F-RWD-15): the
+            # read that decides moved-or-refused waits for the event that
+            # says it ran, or the line that says it was dropped, or the
+            # bound. The outcome decides only WHEN to read; the verdict is
+            # the read against the threshold, as measured (12.2) -- a
+            # `refused` clause on the outcome was an equivalent mutant,
+            # because a dropped seek leaves the position where it was. The
+            # subscription is error-level only and the text is never emitted.
+            client.try_command("request_log_messages", "error")
             sent, _ = client.try_command("seek", plan["target"], "absolute")
+            if sent:
+                await_seek_outcome(client, time.monotonic() + SEEK_EVENT_BOUND_S)
             ok, pos = client.try_command("get_property", "time-pos")
             after = _finite(pos) if ok else None
             if not sent or after is None or before is None or abs(after - before) < SEEK_MOVED_THRESHOLD_S:

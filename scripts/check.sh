@@ -152,7 +152,7 @@ fail=0
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-70}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1821}
-PY_TESTS_MIN=${PY_TESTS_MIN:-820}
+PY_TESTS_MIN=${PY_TESTS_MIN:-823}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -172,8 +172,8 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # to nothing would scan nothing and exit 0 if the guard did not refuse that
 # itself; this is the second line of defence, in the gate's own vocabulary.
 TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
-# The player stub's self-test (M5-01): 14 cases when wired in.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-14}
+# The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-16}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }

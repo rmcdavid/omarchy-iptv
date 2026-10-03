@@ -213,7 +213,26 @@ class RewindPlayerTestCase(PlayerTestCase):
         data = {"omarchy-iptv": self.stash(entry_id)}
         data.update(user_data or {})
         seek_moves = kwargs.pop("seek_moves", True)
-        return self.start(props=self.props(**kwargs), user_data=data, seek_moves=seek_moves)
+        # Lagged by default (F-RWD-15): the fake executes a seek 5 ms after
+        # answering it, on another thread, as mpv's playloop does after the
+        # IPC thread has replied. A helper that reads at once reads the old
+        # position here, as it did once in twelve on the real player.
+        seek_lag_s = kwargs.pop("seek_lag_s", 0.005)
+        seek_silent = kwargs.pop("seek_silent", False)
+        return self.start(props=self.props(**kwargs), user_data=data, seek_moves=seek_moves,
+                          seek_lag_s=seek_lag_s, seek_silent=seek_silent)
+
+    def read_after_seek_s(self):
+        """Seconds between the `seek` command and the next `time-pos` read
+        the fake received, from its own clock: the ordering F-RWD-15 is
+        about, observed at the sink rather than inferred from the reply."""
+        commands, times = self.server.commands, self.server.command_times
+        for i, command in enumerate(commands):
+            if command[0] == "seek":
+                for j in range(i + 1, len(commands)):
+                    if commands[j][:2] == ["get_property", "time-pos"]:
+                        return times[j] - times[i]
+        return None
 
     def seek(self, *args):
         return run("player", "seek", "--socket", self.sock, "--ipc-timeout", "1", *args)
@@ -278,6 +297,52 @@ class SeekVerbTest(RewindPlayerTestCase):
         self.assertEqual(payload["rewind"]["history"], 2.0)
         self.assertEqual(payload["rewind"]["behindLive"], 354.589)
         self.assertEqual(server.osd, [["-5:54 behind live, as far back as it goes", 3000]])
+
+    def test_the_deciding_read_waits_for_the_seek_event_so_a_lagged_landing_is_never_reported_refused(self):
+        # F-RWD-15. The fake answers the seek at once and executes it 50 ms
+        # later; a read sent at once would echo 400.617 and call the seek
+        # refused, as the real player did on 1 of 12. The helper subscribes
+        # to error-level log messages first, then waits for the `seek`
+        # event, and its read is the landing.
+        server = self.playing(seek_lag_s=0.05)
+        code, payload, _, stderr = self.seek("--by", "-10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["refused"], payload["applied"], payload["rewind"]["position"]), (False, -10.0, 390.617))
+        self.assertEqual(server.osd, [["-0:10 behind live", 3000]])
+        names = [c[0] for c in server.commands]
+        self.assertIn("request_log_messages", names)
+        self.assertLess(names.index("request_log_messages"), names.index("seek"))
+        self.assertEqual([c for c in server.commands if c[0] == "request_log_messages"], [["request_log_messages", "error"]])
+        gap = self.read_after_seek_s()
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(gap, 0.05)
+        self.assertLess(gap, helper.SEEK_EVENT_BOUND_S)
+
+    def test_a_refusal_is_known_from_the_line_without_paying_the_bound(self):
+        # The dropped seek's refusal line arrives after the lag; the helper
+        # reads then, not 250 ms later -- a held key must not pay the bound
+        # on every refusal.
+        server = self.playing(seek_moves=False, seek_lag_s=0.01)
+        code, payload, _, stderr = self.seek("--by", "-10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["refused"], payload["applied"]), (True, 0))
+        self.assertEqual(server.osd, [])
+        gap = self.read_after_seek_s()
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(gap, 0.01)
+        self.assertLess(gap, helper.SEEK_EVENT_BOUND_S)
+
+    def test_a_seek_that_neither_runs_nor_refuses_pays_the_bound_and_the_threshold_decides(self):
+        # Neither event nor line: the helper waits the bound, then reads and
+        # applies the 0.5 s threshold, which says refused.
+        server = self.playing(seek_silent=True)
+        code, payload, _, stderr = self.seek("--by", "-10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["refused"], payload["applied"], payload["rewind"]["position"]), (True, 0, 400.617))
+        gap = self.read_after_seek_s()
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(gap, helper.SEEK_EVENT_BOUND_S)
+        self.assertEqual(helper.SEEK_EVENT_BOUND_S, 0.25)
 
     def test_a_seek_mpv_drops_is_reported_refused_not_success(self):
         # The underrun case (12.2, F-RWD-9): a target inside the range that
@@ -583,7 +648,7 @@ class FakeMpvSeekSemanticsTest(RewindPlayerTestCase):
         return client
 
     def test_a_target_below_the_floor_answers_success_moves_nothing_and_logs_the_refusal(self):
-        server = self.playing()
+        server = self.playing(seek_lag_s=0)
         client = self.client()
         client.command("request_log_messages", "error")
         reply = client.request(["seek", 43.028, "absolute"])
@@ -595,14 +660,16 @@ class FakeMpvSeekSemanticsTest(RewindPlayerTestCase):
         self.assertEqual(events[0]["level"], "error")
 
     def test_a_target_past_the_end_is_the_same_silent_refusal(self):
-        server = self.playing()
+        server = self.playing(seek_lag_s=0)
         client = self.client()
         self.assertEqual(client.request(["seek", 489.977, "absolute"])["error"], "success")
         self.assertEqual(client.command("get_property", "time-pos"), 400.617)
         self.assertEqual(server.seeks, [(489.977, False)])
 
     def test_a_target_inside_the_range_echoes_exactly(self):
-        server = self.playing()
+        # Synchronous fake (seek_lag_s 0): what the position reads once the
+        # seek has executed. The lagged ordering is SeekVerbTest's.
+        server = self.playing(seek_lag_s=0)
         client = self.client()
         client.command("seek", 100.617, "absolute")
         self.assertEqual(client.command("get_property", "time-pos"), 100.617)
@@ -610,14 +677,14 @@ class FakeMpvSeekSemanticsTest(RewindPlayerTestCase):
 
     def test_a_negative_absolute_target_counts_from_the_cache_end(self):
         # F-RWD-7, 5 of 5 on the real player.
-        server = self.playing()
+        server = self.playing(seek_lag_s=0)
         client = self.client()
         client.command("seek", -6.462, "absolute")
         self.assertEqual(client.command("get_property", "time-pos"), 418.001 - 6.462)
         self.assertEqual(server.seeks, [(418.001 - 6.462, True)])
 
     def test_the_underrun_double_moves_nothing_inside_the_range(self):
-        server = self.playing(seek_moves=False)
+        server = self.playing(seek_moves=False, seek_lag_s=0)
         client = self.client()
         client.command("seek", 100.617, "absolute")
         self.assertEqual(client.command("get_property", "time-pos"), 400.617)

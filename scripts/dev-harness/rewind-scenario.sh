@@ -109,6 +109,16 @@ near() { python3 -c '
 import sys
 try: print(0 if abs(float(sys.argv[1]) - float(sys.argv[2])) <= float(sys.argv[3]) else 1)
 except Exception: print(2)' "$1" "$2" "$3"; }
+# fdelta <before> <after>: after - before as a float, or "x" when either is
+# not a number. qa_delta is integer-only by design (it subtracts counters);
+# the rewind readings are floats, and feeding them to it printed NODELTA on
+# every run of the integrated tree (F-HARNESS-3) -- a red that was the
+# instrument's, invisible on the pre-feature tree where the field was
+# NOSTATE anyway.
+fdelta() { python3 -c '
+import sys
+try: print(round(float(sys.argv[2]) - float(sys.argv[1]), 3))
+except Exception: print("x")' "$1" "$2"; }
 # ge <a> <b>: "0" when a >= b as numbers, else "1"/"2" as above.
 ge() { python3 -c '
 import sys
@@ -378,7 +388,13 @@ is "R3 mode live" "$(rf 'd["mode"]' "$r")" "live"
 is "R3 atEdge" "$(rf 'd["atEdge"]' "$r")" "true"
 ck "R3 ahead <= 1 s ($(rf 'd["rewind"]["ahead"]' "$r"))" '[[ $(ge 1.0 "$(rf "d[\"rewind\"][\"ahead\"]" "$r")") == 0 ]]'
 ck "R3 behindLive below the display threshold ($(rf 'd["rewind"]["behindLive"]' "$r"))" '[[ $(ge "$SHOW_S" "$(rf "d[\"rewind\"][\"behindLive\"]" "$r")") == 0 && $(ge "$(rf "d[\"rewind\"][\"behindLive\"]" "$r")" 0) == 0 ]]'
-ck "R3 the socket agrees it is at the edge" '[[ $(ge 1.0 "$(rf "d[\"ahead\"]" "$(probe range "$SOCK")")") == 0 ]]'
+# The socket's own read a moment later: on a 2 s-segment stream the cache
+# end moves in 2 s steps as segments land, so `ahead` at the edge is
+# anywhere up to a segment plus the 0.5 s margin (F-RWD-12's quantisation,
+# on arrival rather than eviction); the helper's own read, a millisecond
+# after its seek, is the 0.5 s R3 asserts above.
+r3a=$(rf 'd["ahead"]' "$(probe range "$SOCK")")
+ck "R3 the socket agrees it is at the edge, within a segment ($r3a <= 2.5)" '[[ $(ge 2.5 "$r3a") == 0 ]]'
 
 echo "== R4 the over-long seek: mpv drops it, the helper clamps it (MUST be red on 2d7df1f)"
 # The refusal needs an EVICTED floor: while the start of the stream is
@@ -467,7 +483,7 @@ p1=$(pos)
 is "R10 still paused on the socket" "$(rf 'd["paused"]' "$(probe range "$SOCK")")" "true"
 ck "R10 the position moved back 10 while paused (before $p0, after $p1)" '[[ $(near "$(python3 -c "print(float(\"$p1\")-float(\"$p0\"))" 2>/dev/null || echo x)" -10 2.5) == 0 ]]'
 b0=$(rw behindLive); sleep 3; b1=$(rw behindLive)
-ck "R10 behindLive counts UP while paused ($b0 -> $b1)" '[[ $(near "$(qa_delta "$b0" "$b1" 2>/dev/null | sed "s/NODELTA/x/")" 3 1.5) == 0 ]]'
+ck "R10 behindLive counts UP while paused ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 3 1.5) == 0 ]]'
 ck "R10 playbackStateText says paused ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" == paused* && "$(snap playbackStateText)" == *"behind live" ]]'
 is "R10 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
@@ -481,7 +497,7 @@ sleep 1
 p0=$(pos); sleep 2; p1=$(pos)
 ck "R11 the position holds while paused ($p0, $p1)" '[[ $(near "$p0" "$p1" 0.25) == 0 ]]'
 b0=$(rw behindLive); sleep 3; b1=$(rw behindLive)
-ck "R11 behindLive counts up ($b0 -> $b1)" '[[ $(near "$(qa_delta "$b0" "$b1" 2>/dev/null | sed "s/NODELTA/x/")" 3 1.5) == 0 ]]'
+ck "R11 behindLive counts up ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 3 1.5) == 0 ]]'
 is "R11 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
 ck "R11 resumed from the held position ($(rf 'd["pos"]' "$w") vs $p1)" '[[ "$(rf "d[\"ok\"]" "$w")" == true && $(near "$(rf "d[\"pos\"]" "$w")" "$p1" 4.0) == 0 ]]'

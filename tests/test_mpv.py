@@ -72,12 +72,24 @@ class FakeMpv:
     NEGATIVE target is an offset from the cache end, not a refusal (F-RWD-7,
     5 of 5). `seek_moves=False` is the underrun case: a target inside the
     range that still moves nothing. `show-text` is recorded in `osd`.
+
+    And the ordering mpv really has (F-RWD-15, measured 2026-10-03): the
+    reply to `seek` means QUEUED. The position moves, the `seek` event is
+    sent to every client and -- for a dropped seek -- the refusal line is
+    sent to the clients that subscribed, all `seek_lag_s` AFTER the reply,
+    on another thread, the way the playloop executes a queued seek after
+    the IPC thread has answered. A read sent at once can be answered first
+    and echo the old position; 1 of 12 did on the real player. `seek_lag_s`
+    0 is the synchronous fake the direct-socket semantics tests drive;
+    the verb tests run lagged. `seek_silent=True` is the pathological case
+    that neither executes nor refuses, for the bound. Log messages reach
+    only connections that asked for them, as on mpv.
     """
 
     REFUSAL_LINE = "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"
 
     def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True,
-                 entry_ids=True, user_data=None, seek_moves=True):
+                 entry_ids=True, user_data=None, seek_moves=True, seek_lag_s=0.0, seek_silent=False):
         self.path = path
         self.props = props or {}
         self.event_first = event_first
@@ -87,6 +99,10 @@ class FakeMpv:
         self.entry_ids = entry_ids
         self.user_data = dict(user_data or {})
         self.seek_moves = seek_moves
+        self.seek_lag_s = seek_lag_s
+        self.seek_silent = seek_silent
+        self.log_conns = set()
+        self.command_times = []
         self.seeks = []
         self.osd = []
         self.commands = []
@@ -119,10 +135,13 @@ class FakeMpv:
 
     def inject(self, event):
         """Push an unsolicited event line to every live connection, the way
-        mpv emits start-file / end-file / log-message / property-change."""
+        mpv emits start-file / end-file / seek / property-change -- and a
+        log-message only to the connections that subscribed, as mpv does."""
         payload = (json.dumps(event) + "\n").encode("utf-8")
         with self.lock:
             targets = list(self.conns)
+            if event.get("event") == "log-message":
+                targets = [c for c in targets if c in self.log_conns]
         for conn in targets:
             try:
                 conn.sendall(payload)
@@ -148,6 +167,9 @@ class FakeMpv:
                     message = json.loads(line.decode("utf-8"))
                     with self.lock:
                         self.commands.append(message["command"])
+                        self.command_times.append(time.monotonic())
+                        if message["command"][0] == "request_log_messages":
+                            self.log_conns.add(conn)
                     if self.silent:
                         continue
                     reply = self.reply_for(message)
@@ -231,13 +253,23 @@ class FakeMpv:
                 target = ranges[-1][1] + amount
             inside = any(start <= target <= end for start, end in ranges)
             if inside and self.seek_moves:
-                self.props["time-pos"] = target
                 landed = True
         with self.lock:
             self.seeks.append((target, landed))
-        if not landed:
-            self.inject({"event": "log-message", "prefix": "cplayer", "level": "error",
-                         "text": self.REFUSAL_LINE})
+
+        def execute():
+            if self.seek_silent:
+                return
+            if landed:
+                self.props["time-pos"] = target
+                self.inject({"event": "seek"})
+            else:
+                self.inject({"event": "log-message", "prefix": "cplayer", "level": "error",
+                             "text": self.REFUSAL_LINE})
+        if self.seek_lag_s > 0:
+            threading.Timer(self.seek_lag_s, execute).start()
+        else:
+            execute()
 
     def close(self):
         self.running = False
