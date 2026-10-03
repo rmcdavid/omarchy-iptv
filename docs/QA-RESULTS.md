@@ -10356,3 +10356,41 @@ footer  j/k move - h/l group - Enter play - Space preview - x hide group - i det
 panel   The Ring Two | 00s Replay | 04:30 - 07:00 | description, category
         j/k scroll - PgUp/PgDn page - Home/End ends - Esc back
 ```
+
+## F-BOARD-1, 2026-10-03: the board said open where the code said fixed, five times
+
+Asked what was next, I read the board first and found five of its nine open
+rows already closed in the code. Each was verified before being moved, by
+calling the shipping function or reading the shipped file, not by trusting a
+commit message:
+
+| row | what the code says |
+|---|---|
+| F-SINK-10 | a title holding `http://u5er:5ecretpw@tracker.example/x?t=1` reaches the row as `Now: Watch at tracker.example`; the channel name is redacted in the accessible name |
+| D-SAVE-6 | `savedSearchDepartures` and `savedSearchArrivals` are exported and called from the guide |
+| D-DOC-1 | the README's Sources key table lists `g` |
+| D-DOC-2 | the README status paragraph reads v0.10.0 and names what shipped |
+| D-PLY-23 | `drainPendingPlay` is called from the pause branch and three other sites |
+
+**The sharpest of them is D-PLY-23.** Its own follow-up, D-PLY-24, says in
+its text that it records what D-PLY-23's REPAIR dropped, and has read `fixed`
+since the 0.9.1 round. The two rows sat adjacent for a week saying things
+that cannot both be true. F-SINK-10 read `open` for a day after a commit
+whose subject line is "Close F-SINK-10 at the sink".
+
+**Why nothing caught it.** `scripts/check-defect-ledger.py` was written for
+exactly this class: rule 13 says a cross-document id joined by a NAME rather
+than a call will eventually stop being copied, and the checker makes the
+join a call by proving every id exists in both the board and a write-up. It
+does not check that the two AGREE. The state column is still a thing a human
+copies, which is the same failure one level up from the one the checker was
+built to end. F-CHNO-4 was this project's first lesson of this shape; this is
+the second.
+
+The five are closed. The structural question is left open as F-BOARD-1,
+because the fix is not obvious: a write-up saying "FIXED" is prose, and
+teaching a checker to read it is how you get a checker that lies. The
+candidates worth weighing are a state keyword the write-up must carry beside
+the id, a convention that a fix commit must move the row in the same commit
+(testable in the gate against the range), or a periodic reconciliation run
+that reports disagreement without trying to resolve it.
