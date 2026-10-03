@@ -444,10 +444,13 @@ is "R7 the harness verb back answers" "$(rf 'd["ok"]' "$(ipc back 10)")" "true"
 until_rw behindLive 8 13 6 || true
 ck "R7 service rewind.behindLive ~10 ($(rw behindLive))" '[[ $(near "$(rw behindLive)" 10 2.5) == 0 ]]'
 ck "R7 playbackStateText says so ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" =~ ^0:(0[8-9]|1[0-3])\ behind\ live$ ]]'
-pr=$(pipc back 10)
+# `back 5`, not 10: the verb's argument is the size of the step (F-RWD-17,
+# every verb press seeked ten seconds whatever N was), and 5 + the 10 above
+# is a window a 30 s cache still holds.
+pr=$(pipc back 5)
 is "R7 the plugin IPC verb back answers JSON ok" "$(rf 'd["ok"]' "$pr")" "true"
-until_rw behindLive 18 23 6 || true
-ck "R7 and the readout followed it (~20, $(rw behindLive))" '[[ $(near "$(rw behindLive)" 20 2.5) == 0 ]]'
+until_rw behindLive 13 18 6 || true
+ck "R7 and the readout followed it by the argument (~15, $(rw behindLive))" '[[ $(near "$(rw behindLive)" 15 2.5) == 0 ]]'
 ck "R7 the hint pairs name the keys (b back, w forward, g live)" '[[ "$(snap keyboardMap)" == *"b=back"* && "$(snap keyboardMap)" == *"w=forward"* && "$(snap keyboardMap)" == *"g=live"* ]]'
 
 echo "== R8 the bar"
@@ -482,8 +485,13 @@ sleep 1.5
 p1=$(pos)
 is "R10 still paused on the socket" "$(rf 'd["paused"]' "$(probe range "$SOCK")")" "true"
 ck "R10 the position moved back 10 while paused (before $p0, after $p1)" '[[ $(near "$(python3 -c "print(float(\"$p1\")-float(\"$p0\"))" 2>/dev/null || echo x)" -10 2.5) == 0 ]]'
+# Two snapshot reads 3 s apart; each read is an IPC round trip of a few
+# hundred ms under load, and the count-up is quantised to the 1 Hz tick,
+# so the delta reads 3 to 5.5 for a true 1 s/s (measured 1.8-5.5 over four
+# runs, F-HARNESS-3): the band is [1.5, 6.5], red for a number that holds
+# (0) and for one that doubles (8+).
 b0=$(rw behindLive); sleep 3; b1=$(rw behindLive)
-ck "R10 behindLive counts UP while paused ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 3 1.5) == 0 ]]'
+ck "R10 behindLive counts UP while paused ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
 ck "R10 playbackStateText says paused ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" == paused* && "$(snap playbackStateText)" == *"behind live" ]]'
 is "R10 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
@@ -497,7 +505,7 @@ sleep 1
 p0=$(pos); sleep 2; p1=$(pos)
 ck "R11 the position holds while paused ($p0, $p1)" '[[ $(near "$p0" "$p1" 0.25) == 0 ]]'
 b0=$(rw behindLive); sleep 3; b1=$(rw behindLive)
-ck "R11 behindLive counts up ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 3 1.5) == 0 ]]'
+ck "R11 behindLive counts up ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
 is "R11 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
 ck "R11 resumed from the held position ($(rf 'd["pos"]' "$w") vs $p1)" '[[ "$(rf "d[\"ok\"]" "$w")" == true && $(near "$(rf "d[\"pos\"]" "$w")" "$p1" 4.0) == 0 ]]'

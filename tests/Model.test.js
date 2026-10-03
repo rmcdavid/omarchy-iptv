@@ -8763,7 +8763,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.coalesceSeek({ pending: 0, press: 0, history: 356, step: 10 }),
      Model.coalesceSeek({ pending: -5, press: -1, history: 356, step: -10 }),
      Model.coalesceSeek({})],
-    [-10, -40, -35, -20, 0, -10, -10, 10, -10, 0, -15, 0])
+    [-10, -40, -35, -20, -10, -10, -10, 10, -10, 0, -15, 0])   // history 0 and history null both -10: the cap is one step at least (see the integration block)
   // 9. The paused count-up (2.3): holds while playing, counts up while paused.
   const atRest = { position: 300, floor: 44, ceiling: 418, history: 256, ahead: 118, behindLive: 92.4, zeroed: true, paused: false, pausedForCache: false, entryId: 7 }
   check("M5-01: behindLiveNow holds while playing, counts up while paused from the read, and is null without a zero point",
@@ -8807,7 +8807,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.coalesceSeek({ pending: -390, press: -1, history: null, step: 10 }),
      Model.coalesceSeek({ pending: 0, press: -1, history: 0, step: 10 }),
      Model.coalesceSeek({ pending: 0, press: -1, history: "", step: 10 })],
-    [-10, -20, -10, 10, -400, 0, -10])
+    [-10, -20, -10, 10, -400, -10, -10])
+  check("M5-01 integration: the cap is one step below the history at least, so a sub-second window still runs the helper and hears the floor",
+    [Model.coalesceSeek({ pending: 0, press: -1, history: 0.4, step: 10 }),
+     Model.coalesceSeek({ pending: -10, press: -1, history: 5, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -1, history: 5, step: 30 }),
+     Model.coalesceSeek({ pending: -350, press: -1, history: 356.6, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: 1, history: 0.4, step: 10 }),
+     Model.coalesceSeek({ pending: -20, press: -1, history: 20, step: 10 })],
+    [-10, -10, -30, -356.6, 10, -20])
   // 2. The bar glyph is one decision in one place: behind live while
   // playing is the history glyph, paused wins over it, and nothing else
   // moves.

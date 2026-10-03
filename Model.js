@@ -4970,7 +4970,11 @@ function coalesceSeek(opts) {
   var history = finiteOr(o.history, null)
   if (history !== null && history < 0) history = 0
   var sum = pending + (press < 0 ? -step : press > 0 ? step : 0)
-  if (history !== null && sum < -history) sum = -history
+  // The cap is one step below the history at least: with 0.4 s of history
+  // a press capped at -0.4 rounded to nothing and ran nothing, silently;
+  // capped at -10 it runs, the helper clamps to the floor, and the user is
+  // told "As far back as it goes" (review of the integrated tree).
+  if (history !== null && sum < -history) sum = -Math.max(history, step)
   return round3(sum)
 }
 

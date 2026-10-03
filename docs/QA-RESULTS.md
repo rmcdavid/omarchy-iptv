@@ -10684,6 +10684,56 @@ runs; no mpv or ffmpeg left; the user's files untouched.
   while playing at live -- by design, the number holds while playing and is
   only shown behind live; noted, not filed.
 
-### Still not done
+### Still not done at that point
 
 The review round, and the owner's call on F-RWD-10 if they object.
+
+## M5-01: the review round's first repairs, 2026-10-03
+
+The review workflow (five lenses -- seek path, sinks, claims, tests and
+doubles, UX/a11y/docs -- each finding adversarially verified) was launched
+on d508e9d while the live pass ran. Its seek-path lens reported first, and
+one of its seven findings was a P2 the lead's own live-pass data already
+held.
+
+### F-RWD-17: `back N` seeked ten seconds whatever N was
+
+`seekBy` handed `Model.coalesceSeek` the press's sign and
+`Model.REWIND_STEP_S` as the step for every request. The README's verb
+table, the CHANGELOG and contrib/bindings.lua all describe the argument as
+the size of the step; it reached nothing. The live pass had recorded BET's
+`back 30` landing "7.6 for a target of 2.0" and the lead filed it under
+F-RWD-8 as a landing past the target -- a 10 s step from 17.4 lands at 7.4,
+0.2 s off. That addendum is withdrawn on the board; the sighting was the
+finding, misread.
+
+Fixed with four siblings from the same lens: `seekPending` was an `int`
+(a cap below one second truncated to 0: "queued, pending 0", nothing run),
+`Model.seekVerbSeconds` was tested and dead beside the service's own parser,
+a press on a stopping player answered "queued" for a run that never came,
+and a seek reply landing after stop() or EOF repopulated the readout; plus
+the probe's parsed `rewind` was being thrown away for a re-parse under a
+comment that said the parser did not carry it. The coalescer's cap is now
+one step below the history at least, so a sub-second window still runs the
+helper and the user hears "As far back as it goes" instead of nothing.
+
+### Evidence
+
+| Run | Tree | Result | The R7 check that moved |
+|---|---|---|---|
+| 3, `--baseline 1a2a6a5` | before the fix, current scenario | 77 / 2 | `back 5` through the plugin verb: readout 20.8 against ~15 -- RED, the verb ignored its argument |
+| 4 | fixed | 76 / 3 | 17.8 against ~15: moved by the argument, plus the drift below |
+| node | | 1822 checks, 0 failures | six cap vectors re-pinned or added; two were red before the re-pin (history 0 read as a cap of 0) |
+
+Run 4's three reds are not the fix's. The review's agents were running the
+suites in the background (load average 2.5 on four cores), the local
+`ffmpeg -re` encoder fell behind, and the reader fell 2.8 s behind live
+on the stream itself between the seek reply and the status tick: R7's
+first reading was 12.8 against ~10 and its second 17.8 against ~15, the
+same 2.8 both times, which is F-RWD-10's shape reported honestly rather
+than hidden. R11's count-up read 5.3 in a 3 s window on run 4 and 5.5 on
+run 3, as it had read 4.2-4.5 on runs 1-2 and R10 1.8-3.0: two snapshot
+reads 3 s apart cost an IPC round trip each and the count is quantised to
+the 1 Hz tick, so the band is now [1.5, 6.5] (red for a number that holds
+and for one that doubles), recorded under F-HARNESS-3. A fifth run on a
+quiet machine follows below once the review has finished.

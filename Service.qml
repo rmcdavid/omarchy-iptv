@@ -384,7 +384,10 @@ Item {
   // queueing a process. Model.coalesceSeek caps it at the last-read history
   // so a sum past the floor is never asked for. `seekLiveQueued` is the one
   // request that is not a sum: it replaces whatever was pending.
-  property int seekPending: 0
+  // real, not int: the cap is the last-read history, a float, and an int
+  // truncated a sub-second cap to 0 -- "queued, pending 0" and nothing run
+  // (review of the integrated tree, F-RWD-17's sibling finding).
+  property real seekPending: 0
   property bool seekLiveQueued: false
   // Wall seconds of the last reply that carried `rewind`, and of the moment
   // `paused` flipped true. "Behind live" holds while playing and counts up
@@ -2123,7 +2126,10 @@ Item {
       // these numbers back would put the OLD stream's clock on the new
       // channel's bar for up to a health tick. Stale replies apply nothing
       // and say nothing (the tracks branch above does the same by channel).
-      if (root.pendingPlayId === "") {
+      // And a reply that lands after stop() or the player's EOF describes a
+      // player that is gone: nothing plays, so nothing is behind live, and
+      // the guide would otherwise show a transient for it (review finding).
+      if (root.pendingPlayId === "" && root.nowPlaying && root.playerUp) {
         root.applyRewind(status)
         if (status.ok === true) root.seekAtFloor = status.atFloor === true
         root.seekReplied(status)
@@ -2622,10 +2628,11 @@ Item {
     // M5-01 (2.2): the zero point lives on the player, so a shell restart
     // recovers "behind live" from the probe reply the way the channel is
     // recovered from the stash, with the number continuous across it.
-    // Model.parsePlayerProbe does not carry the `rewind` object; the reply
-    // text is still in hand, so it is read through the same parser every
-    // other control reply goes through.
-    root.applyRewind(Model.parseHelperStatus(text, "probe"))
+    // Model.parsePlayerProbe carries it, coerced by Model.parseRewind
+    // (numbers finite or null, booleans strict); the service lane's first
+    // version re-parsed the reply text and said the probe parser did not
+    // carry it, which was true of the design and not of the tree.
+    root.applyRewind({ ok: true, running: probe.running === true, rewind: probe.rewind })
     // Restored from the stash inside the surviving process, BEFORE the
     // channel cache exists: the bar and the guide are correct immediately
     // and the zap ring is fixed by reconcileNowPlaying() when the cache
@@ -3239,16 +3246,11 @@ Item {
     seekThrottle.stop()
   }
 
-  // `seconds` as the IPC verbs receive it: a string holding a positive
-  // integer, or empty for one step. null for anything else, so a mistyped
-  // binding is a refusal and never a seek of some other size.
-  function parseSeekSeconds(seconds) {
-    var s = String(seconds === undefined || seconds === null ? "" : seconds).replace(/^\s+|\s+$/g, "")
-    if (s === "") return Model.REWIND_STEP_S
-    if (!/^[0-9]{1,5}$/.test(s)) return null
-    var n = parseInt(s, 10)
-    return n > 0 ? n : null
-  }
+  // The IPC verbs' argument is read by Model.seekVerbSeconds (design 2.4):
+  // empty is one step, a positive whole number is itself, anything else is
+  // 0 and refused as bad_seconds. The service lane had written a second
+  // parser here while Model.js was closed to it; the review found the
+  // tested one dead (rule 12) and this one with different limits.
 
   function seekRefuse(requested, code) {
     return { ok: false, kind: "seek", requested: requested, code: String(code),
@@ -3265,15 +3267,24 @@ Item {
   function seekBy(seconds) {
     var n = Math.round(Number(seconds))
     if (!isFinite(n) || n === 0) return root.seekRefuse(seconds, "bad_seconds")
-    if (!root.nowPlaying || !root.playerUp) return root.seekRefuse(n, "nothing_playing")
+    // A player on its way out takes no press: issueSeek would clear the
+    // queue and the reply would have said "queued" for a run that never
+    // comes (review finding; CN15, a refusal is never a false success).
+    if (!root.nowPlaying || !root.playerUp || root.stopping || root.userStopped) return root.seekRefuse(n, "nothing_playing")
     if (n < 0 && root.seekAtFloor) return root.seekRefuse(n, "at_floor")
     // A press after `g` was queued is a new intention: the live request
     // stood for "forget the sum", and this press starts a new one.
     if (root.seekLiveQueued) { root.seekLiveQueued = false; root.seekPending = 0 }
+    // `press` carries the direction and `step` the size: the size is THIS
+    // request's, so `back 30` is thirty seconds. The first version passed
+    // Model.REWIND_STEP_S as the step for every press and every verb seeked
+    // ten seconds whatever its argument (F-RWD-17, found by the review of
+    // the integrated tree after the live pass had recorded it as a landing
+    // past the target and the lead had misread it).
     root.seekPending = Model.coalesceSeek({
       pending: root.seekPending, press: n,
       history: root.rewind ? root.rewind.history : null,
-      step: Model.REWIND_STEP_S
+      step: Math.abs(n)
     })
     var state = root.issueSeek() ? "applying" : "queued"
     return { ok: true, kind: "seek", requested: n, pending: root.seekPending, state: state }
@@ -3310,6 +3321,9 @@ Item {
       if (by > 0) root.seekAtFloor = false
       argv = Model.playerSeekArgv(root.socketPath, by)
     }
+    // playerSeekArgv answers [] for a request that rounds to nothing; the
+    // helper is never spawned with no verb.
+    if (argv.length === 0) return false
     return root.runControl("seek", argv)
   }
 
@@ -4860,12 +4874,12 @@ Item {
     // a refusal is reported with its code and never as a success (CN15).
     // contrib/bindings.lua suggests SUPER+SHIFT+H / L / R.
     function back(seconds: string): string {
-      var n = root.parseSeekSeconds(seconds)
-      return JSON.stringify(n === null ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
+      var n = Model.seekVerbSeconds(seconds)
+      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
     }
     function forward(seconds: string): string {
-      var n = root.parseSeekSeconds(seconds)
-      return JSON.stringify(n === null ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
+      var n = Model.seekVerbSeconds(seconds)
+      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
     }
     function live(): string { return JSON.stringify(root.seekLive()) }
     function stop(): string { root.stop(); return "ok" }
