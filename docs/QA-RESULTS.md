@@ -9951,3 +9951,93 @@ ledger could not see it and nobody copied it across. Sixteen days. That is
 precisely the failure engineering rule 13 was written for, by a document that
 was describing the problem while committing it. Repair proposed as M4-01 in
 `docs/PLAN-M4.md`; not scheduled, pending product-owner review.
+
+## M4 built and integrated, 2026-10-03: the guide renders, measured end to end
+
+Three lanes in separate worktrees (helper; model and service; guide),
+integrated by cherry-pick onto `dev` and finished by the lead. The
+acceptance is the one the milestone was scoped on: the SAME frozen inputs
+through the SAME shipping verb, before and after.
+
+### The number the milestone exists to move
+
+Inputs frozen under the session scratchpad so the run repeats offline: the
+installed source's `channels.json` (iptv-org US, 1,453 channels, `tvg-id`
+coverage 1,453 of 1,453) and the project's own documented XMLTV asset
+(`https://i.mjh.nz/PlutoTV/us.xml.gz`, 427 channel declarations). Command
+both times: `OMARCHY_IPTV_URL=<frozen guide> bin/omarchy-iptv epg
+--cache-dir <fresh> --force`.
+
+| | shipped 0.9.3 | integrated M4 |
+|---|---|---|
+| `matched` | **0** | **227** |
+| by id / by feed base / by name | 0 / 0 / 0 | 0 / 0 / **227** |
+| `epg-now.json` | 126 bytes, 0 channels | 76 KiB, 227 channels, each with a description |
+| `epg-window.txt` | 381 bytes | 507 KiB |
+| wall | n/a | 676 ms |
+| names indexed / dropped ours / dropped guide's | n/a | 1,443 / 10 / 4 |
+
+Nothing matched by id or by feed base, which is the finding restated: this
+guide and this playlist share no id scheme at all. The whole of it is the
+name fallback, and the uniqueness rule dropped fourteen names rather than
+guessing between them.
+
+### The gap the fixtures could not see (rule 10, found by running it)
+
+The first integrated run returned **126**, not the 232 the D-EPG-2 research
+predicted. The cause: the matcher joined on `normalize_text`, the SEARCH
+key, which keeps the distribution markers iptv-org writes into names.
+`48 Hours (1080p)` and `48 Hours` are the same stream; `(1080p)` says how it
+is encoded and `[Geo-blocked]` says where it works, and neither is part of
+the channel's identity. **1,155 of the 1,453 names carry one.**
+
+| name matching on the real guide | channels |
+|---|---|
+| on `normalize_text`, as the lane built it | 125 |
+| with the markers taken out first | 224 |
+
+So the matcher got its own key, `epg_name_key`, and `normalize_text` was
+deliberately left alone: a user typing "1080" is searching for exactly those
+markers and the four ranking tiers are calibrated on that key. Two keys, two
+jobs. The price is ambiguity -- playlist collisions go from 2 names to 10 --
+and it is paid by the uniqueness rule, which drops them rather than guessing.
+The end-to-end run then read 227.
+
+The fixtures could not catch this because synthetic channel names never say
+`(1080p)`: a test double more forgiving than the real thing, which is the
+hazard engineering rule 10 names. `NameNoiseTest` (4 cases) now calls
+`epg_name_key` directly; reverting it to `normalize_text` turns all four red,
+and moving the strip INTO `normalize_text` -- the cheap way, which would
+quietly re-rank every search -- turns one red on purpose.
+
+### The contract the two lanes named two ways
+
+`Model.programmeDetail` was specified as taking `row`; the model lane read
+`row.name` and the guide lane passed `row.channel`, and both were defensible.
+Settled by reading both rather than making one lane re-say the other's word.
+The guide's panel also had a slot for what is on next that the model never
+filled, so the model composes that line now, and only while the panel is
+showing the CURRENT programme: when it is already showing the next one there
+is nothing after it in a now/next record, and a line saying otherwise would
+invent data the feed never carried. Three node checks cover it, each proven
+red by mutation (drop the row form: 1 red; compose the line in the next-only
+case: 2 red; skip redaction on it: 1 red).
+
+### Two assertions the milestone was supposed to move
+
+Both were the gate working, not noise. The footer's list-mode length in the
+QML spec is asserted BY INDEX so a key added ahead of the digits is caught
+rather than absorbed; `?` appends last, so the digits keep index 10 and the
+counts go 11 to 12 and 12 to 13. `D-RUNG-9`'s call-site check counts
+`PanelSectionHeader` instances against `Model.sectionHeaderAlpha` call sites
+and is equal-or-red by construction; the keyboard map's section titles make
+it 4 of 4.
+
+### Counts
+
+Gate green: node 1,716 checks (floor 1667 -> 1716), python 724 tests (690 ->
+724), qml spec 68, text format guard 59 Text blocks (49 -> 59), release
+allowlist 13 files. Lane rule-11 evidence as reported: the helper lane's 30
+new matcher tests were 26 of 30 red against the shipped helper and the other
+four reddened by six separate mutations of the shipping functions; the model
+lane ran twelve mutations, each red; the guide lane added no stubs.

@@ -6194,6 +6194,15 @@ function programmeDetail(row) {
   var entry = o.entry && typeof o.entry === "object" ? o.entry : null
   if (!entry) return null
   var nowSec = Number(o.nowSec) || 0
+  // The guide hands over the row it DRAWS, which is a channel object plus the
+  // guide entry for it; an earlier draft of this contract said `name` and the
+  // guide said `channel`, and both were defensible, so both are read here
+  // rather than one lane being made to re-say the other's word. A caller that
+  // passes neither still gets a panel, without a channel line.
+  var channelObj = o.channel && typeof o.channel === "object" ? o.channel : null
+  var rawName = o.name !== undefined && o.name !== null && str(o.name) !== ""
+    ? o.name
+    : (channelObj ? channelObj.name : "")
   var fields = epgFields(entry, nowSec)
   var period = ""
   var programme = null
@@ -6211,7 +6220,7 @@ function programmeDetail(row) {
   // The channel name is redacted here as well, and it is the only place it
   // is: a playlist-supplied name is the same provider-controlled string a
   // description is, and this object must hold no URL at all.
-  var name = cleanName(epgDetailText(o.name, EPG_DETAIL_MAX))
+  var name = cleanName(epgDetailText(rawName, EPG_DETAIL_MAX))
   if (name !== "") out.channel = name
   var when = period === "now"
     ? formatTimeRange(fields.nowStart, fields.nowStop)
@@ -6229,6 +6238,20 @@ function programmeDetail(row) {
   }
   for (var k = 0; k < order.length; k++) {
     if (out[order[k]] !== undefined) out.fields.push([labels[order[k]], out[order[k]]])
+  }
+  // What is on after this one, as a finished line, because the panel renders
+  // what it is given and composes nothing (rule 12). Only when the panel is
+  // showing the CURRENT programme: when it is already showing the next one
+  // there is nothing after it in a now/next record, and a line that said
+  // otherwise would be inventing data the feed never carried. The words match
+  // the row's own `Next: <title> at HH:MM` so the panel and the list read the
+  // same (Model.formatEpgLine owns that vocabulary for the row).
+  if (period === "now" && fields.nextTitle !== "") {
+    var nextTitle = epgDetailText(fields.nextTitle, EPG_DETAIL_MAX)
+    if (nextTitle !== "") {
+      var at = formatClock(fields.nextStart)
+      out.next = at === "" ? "Next: " + nextTitle : "Next: " + nextTitle + " at " + at
+    }
   }
   return out
 }

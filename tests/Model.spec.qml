@@ -1517,9 +1517,12 @@ TestCase {
     // one further and growing both lists again -- asserted by INDEX here on
     // purpose, so a key added anywhere ahead of the digits is caught rather
     // than absorbed.
+    // M4-04 appends `? help` LAST and ungated, so the digits keep index 10
+    // and both lists grow by one again. The index assertion is the point: a
+    // key added AHEAD of the digits moves them and is caught here.
     compare(Model.footerHints({ mode: "list", hasNumbers: true })[10][0], "0-9")
-    compare(Model.footerHints({ mode: "list" }).length, 11)
-    compare(Model.footerHints({ mode: "list", hasNumbers: true }).length, 12)
+    compare(Model.footerHints({ mode: "list" }).length, 12)
+    compare(Model.footerHints({ mode: "list", hasNumbers: true }).length, 13)
     compare(Model.footerHints({ mode: "list", hasNumbers: true, numberEntry: { active: true } }).length, 5)
     compare(Model.rowAccessibleName({ name: "BBC One HD", chno: "101" }), "Channel 101, BBC One HD")
     compare(Model.rowAccessibleName({ name: "The One Show", chno: "" }), "The One Show")

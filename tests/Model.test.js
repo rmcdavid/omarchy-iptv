@@ -3513,10 +3513,43 @@ checkCall("D-RUNG-9: the floor and the separation are pinned, so neither can be 
 checkCall("D-RUNG-9: and the guide really asks for it, at EVERY call site", function () {
   // Rule 14: the arithmetic above is worth nothing if the QML still takes the
   // host default. Every PanelSectionHeader instance must override `color`:
-  // the group column's, the Sources screen's and (M3-02) the track picker's.
-  // Counted against the instances, not against a number someone remembers.
+  // the group column's, the Sources screen's, (M3-02) the track picker's and
+  // (M4-04) the keyboard map's section titles.
+  // Counted against the instances, not against a number someone remembers:
+  // the pair is equal-or-red, so a header added without the override is a
+  // failure rather than a number someone edits to match.
   return [qmlSites(/Model\.sectionHeaderAlpha/).length, qmlSites(/PanelSectionHeader \{/).length]
-}, [3, 3])
+}, [4, 4])
+
+// M4 integration: the model and the guide named the same argument two ways,
+// and the panel has a slot the model did not fill. Both are settled here
+// rather than by one lane re-saying the other's word, so the checks are the
+// record of WHICH shape ships.
+checkCall("M4-02: programmeDetail reads the channel name whether the caller says `name` or hands the row it draws", function () {
+  const entry = { now: { title: "Newsnight", start: 1790000000, stop: 1790003600 } }
+  const byName = Model.programmeDetail({ name: "BBC Two HD", entry: entry, nowSec: 1790001000 })
+  const byRow = Model.programmeDetail({ channel: { name: "BBC Two HD" }, entry: entry, nowSec: 1790001000 })
+  const neither = Model.programmeDetail({ entry: entry, nowSec: 1790001000 })
+  return [byName.channel, byRow.channel, neither.channel === undefined, neither.title]
+}, ["BBC Two HD", "BBC Two HD", true, "Newsnight"])
+checkCall("M4-02: the panel's `next` line is composed in the model, and only while the current programme is showing", function () {
+  const both = { now: { title: "Newsnight", start: 1790000000, stop: 1790003600 },
+                 next: { title: "Film 2026", start: 1790003600, stop: 1790010000 } }
+  const nextOnly = { next: { title: "Film 2026", start: 1790003600, stop: 1790010000 } }
+  const nowOnly = { now: { title: "Newsnight", start: 1790000000, stop: 1790003600 } }
+  const a = Model.programmeDetail({ name: "X", entry: both, nowSec: 1790001000 })
+  const b = Model.programmeDetail({ name: "X", entry: nextOnly, nowSec: 1790001000 })
+  const c = Model.programmeDetail({ name: "X", entry: nowOnly, nowSec: 1790001000 })
+  // b is showing the NEXT programme already: there is nothing after it in a
+  // now/next record, so a `next` line there would be invented.
+  return [a.next, a.period, b.next === undefined, b.period, c.next === undefined]
+}, ["Next: Film 2026 at 10:13", "now", true, "next", true])
+checkCall("M4-02: a URL in the next line is redacted like every other field the panel renders", function () {
+  const entry = { now: { title: "Now", start: 1790000000, stop: 1790003600 },
+                  next: { title: "Watch at https://user:pw@tracker.example/x?t=1", start: 1790003600, stop: 1790010000 } }
+  const d = Model.programmeDetail({ name: "X", entry: entry, nowSec: 1790001000 })
+  return [d.next.indexOf("tracker.example") !== -1, d.next.indexOf("user:pw") === -1, d.next.indexOf("?t=1") === -1]
+}, [true, true, true])
 
 checkCall("D-RUNG-5: the idle glyph is no longer BOLDER than the active one anywhere", function () {
   // The defect, as a user would see it, and confirmed on a real screen:

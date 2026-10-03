@@ -456,6 +456,30 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 
 
+# A channel NAME as the EPG matcher compares it: normalize_text with the
+# distribution markers taken out first. Measured on the installed 1,453-channel
+# list against the project's own XMLTV asset: matching on normalize_text alone
+# reaches 125 channels, and taking these markers out first reaches 224, because
+# 1,155 of those 1,453 names carry one. `48 Hours (1080p)` and `48 Hours` are
+# the same programme stream; `(1080p)` says how it is encoded and `[Geo-blocked]`
+# says where it works, and neither is part of the channel's identity.
+#
+# Deliberately NOT applied inside normalize_text, which is the SEARCH key: a
+# user who types "1080" is searching for exactly these markers, and the four
+# ranking tiers are calibrated on that key. Two keys, two jobs.
+#
+# Ambiguity is the price and it is paid by the uniqueness rule, not here:
+# stripping takes playlist collisions from 2 names to 10 on that list, and
+# build_alias drops every colliding name rather than guessing between them.
+_EPG_NAME_NOISE = re.compile(
+    r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)|\[[^\]]*\]", re.IGNORECASE)
+
+
+def epg_name_key(value: Any) -> str:
+    """The channel-name key the EPG matcher joins on (D-EPG-2, M4-01)."""
+    return normalize_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
+
+
 def normalize_text(value: Any) -> str:
     """Lower-case, fold Latin diacritics (precomposed via FOLD, decomposed via
     NFD + dropping U+0300-U+036F after an ASCII letter, then NFC so every
@@ -1872,12 +1896,11 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
         base = tvg.split("@", 1)[0].lower()
         if base and base not in feed:
             feed[base] = tvg
-        # `nameKey` is normalize_text(name), precomputed by make_channel
-        # (F-PERF-1); an older cache without it is folded here rather than
-        # losing name matching until the next playlist refresh.
-        key = channel.get("nameKey")
-        if not isinstance(key, str) or not key:
-            key = normalize_text(channel.get("name"))
+        # The matcher's own key (epg_name_key), not the cached `nameKey`:
+        # that one is the SEARCH key and keeps `(1080p)` in, which is exactly
+        # what stops the guide matching. Computed from the name here, so an
+        # older cache needs no refresh for this to work.
+        key = epg_name_key(channel.get("name"))
         if not key:
             continue
         name_rows[key] = name_rows.get(key, 0) + 1
@@ -2131,7 +2154,7 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                 if cid and cid not in guide_names:
                     name = ""
                     for child in elem.iterfind("display-name"):
-                        name = normalize_text(child.text)
+                        name = epg_name_key(child.text)
                         if name:
                             break
                     if name and name in playlist_names:

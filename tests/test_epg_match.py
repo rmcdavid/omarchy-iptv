@@ -230,6 +230,51 @@ class MatcherFixtureTest(unittest.TestCase):
                 self.assertEqual(status[key], value, key)
 
 
+class NameNoiseTest(unittest.TestCase):
+    """The matcher's name key, which is NOT the search key (D-EPG-2).
+
+    Found by running the integrated milestone against the REAL guide rather
+    than against this file's fixtures: matching on normalize_text alone
+    reached 125 of the installed 1,453 channels and taking the distribution
+    markers out first reached 224, because 1,155 of those names carry one.
+    The fixtures could not see it because synthetic names never say
+    "(1080p)" -- which is the hazard engineering rule 10 names, a double more
+    forgiving than the real thing.
+
+    These call the shipping function rather than re-stating its pattern.
+    """
+
+    def test_a_resolution_marker_is_not_part_of_a_channels_identity(self):
+        same = helper.epg_name_key
+        self.assertEqual(same("48 Hours (1080p)"), same("48 Hours"))
+        self.assertEqual(same("Avang TV (720p)"), same("Avang TV"))
+        self.assertEqual(same("Foo (2160p)"), same("Foo"))
+        self.assertEqual(same("Foo (UHD)"), same("Foo"))
+
+    def test_a_bracketed_annotation_is_not_either(self):
+        same = helper.epg_name_key
+        self.assertEqual(same("NBC Sports Philadelphia (1080p) [Geo-blocked]"),
+                         same("NBC Sports Philadelphia"))
+        self.assertEqual(same("Reuters [Not 24/7]"), same("Reuters"))
+
+    def test_it_takes_out_the_markers_and_nothing_else(self):
+        # A digit that is part of the name survives: "Channel 4" is not
+        # "Channel", and a name that merely contains 1080p is not emptied
+        # into something another row could collide with.
+        same = helper.epg_name_key
+        self.assertNotEqual(same("Channel 4"), same("Channel"))
+        self.assertNotEqual(same("1080p TV"), same("TV"))
+        self.assertEqual(same("Foo  (1080p)  Bar"), same("Foo Bar"))
+
+    def test_the_search_key_is_left_alone(self):
+        # normalize_text is the SEARCH key and the four ranking tiers are
+        # calibrated on it: someone typing "1080" is looking for exactly
+        # these markers. Doing this inside normalize_text would have been the
+        # cheap way and it would have been wrong.
+        self.assertIn("1080", helper.normalize_text("48 Hours (1080p)"))
+        self.assertNotIn("1080", helper.epg_name_key("48 Hours (1080p)"))
+
+
 class OldWindowTest(unittest.TestCase):
     def test_a_window_written_before_m4_reports_none_not_zero(self):
         """An epg-window.txt from an older helper has no match counts. The
