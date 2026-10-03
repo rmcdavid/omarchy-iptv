@@ -455,7 +455,9 @@ ck "R7 the hint pairs name the keys (b back, w forward, g live)" '[[ "$(snap key
 
 echo "== R8 the bar"
 lbl=$(snap barLabel)
-ck "R8 barLabel carries -m:ss outside the name ($lbl)" '[[ "$lbl" =~ -0:(1[7-9]|2[0-4])$ ]]'
+# After R7's 10 + 5 (F-RWD-17 made the second press a 5), the bar reads
+# about -0:15; the band allows the stream's lag either way.
+ck "R8 barLabel carries -m:ss outside the name ($lbl)" '[[ "$lbl" =~ -0:(1[2-9])$ ]]'
 glyph=$(rf 'd["glyph"]' "$(ipc widget)")
 ck "R8 the bar glyph is the history glyph U+F02DA while behind live" '[[ "$glyph" == "$HISTORY_GLYPH" ]]'
 

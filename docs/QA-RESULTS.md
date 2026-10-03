@@ -10900,3 +10900,16 @@ Gate on this tree: `./scripts/check.sh` all green (node 1825, python 825,
 spec 70, stub 17, text 61). The scenario's clean run on a quiet machine
 and the verdicts follow.
 
+### Runs 5 and 6, the committed tree (8d1da69), 2026-10-03
+
+Run 5: 78 passed, 1 failed -- R8's expectation was the lead's own stale
+instrument: it expected the bar to read 17-24 s behind after R7's two
+presses, which F-RWD-17's fix had made a 10 and a 5; the bar read `-0:15`
+and the product was right. Re-pointed. Run 6, the same tree: **79 passed, 0
+failed, 79 assertions**, load average 1.9, the verifiers of the review
+still running in the background. R7's readout followed the argument
+(10.8 after `back 10`, 15.9 after `back 5`); R10 and R11 counted up 1.9
+and 4.2 in their 3 s windows; R13 coalesced twenty presses into 3 helper
+runs; R15 spawn-to-reply median 222 ms (runs 225 221 227 222 220). Owner's
+shell pid 2186866 before and after; no mpv or ffmpeg left.
+
