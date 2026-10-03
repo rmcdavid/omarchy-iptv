@@ -221,7 +221,7 @@ EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no succes
 # and again after the URLs are redacted (see clean_detail). A longer value is
 # CUT at the cap with nothing appended: no ellipsis, no word boundary, so the
 # panel can end mid-word, and a value carrying URLs ends up shorter than the
-# cap because redaction runs on the already-cut text.
+# cap because redaction removed something.
 #
 # 400 is a judgement, not a measurement: the synopsis length of a real guide
 # has not been measured here. What HAS been measured is what the cap is for.
@@ -230,7 +230,27 @@ EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no succes
 # multiply the cache: a synthetic 2,000-channel guide carrying a
 # 600-character desc on every one of 48,000 programmes takes
 # epg-window.txt from 2.41 to 23.13 MiB and epg-now.json from 0.35 to 2.07
-# MiB. This number is the only lever on that, so move it with a measurement.
+# MiB.
+#
+# This number is NOT the only lever, which is what this comment used to say.
+# MAX_SOURCE_BYTES is the hard one and it binds first. Measured on this
+# machine with every detail field filled to exactly these caps:
+#   10,000 channels x 28 programmes -> 188.84 MiB of XML, REFUSED outright
+#       ("EPG file ... is larger than 64 MB"), so the ~100 MiB cache that
+#       extrapolating the 2,000-channel run suggests is not reachable.
+#   10,000 x 9 -> 61.15 MiB of XML, the largest detail-bearing guide that
+#       fits: 90,000 programmes, epg-window.txt 48.96 MiB, epg-now.json
+#       11.60 MiB, nowCount 10,000. epg-now.json is bounded by CHANNELS, not
+#       programmes, so 11.60 MiB is its ceiling at 10,000 channels either way.
+# The cost that shows is the recompute: `epg --now-only` over that window
+# reads 176 ms (in-process, best of 3) against 84 ms for the same 10,000
+# channels detail-free. That is over the 100 ms the 10,000-channel now-only
+# budget case names as its budget, and under its 500 ms ceiling
+# (`test_now_only_10k_channels_is_fast`, the EPG test module on the dev
+# branch); the detail-bearing window is pinned beside it by
+# `test_now_only_10k_detail_bearing_channels_is_fast`, whose ceiling is set
+# from this measurement rather than inherited. Move this number with a
+# measurement, and re-level that case.
 EPG_MAX_DESC = 400
 EPG_MAX_CATEGORY = 48
 EPG_MAX_EPISODE = 32
@@ -457,9 +477,10 @@ _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 
 
 # A channel NAME as the EPG matcher compares it: normalize_text with the
-# distribution markers taken out first. Measured on the installed 1,453-channel
-# list against the project's own XMLTV asset: matching on normalize_text alone
-# reaches 125 channels, and taking these markers out first reaches 224, because
+# distribution markers taken out first. Measured through build_alias ->
+# parse_xmltv -> match_counts on the installed 1,453-channel list against the
+# project's own XMLTV asset: matching on normalize_text alone reaches 126
+# channels, and taking these markers out first reaches 227, because
 # 1,155 of those 1,453 names carry one. `48 Hours (1080p)` and `48 Hours` are
 # the same programme stream; `(1080p)` says how it is encoded and `[Geo-blocked]`
 # says where it works, and neither is part of the channel's identity.
@@ -469,8 +490,10 @@ _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 # ranking tiers are calibrated on that key. Two keys, two jobs.
 #
 # Ambiguity is the price and it is paid by the uniqueness rule, not here:
-# stripping takes playlist collisions from 2 names to 10 on that list, and
-# build_alias drops every colliding name rather than guessing between them.
+# stripping takes playlist collisions from 2 channels to 10 on that list (1
+# colliding NAME to 5 -- the ten are `nameDroppedPlaylist`, which counts
+# channels, and the five names are four News 12 regions and Tennis Channel 2),
+# and build_alias drops every colliding name rather than guessing between them.
 _EPG_NAME_NOISE = re.compile(
     r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)|\[[^\]]*\]", re.IGNORECASE)
 
@@ -1737,6 +1760,25 @@ def clean_title(text: str | None) -> str:
     return clean_field(text, EPG_MAX_TITLE)
 
 
+def element_text(elem: Any) -> str:
+    """Every run of text under an XMLTV element, children included.
+
+    `elem.text` is only the text BEFORE the first child element, and that is
+    what every field here used to read: `<desc>Hello <b>world</b> and
+    more</desc>` arrived as "Hello" and the body of the synopsis was dropped
+    with no warning and no count. XMLTV's DTD declares these fields as
+    #PCDATA, so markup inside one is already malformed -- but a provider that
+    ships it is not a hypothetical (the same feeds ship it ESCAPED, which
+    arrives as text and was always kept in full), and losing the text is a
+    worse answer than keeping it. Nothing is trusted by keeping it: the run
+    goes to clean_field or clean_detail exactly as before, so it is folded,
+    capped, URL-redacted and rendered as PlainText.
+    """
+    if elem is None:
+        return ""
+    return "".join(elem.itertext())
+
+
 def clean_detail(text: str | None, limit: int) -> str:
     """clean_field plus URL redaction, for the M4-02 detail fields.
 
@@ -1756,15 +1798,46 @@ def clean_detail(text: str | None, limit: int) -> str:
       the only stop, and the gate's text format guard (dev branch) fails on
       a Text that does not declare its format.
 
-    The cap is applied on the way IN as well as on the way out: the regex
-    never scans more than `limit` code points of a hostile description, and
-    the value is never longer than the cap even when redacting an
-    unparseable URL grows it ("[redacted]"). Cutting first and redacting
-    second is the order that bounds the scan, and it means a description
-    whose first `limit` characters carry URLs comes out SHORTER than the cap
-    -- by exactly what the redaction removed. Nothing is added back.
+    The cap is applied on the way IN as well as on the way out, and the
+    order of the three steps is a SECURITY property, not a preference. The
+    rule is Model.epgDetailText's (Model.js, the JS mirror of this sink):
+    REDACTION NEVER SEES A TRUNCATED URL. Cutting first and redacting second
+    was what this function did until 2026-10-03, and it leaked the username:
+    `http://user:pw@host/x` cut after `pw` is `http://user:pw`, which has no
+    `@` left, so urlparse reads `user` as the host and redaction PUBLISHES
+    IT -- into the panel, into epg-now.json and onto the accessibility bus.
+    Measured at every cut offset of all three caps before the fix.
+
+    The cut is still bounded, because the regex cost is quadratic in a run of
+    scheme-legal characters that does not match and the input is
+    provider-controlled up to MAX_SOURCE_BYTES. Measured here on the shape
+    that defeats the `://` guard (`a-a-a-...` plus one real URL): 1.2 ms at
+    400 code points, and four times that for every doubling -- 173 ms at
+    6,400, 694 ms at 12,800, which puts a single 64 MiB description out of
+    reach of any budget. So the bound stays and the SPLIT is what moved: the
+    text is cut at `limit`, and when that cut lands inside a token carrying
+    `://` the whole token is dropped rather than handed to the redactor. A
+    URL cannot contain whitespace (_URL_ANYWHERE excludes it), so the only
+    token the cut can ever have truncated is the last one, and dropping it
+    costs a fragment that was unreadable anyway.
+
+    What the caller sees: a value at most `limit` code points long -- at most,
+    because redacting an unparseable URL GROWS the text ("[redacted]") and
+    the final cut takes it back to the cap -- and usually shorter than the
+    cap when the text carried URLs, by what the redaction removed.
     """
-    text = clean_field(text, limit)
+    text = _CONTROL_WS.sub(" ", text or "").strip()
+    if len(text) > limit:
+        cut = text[:limit]
+        if text[limit] != " ":
+            # The cut landed inside a token. Every run of whitespace is one
+            # space by now, so rpartition finds the start of exactly that
+            # token, and a token carrying "://" is a URL the redactor must
+            # not be given half of.
+            head, _, tail = cut.rpartition(" ")
+            if "://" in tail:
+                cut = head
+        text = cut
     if "://" not in text:
         # The common case, and the hot one. _URL_ANYWHERE cannot match
         # without "://", so this guard changes no answer; it is here because
@@ -1818,11 +1891,11 @@ def episode_text(elem: Any) -> str:
     for child in elem.iterfind("episode-num"):
         system = (child.get("system") or "").strip().lower()
         if system in ("onscreen", ""):
-            text = clean_detail(child.text, EPG_MAX_EPISODE)
+            text = clean_detail(element_text(child), EPG_MAX_EPISODE)
             if text:
                 return text
         elif system == "xmltv_ns" and not fallback:
-            fallback = episode_ns_text(clean_field(child.text, EPG_MAX_EPISODE))
+            fallback = episode_ns_text(clean_field(element_text(child), EPG_MAX_EPISODE))
     return fallback
 
 
@@ -1837,12 +1910,12 @@ def programme_detail(elem: Any) -> dict[str, str]:
     detail: dict[str, str] = {}
     desc = elem.find("desc")
     if desc is not None:
-        text = clean_detail(desc.text, EPG_MAX_DESC)
+        text = clean_detail(element_text(desc), EPG_MAX_DESC)
         if text:
             detail["desc"] = text
     category = elem.find("category")
     if category is not None:
-        text = clean_detail(category.text, EPG_MAX_CATEGORY)
+        text = clean_detail(element_text(category), EPG_MAX_CATEGORY)
         if text:
             detail["category"] = text
     episode = episode_text(elem)
@@ -2087,22 +2160,31 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
     soon as they are processed.
 
     The name strategy needs a channel's <display-name>, so the channel pass
-    retains one: the first non-empty one the provider listed. XMLTV allows
-    several (language variants), and choosing among them would need a
-    language policy this plugin has no data to pick. What is retained is BOUNDED by the playlist, not by
-    the guide: a name no playlist channel claims can never match, so it is
-    never stored, and the dict therefore holds at most as many entries as the
-    playlist has unique names. A guide declaring as many channels as the
-    whole published index lists (180,681 entries) therefore costs no more
-    here than one declaring 400.
+    retains one: the first one A PLAYLIST CHANNEL CLAIMS, out of however many
+    the provider listed (see the channel branch). A name no playlist channel
+    claims can never match, so it is never stored.
+
+    That makes the retained table proportional to the GUIDE and not to the
+    playlist, which an earlier version of this docstring had backwards. The
+    bound is one entry per guide <channel> whose name a playlist channel
+    claims, and the ambiguity branch below writes an entry per colliding
+    DECLARATION: measured against this function with a playlist of ONE name,
+    a guide declaring that name 50,000 times reaches nameDroppedGuide 50,000
+    and a traced peak of 4.8 MiB above the start, matching 0 rows. The hard
+    bound on it is MAX_SOURCE_BYTES (64 MiB, on the download and on the
+    inflated stream), not the playlist.
 
     A name is only usable while it is unique on the guide's side too, so the
-    second declaration of a name blanks the first one's entry and both are
+    second declaration of a name blanks the first one's entry, REVOKES any
+    claim and programmes the first one had already banked, and both are
     counted as dropped. Conforming XMLTV declares every <channel> before the
     first <programme> (the DTD orders them), so a conforming guide has its
-    whole name table built before the first lookup; in a guide that does not,
-    name matching simply misses the programmes that arrive before their
-    declaration, and id matching is unaffected either way.
+    whole name table built before the first lookup. A guide that interleaves
+    them instead still misses the programmes that arrive before their own
+    declaration -- but it no longer GAINS a match the uniqueness rule
+    forbids, which is what the revocation is for and what this paragraph
+    claimed by omission until 2026-10-03. Id matching is unaffected either
+    way.
     """
     import xml.etree.ElementTree as ET
     window_start = now - EPG_PAST_SECONDS
@@ -2152,7 +2234,7 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                         effective_stop = stop if stop is not None else start + EPG_DEFAULT_DURATION
                         if effective_stop > window_start and start < window_end:
                             title_elem = elem.find("title")
-                            title = clean_title(title_elem.text if title_elem is not None else "")
+                            title = clean_title(element_text(title_elem))
                             if title:
                                 pending.setdefault(key, []).append(
                                     (start, stop, title, programme_detail(elem)))
@@ -2162,12 +2244,24 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                 channel_elements += 1
                 cid = _CONTROL_WS.sub(" ", elem.get("id") or "").strip()
                 if cid and cid not in guide_names:
+                    # The FIRST <display-name> a playlist channel claims, not
+                    # the first one the provider listed. XMLTV allows several
+                    # and ranks none of them, and on real guides the first is
+                    # routinely not the name: a channel number
+                    # (<display-name>101</display-name>) or a language the
+                    # user does not have come first, and taking the first
+                    # non-empty one threw the match away while the guide was
+                    # declaring it. Choosing among CLAIMED names needs no
+                    # language policy, because the playlist is the policy.
+                    # A channel declaring two claimed names takes the first:
+                    # one guide channel cannot hold two rows (claim_channel).
                     name = ""
                     for child in elem.iterfind("display-name"):
-                        name = epg_name_key(child.text)
-                        if name:
+                        candidate = epg_name_key(child.text)
+                        if candidate and candidate in playlist_names:
+                            name = candidate
                             break
-                    if name and name in playlist_names:
+                    if name:
                         owner = guide_name_owner.get(name)
                         if owner is None:
                             guide_name_owner[name] = cid
@@ -2176,6 +2270,22 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                             # Ambiguous on the GUIDE's side: neither may match.
                             guide_names[owner] = ""
                             guide_names[cid] = ""
+                            # And neither may KEEP a match it already won. A
+                            # guide that declares each channel beside its own
+                            # programmes (the DTD orders them the other way,
+                            # but feeds are not all conforming) has already
+                            # banked the first declaration's claim by the
+                            # time the second one arrives, so blanking the
+                            # lookup is not enough: the claim and the
+                            # programmes collected under it are revoked here,
+                            # which is what makes the rule independent of the
+                            # order the guide streamed.
+                            owned = playlist_names[name]
+                            for loser in (owner, cid):
+                                if claim.get(owned) == (EPG_MATCH_NAME, loser):
+                                    claim.pop(owned, None)
+                                    pending.pop(owned, None)
+                                    seen_ids.discard(owned)
                             if name in guide_name_collided:
                                 guide_names_dropped += 1
                             else:
@@ -2227,11 +2337,21 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
 
 
 def match_counts(channels_doc: Any, seen_ids: set[str], strategy_of: dict[str, int]) -> dict[str, int]:
-    """Playlist channels that will render a programme, split by strategy.
+    """Playlist channels an XMLTV channel MATCHED, split by strategy.
 
     Counted over CHANNELS and not over guide ids, because the acceptance of
     M4-01 is a number of rows: two playlist rows sharing one tvg-id both
     count, exactly as `matched` has always counted them.
+
+    A match, not a render. `seen_ids` is added to when a claim is granted,
+    which is before the window, time and title tests, so a channel whose
+    only programme is a month out counts here and renders nothing: `matched`
+    is the match count and `nowCount` is the render count, and a report that
+    quotes one as the other overstates whichever is larger. They agree on the
+    real data the milestone was accepted on (227 and 227) and they are free
+    to diverge. Claim REVOCATION (parse_xmltv's guide-side ambiguity branch)
+    is the one case that also takes a key back OUT of `seen_ids`, so a
+    revoked claim is not counted as a match it no longer holds.
     """
     counts = {"matched": 0, "matchedById": 0, "matchedByFeed": 0, "matchedByName": 0}
     for channel in channels_doc.get("channels", []):

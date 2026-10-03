@@ -4,25 +4,29 @@
     "tests/fixtures/epg-match.xml at now = 1789246800 (2026-09-12T21:00:00Z).",
     "One fixture, asserted by counts: tests/test_epg_match.py reads this file",
     "and never restates a number in Python. See docs/PLAN-M4.md M4-01.",
-    "channelTotal 13 = 8 matched + 2 ambiguous on our side + 1 ambiguous on",
+    "channelTotal 19 = 14 matched + 2 ambiguous on our side + 1 ambiguous on",
     "the guide's side + 1 with no guide channel + 1 with no tvg-id.",
     "The expected desc is 376 code points, not the 400 of EPG_MAX_DESC: the",
-    "whitespace fold cuts at 400 and redaction then removes the two URL paths.",
-    "That shortfall IS the proof that clean_detail redacted, in the data."
+    "cut falls at 400 in prose and redaction then removes the two URL paths.",
+    "That shortfall IS the proof that clean_detail redacted, in the data.",
+    "`sink` is the rule 5 case: the cut lands inside a URL's userinfo, so the",
+    "whole truncated token goes and the pad is all that is left. Its url and",
+    "forbidden list are vectors, not formatting, so a second implementation of",
+    "the same sink (Model.epgDetailText) can run them unchanged."
   ],
   "now": 1789246800,
   "status": {
-    "matched": 8,
-    "channelTotal": 13,
-    "matchedById": 4,
+    "matched": 14,
+    "channelTotal": 19,
+    "matchedById": 6,
     "matchedByFeed": 3,
-    "matchedByName": 1,
-    "nameIndexed": 10,
+    "matchedByName": 5,
+    "nameIndexed": 16,
     "nameDroppedPlaylist": 2,
     "nameDroppedGuide": 2,
-    "epgChannels": 8,
-    "programmeCount": 9,
-    "nowCount": 8
+    "epgChannels": 14,
+    "programmeCount": 15,
+    "nowCount": 14
   },
   "warnings": [
     "3 programmes for channels not in the playlist dropped",
@@ -36,7 +40,13 @@
     "Detail.us": "Detail Now",
     "Case.US": "Case Now",
     "Clash.us": "Clash Id Now",
-    "Multi.us": "Multi SD Now"
+    "Multi.us": "Multi SD Now",
+    "noise.xx": "Noise Now",
+    "numfirst.xx": "Number First Now",
+    "lang.xx": "Lang Now",
+    "Markup.us": "Markup Now",
+    "Sink.us": "Sink Now",
+    "gnoise.xx": "Guide Marker Now"
   },
   "unmatched": [
     "ambi1.xx",
@@ -44,6 +54,25 @@
     "guideambi.xx",
     "none.xx"
   ],
+  "displayNameChoice": {
+    "numfirst.xx": "Number First Now",
+    "lang.xx": "Lang Now"
+  },
+  "markupDesc": "Hello world and more",
+  "sink": {
+    "url": "http://u5er:5ecretpw@host.example/live/x.m3u8?t=abc",
+    "forbidden": [
+      "u5er",
+      "5ecretpw",
+      "/live",
+      "x.m3u8",
+      "t=abc",
+      "host.example"
+    ],
+    "padChar": "a",
+    "padLength": 385,
+    "nowDescLength": 385
+  },
   "detail": {
     "now": {
       "title": "Detail Now",
@@ -67,5 +96,9 @@
     "secret",
     "icon.example.test",
     "portal.example.test"
+  ],
+  "noiseOnlyNames": [
+    "noise.xx",
+    "gnoise.xx"
   ]
 }

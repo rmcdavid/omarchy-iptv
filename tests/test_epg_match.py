@@ -11,39 +11,82 @@ actually wrote, never as "the feature is on" (CLAUDE.md rule 14), and every
 expectation lives in tests/fixtures/epg-match.json so one fixture serves any
 second implementation of the same rule.
 
-Rule 11 proof, recorded, every run from this worktree with
-`python3 -m unittest test_epg_match` in tests/:
+Rule 11 proof, recorded, every run in an isolated copy of this worktree with
+the helper replaced or mutated and nothing else changed. Re-levelled on
+2026-10-03 for the review of the M4 round: the counts below used to be this
+module's own 30-test counts from before integration, and 18 cases have been
+added since.
 
-  Against the helper as it shipped at 86cdca5 (bin/omarchy-iptv replaced by
-  `git show HEAD:bin/omarchy-iptv`, this module and its fixtures unchanged):
+  Against the helper as it shipped at e83e4a6, the commit before the matcher
+  (`git show e83e4a6:bin/omarchy-iptv`), from tests/ with
+  `python3 -m unittest test_epg_match`:
 
-      Ran 30 tests -- FAILED (failures=6, errors=20)
-      Against the helper with the matcher and the detail fields: 30 tests, OK
+      Ran 48 tests -- FAILED (failures=7, errors=37)
+      Against the helper on the tree: 48 tests, OK
 
-  Twenty-six of the thirty go red on the code that shipped. The four that do
-  not are proven by mutating the shipping function instead, one mutation at a
-  time, with the helper restored in between -- including the two that pass
-  before M4 only because the strategy they constrain did not exist yet:
+  Forty-four of the forty-eight go red on the code that shipped. The four
+  that do not are test_no_channel_cache_means_no_restriction,
+  test_the_status_is_also_what_is_written_to_disk,
+  test_an_ambiguous_name_is_never_guessed and
+  test_a_stronger_strategy_displaces_a_weaker_claim -- the last two pass
+  before M4 only because the strategy they constrain did not exist yet -- so
+  they are proven by mutating the shipping function instead, one mutation at
+  a time, same command, with the helper restored in between:
 
     1. match_xmltv_channel, feed branch never taken     failures=6 errors=1
     2. build_alias, playlist-side name ambiguity indexed anyway   failures=5
          (reddens test_an_ambiguous_name_is_never_guessed)
-    3. parse_xmltv, guide-side name ambiguity kept               failures=5
-         (reddens test_an_ambiguous_name_is_never_guessed)
-    4. claim_channel, every claim granted                       failures=10
+    3. parse_xmltv, guide-side name ambiguity kept                failures=8
+         (reddens test_an_ambiguous_name_is_never_guessed and all three
+          GuideOrderTest cases)
+    4. claim_channel, every claim granted                        failures=10
          (reddens test_a_stronger_strategy_displaces_a_weaker_claim and the
-          three direct claim tests)
+          FOUR direct claim tests -- ClaimTest holds four and all four go)
     5. build_alias returns an index when there is no channel cache
                                                                  failures=1
          (reddens test_no_channel_cache_means_no_restriction)
-    6. cmd_epg writes a status missing a count the emitted one carries
+    6. the status written to disk misses a count the emitted one carries
                                                                  failures=1
          (reddens test_the_status_is_also_what_is_written_to_disk)
 
-  tests/test_epg.py was edited for M4-02 as well, and against the shipped
-  helper that module reads: Ran 34 tests -- FAILED (failures=2, errors=2).
-  The two failures are the detail fields now carried on fixtures that have
-  declared them since M1; the two errors are encode_records' item arity.
+  The review of the M4 round found two decisions nothing observed and seven
+  more that no fixture could see. Each mutation below is one of those, run on
+  its own against the WHOLE suite -- `python3 -m unittest discover -s tests`,
+  which is 740 tests OK on the tree -- because "the gate stays green while
+  the repair is reverted" was the finding:
+
+    M1. epg_name_key -> normalize_text at the PLAYLIST call site failures=5
+    M2. the same at the GUIDE call site                          failures=5
+    M3. both call sites                                          failures=5
+         Before the `noise.xx` and `gnoise.xx` fixture rows, ALL THREE of
+         these were 729 tests OK: the milestone's headline repair was
+         revertible whole with the gate green, because NameNoiseTest calls
+         epg_name_key directly and no fixture pair needed the strip in order
+         to match. It takes both rows -- the markers on our side, then on the
+         guide's -- because either one alone leaves the other site green.
+    M4. clean_detail cuts before redacting (the shipped order)   failures=2
+         (reddens the two sink cases; this is the blocker)
+    M5. the first NON-EMPTY display-name (the shipped rule)      failures=5
+    M6. the LAST non-empty display-name                          failures=5
+    M7. the guide-side collision blanks the lookup and revokes nothing
+         (the shipped rule)                                      failures=2
+         (reddens the two GuideOrderTest cases that are not DTD-ordered)
+    M8. element_text reads elem.text only (the shipped rule)     failures=1
+    M9. episode_text takes the first accepted system, no onscreen preference
+                                                                 failures=1
+         (test_onscreen_wins_wherever_it_appears_in_the_order, which could
+          not be reddened by any mutation of the rule it names until its
+          competing element became xmltv_ns)
+
+  tests/test_epg.py carries the same round's budget cases, and the two
+  committed ones were green only because the generator emitted no detail:
+    M10. generate_xmltv(detail=True) under the committed 2.0 s fetch ceiling
+         -> FAILED (failures=1), "epg fetch took 2515 ms for 48k programmes"
+    M11. a detail dict in the committed 10k x 28 now-only case
+         -> FAILED (failures=1), "epg --now-only took 549 ms (best of 3)"
+         against its 500 ms ceiling
+  Against e83e4a6's helper that module reads: Ran 36 tests -- FAILED
+  (failures=2, errors=4), six of the thirty-six.
 
 Run: python3 -m unittest discover -s tests
 """
@@ -202,11 +245,85 @@ class MatcherFixtureTest(unittest.TestCase):
         self.assertIn('<img src="http://evil.example.test">', desc)
         self.assertLessEqual(len(desc), helper.EPG_MAX_DESC)
 
+    def test_the_matcher_joins_on_the_name_key_and_not_the_search_key(self):
+        """M4-01's headline repair, observed at the sink rather than on the
+        function that performs it.
+
+        `noise.xx` and `gnoise.xx` are the two rows whose playlist name and
+        guide display-name are DIFFERENT strings under normalize_text, the
+        search key, and the same string under epg_name_key, the matcher's.
+        They are mirror images -- `noise.xx` carries the distribution markers
+        on OUR side, `gnoise.xx` on the GUIDE's -- and it takes both, because
+        the key is called at two sites and one row leaves the other site
+        revertible with the suite green. Both keys are computed here by the
+        shipping functions over the names the two fixtures actually carry
+        (CLAUDE.md rule 14: the decision is observed where it lands, not
+        where it is implemented).
+        """
+        import xml.etree.ElementTree as ET
+        declared = [child.text for channel in ET.parse(XMLTV).getroot().iterfind("channel")
+                    for child in channel.iterfind("display-name")]
+        for key in EXPECTED["noiseOnlyNames"]:
+            ours = next(c["name"] for c in
+                        read(os.path.join(self.cache, "channels.json"))["channels"]
+                        if c.get("tvgId") == key)
+            theirs = next((name for name in declared
+                           if helper.epg_name_key(name) == helper.epg_name_key(ours)), None)
+            self.assertIsNotNone(theirs, "no guide declaration folds to %r" % ours)
+            self.assertNotEqual(helper.normalize_text(ours), helper.normalize_text(theirs), key)
+            self.assertEqual(helper.epg_name_key(ours), helper.epg_name_key(theirs), key)
+            self.assertIn(key, self.now_doc["channels"],
+                          "%r is declared by the guide as %r and still has no row" % (ours, theirs))
+            self.assertEqual(self.now_doc["channels"][key]["now"]["title"],
+                             EXPECTED["nowTitles"][key], key)
+
+    def test_the_display_name_taken_is_the_one_the_playlist_claims(self):
+        """XMLTV allows several <display-name>s and ranks none of them.
+        `pluto-numfirst` declares a channel number first, the matching name
+        second and a foreign-language variant third; `pluto-lang` declares a
+        language we do not have first. Taking "the first non-empty one" lost
+        both, and so does taking the last -- the playlist is the only thing
+        on the machine that can choose, and these rows are blank unless it
+        does."""
+        channels = self.now_doc["channels"]
+        for key, title in EXPECTED["displayNameChoice"].items():
+            self.assertIn(key, channels, key)
+            self.assertEqual(channels[key]["now"]["title"], title, key)
+
+    def test_a_description_keeps_the_text_after_a_child_element(self):
+        """`elem.text` is only the text before the first child, so a <desc>
+        carrying markup lost its body at the first tag: `Hello <b>world</b>
+        and more` arrived as "Hello". The whole run of text survives, and is
+        still folded and capped by the same sink."""
+        self.assertEqual(self.now_doc["channels"]["Markup.us"]["now"]["desc"],
+                         EXPECTED["markupDesc"])
+
+    def test_a_cut_inside_a_url_never_publishes_the_userinfo(self):
+        """Rule 5, at the offset that broke it.
+
+        `Sink.us` declares a description whose EPG_MAX_DESC cut falls inside
+        the password of `http://u5er:5ecretpw@host.example/live/x.m3u8?t=abc`.
+        Cut first, that is `http://u5er:5e` -- no `@` left, so urlparse reads
+        `u5er` as the host and the redactor PUBLISHED THE USERNAME, into the
+        window file, into epg-now.json and from there onto the accessibility
+        bus. Asserted at the sink: the credential appears in neither file,
+        and what is left is the pad alone.
+        """
+        sink = EXPECTED["sink"]
+        window = pathlib.Path(self.cache, helper.EPG_WINDOW_FILE).read_text(encoding="utf-8")
+        published = json.dumps(self.now_doc) + window
+        for forbidden in sink["forbidden"]:
+            self.assertNotIn(forbidden, published, forbidden)
+        desc = self.now_doc["channels"]["Sink.us"]["now"]["desc"]
+        self.assertEqual(desc, sink["padChar"] * sink["nowDescLength"])
+
     def test_a_long_description_is_cut_at_the_cap(self):
         """The fixture's description is over EPG_MAX_DESC and comes back
-        shorter than the cap, because the cut happens before redaction and
-        the redaction then removes two URL paths. Nothing is appended, so it
-        ends mid-word -- that is the documented behaviour, asserted."""
+        shorter than the cap, because the two URLs inside the first 400 code
+        points lose their paths. Nothing is appended, so it ends mid-word --
+        that is the documented behaviour, asserted. The cut that produced
+        this one falls in prose; the cut that falls inside a URL is
+        test_a_cut_inside_a_url_never_publishes_the_userinfo."""
         desc = self.now_doc["channels"]["Detail.us"]["now"]["desc"]
         self.assertEqual(len(desc), 376)
         self.assertLess(len(desc), helper.EPG_MAX_DESC)
@@ -260,8 +377,21 @@ class EpisodeSystemTest(unittest.TestCase):
         self.assertEqual(helper.episode_text(e), "")
 
     def test_onscreen_wins_wherever_it_appears_in_the_order(self):
-        e = self._prog(("original-air-date", "19920406000000 +0000"), ("onscreen", "S08E10"))
+        """The competing element has to be one that could actually win.
+
+        This case used to pit `onscreen` against `original-air-date`, and
+        after the narrowing that system is ignored outright, so no mutation
+        of the preference could redden it: the test named a decision nothing
+        observed. `xmltv_ns` is the only other system episode_text accepts,
+        so it is the only one that can compete, and it is placed FIRST --
+        a first-wins implementation returns "S1 E2" here.
+        """
+        e = self._prog(("xmltv_ns", "0.1.0/1"), ("onscreen", "S08E10"))
         self.assertEqual(helper.episode_text(e), "S08E10")
+        # And the date still loses to it from either side.
+        self.assertEqual(helper.episode_text(
+            self._prog(("original-air-date", "19920406000000 +0000"),
+                       ("onscreen", "S08E10"))), "S08E10")
 
     def test_a_bare_episode_num_is_taken_as_onscreen(self):
         self.assertEqual(helper.episode_text(self._prog((None, "S2 E5"))), "S2 E5")
@@ -271,18 +401,93 @@ class EpisodeSystemTest(unittest.TestCase):
         self.assertEqual(helper.episode_text(e), "S1 E2")
 
 
+class GuideOrderTest(unittest.TestCase):
+    """The guide-side uniqueness rule, against a guide that is not DTD-ordered.
+
+    tests/fixtures/epg-match.xml declares every <channel> before the first
+    <programme>, the order the XMLTV DTD gives, so `pluto-a` and `pluto-b`
+    are both known ambiguous before any programme is read and
+    test_an_ambiguous_name_is_never_guessed only ever exercised the easy half
+    of the rule. A guide that emits each channel beside its own programmes
+    has already banked the first declaration's claim when the second arrives:
+    blanking the lookup is then not enough, and the shipped helper reported
+    `nameDroppedGuide: 2` -- both dropped -- while writing one of the two
+    schedules onto the row. Which one depended on the order the guide
+    streamed, which is the failure docs/PLAN-M4.md calls worse than a blank.
+    """
+
+    PLAYLIST = ("#EXTM3U\n"
+                "#EXTINF:-1 tvg-id=\"T1\",Alpha\nhttp://stream.example.test/a.m3u8\n")
+
+    def guide(self, interleaved):
+        decl = "<channel id=\"%s\"><display-name>Alpha</display-name></channel>"
+        prog = ("<programme start=\"20260912203000 +0000\" stop=\"20260912213000 +0000\" "
+                "channel=\"%s\"><title>FROM-%s</title></programme>")
+        parts = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?><tv>"]
+        if interleaved:
+            for cid in ("g1", "g2"):
+                parts.append(decl % cid)
+                parts.append(prog % (cid, cid.upper()))
+        else:
+            parts.extend(decl % cid for cid in ("g1", "g2"))
+            parts.extend(prog % (cid, cid.upper()) for cid in ("g1", "g2"))
+        parts.append("</tv>")
+        return "".join(parts)
+
+    def epg(self, interleaved):
+        with tempfile.TemporaryDirectory() as tmp:
+            pathlib.Path(tmp, "list.m3u").write_text(self.PLAYLIST, encoding="utf-8")
+            pathlib.Path(tmp, "guide.xml").write_text(self.guide(interleaved), encoding="utf-8")
+            code, _, stderr = run("playlist", "--url", os.path.join(tmp, "list.m3u"),
+                                  "--cache-dir", tmp)
+            self.assertEqual(code, 0, stderr)
+            code, status, stderr = run("epg", "--url", os.path.join(tmp, "guide.xml"),
+                                       "--cache-dir", tmp, "--now", str(NOW))
+            self.assertEqual(code, 0, stderr)
+            return status, read(os.path.join(tmp, "epg-now.json"))["channels"]
+
+    def test_a_dtd_ordered_guide_drops_both_declarations(self):
+        status, channels = self.epg(interleaved=False)
+        self.assertEqual((status["nameDroppedGuide"], status["matched"]), (2, 0))
+        self.assertEqual(channels, {})
+
+    def test_an_interleaved_guide_drops_both_declarations_too(self):
+        """The same guide, the same content, one reordering: the answer must
+        not move. The count and the row have to agree -- a status saying both
+        declarations were dropped while one of them is on the row is worse
+        than either failure alone, because the count is what the acceptance
+        reads."""
+        status, channels = self.epg(interleaved=True)
+        self.assertEqual(status["nameDroppedGuide"], 2)
+        self.assertEqual(channels, {}, "a dropped declaration may not keep the row")
+        self.assertEqual(status["matched"], 0)
+        self.assertEqual(status["epgChannels"], 0)
+
+    def test_both_orderings_give_the_same_answer(self):
+        first, rows_a = self.epg(interleaved=False)
+        second, rows_b = self.epg(interleaved=True)
+        self.assertEqual(rows_a, rows_b)
+        for key in ("matched", "matchedByName", "nameDroppedGuide", "epgChannels",
+                    "programmeCount", "nowCount"):
+            self.assertEqual(first[key], second[key], key)
+
+
 class NameNoiseTest(unittest.TestCase):
     """The matcher's name key, which is NOT the search key (D-EPG-2).
 
     Found by running the integrated milestone against the REAL guide rather
     than against this file's fixtures: matching on normalize_text alone
-    reached 125 of the installed 1,453 channels and taking the distribution
-    markers out first reached 224, because 1,155 of those names carry one.
-    The fixtures could not see it because synthetic names never say
-    "(1080p)" -- which is the hazard engineering rule 10 names, a double more
-    forgiving than the real thing.
+    reaches 126 of the installed 1,453 channels and taking the distribution
+    markers out first reaches 227, because 1,155 of those names carry one.
+    (125 and 224 were the first write-up's numbers and are wrong; re-measured
+    through build_alias -> parse_xmltv -> match_counts on the frozen inputs,
+    2026-10-03.) The fixtures could not see it because synthetic names never
+    say "(1080p)" -- which is the hazard engineering rule 10 names, a double
+    more forgiving than the real thing.
 
-    These call the shipping function rather than re-stating its pattern.
+    These call the shipping function rather than re-stating its pattern. What
+    they CANNOT see is whether the matcher calls it: that is the fixture's
+    job, in test_the_matcher_joins_on_the_name_key_and_not_the_search_key.
     """
 
     def test_a_resolution_marker_is_not_part_of_a_channels_identity(self):
@@ -522,6 +727,41 @@ class DetailFieldTest(unittest.TestCase):
         self.assertEqual(helper.clean_detail("see http://u:p@host.test/a?b=c now", helper.EPG_MAX_DESC),
                          "see http://host.test now")
         self.assertEqual(helper.clean_detail("  spaced\n\tout  ", helper.EPG_MAX_DESC), "spaced out")
+
+    def test_no_cut_offset_of_any_cap_can_publish_a_credential(self):
+        """The whole offset space, at every cap the helper ships, because the
+        leak was a property of ONE offset and a fixture picks one offset.
+
+        The vectors live in tests/fixtures/epg-match.json so the JS mirror of
+        this sink (Model.epgDetailText) can run the same ones. Both forms are
+        swept: the URL preceded by a space, where the fix drops the truncated
+        token, and the URL inside one enormous token, where there is nothing
+        to keep. The length assertion is in the loop on purpose -- redaction
+        can GROW the text ("[redacted]"), and "never longer than the cap" is
+        the other half of what this function promises.
+        """
+        sink = EXPECTED["sink"]
+        url, forbidden = sink["url"], sink["forbidden"]
+        caps = (helper.EPG_MAX_DESC, helper.EPG_MAX_CATEGORY, helper.EPG_MAX_EPISODE)
+        self.assertIn("@", url, "the vector has to carry userinfo to be a vector")
+        for cap in caps:
+            for pad in range(cap + 60):
+                for text in ("a" * pad + " " + url + " tail words here",
+                             "a" * pad + url + "tail"):
+                    out = helper.clean_detail(text, cap)
+                    self.assertLessEqual(len(out), cap, (cap, pad))
+                    for bad in forbidden:
+                        if bad == "host.example":
+                            continue        # the host is what redaction KEEPS
+                        self.assertNotIn(bad, out, (cap, pad, out))
+
+    def test_a_url_that_fits_keeps_its_scheme_and_host(self):
+        """The other direction, so the sweep above cannot be passed by a
+        function that simply deletes every URL: a URL the cut never touches
+        is reduced to scheme://host and keeps both."""
+        sink = EXPECTED["sink"]
+        out = helper.clean_detail("see " + sink["url"] + " now", helper.EPG_MAX_DESC)
+        self.assertEqual(out, "see http://host.example now")
 
 
 class OldFixtureTest(unittest.TestCase):

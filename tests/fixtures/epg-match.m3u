@@ -1,8 +1,18 @@
 #EXTM3U
-# M4-01 matcher fixture (D-EPG-2). One row per strategy and per ambiguity
-# rule; the guide side is tests/fixtures/epg-match.xml and the expected
-# counts are tests/fixtures/epg-match.json. Do not reorder: the playlist
-# order decides which row wins a feed base, and the Multi row depends on it.
+# M4-01 matcher fixture (D-EPG-2). One row per strategy, per ambiguity rule
+# and per <display-name> shape; the guide side is tests/fixtures/epg-match.xml
+# and the expected counts are tests/fixtures/epg-match.json. Do not reorder:
+# the playlist order decides which row wins a feed base, and the Multi row
+# depends on it. Append, do not insert.
+#
+# The last six rows were added on 2026-10-03 for the review of the M4 round.
+# "Noise Channel (1080p) [Geo-blocked]" and "Guide Marker Channel" are the
+# two rows the SEARCH key cannot match -- one carries the markers on OUR
+# side, the other on the GUIDE's -- so between them they make each of
+# M4-01's two epg_name_key call sites revertible-red; the
+# Number First and Lang rows are guides whose first <display-name> is not the
+# name; Markup and Sink are M4-02 sinks (a <desc> with a child element, and a
+# <desc> whose cap cut lands inside a URL's userinfo).
 #EXTINF:-1 tvg-id="Exact.us" group-title="Match",Exact Channel
 http://stream.example.test/exact.m3u8
 #EXTINF:-1 tvg-id="Suffix.us@SD" group-title="Match",Suffix Channel
@@ -29,3 +39,15 @@ http://stream.example.test/case.m3u8
 http://stream.example.test/clash.m3u8
 #EXTINF:-1 tvg-id="Multi.us" group-title="Match",Multi Channel
 http://stream.example.test/multi.m3u8
+#EXTINF:-1 tvg-id="noise.xx" group-title="Match",Noise Channel (1080p) [Geo-blocked]
+http://stream.example.test/noise.m3u8
+#EXTINF:-1 tvg-id="numfirst.xx" group-title="Match",Number First Channel
+http://stream.example.test/numfirst.m3u8
+#EXTINF:-1 tvg-id="lang.xx" group-title="Match",Lang Channel
+http://stream.example.test/lang.m3u8
+#EXTINF:-1 tvg-id="Markup.us" group-title="Match",Markup Channel
+http://stream.example.test/markup.m3u8
+#EXTINF:-1 tvg-id="Sink.us" group-title="Match",Sink Channel
+http://stream.example.test/sink.m3u8
+#EXTINF:-1 tvg-id="gnoise.xx" group-title="Match",Guide Marker Channel
+http://stream.example.test/gnoise.m3u8

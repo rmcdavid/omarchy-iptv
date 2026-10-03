@@ -334,7 +334,22 @@ class EpgCommandTest(unittest.TestCase):
         self.assertNotIn("user:pw", stderr + json.dumps(status))
 
 
-def generate_xmltv(path, channel_count, per_channel, first_start):
+def generate_xmltv(path, channel_count, per_channel, first_start, detail=False):
+    """A synthetic guide. `detail` fills <desc>, <category> and <episode-num>
+    to exactly the caps the helper ships.
+
+    The flag exists because the generator had no detail at all, so both
+    budget tests ran only the path M4-02 widened -- a double more forgiving
+    than any real detail-bearing guide, which is what CLAUDE.md rule 10
+    forbids. Filled to the cap rather than to a realistic length on purpose:
+    the budget is what the caps allow, and a guide that ships longer text
+    reaches exactly this because clean_detail cuts it here."""
+    fields = ""
+    if detail:
+        fields = ("<desc>%s</desc><category>%s</category>"
+                  "<episode-num system=\"onscreen\">%s</episode-num>"
+                  % ("d" * helper.EPG_MAX_DESC, "c" * helper.EPG_MAX_CATEGORY,
+                     "e" * helper.EPG_MAX_EPISODE))
     with open(path, "w", encoding="ascii") as handle:
         handle.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tv>\n")
         for c in range(channel_count):
@@ -343,8 +358,8 @@ def generate_xmltv(path, channel_count, per_channel, first_start):
             start = first_start
             for p in range(per_channel):
                 stop = start + 1800
-                handle.write("<programme start=\"%s +0000\" stop=\"%s +0000\" channel=\"chan%d.tv\"><title>Programme %d on channel %d</title></programme>\n"
-                             % (time.strftime("%Y%m%d%H%M%S", time.gmtime(start)), time.strftime("%Y%m%d%H%M%S", time.gmtime(stop)), c, p, c))
+                handle.write("<programme start=\"%s +0000\" stop=\"%s +0000\" channel=\"chan%d.tv\"><title>Programme %d on channel %d</title>%s</programme>\n"
+                             % (time.strftime("%Y%m%d%H%M%S", time.gmtime(start)), time.strftime("%Y%m%d%H%M%S", time.gmtime(stop)), c, p, c, fields))
                 start = stop
         handle.write("</tv>\n")
 
@@ -489,6 +504,64 @@ class EpgPerformanceTest(unittest.TestCase):
             # multiple, not a few milliseconds.
             self.assertLess(elapsed, 0.5, "epg --now-only took %.0f ms (best of 3) for 10k channels" % (elapsed * 1000))
 
+    def test_now_only_10k_detail_bearing_channels_is_fast(self):
+        """The recompute budget against the biggest detail-bearing window a
+        source can actually produce, which is NOT 10,000 x 28.
+
+        MAX_SOURCE_BYTES is the bound that binds first, and it binds before
+        EPG_MAX_DESC does. Measured with every field at its cap:
+          10,000 x 28 -> 188.84 MiB of XML, REFUSED ("larger than 64 MB")
+          10,000 x  9 ->  61.15 MiB of XML, accepted: 90,000 programmes,
+                          epg-window.txt 48.96 MiB, epg-now.json 11.60 MiB
+        so 9 per channel is the shape to pin, and the window built here is
+        the same size as that fetch's. `epg --now-only` over it reads 176 ms
+        best of 3 in-process against 84 ms for the same 10,000 channels
+        detail-free -- OVER the 100 ms the case above names as its budget and
+        under its 500 ms ceiling. That is the real cost of M4-02 on the
+        recompute, it was never measured when the fields were added, and the
+        number is recorded here rather than left to the reader of a comment.
+
+        epg-now.json is bounded by CHANNELS, not programmes, so its 11.60 MiB
+        is the ceiling at 10,000 channels whichever shape the guide takes.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sep = helper.EPG_RECORD_SEP
+            detail = {"desc": "d" * helper.EPG_MAX_DESC,
+                      "category": "c" * helper.EPG_MAX_CATEGORY,
+                      "episode": "e" * helper.EPG_MAX_EPISODE}
+            channels = {}
+            for c in range(10000):
+                start = NOW - 2 * H
+                records = []
+                for p in range(9):
+                    records.append(helper.encode_record(
+                        start, start + 1800, "Programme %d on channel %d" % (p, c), detail))
+                    start += 1800
+                channels["chan%d.tv" % c] = sep.join(records)
+            meta = {
+                "version": 1, "fetchedAt": NOW, "sourceHost": "epg.example.test", "sourceKey": "x",
+                "channelsMtime": None, "windowStart": NOW - 2 * H, "windowEnd": NOW + 12 * H,
+                "restricted": False, "channelTotal": None, "matched": None, "epgChannels": 10000,
+                "programmeCount": 90000, "warnings": [],
+            }
+            helper.write_window(os.path.join(tmp, helper.EPG_WINDOW_FILE), meta, channels)
+            elapsed = float("inf")
+            for _ in range(3):
+                started = time.perf_counter()
+                code, status, stderr = run("epg", "--now-only", "--cache-dir", tmp,
+                                           "--now", str(NOW + 1000))
+                elapsed = min(elapsed, time.perf_counter() - started)
+                self.assertEqual(code, 0, stderr)
+            self.assertEqual(status["nowCount"], 10000)
+            doc = read(os.path.join(tmp, "epg-now.json"))
+            self.assertEqual(len(doc["channels"]), 10000)
+            self.assertEqual(doc["channels"]["chan9999.tv"]["now"]["desc"], detail["desc"])
+            # Six times the 176 ms measurement, the same headroom the
+            # detail-free case carries over its own 84 ms.
+            self.assertLess(elapsed, 1.0,
+                            "epg --now-only took %.0f ms (best of 3) for 10k detail-bearing channels"
+                            % (elapsed * 1000))
+
     def test_fetch_2000_channels_streams_quickly(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "big.xml")
@@ -500,6 +573,43 @@ class EpgPerformanceTest(unittest.TestCase):
             self.assertEqual(status["programmeCount"], 48000)
             self.assertEqual(status["nowCount"], 2000)
             self.assertLess(elapsed, 2.0, "epg fetch took %.0f ms for 48k programmes" % (elapsed * 1000))
+
+    def test_fetch_2000_detail_bearing_channels_streams_quickly(self):
+        """The same guide with the M4-02 fields filled to the caps.
+
+        The case above ran the detail-FREE path only, because the generator
+        emitted no <desc>, <category> or <episode-num> at all, so M4-02
+        widened the pipeline without either budget test ever seeing it. Patch
+        detail into the generator and the committed 2.0 s ceiling goes red --
+        which is how this case was found, and why its own ceiling is set from
+        a measurement rather than inherited.
+
+        Measured on this machine, in-process, same 2,000 x 24 guide:
+          detail=False  source  6.76 MiB  fetch  805 ms  window  2.41 MiB
+          detail=True   source 32.35 MiB  fetch 2375-2500 ms  window 26.07 MiB
+        The ceiling is about 2.5 times the measurement, the same headroom the
+        case above carries, because a wall-clock assertion on a loaded
+        machine measures the machine. A real regression here is a multiple.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "big.xml")
+            generate_xmltv(source, 2000, 24, NOW - 2 * H, detail=True)
+            started = time.perf_counter()
+            code, status, stderr = run("epg", "--url", source, "--cache-dir", tmp, "--now", str(NOW))
+            elapsed = time.perf_counter() - started
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(status["programmeCount"], 48000)
+            self.assertEqual(status["nowCount"], 2000)
+            # The detail really is in the cache, so the timing above is not
+            # measuring a guide whose fields were silently dropped.
+            doc = read(os.path.join(tmp, "epg-now.json"))
+            entry = doc["channels"]["chan1999.tv"]["now"]
+            self.assertEqual(len(entry["desc"]), helper.EPG_MAX_DESC)
+            self.assertEqual(len(entry["category"]), helper.EPG_MAX_CATEGORY)
+            self.assertEqual(len(entry["episode"]), helper.EPG_MAX_EPISODE)
+            self.assertLess(elapsed, 6.0,
+                            "epg fetch took %.0f ms for 48k detail-bearing programmes"
+                            % (elapsed * 1000))
 
     def test_a_runs_forever_stop_does_not_destroy_every_channels_guide(self):
         """One programme with a 12-digit stop made epg-now.json unparseable.

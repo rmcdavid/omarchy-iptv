@@ -24,6 +24,26 @@
                        reaches it by id, so the id must displace the name
        Multi.us@SD/HD  two guide channels fold to one playlist base: the
                        first claims it, the second is refused, never merged
+       pluto-noise     matches "Noise Channel (1080p) [Geo-blocked]" ONLY
+                       through epg_name_key: on normalize_text, the search
+                       key, the two names are different strings and nothing
+                       matches. The markers are on OUR side here, so this
+                       pair reddens the PLAYLIST call site
+       pluto-gnoise    the mirror image: the markers are on the GUIDE's side
+                       ("Guide Marker Channel (720p)" against a clean
+                       playlist name), so this pair reddens the GUIDE call
+                       site. One pair alone leaves the other site revertible
+                       with the suite green (tests/test_epg_match.py rule 11)
+       pluto-numfirst  declares a channel NUMBER first, the matching name
+                       second and a non-matching language variant third, so
+                       neither "the first display-name" nor "the last" finds
+                       it; only "the first one a playlist channel claims" does
+       pluto-lang      declares a non-matching language first, the matching
+                       name second: the same rule, the shape real guides ship
+       Markup.us       a <desc> carrying a CHILD ELEMENT, which elem.text
+                       truncates at the first tag
+       Sink.us         a <desc> whose EPG_MAX_DESC cut lands inside a URL's
+                       userinfo: the rule 5 case that leaked the username
 -->
 <tv generator-info-name="omarchy-iptv fixture" source-info-name="fixture">
   <channel id="Exact.us"><display-name>Exact Guide Name</display-name></channel>
@@ -39,6 +59,12 @@
   <channel id="pluto-clash"><display-name>Clash Channel</display-name></channel>
   <channel id="Multi.us@SD"><display-name>Multi Guide SD</display-name></channel>
   <channel id="Multi.us@HD"><display-name>Multi Guide HD</display-name></channel>
+  <channel id="pluto-noise"><display-name>Noise Channel</display-name></channel>
+  <channel id="pluto-gnoise"><display-name>Guide Marker Channel (720p)</display-name></channel>
+  <channel id="pluto-numfirst"><display-name>101</display-name><display-name>Number First Channel</display-name><display-name>Nummer Eins Kanal</display-name></channel>
+  <channel id="pluto-lang"><display-name lang="es">Canal Lengua</display-name><display-name lang="en">Lang Channel</display-name></channel>
+  <channel id="Markup.us"><display-name>Markup Guide Name</display-name></channel>
+  <channel id="Sink.us"><display-name>Sink Guide Name</display-name></channel>
 
   <!-- Strategy (a): the exact id. The empty <desc> must not reach the panel. -->
   <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Exact.us"><title>Exact Now</title><desc>   </desc></programme>
@@ -87,4 +113,30 @@
   <!-- Same strategy, two guide channels, one playlist base: first wins. -->
   <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Multi.us@SD"><title>Multi SD Now</title></programme>
   <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Multi.us@HD"><title>Multi HD Now</title></programme>
+  <!-- The name key, which is not the search key. The playlist row is
+       "Noise Channel (1080p) [Geo-blocked]"; only epg_name_key folds the two
+       to one string, so reverting either call site leaves this row blank. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-noise"><title>Noise Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-gnoise"><title>Guide Marker Now</title></programme>
+
+  <!-- Several <display-name>s, and the match is not the first or the last. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-numfirst"><title>Number First Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-lang"><title>Lang Now</title></programme>
+
+  <!-- A description with real markup inside it. `desc.text` stops at <b>,
+       so the tail after the child element is the part that used to vanish. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Markup.us">
+    <title>Markup Now</title>
+    <desc>Hello <b>world</b> and more</desc>
+  </programme>
+
+  <!-- Rule 5. The EPG_MAX_DESC cut falls at code point 400, which is inside
+       this URL's password, and a URL cut before its "@" reads as a host:
+       redacting the cut text published "http://u5er". The whole truncated
+       token goes instead, so the panel gets the 385-character pad and nothing
+       of the credential. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Sink.us">
+    <title>Sink Now</title>
+    <desc>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa http://u5er:5ecretpw@host.example/live/x.m3u8?t=abc trailing words.</desc>
+  </programme>
 </tv>
