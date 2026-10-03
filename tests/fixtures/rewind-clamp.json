@@ -1,0 +1,134 @@
+{
+  "_comment": [
+    "M5-01 live rewind: the seek clamp, docs/M5-01-LIVE-REWIND.md 2.1 on",
+    "docs/SPIKE-LIVE-REWIND.md 11.4 and 12.2. Run by Model.clampSeek (JS) and",
+    "clamp_seek (python); `out` is what both must return for `in`. A rule",
+    "written twice gets one fixture (CLAUDE.md).",
+    "Inputs are NUMBERS (seconds) or null; the helper is only ever handed",
+    "argparse integers and mpv floats, and the two implementations do not",
+    "agree on what a numeric string means, so none is pinned here.",
+    "The ranges and positions are the measured ones: the ABC KAAL plateau",
+    "[44.028, 418.001] with the reader at 400.617 (11.3), the Q1 tiny range",
+    "[0.0, 1.988] with the reader at 1.92 (11.1), and a fresh stream.",
+    "`issue` false means the helper reports atFloor / atEdge WITHOUT seeking:",
+    "the target sits within the 0.5 s not-moved threshold of the position.",
+    "`target` is never negative: a negative absolute target is an offset from",
+    "the cache END on mpv 0.41 (F-RWD-7), and tests on both sides assert it.",
+    "ASCII only: scripts/check.sh greps tests/fixtures/* for non-ASCII bytes."
+  ],
+  "floorMargin": 2.0,
+  "edgeMargin": 0.5,
+  "movedThreshold": 0.5,
+  "cases": [
+    {
+      "name": "a 10 s rewind at the plateau lands 10 s back",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": -10 },
+      "out": { "ok": true, "mode": "by", "requested": -10, "target": 390.617, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": true }
+    },
+    {
+      "name": "the Q3 300 s rewind is inside the window and goes unclamped",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": -300 },
+      "out": { "ok": true, "mode": "by", "requested": -300, "target": 100.617, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": true }
+    },
+    {
+      "name": "an over-long rewind is clamped to the floor plus two seconds, and said",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": -1000 },
+      "out": { "ok": true, "mode": "by", "requested": -1000, "target": 46.028, "clamped": true, "clampedTo": 46.028, "atFloor": true, "atEdge": false, "issue": true }
+    },
+    {
+      "name": "a rewind pressed within two seconds of the floor never moves FORWARD and is not issued",
+      "in": { "position": 45.0, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": -10 },
+      "out": { "ok": true, "mode": "by", "requested": -10, "target": 45.0, "clamped": true, "clampedTo": 45.0, "atFloor": true, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "a clamped target 0.472 s away is under the threshold: atFloor without a seek (12.2)",
+      "in": { "position": 46.5, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": -10 },
+      "out": { "ok": true, "mode": "by", "requested": -10, "target": 46.028, "clamped": true, "clampedTo": 46.028, "atFloor": true, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "a clamped target 0.972 s away is over the threshold and is issued",
+      "in": { "position": 47.0, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": -10 },
+      "out": { "ok": true, "mode": "by", "requested": -10, "target": 46.028, "clamped": true, "clampedTo": 46.028, "atFloor": true, "atEdge": false, "issue": true }
+    },
+    {
+      "name": "a forward press inside the window lands where it asked",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": 10 },
+      "out": { "ok": true, "mode": "by", "requested": 10, "target": 410.617, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": true }
+    },
+    {
+      "name": "a forward press past the end is clamped to the edge minus half a second",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": 30 },
+      "out": { "ok": true, "mode": "by", "requested": 30, "target": 417.501, "clamped": true, "clampedTo": 417.501, "atFloor": false, "atEdge": true, "issue": true }
+    },
+    {
+      "name": "a forward press from inside the edge margin never moves BACK and is not issued",
+      "in": { "position": 417.8, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": 10 },
+      "out": { "ok": true, "mode": "by", "requested": 10, "target": 417.8, "clamped": true, "clampedTo": 417.8, "atFloor": false, "atEdge": true, "issue": false }
+    },
+    {
+      "name": "live from 300 s behind targets the edge minus half a second (D8: never a reload)",
+      "in": { "position": 100.617, "floor": 44.028, "ceiling": 418.001, "mode": "live", "by": null },
+      "out": { "ok": true, "mode": "live", "requested": 316.884, "target": 417.501, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": true, "issue": true }
+    },
+    {
+      "name": "live when already at the edge is atEdge with nothing issued",
+      "in": { "position": 417.8, "floor": 44.028, "ceiling": 418.001, "mode": "live", "by": null },
+      "out": { "ok": true, "mode": "live", "requested": -0.299, "target": 417.8, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": true, "issue": false }
+    },
+    {
+      "name": "live ignores a `by` it was handed",
+      "in": { "position": 100.617, "floor": 44.028, "ceiling": 418.001, "mode": "live", "by": -10 },
+      "out": { "ok": true, "mode": "live", "requested": 316.884, "target": 417.501, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": true, "issue": true }
+    },
+    {
+      "name": "Q1: a rewind in the first seconds after a zap lands on the floor it is already at",
+      "in": { "position": 1.92, "floor": 0.0, "ceiling": 1.988, "mode": "by", "by": -20 },
+      "out": { "ok": true, "mode": "by", "requested": -20, "target": 1.92, "clamped": true, "clampedTo": 1.92, "atFloor": true, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "Q1: a forward press in that tiny range is atEdge with nothing issued",
+      "in": { "position": 1.92, "floor": 0.0, "ceiling": 1.988, "mode": "by", "by": 10 },
+      "out": { "ok": true, "mode": "by", "requested": 10, "target": 1.92, "clamped": true, "clampedTo": 1.92, "atFloor": false, "atEdge": true, "issue": false }
+    },
+    {
+      "name": "F-RWD-7: a rewind deeper than the position is clamped to floor plus two, never sent negative",
+      "in": { "position": 5.0, "floor": 0.0, "ceiling": 30.0, "mode": "by", "by": -20 },
+      "out": { "ok": true, "mode": "by", "requested": -20, "target": 2.0, "clamped": true, "clampedTo": 2.0, "atFloor": true, "atEdge": false, "issue": true }
+    },
+    {
+      "name": "no range at all: nothing to seek within, nothing issued (F-RWD-7)",
+      "in": { "position": 5.0, "floor": null, "ceiling": null, "mode": "by", "by": -10 },
+      "out": { "ok": false, "mode": "by", "requested": -10, "target": null, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "no position (the demuxer is still opening after a zap): nothing issued",
+      "in": { "position": null, "floor": 0.0, "ceiling": 17.956, "mode": "by", "by": -10 },
+      "out": { "ok": false, "mode": "by", "requested": -10, "target": null, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "live with no range is refused the same way, with no number to request",
+      "in": { "position": 5.0, "floor": null, "ceiling": null, "mode": "live", "by": null },
+      "out": { "ok": false, "mode": "live", "requested": null, "target": null, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "a range whose end is before its start is no range",
+      "in": { "position": 50.0, "floor": 60.0, "ceiling": 40.0, "mode": "by", "by": -10 },
+      "out": { "ok": false, "mode": "by", "requested": -10, "target": null, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "by zero asks for nothing and flags nothing",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": 0 },
+      "out": { "ok": true, "mode": "by", "requested": 0, "target": 400.617, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": false }
+    },
+    {
+      "name": "a fractional request is honoured to the millisecond",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "by", "by": -2.5 },
+      "out": { "ok": true, "mode": "by", "requested": -2.5, "target": 398.117, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": true }
+    },
+    {
+      "name": "an unknown mode is read as by",
+      "in": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "mode": "sideways", "by": -10 },
+      "out": { "ok": true, "mode": "by", "requested": -10, "target": 390.617, "clamped": false, "clampedTo": null, "atFloor": false, "atEdge": false, "issue": true }
+    }
+  ]
+}

@@ -61,10 +61,23 @@ class FakeMpv:
     `user-data/<node>` sub-paths store and read back per node while the top
     level is not writable, `loadfile` answers with a playlist_entry_id, and
     events can arrive unasked at any moment (`inject`).
+
+    M5-01 taught it the seek semantics docs/SPIKE-LIVE-REWIND.md 11.4 and
+    12.2 measured, NO MORE FORGIVING than mpv 0.41 (CLAUDE.md rule 10):
+    `seek <t> absolute` always answers `success`; the position moves only
+    when the target lies inside a `seekable-ranges` entry of the
+    `demuxer-cache-state` prop, and then echoes the target exactly (72 of
+    72); outside it the position is unchanged and one error-level
+    `Cannot seek in this stream` log-message event is pushed (31 of 31); a
+    NEGATIVE target is an offset from the cache end, not a refusal (F-RWD-7,
+    5 of 5). `seek_moves=False` is the underrun case: a target inside the
+    range that still moves nothing. `show-text` is recorded in `osd`.
     """
 
+    REFUSAL_LINE = "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"
+
     def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True,
-                 entry_ids=True, user_data=None):
+                 entry_ids=True, user_data=None, seek_moves=True):
         self.path = path
         self.props = props or {}
         self.event_first = event_first
@@ -73,6 +86,9 @@ class FakeMpv:
         self.close_on_quit = close_on_quit
         self.entry_ids = entry_ids
         self.user_data = dict(user_data or {})
+        self.seek_moves = seek_moves
+        self.seeks = []
+        self.osd = []
         self.commands = []
         self.log_levels = []
         self.entry_id = 0
@@ -187,7 +203,41 @@ class FakeMpv:
                 self.entry_id += 1
                 entry = self.entry_id
             return {"error": "success", "data": {"playlist_entry_id": entry}, "request_id": request_id}
+        if command[0] == "seek":
+            self.seek(command)
+            return {"error": "success", "data": None, "request_id": request_id}
+        if command[0] == "show-text":
+            with self.lock:
+                self.osd.append(list(command[1:]))
+            return {"error": "success", "data": None, "request_id": request_id}
         return {"error": "success", "data": None, "request_id": request_id}
+
+    def seek(self, command):
+        """mpv 0.41's measured seek: see the class docstring. Records
+        (target, landed) in `seeks`; a refusal pushes the log line."""
+        amount = float(command[1])
+        mode = command[2] if len(command) > 2 else "relative"
+        position = self.props.get("time-pos")
+        ranges = []
+        state = self.props.get("demuxer-cache-state")
+        if isinstance(state, dict):
+            ranges = [(float(r["start"]), float(r["end"])) for r in state.get("seekable-ranges", [])]
+        landed = False
+        target = None
+        if isinstance(position, (int, float)) and not isinstance(position, bool):
+            target = amount if mode == "absolute" else position + amount
+            if mode == "absolute" and amount < 0 and ranges:
+                # F-RWD-7: a negative absolute target counts from the END.
+                target = ranges[-1][1] + amount
+            inside = any(start <= target <= end for start, end in ranges)
+            if inside and self.seek_moves:
+                self.props["time-pos"] = target
+                landed = True
+        with self.lock:
+            self.seeks.append((target, landed))
+        if not landed:
+            self.inject({"event": "log-message", "prefix": "cplayer", "level": "error",
+                         "text": self.REFUSAL_LINE})
 
     def close(self):
         self.running = False
@@ -430,6 +480,9 @@ class StatusTest(MpvTestCase):
             # key, so the shell can tell "nothing to compare" from "the
             # helper is too old to be asked".
             "stash": None,
+            # M5-01: the same for the rewind readout -- STATUS_PROPS carries
+            # no time-pos, and "no position yet" is null, never zero.
+            "rewind": None,
         })
         self.assertNotIn("path\"", stdout.replace("pathHost", ""))
         for secret in ("user:pw", "/live/", "1.m3u8"):

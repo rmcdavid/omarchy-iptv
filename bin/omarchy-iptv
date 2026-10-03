@@ -89,6 +89,7 @@ import fcntl
 import gzip
 import io
 import json
+import math
 import os
 import re
 import select
@@ -3350,6 +3351,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             ok, data = client.try_command("get_property", prop)
             values[prop] = data if ok else None
         path_value = values["path"]
+        stash = values[USER_DATA_STASH] if isinstance(values[USER_DATA_STASH], dict) else None
         emit({
             "ok": True,
             "kind": "status",
@@ -3364,7 +3366,11 @@ def cmd_status(args: argparse.Namespace) -> int:
             # the player a question every few seconds, and until now the one
             # thing it never asked was WHICH CHANNEL. Never a URL - the record
             # carries the channel id, the name and the scope and nothing else.
-            "stash": values[USER_DATA_STASH] if isinstance(values[USER_DATA_STASH], dict) else None,
+            "stash": stash,
+            # M5-01: the rewind readout rides the tick the service already
+            # runs, so "behind live" re-syncs every ten seconds with no new
+            # process. Null until the player has a position (design 2.2).
+            "rewind": read_rewind(client, stash, paused=bool(values["pause"]) if values["pause"] is not None else None),
         })
         return EXIT_OK
     except HelperError as error:
@@ -3401,6 +3407,15 @@ PLAYER_STASH_SCHEMA = 1
 # describes, which is exactly why it is not a file on disk.
 USER_DATA_STASH = "user-data/omarchy-iptv"
 USER_DATA_OWNER = "user-data/omarchy-iptv-owner"
+# M5-01 live rewind (M5-01-LIVE-REWIND.md 2.2, dev branch): the third sibling node,
+# the zero point "behind live" is measured from. Keyed by the stash's
+# `entryId`, so a zap -- which changes the entry id -- invalidates it by
+# construction, and a shell restart recovers it from the player the way
+# pause state is recovered today. Written lazily by `status`, `pause` and
+# `seek`, whichever first sees a numeric `time-pos` for the current entry;
+# `probe` reads it and never writes (the probe is side-effect-free).
+USER_DATA_REWIND = "user-data/omarchy-iptv-rewind"
+REWIND_SCHEMA = 1
 PLAYER_GENERIC_FAILURE = "Playback stopped unexpectedly"   # mirrors Model.PLAYER_GENERIC_FAILURE
 # The D-LIVE-17 ladder, unchanged: quit at 0, SIGTERM at 2 s, SIGKILL at 4 s.
 STOP_QUIT_GRACE_MS = 2000
@@ -3440,8 +3455,15 @@ MPV_RESERVED = frozenset((
     "--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit",
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
     "--term-status-msg", "--screenshot-template",
+    # M5-01 (design 2.6, D3). The privacy-relevant switch is not whether mpv
+    # caches on disk but whether the file OUTLIVES the process: mpv unlinks
+    # its cache file the moment it is created (F-RWD-5), and `whendone` or
+    # `no` here keeps a copy of the stream at a path the plugin never listed,
+    # which is `--stream-record`'s class. `--cache-on-disk` itself stays a
+    # user choosing their own disk (PO-5's shape) and is warned about below.
+    "--demuxer-cache-unlink-files",
 ))
-PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks")
+PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
 # Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
 # are not direct streams - but each one puts the credentialed stream address
@@ -3452,6 +3474,13 @@ MPV_HANDOFF = frozenset(("--ytdl-format", "--ytdl-raw-options"))
 MPV_HANDOFF_SCRIPT_OPTS = frozenset(("--script-opts", "--script-opt"))
 MPV_YTDL_OFF = frozenset(("no", "0", "false"))
 MPV_HANDOFF_TEXT = " hands the stream address to another program"
+# M5-01 (design 2.6): the same PO-10 mechanism, a different cost. `--cache-on-disk`
+# writes the stream to the user's own disk continuously (1.8 to 4.5 GiB per
+# hour at the measured bitrates, into a file mpv unlinks at creation, so `ls`
+# and `du` show nothing). Allowed, because it is the user's disk; said out
+# loud, because nothing else would say it. Mirror of Model.MPV_DISK_WARN.
+MPV_DISK_WARN = frozenset(("--cache-on-disk",))
+MPV_DISK_TEXT = " writes the stream to disk while it plays"
 MPV_LIST_SUFFIX_RE = re.compile(r"-(add|append|set|pre|clr|del|remove|toggle)$")
 
 
@@ -3512,17 +3541,43 @@ def mpv_arg_hands_off_url(token: str) -> str:
     return ""
 
 
+def mpv_arg_writes_disk(token: str) -> str:
+    """Mirror of Model.mpvDiskName: the option NAME when the token turns the
+    disk cache on, "" otherwise. A flag like `--ytdl`: `--no-cache-on-disk`
+    and `=no` turn it off and are silent."""
+    text = str(token)
+    name, _, value = text.partition("=")
+    if name.startswith("--no-"):
+        return ""
+    if mpv_option_base(name) in MPV_DISK_WARN:
+        return "" if value.lower() in MPV_YTDL_OFF else name
+    return ""
+
+
+def mpv_arg_warning(token: str) -> str:
+    """Mirror of Model.mpvArgWarning: the whole warning line for one token,
+    or "". The two costs carry their own sentence, so the user is told WHAT
+    the option does rather than that it is "dangerous"."""
+    name = mpv_arg_hands_off_url(token)
+    if name:
+        return "mpvArg " + name + MPV_HANDOFF_TEXT
+    name = mpv_arg_writes_disk(token)
+    if name:
+        return "mpvArg " + name + MPV_DISK_TEXT
+    return ""
+
+
 def mpv_arg_warnings(tokens: list[str]) -> list[str]:
     """Mirror of Model.mpvArgWarnings: one line per distinct option, in the
     order the user wrote them."""
     seen: set[str] = set()
     out: list[str] = []
     for token in tokens or []:
-        name = mpv_arg_hands_off_url(token)
-        if not name or name in seen:
+        line = mpv_arg_warning(token)
+        if not line or line in seen:
             continue
-        seen.add(name)
-        out.append("mpvArg " + name + MPV_HANDOFF_TEXT)
+        seen.add(line)
+        out.append(line)
     return out
 
 
@@ -4721,6 +4776,7 @@ def player_probe(args: argparse.Namespace) -> int:
             "ok": True, "kind": "player.probe", "running": bool(found), "responsive": False,
             "pid": int(found[0]["pid"]) if found else None, "idle": None, "mpvVersion": None,
             "stash": None, "owner": None, "seq": record_seq(read_lock_file(sock)), "claimed": False,
+            "rewind": None,
         }
         client = probe_client(sock, args.ipc_timeout) if found else None
         if client is None:
@@ -4744,6 +4800,11 @@ def player_probe(args: argparse.Namespace) -> int:
             payload["stash"] = stash if ok and isinstance(stash, dict) and stash.get("id") else None
             ok, owner = client.try_command("get_property", USER_DATA_OWNER)
             payload["owner"] = owner if ok and isinstance(owner, dict) else None
+            # M5-01: the reattach read recovers "behind live" from the zero
+            # point the player carries. Read only -- the probe writes nothing
+            # but the owner claim, and a zero point taken here would be one
+            # taken by a verb that is documented as side-effect-free.
+            payload["rewind"] = read_rewind(client, payload["stash"], write=False)
             claim = owner_claim(args.owner_pid)
             if claim is not None:
                 written, _ = client.try_command("set_property", USER_DATA_OWNER, claim)
@@ -4814,14 +4875,19 @@ def player_pause(args: argparse.Namespace) -> int:
 
     WHAT THIS IS AND IS NOT. mpv keeps filling its demuxer cache while paused,
     so resuming continues from the moment you pressed it -- you are then
-    watching behind live, which is the point. It is NOT rewind: measured
-    across 22 live channels from 21 providers, 21 paused and resumed
-    correctly and exactly ONE reported itself seekable, so there is no going
-    back to before you pressed pause. Never call this feature DVR.
+    watching behind live. Going back to BEFORE the keypress is `player seek`
+    (M5-01), which moves inside the same cache: `seekable` reads false on
+    every live channel measured and 31 of 32 rewound anyway, because the
+    property that decides it is `demuxer-cache-state.seekable-ranges`
+    (SPIKE-LIVE-REWIND.md, dev branch). An earlier version of this docstring read
+    the wrong property and called the feature impossible. Never call either
+    feature DVR: nothing is recorded.
 
-    The bound is mpv's default demuxer-max-bytes, 150 MiB, which on a
-    ~3.8 Mbps stream measured 315 s of pause before the buffer stopped
-    growing. A higher bitrate caps sooner.
+    The bound of a pause is mpv's forward quota, 150 MiB, which on a
+    ~3.8 Mbps stream measured 315 s before the buffer stopped growing, with
+    or without history behind it. A long pause then reclaims the rewind
+    window one second per paused second down to the 50 MiB the back buffer
+    owns outright (11.2), which the `rewind` object in this reply shows.
 
     Side-effect-free when the player is not there: no spawn, no lock, no
     stale-socket unlink. Pausing something that is not playing is a no-op and
@@ -4829,7 +4895,7 @@ def player_pause(args: argparse.Namespace) -> int:
     """
     sock = socket_path(args.socket)
     payload: dict[str, Any] = {"ok": True, "kind": "player.pause", "running": False,
-                               "paused": None, "changed": False}
+                               "paused": None, "changed": False, "rewind": None}
     if not find_player(sock):
         emit(payload)
         return EXIT_OK
@@ -4847,6 +4913,7 @@ def player_pause(args: argparse.Namespace) -> int:
             want = args.state == "on"
         if was is not None and was == want:
             payload["paused"] = was
+            payload["rewind"] = read_rewind(client, paused=was)
             emit(payload)
             return EXIT_OK
         set_ok, _ = client.try_command("set_property", "pause", want)
@@ -4854,6 +4921,7 @@ def player_pause(args: argparse.Namespace) -> int:
             raise HelperError("pause_refused", "the player refused to change pause state")
         payload["paused"] = want
         payload["changed"] = True
+        payload["rewind"] = read_rewind(client, paused=want)
         emit(payload)
         return EXIT_OK
     except HelperError as error:
@@ -4988,6 +5056,402 @@ def player_tracks(args: argparse.Namespace) -> int:
         client.close()
 
 
+# ---- M5-01: live rewind ----------------------------------------------------
+#
+# M5-01-LIVE-REWIND.md (dev branch) 2.1 and 2.2, on SPIKE-LIVE-REWIND.md (dev branch) 11 and
+# 12. Rewind, forward and back-to-live INSIDE the demuxer cache mpv already
+# keeps on the plugin's own argv: no option added, nothing written, nothing
+# forked. The verb is `player seek`, beside `player pause`, same socket, same
+# request ids, same single control slot.
+#
+# What the measurements fixed, and this code obeys:
+#   - `seekable` and `partially-seekable` read false on every live channel
+#     that rewound; `demuxer-cache-state.seekable-ranges` is the truth.
+#   - mpv answers `success` to a seek it DROPS (below the floor or past the
+#     end), so a reply is no evidence of movement. The detector is the
+#     immediate `time-pos` read after the reply: a landed seek echoes its
+#     target to the millisecond (72 of 72), a refused one echoes the previous
+#     position within one frame (31 of 31, max 0.033 s). Threshold 0.5 s.
+#   - A NEGATIVE absolute target is an offset from the cache END, not a
+#     refusal (F-RWD-7, 5 of 5 moved to the live edge). The clamp keeps every
+#     target at or above `floor + 2`, and with no range at all the helper
+#     refuses WITHOUT seeking: `position + by` is never sent raw.
+#   - "Behind live" is `(wall - wall0) - (pos - pos0)` from a zero point
+#     taken at the first `time-pos` after each loadfile, never
+#     `cache end - time-pos`: after a deep rewind the fetch stalls, the cache
+#     end freezes and that difference counts DOWN while the real gap holds.
+#     Zero-point error measured below 0.05 s at a minute on clean streams.
+#   - Every field of `demuxer-cache-state` was enumerated on the real player
+#     (12.1): twenty leaves, one string among them (`ts-per-stream[].type`,
+#     mpv's own "video"/"audio"), nothing that is a path, URL or title. The
+#     allowlist below is built from that reply; the string never enters.
+#
+# Nothing in a reply is a string from the stream: numbers, booleans and null.
+# `path` is never read here. The one line that reaches the player's OSD is
+# composed from numbers and this file's own words, and never contains `$`,
+# because `show-text` property-expands (the reason --osd-msg1..3 are
+# reserved).
+SEEK_FLOOR_MARGIN_S = 2.0        # a target at the floor lands 1-2 s above it; below it is dropped
+SEEK_EDGE_MARGIN_S = 0.5         # the edge target, inside the range
+SEEK_MOVED_THRESHOLD_S = 0.5     # 0.467 above the refused max, 1.5 below the smallest request (12.2)
+BEHIND_LIVE_SHOW_S = 2           # mirrors Model.BEHIND_LIVE_SHOW_S (12.4: fifty-fold margin)
+OSD_TEXT_MS = 3000               # the show-text duration M3 measured
+# The twelve leaves forwarded out of `demuxer-cache-state` (12.1), as
+# (mpv name, our name, type). The other eight -- the three debug-* counters,
+# raw-input-rate and the four ts-per-stream[] leaves -- are dropped.
+CACHE_STATE_SCALARS = (
+    ("cache-end", "cacheEnd", float), ("reader-pts", "readerPts", float),
+    ("cache-duration", "cacheDuration", float), ("fw-bytes", "fwBytes", int),
+    ("total-bytes", "totalBytes", int), ("underrun", "underrun", bool),
+    ("idle", "idle", bool), ("eof", "eof", bool), ("eof-cached", "eofCached", bool),
+    ("bof-cached", "bofCached", bool),
+)
+
+
+def _boot_clock() -> float:
+    """The clock the zero point is taken on. CLOCK_BOOTTIME counts a suspend
+    (the provider's edge moves on while the box sleeps, so the viewer IS that
+    much further behind) and never jumps with NTP, which the wall clock does.
+    Indirection so tests can hold it still."""
+    try:
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+    except (AttributeError, OSError):
+        return time.monotonic()
+
+
+def round3(value: float) -> float:
+    """Three decimals, half up, the same arithmetic as Model.round3 so the
+    shared fixtures compare equal across the two implementations."""
+    return math.floor(float(value) * 1000.0 + 0.5) / 1000.0
+
+
+def _finite(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return number
+
+
+def cache_state_view(raw: Any) -> dict[str, Any]:
+    """The allowlisted view of `demuxer-cache-state` (12.1). Only the twelve
+    enumerated leaves pass, each coerced to its measured type; a leaf of the
+    wrong type is dropped rather than forwarded. The reply's one string leaf
+    is not on the list, so no string ever enters."""
+    view: dict[str, Any] = {"seekableRanges": []}
+    if not isinstance(raw, dict):
+        return view
+    for mpv_name, ours, kind in CACHE_STATE_SCALARS:
+        value = raw.get(mpv_name)
+        if kind is bool:
+            if isinstance(value, bool):
+                view[ours] = value
+        elif kind is int:
+            if isinstance(value, int) and not isinstance(value, bool):
+                view[ours] = value
+        else:
+            number = _finite(value)
+            if number is not None:
+                view[ours] = number
+    ranges = raw.get("seekable-ranges")
+    if isinstance(ranges, list):
+        for entry in ranges:
+            if not isinstance(entry, dict):
+                continue
+            start = _finite(entry.get("start"))
+            end = _finite(entry.get("end"))
+            if start is not None and end is not None and end >= start:
+                view["seekableRanges"].append({"start": start, "end": end})
+    return view
+
+
+def range_for(ranges: list[dict[str, Any]], position: float | None) -> dict[str, Any] | None:
+    """The seekable range the reader sits in; failing that the last range
+    that starts at or before the position; failing that the first. None
+    when there is no range at all, which is the one case the verb must
+    refuse WITHOUT seeking (F-RWD-7)."""
+    if not ranges:
+        return None
+    if position is not None:
+        for entry in ranges:
+            if entry["start"] <= position <= entry["end"]:
+                return entry
+        below = [entry for entry in ranges if entry["start"] <= position]
+        if below:
+            return below[-1]
+    return ranges[0]
+
+
+def clamp_seek(opts: dict[str, Any]) -> dict[str, Any]:
+    """Mirror of Model.clampSeek, pinned by the rewind-clamp.json fixture (dev branch).
+
+    `opts`: position, floor, ceiling (seconds; floor and ceiling from the
+    seekable range the reader sits in), mode "by" | "live", by (signed
+    seconds, negative is back). Returns the plan: `target` (absolute), whether
+    it was `clamped` and to what, `atFloor` / `atEdge`, and `issue` -- False
+    when the target is within the not-moved threshold of the position, where
+    a seek would be reported refused whether or not mpv moved (12.2).
+
+    A back press never produces a target above the position and a forward or
+    live press never one below it, so a tiny range (the first seconds after
+    a zap) answers atFloor / atEdge rather than moving the wrong way.
+    """
+    mode = "live" if opts.get("mode") == "live" else "by"
+    by = _finite(opts.get("by"))
+    by = 0.0 if by is None else by
+    position = _finite(opts.get("position"))
+    floor = _finite(opts.get("floor"))
+    ceiling = _finite(opts.get("ceiling"))
+    # A whole-second request stays the integer it was asked as (-10, not
+    # -10.0): JSON readers see the number the design shows.
+    requested = int(by) if by == int(by) else round3(by)
+    plan: dict[str, Any] = {
+        "ok": False, "mode": mode, "requested": requested if mode == "by" else None,
+        "target": None, "clamped": False, "clampedTo": None,
+        "atFloor": False, "atEdge": False, "issue": False,
+    }
+    if position is None or floor is None or ceiling is None or ceiling < floor:
+        return plan
+    plan["ok"] = True
+    low = floor + SEEK_FLOOR_MARGIN_S
+    high = ceiling - SEEK_EDGE_MARGIN_S
+    if mode == "live":
+        want = high
+        plan["requested"] = round3(high - position)
+    else:
+        want = position + by
+    target = want
+    if mode == "by" and by < 0:
+        if target < low:
+            target = low
+            plan["clamped"] = True
+            plan["atFloor"] = True
+        if target > position:
+            target = position
+    elif mode == "by" and by > 0:
+        if target > high:
+            target = high
+            plan["clamped"] = True
+            plan["atEdge"] = True
+        if target < position:
+            target = position
+    elif mode == "live":
+        plan["atEdge"] = True
+        if target < position:
+            target = position
+    else:
+        target = position
+    plan["issue"] = abs(target - position) >= SEEK_MOVED_THRESHOLD_S
+    plan["target"] = round3(target)
+    plan["clampedTo"] = round3(target) if plan["clamped"] else None
+    return plan
+
+
+def clock_span(seconds: Any) -> str:
+    """Mirror of Model.clockSpan: "m:ss", or "h:mm:ss" from an hour on."""
+    number = _finite(seconds)
+    total = 0 if number is None or number < 0 else int(math.floor(number))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours > 0:
+        return "%d:%02d:%02d" % (hours, minutes, secs)
+    return "%d:%02d" % (minutes, secs)
+
+
+def rewind_osd_text(reply: Any) -> str:
+    """Mirror of Model.rewindOsdText, pinned by the rewind-osd.json fixture (dev branch).
+
+    The one line `player seek` puts on the player's OSD (owner decision D9).
+    Composed from the reply's numbers and this function's own words only:
+    nothing from the stream, and never a `$`, because show-text expands
+    `${...}` against the player's properties, `path` included. "" when there
+    is nothing to say -- a refused seek, or no zero point yet.
+    """
+    if not isinstance(reply, dict) or reply.get("refused") is True:
+        return ""
+    rewind = reply.get("rewind")
+    if not isinstance(rewind, dict):
+        return ""
+    behind = _finite(rewind.get("behindLive"))
+    if behind is None:
+        return ""
+    if behind < BEHIND_LIVE_SHOW_S:
+        text = "live"
+    else:
+        text = "-" + clock_span(behind) + " behind live"
+    if reply.get("atFloor") is True:
+        text += ", as far back as it goes"
+    elif reply.get("atEdge") is True and behind >= BEHIND_LIVE_SHOW_S:
+        text += ", at the edge of the buffer"
+    if rewind.get("paused") is True:
+        text = "paused, " + text
+    return text
+
+
+def rewind_node_valid(node: Any, entry_id: int | None) -> bool:
+    """A zero point is valid for exactly one entry id: the one the stash
+    carries now. Any other, or an absent entry id, is no zero point."""
+    if entry_id is None or not isinstance(node, dict):
+        return False
+    return (node.get("schema") == REWIND_SCHEMA and node.get("entryId") == entry_id
+            and _finite(node.get("wall0")) is not None and _finite(node.get("pos0")) is not None)
+
+
+def stash_entry_id(stash: Any) -> int | None:
+    entry = stash.get("entryId") if isinstance(stash, dict) else None
+    return entry if isinstance(entry, int) and not isinstance(entry, bool) and entry > 0 else None
+
+
+def zero_point(client: MpvIpc, entry_id: int | None, position: float | None,
+               wall: float, write: bool) -> dict[str, Any] | None:
+    """The zero point for `entry_id`, read from the player; with `write`,
+    taken now from (`wall`, `position`) when none valid exists. `position`
+    must be a read that no seek sits between it and `wall`."""
+    ok, node = client.try_command("get_property", USER_DATA_REWIND)
+    if ok and rewind_node_valid(node, entry_id):
+        return node
+    if not write or entry_id is None or position is None:
+        return None
+    node = {"schema": REWIND_SCHEMA, "entryId": entry_id, "wall0": wall, "pos0": position}
+    written, _ = client.try_command("set_property", USER_DATA_REWIND, node)
+    return node if written else None
+
+
+def rewind_view(position: float | None, cache: dict[str, Any], zero: dict[str, Any] | None,
+                paused: Any, paused_for_cache: Any, entry_id: int | None, wall: float) -> dict[str, Any] | None:
+    """The `rewind` object every player reply carries (2.1). None when the
+    player has no numeric `time-pos` -- a demuxer still opening after a zap
+    -- and `behindLive` None when there is no zero point: absent, never 0
+    (D-DEAD-1)."""
+    if position is None:
+        return None
+    current = range_for(cache.get("seekableRanges") or [], position)
+    behind = None
+    if zero is not None:
+        behind = round3((wall - float(zero["wall0"])) - (position - float(zero["pos0"])))
+    return {
+        "position": round3(position),
+        "floor": round3(current["start"]) if current else None,
+        "ceiling": round3(current["end"]) if current else None,
+        "history": round3(position - current["start"]) if current else None,
+        "ahead": round3(current["end"] - position) if current else None,
+        "behindLive": behind,
+        "zeroed": zero is not None,
+        "paused": paused is True,
+        "pausedForCache": paused_for_cache is True,
+        "entryId": entry_id,
+    }
+
+
+def read_rewind(client: MpvIpc, stash: Any = None, paused: Any = None, write: bool = True) -> dict[str, Any] | None:
+    """One read of the rewind state for the `status`, `pause` and `probe`
+    replies: time-pos, the allowlisted cache state, paused-for-cache, and the
+    zero point (written lazily unless `write` is False). `stash` is the
+    stash already read by the caller, or None to read it here."""
+    if stash is None:
+        ok, stash = client.try_command("get_property", USER_DATA_STASH)
+        stash = stash if ok and isinstance(stash, dict) else None
+    entry_id = stash_entry_id(stash)
+    ok, pos = client.try_command("get_property", "time-pos")
+    position = _finite(pos) if ok else None
+    wall = _boot_clock()
+    ok, raw = client.try_command("get_property", "demuxer-cache-state")
+    cache = cache_state_view(raw if ok else None)
+    if paused is None:
+        ok, value = client.try_command("get_property", "pause")
+        paused = bool(value) if ok and value is not None else False
+    ok, pfc = client.try_command("get_property", "paused-for-cache")
+    paused_for_cache = bool(pfc) if ok and pfc is not None else False
+    zero = zero_point(client, entry_id, position, wall, write) if position is not None else None
+    return rewind_view(position, cache, zero, paused, paused_for_cache, entry_id, wall)
+
+
+def player_seek(args: argparse.Namespace) -> int:
+    """`player seek --by N` (signed seconds, negative is back) or `--live`.
+
+    One run: read time-pos and the cache state, clamp (clamp_seek), issue ONE
+    absolute seek, read time-pos again, decide moved or refused by the
+    not-moved threshold, take the zero point if none exists, put one
+    numbers-only line on the OSD when the request was honoured, and reply.
+    Side-effect-free when no player is there, like `pause`.
+    """
+    sock = socket_path(args.socket)
+    mode = "live" if args.live else "by"
+    by = int(args.by) if mode == "by" and args.by is not None else 0
+    payload: dict[str, Any] = {
+        "ok": True, "kind": "seek", "running": False, "mode": mode,
+        "requested": by if mode == "by" else None, "applied": 0,
+        "clamped": False, "clampedTo": None, "refused": True,
+        "atFloor": False, "atEdge": False, "rewind": None,
+    }
+    if not find_player(sock):
+        emit(payload)
+        return EXIT_OK
+    client = probe_client(sock, args.ipc_timeout)
+    if client is None:
+        emit(payload)
+        return EXIT_OK
+    try:
+        payload["running"] = True
+        ok, stash = client.try_command("get_property", USER_DATA_STASH)
+        stash = stash if ok and isinstance(stash, dict) else None
+        entry_id = stash_entry_id(stash)
+        ok, pos = client.try_command("get_property", "time-pos")
+        before = _finite(pos) if ok else None
+        wall_before = _boot_clock()
+        ok, raw = client.try_command("get_property", "demuxer-cache-state")
+        cache = cache_state_view(raw if ok else None)
+        ok, value = client.try_command("get_property", "pause")
+        paused = bool(value) if ok and value is not None else False
+        ok, pfc = client.try_command("get_property", "paused-for-cache")
+        paused_for_cache = bool(pfc) if ok and pfc is not None else False
+        # The zero point is taken from the PRE-seek read: a seek breaks the
+        # (wall, pos) relation, so one taken after it would read a fresh
+        # rewind as "at live".
+        zero = zero_point(client, entry_id, before, wall_before, True) if before is not None else None
+        current = range_for(cache["seekableRanges"], before)
+        plan = clamp_seek({
+            "position": before, "mode": mode, "by": by,
+            "floor": current["start"] if current else None,
+            "ceiling": current["end"] if current else None,
+        })
+        payload["requested"] = plan["requested"]
+        payload["clamped"] = plan["clamped"]
+        payload["clampedTo"] = plan["clampedTo"]
+        payload["atFloor"] = plan["atFloor"]
+        payload["atEdge"] = plan["atEdge"]
+        after = before
+        if not plan["ok"]:
+            # No position or no range: nothing to seek within. Refused here,
+            # never computed and sent (F-RWD-7).
+            payload["refused"] = True
+        elif not plan["issue"]:
+            payload["refused"] = False
+        else:
+            sent, _ = client.try_command("seek", plan["target"], "absolute")
+            ok, pos = client.try_command("get_property", "time-pos")
+            after = _finite(pos) if ok else None
+            if not sent or after is None or before is None or abs(after - before) < SEEK_MOVED_THRESHOLD_S:
+                payload["refused"] = True
+                after = before if after is None else after
+            else:
+                payload["refused"] = False
+                payload["applied"] = round3(after - before)
+        payload["rewind"] = rewind_view(after, cache, zero, paused, paused_for_cache, entry_id, _boot_clock())
+        if not payload["refused"]:
+            text = rewind_osd_text(payload)
+            if text:
+                client.try_command("show-text", text, OSD_TEXT_MS)
+        emit(payload)
+        return EXIT_OK
+    except HelperError as error:
+        emit(error_payload("seek", error))
+        return EXIT_ERROR
+    finally:
+        client.close()
+
+
 def cmd_player(args: argparse.Namespace) -> int:
     action = args.action
     if action == "start":
@@ -5002,6 +5466,8 @@ def cmd_player(args: argparse.Namespace) -> int:
         return player_pause(args)
     if action == "tracks":
         return player_tracks(args)
+    if action == "seek":
+        return player_seek(args)
     return player_orphan_check(args)
 
 
@@ -5875,9 +6341,15 @@ def build_parser() -> argparse.ArgumentParser:
     probe = player_actions.add_parser("probe", parents=[player_socket], help="report the player without touching it (the reattach read)")
     probe.add_argument("--owner-pid", type=int, default=0, help="claim the player for this shell pid")
     pause = player_actions.add_parser("pause", parents=[player_socket],
-                                      help="pause, resume or toggle the live stream (not rewind: the streams are not seekable)")
+                                      help="pause, resume or toggle the live stream; resuming continues from the pause (to go further back: seek)")
     pause.add_argument("--state", choices=("on", "off", "toggle"), default="toggle")
     pause.set_defaults(func=cmd_player)
+    seek = player_actions.add_parser("seek", parents=[player_socket],
+                                     help="move inside the cache mpv already keeps of the live stream: --by N seconds (negative is back) or --live; clamped to the window, a refusal is reported")
+    seek_how = seek.add_mutually_exclusive_group(required=True)
+    seek_how.add_argument("--by", type=int, default=None, help="signed whole seconds; negative rewinds")
+    seek_how.add_argument("--live", action="store_true", help="back to the cache edge (never a reload: the history is kept)")
+    seek.set_defaults(func=cmd_player)
     tracks = player_actions.add_parser("tracks", parents=[player_socket],
                                        help="list audio and subtitle tracks; with --audio/--sub, select first and then list")
     tracks.add_argument("--audio", default=None, help="mpv audio track id, or 'no'")

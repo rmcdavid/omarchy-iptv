@@ -156,7 +156,11 @@
       "address to a second program. Run by Model.mpvArgWarnings (JS) and by",
       "mpv_arg_warnings (python); `warnings` is what both must return for",
       "`tokens`. Only the option name may appear in a warning - the value can",
-      "carry a credentialed URL of its own."
+      "carry a credentialed URL of its own.",
+      "M5-01 (design 2.6): `--cache-on-disk` rides the same mechanism with its",
+      "own sentence, `diskText`: it writes the stream to the user's own disk",
+      "while it plays (allowed, PO-5's shape) and is said out loud (PO-10).",
+      "`--demuxer-cache-unlink-files` is RESERVED, not warned: see mpvReserved."
     ],
     "text": " hands the stream address to another program",
     "cases": [
@@ -288,11 +292,67 @@
         "name": "an empty setting warns about nothing",
         "tokens": [],
         "warnings": []
+      },
+      {
+        "name": "--cache-on-disk writes the stream to disk and is told so",
+        "tokens": [
+          "--cache-on-disk"
+        ],
+        "warnings": [
+          "mpvArg --cache-on-disk writes the stream to disk while it plays"
+        ]
+      },
+      {
+        "name": "--cache-on-disk=yes is the same switch",
+        "tokens": [
+          "--cache-on-disk=yes"
+        ],
+        "warnings": [
+          "mpvArg --cache-on-disk writes the stream to disk while it plays"
+        ]
+      },
+      {
+        "name": "--cache-on-disk=no and --no-cache-on-disk turn it off and are silent",
+        "tokens": [
+          "--cache-on-disk=no",
+          "--no-cache-on-disk"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "a cache directory alone writes nothing: no warning",
+        "tokens": [
+          "--demuxer-cache-dir=/tmp/x"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "the disk warning and the handoff warning are two lines, in the order written",
+        "tokens": [
+          "--cache-on-disk",
+          "--ytdl"
+        ],
+        "warnings": [
+          "mpvArg --cache-on-disk writes the stream to disk while it plays",
+          "mpvArg --ytdl hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "the disk warning is said once however many times the option is written",
+        "tokens": [
+          "--cache-on-disk",
+          "--cache-on-disk=1"
+        ],
+        "warnings": [
+          "mpvArg --cache-on-disk writes the stream to disk while it plays"
+        ]
       }
-    ]
+    ],
+    "diskText": " writes the stream to disk while it plays"
   },
   "mpvReserved": [
     "--config-dir",
+    "--demuxer-cache-unlink-files",
     "--dump-stats",
     "--force-media-title",
     "--idle",
@@ -499,7 +559,10 @@
       "reads them back.",
       "`claimed` is emitted but not parsed - the shell does not act on it - which",
       "is why `parsed` names every field the model does produce rather than",
-      "mirroring the reply key for key."
+      "mirroring the reply key for key.",
+      "M5-01: `rewind` is the reattach read of `behind live` (design 2.2), the",
+      "object parsePlayerProbe hands to parseRewind; the key is pinned here on",
+      "both sides like `pid`, for the same reason."
     ],
     "reply": {
       "ok": true,
@@ -528,7 +591,19 @@
         "at": 1758000100
       },
       "seq": 41,
-      "claimed": true
+      "claimed": true,
+      "rewind": {
+        "position": 400.617,
+        "floor": 44.028,
+        "ceiling": 418.001,
+        "history": 356.589,
+        "ahead": 17.384,
+        "behindLive": 300.6,
+        "zeroed": true,
+        "paused": false,
+        "pausedForCache": false,
+        "entryId": 2
+      }
     },
     "keys": [
       "claimed",
@@ -539,6 +614,7 @@
       "owner",
       "pid",
       "responsive",
+      "rewind",
       "running",
       "seq",
       "stash"
@@ -551,7 +627,19 @@
       "idle": false,
       "seq": 41,
       "stashId": "t:bbc1.uk",
-      "ownerPid": 301706
+      "ownerPid": 301706,
+      "rewind": {
+        "position": 400.617,
+        "floor": 44.028,
+        "ceiling": 418.001,
+        "history": 356.589,
+        "ahead": 17.384,
+        "behindLive": 300.6,
+        "zeroed": true,
+        "paused": false,
+        "pausedForCache": false,
+        "entryId": 2
+      }
     }
   },
   "stopLadder": [

@@ -1,0 +1,100 @@
+{
+  "_comment": [
+    "M5-01 live rewind: the one line `player seek` puts on the player's OSD",
+    "(owner decision D9, docs/M5-01-LIVE-REWIND.md 2.5). Run by",
+    "Model.rewindOsdText (JS) and rewind_osd_text (python); `text` is what both",
+    "must return for `reply`, a `player seek` reply as 2.1 shapes it.",
+    "The line is composed from the reply's NUMBERS and the composer's own words",
+    "and never from a string in the reply: `show-text` property-expands, so a",
+    "`$` in it would reach `${path}`, the credentialed stream URL. Both suites",
+    "assert that no text here, and no text either composer produces for a",
+    "reply carrying `$` in a stray string field, contains `$`.",
+    "ASCII only: scripts/check.sh greps tests/fixtures/* for non-ASCII bytes."
+  ],
+  "showThreshold": 2,
+  "cases": [
+    {
+      "name": "a landed 10 s rewind",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": -10, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": false,
+                 "rewind": { "position": 390.617, "floor": 44.028, "ceiling": 418.001, "history": 346.589, "ahead": 27.384, "behindLive": 10.0, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "-0:10 behind live"
+    },
+    {
+      "name": "ninety-two seconds behind",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": -10, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": false,
+                 "rewind": { "position": 300.0, "floor": 44.028, "ceiling": 418.001, "history": 255.972, "ahead": 118.001, "behindLive": 92.4, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "-1:32 behind live"
+    },
+    {
+      "name": "over an hour behind reads h:mm:ss",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": -10, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": false,
+                 "rewind": { "position": 100.0, "floor": 0.0, "ceiling": 4000.0, "history": 100.0, "ahead": 3900.0, "behindLive": 3723.9, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "-1:02:03 behind live"
+    },
+    {
+      "name": "below the show threshold is live",
+      "reply": { "ok": true, "kind": "seek", "mode": "live", "requested": 16.9, "applied": 16.9, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": true,
+                 "rewind": { "position": 417.501, "floor": 44.028, "ceiling": 418.001, "history": 373.473, "ahead": 0.5, "behindLive": 0.6, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "live"
+    },
+    {
+      "name": "the zero-point error can read slightly negative; that is live too",
+      "reply": { "ok": true, "kind": "seek", "mode": "live", "requested": 0.3, "applied": 0, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": true,
+                 "rewind": { "position": 417.8, "floor": 44.028, "ceiling": 418.001, "history": 373.772, "ahead": 0.201, "behindLive": -0.041, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "live"
+    },
+    {
+      "name": "at the floor says so",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -1000, "applied": -344.589, "clamped": true, "clampedTo": 46.028, "refused": false, "atFloor": true, "atEdge": false,
+                 "rewind": { "position": 46.028, "floor": 44.028, "ceiling": 418.001, "history": 2.0, "ahead": 371.973, "behindLive": 412.3, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "-6:52 behind live, as far back as it goes"
+    },
+    {
+      "name": "D8: live after a deep rewind seeks to the frozen edge and says what remains",
+      "reply": { "ok": true, "kind": "seek", "mode": "live", "requested": 316.884, "applied": 316.884, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": true,
+                 "rewind": { "position": 417.501, "floor": 44.028, "ceiling": 418.001, "history": 373.473, "ahead": 0.5, "behindLive": 27.4, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "-0:27 behind live, at the edge of the buffer"
+    },
+    {
+      "name": "a forward press clamped to the edge says the same",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": 30, "applied": 16.884, "clamped": true, "clampedTo": 417.501, "refused": false, "atFloor": false, "atEdge": true,
+                 "rewind": { "position": 417.501, "floor": 44.028, "ceiling": 418.001, "history": 373.473, "ahead": 0.5, "behindLive": 13.7, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": "-0:13 behind live, at the edge of the buffer"
+    },
+    {
+      "name": "paused is said first",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": -10, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": false,
+                 "rewind": { "position": 300.0, "floor": 44.028, "ceiling": 418.001, "history": 255.972, "ahead": 118.001, "behindLive": 42.0, "zeroed": true, "paused": true, "pausedForCache": false, "entryId": 7 } },
+      "text": "paused, -0:42 behind live"
+    },
+    {
+      "name": "paused at the floor",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -600, "applied": -100.0, "clamped": true, "clampedTo": 46.028, "refused": false, "atFloor": true, "atEdge": false,
+                 "rewind": { "position": 46.028, "floor": 44.028, "ceiling": 418.001, "history": 2.0, "ahead": 371.973, "behindLive": 93.0, "zeroed": true, "paused": true, "pausedForCache": false, "entryId": 7 } },
+      "text": "paused, -1:33 behind live, as far back as it goes"
+    },
+    {
+      "name": "a refused seek puts nothing on screen",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": 0, "clamped": false, "clampedTo": null, "refused": true, "atFloor": false, "atEdge": false,
+                 "rewind": { "position": 400.617, "floor": 44.028, "ceiling": 418.001, "history": 356.589, "ahead": 17.384, "behindLive": 0.0, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7 } },
+      "text": ""
+    },
+    {
+      "name": "no zero point yet: nothing to say rather than a zero (D-DEAD-1)",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": -10, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": false,
+                 "rewind": { "position": 390.617, "floor": 44.028, "ceiling": 418.001, "history": 346.589, "ahead": 27.384, "behindLive": null, "zeroed": false, "paused": false, "pausedForCache": false, "entryId": null } },
+      "text": ""
+    },
+    {
+      "name": "no rewind object at all",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": 0, "clamped": false, "clampedTo": null, "refused": true, "atFloor": false, "atEdge": false, "rewind": null },
+      "text": ""
+    },
+    {
+      "name": "a stray string field carrying a property expansion never reaches the line",
+      "reply": { "ok": true, "kind": "seek", "mode": "by", "requested": -10, "applied": -10, "clamped": false, "clampedTo": null, "refused": false, "atFloor": false, "atEdge": false, "note": "${path} $$ $>",
+                 "rewind": { "position": 390.617, "floor": 44.028, "ceiling": 418.001, "history": 346.589, "ahead": 27.384, "behindLive": 10.0, "zeroed": true, "paused": false, "pausedForCache": false, "entryId": 7, "title": "${path}" } },
+      "text": "-0:10 behind live"
+    }
+  ]
+}

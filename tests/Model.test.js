@@ -4374,7 +4374,17 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // others and not it reserved nothing. `--script-opts` was deliberately NOT
 // added -- ruling PO-10 keeps it a HANDOFF option that warns rather than a
 // rejected one, and the suite holds that line (it caught an attempt to add it).
-check("MPV_RESERVED gained exactly twelve entries", Object.keys(Model.MPV_RESERVED).length, 21)
+// M5-01 (design 2.6, D3) made it twenty-two: `--demuxer-cache-unlink-files`
+// is the switch that lets mpv's on-disk cache file OUTLIVE the process at a
+// path the plugin never listed, `--stream-record`'s class. `--cache-on-disk`
+// itself is deliberately NOT here: it is the user's own disk, warned about
+// through the handoff mechanism (MPV_DISK_WARN) and never refused.
+check("MPV_RESERVED gained exactly thirteen entries", Object.keys(Model.MPV_RESERVED).length, 22)
+check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is not",
+  [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
+check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
+  Model.splitMpvArgs("--demuxer-cache-unlink-files=no --no-demuxer-cache-unlink-files --demuxer-cache-unlink-files=whendone --cache-on-disk"),
+  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT] })
 
 checkCall("D-SINK-4: --load-scripts is RESERVED, not merely defaulted off", function () {
   // The base argv says --load-scripts=no, but user tokens are concatenated
@@ -4488,8 +4498,16 @@ check("playerStash reads a record written before the writer was named", Model.pl
 const probeFixture = playerFixture.playerProbe
 const probeBody = JSON.stringify(probeFixture.reply)
 check("parsePlayerProbe: a live player, from the shared vector",
-  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid } })(),
+  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind } })(),
   probeFixture.parsed)
+// M5-01: the reattach read. The key is pinned on both sides like `pid`, and a
+// probe without it (an older helper) parses to null rather than to zero.
+check("parsePlayerProbe: `rewind` is read through parseRewind, and absent reads null", [
+  probeFixture.keys.indexOf("rewind") >= 0,
+  Model.parsePlayerProbe(probeBody).rewind.behindLive,
+  (() => { const bare = Object.assign({}, probeFixture.reply); delete bare.rewind; return Model.parsePlayerProbe(JSON.stringify(bare)).rewind })(),
+  Model.parsePlayerProbe("junk").rewind
+], [true, 300.6, null, null])
 check("parsePlayerProbe: the pid M2-05 addresses the window by survives every shape the helper can send it in", [
   Model.parsePlayerProbe(probeBody).pid,
   Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { pid: 0 }))).pid,
@@ -8365,6 +8383,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                                 hasDetail: hasDetail, numberEntry: numberEntry, groupsNarrow: wall,
                                 retry: hasNumbers, sourcesExist: hasDetail, showLogos: wall,
                                 cursorKind: playing ? "add" : "source",
+                                // M5-01: both rewind gates, each seen open and shut, riding the
+                                // switches already in the grid so its size is unchanged.
+                                canRewind: playing, behindLive: hasDetail ? 300 : 0,
                                 scopeId: scopeId, channel: aChannel, state: st })
             }) })
           })
@@ -8562,6 +8583,205 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
          Model.keyboardMapKeys({ hasNumbers: false }).indexOf("0-9") !== -1,
          Model.keyboardMap({ hasNumbers: false }).map(function (s) { return s.title }).indexOf("Channel numbers")],
         [true, false, -1])
+})()
+
+// ---- M5-01: live rewind (docs/M5-01-LIVE-REWIND.md 2.1-2.5) ----
+//
+// The Model half: constants, the letter table, the hints and the map, the
+// composers, the argv, the coalescer, the count-up and the clamp. The clamp
+// and the OSD composer are pinned to the helper by two shared fixtures that
+// tests/test_rewind.py runs over the python mirrors. Every check here was
+// seen red by a named mutation of the shipping function (CLAUDE.md 11).
+;(function () {
+  const clampFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/rewind-clamp.json"), "utf8"))
+  const osdFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/rewind-osd.json"), "utf8"))
+
+  // 1. The names that join the lanes (the brief fixes them; the review
+  // checks the join).
+  check("M5-01: the keys and the step are the design's (2.4, D5, D7)",
+    [Model.REWIND_KEY, Model.FORWARD_KEY, Model.LIVE_KEY, Model.REWIND_STEP_S, Model.BEHIND_LIVE_SHOW_S],
+    ["b", "w", "g", 10, 2])
+  check("M5-01: the clamp constants are the measured ones and the fixture carries the same three",
+    [Model.SEEK_FLOOR_MARGIN_S, Model.SEEK_EDGE_MARGIN_S, Model.SEEK_MOVED_THRESHOLD_S,
+     clampFixture.floorMargin, clampFixture.edgeMargin, clampFixture.movedThreshold, osdFixture.showThreshold],
+    [2, 0.5, 0.5, 2, 0.5, 0.5, 2])
+  check("M5-01: listLetterAction answers rewind / forward / live for both cases of each letter",
+    ["b", "B", "w", "W", "g", "G"].map(Model.listLetterAction),
+    ["rewind", "rewind", "forward", "forward", "live", "live"])
+  check("M5-01: the three letters were free before this (no other action claimed them)",
+    [Model.listLetterAction("b") !== Model.listLetterAction("f"), Model.PAUSE_KEY !== Model.REWIND_KEY, Model.TRACKS_KEY !== Model.FORWARD_KEY, Model.SOURCE_KEYS.logos === Model.LIVE_KEY],
+    // `g` IS Sources' logos key, and that is fine: listLetterAction is
+    // list-mode only and the Sources screen dispatches on its own table.
+    [true, true, true, true])
+
+  // 2. The footer gates, each seen open and shut.
+  const playingBase = { mode: "list", query: "", playing: true, paused: false }
+  const pairsOf = o => Model.footerHints(Object.assign({}, playingBase, o)).map(p => p.join(" "))
+  check("M5-01: `b back` needs playing AND a non-empty range read; `w forward` / `g live` need behind live",
+    [pairsOf({ canRewind: true, behindLive: 0 }).filter(p => /^[bwg] /.test(p)),
+     pairsOf({ canRewind: true, behindLive: 1.9 }).filter(p => /^[bwg] /.test(p)),
+     pairsOf({ canRewind: true, behindLive: 2 }).filter(p => /^[bwg] /.test(p)),
+     pairsOf({ canRewind: false, behindLive: 300 }).filter(p => /^[bwg] /.test(p)),
+     pairsOf({ canRewind: true, behindLive: 300, playing: false }).filter(p => /^[bwg] /.test(p)),
+     pairsOf({ canRewind: "yes", behindLive: "300" }).filter(p => /^[bwg] /.test(p)),
+     pairsOf({}).filter(p => /^[bwg] /.test(p))],
+    [["b back"], ["b back"], ["b back", "w forward", "g live"], ["w forward", "g live"], ["w forward", "g live"], ["w forward", "g live"], []])
+  check("M5-01: the rewind hints sit in the playback cluster, between pause and tracks, and the line still ends with o sources ? help",
+    (() => { const l = pairsOf({ canRewind: true, behindLive: 300 }); return [l.slice(l.indexOf("c pause"), l.indexOf("t tracks") + 1), l.slice(-2)] })(),
+    [["c pause", "b back", "w forward", "g live", "t tracks"], ["o sources", "? help"]])
+  check("M5-01: a resumed footer keeps the same three while paused says resume",
+    pairsOf({ paused: true, canRewind: true, behindLive: 42 }).filter(p => /^[cbwg] /.test(p)),
+    ["c resume", "b back", "w forward", "g live"])
+  check("M5-01: every other mode and the empty states are untouched by the two flags",
+    [Model.footerHints({ mode: "search", query: "", canRewind: true, behindLive: 300 }).map(p => p[0]).filter(k => "bwg".indexOf(k) !== -1),
+     Model.footerHints({ mode: "list", empty: "error", canRewind: true, behindLive: 300 }).map(p => p[0]).filter(k => "bwg".indexOf(k) !== -1),
+     Model.footerHints({ mode: "sources", canRewind: true, behindLive: 300 }).map(p => p[0]).filter(k => "bwg".indexOf(k) !== -1),
+     Model.footerHints({ mode: "list", numberEntry: { active: true }, canRewind: true, behindLive: 300 }).map(p => p[0]).filter(k => "bwg".indexOf(k) !== -1)],
+    [[], [], ["g"], []])   // Sources' `g` is logos, its own table (above)
+
+  // 3. The map picks the three up from the same table, with no row of its
+  // own: the verbs in the map are the footer's verbs, and narrowing the map
+  // the way the footer gates drops them.
+  const mapRows = Model.keyboardMap({})[0].rows
+  check("M5-01: the keyboard map carries b / w / g with the footer's own verbs, from the footer's table",
+    [Model.verbForKey(mapRows, "b"), Model.verbForKey(mapRows, "w"), Model.verbForKey(mapRows, "g"), Model.keyboardMap({})[0].title],
+    ["back", "forward", "live", "Channel list"])
+  // The channel-list section only: Sources keeps its own `g logos` row.
+  const listKeys = o => Model.keyboardMap(o)[0].rows.map(r => r[0]).filter(k => "bwg".indexOf(k) !== -1)
+  check("M5-01: the map narrows on the same flags the footer gates on",
+    [listKeys({ canRewind: false }), listKeys({ behindLive: 0 }), listKeys({ playing: false }), listKeys({}),
+     Model.keyboardMapKeys({}).filter(k => "bwg".indexOf(k) !== -1)],
+    [["w", "g"], ["b"], ["w", "g"], ["b", "w", "g"], ["b", "w", "g"]])
+
+  // 4. The composers.
+  check("M5-01: clockSpan is m:ss below an hour and h:mm:ss from one",
+    [0, 7, 59, 60, 92, 412.9, 3599, 3600, 3723, 36000, -5, NaN, "x", null, undefined, true].map(Model.clockSpan),
+    ["0:00", "0:07", "0:59", "1:00", "1:32", "6:52", "59:59", "1:00:00", "1:02:03", "10:00:00", "0:00", "0:00", "0:00", "0:00", "0:00", "0:00"])
+  check("M5-01: spokenSpan names units, singular and plural, and drops the zero ones",
+    [0, 1, 45, 60, 61, 92, 120, 3600, 3661, 7322, -3, "x"].map(Model.spokenSpan),
+    ["0 seconds", "1 second", "45 seconds", "1 minute", "1 minute 1 second", "1 minute 32 seconds", "2 minutes", "1 hour", "1 hour 1 minute 1 second", "2 hours 2 minutes 2 seconds", "0 seconds", "0 seconds"])
+  check("M5-01: playbackStateText is one of three outputs and the dot is SEP (2.5)",
+    [Model.playbackStateText({ paused: false, behindS: 0 }), Model.playbackStateText({ paused: false, behindS: 1.99 }),
+     Model.playbackStateText({ paused: false, behindS: 92 }), Model.playbackStateText({ paused: true, behindS: 42 }),
+     Model.playbackStateText({ paused: true, behindS: 0.5 }), Model.playbackStateText({ paused: false, behindS: null }),
+     Model.playbackStateText({}), Model.playbackStateText(null),
+     Model.playbackStateText({ paused: true, behindS: 42 }).indexOf(Model.SEP) !== -1, Model.SEP],
+    ["", "", "1:32 behind live", "paused \u00b7 0:42 behind live", "", "", "", "", true, " \u00b7 "])
+  check("M5-01: barBehindText is the bar's fourth holder: -m:ss while playing behind live, else empty",
+    [Model.barBehindText({ playing: true, behindS: 92 }), Model.barBehindText({ playing: true, paused: true, behindS: 312 }),
+     Model.barBehindText({ playing: true, behindS: 1 }), Model.barBehindText({ playing: false, behindS: 92 }), Model.barBehindText({ playing: true, behindS: null }), Model.barBehindText({})],
+    ["-1:32", "-5:12", "", "", "", ""])
+  check("M5-01: the bar tooltip gains the state line and the window, and is unchanged without them",
+    [Model.barTooltip({ playing: true, chno: "7", name: "BBC One", behindS: 92, historyS: 412 }),
+     Model.barTooltip({ playing: true, paused: true, chno: "7", name: "BBC One", behindS: 42, historyS: 7 }),
+     Model.barTooltip({ playing: true, name: "BBC One", behindS: 0.3, historyS: 412 }),
+     Model.barTooltip({ playing: true, name: "BBC One", behindS: 92 }),
+     Model.barTooltip({ playing: true, name: "BBC One", behindS: 92, historyS: 412, pip: true }),
+     Model.barTooltip({ playing: true, name: "BBC One" }),
+     Model.barTooltip({ playing: true, name: "BBC One", historyS: null, behindS: null })],
+    ["Playing 7 \u00b7 BBC One\n1:32 behind live \u00b7 up to 6:52 back",
+     "Paused 7 \u00b7 BBC One\npaused \u00b7 0:42 behind live \u00b7 up to 0:07 back",
+     "Playing BBC One\nup to 6:52 back",
+     "Playing BBC One\n1:32 behind live",
+     "Playing BBC One\n1:32 behind live \u00b7 up to 6:52 back\n" + Model.barTooltip({ playing: true, name: "x", pip: true }).split("\n")[1],
+     "Playing BBC One",
+     "Playing BBC One"])
+  check("M5-01: the accessible name speaks the span in units at the same threshold, and is unchanged below it",
+    [Model.barAccessibleName({ playing: true, chno: "7", name: "BBC One", behindS: 92 }),
+     Model.barAccessibleName({ playing: true, paused: true, name: "BBC One", behindS: 42 }),
+     Model.barAccessibleName({ playing: true, name: "BBC One", behindS: 1.9 }),
+     Model.barAccessibleName({ playing: true, name: "BBC One" }),
+     Model.barAccessibleName({ playing: false, name: "BBC One", behindS: 92 })],
+    ["IPTV, playing channel 7, BBC One, 1 minute 32 seconds behind live",
+     "IPTV, paused BBC One, 42 seconds behind live",
+     "IPTV, playing BBC One", "IPTV, playing BBC One", "IPTV, idle"])
+  check("M5-01: the accessible name never carries a URL from a channel name beside the span",
+    Model.barAccessibleName({ playing: true, name: Model.sinkText("see http://u:p@h.test/x"), behindS: 92 }).indexOf("h.test/x") === -1, true)
+
+  // 5. The OSD line, pinned to the helper by the shared fixture, and the
+  // no-`$` rule.
+  osdFixture.cases.forEach(c => {
+    checkCall("rewindOsdText: " + c.name, () => Model.rewindOsdText(c.reply), c.text)
+  })
+  check("M5-01: the OSD fixture is big enough to be an assertion and no text in it carries `$`",
+    [osdFixture.cases.length >= 12, osdFixture.cases.filter(c => c.text.indexOf("$") !== -1).length,
+     osdFixture.cases.filter(c => JSON.stringify(c.reply).indexOf("$") !== -1).length >= 1],
+    [true, 0, true])
+  check("M5-01: no reply shape puts a `$` on the OSD -- every string field is ignored, numbers only",
+    (() => {
+      const poisoned = { refused: false, atFloor: "${path}", atEdge: "$>", note: "$$",
+                         rewind: { behindLive: "${path}", position: "$", paused: "${path}", floor: "${path}" } }
+      const a = Model.rewindOsdText(poisoned)
+      const b = Model.rewindOsdText({ refused: false, rewind: { behindLive: 92, paused: false, title: "${path}" } })
+      return [a, b, a.indexOf("$"), b.indexOf("$")]
+    })(), ["", "-1:32 behind live", -1, -1])
+
+  // 6. The clamp, pinned to the helper by the shared fixture.
+  clampFixture.cases.forEach(c => {
+    checkCall("clampSeek: " + c.name, () => Model.clampSeek(c["in"]), c.out)
+  })
+  check("M5-01: the clamp fixture is big enough to be an assertion and never yields a negative target (F-RWD-7)",
+    [clampFixture.cases.length >= 20,
+     clampFixture.cases.filter(c => c.out.target !== null && c.out.target < 0).length,
+     clampFixture.cases.filter(c => Model.clampSeek(c["in"]).target !== null && Model.clampSeek(c["in"]).target < 0).length,
+     clampFixture.cases.filter(c => c.out.ok === false).length >= 3,
+     clampFixture.cases.filter(c => c.out.issue === false && c.out.ok === true).length >= 4],
+    [true, 0, 0, true, true])
+  check("M5-01: round3 is half-up to the millisecond, the helper's arithmetic",
+    [Model.round3(1.0005), Model.round3(1.0004), Model.round3(-0.299), Model.round3(416.884000001), Model.round3(2)],
+    [1.001, 1, -0.299, 416.884, 2])
+
+  // 7. The argv and the verbs' argument.
+  check("M5-01: playerSeekArgv builds --by N or --live and nothing for a request that asks nothing",
+    [Model.playerSeekArgv("/s", -10), Model.playerSeekArgv("/s", "live"), Model.playerSeekArgv("/s", 30), Model.playerSeekArgv("/s", "-10"),
+     Model.playerSeekArgv("/s", 0), Model.playerSeekArgv("/s", "x"), Model.playerSeekArgv("/s", NaN), Model.playerSeekArgv("/s", 2.6),
+     Model.playerSeekArgv("/s", -1e9)],
+    [["player", "seek", "--socket", "/s", "--by", "-10"], ["player", "seek", "--socket", "/s", "--live"], ["player", "seek", "--socket", "/s", "--by", "30"],
+     ["player", "seek", "--socket", "/s", "--by", "-10"], [], [], [], ["player", "seek", "--socket", "/s", "--by", "3"],
+     ["player", "seek", "--socket", "/s", "--by", String(-Model.SEEK_MAX_S)]])
+  check("M5-01: the argv is argv -- no shell text, every item a plain token",
+    Model.playerSeekArgv("/run/x y/mpv.sock", -10).every(t => typeof t === "string" && t.indexOf(" ") === -1 || t === "/run/x y/mpv.sock"), true)
+  check("M5-01: seekVerbSeconds -- empty is the step, a positive integer is itself, anything else is 0 (CN15: refused, never a false success)",
+    ["", "  ", "30", "007", "0", "-5", "10.5", "1e3", "x", "999999", "9999999", null, undefined].map(Model.seekVerbSeconds),
+    [10, 10, 30, 7, 0, 0, 0, 0, 0, 999999 > Model.SEEK_MAX_S ? Model.SEEK_MAX_S : 999999, 0, 10, 10])
+
+  // 8. Coalescing (2.3): a press joins the pending sum, capped at the floor.
+  check("M5-01: coalesceSeek sums presses by direction and step and caps a back sum at the history",
+    [Model.coalesceSeek({ pending: 0, press: -1, history: 356, step: 10 }),
+     Model.coalesceSeek({ pending: -30, press: -1, history: 356, step: 10 }),
+     Model.coalesceSeek({ pending: -30, press: -1, history: 35, step: 10 }),
+     Model.coalesceSeek({ pending: -30, press: -1, history: 20, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -1, history: 0, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -1, history: null, step: 10 }),
+     Model.coalesceSeek({ pending: -20, press: 1, history: 356, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: 1, history: 0, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -3, history: 356 }),
+     Model.coalesceSeek({ pending: 0, press: 0, history: 356, step: 10 }),
+     Model.coalesceSeek({ pending: -5, press: -1, history: 356, step: -10 }),
+     Model.coalesceSeek({})],
+    [-10, -40, -35, -20, 0, 0, -10, 10, -10, 0, -15, 0])
+  // 9. The paused count-up (2.3): holds while playing, counts up while paused.
+  const atRest = { position: 300, floor: 44, ceiling: 418, history: 256, ahead: 118, behindLive: 92.4, zeroed: true, paused: false, pausedForCache: false, entryId: 7 }
+  check("M5-01: behindLiveNow holds while playing, counts up while paused from the read, and is null without a zero point",
+    [Model.behindLiveNow({ rewind: atRest, nowSec: 1000, pausedSinceSec: 990 }),
+     Model.behindLiveNow({ rewind: Object.assign({}, atRest, { paused: true }), nowSec: 1000, pausedSinceSec: 990 }),
+     Model.behindLiveNow({ rewind: Object.assign({}, atRest, { paused: true }), nowSec: 1000, pausedSinceSec: 1000 }),
+     Model.behindLiveNow({ rewind: Object.assign({}, atRest, { paused: true }), nowSec: 980, pausedSinceSec: 990 }),
+     Model.behindLiveNow({ rewind: Object.assign({}, atRest, { paused: true }), nowSec: 1000, pausedSinceSec: null }),
+     Model.behindLiveNow({ rewind: Object.assign({}, atRest, { behindLive: null, zeroed: false }), nowSec: 1000, pausedSinceSec: 990 }),
+     Model.behindLiveNow({ rewind: Object.assign({}, atRest, { behindLive: -0.041 }), nowSec: 1000 }),
+     Model.behindLiveNow({ rewind: null, nowSec: 1000, pausedSinceSec: 990 }),
+     Model.behindLiveNow({})],
+    [92.4, 102.4, 92.4, 92.4, 92.4, null, 0, null, null])
+  // 10. The reply object, coerced.
+  check("M5-01: parseRewind coerces every field and reads an absent position as no object at all",
+    [Model.parseRewind(atRest),
+     Model.parseRewind({ position: "390.617", floor: "x", behindLive: "10", zeroed: "true", paused: 1, entryId: "7" }),
+     Model.parseRewind({ floor: 44 }), Model.parseRewind(null), Model.parseRewind("x"),
+     Model.parseRewind({ position: 1, entryId: 0 }).entryId, Model.parseRewind({ position: 1, entryId: 2.9 }).entryId],
+    [atRest,
+     { position: 390.617, floor: null, ceiling: null, history: null, ahead: null, behindLive: 10, zeroed: false, paused: false, pausedForCache: false, entryId: 7 },
+     null, null, null, null, 2])
 })()
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")

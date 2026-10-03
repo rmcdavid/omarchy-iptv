@@ -1929,9 +1929,15 @@ class ParityTest(unittest.TestCase):
         # it, so defaulting alone leaves a pasted `--load-scripts=yes` free to
         # put the credentialed stream URL back on the session bus via
         # mpv-mpris. Measured on the real bus before it was reserved.
-        self.assertEqual(len(names), 21)
+        # M5-01 (design 2.6) made it twenty-two: `--demuxer-cache-unlink-files`
+        # lets mpv's on-disk cache file outlive the process at a path the
+        # plugin never listed, `--stream-record`'s class. `--cache-on-disk`
+        # itself stays allowed and WARNED (the disk-warning vectors below).
+        self.assertEqual(len(names), 22)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
+        self.assertIn("--demuxer-cache-unlink-files", names)
+        self.assertNotIn("--cache-on-disk", names)
         self.assertNotIn("--ytdl", names)          # PO-5
         # NOT reserved, deliberately: ruling PO-10 / D-PLY-5 keeps --script-opts
         # a HANDOFF option that warns. This line is what caught an attempt to
