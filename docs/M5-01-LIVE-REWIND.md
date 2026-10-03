@@ -237,7 +237,9 @@ One composer, `Model.playbackStateText({paused, behindS})`, yields `""`,
 it, before the name: the status elides on the right, a name can lose its
 tail, a number cannot -- F-UX-5, from the review), the bar tooltip (`Model.barTooltip`, `behindS` and `historyS`) and the
 bar's accessible name (`Model.barAccessibleName`, spoken through
-`Model.spokenSpan`: "1 minute 32 seconds behind live") all call it. The 3 s
+`Model.spokenSpan`: "1 minute 32 seconds behind live") all read the same
+threshold, `Model.BEHIND_LIVE_SHOW_S`; the first two call the composer and
+the accessible name composes its own spoken form from the same number. The 3 s
 transient is `Model.seekTransientText(reply, fallback)` and the glyph is
 `Model.barGlyph({..., behindLive})`: every sentence and symbol the feature
 COMPOSES is a function a test calls (rule 12), none is composed in QML; the

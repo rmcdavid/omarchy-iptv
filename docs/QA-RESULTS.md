@@ -10916,9 +10916,10 @@ shell pid 2186866 before and after; no mpv or ffmpeg left.
 ## Review of the M5-01 round, 2026-10-03: the verdicts
 
 Five lenses over 9ff7f9b..d508e9d, each finding handed to adversarial
-verifiers told to refute. **43 findings; 38 verdicts: 31 confirmed, 4
-partial, 3 refuted; 5 without a verdict** (one verifier chunk of five
-returned nothing). By severity: 4 P2, 30 P3, 9 nit; by kind: 10 code, 17
+verifiers told to refute. **43 findings; 43 verdicts: 36 confirmed, 4
+partial, 3 refuted.** (An earlier paragraph here counted 38 verdicts from a
+partial read of the journal while the last chunk was still running; the
+workflow's final record, 15 agents and none empty, is the count.) By severity: 4 P2, 30 P3, 9 nit; by kind: 10 code, 17
 claim, 6 test, 7 seam, 3 sink. Every one is closed above or filed on the
 board (F-RWD-18, F-RWD-19 open; the mpv.conf question and the foreign seek
 event accepted and stated). The three refutations are of one kind: the
@@ -10927,8 +10928,8 @@ UX 4.8 tick sentence, the README's missing OSD sentence and the UX 6.2
 transcription already fixed at HEAD, and recorded each as "refuted at HEAD
 because it was already fixed; it held at d508e9d" -- confirmations of the
 finding, not of its absence. (The lead's first draft of this paragraph
-said "0 refuted" from a partial reading of the journal; the count above is
-from every verdict line.) The four partial verdicts: two findings that
+said "0 refuted", the second "5 without a verdict", both from partial
+readings of the journal; the count above is the final record's.) The four partial verdicts: two findings that
 held at the reviewed revision and were already closed at HEAD (the
 post-stop reply; the UX tooltip sentence); the foreign-seek-event nit,
 whose code claim holds while the fake's ordering the verifier built to
@@ -10965,3 +10966,24 @@ verbs probed with nothing playing: `back ""`, `back 30`, `forward 10` and
 `live` each answer `{"ok":false,...,"code":"nothing_playing"}`; a bare
 `back` is refused by qs before the plugin (F-RWD-20, README corrected).
 
+## The review's final record, and four residuals closed on dev, 2026-10-03
+
+The workflow finished after the cut (15 agents, 43 verdicts). Four notes
+its verifiers left about the tree at HEAD were still true and are closed
+here, on dev, for the next release: `seekLive` refused a stopping player
+only half as well as `seekBy` (a `g` during the stop ladder answered
+"queued" for a run that never came); `applyRewind` stored the reply's
+`rewind` object raw on the status, pause and seek paths while the reattach
+path stored the probe's through `Model.parseRewind` (now every path does);
+the stub writes its `seek` event only to the issuing connection where mpv
+broadcasts it (stated in the stub, unmodelled by design, since the plugin
+holds one control connection per run); and design 2.5 said the accessible
+name "calls" `playbackStateText` when it composes its own spoken form from
+the same threshold. The verifier also noted that the post-stop reply guard
+and the seek queue as a whole are tested by the scenario alone, which is
+F-RWD-19.
+
+Gate all green; the scenario on the display against these changes, run 7:
+**79 passed, 0 failed**, the readout following the argument (15.8), the
+zap emptying it, the restarted shell recovering 28.3 from the player, R15
+median 221 ms. Owner's shell (now 2724554, on 0.11.0) untouched.

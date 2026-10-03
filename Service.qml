@@ -3228,9 +3228,15 @@ Item {
     // entry's numbers; the socket's start-file event has moved
     // currentEntryId on by then, so the mismatch is visible and the
     // reading is dropped rather than shown on the wrong channel.
-    if (r && typeof r === "object" && Number(r.entryId) > 0 && root.currentEntryId > 0
-        && Number(r.entryId) !== root.currentEntryId) return
-    root.rewind = r && typeof r === "object" ? r : null
+    // Stored COERCED, through Model.parseRewind -- numbers finite or null,
+    // booleans strict, entryId a positive integer or null -- on every path,
+    // the way the reattach path already stored the probe's. The first
+    // version stored the reply object raw here (the review's sinks lens):
+    // a string in a numeric field would have reached the composers.
+    var parsed = Model.parseRewind(r)
+    if (parsed && parsed.entryId !== null && root.currentEntryId > 0
+        && parsed.entryId !== root.currentEntryId) return
+    root.rewind = parsed
     root.rewindAtSec = Math.floor(Date.now() / 1000)
     root.behindTickSec = root.rewindAtSec
     // Room for a step again -- the stream filled past the floor, or the
@@ -3294,7 +3300,9 @@ Item {
   // helper seeks to the range end minus 0.5 s and the reply says what
   // remains. It never re-tunes; only Enter on the row reloads.
   function seekLive() {
-    if (!root.nowPlaying || !root.playerUp) return root.seekRefuse("live", "nothing_playing")
+    // The same refusal as seekBy's: a player on its way out takes no press
+    // (the review's verifier found this half still answering "queued").
+    if (!root.nowPlaying || !root.playerUp || root.stopping || root.userStopped) return root.seekRefuse("live", "nothing_playing")
     root.seekPending = 0
     root.seekLiveQueued = true
     var state = root.issueSeek() ? "applying" : "queued"

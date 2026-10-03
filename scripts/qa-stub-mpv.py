@@ -68,7 +68,12 @@ HLS stream (docs/QA-REWIND.md section 2):
     the error-level refusal line, to the connections that subscribed with
     `request_log_messages` and to no other. (An earlier version of this
     file emitted no line and moved the position before replying; the review
-    of the integrated tree found both more forgiving than mpv.)
+    of the integrated tree found both more forgiving than mpv.) One half
+    stays unmodelled and is stated: mpv broadcasts the `seek` event to EVERY
+    client, and this stub writes it only to the connection that issued the
+    seek. The plugin opens one control connection per helper run, so no
+    scenario can tell the difference; a test that needs the broadcast
+    would be the first to.
 
 `python3 scripts/qa-stub-mpv.py --self-test` runs the unittest cases that
 pin these, against a fake clock. Each case was seen red by mutating the rule
