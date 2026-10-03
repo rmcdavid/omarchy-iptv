@@ -3672,6 +3672,57 @@ checkCall("M4-02: a URL in the next line is redacted like every other field the 
   return [d.next.indexOf("tracker.example") !== -1, d.next.indexOf("user:pw") === -1, d.next.indexOf("?t=1") === -1]
 }, [true, true, true])
 
+// F-UX-2: the hint row is dropped to what fits rather than left to elide from
+// the left, which is what made it lose `j/k move` first. These call the
+// shipping function; the guide owns only the budget.
+;(function () {
+  const full = Model.footerHints({ mode: "list", hasNumbers: true, hasDetail: true })
+  const verbs = function (pairs) { return pairs.map(function (p) { return p[1] }) }
+  check("F-UX-2: a row that fits is returned untouched, and the width is the one the composer renders",
+        [Model.fitFooterHints(full, 1000), Model.footerHintWidth([["j/k", "move"], ["?", "help"]])],
+        // "j/k move" is 8, "? help" is 6, one separator is 3.
+        [full, 8 + 3 + 6])
+  check("F-UX-2: the first pair and the help pair survive every budget", (function () {
+    const out = []
+    for (let b = 200; b >= 1; b -= 7) {
+      const kept = Model.fitFooterHints(full, b)
+      out.push(kept.length > 0 && kept[0][1] === "move" && verbs(kept).indexOf("help") !== -1)
+    }
+    return out.every(Boolean)
+  })(), true)
+  check("F-UX-2: how you move and how you find the rest are not on the drop list, which is what protects them",
+        [Model.FOOTER_DROP_ORDER.indexOf("move"), Model.FOOTER_DROP_ORDER.indexOf("help")], [-1, -1])
+  check("F-UX-2: the first pair is kept even when its verb IS droppable", (function () {
+    // Reaches the positional guard, which the shipping row cannot: here the
+    // first pair is one the drop order names, so only the guard saves it.
+    const crafted = [["o", "sources"], ["Ctrl+G", "wall"], ["r", "refresh"], ["?", "help"]]
+    return verbs(Model.fitFooterHints(crafted, 12))
+  })(), ["sources", "help"])
+  check("F-UX-2: pairs go in the declared order, lowest value first", (function () {
+    // Shrink one step at a time and record what left, in the order it left.
+    const gone = []
+    let prev = verbs(Model.fitFooterHints(full, 1000))
+    for (let b = 160; b >= 60; b--) {
+      const now = verbs(Model.fitFooterHints(full, b))
+      prev.forEach(function (v) { if (now.indexOf(v) === -1 && gone.indexOf(v) === -1) gone.push(v) })
+      prev = now
+    }
+    return gone
+    // The whole declared order, in order: by 60 characters every droppable
+    // pair has gone and the floor below is what is left.
+  })(), ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview"])
+  check("F-UX-2: nothing outside the declared drop order is ever taken", (function () {
+    const kept = verbs(Model.fitFooterHints(full, 1))
+    return kept.filter(function (v) { return Model.FOOTER_DROP_ORDER.indexOf(v) !== -1 })
+  })(), [])
+  check("F-UX-2: a budget of zero or nonsense changes nothing, so a card that has not laid out yet still draws",
+        [Model.fitFooterHints(full, 0), Model.fitFooterHints(full, -5), Model.fitFooterHints(full, NaN)],
+        [full, full, full])
+  check("F-UX-2: the row that survives the smallest budget is still a usable guide",
+        verbs(Model.fitFooterHints(full, 1)),
+        ["move", "group", "play", "detail", "search", "channel", "help"])
+})()
+
 checkCall("D-RUNG-5: the idle glyph is no longer BOLDER than the active one anywhere", function () {
   // The defect, as a user would see it, and confirmed on a real screen:
   // rose-pine measured idle 2.48:1 against active 2.25:1 before this change.
@@ -8169,15 +8220,16 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     const drawn = (qmlBlock("detailBody").match(/detailPanel\.field\("[a-z]+"\)/g) || [])
       .map(function (m) { return m.slice(19, -2) })
     const modelFields = Model.EPG_DETAIL_FIELDS.map(function (f) { return f[0] })
-    // F-PANEL-1, found by writing this check and not by reading the code:
-    // `channel` is the OTHER dead field. programmeDetail composes it, cleans
-    // it and is the only place in the plugin that REDACTS a channel name
-    // (its own comment says so), and the panel draws no channel line at all
-    // -- the card's only heading is the literal "Programme". Left in the
-    // model rather than deleted with `fields`, because unlike `fields` it is
-    // a distinct datum and the cross-lane contract for it was settled at
-    // integration two commits ago; pinned here so whoever settles it has to
-    // move this list, and raised for the board.
+    // F-PANEL-1, SETTLED 2026-10-03 by drawing it. The check was written to
+    // force the question and it did: `channel` was composed, cleaned and
+    // redacted -- the only place in the plugin that redacts a channel name --
+    // and nothing drew it. It is drawn now, under the programme title and on
+    // the caption rung, because the panel COVERS the list: the cursor row is
+    // the only thing on screen naming the channel, and it is gone the moment
+    // the panel opens, while the title above is the PROGRAMME's name, which
+    // on a film channel looks nothing like the channel's. The undrawn list
+    // below is empty on purpose: a field programmeDetail can emit and the
+    // panel does not draw is the defect this check exists to catch.
     check("M4-02: the panel draws every field the model can emit, in the order the model's table declares", [
       drawn,
       // Every key programmeDetail can put on the object, and whether the
@@ -8188,8 +8240,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       // claimed to own and never reached the screen to make.
       drawn.filter(function (k) { return modelFields.indexOf(k) !== -1 })
     ], [
-      ["title", "when", "episode", "category", "description", "next"],
-      ["channel"],
+      ["title", "channel", "when", "episode", "category", "description", "next"],
+      [],
       ["episode", "category", "description"]
     ])
   })()

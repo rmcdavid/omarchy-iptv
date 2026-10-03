@@ -853,11 +853,40 @@ Item {
       state: root.serviceReady ? root.service.userState : null }
   }
 
+  // F-UX-2. The hint row is dropped to what the card can actually show rather
+  // than left to elide, because the element elides from the LEFT and so loses
+  // `j/k move` first -- the one pair a newcomer needs. `Model.fitFooterHints`
+  // owns WHICH pairs go (rule 12: a node test calls it); this binding owns
+  // only the budget, and takes it from the font rather than from a constant:
+  // the row's own measured advance over its own text, so a theme with a wider
+  // font drops one more pair instead of silently overflowing again.
+  // The budget is the room the row is ALLOWED, not the width it ended up
+  // with: reading footerHints.width here would be a binding loop, because
+  // that width comes from implicitWidth, which comes from the text this
+  // binding produces. 0.7 is the element's own share of the footer.
+  readonly property real footerHintBudget: footerRow.width > 0 ? footerRow.width * 0.7 : root.cardWidth * 0.7
   readonly property string footerHintText: {
     var pairs = Model.footerHints(root.hintOpts)
+    var chars = Model.footerHintWidth(pairs)
+    if (chars > 0) {
+      var plain = new Array(chars + 1).join("M")
+      var px = footerHintMetrics.advanceWidth(plain)
+      if (px > 0 && px > root.footerHintBudget) {
+        pairs = Model.fitFooterHints(pairs, Math.floor(root.footerHintBudget * chars / px))
+      }
+    }
     // The composer is Model.footerHintMarkup so the F-TEXT-2 check in the
     // node suite calls the function that ships (rule 12), not a copy.
     return Model.footerHintMarkup(pairs, root.keyColor, root.verbColor)
+  }
+
+  // Measures the hint row in ITS OWN font, by binding to the element rather
+  // than restating family, size and weight -- a second copy of a font spec is
+  // a thing that drifts, and the D-RUNG-14 caption inventory reads a restated
+  // one as another 10 px caption site, which it is not: nothing here draws.
+  FontMetrics {
+    id: footerHintMetrics
+    font: footerHints.font
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -4854,6 +4883,7 @@ Item {
 
         // ---- footer (UX 5.7 / 6.1 / 6.2)
         Item {
+          id: footerRow
           width: parent.width
           height: root.footerHeight
 
@@ -5280,6 +5310,28 @@ Item {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
                 font.bold: true
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+              }
+
+              // WHICH CHANNEL this programme is on (F-PANEL-1). The panel
+              // covers the list, so the cursor row -- the only thing on
+              // screen naming the channel -- is hidden the moment the panel
+              // opens, and the title above is the PROGRAMME's name, which on
+              // a film channel looks nothing like the channel's. The model
+              // was already composing and redacting this string and nothing
+              // drew it, which is the shape the review filed: a field paid
+              // for and never rendered.
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                visible: text !== ""
+                text: detailPanel.field("channel")
+                color: root.foreground
+                opacity: root.captionAlphaOnCard
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
                 elide: Text.ElideRight
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text

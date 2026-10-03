@@ -3645,6 +3645,65 @@ var WALL_KEY = "Ctrl+G"
 // the one string the plugin renders under Text.StyledText (the footer's
 // MARKUP-EXCEPTION), so the only markup allowed in it is these font tags
 // around the pairs, and the pairs are literals (D-TEXT-1, F-TEXT-2).
+// F-UX-2. The footer hint row overflows the widest card the guide can draw:
+// the list line is 165 characters, about 990 px at the measured 6.0 px per
+// character, against a 655 px budget, and it elides from the LEFT, so the
+// segments a reader keeps are the LAST ones and `j/k move` -- the first thing
+// a newcomer needs -- is the first thing to go. Measured by the guide lane
+// with offscreen font metrics, not estimated.
+//
+// It could not be shortened before M4-04, because the row was the only place
+// in the product where the keys were written down. `?` changed that, so the
+// row can now carry what fits and point at the map for the rest, which is the
+// whole argument for fixing this now rather than earlier.
+//
+// Dropped lowest value first. The order is a judgement and it is written here
+// so it can be argued with: a trip to another screen goes before a view
+// toggle, a view toggle before a maintenance key, and anything that only
+// means something while a channel is playing before anything that acts on the
+// list in front of you.
+//
+// `move` and `help` are not on it, and that is the whole protection for them:
+// how you move and how you find what was taken away. An earlier version also
+// guarded them positionally, at the first pair and the last; both guards were
+// unreachable given this list, no mutation could redden them, and dead
+// defence that no test can see is what this project keeps finding in its own
+// instruments. The reachable invariant is asserted instead.
+var FOOTER_DROP_ORDER = ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview"]
+
+// The rendered width of a hint row, in characters, composed the way
+// footerHintMarkup composes it (the font tags carry no width).
+function footerHintWidth(pairs) {
+  var list = asList(pairs)
+  var n = 0
+  for (var i = 0; i < list.length; i++) {
+    var pair = asList(list[i])
+    n += str(pair[0]).length + 1 + str(pair[1]).length
+  }
+  return n + (list.length > 1 ? (list.length - 1) * SEP.length : 0)
+}
+
+// The pairs that fit in `maxChars`, dropping by FOOTER_DROP_ORDER until they
+// do. A row that still does not fit is returned as it stands: this is a floor,
+// not a promise, and the Text's own elide remains the last resort for a card
+// too narrow for `j/k move` and `? help` alone.
+function fitFooterHints(pairs, maxChars) {
+  var list = asList(pairs).slice()
+  var budget = Number(maxChars)
+  if (!(budget > 0) || footerHintWidth(list) <= budget) return list
+  for (var d = 0; d < FOOTER_DROP_ORDER.length; d++) {
+    for (var i = list.length - 1; i >= 1; i--) {
+      if (str(asList(list[i])[1]) !== FOOTER_DROP_ORDER[d]) continue
+      // Never the first pair, whatever it says: a row that cannot tell you
+      // how to move is not a shorter row, it is a worse one.
+      list.splice(i, 1)
+      if (footerHintWidth(list) <= budget) return list
+      break
+    }
+  }
+  return list
+}
+
 function footerHintMarkup(pairs, keyColor, verbColor) {
   var list = asList(pairs)
   var out = []
@@ -9379,6 +9438,9 @@ if (typeof module !== "undefined") {
     footerStatus: footerStatus,
     footerHints: footerHints,
     footerHintMarkup: footerHintMarkup,
+    fitFooterHints: fitFooterHints,
+    footerHintWidth: footerHintWidth,
+    FOOTER_DROP_ORDER: FOOTER_DROP_ORDER,
     formHints: formHints,
     keyboardMap: keyboardMap,
     keyboardMapKeys: keyboardMapKeys,

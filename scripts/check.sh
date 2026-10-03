@@ -147,7 +147,7 @@ fail=0
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-68}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1730}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1738}
 PY_TESTS_MIN=${PY_TESTS_MIN:-744}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
@@ -167,7 +167,7 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # derives its file list from the release allowlist, and a list that resolves
 # to nothing would scan nothing and exit 0 if the guard did not refuse that
 # itself; this is the second line of defence, in the gate's own vocabulary.
-TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-59}
+TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-60}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }

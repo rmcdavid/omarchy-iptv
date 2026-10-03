@@ -10307,3 +10307,52 @@ is the order the panel is pinned to. That is twice in one milestone that the
 instrument, not the product, was the thing reading blank -- F-HARNESS-2 was
 the first.
 
+
+## F-PANEL-1 and F-UX-2 closed, 2026-10-03
+
+The two the milestone had left open, taken together because the second is
+only possible because of the first milestone item.
+
+**F-PANEL-1, the panel now says which channel.** `programmeDetail` was
+composing, cleaning and redacting a channel name that nothing drew. Settled
+by drawing it rather than deleting it, on the argument that decides it: the
+panel COVERS the list, so the cursor row is the only thing on screen naming
+the channel and it is gone the moment the panel opens, while the title above
+is the programme's name, which on a film channel looks nothing like the
+channel's. Live: `The Ring Two` under `00s Replay`. The check that pinned the
+open question was written to force a decision and did; removing the line
+turns it red.
+
+**F-UX-2, the footer carries what fits.** Measured before: 165 characters,
+about 990 px at the row's own advance, against a 655 px budget, eliding from
+the LEFT so the pair a newcomer most needs is the first to vanish.
+
+| | characters | segments |
+|---|---|---|
+| before | 165 | 14 |
+| after, on the real card | **95** | 8 |
+
+`Model.fitFooterHints` owns which pairs go; the guide owns only the budget,
+and takes it from the row's own font rather than a constant, so a theme with
+a wider face drops one more pair instead of silently overflowing again. The
+drop order is a judgement written where it can be argued with: a trip to
+another screen before a view toggle, a view toggle before a maintenance key,
+and anything that only means something while a channel is playing before
+anything that acts on the list in front of you. `move` and `help` are not on
+that list, and that absence IS their protection.
+
+Two guards did not survive rule 11 and were removed rather than kept as
+decoration. Positional guards on the first and last pair could not be
+reddened by any mutation, because neither verb appears in the drop order; the
+reachable invariant is asserted instead, and adding `help` to the order now
+turns five checks red. The first-pair guard that remains is reached by a
+crafted row whose first pair IS droppable, which the shipping row never is.
+
+Six checks, eight new in total with the invariant and the crafted case, each
+proven by mutation. Live on the real card, both at once:
+
+```
+footer  j/k move - h/l group - Enter play - Space preview - x hide group - i detail - / search - ? help
+panel   The Ring Two | 00s Replay | 04:30 - 07:00 | description, category
+        j/k scroll - PgUp/PgDn page - Home/End ends - Esc back
+```
