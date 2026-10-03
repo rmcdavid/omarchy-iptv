@@ -77,6 +77,8 @@ Item {
   // a ~130 ms run and next to the helper's own --ipc-timeout, because this
   // is the belt and braces, not the deadline.
   readonly property int controlTimeoutMs: 8 * 1000
+  // M5-01 (2.3): the gap between a seek reply and the next seek run.
+  readonly property int seekThrottleMs: 300
   readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
   readonly property int stopSettleMs: 5 * 1000     // backstop that clears `stopping` (4.10)
   readonly property int focusRetryMs: 500
@@ -347,10 +349,83 @@ Item {
   // already asks mpv for `pause` every few seconds, so this costs no new
   // traffic -- it was being read and thrown away.
   //
-  // Not rewind: the streams are not seekable (1 of 22 measured), so there is
-  // no going back before the keypress. Bounded by mpv's 150 MiB cache, about
-  // five minutes on a typical stream.
+  // This comment used to say "not rewind: the streams are not seekable
+  // (1 of 22 measured)". That read the wrong property. `seekable` is false
+  // on every live stream, and 31 of 32 rewound anyway: the truth is in
+  // `demuxer-cache-state.seekable-ranges`, and mpv's default cache -- the
+  // 50 MiB back buffer plus the donated 150 MiB forward quota, 200 MiB in
+  // all -- holds a measured 353-359 s of history on a 4.7 Mbps stream and a
+  // median 411 s across the owner's source (the live-rewind spike, sections
+  // 3, 4 and 11, and the M5-01 live-rewind design, both on the dev branch).
+  // Rewind is the `rewind` state below. What the measurement says about PAUSE: the pause
+  // itself is bounded by the forward quota alone, 150 MiB over the bitrate
+  // (265 s at 4.7 Mbps), with or without history behind it -- and once the
+  // total reaches 200 MiB a pause EATS the rewind window, one second of
+  // history per paused second, down to the 93 s the back buffer owns
+  // outright. Pause and rewind compose in both orders (spike 11.2).
   property bool paused: false
+  // M5-01 LIVE REWIND (design section 2.3, on the dev branch). The `rewind` object of
+  // the last helper reply that carried one -- `status`, `pause`, `probe` and
+  // `seek` all do -- or null until the player has said anything. Null is
+  // "unknown", never zero (D-DEAD-1): the bar and the footer show nothing
+  // until there is a number. Numbers and booleans only, never a string from
+  // the stream (2.1). Cleared in play() beside `paused`, because every
+  // `loadfile` restarts the timeline at zero and the history with it
+  // (spike 11.1, measured 10 ms after the reply).
+  property var rewind: null
+  // The last `seek` reply said the request was already at the floor. A
+  // backward press while this holds spawns nothing: the helper would read,
+  // clamp and refuse again at a process launch each, and a held key would
+  // do that five times a second. Cleared by the next reply that shows room
+  // for a step, by a forward or live seek, and by play().
+  property bool seekAtFloor: false
+  // Presses coalesce (2.3): a press while a seek is in flight, or inside the
+  // 300 ms throttle after a reply, adds to this signed sum instead of
+  // queueing a process. Model.coalesceSeek caps it at the last-read history
+  // so a sum past the floor is never asked for. `seekLiveQueued` is the one
+  // request that is not a sum: it replaces whatever was pending.
+  // real, not int: the cap is the last-read history, a float, and an int
+  // truncated a sub-second cap to 0 -- "queued, pending 0" and nothing run
+  // (review of the integrated tree, F-RWD-17's sibling finding).
+  property real seekPending: 0
+  property bool seekLiveQueued: false
+  // Wall seconds of the last reply that carried `rewind`, and of the moment
+  // `paused` flipped true. "Behind live" holds while playing and counts up
+  // only while paused, from whichever of the two is later: a reply that
+  // lands mid-pause already includes the seconds paused before it.
+  property int rewindAtSec: 0
+  property int pausedAtSec: 0
+  // The 1 Hz clock the paused count-up reads. NOT `nowSec`: that tick is
+  // 30 s (epgTickMs) and re-derives every EPG fraction on the guide, so a
+  // 1 Hz tick on it would re-render the whole list once a second to move
+  // one number. This clock runs only while paused with a reading to count
+  // from (behindTick below), so while playing nothing re-renders at all.
+  property int behindTickSec: 0
+  // `b back` is hinted whenever something plays and the last range read is
+  // non-empty (2.5): a rewind pressed inside the first seconds of a zap
+  // lands on the first keyframe and moves nothing (spike 11.1).
+  readonly property bool canRewind: root.playing && root.rewind !== null
+    && root.rewind.history !== undefined && root.rewind.history !== null && Number(root.rewind.history) > 0
+  // Seconds behind live as of now, or null while there is no zero point.
+  // The composer is Model.behindLiveNow so the count-up is a function a test
+  // can call (rule 12), not arithmetic in a binding.
+  readonly property var behindLive: Model.behindLiveNow({
+    rewind: root.rewind,
+    nowSec: root.behindTickSec,
+    pausedSinceSec: root.paused ? Math.max(root.rewindAtSec, root.pausedAtSec) : null
+  })
+  onPausedChanged: {
+    if (root.paused) {
+      root.pausedAtSec = Math.floor(Date.now() / 1000)
+      root.behindTickSec = root.pausedAtSec
+    }
+  }
+  // Every `seek` reply, with the helper's own verdict: `applied`, `clamped`,
+  // `refused`, `atFloor`, `atEdge` and the `rewind` object (2.1). The guide
+  // composes its 3 s transient from it; the service never emits a sentence.
+  // The handler name on the guide side is pinned by test_pip.py's
+  // signal-join test, the way pipOutcome is.
+  signal seekReplied(var reply)
   // M3-02: the audio and subtitle tracks the player last reported and the
   // state of the question (idle | asking | ready | failed). `tracksQueued`
   // is a request that arrived while another control ran: the channel is
@@ -708,6 +783,11 @@ Item {
     // A new play is never paused: the flag belongs to the stream that was
     // playing, and carrying it over would show a pause nobody asked for.
     root.paused = false
+    // M5-01: and it has no history. Every loadfile empties the cache and
+    // restarts the timeline at zero (spike 11.1), so the readout goes absent
+    // -- not to zero -- until the player reports again, and a seek that was
+    // waiting its turn was aimed at the stream this play replaces.
+    root.clearRewind()
     // A new play puts the last failure behind us: the next guide open is a
     // fresh start, not a come-back.
     root.lastFailedId = ""
@@ -802,6 +882,9 @@ Item {
     root.nowPlaying = null
     root.userStopped = true
     root.playerPending = false
+    // M5-01: the history goes with the player; a press queued behind the
+    // stop has nothing to seek in.
+    root.clearRewind()
     // Stop hunting for a socket, but keep an attached one: its EOF is how
     // we learn the ladder finished (and is what clears `stopping`).
     root.playerWanted = false
@@ -1495,6 +1578,11 @@ Item {
       // beside it, and the verdict the footer reads. Version strings carry no
       // credential and no path, so this adds nothing to the redaction surface.
       paused: root.paused,
+      // M5-01: the last `rewind` object the player reported, or null until
+      // it has (2.1, 2.2). Numbers and booleans only; nothing in it is a
+      // string from the stream, so it adds nothing to the redaction surface.
+      rewind: root.rewind,
+      behindLive: root.behindLive,
       // D-LOGO-8: how many logos the shell currently knows are on disk. It
       // exists so the streaming fix can be OBSERVED rather than inferred --
       // the defect was precisely that this number stayed 0 until the fetch
@@ -1970,6 +2058,12 @@ Item {
     // branches below return early and some issue a control of their own.
     if (root.statusQueued) Qt.callLater(root.askPlayerStatus)
     if (root.tracksQueued) Qt.callLater(root.issueQueuedTracks)
+    // M5-01: a press that coalesced behind this run goes out once the
+    // handler is done. Deferred for the same reason as the two above, and
+    // AFTER the drain at the bottom takes the slot synchronously: a zap
+    // queued behind this reply outranks a seek, which play() has by then
+    // dropped as aimed at the previous stream.
+    if (root.seekPending !== 0 || root.seekLiveQueued) Qt.callLater(root.issueSeek)
     // Whatever this reply was, an open picker may ask again -- the whole
     // rule is Model.shouldRefreshTracks, which is a function and not a
     // conjunction here precisely because two comments in a row described a
@@ -2020,7 +2114,41 @@ Item {
       root.drainPendingPlay()
       return
     }
+    if (kind === "seek") {
+      // M5-01 (design 2.3). The helper read, clamped, seeked and read again;
+      // its reply is the whole verdict and `success` from mpv was never
+      // evidence (spike 11.4). Nothing here decides whether the seek moved:
+      // the guide's transient and the bar's number come from the reply.
+      //
+      // A zap queued behind this run means the reply describes the stream
+      // the user has already left: play() cleared `rewind` when the zap was
+      // asked for, and the drain below spawns `play` directly, so writing
+      // these numbers back would put the OLD stream's clock on the new
+      // channel's bar for up to a health tick. Stale replies apply nothing
+      // and say nothing (the tracks branch above does the same by channel).
+      // And a reply that lands after stop() or the player's EOF describes a
+      // player that is gone: nothing plays, so nothing is behind live, and
+      // the guide would otherwise show a transient for it (review finding).
+      if (root.pendingPlayId === "" && root.nowPlaying && root.playerUp) {
+        root.applyRewind(status)
+        if (status.ok === true) root.seekAtFloor = status.atFloor === true
+        root.seekReplied(status)
+      }
+      // The 300 ms throttle counts from THIS reply; issueSeek re-arms from
+      // the timer. A zap queued behind the seek outranks any press that
+      // coalesced behind it: the press was aimed at the stream the zap
+      // replaces, and play() has already dropped it.
+      seekThrottle.restart()
+      // D-PLY-24: every path of a new branch owes the queued play its drain,
+      // and this branch has only one path, so it is here and not in an else.
+      root.drainPendingPlay()
+      return
+    }
     if (kind === "pause") {
+      // M5-01: a `pause` reply carries the rewind numbers too (2.1), so the
+      // bar's `-m:ss` is current from the key the user just pressed rather
+      // than from the next 10 s status tick.
+      root.applyRewind(status)
       // The helper is authoritative: the optimistic flip is corrected here if
       // the player refused, or if there was no player to ask.
       if (status.ok === true && status.running === true && status.paused !== undefined
@@ -2085,6 +2213,14 @@ Item {
         // has to reach the file too or it returns at the next guide open.
         if (root.failedAt !== beforeHealthy && root.nowPlaying)
           root.persistFailed("clear", String(root.nowPlaying.id || ""))
+        // M5-01 (2.3): the 10 s status tick re-syncs "behind live" from the
+        // player, which also absorbs seeks made with mpv's own arrow keys --
+        // live in the player window today, since the plugin passes no
+        // --input-default-bindings override. AFTER the D-PLY-14 call above:
+        // the node suite bounds that call's distance from the healthy test
+        // as a proxy for "it sits in the healthy branch", and a block
+        // inserted ahead of it is what turns the proxy red.
+        root.applyRewind(status)
       } else if (code === "not_implemented" || code === "no_output") {
         // The helper cannot tell (stub or crash): neither healthy nor a
         // strike, so a missing subcommand never reaps a working player.
@@ -2489,6 +2625,14 @@ Item {
     // M2-05: the reattach path learns the window-owning pid too, so PiP
     // works on a player this shell did not start (4.7).
     root.notePlayerPid(probe.pid)
+    // M5-01 (2.2): the zero point lives on the player, so a shell restart
+    // recovers "behind live" from the probe reply the way the channel is
+    // recovered from the stash, with the number continuous across it.
+    // Model.parsePlayerProbe carries it, coerced by Model.parseRewind
+    // (numbers finite or null, booleans strict); the service lane's first
+    // version re-parsed the reply text and said the probe parser did not
+    // carry it, which was true of the design and not of the tree.
+    root.applyRewind({ ok: true, running: probe.running === true, rewind: probe.rewind })
     // Restored from the stash inside the surviving process, BEFORE the
     // channel cache exists: the bar and the guide are correct immediately
     // and the zap ring is fixed by reconcileNowPlaying() when the cache
@@ -2788,6 +2932,8 @@ Item {
     root.stopConfirmPending = false     // the EOF is the confirmation
     root.pendingPlayId = ""
     root.playRetries = 0
+    // M5-01: no player, no history, and no seek to deliver to it.
+    root.clearRewind()
     root.healthSkips = 0
     root.healthFailures = 0
     // The death IS the end of the stop (4.10); the 5 s backstop is only for
@@ -3055,6 +3201,130 @@ Item {
     if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return "busy"
     root.paused = want
     return ""
+  }
+
+  // ---- M5-01 LIVE REWIND (design section 2.3, on the dev branch)
+  //
+  // The keypress path goes through the one control slot, like `pause`. The
+  // helper does every piece of cache arithmetic -- it reads the range,
+  // clamps the target to the floor plus 2 s or the edge minus 0.5 s, issues
+  // ONE absolute seek and reads `time-pos` back (2.1); QML never computes a
+  // target. What the service owns is the queue: presses that arrive while a
+  // seek is in flight, or inside the 300 ms throttle after a reply, are
+  // summed and capped by Model.coalesceSeek rather than spawned one by one.
+
+  // Every reply that carries a `rewind` object refreshes the state. A reply
+  // that carries none -- an older helper, a refusal with no player --
+  // leaves the last reading alone rather than inventing one (rule 10); a
+  // `running: false` reply clears it, because there is no player to be
+  // behind. `rewind` is null, never {}, until the player says.
+  function applyRewind(status) {
+    if (!status || status.ok !== true) return
+    if (status.running === false) { root.rewind = null; return }
+    if (status.rewind === undefined) return
+    var r = status.rewind
+    // The object is keyed by the player's entry id (2.2). A reply in flight
+    // across a zap that has already landed on the player carries the OLD
+    // entry's numbers; the socket's start-file event has moved
+    // currentEntryId on by then, so the mismatch is visible and the
+    // reading is dropped rather than shown on the wrong channel.
+    if (r && typeof r === "object" && Number(r.entryId) > 0 && root.currentEntryId > 0
+        && Number(r.entryId) !== root.currentEntryId) return
+    root.rewind = r && typeof r === "object" ? r : null
+    root.rewindAtSec = Math.floor(Date.now() / 1000)
+    root.behindTickSec = root.rewindAtSec
+    // Room for a step again -- the stream filled past the floor, or the
+    // user moved -- so a backward press may spawn again.
+    if (root.seekAtFloor && root.rewind && Number(root.rewind.history) >= Model.REWIND_STEP_S) root.seekAtFloor = false
+  }
+
+  function clearRewind() {
+    root.rewind = null
+    root.seekAtFloor = false
+    root.seekPending = 0
+    root.seekLiveQueued = false
+    seekThrottle.stop()
+  }
+
+  // The IPC verbs' argument is read by Model.seekVerbSeconds (design 2.4):
+  // empty is one step, a positive whole number is itself, anything else is
+  // 0 and refused as bad_seconds. The service lane had written a second
+  // parser here while Model.js was closed to it; the review found the
+  // tested one dead (rule 12) and this one with different limits.
+
+  function seekRefuse(requested, code) {
+    return { ok: false, kind: "seek", requested: requested, code: String(code),
+             error: { code: String(code) }, rewind: root.rewind }
+  }
+
+  // A relative seek of `seconds` (negative is back). Returns the reply the
+  // IPC verbs serialise: accepted requests say "applying" when the helper
+  // was spawned now and "queued" when the press coalesced behind a run in
+  // flight or the throttle; refusals carry a code. `at_floor` is decided
+  // here from the LAST reply only when the request is backward: the helper
+  // already said there is nothing behind the floor, and spawning it to hear
+  // that again at a held key's repeat rate is the one case design 2.3 names.
+  function seekBy(seconds) {
+    var n = Math.round(Number(seconds))
+    if (!isFinite(n) || n === 0) return root.seekRefuse(seconds, "bad_seconds")
+    // A player on its way out takes no press: issueSeek would clear the
+    // queue and the reply would have said "queued" for a run that never
+    // comes (review finding; CN15, a refusal is never a false success).
+    if (!root.nowPlaying || !root.playerUp || root.stopping || root.userStopped) return root.seekRefuse(n, "nothing_playing")
+    if (n < 0 && root.seekAtFloor) return root.seekRefuse(n, "at_floor")
+    // A press after `g` was queued is a new intention: the live request
+    // stood for "forget the sum", and this press starts a new one.
+    if (root.seekLiveQueued) { root.seekLiveQueued = false; root.seekPending = 0 }
+    // `press` carries the direction and `step` the size: the size is THIS
+    // request's, so `back 30` is thirty seconds. The first version passed
+    // Model.REWIND_STEP_S as the step for every press and every verb seeked
+    // ten seconds whatever its argument (F-RWD-17, found by the review of
+    // the integrated tree after the live pass had recorded it as a landing
+    // past the target and the lead had misread it).
+    root.seekPending = Model.coalesceSeek({
+      pending: root.seekPending, press: n,
+      history: root.rewind ? root.rewind.history : null,
+      step: Math.abs(n)
+    })
+    var state = root.issueSeek() ? "applying" : "queued"
+    return { ok: true, kind: "seek", requested: n, pending: root.seekPending, state: state }
+  }
+
+  // Back to the live edge, or as near as the cache reaches (ruling D8): the
+  // helper seeks to the range end minus 0.5 s and the reply says what
+  // remains. It never re-tunes; only Enter on the row reloads.
+  function seekLive() {
+    if (!root.nowPlaying || !root.playerUp) return root.seekRefuse("live", "nothing_playing")
+    root.seekPending = 0
+    root.seekLiveQueued = true
+    var state = root.issueSeek() ? "applying" : "queued"
+    return { ok: true, kind: "seek", requested: "live", state: state }
+  }
+
+  // Spawn the queued seek if the slot is free and the throttle has elapsed;
+  // true when a helper was spawned now. Called from the press, from the
+  // throttle timer, and after every control reply.
+  function issueSeek() {
+    if (!root.seekLiveQueued && root.seekPending === 0) return false
+    if (!root.nowPlaying || !root.playerUp || root.stopping || root.userStopped) { root.clearRewind(); return false }
+    if (controlProc.running || seekThrottle.running) return false
+    var argv
+    if (root.seekLiveQueued) {
+      root.seekLiveQueued = false
+      root.seekPending = 0
+      argv = Model.playerSeekArgv(root.socketPath, "live")
+    } else {
+      var by = root.seekPending
+      root.seekPending = 0
+      // A forward or live request is a reason to try backward again
+      // afterwards; the reply will say if the floor is still there.
+      if (by > 0) root.seekAtFloor = false
+      argv = Model.playerSeekArgv(root.socketPath, by)
+    }
+    // playerSeekArgv answers [] for a request that rounds to nothing; the
+    // helper is never spawned with no verb.
+    if (argv.length === 0) return false
+    return root.runControl("seek", argv)
   }
 
   // M3-02 (PLAN-M3 decision 5). Ask the player for its tracks, selecting
@@ -3815,7 +4085,12 @@ Item {
     running: root.playerUp || root.nowPlaying !== null
     onTriggered: {
       if (root.userStopped || root.stopping) return
-      var tick = Model.healthTick(root.healthSkips, controlProc.running)
+      // M5-01 ruling D10: a seek run does not count as busy. The three-
+      // strikes restart guards a helper that never returns, which the 8 s
+      // control watchdog now terminates; a slot re-occupied every few
+      // hundred milliseconds by a sub-second verb under a held key is the
+      // benign case it must not punish.
+      var tick = Model.healthTick(root.healthSkips, controlProc.running && root.controlKind !== "seek")
       root.healthSkips = tick.skips
       if (tick.restart) root.restartPlayer()
       else if (tick.check) root.runControl("status", ["status", "--socket", root.socketPath])
@@ -3847,6 +4122,28 @@ Item {
       root.epgTimedOut = true
       epgProc.signal(15)
     }
+  }
+
+  Timer {
+    // M5-01 (2.3): the next seek run starts no sooner than 300 ms after the
+    // previous reply. A held key repeats at about 30 Hz; without this the
+    // slot would spawn a helper per reply and the presses in between would
+    // still coalesce, so the throttle costs no movement, only processes.
+    id: seekThrottle
+    interval: root.seekThrottleMs
+    repeat: false
+    onTriggered: root.issueSeek()
+  }
+
+  Timer {
+    // M5-01: the paused count-up. 1 Hz, and only while paused with a
+    // reading to count from; while playing "behind live" holds and this
+    // timer does not run, so nothing re-renders.
+    id: behindTick
+    interval: 1000
+    repeat: true
+    running: root.paused && root.rewind !== null
+    onTriggered: root.behindTickSec = Math.floor(Date.now() / 1000)
   }
 
   Timer {
@@ -4567,6 +4864,24 @@ Item {
       if (why === "") return root.paused ? "paused" : "playing"
       return why === "busy" ? "busy" : "nothing playing"
     }
+    // M5-01 LIVE REWIND (design 2.4, rulings D5, D6). `back [seconds]`,
+    // `forward [seconds]`, `live`. The argument is a POSITIVE integer, so no
+    // sign has to survive `omarchy-shell <id> <verb>`; empty means one step
+    // (Model.REWIND_STEP_S). Replies are JSON like `channel` and `pip`: an
+    // accepted request answers {"ok":true,"kind":"seek",...,"state":
+    // "applying"|"queued"} and no more, because whether it MOVED is a fact
+    // only the helper's read-back establishes, one process round-trip away;
+    // a refusal is reported with its code and never as a success (CN15).
+    // contrib/bindings.lua suggests SUPER+SHIFT+H / L / R.
+    function back(seconds: string): string {
+      var n = Model.seekVerbSeconds(seconds)
+      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
+    }
+    function forward(seconds: string): string {
+      var n = Model.seekVerbSeconds(seconds)
+      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
+    }
+    function live(): string { return JSON.stringify(root.seekLive()) }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }

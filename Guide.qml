@@ -312,6 +312,11 @@ Item {
     detailNothing: "No guide data for this channel",
     helpTitle: "Keys",
     pauseBusy: "The player is busy" + Model.SEP + "try again",
+    // M5-01 LIVE REWIND (design 2.5). The 3 s transient on each seek reply
+    // and the two refusals the guide can see for itself. The numbers in
+    // them come from Model.clockSpan; the words are these and nothing from
+    // the stream.
+    rewindNotReady: "Nothing to rewind yet",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
     rowXtream: "Add Xtream login",
@@ -500,6 +505,26 @@ Item {
   readonly property string playingId: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.id) : ""
   readonly property string playingName: serviceReady && service.playing && service.nowPlaying ? String(service.nowPlaying.name) : ""
   readonly property int nowSec: serviceReady ? service.nowSec : Math.floor(Date.now() / 1000)
+  // ---- M5-01 LIVE REWIND (design sections 2.3 - 2.5, on the dev branch). Guarded
+  // for `undefined` like every other service access here: the harness runs
+  // this guide against a pre-change service, and an undefined read must
+  // never invent a value (rule 10). `canRewind` is the service's own gate
+  // (something plays and the last range read is non-empty), `behindLiveS` is
+  // null until the player has a zero point -- absent, never zero (D-DEAD-1).
+  readonly property bool canRewind: serviceReady && service.canRewind === true
+  // Whether the player has said anything about its window yet. "Not yet
+  // rewindable" is a verdict only once a range has been read; before that
+  // (the first seconds after a zap) the key falls through to the service,
+  // which spawns the helper to decide, the way the IPC verbs do (design
+  // 12.1) -- the reply's transient then says what happened.
+  readonly property bool rewindKnown: serviceReady && service.rewind !== undefined && service.rewind !== null
+  readonly property var behindLiveS: serviceReady && service.behindLive !== undefined ? service.behindLive : null
+  readonly property bool pausedNow: serviceReady && service.paused === true
+  // "" at live, `1:32 behind live`, or `paused · 0:42 behind live`. ONE
+  // composer for the footer, the bar tooltip and the bar's accessible name
+  // (2.5), so the three cannot disagree about the number.
+  readonly property string playbackStateText: root.playingId !== ""
+    ? Model.playbackStateText({ paused: root.pausedNow, behindS: root.behindLiveS }) : ""
 
   // ---- picture in picture (M2-05). Every access is guarded the way the
   // Sources API is: the service may not carry PiP yet (lane V2 merges after
@@ -751,6 +776,12 @@ Item {
     resultTotal: root.resultTotal,
     cap: root.maxRows,
     playingName: root.playingName,
+    // M5-01 (2.5): the playing line carries the one state line --
+    // `1:32 behind live` or `paused · 0:42 behind live` -- after the name,
+    // from the same composer the bar reads; Model.footerStatus joins them,
+    // so the line is a function a test calls rather than a concatenation
+    // here. Nothing is appended at live.
+    playbackState: root.playbackStateText,
     refreshing: root.serviceReady && root.service.refreshing,
     epgPending: root.serviceReady && root.service.epgPending,
     warning: root.warningText,
@@ -843,6 +874,13 @@ Item {
       // M2-13: h/l names what it does in the view that is actually up.
       wall: root.wallView,
       paused: root.serviceReady && root.service.paused === true,
+      // M5-01 (2.5): `b back` only where the last range read is non-empty,
+      // `w forward` and `g live` only while behind live -- a hint that does
+      // nothing is the lie the footer was redesigned to stop telling. Both
+      // flags are the ones the keys themselves are gated on, so the `?` map
+      // and the footer describe the keys that act.
+      canRewind: root.canRewind,
+      behindLive: root.behindLiveS,
       // M2-09 D6: the h/l pair is never dropped -- the key still rings
       // Recent / Favorites / All -- but it stops naming an axis that is not
       // on screen. `scope` and `group` are the same five characters.
@@ -1748,6 +1786,13 @@ Item {
     else if (action === "refresh") root.refresh()
     else if (action === "pip") root.togglePip()
     else if (action === "pause") root.togglePause()
+    // M5-01 (2.4): b / w / g, vim's word back, word forward, go to the end.
+    // Dispatched on the answer like every letter above, so the table that
+    // names the keys (Model.REWIND_KEY and its siblings) is the table the
+    // footer and the `?` map read; gated at the call site like `c`.
+    else if (action === "rewind") root.seekBack()
+    else if (action === "forward") root.seekForward()
+    else if (action === "live") root.seekLive()
     else if (action === "tracks") root.openTracks()
     // M4-02 / M4-04. Dispatched on the answer, like every letter above: the
     // key that means "detail" and the key that means "help" are
@@ -2190,6 +2235,42 @@ Item {
     if (why === "busy") root.showTransient(root.copy.pauseBusy)
     else if (why !== "") root.showTransient(root.copy.pauseNothing)
   }
+
+  // ---- M5-01 LIVE REWIND (design 2.4, 2.5). Guarded on the function like
+  // every other service access in this file. The gate is the one `c` uses:
+  // nothing playing says so in the existing transient; playing but not yet
+  // rewindable (the first seconds after a zap, spike 11.1) says so too,
+  // because a key that does nothing silently is the one thing a transient
+  // slot exists to prevent. The seek itself is the service's; this file
+  // never decides a target.
+  function seekBack() {
+    if (!root.serviceReady || typeof root.service.seekBy !== "function") return
+    if (root.playingId === "") { root.showTransient(root.copy.pauseNothing); return }
+    if (!root.canRewind && root.rewindKnown) { root.showTransient(root.copy.rewindNotReady); return }
+    var reply = root.service.seekBy(-Model.REWIND_STEP_S)
+    // The one refusal decided before any process runs: the last reply said
+    // the floor is here. Said at once, with the number it was said with.
+    if (reply && reply.ok !== true && reply.code === "at_floor") root.showTransient(Model.seekTransientText({ atFloor: true, rewind: reply.rewind }, root.copy.pauseBusy))
+  }
+
+  function seekForward() {
+    if (!root.serviceReady || typeof root.service.seekBy !== "function") return
+    if (root.playingId === "") { root.showTransient(root.copy.pauseNothing); return }
+    if (!root.canRewind && root.rewindKnown) { root.showTransient(root.copy.rewindNotReady); return }
+    root.service.seekBy(Model.REWIND_STEP_S)
+  }
+
+  function seekLive() {
+    if (!root.serviceReady || typeof root.service.seekLive !== "function") return
+    if (root.playingId === "") { root.showTransient(root.copy.pauseNothing); return }
+    if (!root.canRewind && root.rewindKnown) { root.showTransient(root.copy.rewindNotReady); return }
+    root.service.seekLive()
+  }
+
+  // The 3 s footer transient for a seek reply is Model.seekTransientText
+  // (design 2.5), lifted there at integration so the sentence the footer
+  // shows is a function a test calls (rule 12); the one word this file adds
+  // is the fallback for a reply that gives no reason.
 
   // ---- M3-02: the track picker (PLAN-M3 decision 5). It asks the player
   // and shows what the player answers; nothing here remembers a choice.
@@ -2654,6 +2735,11 @@ Item {
     // can see without telling them would be the guide lying about state
     // (UX principle 4).
     function onZapSkippedDead(text) { root.showTransient(text) }
+    // M5-01 (2.5): every seek reply, landed or refused, gets the 3 s
+    // transient -- a clamp is always said, never silent. The signal name is
+    // the service's `seekReplied`, pinned by the same test_pip.py join that
+    // caught `onPipResult` listening to nothing.
+    function onSeekReplied(reply) { if (root.opened) root.showTransient(Model.seekTransientText(reply, root.copy.pauseBusy)) }
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onTracksChanged() { root.settleTrackCursor() }

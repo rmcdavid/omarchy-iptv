@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.10.0"
+var PLUGIN_VERSION = "0.11.0"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -234,7 +234,14 @@ var MPV_RESERVED = {
   "--osd-msg2": true,
   "--osd-msg3": true,
   "--term-status-msg": true,      // property-expanding into a terminal
-  "--screenshot-template": true   // property-expanding into file names
+  "--screenshot-template": true,  // property-expanding into file names
+  // M5-01 (design 2.6, D3). Not whether mpv caches on disk but whether the
+  // file OUTLIVES the process: mpv unlinks its cache file at creation
+  // (F-RWD-5), and `whendone` or `no` here keeps a copy of the stream at a
+  // path the plugin never listed -- `--stream-record`'s class, reserved
+  // above. `--cache-on-disk` itself is the user's own disk and is warned
+  // about (MPV_DISK_WARN), not refused.
+  "--demuxer-cache-unlink-files": true
 }
 
 // Stable notification replace-ids so a repeated failure replaces its toast
@@ -3669,7 +3676,15 @@ var WALL_KEY = "Ctrl+G"
 // unreachable given this list, no mutation could redden them, and dead
 // defence that no test can see is what this project keeps finding in its own
 // instruments. The reachable invariant is asserted instead.
-var FOOTER_DROP_ORDER = ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview"]
+// M5-01 added `b back`, `w forward` and `g live` to the playing row behind
+// live, 30 characters, and the review's UX lens measured the irreducible
+// row at 129 against the widest card's 107: nothing could be dropped any
+// more and `j/k move` elided off the left (F-UX-4). The three are droppable
+// LAST, after everything the previous order gave up, because behind live
+// they are the keys that act; on the widest card today all three go and
+// the row is the pre-M5 nine, with the state line and the `?` map still
+// naming them.
+var FOOTER_DROP_ORDER = ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview", "forward", "live", "back"]
 
 // The rendered width of a hint row, in characters, composed the way
 // footerHintMarkup composes it (the font tags carry no width).
@@ -4064,6 +4079,14 @@ var MPV_HANDOFF_SCRIPT_OPTS = { "--script-opts": true, "--script-opt": true }
 // who writes the default out in full (`--ytdl=no`) is never warned at all.
 var MPV_YTDL_OFF = { "no": true, "0": true, "false": true }
 var MPV_HANDOFF_TEXT = " hands the stream address to another program"
+// M5-01 (design 2.6): the same PO-10 mechanism, a different cost.
+// `--cache-on-disk` writes the stream to the user's own disk continuously
+// (1.8 to 4.5 GiB per hour at the measured bitrates, into a file mpv unlinks
+// at creation, so `ls` and `du` show nothing). Allowed, because it is the
+// user's disk; said out loud, because nothing else would say it. Mirrored
+// by `mpv_arg_writes_disk()` in bin/omarchy-iptv, same fixture.
+var MPV_DISK_WARN = { "--cache-on-disk": true }
+var MPV_DISK_TEXT = " writes the stream to disk while it plays"
 
 // mpv spells the list-option variants `--opt-append`, `--opt-set` and so on;
 // every one of them sets the same option, so the base name is what decides.
@@ -4088,16 +4111,38 @@ function mpvHandoffName(token) {
   return ""
 }
 
+// The option NAME when the token turns the disk cache on, "" otherwise. A
+// flag like `--ytdl`: `--no-cache-on-disk` and `=no` turn it off, silently.
+function mpvDiskName(token) {
+  var text = str(token)
+  var eq = text.indexOf("=")
+  var name = eq === -1 ? text : text.substring(0, eq)
+  var value = eq === -1 ? "" : text.substring(eq + 1)
+  if (name.indexOf("--no-") === 0) return ""
+  if (MPV_DISK_WARN[mpvOptionBase(name)] !== true) return ""
+  return MPV_YTDL_OFF[value.toLowerCase()] === true ? "" : name
+}
+
+// The whole warning line for one token, or "". Each cost carries its own
+// sentence, so the user is told WHAT the option does.
+function mpvArgWarning(token) {
+  var name = mpvHandoffName(token)
+  if (name !== "") return "mpvArg " + name + MPV_HANDOFF_TEXT
+  name = mpvDiskName(token)
+  if (name !== "") return "mpvArg " + name + MPV_DISK_TEXT
+  return ""
+}
+
 // One line per distinct option, in the order the user wrote them.
 function mpvArgWarnings(tokens) {
   var list = asList(tokens)
   var seen = {}
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var name = mpvHandoffName(list[i])
-    if (name === "" || seen[name] === true) continue
-    seen[name] = true
-    out.push("mpvArg " + name + MPV_HANDOFF_TEXT)
+    var line = mpvArgWarning(list[i])
+    if (line === "" || seen[line] === true) continue
+    seen[line] = true
+    out.push(line)
   }
   return out
 }
@@ -4427,13 +4472,18 @@ function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, fro
   return argv
 }
 
-// PAUSE LIVE TV (2026-09-24). Not rewind, and the naming matters: measured
-// across 22 live channels from 21 providers, 21 paused and resumed correctly
-// and exactly ONE reported itself seekable, so there is no going back to
-// before the keypress. mpv keeps filling its cache while paused, so resuming
-// continues from the moment it was pressed and the viewer is then behind
-// live. The bound is mpv's default 150 MiB demuxer cache: 315 s measured on a
-// ~3.8 Mbps stream, less on a fatter one.
+// PAUSE LIVE TV (2026-09-24). mpv keeps filling its cache while paused, so
+// resuming continues from the moment it was pressed and the viewer is then
+// behind live. Going back to BEFORE the keypress is `playerSeekArgv` (M5-01,
+// 2026-10-03), which moves inside the same cache: an earlier version of this
+// comment said "exactly ONE of 22 channels reported itself seekable, so
+// there is no going back", a true reading of `seekable` with a false
+// conclusion attached -- 31 of 32 channels rewound 20 s with that property
+// reading false, because `demuxer-cache-state.seekable-ranges` is the one
+// that decides (SPIKE-LIVE-REWIND.md, dev branch). The bound of a pause is mpv's
+// 150 MiB forward quota: 315 s measured on a ~3.8 Mbps stream, less on a
+// fatter one, with or without history behind it; a long pause then eats the
+// rewind window one second per paused second (11.2).
 //
 // `state` is "on", "off" or "toggle"; anything else is a toggle, because a
 // key that means "pause" must never be able to mean "start playing".
@@ -4685,6 +4735,312 @@ function trackAccessibleName(rows, index) {
   return parts.join(", ")
 }
 
+// ---- M5-01: live rewind ----
+//
+// M5-01-LIVE-REWIND.md (dev branch) 2.1-2.5 on SPIKE-LIVE-REWIND.md (dev branch) 11 and 12.
+// The helper verb `player seek` clamps and seeks; QML never does cache
+// arithmetic. What lives here is the pure half: the clamp (mirrored by the
+// helper and pinned by the rewind-clamp.json fixture (dev branch), because the service
+// coalesces presses against the same floor the helper clamps to), the
+// composers for the bar, the footer, the accessible name and the player's
+// OSD line (mirrored by the helper, the rewind-osd.json fixture (dev branch)), the
+// argv, the press coalescer and the paused count-up.
+//
+// Every number here is seconds. `rewind` is the helper's reply object:
+//   { position, floor, ceiling, history, ahead, behindLive, zeroed, paused,
+//     pausedForCache, entryId }
+// or null until the player has a position; `behindLive` is null until the
+// zero point exists (absent, never 0 -- D-DEAD-1).
+var SEEK_FLOOR_MARGIN_S = 2.0        // a target at the floor lands 1-2 s above it; below it is dropped (11.4)
+var SEEK_EDGE_MARGIN_S = 0.5         // the edge target, inside the range
+var SEEK_MOVED_THRESHOLD_S = 0.5     // 0.467 above the refused max, 1.5 below the smallest request (12.2)
+var SEEK_MAX_S = 24 * 3600           // the verbs' argument cap: a day, past any window measured
+
+// A finite number, or `dflt`. Booleans, null, "" and NaN all fall through.
+function finiteOr(value, dflt) {
+  if (typeof value === "boolean" || value === null || value === undefined || value === "") return dflt
+  var n = Number(value)
+  return isFinite(n) ? n : dflt
+}
+
+// Three decimals, half up: the same arithmetic as the helper's round3, so the
+// shared fixtures compare equal across the two implementations.
+function round3(value) {
+  return Math.floor(Number(value) * 1000 + 0.5) / 1000
+}
+
+// "m:ss", or "h:mm:ss" from an hour on. Negative and non-numbers read 0:00.
+function clockSpan(seconds) {
+  var n = finiteOr(seconds, 0)
+  var total = n < 0 ? 0 : Math.floor(n)
+  var hours = Math.floor(total / 3600)
+  var minutes = Math.floor((total % 3600) / 60)
+  var secs = total % 60
+  if (hours > 0) return hours + ":" + pad2(minutes) + ":" + pad2(secs)
+  return minutes + ":" + pad2(secs)
+}
+
+// The same span in words for a screen reader: "1 minute 32 seconds",
+// "2 hours 1 minute", "45 seconds". Zero units are left out; all-zero is
+// "0 seconds".
+function spokenSpan(seconds) {
+  var n = finiteOr(seconds, 0)
+  var total = n < 0 ? 0 : Math.floor(n)
+  var hours = Math.floor(total / 3600)
+  var minutes = Math.floor((total % 3600) / 60)
+  var secs = total % 60
+  var parts = []
+  if (hours > 0) parts.push(hours + (hours === 1 ? " hour" : " hours"))
+  if (minutes > 0) parts.push(minutes + (minutes === 1 ? " minute" : " minutes"))
+  if (secs > 0 || parts.length === 0) parts.push(secs + (secs === 1 ? " second" : " seconds"))
+  return parts.join(" ")
+}
+
+// One composer for the footer status line, the bar tooltip and the accessible
+// name (design 2.5): "" at live, "1:32 behind live", or "paused" + SEP +
+// "0:42 behind live". The middle dot is SEP (U+00B7 escaped at its one
+// declaration), never a literal here -- rule 8, ASCII only in .js.
+function playbackStateText(opts) {
+  var o = opts || {}
+  var behind = finiteOr(o.behindS, 0)
+  if (behind < BEHIND_LIVE_SHOW_S) return ""
+  var text = clockSpan(behind) + " behind live"
+  return o.paused === true ? "paused" + SEP + text : text
+}
+
+// The bar's fourth holder after the name (design 2.5): "-m:ss" while playing
+// behind live, paused or not; "" at live or idle. Monospaced by the widget.
+function barBehindText(opts) {
+  var o = opts || {}
+  if (o.playing !== true) return ""
+  var behind = finiteOr(o.behindS, 0)
+  return behind >= BEHIND_LIVE_SHOW_S ? "-" + clockSpan(behind) : ""
+}
+
+// The one line `player seek` puts on the player's OSD (owner decision D9),
+// mirrored by rewind_osd_text() in the helper and pinned by
+// the rewind-osd.json fixture (dev branch). Composed from the reply's NUMBERS and this
+// function's own words: nothing from the stream, and never a `$`, because
+// show-text expands `${...}` against the player's properties, `path`
+// included -- the reason --osd-msg1..3 are reserved. "" when there is
+// nothing to say: a refused seek, or no zero point yet.
+function rewindOsdText(reply) {
+  var r = reply && typeof reply === "object" ? reply : null
+  if (!r || r.refused === true) return ""
+  var rewind = r.rewind && typeof r.rewind === "object" ? r.rewind : null
+  if (!rewind) return ""
+  var behind = finiteOr(rewind.behindLive, null)
+  if (behind === null) return ""
+  var text = behind < BEHIND_LIVE_SHOW_S ? "live" : "-" + clockSpan(behind) + " behind live"
+  if (r.atFloor === true) text += ", as far back as it goes"
+  else if (r.atEdge === true && behind >= BEHIND_LIVE_SHOW_S) text += ", at the edge of the buffer"
+  if (rewind.paused === true) text = "paused, " + text
+  return text
+}
+
+// The guide's 3 s footer transient for a seek reply (design 2.5): `Back 10 s
+// SEP 1:32 behind live`; at the floor `As far back as it goes SEP 6:52
+// behind live`; at the edge `Live`, or -- after a rewind deeper than the
+// forward quota, where the cache edge is not the live edge (ruling D8) --
+// `At the edge of the buffer SEP 0:27 behind live`, SEP being the middle
+// dot every footer line joins with. Numbers only from the reply,
+// through clockSpan; a reply without a zero point carries no number and
+// says so by saying nothing after the verb (null is absent, never 0:00). A
+// reply that is not ok is its reason (statusReason) or `fallback` when it
+// gives none; the service's own at_floor refusal carries no `ok` and is the
+// floor sentence. Lifted out of Guide.qml at integration so a test calls
+// the function the footer shows (rule 12).
+function seekTransientText(reply, fallback) {
+  var r = reply && typeof reply === "object" ? reply : null
+  var rewind = r && r.rewind && typeof r.rewind === "object" ? r.rewind : null
+  var behindS = rewind ? finiteOr(rewind.behindLive, null) : null
+  var behind = behindS !== null && behindS >= BEHIND_LIVE_SHOW_S ? clockSpan(behindS) + " behind live" : ""
+  var tail = behind !== "" ? SEP + behind : ""
+  var floorText = "As far back as it goes" + tail
+  var edgeText = behind === "" ? "Live" : "At the edge of the buffer" + tail
+  if (r && r.atFloor === true) return floorText
+  if (!r || r.ok !== true) {
+    // The service's own refusal for an idle player (design 2.4) says what
+    // the PiP verb says for the same state: one copy of the sentence.
+    if (r && str(r.code) === "nothing_playing") return pipStatusText("nothing_playing")
+    var reason = statusReason(r)
+    return reason !== "" ? reason : str(fallback)
+  }
+  // Refused by the player -- the seek was issued and nothing moved (spike
+  // 11.4) -- BEFORE the edge and live branches: a refused `live` did not
+  // reach the edge, and saying "At the edge of the buffer" for it was the
+  // review's finding. The sentence is the fact: nothing moved, and how far
+  // behind the viewer still is.
+  // No player behind the socket: the helper says running false and refused.
+  if (r.running === false) return pipStatusText("nothing_playing")
+  if (r.refused === true) return "Nothing moved" + tail
+  if (r.mode === "live" || r.atEdge === true) return edgeText
+  var applied = Math.round(finiteOr(r.applied, 0))
+  if (applied < 0) return "Back " + String(-applied) + " s" + tail
+  if (applied > 0) return "Forward " + String(applied) + " s" + tail
+  return floorText
+}
+
+// The clamp, mirrored by clamp_seek() in the helper and pinned by
+// the rewind-clamp.json fixture (dev branch). opts: position, floor, ceiling (the
+// seekable range the reader sits in), mode "by" | "live", by (signed
+// seconds). Returns the plan: the absolute `target`, whether it was
+// `clamped` and to what, `atFloor` / `atEdge`, and `issue` -- false when the
+// target sits within the not-moved threshold of the position, where a seek
+// would be reported refused whether or not mpv moved (12.2). `ok` is false
+// with no position or no range: nothing to seek within, and the helper then
+// refuses WITHOUT seeking, because `position + by` sent raw can go negative
+// and a negative absolute target is an offset from the cache END (F-RWD-7).
+//
+// A back press never yields a target above the position and a forward or
+// live press never one below it, so the tiny range of the first seconds
+// after a zap answers atFloor / atEdge rather than moving the wrong way.
+function clampSeek(opts) {
+  var o = opts || {}
+  var mode = o.mode === "live" ? "live" : "by"
+  var by = finiteOr(o.by, 0)
+  var position = finiteOr(o.position, null)
+  var floor = finiteOr(o.floor, null)
+  var ceiling = finiteOr(o.ceiling, null)
+  var plan = { ok: false, mode: mode, requested: mode === "by" ? round3(by) : null,
+               target: null, clamped: false, clampedTo: null, atFloor: false, atEdge: false, issue: false }
+  if (position === null || floor === null || ceiling === null || ceiling < floor) return plan
+  plan.ok = true
+  var low = floor + SEEK_FLOOR_MARGIN_S
+  var high = ceiling - SEEK_EDGE_MARGIN_S
+  var target
+  if (mode === "live") {
+    target = high
+    plan.requested = round3(high - position)
+  } else {
+    target = position + by
+  }
+  if (mode === "by" && by < 0) {
+    if (target < low) { target = low; plan.clamped = true; plan.atFloor = true }
+    if (target > position) target = position
+  } else if (mode === "by" && by > 0) {
+    if (target > high) { target = high; plan.clamped = true; plan.atEdge = true }
+    if (target < position) target = position
+  } else if (mode === "live") {
+    plan.atEdge = true
+    if (target < position) target = position
+  } else {
+    target = position
+  }
+  plan.issue = Math.abs(target - position) >= SEEK_MOVED_THRESHOLD_S
+  plan.target = round3(target)
+  plan.clampedTo = plan.clamped ? round3(target) : null
+  return plan
+}
+
+// argv for `player seek`: `byOrLive` is "live" or a signed number of whole
+// seconds (negative is back). [] for a request that asks for nothing -- 0,
+// NaN, text -- so a caller can tell "nothing to run" from an argv.
+function playerSeekArgv(socket, byOrLive) {
+  if (byOrLive === "live") return ["player", "seek", "--socket", str(socket), "--live"]
+  var n = Math.round(finiteOr(byOrLive, 0))
+  if (n === 0) return []
+  if (n > SEEK_MAX_S) n = SEEK_MAX_S
+  if (n < -SEEK_MAX_S) n = -SEEK_MAX_S
+  return ["player", "seek", "--socket", str(socket), "--by", String(n)]
+}
+
+// The IPC verbs' argument (design 2.4): `back [seconds]` / `forward
+// [seconds]` take a POSITIVE whole number, so no sign has to survive
+// `omarchy-shell <id> <verb>`. Empty is the step; anything else that is not
+// a positive integer is 0, which the service reports as a refusal (CN15: a
+// refusal is reported, never a false success).
+function seekVerbSeconds(text) {
+  var t = str(text).trim()
+  if (t === "") return REWIND_STEP_S
+  if (!/^[0-9]{1,6}$/.test(t)) return 0
+  var n = Number(t)
+  if (n <= 0) return 0
+  return n > SEEK_MAX_S ? SEEK_MAX_S : n
+}
+
+// Presses are coalesced while a seek is in flight (design 2.3): this press
+// joins the pending sum, and the sum is capped at the last-read `history` so
+// a sum past the floor is never asked for -- the helper would clamp it, but
+// a sum the floor cannot honour is also a sum that would be run and refused.
+// `press` is the direction (its sign: negative back, positive forward),
+// `step` the seconds per press (REWIND_STEP_S absent), `pending` the sum
+// already waiting, `history` the seconds behind the reader.
+//
+// `history` null or undefined is "no range read yet", and that is NO cap,
+// not a cap of zero. The first press after a zap, before any reply has
+// carried a range, must still spawn the helper, which reads the range for
+// itself and clamps or refuses in its reply. The first version capped it at
+// 0: that press answered "queued, pending 0" and ran nothing, a false
+// success (CN15). Found at integration by the QML spec's null case, which
+// the service lane wrote against the contract while the helper lane wrote
+// the other reading of it.
+function coalesceSeek(opts) {
+  var o = opts || {}
+  var pending = finiteOr(o.pending, 0)
+  var press = finiteOr(o.press, 0)
+  var step = finiteOr(o.step, REWIND_STEP_S)
+  if (step < 0) step = -step
+  var history = finiteOr(o.history, null)
+  if (history !== null && history < 0) history = 0
+  var sum = pending + (press < 0 ? -step : press > 0 ? step : 0)
+  // The cap is one step below the history at least: with 0.4 s of history
+  // a press capped at -0.4 rounded to nothing and ran nothing, silently;
+  // capped at -10 it runs, the helper clamps to the floor, and the user is
+  // told "As far back as it goes" (review of the integrated tree).
+  if (history !== null && sum < -history) sum = -Math.max(history, step)
+  return round3(sum)
+}
+
+// "Behind live" for display now. While playing it is what the last reply
+// said (it holds, and the 10 s status tick re-syncs it); while paused it
+// counts up at one second per second from `pausedSinceSec`, the later of
+// the reply that carried this `rewind` and the moment the pause began. null
+// when there is no reply or no zero point: absent, never 0.
+//
+// `pausedSinceSec` non-null IS the statement that the player is paused: the
+// service passes it only while its own `paused` holds, and that is the flag
+// the bar's pause glyph and the footer's "paused" word read. The reply's own
+// `paused` field is not consulted here, on purpose. The first version
+// required both, and in the 100 ms between the optimistic flip on `c` and
+// the pause reply the glyph said paused while the number held -- two
+// surfaces disagreeing about one state. One source of truth, the service's.
+function behindLiveNow(opts) {
+  var o = opts || {}
+  var rewind = o.rewind && typeof o.rewind === "object" ? o.rewind : null
+  if (!rewind) return null
+  var behind = finiteOr(rewind.behindLive, null)
+  if (behind === null) return null
+  var now = finiteOr(o.nowSec, null)
+  var since = finiteOr(o.pausedSinceSec, null)
+  if (now !== null && since !== null && now > since) behind += now - since
+  return behind < 0 ? 0 : behind
+}
+
+// The reply's `rewind` object, every field coerced: numbers finite or null,
+// booleans strict, `entryId` a positive integer or null. null when the
+// player had no position. The shape the service stores and every composer
+// above reads.
+function parseRewind(value) {
+  var r = value && typeof value === "object" ? value : null
+  if (!r) return null
+  var position = finiteOr(r.position, null)
+  if (position === null) return null
+  var entry = Math.floor(finiteOr(r.entryId, 0))
+  return {
+    position: position,
+    floor: finiteOr(r.floor, null),
+    ceiling: finiteOr(r.ceiling, null),
+    history: finiteOr(r.history, null),
+    ahead: finiteOr(r.ahead, null),
+    behindLive: finiteOr(r.behindLive, null),
+    zeroed: r.zeroed === true,
+    paused: r.paused === true,
+    pausedForCache: r.pausedForCache === true,
+    entryId: entry > 0 ? entry : null
+  }
+}
+
 // `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
 // probe is read-only.
 function playerProbeArgv(socket, ownerPid) {
@@ -4897,7 +5253,7 @@ function playerOwner(raw) {
 // line, a foreign JSON document or an error reply all return valid:false
 // rather than throwing, so a probe can never break the reattach path.
 function parsePlayerProbe(text) {
-  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0 }
+  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null }
   var doc = parseJsonObject(text)
   if (!doc || doc.ok !== true || str(doc.kind) !== "player.probe") return empty
   var pid = Math.floor(Number(doc.pid))
@@ -4909,7 +5265,9 @@ function parsePlayerProbe(text) {
     idle: doc.idle === null || doc.idle === undefined ? null : doc.idle === true,
     stash: playerStash(doc.stash),
     owner: playerOwner(doc.owner),
-    seq: Math.max(0, Math.floor(Number(doc.seq)) || 0)
+    seq: Math.max(0, Math.floor(Number(doc.seq)) || 0),
+    // M5-01: the reattach read recovers "behind live" from the player.
+    rewind: parseRewind(doc.rewind)
   }
 }
 
@@ -5880,6 +6238,13 @@ function listLetterAction(text) {
   // M3-02: offered unconditionally here like `pause`, gated at the call
   // site on something playing.
   if (t === TRACKS_KEY || t === TRACKS_KEY.toUpperCase()) return "tracks"
+  // M5-01 live rewind (design 2.4): vim's letters -- word back, word
+  // forward, go to the end. Offered unconditionally here like `pause`, and
+  // gated at the call site the way `c` is: on something playing, and for
+  // `rewind` on the last range read being non-empty (footerHints says when).
+  if (t === REWIND_KEY || t === REWIND_KEY.toUpperCase()) return "rewind"
+  if (t === FORWARD_KEY || t === FORWARD_KEY.toUpperCase()) return "forward"
+  if (t === LIVE_KEY || t === LIVE_KEY.toUpperCase()) return "live"
   // M4-02 / M4-04. Both are offered unconditionally here, like `pause` and
   // `tracks`: this table says what a letter MEANS. `detail` is gated at the
   // call site on the row actually having guide data to show; `help` is gated
@@ -6950,6 +7315,11 @@ function barGlyph(opts) {
   // PAUSE LIVE TV. R7 is that a bar state is never carried by colour alone,
   // so a paused stream gets its own glyph rather than the playing one dimmed.
   if (o.playing && o.paused) return GLYPHS.tvPause
+  // M5-01 (design 2.5): playing behind live is a bar state of its own and
+  // gets the history glyph; the `-m:ss` beside it carries the number. Paused
+  // wins above it, because the pause glyph with the count-up is what 2.5
+  // draws. Decided here rather than in the widget so a test can call it.
+  if (o.playing && o.behindLive === true) return GLYPHS.history
   if (o.playing) return GLYPHS.tvPlay
   if (o.error) return GLYPHS.tvOff
   return GLYPHS.tv
@@ -6968,7 +7338,25 @@ function barTooltip(opts) {
   var line = ""
   // M2-03 6.4: the number joins the tooltip whenever the playing channel has
   // one, including on a vertical bar where the label itself is glyph-only.
-  if (o.playing && str(o.name) !== "") line = (o.paused ? "Paused " : "Playing ") + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
+  if (o.playing && str(o.name) !== "") {
+    line = (o.paused ? "Paused " : "Playing ") + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
+    // M5-01 (design 2.5): the state line the footer shows, plus the window
+    // from the last read -- `up to 6:52 back`. On a channel whose window is
+    // 7 s the number is 0:07, not a promise. `behindS` and `historyS` come
+    // from the service's `rewind` object; absent, the tooltip is unchanged.
+    // The first line already says Paused, so the state line here is the
+    // number alone: `Paused 7 SEP BBC One` / `0:42 behind live SEP up to ...`,
+    // not "Paused ... paused SEP 0:42" (seen on the live pass, F-UX-3).
+    var state = playbackStateText({ paused: false, behindS: o.behindS })
+    var window = finiteOr(o.historyS, 0)
+    var extra = []
+    if (state !== "") extra.push(state)
+    // Only once there is a whole second of window: `b` is hinted on a
+    // non-empty range, and "up to 0:00 back" in the first instant after a
+    // zap (clockSpan of 0.4 s) would promise what the key cannot do.
+    if (window >= 1) extra.push("up to " + clockSpan(window) + " back")
+    if (extra.length > 0) line += "\n" + extra.join(SEP)
+  }
   else if (o.refreshing) line = "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
   else if (!o.configured) line = "IPTV" + SEP + "no playlist configured"
   else if (o.error) line = "IPTV" + SEP + "playlist error, open the guide"
@@ -6981,7 +7369,15 @@ function barAccessibleName(opts) {
   // PAUSE LIVE TV. The glyph and the tooltip both changed for paused; the
   // accessible name has to as well, or the one user who cannot see the glyph
   // is the one user not told. That asymmetry is exactly the D-GS-3 shape.
-  if (o.playing && str(o.name) !== "") return "IPTV, " + (o.paused ? "paused" : "playing") + " " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
+  if (o.playing && str(o.name) !== "") {
+    var name = "IPTV, " + (o.paused ? "paused" : "playing") + " " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
+    // M5-01: the same threshold the label and the footer use, spoken as
+    // units ("1 minute 32 seconds behind live") rather than as a clock,
+    // because "one thirty-two" is a time of day to a listener.
+    var behind = finiteOr(o.behindS, 0)
+    if (behind >= BEHIND_LIVE_SHOW_S) name += ", " + spokenSpan(behind) + " behind live"
+    return name
+  }
   if (o.error) return "IPTV, playlist error"
   return "IPTV, idle"
 }
@@ -7090,7 +7486,18 @@ function footerStatus(opts) {
   if (str(o.transient) !== "") return str(o.transient)
   if (o.configured === false || !(Number(o.count) > 0)) return ""
   if (o.truncated) return "First " + formatCount(o.cap || MAX_ROWS_DEFAULT) + " of " + formatCount(o.resultTotal) + SEP + "keep typing"
-  if (str(o.playingName) !== "") return GLYPHS.play + " " + str(o.playingName) + SEP + "s stop"
+  // M5-01 (design 2.5): the state line -- `1:32 behind live`, `paused SEP
+  // 0:42 behind live` -- rides the playing line after the name, from the
+  // same composer the bar reads (playbackStateText). "" at live adds nothing,
+  // so the line the footer has shown since M1 is unchanged there.
+  // The state LEADS the line, before the name: the footer status elides on
+  // the right, a channel name can lose its tail and stay useful (the bar's
+  // rule), and a number cannot. Composed after the name it was the first
+  // casualty of a long name (F-UX-5, the review's UX lens).
+  if (str(o.playingName) !== "") {
+    var state = str(o.playbackState)
+    return GLYPHS.play + " " + (state !== "" ? state + SEP : "") + str(o.playingName) + SEP + "s stop"
+  }
   if (o.refreshing) return "Refreshing" + ELLIPSIS
   if (footerDegraded(o)) return footerCounts(o)
   if (o.epgPending) return "Guide data loading" + ELLIPSIS
@@ -7185,6 +7592,14 @@ function footerHints(opts) {
     // idle guide has nothing to act on and would be a hint that lies. Names
     // the direction, so nobody presses it to find out which way it goes.
     if (o.playing === true) list.push([PAUSE_KEY, o.paused === true ? "resume" : "pause"])
+    // M5-01 (design 2.5). `b back` whenever something plays and the last
+    // range read is non-empty (`canRewind`); `w forward` and `g live` only
+    // while behind live, because a hint that does nothing is the lie the
+    // footer was just redesigned to stop telling. Both flags are read
+    // strictly, like `hasDetail`: the keys are new, and an absent flag has
+    // no shipped wording to keep.
+    if (o.playing === true && o.canRewind === true) list.push([REWIND_KEY, "back"])
+    if (Number(o.behindLive) >= BEHIND_LIVE_SHOW_S) list.push([FORWARD_KEY, "forward"], [LIVE_KEY, "live"])
     // M3-02: gated the same way, for the same reason -- a picker with no
     // player to ask has nothing to show.
     if (o.playing === true) list.push([TRACKS_KEY, "tracks"])
@@ -7444,7 +7859,12 @@ function keyboardMap(opts) {
     wall: flag("wall", false), groupsNarrow: flag("groupsNarrow", true),
     playing: flag("playing", true), paused: flag("paused", false),
     pipAvailable: flag("pipAvailable", true), hasNumbers: flag("hasNumbers", true),
-    hasDetail: flag("hasDetail", true), numberEntry: null
+    hasDetail: flag("hasDetail", true), numberEntry: null,
+    // M5-01: available unless the caller narrows, like every flag above --
+    // the map describes the grammar and the footer gates. `behindLive` is
+    // a number, so "available" is the threshold the footer shows it at.
+    canRewind: flag("canRewind", true),
+    behindLive: o.behindLive === undefined ? BEHIND_LIVE_SHOW_S : Number(o.behindLive)
   }
   var sections = []
   // 1. The channel list. footerHints gives the whole line.
@@ -7579,6 +7999,20 @@ var TRACKS_KEY = "t"
 // M4-02: the programme detail panel. `i` for information; d is unused but
 // reads as "delete" beside x, and e is edit on Sources.
 var DETAIL_KEY = "i"
+// M5-01 live rewind (design 2.4): vim's letters, word back / word forward /
+// go to the end, all three free in list mode and query text in search mode
+// like `c`. The IPC verbs `back`, `forward` and `live` are the surface a
+// watcher actually uses, because rewinding is done with the guide closed.
+var REWIND_KEY = "b"
+var FORWARD_KEY = "w"
+var LIVE_KEY = "g"
+// Step per guide press, one size, no setting (D7): the first rewindable
+// second arrives about 6 s after a zap and the median window is 411 s, so
+// 10 s reaches a missed sentence in one to three taps.
+var REWIND_STEP_S = 10
+// "Behind live" below this is shown as live. The zero-point error measured
+// 0.007-0.031 s at a minute on clean streams (12.4): a fifty-fold margin.
+var BEHIND_LIVE_SHOW_S = 2
 // M4-04: the keyboard map. `?` IS THE ONE EXCEPTION to the bare-letter rule,
 // and this comment used to say the opposite -- "LIST-MODE ONLY ... the footer
 // never hints it in search mode" -- while Guide.qml's handleSearchKey had
@@ -9287,6 +9721,34 @@ if (typeof module !== "undefined") {
     playerRestartArgv: playerRestartArgv,
     playerProbeArgv: playerProbeArgv,
     playerPauseArgv: playerPauseArgv,
+    // M5-01 live rewind
+    REWIND_KEY: REWIND_KEY,
+    FORWARD_KEY: FORWARD_KEY,
+    LIVE_KEY: LIVE_KEY,
+    REWIND_STEP_S: REWIND_STEP_S,
+    BEHIND_LIVE_SHOW_S: BEHIND_LIVE_SHOW_S,
+    SEEK_FLOOR_MARGIN_S: SEEK_FLOOR_MARGIN_S,
+    SEEK_EDGE_MARGIN_S: SEEK_EDGE_MARGIN_S,
+    SEEK_MOVED_THRESHOLD_S: SEEK_MOVED_THRESHOLD_S,
+    SEEK_MAX_S: SEEK_MAX_S,
+    MPV_DISK_WARN: MPV_DISK_WARN,
+    MPV_DISK_TEXT: MPV_DISK_TEXT,
+    mpvDiskName: mpvDiskName,
+    mpvArgWarning: mpvArgWarning,
+    finiteOr: finiteOr,
+    round3: round3,
+    clockSpan: clockSpan,
+    spokenSpan: spokenSpan,
+    playbackStateText: playbackStateText,
+    barBehindText: barBehindText,
+    rewindOsdText: rewindOsdText,
+    clampSeek: clampSeek,
+    playerSeekArgv: playerSeekArgv,
+    seekVerbSeconds: seekVerbSeconds,
+    coalesceSeek: coalesceSeek,
+    behindLiveNow: behindLiveNow,
+    seekTransientText: seekTransientText,
+    parseRewind: parseRewind,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
     playFork: playFork,
     zapArgs: zapArgs,
