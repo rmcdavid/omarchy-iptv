@@ -84,12 +84,16 @@ reopen them except where noted:
   the first time, and mpv documents that switching streams during recording
   may break the file, which collides with a plugin whose core verb is
   zapping. See decision D3.
-- **Live rewind: not measured, and the obvious implementation is refused by
-  arithmetic.** Of 22 live streams on 21 providers, exactly one reported
-  itself seekable; mpv also reports `partially-seekable`, which our M2-11
-  sweep did not distinguish. A disk buffer is not available: `$XDG_RUNTIME_DIR`
-  here is a 782 MiB tmpfs in RAM on a box already at 5.5 of 7.6 GiB. See
-  decision D2 -- this is a measurement to take, not a feature to schedule.
+- **Live rewind: measured on 2026-10-03, and the project's belief was wrong.**
+  This paragraph first said the feature was refused by arithmetic and that a
+  disk buffer was unavailable because `$XDG_RUNTIME_DIR` is a tmpfs; the
+  measurement pass D2 authorised found rewind available on 31 of 32 channels
+  that played, inside a window the plugin already pays for, and that mpv's
+  disk cache lives wherever `--demuxer-cache-dir` points, not in the runtime
+  directory (F-RWD-2). The evidence is `docs/SPIKE-LIVE-REWIND.md`; the
+  design is `docs/M5-01-LIVE-REWIND.md`. The disk option stays refused there,
+  on its real grounds: it writes the stream to disk every second into a file
+  no tool can show, which is D3's shape by another door.
 
 ## 2. Proposed M4, four items
 

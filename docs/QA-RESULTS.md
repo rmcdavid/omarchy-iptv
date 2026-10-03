@@ -10432,3 +10432,34 @@ rendered guide data.
 
 Snapshots taken before the change: `shell.json` and the whole state
 directory, under the session scratchpad.
+
+## The live rewind design pass, 2026-10-03
+
+Authorised by the product owner as D2's successor; design only. Before any
+lane designed anything, the spike's four open questions were taken on the
+display (`docs/SPIKE-LIVE-REWIND.md` section 11, five players, every one
+killed by pid, the owner's shell untouched):
+
+| question | answer, measured |
+|---|---|
+| does a zap keep any history | no: gone 10 ms after the `loadfile` reply, timeline restarts at 0, first rewindable second at about +6.3 s |
+| does a full back buffer shorten a pause | by 0 s; what pays is the history, reclaimed at 1 s per paused second from 241 s down to the 93 s the back buffer owns outright |
+| do pause and rewind compose | both orders: rewind 60 then pause 60 held with 0.000 s drift; pause then seek -30 moved 30.03 s frozen and resumed from there |
+| is the seek a watchdog risk | no: reply 0.10 ms, next `time-pos` read 0.34 ms and already -300.0 s, playback resumed within 1.12 s, against an 8 s control watchdog |
+| can a UI compute behind-live from the cache end | no: after a deep rewind the cache end freezes and that difference counts down while the gap holds; `(wall - wall0) - (pos - pos0)` holds within 0.04 s over 30 ticks |
+| is `seekable-ranges[0].start` the floor | exactly: start lands +1.0 s, start-1 is dropped with reply `success` and one error-level log line |
+
+Four role lanes then designed against those verdicts and a critic read them
+against each other and against the code: thirteen contradictions resolved,
+twelve decisions for the owner, seventeen measurements a build would take,
+and eight lane claims that did not survive a read of the tree (recorded in
+the design's section 11 so nobody inherits them). The design is
+`docs/M5-01-LIVE-REWIND.md`. Nothing is built.
+
+**One finding against shipped code, F-RWD-6.** `contrib/bindings.lua`
+suggests `SUPER + SHIFT + C`, `SUPER + SHIFT + P` and `SUPER + SHIFT + COMMA`,
+and stock Omarchy binds all three; verified by reading
+`/usr/share/omarchy/default/hypr/bindings/*.lua`. The rewind bindings were
+chosen from the chords that are actually free. The correction to F-RWD-1's
+count (seven sites in five shipped files, not four) and the amendment to
+`docs/PLAN-M4.md`'s tmpfs premise (F-RWD-2) land with this record.
