@@ -10394,3 +10394,41 @@ candidates worth weighing are a state keyword the write-up must carry beside
 the id, a convention that a fix commit must move the row in the same commit
 (testable in the gate against the range), or a periodic reconciliation run
 that reports disagreement without trying to resolve it.
+
+## The owner's install gets a guide, 2026-10-03, and a CLI that does not stick (D-SRC-11)
+
+The 0.10.0 release repairs guide matching and the owner's install had no
+guide URL, so the headline was invisible on the one machine that matters.
+Set at their request.
+
+**First attempt, the documented CLI, failed silently.** `state source update
+<key> --epg-url <url>` reported `ok: true` and the record read `""`
+immediately afterwards. Against an isolated copy of the state directory the
+same command writes the value and it persists, so the helper is correct; the
+running service writes the record back from the plugin setting on start
+(`activeEpgUrl` / `persistActive`, ruling D-SRC-10 -- the setting is the
+authority and the record follows it). The CLI writes the follower. Filed as
+D-SRC-11.
+
+**Second attempt, the plugin setting, worked.** `epgUrl` added to the
+plugin's bar entry in `shell.json` (mode 0600 preserved, written to a
+temporary file and renamed), shell restarted, and the service reported the
+guide configured and loaded within five seconds. The value then propagated
+INTO the source record, which confirms the direction of the sync.
+
+**On the owner's own 1,453-channel list, with the guide this project
+measured against:**
+
+| | |
+|---|---|
+| matched | **227 of 1,453** |
+| by id / feed base / name | 0 / 0 / **227** |
+| names indexed, dropped ours, dropped the guide's | 1,443 / 10 / 4 |
+| `epg-now.json` | 119 KiB, 227 channels |
+
+Rows now read `Barney & Friends`, `MST3K: Invasion Of The Neptune Men`,
+`Scripps News Weekend`. This is the first time the owner's own install has
+rendered guide data.
+
+Snapshots taken before the change: `shell.json` and the whole state
+directory, under the session scratchpad.
