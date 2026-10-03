@@ -3968,20 +3968,61 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
     return {"pid": pid, "stderrFd": log_r}
 
 
+# The un-redacted tail of a partial line, per fd, between calls to
+# drain_launch_stderr. It exists because redaction is not distributive over a
+# split: redact(a) + redact(b) is not redact(a + b) when a URL straddles the
+# boundary. The old code redacted each 4096-byte os.read separately and a
+# stream whose URL crossed a read left `http://host.example/li` in the buffer
+# -- the path, which rule 5 says never leaves the helper -- and, at another
+# offset, the username. Same defect class as the clean_detail cut-before-
+# redact blocker, at a sink that reaches a desktop notification through
+# launch_reason (D-SINK-12).
+#
+# Bounded: a tail is at most one line, and a line longer than
+# LAUNCH_STDERR_MAX is redacted and flushed rather than grown, so a single
+# newline-free stream cannot hold memory open.
+_LAUNCH_TAIL: dict[int, str] = {}
+
+
 def drain_launch_stderr(fd: int, buffer: list[str]) -> None:
     """PO-6: whatever mpv said while starting, redacted, memory only, capped.
-    Kept drained so a chatty mpv can never block on a full pipe."""
+
+    Kept drained so a chatty mpv can never block on a full pipe. Redacts
+    whole LINES, carrying an unterminated one to the next call, because mpv's
+    stderr is line-oriented and a URL never spans a newline.
+    """
+    def keep(text: str) -> None:
+        room = LAUNCH_STDERR_MAX - sum(len(part) for part in buffer)
+        if room > 0:
+            buffer.append(text[:room])
+
+    pending = _LAUNCH_TAIL.pop(fd, "")
     while True:
         try:
             chunk = os.read(fd, 4096)
         except (BlockingIOError, OSError):
-            return
+            break
         if not chunk:
+            # EOF: whatever is left is a whole line as far as this fd goes.
+            if pending:
+                keep(redact_urls(pending))
             return
-        text = redact_urls(chunk.decode("utf-8", "replace"))
-        room = LAUNCH_STDERR_MAX - sum(len(part) for part in buffer)
-        if room > 0:
-            buffer.append(text[:room])
+        pending += chunk.decode("utf-8", "replace")
+        head, sep, tail = pending.rpartition("\n")
+        if sep:
+            keep(redact_urls(head + sep))
+            pending = tail
+        if len(pending) > LAUNCH_STDERR_MAX:
+            # A single line longer than the whole budget. It is DROPPED, not
+            # flushed: emitting it would mean redacting a fragment that may be
+            # cut mid-URL, which is the defect this function was repaired for.
+            # Measured while repairing it -- flushing the over-long partial
+            # leaked at 33 of 48 boundary offsets, because the flush itself is
+            # a cut. Nothing a person would read is lost: launch_reason wants
+            # mpv's last LINE, and a newline-free blob of this size is not one.
+            pending = ""
+    if pending:
+        _LAUNCH_TAIL[fd] = pending
 
 
 def launch_reason(buffer: list[str]) -> str:

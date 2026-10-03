@@ -472,6 +472,74 @@ class GuideOrderTest(unittest.TestCase):
             self.assertEqual(first[key], second[key], key)
 
 
+class LaunchStderrSinkTest(unittest.TestCase):
+    """D-SINK-12: redaction is not distributive over a split.
+
+    `drain_launch_stderr` redacted each 4096-byte `os.read` on its own, so a
+    URL that straddled a read boundary was redacted in halves and the
+    survivors reached `launch_reason`, which is the text of a desktop
+    notification. The same defect class as the clean_detail blocker this
+    round opened with, at a different sink.
+
+    The sweep is the test: one offset proves nothing, because the leak only
+    happens when the boundary lands inside the URL. Repairing it naively --
+    carrying the partial line but FLUSHING one longer than the budget -- still
+    leaked at 33 of 48 offsets, because the flush is itself a cut; an
+    over-long newline-free line is dropped instead.
+    """
+
+    URL = "http://u5er:5ecretpw@host.example/live/x.m3u8?t=abc"
+    FORBIDDEN = ("5ecretpw", "u5er", "x.m3u8", "t=abc", "/live")
+
+    def _drain(self, payload):
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, payload.encode("utf-8"))
+            os.set_blocking(read_fd, False)
+            buffer = []
+            for _ in range(4):
+                helper.drain_launch_stderr(read_fd, buffer)
+            return "".join(buffer)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_no_boundary_offset_lets_any_part_of_a_url_through(self):
+        leaked = []
+        for pad in range(64):
+            head = "mpv: failed to open " + "a" * pad
+            filler = "b" * max(0, 4096 - len(head) - pad)
+            text = self._drain(filler + head + self.URL + "\n")
+            if any(bad in text for bad in self.FORBIDDEN):
+                leaked.append(pad)
+        self.assertEqual([], leaked,
+                         "a URL survived the read boundary at these offsets")
+
+    def test_an_ordinary_line_is_still_reduced_to_scheme_and_host(self):
+        text = self._drain("mpv: cannot open " + self.URL + "\n")
+        self.assertIn("http://host.example", text)
+        for bad in self.FORBIDDEN:
+            self.assertNotIn(bad, text)
+
+    def test_the_last_line_still_reaches_the_notification(self):
+        self._drain("")
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"first\nsecond\nthird\n")
+            os.set_blocking(read_fd, False)
+            buffer = []
+            helper.drain_launch_stderr(read_fd, buffer)
+            self.assertEqual(helper.launch_reason(buffer), "third")
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_a_line_longer_than_the_budget_is_dropped_rather_than_cut(self):
+        text = self._drain("c" * (helper.LAUNCH_STDERR_MAX + 200) + self.URL)
+        for bad in self.FORBIDDEN:
+            self.assertNotIn(bad, text)
+
+
 class NameNoiseTest(unittest.TestCase):
     """The matcher's name key, which is NOT the search key (D-EPG-2).
 

@@ -10186,3 +10186,90 @@ performed on the 227 pairs. Recorded as unmet rather than quietly dropped.
 
 Repairs are in flight in two lanes; the board rows, the corrected numbers and
 the amended plan are in this commit.
+
+## The M4 review repaired, 2026-10-03: both blockers closed, and a third sink found on the way
+
+Two lanes plus the lead. Every count below was run, not quoted.
+
+### Blocker 1, the credential in the panel, measured at the sink
+
+`clean_detail` cut to the cap and then redacted. The repair swept **every cut
+offset of all three caps** with a URL carrying a username, a password, a path
+and a query:
+
+| | leaking offsets |
+|---|---|
+| before, each of the three caps | 10 of 10 |
+| after | **0** |
+
+End to end through the shipping verb, a fixture row whose description holds
+`http://u5er:5ecretpw@host.example/live/x.m3u8?t=abc` reaches `epg-now.json`
+and `epg-window.txt` carrying none of the user, the password, the path, the
+file or the query. One deliberate behaviour change: when the cap lands inside
+a token containing `://`, the whole token is dropped rather than truncated.
+It cost nothing on the real guide, where `epg-now.json` is byte identical.
+
+### Blocker 2, the repair that could be reverted whole
+
+`NameNoiseTest` proved `epg_name_key` and not its USE. Reverting either call
+site to `normalize_text` left the suite green. The fixture now carries a pair
+that only the marker strip can match, and the three mutations are red:
+
+| mutation | before | after |
+|---|---|---|
+| playlist call site back to `normalize_text` | 729 OK | **5 failures** |
+| guide call site | 729 OK | **5 failures** |
+| both | 729 OK | **5 failures** |
+
+### D-SINK-12, the same defect class at a notification sink
+
+Found by the helper lane while fixing blocker 1: `drain_launch_stderr`
+redacted each 4096-byte read on its own, so a URL straddling the boundary was
+redacted in halves. **Redaction is not distributive over a split** -- that
+sentence is the whole class, and this is its third instance in two days.
+
+The first repair carried the partial line but FLUSHED one longer than the
+budget, and still leaked at **33 of 48 offsets**, because a flush is itself a
+cut. An over-long newline-free line is now dropped instead, which loses
+nothing `launch_reason` wants: a sweep of 64 boundary offsets leaks at none,
+an ordinary line still reduces to `mpv: cannot open http://host.example`, and
+a three-line stream still reports `third`.
+
+### The rest
+
+Guide-side name uniqueness now revokes a claim the first declaration won, so
+the rule is order-independent; the DTD-ordered fixture gained a
+channel-then-programmes case. `<display-name>` selection prefers one the
+playlist actually claims rather than the first non-empty, which a real guide
+that leads with a channel number would have lost. A `<desc>` carrying child
+markup keeps its whole text. F-SINK-10 is closed at the sink: the row's title
+and the accessible name are redacted where only the panel's were.
+
+**The budget question is answered by a refusal rather than a cap.** A
+10,000-channel guide with every detail field at its cap is 189 MiB of XML and
+the helper refuses it at 64 MB; the largest that is accepted is about 9
+programmes per channel at 61 MiB, which recomputes in 176 ms. The committed
+ceilings were inherited from a detail-free generator, which is rule 10's
+shape: the generator now has a detail option and the two new ceilings are set
+from measurement, 6.0 s on the fetch and 1.0 s on the recompute, each red
+when the detail is restored under the old number.
+
+Counts: node 1,730 checks (1716 -> 1730), python 744 tests (729 -> 744),
+qml spec 68, text format guard 59. The frozen acceptance is unchanged at
+**matched 227**, `epg-now.json` byte identical to the integration run.
+
+### F-PANEL-1, left open on purpose
+
+`Model.programmeDetail` composes a channel name, redacts it, and returns it
+as `channel`. The panel draws the title, the time range, the fields and the
+next line, and never the channel. The model lane raised it while closing
+F-SINK-10 and gave it an id the day it wrote it rather than quietly deleting
+the field.
+
+It is a design question, not a defect in the code. The case for drawing it:
+the panel can be opened over a list where the cursor row is the only thing
+saying which channel this description belongs to, and once the panel covers
+the list that cue is gone. The case for deleting it: the panel is already the
+cursor row's panel, and a line that repeats the row is noise. Either way the
+field should not sit there composed, redacted and undrawn, which is what a
+check now pins so it cannot drift while the question is open.
