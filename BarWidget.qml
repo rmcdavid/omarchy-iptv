@@ -59,7 +59,33 @@ BarWidget {
   // like nowPlayingChno above: a service that predates PiP reports nothing,
   // and an undefined read must never invent a value (engineering rule 10 (dev branch)).
   readonly property bool pipOn: serviceReady && service.pipOn === true
-  readonly property string glyph: Model.barGlyph({ playing: root.playing, error: root.hasError, paused: root.paused })
+  // ---- M5-01 LIVE REWIND (design section 2.5, on the dev branch). Guarded for
+  // `undefined` like nowPlayingChno: a service that predates rewind reports
+  // nothing, and an undefined read must never invent a value (rule 10).
+  // `behindLiveS` is null until the player has a zero point -- absent, never
+  // zero (D-DEAD-1) -- so the holder below is empty rather than `-0:00`.
+  readonly property var behindLiveS: playing && service.behindLive !== undefined ? service.behindLive : null
+  readonly property bool behindLive: root.behindLiveS !== null && Number(root.behindLiveS) >= Model.BEHIND_LIVE_SHOW_S
+  // The window from the last read, for the tooltip: `up to 6:52 back`. On a
+  // channel whose window is 7 s the number is 0:07, not a promise.
+  readonly property var historyS: playing && service.rewind !== undefined && service.rewind !== null
+    && service.rewind.history !== undefined && service.rewind.history !== null ? service.rewind.history : null
+  // ONE composer for the footer, this tooltip and the accessible name (2.5):
+  // "" at live, `1:32 behind live`, `paused · 0:42 behind live`.
+  readonly property string playbackStateText: playing ? Model.playbackStateText({ paused: root.paused, behindS: root.behindLiveS }) : ""
+  // The fourth holder's text: `-m:ss` while playing behind live, and while
+  // paused (counting up, from the service's 1 Hz tick). "" otherwise, so the
+  // holder collapses the way the number holder does.
+  readonly property string behindLabel: playing && root.behindLiveS !== null && (root.paused || root.behindLive)
+    ? "-" + Model.clockSpan(root.behindLiveS) : ""
+  // The history glyph while playing behind live; the pause glyph while
+  // paused, which Model.barGlyph already decides. R7: never colour alone.
+  // Model.barGlyph is handed the playing/paused/error triple it has always
+  // taken; the behind-live case is decided here because it is a bar state
+  // the composer does not know, and the number beside it carries the fact.
+  readonly property string glyph: root.playing && !root.paused && root.behindLive
+    ? Model.GLYPHS.history
+    : Model.barGlyph({ playing: root.playing, error: root.hasError, paused: root.paused })
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""
   // Vertical bars stay glyph-only (UX 8 #12); the number is in the tooltip.
   readonly property bool showNumber: !root.vertical && root.showChannelNumber && root.nowPlayingChno !== ""
@@ -84,7 +110,17 @@ BarWidget {
     error: root.hasError,
     refreshing: root.refreshing,
     pip: root.pipOn, paused: root.paused
-  })
+  }) + root.rewindTooltipLine
+  // M5-01 (2.5): one more LINE, like PiP's -- the state line from the shared
+  // composer and the window from the last read. Numbers only; nothing from
+  // the stream.
+  readonly property string rewindTooltipLine: {
+    if (!root.playing) return ""
+    var parts = []
+    if (root.playbackStateText !== "") parts.push(root.playbackStateText)
+    if (root.historyS !== null && Number(root.historyS) > 0) parts.push("up to " + Model.clockSpan(root.historyS) + " back")
+    return parts.length > 0 ? "\n" + parts.join(Model.SEP) : ""
+  }
 
   Behavior on glyphColor {
     enabled: !root.bar || root.bar.foregroundAnimationEnabled
@@ -128,14 +164,19 @@ BarWidget {
     for (var i = 0; i < count; i++) root.service.zap(direction)
   }
 
-  implicitWidth: root.vertical ? root.barSize : icon.implicitWidth + numberHolder.width + labelHolder.width
+  implicitWidth: root.vertical ? root.barSize : icon.implicitWidth + numberHolder.width + labelHolder.width + behindHolder.width
   implicitHeight: root.vertical ? icon.implicitHeight : root.barSize
 
   Accessible.role: Accessible.Button
   // M2-03 8.1: the number is spoken as "channel 101", never as a bare digit
   // string.
+  // M5-01: the glyph and the number both changed for behind-live; the
+  // accessible name has to as well, or the one user who cannot see the
+  // glyph is the one user not told (the D-GS-3 shape, again). The same
+  // composer the tooltip and the footer read.
   Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
                                              chno: root.nowPlayingChno, error: root.hasError, paused: root.paused })
+                   + (root.playbackStateText !== "" ? ", " + root.playbackStateText : "")
 
   // Mirrors WidgetButton: registered click targets keep receiving clicks
   // while a bar popup (KeyboardPanel) is open.
@@ -240,6 +281,37 @@ BarWidget {
       font.pixelSize: Style.font.body
       renderType: Text.NativeRendering
       elide: Text.ElideRight
+      verticalAlignment: Text.AlignVCenter
+    }
+  }
+
+  // M5-01 (2.5): the fourth holder, `-m:ss`, after the name. OUTSIDE the
+  // name's Style.space(barLabelMaxWidth) budget and never elided, as the
+  // channel number is: half a clock is worse than none, and the name is the
+  // part that can lose characters and stay useful. Monospaced through the
+  // bar's own family (`monospace` on Omarchy), so a tick does not reflow.
+  // Horizontal bars only, like the number; vertical bars stay glyph-only
+  // and carry the state in the tooltip (UX 8 #12).
+  Item {
+    id: behindHolder
+    anchors.left: labelHolder.right
+    anchors.verticalCenter: parent.verticalCenter
+    height: root.barSize
+    width: !root.vertical && root.behindLabel !== "" ? behind.implicitWidth + Style.spaceReal(8.5) : 0
+    clip: true
+    Behavior on width { NumberAnimation { duration: root.labelAnimMs; easing.type: Easing.OutCubic } }
+
+    Text {
+      id: behind
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: root.behindLabel
+      visible: !root.vertical && root.behindLabel !== ""
+      color: root.barFg
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+      renderType: Text.NativeRendering
       verticalAlignment: Text.AlignVCenter
     }
   }

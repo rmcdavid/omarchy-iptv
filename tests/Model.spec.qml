@@ -1802,6 +1802,123 @@ TestCase {
     compare(Model.barTooltip({ configured: true, playing: true, name: "Sky" }), "Playing Sky")
   }
 
+  // ---- M5-01 live rewind (design sections 2.4 and 2.5, on the dev branch) ----
+  //
+  // The keys, the footer counts and the composers, in the engine the guide
+  // and the bar actually run in. The footer assertions are BY INDEX, as the
+  // number-entry case above is: the three new keys are gated on something
+  // playing, so the two lists that case pins (12 and 13 while idle) must not
+  // move, and the digits hint must move by exactly the keys that join the
+  // playing line ahead of it.
+  function pairIndex(pairs, key) {
+    for (var i = 0; i < pairs.length; i++) if (pairs[i][0] === key) return i
+    return -1
+  }
+
+  function test_liveRewindKeysAndHints() {
+    compare(Model.REWIND_KEY, "b")
+    compare(Model.FORWARD_KEY, "w")
+    compare(Model.LIVE_KEY, "g")
+    compare(Model.REWIND_STEP_S, 10)
+    compare(Model.BEHIND_LIVE_SHOW_S, 2)
+    // Uppercase folds like F / S / R / X; search mode never reaches this.
+    compare(Model.listLetterAction("b"), "rewind")
+    compare(Model.listLetterAction("B"), "rewind")
+    compare(Model.listLetterAction("w"), "forward")
+    compare(Model.listLetterAction("W"), "forward")
+    compare(Model.listLetterAction("g"), "live")
+    compare(Model.listLetterAction("G"), "live")
+    // Idle: nothing changes, and the index case above still holds.
+    compare(Model.footerHints({ mode: "list" }).length, 12)
+    compare(pairIndex(Model.footerHints({ mode: "list" }), Model.REWIND_KEY), -1)
+    // Playing with an empty range read (the first seconds after a zap,
+    // spike 11.1): `c pause` and `t tracks` join, `b` does not.
+    var playing = Model.footerHints({ mode: "list", playing: true })
+    compare(playing.length, 14)
+    compare(pairIndex(playing, Model.REWIND_KEY), -1)
+    // A non-empty range: `b back`, and nothing else, because at live the
+    // other two keys would do nothing.
+    var rewindable = Model.footerHints({ mode: "list", playing: true, canRewind: true })
+    compare(rewindable.length, 15)
+    var b = pairIndex(rewindable, Model.REWIND_KEY)
+    verify(b > pairIndex(rewindable, Model.PAUSE_KEY), "b back sits with the playing-gated keys")
+    compare(rewindable[b][1], "back")
+    compare(pairIndex(rewindable, Model.FORWARD_KEY), -1)
+    compare(pairIndex(rewindable, Model.LIVE_KEY), -1)
+    // Below the display threshold is still "at live" for the hints.
+    compare(Model.footerHints({ mode: "list", playing: true, canRewind: true, behindLive: 1 }).length, 15)
+    // Behind live: all three, in order b, w, g.
+    var behind = Model.footerHints({ mode: "list", playing: true, canRewind: true, behindLive: 2 })
+    compare(behind.length, 17)
+    var w = pairIndex(behind, Model.FORWARD_KEY)
+    var g = pairIndex(behind, Model.LIVE_KEY)
+    compare(behind[w][1], "forward")
+    compare(behind[g][1], "live")
+    verify(pairIndex(behind, Model.REWIND_KEY) < w && w < g, "b, w, g in that order")
+    // By index: the digits hint moves by the five playing keys ahead of it
+    // (c, t, b, w, g) and by nothing else, so a key added anywhere ahead of
+    // the digits is caught rather than absorbed.
+    compare(Model.footerHints({ mode: "list", hasNumbers: true })[10][0], "0-9")
+    compare(Model.footerHints({ mode: "list", hasNumbers: true, playing: true, canRewind: true, behindLive: 2 })[15][0], "0-9")
+    // `b` is never hinted on a guide that is not playing, whatever else is set.
+    compare(pairIndex(Model.footerHints({ mode: "list", canRewind: true, behindLive: 400 }), Model.REWIND_KEY), -1)
+    // The `?` map reads the same table (2.5), so a key the footer hints is a
+    // key the map describes.
+    var map = Model.keyboardMap({ mode: "list", playing: true, canRewind: true, behindLive: 2 })
+    var mapKeys = []
+    for (var s = 0; s < map.length; s++) for (var r = 0; r < map[s].rows.length; r++) mapKeys.push(map[s].rows[r].key !== undefined ? map[s].rows[r].key : map[s].rows[r][0])
+    verify(mapKeys.indexOf(Model.REWIND_KEY) >= 0, "the map carries b")
+    verify(mapKeys.indexOf(Model.LIVE_KEY) >= 0, "the map carries g")
+  }
+
+  function test_liveRewindComposers() {
+    // m:ss below an hour, h:mm:ss from one hour; whole seconds, never a
+    // fraction on the bar.
+    compare(Model.clockSpan(92), "1:32")
+    compare(Model.clockSpan(0), "0:00")
+    compare(Model.clockSpan(412), "6:52")
+    compare(Model.clockSpan(300.6), "5:00")
+    compare(Model.clockSpan(3662), "1:01:02")
+    // The one state line (2.5). "" at live and below the 2 s threshold;
+    // null is absent, never zero (D-DEAD-1).
+    compare(Model.playbackStateText({ paused: false, behindS: 92 }), "1:32 behind live")
+    compare(Model.playbackStateText({ paused: false, behindS: 0 }), "")
+    compare(Model.playbackStateText({ paused: false, behindS: 1 }), "")
+    compare(Model.playbackStateText({ paused: false, behindS: null }), "")
+    compare(Model.playbackStateText({ paused: true, behindS: 42 }), "paused" + Model.SEP + "0:42 behind live")
+    // The middle dot reaches the string ONLY through Model.SEP: a .js
+    // literal would fail the ASCII gate, and this proves the composer did
+    // not route around it by spelling something else.
+    compare(Model.playbackStateText({ paused: true, behindS: 42 }).indexOf("·") > 0, true)
+    // The argv the service hands the one control slot (2.1).
+    compare(JSON.stringify(Model.playerSeekArgv("/run/s", -10)), JSON.stringify(["player", "seek", "--socket", "/run/s", "--by", "-10"]))
+    compare(JSON.stringify(Model.playerSeekArgv("/run/s", 10)), JSON.stringify(["player", "seek", "--socket", "/run/s", "--by", "10"]))
+    compare(JSON.stringify(Model.playerSeekArgv("/run/s", "live")), JSON.stringify(["player", "seek", "--socket", "/run/s", "--live"]))
+    // Presses coalesce into one signed sum, capped at the last-read history
+    // so a sum past the floor is never asked for (2.3).
+    compare(Model.coalesceSeek({ pending: -10, press: -10, history: 356.6, step: 10 }), -20)
+    compare(Model.coalesceSeek({ pending: 0, press: 10, history: 356.6, step: 10 }), 10)
+    compare(Model.coalesceSeek({ pending: -20, press: 10, history: 356.6, step: 10 }), -10)
+    var capped = Model.coalesceSeek({ pending: -350, press: -10, history: 356.6, step: 10 })
+    verify(capped < 0 && -capped <= 356.6 && -capped >= 350, "capped at the history, not past it: " + capped)
+    compare(Model.coalesceSeek({ pending: 0, press: -10, history: null, step: 10 }), -10)
+    // "Behind live" holds while playing and counts up only while paused
+    // (2.3), from the later of the reply and the pause; null until the
+    // player has a zero point.
+    compare(Model.behindLiveNow({ rewind: null, nowSec: 100, pausedSinceSec: null }), null)
+    compare(Model.behindLiveNow({ rewind: { behindLive: 300.6, zeroed: true }, nowSec: 100, pausedSinceSec: null }), 300.6)
+    compare(Model.behindLiveNow({ rewind: { behindLive: 300.6, zeroed: true }, nowSec: 110, pausedSinceSec: 100 }), 310.6)
+    compare(Model.behindLiveNow({ rewind: { behindLive: null, zeroed: false }, nowSec: 110, pausedSinceSec: 100 }), null)
+    // Ruling D9: the OSD line never carries `$` -- show-text property-expands.
+    var osd = Model.rewindOsdText({ ok: true, kind: "seek", mode: "by", requested: -10, applied: -10, clamped: false, clampedTo: null,
+                                    refused: false, atFloor: false, atEdge: false,
+                                    rewind: { position: 400.6, floor: 44.0, ceiling: 418.0, history: 356.6, ahead: 17.4,
+                                              behindLive: 300.6, zeroed: true, paused: false, pausedForCache: false, entryId: 7 } })
+    compare(typeof osd, "string")
+    compare(osd.indexOf("$"), -1)
+    verify(osd.indexOf("5:00") >= 0, "the OSD carries the number: " + osd)
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)

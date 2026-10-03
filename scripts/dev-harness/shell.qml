@@ -149,6 +149,20 @@ ShellRoot {
   // needs it: the stub compositor's canned clients JSON is rewritten to
   // carry the pid the service actually holds, so the pid-narrowed lookup is
   // exercised for real rather than stepped over.
+  // M5-01. The bar widget's four holders joined as the bar draws them, left
+  // to right: glyph, number, name, `-m:ss`. Empty holders are skipped, so a
+  // bar at live reads `GLYPH 7 BBC One` and one behind reads
+  // `GLYPH 7 BBC One -1:32`. null when the widget has not loaded; a
+  // pre-change widget has no behindLabel and contributes nothing there.
+  function barLabel(w) {
+    if (!w) return null
+    var parts = [String(w.glyph || "")]
+    if (w.showNumber === true) parts.push(String(w.nowPlayingChno))
+    if (w.showLabel === true) parts.push(String(w.nowPlayingName))
+    if (w.behindLabel !== undefined && String(w.behindLabel) !== "") parts.push(String(w.behindLabel))
+    return parts.join(" ")
+  }
+
   function pipSnapshot(s) {
     if (!s) return { available: null, on: null, applying: null, reason: null, playerPid: null, lastOutcome: null }
     return {
@@ -871,7 +885,34 @@ ShellRoot {
       return JSON.stringify({ service: w.service !== null, glyph: w.glyph, label: w.showLabel ? w.nowPlayingName : "",
                               number: w.showNumber === true ? String(w.nowPlayingChno) : "",
                               chno: w.nowPlayingChno === undefined ? null : String(w.nowPlayingChno),
+                              // M5-01: the fourth holder's text (`-m:ss` or "")
+                              // and the whole bar as drawn, left to right.
+                              behind: w.behindLabel === undefined ? null : String(w.behindLabel),
+                              barLabel: harness.barLabel(w),
                               tooltip: w.tooltip, width: w.implicitWidth })
+    }
+    // ---- M5-01 LIVE REWIND. PASSTHROUGHS to the service functions the
+    // plugin's own IPC verbs call (`back`, `forward`, `live`), not a second
+    // implementation: a scenario driving a copy would prove nothing about
+    // the verb a user runs (CLAUDE.md rule 12). `n` is the step in seconds,
+    // positive; `back` negates it the way the plugin's verb does. A
+    // pre-change service has no seekBy, and the scenario has to run against
+    // one to show its checks failing there first (rule 10), so the absence
+    // answers rather than throws.
+    function back(n: int): string {
+      var s = serviceLoader.item
+      if (!s || typeof s.seekBy !== "function") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
+      return JSON.stringify(s.seekBy(-(n > 0 ? n : Model.REWIND_STEP_S)))
+    }
+    function forward(n: int): string {
+      var s = serviceLoader.item
+      if (!s || typeof s.seekBy !== "function") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
+      return JSON.stringify(s.seekBy(n > 0 ? n : Model.REWIND_STEP_S))
+    }
+    function live(): string {
+      var s = serviceLoader.item
+      if (!s || typeof s.seekLive !== "function") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
+      return JSON.stringify(s.seekLive())
     }
     function state(): string {
       var g = guideLoader.item
@@ -990,6 +1031,11 @@ ShellRoot {
           // PAUSE LIVE TV: what the bar and the guide actually say, so a
           // scenario can observe the state rather than infer it.
           paused: s2 && s2.paused !== undefined ? s2.paused : null,
+          // M5-01: the footer's state line as the guide composes it --
+          // "" at live, `1:32 behind live`, `paused <middle dot> 0:42 behind live` --
+          // so a scenario reads what the footer SAYS, not what the
+          // service holds. Absent on a pre-change guide.
+          playbackStateText: g.playbackStateText === undefined ? null : String(g.playbackStateText),
           // D-LOGO-8: how many logos the shell knows are on disk RIGHT NOW.
           // The defect was that this stayed 0 until the fetch exited.
           logoCount: s2 && s2.logoHave ? Object.keys(s2.logoHave).length : null,
@@ -1044,7 +1090,21 @@ ShellRoot {
         // player pid the stub compositor's fixture has to match.
         out.service.pip = harness.pipSnapshot(s)
         out.service.persistFails = harness.persistFails
+        // M5-01. The service's `rewind` object exactly as the last helper
+        // reply carried it (null until the player says, never 0), the
+        // derived "behind live" (counting up while paused), and the queue
+        // a held key fills, so a scenario can watch presses coalesce rather
+        // than count processes. Every field optional, for the same reason
+        // as addPlayerState's: the same harness drives a pre-change tree.
+        out.service.rewind = s.rewind === undefined ? null : s.rewind
+        out.service.behindLive = s.behindLive === undefined ? null : s.behindLive
+        out.service.canRewind = s.canRewind === undefined ? null : s.canRewind
+        out.service.seekPending = s.seekPending === undefined ? null : s.seekPending
+        out.service.seekAtFloor = s.seekAtFloor === undefined ? null : s.seekAtFloor
       }
+      // M5-01: the bar as drawn, glyph to clock, so a scenario asserts
+      // `<history glyph> 7 BBC One -1:32` as one string rather than four fields.
+      out.barLabel = harness.barLabel(barLoader.item)
       return JSON.stringify(out)
     }
   }
