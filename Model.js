@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.9.3"
+var PLUGIN_VERSION = "0.10.0"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -1887,7 +1887,12 @@ function scopeLabel(scopeId, query, count, position) {
 // `sourceXtream` and `confirmRemove` are the Sources screens. `returnMode`
 // remembers where Sources was opened from, `form` holds the open form
 // (section "sources" below), `sourceCursor` is the Sources list cursor.
-var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos", "tracks"]
+//
+// M4-02 and M4-04 add `detail` (the programme panel, DETAIL_KEY) and `help`
+// (the keyboard map, HELP_KEY), in that order, at the end: the order of this
+// list is the contract the three M4 lanes share, and guideMode() resolves an
+// unknown mode by membership rather than by position, so appending is safe.
+var GUIDE_MODES = ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos", "tracks", "detail", "help"]
 
 function guideMode(mode) {
   var m = str(mode)
@@ -3112,6 +3117,16 @@ function parseChannels(text) {
 }
 
 // epg-now.json -> { channels: {tvgId: {now, next}}, meta }
+//
+// `now` and `next` are programme records: `title`, `start` and `stop`
+// always, plus the optional description / category / episode fields M4-02
+// widened them with (see EPG_DETAIL_FIELDS). This function deliberately
+// does NOT walk them: it hands `doc.channels` over by reference, so a
+// widened record costs it nothing beyond the JSON.parse the file already
+// paid for, and only programmeDetail -- one row at a time -- reads the new
+// fields. `version` is ignored on purpose, as it always has been: an
+// unknown version still parses, and a missing field reads as absent rather
+// than as a failure.
 function parseEpgNow(text) {
   var doc = parseJsonObject(text)
   if (!doc || !doc.channels || typeof doc.channels !== "object" || Array.isArray(doc.channels)) return { ok: false, channels: {}, meta: {} }
@@ -3630,6 +3645,65 @@ var WALL_KEY = "Ctrl+G"
 // the one string the plugin renders under Text.StyledText (the footer's
 // MARKUP-EXCEPTION), so the only markup allowed in it is these font tags
 // around the pairs, and the pairs are literals (D-TEXT-1, F-TEXT-2).
+// F-UX-2. The footer hint row overflows the widest card the guide can draw:
+// the list line is 165 characters, about 990 px at the measured 6.0 px per
+// character, against a 655 px budget, and it elides from the LEFT, so the
+// segments a reader keeps are the LAST ones and `j/k move` -- the first thing
+// a newcomer needs -- is the first thing to go. Measured by the guide lane
+// with offscreen font metrics, not estimated.
+//
+// It could not be shortened before M4-04, because the row was the only place
+// in the product where the keys were written down. `?` changed that, so the
+// row can now carry what fits and point at the map for the rest, which is the
+// whole argument for fixing this now rather than earlier.
+//
+// Dropped lowest value first. The order is a judgement and it is written here
+// so it can be argued with: a trip to another screen goes before a view
+// toggle, a view toggle before a maintenance key, and anything that only
+// means something while a channel is playing before anything that acts on the
+// list in front of you.
+//
+// `move` and `help` are not on it, and that is the whole protection for them:
+// how you move and how you find what was taken away. An earlier version also
+// guarded them positionally, at the first pair and the last; both guards were
+// unreachable given this list, no mutation could redden them, and dead
+// defence that no test can see is what this project keeps finding in its own
+// instruments. The reachable invariant is asserted instead.
+var FOOTER_DROP_ORDER = ["sources", "wall", "refresh", "pip", "stop", "favorite", "preview"]
+
+// The rendered width of a hint row, in characters, composed the way
+// footerHintMarkup composes it (the font tags carry no width).
+function footerHintWidth(pairs) {
+  var list = asList(pairs)
+  var n = 0
+  for (var i = 0; i < list.length; i++) {
+    var pair = asList(list[i])
+    n += str(pair[0]).length + 1 + str(pair[1]).length
+  }
+  return n + (list.length > 1 ? (list.length - 1) * SEP.length : 0)
+}
+
+// The pairs that fit in `maxChars`, dropping by FOOTER_DROP_ORDER until they
+// do. A row that still does not fit is returned as it stands: this is a floor,
+// not a promise, and the Text's own elide remains the last resort for a card
+// too narrow for `j/k move` and `? help` alone.
+function fitFooterHints(pairs, maxChars) {
+  var list = asList(pairs).slice()
+  var budget = Number(maxChars)
+  if (!(budget > 0) || footerHintWidth(list) <= budget) return list
+  for (var d = 0; d < FOOTER_DROP_ORDER.length; d++) {
+    for (var i = list.length - 1; i >= 1; i--) {
+      if (str(asList(list[i])[1]) !== FOOTER_DROP_ORDER[d]) continue
+      // Never the first pair, whatever it says: a row that cannot tell you
+      // how to move is not a shorter row, it is a worse one.
+      list.splice(i, 1)
+      if (footerHintWidth(list) <= budget) return list
+      break
+    }
+  }
+  return list
+}
+
 function footerHintMarkup(pairs, keyColor, verbColor) {
   var list = asList(pairs)
   var out = []
@@ -5806,6 +5880,13 @@ function listLetterAction(text) {
   // M3-02: offered unconditionally here like `pause`, gated at the call
   // site on something playing.
   if (t === TRACKS_KEY || t === TRACKS_KEY.toUpperCase()) return "tracks"
+  // M4-02 / M4-04. Both are offered unconditionally here, like `pause` and
+  // `tracks`: this table says what a letter MEANS. `detail` is gated at the
+  // call site on the row actually having guide data to show; `help` is gated
+  // on nothing, because the keyboard map is the one surface that is useful
+  // precisely when the user does not know what works.
+  if (t === DETAIL_KEY || t === DETAIL_KEY.toUpperCase()) return "detail"
+  if (t === HELP_KEY) return "help"
   if (t === "/") return "search"
   if (t.toLowerCase() === SOURCE_KEYS.open) return "sources"
   return ""
@@ -5848,7 +5929,15 @@ function sourceLabel(url) {
   var text = str(url).replace(/^\s+|\s+$/g, "")
   if (text === "") return ""
   if (/^file:/i.test(text)) return "local file"
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^@\/\s]*@)?([^\/\s?#:]+)(?::\d+)?/i)
+  // D-SINK-1's authority rule, which this spelling did not get when
+  // redactUrls got it: userinfo runs to the LAST `@` of the authority
+  // (RFC 3986) and the host group excludes `@` entirely. With the old
+  // `(?:[^@\/\s]*@)?([^\/\s?#:]+)` pair, `http://user:p@ss@host/x` labelled
+  // itself `http://ss@host` -- the password TAIL in the host position, which
+  // is the defect redactUrls was fixed for. Both halves are needed: either
+  // alone still leaks. M4-01 made this reachable from a remote party, because
+  // resolveEpgUrl publishes `hostOf` over a `url-tvg` the PLAYLIST declared.
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/\s]*@)?([^\/\s?#:@]+)(?::\d+)?/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
@@ -5883,6 +5972,32 @@ function redactUrls(text) {
 // Older name kept for callers; same behaviour.
 function scrubUrls(text) {
   return redactUrls(text)
+}
+
+// F-SINK-10. Provider-controlled text on its way to a guide-text or
+// accessibility sink, redacted exactly as redactUrls redacts it and at a
+// linear cost.
+//
+// WHY THIS EXISTS AS ITS OWN NAME rather than `redactUrls` at each call site.
+// redactUrls is QUADRATIC in a run of scheme-legal characters (its own
+// comment, and the measurement in epgDetailText below), and these sinks run
+// per instantiated row, on every clock tick and on every keystroke in search
+// mode -- the one place in this plugin where a 0.6 ms call is not free. The
+// exit is EXACT and not an approximation: redactUrls' pattern requires
+// "://", so text without it is returned by redactUrls unchanged, and the
+// node suite asserts the two agree over every input it is given.
+//
+// WHY AT THE SINK and not at one caller. The strings these sinks compose come
+// from an XMLTV programme title and an M3U channel name, both written by the
+// provider. Until M4-01 the matcher matched 0 of 1,453 channels on the
+// owner's install, so the row's now/next title was empty on every row and the
+// gap was theoretical; M4-01 made it 227 channels of provider-written titles.
+// Redacting in the composers (rowDetail, rowAccessibleName, formatEpgLine)
+// AND at the epgFields boundary that feeds them means a caller that hands a
+// raw title in is still safe, which a fix at one caller does not give.
+function sinkText(value) {
+  var s = str(value)
+  return s.indexOf("://") === -1 ? s : redactUrls(s)
 }
 
 // ------------------------------------------------------------ formatting
@@ -5932,6 +6047,17 @@ function epgNowStale(meta, nowSec) {
 
 // epg-now entry -> flat row fields. An expired `now` (stop <= nowSec) yields
 // no current programme so a row never shows a stale title; `next` is kept.
+//
+// F-SINK-10: the two TITLES go through sinkText here, at the boundary where a
+// provider-written XMLTV string becomes a row field. This is the one place
+// every row-side reader of a programme title passes through -- rowDetail,
+// rowAccessibleName, formatEpgLine and the guide's own `nowTitle` /
+// `nextTitle` bindings -- so a title that holds
+// `http://user:pw@host/path` cannot reach guide text or the accessibility bus
+// by any of them. The composers redact again for a caller that hands a raw
+// title straight to them; this makes the FIELD clean, they make the SINK
+// clean, and neither relies on the other. The cost is one indexOf per title
+// per row (sinkText's exit), measured at the 10,000 channel budget.
 function epgFields(entry, nowSec) {
   var out = { nowTitle: "", nowStart: 0, nowStop: 0, nextTitle: "", nextStart: 0, until: "", fraction: 0 }
   if (!entry || typeof entry !== "object") return out
@@ -5941,7 +6067,7 @@ function epgFields(entry, nowSec) {
     var stop = Number(cur.stop) || 0
     var start = Number(cur.start) || 0
     if (!t || stop <= 0 || stop > t) {
-      out.nowTitle = str(cur.title)
+      out.nowTitle = sinkText(cur.title)
       out.nowStart = start
       out.nowStop = stop
       out.until = stop > 0 ? formatClock(stop) : ""
@@ -5950,7 +6076,7 @@ function epgFields(entry, nowSec) {
   }
   var next = entry.next
   if (next && next.title) {
-    out.nextTitle = str(next.title)
+    out.nextTitle = sinkText(next.title)
     out.nextStart = Number(next.start) || 0
   }
   return out
@@ -5993,12 +6119,14 @@ function epgCoverage(channels, epgMap) {
   return out
 }
 
-// Backwards-compatible strings for callers that only want text.
+// Backwards-compatible strings for callers that only want text. Both lines
+// are sinks in their own right (F-SINK-10), so both titles are redacted here
+// too: epgFields has already done it, and this does not depend on that.
 function formatEpgLine(entry, nowSec) {
   var f = epgFields(entry, nowSec)
   var out = { now: "", next: "" }
-  if (f.nowTitle !== "") out.now = "Now: " + f.nowTitle + (f.until !== "" ? " until " + f.until : "")
-  if (f.nextTitle !== "") out.next = "Next: " + f.nextTitle + (f.nextStart > 0 ? " at " + formatClock(f.nextStart) : "")
+  if (f.nowTitle !== "") out.now = "Now: " + sinkText(f.nowTitle) + (f.until !== "" ? " until " + f.until : "")
+  if (f.nextTitle !== "") out.next = "Next: " + sinkText(f.nextTitle) + (f.nextStart > 0 ? " at " + formatClock(f.nextStart) : "")
   return out
 }
 
@@ -6007,6 +6135,277 @@ function joinParts(parts) {
   var list = asList(parts)
   for (var i = 0; i < list.length; i++) if (str(list[i]) !== "") out.push(str(list[i]))
   return out.join(SEP)
+}
+
+// ------------------------------------------------------ programme detail (M4-02)
+//
+// epg-now.json's programme records carry three things the guide has always
+// drawn (title, start, stop) and, from M4-02, three it dropped: a
+// description, a category and episode information. The XMLTV was already
+// parsed and the fields were already being discarded.
+//
+// WHY NONE OF THIS IS IN epgFields. epgFields runs once per INSTANTIATED
+// DELEGATE and is re-evaluated on every clock tick; the detail fields are
+// read by exactly one row at a time, the one the panel is open on. So they
+// are parsed LAZILY here, by programmeDetail, and epgFields is left byte for
+// byte as it was. The hot path is untouched by construction: parseEpgNow
+// hands `doc.channels` over by reference and does no per-channel work at
+// all, and prepareChannels / filterChannels never see guide data. The 0.7.5
+// work took a keystroke from 165 ms to 11 ms and this gives none of it back.
+//
+// THE ON-DISK SHAPE. Lane A owns the encoding; this is the consumer, and the
+// one thing it must not do is hard-code a single spelling of a field it has
+// not seen written yet. So the accepted keys are a TABLE, read by
+// programmeFieldText below, and the table is exported: if lane A's writer
+// spells a field differently, the repair is one entry here and the test that
+// drives this table goes red rather than the panel going quietly blank.
+// `start` and `stop` are NOT in it -- they are the record format's
+// fixed-width prefix and have never moved.
+var EPG_DETAIL_FIELDS = [
+  ["description", ["desc", "description"]],
+  ["category", ["category", "categories"]],
+  ["episode", ["episode", "episodeNum"]]
+]
+
+// One field of a programme record, as text, "" when absent. An array (XMLTV
+// allows several <category> elements per programme) yields its first usable
+// entry rather than a join, because the panel has one line for it.
+function programmeFieldText(programme, keys) {
+  var p = programme && typeof programme === "object" ? programme : {}
+  var names = asList(keys)
+  for (var i = 0; i < names.length; i++) {
+    var value = p[str(names[i])]
+    if (value === undefined || value === null) continue
+    if (Array.isArray(value)) {
+      for (var j = 0; j < value.length; j++) {
+        var one = epgEpisodeText(value[j])
+        if (one !== "") return one
+      }
+      continue
+    }
+    var text = epgEpisodeText(value)
+    if (text !== "") return text
+  }
+  return ""
+}
+
+// Episode information as one string. XMLTV's <episode-num> is a free-text
+// field and every exporter spells it differently, so three shapes are
+// accepted and NOTHING else is guessed at: a string (used as it stands), a
+// finite number (an episode on its own), and an object carrying `season`
+// and/or `episode` numbers. The same normaliser serves the description and
+// the category because the string and number cases are the whole of what
+// those can be; only the object case is episode-specific.
+function epgEpisodeText(value) {
+  if (value === undefined || value === null) return ""
+  if (typeof value === "number") return isFinite(value) ? String(Math.floor(value)) : ""
+  if (typeof value === "string") return value.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "")
+  if (typeof value === "object" && !Array.isArray(value)) {
+    var season = Number(value.season)
+    var episode = Number(value.episode)
+    var parts = []
+    if (isFinite(season) && season > 0) parts.push("S" + Math.floor(season))
+    if (isFinite(episode) && episode > 0) parts.push("E" + Math.floor(episode))
+    return parts.join(" ")
+  }
+  return ""
+}
+
+// The cap THE MODEL applies to detail text. The panel reuses the track
+// picker's geometry, so a feed that ships a 20,000 character synopsis is a
+// layout problem, not a feature; 600 characters is roughly eight lines at the
+// panel's width.
+//
+// IT IS NOT THE FIRST CAP, and an earlier version of this comment called it
+// "the one cap", which is wrong in a way that matters to anyone reasoning
+// about the worst case. The helper has already capped the same three fields
+// before they are written to epg-now.json: EPG_MAX_DESC = 400,
+// EPG_MAX_CATEGORY = 48, EPG_MAX_EPISODE = 32 (bin/omarchy-iptv:234-236,
+// applied in clean_detail). Those are the ones that BIND on any record this
+// plugin produces -- 600 never does -- so the 20,000 character case the node
+// suite exercises can only arrive from a cache this plugin did not write, or
+// from a future producer. This cap is the model's own floor under that, kept
+// because the panel must not depend on the producer's number; if either side
+// moves, move the other and say so in both places.
+var EPG_DETAIL_MAX = 600
+
+// One detail field, redacted and bounded, for the detail panel's sinks.
+//
+// TWO MEASURED REASONS THIS IS NOT JUST `redactUrls(text)`:
+//
+//  1. redactUrls is QUADRATIC in the length of a run of scheme-legal
+//     characters. Its pattern is `[a-z][a-z0-9+.-]*://...`, so on a long run
+//     of letters the engine consumes the whole run at every start position
+//     and then backtracks out of it. Re-measured on node v26.8.1,
+//     2026-10-03, through programmeDetail: 0.0141 ms for a 300 character
+//     description, 0.1363 ms for 5,000 characters of words, 40.5 ms for
+//     5,000 no-space characters THAT ALSO CARRY "://", and 648.9 ms for
+//     redactUrls over 20,000 no-space characters.
+//     The "://" is load-bearing in that third figure and the earlier comment
+//     did not say so: 5,000 no-space characters WITHOUT it cost 0.0063 ms,
+//     because this function's own exit takes them. The quadratic case is a
+//     long run plus a URL somewhere in the same field, not a long run alone.
+//     The cheap exit is exact rather than approximate: redactUrls can only
+//     ever rewrite text that contains "://", because its own pattern
+//     requires it. A field without "://" is returned verbatim, same answer,
+//     linear cost, and that half of the adversarial case stops existing.
+//     What REMAINS is a field that is both enormous and contains "://" --
+//     that still pays redactUrls' quadratic cost, and it does so at every
+//     other sink in the plugin too. F-SINK-11 for the board, with the fix
+//     (bound the scheme's repetition in redactUrls' pattern, `{0,30}` rather
+//     than `*`) named there rather than attempted from here: redactUrls
+//     guards every sink and a narrower pattern that MISSED a URL would be
+//     worse than a slow one.
+//     WHAT THE BOARD MUST NOT CARRY IS A KEY-PRESS FREEZE ON THIS PATH. The
+//     producer caps the description at 400 characters before it is written
+//     (EPG_MAX_DESC, bin/omarchy-iptv:234) and this function caps at 600, so
+//     the worst input the panel can be handed costs 0.2859 ms at 400 and
+//     0.6135 ms at 600, both measured in the same run. The 690.9 ms figure
+//     for a 20,000 character field is real and is what F-SINK-11 is about,
+//     but it is reachable only through a sink whose input is NOT capped --
+//     every other redactUrls caller -- and not through this panel.
+//  2. The cut is made AFTER redaction, never before, and the order is a
+//     security property rather than a preference. Truncating first can land
+//     inside a URL: `http://user:pw@host/x` cut after `pw` leaves
+//     `http://user:pw`, which has no `@` left, so redactUrls reads `user` as
+//     the host and PUBLISHES THE USERNAME. Redacting first collapses the URL
+//     to its host, and the cut can then fall anywhere.
+function epgDetailText(value, cap) {
+  // sinkText is the same guarded redaction, in one place, so this function
+  // and the row sinks cannot drift about what the exit is (F-SINK-10).
+  var s = sinkText(value)
+  s = s.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "")
+  var max = Math.max(1, Math.floor(Number(cap) || EPG_DETAIL_MAX))
+  // The ellipsis counts toward the cap, so the result is never longer than
+  // `max`: a caller sizing a panel from EPG_DETAIL_MAX would otherwise be
+  // one character out, and one character out is how a line wraps.
+  if (s.length > max) s = s.substring(0, max - 1).replace(/\s+$/, "") + ELLIPSIS
+  return s
+}
+
+// A programme's clock range. The product's clock vocabulary is formatClock
+// -- 24 hour, local, no seconds, "" for a zero or unparseable stamp -- and
+// this is the one place a RANGE of it is spelled, because the product had no
+// range before the detail panel and two spellings of one is how they drift.
+// A missing or impossible stop yields the start alone rather than a range
+// with a blank end.
+function formatTimeRange(start, stop) {
+  var from = formatClock(start)
+  var to = formatClock(stop)
+  if (from === "") return ""
+  if (to === "" || Number(stop) <= Number(start)) return from
+  return from + " - " + to
+}
+
+// What the detail panel renders, or null when there is nothing to show.
+//
+// The DECISION of what a panel shows is logic, so it lives here and not in
+// QML (rule 12). `row` is the one object the guide hands over:
+//
+//   { name: <channel display name>, entry: <epgMap[tvgId]>, nowSec: <clock> }
+//
+// `entry` is the epg-now record for the row's tvg-id, exactly as the service
+// holds it; the guide looks it up and passes it, and composes nothing.
+//
+// `now` is preferred and `next` is the fallback, because a channel between
+// programmes (or one whose current programme has ended, which epgFields
+// hides for the same reason) still has something true to say. `period` names
+// which of the two was used so the panel can title itself without guessing.
+//
+// NEVER RETURNS A URL. A description is the longest provider-controlled
+// string this plugin has ever rendered, and engineering rule 5 lists guide
+// text as a sink, so every text field here goes through redactUrls -- the
+// title and the channel name included. The LIST's own title path
+// (epgFields -> rowDetail / rowAccessibleName / formatEpgLine) did not redact
+// either of them, which was F-SINK-10; it is CLOSED, at those sinks and at
+// the epgFields boundary that feeds them, so this function is no longer the
+// only place a programme title is safe. The guide renders the result as
+// plain text (D-TEXT-1).
+function programmeDetail(row) {
+  var o = row && typeof row === "object" ? row : {}
+  var entry = o.entry && typeof o.entry === "object" ? o.entry : null
+  if (!entry) return null
+  var nowSec = Number(o.nowSec) || 0
+  // The guide hands over the row it DRAWS, which is a channel object plus the
+  // guide entry for it; an earlier draft of this contract said `name` and the
+  // guide said `channel`, and both were defensible, so both are read here
+  // rather than one lane being made to re-say the other's word. A caller that
+  // passes neither still gets a panel, without a channel line.
+  var channelObj = o.channel && typeof o.channel === "object" ? o.channel : null
+  var rawName = o.name !== undefined && o.name !== null && str(o.name) !== ""
+    ? o.name
+    : (channelObj ? channelObj.name : "")
+  var fields = epgFields(entry, nowSec)
+  var period = ""
+  var programme = null
+  if (fields.nowTitle !== "") {
+    period = "now"
+    programme = entry.now
+  } else if (fields.nextTitle !== "") {
+    period = "next"
+    programme = entry.next
+  }
+  if (!programme) return null
+  var title = epgDetailText(programme.title, EPG_DETAIL_MAX)
+  if (title === "") return null
+  var out = { period: period, title: title }
+  // The channel name is redacted here as well: a playlist-supplied name is
+  // the same provider-controlled string a description is, and this object must
+  // hold no URL at all. It is no longer the ONLY place -- rowAccessibleName
+  // and the guide's own row and tile bindings redact it too, which is what
+  // closing F-SINK-10 means -- and the comment that said it was is gone.
+  // NOTE (F-PANEL-1): nothing RENDERS this field. The panel draws title,
+  // when, episode, category, description and next, and no channel line; the
+  // node suite pins that so it has to be settled rather than noticed again.
+  var name = cleanName(epgDetailText(rawName, EPG_DETAIL_MAX))
+  if (name !== "") out.channel = name
+  var when = period === "now"
+    ? formatTimeRange(fields.nowStart, fields.nowStop)
+    : formatTimeRange(fields.nextStart, programme.stop)
+  if (when !== "") out.when = when
+  // One key per accepted field, omitted when the record does not carry it.
+  //
+  // THIS USED TO ALSO BUILD AN ORDERED `fields` ARRAY OF [label, text] PAIRS,
+  // under a comment claiming the panel was handed it so the ORDER stayed this
+  // function's decision. It was dead: nothing in Guide.qml, Service.qml,
+  // BarWidget.qml or the dev harness ever read `.fields`; the panel names
+  // each field itself (`detailPanel.field("episode")` and the two beside it)
+  // and drew no labels, so the labels never shipped either. Three node
+  // assertions were its only consumers, which is a shape rule 14 exists to
+  // catch.
+  //
+  // DELETED RATHER THAN WIRED UP, and the reason is typography. The three
+  // fields do not render alike: `episode` and `category` are bodySmall at the
+  // caption rung and elide, `description` is body, full rung, and is the only
+  // element on the card that WRAPS -- which is the whole feature. A Repeater
+  // over [label, text] pairs cannot carry that, so the panel would have to
+  // switch styling on the field's identity, which puts a decision back in QML
+  // (rule 12) to take one out. Reinstating the labels would also be a UX
+  // change the interaction document never asked for, decided by a lane with
+  // no display this round.
+  // So the render ORDER lives where the render does, in the panel's element
+  // order, and the node suite reads it out of the shipping Guide.qml and
+  // checks it against EPG_DETAIL_FIELDS -- a field added here and not drawn
+  // there is red. That join is the thing the dead array only claimed to give.
+  for (var i = 0; i < EPG_DETAIL_FIELDS.length; i++) {
+    var text = epgDetailText(programmeFieldText(programme, EPG_DETAIL_FIELDS[i][1]), EPG_DETAIL_MAX)
+    if (text !== "") out[EPG_DETAIL_FIELDS[i][0]] = text
+  }
+  // What is on after this one, as a finished line, because the panel renders
+  // what it is given and composes nothing (rule 12). Only when the panel is
+  // showing the CURRENT programme: when it is already showing the next one
+  // there is nothing after it in a now/next record, and a line that said
+  // otherwise would be inventing data the feed never carried. The words match
+  // the row's own `Next: <title> at HH:MM` so the panel and the list read the
+  // same (Model.formatEpgLine owns that vocabulary for the row).
+  if (period === "now" && fields.nextTitle !== "") {
+    var nextTitle = epgDetailText(fields.nextTitle, EPG_DETAIL_MAX)
+    if (nextTitle !== "") {
+      var at = formatClock(fields.nextStart)
+      out.next = at === "" ? "Next: " + nextTitle : "Next: " + nextTitle + " at " + at
+    }
+  }
+  return out
 }
 
 // The failure notice, in one place (M2-09 D4). UX.md:181, UX.md:739, ruling 9
@@ -6428,15 +6827,23 @@ function rowNoticeEmphasis(failedAt) {
 
 // Row detail line (UX 2.4): `Group - Now: X - Next: Y`, group omitted inside
 // its own group, EPG segments replaced by the failure notice when set.
+//
+// F-SINK-10: this is GUIDE TEXT, which engineering rule 5 lists as a sink,
+// and all three of the strings it composes are provider-written -- the
+// `group-title` of an M3U entry and two XMLTV programme titles. Every one of
+// them goes through sinkText. The titles arrive already redacted from
+// epgFields; redacting here as well is what makes the SINK safe rather than
+// the one path that feeds it today.
 function rowDetail(opts) {
   var o = opts || {}
   var parts = []
-  if (o.showGroup) parts.push(str(o.group))
+  var group = sinkText(o.group)
+  if (o.showGroup) parts.push(group)
   if (str(o.failedAt) !== "") {
-    return joinParts([o.showGroup ? str(o.group) : "", failedNotice(o.failedAt)])
+    return joinParts([o.showGroup ? group : "", failedNotice(o.failedAt)])
   }
-  if (str(o.nowTitle) !== "") parts.push("Now: " + str(o.nowTitle))
-  if (str(o.nextTitle) !== "") parts.push("Next: " + str(o.nextTitle))
+  if (str(o.nowTitle) !== "") parts.push("Now: " + sinkText(o.nowTitle))
+  if (str(o.nextTitle) !== "") parts.push("Next: " + sinkText(o.nextTitle))
   return joinParts(parts)
 }
 
@@ -6475,13 +6882,21 @@ function rowShowsGroup(opts) {
 // Accessible name for a channel row (UX 7.1, M2-03 8.1). An unnumbered row
 // in a numbered playlist announces nothing extra: the empty slot is not read
 // out, because the absence IS the information (CN6).
+//
+// F-SINK-10: engineering rule 5 lists THE ACCESSIBILITY BUS as a sink, and
+// D-A11Y-1 is what happens when something publishes there unredacted. This
+// name is the one string the whole row publishes, and two of its parts are
+// provider-written: the channel NAME out of the M3U and the programme title
+// out of the XMLTV. Both go through sinkText. The name is the older half of
+// the gap -- it has been raw here since M2-09 -- and programmeDetail already
+// redacted its own copy of it, which is the asymmetry the finding named.
 function rowAccessibleName(opts) {
   var o = opts || {}
-  var out = str(o.name)
+  var out = sinkText(o.name)
   if (str(o.chno) !== "") out = "Channel " + str(o.chno) + ", " + out
   if (o.favorite) out += ", favorite"
   if (o.playing) out += ", playing"
-  if (str(o.nowTitle) !== "") out += ", now " + str(o.nowTitle) + (str(o.until) !== "" ? " until " + str(o.until) : "")
+  if (str(o.nowTitle) !== "") out += ", now " + sinkText(o.nowTitle) + (str(o.until) !== "" ? " until " + str(o.until) : "")
   if (str(o.failedAt) !== "") out += ", failed"
   // M2-09 D5 / GS5: the position, LAST -- after the failure state, so someone
   // stepping rows hears the name first and the index after. Today this
@@ -6709,6 +7124,23 @@ function footerHints(opts) {
   var mode = str(o.mode)
   if (mode === "confirmRemove" || mode === "confirmLogos") return [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]]
   if (mode === "tracks") return [["j/k", "move"], ["Enter", "select"], ["Esc", "back"]]
+  // M4-02 / M4-04. The keys both panels actually handle, which is four and
+  // not one. An earlier version of this line returned `Esc back` alone,
+  // reasoning that a panel whose content fits needs no movement key -- but
+  // the content does not always fit. The detail panel's description is the
+  // one element in the plugin that WRAPS, Guide.qml's handlePanelKey takes
+  // PageUp, PageDown, Home and End, and onMoveRequested pans on j/k, so on a
+  // 600 character synopsis or a map taller than the card the user was left
+  // with no on-screen cue that anything could move. A hint that lies by
+  // omission is the one the footer was redesigned to stop telling.
+  //
+  // `Enter` is deliberately NOT here: onActivateRequested returns immediately
+  // for `inPanel`, so Enter does nothing in either panel, and the track
+  // picker's own line is where `Enter select` belongs. That is also why
+  // keyboardMap no longer merges the picker and these two into one section.
+  if (mode === "detail" || mode === "help") {
+    return [["j/k", "scroll"], ["PgUp/PgDn", "page"], ["Home/End", "ends"], ["Esc", "back"]]
+  }
   if (mode === "sourceEdit" || mode === "sourceXtream") return formHints(o.form)
   if (mode === "sources") {
     if (o.cursorKind === "add" || o.cursorKind === "xtream") return [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]]
@@ -6756,6 +7188,13 @@ function footerHints(opts) {
     // M3-02: gated the same way, for the same reason -- a picker with no
     // player to ask has nothing to show.
     if (o.playing === true) list.push([TRACKS_KEY, "tracks"])
+    // M4-02. Gated STRICTLY (`=== true`, not `!== false`) and not the way
+    // `pipAvailable` is, because this key is new: there is no shipped
+    // wording an absent flag has to keep reading as. The flag is "this row
+    // has a programme to show", and on the measurement that opened M4
+    // (D-EPG-2: 0 of 1,453 rows carry one) hinting it unconditionally would
+    // advertise a key that answers nothing on every install we have seen.
+    if (o.hasDetail === true) list.push([DETAIL_KEY, "detail"])
     // M2-05 section 5. Gated the way `0-9` is: a machine with no Hyprland
     // never advertises a key that can only answer "picture in picture needs
     // Hyprland". An absent flag shows it, so a service that predates PiP is
@@ -6773,6 +7212,12 @@ function footerHints(opts) {
     // gains no clutter and never advertises a key that does nothing.
     if (o.hasNumbers === true) list.push(["0-9", "channel"])
     list.push([SOURCE_KEYS.open, "sources"])
+    // M4-04, LAST and ungated. The footer elides from the LEFT on a narrow
+    // card, so the final segment is the one that always survives -- and the
+    // key that says what the other fourteen are is the one that must. The
+    // plan's own reason for the map is that this line is at its structural
+    // limit; the way out of a full line is not to keep the way out off it.
+    list.push([HELP_KEY, "help"])
     return list
   }
   // M2-13. Search mode gets the toggle too, and this is not symmetry for its
@@ -6788,9 +7233,18 @@ function footerHints(opts) {
             ["Left/Right", wall ? arrowVerb(o, "h") : "narrow"],
             [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "clear"]]
   }
+  // M4-04, and the one hint on this line a first-run user needs. `?` really
+  // does work here -- handleSearchKey takes it while the query is empty, see
+  // HELP_KEY -- and the guide OPENS on this screen, so leaving it unhinted
+  // meant nothing on the first screen the user sees said the map exists, not
+  // even the map's own key. LAST for the same elide reason as the list line:
+  // the footer elides from the left, so the final segment is the one that
+  // survives on a narrow card. Only on the EMPTY-query line, because the
+  // moment there is query text `?` is a character again.
   return [["Enter", "play"], ["Up/Down", arrowVerb(o, "v")],
           ["Left/Right", arrowVerb(o, "h")],
-          [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "close"]]
+          [WALL_KEY, wall ? "list" : "wall"], ["Tab", "keys"], ["Esc", "close"],
+          [HELP_KEY, "help"]]
 }
 
 // M2-09 D6. The h/l ring still does something real on a one-group playlist --
@@ -6828,6 +7282,267 @@ function formHints(form) {
   return [["Enter", submit], ["Tab", "next field"], [SOURCE_KEYS.paste, "paste"], ["Esc", esc]]
 }
 
+// ------------------------------------------------------ keyboard map (M4-04)
+//
+// `?` opens a panel listing every key. The whole point of the feature is
+// that it cannot drift, so it is BUILT BY CALLING the tables the rest of the
+// product dispatches on -- footerHints, formHints, hideAction, onEscape,
+// arrowAction (through footerHints' arrowVerb), SOURCE_KEYS, PAUSE_KEY,
+// TRACKS_KEY, WALL_KEY, DETAIL_KEY, HELP_KEY and the number-entry branch --
+// and never from a second hand-written list beside them.
+//
+// A hand-written map is the engineering rule 13 failure exactly: two
+// statements of one fact joined by nothing but a name. This project has been
+// bitten by that shape repeatedly -- the three arrow branches the 0.8.0
+// preflight blocked on, the defect ledger's 32 drifted ids, the hide verb,
+// the EPG-configured predicate -- and a help screen is the worst place for
+// it, because the one user who reads it is the one who cannot tell it is
+// wrong.
+//
+// WHAT THE MAP DOES NOT GATE. footerHints hides a key that cannot act right
+// now (`playing`, `pipAvailable`, `hasNumbers`, `hasDetail`). The map does
+// the opposite by default: it describes the grammar, and a help screen that
+// hid the keys the user has not discovered yet would be useless on exactly
+// the install that needs it. So keyboardMap() with no options shows
+// everything, and `opts` only ever narrows it.
+//
+// WHAT CANNOT BE DERIVED. Five pairs, and they are in ONE named table below
+// rather than scattered through the builder, so the gap is countable and a
+// test can assert it has not grown. Each is a key Guide.qml dispatches on
+// directly with no table in between:
+//
+//   Home, End, PageUp, PageDown -- handleSharedKey() branches on the Qt key
+//     codes itself. The table that would close this is `listKeyAction(key,
+//     opts)`, the Qt-key-code sibling of listLetterAction, returning
+//     "first" / "last" / "page" / "" so the handler, the footer and this map
+//     would all read one decision. It does not exist yet.
+//   Ctrl+S (save the current search) -- handleSearchKey() branches on it and
+//     no hint line names it; the same `listKeyAction` would cover it.
+//   SOURCE_KEYS.clear (Ctrl+U) -- its KEY comes from SOURCE_KEYS, so half
+//     the join holds; its MEANING is a literal because formHints never had
+//     room for it. A `SOURCE_KEY_VERBS` map beside SOURCE_KEYS, one verb per
+//     member, is what formHints and this would then share.
+//
+// Delete is a sixth key no table NAMES -- Guide.qml branches on
+// Qt.Key_Delete, so `listKeyAction` would cover it too -- but it is not in
+// the table above, because its MEANING is derived: in the list it reaches the
+// same hideAction call `x` does (removeAt), and in Sources it is the remove
+// action's twin, so it takes that verb rather than a second spelling of it.
+// Esc is fully derived: in list mode it dispatches on Model.onEscape, and
+// sameEscape() below proves list and search agree before the list borrows
+// search's wording.
+//
+// A function and not a `var` only because SOURCE_KEYS is declared below
+// this point in the file: a literal array here would read `undefined.clear`
+// at module evaluation time.
+function keyboardMapUntabled() {
+  return [
+    ["Channel list", "Home", "first channel"],
+    ["Channel list", "End", "last channel"],
+    ["Channel list", "PgUp/PgDn", "page up / down"],
+    ["Search", "Ctrl+S", "save this search"],
+    ["Source forms", SOURCE_KEYS.clear, "clear the field"]
+  ]
+}
+
+// The word for `x` in the MAP, over hideAction's whole action vocabulary.
+// Not hideVerb: the footer is deliberately SILENT on `x` in Recent and
+// Favorites (M3-01), and inheriting that silence here would leave a key that
+// does something off the one screen that lists what keys do. One table, two
+// readings, and the difference is stated rather than duplicated.
+function hideMeaning(opts) {
+  var act = hideAction(opts).action
+  if (act === "recent") return "remove from Recent"
+  if (act === "favorite") return "remove from Favorites"
+  if (act === "unhide") return "unhide this group"
+  // "hide", and "none" -- which means no row is highlighted yet, so the key
+  // takes this meaning the moment one is.
+  return "hide this group"
+}
+
+// What Esc does in a mode, as a comparable string, straight out of the
+// reducer the handler calls. Used to prove that list mode and search mode
+// dispatch it identically before the list borrows search's wording, instead
+// of assuming it: if the two ever diverge the list's Esc row disappears
+// rather than describing the wrong one.
+function escapeOutcome(mode, query) {
+  var st = guideState(SCOPE_ALL)
+  st.mode = str(mode)
+  st.query = str(query)
+  var r = onEscape(st, { configured: true })
+  // The resulting MODE is compared as "changed or not", never by value: the
+  // two modes trivially differ by their own name, and what has to match is
+  // the BEHAVIOUR -- whether Esc closes the guide, whether it leaves the
+  // mode, and what it leaves in the query.
+  var moved = str(r.state.mode) !== str(mode) ? "mode-changed" : "same-mode"
+  return (r.close === true ? "close" : "stay") + ":" + moved + ":" + str(r.state.query)
+}
+
+function sameEscape(a, b) {
+  return escapeOutcome(a, "") === escapeOutcome(b, "") && escapeOutcome(a, "x") === escapeOutcome(b, "x")
+}
+
+// The meaning a set of [key, verb] pairs gives one key, "" when it names
+// none. Lets one section borrow a pair another screen's table already
+// spells, rather than spelling it a second time.
+function verbForKey(pairs, key) {
+  var list = asList(pairs)
+  var want = str(key)
+  for (var i = 0; i < list.length; i++) {
+    var pair = asList(list[i])
+    if (str(pair[0]) === want) return str(pair[1])
+  }
+  return ""
+}
+
+// Overwrite (or add) one key's meaning, for the two keys whose map wording
+// is READ FROM A WIDER TABLE than the footer's -- `x` and Delete come from
+// hideMeaning, which covers the two actions the footer is silent about, so
+// the footer's narrower verb is replaced rather than joined to it.
+function setKeyRow(rows, key, meaning) {
+  var k = str(key)
+  var m = str(meaning)
+  if (k === "" || m === "") return rows
+  for (var i = 0; i < rows.length; i++) if (rows[i][0] === k) { rows[i][1] = m; return rows }
+  rows.push([k, m])
+  return rows
+}
+
+// Merge [key, meaning] pairs into one section, first meaning first, and join
+// two meanings for the same key with " / " (Esc really does read `clear` on
+// a search with text and `close` on an empty one).
+function mergeKeyRows(rows, pairs) {
+  var list = asList(pairs)
+  for (var i = 0; i < list.length; i++) {
+    var pair = asList(list[i])
+    var key = str(pair[0])
+    var meaning = str(pair[1])
+    if (key === "" || meaning === "") continue
+    var at = -1
+    for (var j = 0; j < rows.length; j++) if (rows[j][0] === key) { at = j; break }
+    if (at === -1) { rows.push([key, meaning]); continue }
+    if (rows[at][1].split(" / ").indexOf(meaning) === -1) rows[at][1] += " / " + meaning
+  }
+  return rows
+}
+
+// `opts` is the live guide context, all of it optional:
+//   scopeId, query, channel, state   -> the `x` and Delete meaning, via hideAction
+//   wall, groupsNarrow               -> the arrow verbs, via arrowAction
+//   playing, paused, pipAvailable, hasNumbers, hasDetail, showLogos
+//                                    -> only ever to NARROW the list
+// -> [{ title, rows: [[key, meaning], ...] }, ...] in reading order.
+function keyboardMap(opts) {
+  var o = opts || {}
+  function flag(name, dflt) { return o[name] === undefined ? dflt : o[name] === true }
+  // The list-mode context, with everything available unless the caller says
+  // otherwise. `mode` is forced: footerHints dispatches on it and the map
+  // asks each screen's question itself.
+  var list = {
+    mode: "list", query: "", empty: "",
+    scopeId: o.scopeId, channel: o.channel, state: o.state,
+    wall: flag("wall", false), groupsNarrow: flag("groupsNarrow", true),
+    playing: flag("playing", true), paused: flag("paused", false),
+    pipAvailable: flag("pipAvailable", true), hasNumbers: flag("hasNumbers", true),
+    hasDetail: flag("hasDetail", true), numberEntry: null
+  }
+  var sections = []
+  // 1. The channel list. footerHints gives the whole line.
+  var listRows = mergeKeyRows([], footerHints(list))
+  // Both views, so the h/l verb that belongs to the other one is listed too
+  // (arrowAction, the table the handler dispatches on) and WALL_KEY carries
+  // both of its words.
+  var other = {}
+  for (var k in list) other[k] = list[k]
+  other.wall = !list.wall
+  mergeKeyRows(listRows, footerHints(other))
+  // `x` widened to hideAction's other two actions, which the footer omits on
+  // purpose, and Delete which reaches the same hideAction call in removeAt().
+  var hideWord = hideMeaning(o)
+  setKeyRow(listRows, "x", hideWord)
+  setKeyRow(listRows, "Delete", hideWord)
+  // 2. Search, both the empty and the typed-in line, because Esc and
+  // Left/Right change meaning between them.
+  var searchRows = mergeKeyRows([], footerHints({ mode: "search", query: "", wall: list.wall, groupsNarrow: list.groupsNarrow }))
+  mergeKeyRows(searchRows, footerHints({ mode: "search", query: "x", wall: list.wall, groupsNarrow: list.groupsNarrow }))
+  // The list footer never hints Esc, but onEscape proves the two modes
+  // dispatch it identically, so the list gets search's own wording.
+  if (sameEscape("list", "search")) mergeKeyRows(listRows, [["Esc", verbForKey(searchRows, "Esc")]])
+  sections.push({ title: "Channel list", rows: listRows })
+  sections.push({ title: "Search", rows: searchRows })
+  // 3. Channel numbers, from the number-entry branch of the same function.
+  if (list.hasNumbers) sections.push({ title: "Channel numbers", rows: mergeKeyRows([], footerHints({ mode: "list", numberEntry: { active: true } })) })
+  // 4. The panels, one footerHints call per mode, so a panel that gains a key
+  // gains a row here. The keys that OPEN them are already in the channel-list
+  // section, out of the same footer line, and are not restated.
+  //
+  // TWO SECTIONS, NOT ONE, and the reason is that merging them produced a
+  // map that lied. mergeKeyRows unions the keys across the modes it is given,
+  // so one "Panels" section carrying tracks + detail + help told the reader
+  // `Enter select` -- true in the picker, and nothing at all in the other two,
+  // where onActivateRequested returns immediately -- and, once the two
+  // read-only panels gained their real movement rows, it would have had to
+  // read `j/k move / scroll` for keys that do one or the other depending on
+  // which panel is up. The map's whole job is to be the screen that does not
+  // make you press a key to find out, so each row is filed under the panels
+  // it is actually true on.
+  sections.push({ title: "Audio and subtitles", rows: mergeKeyRows([], footerHints({ mode: "tracks" })) })
+  var panelRows = mergeKeyRows([], footerHints({ mode: "detail" }))
+  mergeKeyRows(panelRows, footerHints({ mode: "help" }))
+  sections.push({ title: "Programme and Keys panels", rows: panelRows })
+  // 5. Sources: the list, both cursor kinds, and the logos switch in the
+  // state it is actually in. Delete is the remove key's twin, so it takes the
+  // remove verb rather than a second spelling of it.
+  var srcRows = mergeKeyRows([], footerHints({ mode: "sources", showLogos: flag("showLogos", false) }))
+  mergeKeyRows(srcRows, footerHints({ mode: "sources", cursorKind: "add" }))
+  mergeKeyRows(srcRows, [["Delete", verbForKey(srcRows, SOURCE_KEYS.remove)]])
+  sections.push({ title: "Sources", rows: srcRows })
+  // 6. The forms, over every branch of formHints that changes a key: a
+  // maskable field, a revealed one, a plain one, Xtream, a focus that is not
+  // a field at all, and a probing form.
+  var formRows = []
+  var forms = [
+    { kind: "m3u", focus: "playlist", values: { playlist: "http://user:pass@host/get.php" } },
+    { kind: "m3u", focus: "playlist", values: { playlist: "http://user:pass@host/get.php" }, revealed: { playlist: true } },
+    { kind: "m3u", focus: "label", values: { label: "x" } },
+    { kind: "xtream", focus: "server", values: { server: "x" } },
+    { kind: "m3u", focus: "submit", values: {} },
+    { kind: "m3u", focus: "playlist", values: {}, probing: true }
+  ]
+  for (var f = 0; f < forms.length; f++) mergeKeyRows(formRows, formHints(forms[f]))
+  sections.push({ title: "Source forms", rows: formRows })
+  // 7. Confirmations and the empty state, the last two screens footerHints
+  // answers for.
+  var elseRows = mergeKeyRows([], footerHints({ mode: "confirmRemove" }))
+  mergeKeyRows(elseRows, footerHints({ mode: "list", empty: "error", retry: true, sourcesExist: true }))
+  mergeKeyRows(elseRows, footerHints({ mode: "list", empty: "loading" }))
+  sections.push({ title: "Confirmations and errors", rows: elseRows })
+  // The pairs no table spells, each into the section it belongs to, LAST so
+  // that a derived pair always wins the key if one ever appears.
+  var untabled = keyboardMapUntabled()
+  for (var u = 0; u < untabled.length; u++) {
+    for (var s = 0; s < sections.length; s++) {
+      if (sections[s].title === untabled[u][0]) {
+        mergeKeyRows(sections[s].rows, [[untabled[u][1], untabled[u][2]]])
+      }
+    }
+  }
+  return sections
+}
+
+// Every key the map names, flattened and de-duplicated. The guide does not
+// need this; the test that holds the join does, and so does anything that
+// wants to ask whether a key is covered without walking the sections.
+function keyboardMapKeys(opts) {
+  var sections = keyboardMap(opts)
+  var out = []
+  for (var i = 0; i < sections.length; i++) {
+    var rows = asList(sections[i].rows)
+    for (var j = 0; j < rows.length; j++) if (out.indexOf(str(rows[j][0])) === -1) out.push(str(rows[j][0]))
+  }
+  return out
+}
+
 // ------------------------------------------------------------ sources (M2-01)
 //
 // ARCHITECTURE-SOURCES.md (dev branch) section 3 (state records, keys, validation,
@@ -6861,6 +7576,31 @@ var PAUSE_KEY = "c"
 // M3-02: the audio and subtitle picker. A bare letter, because the picker
 // is list-mode only: search mode types it (PLAN-M3 section 2).
 var TRACKS_KEY = "t"
+// M4-02: the programme detail panel. `i` for information; d is unused but
+// reads as "delete" beside x, and e is edit on Sources.
+var DETAIL_KEY = "i"
+// M4-04: the keyboard map. `?` IS THE ONE EXCEPTION to the bare-letter rule,
+// and this comment used to say the opposite -- "LIST-MODE ONLY ... the footer
+// never hints it in search mode" -- while Guide.qml's handleSearchKey had
+// taken it from the day it was written. Both could not be true, and the one
+// that was wrong was this one, so the footer and keyboardMap inherited a
+// silence the code did not have.
+//
+// WHY THE EXCEPTION IS SOUND. DETAIL_KEY, PAUSE_KEY and TRACKS_KEY are bare
+// printable characters and therefore list-mode only: in search mode they are
+// query text and there is nothing to be done about it, which is why WALL_KEY
+// had to take a modifier. `?` is different in one measurable way: tokenize
+// drops it entirely, so a query of "?" alone has zero terms and filters
+// nothing. The keystroke was already a no-op on the results and showed only
+// as a stray character, so taking it for the map costs a user nothing -- and
+// the guide OPENS in search mode, which is exactly the screen a first-time
+// user needs the map from. The exception is NARROW: it holds only while the
+// query is empty, so `who?` is unaffected.
+//
+// So all three places say so. handleSearchKey takes it on an empty query,
+// footerHints' empty-query search line hints it last, and keyboardMap files
+// it under both Channel list and Search because it is reached from both.
+var HELP_KEY = "?"
 
 var SOURCE_KEYS = { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" }
 var SOURCE_KEY_RE = /^[0-9a-f]{8}(-[0-9]{1,3})?$/
@@ -7083,6 +7823,82 @@ function validateSourceUrl(text, opts) {
 function normalizeSourceUrl(text, opts) {
   var v = validateSourceUrl(text, opts)
   return v.ok ? v.url : ""
+}
+
+// ---- the guide URL the playlist declares (M4-01 repair 3, D-EPG-2)
+//
+// `#EXTM3U url-tvg="..."` / `x-tvg-url="..."` has reached channels.json as
+// `epgUrlHint` since the first playlist parser (bin/omarchy-iptv) and NOTHING
+// has ever read it. A provider that tells us where its guide lives was
+// ignored, and the owner's own install carries no guide URL at all -- so the
+// one repair of the four that can fix an install without the user typing
+// anything was sitting in the cache unused.
+//
+// Two decisions, both deliberate.
+//
+// 1. THE HINT IS RESOLVED AT FETCH TIME AND NEVER PERSISTED. It is not
+//    written into the source record (`epgUrl`) and not into the bar settings.
+//    A playlist's declaration belongs to the playlist: copying it into the
+//    user's own field would destroy the only fact that lets the two be told
+//    apart, so the user could neither recognise it as the provider's nor get
+//    rid of it -- clearing the field would re-adopt the same value on the next
+//    refresh, which reads as the plugin refusing to forget a URL. Resolution
+//    is a pure function of (the user's URL, the cache's hint): typing a URL
+//    buries the hint, clearing the field reveals it again, and there is
+//    nothing to migrate in either direction.
+// 2. A HINTED URL IS PROVIDER-CONTROLLED INPUT. It goes through the same
+//    validateSourceUrl a typed one does, and then through a NARROWER scheme
+//    rule: only `http`/`https` survive. validateSourceUrl accepts absolute
+//    paths and `file://` for a TYPED value, because a user may keep a guide
+//    on disk; honouring either from a playlist would let a remote party
+//    choose which local file this plugin opens and parses. A user's own file
+//    guide is unaffected -- it is typed, not hinted.
+//
+// Both halves of the resolution are redacted to scheme and host at every
+// sink the same way the user's URL is: nothing here returns a URL to the
+// guide. `host` is the redacted form callers display; `url` is for the fetch
+// environment only (D-SINK-8).
+var EPG_ORIGIN_NONE = ""
+var EPG_ORIGIN_USER = "user"
+var EPG_ORIGIN_PLAYLIST = "playlist"
+
+// The channels.json hint, validated and narrowed to http(s), or "".
+function epgHintUrl(meta) {
+  var m = meta && typeof meta === "object" ? meta : {}
+  var raw = str(m.epgUrlHint)
+  if (raw === "") return ""
+  var v = validateSourceUrl(raw, { kind: "epg" })
+  // `kind: "epg"` passes an EMPTY value as ok with kind "", so `v.ok` alone
+  // would accept nonsense that sanitized away to nothing; and `kind !==
+  // "http"` is decision 2 above, not a formality -- that branch is the one
+  // that refuses `/etc/passwd` and `file:///...` from a provider.
+  if (!v.ok || v.kind !== "http" || v.url === "") return ""
+  return v.url
+}
+
+// Which guide URL is in force, and where it came from.
+//
+// The user's own value always wins, and an INVALID user value still wins: it
+// is returned verbatim with origin `user` so the helper reports the fault the
+// user can see and fix. Substituting the provider's hint for a URL the user
+// mistyped would produce an error message about a URL they never entered, or
+// worse, silently fetch somewhere else and look like it worked.
+function resolveEpgUrl(opts) {
+  var o = opts || {}
+  var user = str(o.userUrl)
+  if (user !== "") return { url: user, origin: EPG_ORIGIN_USER, host: hostOf(user), fromPlaylist: false }
+  var hint = epgHintUrl({ epgUrlHint: o.hint })
+  if (hint === "") return { url: "", origin: EPG_ORIGIN_NONE, host: "", fromPlaylist: false }
+  return { url: hint, origin: EPG_ORIGIN_PLAYLIST, host: hostOf(hint), fromPlaylist: true }
+}
+
+// The one line of copy that makes the provenance visible (M4-01 repair 3:
+// "saying in Sources where it came from"). "" for a URL the user typed and
+// for none at all -- a typed URL needs no provenance, it is theirs.
+var EPG_HINT_NOTICE = "Guide URL from the playlist"
+
+function epgOriginNotice(origin) {
+  return str(origin) === EPG_ORIGIN_PLAYLIST ? EPG_HINT_NOTICE : ""
 }
 
 function isUrlField(field) {
@@ -7348,17 +8164,26 @@ function formatAgo(nowSec, atSec) {
 // UX kind (`url` | `file` | `xtream`), `host` never a URL, `channelCount`
 // -1 until the first successful fetch. `errorReason` is the session-only
 // probe failure (already redacted) the service may attach.
-function sourceView(source, activeKey, nowSec, errorReason) {
+// `epgFromPlaylist` (M4-01 repair 3) is the ACTIVE source's resolved hint:
+// the hint lives in a source's own channels.json, and only the active
+// source's cache is in memory, so no other row can know and none of them
+// claims to. A source with its own `epgUrl` is never marked hinted -- the
+// user's value wins in resolveEpgUrl and it must win here too, or the row
+// would tell the user their own URL came from the provider.
+function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist) {
   var s = source || {}
   var key = str(s.key)
   var kind = str(s.kind) === "file" ? "file" : (str(s.origin) === "xtream" ? "xtream" : "url")
   var fetched = Number(s.fetchedAt) > 0
+  var ownEpg = str(s.epgUrl) !== ""
+  var hinted = !ownEpg && epgFromPlaylist === true && key !== "" && key === str(activeKey)
   return {
     id: key,
     label: str(s.label),
     kind: kind,
     host: kind === "file" ? "local file" : hostPortOf(s.url),
-    hasEpg: str(s.epgUrl) !== "",
+    hasEpg: ownEpg || hinted,
+    epgFromPlaylist: hinted,
     channelCount: fetched ? Math.max(0, Math.floor(Number(s.channelCount) || 0)) : -1,
     groupCount: fetched ? Math.max(0, Math.floor(Number(s.groupCount) || 0)) : 0,
     cachedAt: fetched ? Math.floor(Number(s.fetchedAt)) : 0,
@@ -7372,14 +8197,14 @@ function sourceView(source, activeKey, nowSec, errorReason) {
 
 // Every record as a view, active first, then last used (newest first),
 // then added (newest first). `errors` is the service's { key: reason } map.
-function sourceViews(state, activeKey, nowSec, errors) {
+function sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist) {
   var st = state || emptyState()
   var errs = errors && typeof errors === "object" ? errors : {}
   var list = asList(st.sources)
   var out = []
   for (var i = 0; i < list.length; i++) {
     if (!list[i]) continue
-    var view = sourceView(list[i], activeKey, nowSec, errs[str(list[i].key)])
+    var view = sourceView(list[i], activeKey, nowSec, errs[str(list[i].key)], epgFromPlaylist)
     view.addedAt = Math.floor(Number(list[i].addedAt) || 0)
     out.push(view)
   }
@@ -7399,9 +8224,13 @@ function sourceViews(state, activeKey, nowSec, errors) {
 }
 
 // Architecture name.
-function sourceRows(state, activeKey, nowSec, errors) {
-  return sourceViews(state, activeKey, nowSec, errors)
+function sourceRows(state, activeKey, nowSec, errors, epgFromPlaylist) {
+  return sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist)
 }
+
+// The Sources row and accessible-name word for a hinted guide URL. One
+// literal, two sinks, so the screen and the screen reader cannot drift.
+var EPG_HINT_ROW_TEXT = "EPG from playlist"
 
 // Row detail (UX-SOURCES 5.2): `active` (active source only), `used ...` on
 // narrow cards, host, `Xtream`, counts or `not loaded yet`, `EPG`. Rows
@@ -7415,7 +8244,11 @@ function sourceDetail(view, narrow) {
   parts.push(str(v.host))
   if (v.kind === "xtream") parts.push("Xtream")
   parts.push(Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
-  if (v.hasEpg) parts.push("EPG")
+  // M4-01 repair 3: `EPG` for a URL the user set, `EPG from playlist` for one
+  // the playlist declared. The row is where the user finds out, and the two
+  // must never read the same -- an adopted hint that looked like their own
+  // setting is the failure this wording exists to prevent.
+  if (v.hasEpg) parts.push(v.epgFromPlaylist === true ? EPG_HINT_ROW_TEXT : "EPG")
   return joinParts(parts)
 }
 
@@ -7425,7 +8258,7 @@ function sourceAccessibleName(view) {
   var out = str(v.label) + ", " + str(v.host)
   out += ", " + (Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
   if (v.active) out += ", active"
-  if (v.hasEpg) out += ", EPG"
+  if (v.hasEpg) out += ", " + (v.epgFromPlaylist === true ? EPG_HINT_ROW_TEXT : "EPG")
   var used = str(v.lastUsedText) || formatLastUsed(v.lastUsedAt)
   out += ", " + (used === "never used" ? used : "last " + used)
   return out
@@ -8317,6 +9150,7 @@ if (typeof module !== "undefined") {
     browsableChannels: browsableChannels,
     hideAction: hideAction,
     hideVerb: hideVerb,
+    hideMeaning: hideMeaning,
     hideNotice: hideNotice,
     numberJumpScope: numberJumpScope,
     scopeEntryAccessibleName: scopeEntryAccessibleName,
@@ -8331,6 +9165,7 @@ if (typeof module !== "undefined") {
     scopeLabel: scopeLabel,
     revealOffset: revealOffset,
     guideState: guideState,
+    guideMode: guideMode,
     withQuery: withQuery,
     withScope: withScope,
     withMode: withMode,
@@ -8519,6 +9354,7 @@ if (typeof module !== "undefined") {
     hostOf: hostOf,
     redactUrls: redactUrls,
     scrubUrls: scrubUrls,
+    sinkText: sinkText,
     cleanName: cleanName,
     displayName: displayName,
     looksLikeUrl: looksLikeUrl,
@@ -8528,6 +9364,13 @@ if (typeof module !== "undefined") {
     epgFraction: epgFraction,
     epgNowStale: epgNowStale,
     epgFields: epgFields,
+    EPG_DETAIL_FIELDS: EPG_DETAIL_FIELDS,
+    programmeFieldText: programmeFieldText,
+    epgEpisodeText: epgEpisodeText,
+    formatTimeRange: formatTimeRange,
+    EPG_DETAIL_MAX: EPG_DETAIL_MAX,
+    epgDetailText: epgDetailText,
+    programmeDetail: programmeDetail,
     epgCoverage: epgCoverage,
     formatEpgLine: formatEpgLine,
     joinParts: joinParts,
@@ -8595,7 +9438,16 @@ if (typeof module !== "undefined") {
     footerStatus: footerStatus,
     footerHints: footerHints,
     footerHintMarkup: footerHintMarkup,
+    fitFooterHints: fitFooterHints,
+    footerHintWidth: footerHintWidth,
+    FOOTER_DROP_ORDER: FOOTER_DROP_ORDER,
     formHints: formHints,
+    keyboardMap: keyboardMap,
+    keyboardMapKeys: keyboardMapKeys,
+    keyboardMapUntabled: keyboardMapUntabled,
+    verbForKey: verbForKey,
+    setKeyRow: setKeyRow,
+    sameEscape: sameEscape,
     // ---- sources (M2-01)
     STATE_VERSION: STATE_VERSION,
     PLUGIN_VERSION: PLUGIN_VERSION,
@@ -8614,6 +9466,8 @@ if (typeof module !== "undefined") {
     SOURCE_KEYS: SOURCE_KEYS,
     PAUSE_KEY: PAUSE_KEY,
     TRACKS_KEY: TRACKS_KEY,
+    DETAIL_KEY: DETAIL_KEY,
+    HELP_KEY: HELP_KEY,
     playerTracksArgv: playerTracksArgv,
     trackChoice: trackChoice,
     parseTracks: parseTracks,
@@ -8643,6 +9497,14 @@ if (typeof module !== "undefined") {
     sourceReason: sourceReason,
     validateSourceUrl: validateSourceUrl,
     normalizeSourceUrl: normalizeSourceUrl,
+    EPG_ORIGIN_NONE: EPG_ORIGIN_NONE,
+    EPG_ORIGIN_USER: EPG_ORIGIN_USER,
+    EPG_ORIGIN_PLAYLIST: EPG_ORIGIN_PLAYLIST,
+    EPG_HINT_NOTICE: EPG_HINT_NOTICE,
+    EPG_HINT_ROW_TEXT: EPG_HINT_ROW_TEXT,
+    epgHintUrl: epgHintUrl,
+    resolveEpgUrl: resolveEpgUrl,
+    epgOriginNotice: epgOriginNotice,
     isUrlField: isUrlField,
     sourceKey: sourceKey,
     isSourceKey: isSourceKey,

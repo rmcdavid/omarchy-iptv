@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.9.3. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.10.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV, a guide that remembers which
 channels did not work, a channel wall that shows your channels as a grid of
@@ -105,7 +105,7 @@ One place they can escape that, worth knowing, and one that used to:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist |
-| `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional |
+| `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional. If your playlist names its own guide and you leave this empty, that one is used and the Sources screen says so. Channels are matched by id and, when the ids do not agree, by name -- which is usually what happens, because playlists and guides rarely come from the same place |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
 | `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
@@ -159,6 +159,8 @@ Guide keys (the full map is section 3 of the UX spec on the `dev` branch):
 | list | `.` or `,` | subchannel separator, for numbers like `7.1`. Both keys work, because the numpad decimal differs by keyboard layout |
 | list | c | pause or resume the live stream. Not rewind: live streams cannot be wound back, so there is no returning to something that already happened, and the pause lasts about five minutes before the buffer fills. Bind a key to `omarchy-shell io.github.rmcdavid.iptv pause` to reach it while the guide is closed |
 | list | t | while something plays: choose the audio track and the subtitles. A small panel lists what the stream carries; `j`/`k` move, `Enter` selects, `Esc` closes. List mode only -- in search mode `t` is just a letter you are typing |
+| list | i | read what is on: a panel over the list with the programme's name, the channel it is on, when it runs, its category and episode where the guide gives them, the description, and what is on next. `j`/`k` scroll it, `Esc` closes. Needs guide data for that channel |
+| both | ? | every key, in one overlay, built from the same table the hint row is built from -- so a key the plugin learns cannot be missing from the list. `Esc` closes. In search mode it opens on the empty query, where a first-time reader is most likely to press it |
 | list | p | picture in picture: shrink the player into a corner, or put it back |
 | list | r | refresh playlist and EPG now |
 | list | / or Tab | back to search mode; Esc clears the query, then closes |

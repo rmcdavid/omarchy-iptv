@@ -140,18 +140,56 @@ Item {
   // consent when the real answer is countable.
   function logoSurvey() { return Model.logoSurvey(root.channels) }
   readonly property bool configured: playlistUrl !== ""
-  // The EPG URL in force for the active source: the active record's own
+  // The EPG URL THE USER SET for the active source: the active record's own
   // epgUrl once the history knows the source (an EPG URL belongs to the
   // source it was set for, D-SRC-10; the settings follow it through
   // reconcile), the raw setting while no record exists or the setting does
   // not validate (the helper then reports it, as in 0.1.0).
+  //
+  // Since M4-01 repair 3 this is no longer the URL the fetch uses -- see
+  // `epgFetchUrl` below, which falls back to the playlist's own declaration.
+  // Everything that PERSISTS a guide URL still reads this one, and that is
+  // the point of the split.
   readonly property string activeEpgUrl: {
     var rec = Model.findSource(root.userState.sources, root.activeSourceKey)
     if (!rec) return root.epgUrl
     if (root.epgUrl !== "" && Model.normalizeSourceUrl(root.epgUrl, { kind: "epg", origin: "cli" }) === "") return root.epgUrl
     return String(rec.epgUrl || "")
   }
-  readonly property bool epgConfigured: activeEpgUrl !== ""
+  // M4-01 repair 3 (D-EPG-2). The guide URL actually in force, and where it
+  // came from: the user's own value when they set one, otherwise the
+  // `url-tvg` / `x-tvg-url` the playlist declared, which the helper has
+  // parsed into channels.json as `epgUrlHint` since the first parser and
+  // which nothing has ever read.
+  //
+  // RESOLVED HERE, EVERY TIME, AND NEVER PERSISTED (Model.resolveEpgUrl
+  // decision 1). `activeEpgUrl` above is untouched and still means "the URL
+  // the USER set for the active source": it is what persistActive writes,
+  // what the Sources form edits, and what `onActiveEpgUrlChanged` clears the
+  // EPG cache for. The hint is a third input that joins them only at the
+  // fetch, so nothing in the persist or settings path can mistake it for a
+  // value the user typed, and no source record ever carries it.
+  //
+  // It is also why the clear-the-cache branch of onActiveEpgUrlChanged stays
+  // keyed to `activeEpgUrl` and not to this: `channelsMeta` is emptied on
+  // every source swap (clearSourceData), so a resolved hint goes to "" on a
+  // swap, and wiping epg-now.json / epg-status.json on a swap would be a new
+  // defect rather than the setting-owns-its-cache rule it looks like.
+  readonly property var epgSource: Model.resolveEpgUrl({
+    userUrl: root.activeEpgUrl,
+    hint: root.channelsMeta ? root.channelsMeta.epgUrlHint : ""
+  })
+  // The URL every EPG fetch uses. Redacted everywhere else: `epgSourceHost`
+  // is what any sink gets, and the URL itself only ever reaches the helper's
+  // environment (D-SINK-8).
+  readonly property string epgFetchUrl: root.epgSource.url
+  readonly property string epgUrlOrigin: root.epgSource.origin
+  readonly property bool epgFromPlaylist: root.epgSource.origin === Model.EPG_ORIGIN_PLAYLIST
+  readonly property string epgSourceHost: root.epgSource.host
+  // The one line that makes the provenance visible, for the Sources screen
+  // and the source form: "" when the URL is the user's own.
+  readonly property string epgOriginNotice: Model.epgOriginNotice(root.epgSource.origin)
+  readonly property bool epgConfigured: epgFetchUrl !== ""
   // scheme + host only; safe to render anywhere
   readonly property string sourceLabel: Model.sourceLabel(playlistUrl)
   readonly property string sourceHost: Model.hostOf(playlistUrl)
@@ -217,7 +255,11 @@ Item {
   // View objects for the guide (SR1, ordered per SR32); `sourcesChanged` is
   // this property's change signal (SR3) and fires on every state, settings,
   // error or clock change.
-  readonly property var sources: Model.sourceViews(root.userState, root.activeSourceKey, root.nowSec, root.sourceErrors)
+  // `epgFromPlaylist` reaches the view objects so the active row can read
+  // `EPG from playlist` rather than `EPG` (M4-01 repair 3): the user must be
+  // able to tell a URL the provider declared from one they typed, which is
+  // the whole reason the hint is not persisted.
+  readonly property var sources: Model.sourceViews(root.userState, root.activeSourceKey, root.nowSec, root.sourceErrors, root.epgFromPlaylist)
 
   // ---- data (read by Guide.qml / BarWidget.qml; never mutated by them)
   property var channels: []                 // Model.prepareChannels output, in the ACTIVE order
@@ -1400,7 +1442,10 @@ Item {
   }
 
   function refreshEpg(force) {
-    if (root.activeEpgUrl === "") return
+    // M4-01 repair 3: the RESOLVED URL, so a playlist-declared guide fetches
+    // like a typed one. Read directly and never through `epgConfigured`, for
+    // the reason D-LIVE-02 recorded above.
+    if (root.epgFetchUrl === "") return
     if (epgProc.running) {
       if (force) root.epgRerun = true
       return
@@ -1840,7 +1885,7 @@ Item {
       ok: false,
       kind: kind,
       stale: stale,
-      sourceHost: kind === "epg" ? Model.hostOf(root.activeEpgUrl) : root.sourceHost,
+      sourceHost: kind === "epg" ? root.epgSourceHost : root.sourceHost,
       error: { code: "helper_timeout", message: "helper timed out" }
     })
   }
@@ -1890,7 +1935,7 @@ Item {
       epgProc.nowOnly = true
       epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, true)
     } else {
-      if (root.activeEpgUrl === "") return
+      if (root.epgFetchUrl === "") return
       root.epgAttempted = true
       epgProc.nowOnly = false
       epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, false)
@@ -1901,7 +1946,7 @@ Item {
     // deliberately rather than left alone: the assignment REPLACES the value
     // the last fetch set (measured, see Model.fetchEnvironment), so the
     // offline recompute runs with no URL in its environment at all.
-    epgProc.environment = Model.fetchEnvironment(nowOnly ? "" : root.activeEpgUrl)
+    epgProc.environment = Model.fetchEnvironment(nowOnly ? "" : root.epgFetchUrl)
     epgProc.running = true
     epgWatchdog.restart()
   }
@@ -2820,7 +2865,7 @@ Item {
       // US6: the EPG follows the playlist (the helper restricts programmes
       // to the playlist's ids). Fetch it when none is loaded or its now/next
       // window has expired; a run already in flight is repeated (D-LIVE-02).
-      if (root.activeEpgUrl !== "" && (!root.epgLoaded || Model.epgNowStale(root.epgMeta, Math.floor(Date.now() / 1000)))) root.refreshEpg(true)
+      if (root.epgFetchUrl !== "" && (!root.epgLoaded || Model.epgNowStale(root.epgMeta, Math.floor(Date.now() / 1000)))) root.refreshEpg(true)
     } else {
       root.notify("playlistError", { reason: root.statusReason, cachedAt: status.stale === true ? root.lastUpdated : "" })
     }
@@ -3388,7 +3433,7 @@ Item {
     if (root.activeCacheDir === "") return
     var nowSec = Math.floor(Date.now() / 1000)
     if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)) root.refreshPlaylist(true)
-    if (root.activeEpgUrl !== "" && !epgProc.running) root.refreshEpg(true)
+    if (root.epgFetchUrl !== "" && !epgProc.running) root.refreshEpg(true)
   }
 
   // Reset the per-source data to "nothing known yet" so no reason, count
@@ -3515,6 +3560,22 @@ Item {
     }
     // A cache swap in flight fetches the EPG from its freshness check.
     if (!root.pendingFreshness) root.refreshEpg(true)
+  }
+  // M4-01 repair 3. The resolved URL changes on its own whenever the
+  // playlist cache lands (channelsMeta arrives after activeEpgUrl has long
+  // since settled), so the hinted first fetch has no other trigger: this is
+  // the "" -> hint edge that onActiveEpgUrlChanged cannot see.
+  //
+  // Only the non-empty edge is handled. The empty edge belongs to
+  // onActiveEpgUrlChanged, which owns clearing the cache a SETTING produced;
+  // a hint going away on a source swap must not delete anything, and
+  // clearSourceData has already emptied the in-memory guide data by then.
+  //
+  // A settings write that sets an epgUrl moves both properties and so calls
+  // refreshEpg twice; `epgDebounce` is what makes that one helper run.
+  onEpgFetchUrlChanged: {
+    if (root.epgFetchUrl === "" || root.pendingFreshness) return
+    root.refreshEpg(true)
   }
   onMaxRecentsChanged: {
     var trimmed = Model.trimRecents(root.userState, root.maxRecents)
