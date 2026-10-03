@@ -198,7 +198,7 @@ omarchy-shell io.github.rmcdavid.iptv previous            # zap back
 omarchy-shell io.github.rmcdavid.iptv channel 101         # tune straight to channel 101
 omarchy-shell io.github.rmcdavid.iptv pip toggle          # picture in picture on / off
 omarchy-shell io.github.rmcdavid.iptv pause               # pause / resume live TV
-omarchy-shell io.github.rmcdavid.iptv back 30             # rewind 30 s (default 10); JSON reply
+omarchy-shell io.github.rmcdavid.iptv back 30             # rewind 30 s; JSON reply. The argument is required by the shell's IPC: `back ""` is the 10 s step, a bare `back` is refused before it reaches the plugin
 omarchy-shell io.github.rmcdavid.iptv forward 30          # forward 30 s (default 10); JSON reply
 omarchy-shell io.github.rmcdavid.iptv live                # back to live; JSON reply
 omarchy-shell io.github.rmcdavid.iptv stop

@@ -10949,3 +10949,19 @@ The review found each by driving the shipping code, not by reading the
 write-ups, which is the discipline rule 14 asks for and the one that keeps
 working.
 
+## The owner's install moves to 0.11.0, 2026-10-03
+
+Pre-flight: no hyprlock, the clone clean at 526a6c7 with no `bin/__pycache__`,
+fast-forward to bf4ae8f possible; `shell.json`, the state directory and the
+cache snapshotted. `omarchy-plugin-update io.github.rmcdavid.iptv --yes`
+(the stock updater, which refuses without `--yes` when not interactive):
+"Updated io.github.rmcdavid.iptv." -- HEAD bf4ae8f, manifest 0.11.0, the
+installed helper answering 0.11.0 as a subprocess, no pycache. `omarchy
+restart shell`: old pid 2186866, new pid 2724554, the plugin's `status`
+answering over `omarchy-shell` with the new `rewind` and `behindLive`
+fields, 1,453 channels. `shell.json` and `state.json` hashes identical
+before and after (77e85f64, 3c9f3f65); the snapshots deleted. The three
+verbs probed with nothing playing: `back ""`, `back 30`, `forward 10` and
+`live` each answer `{"ok":false,...,"code":"nothing_playing"}`; a bare
+`back` is refused by qs before the plugin (F-RWD-20, README corrected).
+
