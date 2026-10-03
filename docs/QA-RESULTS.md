@@ -10629,7 +10629,61 @@ same player pid; R15, spawn-to-reply median 220 ms (runs 220 227 217 220
 219) within the 300 ms budget, 22 ms above run 1's 198 with the event wait
 in the path. R3's socket-side `ahead` read 2.08 s, inside a segment.
 
-### Still not done
+### Still not done at that point
 
 The bounded live pass on the owner's own channels, the OSD line observed
 on screen (SPIKE 12.3 is the only observation), and the review round.
+
+## M5-01: the bounded live pass on the owner's channels, 2026-10-03
+
+The dev harness (not the live install) on the 30-channel copy of the
+owner's list the M4 pass used, three public Pluto channels, the plugin's
+own IPC verbs (`back`, `forward`, `live`, `pause`) through `qs ipc`, the
+service and bar read through the harness snapshot, mpv's default cache (no
+shrunken-cache override). Owner's shell pid 2186866 before and after both
+runs; no mpv or ffmpeg left; the user's files untouched.
+
+### What was seen
+
+| Channel | Step | Reply / readout |
+|---|---|---|
+| 48 Hours (1080p) | filled | history 19.8 s at +20 s; bar `play-glyph 48 Hours (1080p)`, text "" |
+| | `back 10` | applying; position 19.9 -> 11.7, behindLive 10.0; text `0:10 behind live`; bar `history-glyph 48 Hours (1080p) -0:10`; tooltip second line `0:10 behind live · up to 0:11 back` |
+| | `back 10` again | clamped at the floor (0.03 + 2): position 3.8, behindLive 20.1; bar `-0:20`; tooltip `up to 0:03 back` |
+| | `forward 10` | position 16.0 |
+| | **the OSD line** | `grim` of the player window 150 ms after `back 10`: `-0:10 behind live` drawn top-left in mpv's OSD font; 650 ms: still there; 4.1 s: gone. **D9 observed on screen through the plugin's own verb**, which SPIKE 12.3 had only shown for a raw `show-text` |
+| | `live` | position 47.8, ceiling 48.3, ahead 0.5, behindLive 0; text ""; tooltip `up to 0:29 back` only |
+| | `pause`, then `back 10` | paused; position moved 49.9 -> 39.9 while paused; behindLive 12.1 -> 16.1 over 3 s (the 1 Hz count-up, quantised); text `paused · 0:16 behind live`; bar `pause-glyph 48 Hours (1080p) -0:16` |
+| | resume | behindLive 16.8, held; text `0:16 behind live` |
+| BET Pluto TV | right after the zap | `rewind` null, behindLive null, text "", bar `play-glyph BET Pluto TV` (absent, never 0) |
+| | filled | position 15.9, floor 0, behindLive 0.006, text "" |
+| | `back 30` | clamped to 2.0; the reply's read said 7.6 (F-RWD-8 again, 5.6 s past the target, through the plugin path); behindLive 10.0; text `0:10 behind live` |
+| | `back 600` | clamped: position 2.7, behindLive 17.1; tooltip `up to 0:02 back` |
+| | `live` | ahead 0.5, behindLive 0 |
+| Blaze Live (720p), run 1 | zap | **`time-pos` 0 and no range for 40 s**; the zero point was taken at that 0; bar `history-glyph Blaze Live (720p) -0:30` then `-0:35`, `-0:40`; text `0:30 behind live`; the seeks refused without a seek (F-RWD-7, correct) -- **F-RWD-16** |
+| Blaze Live, run 2 (replay with the socket read beside the service) | zap | `time-pos` null and `core-idle` true for 3 s, playing at +6 s, the service's readout at the next status tick (+15 s): position 9.4, behindLive 0. The first run was a transient open failure; a headless mpv on the same URL opened in 5 s |
+
+### What it found
+
+- **F-RWD-16** (P2, fixed): the helper took a zero point from a position
+  with no seekable range, so a stream that had not opened read "behind live"
+  and counted up, with the history glyph, on a window that had shown
+  nothing -- while the guide's `b` said "Nothing to rewind yet", because
+  `canRewind` needs a range. The zero point is now taken, and moved, only
+  from a position inside a range, on every verb; the first read inside a
+  range takes it and reads live. The test (`test_no_range_means_no_zero_point_even_with_a_position`)
+  against the helper as committed in d508e9d: `AssertionError: 0.0 is not None`,
+  Ran 1, failures=1; green after. `test_rewind.py` is 53 cases.
+- **F-UX-3** (P4, fixed): the paused tooltip said "Paused ..." and then
+  "paused · 0:12 behind live". `barTooltip` composes its state line without
+  the word; the node expectation re-pinned.
+- **F-RWD-8**, evidence added: a second channel, through the plugin's own
+  verb, landing 5.6 s past a clamped target. Still open; the reply carries
+  what the player reports, and every surface agreed with it.
+- The service's readout lags the socket by up to one status tick (10 s)
+  while playing at live -- by design, the number holds while playing and is
+  only shown behind live; noted, not filed.
+
+### Still not done
+
+The review round, and the owner's call on F-RWD-10 if they object.

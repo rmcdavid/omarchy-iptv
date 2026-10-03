@@ -145,7 +145,12 @@ whose behind-live is negative, on the verbs that write (`status`, `pause`,
 `seek`); the probe, which never writes, returns the raw reading and the
 shell clamps it at 0 for display. The invariant the reader can rely on:
 `behindLive` from a writing verb is never negative, and a `back 10` after
-`live` reads 10.
+`live` reads 10. And the point is taken only from a position INSIDE a
+seekable range (F-RWD-16, from the live pass): mpv reports `time-pos` 0 on
+a stream that has not opened, and a zero point taken there counts up from a
+moment nothing had played; a rangeless position is reported with
+`zeroed: false` and the readout stays absent until the stream is really
+playing.
 
 ### 2.3 The service
 

@@ -1467,7 +1467,10 @@ HLS lead behind the cache end, and a `live` seek lands past it, so the
 formula reads negative there; the helper then writes a fresh `(wall0, pos0)`
 at that reading on the verbs that write, and the probe, which never writes,
 returns the raw value for the shell to clamp. `behindLive` from `status`,
-`pause` or `seek` is therefore never negative.
+`pause` or `seek` is therefore never negative, and it is `null` until the
+reader sits inside a seekable range: a position reported with no range (a
+stream still opening, or one that never opens) takes no zero point and
+moves none (F-RWD-16).
 
 **A seek verb in the control slot (amends 4.3).** `player seek --socket S
 --by N` (N a signed integer of seconds, negative is back) and `player seek

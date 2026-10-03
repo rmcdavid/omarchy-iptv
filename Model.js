@@ -7326,7 +7326,10 @@ function barTooltip(opts) {
     // from the last read -- `up to 6:52 back`. On a channel whose window is
     // 7 s the number is 0:07, not a promise. `behindS` and `historyS` come
     // from the service's `rewind` object; absent, the tooltip is unchanged.
-    var state = playbackStateText({ paused: o.paused === true, behindS: o.behindS })
+    // The first line already says Paused, so the state line here is the
+    // number alone: `Paused 7 SEP BBC One` / `0:42 behind live SEP up to ...`,
+    // not "Paused ... paused SEP 0:42" (seen on the live pass, F-UX-3).
+    var state = playbackStateText({ paused: false, behindS: o.behindS })
     var window = finiteOr(o.historyS, 0)
     var extra = []
     if (state !== "") extra.push(state)

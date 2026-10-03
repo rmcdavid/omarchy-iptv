@@ -8684,7 +8684,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.barTooltip({ playing: true, name: "BBC One" }),
      Model.barTooltip({ playing: true, name: "BBC One", historyS: null, behindS: null })],
     ["Playing 7 \u00b7 BBC One\n1:32 behind live \u00b7 up to 6:52 back",
-     "Paused 7 \u00b7 BBC One\npaused \u00b7 0:42 behind live \u00b7 up to 0:07 back",
+     "Paused 7 \u00b7 BBC One\n0:42 behind live \u00b7 up to 0:07 back",   // the first line says Paused; the state line is the number (live pass, F-UX-3)
      "Playing BBC One\nup to 6:52 back",
      "Playing BBC One\n1:32 behind live",
      "Playing BBC One\n1:32 behind live \u00b7 up to 6:52 back\n" + Model.barTooltip({ playing: true, name: "x", pip: true }).split("\n")[1],

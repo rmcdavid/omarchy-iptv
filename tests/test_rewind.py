@@ -448,6 +448,39 @@ class SeekVerbTest(RewindPlayerTestCase):
         self.assertEqual(payload["rewind"]["behindLive"], 10.0)
         self.assertEqual(server.user_data["omarchy-iptv-rewind"], {"schema": 1, "entryId": 7, "wall0": 1000.5, "pos0": 417.501})
 
+    def test_no_range_means_no_zero_point_even_with_a_position(self):
+        # F-RWD-16, from the live pass: a channel that never opened reported
+        # time-pos 0 and no seekable range for 40 s, the zero point was taken
+        # at that 0, and the bar counted "-0:40 behind live" on a stream that
+        # had shown nothing. A position outside every range is read and
+        # reported, but it is no zero point and it moves none.
+        server = self.playing(position=0.0, ranges=[])
+        code, payload, _, stderr = run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["rewind"]["position"], payload["rewind"]["history"], payload["rewind"]["floor"]), (0.0, None, None))
+        self.assertIsNone(payload["rewind"]["behindLive"])
+        self.assertFalse(payload["rewind"]["zeroed"])
+        self.assertNotIn("omarchy-iptv-rewind", server.user_data)
+        # The seek verb neither: refused without a seek (F-RWD-7) and no node.
+        code, payload, _, _ = self.seek("--by", "-10")
+        self.assertEqual((payload["refused"], payload["rewind"]["zeroed"]), (True, False))
+        self.assertEqual(self.seeks_sent(), [])
+        self.assertNotIn("omarchy-iptv-rewind", server.user_data)
+        # The stream opens: the first read INSIDE a range takes the point,
+        # and it reads live, not forty seconds behind.
+        self.clock = 1040.0
+        server.props["time-pos"] = 12.4
+        server.props["demuxer-cache-state"]["seekable-ranges"] = [{"start": 0.0, "end": 20.0}]
+        code, payload, _, _ = run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(payload["rewind"]["behindLive"], 0.0)
+        self.assertEqual(server.user_data["omarchy-iptv-rewind"], {"schema": 1, "entryId": 7, "wall0": 1040.0, "pos0": 12.4})
+        # A stale node from before is not re-based by a rangeless read either.
+        server.props["time-pos"] = 50.0
+        server.props["demuxer-cache-state"]["seekable-ranges"] = []
+        self.clock = 1041.0
+        code, payload, _, _ = run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(server.user_data["omarchy-iptv-rewind"]["pos0"], 12.4)
+
     def test_status_re_bases_too_and_the_probe_never_does(self):
         # The same reading through `status` (which writes) moves the node;
         # through `probe` (which never writes, 2.2) the raw reading comes

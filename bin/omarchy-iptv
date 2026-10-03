@@ -5401,8 +5401,14 @@ def read_rewind(client: MpvIpc, stash: Any = None, paused: Any = None, write: bo
         paused = bool(value) if ok and value is not None else False
     ok, pfc = client.try_command("get_property", "paused-for-cache")
     paused_for_cache = bool(pfc) if ok and pfc is not None else False
-    zero = zero_point(client, entry_id, position, wall, write) if position is not None else None
-    zero = rebase_zero_point(client, zero, entry_id, position, wall, write)
+    # A position with no seekable range is not a playing position (F-RWD-16):
+    # mpv reports time-pos 0 while a stream is still opening, or never
+    # opens, and a zero point taken there counts up from a moment nothing
+    # had played. Read it, say it, but neither take nor move the zero point
+    # until the reader sits inside a range.
+    inside = position is not None and range_for(cache["seekableRanges"], position) is not None
+    zero = zero_point(client, entry_id, position, wall, write and inside) if position is not None else None
+    zero = rebase_zero_point(client, zero, entry_id, position, wall, write and inside)
     return rewind_view(position, cache, zero, paused, paused_for_cache, entry_id, wall)
 
 
@@ -5470,9 +5476,10 @@ def player_seek(args: argparse.Namespace) -> int:
         paused_for_cache = bool(pfc) if ok and pfc is not None else False
         # The zero point is taken from the PRE-seek read: a seek breaks the
         # (wall, pos) relation, so one taken after it would read a fresh
-        # rewind as "at live".
-        zero = zero_point(client, entry_id, before, wall_before, True) if before is not None else None
+        # rewind as "at live". And only from a position inside a range
+        # (F-RWD-16): with no range there is nothing playing to be behind.
         current = range_for(cache["seekableRanges"], before)
+        zero = zero_point(client, entry_id, before, wall_before, current is not None) if before is not None else None
         plan = clamp_seek({
             "position": before, "mode": mode, "by": by,
             "floor": current["start"] if current else None,
@@ -5515,7 +5522,7 @@ def player_seek(args: argparse.Namespace) -> int:
         # landed past the zero point re-bases it here (F-RWD-11), so the
         # reply reads 0.0 at the edge and the next `back 10` reads 10.
         wall_after = _boot_clock()
-        zero = rebase_zero_point(client, zero, entry_id, after, wall_after, True)
+        zero = rebase_zero_point(client, zero, entry_id, after, wall_after, current is not None)
         payload["rewind"] = rewind_view(after, cache, zero, paused, paused_for_cache, entry_id, wall_after)
         # The composer decides what is said and when (a refused seek and a
         # missing zero point both compose to ""), so there is ONE guard, the
