@@ -12,6 +12,10 @@
 #   8. defect ledger             (scripts/check-defect-ledger.py: every defect
 #                                id filed in any tracked .md has a row, with a
 #                                severity and a state, in STATUS.md "## Defects")
+#   8b. board staleness          (scripts/check-board-staleness.py: no row
+#                                reads a bare `open` while a commit message of
+#                                ours says that id was closed -- the agreement
+#                                the ledger step does not check)
 #   9. marketplace capabilities  (scripts/check-marketplace-capabilities.py: no
 #                                tracked file the marketplace scan reads holds a
 #                                string it would report as a capability)
@@ -486,6 +490,31 @@ if python3 "$ROOT/scripts/check-defect-ledger.py" >"$ledger_log" 2>&1; then
   ok "$(head -1 "$ledger_log")"
 else
   cat "$ledger_log"; bad "defect ledger"
+fi
+
+step "board staleness (no row says open where a commit of ours says closed)"
+# The ledger step above proves the board and the write-ups agree that an id
+# EXISTS. It does not prove they agree about anything else, and on 2026-10-03
+# five of the nine rows reading `open` were already fixed in the code
+# (F-BOARD-1) -- one of them for a day after the commit whose own subject is
+# "Close F-SINK-10 at the sink", three for a week after the commit that says
+# "the D-SAVE-6 repair" in its own body. The gate was green throughout.
+#
+# This step never decides whether a defect is fixed. It refuses a tree in
+# which a commit message of ours and a board row contradict each other, and
+# either half can be made true. Measured over all 523 commits to 64fa114: 47
+# red commits of the 486 that carry a board (9.7%), five ids ever flagged,
+# four of them truly stale and one a repair in flight for four commits. A row
+# whose state cell says anything more than the bare word `open` is exempt, so
+# a repair that is mid-wave is recorded rather than refused. The --report mode
+# adds document prose and the board's own cross-row claims, which reach the
+# fifth stale row of 2026-10-03 at the cost of four more false alarms, and is
+# deliberately not in the gate.
+staleness_log=$CHECK_TMP/board-staleness.log
+if python3 "$ROOT/scripts/check-board-staleness.py" >"$staleness_log" 2>&1; then
+  ok "$(head -1 "$staleness_log")"
+else
+  cat "$staleness_log"; bad "board staleness"
 fi
 
 step "marketplace capability scan (developer messages stay messages)"
