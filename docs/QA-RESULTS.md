@@ -9907,3 +9907,47 @@ F-M3-8, tenth round: twenty-one of the twenty-six were sentences, and
 the P2 was a test never seen red. Python 690 (689 -> 690); guard 21
 tests, 49 blocks; the spike re-run matches; text-scenario forward on the
 repaired scripts in the gate record below.
+
+## D-EPG-2, 2026-10-02: the guide data has never matched anything here
+
+Measured while scouting features, against the source actually installed on
+this machine and the XMLTV asset this project's own `docs/QA-ASSETS.md`
+names (`https://i.mjh.nz/PlutoTV/us.xml.gz`, 427 `<channel>` declarations).
+The installed source is the iptv-org US list, 1,453 channels, `tvg-id`
+coverage 1,453 of 1,453 -- so this is not a playlist with missing ids.
+
+| matcher | channels that would render a programme |
+|---|---|
+| what ships: exact `tvg-id`, lowercase alias, no fallback | **0 of 1,453** |
+| exact id after stripping the `@SD` feed suffix | 0 of 1,453 |
+| normalised channel NAME | **232 of 1,453** |
+| id or name | 232 of 1,453 |
+
+The two sides never meet by id: the playlist carries iptv-org ids
+(`00sReplay.us@SD`) and this guide carries Pluto's own
+(`673247127d5da5000817b4d6`). The name matches are not approximate --
+`00s Replay -> 00s Replay`, `48 Hours (1080p) -> 48 Hours`,
+`ALLBLK Gems (720p) -> ALLBLK Gems` -- and every matched pair has identical
+normalised keys by construction.
+
+A second measurement, independent of any one guide: across the 180,681
+entries of the published guide index, **582** of our 1,453 channels are
+covered under their exact `channel@feed` id and **735** under the bare
+channel id. The feed suffix alone costs 153 channels, 26 per cent of what id
+matching could reach, and that repair is not the same repair as the name
+fallback -- the table above shows the suffix repair buying nothing against
+THIS guide, because this guide uses neither id scheme.
+
+Precision, which is the acceptance criterion rather than recall: 3 of 424
+guide names and 5 of 1,453 channel names collide after normalising, so a
+rule of "match only when the normalised name is unique on both sides" costs a
+handful of channels and removes the failure mode that matters, which is a
+programme shown against the wrong channel.
+
+Why it is filed now and not in September: `docs/ROADMAP-PROPOSED.md` section
+5 recorded the zero-match reading on 2026-09-16 and said in the same sentence
+that it was not on the board and should be. It carried no `D-` id, so the
+ledger could not see it and nobody copied it across. Sixteen days. That is
+precisely the failure engineering rule 13 was written for, by a document that
+was describing the problem while committing it. Repair proposed as M4-01 in
+`docs/PLAN-M4.md`; not scheduled, pending product-owner review.
