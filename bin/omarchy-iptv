@@ -499,8 +499,24 @@ _EPG_NAME_NOISE = re.compile(
 
 
 def epg_name_key(value: Any) -> str:
-    """The channel-name key the EPG matcher joins on (D-EPG-2, M4-01)."""
-    return normalize_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
+    """The channel-name key the EPG matcher joins on (D-EPG-2, M4-01).
+
+    Folds on normalize_id_text, NOT normalize_text, since D-EPG-5: the id
+    fold keeps `+` and `*` "because they are the difference between two
+    channels rather than noise inside one", which is exactly the question a
+    matcher asks. The search fold drops them, and that single character put
+    the guide's `Bloomberg TV+` schedule on the playlist's `Bloomberg TV`
+    row, and made four News12/News12+ regional pairs and Tennis Channel
+    2/+2 collide so the uniqueness rule dropped all ten rather than guess.
+    The project already owned the right rule and the matcher used the other
+    one.
+
+    Measured end to end on the frozen inputs when this changed: matched
+    227 -> 226, and the one pair lost is the wrong one; nameIndexed 1,443 ->
+    1,453 and nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair
+    and returns ten channels to the index. No confirmed pair moved.
+    """
+    return normalize_id_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
 
 
 def normalize_text(value: Any) -> str:

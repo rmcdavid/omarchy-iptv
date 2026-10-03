@@ -945,10 +945,21 @@ class EpgPrecisionTest(unittest.TestCase):
             self.assertIsNotNone(record, entry["tvgId"])
             self.assertEqual(record["now"]["title"], entry["nowTitle"], entry["tvgId"])
 
-    def test_nothing_matched_beyond_the_oracle_and_the_known_wrong_pair(self):
-        """The matched SET, not just its size: a wrong pair is an extra key."""
+    def test_nothing_matched_beyond_the_oracle(self):
+        """The matched SET, not just its size: a wrong pair is an extra key.
+
+        Before D-EPG-5 was repaired this set also had to carry the wrong
+        Bloomberg pair, and the repair's whole shape is visible here: that
+        key leaves and `News12LongIsland` arrives, because the fold that
+        married two channels was the same one that denied two rows a guide
+        offering one of them. The size did not move; the membership did.
+        """
         expected = {entry["tvgId"] for entry in PRECISION["oracle"]}
-        expected.add(PRECISION["crossChannel"]["tvgId"])
+        # The rows the D-EPG-5 repair returned are right by reading rather
+        # than by an identifier, so the fixture keeps them in their own block:
+        # a pair the oracle CANNOT confirm must not be able to hide among the
+        # ones it can.
+        expected |= {entry["tvgId"] for entry in PRECISION["returnedByRepair"]}
         self.assertEqual(set(self.now["channels"]), expected)
         for entry in PRECISION["unmatched"]:
             self.assertNotIn(entry["tvgId"], self.now["channels"],
@@ -959,8 +970,8 @@ class EpgPrecisionTest(unittest.TestCase):
             self.assertEqual(self.status[key], value, key)
         self.assertEqual(self.status["warnings"], PRECISION["warnings"])
 
-    def test_the_plus_that_separates_two_channels_is_folded_away(self):
-        """D-EPG-5, asserted as it behaves TODAY, which is wrongly.
+    def test_the_plus_that_separates_two_channels_is_kept(self):
+        """D-EPG-5, REPAIRED 2026-10-03, asserted as the repair behaves.
 
         This is the one wrong pair the audit of the real 227 found. The
         matcher's key folds `+` to a space, so iptv-org's Bloomberg Television
@@ -977,17 +988,18 @@ class EpgPrecisionTest(unittest.TestCase):
         the real inputs at one pair, and that pair is this one.
         """
         cross = PRECISION["crossChannel"]
-        record = self.now["channels"].get(cross["tvgId"])
-        self.assertIsNotNone(record, "D-EPG-5 no longer reproduces: see the docstring")
-        self.assertEqual(record["now"]["title"], cross["nowTitle"])
+        self.assertNotIn(cross["tvgId"], self.now["channels"],
+                         "the wrong pair formed again: D-EPG-5 has regressed")
         first, second = PRECISION["plusPair"]["playlistNames"]
-        self.assertEqual(helper.epg_name_key(first), helper.epg_name_key(second))
-        self.assertNotEqual(
-            helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", first)),
-            helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", second)))
+        # The repair IS this inequality: the two names are one under the
+        # search fold and two under the id fold, and the matcher now uses
+        # the second. Asserting both folds keeps the reason in the test.
+        self.assertEqual(helper.normalize_text(helper._EPG_NAME_NOISE.sub(" ", first)),
+                         helper.normalize_text(helper._EPG_NAME_NOISE.sub(" ", second)))
+        self.assertNotEqual(helper.epg_name_key(first), helper.epg_name_key(second))
 
-    def test_the_same_fold_denies_two_rows_a_guide_that_is_offering_one(self):
-        """D-EPG-5's recall half, which is the cost of the defect, not the fix.
+    def test_the_repair_returns_the_rows_the_fold_was_denying(self):
+        """D-EPG-5's recall half: what the defect cost, now returned.
 
         News12 and News12+ Long Island are two channels. The fold makes their
         names one, the uniqueness rule then drops BOTH rather than guess, and
@@ -996,12 +1008,11 @@ class EpgPrecisionTest(unittest.TestCase):
         Tennis Channel +2: ten channels of nameDroppedPlaylist, every one of
         them a `+`.
         """
-        dropped = [entry["tvgId"] for entry in PRECISION["unmatched"]
-                   if entry["finding"] == PRECISION["crossChannel"]["defect"]]
-        self.assertEqual(len(dropped), self.status["nameDroppedPlaylist"])
-        for tvg in dropped:
-            self.assertNotIn(tvg, self.now["channels"])
+        # Nothing is dropped for ambiguity any more on this fixture, and the
+        # row the collision used to deny now carries its guide's programme.
+        self.assertEqual(self.status["nameDroppedPlaylist"], 0)
         self.assertEqual(self.status["nameDroppedGuide"], 0)
+        self.assertIn("News12LongIsland.us@SD", self.now["channels"])
 
     def test_a_country_qualifier_keeps_an_oracle_pair_apart(self):
         """F-EPG-7, pinned as it behaves today so a loosening cannot be silent.

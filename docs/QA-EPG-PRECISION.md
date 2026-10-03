@@ -401,3 +401,37 @@ one. The grading above is a reconstruction of the pair list from the shipping
 `build_alias`, `epg_name_key` and `<display-name>` selection, checked against
 `epg-now.json`'s key set; the Pluto ids are read out of `channels.json`'s own
 `url` and `logo` fields and out of the guide's `<channel id=...>`.
+
+## Repair applied, 2026-10-03
+
+`epg_name_key` now folds on `normalize_id_text` rather than `normalize_text`.
+The audit recommended it, measured its cost, and wrote the test that would go
+red when it landed; this is that landing.
+
+End to end through the shipping verb on the frozen inputs, clock pinned:
+
+| | before | after |
+|---|---|---|
+| matched | 227 | **226** |
+| by name | 227 | 226 |
+| nameIndexed | 1,443 | **1,453** |
+| nameDroppedPlaylist | 10 | **0** |
+| nameDroppedGuide | 4 | 4 |
+
+The set difference is exactly `{BloombergTV.us@US}` leaving, with nothing
+joining in its place on this guide: the repair costs the one wrong pair and
+nothing else. The ten channels the fold had denied are back in the index --
+four News12/News12+ regional pairs and Tennis Channel 2 / Tennis Channel +2 --
+and on a guide that declares them they will now match.
+
+On the audit fixture the shape is visible in one line: the wrong Bloomberg
+pair leaves and News12 Long Island arrives, so `matched` stays at six while
+its membership changes. The two tests written to assert the defect were
+flipped to assert the repair, and `test_nothing_matched_beyond_the_oracle`
+lost its wrong-pair exemption. The returned row is declared in its own
+fixture block rather than added to the oracle, because the oracle confirms a
+pair by an identifier the matcher never saw and this pair has none: a row
+that is right by reading must not be able to hide among rows that are right
+by evidence.
+
+Reverting the single word turns four precision checks red.
