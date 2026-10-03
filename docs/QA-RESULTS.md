@@ -10041,3 +10041,96 @@ allowlist 13 files. Lane rule-11 evidence as reported: the helper lane's 30
 new matcher tests were 26 of 30 red against the shipped helper and the other
 four reddened by six separate mutations of the shipping functions; the model
 lane ran twelve mutations, each red; the guide lane added no stubs.
+
+## M4 live pass, 2026-10-03: the guide renders on a real screen, and two defects the fixtures could not reach
+
+First execution of either new panel: lane C measured that `Guide.qml` cannot
+be instantiated outside Quickshell on this machine, so nothing in the
+milestone had been run until this pass. Harness, a 30-channel playlist built
+from the installed source's own names, the frozen Pluto guide attached.
+
+Live matcher result inside the real shell: **matched 30 of 30, all by name**,
+`matchedById` 0, `matchedByFeed` 0.
+
+### F-HARNESS-2: the instrument had the answer hard-coded blank
+
+The first reading said the row showed `Movies` -- the group, no programme --
+while `epg-now.json` held `The Ruins` for that very channel and the shipping
+composers, called directly, produced `Movies · Now: The Ruins · Next: The
+Ring`. The cause was not the guide. `scripts/dev-harness/shell.qml`'s
+`cursorDetail` passes `nowTitle: ""`, `nextTitle: ""`, under a comment saying
+it exists so a scenario can prove the ROW says something rather than only
+that the service received it. It now makes the delegate's own lookup, and the
+same run then read:
+
+```
+Movies · Now: The Ruins · Next: The Ring
+```
+
+That is the first time in this project's life that a guide row has carried
+programme data on a screen. It is also most of the answer to why D-EPG-2
+survived: the instrument that existed to catch it had been built unable to.
+
+### D-EPG-3: a date under the label "Episode"
+
+With the panel finally observable, it rendered `20080101000000 +0000` as the
+episode. `episode_text` preferred `onscreen` and then took anything else as
+written. Measured on the asset: `original-air-date` 8,799, `onscreen` 4,273,
+`pluto` 4,274, and the date comes FIRST in document order, so **4,526
+programmes would have shown a timestamp**. The `pluto` value is a
+24-character hex id. Narrowed to the two systems XMLTV defines as an episode
+number plus the bare shorthand; 5 tests, 3 red against the old rule.
+
+### What the panels draw, read back from the running guide
+
+```
+row      Movies · Now: The Ruins · Next: The Ring
+title    The Ruins
+when     00:00 - 02:00
+Category Teen Screams
+Description  "The Ruins" follows a group of friends who become entangled ...
+next     Next: The Ring at 02:00
+```
+
+Keyboard map: 6 sections, built from the shipping tables. Both panels walked
+with the real keys: `i` opens detail and Esc returns to the list, `?` opens
+the map and Esc returns. The two panels were added to the harness snapshot
+for the same reason the row's detail was fixed -- a scenario must be able to
+prove a panel SAYS something, not only that the mode changed.
+
+Teardown: harness reaped, no stray quickshell, the user's own shell untouched.
+
+### Four findings the lanes raised that this milestone does not close
+
+Filed on the day they were written (rule 13), each by the lane that found it
+while doing something else, and each left open with its reason.
+
+**F-SINK-10, the list's title path is not redacted where the panel's is.**
+The model lane found it while writing `programmeDetail`: that function
+redacts every field it returns, including the channel name and the composed
+next line, while `epgFields` copies a programme title raw and `rowDetail`,
+`rowMeta` and `rowAccessibleName` render it -- the last onto the
+accessibility bus, which engineering rule 5 names explicitly. The same
+provider string therefore reaches two sinks under two rules. The lane
+deliberately did not widen the panel's redaction to cover for it, which would
+have hidden the asymmetry rather than recorded it.
+
+**F-SINK-11, `redactUrls` is quadratic.** Measured by the same lane: 41.9 ms
+over 5,000 scheme-legal characters with no space, about 670 ms extrapolated
+at 20,000, because the pattern consumes the run from every start position and
+backtracks out. `epgDetailText` added a cheap exit for strings with no `://`,
+which helps the common case and is not a fix: the pathological input contains
+`://` by construction, and every other sink calls the same function.
+
+**F-UX-2, the footer hint row is already past its limit.** The guide lane
+measured it with offscreen font metrics rather than estimating: on the widest
+card the guide can draw, the list-mode row overflows and elides from the
+LEFT, so the segments a user can read are the last ones. M4-04 appends `?
+help` at that readable end and the overlay is the answer to the row being
+unreadable, but the row is still what a user sees first.
+
+**F-GATE-1, the ASCII check scans only tracked files.** The helper lane found
+it on itself: its first commit was red for a literal e-acute in a brand-new
+test file, which the gate could not see until the file was staged. The step
+prints a file count that reads as coverage while excluding exactly the
+population a lane is adding.

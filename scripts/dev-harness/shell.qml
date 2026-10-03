@@ -893,11 +893,22 @@ ShellRoot {
             if (!(g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0)) return ""
             var c = g.currentRows[g.cursorIndex]
             var id = Model.channelId(c)
+            // The guide fields come from the same lookup the delegate makes
+            // (Guide.qml: `Model.epgFields(epgMap[row.tvgId], nowSec)`).
+            // They were hard-coded to "" here until 2026-10-03, which made
+            // this snapshot unable to show guide data AT ALL -- in the one
+            // instrument whose own comment says it exists so a scenario can
+            // prove the ROW says something rather than only that the service
+            // received it. That is rule 14's shape inside the instrument, and
+            // it is why D-EPG-2 (the guide matched nothing for the life of
+            // the project) could not be seen from here: a blank row read the
+            // same whether the data was missing or merely never looked up.
+            var epg = Model.epgFields(c && String(c.tvgId || "") !== "" ? g.epgMap[c.tvgId] : null, g.nowSec)
             return Model.rowDetail({
               showGroup: Model.rowShowsGroup({ scopeIsGroup: g.scopeIsGroup, groupsNarrow: g.groupAxis.narrows }),
               group: Model.primaryGroup(c),
               failedAt: Model.failedWhen(g.failedMap[id], g.nowSec),
-              nowTitle: "", nextTitle: "" })
+              nowTitle: epg.nowTitle, nextTitle: epg.nextTitle })
           })(),
           scopes: g.scopeList.map(function(e) { return e.id + "=" + e.count }),
           // M3-01: the column's kinds, so a scenario can see a group MOVE
@@ -906,6 +917,24 @@ ShellRoot {
           hiddenGroups: s2 && s2.userState ? (s2.userState.hiddenGroups || []) : [],
           // M3-02: the picker as the panel binds it -- the rows the Repeater
           // draws, the cursor row, and what the one line under the title says.
+          // M4-02 / M4-04: what the two new panels actually DRAW, for the
+          // same reason cursorDetail exists -- a scenario must be able to
+          // prove the PANEL says something, not only that the mode changed.
+          // Composed by the shipping functions, with the same argument the
+          // guide passes them, so a panel that renders nothing reads as
+          // nothing here too.
+          detail: (function () {
+            if (!(g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0)) return null
+            var c = g.currentRows[g.cursorIndex]
+            var id = c ? String(c.tvgId || "") : ""
+            return Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec })
+          })(),
+          keyboardMap: (function () {
+            var secs = Model.keyboardMap(g.hintOpts !== undefined ? g.hintOpts : {})
+            return (secs || []).map(function (s) {
+              return s.title + ": " + (s.rows || []).map(function (r) { return r[0] + "=" + r[1] }).join(", ")
+            })
+          })(),
           inTracks: g.inTracks === true, trackCursor: g.trackCursor,
           trackMessage: g.trackMessage !== undefined ? g.trackMessage : "",
           trackRows: (g.trackRows || []).map(function(r) { return r.kind + ":" + r.label + (r.selected ? "*" : "") }),

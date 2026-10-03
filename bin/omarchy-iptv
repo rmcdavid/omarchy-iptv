@@ -1798,21 +1798,31 @@ def episode_ns_text(raw: str) -> str:
 def episode_text(elem: Any) -> str:
     """The first readable <episode-num> of a programme, as text to render.
 
-    `system="onscreen"` is preferred wherever it exists because XMLTV
-    defines it as the number as shown to the viewer; `xmltv_ns` is machine
-    form and is translated by episode_ns_text; anything else is taken as the
-    provider wrote it. A programme with no usable episode-num yields "".
+    Only the two systems XMLTV defines as an EPISODE NUMBER are rendered:
+    `onscreen`, the number as shown to the viewer, preferred wherever it
+    exists and taken as the provider wrote it; and `xmltv_ns`, the machine
+    form, translated by episode_ns_text. An element with NO system attribute
+    is taken as onscreen, which is the common shorthand.
+
+    Every other system is an identifier or a date, not an episode number, and
+    is ignored -- found by looking at the panel on real data rather than at a
+    fixture. On the project's own XMLTV asset, `original-air-date` outnumbers
+    `onscreen` 8,799 to 4,273 and comes FIRST in the element order, so taking
+    "anything else as the provider wrote it" put a fourteen-digit timestamp
+    (`20080101000000 +0000`) under the label "Episode" on 4,526 programmes;
+    the same feed's `pluto` system is a 24-character hex id. A field the
+    viewer cannot read is worse than no field, because the panel spends a
+    line on it.
     """
     fallback = ""
     for child in elem.iterfind("episode-num"):
         system = (child.get("system") or "").strip().lower()
-        if system == "onscreen":
+        if system in ("onscreen", ""):
             text = clean_detail(child.text, EPG_MAX_EPISODE)
             if text:
                 return text
-        elif not fallback:
-            raw = clean_field(child.text, EPG_MAX_EPISODE)
-            fallback = episode_ns_text(raw) if system == "xmltv_ns" else clean_detail(raw, EPG_MAX_EPISODE)
+        elif system == "xmltv_ns" and not fallback:
+            fallback = episode_ns_text(clean_field(child.text, EPG_MAX_EPISODE))
     return fallback
 
 

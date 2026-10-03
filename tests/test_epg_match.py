@@ -230,6 +230,47 @@ class MatcherFixtureTest(unittest.TestCase):
                 self.assertEqual(status[key], value, key)
 
 
+class EpisodeSystemTest(unittest.TestCase):
+    """Only an EPISODE NUMBER goes under the label "Episode" (D-EPG-2 round).
+
+    Found by opening the panel on the real guide, not by a fixture: the
+    project's own XMLTV asset carries `original-air-date` 8,799 times against
+    `onscreen` 4,273, and the date comes first in document order, so the panel
+    showed `20080101000000 +0000` as the episode on 4,526 programmes. The same
+    feed's `pluto` system is a 24-character hex id.
+    """
+
+    @staticmethod
+    def _prog(*pairs):
+        import xml.etree.ElementTree as ET
+        elem = ET.Element("programme")
+        for system, text in pairs:
+            child = ET.SubElement(elem, "episode-num")
+            if system is not None:
+                child.set("system", system)
+            child.text = text
+        return elem
+
+    def test_a_date_is_not_an_episode_number(self):
+        e = self._prog(("original-air-date", "20080101000000 +0000"))
+        self.assertEqual(helper.episode_text(e), "")
+
+    def test_a_provider_id_is_not_either(self):
+        e = self._prog(("pluto", "68c98f288376cad38dbef85b"), ("thetvdb.com", "series/1234"))
+        self.assertEqual(helper.episode_text(e), "")
+
+    def test_onscreen_wins_wherever_it_appears_in_the_order(self):
+        e = self._prog(("original-air-date", "19920406000000 +0000"), ("onscreen", "S08E10"))
+        self.assertEqual(helper.episode_text(e), "S08E10")
+
+    def test_a_bare_episode_num_is_taken_as_onscreen(self):
+        self.assertEqual(helper.episode_text(self._prog((None, "S2 E5"))), "S2 E5")
+
+    def test_the_machine_form_is_still_translated_when_it_is_all_there_is(self):
+        e = self._prog(("original-air-date", "20080101000000 +0000"), ("xmltv_ns", "0.1.0/1"))
+        self.assertEqual(helper.episode_text(e), "S1 E2")
+
+
 class NameNoiseTest(unittest.TestCase):
     """The matcher's name key, which is NOT the search key (D-EPG-2).
 
