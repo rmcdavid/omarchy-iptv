@@ -435,3 +435,298 @@ reason: a rule that cannot be run against a hand-written reading is a rule
 nobody has checked (requirement 14). The window model in section 4.2 is held
 to the same standard -- it is not asserted, it is checked against two
 directly observed plateaus an eight-fold apart, and the error is reported.
+
+## 11. Second pass, 2026-10-03
+
+**Design pass, the successor to D2, authorised 2026-10-03. Measurement
+only; no build. The four open questions in section 8 that a design
+depends on, each read as a property AND provoked as a behaviour.**
+
+Same machine, same mpv v0.41.0, same channel for every question but one:
+ABC KAAL (1080p), `https://amg01942-amg01942c6-stirr-us-10178.playouts.now.amagi.tv`,
+the channel section 4.1 measured its plateau on, reading **4.72 Mbps**
+(0.562 MiB/s, slope of `total-bytes`) today against 5.44 on the first pass.
+BYU TV (1080p), `https://d13j8jpstr8iqz.cloudfront.net`, is the second
+channel in Q1. Both are healthy rows in section 3's table, read by id from
+the owner's installed cache (`channels.json` mtime 05:06, unchanged at the
+end; the owner's own service rewrote `epg-now.json` at 10:11, not this
+lane). Argv: the plugin's own, including `--title=$>IPTV` and the four
+directory options `mpv_launch_argv()` carries at dev tip b2f944d, pointed at
+this pass's scratch, plus `--vo=null --ao=null` as section 1 justified. The
+zap is `apply_channel()`'s wire sequence copied in order -- `pause` off,
+`aid`/`sid` auto, `title`, `force-media-title`, the three header properties,
+the stash, `loadfile <url> replace`, the stash again, the owner claim --
+in `design_pass.py` `zap()`. Five players, pids 2373134, 2374889, 2380538,
+2383492, 2386363, each killed by that pid with SIGTERM (mpv exit status 4,
+"quit by signal", all five); `pgrep -x mpv` empty at the end;
+`pgrep -x quickshell` 2186866 before and after. Sockets lived in
+`$XDG_RUNTIME_DIR/lrw2`, removed afterwards; the plugin's own socket
+directory was listed once and held only its September files.
+
+One correction to the brief before the numbers: the control slot's watchdog
+is **8 s**, `Service.qml:79` `controlTimeoutMs: 8 * 1000`, not 10; the
+12 s figure on the same file is `playerTimeoutMs`, the cold-start verb.
+Every margin below is stated against 8.
+
+### 11.1 Q1, the zap
+
+Play A 90 s, zap to B exactly as the plugin does, trace
+`demuxer-cache-state` four times a second for 31 s, seek, zap back to A.
+
+| moment | `time-pos` | back buffer | `seekable-ranges` | cache end | total | fw | `playlist-playing-pos` / count |
+|---|---:|---:|---|---:|---:|---:|---|
+| A at 95.0 s, before the zap | 90.83 | **91.2 s** | `[[0.0, 105.983]]` | 107.99 | 57.0 MiB | 8.9 MiB | 0 / 1 |
+| B +0.01 s (first read after the `loadfile` reply) | none | none | `[]` | none | none | none | **-1** / 1 |
+| B +1.01 s | none | none | `[]` | none | none | none | 0 / 1 |
+| B +2.02 s | none | none | `[]` | none | none | none | 0 / 1 |
+| B +5.04 s | none | none | `[]` | none | none | none | 0 / 1 |
+| B +10.07 s | 4.68 | 4.9 s | `[[0.0, 17.956]]` | 18.42 | 9.9 MiB | 7.2 MiB | 0 / 1 |
+| B +20.12 s | 14.75 | 15.1 s | `[[0.0, 27.966]]` | 29.99 | 16.1 MiB | 8.1 MiB | 0 / 1 |
+| B +29.93 s | 24.56 | 24.9 s | `[[0.0, 45.951]]` | 47.98 | 25.2 MiB | 11.8 MiB | 0 / 1 |
+| A again +5.03 s | 0.89 | 1.1 s | `[[0.0, 1.988]]` | 3.66 | 2.2 MiB | 1.5 MiB | 0 / 1 |
+
+| event | B | A again |
+|---|---:|---:|
+| `loadfile` reply round trip | 0.1 ms | 0.6 ms |
+| first numeric `time-pos` after the reply | **+5.29 s** | +4.28 s |
+| first non-empty `seekable-ranges` | +6.04 s | +4.78 s |
+| first second of rewindable history | **+6.30 s** | +5.03 s |
+
+| seek | before | 2 s after | 5 s after | moved | verdict |
+|---|---:|---:|---:|---:|---|
+| B at +30 s, `seek -20 relative` | 25.83 | 5.98 | 8.98 | **19.85 s** | rewound |
+| A again at +6 s, `seek -20 relative`, ranges `[[0.0, 5.992]]` | 1.92 | 1.99 | 4.99 | -0.07 s | refused -- it landed on the stream's first keyframe at 1.99, which is where it already was |
+| A again at +30 s, `seek -20 relative` | 23.98 | 4.02 | 7.03 | **19.95 s** | rewound |
+
+A's history is gone at the first read after the `loadfile` reply, 10 ms in:
+the state is EMPTY, not B's and not A's, and stays empty for the five
+seconds the new demuxer takes to open. `playlist-playing-pos` reads -1 for
+that first read and the count stays 1 -- `replace` is a replacement, there
+is no second entry to seek into. Zapping back to A brings none of A's
+91 s: at +5 s its range is `[0.0, 1.988]`. Every loadfile restarts the
+demuxer timeline at 0, which is why the judgement in `verdict.py` is a
+span test and not an overlap test -- the first version of it said A's
+history was visible because `[0, 106]` overlaps `[0, 1.99]`, and the fix
+is recorded in the test with the measured reading.
+
+RSS across the zap: 230,132 KiB on A before, 229,960 at B +0.01 s,
+302,188 at B +30 s. The old cache is released, not carried.
+
+**Verdict for the designers: a rewind UI resets to zero on every zap, and
+the back buffer after a zap is seconds since the `loadfile` reply minus
+the demuxer's own start-up, 5 to 6 s here; the first second you can rewind
+arrives about 6 s after the zap, and a full 20 s rewind works at +30. A
+rewind pressed inside those first seconds lands on the first keyframe
+(about 2.0 s) and moves nothing, so the UI must read the range before it
+offers the key.**
+
+### 11.2 Q2, pause
+
+(a) 240 s of history then pause; (b) a fresh stream paused at 10 s as the
+control; (c) rewind 60 then pause 60; (d) pause 60 then rewind 30 while
+still paused. Forward growth is "stopped" when `fw-bytes` holds within
+0.5 per cent for three 5 s samples.
+
+| | (a) full back buffer | (b) fresh stream |
+|---|---:|---:|
+| back buffer at the pause | **241.1 s** | 10.7 s |
+| cache total at the pause | 137.2 MiB | 14.2 MiB |
+| forward growth stopped after | **265.1 s** | **265.1 s** |
+| `fw-bytes` at the stop | **150.0 MiB** | **150.0 MiB** |
+| cache total at the stop | 199.6 MiB | 156.1 MiB |
+| back buffer at the stop | **93.0 s** | 10.9 s |
+| `seekable-ranges` at the stop | `[[147.993, 519.964]]` | `[[0.0, 291.967]]` |
+| cache end - `time-pos` at the stop | 279.2 s | 282.8 s |
+| process RSS at the stop | 393,804 KiB | 335,500 KiB |
+| resumed from the paused point (`time-pos` at +2 s, +5 s) | 240.785 -> 242.787 -> 245.790, **yes** | 10.520 -> 12.522 -> 15.525, **yes** |
+| predicted, 150 MiB over 0.562 MiB/s | 267 s | 267 s |
+
+The pause is the same length to the sample with a full back buffer as
+with an empty one: **a full back buffer shortens the pause by 0 s**. What
+pays is the history. Section 4.2 quoted the manual's rule that free
+backward buffer is never donated forward; what the manual does not say is
+what happens when the backward buffer is NOT free. Measured: the cache
+total reached 199.7 MiB at **120 s** of pause, and from then on the floor
+of the range moved one second per paused second -- `[4.016, 375.954]` at
+120 s, `[87.999, 459.971]` at 200 s, `[147.993, 519.964]` at 265 s -- until
+the back buffer was down to **93 s, which is 49.6 MiB at this bitrate: the
+50 MiB `--demuxer-max-back-bytes` the back buffer owns outright.** The
+forward buffer reclaims every byte the back buffer had borrowed, and the
+rewind window a viewer had before pressing pause is 241 s on the way in
+and 93 s on the way out.
+
+| (c) and (d), same player, 120 s of history | reading |
+|---|---|
+| `seek -60 relative` then pause | 120.74 -> 62.01 -> 65.02, moved 58.73 s, rewound |
+| `time-pos` across 60 s paused | 65.018 at 10 s, 65.018 at 60 s, **drift 0.000 s** |
+| forward cache across those 60 s | 49.3 MiB -> 75.0 MiB; cache end 155.97 -> 203.99 (kept filling from the rewound point) |
+| resume | 65.018 -> 67.020 -> 70.023, **continued from the paused point** |
+| pause 60 s, then `seek -30 relative` WHILE PAUSED | 70.02 -> 39.99 one second later, **moved 30.03 s**, still paused (`pause` true before and after) |
+| resume | 39.993 -> 42.028 -> 44.998, **continued from the rewound point** |
+
+**Verdict for the designers: pause and rewind compose in both orders --
+a rewound pause resumes where it paused, a paused rewind moves the
+position while the picture is frozen and resumes there -- but a pause EATS
+the history: 265 s of pause at 4.7 Mbps took the window from 241 s to
+93 s, and nothing on screen would say so unless the UI reads the floor.
+The pause itself is bounded by the forward quota alone, 150 MiB over the
+bitrate, with or without history behind it.**
+
+### 11.3 Q3, the watchdog and the seek itself
+
+Fill to the plateau -- reached at 365 s: back buffer 356.9 / 361.0 /
+357.0 s over the last three samples, cache total 199.3 / 200.0 / 199.5 MiB,
+range `[[44.028, 418.001]]` -- then `seek -300 relative`, then
+`get_property time-pos` as the very next command, then thirty 1 s ticks.
+
+| reading | value |
+|---|---:|
+| `seek -300 relative` reply round trip | **0.10 ms** |
+| `get_property time-pos` issued right after, round trip | **0.34 ms** |
+| `time-pos` on that first read | 100.617 against 400.617 before: **exactly -300.0 s** |
+| `time-pos` advanced 0.5 s past that at | **+1.12 s** after the seek |
+| `paused-for-cache` across the 30 ticks | false on all 30 |
+| `time-pos` per wall second over 29 intervals | **median 1.001, min 0.967, max 1.002** |
+| the 8 s control watchdog against the slowest reply seen | 0.34 ms: a margin of four orders of magnitude |
+
+The seek is not where the watchdog's risk is. Where the risk is, is the
+number the UI would show.
+
+| tick | wall s | `time-pos` | cache end | `fw-bytes` | cache end - `time-pos` | (wall - wall0) - (pos - pos0) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 1.12 | 101.15 | 419.99 | **169.1 MiB** | 318.8 | 300.60 |
+| 10 | 11.12 | 111.13 | 420.01 | 163.6 MiB | 308.9 | 300.62 |
+| 20 | 21.12 | 121.14 | 420.01 | 158.3 MiB | 298.9 | 300.63 |
+| 29 | 30.12 | 130.11 | 420.01 | 153.7 MiB | **289.9** | 300.64 |
+
+After a 300 s rewind every byte that was history is now ahead of the
+reader: `fw-bytes` reads **169.1 MiB against a 150 MiB forward quota**,
+and mpv stops fetching -- **cache end was flat for the whole 30 s, 419.99
+to 420.01**, while the live edge on the provider moved 30 s on. So
+`cache end - time-pos` counted DOWN, 318.8 to 289.9, one second per second,
+while the viewer's real distance behind live did not change at all. A UI
+built on that difference would show the gap closing when it is not.
+
+The right-hand column is the number that holds: wall-clock time since the
+first frame minus playback time since the first frame, `(wall - wall0) -
+(pos - pos0)`, read **300.60 to 300.64 across all thirty ticks** -- a
+300 s seek plus 0.6 s of the zero point being the first `time-pos` reading
+rather than the exact instant. The same formula over Q2(a)'s pause read
+280.1 at the 280 s sample against 279.2 from the cache-end difference,
+which agreed there only because the forward fetch had not yet stalled. It
+needs no property but `time-pos` and a clock, it is reset at the zap by
+the zero point being re-taken at the first `time-pos` after the
+`loadfile`, and it counts up while paused and holds while playing, which
+is what "behind live" means. Its one residual is the live-edge lead the
+demuxer keeps ahead of the reader before any rewind, 13.4 to 21.4 s on
+this channel over the fill and jittering with segment arrival, which the
+formula counts as zero -- the viewer at the live edge is already that far
+behind the provider, and that is the same on every live player.
+
+The stall has a second consequence, observed once and not sized: fetching
+resumed when the reader reached the frozen edge (Q4's edge seek below,
+`fw-bytes` 17.6 MiB a few seconds later, cache end 461.11), and the
+segments for the stalled 50 s were still on the provider's playlist, so
+playback continued without a gap. **ASSUMED, not measured: a stall longer
+than the provider's playlist window leaves a hole the viewer reaches
+later.** On this channel at this bitrate the fetch stalls whenever the
+viewer is more than about 265 s behind, which is a condition the window
+itself invites.
+
+**Verdict for the designers: the seek and the read after it answer in
+under half a millisecond against an 8 s watchdog, and playback is at
+1 s/s within 1.1 s; but "seconds behind live" must be computed from the
+wall clock and `time-pos`, never from the cache end, because a rewind past
+the forward quota freezes the cache end and makes that difference count
+down while the real gap holds.**
+
+### 11.4 Q4, the floor, precisely
+
+Same player, still rewound, range `[[44.028, 418.001]]` at the first row.
+Absolute seeks; "landed from floor" is `time-pos` one second after the
+seek minus `seekable-ranges[0].start` at the moment it was issued.
+
+| target | before | 1 s after | 4 s after | landed from floor | reply | log line | verdict |
+|---|---:|---:|---:|---:|---|---|---|
+| start + 1 = 45.028 | 131.15 | 45.96 | 48.97 | +1.935 s | success | -- | **landed** |
+| start = 44.028 | 48.97 | 45.03 | 48.03 | +1.001 s | success | -- | **landed** |
+| start - 1 = 43.028 | 48.03 | 49.03 | 52.04 | (unmoved) | **success** | `Cannot seek in this stream.` | **refused** |
+| end - 0.5 = 417.501 (inside, at the frozen edge) | 52.04 | 418.44 | 421.40 | -- | success | -- | landed; fetch resumed, range then `[[80.03, 459.977]]` |
+| end + 30 = 489.977 (outside) | 421.44 | 422.44 | 425.41 | (unmoved) | **success** | `Cannot seek in this stream.` | **refused** |
+
+`seekable-ranges[0].start` is the floor exactly: a target at it or one
+second above it lands on the first keyframe at or after the target, one to
+two seconds up; a target one second below it is dropped. The IPC reply for
+a dropped seek is `success`, identical to a seek that worked, and the only
+tells are `time-pos` not moving and an **error-level log line, `Cannot seek
+in this stream. You can force it with '--force-seekable=yes'`**, written
+once per refusal -- the player's log held exactly two, one per refused row
+above. `player start` already subscribes to that stream with
+`request_log_messages`, so a build can see the refusal rather than infer
+it. (Do not take the hint in the message: `--force-seekable` is for files
+whose demuxer lies about seekability, and the ranges here are honest.)
+
+The underrun case was not provoked on its own. What was measured is its
+degenerate form in Q1: with 1.1 s of history and the reader 1.92 s in,
+`seek -20` landed on the first keyframe at 1.99 -- the clamp to a still
+cached stream start that section 4.3 described, moving nothing. A range
+only ever describes what is cached, so "inside the range but not cached"
+is not a state the property can be in; what happens instead is that the
+range is a second wide. ASSUMED: a target inside a tiny range behaves as
+these rows do -- it lands on the nearest keyframe at or after it.
+
+**Verdict for the designers: clamp every backwards target to
+`seekable-ranges[0].start`, expect to land one to two seconds above it,
+treat a reply of `success` as no evidence at all, and read the refusal from
+`time-pos` or from the error-level log line the player already streams to
+the helper.**
+
+### 11.5 What this adds to the findings (no new defect ids; these refine F-RWD-3 and section 8)
+
+- F-RWD-3 is sharper than section 4.3 stated: the refusal is silent on the
+  IPC reply but not in the log, and it applies in both directions.
+- Section 8's first three questions are closed above. Audio-video sync,
+  subtitles, other providers and multi-hour runs remain open.
+- One new fact nothing in sections 1-10 anticipated: **pause reclaims the
+  rewind window** down to the 50 MiB the back buffer owns, and **a deep
+  rewind freezes the live-edge fetch** until the viewer has played the
+  forward quota back down. A design that ships rewind beside M2-11's pause
+  has to show the floor moving during a pause and must not derive "behind
+  live" from the cache end.
+
+### 11.6 Reproducing this
+
+```bash
+cd scripts/dev-harness/spikes/live-rewind
+python3 -m unittest test_verdict          # 51 assertions, 26 from the first pass
+python3 design_pass.py q1   --channels <channels.json> --a 't:ABC.us@KAAL' --b 't:BYUTV.us@SD' \
+    --scratch <scratch> --sock-dir "$XDG_RUNTIME_DIR/lrw2" --out <scratch>/q1.json
+python3 design_pass.py q2a  ... --a 't:ABC.us@KAAL' --q2-cap 300
+python3 design_pass.py q2b  ... --a 't:ABC.us@KAAL' --q2-cap 420
+python3 design_pass.py q2cd ... --a 't:ABC.us@KAAL'
+python3 design_pass.py q34  ... --a 't:ABC.us@KAAL' --q3-cap 430
+```
+
+Q1 and Q2a ran concurrently on separate players, then Q2b and Q2cd; Q34,
+the one whose numbers are round-trip timings, ran alone. Wall time 167,
+529, 300, 263 and 456 s. Each run was wrapped in `timeout -k 5 <bound>`
+and the script traps SIGTERM into the `finally` that reaps mpv by pid, so
+a bound that fires still leaves no player behind.
+
+The seven judgements added to `verdict.py` were each seen red. Baseline
+**Ran 51 tests ... OK**; eight mutations, each one red:
+
+| mutation of `verdict.py` | result |
+|---|---|
+| `history_survives` goes back to an overlap test (the false positive this pass made first) | Ran 51, FAILED (failures=1) |
+| `resumed_from` stops checking that playback moved on | Ran 51, FAILED (failures=1) |
+| `floor_seek_verdict` checks landed before clamped | Ran 51, FAILED (failures=1) |
+| `floor_seek_verdict` calls refused only on a strict < 1 s move, which the 1 s read gap defeats | Ran 50, OK until the measured `start-1` reading was added as a test; then Ran 51, FAILED (failures=1) |
+| `at_plateau` drops the cap check, so an underrun reads as a plateau | Ran 51, FAILED (failures=1) |
+| `tick_rate` invents a rate across a missing reading | Ran 51, FAILED (failures=1) |
+| `trend` flips its sign | Ran 51, FAILED (failures=1) |
+| `behind_live_seconds` returns pos minus end | Ran 51, FAILED (failures=1) |
+
+The fourth row is the point of the rule: a mutation survived the tests
+written from the function's description and died only when a reading the
+player had actually produced was pasted in.

@@ -160,3 +160,124 @@ class Summarise(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- Second pass, 2026-10-03 -------------------------------------------------
+
+class BehindLive(unittest.TestCase):
+    def test_cache_end_minus_time_pos(self):
+        self.assertAlmostEqual(verdict.behind_live_seconds({"cache-end": 107.99}, 90.83), 17.16, places=2)
+
+    def test_missing_side_is_none(self):
+        self.assertIsNone(verdict.behind_live_seconds({"cache-end": 107.99}, None))
+        self.assertIsNone(verdict.behind_live_seconds({}, 90.83))
+        self.assertIsNone(verdict.behind_live_seconds(None, 90.83))
+
+
+class HistorySurvives(unittest.TestCase):
+    # Measured 2026-10-03: a loadfile restarts the timeline at 0, so the old
+    # range and the fresh one OVERLAP by construction. The first version of
+    # this rule was an overlap test and said True about a history that was
+    # gone. A fresh demuxer cannot show a range wider than its own age plus
+    # the forward lead.
+    def test_fresh_timeline_overlapping_at_zero_is_not_survival(self):
+        self.assertFalse(verdict.history_survives([[-0.0, 105.983]], [[0.0, 1.988]], 5.034))
+
+    def test_a_range_wider_than_the_demuxer_is_old_is_survival(self):
+        self.assertTrue(verdict.history_survives([[0.0, 105.983]], [[0.0, 100.0]], 5.0))
+
+    def test_unknown_is_none(self):
+        self.assertIsNone(verdict.history_survives(None, [[0.0, 1.0]], 5.0))
+        self.assertIsNone(verdict.history_survives([[0.0, 1.0]], [[0.0, 1.0]], None))
+
+
+class ResumedFrom(unittest.TestCase):
+    def test_continues_from_the_paused_point(self):
+        self.assertTrue(verdict.resumed_from(240.785, 242.787, 245.790))
+
+    def test_a_jump_to_live_is_not_a_resume(self):
+        self.assertFalse(verdict.resumed_from(240.785, 519.9, 522.9))
+
+    def test_not_moving_is_not_a_resume(self):
+        self.assertFalse(verdict.resumed_from(240.785, 240.785, 240.785))
+
+    def test_missing_reading_is_none(self):
+        self.assertIsNone(verdict.resumed_from(240.785, None, 245.79))
+
+
+class FloorSeek(unittest.TestCase):
+    def test_landed_near_the_target(self):
+        self.assertEqual(verdict.floor_seek_verdict(149.0, 400.0, 149.9, 152.9, 148.0), "landed")
+
+    def test_clamped_to_the_floor_when_asked_below_it(self):
+        self.assertEqual(verdict.floor_seek_verdict(147.0, 400.0, 148.2, 151.2, 148.0), "clamped")
+
+    def test_refused_when_it_did_not_move(self):
+        self.assertEqual(verdict.floor_seek_verdict(147.0, 400.0, 400.3, 403.3, 148.0), "refused")
+
+    def test_an_ignored_seek_read_a_second_later_is_refused_not_elsewhere(self):
+        # Measured 2026-10-03: seek absolute 43.028 with the floor at 44.028
+        # answered "success"; time-pos read 48.03 before, 49.03 one second
+        # after, 52.04 three seconds later. The player just kept playing.
+        self.assertEqual(verdict.floor_seek_verdict(43.028, 48.03, 49.03, 52.04, 44.028), "refused")
+
+    def test_stalled_when_it_moved_but_did_not_play(self):
+        self.assertEqual(verdict.floor_seek_verdict(149.0, 400.0, 149.9, 149.9, 148.0), "stalled")
+
+    def test_elsewhere_when_it_landed_somewhere_else(self):
+        self.assertEqual(verdict.floor_seek_verdict(149.0, 400.0, 300.0, 303.0, 148.0), "elsewhere")
+
+
+class Plateau(unittest.TestCase):
+    CAP = 200 * 1024 * 1024
+
+    def test_flat_span_at_the_cap_is_a_plateau(self):
+        snaps = [{"totalBytes": self.CAP * 0.995, "backSpan": 357.1},
+                 {"totalBytes": self.CAP * 0.996, "backSpan": 357.0},
+                 {"totalBytes": self.CAP * 0.998, "backSpan": 355.1}]
+        self.assertTrue(verdict.at_plateau(snaps, self.CAP))
+
+    def test_still_growing_is_not_a_plateau_even_at_the_cap(self):
+        snaps = [{"totalBytes": self.CAP * 0.99, "backSpan": 300.0},
+                 {"totalBytes": self.CAP * 0.99, "backSpan": 320.0},
+                 {"totalBytes": self.CAP * 0.99, "backSpan": 340.0}]
+        self.assertFalse(verdict.at_plateau(snaps, self.CAP))
+
+    def test_flat_below_the_cap_is_an_underrun_not_a_plateau(self):
+        snaps = [{"totalBytes": self.CAP * 0.5, "backSpan": 100.0},
+                 {"totalBytes": self.CAP * 0.5, "backSpan": 100.0},
+                 {"totalBytes": self.CAP * 0.5, "backSpan": 100.0}]
+        self.assertFalse(verdict.at_plateau(snaps, self.CAP))
+
+    def test_needs_three_samples(self):
+        self.assertFalse(verdict.at_plateau([{"totalBytes": self.CAP, "backSpan": 1.0}] * 2, self.CAP))
+
+
+class TickRate(unittest.TestCase):
+    def test_one_second_per_second(self):
+        rate = verdict.tick_rate([(0.0, 10.0), (1.0, 11.0), (2.0, 12.0), (3.0, 13.0)])
+        self.assertEqual(rate["ticks"], 3)
+        self.assertAlmostEqual(rate["median"], 1.0)
+        self.assertAlmostEqual(rate["min"], 1.0)
+
+    def test_a_stall_shows_as_a_zero_minimum(self):
+        rate = verdict.tick_rate([(0.0, 10.0), (1.0, 11.0), (2.0, 11.0), (3.0, 12.0)])
+        self.assertAlmostEqual(rate["min"], 0.0)
+        self.assertAlmostEqual(rate["median"], 1.0)
+
+    def test_a_missing_reading_breaks_the_pair_rather_than_inventing_a_rate(self):
+        rate = verdict.tick_rate([(0.0, 10.0), (1.0, None), (2.0, 12.0)])
+        self.assertIsNone(rate)
+
+
+class Trend(unittest.TestCase):
+    def test_down(self):
+        self.assertEqual(verdict.trend([300.0, 290.0, 280.0])["direction"], "down")
+
+    def test_flat_within_two_seconds(self):
+        self.assertEqual(verdict.trend([300.0, 301.0, 301.5])["direction"], "flat")
+
+    def test_up_skipping_none(self):
+        t = verdict.trend([None, 10.0, None, 20.0])
+        self.assertEqual(t["direction"], "up")
+        self.assertEqual(t["n"], 2)

@@ -164,3 +164,152 @@ def summarise(rows):
         if seek in counts:
             counts[seek] += 1
     return counts
+
+
+# --- Second pass, 2026-10-03 (design_pass.py) --------------------------------
+
+FLOOR_TOLERANCE_S = 1.5       # a landing this close to the target counts as hitting it
+PLATEAU_GROWTH_S = 2.0        # back buffer growing less than this over two samples is flat
+CONTINUED_PLAY_S = 3.5        # an ignored seek read up to this much later just kept playing
+
+
+def behind_live_seconds(cache_state, time_pos):
+    """Seconds between the play head and the newest cached packet:
+    cache-end minus time-pos. This is the number a UI would show as
+    "behind live" on a 1 s tick. None when either side is missing. Note
+    that at the live edge it is NOT zero: HLS keeps whole segments ahead of
+    the reader, so the figure a UI shows has to subtract the lead it saw
+    before the first rewind.
+    """
+    if not isinstance(cache_state, dict):
+        return None
+    try:
+        end = float(cache_state.get("cache-end"))
+        pos = float(time_pos)
+    except (TypeError, ValueError):
+        return None
+    return end - pos
+
+
+def history_survives(old_ranges, new_ranges, seconds_since_zap, lead_s=30.0):
+    """Does the OLD channel's history still show after a loadfile?
+
+    Not an overlap test: measured 2026-10-03, every HLS loadfile restarts the
+    demuxer timeline at 0, so the old [0, 106] and a fresh [0, 1.99] overlap
+    by construction and say nothing. What a fresh demuxer CANNOT produce is a
+    range wider than the seconds it has been running plus the forward lead
+    it fetches ahead (lead_s, generous). True when any new range is wider
+    than that; False otherwise; None when a side is unknown.
+    """
+    if not isinstance(old_ranges, list) or not isinstance(new_ranges, list):
+        return None
+    try:
+        budget = float(seconds_since_zap) + float(lead_s)
+    except (TypeError, ValueError):
+        return None
+    for new in new_ranges:
+        try:
+            if float(new[1]) - float(new[0]) > budget:
+                return True
+        except (TypeError, ValueError, IndexError):
+            continue
+    return False
+
+
+def resumed_from(paused_at, at2, at5):
+    """After an unpause, did playback continue from the paused position?
+    True when the +2 s reading is within 1.5 s of where it was paused and
+    the +5 s reading has advanced past it; False when it jumped (to live,
+    or anywhere else) or did not move; None when a reading is missing.
+    """
+    if paused_at is None or at2 is None or at5 is None:
+        return None
+    near = abs(float(at2) - float(paused_at)) <= 2.0 + FLOOR_TOLERANCE_S
+    moving = float(at5) - float(at2) >= MIN_RESUME_ADVANCE_S
+    return bool(near and moving)
+
+
+def floor_seek_verdict(target, before, after, later, floor):
+    """An ABSOLUTE seek near the floor of the seekable range.
+
+      refused  -- the position just carried on playing: it neither moved
+                  back nor jumped forward by more than CONTINUED_PLAY_S,
+                  which is what an ignored seek looks like when the second
+                  reading is taken a second or three later (measured
+                  2026-10-03: a seek to start-1 answered "success" and the
+                  position read before+1.0 one second later)
+      clamped  -- the target was below the floor and it came to rest at the
+                  floor; checked BEFORE landed because a target one second
+                  under the floor is within tolerance of both
+      landed   -- came to rest within FLOOR_TOLERANCE_S of the target
+      stalled  -- moved but did not play on
+      elsewhere-- moved to somewhere that is none of the above
+    """
+    if before is None or after is None:
+        return "lost"
+    delta = float(after) - float(before)
+    if -MIN_BACKWARD_MOVE_S < delta <= CONTINUED_PLAY_S:
+        return "refused"
+    if later is None or float(later) - float(after) < MIN_RESUME_ADVANCE_S:
+        return "stalled"
+    if floor is not None and float(target) < float(floor) and abs(float(after) - float(floor)) <= FLOOR_TOLERANCE_S:
+        return "clamped"
+    if abs(float(after) - float(target)) <= FLOOR_TOLERANCE_S:
+        return "landed"
+    return "elsewhere"
+
+
+def at_plateau(snapshots, cap_bytes):
+    """Has the back buffer stopped growing? True once the cache total is
+    within 3 per cent of the cap AND the back span grew less than
+    PLATEAU_GROWTH_S across the last two samples. Needs three samples."""
+    if len(snapshots) < 3:
+        return False
+    a, b, c = snapshots[-3], snapshots[-2], snapshots[-1]
+    try:
+        total = float(c.get("totalBytes"))
+        spans = [float(a.get("backSpan")), float(b.get("backSpan")), float(c.get("backSpan"))]
+    except (TypeError, ValueError):
+        return False
+    if total < 0.97 * float(cap_bytes):
+        return False
+    return (spans[2] - spans[0]) < PLATEAU_GROWTH_S
+
+
+def tick_rate(pairs):
+    """Median and worst per-tick rate of time-pos against the wall clock
+    over (wall_s, pos) pairs: {"median": r, "min": r, "max": r, "ticks": n}.
+    A player advancing at 1 s/s reads 1.0; a stall reads 0. None when fewer
+    than two usable pairs."""
+    rates = []
+    last = None
+    for wall, pos in pairs:
+        if not isinstance(pos, (int, float)) or not isinstance(wall, (int, float)):
+            last = None
+            continue
+        if last is not None and wall > last[0]:
+            rates.append((pos - last[1]) / (wall - last[0]))
+        last = (wall, pos)
+    if not rates:
+        return None
+    rates.sort()
+    return {"median": round(rates[len(rates) // 2], 3), "min": round(rates[0], 3),
+            "max": round(rates[-1], 3), "ticks": len(rates)}
+
+
+def trend(values):
+    """First, last and the sign of a series: {"first", "last", "delta",
+    "direction"} where direction is "down", "up" or "flat" (within 2 s).
+    None values are skipped; None when nothing is left."""
+    kept = [float(v) for v in values if isinstance(v, (int, float))]
+    if not kept:
+        return None
+    delta = kept[-1] - kept[0]
+    if delta <= -2.0:
+        direction = "down"
+    elif delta >= 2.0:
+        direction = "up"
+    else:
+        direction = "flat"
+    return {"first": round(kept[0], 2), "last": round(kept[-1], 2), "delta": round(delta, 2),
+            "direction": direction, "n": len(kept)}
