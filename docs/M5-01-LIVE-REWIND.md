@@ -1,8 +1,8 @@
 # M5-01 design: live rewind
 
-**Status: proposed, for product-owner review. Nothing is built. Twelve
-decisions in section 9 are the owner's; section 10 lists the measurements a
-build would take before the first commit.**
+**Status: APPROVED 2026-10-03, every recommendation in section 9 taken as
+ruled ("Go with your recommendations on all twelve and build it"). The
+build takes section 10's measurements before its first commit.**
 
 Design pass authorised 2026-10-03 as the successor to decision D2 in
 `docs/PLAN-M4.md`. Evidence: `docs/SPIKE-LIVE-REWIND.md` sections 1-7 (the
