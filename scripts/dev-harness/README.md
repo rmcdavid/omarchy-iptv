@@ -372,6 +372,57 @@ caption; after the real `Ctrl+G` `channelWall` showed 21 and the log held
 The same tree with `textFormat: Text.PlainText` on the caption: 0 and 0,
 6 passed, 0 failed.
 
+### Live rewind (M5-01)
+
+```bash
+timeout -k 10 480 scripts/dev-harness/rewind-scenario.sh                     # holds the display; ~4 min
+timeout -k 10 480 scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f  # the pre-rewind tree: every check but R0 red
+python3 scripts/qa-stub-mpv.py --self-test                                   # the stub's seek semantics, no socket, no display
+```
+
+`rewind-scenario.sh` runs REAL mpv against a LOCAL live-like stream and
+drives the helper verb `player seek`, the service, the bar and the guide
+key `b` through the harness; the plan with every check named is
+`docs/QA-REWIND.md`. The stream is two HLS playlists with a sliding window
+(ffmpeg `-re` from lavfi, 6 x 2 s segments, a burned-in clock in the
+picture) served from the scenario's own loopback server on `127.0.0.1:8771`
+(8765 is `--serve`, 8766 `argv-scenario.sh`, 8767 `text-scenario.sh`). mpv
+reads it as it reads a provider's channel -- `seekable` false,
+`file-format` hls, history growing one second per second -- which was
+measured before the scenario was written (QA-REWIND section 2). The
+player's cache is shrunk to 2 MiB back + 4 MiB forward through the plugin's
+own `mpvArgs` setting (`OMARCHY_IPTV_MPV_ARGS`, recorded in
+`last-start.env` so `restart-shell` carries it), because R4 needs an
+EVICTED floor and at the 200 MiB default the floor would not move for
+twenty minutes at this bitrate.
+
+Every "moved" is read off the player's own socket by
+`fixtures/rewind-probe.py` (request-id matched; a `socat | head -1` can
+hand back an event instead of the reply), never from the reply under test.
+The raw floor controls read the floor and seek in ONE probe call: the
+floor on this stream evicts in 4-6 s steps, and a seek aimed at a floor
+read six seconds earlier was refused during development. The held-key
+check counts helper runs with `fixtures/rewind-sweep.py`, a /proc sweep
+keyed on the helper's exact path (the argv-scenario lesson), and reads the
+intent counter the way `player-scenario.sh` P11 does. The plugin's own IPC
+verbs (`back`, `forward`, `live`, `pause`) are reached with the harness
+environment (`XDG_RUNTIME_DIR=<scratch>/runtime WAYLAND_DISPLAY=<absolute
+socket> qs ipc -p <scratch>/root call io.github.rmcdavid.iptv ...`), the
+form SPIKE-LIVE-REWIND 12.5 measured.
+
+`scripts/qa-stub-mpv.py` learned seek semantics for the service's logic
+tests, no more forgiving than mpv 0.41 as measured: `seek` always replies
+`success`; a target inside the range moves `time-pos` exactly; below an
+evicted floor or past the end it does not move; while the start is still
+cached an over-long RELATIVE seek lands at 0; a negative absolute target
+seeks from the cache end; `pause` freezes `time-pos` while the floor keeps
+moving once the window is full; every `loadfile` restarts the timeline;
+`demuxer-cache-state` carries only the twelve numeric leaves the helper
+forwards. Its `--self-test` pins each rule against a fake clock and each
+case was seen red by a named mutation (QA-REWIND section 5). The
+PLY-H17/H18 cold half (`qa-player-scenarios.sh run cold --apply`) still
+passes 20/20 on the changed stub.
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape
