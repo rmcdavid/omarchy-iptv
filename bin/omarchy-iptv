@@ -5428,7 +5428,12 @@ def await_seek_outcome(client: MpvIpc, deadline: float) -> str | None:
     (mpv dropped it), None when neither did by `deadline`. The caller must
     have subscribed with `request_log_messages error`. The line's text is
     matched, never printed: it is mpv's own sentence, but the rule for this
-    sink is nothing from the player reaches stdout unexamined."""
+    sink is nothing from the player reaches stdout unexamined.
+
+    A `seek` event carries no origin, so one raised by a seek that is not
+    ours -- the user's own arrow key in the player window at the same
+    instant -- ends the wait early (review nit, accepted): the read that
+    follows still decides by the threshold, and the status tick re-syncs."""
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:

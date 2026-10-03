@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.11.0 (unreleased)
+## 0.11.0 (2026-10-03)
 
 You can wind live TV back.
 

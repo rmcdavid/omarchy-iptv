@@ -10913,3 +10913,39 @@ and 4.2 in their 3 s windows; R13 coalesced twenty presses into 3 helper
 runs; R15 spawn-to-reply median 222 ms (runs 225 221 227 222 220). Owner's
 shell pid 2186866 before and after; no mpv or ffmpeg left.
 
+## Review of the M5-01 round, 2026-10-03: the verdicts
+
+Five lenses over 9ff7f9b..d508e9d, each finding handed to adversarial
+verifiers told to refute. **43 findings; 38 verdicts: 31 confirmed, 4
+partial, 3 refuted; 5 without a verdict** (one verifier chunk of five
+returned nothing). By severity: 4 P2, 30 P3, 9 nit; by kind: 10 code, 17
+claim, 6 test, 7 seam, 3 sink. Every one is closed above or filed on the
+board (F-RWD-18, F-RWD-19 open; the mpv.conf question and the foreign seek
+event accepted and stated). The three refutations are of one kind: the
+verifiers ran after the lead's repair commit 8d1da69 had landed, found the
+UX 4.8 tick sentence, the README's missing OSD sentence and the UX 6.2
+transcription already fixed at HEAD, and recorded each as "refuted at HEAD
+because it was already fixed; it held at d508e9d" -- confirmations of the
+finding, not of its absence. (The lead's first draft of this paragraph
+said "0 refuted" from a partial reading of the journal; the count above is
+from every verdict line.) The four partial verdicts: two findings that
+held at the reviewed revision and were already closed at HEAD (the
+post-stop reply; the UX tooltip sentence); the foreign-seek-event nit,
+whose code claim holds while the fake's ordering the verifier built to
+show it (event before the move) is not mpv's (the probe read the target
+after the event 12 of 12); and the refused-`live` transient, which held
+and whose cause the verifier placed in the reply's shape rather than the
+branch order (the helper never emits `requested: "live"`; the fix orders
+the branches and pins the real shapes).
+
+What this round's review says about the process, for the board (F-M5-1):
+the two blockers of the integrated tree were a verb that ignored its
+argument and a read that raced the player, and the lead had the data for
+the first on his own live pass and filed it as something else; the lanes'
+mutation ledgers were cited by number and not held by the tree; and the
+test double was more forgiving than mpv in two more places (the stub moved
+before replying, the fake delivered log lines to clients that never asked).
+The review found each by driving the shipping code, not by reading the
+write-ups, which is the discipline rule 14 asks for and the one that keeps
+working.
+
