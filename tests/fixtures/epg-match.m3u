@@ -1,0 +1,31 @@
+#EXTM3U
+# M4-01 matcher fixture (D-EPG-2). One row per strategy and per ambiguity
+# rule; the guide side is tests/fixtures/epg-match.xml and the expected
+# counts are tests/fixtures/epg-match.json. Do not reorder: the playlist
+# order decides which row wins a feed base, and the Multi row depends on it.
+#EXTINF:-1 tvg-id="Exact.us" group-title="Match",Exact Channel
+http://stream.example.test/exact.m3u8
+#EXTINF:-1 tvg-id="Suffix.us@SD" group-title="Match",Suffix Channel
+http://stream.example.test/suffix.m3u8
+#EXTINF:-1 tvg-id="Bare.us" group-title="Match",Bare Channel
+http://stream.example.test/bare.m3u8
+#EXTINF:-1 tvg-id="namehit.xx" group-title="Match",Name Only Channel
+http://stream.example.test/namehit.m3u8
+#EXTINF:-1 tvg-id="ambi1.xx" group-title="Ambiguous",Twin Channel
+http://stream.example.test/ambi1.m3u8
+#EXTINF:-1 tvg-id="ambi2.xx" group-title="Ambiguous",Twin Channel
+http://stream.example.test/ambi2.m3u8
+#EXTINF:-1 tvg-id="guideambi.xx" group-title="Ambiguous",Double Declared
+http://stream.example.test/guideambi.m3u8
+#EXTINF:-1 tvg-id="none.xx" group-title="Match",No Guide Channel
+http://stream.example.test/none.m3u8
+#EXTINF:-1 group-title="Match",Unkeyed Channel
+http://stream.example.test/unkeyed.m3u8
+#EXTINF:-1 tvg-id="Detail.us" group-title="Match",Detail Channel
+http://stream.example.test/detail.m3u8
+#EXTINF:-1 tvg-id="Case.US" group-title="Match",Case Channel
+http://stream.example.test/case.m3u8
+#EXTINF:-1 tvg-id="Clash.us" group-title="Match",Clash Channel
+http://stream.example.test/clash.m3u8
+#EXTINF:-1 tvg-id="Multi.us" group-title="Match",Multi Channel
+http://stream.example.test/multi.m3u8

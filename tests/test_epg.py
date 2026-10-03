@@ -74,11 +74,11 @@ class TimeParsingTest(unittest.TestCase):
 class RecordEncodingTest(unittest.TestCase):
     def test_sorts_infers_stops_and_dedupes(self):
         blob, count = helper.encode_records([
-            (NOW + 1800, None, "Last"),
-            (NOW, None, "Second"),
-            (NOW - 1800, NOW, "First"),
-            (NOW - 1800, NOW, "First"),
-            (NOW - 3600, NOW - 3600, "Zero length"),
+            (NOW + 1800, None, "Last", {}),
+            (NOW, None, "Second", {}),
+            (NOW - 1800, NOW, "First", {}),
+            (NOW - 1800, NOW, "First", {}),
+            (NOW - 3600, NOW - 3600, "Zero length", {}),
         ])
         records = blob.split(helper.EPG_RECORD_SEP)
         self.assertEqual(count, 3)
@@ -89,7 +89,7 @@ class RecordEncodingTest(unittest.TestCase):
         ])
 
     def test_per_channel_cap(self):
-        items = [(NOW + i * 60, NOW + i * 60 + 60, "P%d" % i) for i in range(helper.EPG_MAX_PER_CHANNEL + 50)]
+        items = [(NOW + i * 60, NOW + i * 60 + 60, "P%d" % i, {}) for i in range(helper.EPG_MAX_PER_CHANNEL + 50)]
         _, count = helper.encode_records(items)
         self.assertEqual(count, helper.EPG_MAX_PER_CHANNEL)
 
@@ -140,8 +140,12 @@ class EpgCommandTest(unittest.TestCase):
         self.assertEqual(doc["sourceHost"], "local file")
         channels = doc["channels"]
         self.assertEqual(sorted(channels), ["baddate.tv", "bbc1.uk", "cnn.us", "dup.tv", "mixedcase.id", "nostop.tv", "overlap.tv"])
+        # M4-02: this fixture has declared <desc> on this programme since
+        # it was written (3c392a2, 2026-09-12) and the helper dropped it. It
+        # is carried now, and every other row below shows the other half of
+        # that rule -- a programme that declares nothing gains nothing.
         self.assertEqual(channels["bbc1.uk"], {
-            "now": {"title": "News at Nine", "start": NOW - 1800, "stop": NOW + 1800},
+            "now": {"title": "News at Nine", "desc": "Headlines.", "start": NOW - 1800, "stop": NOW + 1800},
             "next": {"title": "Weather & Travel", "start": NOW + 1800, "stop": NOW + 3600},
         })
         # A programme ending exactly now is over; the gap leaves only `next`.
@@ -368,7 +372,15 @@ class QaEpgFixtureTest(unittest.TestCase):
             self.assertEqual(status["validUntil"], T0 + 300)
             self.assertEqual(status["warnings"], [])
             channels = read(os.path.join(tmp, "epg-now.json"))["channels"]
-            self.assertEqual(channels["bbc1.uk"], {"now": prog("Six O'Clock News", T0 - 4500, 1789245000), "next": prog("Regional News", 1789245000, 1789248600)})
+            # M4-02 over the QA asset as committed: this programme has
+            # carried <desc>, <category> and an xmltv_ns <episode-num> since
+            # the fixture's first commit (c87354c, 2026-09-12), all three of
+            # them dropped until now. "0.1.0/1" is season 0, episode 1,
+            # counted from zero, so it reads S1 E2.
+            self.assertEqual(channels["bbc1.uk"], {
+                "now": dict(prog("Six O'Clock News", T0 - 4500, 1789245000),
+                            desc="Now at T0.", category="News", episode="S1 E2"),
+                "next": prog("Regional News", 1789245000, 1789248600)})
             self.assertEqual(channels["cnn.us"], {"now": prog("The Lead", T0 - 900, T0 + 2700), "next": prog("Situation Room", T0 + 2700, T0 + 6300)})
             self.assertEqual(channels["overlap.test"], {"now": prog("Overlap B", T0 - 900, T0 + 2700), "next": prog("After Overlap", T0 + 2700, T0 + 6300)})
             self.assertEqual(channels["gap.test"], {"next": prog("Starts Later", T0 + 2700, T0 + 6300)})

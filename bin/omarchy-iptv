@@ -217,10 +217,54 @@ EPG_VALID_MAX = 300               # epg-now.json is never declared valid longer 
 EPG_MAX_TITLE = 200
 EPG_MAX_PER_CHANNEL = 400
 EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no successor
-# One record per programme, 'SSSSSSSSSS EEEEEEEEEE "title"' (fixed-width
-# epochs, JSON-encoded title), joined by DEL. The fixed prefix lets bisect and
-# plain string comparison find now/next, and the pre-encoded title lets the
-# recompute emit epg-now.json by concatenation (no per-channel encoder work).
+# M4-02 detail caps, in code points, applied when the whitespace is folded
+# and again after the URLs are redacted (see clean_detail). A longer value is
+# CUT at the cap with nothing appended: no ellipsis, no word boundary, so the
+# panel can end mid-word, and a value carrying URLs ends up shorter than the
+# cap because redaction runs on the already-cut text.
+#
+# 400 is a judgement, not a measurement: the synopsis length of a real guide
+# has not been measured here. What HAS been measured is what the cap is for.
+# The window keeps up to EPG_MAX_PER_CHANNEL records per channel and the
+# recompute reads all of them, so the description is the one field that can
+# multiply the cache: a synthetic 2,000-channel guide carrying a
+# 600-character desc on every one of 48,000 programmes takes
+# epg-window.txt from 2.41 to 23.13 MiB and epg-now.json from 0.35 to 2.07
+# MiB. This number is the only lever on that, so move it with a measurement.
+EPG_MAX_DESC = 400
+EPG_MAX_CATEGORY = 48
+EPG_MAX_EPISODE = 32
+# The detail keys, in the fixed order encode_record emits them. Fixed because
+# epg-now.json is compared byte for byte by the gzip twin test (dev branch).
+EPG_DETAIL_KEYS = ("desc", "category", "episode")
+# The three matcher strategies of M4-01, as RANKS: strongest first, and the
+# order the names appear in is the order build_alias's maps are tried in.
+# A stronger strategy displaces a weaker one on the same playlist channel
+# whatever order the guide streamed them in (see claim_channel).
+EPG_MATCH_ID = 0
+EPG_MATCH_FEED = 1
+EPG_MATCH_NAME = 2
+EPG_MATCH_KEYS = ("matchedById", "matchedByFeed", "matchedByName")
+# One record per programme,
+# 'SSSSSSSSSS EEEEEEEEEE "title"[,"desc":"...","category":"...","episode":"..."]'
+# (fixed-width epochs, then the JSON-encoded title FOLLOWED BY the optional
+# M4-02 detail members), joined by DEL. The fixed prefix lets bisect and plain
+# string comparison find now/next, and the pre-encoded tail lets the recompute
+# emit epg-now.json by concatenation (no per-channel encoder work): the
+# readers prepend '{"title":' to the tail and append the two numbers.
+#
+# A programme with no detail therefore produces the record it produced before
+# M4-02, byte for byte, which is why an epg-window.txt written by an older
+# helper is still readable by this one and costs nothing to keep.
+#
+# Why the M4-02 detail fields cannot break the bisect contract: every
+# comparison the readers make is decided at or before index 10. Records sort
+# by start, every record carries ten digits at [0:10] and a space at [10],
+# and compute_now_next bisects against '<ten digits>~' -- "~" (0x7e) is above
+# every digit and above the space, so a record with the same start always
+# compares below the probe whatever follows it. The stop comparison slices
+# [11:21] by position. Nothing any reader does looks past index 22 except
+# json.loads of the whole body, so the body may grow freely.
 EPG_RECORD_SEP = "\x7f"
 
 MPV_DEFAULT_USER_AGENT = "libmpv"   # mpv 0.41 `--list-options` default, used when option-info is unavailable
@@ -1656,30 +1700,236 @@ def parse_xmltv_time(raw: str | None, cache: dict[str, int | None]) -> int | Non
     return ts
 
 
-def clean_title(text: str | None) -> str:
+def clean_field(text: str | None, limit: int) -> str:
+    """Fold every run of whitespace and control characters to one space, trim,
+    and cut at `limit` code points. A str is cut on a code-point boundary,
+    never inside one, so the result is always encodable."""
     if not text:
         return ""
-    return _CONTROL_WS.sub(" ", text).strip()[:EPG_MAX_TITLE]
+    return _CONTROL_WS.sub(" ", text).strip()[:limit]
 
 
-def build_alias(channels_doc: Any) -> tuple[dict[str, str] | None, int]:
-    """Playlist tvg-ids -> alias map (exact id and, when free, its lower-case
-    form) so XMLTV ids match case-sensitively first, case-insensitively
-    second. Returns (None, 0) when no channel cache exists."""
+def clean_title(text: str | None) -> str:
+    return clean_field(text, EPG_MAX_TITLE)
+
+
+def clean_detail(text: str | None, limit: int) -> str:
+    """clean_field plus URL redaction, for the M4-02 detail fields.
+
+    These three fields (<desc>, <category>, <episode-num>) are
+    provider-controlled text on its way to a renderer, like the channel name
+    (D-TEXT-1) and the programme title before them, so they are a rule 5
+    sink. Two things are true of them and neither is optional:
+
+    - Any URL inside the text is reduced to scheme://host here, so no path,
+      query or userinfo reaches the panel. Nothing else in the guide's markup
+      is read: <icon src> and <url> children are never looked at, so no
+      address enters a record except through this redaction.
+    - The text is entity-DECODED by the XML parser, so `&lt;img src=...&gt;`
+      arrives as real markup, and redaction leaves a fetchable
+      `<img src="http://host">` (D-TEXT-1 measured exactly that). The guide
+      renders every one of these fields as PLAIN TEXT -- `Text.PlainText` is
+      the only stop, and the gate's text format guard (dev branch) fails on
+      a Text that does not declare its format.
+
+    The cap is applied on the way IN as well as on the way out: the regex
+    never scans more than `limit` code points of a hostile description, and
+    the value is never longer than the cap even when redacting an
+    unparseable URL grows it ("[redacted]"). Cutting first and redacting
+    second is the order that bounds the scan, and it means a description
+    whose first `limit` characters carry URLs comes out SHORTER than the cap
+    -- by exactly what the redaction removed. Nothing is added back.
+    """
+    text = clean_field(text, limit)
+    if "://" not in text:
+        # The common case, and the hot one. _URL_ANYWHERE cannot match
+        # without "://", so this guard changes no answer; it is here because
+        # the regex retries at every word boundary and prose is all word
+        # boundaries. Measured over a 48,000-programme fetch with a
+        # 600-character description on every programme: 2.7 s of the 6.3 s
+        # was this sub returning the string it was given.
+        return text
+    return clean_field(redact_urls(text), limit)
+
+
+def episode_ns_text(raw: str) -> str:
+    """xmltv_ns `season.episode.part` -> "S1 E2".
+
+    Every field is zero-based and may carry a "/total" tail or be empty.
+    Season and episode are rendered one-based; part is dropped. A field that
+    is not a plain number is dropped rather than guessed, so an unparseable
+    system yields "" and the panel shows no episode line at all.
+    """
+    fields = raw.split(".")
+    out = []
+    for prefix, index in (("S", 0), ("E", 1)):
+        if index >= len(fields):
+            break
+        number = fields[index].split("/")[0].strip()
+        if number.isdigit():
+            out.append("%s%d" % (prefix, int(number) + 1))
+    return " ".join(out)
+
+
+def episode_text(elem: Any) -> str:
+    """The first readable <episode-num> of a programme, as text to render.
+
+    `system="onscreen"` is preferred wherever it exists because XMLTV
+    defines it as the number as shown to the viewer; `xmltv_ns` is machine
+    form and is translated by episode_ns_text; anything else is taken as the
+    provider wrote it. A programme with no usable episode-num yields "".
+    """
+    fallback = ""
+    for child in elem.iterfind("episode-num"):
+        system = (child.get("system") or "").strip().lower()
+        if system == "onscreen":
+            text = clean_detail(child.text, EPG_MAX_EPISODE)
+            if text:
+                return text
+        elif not fallback:
+            raw = clean_field(child.text, EPG_MAX_EPISODE)
+            fallback = episode_ns_text(raw) if system == "xmltv_ns" else clean_detail(raw, EPG_MAX_EPISODE)
+    return fallback
+
+
+def programme_detail(elem: Any) -> dict[str, str]:
+    """<desc>, the FIRST <category> and <episode-num> of a programme.
+
+    Only the first category is kept: a provider that lists six genres would
+    push six strings per programme into a window file the guide re-reads on
+    every refresh, and the panel shows one line. "First" means the one the
+    provider listed first -- XMLTV does not rank them, so neither do we.
+    """
+    detail: dict[str, str] = {}
+    desc = elem.find("desc")
+    if desc is not None:
+        text = clean_detail(desc.text, EPG_MAX_DESC)
+        if text:
+            detail["desc"] = text
+    category = elem.find("category")
+    if category is not None:
+        text = clean_detail(category.text, EPG_MAX_CATEGORY)
+        if text:
+            detail["category"] = text
+    episode = episode_text(elem)
+    if episode:
+        detail["episode"] = episode
+    return detail
+
+
+def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
+    """-> (match index, playlist channel total), or (None, 0) with no cache.
+
+    The index is what joins an XMLTV channel to a playlist channel. Every
+    strategy answers with a playlist `tvgId`, because that is the key the
+    window, epg-now.json and the guide's own lookup all use (Model.epgFields
+    is reached through `row.tvgId`), so a channel matched by NAME still
+    reaches its row with nothing changed downstream. Three maps, tried in
+    this order by match_xmltv_channel, the later never overriding the earlier
+    (D-EPG-2, the M4 plan (dev branch), M4-01 repairs 1 and 2):
+
+      "exact"  the tvg-id as written, plus its lower-case form when that is
+               free -- case-sensitive first, case-insensitive second, as
+               shipped since M1.
+      "feed"   the id cut at the first "@", lower-cased. iptv-org writes
+               tvg-id="Name.us@SD" where a guide may declare id="Name.us",
+               and the reverse happens too, so every playlist id contributes
+               its base whether or not it carries a suffix. Worth, as
+               measured for D-EPG-2 across the published guide index: 735 of
+               the installed 1,453 channels are covered by a guide under the
+               bare id against 582 under channel@feed.
+      "name"   the normalised channel name, and ONLY when that name belongs
+               to exactly one playlist tvg-id. Precision is the acceptance
+               criterion: a programme on the wrong channel is worse than a
+               blank row, so an ambiguous name is dropped and counted, never
+               guessed.
+
+    Two known limits, both one-to-one consequences of the index answering
+    with a single id. A playlist carrying `A.us@SD` and `A.us@HD` offers one
+    base, so a guide declaring `A.us` lands on whichever came first in the
+    playlist and the twin row stays blank (two rows sharing one tvg-id both
+    match, because they share the key). And a channel with no tvg-id at all
+    can never be matched by any strategy, name included, because there is no
+    key to publish it under; `nameIndexed` counts only channels that have one.
+    """
     if not isinstance(channels_doc, dict) or not isinstance(channels_doc.get("channels"), list):
         return None, 0
-    alias: dict[str, str] = {}
+    exact: dict[str, str] = {}
+    feed: dict[str, str] = {}
+    # normalised name -> the one tvg-id that claims it, "" once two claim it.
+    name_owner: dict[str, str] = {}
+    name_rows: dict[str, int] = {}
     total = 0
     for channel in channels_doc["channels"]:
         total += 1
-        tvg = channel.get("tvgId") if isinstance(channel, dict) else None
-        if isinstance(tvg, str) and tvg:
-            alias[tvg] = tvg
-    for tvg in list(alias):
+        if not isinstance(channel, dict):
+            continue
+        tvg = channel.get("tvgId")
+        if not isinstance(tvg, str) or not tvg:
+            continue
+        if tvg not in exact:
+            exact[tvg] = tvg
+        base = tvg.split("@", 1)[0].lower()
+        if base and base not in feed:
+            feed[base] = tvg
+        # `nameKey` is normalize_text(name), precomputed by make_channel
+        # (F-PERF-1); an older cache without it is folded here rather than
+        # losing name matching until the next playlist refresh.
+        key = channel.get("nameKey")
+        if not isinstance(key, str) or not key:
+            key = normalize_text(channel.get("name"))
+        if not key:
+            continue
+        name_rows[key] = name_rows.get(key, 0) + 1
+        if key not in name_owner:
+            name_owner[key] = tvg
+        elif name_owner[key] != tvg:
+            # Ambiguous on OUR side. Two rows under one tvg-id are not: they
+            # are one channel listed twice and they share the key.
+            name_owner[key] = ""
+    for tvg in list(exact):
         low = tvg.lower()
-        if low not in alias:
-            alias[low] = tvg
-    return alias, total
+        if low not in exact:
+            exact[low] = tvg
+    names = {key: tvg for key, tvg in name_owner.items() if tvg}
+    dropped = sum(rows for key, rows in name_rows.items() if not name_owner[key])
+    index = {
+        "exact": exact,
+        "feed": feed,
+        "name": names,
+        # Counts the epg status reports. `nameIndexed` is normalised names
+        # available for a name match (one per channel, since an indexed name
+        # belongs to one id); `nameDroppedPlaylist` counts the CHANNELS whose
+        # name was thrown away as ambiguous, not the names.
+        "nameIndexed": len(names),
+        "nameDroppedPlaylist": dropped,
+    }
+    return index, total
+
+
+def match_xmltv_channel(index: dict[str, Any], cid: str,
+                        guide_names: dict[str, str]) -> tuple[str, int]:
+    """One XMLTV channel id -> (playlist tvgId, strategy rank), or ("", -1).
+
+    `guide_names` is the XMLTV side's cid -> normalised display name, built by
+    parse_xmltv; an entry is "" once the name is ambiguous among the guide's
+    own declarations, which is the second half of the uniqueness rule.
+    """
+    exact = index["exact"]
+    key = exact.get(cid) or exact.get(cid.lower())
+    if key:
+        return key, EPG_MATCH_ID
+    base = cid.split("@", 1)[0].lower()
+    if base:
+        key = index["feed"].get(base)
+        if key:
+            return key, EPG_MATCH_FEED
+    name = guide_names.get(cid)
+    if name:
+        key = index["name"].get(name)
+        if key:
+            return key, EPG_MATCH_NAME
+    return "", -1
 
 
 def source_key(url: str) -> str:
@@ -1709,23 +1959,45 @@ def source_key(url: str) -> str:
 EPG_MAX_EPOCH = 9999999999
 
 
-def encode_record(start: int, stop: int, title: str) -> str:
+def encode_record(start: int, stop: int, title: str, detail: dict[str, str] | None = None) -> str:
     """See EPG_RECORD_SEP. `start`/`stop` are clamped into the ten-digit range
     the record format requires; a stop past 2286 means "runs forever" and is
-    truthfully represented by the furthest instant the format can hold."""
+    truthfully represented by the furthest instant the format can hold.
+
+    `detail` is the M4-02 panel data: every value is JSON-encoded here, so no
+    caller ever hands this function a ready-made JSON fragment. Keys outside
+    EPG_DETAIL_KEYS are ignored and an empty value is omitted, which is why a
+    programme with no detail produces exactly the record it always did.
+    """
     start = 0 if start < 0 else min(start, EPG_MAX_EPOCH)
     stop = 0 if stop < 0 else min(stop, EPG_MAX_EPOCH)
-    return "%010d %010d %s" % (start, stop, json.dumps(title, ensure_ascii=False))
+    # The title stays the FIRST thing at index 22, bare, exactly as it was
+    # before M4-02: the detail members are appended after it, so a reader
+    # that prepends '{"title":' gets a whole object and a detail-free record
+    # is unchanged.
+    body = json.dumps(title, ensure_ascii=False)
+    if detail:
+        for key in EPG_DETAIL_KEYS:
+            value = detail.get(key)
+            if value:
+                body += ',"%s":%s' % (key, json.dumps(value, ensure_ascii=False))
+    return "%010d %010d %s" % (start, stop, body)
 
 
-def encode_records(items: list[tuple[int, int | None, str]]) -> tuple[str, int]:
+def encode_records(items: list[tuple[int, int | None, str, dict[str, str]]]) -> tuple[str, int]:
     """Sort, infer missing stops, drop duplicates, cap, and pack a channel's
-    programmes into the record string described at EPG_RECORD_SEP."""
+    programmes into the record string described at EPG_RECORD_SEP.
+
+    An item is (start, stop or None, title, detail); the detail dict takes
+    part in the duplicate check, so the same programme listed twice with and
+    without a description keeps both -- the records differ, and choosing
+    between them is not this function's decision to make.
+    """
     items.sort(key=lambda item: item[0])
     records: list[str] = []
-    last: tuple[int, int, str] | None = None
+    last: tuple[int, int, str, dict[str, str]] | None = None
     count = len(items)
-    for index, (start, stop, title) in enumerate(items):
+    for index, (start, stop, title, detail) in enumerate(items):
         if stop is None:
             stop = start + EPG_DEFAULT_DURATION
             for later in range(index + 1, count):
@@ -1734,33 +2006,89 @@ def encode_records(items: list[tuple[int, int | None, str]]) -> tuple[str, int]:
                     break
         if stop <= start or start < 0:
             continue
-        current = (start, stop, title)
+        current = (start, stop, title, detail)
         if current == last:
             continue
         last = current
-        records.append(encode_record(start, stop, title))
+        records.append(encode_record(start, stop, title, detail))
         if len(records) >= EPG_MAX_PER_CHANNEL:
             break
     return EPG_RECORD_SEP.join(records), len(records)
 
 
-def parse_xmltv(stream: BinaryIO, now: int, alias: dict[str, str] | None) -> dict[str, Any]:
+def claim_channel(claim: dict[str, tuple[int, str]], pending: dict[str, list[Any]],
+                  key: str, rank: int, cid: str) -> int:
+    """May `cid` (matched at strategy `rank`) own the playlist channel `key`?
+
+    -> 1 when the claim is granted and this is the first grant, 0 when it was
+    already held by the same guide channel at the same rank, -1 when it is
+    refused. Two guide channels must never pour programmes into one row: with
+    the name fallback in play the guide can reach one playlist channel by id
+    and a DIFFERENT one by name, and merging them would interleave two
+    schedules into one that is wrong everywhere.
+
+    Resolution is by strategy, not by arrival: a stronger rank displaces a
+    weaker claim and DISCARDS what it collected, so the answer does not
+    depend on the order the guide happened to stream its channels in. Equal
+    ranks are first-come, because nothing distinguishes them.
+    """
+    held = claim.get(key)
+    if held is None:
+        claim[key] = (rank, cid)
+        return 1
+    if held == (rank, cid):
+        return 0
+    if rank < held[0]:
+        pending.pop(key, None)
+        claim[key] = (rank, cid)
+        return 1
+    return -1
+
+
+def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dict[str, Any]:
     """Stream-parse XMLTV into per-channel record strings for the window.
 
-    `alias` (from build_alias) restricts the result to playlist channels and
-    maps XMLTV ids onto playlist tvg-ids; None keeps every channel under its
-    XMLTV id. Elements are released as soon as they are processed.
+    `index` (from build_alias) restricts the result to playlist channels and
+    maps XMLTV ids onto playlist tvg-ids by the three strategies of M4-01;
+    None keeps every channel under its XMLTV id. Elements are released as
+    soon as they are processed.
+
+    The name strategy needs a channel's <display-name>, so the channel pass
+    retains one: the first non-empty one the provider listed. XMLTV allows
+    several (language variants), and choosing among them would need a
+    language policy this plugin has no data to pick. What is retained is BOUNDED by the playlist, not by
+    the guide: a name no playlist channel claims can never match, so it is
+    never stored, and the dict therefore holds at most as many entries as the
+    playlist has unique names. A guide declaring as many channels as the
+    whole published index lists (180,681 entries) therefore costs no more
+    here than one declaring 400.
+
+    A name is only usable while it is unique on the guide's side too, so the
+    second declaration of a name blanks the first one's entry and both are
+    counted as dropped. Conforming XMLTV declares every <channel> before the
+    first <programme> (the DTD orders them), so a conforming guide has its
+    whole name table built before the first lookup; in a guide that does not,
+    name matching simply misses the programmes that arrive before their
+    declaration, and id matching is unaffected either way.
     """
     import xml.etree.ElementTree as ET
     window_start = now - EPG_PAST_SECONDS
     window_end = now + EPG_FUTURE_SECONDS
     time_cache: dict[str, int | None] = {}
-    pending: dict[str, list[tuple[int, int | None, str]]] = {}
+    pending: dict[str, list[tuple[int, int | None, str, dict[str, str]]]] = {}
     seen_ids: set[str] = set()
+    # playlist key -> (strategy rank, the guide channel id that owns it).
+    claim: dict[str, tuple[int, str]] = {}
+    playlist_names: dict[str, str] = index["name"] if index is not None else {}
+    guide_names: dict[str, str] = {}          # guide cid -> normalised name, "" when ambiguous
+    guide_name_owner: dict[str, str] = {}     # normalised name -> the one cid that declares it
+    guide_name_collided: set[str] = set()
+    guide_names_dropped = 0
     channel_elements = 0
     bad_time = 0
     no_title = 0
     unknown = 0
+    contested = 0
     total_programmes = 0
     root: Any = None
     try:
@@ -1773,9 +2101,14 @@ def parse_xmltv(stream: BinaryIO, now: int, alias: dict[str, str] | None) -> dic
             if tag == "programme":
                 total_programmes += 1
                 cid = _CONTROL_WS.sub(" ", elem.get("channel") or "").strip()
-                key = cid if alias is None else (alias.get(cid) or alias.get(cid.lower()))
+                if index is None:
+                    key, rank = cid, EPG_MATCH_ID
+                else:
+                    key, rank = match_xmltv_channel(index, cid, guide_names)
                 if not key:
                     unknown += 1
+                elif claim_channel(claim, pending, key, rank, cid) < 0:
+                    contested += 1
                 else:
                     seen_ids.add(key)
                     start = parse_xmltv_time(elem.get("start"), time_cache)
@@ -1788,11 +2121,33 @@ def parse_xmltv(stream: BinaryIO, now: int, alias: dict[str, str] | None) -> dic
                             title_elem = elem.find("title")
                             title = clean_title(title_elem.text if title_elem is not None else "")
                             if title:
-                                pending.setdefault(key, []).append((start, stop, title))
+                                pending.setdefault(key, []).append(
+                                    (start, stop, title, programme_detail(elem)))
                             else:
                                 no_title += 1
             elif tag == "channel":
                 channel_elements += 1
+                cid = _CONTROL_WS.sub(" ", elem.get("id") or "").strip()
+                if cid and cid not in guide_names:
+                    name = ""
+                    for child in elem.iterfind("display-name"):
+                        name = normalize_text(child.text)
+                        if name:
+                            break
+                    if name and name in playlist_names:
+                        owner = guide_name_owner.get(name)
+                        if owner is None:
+                            guide_name_owner[name] = cid
+                            guide_names[cid] = name
+                        elif owner != cid:
+                            # Ambiguous on the GUIDE's side: neither may match.
+                            guide_names[owner] = ""
+                            guide_names[cid] = ""
+                            if name in guide_name_collided:
+                                guide_names_dropped += 1
+                            else:
+                                guide_name_collided.add(name)
+                                guide_names_dropped += 2
             # Release every finished element: the tree never holds more than
             # the element being built, whatever the feed puts under <tv>.
             if root is not None and elem is not root:
@@ -1816,27 +2171,44 @@ def parse_xmltv(stream: BinaryIO, now: int, alias: dict[str, str] | None) -> dic
         warnings.append("%d programmes with unreadable times skipped" % bad_time)
     if no_title:
         warnings.append("%d programmes without a title skipped" % no_title)
-    if alias is not None and unknown:
+    if index is not None and unknown:
         warnings.append("%d programmes for channels not in the playlist dropped" % unknown)
+    if contested:
+        warnings.append("%d programmes dropped: another guide channel already matched that playlist channel" % contested)
     return {
         "channels": channels,
         "seenIds": seen_ids,
+        # playlist key -> the strategy rank that won it, for match_counts.
+        "strategyOf": {key: held[0] for key, held in claim.items()},
         "windowStart": window_start,
         "windowEnd": window_end,
         "epgChannels": len(seen_ids),
         "channelElements": channel_elements,
         "programmeCount": kept,
+        # Guide-side declarations dropped because another declaration folds
+        # to the same name. Counted only over names a playlist channel
+        # claims, because a name nothing claims cannot match either way.
+        "nameDroppedGuide": guide_names_dropped,
         "warnings": warnings,
     }
 
 
-def count_matched(channels_doc: Any, seen_ids: set[str]) -> int:
-    matched = 0
+def match_counts(channels_doc: Any, seen_ids: set[str], strategy_of: dict[str, int]) -> dict[str, int]:
+    """Playlist channels that will render a programme, split by strategy.
+
+    Counted over CHANNELS and not over guide ids, because the acceptance of
+    M4-01 is a number of rows: two playlist rows sharing one tvg-id both
+    count, exactly as `matched` has always counted them.
+    """
+    counts = {"matched": 0, "matchedById": 0, "matchedByFeed": 0, "matchedByName": 0}
     for channel in channels_doc.get("channels", []):
         tvg = channel.get("tvgId") if isinstance(channel, dict) else None
         if isinstance(tvg, str) and tvg in seen_ids:
-            matched += 1
-    return matched
+            counts["matched"] += 1
+            rank = strategy_of.get(tvg)
+            if rank is not None and 0 <= rank < len(EPG_MATCH_KEYS):
+                counts[EPG_MATCH_KEYS[rank]] += 1
+    return counts
 
 
 def channels_mtime(path: str) -> int | None:
@@ -1905,11 +2277,12 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
     data = fetch_bytes(url, timeout, "EPG")
     channels_doc = read_json(channels_path)
     mtime = channels_mtime(channels_path)
-    alias, channel_total = build_alias(channels_doc)
-    parsed = parse_xmltv(open_xml_stream(data), now, alias)
-    matched = count_matched(channels_doc, parsed["seenIds"]) if alias is not None else None
+    index, channel_total = build_alias(channels_doc)
+    parsed = parse_xmltv(open_xml_stream(data), now, index)
+    counts = match_counts(channels_doc, parsed["seenIds"], parsed["strategyOf"]) if index is not None else {}
+    matched = counts.get("matched") if index is not None else None
     warnings = list(parsed["warnings"])
-    if alias is not None and matched == 0:
+    if index is not None and matched == 0:
         warnings.append("no EPG channel id matches a playlist tvg-id")
     meta = {
         "version": 1,
@@ -1919,9 +2292,20 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
         "channelsMtime": mtime,
         "windowStart": parsed["windowStart"],
         "windowEnd": parsed["windowEnd"],
-        "restricted": alias is not None,
-        "channelTotal": channel_total if alias is not None else None,
+        "restricted": index is not None,
+        "channelTotal": channel_total if index is not None else None,
         "matched": matched,
+        # M4-01's acceptance, carried in the window so that a `--now-only`
+        # recompute reports the same numbers as the fetch that produced them.
+        # The window stays version 1 on purpose: these keys are additive and
+        # an older cache simply answers None for them, which is worth more
+        # than throwing a good window away at the first upgrade.
+        "matchedById": counts.get("matchedById") if index is not None else None,
+        "matchedByFeed": counts.get("matchedByFeed") if index is not None else None,
+        "matchedByName": counts.get("matchedByName") if index is not None else None,
+        "nameIndexed": index["nameIndexed"] if index is not None else None,
+        "nameDroppedPlaylist": index["nameDroppedPlaylist"] if index is not None else None,
+        "nameDroppedGuide": parsed["nameDroppedGuide"] if index is not None else None,
         "epgChannels": parsed["epgChannels"],
         "programmeCount": parsed["programmeCount"],
         "warnings": warnings,
@@ -1933,10 +2317,23 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
 
 
 def record_to_dict(record: str) -> dict[str, Any]:
-    return {"title": json.loads(record[22:]), "start": int(record[:10]), "stop": int(record[11:21])}
+    """-> {"title", "start", "stop"} plus whichever EPG_DETAIL_KEYS the record
+    carries. Diagnostics and tests; programme_json is the hot path."""
+    out = dict(json.loads('{"title":' + record[22:] + "}"))
+    out["start"] = int(record[:10])
+    out["stop"] = int(record[11:21])
+    return out
 
 
 def programme_json(record: str) -> str:
+    """The `now`/`next` object of epg-now.json, by concatenation.
+
+    The record's tail from index 22 is the title's JSON value followed by the
+    optional detail members, already encoded by encode_record, so this
+    function only names the title, wraps the tail and appends the two
+    numbers. That is what keeps the 10,000-channel recompute free of
+    per-programme encoding work.
+    """
     start = record[:10]
     stop = record[11:21]
     if start[0] == "0" or stop[0] == "0":
@@ -2045,6 +2442,17 @@ def cmd_epg(args: argparse.Namespace) -> int:
             "fromCache": from_cache,
             "matched": window.get("matched"),
             "channelTotal": window.get("channelTotal"),
+            # M4-01 is accepted on these counts and on nothing else: a flag
+            # saying the matcher is on proves nothing (rule 14). They come
+            # from the window, so `--now-only` reports the fetch's numbers;
+            # a window written before M4 answers None rather than 0, which
+            # is the truthful answer for "not measured".
+            "matchedById": window.get("matchedById"),
+            "matchedByFeed": window.get("matchedByFeed"),
+            "matchedByName": window.get("matchedByName"),
+            "nameIndexed": window.get("nameIndexed"),
+            "nameDroppedPlaylist": window.get("nameDroppedPlaylist"),
+            "nameDroppedGuide": window.get("nameDroppedGuide"),
             "epgChannels": window.get("epgChannels", 0),
             "programmeCount": window.get("programmeCount", 0),
             "nowCount": now_count,

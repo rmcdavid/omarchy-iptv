@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<!-- M4-01 / M4-02 fixture. Guide side of tests/fixtures/epg-match.m3u; the
+     expected counts live in tests/fixtures/epg-match.json. Test "now" is
+     2026-09-12 21:00:00 UTC, the same instant epg-basic.xml uses. ASCII only.
+
+     Every declaration below is deliberate:
+       Exact.us        the playlist id as written, and a display-name that
+                       does NOT match the playlist name, so the id is the
+                       only thing that could have matched it
+       Suffix.us       playlist "Suffix.us@SD" -> guide bare id
+       Bare.us@HD      playlist "Bare.us" -> guide suffixed id (the reverse)
+       pluto-name      matches "Name Only Channel" by name alone
+       pluto-twin      name "Twin Channel", which TWO playlist rows claim:
+                       ambiguous on our side, must not match
+       pluto-a/pluto-b both named "Double Declared": ambiguous on the guide's
+                       side, must not match, counted as two declarations
+       pluto-unkeyed   names a playlist row that carries no tvg-id, so there
+                       is no key to publish it under and it cannot match
+       Detail.us       the M4-02 fields, including a description carrying
+                       markup and a credentialed-looking URL
+       case.us         playlist "Case.US": the lower-case alias
+       pluto-clash     reaches "Clash Channel" by name BEFORE Clash.us
+                       reaches it by id, so the id must displace the name
+       Multi.us@SD/HD  two guide channels fold to one playlist base: the
+                       first claims it, the second is refused, never merged
+-->
+<tv generator-info-name="omarchy-iptv fixture" source-info-name="fixture">
+  <channel id="Exact.us"><display-name>Exact Guide Name</display-name></channel>
+  <channel id="Suffix.us"><display-name>Suffix Guide Name</display-name></channel>
+  <channel id="Bare.us@HD"><display-name>Bare Guide Name</display-name></channel>
+  <channel id="pluto-name"><display-name>Name Only Channel</display-name></channel>
+  <channel id="pluto-twin"><display-name>Twin Channel</display-name></channel>
+  <channel id="pluto-a"><display-name>Double Declared</display-name></channel>
+  <channel id="pluto-b"><display-name>Double Declared</display-name></channel>
+  <channel id="pluto-unkeyed"><display-name>Unkeyed Channel</display-name></channel>
+  <channel id="Detail.us"><display-name>Detail Channel</display-name></channel>
+  <channel id="case.us"><display-name>Case Guide Name</display-name></channel>
+  <channel id="pluto-clash"><display-name>Clash Channel</display-name></channel>
+  <channel id="Multi.us@SD"><display-name>Multi Guide SD</display-name></channel>
+  <channel id="Multi.us@HD"><display-name>Multi Guide HD</display-name></channel>
+
+  <!-- Strategy (a): the exact id. The empty <desc> must not reach the panel. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Exact.us"><title>Exact Now</title><desc>   </desc></programme>
+
+  <!-- Strategy (b): the feed suffix, both directions. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Suffix.us"><title>Suffix Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Bare.us@HD"><title>Bare Now</title></programme>
+
+  <!-- Strategy (c): the normalised name. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-name"><title>Name Now</title></programme>
+
+  <!-- Dropped: ambiguous on our side, ambiguous on the guide's side, and a
+       playlist row with no tvg-id. All three count as "not in the playlist". -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-twin"><title>Twin Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-a"><title>Double Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="pluto-unkeyed"><title>Unkeyed Now</title></programme>
+
+  <!-- M4-02. Two categories (only the first is kept), two episode-num
+       systems (onscreen wins), an <icon> and a <url> that must never be
+       read, and a description that is over the cap, carries escaped markup
+       and carries a URL with a path and a query. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Detail.us">
+    <title>Detail Now</title>
+    <desc>&lt;img src="http://evil.example.test/p.png"&gt; Watch more at http://promo.example.test/path?token=abc123 then sleep. Filler one. Filler two. Filler three. Filler four. Filler five. Filler six. Filler seven. Filler eight. Filler nine. Filler ten. Filler eleven. Filler twelve. Filler thirteen. Filler fourteen. Filler fifteen. Filler sixteen. Filler seventeen. Filler eighteen. Filler nineteen. Filler twenty. Filler twenty-one. Filler twenty-two.</desc>
+    <category>Documentary</category>
+    <category>Second Category Ignored</category>
+    <episode-num system="xmltv_ns">1.4.0/1</episode-num>
+    <episode-num system="onscreen">S2 E5</episode-num>
+    <icon src="http://icon.example.test/detail.png"/>
+    <url>http://portal.example.test/detail?user=secret</url>
+  </programme>
+  <!-- The next programme declares only an xmltv_ns episode: 0.1.0/1 is
+       season 0, episode 1, zero-based, so it reads S1 E2. -->
+  <programme start="20260912213000 +0000" stop="20260912223000 +0000" channel="Detail.us"><title>Detail Next</title><episode-num system="xmltv_ns">0.1.0/1</episode-num></programme>
+
+  <!-- The lower-case alias of strategy (a). -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="case.us"><title>Case Now</title></programme>
+
+  <!-- The name claim arrives FIRST and must lose to the id claim below. It
+       also starts LATER, so if it ever survived it would become the "now"
+       and not merely an extra record: that is what makes the displacement
+       observable in epg-now.json. -->
+  <programme start="20260912204500 +0000" stop="20260912213000 +0000" channel="pluto-clash"><title>Clash Name Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Clash.us"><title>Clash Id Now</title></programme>
+
+  <!-- Same strategy, two guide channels, one playlist base: first wins. -->
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Multi.us@SD"><title>Multi SD Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="Multi.us@HD"><title>Multi HD Now</title></programme>
+</tv>

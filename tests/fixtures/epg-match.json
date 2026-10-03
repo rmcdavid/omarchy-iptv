@@ -1,0 +1,71 @@
+{
+  "comment": [
+    "M4-01 and M4-02 expectations for tests/fixtures/epg-match.m3u against",
+    "tests/fixtures/epg-match.xml at now = 1789246800 (2026-09-12T21:00:00Z).",
+    "One fixture, asserted by counts: tests/test_epg_match.py reads this file",
+    "and never restates a number in Python. See docs/PLAN-M4.md M4-01.",
+    "channelTotal 13 = 8 matched + 2 ambiguous on our side + 1 ambiguous on",
+    "the guide's side + 1 with no guide channel + 1 with no tvg-id.",
+    "The expected desc is 376 code points, not the 400 of EPG_MAX_DESC: the",
+    "whitespace fold cuts at 400 and redaction then removes the two URL paths.",
+    "That shortfall IS the proof that clean_detail redacted, in the data."
+  ],
+  "now": 1789246800,
+  "status": {
+    "matched": 8,
+    "channelTotal": 13,
+    "matchedById": 4,
+    "matchedByFeed": 3,
+    "matchedByName": 1,
+    "nameIndexed": 10,
+    "nameDroppedPlaylist": 2,
+    "nameDroppedGuide": 2,
+    "epgChannels": 8,
+    "programmeCount": 9,
+    "nowCount": 8
+  },
+  "warnings": [
+    "3 programmes for channels not in the playlist dropped",
+    "1 programmes dropped: another guide channel already matched that playlist channel"
+  ],
+  "nowTitles": {
+    "Exact.us": "Exact Now",
+    "Suffix.us@SD": "Suffix Now",
+    "Bare.us": "Bare Now",
+    "namehit.xx": "Name Now",
+    "Detail.us": "Detail Now",
+    "Case.US": "Case Now",
+    "Clash.us": "Clash Id Now",
+    "Multi.us": "Multi SD Now"
+  },
+  "unmatched": [
+    "ambi1.xx",
+    "ambi2.xx",
+    "guideambi.xx",
+    "none.xx"
+  ],
+  "detail": {
+    "now": {
+      "title": "Detail Now",
+      "desc": "<img src=\"http://evil.example.test\"> Watch more at http://promo.example.test then sleep. Filler one. Filler two. Filler three. Filler four. Filler five. Filler six. Filler seven. Filler eight. Filler nine. Filler ten. Filler eleven. Filler twelve. Filler thirteen. Filler fourteen. Filler fifteen. Filler sixteen. Filler seventeen. Filler eighteen. Filler nineteen. Filler twe",
+      "category": "Documentary",
+      "episode": "S2 E5",
+      "start": 1789245000,
+      "stop": 1789248600
+    },
+    "next": {
+      "title": "Detail Next",
+      "episode": "S1 E2",
+      "start": 1789248600,
+      "stop": 1789252200
+    }
+  },
+  "descForbidden": [
+    "token=",
+    "/path",
+    "/p.png",
+    "secret",
+    "icon.example.test",
+    "portal.example.test"
+  ]
+}
