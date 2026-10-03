@@ -1,7 +1,11 @@
 # M4 plan: make the guide a guide
 
-**Status: proposed, for product-owner review. Nothing in this document is
-scheduled and nothing has been built.**
+**Status: APPROVED 2026-10-02 with M4-03 dropped.** The milestone is M4-01,
+M4-02 and M4-04. M4-03 (hidden channels) moves to M5 behind the
+channel-identity repair D-ID-4. Recording is refused for this round; live
+rewind gets a measurement pass and no build. Repair 4 of M4-01 (the
+per-source time offset) is sequenced after the other three and taken only if
+the acceptance run shows a guide arriving in the wrong timezone.
 
 Research pass 2026-10-02: six clients (TiviMate, IPTV Smarters Pro, XCIPTV,
 Sparkle TV, Kodi with its PVR stack, MYTVOnline3), three cross-cutting sweeps
