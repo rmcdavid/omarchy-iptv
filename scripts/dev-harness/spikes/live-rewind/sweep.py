@@ -89,6 +89,11 @@ class Ipc:
         self.next_id = 1
         self.replies = {}
         self.events = 0
+        # Pre-build pass M2: a list here captures every `log-message` event
+        # the way the helper sees it after `request_log_messages`. The text
+        # is NOT stored -- an mpv error line can name the URL it failed to
+        # open -- only whether it is the refusal line, plus prefix and level.
+        self.log_sink = None
 
     def connect(self, deadline):
         """Bounded connect. A refused connect is retried; the socket appears
@@ -164,6 +169,14 @@ def _send(ipc, args):
             # An event, or a reply with no id. Never guessed at: this is the
             # exact mistake that voided the first M2-11 sweep.
             ipc.events += 1
+            if ipc.log_sink is not None and message.get("event") == "log-message":
+                text = str(message.get("text") or "")
+                ipc.log_sink.append({
+                    "t": time.monotonic(),
+                    "level": message.get("level"),
+                    "prefix": message.get("prefix"),
+                    "cannotSeek": "Cannot seek in this stream" in text,
+                })
             continue
         got = message.get("request_id")
         error = message.get("error")

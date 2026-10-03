@@ -18,6 +18,23 @@ once by reading `seekable` and never issuing the seek:
       seek to start+1 / start / start-1 does; then a target inside the range
       that the cache cannot yet serve.
 
+Pre-build pass, 2026-10-03 (docs/M5-01-LIVE-REWIND.md section 10, written
+up in docs/SPIKE-LIVE-REWIND.md section 12):
+
+  m1  every field of `demuxer-cache-state` at +30 s and at the plateau,
+      with its type: the allowlist the helper forwards, and whether any
+      leaf is a string that could carry a path or a URL.
+  m2  the refusal detector: absolute seeks that land and seeks that are
+      refused (below the floor, past the end), each with the immediate
+      `time-pos` read, the read 1 s later and whether the error-level
+      log line arrived over the socket the way `player start` sees it.
+  m3  `show-text` on a REAL window with the plugin argv (muted, the one
+      deviation): screenshot after the line, then fullscreen, then after
+      an IPC `seek` to see whether mpv's own OSD bar appears.
+  m4  the zero-point error: (wall - wall0) - (pos - pos0) at +60 s on
+      three channels, zero point at the first numeric `time-pos` after
+      the `loadfile` reply, zapping on one player as the plugin does.
+
 Reuses sweep.py's socket client, spawner and killer, and verdict.py's
 judgements; adds nothing to the mpv argv beyond what the plugin passes and
 `--vo=null --ao=null` (neither touches the demuxer cache; section 1 of the
@@ -53,7 +70,7 @@ USER_DATA_OWNER = "user-data/omarchy-iptv-owner"
 MPV_DEFAULT_USER_AGENT = "libmpv"
 
 
-def plugin_argv(sock_path, scratch):
+def plugin_argv(sock_path, scratch, windowed=False):
     argv = [part % sock_path if "%s" in part else part for part in sweep.BASE_ARGV]
     argv = [("--title=%sIPTV" % MPV_RAW_PREFIX) if a == "--title=IPTV" else a for a in argv]
     dirs = os.path.join(scratch, "player-dirs")
@@ -65,7 +82,13 @@ def plugin_argv(sock_path, scratch):
         "--gpu-shader-cache-dir=%s" % os.path.join(dirs, "shader-cache"),
         "--icc-cache-dir=%s" % os.path.join(dirs, "shader-cache"),
     ]
-    argv += sweep.HEADLESS_ARGV
+    if windowed:
+        # m3 needs the real video output. Audio would reach the owner's
+        # speakers, so it is muted: `--mute` touches neither the cache nor
+        # the OSD, and it is the only token the plugin does not pass.
+        argv += ["--mute=yes"]
+    else:
+        argv += sweep.HEADLESS_ARGV
     return argv
 
 
@@ -163,7 +186,7 @@ def fmt(snap):
 class Player:
     """One mpv, one socket, killed by pid in close()."""
 
-    def __init__(self, args, index, out):
+    def __init__(self, args, index, out, windowed=False):
         self.args = args
         self.out = out
         self.sock_path = os.path.join(args.sock_dir, "d%02d" % index)
@@ -171,8 +194,9 @@ class Player:
             os.unlink(self.sock_path)
         except OSError:
             pass
-        log_path = os.path.join(args.scratch, "mpv-design-%02d.log" % index)
-        self.proc = sweep.spawn(plugin_argv(self.sock_path, args.scratch), log_path)
+        self.log_path = os.path.join(args.scratch, "mpv-design-%02d.log" % index)
+        log_path = self.log_path
+        self.proc = sweep.spawn(plugin_argv(self.sock_path, args.scratch, windowed), log_path)
         self.pid = self.proc.pid
         out("  mpv pid %d on %s" % (self.pid, self.sock_path))
         self.ipc = sweep.Ipc(self.sock_path, timeout=args.ipc_timeout)
@@ -558,8 +582,439 @@ def q34_watchdog_floor(args, channels, out):
     return result
 
 
+# --- Pre-build measurements, section 12 ---------------------------------
+
+def raw_state(ipc):
+    state, _ = get(ipc, "demuxer-cache-state")
+    return state
+
+
+def fill_until_evicted(player, t0, out, cap, every=10.0):
+    """Play until `seekable-ranges[0].start` leaves zero -- the stream start
+    has been evicted, which is the plateau -- or `cap` passes. Returns the
+    snapshots, the raw cache state at +30 s, the raw state at the stop and
+    whether eviction was seen."""
+    snaps, raw30, evicted = [], None, False
+    until = time.monotonic() + cap
+    while time.monotonic() < until:
+        time.sleep(min(every, max(0.1, until - time.monotonic())))
+        snap = snapshot(player.ipc, player.pid, t0)
+        snaps.append(snap)
+        out("  fill %s" % fmt(snap))
+        if raw30 is None and snap["t"] >= 30.0:
+            raw30 = raw_state(player.ipc)
+        if snap["ranges"] and snap["ranges"][0][0] > 0.5:
+            evicted = True
+            break
+    return snaps, raw30, raw_state(player.ipc), evicted
+
+
+def field_table(state):
+    rows = verdict.enumerate_fields(state)
+    return {"fields": [{"path": p, "type": k, "sample": v} for p, k, v in rows],
+            "strings": verdict.string_fields(state)}
+
+
+def m1_fields(args, channels, out):
+    ch = channels[args.a]
+    out("M1 demuxer-cache-state fields: %s (%s)" % (ch["name"], redact(ch["url"])))
+    result = {"question": "m1", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    player = Player(args, 11, out)
+    result["pid"] = player.pid
+    try:
+        t0, _ = player.play(ch)
+        snaps, raw30, rawstop, evicted = fill_until_evicted(player, t0, out, args.m_cap)
+        result["fill"] = snaps
+        result["evicted"] = evicted
+        result["at30"] = field_table(raw30)
+        result["atStop"] = field_table(rawstop)
+        result["atStopT"] = snaps[-1]["t"] if snaps else None
+        # The raw replies too: the enumeration walks a list through its
+        # first element, and the per-stream list has one entry per stream.
+        result["raw"] = {"at30": raw30, "atStop": rawstop}
+        for label, table in (("+30 s", result["at30"]), ("stop", result["atStop"])):
+            out("  %s: %d leaves, string leaves: %s" % (label, len(table["fields"]), table["strings"]))
+            for row in table["fields"]:
+                out("    %-36s %-6s %s" % (row["path"], row["type"], row["sample"]))
+    except Exception as exc:
+        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        out("  FAILED: %s" % result["failure"])
+    finally:
+        result["mpvExit"] = player.close()
+    return result
+
+
+# The landed battery: deltas from the current position, clamped inside the
+# range the way the helper will clamp (floor + 2, end - 0.5). Backwards
+# first, because the player starts at the live edge with nothing ahead.
+LANDED_DELTAS = [-10, -30, 10, -5, 5, -60, 30, -3, 3, -2, 2, -120, 60,
+                 -10, -10, -10, 10, 10, -45, 45, -7, 7, -90, 20]
+REFUSED_BELOW = [1, 2, 5, 10, 30, 60]
+REFUSED_PAST = [1, 2, 5, 10, 30, 60]
+
+
+def one_seek(player, target, out, label, expect, t0):
+    """One absolute seek with the reads the helper will make: `time-pos`
+    before, immediately after the reply, and 1 s later; then a drain so
+    the log event, if any, has arrived."""
+    ipc = player.ipc
+    pre = snapshot(ipc, player.pid, t0)
+    n0 = len(ipc.log_sink)
+    before, _ = get(ipc, "time-pos")
+    t_s = time.monotonic()
+    _, error = command(ipc, "seek", str(round(target, 3)), "absolute")
+    rtt = time.monotonic() - t_s
+    after, _ = get(ipc, "time-pos")
+    t_after = time.monotonic() - t_s
+    rest = t_s + 1.0 - time.monotonic()
+    if rest > 0:
+        time.sleep(rest)
+    later, _ = get(ipc, "time-pos")
+    t_later = time.monotonic() - t_s
+    time.sleep(0.3)
+    get(ipc, "pause")                     # drains any event that followed
+    lines = [e for e in ipc.log_sink[n0:] if e["cannotSeek"]]
+    row = {"label": label, "expect": expect, "target": round(target, 3),
+           "floor": pre["ranges"][0][0] if pre["ranges"] else None,
+           "end": pre["ranges"][0][1] if pre["ranges"] else None,
+           "before": before, "after": after, "later": later,
+           "deltaAfter": verdict.achieved_seconds(after, before),
+           "deltaLater": verdict.achieved_seconds(later, before),
+           "error": error or "", "rttMs": round(rtt * 1000, 2),
+           "afterReadAtMs": round(t_after * 1000, 1), "laterReadAtS": round(t_later, 3),
+           "logLines": len(lines),
+           "logLineAtMs": None if not lines else round((lines[0]["t"] - t_s) * 1000, 1)}
+    out("  SEEK %-24s expect=%-8s target=%9.3f floor=%s end=%s before=%s after=%s (+%.1f ms) later=%s (+%.2f s) dAfter=%s dLater=%s log=%d" % (
+        label, expect, target, row["floor"], row["end"],
+        None if before is None else round(before, 3), None if after is None else round(after, 3), t_after * 1000,
+        None if later is None else round(later, 3), t_later,
+        None if row["deltaAfter"] is None else round(row["deltaAfter"], 3),
+        None if row["deltaLater"] is None else round(row["deltaLater"], 3), len(lines)))
+    return row
+
+
+def m2_refusal(args, channels, out):
+    ch = channels[args.a]
+    out("M2 refusal detector: %s (%s)" % (ch["name"], redact(ch["url"])))
+    result = {"question": "m2", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    player = Player(args, 20 + args.index, out)
+    result["pid"] = player.pid
+    player.ipc.log_sink = []
+    _, sub_err = command(player.ipc, "request_log_messages", "error")
+    result["logSubscribeError"] = sub_err or ""
+    try:
+        t0, _ = player.play(ch)
+        snaps, raw30, rawstop, evicted = fill_until_evicted(player, t0, out, args.m_cap)
+        result["fill"] = snaps
+        result["evicted"] = evicted
+        result["at30"] = field_table(raw30)
+        result["atStop"] = field_table(rawstop)
+        out("  evicted: %s at t=%s; string leaves at +30: %s, at stop: %s" % (
+            evicted, snaps[-1]["t"] if snaps else None, result["at30"]["strings"], result["atStop"]["strings"]))
+        rows = []
+        for i, delta in enumerate(LANDED_DELTAS):
+            pre = snapshot(player.ipc, player.pid, t0)
+            if not pre["ranges"] or pre["pos"] is None:
+                out("  no range, skipping landed %d" % i)
+                continue
+            floor, end = pre["ranges"][0]
+            target = min(max(pre["pos"] + delta, floor + 2.0), end - 0.5)
+            rows.append(one_seek(player, target, out, "landed %+d" % delta, "landed", t0))
+        for n in REFUSED_BELOW:
+            pre = snapshot(player.ipc, player.pid, t0)
+            if not pre["ranges"]:
+                continue
+            floor = pre["ranges"][0][0]
+            expect = "refused" if floor > 0.5 else "clampedToStart"
+            rows.append(one_seek(player, floor - n, out, "below floor -%d" % n, expect, t0))
+        for n in REFUSED_PAST:
+            pre = snapshot(player.ipc, player.pid, t0)
+            if not pre["ranges"]:
+                continue
+            end = pre["ranges"][0][1]
+            rows.append(one_seek(player, end + n, out, "past end +%d" % n, "refused", t0))
+        result["seeks"] = rows
+        landed = [r for r in rows if r["expect"] == "landed"]
+        refused = [r for r in rows if r["expect"] == "refused"]
+        result["landedAfter"] = verdict.distribution(verdict.abs_deltas(landed))
+        result["landedLater"] = verdict.distribution(verdict.abs_deltas(landed, key_after="later"))
+        result["refusedAfter"] = verdict.distribution(verdict.abs_deltas(refused))
+        result["refusedLater"] = verdict.distribution(verdict.abs_deltas(refused, key_after="later"))
+        result["refusedLogLines"] = sum(1 for r in refused if r["logLines"])
+        result["landedLogLines"] = sum(1 for r in landed if r["logLines"])
+        try:
+            with open(player.log_path, "rb") as handle:
+                result["cannotSeekLinesInLogFile"] = handle.read().count(b"Cannot seek in this stream")
+        except OSError:
+            result["cannotSeekLinesInLogFile"] = None
+        out("  landed n=%d |dAfter| %s |dLater| %s; refused n=%d |dAfter| %s |dLater| %s; log lines on refused %d of %d, on landed %d; in file %s" % (
+            len(landed), result["landedAfter"], result["landedLater"], len(refused),
+            result["refusedAfter"], result["refusedLater"], result["refusedLogLines"], len(refused),
+            result["landedLogLines"], result["cannotSeekLinesInLogFile"]))
+    except Exception as exc:
+        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        out("  FAILED: %s" % result["failure"])
+    finally:
+        result["mpvExit"] = player.close()
+    return result
+
+
+def hyprctl_json(*words):
+    """`hyprctl -j <words>`, argv only, parsed; None on any failure."""
+    import subprocess
+    try:
+        raw = subprocess.run(["hyprctl", "-j"] + list(words), capture_output=True, timeout=5).stdout
+        return json.loads(raw.decode("utf-8", "replace"))
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def hyprctl(*words):
+    import subprocess
+    try:
+        return subprocess.run(["hyprctl"] + list(words), capture_output=True, timeout=5).stdout.decode("utf-8", "replace").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def window_of(pid):
+    for client in hyprctl_json("clients") or []:
+        if client.get("pid") == pid:
+            return client
+    return None
+
+
+def shot_series(ipc, out, label, path_fmt, geometry, count, pre=None):
+    """`pre` is issued, then `count` back-to-back grim captures of
+    `geometry`; each row records when the capture command returned
+    (an upper bound on the capture instant) relative to the command."""
+    t = time.monotonic()
+    err = ""
+    if pre is not None:
+        _, err = command(ipc, *pre)
+    rows = []
+    for i in range(count):
+        ok, ms = grim_region(path_fmt % i, geometry)
+        rows.append({"shot": path_fmt % i, "ok": ok, "doneAtMs": round((time.monotonic() - t) * 1000, 1), "grimMs": ms})
+    out("  %s: %s" % (label, ", ".join("#%d at %.0f ms" % (i, r["doneAtMs"]) for i, r in enumerate(rows))))
+    return {"commandError": err or "", "shots": rows}
+
+
+def grim_region(path, geometry, scale=None):
+    import subprocess
+    argv = ["grim"]
+    if scale:
+        argv += ["-s", str(scale)]
+    if geometry:
+        argv += ["-g", geometry]
+    argv.append(path)
+    t = time.monotonic()
+    try:
+        ok = subprocess.run(argv, capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    return ok, round((time.monotonic() - t) * 1000, 1)
+
+
+def bar_layers():
+    found = []
+    for mon, data in (hyprctl_json("layers") or {}).items():
+        for lvl, entries in (data.get("levels") or {}).items():
+            for entry in entries:
+                if "bar" in str(entry.get("namespace") or ""):
+                    found.append({"monitor": mon, "level": lvl, "namespace": entry.get("namespace"),
+                                  "x": entry.get("x"), "y": entry.get("y"), "w": entry.get("w"), "h": entry.get("h")})
+    return found
+
+
+def m3_osd(args, channels, out):
+    ch = channels[args.a]
+    out("M3 show-text on a real window: %s (%s)" % (ch["name"], redact(ch["url"])))
+    result = {"question": "m3", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    shots = os.path.join(args.scratch, "shots")
+    os.makedirs(shots, exist_ok=True)
+    active_before = (hyprctl_json("activewindow") or {}).get("address")
+    result["activeBefore"] = active_before
+    result["barLayersBefore"] = bar_layers()
+    player = Player(args, 30, out, windowed=True)
+    result["pid"] = player.pid
+    fullscreen_on = False
+    addr = None
+    try:
+        t0, _ = player.play(ch)
+        time.sleep(3.0)
+        win = None
+        deadline = time.monotonic() + 10.0
+        while win is None and time.monotonic() < deadline:
+            win = window_of(player.pid)
+            if win is None:
+                time.sleep(0.25)
+        if win is None:
+            raise RuntimeError("no Hyprland client for pid %d within 10 s" % player.pid)
+        addr = win.get("address")
+        at, size = win.get("at"), win.get("size")
+        geometry = "%d,%d %dx%d" % (at[0], at[1], size[0], size[1])
+        strip = "%d,%d %dx%d" % (at[0], at[1], size[0], 70)
+        result["window"] = {"address": addr, "class": win.get("class"), "at": at, "size": size,
+                            "floating": win.get("floating"), "fullscreen": win.get("fullscreen"),
+                            "workspace": (win.get("workspace") or {}).get("id")}
+        out("  window %s class=%s at=%s size=%s floating=%s" % (addr, win.get("class"), at, size, win.get("floating")))
+        level, _ = get(player.ipc, "osd-level")
+        result["osdLevel"] = level
+        result["baseline"] = shot_series(player.ipc, out, "(0) baseline strip, no command",
+                                         os.path.join(shots, "m3-0-base-%d.png"), strip, 1)
+        # (a) show-text windowed: when does the line appear?
+        result["a"] = shot_series(player.ipc, out, "(a) show-text windowed, top strip",
+                                  os.path.join(shots, "m3-a-%d.png"), strip, 6,
+                                  pre=("show-text", "-1:32 behind live", 3000))
+        time.sleep(3.5)
+        # (c) an IPC seek, windowed, with no show-text active: mpv's own OSD?
+        before, _ = get(player.ipc, "time-pos")
+        t = time.monotonic()
+        _, err = command(player.ipc, "seek", "-5", "relative")
+        rows = []
+        for i in range(3):
+            ok, ms = grim_region(os.path.join(shots, "m3-c-%d.png" % i), geometry, scale=0.5)
+            rows.append({"ok": ok, "doneAtMs": round((time.monotonic() - t) * 1000, 1)})
+        after, _ = get(player.ipc, "time-pos")
+        result["c"] = {"seekError": err or "", "before": before, "after": after, "shots": rows}
+        out("  (c) IPC seek -5 windowed: %s -> %s; shots at %s ms" % (before, after, [r["doneAtMs"] for r in rows]))
+        time.sleep(2.0)
+        # (b) fullscreen by address, at most 3 s
+        # Hyprland 0.56 under a Lua config provider: `hyprctl dispatch X`
+        # is `return hl.dispatch(X)`, so the legacy `fullscreen 0` spelling
+        # is a syntax error (Model.js G-1). The window is named by address
+        # in a table, the shape pipExpression() builds.
+        hyprctl("dispatch", 'hl.dsp.focus({ window = "address:%s" })' % addr)
+        time.sleep(0.2)
+        attempts = []
+        fs_expr = 'hl.dsp.window.fullscreen({ window = "address:%s" })' % addr
+        for form in (fs_expr,
+                     'hl.dsp.window.fullscreen({ window = "address:%s", mode = 0 })' % addr,
+                     'hl.dsp.window.fullscreen_state({ window = "address:%s", internal = 2, client = -1 })' % addr):
+            reply = hyprctl("dispatch", form)
+            time.sleep(0.5)
+            w = window_of(player.pid) or {}
+            attempts.append({"form": form, "reply": reply, "fullscreen": w.get("fullscreen"),
+                             "fullscreenClient": w.get("fullscreenClient"), "size": w.get("size")})
+            out("  fullscreen attempt %s -> %r, fullscreen=%s client=%s size=%s" % (
+                form, reply, w.get("fullscreen"), w.get("fullscreenClient"), w.get("size")))
+            if w.get("fullscreen"):
+                fullscreen_on = True
+                fs_expr = form
+                break
+        result["fullscreenAttempts"] = attempts
+        t_fs = time.monotonic()
+        if fullscreen_on:
+            w = window_of(player.pid) or {}
+            result["b"] = {"fullscreen": w.get("fullscreen"), "at": w.get("at"), "size": w.get("size"),
+                           "barLayers": bar_layers(), "activeWindow": (hyprctl_json("activewindow") or {}).get("address")}
+            top = "0,0 %dx70" % (w.get("size") or [1366])[0]
+            result["b"]["text"] = shot_series(player.ipc, out, "(b) show-text fullscreen, output top strip",
+                                              os.path.join(shots, "m3-b-%d.png"), top, 4,
+                                              pre=("show-text", "-1:32 behind live", 3000))
+            ok, ms = grim_region(os.path.join(shots, "m3-b-output.png"), None, scale=0.4)
+            result["b"]["outputShot"] = ok
+            out("  (b) fullscreen: bar layers %s; output shot %s" % (result["b"]["barLayers"], ok))
+        elapsed = time.monotonic() - t_fs
+        if fullscreen_on:
+            if elapsed < 2.0:
+                time.sleep(2.0 - elapsed)
+            hyprctl("dispatch", fs_expr)            # the verb toggles
+            fullscreen_on = False
+            result["fullscreenHeldS"] = round(time.monotonic() - t_fs, 2)
+            time.sleep(0.5)
+            w = window_of(player.pid) or {}
+            result["afterRestore"] = {"fullscreen": w.get("fullscreen"), "size": w.get("size")}
+            out("  fullscreen held %.2f s, restored fullscreen=%s size=%s" % (result["fullscreenHeldS"], w.get("fullscreen"), w.get("size")))
+    except Exception as exc:
+        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        out("  FAILED: %s" % result["failure"])
+    finally:
+        if fullscreen_on and addr:
+            hyprctl("dispatch", 'hl.dsp.window.fullscreen({ window = "address:%s" })' % addr)
+        result["mpvExit"] = player.close()
+        if active_before:
+            hyprctl("dispatch", 'hl.dsp.focus({ window = "address:%s" })' % active_before)
+        result["activeAfter"] = (hyprctl_json("activewindow") or {}).get("address")
+        result["barLayersAfter"] = bar_layers()
+        out("  focus restored to %s (was %s)" % (result["activeAfter"], active_before))
+    return result
+
+
+def m4_zero_point(args, channels, out):
+    ids = [i for i in (args.a, args.b, args.c) if i]
+    out("M4 zero-point error on %d channels" % len(ids))
+    result = {"question": "m4", "channels": []}
+    player = Player(args, 40, out)
+    result["pid"] = player.pid
+    try:
+        for cid in ids:
+            ch = channels[cid]
+            out("  %s (%s)" % (ch["name"], redact(ch["url"])))
+            row = {"channel": cid, "name": ch["name"], "host": redact(ch["url"])}
+            _, error, rtt, t_z = zap(player.ipc, ch, os.getpid())
+            row["loadfileError"] = error or ""
+            wall0 = pos0 = None
+            polls = 0
+            deadline = t_z + args.start_timeout
+            while time.monotonic() < deadline:
+                pos, _ = get(player.ipc, "time-pos")
+                polls += 1
+                if isinstance(pos, (int, float)):
+                    wall0, pos0 = time.monotonic(), float(pos)
+                    break
+                time.sleep(0.05)
+            row.update({"polls": polls, "firstPosAfterZapS": None if wall0 is None else round(wall0 - t_z, 3), "pos0": pos0})
+            if wall0 is None:
+                row["failure"] = "no time-pos within %.0f s" % args.start_timeout
+                result["channels"].append(row)
+                out("    FAILED: %s" % row["failure"])
+                continue
+            ticks = []
+            pfc_count = 0
+            for i in range(1, args.m4_seconds + 1):
+                target = wall0 + i
+                rest = target - time.monotonic()
+                if rest > 0:
+                    time.sleep(rest)
+                pos, _ = get(player.ipc, "time-pos")
+                wall = time.monotonic()
+                pfc, _ = get(player.ipc, "paused-for-cache")
+                pfc_count += 1 if pfc else 0
+                err = verdict.zero_point_error(wall0, pos0, wall, pos)
+                ticks.append({"i": i, "wall": round(wall - wall0, 3), "pos": pos,
+                              "error": None if err is None else round(err, 3), "pfc": pfc})
+                if i in (1, 5, 10, 30, 60) or i == args.m4_seconds:
+                    out("    +%2d s pos=%s error=%s pfc=%s" % (i, None if pos is None else round(pos, 3),
+                                                            None if err is None else round(err, 3), pfc))
+            errs = [t["error"] for t in ticks if t["error"] is not None]
+            tick5 = ticks[4] if len(ticks) >= 5 else None
+            final = ticks[-1]
+            row.update({"ticks": ticks, "errorAtEnd": final["error"],
+                        "errorMin": min(errs) if errs else None, "errorMax": max(errs) if errs else None,
+                        "errorAtEndFromTick5": None if not tick5 or tick5["error"] is None or final["error"] is None
+                        else round(final["error"] - tick5["error"], 3),
+                        "pausedForCacheTicks": pfc_count,
+                        "stateAtEnd": snapshot(player.ipc, player.pid, wall0)})
+            br, _ = get(player.ipc, "video-bitrate")
+            ab, _ = get(player.ipc, "audio-bitrate")
+            row["bitrateBps"] = ((br or 0) + (ab or 0)) or None
+            out("    error at +%d s: %s (min %s max %s); from a tick-5 zero point: %s; pfc ticks %d; bitrate %s" % (
+                args.m4_seconds, row["errorAtEnd"], row["errorMin"], row["errorMax"],
+                row["errorAtEndFromTick5"], pfc_count, row["bitrateBps"]))
+            result["channels"].append(row)
+    except Exception as exc:
+        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        out("  FAILED: %s" % result["failure"])
+    finally:
+        result["mpvExit"] = player.close()
+    return result
+
+
 QUESTIONS = {"q1": q1_zap, "q2a": q2a_pause_full, "q2b": q2b_pause_fresh,
-             "q2cd": q2cd_rewind_pause, "q34": q34_watchdog_floor}
+             "q2cd": q2cd_rewind_pause, "q34": q34_watchdog_floor,
+             "m1": m1_fields, "m2": m2_refusal, "m3": m3_osd, "m4": m4_zero_point}
 
 
 def main(argv):
@@ -567,7 +1022,11 @@ def main(argv):
     parser.add_argument("question", choices=sorted(QUESTIONS))
     parser.add_argument("--channels", required=True, help="a source channels.json, read only")
     parser.add_argument("--a", required=True, help="channel id for A / the single channel")
-    parser.add_argument("--b", default="", help="channel id for B (q1)")
+    parser.add_argument("--b", default="", help="channel id for B (q1, m4)")
+    parser.add_argument("--c", default="", help="channel id for C (m4)")
+    parser.add_argument("--index", type=int, default=0, help="socket index offset for concurrent m2 runs")
+    parser.add_argument("--m-cap", type=float, default=330.0, help="m1/m2: seconds to wait for eviction")
+    parser.add_argument("--m4-seconds", type=int, default=60)
     parser.add_argument("--scratch", required=True)
     parser.add_argument("--sock-dir", required=True)
     parser.add_argument("--out", required=True)
@@ -591,7 +1050,7 @@ def main(argv):
     rows = document.get("channels") if isinstance(document, dict) else document
     channels = {}
     for row in rows:
-        if row.get("id") in (args.a, args.b):
+        if row.get("id") in (args.a, args.b, args.c):
             channels[row["id"]] = {"id": row["id"], "name": row.get("name") or "", "url": row.get("url") or ""}
     if args.a not in channels or (args.question == "q1" and args.b not in channels):
         sys.stderr.write("channel id not in the list\n")

@@ -281,3 +281,91 @@ class Trend(unittest.TestCase):
         t = verdict.trend([None, 10.0, None, 20.0])
         self.assertEqual(t["direction"], "up")
         self.assertEqual(t["n"], 2)
+
+
+# --- Pre-build measurements, 2026-10-03 (section 12) --------------------
+
+class EnumerateFields(unittest.TestCase):
+    STATE = {"cache-end": 418.0, "eof": False, "fw-bytes": 1000,
+             "seekable-ranges": [{"start": 44.0, "end": 418.0}, {"start": 500.0, "end": 501.0}],
+             "ts-per-stream": [{"type": "video", "cache-duration": 10.0}]}
+
+    def test_every_leaf_once_through_the_first_list_element(self):
+        paths = [p for p, _, _ in verdict.enumerate_fields(self.STATE)]
+        self.assertEqual(paths, ["cache-end", "eof", "fw-bytes",
+                                 "seekable-ranges[].end", "seekable-ranges[].start",
+                                 "ts-per-stream[].cache-duration", "ts-per-stream[].type"])
+
+    def test_types_and_samples(self):
+        rows = dict((p, (k, v)) for p, k, v in verdict.enumerate_fields(self.STATE))
+        self.assertEqual(rows["eof"], ("bool", False))
+        self.assertEqual(rows["fw-bytes"], ("int", 1000))
+        self.assertEqual(rows["cache-end"], ("float", 418.0))
+        self.assertEqual(rows["ts-per-stream[].type"], ("str", "video"))
+
+    def test_an_empty_list_is_a_visible_leaf(self):
+        rows = verdict.enumerate_fields({"seekable-ranges": []})
+        self.assertEqual(rows, [("seekable-ranges", "list", [])])
+
+    def test_string_fields_are_the_privacy_question(self):
+        self.assertEqual(verdict.string_fields(self.STATE), ["ts-per-stream[].type"])
+        self.assertEqual(verdict.string_fields({"a": 1, "b": [{"c": 2.0}]}), [])
+
+
+class NotMoved(unittest.TestCase):
+    def test_a_refused_seek_reads_the_same_position(self):
+        self.assertTrue(verdict.not_moved(48.03, 48.04, 0.5))
+
+    def test_a_landed_seek_is_not_a_refusal(self):
+        self.assertFalse(verdict.not_moved(400.617, 100.617, 0.5))
+
+    def test_the_threshold_is_strict(self):
+        self.assertFalse(verdict.not_moved(10.0, 10.5, 0.5))
+
+    def test_a_missing_reading_is_none(self):
+        self.assertIsNone(verdict.not_moved(None, 10.0, 0.5))
+        self.assertIsNone(verdict.not_moved(10.0, None, 0.5))
+
+
+class Distributions(unittest.TestCase):
+    def test_abs_deltas_skip_broken_rows(self):
+        rows = [{"before": 10.0, "after": 7.0}, {"before": None, "after": 3.0},
+                {"before": 5.0, "after": 5.25}, {"after": 1.0}]
+        self.assertEqual(verdict.abs_deltas(rows), [0.25, 3.0])
+
+    def test_distribution(self):
+        self.assertEqual(verdict.distribution([3.0, 1.0, 2.0]),
+                         {"n": 3, "min": 1.0, "median": 2.0, "max": 3.0})
+        self.assertEqual(verdict.distribution([4.0, 1.0])["median"], 2.5)
+        self.assertIsNone(verdict.distribution([]))
+
+    def test_threshold_margin_separates(self):
+        m = verdict.threshold_margin(landed_min=1.9, refused_max=0.02, threshold=0.5)
+        self.assertTrue(m["separates"])
+        self.assertAlmostEqual(m["aboveRefused"], 0.48)
+        self.assertAlmostEqual(m["belowLanded"], 1.4)
+
+    def test_threshold_margin_fails_when_a_landed_seek_sits_below_it(self):
+        self.assertFalse(verdict.threshold_margin(0.3, 0.02, 0.5)["separates"])
+        self.assertFalse(verdict.threshold_margin(1.9, 0.6, 0.5)["separates"])
+
+    def test_threshold_margin_with_an_empty_side(self):
+        m = verdict.threshold_margin(None, 0.02, 0.5)
+        self.assertIsNone(m["belowLanded"])
+        self.assertTrue(m["separates"])
+
+
+class ZeroPoint(unittest.TestCase):
+    def test_the_q3_reading(self):
+        # section 11.3: a 300 s seek plus 0.6 s of zero-point lateness.
+        self.assertAlmostEqual(verdict.zero_point_error(0.0, 0.0, 1.12, -299.48), 300.60, places=2)
+
+    def test_perfect_playback_is_zero(self):
+        self.assertAlmostEqual(verdict.zero_point_error(100.0, 5.0, 160.0, 65.0), 0.0)
+
+    def test_a_stall_counts_as_behind(self):
+        self.assertAlmostEqual(verdict.zero_point_error(100.0, 5.0, 160.0, 63.0), 2.0)
+
+    def test_missing_is_none(self):
+        self.assertIsNone(verdict.zero_point_error(None, 5.0, 160.0, 63.0))
+

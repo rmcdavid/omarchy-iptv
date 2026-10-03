@@ -313,3 +313,91 @@ def trend(values):
         direction = "flat"
     return {"first": round(kept[0], 2), "last": round(kept[-1], 2), "delta": round(delta, 2),
             "direction": direction, "n": len(kept)}
+
+
+# --- Pre-build measurements, 2026-10-03 (docs/SPIKE-LIVE-REWIND.md section 12)
+
+def enumerate_fields(state, prefix=""):
+    """Every leaf of a `demuxer-cache-state` reply as (path, type, sample).
+
+    Lists are walked through their FIRST element with `[]` in the path, so
+    `seekable-ranges[].start` is one row however many ranges there are. An
+    empty list is reported as a leaf of type `list` so an absent range set
+    is visible rather than silently contributing nothing. The allowlist the
+    helper forwards is built from these paths, and `string_fields` below is
+    the privacy question asked of the same walk.
+    """
+    rows = []
+    if isinstance(state, dict):
+        for key in sorted(state):
+            rows.extend(enumerate_fields(state[key], prefix + ("." if prefix else "") + str(key)))
+        return rows
+    if isinstance(state, list):
+        if not state:
+            return [(prefix, "list", [])]
+        return enumerate_fields(state[0], prefix + "[]")
+    kind = {bool: "bool", int: "int", float: "float", str: "str"}.get(type(state), type(state).__name__)
+    if state is None:
+        kind = "null"
+    return [(prefix, kind, state)]
+
+
+def string_fields(state):
+    """The paths of every leaf whose value is a string: the ones that could
+    carry a path or a URL. Empty means the reply is numbers and booleans."""
+    return [path for path, kind, _ in enumerate_fields(state) if kind == "str"]
+
+
+def not_moved(before, after, threshold_s):
+    """A seek whose immediate `time-pos` read is within `threshold_s` of the
+    read before it did not move. None when a reading is missing: an absent
+    position is not evidence of anything (D-DEAD-1).
+    """
+    try:
+        return abs(float(after) - float(before)) < float(threshold_s)
+    except (TypeError, ValueError):
+        return None
+
+
+def abs_deltas(rows, key_before="before", key_after="after"):
+    """Sorted |after - before| over rows with both readings numeric."""
+    out = []
+    for row in rows:
+        try:
+            out.append(abs(float(row[key_after]) - float(row[key_before])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(out)
+
+
+def distribution(values):
+    """min / median / max of a list, or None for an empty one."""
+    if not values:
+        return None
+    ordered = sorted(float(v) for v in values)
+    n = len(ordered)
+    median = ordered[n // 2] if n % 2 else (ordered[n // 2 - 1] + ordered[n // 2]) / 2.0
+    return {"n": n, "min": ordered[0], "median": median, "max": ordered[-1]}
+
+
+def threshold_margin(landed_min, refused_max, threshold):
+    """How far a not-moved threshold sits from each population.
+
+    Positive on both sides means the threshold separates them. Either side
+    None when that population is empty.
+    """
+    below = None if refused_max is None else float(threshold) - float(refused_max)
+    above = None if landed_min is None else float(landed_min) - float(threshold)
+    return {"threshold": float(threshold), "aboveRefused": below, "belowLanded": above,
+            "separates": (below is None or below > 0) and (above is None or above > 0)}
+
+
+def zero_point_error(wall0, pos0, wall, pos):
+    """(wall - wall0) - (pos - pos0): what "behind live" reads on a player
+    that was never seeked. Its size is the error of the zero point plus any
+    stall since, and it sets the display threshold. None if any reading is
+    missing."""
+    try:
+        return (float(wall) - float(wall0)) - (float(pos) - float(pos0))
+    except (TypeError, ValueError):
+        return None
