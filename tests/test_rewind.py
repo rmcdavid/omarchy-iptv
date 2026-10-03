@@ -358,6 +358,51 @@ class SeekVerbTest(RewindPlayerTestCase):
         # The zero point was valid and is untouched: no re-take on `live`.
         self.assertEqual(server.user_data["omarchy-iptv-rewind"], node)
 
+    def test_a_reading_ahead_of_the_zero_point_re_bases_it_so_the_next_back_reads_what_was_asked(self):
+        # F-RWD-11. The zero point was taken where the reader first sat,
+        # 16.884 s behind the cache end (the HLS lead). `live` lands at the
+        # end: by the stored point that reads -16.384, which is not "ahead
+        # of live" but "the edge was further on than first observed". The
+        # node moves to the landing and the reply reads 0.0 -- so the
+        # `back 10` that follows reads 10, not -6.
+        node = {"schema": 1, "entryId": 7, "wall0": 1000.0, "pos0": 400.617}
+        server = self.playing(user_data={"omarchy-iptv-rewind": node})
+        self.clock = 1000.5
+        code, payload, _, stderr = self.seek("--live")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.seeks_sent(), [["seek", 417.501, "absolute"]])
+        self.assertEqual(payload["rewind"]["behindLive"], 0.0)
+        self.assertEqual(server.user_data["omarchy-iptv-rewind"], {"schema": 1, "entryId": 7, "wall0": 1000.5, "pos0": 417.501})
+        self.assertEqual(server.osd, [["live", 3000]])
+        # Ten seconds of play, then back 10: the number is the request.
+        self.clock = 1010.5
+        server.props["time-pos"] = 427.501
+        server.props["demuxer-cache-state"]["seekable-ranges"] = [{"start": 54.0, "end": 428.0}]
+        code, payload, _, _ = self.seek("--by", "-10")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["rewind"]["behindLive"], 10.0)
+        self.assertEqual(server.user_data["omarchy-iptv-rewind"], {"schema": 1, "entryId": 7, "wall0": 1000.5, "pos0": 417.501})
+
+    def test_status_re_bases_too_and_the_probe_never_does(self):
+        # The same reading through `status` (which writes) moves the node;
+        # through `probe` (which never writes, 2.2) the raw reading comes
+        # back and the node is untouched -- the shell clamps for display.
+        node = {"schema": 1, "entryId": 7, "wall0": 1000.0, "pos0": 420.0}
+        server = self.playing(user_data={"omarchy-iptv-rewind": node})
+        self.clock = 1001.0
+        code, payload, _, _ = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["rewind"]["behindLive"], 20.383)
+        self.assertEqual(server.user_data["omarchy-iptv-rewind"], node)
+        server.props["time-pos"] = 440.0
+        code, payload, _, _ = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(payload["rewind"]["behindLive"], -19.0)
+        self.assertEqual(server.user_data["omarchy-iptv-rewind"], node)
+        code, payload, _, _ = run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["rewind"]["behindLive"], 0.0)
+        self.assertEqual(server.user_data["omarchy-iptv-rewind"], {"schema": 1, "entryId": 7, "wall0": 1001.0, "pos0": 440.0})
+
     def test_live_at_the_edge_issues_nothing(self):
         server = self.playing(position=417.8)
         code, payload, _, stderr = self.seek("--live")

@@ -10463,3 +10463,92 @@ and stock Omarchy binds all three; verified by reading
 chosen from the chords that are actually free. The correction to F-RWD-1's
 count (seven sites in five shipped files, not four) and the amendment to
 `docs/PLAN-M4.md`'s tmpfs premise (F-RWD-2) land with this record.
+
+## M5-01 live rewind: five lanes built, integrated, 2026-10-03
+
+The build the owner authorised on 2026-10-03 ("Go with your recommendations
+on all twelve and build it"), against `docs/M5-01-LIVE-REWIND.md`. Five lanes
+in five worktrees off dev tip 2d7df1f, the measurement and documents lanes
+first, then helper+model, service+guide+bar and QA with the measurements in
+hand. The integrated tree is dev at the commit this section lands in.
+
+### What each lane delivered
+
+| Lane | Commits on dev | Evidence |
+|---|---|---|
+| M measurements (display held) | 6fc86d6, 752881b | spike section 12, M1-M5; `test_verdict.py` 51 -> 68, eight named mutations each red |
+| D documents | 16f89e0 | the seven "cannot rewind" sentences in six files; chord audit against `/usr/share/omarchy/default/hypr/`; F-RWD-6 closed |
+| H helper + Model | e942a0d, 9b9bd9c | node 1738 -> 1810, python 771 -> 818 (`test_rewind.py` 47); 18 JS and 17 python mutations each red, one equivalent mutant (P16) found and the redundant guard removed; shared fixtures `rewind-clamp.json` (22 vectors) and `rewind-osd.json` (14) red on either side's drift |
+| S service + guide + bar | e19b580 | QML spec 68 -> 70, red on this tree for want of H's names and red under ten named stub mutations; text-format guard 60 -> 61 blocks |
+| Q QA | 61da1cd | `rewind-scenario.sh` R0-R15 on a local HLS stream (ffmpeg, 2 s segments, port 8771): 31 passed / 48 failed / 79 on the pre-feature tree, every red one through a sentinel; the player stub refuses like mpv, 14 self-test cases, six named mutations each red |
+
+### Integration
+
+The four code commits cherry-picked in order H, S, Q with no conflict. The
+first gate on the integrated tree was red on exactly one check, the QML
+spec's line 1904: `coalesceSeek({pending: 0, press: -1, history: null})`
+expected -10 and got 0. The helper lane had read "no range read yet" as "cap
+at 0", the service lane as "no cap", and the two had written their tests
+against opposite readings of one sentence. The service lane was right: the
+first press after a zap, before any reply has carried a range, must spawn
+the helper, which clamps for itself; capped at 0 it answered "queued,
+pending 0" and ran nothing, a false success. The second red, after that
+fix, was line 1910 -- the paused count-up's source, which is now the
+service's own `paused` (the flag the glyph shows) rather than the reply's
+field, so two surfaces cannot disagree in the 100 ms between the optimistic
+flip and the pause reply.
+
+Joins settled on the integrated tree, each listed in design section 12:
+
+1. `coalesceSeek` null history is no cap (above).
+2. `behindLiveNow` counts from `pausedSinceSec` alone (above).
+3. **F-RWD-11**, found by lane Q on the local stream before any helper
+   existed: after `live` the zero point sat behind the landing, so the next
+   `back 10` read 7 on the QA stream and would read 0 on the owner's. The
+   helper now re-takes the zero point at any reading ahead of it on the
+   verbs that write; the probe returns the raw value.
+4. The service lane's rule 12 debt, paid: `barGlyph` takes `behindLive`,
+   `footerStatus` takes `playbackState`, `barTooltip` and
+   `barAccessibleName` take `behindS` / `historyS` (the spoken form through
+   `spokenSpan`, which lane H wrote and lane S could not call), and
+   `seekTransientText` replaces 25 lines of Guide.qml. The widget's own
+   glyph branch, tooltip line and accessible-name suffix are gone.
+5. The tooltip's `up to m:ss back` needs a window (`> 0`, not `>= 0`).
+6. The player stub's self-test runs in the gate, floor 14.
+7. Lane H's node check for the `?` map was green on the integrated tree
+   because lane S's `hintOpts` already declared `canRewind` and
+   `behindLive`: the one join both lanes named, closed by construction.
+8. F-RWD-7 and F-RWD-9 closed by lane H's mutations P5/J18 and P1/P14;
+   F-RWD-10 accepted (shown unchanged, design 2.3 amended); F-RWD-12..14
+   filed from lane Q's observations.
+9. One sentence (`Nothing playing`) was briefly duplicated in Model.js by
+   the lead and caught by `test_pip.py`'s one-copy test; the seek transient
+   now reuses the PiP verb's copy.
+
+### Rule 11 evidence for the integration's own tests
+
+| Suite | Against the lane commits | After |
+|---|---|---|
+| node, new integration block + two re-pinned vectors | 1821 checks, 6 failures (lane H's Model.js at 61da1cd) | 1821 checks, 0 failures |
+| python `test_rewind.py`, two re-base tests | Ran 49, failures=2 (lane H's helper at 61da1cd) | Ran 49 OK |
+| QML spec, lane S's two cases | 69 passed, 1 failed (line 1904), then 69/1 (line 1910) | 70 passed, 0 failed |
+
+Two lead mistakes the gate caught before the commit: middle-dot characters
+in Model.js comments and a raw glyph in a test string (rule 8, the ASCII
+check and `test_playlist`'s ASCII read of Model.js both red), and the
+duplicated sentence above.
+
+### Gate on the integrated tree
+
+Floors re-levelled to the tree: node 1821, python 820, QML spec 70, text
+blocks 61, stub 14. `./scripts/check.sh` green on every step; the run is
+recorded in the decisions log row for the integration.
+
+### Not yet done at this point
+
+The rewind scenario on the display against the integrated tree, the
+bounded live pass on the owner's own channels, the two section-10
+measurements the helper lane deferred (spawn-to-reply under a held key, the
+zero-point node across `omarchy restart shell`), and the review round. Each
+gets its own section below as it happens.
+

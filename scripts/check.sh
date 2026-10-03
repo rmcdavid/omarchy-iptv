@@ -150,9 +150,9 @@ fail=0
 # prevented by a sentence. The honest statement is the one above -- the
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
-QML_SPEC_MIN=${QML_SPEC_MIN:-68}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1738}
-PY_TESTS_MIN=${PY_TESTS_MIN:-771}
+QML_SPEC_MIN=${QML_SPEC_MIN:-70}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1821}
+PY_TESTS_MIN=${PY_TESTS_MIN:-820}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -171,7 +171,9 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # derives its file list from the release allowlist, and a list that resolves
 # to nothing would scan nothing and exit 0 if the guard did not refuse that
 # itself; this is the second line of defence, in the gate's own vocabulary.
-TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-60}
+TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
+# The player stub's self-test (M5-01): 14 cases when wired in.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-14}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -305,6 +307,20 @@ if bash "$ROOT/scripts/qa-lib-test.sh" >"$CHECK_TMP/qalib.log" 2>&1; then
   if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$CHECK_TMP/qalib.log"; fi
 else
   bad "harness predicates"; cat "$CHECK_TMP/qalib.log"
+fi
+
+step "scripts/qa-stub-mpv.py --self-test (the stub refuses like mpv)"
+# M5-01: the player stub's seek semantics are measured facts (a seek below
+# the floor answers success and moves nothing; a negative absolute target
+# counts from the cache end; a loadfile restarts the timeline), and a stub
+# more forgiving than mpv is the hazard rule 10 names. The cases live in the
+# stub so they travel with it; the gate runs them so they cannot rot unseen.
+if python3 -B "$ROOT/scripts/qa-stub-mpv.py" --self-test >"$CHECK_TMP/stub.log" 2>&1; then
+  stub_n=$(grep -oE '^Ran [0-9]+ tests?' "$CHECK_TMP/stub.log" | grep -oE '[0-9]+' || echo 0)
+  if (( stub_n >= STUB_TESTS_MIN )); then ok "player stub self-test ($stub_n cases)"
+  else bad "player stub self-test ran $stub_n cases, floor $STUB_TESTS_MIN"; cat "$CHECK_TMP/stub.log"; fi
+else
+  bad "player stub self-test"; cat "$CHECK_TMP/stub.log"
 fi
 
 step "scripts/dev-harness/chno-entry-scenario.sh check-tree (M2-03 CN23)"

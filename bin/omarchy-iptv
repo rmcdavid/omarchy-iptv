@@ -5318,6 +5318,31 @@ def zero_point(client: MpvIpc, entry_id: int | None, position: float | None,
     return node if written else None
 
 
+def rebase_zero_point(client: MpvIpc, zero: dict[str, Any] | None, entry_id: int | None,
+                      position: float | None, wall: float, write: bool) -> dict[str, Any] | None:
+    """A reading AHEAD of the zero point is a better observation of the live
+    edge than the one stored, so the zero point moves to it (F-RWD-11).
+
+    The zero point is taken where the reader first sits after a loadfile, and
+    the reader sits behind the cache end there by the HLS lead: 3.6 s on the
+    QA stream, 13-21 s on the owner's channels (spike 11.3). A `live` seek
+    lands at the cache end, past that point, and the formula then reads
+    negative -- not "ahead of live", which nobody can be, but "the edge was
+    further on than first observed". Left alone, the next `back 10` reads
+    7 behind on a stream with a 3 s lead and 0 on one with a 20 s lead, under
+    a transient that says "Back 10 s". Re-based, it reads 10. With `write`
+    False (the probe, which never writes) the raw reading is returned and the
+    node left alone; the shell clamps at 0 for display either way."""
+    if zero is None or position is None or not write or entry_id is None:
+        return zero
+    behind = (wall - float(zero["wall0"])) - (position - float(zero["pos0"]))
+    if behind >= 0:
+        return zero
+    node = {"schema": REWIND_SCHEMA, "entryId": entry_id, "wall0": wall, "pos0": position}
+    written, _ = client.try_command("set_property", USER_DATA_REWIND, node)
+    return node if written else zero
+
+
 def rewind_view(position: float | None, cache: dict[str, Any], zero: dict[str, Any] | None,
                 paused: Any, paused_for_cache: Any, entry_id: int | None, wall: float) -> dict[str, Any] | None:
     """The `rewind` object every player reply carries (2.1). None when the
@@ -5364,6 +5389,7 @@ def read_rewind(client: MpvIpc, stash: Any = None, paused: Any = None, write: bo
     ok, pfc = client.try_command("get_property", "paused-for-cache")
     paused_for_cache = bool(pfc) if ok and pfc is not None else False
     zero = zero_point(client, entry_id, position, wall, write) if position is not None else None
+    zero = rebase_zero_point(client, zero, entry_id, position, wall, write)
     return rewind_view(position, cache, zero, paused, paused_for_cache, entry_id, wall)
 
 
@@ -5438,7 +5464,12 @@ def player_seek(args: argparse.Namespace) -> int:
             else:
                 payload["refused"] = False
                 payload["applied"] = round3(after - before)
-        payload["rewind"] = rewind_view(after, cache, zero, paused, paused_for_cache, entry_id, _boot_clock())
+        # The post-seek reading, on a clock read AFTER the seek. A `live` that
+        # landed past the zero point re-bases it here (F-RWD-11), so the
+        # reply reads 0.0 at the edge and the next `back 10` reads 10.
+        wall_after = _boot_clock()
+        zero = rebase_zero_point(client, zero, entry_id, after, wall_after, True)
+        payload["rewind"] = rewind_view(after, cache, zero, paused, paused_for_cache, entry_id, wall_after)
         # The composer decides what is said and when (a refused seek and a
         # missing zero point both compose to ""), so there is ONE guard, the
         # one the shared fixture pins. A second `if not refused` here was an

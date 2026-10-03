@@ -4830,6 +4830,43 @@ function rewindOsdText(reply) {
   return text
 }
 
+// The guide's 3 s footer transient for a seek reply (design 2.5): `Back 10 s
+// SEP 1:32 behind live`; at the floor `As far back as it goes SEP 6:52
+// behind live`; at the edge `Live`, or -- after a rewind deeper than the
+// forward quota, where the cache edge is not the live edge (ruling D8) --
+// `At the edge of the buffer SEP 0:27 behind live`, SEP being the middle
+// dot every footer line joins with. Numbers only from the reply,
+// through clockSpan; a reply without a zero point carries no number and
+// says so by saying nothing after the verb (null is absent, never 0:00). A
+// reply that is not ok is its reason (statusReason) or `fallback` when it
+// gives none; the service's own at_floor refusal carries no `ok` and is the
+// floor sentence. Lifted out of Guide.qml at integration so a test calls
+// the function the footer shows (rule 12).
+function seekTransientText(reply, fallback) {
+  var r = reply && typeof reply === "object" ? reply : null
+  var rewind = r && r.rewind && typeof r.rewind === "object" ? r.rewind : null
+  var behindS = rewind ? finiteOr(rewind.behindLive, null) : null
+  var behind = behindS !== null && behindS >= BEHIND_LIVE_SHOW_S ? clockSpan(behindS) + " behind live" : ""
+  var tail = behind !== "" ? SEP + behind : ""
+  var floorText = "As far back as it goes" + tail
+  var edgeText = behind === "" ? "Live" : "At the edge of the buffer" + tail
+  if (r && r.atFloor === true) return floorText
+  if (!r || r.ok !== true) {
+    // The service's own refusal for an idle player (design 2.4) says what
+    // the PiP verb says for the same state: one copy of the sentence.
+    if (r && str(r.code) === "nothing_playing") return pipStatusText("nothing_playing")
+    var reason = statusReason(r)
+    return reason !== "" ? reason : str(fallback)
+  }
+  if (r.mode === "live" || r.atEdge === true) return edgeText
+  // Refused by the player: nothing moved, in whichever direction was asked.
+  if (r.refused === true) return finiteOr(r.requested, 0) > 0 ? edgeText : floorText
+  var applied = Math.round(finiteOr(r.applied, 0))
+  if (applied < 0) return "Back " + String(-applied) + " s" + tail
+  if (applied > 0) return "Forward " + String(applied) + " s" + tail
+  return floorText
+}
+
 // The clamp, mirrored by clamp_seek() in the helper and pinned by
 // the rewind-clamp.json fixture (dev branch). opts: position, floor, ceiling (the
 // seekable range the reader sits in), mode "by" | "live", by (signed
@@ -4914,37 +4951,51 @@ function seekVerbSeconds(text) {
 // a sum the floor cannot honour is also a sum that would be run and refused.
 // `press` is the direction (its sign: negative back, positive forward),
 // `step` the seconds per press (REWIND_STEP_S absent), `pending` the sum
-// already waiting, `history` the seconds behind the reader (null: no range
-// read yet, so a back press is capped at 0 and only forward sums grow).
+// already waiting, `history` the seconds behind the reader.
+//
+// `history` null or undefined is "no range read yet", and that is NO cap,
+// not a cap of zero. The first press after a zap, before any reply has
+// carried a range, must still spawn the helper, which reads the range for
+// itself and clamps or refuses in its reply. The first version capped it at
+// 0: that press answered "queued, pending 0" and ran nothing, a false
+// success (CN15). Found at integration by the QML spec's null case, which
+// the service lane wrote against the contract while the helper lane wrote
+// the other reading of it.
 function coalesceSeek(opts) {
   var o = opts || {}
   var pending = finiteOr(o.pending, 0)
   var press = finiteOr(o.press, 0)
   var step = finiteOr(o.step, REWIND_STEP_S)
   if (step < 0) step = -step
-  var history = finiteOr(o.history, 0)
-  if (history < 0) history = 0
+  var history = finiteOr(o.history, null)
+  if (history !== null && history < 0) history = 0
   var sum = pending + (press < 0 ? -step : press > 0 ? step : 0)
-  if (sum < -history) sum = -history
+  if (history !== null && sum < -history) sum = -history
   return round3(sum)
 }
 
 // "Behind live" for display now. While playing it is what the last reply
 // said (it holds, and the 10 s status tick re-syncs it); while paused it
-// counts up at one second per second from `pausedSinceSec`, the `nowSec` at
-// which the reply carrying this `rewind` was read while paused. null when
-// there is no reply or no zero point: absent, never 0.
+// counts up at one second per second from `pausedSinceSec`, the later of
+// the reply that carried this `rewind` and the moment the pause began. null
+// when there is no reply or no zero point: absent, never 0.
+//
+// `pausedSinceSec` non-null IS the statement that the player is paused: the
+// service passes it only while its own `paused` holds, and that is the flag
+// the bar's pause glyph and the footer's "paused" word read. The reply's own
+// `paused` field is not consulted here, on purpose. The first version
+// required both, and in the 100 ms between the optimistic flip on `c` and
+// the pause reply the glyph said paused while the number held -- two
+// surfaces disagreeing about one state. One source of truth, the service's.
 function behindLiveNow(opts) {
   var o = opts || {}
   var rewind = o.rewind && typeof o.rewind === "object" ? o.rewind : null
   if (!rewind) return null
   var behind = finiteOr(rewind.behindLive, null)
   if (behind === null) return null
-  if (rewind.paused === true) {
-    var now = finiteOr(o.nowSec, null)
-    var since = finiteOr(o.pausedSinceSec, null)
-    if (now !== null && since !== null && now > since) behind += now - since
-  }
+  var now = finiteOr(o.nowSec, null)
+  var since = finiteOr(o.pausedSinceSec, null)
+  if (now !== null && since !== null && now > since) behind += now - since
   return behind < 0 ? 0 : behind
 }
 
@@ -7246,6 +7297,11 @@ function barGlyph(opts) {
   // PAUSE LIVE TV. R7 is that a bar state is never carried by colour alone,
   // so a paused stream gets its own glyph rather than the playing one dimmed.
   if (o.playing && o.paused) return GLYPHS.tvPause
+  // M5-01 (design 2.5): playing behind live is a bar state of its own and
+  // gets the history glyph; the `-m:ss` beside it carries the number. Paused
+  // wins above it, because the pause glyph with the count-up is what 2.5
+  // draws. Decided here rather than in the widget so a test can call it.
+  if (o.playing && o.behindLive === true) return GLYPHS.history
   if (o.playing) return GLYPHS.tvPlay
   if (o.error) return GLYPHS.tvOff
   return GLYPHS.tv
@@ -7271,10 +7327,13 @@ function barTooltip(opts) {
     // 7 s the number is 0:07, not a promise. `behindS` and `historyS` come
     // from the service's `rewind` object; absent, the tooltip is unchanged.
     var state = playbackStateText({ paused: o.paused === true, behindS: o.behindS })
-    var window = finiteOr(o.historyS, -1)
+    var window = finiteOr(o.historyS, 0)
     var extra = []
     if (state !== "") extra.push(state)
-    if (window >= 0) extra.push("up to " + clockSpan(window) + " back")
+    // Only once there is a window: `b` is hinted on a non-empty range, and
+    // "up to 0:00 back" in the first instant after a zap would promise what
+    // the key cannot do.
+    if (window > 0) extra.push("up to " + clockSpan(window) + " back")
     if (extra.length > 0) line += "\n" + extra.join(SEP)
   }
   else if (o.refreshing) line = "IPTV" + SEP + "refreshing playlist" + ELLIPSIS
@@ -7406,7 +7465,14 @@ function footerStatus(opts) {
   if (str(o.transient) !== "") return str(o.transient)
   if (o.configured === false || !(Number(o.count) > 0)) return ""
   if (o.truncated) return "First " + formatCount(o.cap || MAX_ROWS_DEFAULT) + " of " + formatCount(o.resultTotal) + SEP + "keep typing"
-  if (str(o.playingName) !== "") return GLYPHS.play + " " + str(o.playingName) + SEP + "s stop"
+  // M5-01 (design 2.5): the state line -- `1:32 behind live`, `paused SEP
+  // 0:42 behind live` -- rides the playing line after the name, from the
+  // same composer the bar reads (playbackStateText). "" at live adds nothing,
+  // so the line the footer has shown since M1 is unchanged there.
+  if (str(o.playingName) !== "") {
+    var state = str(o.playbackState)
+    return GLYPHS.play + " " + str(o.playingName) + (state !== "" ? SEP + state : "") + SEP + "s stop"
+  }
   if (o.refreshing) return "Refreshing" + ELLIPSIS
   if (footerDegraded(o)) return footerCounts(o)
   if (o.epgPending) return "Guide data loading" + ELLIPSIS
@@ -9656,6 +9722,7 @@ if (typeof module !== "undefined") {
     seekVerbSeconds: seekVerbSeconds,
     coalesceSeek: coalesceSeek,
     behindLiveNow: behindLiveNow,
+    seekTransientText: seekTransientText,
     parseRewind: parseRewind,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
     playFork: playFork,

@@ -8756,14 +8756,14 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.coalesceSeek({ pending: -30, press: -1, history: 35, step: 10 }),
      Model.coalesceSeek({ pending: -30, press: -1, history: 20, step: 10 }),
      Model.coalesceSeek({ pending: 0, press: -1, history: 0, step: 10 }),
-     Model.coalesceSeek({ pending: 0, press: -1, history: null, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -1, history: null, step: 10 }),   // null: no range read yet, NO cap (see the integration block)
      Model.coalesceSeek({ pending: -20, press: 1, history: 356, step: 10 }),
      Model.coalesceSeek({ pending: 0, press: 1, history: 0, step: 10 }),
      Model.coalesceSeek({ pending: 0, press: -3, history: 356 }),
      Model.coalesceSeek({ pending: 0, press: 0, history: 356, step: 10 }),
      Model.coalesceSeek({ pending: -5, press: -1, history: 356, step: -10 }),
      Model.coalesceSeek({})],
-    [-10, -40, -35, -20, 0, 0, -10, 10, -10, 0, -15, 0])
+    [-10, -40, -35, -20, 0, -10, -10, 10, -10, 0, -15, 0])
   // 9. The paused count-up (2.3): holds while playing, counts up while paused.
   const atRest = { position: 300, floor: 44, ceiling: 418, history: 256, ahead: 118, behindLive: 92.4, zeroed: true, paused: false, pausedForCache: false, entryId: 7 }
   check("M5-01: behindLiveNow holds while playing, counts up while paused from the read, and is null without a zero point",
@@ -8776,7 +8776,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.behindLiveNow({ rewind: Object.assign({}, atRest, { behindLive: -0.041 }), nowSec: 1000 }),
      Model.behindLiveNow({ rewind: null, nowSec: 1000, pausedSinceSec: 990 }),
      Model.behindLiveNow({})],
-    [92.4, 102.4, 92.4, 92.4, 92.4, null, 0, null, null])
+    [102.4, 102.4, 92.4, 92.4, 92.4, null, 0, null, null])   // the first: pausedSinceSec alone drives the count-up (see the integration block)
   // 10. The reply object, coerced.
   check("M5-01: parseRewind coerces every field and reads an absent position as no object at all",
     [Model.parseRewind(atRest),
@@ -8786,6 +8786,115 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     [atRest,
      { position: 390.617, floor: null, ceiling: null, history: null, ahead: null, behindLive: 10, zeroed: false, paused: false, pausedForCache: false, entryId: 7 },
      null, null, null, null, 2])
+})()
+
+
+// ---- M5-01 integration: the joins between the helper+model lane and the
+// shell lane, each one a function that was composed in QML or read two ways
+// until the integrated tree was run (rule 12). Every check here was seen red
+// against the lane commits as they landed (see QA-RESULTS, the M5-01
+// integration section) or by a named mutation of the function it calls.
+;(function () {
+  // 1. The first press after a zap. The service hands coalesceSeek
+  // `history: null` until a reply has carried a range; null is NO cap, so the
+  // helper runs and clamps for itself. The helper lane's reading (null caps
+  // at 0) answered that press "queued, pending 0" and ran nothing.
+  check("M5-01 integration: a press with no range read yet is not capped at 0 -- it spawns the helper, which clamps for itself",
+    [Model.coalesceSeek({ pending: 0, press: -1, history: null, step: 10 }),
+     Model.coalesceSeek({ pending: -10, press: -1, history: null, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -1, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: 1, history: null, step: 10 }),
+     Model.coalesceSeek({ pending: -390, press: -1, history: null, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -1, history: 0, step: 10 }),
+     Model.coalesceSeek({ pending: 0, press: -1, history: "", step: 10 })],
+    [-10, -20, -10, 10, -400, 0, -10])
+  // 2. The bar glyph is one decision in one place: behind live while
+  // playing is the history glyph, paused wins over it, and nothing else
+  // moves.
+  check("M5-01 integration: barGlyph draws the history glyph behind live, the pause glyph over it, and ignores the flag when nothing plays",
+    [Model.barGlyph({ playing: true, behindLive: true }), Model.barGlyph({ playing: true, paused: true, behindLive: true }),
+     Model.barGlyph({ playing: true, behindLive: false }), Model.barGlyph({ playing: true }),
+     Model.barGlyph({ playing: false, behindLive: true }), Model.barGlyph({ error: true, behindLive: true }),
+     Model.barGlyph({ playing: true, behindLive: "true" }), Model.barGlyph({ playing: true, behindLive: 1 })],
+    [Model.GLYPHS.history, Model.GLYPHS.tvPause, Model.GLYPHS.tvPlay, Model.GLYPHS.tvPlay, Model.GLYPHS.tv, Model.GLYPHS.tvOff, Model.GLYPHS.tvPlay, Model.GLYPHS.tvPlay])
+  check("M5-01 integration: the history glyph is the codepoint the scenario and the design name (U+F02DA)", Model.GLYPHS.history, "\udb80\udeda")
+  // 3. The footer's playing line carries the state line through footerStatus,
+  // not through a concatenation in the guide, and the line is unchanged at
+  // live; the ladder above it (transient, bounded search) still wins.
+  check("M5-01 integration: footerStatus rides the state line after the name and stays as shipped at live",
+    [Model.footerStatus({ count: 5, playingName: "Arte HD", playbackState: "1:32 behind live" }),
+     Model.footerStatus({ count: 5, playingName: "Arte HD", playbackState: "paused" + Model.SEP + "0:42 behind live" }),
+     Model.footerStatus({ count: 5, playingName: "Arte HD", playbackState: "" }),
+     Model.footerStatus({ count: 5, playingName: "Arte HD" }),
+     Model.footerStatus({ count: 5, playingName: "Arte HD", playbackState: null }),
+     Model.footerStatus({ count: 5, playingName: "Arte", playbackState: "1:32 behind live", transient: "Stopped" }),
+     Model.footerStatus({ count: 5, playingName: "", playbackState: "1:32 behind live", lastUpdated: "12:40" })],
+    [Model.GLYPHS.play + " Arte HD" + Model.SEP + "1:32 behind live" + Model.SEP + "s stop",
+     Model.GLYPHS.play + " Arte HD" + Model.SEP + "paused" + Model.SEP + "0:42 behind live" + Model.SEP + "s stop",
+     Model.GLYPHS.play + " Arte HD" + Model.SEP + "s stop",
+     Model.GLYPHS.play + " Arte HD" + Model.SEP + "s stop",
+     Model.GLYPHS.play + " Arte HD" + Model.SEP + "s stop",
+     "Stopped",
+     "5 channels" + Model.SEP + "updated 12:40"])
+  check("M5-01 integration: the state the footer shows is the composer's own line, so footer, bar and tooltip cannot disagree",
+    Model.footerStatus({ count: 5, playingName: "Arte", playbackState: Model.playbackStateText({ paused: true, behindS: 42 }) }),
+    Model.GLYPHS.play + " Arte" + Model.SEP + "paused" + Model.SEP + "0:42 behind live" + Model.SEP + "s stop")
+  // 4. The 3 s transient, worded as design 2.5, from a function and not from
+  // 25 lines of QML. The replies are the helper's schema (2.1).
+  const landed = { ok: true, kind: "seek", running: true, mode: "by", requested: -10, applied: -10, clamped: false, clampedTo: null,
+                   refused: false, atFloor: false, atEdge: false,
+                   rewind: { position: 400.6, floor: 44, ceiling: 418, history: 356.6, ahead: 17.4, behindLive: 92, zeroed: true, paused: false, pausedForCache: false, entryId: 7 } }
+  const withRewind = (over, rw) => Object.assign({}, landed, over, { rewind: Object.assign({}, landed.rewind, rw || {}) })
+  check("M5-01 integration: seekTransientText says what landed, with the number from the reply",
+    [Model.seekTransientText(landed, "busy"),
+     Model.seekTransientText(withRewind({ requested: 10, applied: 10 }, { behindLive: 82 }), "busy"),
+     Model.seekTransientText(withRewind({ requested: -10, applied: -9.6 }, { behindLive: 412 }), "busy"),
+     Model.seekTransientText(withRewind({}, { behindLive: null, zeroed: false }), "busy"),
+     Model.seekTransientText(withRewind({}, { behindLive: 1.9 }), "busy")],
+    ["Back 10 s" + Model.SEP + "1:32 behind live", "Forward 10 s" + Model.SEP + "1:22 behind live",
+     "Back 10 s" + Model.SEP + "6:52 behind live", "Back 10 s", "Back 10 s"])
+  check("M5-01 integration: the floor, the edge and live, in the design's words",
+    [Model.seekTransientText(withRewind({ requested: -10, applied: -3.2, clamped: true, clampedTo: 46, atFloor: true }, { behindLive: 412 }), "busy"),
+     Model.seekTransientText(withRewind({ requested: -10, applied: 0, atFloor: true }, { behindLive: 412 }), "busy"),
+     Model.seekTransientText({ atFloor: true, rewind: { behindLive: 412 } }, "busy"),
+     Model.seekTransientText({ atFloor: true, rewind: null }, "busy"),
+     Model.seekTransientText(withRewind({ mode: "live", requested: 300, applied: 300, atEdge: true }, { behindLive: 0.3 }), "busy"),
+     Model.seekTransientText(withRewind({ mode: "live", requested: 300, applied: 300, atEdge: true }, { behindLive: 27 }), "busy"),
+     Model.seekTransientText(withRewind({ requested: 10, applied: 4, clamped: true, clampedTo: 417.5, atEdge: true }, { behindLive: 0 }), "busy"),
+     Model.seekTransientText(withRewind({ requested: -10, applied: 0, refused: true }, { behindLive: 412 }), "busy"),
+     Model.seekTransientText(withRewind({ requested: 10, applied: 0, refused: true }, { behindLive: 0.1 }), "busy"),
+     Model.seekTransientText(withRewind({ requested: 10, applied: 0, refused: true }, { behindLive: 30 }), "busy")],
+    ["As far back as it goes" + Model.SEP + "6:52 behind live", "As far back as it goes" + Model.SEP + "6:52 behind live",
+     "As far back as it goes" + Model.SEP + "6:52 behind live", "As far back as it goes",
+     "Live", "At the edge of the buffer" + Model.SEP + "0:27 behind live", "Live",
+     "As far back as it goes" + Model.SEP + "6:52 behind live", "Live", "At the edge of the buffer" + Model.SEP + "0:30 behind live"])
+  check("M5-01 integration: a reply that is not ok is its reason, or the fallback, never a verdict about the floor",
+    [Model.seekTransientText({ ok: false, kind: "seek", error: { code: "not_running" } }, "busy"),
+     Model.seekTransientText({ ok: false, kind: "seek", code: "nothing_playing", error: { code: "nothing_playing" } }, "busy"),
+     Model.seekTransientText({ ok: false, kind: "seek", error: { code: "helper_timeout" } }, "busy"),
+     Model.seekTransientText({ ok: false, kind: "seek" }, "The player is busy"),
+     Model.seekTransientText(null, "busy"), Model.seekTransientText("x", "busy"), Model.seekTransientText(undefined, undefined)],
+    ["mpv is not running", "Nothing playing", "Helper timed out", "The player is busy", "busy", "busy", ""])
+  check("M5-01 integration: nothing but numbers reaches the transient -- a string in a numeric field is read as no number",
+    [Model.seekTransientText(withRewind({ applied: "http://u:p@h.test/x" }, {}), "busy").indexOf("h.test"),
+     Model.seekTransientText(withRewind({}, { behindLive: "http://u:p@h.test/x" }), "busy"),
+     Model.seekTransientText(withRewind({ applied: -10 }, { behindLive: "92" }), "busy")],
+    [-1, "Back 10 s", "Back 10 s" + Model.SEP + "1:32 behind live"])
+  // 5. The paused count-up is driven by the service's own `paused`, the flag
+  // the glyph reads, not by the reply's: one source of truth for one state.
+  const rested = { position: 300, floor: 44, ceiling: 418, history: 256, ahead: 118, behindLive: 92.4, zeroed: true, paused: false, pausedForCache: false, entryId: 7 }
+  check("M5-01 integration: behindLiveNow counts up whenever the service says paused-since, whatever the last reply's own flag said",
+    [Model.behindLiveNow({ rewind: rested, nowSec: 1000, pausedSinceSec: 990 }),
+     Model.behindLiveNow({ rewind: Object.assign({}, rested, { paused: true }), nowSec: 1000, pausedSinceSec: 990 }),
+     Model.behindLiveNow({ rewind: Object.assign({}, rested, { paused: true }), nowSec: 1000, pausedSinceSec: null }),
+     Model.behindLiveNow({ rewind: rested, nowSec: 1000 })],
+    [102.4, 102.4, 92.4, 92.4])
+  // 6. The tooltip's window line needs a window.
+  check("M5-01 integration: the tooltip says `up to m:ss back` only once there is a window, never `up to 0:00 back`",
+    [Model.barTooltip({ playing: true, name: "BBC One", behindS: 0, historyS: 0 }),
+     Model.barTooltip({ playing: true, name: "BBC One", behindS: 0, historyS: 0.4 }).split("\n")[1],
+     Model.barTooltip({ playing: true, name: "BBC One", behindS: 92, historyS: 0 })],
+    ["Playing BBC One", "up to 0:00 back", "Playing BBC One\n1:32 behind live"])
 })()
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")

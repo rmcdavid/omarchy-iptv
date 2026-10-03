@@ -317,13 +317,6 @@ Item {
     // them come from Model.clockSpan; the words are these and nothing from
     // the stream.
     rewindNotReady: "Nothing to rewind yet",
-    seekBack: "Back ",
-    seekForward: "Forward ",
-    seekSeconds: " s",
-    seekFloor: "As far back as it goes",
-    seekEdge: "At the edge of the buffer",
-    seekLive: "Live",
-    seekBehind: " behind live",
     xtreamProse: "Builds the get.php (m3u_plus, ts) and xmltv.php URLs. The password is stored in those URLs and never shown again.",
     rowAdd: "Add source",
     rowXtream: "Add Xtream login",
@@ -776,10 +769,13 @@ Item {
     truncated: root.truncated,
     resultTotal: root.resultTotal,
     cap: root.maxRows,
+    playingName: root.playingName,
     // M5-01 (2.5): the playing line carries the one state line --
     // `1:32 behind live` or `paused · 0:42 behind live` -- after the name,
-    // from the same composer the bar reads. Nothing is appended at live.
-    playingName: root.playingName + (root.playbackStateText !== "" ? Model.SEP + root.playbackStateText : ""),
+    // from the same composer the bar reads; Model.footerStatus joins them,
+    // so the line is a function a test calls rather than a concatenation
+    // here. Nothing is appended at live.
+    playbackState: root.playbackStateText,
     refreshing: root.serviceReady && root.service.refreshing,
     epgPending: root.serviceReady && root.service.epgPending,
     warning: root.warningText,
@@ -2248,7 +2244,7 @@ Item {
     var reply = root.service.seekBy(-Model.REWIND_STEP_S)
     // The one refusal decided before any process runs: the last reply said
     // the floor is here. Said at once, with the number it was said with.
-    if (reply && reply.ok !== true && reply.code === "at_floor") root.showTransient(root.seekTransientText({ atFloor: true, rewind: reply.rewind }))
+    if (reply && reply.ok !== true && reply.code === "at_floor") root.showTransient(Model.seekTransientText({ atFloor: true, rewind: reply.rewind }, root.copy.pauseBusy))
   }
 
   function seekForward() {
@@ -2265,37 +2261,10 @@ Item {
     root.service.seekLive()
   }
 
-  // The 3 s footer transient for a seek reply, worded as design 2.5 words
-  // it: `Back 10 s · 1:32 behind live`; at the floor `As far back as it
-  // goes · 6:52 behind live`; at the edge `Live`, or -- after a rewind
-  // deeper than the forward quota, where the cache edge is not the live
-  // edge (ruling D8) -- `At the edge of the buffer · 0:27 behind live`.
-  // Numbers only from the reply, through Model.clockSpan; a reply without
-  // a zero point carries no number and says so by saying nothing after
-  // the verb (null is absent, never 0:00).
-  function seekTransientText(reply) {
-    var r = reply && reply.rewind && typeof reply.rewind === "object" ? reply.rewind : null
-    var behindS = r && r.behindLive !== undefined && r.behindLive !== null ? Number(r.behindLive) : null
-    var behind = behindS !== null && behindS >= Model.BEHIND_LIVE_SHOW_S
-      ? Model.clockSpan(behindS) + root.copy.seekBehind : ""
-    var tail = behind !== "" ? Model.SEP + behind : ""
-    // The floor first: the service's own at_floor refusal carries no `ok`.
-    if (reply && reply.atFloor === true) return root.copy.seekFloor + tail
-    // A helper that could not seek at all (no player, mpv did not answer)
-    // is a reason, not a verdict about the floor.
-    if (!reply || reply.ok !== true) {
-      var reason = Model.statusReason(reply)
-      return reason !== "" ? reason : root.copy.pauseBusy
-    }
-    if (reply.mode === "live" || reply.atEdge === true) {
-      return behind === "" ? root.copy.seekLive : root.copy.seekEdge + tail
-    }
-    if (reply.refused === true) return root.copy.seekFloor + tail
-    var applied = reply.applied !== undefined && reply.applied !== null ? Math.round(Number(reply.applied)) : 0
-    if (applied < 0) return root.copy.seekBack + String(-applied) + root.copy.seekSeconds + tail
-    if (applied > 0) return root.copy.seekForward + String(applied) + root.copy.seekSeconds + tail
-    return root.copy.seekFloor + tail
-  }
+  // The 3 s footer transient for a seek reply is Model.seekTransientText
+  // (design 2.5), lifted there at integration so the sentence the footer
+  // shows is a function a test calls (rule 12); the one word this file adds
+  // is the fallback for a reply that gives no reason.
 
   // ---- M3-02: the track picker (PLAN-M3 decision 5). It asks the player
   // and shows what the player answers; nothing here remembers a choice.
@@ -2764,7 +2733,7 @@ Item {
     // transient -- a clamp is always said, never silent. The signal name is
     // the service's `seekReplied`, pinned by the same test_pip.py join that
     // caught `onPipResult` listening to nothing.
-    function onSeekReplied(reply) { if (root.opened) root.showTransient(root.seekTransientText(reply)) }
+    function onSeekReplied(reply) { if (root.opened) root.showTransient(Model.seekTransientText(reply, root.copy.pauseBusy)) }
     function onChannelsChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onUserStateChanged() { root.groupsDirty = true; root.scheduleRebuild() }
     function onTracksChanged() { root.settleTrackCursor() }

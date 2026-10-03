@@ -345,9 +345,9 @@ dropping, which the control would misread); and the pause checks read
 from 10 s in). The pause verb also answered `busy` once, mid health-tick,
 and is now retried a bounded five times.
 
-## 7. Observations for the lead (no defect ids; the lead assigns them)
+## 7. Observations for the lead, with the ids the lead assigned at integration
 
-- **The HLS lead and `live`.** On this stream the reader sits 3.6 s behind
+- **F-RWD-11. The HLS lead and `live`.** On this stream the reader sits 3.6 s behind
   the cache end at the live edge (three segments, the HLS rule). A `--live`
   seek to `ceiling - 0.5` therefore moves the reader 3.1 s AHEAD of where
   the zero point says live is, so the formula `(wall - wall0) - (pos - pos0)`
@@ -355,21 +355,21 @@ and is now retried a bounded five times.
   0 <= `behindLive` < 2; a negative reading is a finding against the helper,
   not against the stream, and the spike's channels (13-21 s of lead,
   SPIKE 11.3) would show it larger.
-- **Eviction is quantised.** The floor on a 2 s-segment stream moves in
+- **F-RWD-12. Eviction is quantised.** The floor on a 2 s-segment stream moves in
   4-6 s steps, not continuously. The design's +2.0 s margin is fine when
   the read and the seek are milliseconds apart (the helper's shape), and
   wrong when they are seconds apart (section 2's third raw seek). Anything
   that caches the floor across a throttle window should re-read it.
-- **`time-pos` creeps after a pause** by 0.12-0.16 s in the first
+- **F-RWD-13. `time-pos` creeps after a pause** by 0.12-0.16 s in the first
   half-second. A service test that asserts "holds while paused" at frame
   precision immediately after the flip will flake.
-- **`run.sh ipc` hardcodes target `harness`** (SPIKE 12.5). This runner
+- **F-RWD-14. `run.sh ipc` hardcodes target `harness`** (SPIKE 12.5). This runner
   reaches the plugin's own IpcHandler with its own `pipc`; a `plugin-ipc`
   subcommand on `run.sh` (lane S's file) would let every scenario share it.
-- **The stub self-test lives in the stub.** `tests/` was not this lane's to
-  open, so the cases run through `--self-test`; the lead may wire that
-  command into `scripts/check.sh` or lift the cases into
-  `tests/test_stub_mpv.py`.
+- **The stub self-test lives in the stub** (no id: done at integration).
+  `tests/` was not this lane's to open, so the cases run through
+  `--self-test`; `scripts/check.sh` now runs that command as its own step
+  with a floor of 14 cases.
 
 ## 8. Not covered here
 

@@ -132,6 +132,21 @@ player is authoritative. The helper writes it lazily from `status`, `pause` or
 record of what an empty value read as "known and zero" costs; the readout is
 absent until the player has something to say.
 
+**Amended at integration (F-RWD-11).** A reading AHEAD of the zero point
+moves it. The point is taken where the reader first sits after a `loadfile`,
+and the reader sits behind the cache end there by the HLS lead: 3.6 s on the
+QA stream, 13-21 s on the owner's channels (spike 11.3). A `live` seek lands
+at the cache end, past that point, and the formula then reads negative --
+not "ahead of live", which nobody can be, but "the edge was further on than
+first observed". Left alone, the `back 10` that follows read 7 behind on a
+stream with a 3 s lead and 0 on one with a 20 s lead, under a transient that
+said "Back 10 s". So the helper re-takes `(wall0, pos0)` at any reading
+whose behind-live is negative, on the verbs that write (`status`, `pause`,
+`seek`); the probe, which never writes, returns the raw reading and the
+shell clamps it at 0 for display. The invariant the reader can rely on:
+`behindLive` from a writing verb is never negative, and a `back 10` after
+`live` reads 10.
+
 ### 2.3 The service
 
 State: `rewind` (the reply object or `null`), cleared in `play()` beside
@@ -146,8 +161,22 @@ now terminates, and a slot re-occupied every few hundred milliseconds by a
 sub-second verb is the benign case it must not punish. `drainPendingPlay()`
 runs on every path of the new branch (the D-PLY-24 lesson).
 
-"Behind live" counts up only while paused, on the existing 1 Hz `nowSec` tick;
-while playing it holds, so nothing re-renders. The 10 s status tick re-syncs
+"Behind live" counts up only while paused, at 1 Hz. Not on the `nowSec` tick,
+which this sentence first named: that tick is 30 s (`epgTickMs`) and re-derives
+every EPG fraction on the guide, so a 1 Hz tick on it would re-render the whole
+list once a second to move one number. The service runs a dedicated 1 Hz timer
+that is live only while paused with a reading to count from (found by the
+service lane; stated here so the design and the tree agree). The count-up is
+driven by the service's OWN `paused`, the flag the bar's pause glyph and the
+footer's "paused" word read, not by the `paused` field of the last reply: the
+first integration required both, and in the 100 ms between the optimistic
+flip on `c` and the pause reply the glyph said paused while the number held.
+One source of truth. While playing the number holds on a healthy stream, so
+nothing re-renders. On a stream
+that underruns it grows by the stall, with no key pressed (F-RWD-10, 12.9 s in
+a minute on one 9.7 Mbps channel), and it is shown unchanged: the viewer is
+that far behind, and a number that hid a stall would be the silent failure
+this feature was designed never to commit. The 10 s status tick re-syncs
 it from the player, which also absorbs seeks made with mpv's own arrow keys,
 which are live in the player window today (`--input-default-bindings`
 defaults to yes and the plugin passes no override).
@@ -198,9 +227,14 @@ paused behind      ⏸ 7 BBC One -5:12        (counting up)
 ```
 
 One composer, `Model.playbackStateText({paused, behindS})`, yields `""`,
-`1:32 behind live` or `paused · 0:42 behind live`; the footer status line, the
-bar tooltip and the bar's accessible name (spoken: "1 minute 32 seconds
-behind live") all call it. The tooltip adds the window from the last read:
+`1:32 behind live` or `paused · 0:42 behind live`; the footer status line
+(`Model.footerStatus` takes it as `playbackState` and rides it after the
+name), the bar tooltip (`Model.barTooltip`, `behindS` and `historyS`) and the
+bar's accessible name (`Model.barAccessibleName`, spoken through
+`Model.spokenSpan`: "1 minute 32 seconds behind live") all call it. The 3 s
+transient is `Model.seekTransientText(reply, fallback)` and the glyph is
+`Model.barGlyph({..., behindLive})`: every sentence and symbol the feature
+shows is a function a test calls (rule 12), none is composed in QML. The tooltip adds the window from the last read:
 `up to 6:52 back`. On a channel whose window is 7 s the number is 0:07, not a
 promise.
 
@@ -393,3 +427,32 @@ Recorded so the next reader does not inherit them.
   the player's pid.
 - The brief's "10 s watchdog" is 8 s in the tree; the margin is four orders
   of magnitude either way.
+
+## 12. Integration amendments, 2026-10-03
+
+What the integrated tree settled that the lanes, each blind to the others'
+files, could not. Each is in the section it amends; this is the list.
+
+1. **`coalesceSeek` with no range read yet is NO cap** (2.3). The helper
+   lane read null as "cap at 0", so the first press after a zap -- before any
+   reply carried a range -- answered "queued, pending 0" and ran nothing: a
+   false success (CN15). The service lane's QML spec asserted -10 and was
+   red on the integrated tree (69 passed, 1 failed, line 1904); the node
+   suite now pins both readings' vectors to -10.
+2. **The paused count-up follows the service's `paused`** (2.3), not the
+   reply's field; spec line 1910 was the second red (300.6 against 310.6).
+3. **F-RWD-11, the zero point moves to a reading ahead of it** (2.2). Found
+   by the QA lane on the local stream (QA-REWIND section 7) before any
+   helper existed to show it; fixed in the helper at integration with two
+   tests seen red against the helper lane's commit.
+4. **Every sentence and glyph is a Model function** (2.5): `barGlyph` takes
+   `behindLive`, `footerStatus` takes `playbackState`, `barTooltip` and
+   `barAccessibleName` take `behindS` / `historyS`, and `seekTransientText`
+   replaces 25 lines of Guide.qml. The service lane had composed these in QML
+   because Model.js was closed to it and said so (rule 12 debt, paid here).
+   Six node checks were seen red against the helper lane's Model.js.
+5. **The tooltip's window line needs a window**: `up to 0:00 back` in the
+   first instant after a zap promised what `b` cannot do.
+6. **The player stub's self-test runs in the gate** (`scripts/check.sh`,
+   floor 14 cases), so the stub that refuses like mpv cannot drift silently
+   back to one that clamps.

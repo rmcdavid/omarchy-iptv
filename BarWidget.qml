@@ -70,22 +70,15 @@ BarWidget {
   // channel whose window is 7 s the number is 0:07, not a promise.
   readonly property var historyS: playing && service.rewind !== undefined && service.rewind !== null
     && service.rewind.history !== undefined && service.rewind.history !== null ? service.rewind.history : null
-  // ONE composer for the footer, this tooltip and the accessible name (2.5):
-  // "" at live, `1:32 behind live`, `paused · 0:42 behind live`.
-  readonly property string playbackStateText: playing ? Model.playbackStateText({ paused: root.paused, behindS: root.behindLiveS }) : ""
-  // The fourth holder's text: `-m:ss` while playing behind live, and while
-  // paused (counting up, from the service's 1 Hz tick). "" otherwise, so the
-  // holder collapses the way the number holder does.
-  readonly property string behindLabel: playing && root.behindLiveS !== null && (root.paused || root.behindLive)
-    ? "-" + Model.clockSpan(root.behindLiveS) : ""
+  // The fourth holder's text: `-m:ss` while playing behind live, paused or
+  // not (the count-up comes from the service's 1 Hz tick); "" otherwise, so
+  // the holder collapses the way the number holder does. The same threshold
+  // the footer and the tooltip use, through the one composer.
+  readonly property string behindLabel: Model.barBehindText({ playing: root.playing, behindS: root.behindLiveS })
   // The history glyph while playing behind live; the pause glyph while
-  // paused, which Model.barGlyph already decides. R7: never colour alone.
-  // Model.barGlyph is handed the playing/paused/error triple it has always
-  // taken; the behind-live case is decided here because it is a bar state
-  // the composer does not know, and the number beside it carries the fact.
-  readonly property string glyph: root.playing && !root.paused && root.behindLive
-    ? Model.GLYPHS.history
-    : Model.barGlyph({ playing: root.playing, error: root.hasError, paused: root.paused })
+  // paused. R7: never colour alone. Model.barGlyph decides all three, so
+  // the glyph is a function a test calls.
+  readonly property string glyph: Model.barGlyph({ playing: root.playing, error: root.hasError, paused: root.paused, behindLive: root.behindLive })
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""
   // Vertical bars stay glyph-only (UX 8 #12); the number is in the tooltip.
   readonly property bool showNumber: !root.vertical && root.showChannelNumber && root.nowPlayingChno !== ""
@@ -109,18 +102,12 @@ BarWidget {
     chno: root.nowPlayingChno,
     error: root.hasError,
     refreshing: root.refreshing,
-    pip: root.pipOn, paused: root.paused
-  }) + root.rewindTooltipLine
-  // M5-01 (2.5): one more LINE, like PiP's -- the state line from the shared
-  // composer and the window from the last read. Numbers only; nothing from
-  // the stream.
-  readonly property string rewindTooltipLine: {
-    if (!root.playing) return ""
-    var parts = []
-    if (root.playbackStateText !== "") parts.push(root.playbackStateText)
-    if (root.historyS !== null && Number(root.historyS) > 0) parts.push("up to " + Model.clockSpan(root.historyS) + " back")
-    return parts.length > 0 ? "\n" + parts.join(Model.SEP) : ""
-  }
+    pip: root.pipOn, paused: root.paused,
+    // M5-01 (2.5): one more LINE, like PiP's -- the state line from the
+    // shared composer and the window from the last read, both composed by
+    // Model.barTooltip from these two numbers. Nothing from the stream.
+    behindS: root.behindLiveS, historyS: root.historyS
+  })
 
   Behavior on glyphColor {
     enabled: !root.bar || root.bar.foregroundAnimationEnabled
@@ -174,9 +161,11 @@ BarWidget {
   // accessible name has to as well, or the one user who cannot see the
   // glyph is the one user not told (the D-GS-3 shape, again). The same
   // composer the tooltip and the footer read.
+  // Spoken as units ("1 minute 32 seconds behind live"), which the composer
+  // decides: "one thirty-two" is a time of day to a listener.
   Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
-                                             chno: root.nowPlayingChno, error: root.hasError, paused: root.paused })
-                   + (root.playbackStateText !== "" ? ", " + root.playbackStateText : "")
+                                             chno: root.nowPlayingChno, error: root.hasError, paused: root.paused,
+                                             behindS: root.behindLiveS })
 
   // Mirrors WidgetButton: registered click targets keep receiving clicks
   // while a bar popup (KeyboardPanel) is open.

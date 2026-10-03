@@ -1461,6 +1461,13 @@ the current entry. "No zero point yet" is `null`, never zero (D-DEAD-1).
 time-pos`: after a rewind deeper than the forward quota mpv stops fetching,
 the cache end freezes, and that difference counts DOWN while the real gap
 holds (spike 11.3, measured 300.60-300.64 across thirty ticks).
+A reading AHEAD of the zero point re-takes it (F-RWD-11, integration): the
+point is first taken where the reader sits after a `loadfile`, which is the
+HLS lead behind the cache end, and a `live` seek lands past it, so the
+formula reads negative there; the helper then writes a fresh `(wall0, pos0)`
+at that reading on the verbs that write, and the probe, which never writes,
+returns the raw value for the shell to clamp. `behindLive` from `status`,
+`pause` or `seek` is therefore never negative.
 
 **A seek verb in the control slot (amends 4.3).** `player seek --socket S
 --by N` (N a signed integer of seconds, negative is back) and `player seek
