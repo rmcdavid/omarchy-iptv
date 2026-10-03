@@ -730,3 +730,315 @@ The seven judgements added to `verdict.py` were each seen red. Baseline
 The fourth row is the point of the rule: a mutation survived the tests
 written from the function's description and died only when a reading the
 player had actually produced was pasted in.
+
+## 12. Pre-build measurements, 2026-10-03
+
+**The measurements `docs/M5-01-LIVE-REWIND.md` section 10 says a build
+takes before its first commit. Measurement only; no build.** The five in
+the brief for this phase: the `demuxer-cache-state` field set (M1), the
+refusal detector's threshold (M2), `show-text` on a real window (M3), the
+zero-point error (M4) and the harness's reachability (M5). The two that
+need the helper verb to exist -- spawn-to-reply of `player seek`, and the
+zero-point node across a shell restart -- wait for the helper lane.
+
+Same machine, same mpv v0.41.0, Hyprland 0.56.2, four cores, load average
+1.6 at the start. Channels read by id from the owner's installed cache
+(`channels.json` mtime 05:06, not written by this lane): ABC KAAL (1080p)
+`https://amg01942-amg01942c6-stirr-us-10178.playouts.now.amagi.tv`, A&E
+(720p) `http://23.239.31.26:8989`, ACC Digital Network (1080p)
+`https://raycom-accdn-firetv.amagi.tv`, BBC Food (1080p)
+`https://d1e9r0b71zfwk7.cloudfront.net`, BYU TV (1080p)
+`https://d13j8jpstr8iqz.cloudfront.net`, ACE Country Radio KPVM-LD
+`https://2-fss-1.streamhoster.com` -- all healthy rows in section 3's
+table. Argv: the plugin's own as section 11 built it, plus `--vo=null
+--ao=null` for every player but M3's, which ran the real video output with
+`--mute=yes` as its one deviation (the plugin passes no audio option and
+the owner's speakers are not part of the measurement). Eleven players,
+pids 2441822, 2442046, 2442047, 2442048, 2447201, 2447664, 2449063,
+2450279, 2451244, 2453976, 2453977, each killed by that pid (mpv exit
+status 4 on all eleven); `pgrep -x mpv` empty at the end; `pgrep -x
+quickshell` 2186866 before and after. Sockets in `$XDG_RUNTIME_DIR/lrw3`,
+empty at the end. M2's three players ran concurrently (load average 2.6);
+M3 and M4 overlapped the last two minutes of M1's fill, and the fourth M4
+channel overlapped the short M1 run, two players at a time, which is what
+section 11 also did. Everything below is `design_pass.py m1`..`m4` with the
+judgements in `verdict.py`.
+
+### 12.1 M1, every field of `demuxer-cache-state`
+
+Read on five channels -- ABC KAAL at +30 s and at its plateau (365 s,
+`[[6.015, 375.984]]`, 199.0 MiB, byte-rate slope 4.45 Mbps), the three M2
+channels at +30 s and at their eviction or cap, BYU TV at +30 s and +41 s
+-- and walked by `verdict.enumerate_fields`, which takes a list through its
+first element. Sixteen top-level keys, **20 leaves, the same 20 paths with
+the same types on every channel at every moment**. Samples are ABC KAAL's.
+
+| path | type | +30 s | plateau | forwarded |
+|---|---|---:|---:|---|
+| `bof-cached` | bool | `True` | `False` | yes |
+| `cache-duration` | float | 16.747 | 16.725 | yes |
+| `cache-end` | float | 47.979 | 377.984 | yes |
+| `debug-byte-level-seeks` | int | 0 | 0 | no |
+| `debug-low-level-seeks` | int | 0 | 0 | no |
+| `debug-ts-last` | float | 43542.525 | 43872.554 | no |
+| `eof` | bool | `False` | `False` | yes |
+| `eof-cached` | bool | `False` | `False` | yes |
+| `fw-bytes` | int | 9295312 | 9505744 | yes |
+| `idle` | bool | `False` | `False` | yes |
+| `raw-input-rate` | int | 1544205 | 1383913 | no |
+| `reader-pts` | float | 31.232 | 361.259 | yes |
+| `seekable-ranges[].end` | float | 45.988 | 375.984 | yes |
+| `seekable-ranges[].start` | float | 0.0 | 6.015 | yes |
+| `total-bytes` | int | 27019824 | 208700576 | yes |
+| `ts-per-stream[].cache-duration` | float | 16.817 | 16.783 | no |
+| `ts-per-stream[].cache-end` | float | 43559.475 | 43889.471 | no |
+| `ts-per-stream[].reader-pts` | float | 43542.658 | 43872.688 | no |
+| `ts-per-stream[].type` | **str** | `video` | `video` | no |
+| `underrun` | bool | `False` | `False` | yes |
+
+**Exactly one leaf is a string: `ts-per-stream[].type`.** The raw replies
+kept for BYU TV hold two entries in that list, `video` and `audio` -- mpv's
+own stream-type names, one per stream -- and no top-level value is a string
+on any of the ten readings. Nothing in the reply is a path, a URL or a
+title. The `ts-per-stream[]` timestamps and `debug-ts-last` are PTS in the
+stream's own timebase (43,000-odd seconds here), which is why they are not
+forwarded: they are not positions on the timeline the helper reports.
+
+**Verdict: the helper forwards these twelve paths and drops the other
+eight -- `seekable-ranges[].start`, `seekable-ranges[].end`, `cache-end`,
+`reader-pts`, `cache-duration`, `fw-bytes`, `total-bytes`, `underrun`,
+`idle`, `eof`, `eof-cached`, `bof-cached` -- and the one string in the
+reply never enters it.**
+
+### 12.2 M2, the refusal detector
+
+Three channels, each filled until `seekable-ranges[0].start` left zero
+(the stream start evicted, which is the plateau) or 330 s passed, then 36
+ABSOLUTE seeks apiece, the mode the design chose: 24 meant to land --
+deltas from the current position, clamped inside `[floor + 2, end - 0.5]`
+the way the helper will clamp -- then six below the floor and six past the
+end. For each seek, `time-pos` before, immediately after the reply, and
+1 s later; and the `log-message` events the player sends after
+`request_log_messages error`, which is how `player start` already listens.
+
+| | A&E (720p) | ACC Digital Network (1080p) | BBC Food (1080p) |
+|---|---:|---:|---:|
+| byte-rate slope | 5.80 Mbps | 5.68 Mbps | 4.69 Mbps |
+| stream start evicted at | 292 s | 283 s | not within 335 s (192.2 MiB); evicted during the battery |
+| range at the fill's end | `[[4.185, 258.005]]` | `[[5.975, 297.967]]` | `[[0.067, 345.187]]` |
+| landed seeks | 24 | 24 | 24 |
+| immediate read == target, to the millisecond | **24 of 24** | **24 of 24** | **24 of 24** |
+| landed abs(after - before) min / median / max | 2.000 / 10.000 / 120.000 | 2.000 / 10.000 / 120.000 | 2.000 / 10.000 / 120.000 |
+| landed, read 1 s later minus the immediate read | 0.52 / 1.03 / **5.09** | 0.86 / 0.93 / 0.99 | 0.90 / 0.96 / 1.02 |
+| seek reply round trip, median / max | 0.10 / 0.72 ms | 0.11 / 0.16 ms | 0.11 / 0.23 ms |
+| immediate read in hand after, median / max | 1.2 / 3.2 ms | 0.6 / 8.5 ms | 0.6 / 23.3 ms |
+| log lines on landed seeks | 0 | 0 | 0 |
+| refused seeks (target >= 0) | 10 | 11 | 10 |
+| immediate read == before, exactly | 10 of 10 | 10 of 11 | 2 of 10 |
+| refused abs(after - before) max | **0.000** | **0.033** | **0.033** |
+| refused abs(later - before) min / median / max | 0.00 / 1.00 / 1.20 | 1.00 / 1.00 / 1.00 | 0.97 / 1.00 / 1.00 |
+| `Cannot seek in this stream` on refused | **10 of 10** | **11 of 11** | **10 of 10** |
+| that line parsed by the time of the immediate read | 0 of 10 | 10 of 11 | 9 of 10 |
+| refused seeks whose 1 s read had not advanced 0.5 s | **3** | 0 | 0 |
+| lines in the player's own log file | 10 | 11 | 10 |
+
+Over all three: **72 landed seeks, 72 immediate reads equal to the target;
+31 refused seeks, 31 immediate reads within 0.033 s of the previous
+position, 31 log lines, 0 log lines on a landed seek.** The 0.033 is one
+frame at 29.97 fps: the position advanced a frame between the two reads.
+
+| not-moved threshold | above the refused max (0.033) | below the smallest landed (2.000) | separates |
+|---:|---:|---:|---|
+| 0.10 s | 0.067 | 1.900 | yes |
+| 0.25 s | 0.217 | 1.750 | yes |
+| **0.50 s** | **0.467** | **1.500** | yes |
+| 1.00 s | 0.967 | 1.000 | yes |
+
+The smallest landed move is the smallest REQUEST in the battery, 2 s. The
+helper's clamp can ask for less -- at floor + 2.3 a `--by -10` clamps to a
+0.3 s move -- so the threshold is not a property of mpv alone: **when the
+clamped target is within the threshold of the current position, the helper
+reports `atFloor` (or `atEdge`) without issuing the seek**, and the seeks it
+does issue are at least a threshold long.
+
+Five rows are not in the refused count because they measured something
+else. A target below the floor by more than the floor is NEGATIVE, and mpv
+reads a negative absolute target as an offset from the END: `-6.462` on
+A&E landed at 291.07 with the cache end at 297.41, `-18.022` on ACC at
+317.96 against 333.97, `-34.908` on BBC Food at 349.53 against 383.42 --
+all five moved, none logged a line.
+
+Findings, each with its id on the day (rule 13):
+
+1. **F-RWD-7. A negative absolute seek target is an offset from the cache
+   end, not a refusal.** Five of five such targets moved the viewer to
+   within 0.1-2.0 s of `end + target`. The helper's clamp to `floor + 2`
+   makes the target non-negative whenever a range exists; when
+   `seekable-ranges` is empty the helper must refuse without seeking, never
+   compute `position + by` and send it. Suggested P2 against the build: a
+   rewind that jumps to the live edge is the opposite of what was pressed.
+2. **F-RWD-8. The immediate `time-pos` read is the target echoed, not the
+   decoded position; on A&E the decoded landing was up to 5.1 s past it.**
+   The read 1 s after a landed seek sat 0.52-5.09 s past the immediate read
+   on A&E (720p) against 0.86-1.02 s on the two 1080p channels, so section
+   11's "absolute seeks are exact" holds on two of three channels and on
+   the third the seek lands on the next keyframe up to four seconds on.
+   `applied` in the reply is therefore the request, and the 10 s status
+   re-sync is what carries the decoded truth. Suggested P3: a readout
+   wobble of a few seconds on some channels, corrected within a tick.
+3. **F-RWD-9. The read 1 s later is not a refusal tell, and the log line
+   can arrive after the immediate read.** Three of A&E's ten refusals were
+   followed by a `time-pos` that did not advance in the next second: the
+   stream was underrunning at the live edge (`paused-for-cache`), which a
+   detector keyed on "did it advance" would read as a stalled seek. And on
+   A&E the refusal line reached the socket after the `time-pos` reply on 10
+   of 10 refusals (it was parsed on the next read, up to 1 s later), on the
+   other two channels before it on 19 of 21. The detector is the immediate
+   read; the log line confirms when the helper drains, and the helper never
+   waits for it. Suggested P2 against the build.
+
+**Verdict: the not-moved threshold is 0.5 s on the immediate `time-pos`
+read, 0.467 s above the largest refused movement and 1.5 s below the
+smallest request; the helper reports `atFloor` before issuing a seek
+shorter than that, treats the 1 s read as no evidence, and reads the log
+line only as confirmation.**
+
+### 12.3 M3, `show-text` on a real window
+
+ABC KAAL, the plugin's argv with the real video output, tiled by the
+compositor at 650x718 beside this session's own window; `osd-level` read
+1, mpv's default. The top 70 px of the window (its letterbox band, black
+until the OSD draws) captured back to back after each command; the time is
+when the capture command RETURNED, an upper bound on the capture instant.
+Three runs; the first used the legacy dispatcher spelling and is the
+reason the fullscreen leg says what it says.
+
+| | reading |
+|---|---|
+| `show-text "-1:32 behind live" 3000`, windowed, run 2 | absent at 35 ms, **present at 64 ms**, 85, 100, 134, 164 |
+| the same, run 3 | absent at 30, 48, 66 ms, **present at 97 ms**, 118, 133 |
+| `hyprctl dispatch fullscreen 0` | `error: ')' expected near '0'` -- a Lua syntax error on this build, exactly Model.js gate G-1; the window stayed 650x718 |
+| `hyprctl dispatch 'hl.dsp.window.fullscreen({ window = "address:0x5e594ef65de0" })'` | `ok`; `fullscreen` 2, `fullscreenClient` 2, size 1366x768; held 2.01 s; the same call restored it to 650x718, `fullscreen` 0 |
+| `show-text`, fullscreen, output's top 70 px | absent at 88 ms, **present at 168 ms**, 266, 346 |
+| `hyprctl layers` while fullscreen | `omarchy-bar` still listed, level 2, 0,0 1366x26 -- mapped |
+| the output's top 26 px while fullscreen | video: RMSE 0.10 against the 44 rows below it, 0.20 against the bar band captured windowed (bar band against its own rows below: 0.20) |
+| IPC `seek -5 relative`, windowed, no text active, 7.51 -> 2.31 | **no OSD bar, no OSD text of mpv's own** at 117, 210, 315 ms (run 3; 118, 210, 312 ms in run 2) |
+| the 3000 ms line, run 3 | still drawn at +3.76 s, gone at +3.85 s; one observation |
+| focus and layers after | active window restored by address; `omarchy-bar` listed as before |
+
+**Verdict: the numbers-only line is visible at the default `osd-level`
+within about 100 ms windowed and 170 ms fullscreen; a fullscreen player
+covers the bar, which stays mapped but is not drawn over the client, so
+with the guide closed the line is the only feedback a fullscreen viewer
+gets; and an IPC seek draws nothing of mpv's own, so D9's line is not
+doubled.** A build that drives the compositor uses the Lua forms
+`pipExpression()` already builds; the legacy spelling is a no-op with an
+error nobody sees.
+
+### 12.4 M4, the zero-point error
+
+One player, zapping exactly as the plugin does; `time-pos` polled every
+50 ms after the `loadfile` reply, `(wall0, pos0)` at the first numeric
+value, then one read per second for 60 s. The error is
+`(wall - wall0) - (pos - pos0)`, what "behind live" would show on a player
+nobody rewound.
+
+| channel | bitrate | first `time-pos` after the reply | `pos0` | error at +60 s | min / max over 60 ticks | from a zero point at tick 5 | `paused-for-cache` ticks | cache end - pos at +60 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| ACE Country Radio KPVM-LD | 1.02 Mbps | +1.51 s | 0.095 | **+0.008** | -0.004 / 0.038 | -0.020 | 0 | 8.0 s |
+| ABC KAAL (1080p) | 3.98 Mbps | +5.04 s | 0.050 | **+0.007** | -0.024 / 0.021 | +0.012 | 0 | 11.9 s |
+| ACC Digital Network (1080p) | 6.14 Mbps | +3.32 s | 0.000 | **-0.031** | -0.041 / 0.000 | -0.022 | 0 | 18.0 s |
+| A&E (720p) | 9.66 Mbps | +5.95 s | 0.067 | **+12.903** | 0.300 / 12.903 | +11.123 | **14 of 60** | 0.9 s |
+
+On the three channels that played cleanly the error at a minute is
+0.007-0.031 s and never left +/-0.041 s across 180 ticks: section 11.3's
+0.60-0.64 was the read gap of a 0.5 s poll, not the zero point. The
+fourth channel is a different measurement. A&E ran 0.7-0.9 s ahead of its
+cache end the whole minute, underran on 14 of 60 ticks, and the formula
+counted every stall: 1.78 s by +5 s, 12.9 s by +60 s. That is a true
+distance -- the viewer IS that far behind the edge -- but it grows while
+playing, which section 2.3's "holds while playing" does not anticipate.
+
+4. **F-RWD-10. On an underrunning stream "behind live" grows while
+   playing, with no rewind pressed.** 12.9 s in a minute on A&E, 14 of 60
+   ticks `paused-for-cache`. The number is honest and the 10 s status
+   re-sync will show it; what the design has not decided is whether a
+   stall-driven count-up is displayed, hinted (`g live` would re-seek to an
+   edge the fetch cannot reach) or held back below some bound. Suggested
+   P3, a decision rather than a defect, and the one channel in the sample
+   that behaves so was also the one with 0.7 MiB of forward cache.
+
+**Verdict: the zero-point error is below 0.05 s on clean streams, so
+`BEHIND_LIVE_SHOW_S = 2` has a fifty-fold margin over it; what reaches 2 s
+without a keypress is a stalling stream, and that case needs the decision
+F-RWD-10 asks for.**
+
+### 12.5 M5, reaching the plugin's IpcHandler inside the harness
+
+`run.sh --detach --playlist <abs path>/tests/fixtures/basic.m3u` under
+`OMARCHY_IPTV_HARNESS_DIR=/run/user/1000/lrw3h` (its own scratch, so the
+shared harness directory was not touched), with the owner's shell running
+throughout. `run.sh ipc` hardcodes the target `harness`, so the plugin's
+own target was called by hand.
+
+| command | result |
+|---|---|
+| `qs ipc -p <h>/root call io.github.rmcdavid.iptv status` | `No running instances for ".../root/shell.qml"` -- the harness registers under ITS runtime directory |
+| `XDG_RUNTIME_DIR=<h>/runtime qs ipc -p <h>/root ...` | `No running instances ... present on the current display "wayland/wayland-1"`; it names the harness instance as being on another display, because `run.sh` hands the shell the ABSOLUTE socket path |
+| **`XDG_RUNTIME_DIR=<h>/runtime WAYLAND_DISPLAY=/run/user/1000/wayland-1 qs ipc -p <h>/root call io.github.rmcdavid.iptv status`** | **works**: `{"configured":true,"sourceHost":"local file","status":"ready","channels":3,...}` |
+| `XDG_RUNTIME_DIR=<h>/runtime qs ipc --any-display -p <h>/root call io.github.rmcdavid.iptv status` | works, same reply |
+| `XDG_RUNTIME_DIR=<h>/runtime qs ipc --pid <qs pid> call io.github.rmcdavid.iptv status` | works |
+| `qs ipc -p /usr/share/omarchy/shell call io.github.rmcdavid.iptv status`, plain environment | the OWNER's: `"sourceHost":"iptv-org.github.io","channels":1453` -- the two are told apart by what they answer, not by the target name |
+| `... show` under the working environment | lists both targets, `harness` and `io.github.rmcdavid.iptv` |
+
+A relative `--playlist` path is refused by the service (`Relative path not
+allowed`); the first start used one and read `channels: 0`, which is a
+true answer to the wrong question. `run.sh reap` took the harness down
+both times; `pgrep -x quickshell` named only 2186866 afterwards.
+
+**Verdict: the plugin's verbs are reachable inside the harness with the
+harness's environment -- `harness_env`'s two variables, or `--any-display`
+with the runtime directory alone -- and `run.sh` should grow a
+`plugin-ipc` subcommand that applies them, so the rewind scenario does not
+carry the incantation by hand.**
+
+### 12.6 Reproducing this
+
+```bash
+cd scripts/dev-harness/spikes/live-rewind
+python3 -m unittest test_verdict          # 68 assertions, 51 from the two earlier passes
+python3 design_pass.py m1 --channels <channels.json> --a 't:ABC.us@KAAL' --m-cap 420 \
+    --scratch <scratch> --sock-dir "$XDG_RUNTIME_DIR/lrw3" --out <scratch>/m1.json
+python3 design_pass.py m2 ... --a 't:AE.us@East' --index 1 --m-cap 330   # x3, concurrently
+python3 design_pass.py m3 ... --a 't:ABC.us@KAAL'                          # needs the display
+python3 design_pass.py m4 ... --a 't:ACECountryRadio.us@KPVMLD' --b 't:ABC.us@KAAL' --c 't:AE.us@East'
+```
+
+Each run under `timeout -k 5 <bound>`; the SIGTERM trap reaps the player
+by pid. M3 dispatches to the compositor with the Lua forms, by the window's
+address read from `hyprctl -j clients` for the pid this file holds, never
+by class, and restores focus and the fullscreen state in its `finally`.
+The screenshots are `grim` of a region and are deleted with the scratch.
+
+The six judgements added to `verdict.py` were each seen red. Baseline
+**Ran 68 tests ... OK**; eight mutations, each one red:
+
+| mutation of `verdict.py` | result |
+|---|---|
+| `enumerate_fields` walks every list element, so a path repeats per range | Ran 68, FAILED (failures=1) |
+| `string_fields` counts booleans as strings | Ran 68, FAILED (failures=1) |
+| `not_moved` is non-strict at the threshold | Ran 68, FAILED (failures=1) |
+| `not_moved` answers False (moved) for a missing reading | Ran 68, FAILED (failures=1) |
+| `abs_deltas` keeps the sign | Ran 68, FAILED (failures=1) |
+| `distribution` takes the upper middle for an even count | Ran 68, FAILED (failures=1) |
+| `threshold_margin` flips the refused side | Ran 68, FAILED (failures=3) |
+| `zero_point_error` flips its sign | Ran 68, FAILED (failures=2) |
+
+### 12.7 Board rows for `docs/STATUS.md` (this lane does not own that file)
+
+| id | severity | summary | state |
+|---|---|---|---|
+| F-RWD-7 | P2 | A negative absolute seek target is an offset from the cache END; the helper must never compute one, and must refuse with no range rather than seek | open |
+| F-RWD-8 | P3 | The immediate `time-pos` after a seek echoes the target; on A&E the decoded landing was up to 5.1 s past it (keyframe), so `applied` is the request and the status re-sync carries the truth | open |
+| F-RWD-9 | P2 | The 1 s-later read is not a refusal tell (3 of 10 underran at the edge) and the refusal log line can arrive after the immediate read (10 of 10 on A&E); the immediate read is the detector | open |
+| F-RWD-10 | P3 | On an underrunning stream "behind live" grows while playing with no key pressed (12.9 s in 60 s on A&E); whether a stall-driven count-up is shown is undecided | open |
