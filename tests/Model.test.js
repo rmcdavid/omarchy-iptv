@@ -1327,7 +1327,7 @@ checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at 
     code.filter(function (l) { return /"--url"/.test(l) }).length,
     code.filter(function (l) { return /\.command = /.test(l) && /Url\b|\.url\b/.test(l) }).length
   ]
-}, [["playlistProc <- root.playlistUrl", "epgProc <- nowOnly ? \"\" : root.activeEpgUrl", "sourceProbeProc <- rec.url"],
+}, [["playlistProc <- root.playlistUrl", "epgProc <- nowOnly ? \"\" : root.epgFetchUrl", "sourceProbeProc <- rec.url"],
     [true, true, true], [1, 1, 1], 0, 0, 0])
 
 // ---- D-ID-3: the shell adopts the helper's id scheme, or undoes it ----
@@ -4466,7 +4466,7 @@ check("footerStatus blank without channels (loading / error)", [Model.footerStat
 check("epgNowStale", [Model.epgNowStale({ validUntil: 200 }, 100), Model.epgNowStale({ validUntil: 100 }, 100), Model.epgNowStale({}, 100), Model.epgNowStale(null, 100), Model.epgNowStale({ validUntil: "x" }, 1)], [false, true, true, true, true])
 check("footerHints search", Model.footerHints({ mode: "search", query: "" }).map(h => h[0]), ["Enter", "Up/Down", "Left/Right", "Ctrl+G", "Tab", "Esc"])
 check("footerHints search with query says clear/narrow", Model.footerHints({ mode: "search", query: "x" }).slice(2), [["Left/Right", "narrow"], ["Ctrl+G", "wall"], ["Tab", "keys"], ["Esc", "clear"]])
-check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s p r / Ctrl+G o")
+check("footerHints list", Model.footerHints({ mode: "list" }).map(h => h[0]).join(" "), "j/k h/l Enter Space f s p r / Ctrl+G o ?")
 check("footerHints empty states (UX-SOURCES 5.3: r retry)", [Model.footerHints({ empty: "error" }), Model.footerHints({ empty: "loading" })], [[["r", "retry"], ["Esc", "close"]], [["Esc", "close"]]])
 
 // ---- player shutdown ladder (D-LIVE-17) ----
@@ -4632,7 +4632,7 @@ check("architecture constant names agree with LIMITS", [Model.MAX_SOURCE_URL, Mo
 check("MASK and the clear params", [Model.MASK, Model.MASK_CLEAR_PARAMS], ["****", ["type", "output"]])
 check("SOURCE_KEYS table", Model.SOURCE_KEYS, { open: "o", add: "a", xtream: "c", edit: "e", remove: "x", logos: "g", reveal: "Ctrl+R", clear: "Ctrl+U", paste: "Ctrl+V" })
 check("Sources glyphs are supplementary-plane Nerd Font codepoints", ["sources", "check", "eye", "eyeOff", "plus", "key", "pencil", "closeCircle"].map(k => Model.GLYPHS[k].codePointAt(0).toString(16)), ["f0411", "f012c", "f0208", "f0209", "f0415", "f0306", "f03eb", "f0159"])
-check("guide modes", Model.GUIDE_MODES, ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos", "tracks"])
+check("guide modes", Model.GUIDE_MODES, ["search", "list", "sources", "sourceEdit", "sourceXtream", "confirmRemove", "confirmLogos", "tracks", "detail", "help"])
 
 checkCall("M2-04: only turning logos ON is confirmed, and only from Sources", function () {
   // Turning them off discloses nothing. A dialog in front of the safe
@@ -4793,7 +4793,7 @@ const recCli = { key: "d5977d8a", url: "https://iptv-org.github.io/iptv/countrie
 const recFile = { key: "b0eed9fb", url: "/srv/tv/channels.m3u", epgUrl: "", kind: "file", label: "channels.m3u", labelCustom: false, origin: "guide", addedAt: 10, lastUsed: local(2026, 9, 3, 12, 0), fetchedAt: 220, channelCount: 12, groupCount: 1 }
 const state4 = { version: 2, cacheLayout: 2, favorites: [], recents: [], lastPlayed: null, sources: [recFile, recNas, recProvider, recCli] }
 const viewProvider = Model.sourceView(recProvider, "d990c2e4", nowSep)
-check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080", hasEpg: true, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "" })
+check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080", hasEpg: true, epgFromPlaylist: false, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "" })
 check("sourceView never fetched: channelCount -1, file host is 'local file'", [Model.sourceView(recCli, "", nowSep).channelCount, Model.sourceView(recCli, "", nowSep).cachedAt, Model.sourceView(recFile, "", nowSep).host, Model.sourceView(recFile, "", nowSep).kind, Model.sourceView(recNas, "", nowSep).kind], [-1, 0, "local file", "file", "url"])
 check("sourceView null-safe", Model.sourceView(null, "", 0).id, "")
 check("sourceView attaches the session error", Model.sourceView(recCli, "", nowSep, "Connection refused").errorReason, "Connection refused")
@@ -5569,7 +5569,11 @@ check("footerHints form: plain / masked / revealed / button / xtream / fetching"
 ])
 check("footerHints first run: Enter load, Esc close / clear / back", [Model.footerHints({ mode: "sourceEdit", form: fr.form }), Model.footerHints({ mode: "sourceEdit", form: pasted.form })[4], Model.footerHints({ mode: "sourceXtream", form: xFromFirst.form })[0], Model.footerHints({ mode: "sourceXtream", form: Model.openXtreamForm(fr).form })[2]], [[["Enter", "load"], ["Tab", "next field"], ["Ctrl+V", "paste"], ["Esc", "close"]], ["Esc", "clear"], ["Enter", "save"], ["Esc", "back"]])
 check("footerHints form mode without a form is the fetching-free minimum", Model.footerHints({ mode: "sourceEdit", form: null }), [["Enter", "activate"], ["Tab", "next field"], ["Esc", "cancel"]])
-check("footerHints list mode ends with o sources", Model.footerHints({ mode: "list" }).slice(-1), [["o", "sources"]])
+// M4-04 put HELP_KEY last, and the reason is this test's own reason
+// inverted: the footer elides from the LEFT, so the final segment is the one
+// that always survives, and the key that explains the other fourteen is the
+// one that must. `o sources` keeps its place immediately before it.
+check("footerHints list mode ends with o sources then ? help", Model.footerHints({ mode: "list" }).slice(-2), [["o", "sources"], [Model.HELP_KEY, "help"]])
 
 // ---- M2-01 fix round (docs/STATUS.md D-SRC-01..10) ----
 // Code points spelled out so the file stays ASCII and no editor touches them.
@@ -6030,9 +6034,10 @@ const hintsBase = { mode: "list", query: "" }
 // M2-13 inserts the view toggle between `/ search` and `o sources`: both
 // change what you are looking at, and the footer elides from the LEFT on a
 // narrow card, so the action verbs must stay ahead of it.
-const shippedList = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["Ctrl+G", "wall"], ["o", "sources"]]
+// M4-04 appends `? help` after `o sources` (see footerHints).
+const shippedList = [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["Ctrl+G", "wall"], ["o", "sources"], [Model.HELP_KEY, "help"]]
 check("CN6.3: an unnumbered playlist gains no hint at all", Model.footerHints(hintsBase), shippedList)
-check("CN6.3: hasNumbers inserts 0-9 channel between / search and o sources", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true })), [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["Ctrl+G", "wall"], ["0-9", "channel"], ["o", "sources"]])
+check("CN6.3: hasNumbers inserts 0-9 channel between / search and o sources", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true })), [["j/k", "move"], ["h/l", "group"], ["Enter", "play"], ["Space", "preview"], ["f", "favorite"], ["s", "stop"], ["p", "pip"], ["r", "refresh"], ["/", "search"], ["Ctrl+G", "wall"], ["0-9", "channel"], ["o", "sources"], [Model.HELP_KEY, "help"]])
 check("CN6.3: while typing, the hint line is the entry line and nothing else", Model.footerHints(Object.assign({}, hintsBase, { hasNumbers: true, numberEntry: liveEntry })), [["0-9", "digits"], [".", "sub"], ["Enter", "play"], ["Backspace", "undo"], ["Esc", "cancel"]])
 check("CN6.3: search mode, sources and the empty states are untouched", [Model.footerHints({ mode: "search", query: "", hasNumbers: true }), Model.footerHints({ mode: "search", query: "sky", hasNumbers: true }), Model.footerHints({ mode: "list", empty: "loading", hasNumbers: true })], [[["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "group"], ["Ctrl+G", "wall"], ["Tab", "keys"], ["Esc", "close"]], [["Enter", "play"], ["Up/Down", "move"], ["Left/Right", "narrow"], ["Ctrl+G", "wall"], ["Tab", "keys"], ["Esc", "clear"]], [["Esc", "close"]]])
 
@@ -7088,9 +7093,9 @@ check("section 5: `p pip` joins the list-mode hints, and is hidden where PiP can
   Model.footerHints({ mode: "list", pipAvailable: false }).map(function (h) { return h[0] }).join(" "),
   Model.footerHints({ mode: "search", pipAvailable: true }).map(function (h) { return h[0] }).join(" ")
 ], [
-  "j/k h/l Enter Space f s p r / Ctrl+G o",
-  "j/k h/l Enter Space f s p r / Ctrl+G o",
-  "j/k h/l Enter Space f s r / Ctrl+G o",
+  "j/k h/l Enter Space f s p r / Ctrl+G o ?",
+  "j/k h/l Enter Space f s p r / Ctrl+G o ?",
+  "j/k h/l Enter Space f s r / Ctrl+G o ?",
   "Enter Up/Down Left/Right Ctrl+G Tab Esc"
 ])
 
@@ -7713,8 +7718,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   var MARKER = "<img src=\"http://x/MARKER.png\">"
   var states = []
   function add(o) { states.push(o) }
-  var modes = ["list", "search", "sources", "sourceEdit", "sourceXtream", "tracks",
-               "confirmRemove", "confirmLogos", MARKER, ""]
+  // M4: DERIVED from GUIDE_MODES rather than listed again. The hand-written
+  // copy was a rule 13 join -- two mode lists joined by nothing -- and
+  // `detail` and `help` would have been added to the product and not to this
+  // grid, which is the exact failure the grid exists to catch.
+  var modes = Model.GUIDE_MODES.concat([MARKER, ""])
   var queries = ["", MARKER]
   var empties = ["", "loading", "error", MARKER]
   var hidden = Model.toggleHiddenGroup(Model.emptyState(), MARKER)
@@ -7734,11 +7742,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   var scopes = [Model.SCOPE_RECENT, Model.SCOPE_FAVORITES, Model.SCOPE_ALL, "", Model.groupScopeId(MARKER), MARKER]
   ;[null, { active: true }, { active: false }].forEach(function (numberEntry) { [true, false].forEach(function (playing) { [true, false].forEach(function (paused) {
     [true, false, undefined].forEach(function (pipAvailable) { [true, false].forEach(function (hasNumbers) { [true, false].forEach(function (wall) {
-      [true, false].forEach(function (groupsNarrow) {
+      [true, false].forEach(function (groupsNarrow) { [true, false, undefined].forEach(function (hasDetail) {
         scopes.forEach(function (scopeId) { [null, channel].forEach(function (ch) { [null, hidden].forEach(function (st) {
           add({ mode: "list", numberEntry: numberEntry, playing: playing, paused: paused, pipAvailable: pipAvailable,
-                hasNumbers: hasNumbers, wall: wall, groupsNarrow: groupsNarrow, scopeId: scopeId, channel: ch, state: st, query: "" })
+                hasNumbers: hasNumbers, wall: wall, groupsNarrow: groupsNarrow, hasDetail: hasDetail,
+                scopeId: scopeId, channel: ch, state: st, query: "" })
         }) }) })
+      })
       })
     }) }) })
   }) }) })
@@ -7785,7 +7795,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   })
   // The grid is bounded and its size is asserted, so a branch removed from
   // the product above is a red check rather than a quieter one.
-  check("F-TEXT-2: the hint grid covers every branch of footerHints and formHints (bounded product)", states.length, 10982)
+  check("F-TEXT-2: the hint grid covers every branch of footerHints and formHints (bounded product)", states.length, 24838)
   check("F-TEXT-2: every state yields a non-empty list of [key, verb] string pairs", shapes, [])
   // Reported as a count plus the first three offenders: a red run over ten
   // thousand states must stay readable.
@@ -7802,6 +7812,419 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     Model.footerHints({ mode: "list", scopeId: Model.groupScopeId(MARKER), channel: channel, state: null }).map(function (p) { return p[1] }).indexOf("hide group") !== -1,
     Model.footerHints({ mode: "search", query: MARKER }).map(function (p) { return p[1] }).indexOf("clear") !== -1
   ], [true, true, true, true])
+})()
+
+
+// ============================================================ M4 (lane B)
+//
+// M4-01 repair 3 (the guide URL the playlist declares), M4-02 (programme
+// detail) and M4-04 (the keyboard map). Every check here calls the shipping
+// function; nothing greps for a string the implementation was written to
+// contain (rule 14).
+
+// ---- M4-01 repair 3: the url-tvg hint ----
+;(function () {
+  const CRED = "http://user:s3cret@guide.example.net:8080/xmltv.php?u=user&p=s3cret"
+  // epgHintUrl is validateSourceUrl plus ONE narrowing: http(s) only.
+  check("M4-01/3: a http hint is accepted and normalised the way a typed URL is",
+        [Model.epgHintUrl({ epgUrlHint: "HTTP://Guide.Example.NET:80/xmltv.xml" }),
+         Model.epgHintUrl({ epgUrlHint: "https://g.example/x.xml.gz" })],
+        ["http://guide.example.net/xmltv.xml", "https://g.example/x.xml.gz"])
+  check("M4-01/3: a hint that is absent, blank or unparseable yields no URL",
+        [Model.epgHintUrl({}), Model.epgHintUrl(null), Model.epgHintUrl({ epgUrlHint: "   " }),
+         Model.epgHintUrl({ epgUrlHint: "not a url" }), Model.epgHintUrl({ epgUrlHint: "//g/x" })],
+        ["", "", "", "", ""])
+  // The narrowing is the security decision, not a formality: a playlist is
+  // provider-controlled, so a hint must never choose a LOCAL file to parse.
+  check("M4-01/3: a hint may not be a local path or a file:// URL, though a TYPED one may",
+        [Model.epgHintUrl({ epgUrlHint: "/etc/passwd" }),
+         Model.epgHintUrl({ epgUrlHint: "file:///home/u/guide.xml" }),
+         Model.epgHintUrl({ epgUrlHint: "ftp://g/x.xml" }),
+         Model.validateSourceUrl("/etc/passwd", { kind: "epg" }).ok,
+         Model.validateSourceUrl("file:///home/u/guide.xml", { kind: "epg" }).ok],
+        ["", "", "", true, true])
+  check("M4-01/3: a hint longer than the URL cap is refused like a typed one",
+        Model.epgHintUrl({ epgUrlHint: "http://g.example/" + "a".repeat(Model.LIMITS.url) }), "")
+
+  // Precedence. The user's value wins, INCLUDING an invalid one, so the
+  // helper reports the fault the user can see instead of silently fetching
+  // somewhere else.
+  const userWins = Model.resolveEpgUrl({ userUrl: "https://mine.example/g.xml", hint: "http://theirs.example/g.xml" })
+  const invalidUser = Model.resolveEpgUrl({ userUrl: "not a url", hint: "http://theirs.example/g.xml" })
+  const hintUsed = Model.resolveEpgUrl({ userUrl: "", hint: CRED })
+  const neither = Model.resolveEpgUrl({ userUrl: "", hint: "/etc/passwd" })
+  check("M4-01/3: a hint is NEVER preferred over a URL the user set", [userWins.url, userWins.origin, userWins.fromPlaylist],
+        ["https://mine.example/g.xml", Model.EPG_ORIGIN_USER, false])
+  check("M4-01/3: an INVALID user URL still wins, so the error names the URL the user typed",
+        [invalidUser.url, invalidUser.origin], ["not a url", Model.EPG_ORIGIN_USER])
+  check("M4-01/3: with no user URL the validated hint is used and says where it came from",
+        [hintUsed.url, hintUsed.origin, hintUsed.fromPlaylist, hintUsed.host],
+        [CRED, Model.EPG_ORIGIN_PLAYLIST, true, "guide.example.net"])
+  check("M4-01/3: no user URL and no usable hint is no guide URL at all",
+        [neither.url, neither.origin, neither.fromPlaylist, neither.host, Model.resolveEpgUrl(null).origin],
+        ["", Model.EPG_ORIGIN_NONE, false, "", Model.EPG_ORIGIN_NONE])
+
+  // R12 / rule 5: the resolution's URL is for the fetch environment only.
+  // Everything a human or the bus can see is scheme-and-host at most.
+  check("M4-01/3: nothing the user can see carries the hinted URL (R12)", [
+    Model.epgOriginNotice(hintUsed.origin).indexOf("://"),
+    Model.epgOriginNotice(hintUsed.origin).indexOf("s3cret"),
+    hintUsed.host.indexOf("s3cret"),
+    Model.redactUrls(hintUsed.url)
+  ], [-1, -1, -1, "guide.example.net"])
+  check("M4-01/3: the provenance line exists for a hint and for nothing else",
+        [Model.epgOriginNotice(Model.EPG_ORIGIN_PLAYLIST), Model.epgOriginNotice(Model.EPG_ORIGIN_USER),
+         Model.epgOriginNotice(Model.EPG_ORIGIN_NONE), Model.epgOriginNotice(undefined)],
+        [Model.EPG_HINT_NOTICE, "", "", ""])
+
+  // The Sources screen. A hinted guide URL must never read the same as one
+  // the user typed, and only the ACTIVE source can have a hint in force.
+  const recOwn = { key: "aaaaaaaa", url: "http://a.example/p.m3u", epgUrl: "http://a.example/g.xml", label: "Own", lastUsed: 100, fetchedAt: 100, channelCount: 10, groupCount: 2 }
+  const recBare = { key: "bbbbbbbb", url: "http://b.example/p.m3u", epgUrl: "", label: "Bare", lastUsed: 90, fetchedAt: 90, channelCount: 20, groupCount: 3 }
+  const vBareHinted = Model.sourceView(recBare, "bbbbbbbb", 1000, "", true)
+  const vBareInactive = Model.sourceView(recBare, "aaaaaaaa", 1000, "", true)
+  const vOwnHinted = Model.sourceView(recOwn, "aaaaaaaa", 1000, "", true)
+  check("M4-01/3: the hinted flag lands on the ACTIVE source with no epgUrl of its own",
+        [vBareHinted.hasEpg, vBareHinted.epgFromPlaylist], [true, true])
+  check("M4-01/3: an inactive source never claims a hint -- only the active cache is loaded",
+        [vBareInactive.hasEpg, vBareInactive.epgFromPlaylist], [false, false])
+  check("M4-01/3: a source with its own epgUrl is never marked as the playlist's",
+        [vOwnHinted.hasEpg, vOwnHinted.epgFromPlaylist], [true, false])
+  check("M4-01/3: Sources says where the guide URL came from, in the row and to a screen reader",
+        [Model.sourceDetail(vBareHinted, false).indexOf(Model.EPG_HINT_ROW_TEXT) !== -1,
+         Model.sourceDetail(vOwnHinted, false).indexOf(Model.EPG_HINT_ROW_TEXT) !== -1,
+         Model.sourceDetail(vOwnHinted, false).indexOf("EPG") !== -1,
+         Model.sourceAccessibleName(vBareHinted).indexOf(Model.EPG_HINT_ROW_TEXT) !== -1,
+         Model.sourceAccessibleName(vOwnHinted).indexOf(Model.EPG_HINT_ROW_TEXT) !== -1],
+        [true, false, true, true, false])
+  check("M4-01/3: sourceViews / sourceRows carry the flag through and still hold no URL",
+        [Model.sourceViews({ sources: [recOwn, recBare] }, "bbbbbbbb", 1000, {}, true).map(v => [v.id, v.epgFromPlaylist]),
+         JSON.stringify(Model.sourceViews({ sources: [recBare] }, "bbbbbbbb", 1000, {}, true)).indexOf("://"),
+         Model.sourceRows({ sources: [recBare] }, "bbbbbbbb", 1000, {}, true)[0].epgFromPlaylist],
+        [[["bbbbbbbb", true], ["aaaaaaaa", false]], -1, true])
+  check("M4-01/3: omitting the flag leaves every row exactly as it shipped",
+        Model.sourceViews({ sources: [recBare] }, "bbbbbbbb", 1000, {})[0].epgFromPlaylist, false)
+})()
+
+// ---- M4-02: the widened guide records and the detail panel ----
+;(function () {
+  // The shape this lane CONSUMES, stated once: epg-now.json's `now` / `next`
+  // records keep `title`, `start`, `stop` and gain the optional fields named
+  // in EPG_DETAIL_FIELDS. The accepted spellings are that table's, and this
+  // check is what makes the table load-bearing rather than documentation.
+  check("M4-02: the consumed detail fields are a table, not three hard-coded spellings",
+        Model.EPG_DETAIL_FIELDS,
+        [["description", ["desc", "description"]], ["category", ["category", "categories"]], ["episode", ["episode", "episodeNum"]]])
+  check("M4-02: every spelling the table accepts is actually read",
+        Model.EPG_DETAIL_FIELDS.map(f => f[1].map(k => {
+          const p = { title: "T" }
+          p[k] = "value-" + k
+          return Model.programmeFieldText(p, f[1])
+        })),
+        [["value-desc", "value-description"], ["value-category", "value-categories"], ["value-episode", "value-episodeNum"]])
+  check("M4-02: a field the record does not carry reads as absent, never as a crash",
+        [Model.programmeFieldText({ title: "T" }, ["desc"]), Model.programmeFieldText(null, ["desc"]),
+         Model.programmeFieldText({ desc: null }, ["desc"]), Model.programmeFieldText({ desc: "" }, ["desc"]),
+         Model.programmeFieldText({ desc: [] }, ["desc"]), Model.programmeFieldText({ desc: ["", "second"] }, ["desc"])],
+        ["", "", "", "", "", "second"])
+
+  // Episode information is XMLTV free text; three shapes are accepted and
+  // nothing else is guessed at.
+  check("M4-02: episode information in each accepted shape, and in none other",
+        [Model.epgEpisodeText("S01E02"), Model.epgEpisodeText(7), Model.epgEpisodeText(7.9),
+         Model.epgEpisodeText({ season: 2, episode: 5 }), Model.epgEpisodeText({ season: 2 }),
+         Model.epgEpisodeText({ episode: 5 }), Model.epgEpisodeText({}), Model.epgEpisodeText({ season: 0, episode: 0 }),
+         Model.epgEpisodeText(true), Model.epgEpisodeText(null), Model.epgEpisodeText(undefined),
+         Model.epgEpisodeText(NaN), Model.epgEpisodeText("  two   words  ")],
+        ["S01E02", "7", "7", "S2 E5", "S2", "E5", "", "", "", "", "", "", "two words"])
+
+  check("M4-02: the time range is formatClock at both ends, and the start alone when there is no end",
+        [Model.formatTimeRange(local(2026, 10, 2, 19, 30), local(2026, 10, 2, 20, 0)),
+         Model.formatTimeRange(local(2026, 10, 2, 19, 30), 0),
+         Model.formatTimeRange(local(2026, 10, 2, 19, 30), local(2026, 10, 2, 19, 30)),
+         Model.formatTimeRange(0, local(2026, 10, 2, 20, 0)), Model.formatTimeRange(0, 0)],
+        ["19:30 - 20:00", "19:30", "19:30", "", ""])
+
+  // THE HOT PATH IS UNTOUCHED. epgFields is what every instantiated delegate
+  // calls on every clock tick; the detail fields are parsed lazily by
+  // programmeDetail for the one row the panel is open on. This asserts the
+  // row fields did not grow, which is the claim.
+  const wide = { title: "Wide", start: 1000, stop: 4600, desc: "D", category: "C", episode: "E" }
+  check("M4-02: a widened record adds NOTHING to the per-row fields epgFields returns",
+        Object.keys(Model.epgFields({ now: wide, next: wide }, 2000)).sort(),
+        ["fraction", "nextStart", "nextTitle", "nowStart", "nowStop", "nowTitle", "until"])
+  check("M4-02: parseEpgNow hands the channels map over untouched, widened records included",
+        Model.parseEpgNow(JSON.stringify({ version: 1, validUntil: 9, channels: { "a.us": { now: wide } } })).channels,
+        { "a.us": { now: wide } })
+
+  // programmeDetail over a grid of record shapes, including every field
+  // absent and nothing to show at all.
+  const nowSec = local(2026, 10, 2, 19, 45)
+  const start = local(2026, 10, 2, 19, 30)
+  const stop = local(2026, 10, 2, 20, 0)
+  const full = { title: "The Programme", start: start, stop: stop, desc: "What it is.", category: ["Drama", "Ignored"], episode: { season: 2, episode: 5 } }
+  const dFull = Model.programmeDetail({ name: "Channel One", entry: { now: full }, nowSec: nowSec })
+  check("M4-02: programmeDetail with every field present", dFull, {
+    period: "now", title: "The Programme",
+    fields: [["Episode", "S2 E5"], ["Category", "Drama"], ["Description", "What it is."]],
+    channel: "Channel One", when: "19:30 - 20:00",
+    description: "What it is.", category: "Drama", episode: "S2 E5"
+  })
+  check("M4-02: each detail field is OMITTED when the record does not carry it", [
+    Object.keys(Model.programmeDetail({ entry: { now: { title: "T", start: start, stop: stop } }, nowSec: nowSec })).sort(),
+    Model.programmeDetail({ entry: { now: { title: "T", start: start, stop: stop, desc: "D" } }, nowSec: nowSec }).fields,
+    Model.programmeDetail({ entry: { now: { title: "T", start: start, stop: stop, category: "C" } }, nowSec: nowSec }).fields,
+    Model.programmeDetail({ entry: { now: { title: "T", start: start, stop: stop, episode: "E1" } }, nowSec: nowSec }).fields
+  ], [
+    ["fields", "period", "title", "when"],
+    [["Description", "D"]], [["Category", "C"]], [["Episode", "E1"]]
+  ])
+  check("M4-02: a title with no usable clock still shows, without a time range",
+        Model.programmeDetail({ entry: { now: { title: "T" } }, nowSec: 0 }),
+        { period: "now", title: "T", fields: [] })
+  check("M4-02: nothing to show is null, never an empty panel", [
+    Model.programmeDetail(null), Model.programmeDetail({}), Model.programmeDetail({ entry: null }),
+    Model.programmeDetail({ entry: {} }), Model.programmeDetail({ entry: { now: { start: start, stop: stop } } }),
+    Model.programmeDetail({ entry: { now: { title: "   " } } }),
+    Model.programmeDetail({ entry: "not an object" })
+  ], [null, null, null, null, null, null, null])
+  // An expired `now` is hidden by epgFields for the row; the panel falls
+  // through to `next` rather than going blank between programmes.
+  check("M4-02: an expired current programme falls through to next, and says which it is", [
+    Model.programmeDetail({ entry: { now: { title: "Over", start: start, stop: start + 60 }, next: { title: "Soon", start: stop, stop: stop + 1800, desc: "Later." } }, nowSec: nowSec }),
+    Model.programmeDetail({ entry: { next: { title: "Soon", start: stop } }, nowSec: nowSec }).period
+  ], [
+    { period: "next", title: "Soon", fields: [["Description", "Later."]], when: "20:00 - 20:30", description: "Later." },
+    "next"
+  ])
+  check("M4-02: the channel name is cleaned like every other display name, and dropped when empty",
+        [Model.programmeDetail({ name: " - BBC One ", entry: { now: { title: "T" } } }).channel,
+         Model.programmeDetail({ name: "   ", entry: { now: { title: "T" } } }).channel],
+        ["BBC One", undefined])
+
+  // The detail text gate: redacted, whitespace-normalised, bounded.
+  check("M4-02: detail text is redacted, collapsed and capped, and short text is untouched", [
+    Model.epgDetailText("Plain words.", Model.EPG_DETAIL_MAX),
+    Model.epgDetailText("  ragged\n  text\t here ", Model.EPG_DETAIL_MAX),
+    Model.epgDetailText("tail http://user:pw@host/a?b=c end", Model.EPG_DETAIL_MAX),
+    Model.epgDetailText("word ".repeat(1000), Model.EPG_DETAIL_MAX).length,
+    Model.epgDetailText("word ".repeat(1000), Model.EPG_DETAIL_MAX).slice(-1),
+    Model.epgDetailText("x".repeat(1000), Model.EPG_DETAIL_MAX).length,
+    Model.EPG_DETAIL_MAX
+  ], ["Plain words.", "ragged text here", "tail host end", 600, Model.ELLIPSIS, 600, 600])
+  // THE ORDER IS A SECURITY PROPERTY. Cutting before redacting can land
+  // inside a URL, and half a URL redacts to its USERINFO -- this check shows
+  // redactUrls doing exactly that to a mid-URL cut, and shows that
+  // epgDetailText does not, because it redacts first.
+  check("M4-02: a cut inside a URL would publish the username, so the cut comes AFTER redaction", [
+    Model.redactUrls("http://user:pw@host/secret".substring(0, 14)),
+    Model.epgDetailText("http://user:pw@host/" + "a".repeat(2000), 14)
+  ], ["user", "host"])
+  // The cheap exit must give the SAME answer as redactUrls, not an
+  // approximation of it: redactUrls can only rewrite text containing "://".
+  check("M4-02: skipping redaction when there is no '://' changes no answer",
+        ["plain words", "a:b c:d", "mailto:x@y", "1://2", "no scheme //host/x", "x".repeat(400),
+         "http://h/x", "HTTP://H/X", "s://u:p@h/e"]
+          .map(t => [Model.epgDetailText(t, 5000), Model.redactUrls(t).replace(/\s+/g, " ")])
+          .filter(pair => pair[0] !== pair[1]), [])
+  // A FREEZE DETECTOR, not a benchmark. redactUrls is quadratic in a run of
+  // scheme-legal characters: before the cheap exit, 20,000 characters with
+  // no spaces cost about 670 ms inside a key press (41.9 ms measured at
+  // 5,000, which is where the quadratic shows). The ceiling is deliberately
+  // 30x the measured linear time so load cannot make this flaky.
+  ;(function () {
+    const entry = { now: { title: "T", start: 1000, stop: 5000, desc: "x".repeat(20000) } }
+    for (let i = 0; i < 50; i++) Model.programmeDetail({ entry: entry, nowSec: 2000 })
+    const at = Date.now()
+    for (let i = 0; i < 50; i++) Model.programmeDetail({ entry: entry, nowSec: 2000 })
+    const ms = Date.now() - at
+    check("M4-02: a 20,000 character description does not freeze the key press that opens the panel",
+          { over250ms: ms > 250, capped: Model.programmeDetail({ entry: entry, nowSec: 2000 }).description.length },
+          { over250ms: false, capped: 600 })
+  })()
+
+  // NEVER RETURNS A URL (rule 5: guide text is a sink, and a description is
+  // the longest provider-controlled string this plugin renders).
+  const poisoned = {
+    title: "Watch at http://user:pw@evil.example/a",
+    start: start, stop: stop,
+    desc: "Stream: https://user:pw@evil.example/live?token=abc123 now",
+    category: ["http://user:pw@evil.example/c"],
+    episode: "s://user:pw@evil.example/e"
+  }
+  const dPoisoned = Model.programmeDetail({ name: "http://user:pw@evil.example/n", entry: { now: poisoned }, nowSec: nowSec })
+  check("M4-02: no sink of the detail panel can carry a URL, a credential or a token", [
+    JSON.stringify(dPoisoned).indexOf("://"), JSON.stringify(dPoisoned).indexOf("user:pw"),
+    JSON.stringify(dPoisoned).indexOf("token=abc123"),
+    dPoisoned.title, dPoisoned.category
+  ], [-1, -1, -1, "Watch at evil.example", "evil.example"])
+})()
+
+// ---- M4-04: the keyboard map, and the join that holds it ----
+;(function () {
+  // THE JOIN, MADE A CALL. The expected key set is DERIVED here from the
+  // shipping tables -- not copied from the map and not hand-written -- so a
+  // key added to the product and not to the map is a red check, which is the
+  // whole point of the feature (rule 13).
+  const derived = {}
+  function want(key, why) { if (String(key) !== "") derived[String(key)] = why }
+
+  // 1. The named key constants.
+  want(Model.PAUSE_KEY, "PAUSE_KEY")
+  want(Model.TRACKS_KEY, "TRACKS_KEY")
+  want(Model.WALL_KEY, "WALL_KEY")
+  want(Model.DETAIL_KEY, "DETAIL_KEY")
+  want(Model.HELP_KEY, "HELP_KEY")
+  Object.keys(Model.SOURCE_KEYS).forEach(function (k) { want(Model.SOURCE_KEYS[k], "SOURCE_KEYS." + k) })
+  // 2. Every printable character listLetterAction answers for. A letter that
+  // gains a meaning in the product gains a row in the map or this goes red.
+  const letters = []
+  for (let c = 33; c < 127; c++) {
+    const ch = String.fromCharCode(c)
+    if (Model.listLetterAction(ch) !== "") { letters.push(ch); want(ch, "listLetterAction") }
+  }
+  // 3. Every key footerHints and formHints yield, over a grid built HERE
+  // from GUIDE_MODES and the switches those two functions read. Built
+  // independently of keyboardMap's own grid, so a branch keyboardMap forgets
+  // to visit is caught rather than mirrored.
+  const hintStates = []
+  const scopeIds = [Model.SCOPE_ALL, Model.SCOPE_RECENT, Model.SCOPE_FAVORITES, Model.groupScopeId("G")]
+  const aChannel = { id: "c", name: "C", group: "G" }
+  const withHidden = Model.toggleHiddenGroup(Model.emptyState(), "G")
+  Model.GUIDE_MODES.forEach(function (mode) {
+    ;["", "q"].forEach(function (query) { ["", "loading", "error"].forEach(function (empty) {
+      [true, false].forEach(function (wall) { [true, false].forEach(function (playing) {
+        [true, false].forEach(function (hasNumbers) { [true, false].forEach(function (hasDetail) {
+          [null, { active: true }].forEach(function (numberEntry) {
+            scopeIds.forEach(function (scopeId) { [null, withHidden].forEach(function (st) {
+              hintStates.push({ mode: mode, query: query, empty: empty, wall: wall, playing: playing,
+                                paused: !playing, pipAvailable: hasDetail, hasNumbers: hasNumbers,
+                                hasDetail: hasDetail, numberEntry: numberEntry, groupsNarrow: wall,
+                                retry: hasNumbers, sourcesExist: hasDetail, showLogos: wall,
+                                cursorKind: playing ? "add" : "source",
+                                scopeId: scopeId, channel: aChannel, state: st })
+            }) })
+          })
+        }) })
+      }) })
+    }) })
+  })
+  const formStates = []
+  ;["m3u", "xtream"].forEach(function (kind) { ["guide", "firstRun"].forEach(function (origin) {
+    [true, false].forEach(function (probing) { [true, false].forEach(function (parent) {
+      ["label", "playlist", "epg", "server", "username", "password", "submit"].forEach(function (focus) {
+        [{}, { playlist: "http://u:p@h/get.php", epg: "http://h/g.xml", label: "L", server: "s", username: "u", password: "p" }].forEach(function (values) {
+          [null, { playlist: true, epg: true }].forEach(function (revealed) {
+            formStates.push({ kind: kind, origin: origin, probing: probing, parent: parent, focus: focus, values: values, revealed: revealed })
+          })
+        })
+      })
+    }) })
+  }) })
+  hintStates.forEach(function (o) { Model.footerHints(o).forEach(function (p) { want(p[0], "footerHints " + o.mode) }) })
+  formStates.forEach(function (f) { Model.formHints(f).forEach(function (p) { want(p[0], "formHints") }) })
+  // 4. The number machine's own separator.
+  want(Model.CHNO_ENTRY_SEP, "CHNO_ENTRY_SEP")
+
+  const mapped = Model.keyboardMapKeys({})
+  // listLetterAction answers for BOTH cases of every letter it knows, and
+  // the map names the lowercase one: a help screen listing `f` and `F` as
+  // two rows for one action would be noise. So a key counts as present when
+  // the map holds it in either case.
+  const held = k => mapped.indexOf(k) !== -1 || mapped.indexOf(k.toLowerCase()) !== -1
+  const missing = Object.keys(derived).filter(function (k) { return !held(k) })
+    .map(function (k) { return [k, derived[k]] })
+  check("M4-04: the grid this test derives from is big enough to be an assertion",
+        [hintStates.length, formStates.length, letters.length > 5], [15360, 448, true])
+  check("M4-04: EVERY key the shipping tables name has a row in the map",
+        { missing: missing.length, first: missing.slice(0, 5) }, { missing: 0, first: [] })
+
+  // The other direction, so the map cannot invent a key either. The only
+  // keys allowed that no table names are the six Guide.qml dispatches on
+  // directly, and the count is asserted so the gap cannot grow unnoticed.
+  const untabled = Model.keyboardMapUntabled()
+  check("M4-04: the keys no table names are exactly five pairs plus Delete, and the table says which",
+        untabled, [["Channel list", "Home", "first channel"],
+                   ["Channel list", "End", "last channel"],
+                   ["Channel list", "PgUp/PgDn", "page up / down"],
+                   ["Search", "Ctrl+S", "save this search"],
+                   ["Source forms", Model.SOURCE_KEYS.clear, "clear the field"]])
+  const allowedExtra = untabled.map(function (u) { return u[1] }).concat(["Delete"])
+  const derivedLower = {}
+  Object.keys(derived).forEach(function (k) { derivedLower[k.toLowerCase()] = derived[k] })
+  const invented = mapped.filter(function (k) { return derivedLower[k.toLowerCase()] === undefined && allowedExtra.indexOf(k) === -1 })
+  check("M4-04: the map invents no key -- every row is a table's or one of the six named gaps",
+        invented, [])
+
+  // Shape and safety. The panel renders this as plain text (D-TEXT-1) and
+  // the accessibility bus reads it (rule 5), so nothing here may carry
+  // markup or a URL.
+  const sections = Model.keyboardMap({})
+  const badShape = []
+  let rowCount = 0
+  sections.forEach(function (s, i) {
+    if (typeof s.title !== "string" || s.title === "" || !Array.isArray(s.rows) || s.rows.length === 0) badShape.push(["section", i])
+    s.rows.forEach(function (r) {
+      rowCount++
+      if (!Array.isArray(r) || r.length !== 2 || typeof r[0] !== "string" || typeof r[1] !== "string"
+          || r[0] === "" || r[1] === "" || r[0].indexOf("<") !== -1 || r[1].indexOf("<") !== -1
+          || r[0].indexOf("://") !== -1 || r[1].indexOf("://") !== -1) badShape.push(r)
+    })
+  })
+  check("M4-04: every section is {title, rows} and every row a non-empty [key, meaning] of plain text",
+        { bad: badShape.length, first: badShape.slice(0, 3) }, { bad: 0, first: [] })
+  check("M4-04: the map is ordered sections with the channel list first and real content throughout",
+        [sections.map(function (s) { return s.title }), rowCount > 40],
+        [["Channel list", "Search", "Channel numbers", "Panels", "Sources", "Source forms", "Confirmations and errors"], true])
+
+  // `x` and Delete read out of hideAction over its WHOLE action vocabulary,
+  // including the two actions the footer is deliberately silent about.
+  const hideCtx = [
+    { scopeId: Model.SCOPE_RECENT, channel: aChannel, state: null },
+    { scopeId: Model.SCOPE_FAVORITES, channel: aChannel, state: null },
+    { scopeId: Model.groupScopeId("G"), channel: aChannel, state: null },
+    { scopeId: Model.groupScopeId("G"), channel: aChannel, state: withHidden },
+    { scopeId: Model.SCOPE_ALL, channel: null, state: null }
+  ]
+  check("M4-04: the x / Delete meaning covers every action hideAction can return",
+        hideCtx.map(function (c) { return [Model.hideAction(c).action, Model.hideMeaning(c)] }),
+        [["recent", "remove from Recent"], ["favorite", "remove from Favorites"],
+         ["hide", "hide this group"], ["unhide", "unhide this group"], ["none", "hide this group"]])
+  check("M4-04: the map's x and Delete rows follow the live context, and agree with each other",
+        hideCtx.map(function (c) {
+          const rows = Model.keyboardMap(c)[0].rows
+          return [Model.verbForKey(rows, "x"), Model.verbForKey(rows, "Delete")]
+        }),
+        [["remove from Recent", "remove from Recent"], ["remove from Favorites", "remove from Favorites"],
+         ["hide this group", "hide this group"], ["unhide this group", "unhide this group"],
+         ["hide this group", "hide this group"]])
+  // Esc in list mode is hinted by no footer line; it is derived from the
+  // reducer the handler calls, and only while the two modes agree.
+  check("M4-04: Esc reaches the channel list from onEscape, with search's own wording",
+        [Model.sameEscape("list", "search"), Model.verbForKey(Model.keyboardMap({})[0].rows, "Esc"),
+         Model.verbForKey(Model.keyboardMap({})[1].rows, "Esc")],
+        [true, "close / clear", "close / clear"])
+  // The two new keys and the two new modes, end to end.
+  check("M4-04/M4-02: the new keys and modes are the ones the three lanes agreed",
+        [Model.DETAIL_KEY, Model.HELP_KEY, Model.GUIDE_MODES.slice(-2),
+         Model.listLetterAction(Model.DETAIL_KEY), Model.listLetterAction(Model.HELP_KEY),
+         Model.guideMode("detail"), Model.guideMode("help"),
+         Model.footerHints({ mode: "detail" }), Model.footerHints({ mode: "help" })],
+        ["i", "?", ["detail", "help"], "detail", "help", "detail", "help",
+         [["Esc", "back"]], [["Esc", "back"]]])
+  check("M4-02: the detail key is hinted only where there is a programme to show",
+        [Model.verbForKey(Model.footerHints({ mode: "list", hasDetail: true }), Model.DETAIL_KEY),
+         Model.verbForKey(Model.footerHints({ mode: "list", hasDetail: false }), Model.DETAIL_KEY),
+         Model.verbForKey(Model.footerHints({ mode: "list" }), Model.DETAIL_KEY),
+         Model.verbForKey(Model.footerHints({ mode: "list" }), Model.HELP_KEY)],
+        ["detail", "", "", "help"])
+  // The map describes the grammar; the footer gates. A narrowed map is still
+  // possible, and that is what `opts` is for.
+  check("M4-04: the map shows the whole grammar by default and narrows only when told",
+        [Model.keyboardMapKeys({}).indexOf("0-9") !== -1,
+         Model.keyboardMapKeys({ hasNumbers: false }).indexOf("0-9") !== -1,
+         Model.keyboardMap({ hasNumbers: false }).map(function (s) { return s.title }).indexOf("Channel numbers")],
+        [true, false, -1])
 })()
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
