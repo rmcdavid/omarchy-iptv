@@ -991,6 +991,38 @@ class NameNoiseTest(unittest.TestCase):
         self.assertEqual(same("NBC Sports Philadelphia (1080p) [Geo-blocked]"),
                          same("NBC Sports Philadelphia"))
         self.assertEqual(same("Reuters [Not 24/7]"), same("Reuters"))
+        # Case is not part of the marker.
+        self.assertEqual(same("Reuters [NOT 24/7]"), same("Reuters"))
+
+    def test_only_the_two_markers_that_occur_are_taken_out(self):
+        """F-EPG-10, ruled by the product owner on 2026-10-04.
+
+        The bracket half of the pattern was `\\[[^\\]]*\\]`, which deletes
+        whatever a provider puts in brackets. That is a branch whose blast
+        radius is arbitrary content: a span carrying part of a channel's
+        identity would be dropped from the key and the row would match the
+        wrong guide channel with no sign of it. The owner's 1,453 names carry
+        exactly two distinct spans (`[Not 24/7]` 82, `[Geo-blocked]` 60) and
+        the guide's 427 declarations carry none, so the narrowing was measured
+        at zero cost in both directions before it was taken.
+
+        An UNKNOWN marker now stays in the key, so the row does not match by
+        name. That is silence, and silence is the side to fail on: the broad
+        pattern's failure mode was a confident wrong match. This asserts the
+        narrowing is real -- under the old pattern every one of these joined.
+        """
+        same = helper.epg_name_key
+        # `[]` is deliberately not in this list: an EMPTY span carries no
+        # identity to lose, and the brackets themselves fold away as
+        # punctuation either way, so no pattern can tell the two readings
+        # apart. Asserting on it would be asserting on nothing.
+        for marker in ("[Whatever]", "[New]", "[24/7]", "[Geo blocked]",
+                       "[Not 24-7]", "[Sports]"):
+            self.assertNotEqual(same("Foo " + marker), same("Foo"),
+                                "%s is not a marker this list names" % marker)
+        # And the identity inside an unknown span is KEPT rather than deleted,
+        # which is the whole point: `Foo [Sports]` is not `Foo`.
+        self.assertIn("sports", same("Foo [Sports]"))
 
     def test_it_takes_out_the_markers_and_nothing_else(self):
         # A digit that is part of the name survives: "Channel 4" is not

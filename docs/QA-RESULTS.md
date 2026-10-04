@@ -11392,3 +11392,47 @@ The matcher's keeps the number, because it is embedded in shipped code
 comments and test names; the oracle's became F-EPG-14 at integration. The
 next round that spawns parallel lanes hands each a reserved block of ids.
 
+## The two rulings, 2026-10-04
+
+Product owner, on the round's measurements: "Drop F-EPG-7 and take the
+F-EPG-10 narrowing".
+
+**F-EPG-7 is dropped.** The parenthetical loosening is not taken. Before
+F-EPG-11 it bought 29 rows for one contradicted pair; after it, thirty of
+those rows are already in by address and what remains is one row that no
+oracle this project has can confirm, against a cost that rests on one of
+two mutually inconsistent id fields (F-EPG-14). The pattern is unchanged
+and the measurement stays in the precision document for anyone who
+revisits it. Row closed as will not fix, which is a decision and not a
+defect.
+
+**F-EPG-10 is taken.** The bracket half of `_EPG_NAME_NOISE` was
+`\[[^\]]*\]` -- whatever a provider puts in brackets. It is now the two
+literals the data actually contains, case-insensitive.
+
+Re-measured at the NEW baseline rather than trusting the figure the oracle
+lane took at 226 pairs:
+
+| | before the narrowing | after |
+|---|---|---|
+| pairs | 265 | 265 |
+| confirmed by the schedule oracle | 110 | 110 |
+| contradicted | 0 | 0 |
+
+A census of the owner's 1,453 names finds exactly two distinct bracket
+spans and no third: `[Not 24/7]` 82 times, `[Geo-blocked]` 60.
+
+The residual is stated in the code rather than left to be discovered: a
+provider who writes a marker this list does not name keeps it in the key,
+so that row does not match by name. That is silence, and silence is the
+side to fail on -- the broad pattern's failure mode was a confident wrong
+match on a span that carried part of a channel's identity. A new marker is
+a one-line addition with a census behind it, which is the bar the two in
+the list were held to.
+
+One test, `test_only_the_two_markers_that_occur_are_taken_out`, seen red
+against the pattern as it was. Its empty-span case was removed with its
+reason rather than asserted: `Foo []` folds to `foo` under either pattern
+because brackets are punctuation, so no pattern can tell the two readings
+apart and asserting on it would be asserting on nothing.
+

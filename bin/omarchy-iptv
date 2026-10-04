@@ -555,8 +555,28 @@ _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 # colliding NAME to 5 -- the ten are `nameDroppedPlaylist`, which counts
 # channels, and the five names are four News 12 regions and Tennis Channel 2),
 # and build_alias drops every colliding name rather than guessing between them.
+# The bracket half is TWO LITERALS, not an arbitrary span (F-EPG-10, ruled by
+# the product owner on 2026-10-04). It used to be `\[[^\]]*\]`, which strips
+# whatever a provider puts in brackets, and that is a branch whose blast
+# radius is arbitrary content: a bracket span that carries part of a channel's
+# identity would be deleted from the key and the row would match the wrong
+# guide channel, silently. Measured before the ruling: the owner's 1,453 names
+# carry exactly TWO distinct spans, `[Not 24/7]` 82 times and `[Geo-blocked]`
+# 60; 0 of the guide's 427 declarations carry one at all, counting every
+# display-name and not just the first; and a named mutation deleting the
+# bracket alternative outright produced the SAME pairs, set difference empty
+# in both directions, every grade unchanged. So the branch was needed by no
+# pair and broke no pair, and narrowing it costs nothing measurable here.
+#
+# What it costs ELSEWHERE is stated rather than hidden: a provider who writes
+# a marker this list does not name keeps it in the key, so the row simply does
+# not match by name. That is silence, not a wrong answer, and it is the side
+# to fail on -- the broad pattern's failure mode was a confident wrong match.
+# A new marker is a one-line addition with a census behind it, which is the
+# same bar the two below were held to.
 _EPG_NAME_NOISE = re.compile(
-    r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)|\[[^\]]*\]", re.IGNORECASE)
+    r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)"
+    r"|\[not 24/7\]|\[geo-blocked\]", re.IGNORECASE)
 
 
 def epg_name_key(value: Any) -> str:
