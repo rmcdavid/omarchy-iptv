@@ -11658,3 +11658,73 @@ owner's data" as all of it.
 Each of the three new tests was seen red against the pattern it replaces:
 the respelling test fails against the byte-for-byte literals, and the
 wrong-channel test fails against the broad span.
+
+## The F-EPG-11 review and its repairs, 2026-10-04
+
+Four lenses over the round, every finding handed to adversarial verifiers:
+**30 findings, 26 confirmed, 4 partial, 0 refuted**, ten of them P2. Three
+repair lanes closed them, each reproducing a finding before repairing it;
+none failed to reproduce. Shipping behaviour after the repairs is unchanged
+on the owner's data -- 265 pairs, 185 by address, 80 by name, graded 110
+confirmed and 0 contradicted -- with one number added that was not there
+before.
+
+### The three that were about the product
+
+- **The headline denominator was a superset of what ships.** "193 rows carry
+  a declared id, 153 already matched that channel by name" was measured over
+  the stream AND logo addresses; the strategy reads the stream only, where
+  it is **185 and 145**. The safety conclusion survives -- zero
+  disagreements under either definition, re-derived twice by hand -- but the
+  strongest claim this round made had the wrong denominator in the helper,
+  the board, the QA record and the tests. All corrected, each census now
+  saying which field it counted.
+- **A row the guide names better than the address does.** The address pairs
+  `Pluto TV Reality (United States)` with `Pluto TV Pride`, because that
+  row's stream carries Pride's id, while the guide also declares a
+  `Pluto TV Reality` nobody claims. The lead ruled the pairing stands: the
+  address names the playout that opens, and the row's own artwork names a
+  third id this guide never declares, so the provider's fields disagree
+  about that row and not our matcher. What was wrong was that it was
+  invisible -- the "empty disagreement set" measurement only asked whether
+  the NAME matcher had paired these rows differently, never whether the
+  guide declared a better-named candidate. The helper now counts it
+  (`addrNameConflicts`, 1 on this data) and a test pins the shape.
+- **The address index was linear in address BYTES, not rows.** At the size
+  limits the code already enforces that is 12 s and 385 MiB inside the
+  helper, stated in a comment as a bound nobody had measured. Now bounded
+  per row, with the recall cost measured at zero.
+
+### What the review cost the oracle, which is the honest part
+
+The grader is the project's only independent statement about whether a
+pairing is right, and the review found it weaker than its own claims:
+
+- its false-confirmation rate is **0.0038, not 0** (F-EPG-18) -- the
+  published zero was the 226-pair measurement, and the document told the
+  reader to run the command that now returns otherwise;
+- **109 of its 110 confirmations** echo a token the paired channel's
+  display-name also carries (F-EPG-19), so "confirmation comes only from the
+  schedule" overstated it. The operative half survives and was re-measured:
+  a name may not confirm alone, and the arm is silent on 37 of the 80
+  name-matched pairs where the forbidden name-grader confirms every one;
+- an undocumented confirming arm was on by default and unreachable here, so
+  "0 false confirmations" was published about a grader with an unmeasured
+  arm in it (F-EPG-20);
+- **47 of the 110 confirmations are not row-unique** (F-EPG-23), a limit
+  that was prose and is now a number.
+
+None of that changes a pairing. It changes what we may say about them, which
+is the thing worth getting right: this project can now assert that 110 of
+265 pairings are confirmed by evidence the matcher never reads, that one
+known pairing is wrong by construction in the negative control, and that it
+cannot yet separate 47 of the confirmations from a rival row.
+
+### Filed open
+
+F-EPG-21 (an id cited only in a `.py` file is invisible to both id gates --
+the route by which the grader went on calling F-EPG-14 by its old number),
+F-EPG-22 (the echo arm confirms either brand of a row naming two, with the
+exchange rate for closing it measured at 54 of 110 confirmations), and
+F-EPG-23.
+
