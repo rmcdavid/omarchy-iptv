@@ -215,7 +215,8 @@ ShellRoot {
   function healthBucket(kind) {
     var by = harness.healthTally.byKind
     if (by[kind] === undefined) {
-      by[kind] = { samples: 0, runningTrue: 0, healthBusyTrue: 0, healthBusyFalse: 0, healthBusyUnknown: 0 }
+      by[kind] = { samples: 0, runningTrue: 0, healthBusyTrue: 0, healthBusyFalse: 0, healthBusyUnknown: 0,
+                   runTrueBusyTrue: 0, runTrueBusyFalse: 0, runTrueBusyUnknown: 0 }
     }
     return by[kind]
   }
@@ -233,10 +234,29 @@ ShellRoot {
     var kind = s.controlKind === null ? "unknown" : (s.controlKind === "" ? "idle" : s.controlKind)
     var b = harness.healthBucket(kind)
     b.samples++
-    if (s.controlRunning === true) b.runningTrue++
     if (s.healthBusy === true) b.healthBusyTrue++
     else if (s.healthBusy === false) b.healthBusyFalse++
     else b.healthBusyUnknown++
+    // The same three, NARROWED to the samples where the slot was really
+    // held. The two are not the same window: `controlKind` outlives
+    // `controlProc.running` by about one sampler tick at the end of every
+    // run -- the Process has exited and its StdioCollector is still
+    // draining (waitForEnd), so `running` is already false while the kind
+    // still names the run that just finished, and `healthBusy` is
+    // correctly false there because nothing IS running. Measured on
+    // 2026-10-03: 2 samples of 128 over three status runs. A check about
+    // the predicate must therefore be keyed on `runningTrue`, not on the
+    // kind alone, or it reddens on that handover rather than on the
+    // decision it is about. Nothing shipped reads `controlKind` as
+    // liveness (runControl, the watchdog and the health predicate all
+    // guard on `running`), so this is the instrument's business and not a
+    // defect.
+    if (s.controlRunning === true) {
+      b.runningTrue++
+      if (s.healthBusy === true) b.runTrueBusyTrue++
+      else if (s.healthBusy === false) b.runTrueBusyFalse++
+      else b.runTrueBusyUnknown++
+    }
     // A RUN is counted on every change INTO a kind that is not idle, not on
     // an idle sample between two runs: a reply can hand the slot straight to
     // the next helper with no idle sample in between (handleControlResult

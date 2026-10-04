@@ -674,6 +674,15 @@ probe wait "$SOCK" 25 >/dev/null
 # window below holds nothing but health ticks.
 sleep 8
 
+# The three `healthBusy` checks below and in the busy window are keyed on
+# the samples where `controlRunning` was TRUE, not on `controlKind` alone:
+# the kind outlives the running flag by about one sampler tick at the end of
+# every run (shell.qml healthSample explains and dates the measurement), and
+# `healthBusy` is correctly false in that handover. Keyed on the kind alone,
+# the status check reddened on 2 samples of 128 for the handover and not for
+# the decision -- the only check this round re-points, and it is a narrowing
+# to the right window, not a weakening of the claim.
+#
 # ---- the QUIET window: no presses at all. It measures three things the
 # busy window cannot: that the sampler runs, that health ticks are visible to
 # it, and -- the negative control that keeps R16's main check from being
@@ -685,8 +694,8 @@ sleep $((QUIET_MS / 1000 + 2))
 q=$(ipc healthLog)
 qsam=$(cnt "$q" samples)
 qstatus=$(cnt "$q" runs.status)
-qsb=$(cnt "$q" byKind.status.healthBusyTrue)
-qsf=$(cnt "$q" byKind.status.healthBusyFalse)
+qsb=$(cnt "$q" byKind.status.runTrueBusyTrue)
+qsf=$(cnt "$q" byKind.status.runTrueBusyFalse)
 qsu=$(cnt "$q" byKind.status.healthBusyUnknown)
 qif=$(cnt "$q" byKind.idle.healthBusyFalse)
 qit=$(cnt "$q" byKind.idle.healthBusyTrue)
@@ -695,8 +704,8 @@ printf '   R16 quiet window: %s samples, status runs %s, marks %s\n' \
   "$qsam" "$qstatus" "$(rf 'd["marks"]' "$q")"
 ck "R16 control: the shell sampled itself over the ${QUIET_MS} ms quiet window ($qsam >= 200)" '[[ $(ge "$qsam" 200) == 0 ]]'
 ck "R16 control: health ticks are visible to the sampler ($qstatus status runs >= 2)" '[[ $(ge "$qstatus" 2) == 0 ]]'
-ck "R16 NEGATIVE control: healthBusy is TRUE while a status helper runs ($qsb samples >= 20)" '[[ $(ge "$qsb" 20) == 0 ]]'
-is "R16 and never false while a status helper runs" "$qsf" "0"
+ck "R16 NEGATIVE control: healthBusy is TRUE while a status helper HOLDS the slot ($qsb samples >= 20)" '[[ $(ge "$qsb" 20) == 0 ]]'
+is "R16 and never false while a status helper holds the slot" "$qsf" "0"
 is "R16 and never the sentinel while a status helper runs" "$qsu" "0"
 ck "R16 control: healthBusy is false with the slot idle ($qif samples >= 20)" '[[ $(ge "$qif" 20) == 0 ]]'
 is "R16 and never true with the slot idle" "$qit" "0"
@@ -731,7 +740,7 @@ done
 sleep 1
 b=$(ipc healthLog)
 bseek=$(cnt "$b" byKind.seek.samples)
-bfalse=$(cnt "$b" byKind.seek.healthBusyFalse)
+bfalse=$(cnt "$b" byKind.seek.runTrueBusyFalse)
 btrue=$(cnt "$b" byKind.seek.healthBusyTrue)
 bunk=$(cnt "$b" byKind.seek.healthBusyUnknown)
 brun=$(cnt "$b" byKind.seek.runningTrue)
@@ -745,7 +754,7 @@ printf '   R16 busy window: %s drives, %s samples, seek samples %s, seek runs %s
 # The control is read from `controlKind`, which EVERY tree has, so a red
 # healthBusy check below names the missing join and not a missing seek.
 ck "R16 control: a seek was really in flight when sampled ($bseek samples >= 100 = 10 s)" '[[ $(ge "$bseek" 100) == 0 ]]'
-ck "R16 D10: healthBusy is FALSE for every sampled running seek ($bfalse of $bseek)" '[[ $(ge "$bfalse" 100) == 0 ]]'
+ck "R16 D10: healthBusy is FALSE for every sample where a seek HOLDS the slot ($bfalse, of $bseek by kind)" '[[ $(ge "$bfalse" 100) == 0 ]]'
 is "R16 D10: and never true for a running seek" "$btrue" "0"
 is "R16 D10: and never the sentinel for a running seek" "$bunk" "0"
 ck "R16 controlRunning says the slot IS held while the kind is seek ($brun >= 100)" '[[ $(ge "$brun" 100) == 0 ]]'
