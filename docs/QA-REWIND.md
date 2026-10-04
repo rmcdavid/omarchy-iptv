@@ -237,10 +237,12 @@ and a dropped seek is followed by the error-level refusal line on the
 connections that subscribed. The stub now does exactly that -- the move is
 deferred until the reply has been written, the `seek` event follows a
 landed seek, the refusal line follows a dropped one only on a subscribed
-connection -- and its self-test is 17 cases (14 here, two for the
-followups, one for the ordering), each seen red by a named mutation
-(`docs/QA-RESULTS.md`, the review round). The six mutations in the table
-above were run against the 14-case file.
+connection -- and an EVENT reaches every connected client, which it did not
+until F-MPV-2. Each case was seen red by a named mutation
+(`docs/QA-RESULTS.md`, the review rounds). The case count and the gate floor
+live in `scripts/check.sh` as `STUB_TESTS_MIN`; they have moved three times
+in two days, so they are not copied here. The six mutations in the table
+above were run against the file as it stood at 14 cases.
 
 ## 6. The run on 2d7df1f plus this lane's files (red, as required)
 

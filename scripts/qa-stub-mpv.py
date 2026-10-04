@@ -66,14 +66,12 @@ HLS stream (docs/QA-REWIND.md section 2):
     written, never before, so a client that reads `time-pos` at once reads
     the old position the way it can on mpv; a dropped seek is followed by
     the error-level refusal line, to the connections that subscribed with
-    `request_log_messages` and to no other. (An earlier version of this
-    file emitted no line and moved the position before replying; the review
-    of the integrated tree found both more forgiving than mpv.) One half
-    stays unmodelled and is stated: mpv broadcasts the `seek` event to EVERY
-    client, and this stub writes it only to the connection that issued the
-    seek. The plugin opens one control connection per helper run, so no
-    scenario can tell the difference; a test that needs the broadcast
-    would be the first to.
+    `request_log_messages` and to no other. (Earlier versions of this file
+    emitted no line, moved the position before replying, and wrote both
+    followups to the issuing connection alone; each was found more forgiving
+    than mpv -- the last of them by F-MPV-1's own rule, after a write-up had
+    excused it on the false premise that the plugin holds one connection.)
+    An EVENT now goes to every live client, as mpv's do.
 
 `python3 scripts/qa-stub-mpv.py --self-test` runs the unittest cases that
 pin these, against a fake clock. Each case was seen red by mutating the rule
@@ -347,7 +345,6 @@ class Stub(object):
 
     def serve_loop(self, conn, first):
         buf = b""
-        subscribed = False   # request_log_messages on THIS connection (mpv is per client)
         while True:
             try:
                 chunk = conn.recv(65536)
@@ -366,12 +363,12 @@ class Stub(object):
                     continue
                 self.log("REQ " + line.decode("utf-8", "replace"))
                 self.hold(first)
+                # mpv tracks the subscription per CLIENT; so does this.
                 if (req.get("command") or [None])[0] == "request_log_messages":
-                    subscribed = True
                     with self.lock:
                         if conn not in self.log_conns:
                             self.log_conns.append(conn)
-                reply = self.dispatch(req, subscribed)
+                reply = self.dispatch(req)
                 if reply is None:
                     return
                 followup = reply.pop("_followup", [])
@@ -398,12 +395,14 @@ class Stub(object):
                                 return
                 self.log("REP " + json.dumps(reply))
 
-    def dispatch(self, req, subscribed=False):
-        """One reply for one request. `subscribed` is whether THIS connection
-        asked for log messages; the refusal line is filtered here, so the
-        self-test can see the filter (a filter in serve() was invisible to
-        it: the review's finding). A seek's move is deferred into `_apply`
-        and its followups into `_followup`, both popped by serve()."""
+    def dispatch(self, req):
+        """One reply for one request, and WHAT follows it. Who RECEIVES the
+        followups is followup_targets(), which the self-test calls directly;
+        a seek's move is deferred into `_apply` and its followups into
+        `_followup`, both popped by serve(). This used to take a
+        `subscribed` flag and filter the refusal line itself, which meant a
+        second subscribed client never heard a refusal it did not cause --
+        F-MPV-1's shape in the other direction."""
         rid = req.get("request_id", 0)
         cmd = req.get("command") or []
         out = {"error": "success", "request_id": rid, "data": None}
@@ -484,8 +483,8 @@ def self_test():
         def get(self, name):
             return self.stub.get(name)
 
-        def seek(self, target, mode="relative", subscribed=True, apply=True):
-            out = self.stub.dispatch({"command": ["seek", target, mode], "request_id": 7}, subscribed)
+        def seek(self, target, mode="relative", apply=True):
+            out = self.stub.dispatch({"command": ["seek", target, mode], "request_id": 7})
             # dispatch decides WHAT follows; followup_targets decides who gets
             # it, and the self-test drives the two separately.
             fn = out.pop("_apply", None)
@@ -576,12 +575,18 @@ def self_test():
                 a, b = connect(), connect()
                 send(a, "loadfile", "http://127.0.0.1:9/x.m3u8", "replace")
                 lines(a, 1)
-                for _ in range(40):
+                # Just enough for time-pos to EXIST. A backward seek from a
+                # young position is clamped to 0 by the stub (as mpv does
+                # while the start is still cached), so it lands either way;
+                # an earlier version waited for time-pos > 6 in 40 steps of
+                # 0.1 s, which that loop can never reach, and so spent four
+                # seconds of every gate run arriving where it started.
+                for _ in range(20):
                     send(a, "get_property", "time-pos")
                     pos = lines(a, 1)
-                    if pos and isinstance(pos[0].get("data"), (int, float)) and pos[0]["data"] > 6:
+                    if pos and isinstance(pos[0].get("data"), (int, float)):
                         break
-                    time.sleep(0.1)
+                    time.sleep(0.05)
                 # Only A subscribes to log messages; both are live clients.
                 send(a, "request_log_messages", "error")
                 lines(a, 1)
@@ -596,16 +601,36 @@ def self_test():
                 self.assertNotIn("request_id", got_b[0])
                 with stub.lock:
                     self.assertEqual(len(stub.conns), 2)
-                # A client that goes away stops being a target. Bounded wait:
-                # the serve thread notices the close on its next read.
+                    self.assertEqual(len(stub.log_conns), 1)   # A only
+                # A DROPPED seek: the refusal line reaches the subscriber and
+                # nobody else. Without this the log_conns half of the fix had
+                # no check at all -- registering every client as a subscriber,
+                # or none, left the suite green (the review's finding).
+                send(a, "seek", 99999.0, "absolute")   # past the end: dropped, as mpv drops it
+                got_a = lines(a, 2)
+                self.assertEqual([m.get("error") for m in got_a if "request_id" in m], ["success"])
+                levels = [m for m in got_a if m.get("event") == "log-message"]
+                self.assertEqual(len(levels), 1, got_a)
+                self.assertIn("Cannot seek in this stream", levels[0]["text"])
+                self.assertEqual(lines(b, 1, bound=0.5), [], "a client that never subscribed heard a refusal")
+                # A client that goes away stops being a target -- and stops
+                # being a SUBSCRIBER, which is a second list and was the one
+                # with no check. B subscribes first so the assertion cannot
+                # pass on an empty list. Bounded wait: the serve thread
+                # notices the close on its next read.
+                send(b, "request_log_messages", "error")
+                lines(b, 1)
+                with stub.lock:
+                    self.assertEqual(len(stub.log_conns), 2)
                 b.close()
                 for _ in range(40):
                     with stub.lock:
-                        if len(stub.conns) == 1:
+                        if len(stub.conns) == 1 and len(stub.log_conns) == 1:
                             break
                     time.sleep(0.05)
                 with stub.lock:
                     self.assertEqual(len(stub.conns), 1, "a closed connection is still a broadcast target")
+                    self.assertEqual(len(stub.log_conns), 1, "a closed connection is still a log subscriber")
                 a.close()
             finally:
                 stop.set()

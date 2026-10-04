@@ -502,10 +502,12 @@ files, could not. Each is in the section it amends; this is the list.
    and riding the next one: `seekLive` refuses a stopping or user-stopped
    player the way `seekBy` does rather than answering "queued" for a run
    that never comes; every reply's `rewind` object is stored through
-   `Model.parseRewind` on all four paths, not only the probe's; the QA
-   stub states that it writes the `seek` event to the issuing connection
-   where mpv broadcasts it; and the accessible name composes its own spoken
-   form from the shared threshold rather than calling the composer.
+   `Model.parseRewind` on all four paths, not only the probe's; and the
+   accessible name composes its own spoken form from the shared threshold
+   rather than calling the composer. (A fourth residual said the QA stub
+   "states that it writes the `seek` event to the issuing connection where
+   mpv broadcasts it". That excuse lasted two commits: F-MPV-2 is the record
+   of why it was wrong, and the stub broadcasts now.)
 
 This list was written in the order the amendments landed and for a day
 carried them in the order 1-5, 8, 9, 10, 7, 6 -- the numbers were right and

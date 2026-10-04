@@ -11032,7 +11032,7 @@ privilege, which is the whole point.
 |---|---|
 | stub self-test, before | Ran 17 tests OK |
 | after | Ran 19 tests OK (a decision case and a two-client socket case) |
-| mutant: `followup_targets` returns the issuing connection alone | 1 red (the decision case) |
+| mutant: `followup_targets` returns the issuing connection alone | 2 red (the decision case AND the socket case) |
 | mutant: the serve loop writes followups to `conn` alone (the pre-fix wiring) | 1 red (the socket case; the decision case cannot see the wiring, which is why both exist) |
 | mutant: a closed connection is never removed from the list | first version 0 red -- an honest gap; the socket case now asserts the list drops to one after a client closes, and the mutant is 1 red |
 | `scripts/qa-player-scenarios.sh run cold --apply` (PLY-H17/H18 phase A, the stub's existing consumer) | 20 pass, 0 fail |
@@ -11064,7 +11064,7 @@ the three remaining gates. Service.qml keeps what Qt owns and nothing else.
 |---|---|
 | new tests against the shipping tree | node 1852 checks, **27 failures**; spec 70 passed, **1 failed** (`Property 'seekQueueStep' ... is not a function`) |
 | after | node 1852 / 0, spec 71 / 0 |
-| named mutations of the shipping functions | **28**, each applied alone, each red: M1 and M1b the nothing_playing refusal and the stop ladder (2 and 4), M2 bad_seconds, M3 at_floor, M4 a queued live forgotten, M5 the constant step instead of this request's size, M6 the throttle in the spawn gate (3), M7 the forward floor-clear, M8 live replacing the sum, M9 a gone player clearing the readout, M10 the argv builder, M11 and M11b the stale-reply gate, M12 the entry-id drop, M13a/b/c running-false, undefined-rewind and the raw store (2), M14a/b the floor memory, M15 the throttle restart, M16 clear keeping the memory, M17 a queued live counting as pending (5), M18 the D10 exemption (2), M19 the error member the footer reads, M20 an empty window counting as a window, M21 the reading term in the tick gate, M22 the unknown-kind fall-through, M23 the pending the reply reports |
+| named mutations of the shipping functions | **28**, each applied alone, each red: M1 and M1b the nothing_playing refusal and the stop ladder (2 and 4), M2 bad_seconds, M3 at_floor, M4 a queued live forgotten, M5 the constant step instead of this request's size, M6 the throttle in the spawn gate (3), M7 the forward floor-clear, M8 live replacing the sum, M9 a gone player clearing the readout, M10 the argv builder, M11 and M11b the stale-reply gate, M12 the entry-id drop, M13a/b/c running-false, undefined-rewind and the raw store (2), M14a/b the floor memory, M15 the throttle restart, M16 clear keeping the memory, M17 a queued live counting as pending (5 when the lane measured it, 6 at this tree -- F-RWD-21's re-pinned check asserts a queued live issues an argv), M18 the D10 exemption (2), M19 the error member the footer reads, M20 an empty window counting as a window, M21 the reading term in the tick gate, M22 the unknown-kind fall-through, M23 the pending the reply reports |
 | spec mutations | 3, each 71 -> 70 passed: two field renames and the D10 exemption, which is how the plan's field names -- a join Service.qml reads BY NAME -- became a call |
 
 Two things the lane handed up rather than deciding, both settled at
@@ -11150,4 +11150,106 @@ next occurrence says whether the 1 Hz tick stopped (a `paused` corrected
 false by a reply) or the number is simply late. That is a smaller claim
 than "we cannot tell", and it is the honest one: the instrument that could
 not tell has been replaced rather than the finding being closed.
+
+## The review of the F-RWD-18/19 round, and what it cost, 2026-10-03
+
+Four lenses over 56ffba7..7ac9d84, every finding handed to adversarial
+verifiers. **28 findings; 26 kept after verification (23 confirmed, 3
+partial), 2 refuted.** Six P2s. Every one is closed below or filed.
+
+### The two that matter
+
+**A test pinned to a field nothing reads** (equivalence lens, P2). The
+reducer's plan carried an `apply` flag beside `readout`. Service.qml decides
+from `readout`; nothing read `apply`; and the node checks asserted `apply`.
+So nulling `readout` -- which stops the bar updating from a seek reply for
+ever and never restamps the zero point -- left the node suite **green**,
+while flipping the dead flag reddened two checks. Only the QML spec caught
+the real mutation, and by an incidental null dereference rather than an
+assertion. That is rule 14's shape exactly, inside the round whose own claim
+was "28 named mutations each reddening exactly the decision it broke".
+The field is gone, the checks assert `readout.store` / `readout.rewind`, and
+the mutation that was green is now 2 red.
+
+**A check that changed its subject** (instrument lens, P2). R10 asserted the
+PLAYER's stored reading rose while paused. The lead's F-RWD-24 repair moved
+it to the service's derived count-up, which rises from the shell's own 1 Hz
+clock with no player involved -- and said so nowhere. The check could no
+longer go red for readings that stop arriving, which is one of the two
+causes F-RWD-22 exists to tell apart. R10 and R11 now assert BOTH, from one
+snapshot per end, so a stopped reply stream and a stopped tick redden
+different checks.
+
+### The rest, by what they were
+
+- **Sinks.** F-SINK-13: the slow-helper fixture inherits the helper's
+  credentialed environment and slept four seconds holding it dumpable, where
+  the real helper shields itself in about 105 ms (D-SINK-9). Measured both
+  ways; fixed with the same `prctl` call, and the fixture now refuses to
+  sleep at all if the shield fails. The scenario also claimed "No URL is
+  printed" with nothing scanning its own stdout, and R6's scans run long
+  before this round's prints: R18 scans the run's own output at the end and
+  re-scans the harness log after R16's second shell.
+- **Tests with no teeth.** The `log_conns` half of F-MPV-2 had no check at
+  all -- registering every client as a subscriber, or none, left the suite
+  green. The socket case now drives a DROPPED seek as well, and asserts the
+  subscriber list shrinks when a subscribed client closes; three mutations
+  that were green are red. The ctx join between `Service.qml`'s `seekCtx()`
+  and the reducer was a join by name over defaults that all look healthy --
+  renaming `pendingPlayId` by one character turned F-RWD-24's gate off with
+  nothing red. A check reads the real file and compares the key sets.
+- **Dead code and dead claims.** A floor assignment in the reply branch was
+  unobservable under a comment asserting a precedence with no reachable
+  case. `dispatch`'s `subscribed` parameter was unread. The stub's docstring
+  still described the behaviour F-MPV-2 had just fixed. A paragraph in the
+  tests still called F-RWD-21's asymmetry "the tree as it shipped" an hour
+  after the tree stopped doing it. The socket case waited four seconds for a
+  threshold its own loop can never reach, on every gate run.
+- **Numbers.** Three mutation counts understated (all in the safe
+  direction), the stub table's "1 red" that is 2, M17's 5 that is 6 at this
+  tree, QA-REWIND's "17 cases" and "floor of 14" for a floor that has moved
+  three times in two days -- the counts now point at `STUB_TESTS_MIN` rather
+  than being copied. The floor recipe over-counted the two new R18 blocks.
+- **A board row the lead inverted.** F-RWD-23 described the control-slot
+  handover in the opposite direction from the measurement it cited, and
+  called the wrong side "conservative": under `Model.healthTick` a busy tick
+  ADVANCES the counter toward the restart, so the measured side (slot free,
+  kind still set, `healthBusy` false) is the one that resets it. Corrected
+  against QA-REWIND 9.5.
+- **An UNVERIFIED gap with no row.** QA-REWIND 9.8 lists three; the board
+  cited one. The second is now F-RWD-25.
+
+### Refuted, and worth recording
+
+The claims lens filed a P2 saying the refactor had tightened `canRewind` and
+made three Guide refusals live. The verifier refuted it: the finding quoted
+a one-line `grep` of a TWO-line binding, and the history term it said
+`Model.canRewindNow` added was already there at 56ffba7. Driving both
+expressions over the same inputs gives identical answers. "Behaviour is
+unchanged" stands on that point.
+
+### F-RWD-22, settled by the instrument the review asked for
+
+R10 was split into the two readings it had been conflating, and told us on
+its first run which one moved:
+
+```
+PASS R10 the SHOWN count-up rises while paused (12.375 -> 16.375)
+FAIL R10 the PLAYER's own reading rises too  (12.375 -> 12.375)
+```
+
+The stored reading is written only when a control reply lands, and whether
+one lands inside any given three seconds is chance: the health tick is 10 s,
+and R11 passed the same pair only because `ipc back 10` runs a second
+before it. So the flake was the check asserting that a reply happened to
+arrive, which is not a promise this product makes, and the product was never
+late. R10 now asserts the shown count-up rises (the promise), the stored
+reading never goes backwards (always true), and that over a window
+containing a tick by construction it rises -- measured 11.136 -> 24.357 over
+15 s. Final run: **112 passed, 0 failed, 110 assertions**, the owner's shell
+untouched.
+
+That is five red runs across two days for a claim nobody had meant to make,
+and the thing that settled it was splitting one assertion into two that fail
+for different reasons.
 

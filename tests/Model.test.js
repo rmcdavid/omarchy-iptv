@@ -8902,12 +8902,33 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      "Nothing moved" + Model.SEP + "6:52 behind live", "Nothing moved", "Nothing moved" + Model.SEP + "0:30 behind live",
      "Nothing moved" + Model.SEP + "5:00 behind live",
      "Nothing moved", "Nothing moved", "Nothing playing"])
+  // The ctx join. Service.qml's seekCtx() builds the reducer's input BY NAME,
+  // and every field of seekQueueCtx defaults to something healthy-looking
+  // when absent -- a missing pendingPlayId is "", which turns F-RWD-24's gate
+  // off; a missing controlBusy is false, which turns the spawn gate off. So a
+  // one-character misspelling on the service side switches a decision off
+  // with nothing red. Measured by the review: renaming pendingPlayId to
+  // pendingPlayid in seekCtx() left node 1855/0 and the spec 71/0. This reads
+  // the real file and compares the two lists, so the join is a call.
+  checkCall("F-RWD-19: the ctx Service.qml builds carries exactly the keys the reducer reads", function () {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Service.qml"), "utf8")
+    const body = src.split("function seekCtx()")[1].split("\n  }")[0]
+    const keys = []
+    const re = /([A-Za-z_][A-Za-z0-9_]*)\s*:/g
+    let m
+    while ((m = re.exec(body)) !== null) keys.push(m[1])
+    keys.sort()
+    return [keys, Model.SEEK_CTX_KEYS.slice().sort(), keys.length] },
+    [Model.SEEK_CTX_KEYS.slice().sort(), Model.SEEK_CTX_KEYS.slice().sort(), Model.SEEK_CTX_KEYS.length])
+  check("F-RWD-19: and seekQueueCtx answers exactly those keys, so a field added to one side is missing from the other",
+    Object.keys(Model.seekQueueCtx ? Model.seekQueueCtx({}) : {}).sort(), Model.SEEK_CTX_KEYS.slice().sort())
+
   // F-RWD-24: a reading that arrives while a play is queued belongs to the
   // stream the user has already left, and the entry id cannot say so --
   // currentEntryId still holds the old entry until the new load's start-file
   // arrives, so the stale reading MATCHES. Measured on the display: 0:16
   // behind live on a channel 300 ms old. Mutation: drop the zapping gate ->
-  // 1 failure.
+  // 2 failures (this check and the at-floor one below it).
   ;(function () {
     const live = { ok: true, running: true, rewind: { position: 400, floor: 44, ceiling: 418, history: 356, ahead: 18,
                                                       behindLive: 16, zeroed: true, paused: false, pausedForCache: false, entryId: 7 } }
@@ -9104,14 +9125,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: range, throttled: true }) }).state.pending]) },
     [["applying", byArgv(-10)], ["queued", []], ["queued", []], 0, -10])
 
-  // 7. A forward request is a reason to try backward again afterwards; the
-  // reply will say if the floor is still there.
-  // Mutation: `st.pending > 0 ? false : st.atFloor` -> `st.atFloor`
-  // -> 1 failure.
+  // 7. A forward or live request is a reason to try backward again
+  // afterwards; the reply will say if the floor is still there.
+  // Mutation: the live branch keeping `st.atFloor` -> 1 failure.
   //
-  // F-RWD-21 (filed by this lane, see the report): `live` does NOT clear it
-  // at the issue, only its reply does. That asymmetry is the tree as it
-  // shipped and is pinned here as such rather than changed under a refactor.
+  // (The lane that lifted this found `live` NOT clearing the memory and
+  // filed F-RWD-21 rather than changing it under a refactor, which was the
+  // right call; the lead then settled it the other way at integration. The
+  // paragraph that described the asymmetry as "the tree as it shipped" stood
+  // here for an hour after the code stopped doing it -- the review found it.)
   // F-RWD-21: a FORWARD press and a LIVE request both clear the memory at the
   // issue; a backward one keeps it, because it is the only one the memory is
   // about. The lane that lifted this found live keeping it and filed rather
@@ -9148,7 +9170,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      // Nothing queued is nothing to do, and that is NOT a clear: the readout
      // belongs to a player that is still there.
      Model.seekQueueStep(st(), { kind: "issue", ctx: ctx({ playing: false }) }).clearReadout]) },
-    [{ state: st(), reply: null, argv: [], apply: false, announce: false,
+    [{ state: st(), reply: null, argv: [], announce: false,
        clearReadout: true, restartThrottle: false, readout: null },
      true, false])
 
@@ -9186,24 +9208,32 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // -> 1 failure; widening it to `|| !alive` -> 1 failure.
   const okReply = { ok: true, kind: "seek", running: true, mode: "by", requested: -10, applied: -10,
                     refused: false, atFloor: false, atEdge: false, rewind: range }
-  checkCall("F-RWD-19: a reply that arrives with a zap queued, or with nothing playing, applies nothing and announces nothing", function () { return (
-    [[Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).apply,
+  // Asserted on `readout`, which is the field Service.qml obeys, and never on
+  // a field nothing reads: the plan used to carry `apply` beside it, and a
+  // mutation that nulled `readout` -- the bar never updating from a seek
+  // reply again -- left this suite green while flipping the dead field
+  // reddened two checks. The field is gone; these assert the real one.
+  checkCall("F-RWD-19: a reply that arrives with a zap queued, or with nothing playing, stores nothing and announces nothing", function () { return (
+    [[Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).readout,
       Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).announce,
-      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).readout,
       Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).restartThrottle],
-     [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ playing: false }) }).apply,
+     [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ playing: false }) }).readout,
       Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ playing: false }) }).announce],
-     [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx() }).apply,
+     // the healthy reply: the readout is carried, it says STORE, and it
+     // carries the reply's own numbers -- nulling it must redden this
+     [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx() }).readout.store,
+      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx() }).readout.rewind.behindLive,
+      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx() }).readout.clear,
       Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx() }).announce]]) },
-    [[false, false, null, true], [false, false], [true, true]])
+    [[null, false, true], [null, false], [true, range.behindLive, false, true]])
   // The stop ladder is deliberately NOT part of this gate: `stopping` holds
   // while the player is still answering, and the reply it answered with is
   // about a stream that is still on screen. This is the gate the service has
   // always had on this path, and it is pinned so a later tidy cannot widen it
   // to `alive` without a reader seeing the change.
   checkCall("F-RWD-19: a reply during the stop ladder is still applied -- the reply gate is `playing`, not the press gate", function () { return (
-    [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ stopping: true }) }).apply,
-     Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ userStopped: true }) }).apply]) },
+    [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ stopping: true }) }).readout.store,
+     Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ userStopped: true }) }).readout.store]) },
     [true, true])
 
   // 12. The readout rules, shared by the `status`, `pause`, `probe` and
@@ -9296,7 +9326,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     [Model.seekQueueStep(st({ pending: -40, liveQueued: true, atFloor: true }), { kind: "clear", ctx: ctx() }),
      Model.seekQueueStep(st({ pending: -40, liveQueued: true, atFloor: true }),
                          { kind: "clear", ctx: ctx({ playing: false, controlBusy: true, throttled: true }) }).state]) },
-    [{ state: st(), reply: null, argv: [], apply: false, announce: false,
+    [{ state: st(), reply: null, argv: [], announce: false,
        clearReadout: true, restartThrottle: false, readout: null },
      st()])
 
@@ -9304,8 +9334,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // defers a drive of the queue AND by the issue branch's own first gate, so
   // the deferral and the gate cannot drift apart.
   // Mutation: `st.liveQueued || st.pending !== 0` -> `st.pending !== 0`
-  // -> 5 failures (the deferral AND the four places a queued live has to
-  // survive: the gate shares this one expression with them).
+  // -> 6 failures at this tree (the deferral, the four places a queued live
+  // has to survive, and F-RWD-21's re-pinned check, which asserts that a
+  // queued live issues an argv). The lane measured 5 before the integration
+  // added that sixth; a count in a comment is a claim, so it is re-levelled
+  // here rather than left as the number that was true for one commit.
   checkCall("F-RWD-19: seekQueuePending is the one answer to `is anything waiting`, and a queued live counts", function () { return (
     [Model.seekQueuePending(st()), Model.seekQueuePending(st({ pending: -10 })),
      Model.seekQueuePending(st({ liveQueued: true })), Model.seekQueuePending(st({ pending: 0.4 })),
@@ -9400,7 +9433,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   checkCall("F-RWD-19: an unknown event kind is a no-op: no reply, no argv, no clear", function () { return (
     [Model.seekQueueStep(st({ pending: -10, atFloor: true }), { kind: "nonsense", ctx: ctx() }),
      Model.seekQueueStep(st({ pending: -10 }), null).argv]) },
-    [{ state: st({ pending: -10, atFloor: true }), reply: null, argv: [], apply: false,
+    [{ state: st({ pending: -10, atFloor: true }), reply: null, argv: [],
        announce: false, clearReadout: false, restartThrottle: false, readout: null },
      []])
 })()

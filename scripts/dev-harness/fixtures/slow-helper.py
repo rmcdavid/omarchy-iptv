@@ -35,8 +35,32 @@ standard library only -- this file is dev tooling and never ships, but it
 runs the shipped helper and must not need anything the helper does not.
 """
 
-import os
 import sys
+
+
+def shield_environment():
+    """Non-dumpable, as this file's FIRST act, exactly as the real helper
+    does for the same reason (D-SINK-9).
+
+    This fixture sits between the service and the helper and INHERITS the
+    helper's environment, OMARCHY_IPTV_URL and its credentials with it. The
+    real helper shields itself within about 105 ms of exec; this one sleeps
+    for seconds on purpose, so leaving it dumpable would turn a measured
+    105 ms window into a measured four-second one and re-open the sink the
+    helper closed -- in a fixture a scenario runs on the owner's own
+    machine. The review of the F-RWD-18 round found it. prctl(PR_SET_DUMPABLE,
+    0) is what the helper calls; it is in ctypes, which is why the import
+    below is the only one above this line."""
+    try:
+        import ctypes
+        return ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0) == 0
+    except Exception:
+        return False
+
+
+SHIELDED = shield_environment()
+
+import os
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,6 +85,11 @@ def main():
         ms = 4000
     if not os.path.exists(REAL):
         sys.stderr.write("slow-helper: no omarchy-iptv.real beside me\n")
+        return 2
+    if not SHIELDED:
+        # Refuse rather than sleep for seconds holding a credentialed
+        # environment in a readable /proc entry.
+        sys.stderr.write("slow-helper: could not go non-dumpable, refusing to hold the environment\n")
         return 2
     if verb_of(argv) in slow and ms > 0:
         time.sleep(ms / 1000.0)

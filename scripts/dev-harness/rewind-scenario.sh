@@ -65,7 +65,10 @@
 #   scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f
 #   scripts/dev-harness/rewind-scenario.sh --tree /tmp/tree-without-D10
 #
-# Output: one PASS/FAIL line per assertion and a summary. No URL is printed.
+# Output: one PASS/FAIL line per assertion and a summary, and the run SCANS
+# ITS OWN STDOUT for a URL at the end (R18) rather than claiming not to print
+# one -- R6's scans cover the helper replies and the harness log, and they run
+# long before the prints this file has grown since.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -357,6 +360,10 @@ export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
 HELPER=$(readlink -f "$PLUGIN_ROOT/bin/omarchy-iptv")
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-rewind-XXXXXX")
 : >"$WORK/replies.jsonl"
+# Everything from here on is tee'd so R18 can scan what the operator reads.
+RUNOUT="$WORK/run.out"
+: >"$RUNOUT"
+exec > >(tee -a "$RUNOUT") 2>&1
 echo "== plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
 
 # ---- the local live stream: a loopback server and two sliding-window HLS
@@ -560,19 +567,36 @@ ck "R10 the position moved back 10 while paused (before $p0, after $p1)" '[[ $(n
 # so the delta reads 3 to 5.5 for a true 1 s/s (measured 1.8-5.5 over four
 # runs, F-HARNESS-3): the band is [1.5, 6.5], red for a number that holds
 # (0) and for one that doubles (8+).
-# One snapshot per END, and the whole state printed with it: when this
-# flakes (F-RWD-22, once in five runs) the run must carry its own
-# diagnosis -- a count that held because the service was not paused reads
-# differently from one that held because the tick never fired.
-s0=$(ipc state); b0=$(snap_of behindLive "$s0")
+# TWO readings, from one snapshot per end, because they fail for different
+# reasons and F-RWD-22 is the record of not being able to tell them apart:
+#   STORED, `rewind.behindLive`, is what the PLAYER last said, written only
+#     when a control reply lands. It stops rising if the replies stop.
+#   SHOWN, `behindLive`, is Model.behindLiveNow over the service's own 1 Hz
+#     tick. It stops rising if the tick stops -- if `paused` were corrected
+#     false, say -- and it rises from the shell's clock with no player at all.
+# Asserting only one of them is how an earlier version of this check moved
+# from the player's reading to the local clock without saying so.
+stored_of() { qa_field "d['rewind']['behindLive'] if isinstance(d.get('rewind'), dict) else None" "$1"; }
+s0=$(ipc state); b0=$(snap_of behindLive "$s0"); r0=$(stored_of "$s0")
 sleep 3
-s1=$(ipc state); b1=$(snap_of behindLive "$s1")
+s1=$(ipc state); b1=$(snap_of behindLive "$s1"); r1=$(stored_of "$s1")
 printf '   R10 paused=%s/%s stored=%s/%s shown=%s/%s text=%s\n' \
   "$(qa_field "d['paused']" "$s0")" "$(qa_field "d['paused']" "$s1")" \
-  "$(qa_field "d['rewind']['behindLive'] if isinstance(d.get('rewind'), dict) else None" "$s0")" \
-  "$(qa_field "d['rewind']['behindLive'] if isinstance(d.get('rewind'), dict) else None" "$s1")" \
-  "$b0" "$b1" "$(qa_guide_field "d['playbackStateText']" "$s1")"
-ck "R10 behindLive counts UP while paused ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
+  "$r0" "$r1" "$b0" "$b1" "$(qa_guide_field "d['playbackStateText']" "$s1")"
+ck "R10 the SHOWN count-up rises while paused, on the service's own tick ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
+# The STORED reading is written only when a control reply lands, and whether
+# one lands inside any given three seconds is chance -- the health tick is
+# 10 s. That is F-RWD-22 settled: the check that flaked one run in five was
+# asserting that a reply happened to arrive, which is not a promise this
+# product makes. Over three seconds the honest claim is that it never goes
+# BACKWARDS; the arrival itself is asserted below, over a window that
+# contains a tick by construction.
+ck "R10 the PLAYER's own reading never goes backwards while paused ($r0 -> $r1)" '[[ $(ge "$(fdelta "$r0" "$r1")" 0) == 0 ]]'
+sleep 12
+r2=$(stored_of "$(ipc state)")
+printf '   R10 stored after a further 12 s: %s\n' "$r2"
+ck "R10 and over a window that contains a health tick it rises, so the replies keep arriving ($r0 -> $r2)" \
+  '[[ $(near "$(fdelta "$r0" "$r2")" 15 6) == 0 ]]'
 ck "R10 playbackStateText says paused ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" == paused* && "$(snap playbackStateText)" == *"behind live" ]]'
 is "R10 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
@@ -585,8 +609,13 @@ is "R11 paused" "$(pause_toggle)" "paused"
 sleep 1
 p0=$(pos); sleep 2; p1=$(pos)
 ck "R11 the position holds while paused ($p0, $p1)" '[[ $(near "$p0" "$p1" 0.25) == 0 ]]'
-b0=$(rw behindLive); sleep 3; b1=$(rw behindLive)
-ck "R11 behindLive counts up ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
+# The same pair as R10, for the same reason.
+s0=$(ipc state); b0=$(snap_of behindLive "$s0"); r0=$(stored_of "$s0")
+sleep 3
+s1=$(ipc state); b1=$(snap_of behindLive "$s1"); r1=$(stored_of "$s1")
+printf '   R11 stored=%s/%s shown=%s/%s\n' "$r0" "$r1" "$b0" "$b1"
+ck "R11 the SHOWN count-up rises ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
+ck "R11 the PLAYER's own reading rises ($r0 -> $r1)" '[[ $(near "$(fdelta "$r0" "$r1")" 4 2.5) == 0 ]]'
 is "R11 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
 ck "R11 resumed from the held position ($(rf 'd["pos"]' "$w") vs $p1)" '[[ "$(rf "d[\"ok\"]" "$w")" == true && $(near "$(rf "d[\"pos\"]" "$w")" "$p1" 4.0) == 0 ]]'
@@ -735,6 +764,13 @@ printf '   R16 quiet window: %s samples, status runs %s, marks %s\n' \
   "$qsam" "$qstatus" "$(rf 'd["marks"]' "$q")"
 ck "R16 control: the shell sampled itself over the ${QUIET_MS} ms quiet window ($qsam >= 200)" '[[ $(ge "$qsam" 200) == 0 ]]'
 ck "R16 control: health ticks are visible to the sampler ($qstatus status runs >= 2)" '[[ $(ge "$qstatus" 2) == 0 ]]'
+# And the cadence itself, which HEALTH_TICK_MS asserts by NAME and nothing
+# read back (rule 13). Over a 28 s quiet window a 10 s tick gives 2 or 3
+# runs; 1 or fewer means the period is above 14 s, 4 or more means it is
+# below 9.3 s, and either way the TICKS arithmetic the busy window argues
+# from is wrong. A band, because the window does not start on a tick.
+ck "R16 control: and at the cadence HEALTH_TICK_MS claims ($qstatus runs in ${QUIET_MS} ms is 2 or 3)" \
+  '[[ $(ge "$qstatus" 2) == 0 && $(ge 3 "$qstatus") == 0 ]]'
 ck "R16 NEGATIVE control: healthBusy is TRUE while a status helper HOLDS the slot ($qsb samples >= 20)" '[[ $(ge "$qsb" 20) == 0 ]]'
 is "R16 and never false while a status helper holds the slot" "$qsf" "0"
 is "R16 and never the sentinel while a status helper runs" "$qsu" "0"
@@ -815,18 +851,45 @@ is "R17 controlKind says a seek is in flight at the moment of the press" "$(svc 
 is "R17 the press coalesced rather than spawning" "$(rf 'd["state"]' "$p17")" "queued"
 is "R17 and the queue carries this press's own size" "$(rf 'd["pending"]' "$p17")" "-7"
 ipc stop >/dev/null 2>&1
+# The ladder has to still be RUNNING for this to be the decision it claims:
+# a press after the ladder has finished is refused for a different reason
+# (nothing is playing at all), and the two cannot be told apart from the
+# reply alone -- the reducer answers nothing_playing for both. So the state
+# is read in the same window as the press, and the check says which case it
+# saw. Without the slow tree this window is a few hundred milliseconds.
+st17=$(ipc state)
 s17=$(ipc back 10)
+is "R17 the stop ladder is still running at the moment of the press" "$(qa_field "d['stopping']" "$st17")" "true"
 is "R17 a press during the stop ladder is refused" "$(rf 'd["ok"]' "$s17")" "false"
 is "R17 and the refusal names nothing_playing" "$(rf 'd["error"]["code"]' "$s17")" "nothing_playing"
+
+echo "== R18 the run's own output carries no URL"
+# R6 scans the helper replies and the harness log, and it runs at R6 -- before
+# R10's diagnostic line, R16's two tallies and R17's state reads, and before
+# the second harness shell R16 starts appends to the log. This scans what a
+# reader actually sees, at the end, plus the log again for the second shell.
+if qa_leak_scan 'PASS|FAIL' "://|$HOST|live\.m3u8|/rewind/" "$RUNOUT"
+then ok "R18 the run's own stdout carries neither a URL nor the fixture host ($(qa_count 'PASS|FAIL' "$RUNOUT") lines)"
+else bad "R18 the run's stdout: leak or vacuous capture (status $?; $(wc -l <"$RUNOUT") lines)"; fi
+if qa_leak_scan 'service loaded' "://|$HOST|live\.m3u8|/rewind/" "$HLOG"
+then ok "R18 the harness log still carries none after the second shell"
+else bad "R18 the harness log after R16: leak or vacuous capture (status $?)"; fi
 
 # The floor (player-scenario.sh's rule): assert how many assertions ran so a
 # check that stops executing turns the run red instead of shortening it.
 # Recount after adding or removing one:
-#   grep -cE '^(is|ck) ' scripts/dev-harness/rewind-scenario.sh  plus the two R6
-#   blocks, MINUS the floor line itself below (it is an `is` line the grep
-#   counts and the counter has not yet reached): 103 + 2 - 1 = 104.
-# (78 before R16 and R17; the 26 new ones are F-RWD-18's.)
-EXPECTED_CHECKS=104
+# The number is what a GREEN run prints, not an arithmetic from the source:
+# the grep below over-counts, because some `is`/`ck` lines sit in branches a
+# normal run does not take (the --tree and --baseline paths), and it
+# under-counts the four if/ok/bad blocks of R6 and R18. Re-level it from the
+# summary line of a green run and say which run:
+#   grep -cE '^(is|ck) ' scripts/dev-harness/rewind-scenario.sh   # upper bound
+# 109 as of the F-RWD-22 run on 2026-10-03 (108 before R10 gained its third).
+# The summary's "passed" can exceed this: the if/ok/bad blocks count as
+# passes without being assertions, which is why the two numbers differ by
+# two on a green run and why this floor is read off "assertions executed".
+# (78 before R16 and R17; the rest are F-RWD-18's and the review's.)
+EXPECTED_CHECKS=109
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"
 
 printf '\n== rewind-scenario: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"

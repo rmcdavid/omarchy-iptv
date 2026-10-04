@@ -5079,6 +5079,18 @@ function seekQueueState(value) {
 // field that can disagree. `rewind` is the stored readout: the cap the
 // coalescer applies is read from its `history` here, so there is one source
 // for it rather than a `historyS` beside an object that also carries it.
+// The keys `seekQueueStep` reads out of its ctx, which Service.qml's
+// seekCtx() builds BY NAME -- the join rule 13 is about. Every field here
+// defaults to something healthy-looking when absent (a missing
+// `pendingPlayId` is "", which turns the F-RWD-24 gate off; a missing
+// `controlBusy` is false, which turns the spawn gate off), so a one-character
+// misspelling on the service side would switch a decision off with nothing
+// red anywhere. The node suite (dev branch) reads seekCtx() out of
+// Service.qml and compares its keys with this list, so the join is checked
+// rather than copied.
+var SEEK_CTX_KEYS = ["controlBusy", "currentEntryId", "pendingPlayId", "playing", "rewind",
+                     "socket", "stepS", "stopping", "throttled", "userStopped"]
+
 function seekQueueCtx(value) {
   var c = value && typeof value === "object" ? value : {}
   return {
@@ -5118,7 +5130,13 @@ function seekPlanOf(state, extra) {
     state: seekQueueState(state),
     reply: e.reply === undefined ? null : e.reply,
     argv: e.argv === undefined ? [] : e.argv,
-    apply: e.apply === true,
+    // There is no `apply` field. The plan carried one, nothing read it --
+    // Service.qml decides from `readout` -- and the node checks asserted it,
+    // so nulling `readout` (which stops the bar updating from a seek reply
+    // for ever) left the suite green while flipping the dead field reddened
+    // two checks. The review's equivalence lens found it; it is rule 14's
+    // shape, a test pinned to a string the implementation happens to carry.
+    // Whether a reply is applied IS `readout.store` / `readout.clear`.
     announce: e.announce === true,
     clearReadout: e.clearReadout === true,
     restartThrottle: e.restartThrottle === true,
@@ -5329,12 +5347,17 @@ function seekQueueStep(state, event) {
     if (ctx.pendingPlayId !== "" || !ctx.playing) return seekPlanOf(st, { restartThrottle: true })
     var readout = rewindApply({ status: status, currentEntryId: ctx.currentEntryId,
                                 atFloor: st.atFloor, stepS: ctx.stepS })
-    // The helper's own verdict outranks the floor-clear above it: this reply
-    // IS the newest word on whether there is room behind.
-    var floor = readout.atFloor
-    if (status && status.ok === true) floor = status.atFloor === true
+    // A SEEK reply carries the helper's own verdict on the floor, and that
+    // verdict is the newest word there is, so it is taken whole. The
+    // floor-clear rewindApply applies -- the window grew back past a step --
+    // is live on the OTHER three reply paths (Service.qml's applyRewind
+    // reads readout.atFloor for status, pause and probe); here it could only
+    // ever be overwritten by the line below, so reading it back would be a
+    // dead assignment under a comment claiming a precedence with no
+    // reachable case. The review's tests lens found that.
+    var floor = status && status.ok === true ? status.atFloor === true : st.atFloor
     return seekPlanOf({ pending: st.pending, liveQueued: st.liveQueued, atFloor: floor },
-                      { apply: true, announce: true, readout: readout, restartThrottle: true })
+                      { announce: true, readout: readout, restartThrottle: true })
   }
 
   return seekPlanOf(st, {})
@@ -10057,6 +10080,7 @@ if (typeof module !== "undefined") {
     healthBusy: healthBusy,
     canRewindNow: canRewindNow,
     behindTickRunning: behindTickRunning,
+    SEEK_CTX_KEYS: SEEK_CTX_KEYS,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
     playFork: playFork,
     zapArgs: zapArgs,

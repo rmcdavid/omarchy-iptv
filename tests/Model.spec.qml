@@ -1952,7 +1952,7 @@ TestCase {
     // The plan's shape, exactly as Service.qml reads it.
     var plan = Model.seekQueueStep(idle, { kind: "press", by: -10, ctx: ctx })
     compare(JSON.stringify(Object.keys(plan).sort()),
-            JSON.stringify(["announce", "apply", "argv", "clearReadout", "readout", "reply", "restartThrottle", "state"]))
+            JSON.stringify(["announce", "argv", "clearReadout", "readout", "reply", "restartThrottle", "state"]))
     compare(JSON.stringify(Object.keys(plan.state).sort()), JSON.stringify(["atFloor", "liveQueued", "pending"]))
     compare(JSON.stringify(plan.argv), JSON.stringify(["player", "seek", "--socket", "/run/s", "--by", "-10"]))
     compare(plan.reply.state, "applying")
