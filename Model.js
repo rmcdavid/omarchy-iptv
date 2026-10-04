@@ -5041,6 +5041,279 @@ function parseRewind(value) {
   }
 }
 
+// ---- M5-01: the seek queue as a reducer (F-RWD-19) ----
+//
+// The queue's decisions used to be branches inside Service.qml -- the
+// refusals, the coalescing, the spawn gate, the at-floor memory, the stale
+// reply -- where no node test could drive them and no mutation could redden
+// them. The scenario observed their OUTCOMES on a real player, which is
+// calling the shipping path and not mirroring it, but an outcome is not a
+// decision: a branch could be deleted and the scenario still pass. They are
+// functions here, and the QML keeps only what Qt owns: reading
+// `controlProc.running` and a Timer's `running`, `Date.now()`, assigning
+// properties, starting timers, calling runControl and emitting the signal.
+//
+// The queue's own state is three fields and nothing else:
+//   pending     the signed second sum waiting (real: the cap is a float)
+//   liveQueued  the one request that is not a sum -- it REPLACES the sum
+//   atFloor     the last reply said the request was already at the floor
+function seekQueueState(value) {
+  var s = value && typeof value === "object" ? value : {}
+  return {
+    pending: finiteOr(s.pending, 0),
+    liveQueued: s.liveQueued === true,
+    atFloor: s.atFloor === true
+  }
+}
+
+// What the service knows about the world when an event arrives. `playing` IS
+// the service's `playing` property, which is `playerUp && nowPlaying !== null`
+// -- one field rather than the two the brief named, because nothing in this
+// block has ever distinguished them and two fields that must agree are a
+// field that can disagree. `rewind` is the stored readout: the cap the
+// coalescer applies is read from its `history` here, so there is one source
+// for it rather than a `historyS` beside an object that also carries it.
+function seekQueueCtx(value) {
+  var c = value && typeof value === "object" ? value : {}
+  return {
+    playing: c.playing === true,
+    stopping: c.stopping === true,
+    userStopped: c.userStopped === true,
+    controlBusy: c.controlBusy === true,
+    throttled: c.throttled === true,
+    rewind: c.rewind && typeof c.rewind === "object" ? c.rewind : null,
+    socket: str(c.socket),
+    pendingPlayId: str(c.pendingPlayId),
+    currentEntryId: Math.floor(finiteOr(c.currentEntryId, 0)),
+    stepS: finiteOr(c.stepS, REWIND_STEP_S)
+  }
+}
+
+// The refusal reply the IPC verbs serialise and the guide reads (CN15: a
+// refusal is reported, never a false success). One composer, because the
+// verbs refuse `bad_seconds` for an unparsable argument before the queue is
+// consulted at all and that reply must have the same shape as the queue's.
+function seekRefusal(requested, code, rewind) {
+  return { ok: false, kind: "seek", requested: requested, code: str(code),
+           error: { code: str(code) }, rewind: rewind === undefined ? null : rewind }
+}
+
+// Is anything waiting to be spawned? Read by the reply handler, which defers
+// a drive of the queue, and by the `issue` branch below -- one expression, so
+// the deferral and the gate cannot drift apart.
+function seekQueuePending(state) {
+  var st = seekQueueState(state)
+  return st.liveQueued || st.pending !== 0
+}
+
+function seekPlanOf(state, extra) {
+  var e = extra || {}
+  return {
+    state: seekQueueState(state),
+    reply: e.reply === undefined ? null : e.reply,
+    argv: e.argv === undefined ? [] : e.argv,
+    apply: e.apply === true,
+    announce: e.announce === true,
+    clearReadout: e.clearReadout === true,
+    restartThrottle: e.restartThrottle === true,
+    readout: e.readout === undefined ? null : e.readout
+  }
+}
+
+// What a reply means for the readout, shared by the `status`, `pause`,
+// `probe` and `seek` paths (design 2.1: all four carry a `rewind` object).
+// opts: status (the parsed helper reply), currentEntryId, atFloor (the
+// memory now), stepS.
+//
+//   store   write `rewind` and restamp the zero point
+//   rewind  the COERCED object, through parseRewind -- numbers finite or
+//           null, booleans strict, entryId a positive integer or null -- on
+//           every path. May be null with `store` true: a reply with no
+//           position has no reading, and that is a reading of "none", not
+//           "leave the last one".
+//   clear   there is no player to be behind, so the readout goes absent
+//   atFloor the memory after this reply
+//
+// A reply that carries no `rewind` field at all -- an older helper, a
+// refusal with no player -- leaves the last reading alone rather than
+// inventing one (rule 10). The entry-id drop is here: the object is keyed by
+// the player's entry id (2.2), and a reply in flight across a zap that has
+// landed carries the OLD entry's numbers, which the socket's start-file
+// event has already made visible as a mismatch.
+function rewindApply(opts) {
+  var o = opts || {}
+  var status = o.status && typeof o.status === "object" ? o.status : null
+  var atFloor = o.atFloor === true
+  var step = finiteOr(o.stepS, REWIND_STEP_S)
+  var entry = Math.floor(finiteOr(o.currentEntryId, 0))
+  var idle = { store: false, rewind: null, clear: false, atFloor: atFloor }
+  if (!status || status.ok !== true) return idle
+  if (status.running === false) return { store: false, rewind: null, clear: true, atFloor: atFloor }
+  if (status.rewind === undefined) return idle
+  var parsed = parseRewind(status.rewind)
+  if (parsed && parsed.entryId !== null && entry > 0 && parsed.entryId !== entry) return idle
+  // Room for a step again -- the stream filled past the floor, or the user
+  // moved -- so a backward press may spawn again.
+  var floor = atFloor
+  if (atFloor && parsed && finiteOr(parsed.history, null) !== null && parsed.history >= step) floor = false
+  return { store: true, rewind: parsed, clear: false, atFloor: floor }
+}
+
+// Ruling D10 as a predicate: a running control slot counts as busy for the
+// health tick's three-strikes restart UNLESS its kind is `seek`. The restart
+// guards a helper that never returns, which the 8 s control watchdog
+// terminates; a slot re-occupied every few hundred milliseconds by a
+// sub-second verb under a held key is the benign case it must not punish.
+// The service exposes this as one property the health timer reads, so there
+// is ONE expression and an observer can see it.
+function healthBusy(opts) {
+  var o = opts || {}
+  return o.running === true && str(o.kind) !== "seek"
+}
+
+// `b back` is hinted whenever something plays and the last range read is
+// non-empty (design 2.5): a rewind pressed inside the first seconds of a zap
+// lands on the first keyframe and moves nothing (spike 11.1). null history
+// is "no range read yet", which is not a window.
+function canRewindNow(opts) {
+  var o = opts || {}
+  if (o.playing !== true) return false
+  var r = o.rewind && typeof o.rewind === "object" ? o.rewind : null
+  if (!r) return false
+  return finiteOr(r.history, null) !== null && Number(r.history) > 0
+}
+
+// The paused count-up's 1 Hz timer runs only while paused with a reading to
+// count from (design 2.3); while playing nothing re-renders at all.
+function behindTickRunning(opts) {
+  var o = opts || {}
+  return o.paused === true && !!(o.rewind && typeof o.rewind === "object")
+}
+
+// One event against the queue, returning the PLAN the service then obeys.
+//
+// `event` is { kind, by, status, ctx }:
+//   press  a guide key or a verb, `by` signed whole seconds (negative back)
+//   live   back to the live edge (ruling D8); replaces the pending sum
+//   issue  drive the queue: spawn now if the slot is free and the throttle
+//          has elapsed. Called from the press, the throttle timer and after
+//          every control reply.
+//   reply  a `seek` reply came back
+//   clear  the player went away (play(), stop(), the socket's EOF)
+//
+// The plan is every decision the service obeys and nothing it has to decide:
+//   state           the queue's three fields after this event
+//   reply           the object the IPC verbs serialise and the guide reads
+//   argv            the helper argv to spawn NOW; [] is "spawn nothing"
+//   apply/announce  whether the reply reaches the readout and the signal
+//   readout         the rewindApply outcome when `apply`
+//   clearReadout    the readout goes absent and the throttle is disarmed
+//   restartThrottle the 300 ms throttle counts from THIS reply
+function seekQueueStep(state, event) {
+  var st = seekQueueState(state)
+  var ev = event && typeof event === "object" ? event : {}
+  var kind = str(ev.kind)
+  var ctx = seekQueueCtx(ev.ctx)
+  // A player on its way out takes no press: the stop ladder is already
+  // running, so a "queued" answer would promise a run that never comes
+  // (CN15). `playing` alone is not enough -- `stopping` and `userStopped`
+  // both hold while nowPlaying still names the channel.
+  var alive = ctx.playing && !ctx.stopping && !ctx.userStopped
+
+  if (kind === "clear") {
+    return seekPlanOf({ pending: 0, liveQueued: false, atFloor: false }, { clearReadout: true })
+  }
+
+  if (kind === "press") {
+    var n = Math.round(Number(ev.by))
+    if (!isFinite(n) || n === 0) return seekPlanOf(st, { reply: seekRefusal(ev.by, "bad_seconds", ctx.rewind) })
+    if (!alive) return seekPlanOf(st, { reply: seekRefusal(n, "nothing_playing", ctx.rewind) })
+    // The helper already said there is nothing behind the floor; spawning it
+    // to hear that again at a held key's repeat rate -- five times a second,
+    // a process each -- is the one case design 2.3 names.
+    if (n < 0 && st.atFloor) return seekPlanOf(st, { reply: seekRefusal(n, "at_floor", ctx.rewind) })
+    // A press after `g` was queued is a new intention: the live request
+    // stood for "forget the sum", and this press starts a new one.
+    var base = st.liveQueued ? 0 : st.pending
+    // `press` carries the direction and `step` the size: the size is THIS
+    // request's, so `back 30` is thirty seconds. The first version passed
+    // REWIND_STEP_S for every press and every verb seeked ten seconds
+    // whatever its argument (F-RWD-17).
+    var sum = coalesceSeek({
+      pending: base, press: n,
+      history: ctx.rewind ? ctx.rewind.history : null,
+      step: Math.abs(n)
+    })
+    var queued = { pending: sum, liveQueued: false, atFloor: st.atFloor }
+    var pressIssue = seekQueueStep(queued, { kind: "issue", ctx: ev.ctx })
+    // `pending` in the reply is the sum STILL waiting after the attempt, not
+    // the sum that was asked for: 0 when the helper was spawned, the sum when
+    // the slot or the throttle held it back, and 0 again when the sum rounded
+    // to nothing and was spent on no argv at all. Reading it off the new
+    // state rather than recomputing it is what keeps those three the same
+    // three the tree answered before F-RWD-19 moved them here.
+    return seekPlanOf(pressIssue.state, {
+      argv: pressIssue.argv,
+      clearReadout: pressIssue.clearReadout,
+      reply: { ok: true, kind: "seek", requested: n,
+               pending: pressIssue.state.pending,
+               state: pressIssue.argv.length > 0 ? "applying" : "queued" }
+    })
+  }
+
+  if (kind === "live") {
+    if (!alive) return seekPlanOf(st, { reply: seekRefusal("live", "nothing_playing", ctx.rewind) })
+    var liveQueue = { pending: 0, liveQueued: true, atFloor: st.atFloor }
+    var liveIssue = seekQueueStep(liveQueue, { kind: "issue", ctx: ev.ctx })
+    return seekPlanOf(liveIssue.state, {
+      argv: liveIssue.argv,
+      clearReadout: liveIssue.clearReadout,
+      reply: { ok: true, kind: "seek", requested: "live",
+               state: liveIssue.argv.length > 0 ? "applying" : "queued" }
+    })
+  }
+
+  if (kind === "issue") {
+    if (!seekQueuePending(st)) return seekPlanOf(st, {})
+    // The player is gone and the queue was aimed at it.
+    if (!alive) return seekPlanOf({ pending: 0, liveQueued: false, atFloor: false }, { clearReadout: true })
+    if (ctx.controlBusy || ctx.throttled) return seekPlanOf(st, {})
+    if (st.liveQueued) {
+      return seekPlanOf({ pending: 0, liveQueued: false, atFloor: st.atFloor },
+                        { argv: playerSeekArgv(ctx.socket, "live") })
+    }
+    // A forward request is a reason to try backward again afterwards; the
+    // reply will say if the floor is still there. The sum is spent whether
+    // or not an argv comes of it: playerSeekArgv answers [] for a request
+    // that rounds to nothing, and the helper is never spawned with no verb.
+    return seekPlanOf({ pending: 0, liveQueued: false, atFloor: st.pending > 0 ? false : st.atFloor },
+                      { argv: playerSeekArgv(ctx.socket, st.pending) })
+  }
+
+  if (kind === "reply") {
+    var status = ev.status
+    // A zap queued behind this run means the reply describes the stream the
+    // user has already left: play() cleared the readout when the zap was
+    // asked for, and the drain spawns `play` directly, so writing these
+    // numbers back would put the OLD stream's clock on the new channel's bar
+    // for up to a health tick. And a reply that lands after stop() or the
+    // player's EOF describes a player that is gone. Both apply nothing and
+    // say nothing. `playing` and not `alive` here, deliberately: this is the
+    // same gate the service has always had on this path.
+    if (ctx.pendingPlayId !== "" || !ctx.playing) return seekPlanOf(st, { restartThrottle: true })
+    var readout = rewindApply({ status: status, currentEntryId: ctx.currentEntryId,
+                                atFloor: st.atFloor, stepS: ctx.stepS })
+    // The helper's own verdict outranks the floor-clear above it: this reply
+    // IS the newest word on whether there is room behind.
+    var floor = readout.atFloor
+    if (status && status.ok === true) floor = status.atFloor === true
+    return seekPlanOf({ pending: st.pending, liveQueued: st.liveQueued, atFloor: floor },
+                      { apply: true, announce: true, readout: readout, restartThrottle: true })
+  }
+
+  return seekPlanOf(st, {})
+}
+
 // `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
 // probe is read-only.
 function playerProbeArgv(socket, ownerPid) {
@@ -9749,6 +10022,15 @@ if (typeof module !== "undefined") {
     behindLiveNow: behindLiveNow,
     seekTransientText: seekTransientText,
     parseRewind: parseRewind,
+    seekQueueState: seekQueueState,
+    seekQueueCtx: seekQueueCtx,
+    seekQueueStep: seekQueueStep,
+    seekQueuePending: seekQueuePending,
+    seekRefusal: seekRefusal,
+    rewindApply: rewindApply,
+    healthBusy: healthBusy,
+    canRewindNow: canRewindNow,
+    behindTickRunning: behindTickRunning,
     playerOrphanCheckArgv: playerOrphanCheckArgv,
     playFork: playFork,
     zapArgs: zapArgs,
