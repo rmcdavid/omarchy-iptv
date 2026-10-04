@@ -9,36 +9,43 @@
   "docs/PLAN-M4.md states and the M4 round never ran. The audit is",
   "docs/QA-EPG-PRECISION.md.",
   "",
-  "`oracle` is the point of the fixture. Each entry's plutoId is the",
-  "channel id Pluto itself uses: the installed playlist carries it inside",
-  "that row's stream URL and the guide carries it as the channel id. The",
-  "matcher reads neither -- it joins on the name -- so when the programme",
-  "that lands on a row is the programme of the channel whose id that row's",
-  "URL names, two independent identifiers agree and the pair is right for a",
-  "reason the code under test did not supply (CLAUDE.md rule 14). nowTitle",
-  "is unique per entry so the title alone says which guide channel won.",
+  "RE-LEVELLED 2026-10-04 BY F-EPG-11, AND THE ORACLE COLLAPSED WITH IT.",
+  "`oracle` entries were graded by an identifier the matcher did not read:",
+  "the Pluto channel id in each row's own stream URL. F-EPG-11 makes the",
+  "matcher read exactly that identifier, so 8 of this fixture's 9 pairs are",
+  "now matched BY the thing that used to grade them and `oracle` is a",
+  "tautology, not evidence. It is kept because it still pins the wiring, and",
+  "`oracleIsNowTheMatcher` makes the collapse an assertion rather than a",
+  "footnote. The one pair still graded by something the matcher never read is",
+  "in `returnedByRepair`, matched by NAME.",
+  "A grader that does not depend on the stream URL is owed to this fixture;",
+  "until one exists the precision question is OPEN, not answered here.",
   "",
-  "channelTotal 11 = 5 oracle pairs + 1 cross-channel pair + 2 country-",
-  "qualifier rows + 2 News12 rows dropped as ambiguous + 1 Tennis row.",
-  "matched 6 = the 5 oracle pairs plus the cross-channel pair, which is",
-  "the defect: D-EPG-5 is in the matched count, not outside it."
+  "channelTotal 11 = 5 address pairs + 1 D-EPG-5 row + 2 country-qualifier",
+  "rows (F-EPG-7, now matched by address) + 2 News12 rows + 1 Tennis row",
+  "(F-EPG-8, now matched by address).",
+  "matched 9 = the 5 address pairs, the 2 country-qualifier rows, the Tennis",
+  "row, and News12 Long Island by name."
  ],
  "now": 1790986500,
  "status": {
-  "matched": 6,
+  "matched": 9,
   "channelTotal": 11,
   "matchedById": 0,
+  "matchedByAddr": 8,
   "matchedByFeed": 0,
-  "matchedByName": 6,
+  "matchedByName": 1,
   "nameIndexed": 11,
   "nameDroppedPlaylist": 0,
   "nameDroppedGuide": 0,
-  "epgChannels": 6,
-  "programmeCount": 8,
-  "nowCount": 6
+  "addrIndexed": 8,
+  "addrDroppedPlaylist": 0,
+  "epgChannels": 9,
+  "programmeCount": 11,
+  "nowCount": 9
  },
  "warnings": [
-  "4 programmes for channels not in the playlist dropped"
+  "1 programmes for channels not in the playlist dropped"
  ],
  "oracle": [
   {
@@ -96,24 +103,9 @@
  },
  "unmatched": [
   {
-   "tvgId": "CSI.us@SD",
-   "finding": "F-EPG-7",
-   "why": "the key keeps '(United States)'; the oracle says 5efbd29e... is the right guide channel"
-  },
-  {
-   "tvgId": "FamilyTies.us@SD",
-   "finding": "F-EPG-7",
-   "why": "the key keeps '(United States)'; the oracle says 5f77939a... is the right guide channel"
-  },
-  {
-   "tvgId": "TennisChannel.us@Plus2",
-   "finding": "F-EPG-8",
-   "why": "the guide writes 'TennisChannel 2' as one word; no marker rule closes a missing space"
-  },
-  {
    "tvgId": "BloombergTV.us@US",
    "finding": "D-EPG-5",
-   "why": "REPAIRED: the id fold keeps the + that separates Bloomberg TV from the guide's Bloomberg TV+, so this pair no longer forms"
+   "why": "REPAIRED: the id fold keeps the + that separates Bloomberg TV from the guide's Bloomberg TV+, so this pair no longer forms. This row streams from an unbranded address and so is out of F-EPG-11's reach too, which is why it is the one row here that still tests the NAME rule's precision"
   }
  ],
  "plusPair": {
@@ -134,6 +126,54 @@
    "finding": "D-EPG-5",
    "why": "The row the + fold used to deny. It carries no Pluto id, so the oracle cannot confirm it the way it confirms the five above; it is right by reading, and it is here rather than in `oracle` so the two kinds of evidence stay distinguishable.",
    "nowTitle": null
+  }
+ ],
+ "oracleIsNowTheMatcher": {
+  "finding": "F-EPG-11",
+  "why": [
+   "Every plutoId below is now a key of build_alias's `addr` map pointing at",
+   "that same tvgId, which is precisely what the matcher looks a guide",
+   "channel up by. The test asserts that, so the collapse cannot be",
+   "forgotten: if the two ever become independent again this fixture says so",
+   "by going red."
+  ],
+  "matchedByAddrRank": true
+ },
+ "settledByAddress": [
+  {
+   "tvgId": "CSI.us@SD",
+   "finding": "F-EPG-7",
+   "guideId": "5efbd29e4aa26700076c0d06",
+   "nowTitle": "CSI",
+   "why": [
+    "The name key still keeps '(United States)' and still cannot match: that",
+    "half of F-EPG-7 is unchanged and asserted. What changed is that the",
+    "pair no longer costs anything, because the address reaches it.",
+    "Measured on the frozen inputs: the parenthetical strip was worth 29",
+    "rows and one CONTRADICTED pair before F-EPG-11 and is worth 1 row and",
+    "zero contradicted pairs after it."
+   ]
+  },
+  {
+   "tvgId": "FamilyTies.us@SD",
+   "finding": "F-EPG-7",
+   "guideId": "5f77939a630f530007dde654",
+   "nowTitle": "Family Ties",
+   "why": [
+    "the second country-qualifier row, same rule"
+   ]
+  },
+  {
+   "tvgId": "TennisChannel.us@Plus2",
+   "finding": "F-EPG-8",
+   "guideId": "681109b688b9d85d0938c6ba",
+   "nowTitle": "Tennis Today",
+   "why": [
+    "F-EPG-8 SETTLED. The guide writes 'TennisChannel 2' where the playlist",
+    "writes 'Tennis Channel +2 (720p)' and no key that strips markers can",
+    "join them -- which is still true and still asserted. The address joins",
+    "them without reading either name."
+   ]
   }
  ]
 }

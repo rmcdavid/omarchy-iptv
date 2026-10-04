@@ -88,6 +88,55 @@ added since.
   Against e83e4a6's helper that module reads: Ran 36 tests -- FAILED
   (failures=2, errors=4), six of the thirty-six.
 
+F-EPG-11, the ADDRESS strategy, 2026-10-04. Rule 11 again, same method: each
+run is the WHOLE suite in an isolated copy of this worktree with one thing
+changed and nothing else, helper restored in between. Copying the tree out of
+git costs 5 errors in test_marketplace_capabilities on every run below,
+before and after, and they are not counted as reddening anything.
+
+  Baseline in the worktree: Ran 825 tests, OK. With this round:
+  Ran 843 tests, OK.
+
+  Against the helper at 9ae43cf, the commit before this strategy, with this
+  round's tests and fixtures in place:
+
+      Ran 842 tests -- FAILED (failures=8, errors=20, skipped=2)
+
+  Twenty-three of the twenty-eight are this round's: the whole of
+  AddressStrategyTest and AddressIndexTest, the fixture count cases, and the
+  precision cases F-EPG-11 re-levelled. The decisions INSIDE the strategy
+  cannot be reddened by removing it, so each one is a named mutation of the
+  shipping function, one at a time:
+
+    M-F1. EPG_ADDR_MIN_TOKEN 12 -> 1 (the collision guard removed)
+                                                      failures=11
+         (reddens test_a_guide_id_shorter_than_the_floor_claims_nothing,
+          and the loosened floor also makes two real addresses collide)
+    M-F2. build_alias indexes the LOGO as well as the stream URL
+                                                       failures=6
+         (reddens test_a_guide_id_in_the_artwork_is_not_a_stream_identity)
+    M-F3. the address lookup moved BELOW the name lookup
+                                             failures=7, errors=2
+         (reddens both ranking cases and the strategy case)
+    M-F4. the address lookup moved ABOVE the exact tvg-id lookup
+                                             failures=4, errors=1
+         (reddens test_a_declared_tvg_id_is_consulted_before_an_address.
+          THIS MUTATION SURVIVED THE FIRST VERSION OF THIS MODULE: the rank
+          case passed under it, because there the two strategies resolved two
+          DIFFERENT guide channels onto one row and claim_channel settled it
+          either way. It takes one guide id that the two maps resolve to two
+          different ROWS to see the order at all, which is what the
+          `aaaaaaaaaaaaaaaaaaaa0009` pair in the fixture is for)
+    M-F5. the address lookup moved BELOW the feed lookup
+                                             failures=5, errors=1
+         (reddens test_the_address_outranks_the_feed_base)
+    M-F6. build_alias keeps the first claim on a token two rows share
+                                                       failures=6
+         (reddens test_an_address_two_rows_share_is_dropped_rather_than_guessed)
+    M-F7. the address token folded to lower case when indexed
+                                                       failures=6
+         (reddens test_the_address_match_is_case_sensitive)
+
 Run: python3 -m unittest discover -s tests
 """
 import contextlib
@@ -154,8 +203,15 @@ class MatcherFixtureTest(unittest.TestCase):
         for key, value in EXPECTED["status"].items():
             self.assertEqual(self.status[key], value, key)
         # Nothing is counted twice and nothing is lost between the buckets.
-        self.assertEqual(self.status["matchedById"] + self.status["matchedByFeed"]
-                         + self.status["matchedByName"], self.status["matched"])
+        # Summed over EPG_MATCH_KEYS and not over three names spelled out
+        # here: a strategy added to that tuple and forgotten in the status
+        # would have left this sum green, which is how F-EPG-11's counter
+        # could have shipped unreported.
+        self.assertEqual(sum(self.status[key] for key in helper.EPG_MATCH_KEYS),
+                         self.status["matched"])
+        for key in helper.EPG_MATCH_KEYS:
+            self.assertIn(key, EXPECTED["status"],
+                          "%s has no expectation in the fixture" % key)
 
     def test_the_status_is_also_what_is_written_to_disk(self):
         self.assertEqual(read(os.path.join(self.cache, "epg-status.json")), self.status)
@@ -346,6 +402,370 @@ class MatcherFixtureTest(unittest.TestCase):
         for key, value in EXPECTED["status"].items():
             if key != "nowCount":
                 self.assertEqual(status[key], value, key)
+
+
+ADDR = EXPECTED["addr"]
+_ROW_URL = re.compile(r'^#EXTINF:[^\n]*tvg-id="([^"]*)"[^\n]*\n([^#\n][^\n]*)$',
+                      re.MULTILINE)
+_ROW_LOGO = re.compile(r'^#EXTINF:[^\n]*tvg-id="([^"]*)"[^\n]*tvg-logo="([^"]*)"',
+                       re.MULTILINE)
+
+
+def playlist_rows(path):
+    """tvg-id -> stream URL, read out of the m3u itself.
+
+    The fixture's own side of every address assertion is read from the
+    FIXTURE and not from the helper's parse, so a test cannot be satisfied by
+    the same code it is testing (CLAUDE.md rule 14).
+    """
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    return {tvg: url.strip() for tvg, url in _ROW_URL.findall(text)}
+
+
+def playlist_logos(path):
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    return dict(_ROW_LOGO.findall(text))
+
+
+def guide_names(path):
+    """guide channel id -> its first <display-name>, read out of the xml."""
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    return dict(re.findall(r'<channel id="([^"]+)"><display-name>([^<]*)</display-name>',
+                           text))
+
+
+class AddressStrategyTest(unittest.TestCase):
+    """F-EPG-11: the guide channel id that the playlist row's own ADDRESS names.
+
+    The M4-01 precision audit (docs/QA-EPG-PRECISION.md) graded the name
+    matcher with an identifier the matcher never read: the guide's channel id,
+    sitting in the stream URL of the row that streams that channel. Measured
+    on the frozen 1,453-channel list against the frozen 427-declaration
+    guide: 193 rows carry such an id, the name matcher already paired 153 of
+    them with THAT SAME guide channel, paired 0 of them with a different one,
+    and left 40 unmatched. So the identifier was never in disagreement with
+    the matcher -- it was simply unread, and reading it takes `matched` from
+    226 to 265.
+
+    Each case below pins one decision, and every case first proves the join
+    was AVAILABLE -- the id really is in that row's address and the guide
+    really declares it with a programme in the window -- before asserting
+    what the matcher did with it. Without that half, "it did not match" is
+    satisfied by a fixture that never offered the match.
+
+    Rule 11, counts recorded in the module docstring: all nine cases go red
+    against the helper at 9ae43cf, where the strategy does not exist, and the
+    decisions INSIDE the strategy are proven by the named mutations listed
+    there -- the token floor, the artwork exclusion, the three rank
+    positions, the playlist-side uniqueness rule and the case fold.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.cache = cls.tmp.name
+        code, _, stderr = run("playlist", "--url", PLAYLIST, "--cache-dir", cls.cache)
+        assert code == 0, stderr
+        code, cls.status, stderr = run("epg", "--url", XMLTV, "--cache-dir", cls.cache,
+                                       "--force", "--now", str(NOW))
+        assert code == 0, stderr
+        cls.now = read(os.path.join(cls.cache, "epg-now.json"))
+        cls.rows = playlist_rows(PLAYLIST)
+        cls.logos = playlist_logos(PLAYLIST)
+        cls.declared = guide_names(XMLTV)
+        cls.guide_text = pathlib.Path(XMLTV).read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def assert_offered(self, guide_id):
+        """The guide declares it AND gives it a programme, so a refusal below
+        is the rule refusing and not the fixture withholding."""
+        self.assertIn(guide_id, self.declared, guide_id)
+        self.assertIn('channel="%s">' % guide_id, self.guide_text, guide_id)
+
+    def test_a_guide_id_in_the_stream_address_reaches_its_row(self):
+        """The strategy itself, at the sink the guide reads.
+
+        For each row the fixture declares matched by address: the id is a
+        token of that row's URL, the guide declares it, and the title that
+        landed is the title the guide carries for it. The name is excluded as
+        the cause in the same breath -- the guide's display-name does not fold
+        to this row's own name -- so the address is the only strategy that
+        could have produced the pair.
+        """
+        for tvg, entry in ADDR["matchedByAddress"].items():
+            guide_id = entry["guideId"]
+            self.assert_offered(guide_id)
+            self.assertIn(guide_id, re.findall(r"[A-Za-z0-9]+", self.rows[tvg]), tvg)
+            record = self.now["channels"].get(tvg)
+            self.assertIsNotNone(record, tvg)
+            self.assertEqual(record["now"]["title"], entry["nowTitle"], tvg)
+            self.assertNotEqual(helper.epg_name_key(self.declared[guide_id]),
+                                helper.epg_name_key(self.row_name(tvg)),
+                                "%s could have matched by name" % tvg)
+
+    def row_name(self, tvg):
+        text = pathlib.Path(PLAYLIST).read_text(encoding="utf-8")
+        found = re.search(r'^#EXTINF:[^\n]*tvg-id="%s"[^\n]*,(.*)$' % re.escape(tvg),
+                          text, re.MULTILINE)
+        self.assertIsNotNone(found, tvg)
+        return found.group(1)
+
+    def test_a_guide_id_that_is_not_hex_matches_too(self):
+        """The strategy must be provider-general, not Pluto-shaped.
+
+        `globalfashionchannel` is a real 20-character token of the installed
+        list and nothing about it is hex. A 24-hex regex would have been the
+        easy implementation and would have matched this provider only.
+        """
+        entry = ADDR["matchedByAddress"]["AddrSlug.us"]
+        self.assertFalse(re.fullmatch(r"[0-9a-f]+", entry["guideId"]))
+        self.assertEqual(self.now["channels"]["AddrSlug.us"]["now"]["title"],
+                         entry["nowTitle"])
+
+    def test_a_guide_id_in_the_artwork_is_not_a_stream_identity(self):
+        """Artwork provenance is not stream identity.
+
+        Indexing the logo URL as well reaches 8 more rows of the installed
+        list and costs nothing in recall, because all 8 match by name anyway
+        -- and 7 of the 8 stream from a DIFFERENT distributor than the
+        artwork (Pluto artwork on Amagi, CloudFront and Google DAI
+        addresses). Claiming a stream identity on the strength of a hotlinked
+        picture is the F-EPG-9 failure, so the logo is not indexed.
+        """
+        entry = ADDR["refused"]["AddrLogo.us"]
+        guide_id = entry["guideId"]
+        self.assert_offered(guide_id)
+        self.assertIn(guide_id, self.logos["AddrLogo.us"])
+        self.assertNotIn(guide_id, self.rows["AddrLogo.us"])
+        self.assertNotIn("AddrLogo.us", self.now["channels"])
+
+    def test_a_guide_id_shorter_than_the_floor_claims_nothing(self):
+        """The collision guard, and the whole of it.
+
+        A guide declaring id="playlist" would otherwise claim a row for every
+        address containing that word -- 583 of the 1,453 installed rows do.
+        Measured over those addresses: every alphanumeric token shared by two
+        or more of them that is not a 24-hex id is URL vocabulary, and the
+        longest is eight characters.
+        """
+        entry = ADDR["refused"]["AddrShort.us"]
+        guide_id = entry["guideId"]
+        self.assert_offered(guide_id)
+        self.assertLess(len(guide_id), helper.EPG_ADDR_MIN_TOKEN)
+        self.assertIn(guide_id, self.rows["AddrShort.us"])
+        self.assertNotIn("AddrShort.us", self.now["channels"])
+
+    def test_an_address_two_rows_share_is_dropped_rather_than_guessed(self):
+        """The name strategy's uniqueness discipline, kept for addresses.
+
+        A token two rows stream says nothing about which of them the guide
+        channel is, and a programme on the wrong channel is worse than a
+        blank row. Both rows are refused and both are counted.
+        """
+        first, second = "AddrDupA.us", "AddrDupB.us"
+        guide_id = ADDR["refused"][first]["guideId"]
+        self.assert_offered(guide_id)
+        self.assertEqual(self.rows[first], self.rows[second])
+        self.assertIn(guide_id, self.rows[first])
+        self.assertNotIn(first, self.now["channels"])
+        self.assertNotIn(second, self.now["channels"])
+        self.assertEqual(self.status["addrDroppedPlaylist"], 2)
+
+    def test_the_address_match_is_case_sensitive(self):
+        """A URL path is case-sensitive by the URL spec, so folding case
+        would read an identity the address does not assert. It costs nothing:
+        0 of the 193 real rows need the fold."""
+        entry = ADDR["refused"]["AddrCase.us"]
+        guide_id = entry["guideId"]
+        self.assert_offered(guide_id)
+        url = self.rows["AddrCase.us"]
+        self.assertNotIn(guide_id, url)
+        self.assertIn(guide_id, url.lower())
+        self.assertNotIn("AddrCase.us", self.now["channels"])
+
+    def test_one_address_naming_two_guide_channels_is_not_merged(self):
+        """claim_channel's rule, reached through the new strategy.
+
+        Equal ranks are first-come, so the declaration that streams a
+        programme first takes the row; the second is contested and its
+        programmes are dropped, never interleaved into the first's schedule.
+        """
+        entry = ADDR["matchedByAddress"]["AddrTwo.us"]
+        self.assertEqual(self.now["channels"]["AddrTwo.us"]["now"]["title"],
+                         entry["nowTitle"])
+        self.assertNotIn("Two Second Now", json.dumps(self.now))
+
+    def test_the_address_outranks_the_name_because_it_names_the_playout(self):
+        """The ranking, set by the one real row where the two strategies
+        compete.
+
+        On the installed list the guide's `Heartland` is the provider's own
+        playout of that brand. `Heartland.us@Web` streams exactly that
+        playout and carries its id; `Heartland.us@Eastern` streams the
+        broadcaster's own feed and matched the guide by NAME. The name says
+        the brand, the address says the playout, and the schedule belongs to
+        the playout. This fixture is that shape: the Eastern row's name is
+        what the guide declares, and the Web row still wins.
+        """
+        won = ADDR["matchedByAddress"]["AddrRank.us@Web"]
+        lost = "AddrRank.us@Eastern"
+        guide_id = won["guideId"]
+        # The name path really was offering the channel to the other row.
+        self.assertEqual(helper.epg_name_key(self.declared[guide_id]),
+                         helper.epg_name_key(self.row_name(lost)))
+        self.assertNotIn(guide_id, self.rows[lost])
+        self.assertEqual(self.now["channels"]["AddrRank.us@Web"]["now"]["title"],
+                         won["nowTitle"])
+        self.assertNotIn(lost, self.now["channels"])
+
+    def test_the_address_outranks_the_feed_base(self):
+        """ADDR before FEED, which the frozen data cannot rank.
+
+        FEED matched 0 rows of the installed list, so nothing there decides
+        this order and it is pinned here rather than left to a comment
+        (CLAUDE.md rule 14). The argument it encodes: FEED compares a
+        TRUNCATION of two ids and its own docstring records that it picks
+        arbitrarily between @SD/@HD twins, while ADDR compares a whole id for
+        equality.
+        """
+        won = ADDR["matchedByAddress"]["AddrFeed.us"]
+        lost = "feedbasetoken1@SD"
+        guide_id = won["guideId"]
+        self.assertEqual(lost.split("@", 1)[0].lower(), guide_id,
+                         "the loser's FEED base must be the contested id")
+        self.assertIn(guide_id, self.rows["AddrFeed.us"])
+        self.assertEqual(self.now["channels"]["AddrFeed.us"]["now"]["title"],
+                         won["nowTitle"])
+        self.assertNotIn(lost, self.now["channels"])
+
+    def test_a_declared_tvg_id_outranks_an_address(self):
+        """ID before ADDR: a join the playlist author DECLARED beats one the
+        helper deduced.
+
+        The weaker claim arrives first in the stream and starts later, so if
+        it ever stopped being displaced it would become the row's "now" and
+        not merely an extra record -- the same construction the M4-01 clash
+        row uses.
+        """
+        key, entry = next(iter(ADDR["displacedRank"].items()))
+        self.assertIn(key, self.declared, "the row's own tvg-id must be a guide id")
+        self.assertIn(entry["loserGuideId"], self.rows[key])
+        self.assertEqual(self.now["channels"][key]["now"]["title"], entry["nowTitle"])
+        self.assertNotIn(entry["loserTitle"], json.dumps(self.now))
+
+    def test_a_declared_tvg_id_is_consulted_before_an_address(self):
+        """The ORDER of the two id maps, which the RANKS cannot pin.
+
+        `test_a_declared_tvg_id_outranks_an_address` above proves the rank:
+        an address claim is displaced by an id claim on the same row. It does
+        NOT prove the order the maps are consulted in, because there the two
+        strategies resolved two DIFFERENT guide channels onto one row. This
+        case is the other shape: ONE guide id that the exact map and the
+        address map resolve to two different rows. Swapping the two lookups
+        survives every other case in this module and fails here.
+
+        UNVERIFIED on the frozen data: 0 of its 1,453 rows carry a tvg-id the
+        guide declares, so nothing measured ranks these two and the fixture
+        says `verified: false` on the entry (CLAUDE.md rule 14).
+        """
+        order = ADDR["lookupOrder"]
+        self.assertFalse(order["verified"])
+        guide_id = order["guideId"]
+        self.assert_offered(guide_id)
+        # Available to BOTH maps, to two different rows.
+        self.assertEqual(order["declaredBy"], guide_id)
+        self.assertIn(guide_id, self.rows[order["streamedBy"]])
+        self.assertNotEqual(order["declaredBy"], order["streamedBy"])
+        # And the declaring row is the one that gets it.
+        self.assertEqual(self.now["channels"][order["declaredBy"]]["now"]["title"],
+                         order["nowTitle"])
+        self.assertNotIn(order["streamedBy"], self.now["channels"])
+
+    def test_nothing_the_strategy_refused_reaches_the_guide_at_all(self):
+        """One assertion over every refused title, so a refusal cannot be
+        satisfied by the programme landing on some OTHER row."""
+        rendered = json.dumps(self.now)
+        for title in ADDR["neverRendered"]:
+            self.assertNotIn(title, rendered, title)
+        for tvg in list(ADDR["refused"]) + list(ADDR["displacedByAddress"]):
+            self.assertNotIn(tvg, self.now["channels"], tvg)
+
+
+class AddressIndexTest(unittest.TestCase):
+    """build_alias and match_xmltv_channel called directly for F-EPG-11."""
+
+    def index(self, channels):
+        return helper.build_alias({"channels": channels})
+
+    def test_the_index_answers_with_the_rank_and_counts_what_it_held(self):
+        index, total = self.index([
+            {"tvgId": "A.us", "name": "Alpha",
+             "url": "http://h.example.test/plu-aaaaaaaaaaaaaaaaaaaa0001.m3u8"},
+            {"tvgId": "B.us", "name": "Beta", "url": "http://h.example.test/short.m3u8"},
+        ])
+        self.assertEqual(total, 2)
+        self.assertEqual(index["addrIndexed"], 1)
+        self.assertEqual(index["addrDroppedPlaylist"], 0)
+        self.assertEqual(index["addr"], {"aaaaaaaaaaaaaaaaaaaa0001": "A.us"})
+        self.assertEqual(
+            helper.match_xmltv_channel(index, "aaaaaaaaaaaaaaaaaaaa0001", {}),
+            ("A.us", helper.EPG_MATCH_ADDR))
+
+    def test_a_row_naming_one_token_twice_is_one_claim(self):
+        """addrDroppedPlaylist counts ROWS, as nameDroppedPlaylist does, so a
+        token repeated inside ONE address must not look like two rows
+        claiming it."""
+        token = "aaaaaaaaaaaaaaaaaaaa0001"
+        index, _ = self.index([
+            {"tvgId": "A.us", "name": "Alpha",
+             "url": "http://h.example.test/%s/%s.m3u8" % (token, token)},
+        ])
+        self.assertEqual(index["addr"], {token: "A.us"})
+        self.assertEqual(index["addrDroppedPlaylist"], 0)
+
+    def test_a_row_without_a_url_is_in_no_address_map(self):
+        index, _ = self.index([{"tvgId": "A.us", "name": "Alpha"}])
+        self.assertEqual(index["addr"], {})
+        self.assertEqual(index["addrIndexed"], 0)
+
+    def test_the_strategies_stay_in_their_declared_order(self):
+        """The ranks are an ORDER and claim_channel compares them with `<`, so
+        they must be the distinct ascending run that EPG_MATCH_KEYS names."""
+        ranks = (helper.EPG_MATCH_ID, helper.EPG_MATCH_ADDR,
+                 helper.EPG_MATCH_FEED, helper.EPG_MATCH_NAME)
+        self.assertEqual(ranks, tuple(range(len(helper.EPG_MATCH_KEYS))))
+
+    def test_building_the_address_map_over_ten_thousand_rows_is_cheap(self):
+        """Rule 7's budget, for the work this strategy added to build_alias.
+
+        The helper parses 10,000 channels in under a second, and the address
+        index is new per-row work in build_alias. Measured on this machine
+        over exactly the rows below, best of five: 47.6 ms before this
+        strategy and 70.3 ms after, so it costs about 23 ms per 10,000 rows
+        on a path that is not the budgeted one -- `parse_m3u` over the same
+        10,000 channels reads 511.9 ms before and 507.3 ms after, unchanged.
+        The ceiling here is five times the measurement on purpose: it is a
+        tripwire for an accidental quadratic, not a stopwatch.
+        """
+        import time
+        channels = [
+            {"tvgId": "ch%d.us" % i, "name": "Channel %d" % i,
+             "url": "https://jmp.example.test/plu-%024x.m3u8" % i,
+             "logo": "https://img.example.test/channels/%024x/colorLogoPNG.png" % i}
+            for i in range(10000)
+        ]
+        best = None
+        for _ in range(3):
+            started = time.monotonic()
+            index, total = helper.build_alias({"channels": channels})
+            elapsed = (time.monotonic() - started) * 1000
+            best = elapsed if best is None else min(best, elapsed)
+        self.assertEqual(total, 10000)
+        self.assertEqual(index["addrIndexed"], 10000)
+        self.assertLess(best, 400.0, "build_alias took %d ms for 10,000 rows" % best)
 
 
 class EpisodeSystemTest(unittest.TestCase):
@@ -607,8 +1027,9 @@ class OldWindowTest(unittest.TestCase):
             code, status, stderr = run("epg", "--now-only", "--cache-dir", tmp, "--now", str(NOW))
             self.assertEqual(code, 0, stderr)
             self.assertEqual(status["matched"], 1)
-            for key in ("matchedById", "matchedByFeed", "matchedByName",
-                        "nameIndexed", "nameDroppedPlaylist", "nameDroppedGuide"):
+            for key in helper.EPG_MATCH_KEYS + (
+                    "nameIndexed", "nameDroppedPlaylist", "nameDroppedGuide",
+                    "addrIndexed", "addrDroppedPlaylist"):
                 self.assertIsNone(status[key], key)
             self.assertEqual(status["nowCount"], 1)
 
@@ -871,14 +1292,27 @@ class EpgPrecisionTest(unittest.TestCase):
     inputs and graded nothing about the 227. docs/QA-EPG-PRECISION.md is the
     audit; this class is the part of it a gate can run.
 
-    The oracle is not the matcher's own output and not a string the matcher
-    contains (CLAUDE.md rule 14). The installed iptv-org list streams its
-    Pluto channels from an address carrying Pluto's own channel id, and the
-    guide declares that same id as its channel id. The matcher reads neither:
-    it joins on the display name. So "the programme on this row is the
-    programme of the channel this row's URL names" is two independent
-    identifiers agreeing, and it goes red the moment a looser key marries two
-    different channels.
+    THE ORACLE THIS CLASS WAS BUILT ON COLLAPSED ON 2026-10-04 (F-EPG-11).
+
+    It used to read: the installed iptv-org list streams its Pluto channels
+    from an address carrying Pluto's own channel id, the guide declares that
+    same id, and THE MATCHER READS NEITHER -- it joins on the display name --
+    so "the programme on this row is the programme of the channel this row's
+    URL names" was two independent identifiers agreeing.
+
+    F-EPG-11 makes the matcher read that identifier, because the audit that
+    used it as an oracle also measured that it reached 193 rows the matcher
+    was leaving on the table. Eight of this fixture's nine pairs are now
+    matched BY the oracle, so for those eight the agreement proves only that
+    the lookup is wired up. That is not a reason to delete the assertions --
+    a wiring check is worth keeping -- but it IS a reason to stop calling
+    them precision evidence, and `test_the_oracle_is_now_also_the_matcher`
+    asserts the collapse so that nobody has to remember it.
+
+    What still grades precision here is one pair, `News12LongIsland.us@SD`,
+    matched by NAME and judged by reading. A grader that does not depend on
+    the stream URL is owed to this fixture, and until there is one the
+    precision question is OPEN rather than answered.
     """
 
     @classmethod
@@ -897,7 +1331,38 @@ class EpgPrecisionTest(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def test_the_oracle_is_in_the_fixture_and_not_in_the_matcher(self):
+    def test_the_oracle_is_now_also_the_matcher(self):
+        """F-EPG-11: the collapse, asserted rather than remembered.
+
+        Every oracle entry's plutoId is now a key of build_alias's address
+        map pointing at that entry's own tvgId -- which is exactly what
+        match_xmltv_channel looks a guide channel up by. So the grader and
+        the thing being graded are the same identifier, and the five pairs
+        below are matched BY their own oracle.
+
+        This test is the tripwire on the DOCUMENTATION claim: if the two ever
+        become independent again -- the strategy removed, the floor raised
+        past 24, the stream URL no longer indexed -- this goes red and the
+        fixture's comment stops being a lie. It calls build_alias for real
+        rather than grepping the helper for a constant (CLAUDE.md rule 14).
+        """
+        self.assertTrue(PRECISION["oracleIsNowTheMatcher"]["matchedByAddrRank"])
+        channels = read(os.path.join(self.cache, "channels.json"))
+        index, _ = helper.build_alias(channels)
+        for entry in PRECISION["oracle"]:
+            self.assertEqual(index["addr"].get(entry["plutoId"]), entry["tvgId"],
+                             entry["tvgId"])
+            self.assertEqual(
+                helper.match_xmltv_channel(index, entry["plutoId"], {}),
+                (entry["tvgId"], helper.EPG_MATCH_ADDR), entry["tvgId"])
+        # And the one pair that is still judged by something the matcher did
+        # not read is matched by the NAME strategy, not by the address.
+        for entry in PRECISION["returnedByRepair"]:
+            self.assertNotIn(entry["tvgId"], index["addr"].values(), entry["tvgId"])
+        self.assertEqual(self.status["matchedByName"],
+                         len(PRECISION["returnedByRepair"]))
+
+    def test_the_oracle_is_in_the_fixture(self):
         """The fixture's own invariant, so a doctored fixture cannot pass.
 
         Every oracle row's stream URL must carry the Pluto id that the guide
@@ -933,12 +1398,15 @@ class EpgPrecisionTest(unittest.TestCase):
         self.assertEqual(len(set(titles)), len(titles))
 
     def test_each_match_lands_the_programme_of_the_channel_its_url_names(self):
-        """The precision assertion, at the sink the guide reads.
+        """CIRCULAR SINCE F-EPG-11: a wiring check, no longer evidence.
 
         For every oracle pair, the title in epg-now.json is the title the
-        guide carries for the channel whose id that row's URL names. Equality
-        here means the name join married the two channels an identifier the
-        matcher never saw says are the same one.
+        guide carries for the channel whose id that row's URL names. That
+        used to mean the NAME join had married two channels an identifier the
+        matcher never saw says are the same one. The matcher now joins on
+        that identifier, so the equality is a tautology and what it still
+        buys is end-to-end wiring: index -> match -> claim -> window ->
+        epg-now.json.
         """
         for entry in PRECISION["oracle"]:
             record = self.now["channels"].get(entry["tvgId"])
@@ -960,6 +1428,10 @@ class EpgPrecisionTest(unittest.TestCase):
         # a pair the oracle CANNOT confirm must not be able to hide among the
         # ones it can.
         expected |= {entry["tvgId"] for entry in PRECISION["returnedByRepair"]}
+        # And the three F-EPG-11 settled rows, in a block of their own for
+        # the same reason: they are right because the address names them, and
+        # the findings they close stay readable on the row that closed them.
+        expected |= {entry["tvgId"] for entry in PRECISION["settledByAddress"]}
         self.assertEqual(set(self.now["channels"]), expected)
         for entry in PRECISION["unmatched"]:
             self.assertNotIn(entry["tvgId"], self.now["channels"],
@@ -1014,38 +1486,74 @@ class EpgPrecisionTest(unittest.TestCase):
         self.assertEqual(self.status["nameDroppedGuide"], 0)
         self.assertIn("News12LongIsland.us@SD", self.now["channels"])
 
-    def test_a_country_qualifier_keeps_an_oracle_pair_apart(self):
-        """F-EPG-7, pinned as it behaves today so a loosening cannot be silent.
+    def settled(self, finding):
+        return [entry for entry in PRECISION["settledByAddress"]
+                if entry["finding"] == finding]
 
-        Both rows' URLs name the very guide channel declared beside them, so
-        the oracle says both SHOULD match and neither does: the key keeps
-        "(United States)". 88 of the 1,453 installed names carry one and 31 of
-        those carry a Pluto id this guide declares. Stripping any parenthetical
-        would reach them, and docs/QA-EPG-PRECISION.md measures that loosening
-        on the real inputs rather than guessing at it. If it is ever taken,
-        this test goes red and names the decision.
+    def test_a_country_qualifier_still_defeats_the_name_key(self):
+        """F-EPG-7, both halves, after F-EPG-11.
+
+        The key still keeps "(United States)" and still cannot join these two
+        rows to their guide channels: that is asserted here on the two raw
+        names, through the shipping key. 87 of the 1,453 installed names carry
+        the qualifier and 30 of those carry a Pluto id this guide declares.
+
+        What changed is the PRICE. The address reaches all 30 of those rows,
+        so the loosening F-EPG-7 proposed -- strip any parenthetical -- is
+        worth 29 rows and one CONTRADICTED pair before F-EPG-11 and 1 row and
+        zero contradicted pairs after it, measured end to end on the frozen
+        inputs. The contradiction it used to create was
+        `Pluto TV Reality (United States)`, whose address names the guide's
+        `Pluto TV Pride`; the address now holds that row at a stronger rank,
+        so the name claim is refused instead of winning.
         """
         guide = pathlib.Path(PRECISION_XMLTV).read_text(encoding="utf-8")
-        for entry in PRECISION["unmatched"]:
-            if entry["finding"] != "F-EPG-7":
-                continue
-            self.assertNotIn(entry["tvgId"], self.now["channels"])
-            prefix = entry["why"].split("the oracle says ")[1].split("...")[0]
-            self.assertIn('<channel id="%s' % prefix, guide)
+        entries = self.settled("F-EPG-7")
+        self.assertTrue(entries)
+        for entry in entries:
+            self.assertIn('<channel id="%s"' % entry["guideId"], guide)
+            playlist_name = self.row_name(entry["tvgId"])
+            guide_name = re.search(
+                r'<channel id="%s">\s*<display-name>([^<]*)</display-name>'
+                % entry["guideId"], guide).group(1)
+            # The name path is still defeated: these are two different keys.
+            self.assertIn("(United States)", playlist_name)
+            self.assertNotEqual(helper.epg_name_key(playlist_name),
+                                helper.epg_name_key(guide_name))
+            # And the row is matched anyway, by the address, at its own rank.
+            self.assertEqual(self.now["channels"][entry["tvgId"]]["now"]["title"],
+                             entry["nowTitle"])
+            self.assertIn(entry["guideId"], self.row_url(entry["tvgId"]))
 
     def test_a_missing_space_is_not_a_distribution_marker(self):
-        """F-EPG-8: the guide writes "TennisChannel 2", the playlist two words.
+        """F-EPG-8 SETTLED by F-EPG-11, with the reason it was open intact.
 
-        The oracle names the pair and no rule in the matcher closes a missing
-        space -- not the shipping key and not the normalize_id_text repair
-        D-EPG-5 asks for. Recorded so the repair is not credited with it.
+        The guide writes "TennisChannel 2" where the playlist writes
+        "Tennis Channel +2 (720p)". No rule in the matcher closes a missing
+        space -- not the shipping key, not the normalize_id_text repair of
+        D-EPG-5 -- and both of those are still asserted, because the finding
+        was that NO KEY CAN JOIN THEM and that remains true. The address
+        joins them without reading either name.
         """
-        self.assertNotIn("TennisChannel.us@Plus2", self.now["channels"])
+        entry, = self.settled("F-EPG-8")
         self.assertNotEqual(helper.epg_name_key("Tennis Channel +2 (720p)"),
                             helper.epg_name_key("TennisChannel 2"))
         self.assertNotEqual(
             helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", "Tennis Channel +2 (720p)")),
             helper.normalize_id_text(helper._EPG_NAME_NOISE.sub(" ", "TennisChannel 2")))
+        self.assertIn(entry["guideId"], self.row_url(entry["tvgId"]))
+        self.assertEqual(self.now["channels"][entry["tvgId"]]["now"]["title"],
+                         entry["nowTitle"])
+
+    def row_name(self, tvg):
+        text = pathlib.Path(PRECISION_PLAYLIST).read_text(encoding="utf-8")
+        found = re.search(r'^#EXTINF:[^\n]*tvg-id="%s"[^\n]*,(.*)$' % re.escape(tvg),
+                          text, re.MULTILINE)
+        self.assertIsNotNone(found, tvg)
+        return found.group(1)
+
+    def row_url(self, tvg):
+        return playlist_rows(PRECISION_PLAYLIST)[tvg]
 
 
 if __name__ == "__main__":

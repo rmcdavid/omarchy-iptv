@@ -51,3 +51,79 @@ http://stream.example.test/markup.m3u8
 http://stream.example.test/sink.m3u8
 #EXTINF:-1 tvg-id="gnoise.xx" group-title="Match",Guide Marker Channel
 http://stream.example.test/gnoise.m3u8
+#
+# --- F-EPG-11, the ADDRESS strategy (added 2026-10-04) -------------------
+# ADDR joins a guide channel id to the row that STREAMS it: an alphanumeric
+# run of at least EPG_ADDR_MIN_TOKEN characters in the row's stream URL that
+# equals a declared guide id, and only when that run belongs to exactly one
+# row. The URL LAYOUTS below are copied from the installed iptv-org US list
+# -- ".../plu-<24 hex>.m3u8" for 185 of its 1,453 rows, and
+# "images.pluto.tv/channels/<24 hex>/colorLogoPNG.png" for the artwork -- so
+# the shapes are real; the ids are synthetic, so no row here points at a
+# channel that exists.
+#
+# The common real shape. The guide name deliberately does NOT match the
+# playlist name, so the address is the only thing that can have matched it.
+#EXTINF:-1 tvg-id="Addr.us" group-title="Addr",Address Channel
+http://jmp.example.test/plu-aaaaaaaaaaaaaaaaaaaa0001.m3u8
+# A guide id that is not hex. ADDR names no id SHAPE, which is what makes it
+# provider-general; `globalfashionchannel` is a real 20-character token of
+# the installed list.
+#EXTINF:-1 tvg-id="AddrSlug.us" group-title="Addr",Slug Channel
+http://cdn.example.test/live/globalfashionchannel/index.m3u8
+# The id is in the LOGO and not in the stream, so it must NOT match: 7 of the
+# 8 real rows of this shape stream from a different distributor than the
+# artwork (Pluto artwork on Amagi, CloudFront and Google DAI addresses).
+# Artwork provenance is not stream identity.
+#EXTINF:-1 tvg-id="AddrLogo.us" tvg-logo="http://images.example.test/channels/aaaaaaaaaaaaaaaaaaaa0002/colorLogoPNG.png" group-title="Addr",Artwork Channel
+http://amg.example.test/vevo/index.m3u8
+# A guide id SHORTER than the floor, sitting in a word addresses really
+# carry: the whole collision guard. `playlist` is a token of 583 real rows.
+#EXTINF:-1 tvg-id="AddrShort.us" group-title="Addr",Short Token Channel
+http://cdn.example.test/playlist.m3u8
+# Two rows streaming one address: ambiguous on OUR side, so neither matches
+# and both are counted in addrDroppedPlaylist.
+#EXTINF:-1 tvg-id="AddrDupA.us" group-title="Addr",Dup Address A
+http://jmp.example.test/plu-aaaaaaaaaaaaaaaaaaaa0003.m3u8
+#EXTINF:-1 tvg-id="AddrDupB.us" group-title="Addr",Dup Address B
+http://jmp.example.test/plu-aaaaaaaaaaaaaaaaaaaa0003.m3u8
+# CONSTRUCTED: one row whose address names TWO declared guide channels. 0 of
+# the 1,453 real rows do. Equal ranks are first-come, so the declaration that
+# streams a programme first takes the row and the second is contested, never
+# merged into it.
+#EXTINF:-1 tvg-id="AddrTwo.us" group-title="Addr",Two Address Channel
+http://cdn.example.test/aaaaaaaaaaaaaaaaaaaa0004/aaaaaaaaaaaaaaaaaaaa0005/index.m3u8
+# ADDR over NAME, which is the real Heartland shape and the measurement that
+# set the ranking: the guide declares ONE channel, the broadcaster's own
+# playout matches it by name, and the provider's playout of it carries its
+# id. The id names the PLAYOUT; the name only names the brand.
+#EXTINF:-1 tvg-id="AddrRank.us@Eastern" group-title="Addr",Rank Channel (720p)
+http://broadcaster.example.test/eastern/index.m3u8
+#EXTINF:-1 tvg-id="AddrRank.us@Web" group-title="Addr",Rank Channel Web
+http://jmp.example.test/plu-aaaaaaaaaaaaaaaaaaaa0006.m3u8
+# ID over ADDR: this row's tvg-id IS one guide channel's id while its address
+# names a different one. The DECLARED join must win over the deduced one.
+#EXTINF:-1 tvg-id="aaaaaaaaaaaaaaaaaaaa0007" group-title="Addr",Id Over Address Channel
+http://jmp.example.test/plu-aaaaaaaaaaaaaaaaaaaa0008.m3u8
+# ADDR over FEED: one guide id is this row's address token AND the next row's
+# feed base. The frozen data cannot rank these two (FEED matched 0 rows
+# there), so the order is pinned here instead of left to a comment.
+#EXTINF:-1 tvg-id="AddrFeed.us" group-title="Addr",Address Over Feed Channel
+http://cdn.example.test/feedbasetoken1/index.m3u8
+#EXTINF:-1 tvg-id="feedbasetoken1@SD" group-title="Addr",Feed Base Channel
+http://cdn.example.test/feedbase/index.m3u8
+# ADDR is case-SENSITIVE: a URL path is case-sensitive by the URL spec, so
+# folding case would read an identity the address does not assert.
+#EXTINF:-1 tvg-id="AddrCase.us" group-title="Addr",Case Token Channel
+http://cdn.example.test/MixedCaseToken12/index.m3u8
+# The LOOKUP ORDER between ID and ADDR, which the rank alone does not pin:
+# one guide id is the first row's DECLARED tvg-id and a token of the second
+# row's address, so whichever map is consulted first decides which row gets
+# the channel. UNVERIFIED on the frozen data -- 0 of its 1,453 rows carry a
+# tvg-id that the guide declares -- so this is an argued order, pinned here
+# rather than left to a comment: writing tvg-id="<guide id>" is the playlist
+# author SAYING this row is that channel.
+#EXTINF:-1 tvg-id="aaaaaaaaaaaaaaaaaaaa0009" group-title="Addr",Declared Id Channel
+http://broadcaster.example.test/declared/index.m3u8
+#EXTINF:-1 tvg-id="AddrOther.us" group-title="Addr",Other Address Channel
+http://jmp.example.test/plu-aaaaaaaaaaaaaaaaaaaa0009.m3u8

@@ -139,4 +139,56 @@
     <title>Sink Now</title>
     <desc>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa http://u5er:5ecretpw@host.example/live/x.m3u8?t=abc trailing words.</desc>
   </programme>
+  <!-- F-EPG-11, the ADDRESS strategy (added 2026-10-04). Ids are synthetic;
+       the URL layouts they sit in are copied from the installed list.
+         ...0001            reaches "Address Channel" by its stream address
+                            alone: the display-name matches no playlist row
+         globalfashionchannel  a guide id that is not hex, so ADDR is shown
+                            to name no id shape
+         ...0002            sits in that row's LOGO and not in its stream:
+                            must not match
+         playlist           shorter than EPG_ADDR_MIN_TOKEN and a word real
+                            addresses carry: must not match
+         ...0003            the address of TWO playlist rows: ambiguous on
+                            our side, must not match
+         ...0004 / ...0005  both named by ONE row's address: first come,
+                            second contested
+         ...0006            declared once, reachable by address on the Web
+                            row and by name on the Eastern row. ADDR is
+                            asked first, so the row that streams it wins
+         ...0008 / ...0007  the first reaches the row by address, the second
+                            by the row's own tvg-id. ...0008 streams first
+                            and starts LATER, so if the declared join ever
+                            stopped displacing it, it would become the "now"
+         feedbasetoken1     this id is one row's address token and another
+                            row's feed base: ADDR is asked first
+         mixedcasetoken12   the address spells it MixedCaseToken12, and ADDR
+                            does not fold case: must not match -->
+  <channel id="aaaaaaaaaaaaaaaaaaaa0001"><display-name>Address Guide Name</display-name></channel>
+  <channel id="globalfashionchannel"><display-name>Slug Guide Name</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0002"><display-name>Artwork Guide Name</display-name></channel>
+  <channel id="playlist"><display-name>Short Guide Name</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0003"><display-name>Dup Guide Name</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0004"><display-name>First Of Two</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0005"><display-name>Second Of Two</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0006"><display-name>Rank Channel</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0007"><display-name>Id Guide Name</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0008"><display-name>Addr Loser Guide Name</display-name></channel>
+  <channel id="feedbasetoken1"><display-name>Feed Or Addr Guide Name</display-name></channel>
+  <channel id="aaaaaaaaaaaaaaaaaaaa0009"><display-name>Declared Or Address</display-name></channel>
+  <channel id="mixedcasetoken12"><display-name>Case Guide Token Name</display-name></channel>
+
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0001"><title>Addr Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="globalfashionchannel"><title>Slug Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0002"><title>Artwork Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="playlist"><title>Short Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0003"><title>Dup Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0004"><title>Two First Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0005"><title>Two Second Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0006"><title>Rank Now</title></programme>
+  <programme start="20260912204500 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0008"><title>Addr Loser Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0007"><title>Addr Id Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="feedbasetoken1"><title>Addr Over Feed Now</title></programme>
+  <programme start="20260912203000 +0000" stop="20260912213000 +0000" channel="mixedcasetoken12"><title>Case Token Now</title></programme>
+  <programme start="20260912204500 +0000" stop="20260912213000 +0000" channel="aaaaaaaaaaaaaaaaaaaa0009"><title>Declared Wins Now</title></programme>
 </tv>

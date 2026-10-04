@@ -1,36 +1,44 @@
 {
   "comment": [
-    "M4-01 and M4-02 expectations for tests/fixtures/epg-match.m3u against",
-    "tests/fixtures/epg-match.xml at now = 1789246800 (2026-09-12T21:00:00Z).",
-    "One fixture, asserted by counts: tests/test_epg_match.py reads this file",
-    "and never restates a number in Python. See docs/PLAN-M4.md M4-01.",
-    "channelTotal 19 = 14 matched + 2 ambiguous on our side + 1 ambiguous on",
-    "the guide's side + 1 with no guide channel + 1 with no tvg-id.",
+    "M4-01, M4-02 and F-EPG-11 expectations for tests/fixtures/epg-match.m3u",
+    "against tests/fixtures/epg-match.xml at now = 1789246800",
+    "(2026-09-12T21:00:00Z). One fixture, asserted by counts:",
+    "tests/test_epg_match.py reads this file and never restates a number in",
+    "Python. See docs/PLAN-M4.md M4-01.",
+    "channelTotal 34 = 14 matched by the M4-01 strategies + 2 ambiguous on our",
+    "side + 1 ambiguous on the guide's side + 1 with no guide channel + 1 with",
+    "no tvg-id, plus the 15 F-EPG-11 address rows (7 matched, 8 refused).",
     "The expected desc is 376 code points, not the 400 of EPG_MAX_DESC: the",
     "cut falls at 400 in prose and redaction then removes the two URL paths.",
     "That shortfall IS the proof that clean_detail redacted, in the data.",
     "`sink` is the rule 5 case: the cut lands inside a URL's userinfo, so the",
     "whole truncated token goes and the pad is all that is left. Its url and",
     "forbidden list are vectors, not formatting, so a second implementation of",
-    "the same sink (Model.epgDetailText) can run them unchanged."
+    "the same sink (Model.epgDetailText) can run them unchanged.",
+    "`addr` is F-EPG-11. Each entry carries the guide id the decision turns on,",
+    "so the test can read it out of the two fixture files and prove the join",
+    "was available before asserting what the matcher did with it."
   ],
   "now": 1789246800,
   "status": {
-    "matched": 14,
-    "channelTotal": 19,
-    "matchedById": 6,
+    "matched": 21,
+    "channelTotal": 34,
+    "matchedById": 8,
+    "matchedByAddr": 5,
     "matchedByFeed": 3,
     "matchedByName": 5,
-    "nameIndexed": 16,
+    "nameIndexed": 31,
     "nameDroppedPlaylist": 2,
     "nameDroppedGuide": 2,
-    "epgChannels": 14,
-    "programmeCount": 15,
-    "nowCount": 14
+    "addrIndexed": 9,
+    "addrDroppedPlaylist": 2,
+    "epgChannels": 21,
+    "programmeCount": 22,
+    "nowCount": 21
   },
   "warnings": [
-    "3 programmes for channels not in the playlist dropped",
-    "1 programmes dropped: another guide channel already matched that playlist channel"
+    "7 programmes for channels not in the playlist dropped",
+    "2 programmes dropped: another guide channel already matched that playlist channel"
   ],
   "nowTitles": {
     "Exact.us": "Exact Now",
@@ -46,7 +54,14 @@
     "lang.xx": "Lang Now",
     "Markup.us": "Markup Now",
     "Sink.us": "Sink Now",
-    "gnoise.xx": "Guide Marker Now"
+    "gnoise.xx": "Guide Marker Now",
+    "Addr.us": "Addr Now",
+    "AddrSlug.us": "Slug Now",
+    "AddrTwo.us": "Two First Now",
+    "AddrRank.us@Web": "Rank Now",
+    "aaaaaaaaaaaaaaaaaaaa0007": "Addr Id Now",
+    "AddrFeed.us": "Addr Over Feed Now",
+    "aaaaaaaaaaaaaaaaaaaa0009": "Declared Wins Now"
   },
   "unmatched": [
     "ambi1.xx",
@@ -100,5 +115,115 @@
   "noiseOnlyNames": [
     "noise.xx",
     "gnoise.xx"
-  ]
+  ],
+  "addr": {
+    "finding": "F-EPG-11",
+    "minToken": 12,
+    "note": [
+      "On the frozen 1,453-channel list this strategy reaches 193 rows, 40 of",
+      "them reached by nothing else, and matched goes 226 -> 265. The URL",
+      "LAYOUTS here are copied from that list; the ids are synthetic."
+    ],
+    "matchedByAddress": {
+      "Addr.us": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0001",
+        "nowTitle": "Addr Now",
+        "why": "the id is a path token of the row's stream URL and the guide name matches no row, so only the address can have matched it"
+      },
+      "AddrSlug.us": {
+        "guideId": "globalfashionchannel",
+        "nowTitle": "Slug Now",
+        "why": "a guide id that is not hex: the strategy names no id shape"
+      },
+      "AddrTwo.us": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0004",
+        "nowTitle": "Two First Now",
+        "why": "one address names two guide channels; equal ranks are first-come and the second is contested, never merged"
+      },
+      "AddrRank.us@Web": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0006",
+        "nowTitle": "Rank Now",
+        "why": "ADDR over NAME: the guide's one declaration is offered to the Eastern row by name and to this row by its address, and the address names the playout"
+      },
+      "AddrFeed.us": {
+        "guideId": "feedbasetoken1",
+        "nowTitle": "Addr Over Feed Now",
+        "why": "ADDR over FEED: this id is also the feed base of feedbasetoken1@SD"
+      }
+    },
+    "refused": {
+      "AddrLogo.us": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0002",
+        "in": "logo",
+        "why": "the id is in the artwork URL and not in the stream. Artwork provenance is not stream identity: 7 of the 8 real rows of this shape stream from a different distributor than the artwork"
+      },
+      "AddrShort.us": {
+        "guideId": "playlist",
+        "in": "url",
+        "why": "shorter than minToken, and a word 583 real addresses carry: the collision guard"
+      },
+      "AddrDupA.us": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0003",
+        "in": "url",
+        "why": "two rows stream this address, so it is ambiguous on our side and dropped rather than guessed"
+      },
+      "AddrDupB.us": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0003",
+        "in": "url",
+        "why": "the other half of the same ambiguity"
+      },
+      "AddrCase.us": {
+        "guideId": "mixedcasetoken12",
+        "in": "url",
+        "why": "the address spells it MixedCaseToken12. A URL path is case-sensitive, so folding case would read an identity the address does not assert"
+      }
+    },
+    "displacedByAddress": {
+      "AddrRank.us@Eastern": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0006",
+        "why": "matched this guide channel by NAME until the address reached the row that streams it; the brand is right and the playout is not"
+      },
+      "feedbasetoken1@SD": {
+        "guideId": "feedbasetoken1",
+        "why": "its FEED base is that id, and ADDR is asked first"
+      },
+      "AddrOther.us": {
+        "guideId": "aaaaaaaaaaaaaaaaaaaa0009",
+        "why": "it STREAMS the channel, but another row DECLARES it as its tvg-id and ID is consulted first"
+      }
+    },
+    "displacedRank": {
+      "aaaaaaaaaaaaaaaaaaaa0007": {
+        "loserGuideId": "aaaaaaaaaaaaaaaaaaaa0008",
+        "loserTitle": "Addr Loser Now",
+        "nowTitle": "Addr Id Now",
+        "why": "ID over ADDR: the row's own tvg-id is a declared guide id, which is a join the playlist author DECLARED, and it displaces the address claim that arrived first"
+      }
+    },
+    "neverRendered": [
+      "Artwork Now",
+      "Short Now",
+      "Dup Now",
+      "Case Token Now",
+      "Two Second Now",
+      "Addr Loser Now"
+    ],
+    "lookupOrder": {
+      "guideId": "aaaaaaaaaaaaaaaaaaaa0009",
+      "declaredBy": "aaaaaaaaaaaaaaaaaaaa0009",
+      "streamedBy": "AddrOther.us",
+      "nowTitle": "Declared Wins Now",
+      "verified": false,
+      "why": [
+        "The ID and ADDR maps both resolve this guide id, to DIFFERENT rows, so",
+        "the lookup ORDER decides it and the ranks do not: ID is consulted",
+        "first and the declaring row wins. UNVERIFIED on the frozen data -- 0 of",
+        "its 1,453 rows carry a tvg-id the guide declares -- so this is an",
+        "argued order rather than a measured one, and it is pinned here because",
+        "a comment cannot go red. The argument: writing tvg-id=\"<guide id>\" is",
+        "the playlist author SAYING this row is that channel, while the address",
+        "only contains the id."
+      ]
+    }
+  }
 }
