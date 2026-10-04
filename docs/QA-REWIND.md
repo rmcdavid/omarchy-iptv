@@ -563,9 +563,10 @@ starts. R16 restarts the harness against its own slow-helper tree, so
 EXIT trap removes the record with the tree, and `run.sh restart-shell` after
 a run says "no detached start recorded" rather than dying on a missing tree.
 
-### 9.7 The three runs
+### 9.7 The runs
 
-Verbatim summary lines, all on `scripts/dev-harness/rewind-scenario.sh` at
+Verbatim summary lines. Three trees, five runs, all on
+`scripts/dev-harness/rewind-scenario.sh` at
 `3e26c68` plus the cleanup-only commit after it (which runs after the last
 check and cannot move a count; run A was re-measured on the final tree,
 runs B and C at `3e26c68`):
@@ -575,14 +576,18 @@ runs B and C at `3e26c68`):
 | A | this branch, no reducer-lane names | `== rewind-scenario: 98 passed, 7 failed, 105 assertions executed` |
 | B | named mutation: stand-in `healthBusy`/`controlRunning`, exemption PRESENT | `== rewind-scenario: 105 passed, 0 failed, 105 assertions executed` |
 | C | named mutation: stand-in names, exemption REMOVED | `== rewind-scenario: 100 passed, 5 failed, 105 assertions executed` |
-| A' | this branch again, on the final tree | `== rewind-scenario: 96 passed, 9 failed, 105 assertions executed` |
+| A' | this branch again, before the cleanup commit | `== rewind-scenario: 96 passed, 9 failed, 105 assertions executed` |
+| A'' | this branch again, on the committed tree | `== rewind-scenario: 98 passed, 7 failed, 105 assertions executed` |
 
-A' is run A repeated after the cleanup-only commit. Its nine red are run A's
-seven, unchanged and identical in their counts, plus TWO PRE-EXISTING checks
-that flaked - `R9 playbackStateText is empty right after the zap` (got
-`0:16 behind live`) and `R10 behindLive counts UP while paused` (12.187 ->
-12.187, no movement at all). Both passed on runs A, B and C and failed on
-A' alone, i.e. once in four runs; section 9.9 hands them to the lead.
+A' and A'' are run A repeated. A''s seven red are A's, with the same counts.
+A's nine are those seven plus TWO PRE-EXISTING checks that flaked - `R9
+playbackStateText is empty right after the zap` (got `0:16 behind live`) and
+`R10 behindLive counts UP while paused` (12.187 -> 12.187, no movement at
+all). Those two were green on A, B, C and A'', so the rate is **once in five
+runs**; section 9.9 hands them to the lead. Every R16 and R17 check held its
+verdict across all five runs, and the controls held their magnitudes: 280
+quiet samples, 320-321 busy samples, 294-296 seek samples, 0 status runs in
+the busy window, every time.
 
 **Run A**, the seven red, all of them the missing join and none of them D10:
 
@@ -650,7 +655,7 @@ enforce. So both items
 below are described here and handed to the lead in the lane report; the lead
 assigns the id and writes the row, and this file gets the id back.
 
-- **R9 and R10 flake, once in four runs.** On run A' only, `R9
+- **R9 and R10 flake, once in five runs.** On run A' only, `R9
   playbackStateText is empty right after the zap` read `0:16 behind live`
   and `R10 behindLive counts UP while paused` read 12.187 twice, three
   seconds apart, i.e. no movement. Neither is about this round's change:
@@ -659,8 +664,9 @@ assigns the id and writes the row, and this file gets the id back.
   readings: either the guide's reset and the service's 1 Hz count-up are
   genuinely late under load, which is a product finding, or the two checks
   sample too soon after the event, which is a scenario finding. The data
-  cannot tell them apart yet, so the item is "two checks that flake" and the
-  next step is to re-run A a few times and record the rate. Until then every
+  cannot tell them apart yet, so the item is "two checks that flake"; five
+  runs put the rate at one in five, and the next step is a tighter estimate
+  under a stated load rather than a fix chosen blind. Until then every
   run of this scenario can come back red on these two for a reason the
   reader will mistake for F-RWD-18.
 - **The control slot's kind outlives its running flag** by about one sampler
