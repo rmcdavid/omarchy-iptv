@@ -427,11 +427,14 @@ _EPG_ADDR_TOKEN = re.compile(r"[A-Za-z0-9]{%d,}" % EPG_ADDR_MIN_TOKEN)
 # maximum on a real provider list, which is the headroom; it is not a number
 # this data forces.
 #
-# The cap also narrows the hijack surface the EPG_ADDR_MIN_TOKEN comment
-# names. The tokens it drops are the ones at the END of a long address --
-# JWTs, signatures, expiries in a query string -- and each of those is a
-# >= 12-character run belonging to exactly one row, which is precisely the
-# class a hostile guide can take with a wrong answer rather than silence.
+# One further effect is ARGUED and UNMEASURED, and says so rather than
+# sitting here as a second reason: the cap would also narrow the hijack
+# surface the EPG_ADDR_MIN_TOKEN comment names, because the tokens it drops
+# are the ones at the END of a long address -- JWTs, signatures, expiries in
+# a query string -- and each of those is a >= 12-character run belonging to
+# exactly one row, which is that comment's uncovered class. On THIS data the
+# cap drops nothing at all (the busiest address holds six tokens), so no
+# measurement here supports it, and it is not why the cap is 16.
 EPG_ADDR_MAX_TOKENS = 16
 # One record per programme,
 # 'SSSSSSSSSS EEEEEEEEEE "title"[,"desc":"...","category":"...","episode":"..."]'
