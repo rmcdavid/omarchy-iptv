@@ -364,9 +364,10 @@ EPG_MATCH_KEYS = ("matchedById", "matchedByAddr", "matchedByFeed", "matchedByNam
 #
 # Rule 5. A playlist URL carries provider credentials, so this index reads
 # one. It is BUILT from them and nothing is published from it: the maps stay
-# inside build_alias's return value, the only things that leave are the two
-# integers `addrIndexed` and `addrDroppedPlaylist`, and every key the window
-# and epg-now.json carry is a playlist tvgId exactly as before. A hostile
+# inside build_alias's return value, the only things that leave are the three
+# integers `addrIndexed`, `addrDroppedPlaylist` and `addrNameConflicts`, and
+# every key the window and epg-now.json carry is a playlist tvgId exactly as
+# before. A hostile
 # GUIDE could try to steal a row by declaring an id equal to a token of the
 # user's address, but it would have to guess a run of >= 12 characters that
 # belongs to exactly one row, and it is never told whether it succeeded --
@@ -734,6 +735,45 @@ def epg_name_key(value: Any) -> str:
     and returns ten channels to the index. No confirmed pair moved.
     """
     return normalize_id_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
+
+
+# A TRAILING parenthetical, which on the owner's list is the country
+# qualifier: `Pluto TV Reality (United States)`. Nothing in the matcher reads
+# this; see bare_name_key.
+_EPG_NAME_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def bare_name_key(value: Any) -> str:
+    """epg_name_key with a TRAILING parenthetical removed first.
+
+    A MEASUREMENT key, never a matching key. The loosening it performs is
+    exactly the one F-EPG-7/F-EPG-10 refused to put in the matcher -- a
+    parenthetical span can carry identity, and deleting unknown identity
+    lands a row on the wrong guide channel silently -- so this function is
+    read by one thing only: parse_xmltv's `addrNameConflicts`, which counts
+    rows the ADDRESS strategy claimed where the guide ALSO declares a
+    different channel under the row's own name with its country qualifier
+    stripped.
+
+    Why that counter exists. The address strategy's acceptance measured
+    whether the NAME matcher had paired these rows with a DIFFERENT guide
+    channel, and found 0. That measurement is blind by construction to the 40
+    rows the name matcher left blank, and one of them is the pairing the
+    product owner has since ruled on: `Pluto TV Reality (United States)` is
+    held by the address at `69fa3faab9c0f0d444e64de3`, whose display-name is
+    `Pluto TV Pride`, while the guide separately declares
+    `5d8bf0b06d2d855ee15115e3` as `Pluto TV Reality` and no row claims it.
+    The row's own stream URL carries Pride's id; its artwork names a third id
+    the guide never declares; the neighbouring `VH1 Queens of Reality` row
+    carries the same Pride id in both. The provider's own fields disagree
+    about this row, and the ruling is that the ADDRESS wins, because it names
+    the playout that will actually be opened. That ruling is not reopened
+    here and this counter does not change any pairing. What it changes is
+    that the case is now COUNTED instead of invisible: `addrNameConflicts` is
+    1 on the frozen inputs, and a reader who sees it rise knows a second one
+    exists without having to run an audit nobody scheduled.
+    """
+    return epg_name_key(_EPG_NAME_QUALIFIER.sub("", str(value or "")))
 
 
 def normalize_text(value: Any) -> str:
@@ -2241,6 +2281,8 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
     # guide channel is.
     addr_owner: dict[str, str] = {}
     addr_rows: dict[str, int] = {}
+    # bare name key -> the rows carrying it. A measurement, not a strategy.
+    bares: dict[str, list[str]] = {}
     total = 0
     for channel in channels_doc["channels"]:
         total += 1
@@ -2281,6 +2323,17 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
                     addr_owner[token] = ""
                 if len(seen_tokens) >= EPG_ADDR_MAX_TOKENS:
                     break
+        # The row's bare name key, for addrNameConflicts and nothing else
+        # (bare_name_key). A list, not an owner-or-blank: this is a
+        # measurement and a key two rows share must not silently vanish from
+        # it the way an ambiguous MATCH key has to.
+        bare = bare_name_key(channel.get("name"))
+        if bare:
+            owners = bares.get(bare)
+            if owners is None:
+                bares[bare] = [tvg]
+            elif tvg not in owners:
+                owners.append(tvg)
         # The matcher's own key (epg_name_key), not the cached `nameKey`:
         # that one is the SEARCH key and keeps `(1080p)` in, which is exactly
         # what stops the guide matching. Computed from the name here, so an
@@ -2331,6 +2384,12 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
         # and says so here.
         "addrIndexed": len(addrs),
         "addrDroppedPlaylist": addr_dropped,
+        # The country-qualifier-stripped name key of each row, for the ADDR
+        # strategy's own contradiction counter. See `bare_name_key` and
+        # parse_xmltv's `addrNameConflicts`: this is a MEASUREMENT surface and
+        # no strategy reads it, which is why an ambiguous key is kept here
+        # (as a list) instead of being dropped the way "name" drops one.
+        "bare": bares,
     }
     return index, total
 
@@ -2563,6 +2622,12 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
     guide_name_owner: dict[str, str] = {}     # normalised name -> the one cid that declares it
     guide_name_collided: set[str] = set()
     guide_names_dropped = 0
+    # bare_name_key -> the guide cids that declare it, kept only for keys some
+    # playlist row carries (bare_rows), so this table is bounded by the GUIDE
+    # the same way guide_names is. Read once, after the parse, for
+    # addrNameConflicts.
+    bare_rows: dict[str, list[str]] = index["bare"] if index is not None else {}
+    bare_guide: dict[str, set[str]] = {}
     channel_elements = 0
     bad_time = 0
     no_title = 0
@@ -2619,12 +2684,28 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                     # language policy, because the playlist is the policy.
                     # A channel declaring two claimed names takes the first:
                     # one guide channel cannot hold two rows (claim_channel).
+                    #
+                    # The loop no longer BREAKS on the first claimed name,
+                    # because the bare-name pass below has to see every
+                    # declaration of this channel; `name` is still the first
+                    # claimed one, which is the decision that paragraph
+                    # describes.
                     name = ""
                     for child in elem.iterfind("display-name"):
-                        candidate = epg_name_key(child.text)
-                        if candidate and candidate in playlist_names:
+                        text = child.text
+                        candidate = epg_name_key(text)
+                        if candidate and candidate in playlist_names and not name:
                             name = candidate
-                            break
+                        # The bare key, for addrNameConflicts and nothing else.
+                        # Computed from `candidate` when the raw text carries
+                        # no trailing parenthetical, which is the common case
+                        # and costs no second fold.
+                        if bare_rows:
+                            bare = candidate
+                            if not isinstance(text, str) or text.rstrip().endswith(")"):
+                                bare = bare_name_key(text)
+                            if bare and bare in bare_rows:
+                                bare_guide.setdefault(bare, set()).add(cid)
                     if name:
                         owner = guide_name_owner.get(name)
                         if owner is None:
@@ -2666,6 +2747,28 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
     if total_programmes == 0:
         raise HelperError("empty_epg", "no programmes found in the EPG")
 
+    # addrNameConflicts: rows the ADDRESS strategy holds where the guide also
+    # declares a DIFFERENT channel under the row's own bare name. Read off the
+    # final `claim`, so a claim revoked by the guide-side ambiguity branch is
+    # not counted, and off `bare_guide`, which saw every declaration.
+    #
+    # This is the reverse of the check the address strategy was accepted on.
+    # That one asked whether the NAME matcher had paired these rows with a
+    # different guide channel and found 0, which is true and is blind to the
+    # 40 rows NAME left blank. This one asks the question from the guide's
+    # side and reports 1 on the frozen inputs: see bare_name_key for the row,
+    # the product owner's ruling on it, and why it is counted rather than
+    # re-ranked.
+    addr_name_conflicts = 0
+    for bare, owners in bare_rows.items():
+        declared = bare_guide.get(bare)
+        if not declared:
+            continue
+        for tvg in owners:
+            held = claim.get(tvg)
+            if held is not None and held[0] == EPG_MATCH_ADDR and declared - {held[1]}:
+                addr_name_conflicts += 1
+
     channels: dict[str, str] = {}
     kept = 0
     for key, items in pending.items():
@@ -2696,6 +2799,7 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
         # to the same name. Counted only over names a playlist channel
         # claims, because a name nothing claims cannot match either way.
         "nameDroppedGuide": guide_names_dropped,
+        "addrNameConflicts": addr_name_conflicts,
         "warnings": warnings,
     }
 
@@ -2830,6 +2934,9 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
         "nameDroppedGuide": parsed["nameDroppedGuide"] if index is not None else None,
         "addrIndexed": index["addrIndexed"] if index is not None else None,
         "addrDroppedPlaylist": index["addrDroppedPlaylist"] if index is not None else None,
+        # The ADDR strategy's own contradiction count (see bare_name_key).
+        # Additive like the keys above, so an older window answers None.
+        "addrNameConflicts": parsed["addrNameConflicts"] if index is not None else None,
         "epgChannels": parsed["epgChannels"],
         "programmeCount": parsed["programmeCount"],
         "warnings": warnings,
@@ -2980,6 +3087,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
             "nameDroppedGuide": window.get("nameDroppedGuide"),
             "addrIndexed": window.get("addrIndexed"),
             "addrDroppedPlaylist": window.get("addrDroppedPlaylist"),
+            "addrNameConflicts": window.get("addrNameConflicts"),
             "epgChannels": window.get("epgChannels", 0),
             "programmeCount": window.get("programmeCount", 0),
             "nowCount": now_count,

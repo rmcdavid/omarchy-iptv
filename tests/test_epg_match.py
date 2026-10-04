@@ -143,8 +143,8 @@ helper restored in between. Module counts (`python3 -B -m unittest
 test_epg_match` from tests/) are quoted because each mutation is attributed to
 named cases; the whole-suite figure is in the lane report.
 
-  This module: 90 tests OK on the tree (81 at ada9220, so 9 cases added).
-  Whole suite, in a git export: 846 tests before, 855 after, both
+  This module: 96 tests OK on the tree (81 at ada9220, so 15 cases added).
+  Whole suite, in a git export: 846 tests before, 861 after, both
   `FAILED (errors=5, skipped=2)` -- the same five
   test_marketplace_capabilities git-archive errors in every run below,
   before and after, counted as reddening nothing. Every mutation below was
@@ -153,8 +153,11 @@ named cases; the whole-suite figure is in the lane report.
   nothing further.
 
   Against the helper at ada9220 -- this round's tests and fixtures in place,
-  the helper as it shipped -- 90 tests, errors=1: the cap case. The other
-  cases in this round pin
+  the helper as it shipped -- 96 tests, errors=9: the cap case, the six
+  AddressNameConflictTest cases, and the two status cases that read the
+  fixture's new `addrNameConflicts` key. Against the FIRST of this round's
+  two commits (cff91f0, which has the cap but not the counter), errors=8:
+  the same set without the cap case. The other cases in this round pin
   behaviour the shipped helper already had, so they CANNOT redden by
   reverting it, and each has a named mutation instead:
 
@@ -172,7 +175,7 @@ named cases; the whole-suite figure is in the lane report.
           docstring claimed it counted                    failures=1
          (test_addr_dropped_playlist_counts_token_claims_and_not_rows)
     M-N5noop. the `exact.get(cid.lower())` LOOKUP moved below "addr", the
-          fold left inside `exact`                        90 tests OK
+          fold left inside `exact`                        96 tests OK
          (the trap: nothing changes, because `exact.get(cid)` hits the alias)
     M-N5naive. the `or exact.get(cid.lower())` arm deleted outright
                                                           failures=1
@@ -193,6 +196,17 @@ named cases; the whole-suite figure is in the lane report.
          (reddens the three AddressCollisionTest cases that depend on a
           12-to-14-character token, and six older cases whose fixture ids
           are 14 characters -- the floor is not isolable on this fixture)
+    M-N7. addrNameConflicts hard-wired to 0               failures=1
+         (test_the_contradicted_row_is_counted_and_still_paired_by_address)
+    M-N8. addrNameConflicts counts every ADDR row whose bare name the guide
+          declares, dropping the "a DIFFERENT channel" guard
+                                                          failures=1
+         (test_the_guide_declaring_the_row_under_its_full_name_is_not_a_conflict)
+    M-N9. bare_name_key does not strip the trailing qualifier
+                                                          failures=3
+         (test_bare_name_key_is_a_measurement_key_and_not_a_matching_key,
+          test_the_guide_side_shortcut_agrees_with_bare_name_key and the
+          contradicted-row case)
 
 Run: python3 -m unittest discover -s tests
 """
@@ -956,7 +970,7 @@ class AddressIndexTest(unittest.TestCase):
         has to look like. Moving the `exact.get(cid.lower())` LOOKUP below
         "addr" changes nothing at all, because build_alias writes the fold
         into `exact` itself and `exact.get(cid)` then hits the alias on the
-        line above (M-N5noop: 90 tests OK, nothing red). And a folded map
+        line above (M-N5noop: 96 tests OK, nothing red). And a folded map
         built only from the aliases that were "free" takes `matchedById` 8 ->
         7 on tests/fixtures/epg-channels.m3u, reddening a second case for an
         unrelated reason, as does deleting the `cid.lower()` lookup outright
@@ -1149,6 +1163,119 @@ class AddressCollisionTest(unittest.TestCase):
                                                          "SHOW ESPN")))
         self.assertEqual(status["matched"], 0)
         self.assertEqual(channels, {})
+
+
+class AddressNameConflictTest(unittest.TestCase):
+    """`addrNameConflicts`: the reverse check the strategy was never given.
+
+    The address strategy's safety measurement asked whether the NAME matcher
+    had paired these rows with a DIFFERENT guide channel and found 0. That is
+    true and it is blind by construction to the 40 rows the name matcher left
+    blank, because a row NAME never paired cannot be in a disagreement set
+    computed from NAME's pairings. One of those 40 is a real contradiction:
+
+      row `Pluto TV Reality (United States)`, tvgId PlutoTVReality.us@US
+      its stream url carries 69fa3faab9c0f0d444e64de3, whose display-name in
+        the guide is `Pluto TV Pride`
+      its artwork names a third id the guide never declares
+      the guide separately declares 5d8bf0b06d2d855ee15115e3 as
+        `Pluto TV Reality`, and no row claims it
+
+    The product owner has RULED that the pairing stands: the address names the
+    playout that will actually be opened, the provider's own fields disagree
+    about this row (the neighbouring `VH1 Queens of Reality` row carries the
+    same Pride id in both its stream and its artwork), and a guide that
+    follows the stream beats one that follows a name somebody typed. So this
+    is not a ranking case and nothing here changes a pairing. What it changes
+    is that the case is COUNTED: `addrNameConflicts` is 1 on the frozen
+    inputs, it is in the epg status reply, and a reader who sees it rise knows
+    a second one exists without running an audit nobody scheduled.
+
+    The shapes below are the frozen ones, with synthetic ids: a row whose name
+    carries a country qualifier, whose address names guide channel X, while
+    the guide also declares Y under the row's own bare name.
+    """
+
+    ROW = "Pluto TV Reality (United States)"
+    STREAMED = "aaaaaaaaaaaaaaaaaaaa0001"   # the id in the row's address
+    NAMED = "bbbbbbbbbbbbbbbbbbbb0002"      # the id the guide gives the bare name
+
+    def playlist(self):
+        return ("#EXTM3U\n"
+                '#EXTINF:-1 tvg-id="PlutoTVReality.us@US",%s\n'
+                "http://h.example.test/plu-%s.m3u8\n" % (self.ROW, self.STREAMED))
+
+    def test_the_contradicted_row_is_counted_and_still_paired_by_address(self):
+        status, channels = _epg_on(self.playlist(), _guide_xml(
+            (self.STREAMED, "Pluto TV Pride", "Showgirls"),
+            (self.NAMED, "Pluto TV Reality", "Reality Show")))
+        # The ruling: the address wins, and the row carries Pride's schedule.
+        self.assertEqual((status["matched"], status["matchedByAddr"]), (1, 1))
+        self.assertEqual(channels["PlutoTVReality.us@US"]["now"]["title"], "Showgirls")
+        # And the contradiction is now a number instead of an audit.
+        self.assertEqual(status["addrNameConflicts"], 1)
+
+    def test_no_second_declaration_means_no_conflict(self):
+        """The counter has to be able to read 0, or it measures nothing."""
+        status, channels = _epg_on(self.playlist(), _guide_xml(
+            (self.STREAMED, "Pluto TV Pride", "Showgirls")))
+        self.assertEqual((status["matched"], status["matchedByAddr"]), (1, 1))
+        self.assertEqual(status["addrNameConflicts"], 0)
+
+    def test_the_guide_declaring_the_row_under_its_full_name_is_not_a_conflict(self):
+        """`epg_name_key` already joins those, and the address agreeing with
+        the name is the 145-row majority, not a contradiction."""
+        status, channels = _epg_on(self.playlist(), _guide_xml(
+            (self.STREAMED, self.ROW, "Same Channel")))
+        self.assertEqual((status["matched"], status["matchedByAddr"]), (1, 1))
+        self.assertEqual(status["addrNameConflicts"], 0)
+
+    def test_a_row_the_name_matcher_won_is_not_counted(self):
+        """The counter is scoped to rows the ADDRESS holds. A row matched by
+        name is not one of the 40 the measurement was blind to."""
+        playlist = ("#EXTM3U\n"
+                    '#EXTINF:-1 tvg-id="PlutoTVReality.us@US",%s\n'
+                    "http://h.example.test/plu-nothing.m3u8\n" % self.ROW)
+        status, channels = _epg_on(playlist, _guide_xml(
+            (self.STREAMED, self.ROW, "By Name"),
+            (self.NAMED, "Pluto TV Reality", "Reality Show")))
+        self.assertEqual((status["matched"], status["matchedByName"]), (1, 1))
+        self.assertEqual(status["addrNameConflicts"], 0)
+
+    def test_bare_name_key_is_a_measurement_key_and_not_a_matching_key(self):
+        """It strips a TRAILING parenthetical, which the matcher's own key
+        deliberately does not -- F-EPG-10 ruled that deleting an unknown
+        parenthetical can delete identity. Nothing but the counter reads it.
+        """
+        self.assertEqual(helper.bare_name_key("Pluto TV Reality (United States)"),
+                         helper.epg_name_key("Pluto TV Reality"))
+        self.assertNotEqual(helper.epg_name_key("Pluto TV Reality (United States)"),
+                            helper.epg_name_key("Pluto TV Reality"))
+        # The matcher's key is unchanged by this round.
+        self.assertEqual(helper.epg_name_key("48 Hours (1080p)"),
+                         helper.epg_name_key("48 Hours"))
+        # Only a TRAILING one, and only one of them.
+        self.assertEqual(helper.bare_name_key("ESPN (Deportes) Live"),
+                         helper.epg_name_key("ESPN (Deportes) Live"))
+
+    def test_the_guide_side_shortcut_agrees_with_bare_name_key(self):
+        """parse_xmltv skips the second fold when the raw display-name does not
+        end with `)`, and uses `epg_name_key`'s answer instead. That shortcut
+        is only correct if the two functions agree on exactly those strings --
+        it is a performance decision inside a hot loop, so it is asserted here
+        rather than assumed. Checked over the frozen guide's display-names and
+        the owner's 1,453 row names as well: 1,890 strings, 0 disagreements.
+        """
+        for text in ("Alpha", "Alpha (HD)x", "48 Hours", "ESPN (Deportes) Live",
+                     "Pluto TV Reality", "", "Alpha [Not 24/7]", "101"):
+            self.assertFalse(text.rstrip().endswith(")"), text)
+            self.assertEqual(helper.bare_name_key(text), helper.epg_name_key(text), text)
+        # And where it does end with `)`, however it is spelled, the shortcut
+        # is NOT taken -- these are the strings the two functions differ on.
+        for text in ("Alpha (United States)", "Alpha (United States) ",
+                     "Alpha (United States)\t"):
+            self.assertTrue(text.rstrip().endswith(")"), text)
+            self.assertEqual(helper.bare_name_key(text), helper.epg_name_key("Alpha"))
 
 
 class EpisodeSystemTest(unittest.TestCase):

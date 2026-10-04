@@ -32,6 +32,7 @@
     "nameDroppedGuide": 2,
     "addrIndexed": 9,
     "addrDroppedPlaylist": 2,
+    "addrNameConflicts": 0,
     "epgChannels": 21,
     "programmeCount": 22,
     "nowCount": 21
