@@ -1118,8 +1118,12 @@ The one exception is `Tennis Channel +2 (720p)` against the guide's
 
 **Does "not the name" survive? Narrowed, not withdrawn.** What survives is
 the operative half: **the name may not confirm ALONE.** The forbidden
-`--name-oracle` confirms 226 of 226; E1 confirms 90 of those 226 and is
-silent on 37 of the 80 name-matched pairs in the 265. So the rule is doing
+`--name-oracle` confirms 226 of 226 at 226 and **225 of 265** at 265 -- the
+40 it cannot confirm are all address-matched pairs whose names its own key
+does not equate, which is the address strategy earning its place in this
+argument: the grader that cannot go red has, for the first time, 40 pairs it
+cannot speak about. E1 confirms 110 of the 265, 67 of them address-matched,
+and is silent on **37 of the 80 name-matched pairs**. So the rule is doing
 real work -- it withholds confirmation from pairs whose names agree
 perfectly -- and the schedule is a necessary second input that the matcher
 never reads. What does NOT survive is the stronger reading, that a
