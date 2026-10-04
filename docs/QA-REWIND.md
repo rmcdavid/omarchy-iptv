@@ -1,7 +1,10 @@
 # Omarchy IPTV - QA plan for live rewind (M5-01)
 
-Owner: QA (lane Q). Status: v0.1 (2026-10-03), written against `dev` tip
-`2d7df1f` with `docs/M5-01-LIVE-REWIND.md` approved on all twelve decisions.
+Owner: QA (lane Q). Status: v0.2 (2026-10-03). v0.1 was written against
+`dev` tip `2d7df1f` with `docs/M5-01-LIVE-REWIND.md` approved on all twelve
+decisions; v0.2 adds **section 9**, the health exemption (ruling D10) and the
+instrument that can go red for a missing one, for F-RWD-18, and re-labels R14
+as a control on R13's burst rather than evidence for D10.
 The scenario has been RUN on that tree plus this lane's own files (section 6:
 red on every check that needs the feature) and has NOT yet been run on the
 integrated tree; the lead runs it green after lanes H, S and M merge, and
@@ -23,7 +26,7 @@ quoted as "designed" come from the design and were not measured here.
 
 ## 0. How to read and execute this plan
 
-- Check ids are `R0`-`R15`, one per numbered block of
+- Check ids are `R0`-`R17`, one per numbered block of
   `scripts/dev-harness/rewind-scenario.sh`; a block holds one or more
   assertions and the run prints one `PASS`/`FAIL` line per assertion.
 - Three files carry it, all QA tooling, none on the plugin's allowlist:
@@ -157,8 +160,10 @@ by a grep for a string the implementation was written to contain (rule 14).
 | R11 | `back 10` then pause: the position holds (two reads 2 s apart); `behindLive` rises; resume continues from the held point | same | yes (1 of 5; the holds are controls) | hold +/- 0.25 s |
 | R12 | `behindLive` known before `run.sh restart-shell` (>= 5); the new shell recovers playing, the same pid, and `behindLive` within 4 s of the value before | `rw`, `run.sh restart-shell` | yes (2 of 4) | +/- 4 s |
 | R13 | guide open in list mode; 20 `b` presses 60 ms apart through wtype; >= 1 helper `seek` run (control); FEWER runs than presses; `behindLive` >= 20 afterwards (the capped sum on a ~30 s window) | `rewind-sweep.py`, `rw` | yes (3 of 4) | -- |
-| R14 | with seeks issued (control): same player pid, `playSeq` delta 0, lock `seq` delta 0, `healthSkips` 0, still playing | `player_seq`, `lock_seq`, `svc` | yes through the control (1 of 6) | -- |
+| R14 | with seeks issued (control): same player pid, `playSeq` delta 0, lock `seq` delta 0, `healthSkips` 0, still playing. A CONTROL ON R13's BURST AND NOTHING MORE -- it was written as the evidence for ruling D10 and cannot be; see section 9 | `player_seq`, `lock_seq`, `svc` | yes through the control (1 of 6) | -- |
 | R15 | five timed `player seek --by -4`: spawn-to-reply median <= 300 ms; the last reply is `ok true` | `date +%s%N` around `seek` | yes for the reply half; the timing half passes on 2d7df1f because argparse fails fast (198 ms), which is why the two are paired | median <= 300 ms |
+| R16 | ruling D10 on a PREPARED TREE whose helper sleeps before exec-ing the real one: over a quiet window, that the sampler runs, that health ticks are visible to it, and that `healthBusy` is TRUE while a status HOLDS the slot (the negative control); over a busy window of alternating presses, that `healthBusy` is FALSE for every sample where a seek holds the slot, that `controlRunning` says it is held, that a tick landed on a running seek, and that `healthSkips`, the player pid and `playSeq` never moved | `ipc healthWatch` / `ipc healthLog` sampling the service's own properties at 100 ms inside the shell process; `fixtures/slow-helper.py` | yes, through the sentinels -- `healthBusy` and `controlRunning` do not exist before lane S, and an absent property answers the string `undefined`, never `false` | seek samples >= 100 of ~320; status runs during the busy window < 3 |
+| R17 | two seek-queue decisions the slow tree makes observable at all: a press while a seek holds the slot answers `queued` with `pending` equal to THIS press's own size, and a press during the stop ladder is refused `nothing_playing` | `svc controlKind`, `ipc back`, `ipc stop` | yes (no verb, no state) | -- |
 | floor | the assertion count equals `EXPECTED_CHECKS` | -- | no | exact |
 
 ## 4. Budgets
@@ -170,9 +175,11 @@ by a grep for a string the implementation was written to contain (rule 14).
   175-200 ms, which is the interpreter's start-up alone; the real number
   arrives with lane H. The sweep in R13 also prints each seek run's
   lifetime at 20 ms sampling, for information.
-- **Coalescing and the health exemption** (D10): R13 counts runs against
-  presses and R14 reads the intent counter from both sides of the lock,
-  the way P11 does, because that is the number a second relaunch moves.
+- **Coalescing** : R13 counts runs against presses and R14 reads the intent
+  counter from both sides of the lock, the way P11 does, because that is the
+  number a second relaunch moves. **The health exemption (D10) is NOT in
+  those two checks** -- it was claimed there and was never observable there.
+  Section 9 is the exemption, and R16 is where it is measured.
 - **The 150 ms guide open is untouched** by this feature and this scenario
   does not measure it; `ipc openMs` (PERF-01) remains the instrument and
   the lead's integration gate runs it.
@@ -395,3 +402,268 @@ held key) is the lead's, on the integrated tree. Audio-video sync and
 subtitles after a cache seek (design 7), a fetch stall longer than a
 provider's playlist window, and the window over hours remain the spike's
 open items. The OSD line is section 4's UNVERIFIED entry.
+
+## 9. The health exemption (ruling D10), and why R14 could not see it
+
+Added 2026-10-03 by the QA lane for **F-RWD-18**. Everything in this section
+was measured on this machine on that day; the three runs and their counts are
+at the end.
+
+### 9.1 What D10 is
+
+`docs/M5-01-LIVE-REWIND.md` ruling D10: **a seek run does not count as busy
+for the health tick's three-strikes restart.** The mechanism it modifies is
+`Service.qml`'s `healthTimer`: every `healthCheckMs` (10 s) it asks
+`Model.healthTick(healthSkips, busy)`; three consecutive busy ticks
+(`HEALTH_SKIPS_BEFORE_RESTART`) mean `player restart --from term`. The
+restart exists to catch a helper that never returns. A slot re-occupied
+every few hundred milliseconds by a sub-second verb under a held `b` is the
+benign case it must not punish, so the `busy` argument excludes a run whose
+kind is `seek`.
+
+### 9.2 Why R14 could not go red for a missing exemption
+
+R14 asserts that after R13's burst the player pid, `playSeq`, the lock
+record and `healthSkips` are all unmoved. Three strikes need the slot found
+busy on three consecutive 10 s ticks, i.e. a 20 s span at minimum. R13's
+burst is twenty presses 60 ms apart - about 1.2 s - and the measured helper
+lifetimes are 208-246 ms. **No restart could fire in that window whether or
+not the exemption exists**, so every R14 assertion passed for a reason that
+has nothing to do with D10. That is CLAUDE.md rule 14's shape exactly: a
+check that cannot go red for the failure it guards is not a check. R14 stays
+in the scenario, re-labelled as a control on R13's burst; D10 moved to R16.
+
+### 9.3 The instrument: a wider window, not a luckier sample
+
+Two problems had to be solved, and both are about time.
+
+**The decision is only visible while the slot is held**, and a healthy
+`player seek` run holds it for about 220 ms (R15's median, five runs:
+213-230 ms). One `run.sh ipc state` round trip is of the same order, so a
+shell-side poll samples the window by coincidence. Fixed by sampling INSIDE
+the shell process: `ipc healthWatch <ms>` arms a 100 ms `Timer` in
+`scripts/dev-harness/shell.qml` that tallies the service's own
+`healthBusy`, `controlRunning` and `controlKind`; `ipc healthLog` returns the
+tally. Measured sampling fidelity: 280 samples over a 28 000 ms window and
+320-321 over 32 000 ms, i.e. the full 100 ms cadence with no drops, on every
+run.
+
+**A 220 ms run cannot be caught by a 10 s tick on purpose.** Fixed by making
+runs long: `scripts/dev-harness/fixtures/slow-helper.py` sleeps
+`OMARCHY_IPTV_SLOW_MS` (4000) and then `execv`s the REAL helper with the
+same argv, for the verbs in `OMARCHY_IPTV_SLOW_VERBS` (`seek,status`) only.
+It is not a stub: every reply the service parses is the shipped helper's,
+only later. R16 stages the tree under test into a scratch directory with
+`bin/omarchy-iptv` replaced by it (`bin/omarchy-iptv.real` beside it),
+restarts the harness against that tree, and drives presses. The service
+spawns `python3 <root>/bin/omarchy-iptv ...`, which is why the stand-in has
+to be python and not shell. 4000 ms is chosen under the service's own
+`controlTimeoutMs` (8 s): past that the control watchdog terminates the
+helper and the slot frees for a reason that is not the exemption.
+
+Measured effect: each seek run holds the slot 3.9-4.2 s, the gap between
+runs is the 300 ms `seekThrottle` plus about 100 ms of turnaround, and the
+duty cycle over a 32 s window is 294-296 seek samples of 320-321, i.e.
+91-92 per cent.
+
+### 9.4 What R16 observes, and why each observation is deterministic
+
+A **quiet window** (28 s, no presses at all):
+
+- the sampler ran: >= 200 samples (280 measured);
+- health ticks are visible to it: >= 2 status runs. Measured 3, at
+  101/201, 10200/10501, 20200/20501 ms - the 10 s cadence, and the only
+  periodic `status` the service has (the health tick is the sole caller
+  besides `askPlayerStatus`, which only a pause refusal starts);
+- **the negative control**: `healthBusy` is TRUE on >= 20 samples where a
+  `status` HOLDS the slot (126-129 measured). Without this, "a seek is not
+  busy" would be satisfied by a predicate hard-wired to `false`;
+- and never FALSE, and never the sentinel, on such a sample;
+- `healthBusy` is FALSE on >= 20 samples with the slot idle (151-152
+  measured) and never TRUE there;
+- `controlRunning` answered a boolean on every sample, never the sentinel.
+
+A **busy window** (32 s, presses driven back to back, alternating `back 3`
+and `forward 3` so the position hovers and never walks into the floor -
+`seekBy` refuses `at_floor` locally and spawns nothing, which would collapse
+the duty cycle for a reason that has nothing to do with the tick):
+
+- **the control, read from `controlKind`, which every tree has**: a seek was
+  really in flight when sampled, >= 100 samples (294-296 measured). This is
+  deliberately not keyed on the reducer lane's names, so a red `healthBusy`
+  check names the missing join and not a missing seek;
+- **the D10 predicate**: `healthBusy` is FALSE on >= 100 samples where a
+  seek HOLDS the slot, never TRUE for a running seek, never the sentinel;
+- `controlRunning` says the slot IS held on >= 100 of those samples;
+- **a tick landed on a running seek**: fewer `status` runs than the 3 ticks
+  the window spans. The deduction: a tick that finds the slot held issues no
+  status, because `runControl` refuses one while `controlProc.running`;
+  a tick that finds it free always issues one. Measured **0 status runs** in
+  32 s on all three runs - all three ticks landed on a running seek.
+  This is the check that makes the next one non-vacuous, and it is
+  arithmetic, not luck: at 91 per cent duty the chance of all three ticks
+  landing in a 300-400 ms gap is about 1 in 10^3;
+- **the D10 consequence**: `healthSkips` never left 0, `healthSkips` was
+  readable on every sample, the player pid is the one from before the window,
+  and `playSeq` did not move.
+
+Two assertions in this set pass VACUOUSLY on a tree with no `healthBusy`
+property ("never true for a running seek", "never true with the slot idle"):
+with every sample in the sentinel bucket, the "true" count is 0. They are
+conjuncts of the checks beside them, which cannot pass on such a tree, and
+they earn their keep on a tree that HAS the property - run C below reddens
+the first of them with 296.
+
+### 9.5 Why the `healthBusy` checks are keyed on the slot being HELD
+
+`controlKind` outlives `controlProc.running` by about one sampler tick at
+the end of every run: the `Process` has exited and its `StdioCollector` is
+still draining (`waitForEnd: true`), so `running` is already false while the
+kind still names the run that just finished - and `healthBusy` is correctly
+false there, because nothing IS running. Measured: 2 samples of 128 over
+three status runs, on the first run against a tree carrying the reducer
+lane's names. The first version of the status check was keyed on the kind
+alone and reddened on that handover rather than on the decision; it is the
+one check this round re-points, onto a tally narrowed to
+`controlRunning === true`. For the two seek checks the same move is a
+STRENGTHENING - they now also require `controlRunning` to say the slot is
+held. Nothing shipped reads `controlKind` as liveness (`runControl`, the
+control watchdog and the health predicate all guard on `running`), so this
+is recorded as a property of the instrument's key and **not filed as a
+defect**; if the lead reads it as one it needs an id and a board row, which
+this lane cannot write.
+
+### 9.6 The prepared-tree technique, with the commands
+
+`--tree <dir>` points the scenario at a directory the way `--baseline <ref>`
+points it at a commit. It is how a NAMED MUTATION of a file this lane does
+not own is proved red: export the tree, edit the export, run against it.
+Nothing in the repository is modified.
+
+```bash
+SCR=$(mktemp -d)              # the two mutated trees
+for t in B C; do mkdir -p "$SCR/tree-$t"; git archive HEAD | tar -x -C "$SCR/tree-$t"; done
+# tree B: the reducer lane's two names stood in, WITH the D10 exemption.
+#   after `property string controlKind: ""` in Service.qml, insert
+#     readonly property bool controlRunning: controlProc.running
+#     readonly property bool healthBusy: controlProc.running && root.controlKind !== "seek"
+#   and make the health timer read the property:
+#     var tick = Model.healthTick(root.healthSkips, root.healthBusy)
+# tree C: the same, with the exemption REMOVED:
+#     readonly property bool healthBusy: controlProc.running
+
+scripts/dev-harness/rewind-scenario.sh                     # A: this branch
+scripts/dev-harness/rewind-scenario.sh --tree "$SCR/tree-B"  # B: exemption present
+scripts/dev-harness/rewind-scenario.sh --tree "$SCR/tree-C"  # C: exemption gone
+```
+
+Each run holds the display for about seven minutes and reaps everything it
+starts. R16 restarts the harness against its own slow-helper tree, so
+`last-start.env` would end up naming a directory the run then deletes; the
+EXIT trap removes the record with the tree, and `run.sh restart-shell` after
+a run says "no detached start recorded" rather than dying on a missing tree.
+
+### 9.7 The three runs
+
+Verbatim summary lines, all on `scripts/dev-harness/rewind-scenario.sh` at
+`3e26c68` plus the cleanup-only commit after it (which runs after the last
+check and cannot move a count; run A was re-measured on the final tree,
+runs B and C at `3e26c68`):
+
+| run | tree | result |
+|---|---|---|
+| A | this branch, no reducer-lane names | `== rewind-scenario: 98 passed, 7 failed, 105 assertions executed` |
+| B | named mutation: stand-in `healthBusy`/`controlRunning`, exemption PRESENT | `== rewind-scenario: 105 passed, 0 failed, 105 assertions executed` |
+| C | named mutation: stand-in names, exemption REMOVED | `== rewind-scenario: 100 passed, 5 failed, 105 assertions executed` |
+| A' | this branch again, on the final tree | `== rewind-scenario: 96 passed, 9 failed, 105 assertions executed` |
+
+A' is run A repeated after the cleanup-only commit. Its nine red are run A's
+seven, unchanged and identical in their counts, plus TWO PRE-EXISTING checks
+that flaked - `R9 playbackStateText is empty right after the zap` (got
+`0:16 behind live`) and `R10 behindLive counts UP while paused` (12.187 ->
+12.187, no movement at all). Both passed on runs A, B and C and failed on
+A' alone, i.e. once in four runs; section 9.9 hands them to the lead.
+
+**Run A**, the seven red, all of them the missing join and none of them D10:
+
+```
+FAIL R16 NEGATIVE control: healthBusy is TRUE while a status helper HOLDS the slot (0 samples >= 20)
+FAIL R16 and never the sentinel while a status helper runs (got '126', want '0')
+FAIL R16 control: healthBusy is false with the slot idle (0 samples >= 20)
+FAIL R16 controlRunning answers a boolean, never the sentinel (quiet window) (got '280', want '0')
+FAIL R16 D10: healthBusy is FALSE for every sample where a seek HOLDS the slot (0, of 294 by kind)
+FAIL R16 D10: and never the sentinel for a running seek (got '294', want '0')
+FAIL R16 controlRunning says the slot IS held while the kind is seek (0 >= 100)
+```
+
+Every control around them was green on the same run: 294 seek samples of
+321, 0 status runs across 3 ticks, `healthSkips` 0, pid and `playSeq`
+unmoved. So the instrument worked and only the subject was absent - which is
+the state a check that cannot see its subject must report (rule 10).
+
+**Run C**, the five red - this is the proof the new checks can go red for a
+missing exemption:
+
+```
+FAIL R16 D10: healthBusy is FALSE for every sample where a seek HOLDS the slot (0, of 296 by kind)
+FAIL R16 D10: and never true for a running seek (got '296', want '0')
+FAIL R16 D10: healthSkips never left 0 across the busy window (got '2', want '0')
+FAIL R16 the player was not restarted (same pid as before the window) (got '2970409', want '2968431')
+FAIL R16 the intent counter did not move across the busy window (got '1', want '0')
+```
+
+Without the exemption **the three-strikes restart actually fired**: the
+sampler saw `healthSkips` reach 2 and then the player pid change, which is
+`Model.healthTick` returning `restart` on the third busy tick and resetting
+the counter. Every control and every negative control on run C was green, so
+the five reds are the decision and nothing else. Run B, the same tree with
+the exemption put back, is 105 of 105.
+
+### 9.8 What is still UNVERIFIED here (rule 14)
+
+- **The exemption on a REAL 220 ms seek run.** R16 measures the predicate and
+  its consequence on runs stretched to 4 s. Ruling D10's benign case is a
+  held key at the repeat rate, and the scenario cannot place a 10 s tick on a
+  220 ms run on purpose. The step from "the predicate is right" to "the
+  restart never fires under a held key" is `Model.healthTick`, which is node
+  tested, plus R13/R14 on real runs; that chain is argued, not observed, and
+  is marked UNVERIFIED until something observes it.
+- **The third strike with the exemption in place.** Run C shows the restart
+  firing without the exemption. Nothing shows that three ticks on a seek-held
+  slot leave the counter at 0 for thirty seconds rather than for the one
+  window measured; the busy window spans 3 ticks and `healthSkips` was 0 at
+  all 321 samples, which is the same statement over 32 s and not over a
+  longer run.
+- **The handover window's size.** 2 samples of 128 bounds it at roughly one
+  to two sampler ticks (100-200 ms). It was not measured at finer resolution
+  and the number will move with load.
+
+### 9.9 For the lead: two things that need an id and a board row (no defect ids here - see the note)
+
+This lane owns `docs/QA-REWIND.md` and does not own `docs/STATUS.md`. An id
+filed in a document with no row on the board makes
+`scripts/check-defect-ledger.py` report a problem (verified: a probe id in
+this file produced "<id> is filed in docs/QA-REWIND.md but has no row in
+docs/STATUS.md" - the probe id is written `<id>` here rather than spelled,
+because spelling it would file it), which is the join rule 13 exists to
+enforce. So both items
+below are described here and handed to the lead in the lane report; the lead
+assigns the id and writes the row, and this file gets the id back.
+
+- **R9 and R10 flake, once in four runs.** On run A' only, `R9
+  playbackStateText is empty right after the zap` read `0:16 behind live`
+  and `R10 behindLive counts UP while paused` read 12.187 twice, three
+  seconds apart, i.e. no movement. Neither is about this round's change:
+  both are M5-01 checks on M5-01 code, both green on runs A, B and C, and
+  nothing in this round touches the zap reset or the paused count-up. Two
+  readings: either the guide's reset and the service's 1 Hz count-up are
+  genuinely late under load, which is a product finding, or the two checks
+  sample too soon after the event, which is a scenario finding. The data
+  cannot tell them apart yet, so the item is "two checks that flake" and the
+  next step is to re-run A a few times and record the rate. Until then every
+  run of this scenario can come back red on these two for a reason the
+  reader will mistake for F-RWD-18.
+- **The control slot's kind outlives its running flag** by about one sampler
+  tick (section 9.5). Measured, understood, and harmless to everything
+  shipped - recorded because the next check keyed on `controlKind` as a
+  liveness proxy will be wrong in the same way this one was.

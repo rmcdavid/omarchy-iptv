@@ -308,6 +308,14 @@ cleanup() {
   lpid=$(ss -ltnp 2>/dev/null | grep ":$PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
   [[ -n $lpid ]] && kill "$lpid" 2>/dev/null
   rm -rf "$FIX"
+  # R16 restarted the harness against the slow-helper tree under $WORK, so
+  # `last-start.env` now names a directory that is about to go, and the next
+  # `run.sh restart-shell` would die on it instead of restarting. Take the
+  # record with the tree: this scenario reaps the scratch anyway, and "no
+  # detached start recorded" is the honest state to leave behind.
+  if [[ -n $WORK ]] && grep -q -- "$WORK" "$SCRATCH/last-start.env" 2>/dev/null; then
+    rm -f "$SCRATCH/last-start.env"
+  fi
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   [[ -n $WORK && -d $WORK ]] && rm -rf "$WORK"
   return 0
