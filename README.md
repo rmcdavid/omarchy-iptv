@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.11.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.12.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -198,7 +198,7 @@ omarchy-shell io.github.rmcdavid.iptv previous            # zap back
 omarchy-shell io.github.rmcdavid.iptv channel 101         # tune straight to channel 101
 omarchy-shell io.github.rmcdavid.iptv pip toggle          # picture in picture on / off
 omarchy-shell io.github.rmcdavid.iptv pause               # pause / resume live TV
-omarchy-shell io.github.rmcdavid.iptv back 30             # rewind 30 s (default 10); JSON reply
+omarchy-shell io.github.rmcdavid.iptv back 30             # rewind 30 s; JSON reply. The argument is required by the shell's IPC: `back ""` is the 10 s step, a bare `back` is refused before it reaches the plugin
 omarchy-shell io.github.rmcdavid.iptv forward 30          # forward 30 s (default 10); JSON reply
 omarchy-shell io.github.rmcdavid.iptv live                # back to live; JSON reply
 omarchy-shell io.github.rmcdavid.iptv stop

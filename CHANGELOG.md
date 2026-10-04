@@ -3,6 +3,43 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.12.0 (2026-10-04)
+
+More of your channels show what is on.
+
+### Added
+
+- **The guide finds far more channels.** The plugin used to match a channel
+  to its listings by NAME, which meant guessing: `48 Hours (1080p)` had to be
+  recognised as `48 Hours`. Most providers already put the listings' own
+  channel id inside the stream address, and now the plugin reads it. On the
+  public list this was developed against, channels with listings went from
+  226 to 265 of 1,453, and 185 of those are now matched by the provider's own
+  identifier rather than by a guess. Nothing about this is specific to one
+  provider: the rule is that a long enough run of characters in the address
+  that exactly equals an id the guide declares is that channel, whatever the
+  id looks like.
+- **The guesses that remain are checked by something independent.** The
+  identifier in the address used to be what we graded the matcher WITH, so
+  reading it would have made the audit confirm its own answers. The project
+  now grades pairings from the programme schedule instead -- the half of the
+  guide file the matcher never opens -- and a name is never allowed to
+  confirm a match. Under it, 110 of the 265 pairings are independently
+  confirmed and none is contradicted, against 90 of 226 before.
+
+### Fixed
+
+- **A channel whose name no rule could join to its listings now joins by its
+  address.** The guide writes `TennisChannel 2` where the playlist writes
+  `Tennis Channel +2 (720p)`; no amount of trimming markers can turn one into
+  the other, and the address does it without reading either name.
+- **Bracketed notes in a channel name are no longer stripped blindly.** The
+  plugin removed anything a provider put in brackets, which could delete part
+  of a channel's real name and attach it to the wrong listings. It now
+  removes the two notes that actually occur, `[Not 24/7]` and `[Geo-blocked]`,
+  and leaves anything else alone: an unfamiliar note means that channel
+  simply shows no listings, rather than showing the wrong ones.
+
 ## 0.11.0 (2026-10-03)
 
 You can wind live TV back.

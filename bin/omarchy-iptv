@@ -258,14 +258,184 @@ EPG_MAX_EPISODE = 32
 # The detail keys, in the fixed order encode_record emits them. Fixed because
 # epg-now.json is compared byte for byte by the gzip twin test (dev branch).
 EPG_DETAIL_KEYS = ("desc", "category", "episode")
-# The three matcher strategies of M4-01, as RANKS: strongest first, and the
-# order the names appear in is the order build_alias's maps are tried in.
+# The four matcher strategies, as RANKS: strongest first, and the order the
+# names appear in is the order build_alias's maps are tried in.
 # A stronger strategy displaces a weaker one on the same playlist channel
 # whatever order the guide streamed them in (see claim_channel).
+#
+# ADDR is F-EPG-11, added after the M4-01 precision audit measured that the
+# identifier it used as its ORACLE -- a guide channel id sitting in the
+# playlist row's own stream address -- was reaching 185 rows that the matcher
+# itself never read. Why it ranks where it does, measured on the frozen
+# 1,453-channel list against the frozen Pluto guide (427 declarations):
+#
+# EVERY census below counts the STREAM url and nothing else, which is the
+# only field this strategy reads. The round that added ADDR quoted 193 and
+# 153 here instead; those are the stream-OR-LOGO union, taken from the
+# precision audit's id oracle, which read the logo as a fallback without
+# saying so (F-EPG-14). Re-derived field by field over the frozen inputs,
+# by plain substring search for each of the guide's 427 declared
+# <channel id> values: STREAM 185 rows, LOGO 64, union 193, logo-only 8.
+# So a census quoted without its field is unusable, and this one says it
+# every time. (Filed by the four-lens review of the F-EPG-11 round; the id
+# is the lead's to allocate on the board, which is why this comment names
+# the measurement and not a number nobody can look up.)
+#
+#   ID    first, unchanged: the playlist author writing tvg-id="<guide id>"
+#         is the only strategy where the join is DECLARED rather than
+#         inferred. Contributed 0 on these inputs, so nothing measured here
+#         ranks it; it stays first because a declaration outranks a
+#         deduction. The CASE-FOLDED half of that map is not a declaration
+#         and is ranked by a different argument -- see match_xmltv_channel.
+#   ADDR  second. Against NAME the ordering is measured: of the 185 rows
+#         whose STREAM address names a guide channel, 145 were already paired
+#         with THAT channel by name, 0 were paired with a different one, and
+#         40 were paired with nothing. The one row where the two strategies
+#         compete for a guide channel is decided by the address and the
+#         address is right: the guide's `Heartland` is Pluto's playout of it,
+#         `Heartland.us@Web` streams exactly that playout and
+#         `Heartland.us@Eastern` streams the broadcaster's own, which the
+#         name fold could not tell apart. Against FEED the ordering is
+#         UNVERIFIED on these inputs (FEED contributed 0) and is set by
+#         argument: FEED compares a TRUNCATION of the two ids and its own
+#         docstring records that it picks arbitrarily between @SD/@HD twins,
+#         while ADDR compares a whole id for equality.
+#   FEED, NAME  unchanged, one rank weaker each.
 EPG_MATCH_ID = 0
-EPG_MATCH_FEED = 1
-EPG_MATCH_NAME = 2
-EPG_MATCH_KEYS = ("matchedById", "matchedByFeed", "matchedByName")
+EPG_MATCH_ADDR = 1
+EPG_MATCH_FEED = 2
+EPG_MATCH_NAME = 3
+EPG_MATCH_KEYS = ("matchedById", "matchedByAddr", "matchedByFeed", "matchedByName")
+# The shortest alphanumeric run in a stream address that ADDR will accept as
+# a guide channel id. It is a TRIM, not the collision guard: the guard is the
+# ambiguity rule below (a token claimed by two rows is thrown away), and the
+# floor only keeps short words out of the index.
+#
+# The strategy is "a guide channel id that appears verbatim as an
+# alphanumeric token of the row's stream URL", which is provider-general: it
+# names no provider, no host and no id SHAPE. The absurd collision it has to
+# refuse is a short id -- a guide declaring id="tv" or id="playlist" would
+# otherwise claim a row for every address containing that word.
+#
+# What the floor actually buys, re-measured over the 1,453 real STREAM
+# addresses (the field this strategy reads; the figures the round shipped
+# here were taken over stream+logo and are wrong on this field):
+#
+#   With no floor at all, 626 alphanumeric tokens occur in more than one
+#   row's address and NONE of them is a 24-hex id. The longest is
+#   `44f73ba4d03e9607dcd9bebdcb8494d86964f1d8`, 40 characters, 2 rows. 134
+#   of the 626 are longer than eight characters. Restricted to purely
+#   ALPHABETIC tokens -- the kindest reading of "URL vocabulary" -- the
+#   longest is `montgomerycommunitymedia`, 24 characters, and 32 of them are
+#   at least twelve characters long and so survive this floor:
+#   `sinclairstoryline` (4 rows), `getstreamhosting` (6), `lionsgatestudio`
+#   (3), `ewscrippscompan` (5), `toonamiaftermath` (2). Twelve therefore does
+#   NOT clear the vocabulary, which is what the previous version of this
+#   comment claimed; `channels` is 6 stream rows and 131 LOGO rows, and
+#   `provider` is 0 stream rows.
+#
+#   Swept through build_alias itself, the floor changes no OUTCOME on this
+#   provider. Declared guide ids the index reaches: 185 at every floor from
+#   4 to 24, and 0 at 25 (past the guide's 24-character ids). At 8,
+#   `playlist` (583 rows) is indexed and then discarded as ambiguous anyway,
+#   so the ambiguity rule is doing the work. What the floor buys is index
+#   SIZE: addrIndexed/addrDroppedPlaylist go 2198/7696 at floor 4, 1271/1757
+#   at 8, 719/301 at 12, 299/71 at 24. That is the whole of it, and it is
+#   worth keeping for the reason in EPG_ADDR_MAX_TOKENS below -- every
+#   indexed token is a row the guide could claim -- not because it makes a
+#   collision impossible.
+#
+# A provider whose ids are shorter than this, or whose ids contain a
+# character that is not a letter or a digit (`ESPN.us` -- the dot is a token
+# boundary, so the token is `ESPN`, not the id), gets NOTHING from this
+# strategy and is matched exactly as it was before. That is the intended
+# failure: silence, not a guess.
+#
+# What the floor does NOT buy, and the class this strategy can get WRONG
+# rather than silent: a guide id that is itself a >= 12-character
+# alphanumeric run occurring in exactly one row's address. Driven through the
+# real verb, not reasoned about: a guide declaring id="masterplaylist" takes
+# the one row whose address carries that word (matched 1, matchedByAddr 1),
+# and a guide declaring id="1791015219000" takes the one row whose query
+# string carries that millisecond expiry. Both are wrong answers, not
+# silence. The same id in TWO rows is silence (addrDroppedPlaylist 2,
+# matched 0) -- that is the ambiguity rule, again, and it is the only thing
+# standing here. Pinned by test_epg_match.py's AddressCollisionTest.
+#
+# Rule 5. A playlist URL carries provider credentials, so this index reads
+# one. It is BUILT from them and nothing is published from it: the maps stay
+# inside build_alias's return value, the only things that leave are the three
+# integers `addrIndexed`, `addrDroppedPlaylist` and `addrNameConflicts`, and
+# every key the window and epg-now.json carry is a playlist tvgId exactly as
+# before. A hostile
+# GUIDE could try to steal a row by declaring an id equal to a token of the
+# user's address, but it would have to guess a run of >= 12 characters that
+# belongs to exactly one row, and it is never told whether it succeeded --
+# the helper fetches the guide and sends it nothing back.
+EPG_ADDR_MIN_TOKEN = 12
+_EPG_ADDR_TOKEN = re.compile(r"[A-Za-z0-9]{%d,}" % EPG_ADDR_MIN_TOKEN)
+# The most tokens ADDR will take from ONE address, and the reason the index
+# has a size the reader can compute.
+#
+# The index is linear in address BYTES, not in rows, and the docstring of
+# build_alias used to say "bounded by the ADDRESSES, so by MAX_CHANNELS rows
+# of a source that MAX_SOURCE_BYTES already caps at 64 MiB" as if that were
+# reassurance. Nobody had measured it at those caps. Measured now, three
+# revisions back to back in one process, 3 runs each, over MAX_CHANNELS rows
+# whose addresses carry 50 long tokens each -- 61.3 MiB of address text,
+# inside MAX_SOURCE_BYTES -- reporting the minimum of each (this machine was
+# loaded; the RATIOS are the finding, the absolute seconds are not):
+#
+#   pre-ADDR  (eb89f0f)   1,481-1,542 ms   peak traced  20.0 MiB   no addr map
+#   as shipped (ada9220) 11,792-12,119 ms   peak traced 379.4 MiB   2,500,000 tokens
+#   with this cap         7,485-7,721 ms   peak traced 178.8 MiB     800,000 tokens
+#
+# (the range is two whole runs of the same harness on this machine; the
+# memory figures repeated to the tenth of a MiB, the wall times did not)
+#
+# Not quadratic, and 11.8 s is inside Service.qml's helperTimeoutMs, so the
+# shipped behaviour was never a hang. It was ~6x the input in Python objects
+# inside the helper on every guide fetch, where the index before ADDR held
+# one name key per row.
+#
+# What the cap changes is that the bound is now a product of two constants a
+# reader can multiply -- at most MAX_CHANNELS * EPG_ADDR_MAX_TOKENS = 800,000
+# entries -- instead of "bounded by the addresses". Measured: 2.1x less
+# memory and about 1.6x less time at the caps. It does NOT make the cost
+# constant: scanning stops after the cap's tokens, so the time is still
+# linear in the bytes read up to that point, and about 1.2 s of the 7.5 is
+# the "bare" map this round added for addrNameConflicts (measured by removing
+# it: 6,170 ms against 7,383 ms in the same pair of runs). Pinned by
+# test_the_address_map_is_bounded_per_row, which is a bound on the INDEX and
+# not a wall-clock budget -- a timing assertion at these caps would take 7 s
+# of every suite run and would fail on a loaded machine for reasons that are
+# not this code.
+#
+# The synthetic shape above is adversarial on purpose. The owner's real
+# 1,453-row list averages 0.7 qualifying tokens per address, so a 50,000-row
+# list in that shape would not come near these figures; the caps are what
+# MAX_SOURCE_BYTES and MAX_CHANNELS actually permit, which is the number a
+# bound has to be stated at.
+#
+# Sixteen, and the recall cost on the frozen data is ZERO. Measured over the
+# owner's 1,453 addresses: the most qualifying tokens any one of them holds
+# is SIX, and every one of the 185 declared guide ids the index reaches is
+# the FIRST qualifying token of its row's address (position 0 of the de-duped
+# run). Swept, the index is byte-identical to the uncapped one at every cap
+# down to 6 (addrIndexed 719, addrDroppedPlaylist 301, the same 185 ids) and
+# the 185 ids survive even at a cap of 1. Sixteen is 2.7x the measured
+# maximum on a real provider list, which is the headroom; it is not a number
+# this data forces.
+#
+# One further effect is ARGUED and UNMEASURED, and says so rather than
+# sitting here as a second reason: the cap would also narrow the hijack
+# surface the EPG_ADDR_MIN_TOKEN comment names, because the tokens it drops
+# are the ones at the END of a long address -- JWTs, signatures, expiries in
+# a query string -- and each of those is a >= 12-character run belonging to
+# exactly one row, which is that comment's uncovered class. On THIS data the
+# cap drops nothing at all (the busiest address holds six tokens), so no
+# measurement here supports it, and it is not why the cap is 16.
+EPG_ADDR_MAX_TOKENS = 16
 # One record per programme,
 # 'SSSSSSSSSS EEEEEEEEEE "title"[,"desc":"...","category":"...","episode":"..."]'
 # (fixed-width epochs, then the JSON-encoded title FOLLOWED BY the optional
@@ -495,8 +665,58 @@ _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 # colliding NAME to 5 -- the ten are `nameDroppedPlaylist`, which counts
 # channels, and the five names are four News 12 regions and Tennis Channel 2),
 # and build_alias drops every colliding name rather than guessing between them.
+# The bracket half is TWO LITERALS, not an arbitrary span (F-EPG-10, ruled by
+# the product owner on 2026-10-04). It used to be `\[[^\]]*\]`, which strips
+# whatever a provider puts in brackets, and that is a branch whose blast
+# radius is arbitrary content: a bracket span that carries part of a channel's
+# identity would be deleted from the key and the row would match the wrong
+# guide channel, silently. Measured before the ruling: the owner's 1,453 names
+# carry exactly TWO distinct spans, `[Not 24/7]` 82 times and `[Geo-blocked]`
+# 60; 0 of the guide's 427 declarations carry one at all, counting every
+# display-name and not just the first; and a named mutation deleting the
+# bracket alternative outright produced the SAME pairs, set difference empty
+# in both directions, every grade unchanged. So the branch was needed by no
+# pair and broke no pair, and narrowing it costs nothing measurable here.
+#
+# What it costs ELSEWHERE, stated correctly after an adversarial pass refuted
+# the first version of this paragraph. That version said an unknown marker
+# means "silence, not a wrong answer". It does not, and the reason is that
+# narrowing makes the key LONGER: the words inside an unknown span stay in
+# it, and they can complete the name of a DIFFERENT guide channel.
+# Measured through the real verb on constructed inputs:
+#
+#   `ESPN [Deportes]` keys as `espn deportes`, which matches a guide channel
+#   declared `ESPN Deportes`; the broad pattern keyed it `espn` and matched
+#   `ESPN`. Which of those is right depends on what the provider meant by the
+#   brackets, and nothing in the data says.
+#   `===[ SPORTS ]===`, a separator row, keys as `sports` and matches a guide
+#   channel called `Sports`. The broad pattern keyed it empty and matched
+#   nothing, which was silence by accident rather than by design.
+#
+# So BOTH patterns have a wrong-match route and they point opposite ways: the
+# broad one deletes a span that carried identity and lands on the generic
+# channel, this one keeps a span that was an annotation and lands on the
+# specific one. Neither is safe for bracket content nobody has looked at,
+# which is the finding F-EPG-10 made in the first place; the narrowing is
+# taken because the content on this data IS the two markers and because
+# deleting unknown identity is the worse of the two failures, not because
+# this one cannot fail.
+#
+# A new marker is a one-line addition with a census behind it, the bar the
+# two above were held to. The census itself is scoped: it covers the 1,453-row
+# source installed on this machine, not the four provider lists (5,221
+# channels) the id-fold decision below was measured across, which have never
+# been censused for bracket spans and are not in this checkout.
 _EPG_NAME_NOISE = re.compile(
-    r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)|\[[^\]]*\]", re.IGNORECASE)
+    r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)"
+    # The two markers, tolerant of how they are SPELLED but not of which
+    # markers exist. A trailing space, a double space, a hyphen for the
+    # slash or a space for the hyphen are the same marker; the first version
+    # of this narrowing matched the two byte-for-byte and lost all 142 rows
+    # to any of those, which is a provider changing its own punctuation
+    # between fetches, not a different provider.
+    r"|\[\s*not\s*24\s*[-/]?\s*7\s*\]"
+    r"|\[\s*geo[\s-]*blocked\s*\]", re.IGNORECASE)
 
 
 def epg_name_key(value: Any) -> str:
@@ -518,6 +738,45 @@ def epg_name_key(value: Any) -> str:
     and returns ten channels to the index. No confirmed pair moved.
     """
     return normalize_id_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
+
+
+# A TRAILING parenthetical, which on the owner's list is the country
+# qualifier: `Pluto TV Reality (United States)`. Nothing in the matcher reads
+# this; see bare_name_key.
+_EPG_NAME_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def bare_name_key(value: Any) -> str:
+    """epg_name_key with a TRAILING parenthetical removed first.
+
+    A MEASUREMENT key, never a matching key. The loosening it performs is
+    exactly the one F-EPG-7/F-EPG-10 refused to put in the matcher -- a
+    parenthetical span can carry identity, and deleting unknown identity
+    lands a row on the wrong guide channel silently -- so this function is
+    read by one thing only: parse_xmltv's `addrNameConflicts`, which counts
+    rows the ADDRESS strategy claimed where the guide ALSO declares a
+    different channel under the row's own name with its country qualifier
+    stripped.
+
+    Why that counter exists. The address strategy's acceptance measured
+    whether the NAME matcher had paired these rows with a DIFFERENT guide
+    channel, and found 0. That measurement is blind by construction to the 40
+    rows the name matcher left blank, and one of them is the pairing the
+    product owner has since ruled on: `Pluto TV Reality (United States)` is
+    held by the address at `69fa3faab9c0f0d444e64de3`, whose display-name is
+    `Pluto TV Pride`, while the guide separately declares
+    `5d8bf0b06d2d855ee15115e3` as `Pluto TV Reality` and no row claims it.
+    The row's own stream URL carries Pride's id; its artwork names a third id
+    the guide never declares; the neighbouring `VH1 Queens of Reality` row
+    carries the same Pride id in both. The provider's own fields disagree
+    about this row, and the ruling is that the ADDRESS wins, because it names
+    the playout that will actually be opened. That ruling is not reopened
+    here and this counter does not change any pairing. What it changes is
+    that the case is now COUNTED instead of invisible: `addrNameConflicts` is
+    1 on the frozen inputs, and a reader who sees it rise knows a second one
+    exists without having to run an audit nobody scheduled.
+    """
+    return epg_name_key(_EPG_NAME_QUALIFIER.sub("", str(value or "")))
 
 
 def normalize_text(value: Any) -> str:
@@ -1948,13 +2207,39 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
     strategy answers with a playlist `tvgId`, because that is the key the
     window, epg-now.json and the guide's own lookup all use (Model.epgFields
     is reached through `row.tvgId`), so a channel matched by NAME still
-    reaches its row with nothing changed downstream. Three maps, tried in
+    reaches its row with nothing changed downstream. Four maps, tried in
     this order by match_xmltv_channel, the later never overriding the earlier
-    (D-EPG-2, the M4 plan (dev branch), M4-01 repairs 1 and 2):
+    (D-EPG-2, the M4 plan (dev branch), M4-01 repairs 1 and 2, F-EPG-11):
 
       "exact"  the tvg-id as written, plus its lower-case form when that is
                free -- case-sensitive first, case-insensitive second, as
                shipped since M1.
+      "addr"   the first EPG_ADDR_MAX_TOKENS distinct alphanumeric runs of at
+               least EPG_ADDR_MIN_TOKEN characters in the row's STREAM URL,
+               and only when a run
+               belongs to exactly one playlist tvg-id. A guide channel whose
+               id IS one of those runs is streamed by that row: the join is
+               an exact equality between a whole guide id and a whole token
+               of the address the row opens. Worth 185 of the 1,453
+               installed channels -- a STREAM-field census, see
+               EPG_MATCH_ADDR -- 40 of them reached by nothing else
+               (F-EPG-11).
+
+               The LOGO url is deliberately not indexed. It reaches 8 more
+               rows and costs 0, because all 8 match by name anyway -- and 7
+               of the 8 stream from a different distributor than the artwork
+               (`images.pluto.tv` artwork on Amagi, CloudFront and Google
+               DAI addresses), so indexing it would assert a stream identity
+               on the strength of a hotlinked picture. Artwork provenance is
+               not stream identity. Measured: matched 265 either way. The
+               union of the two fields is 193 rows, and that union -- not
+               this strategy's 185 -- is the number the round originally
+               quoted here.
+
+               Case-SENSITIVE, unlike "exact". A URL path is case-sensitive
+               by the URL spec, so folding case would read an identity the
+               address does not assert; and 0 of the 185 need the fold (every
+               id in the guide is already lower case).
       "feed"   the id cut at the first "@", lower-cased. iptv-org writes
                tvg-id="Name.us@SD" where a guide may declare id="Name.us",
                and the reverse happens too, so every playlist id contributes
@@ -1975,6 +2260,15 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
     match, because they share the key). And a channel with no tvg-id at all
     can never be matched by any strategy, name included, because there is no
     key to publish it under; `nameIndexed` counts only channels that have one.
+
+    Size: "addr" is bounded by EPG_ADDR_MAX_TOKENS per row, so by
+    MAX_CHANNELS * EPG_ADDR_MAX_TOKENS = 800,000 entries, and the cost is
+    linear in address BYTES rather than in rows -- which is why that cap
+    exists and why its comment carries the measurement at the caps rather
+    than an argument. On the installed 1,453-channel list this map holds 719
+    tokens; at the caps, 800,000 of them, about 7.5 s and a 178.8 MiB traced
+    peak (about 12 s and 379.4 MiB without the cap, about 1.5 s and 20.0 MiB
+    before ADDR existed).
     """
     if not isinstance(channels_doc, dict) or not isinstance(channels_doc.get("channels"), list):
         return None, 0
@@ -1983,6 +2277,15 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
     # normalised name -> the one tvg-id that claims it, "" once two claim it.
     name_owner: dict[str, str] = {}
     name_rows: dict[str, int] = {}
+    # The same discipline for addresses: address token -> the one tvg-id that
+    # claims it, "" once two claim it. The name rule's reason applies
+    # unchanged -- a programme on the wrong channel is worse than a blank row
+    # -- and a token shared by two rows says nothing about which of them the
+    # guide channel is.
+    addr_owner: dict[str, str] = {}
+    addr_rows: dict[str, int] = {}
+    # bare name key -> the rows carrying it. A measurement, not a strategy.
+    bares: dict[str, list[str]] = {}
     total = 0
     for channel in channels_doc["channels"]:
         total += 1
@@ -1996,6 +2299,44 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
         base = tvg.split("@", 1)[0].lower()
         if base and base not in feed:
             feed[base] = tvg
+        url = channel.get("url")
+        if isinstance(url, str) and url:
+            # `seen_tokens`: one row naming the same token twice is still one
+            # claim, so `addr_rows[token]` counts ROWS and not occurrences,
+            # exactly as `name_rows` does. The SUM of it does not -- see
+            # `addr_dropped` below, which is the number the status reports.
+            #
+            # finditer and a break, not set(findall()): the cap has to be able
+            # to stop reading a 60 KiB address, and findall materialises every
+            # token of it before the cap could apply. Order inside one row
+            # cannot change the outcome -- each distinct token is processed
+            # once and the owner rule is commutative -- so reading in address
+            # order rather than in set order changes nothing but the cap's
+            # meaning, which is "the first EPG_ADDR_MAX_TOKENS of them".
+            seen_tokens: set[str] = set()
+            for match in _EPG_ADDR_TOKEN.finditer(url):
+                token = match.group()
+                if token in seen_tokens:
+                    continue
+                seen_tokens.add(token)
+                addr_rows[token] = addr_rows.get(token, 0) + 1
+                if token not in addr_owner:
+                    addr_owner[token] = tvg
+                elif addr_owner[token] != tvg:
+                    addr_owner[token] = ""
+                if len(seen_tokens) >= EPG_ADDR_MAX_TOKENS:
+                    break
+        # The row's bare name key, for addrNameConflicts and nothing else
+        # (bare_name_key). A list, not an owner-or-blank: this is a
+        # measurement and a key two rows share must not silently vanish from
+        # it the way an ambiguous MATCH key has to.
+        bare = bare_name_key(channel.get("name"))
+        if bare:
+            owners = bares.get(bare)
+            if owners is None:
+                bares[bare] = [tvg]
+            elif tvg not in owners:
+                owners.append(tvg)
         # The matcher's own key (epg_name_key), not the cached `nameKey`:
         # that one is the SEARCH key and keeps `(1080p)` in, which is exactly
         # what stops the guide matching. Computed from the name here, so an
@@ -2016,8 +2357,11 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
             exact[low] = tvg
     names = {key: tvg for key, tvg in name_owner.items() if tvg}
     dropped = sum(rows for key, rows in name_rows.items() if not name_owner[key])
+    addrs = {token: tvg for token, tvg in addr_owner.items() if tvg}
+    addr_dropped = sum(rows for token, rows in addr_rows.items() if not addr_owner[token])
     index = {
         "exact": exact,
+        "addr": addrs,
         "feed": feed,
         "name": names,
         # Counts the epg status reports. `nameIndexed` is normalised names
@@ -2026,6 +2370,29 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
         # name was thrown away as ambiguous, not the names.
         "nameIndexed": len(names),
         "nameDroppedPlaylist": dropped,
+        # The same two numbers for "addr", so the strategy is reportable and
+        # not only assertable (rule 14). `addrIndexed` counts TOKENS, since a
+        # row contributes as many as its address holds.
+        #
+        # `addrDroppedPlaylist` counts ambiguous token-CLAIMS. It is NOT the
+        # row count its neighbour `nameDroppedPlaylist` is, and it is not
+        # bounded by `channelTotal`: a row naming three ambiguous tokens
+        # contributes three. On the owner's 1,453 rows it reports 301 over 70
+        # ambiguous tokens spanning 281 distinct rows. The round that added it
+        # described it as a row count in a test docstring and in the comment
+        # above the loop; both were wrong and both are corrected. Counting
+        # distinct rows EXACTLY would need either a row set per token or a
+        # second scan of every address, and the per-address cost is the thing
+        # EPG_ADDR_MAX_TOKENS exists to bound, so the number stays what it is
+        # and says so here.
+        "addrIndexed": len(addrs),
+        "addrDroppedPlaylist": addr_dropped,
+        # The country-qualifier-stripped name key of each row, for the ADDR
+        # strategy's own contradiction counter. See `bare_name_key` and
+        # parse_xmltv's `addrNameConflicts`: this is a MEASUREMENT surface and
+        # no strategy reads it, which is why an ambiguous key is kept here
+        # (as a list) instead of being dropped the way "name" drops one.
+        "bare": bares,
     }
     return index, total
 
@@ -2037,11 +2404,53 @@ def match_xmltv_channel(index: dict[str, Any], cid: str,
     `guide_names` is the XMLTV side's cid -> normalised display name, built by
     parse_xmltv; an entry is "" once the name is ambiguous among the guide's
     own declarations, which is the second half of the uniqueness rule.
+
+    The ADDR strategy needs no guide-side uniqueness rule, unlike NAME. A
+    name is a label and two guide channels may carry the same one; `cid` is
+    the guide's own identity key and parse_xmltv already keeps one entry per
+    id, so an address token resolves to one guide channel by construction.
+    Two guide channels reaching one row is still possible across strategies
+    and is still claim_channel's job.
+
+    WHICH WINS, A CASE FOLD OR AN EXACT ADDRESS. The ID map has two halves and
+    only the first is a declaration: `exact[tvg] = tvg` is what the playlist
+    author wrote, and `exact[tvg.lower()] = tvg` (build_alias's post-pass) is
+    a fold the matcher performs. Both are consulted here BEFORE "addr", so a
+    case-folded tvg-id beats an exact-case address equality. Driven through
+    the real verb: a row declaring tvg-id="ABCDEFGHIJKL" takes a guide
+    channel declared `abcdefghijkl` even when a DIFFERENT row's address
+    carries `abcdefghijkl` character for character.
+
+    That order is kept, and "a declaration outranks a deduction" is NOT the
+    reason -- the fold is a deduction, so that sentence justifies the
+    exact-case half of this map and nothing more. The reason is what the two
+    fields are FOR. `tvg-id` exists only to name a guide channel; a row
+    carrying tvg-id="ABCDEFGHIJKL" has asserted which guide channel it is,
+    and all the fold discards is the case of an identifier that XMLTV
+    authors write inconsistently. A stream address exists to open a stream;
+    a guide id appearing in it is an exact equality, but on a string nobody
+    wrote as an identity assertion. The declared join field, folded, beats a
+    deduction from a field that is not a join field at all.
+
+    UNVERIFIED on the project's inputs: 0 of the frozen guide's 427
+    declarations need the fold at all (every id in it is already lower case),
+    so nothing measured here ranks the folded half against ADDR and the
+    paragraph above is an argument. The ordering is nonetheless PINNED, in
+    both directions, by
+    test_a_case_folded_tvg_id_outranks_an_exact_case_address -- which the
+    round that added ADDR left unpinned: taking the fold out of `exact` and
+    consulting it after "addr" left the whole suite green. Moving only the
+    `cid.lower()` LOOKUP is not that mutation and changes nothing, because
+    the fold is written into `exact` itself and the line above already hits
+    it; the test's own docstring records both.
     """
     exact = index["exact"]
     key = exact.get(cid) or exact.get(cid.lower())
     if key:
         return key, EPG_MATCH_ID
+    key = index["addr"].get(cid)
+    if key:
+        return key, EPG_MATCH_ADDR
     base = cid.split("@", 1)[0].lower()
     if base:
         key = index["feed"].get(base)
@@ -2216,6 +2625,12 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
     guide_name_owner: dict[str, str] = {}     # normalised name -> the one cid that declares it
     guide_name_collided: set[str] = set()
     guide_names_dropped = 0
+    # bare_name_key -> the guide cids that declare it, kept only for keys some
+    # playlist row carries (bare_rows), so this table is bounded by the GUIDE
+    # the same way guide_names is. Read once, after the parse, for
+    # addrNameConflicts.
+    bare_rows: dict[str, list[str]] = index["bare"] if index is not None else {}
+    bare_guide: dict[str, set[str]] = {}
     channel_elements = 0
     bad_time = 0
     no_title = 0
@@ -2272,12 +2687,28 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                     # language policy, because the playlist is the policy.
                     # A channel declaring two claimed names takes the first:
                     # one guide channel cannot hold two rows (claim_channel).
+                    #
+                    # The loop no longer BREAKS on the first claimed name,
+                    # because the bare-name pass below has to see every
+                    # declaration of this channel; `name` is still the first
+                    # claimed one, which is the decision that paragraph
+                    # describes.
                     name = ""
                     for child in elem.iterfind("display-name"):
-                        candidate = epg_name_key(child.text)
-                        if candidate and candidate in playlist_names:
+                        text = child.text
+                        candidate = epg_name_key(text)
+                        if candidate and candidate in playlist_names and not name:
                             name = candidate
-                            break
+                        # The bare key, for addrNameConflicts and nothing else.
+                        # Computed from `candidate` when the raw text carries
+                        # no trailing parenthetical, which is the common case
+                        # and costs no second fold.
+                        if bare_rows:
+                            bare = candidate
+                            if not isinstance(text, str) or text.rstrip().endswith(")"):
+                                bare = bare_name_key(text)
+                            if bare and bare in bare_rows:
+                                bare_guide.setdefault(bare, set()).add(cid)
                     if name:
                         owner = guide_name_owner.get(name)
                         if owner is None:
@@ -2319,6 +2750,28 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
     if total_programmes == 0:
         raise HelperError("empty_epg", "no programmes found in the EPG")
 
+    # addrNameConflicts: rows the ADDRESS strategy holds where the guide also
+    # declares a DIFFERENT channel under the row's own bare name. Read off the
+    # final `claim`, so a claim revoked by the guide-side ambiguity branch is
+    # not counted, and off `bare_guide`, which saw every declaration.
+    #
+    # This is the reverse of the check the address strategy was accepted on.
+    # That one asked whether the NAME matcher had paired these rows with a
+    # different guide channel and found 0, which is true and is blind to the
+    # 40 rows NAME left blank. This one asks the question from the guide's
+    # side and reports 1 on the frozen inputs: see bare_name_key for the row,
+    # the product owner's ruling on it, and why it is counted rather than
+    # re-ranked.
+    addr_name_conflicts = 0
+    for bare, owners in bare_rows.items():
+        declared = bare_guide.get(bare)
+        if not declared:
+            continue
+        for tvg in owners:
+            held = claim.get(tvg)
+            if held is not None and held[0] == EPG_MATCH_ADDR and declared - {held[1]}:
+                addr_name_conflicts += 1
+
     channels: dict[str, str] = {}
     kept = 0
     for key, items in pending.items():
@@ -2349,6 +2802,7 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
         # to the same name. Counted only over names a playlist channel
         # claims, because a name nothing claims cannot match either way.
         "nameDroppedGuide": guide_names_dropped,
+        "addrNameConflicts": addr_name_conflicts,
         "warnings": warnings,
     }
 
@@ -2370,7 +2824,11 @@ def match_counts(channels_doc: Any, seen_ids: set[str], strategy_of: dict[str, i
     is the one case that also takes a key back OUT of `seen_ids`, so a
     revoked claim is not counted as a match it no longer holds.
     """
-    counts = {"matched": 0, "matchedById": 0, "matchedByFeed": 0, "matchedByName": 0}
+    # Built FROM EPG_MATCH_KEYS rather than spelled out, so a strategy added
+    # to that tuple cannot be counted into a bucket that does not exist.
+    counts = {"matched": 0}
+    for name in EPG_MATCH_KEYS:
+        counts[name] = 0
     for channel in channels_doc.get("channels", []):
         tvg = channel.get("tvgId") if isinstance(channel, dict) else None
         if isinstance(tvg, str) and tvg in seen_ids:
@@ -2471,11 +2929,17 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
         # an older cache simply answers None for them, which is worth more
         # than throwing a good window away at the first upgrade.
         "matchedById": counts.get("matchedById") if index is not None else None,
+        "matchedByAddr": counts.get("matchedByAddr") if index is not None else None,
         "matchedByFeed": counts.get("matchedByFeed") if index is not None else None,
         "matchedByName": counts.get("matchedByName") if index is not None else None,
         "nameIndexed": index["nameIndexed"] if index is not None else None,
         "nameDroppedPlaylist": index["nameDroppedPlaylist"] if index is not None else None,
         "nameDroppedGuide": parsed["nameDroppedGuide"] if index is not None else None,
+        "addrIndexed": index["addrIndexed"] if index is not None else None,
+        "addrDroppedPlaylist": index["addrDroppedPlaylist"] if index is not None else None,
+        # The ADDR strategy's own contradiction count (see bare_name_key).
+        # Additive like the keys above, so an older window answers None.
+        "addrNameConflicts": parsed["addrNameConflicts"] if index is not None else None,
         "epgChannels": parsed["epgChannels"],
         "programmeCount": parsed["programmeCount"],
         "warnings": warnings,
@@ -2618,11 +3082,15 @@ def cmd_epg(args: argparse.Namespace) -> int:
             # a window written before M4 answers None rather than 0, which
             # is the truthful answer for "not measured".
             "matchedById": window.get("matchedById"),
+            "matchedByAddr": window.get("matchedByAddr"),
             "matchedByFeed": window.get("matchedByFeed"),
             "matchedByName": window.get("matchedByName"),
             "nameIndexed": window.get("nameIndexed"),
             "nameDroppedPlaylist": window.get("nameDroppedPlaylist"),
             "nameDroppedGuide": window.get("nameDroppedGuide"),
+            "addrIndexed": window.get("addrIndexed"),
+            "addrDroppedPlaylist": window.get("addrDroppedPlaylist"),
+            "addrNameConflicts": window.get("addrNameConflicts"),
             "epgChannels": window.get("epgChannels", 0),
             "programmeCount": window.get("programmeCount", 0),
             "nowCount": now_count,

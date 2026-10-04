@@ -404,8 +404,7 @@ Item {
   // `b back` is hinted whenever something plays and the last range read is
   // non-empty (2.5): a rewind pressed inside the first seconds of a zap
   // lands on the first keyframe and moves nothing (spike 11.1).
-  readonly property bool canRewind: root.playing && root.rewind !== null
-    && root.rewind.history !== undefined && root.rewind.history !== null && Number(root.rewind.history) > 0
+  readonly property bool canRewind: Model.canRewindNow({ playing: root.playing, rewind: root.rewind })
   // Seconds behind live as of now, or null while there is no zero point.
   // The composer is Model.behindLiveNow so the count-up is a function a test
   // can call (rule 12), not arithmetic in a binding.
@@ -516,6 +515,13 @@ Item {
   property var pendingPlayId: ""
   property var previousPlaying: null       // restored when a switch over IPC fails
   property string controlKind: ""
+  // M5-01 ruling D10, as ONE expression (F-RWD-19). `healthBusy` is what the
+  // health tick counts as a strike; `controlRunning` is the raw Qt fact, so
+  // an observer can tell "nothing running" from "a seek running" -- the
+  // exemption makes healthBusy false in BOTH, and a check that cannot
+  // distinguish them cannot go red for a missing exemption (F-RWD-18).
+  readonly property bool controlRunning: controlProc.running
+  readonly property bool healthBusy: Model.healthBusy({ running: controlProc.running, kind: root.controlKind })
   property var mpvStderrTail: []
   property string lastError: ""
   property bool manualRefresh: false
@@ -2063,7 +2069,7 @@ Item {
     // AFTER the drain at the bottom takes the slot synchronously: a zap
     // queued behind this reply outranks a seek, which play() has by then
     // dropped as aimed at the previous stream.
-    if (root.seekPending !== 0 || root.seekLiveQueued) Qt.callLater(root.issueSeek)
+    if (Model.seekQueuePending(root.seekState())) Qt.callLater(root.issueSeek)
     // Whatever this reply was, an open picker may ask again -- the whole
     // rule is Model.shouldRefreshTracks, which is a function and not a
     // conjunction here precisely because two comments in a row described a
@@ -2129,16 +2135,16 @@ Item {
       // And a reply that lands after stop() or the player's EOF describes a
       // player that is gone: nothing plays, so nothing is behind live, and
       // the guide would otherwise show a transient for it (review finding).
-      if (root.pendingPlayId === "" && root.nowPlaying && root.playerUp) {
-        root.applyRewind(status)
-        if (status.ok === true) root.seekAtFloor = status.atFloor === true
-        root.seekReplied(status)
-      }
-      // The 300 ms throttle counts from THIS reply; issueSeek re-arms from
-      // the timer. A zap queued behind the seek outranks any press that
-      // coalesced behind it: the press was aimed at the stream the zap
-      // replaces, and play() has already dropped it.
-      seekThrottle.restart()
+      // Both of those are Model.seekQueueStep's `reply` event: it decides
+      // whether the reply is applied and announced, what it means for the
+      // readout (through Model.rewindApply), the at-floor memory after it,
+      // and that the 300 ms throttle counts from THIS reply rather than from
+      // the press. applySeekPlan only obeys. A zap queued behind the seek
+      // outranks any press that coalesced behind it: the press was aimed at
+      // the stream the zap replaces, and play() has already dropped it.
+      var seekPlan = Model.seekQueueStep(root.seekState(), { kind: "reply", status: status, ctx: root.seekCtx() })
+      root.applySeekPlan(seekPlan)
+      if (seekPlan.announce) root.seekReplied(status)
       // D-PLY-24: every path of a new branch owes the queued play its drain,
       // and this branch has only one path, so it is here and not in an else.
       root.drainPendingPlay()
@@ -3212,38 +3218,93 @@ Item {
   // target. What the service owns is the queue: presses that arrive while a
   // seek is in flight, or inside the 300 ms throttle after a reply, are
   // summed and capped by Model.coalesceSeek rather than spawned one by one.
+  //
+  // F-RWD-19: every DECISION the queue takes is Model.seekQueueStep's, and
+  // every reply's meaning for the readout is Model.rewindApply's, so each
+  // one is a line a node test drives and a mutation reddens. What is left
+  // here is what Qt owns -- `controlProc.running`, `seekThrottle.running`,
+  // `Date.now()`, property writes, starting the timer, `runControl` and the
+  // signal. Of every branch below a reader can say which of the two it is.
 
-  // Every reply that carries a `rewind` object refreshes the state. A reply
-  // that carries none -- an older helper, a refusal with no player --
-  // leaves the last reading alone rather than inventing one (rule 10); a
-  // `running: false` reply clears it, because there is no player to be
-  // behind. `rewind` is null, never {}, until the player says.
-  function applyRewind(status) {
-    if (!status || status.ok !== true) return
-    if (status.running === false) { root.rewind = null; return }
-    if (status.rewind === undefined) return
-    var r = status.rewind
-    // The object is keyed by the player's entry id (2.2). A reply in flight
-    // across a zap that has already landed on the player carries the OLD
-    // entry's numbers; the socket's start-file event has moved
-    // currentEntryId on by then, so the mismatch is visible and the
-    // reading is dropped rather than shown on the wrong channel.
-    if (r && typeof r === "object" && Number(r.entryId) > 0 && root.currentEntryId > 0
-        && Number(r.entryId) !== root.currentEntryId) return
-    root.rewind = r && typeof r === "object" ? r : null
-    root.rewindAtSec = Math.floor(Date.now() / 1000)
-    root.behindTickSec = root.rewindAtSec
-    // Room for a step again -- the stream filled past the floor, or the
-    // user moved -- so a backward press may spawn again.
-    if (root.seekAtFloor && root.rewind && Number(root.rewind.history) >= Model.REWIND_STEP_S) root.seekAtFloor = false
+  // The queue's own three fields, and what the service knows about the world
+  // when an event reaches it (F-RWD-19). Every DECISION below is
+  // Model.seekQueueStep's; these two compose its arguments out of Qt state
+  // and nothing else, so a reader can see exactly what the reducer is told.
+  function seekState() {
+    return { pending: root.seekPending, liveQueued: root.seekLiveQueued, atFloor: root.seekAtFloor }
   }
 
-  function clearRewind() {
-    root.rewind = null
-    root.seekAtFloor = false
+  function seekCtx() {
+    return {
+      playing: root.playing, stopping: root.stopping, userStopped: root.userStopped,
+      controlBusy: controlProc.running, throttled: seekThrottle.running,
+      rewind: root.rewind, socket: root.socketPath,
+      pendingPlayId: root.pendingPlayId, currentEntryId: root.currentEntryId,
+      stepS: Model.REWIND_STEP_S
+    }
+  }
+
+  // The one place a plan becomes Qt state: property writes, the timer, the
+  // single control slot. Nothing here chooses anything. Returns the plan's
+  // reply, which is what the IPC verbs serialise and the guide reads.
+  function applySeekPlan(plan) {
+    root.seekPending = plan.state.pending
+    root.seekLiveQueued = plan.state.liveQueued
+    root.seekAtFloor = plan.state.atFloor
+    if (plan.clearReadout) {
+      root.rewind = null
+      seekThrottle.stop()
+    }
+    if (plan.readout) {
+      // `rewind` is null, never {}, until the player says; a reading of
+      // "none" restamps the zero point the same as a reading of numbers.
+      if (plan.readout.clear) root.rewind = null
+      else if (plan.readout.store) {
+        root.rewind = plan.readout.rewind
+        root.rewindAtSec = Math.floor(Date.now() / 1000)
+        root.behindTickSec = root.rewindAtSec
+      }
+    }
+    // The 300 ms throttle counts from THIS reply; the throttle timer
+    // re-drives the queue when it elapses.
+    if (plan.restartThrottle) seekThrottle.restart()
+    if (plan.argv.length === 0) return plan.reply
+    if (root.runControl("seek", plan.argv)) return plan.reply
+    // A spawn the reducer asked for and runControl did not give us. runControl
+    // refuses only while the slot is busy, which the reducer checked in the
+    // same synchronous turn, so this is unreachable by construction rather
+    // than a live path -- and it is here because "applying" for a run that
+    // never happened is the false success CN15 forbids. The sum is spent
+    // either way, exactly as it was before this refactor.
     root.seekPending = 0
     root.seekLiveQueued = false
-    seekThrottle.stop()
+    return root.seekRefuse(plan.reply && plan.reply.requested !== undefined ? plan.reply.requested : 0, "busy")
+  }
+
+  // Every reply that carries a `rewind` object refreshes the state --
+  // `status`, `pause`, `probe` and `seek` all do. What a reply MEANS is
+  // Model.rewindApply: whether to store, the coerced object, whether to
+  // clear, and the at-floor memory after it. The entry-id drop and the
+  // floor-clear rule live there (F-RWD-19).
+  function applyRewind(status) {
+    var readout = Model.rewindApply({ status: status, currentEntryId: root.currentEntryId,
+                                      atFloor: root.seekAtFloor, stepS: Model.REWIND_STEP_S,
+                                      // F-RWD-24: a queued play means every reading in
+                                      // flight is the stream the user has left.
+                                      zapping: root.pendingPlayId !== "" })
+    root.seekAtFloor = readout.atFloor
+    if (readout.clear) { root.rewind = null; return }
+    if (!readout.store) return
+    root.rewind = readout.rewind
+    root.rewindAtSec = Math.floor(Date.now() / 1000)
+    root.behindTickSec = root.rewindAtSec
+  }
+
+  // The player went away and the queue was aimed at it: play(), stop() and
+  // the socket's EOF. What `clear` resets is the reducer's answer, so the
+  // list cannot drift away from the one the queue itself keeps.
+  function clearRewind() {
+    root.applySeekPlan(Model.seekQueueStep(root.seekState(), { kind: "clear", ctx: root.seekCtx() }))
   }
 
   // The IPC verbs' argument is read by Model.seekVerbSeconds (design 2.4):
@@ -3253,78 +3314,33 @@ Item {
   // tested one dead (rule 12) and this one with different limits.
 
   function seekRefuse(requested, code) {
-    return { ok: false, kind: "seek", requested: requested, code: String(code),
-             error: { code: String(code) }, rewind: root.rewind }
+    return Model.seekRefusal(requested, code, root.rewind)
   }
 
   // A relative seek of `seconds` (negative is back). Returns the reply the
   // IPC verbs serialise: accepted requests say "applying" when the helper
   // was spawned now and "queued" when the press coalesced behind a run in
-  // flight or the throttle; refusals carry a code. `at_floor` is decided
-  // here from the LAST reply only when the request is backward: the helper
-  // already said there is nothing behind the floor, and spawning it to hear
-  // that again at a held key's repeat rate is the one case design 2.3 names.
+  // flight or the throttle; refusals carry a code. Which of those it is --
+  // and the refusals, and the coalescing, and the at-floor memory -- is
+  // Model.seekQueueStep's decision, not this function's.
   function seekBy(seconds) {
-    var n = Math.round(Number(seconds))
-    if (!isFinite(n) || n === 0) return root.seekRefuse(seconds, "bad_seconds")
-    // A player on its way out takes no press: issueSeek would clear the
-    // queue and the reply would have said "queued" for a run that never
-    // comes (review finding; CN15, a refusal is never a false success).
-    if (!root.nowPlaying || !root.playerUp || root.stopping || root.userStopped) return root.seekRefuse(n, "nothing_playing")
-    if (n < 0 && root.seekAtFloor) return root.seekRefuse(n, "at_floor")
-    // A press after `g` was queued is a new intention: the live request
-    // stood for "forget the sum", and this press starts a new one.
-    if (root.seekLiveQueued) { root.seekLiveQueued = false; root.seekPending = 0 }
-    // `press` carries the direction and `step` the size: the size is THIS
-    // request's, so `back 30` is thirty seconds. The first version passed
-    // Model.REWIND_STEP_S as the step for every press and every verb seeked
-    // ten seconds whatever its argument (F-RWD-17, found by the review of
-    // the integrated tree after the live pass had recorded it as a landing
-    // past the target and the lead had misread it).
-    root.seekPending = Model.coalesceSeek({
-      pending: root.seekPending, press: n,
-      history: root.rewind ? root.rewind.history : null,
-      step: Math.abs(n)
-    })
-    var state = root.issueSeek() ? "applying" : "queued"
-    return { ok: true, kind: "seek", requested: n, pending: root.seekPending, state: state }
+    return root.applySeekPlan(Model.seekQueueStep(root.seekState(),
+                                                  { kind: "press", by: seconds, ctx: root.seekCtx() }))
   }
 
   // Back to the live edge, or as near as the cache reaches (ruling D8): the
   // helper seeks to the range end minus 0.5 s and the reply says what
   // remains. It never re-tunes; only Enter on the row reloads.
   function seekLive() {
-    if (!root.nowPlaying || !root.playerUp) return root.seekRefuse("live", "nothing_playing")
-    root.seekPending = 0
-    root.seekLiveQueued = true
-    var state = root.issueSeek() ? "applying" : "queued"
-    return { ok: true, kind: "seek", requested: "live", state: state }
+    return root.applySeekPlan(Model.seekQueueStep(root.seekState(),
+                                                  { kind: "live", ctx: root.seekCtx() }))
   }
 
-  // Spawn the queued seek if the slot is free and the throttle has elapsed;
-  // true when a helper was spawned now. Called from the press, from the
-  // throttle timer, and after every control reply.
+  // Drive the queue: spawn the queued seek if the slot is free and the
+  // throttle has elapsed. Called from the throttle timer and after every
+  // control reply (the press drives it through seekQueueStep itself).
   function issueSeek() {
-    if (!root.seekLiveQueued && root.seekPending === 0) return false
-    if (!root.nowPlaying || !root.playerUp || root.stopping || root.userStopped) { root.clearRewind(); return false }
-    if (controlProc.running || seekThrottle.running) return false
-    var argv
-    if (root.seekLiveQueued) {
-      root.seekLiveQueued = false
-      root.seekPending = 0
-      argv = Model.playerSeekArgv(root.socketPath, "live")
-    } else {
-      var by = root.seekPending
-      root.seekPending = 0
-      // A forward or live request is a reason to try backward again
-      // afterwards; the reply will say if the floor is still there.
-      if (by > 0) root.seekAtFloor = false
-      argv = Model.playerSeekArgv(root.socketPath, by)
-    }
-    // playerSeekArgv answers [] for a request that rounds to nothing; the
-    // helper is never spawned with no verb.
-    if (argv.length === 0) return false
-    return root.runControl("seek", argv)
+    root.applySeekPlan(Model.seekQueueStep(root.seekState(), { kind: "issue", ctx: root.seekCtx() }))
   }
 
   // M3-02 (PLAN-M3 decision 5). Ask the player for its tracks, selecting
@@ -4089,8 +4105,11 @@ Item {
       // strikes restart guards a helper that never returns, which the 8 s
       // control watchdog now terminates; a slot re-occupied every few
       // hundred milliseconds by a sub-second verb under a held key is the
-      // benign case it must not punish.
-      var tick = Model.healthTick(root.healthSkips, controlProc.running && root.controlKind !== "seek")
+      // benign case it must not punish. The predicate is `root.healthBusy`,
+      // ONE expression declared beside `controlRunning` above, so a node
+      // test drives the exemption (Model.healthBusy) and an observer can
+      // read it (F-RWD-18, F-RWD-19).
+      var tick = Model.healthTick(root.healthSkips, root.healthBusy)
       root.healthSkips = tick.skips
       if (tick.restart) root.restartPlayer()
       else if (tick.check) root.runControl("status", ["status", "--socket", root.socketPath])
@@ -4142,7 +4161,7 @@ Item {
     id: behindTick
     interval: 1000
     repeat: true
-    running: root.paused && root.rewind !== null
+    running: Model.behindTickRunning({ paused: root.paused, rewind: root.rewind })
     onTriggered: root.behindTickSec = Math.floor(Date.now() / 1000)
   }
 
