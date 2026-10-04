@@ -517,19 +517,36 @@ confirms the wrong pair too (`--calibrate --name-oracle --helper <b2f944d^>`
 reports `falseConfirmations: 1`, the Bloomberg row). That is what "a check
 that cannot go red" looks like when you finally make it go red.
 
-### 10.2 The arms, and why two of them are off
+**But "confirmation comes only from the schedule" was an overstatement, and
+section 17.1 replaces it with what is measured.** Two halves. The grader
+reads no identifier -- proved by a field-level trace, not by a grep. Its
+confirming arm is a NAME TOKEN CORROBORATED BY THE SCHEDULE: 109 of the 110
+confirmations echo a token that the paired guide channel's own display-name
+also carries. Read 10.1 as "the name may not confirm ALONE", which is what
+the rule buys and what the table above measures, and not as "the name is not
+involved".
 
-| arm | kind | what it reads | default | measured |
+### 10.2 The arms, and why three of them are off
+
+Measured at the **265-pair pairing the round ships**, with the 226-pair
+figure beside it where the two differ. Everything in this table was the
+226 measurement until section 17; the column was never re-run when the
+address strategy landed, and one of its numbers stopped being true.
+
+| arm | kind | what it reads | default | measured at 265 (226) |
 |---|---|---|---|---|
-| **E1 title echo** | confirm | a programme TITLE repeats a token of our row's name that **no other guide channel's display-name uses** | **on** | 90 of 226; **0 false confirmations on 452 pairings that are wrong by construction** |
-| **E3 category fit** | confirm | >=80% of the schedule's categories fit our row's group, under a table declared before measuring | **off** | +34 confirmations, but **7 false confirmations on random negatives and 28 on nearest-name negatives**, and 3 of 21 on the hand sample |
-| **C1 prose marker** | contradict | a programme DESCRIPTION spells our brand with a distinguishing marker our row does not carry | on | 1 of 227 pre-repair (the Bloomberg pair), 0 of 226 today, 0 false contradictions on the hand sample |
-| **C2 marker sibling** | contradict | our markers differ from the guide channel's AND the guide declares a sibling carrying ours | on | 0 of 226 today; fires 11 times on random negatives and 6 on nearest, all correct |
+| **E1 title echo** | confirm | a programme TITLE repeats a token of our row's name that **no other guide channel's display-name uses** | **on** | 110 of 265 (90 of 226). **0 false confirmations on the 265 random negatives; ONE on the 265 nearest-name negatives**, rate 0.0038 -- `Cheers + Frasier` against the guide's `Cheers`. At 226 it was 0 on both, and the row that produces it is matched by ADDRESS and was not in the 226 set at all |
+| **E2 desc echo** | confirm | the guide channel's own **CHANNEL-level** `<desc>` repeats such a token | **off** | **unreachable on the frozen guide, which declares 0 channel-level `<desc>`** -- so until section 17.2 this arm had never been seen to fire in either direction while it was ON by default. On the `--promote-desc` synthetic guide: +3 confirmations and the nearest-set rate 0.0038 -> **0.0113**. As it actually stood, gated at a bare 3: +5 confirmations for **1 random and 5 nearest false confirmations** |
+| **E3 category fit** | confirm | >=80% of the schedule's categories fit our row's group, under a table declared before measuring | **off** | +34 confirmations, but **7 false confirmations on random negatives and 28 on nearest-name negatives**, and 3 of 21 on the hand sample (226) |
+| **C1 prose marker** | contradict | a programme DESCRIPTION spells our brand with a distinguishing marker our row does not carry | on | 1 of 227 pre-repair (the Bloomberg pair), 0 of 265 and 0 of 226 today, 0 false contradictions on the hand sample |
+| **C2 marker sibling** | contradict | our markers differ from the guide channel's AND the guide declares a sibling carrying ours | on | 0 of 265 today; fires **13** times on the 265 random negatives and 6 on nearest (11 / 6 at 226), all correct |
 | **category clash** | contradict | no category of the schedule fits our group | **off** | fires twice on the 226 and **both are false** (`50 Cent Action` and `Hallmark Movies & More`, group `Movies` against categories `Entertainment/Series`) |
 
-The two arms that are off are off because of those numbers and not because
-of taste; `--category-fit` and `--strict-categories` turn them on so the
-measurement is reproducible rather than asserted.
+The three arms that are off are off because of those numbers and not because
+of taste; `--category-fit`, `--desc-echo` and `--strict-categories` turn them
+on so the measurement is reproducible rather than asserted. E2 needs
+`--promote-desc` as well, because on this guide there is nothing for it to
+read.
 
 ### 10.3 The threshold sweep, so E1's rarity gate is not a magic number
 
@@ -575,16 +592,36 @@ without them.
    F-EPG-9 (Part I, section 6.1 item 4) is exactly this: `Fox Weather` is the
    right brand and Pluto's playout of it is not the playout our URL opens.
    E1 would confirm such a pair and be right about the only thing it claims.
-   **The oracle cannot grade playout identity. UNVERIFIED.**
-4. **`unknown` is 136 of 226 and that is the honest figure.** It is not an
-   error rate; it is the share of pairs for which these inputs hold no
-   independent evidence at all. Reporting 90 confirmed where Part I reported
-   226 right is not a regression in the matcher, it is the removal of
-   evidence that was never independent in the first place.
-5. **The hand sample is 65 pairings, read by one reader, on one day.** Its
-   judgements are recorded in the script (`HAND_SAME`, `HAND_DIFFERENT`) with
-   a one-line reason each, so a second reader can disagree with a specific
-   row rather than with a number.
+   The oracle cannot grade playout identity, and THAT half stays
+   **UNVERIFIED** -- it needs a live pass. What was also UNVERIFIED and is
+   now measured is how often a confirmation is brand-level in a way the
+   frozen data CAN see: how often the same guide channel's schedule would
+   confirm some OTHER playlist row just as well (`--independence`).
+   **47 of the 110 confirmations are not row-unique over the whole
+   1,453-row playlist, and 20 of 110 are not row-unique among the 265 rows
+   that are actually paired.** The worst is 92 rival rows for one
+   confirmation. So 63 of 110 confirmations are row-unique on these inputs
+   and the rest say "this is the right brand" with varying precision.
+4. **`unknown` is 155 of 265 and that is the honest figure** (it was 136 of
+   226 before the address strategy). It is not an error rate; it is the share
+   of pairs for which these inputs hold no independent evidence at all.
+   Reporting 110 confirmed where Part I reported 226 right is not a
+   regression in the matcher, it is the removal of evidence that was never
+   independent in the first place.
+5. **The hand sample is 65 pairings, read by one reader, on one day**, and 64
+   of them are gradeable against the pairing this round ships -- the 65th,
+   `Heartland.us@Eastern`, left the pairing when the address strategy landed,
+   and `--calibrate` reports it as `notInThisPairing` rather than scoring it.
+   The judgements are recorded in the script (`HAND_SAME`, `HAND_DIFFERENT`),
+   both keyed by (row, guide channel) and both graded on that exact channel,
+   with a one-line reason each, so a second reader can disagree with a
+   specific row rather than with a number.
+6. **Nothing in this oracle is checked by `scripts/check.sh`.** The spike is
+   not on the release allowlist and the gate does not run it. `--selftest`
+   is its only executable check, and it has to be run on purpose with the
+   frozen inputs in hand. **UNVERIFIED by the gate**, by construction, and
+   the lead should decide whether that is acceptable for the project's only
+   independent statement about guide-matching precision.
 
 ### 11.1 Simulcast clusters, measured
 
@@ -607,12 +644,26 @@ distinction the schedule cannot make.
 
 The weaker signature catches one more cluster and this one matters:
 `The Walking Dead en espanol` and `The Walking Dead Universe` run the same
-titles in the same order at different times, and **both are matched**. For
-those two pairs the title evidence is identical on either channel, so E1
-confirms both and cannot say which row belongs to which. Their names do
-distinguish them -- and the name is not allowed to confirm, which is the
-rule paying its own cost. **Those two pairs are marked UNVERIFIED on the
-question of which of the two feeds they are.**
+titles in the same order at different times, and **both are matched**. The
+worked example here used to say "so E1 confirms both and cannot say which
+row belongs to which". **It confirms neither**, and the measurement is the
+stronger statement: `--grade --dump <path>` grades both pairs
+`unknown / no-signal`, identically under the 226 pairing and under the 265.
+There is no echo to have, because the guide channel's only published title
+is `The Walking Dead` and the rare-token gate takes the rest -- `walking`,
+`dead` and `universe` each have census 2, so none of them is rare enough,
+and the one mark with census 0 (`720p`, before the fold of section 17.2
+removed it from the mark set entirely) appears in no title. So the
+conclusion stands and its reason changes: the oracle is SILENT on both
+pairs rather than equally loud about both.
+
+Under the matcher this round ships, both pairs are matched BY ADDRESS and
+the id oracle grades both A -- which is evidence of feed identity that no
+schedule can supply, and the reason the UNVERIFIED mark narrows to
+**unverified by this oracle**. The rest of 11.1 survives the move from 226
+to 265 unchanged: exact-signature clusters 4 over 8 channels with **0
+matched**, title-order clusters 5 over 10 channels with 2 matched, the same
+two.
 
 ## 12. Calibration
 
@@ -649,27 +700,77 @@ sample adds 21:
 
 ### 12.2 Measured error
 
-`--calibrate` on the dev tip:
+Both tables below were taken at the **226-pair** pairing and are restated
+here at the **265** the round ships. The difference is not cosmetic: one
+number went from zero to nonzero and nothing in the document said so.
 
-| | read as the SAME channel (44) | read as DIFFERENT channels (21) |
+`--calibrate` at 265 (44 hand-read same, 21 hand-read different; one of the
+44 -- `Heartland.us@Eastern` -- is no longer in the pairing at all, which is
+why the column totals 43 and `handChecked` is 64):
+
+| | read as the SAME channel (43, was 44) | read as DIFFERENT channels (21) |
 |---|---|---|
-| grader says **confirmed** | 26 | **0 false confirmations** |
+| grader says **confirmed** | **25** (was 26) | **0 false confirmations** |
 | grader says **contradicted** | **0 false contradictions** | 1 caught |
 | grader says **unknown** | 18 | 20 |
 
-And over the two constructed negative sets in full (452 pairings wrong by
-construction, `--negatives`): **0 confirmed**, 17 contradicted (11 random,
-6 nearest, all correct), 435 unknown. **False confirmation rate 0.0000 on
-both sets.**
+And over the two constructed negative sets in full -- now **530** pairings
+wrong by construction, 2 x 265, `--negatives`:
+
+| set | pairings | confirmed | contradicted | unknown | false confirmation rate |
+|---|---|---|---|---|---|
+| random | 265 | **0** | 13 | 252 | **0.0000** |
+| nearest-name | 265 | **1** | 6 | 258 | **0.0038** |
+
+**The oracle's specificity is no longer zero, and this is the number.** At
+226 both sets were 0.0000 and the document said so in two places. The one
+false confirmation is:
+
+```
+{"name": "Cheers + Frasier", "pairedWith": "Cheers",
+ "reason": "title-echo", "detail": "33 of 33 programmes repeat ['cheers']"}
+```
+
+It could only have appeared this round: the row is `CheersPlusFrasier.us@SD`,
+it is matched BY ADDRESS, and it was not in the 226-pair set at all. It is
+reported as a grader error rather than argued away as a contaminated
+negative, and the mechanism is worth stating because it is a new kind of
+hole rather than a near miss. Measured: the playlist row is named
+`Cheers + Frasier`; the guide declares `Cheers` (33 programmes, every title
+`Cheers`) and `Frasier` (33 programmes, every title `Frasier`) as two
+separate channels; `cheers` and `frasier` each have census 1, so both are
+rare marks of this one row. The matcher pairs the row with `Frasier` and E1
+confirms it there on `frasier`, 33 of 33. The nearest-name negative pairs
+the same row with `Cheers`, which is a genuinely different channel, and E1
+confirms that too, on `cheers`, 33 of 33. **A row whose name carries two
+brands has a rare mark for each of them, and E1 confirms on either** -- so
+`ECHO_MIN_TOKENS = 1` buys the coverage that makes the arm useful and pays
+for it here.
+
+Raising the threshold to 2 does close it, and the price is measured at the
+265 rather than quoted from 10.3's 226 column: `--echo-min-tokens 2` takes
+the grade from 110 confirmed / 155 unknown to **56 confirmed / 209
+unknown** and both negative sets to **0 confirmed, rate 0.0000**. So the
+exchange on this data is **54 of 110 confirmations surrendered to remove one
+false confirmation in 530**, and the arm's coverage is what the whole
+re-grade rests on. The threshold is left at 1 and the error is published
+instead, which is this document's standing preference; the decision is the
+lead's and the numbers for it are both here.
+
+The pair is NOT added to `HAND_DIFFERENT`. Moving a known-failing case into
+the calibration fixture would turn the grader's one measured error into a
+second `caughtAWrongPair` and hide it, which is rule 10's shape -- a fixture
+more forgiving than the thing it stands for.
 
 With `--category-fit` on, the same calibration reports **3 false
 confirmations of 21** for 7 more right pairs confirmed -- consistent with the
 7/28 on the constructed sets, and the reason that arm is off.
 
-The shape of the error is the honest headline: **this oracle's cost is
-silence, not wrongness.** It says nothing about 18 of 44 pairs a human can
-read correctly, and in 517 graded pairings across every set it never once
-confirmed a pairing a human called wrong.
+The shape of the error is still the honest headline, with one word changed:
+**this oracle's cost is mostly silence, and once in 530 it is wrongness.**
+It says nothing about 18 of 43 pairs a human can read correctly; in the 64
+hand-read pairings it has never confirmed a pairing a human called wrong;
+and on the 530 constructed negatives it confirms one.
 
 ### 12.3 Every arm seen red (rule 11)
 
@@ -677,12 +778,24 @@ A grader nobody has broken is decoration. Three named mutations, each
 disabling exactly one arm of `grade_pair`, each run against the whole set of
 measurements:
 
-| grader | `--calibrate` false confirmations | wrong pair caught | `--grade` on the pre-D-EPG-5 helper | `--negatives` contradictions (random / nearest) |
+Re-run against the repaired grader (section 17) and with the `--negatives`
+column taken at the 265 the round ships; the published table had that column
+at 226, and the M-G3 cell did not add up.
+
+| grader | `--calibrate` false confirmations | wrong pair caught | `--grade` on the pre-D-EPG-5 helper (227 pairs) | `--negatives` contradictions at 265 (was 226) |
 |---|---|---|---|---|
-| **as written** | **0** of 21 | **1** | 90 confirmed, 136 unknown, **1 contradicted** | 11 / 6 |
-| **M-G1** -- prose-marker arm disabled | **1** | **0** | **91 confirmed, 0 contradicted** | 11 / 6 |
+| **as written** | **0** of 21 | **1** | 90 confirmed, 136 unknown, **1 contradicted** | 13 / 6 (was 11 / 6) |
+| **M-G1** -- prose-marker arm disabled | **1** | **0** | **91 confirmed, 0 contradicted**, 136 unknown | 13 / 6 |
 | **M-G2** -- marker-sibling arm disabled | 0 | 1 | 90 / 136 / 1 | **0 / 0** |
-| **M-G3** -- title-echo arm disabled | 0 | 1 | **0 confirmed**, 227 unknown | 11 / 6 |
+| **M-G3** -- title-echo arm disabled | 0 | 1 | **0 confirmed, 226 unknown, 1 contradicted** | 13 / 6 |
+
+The M-G3 cell read "**0 confirmed**, 227 unknown". It is 226 unknown and 1
+contradicted, and the row's own neighbouring column said so: disabling the
+title-echo arm cannot suppress a contradiction, because both contradiction
+arms return before the echo block is reached, so the Bloomberg pair is still
+caught. "227 unknown" would have required that contradiction to vanish.
+M-G3 also removes the one false confirmation of 12.2, so its `--negatives`
+confirmed count is 0 / 0 where the as-written grader is 0 / 1.
 
 M-G1 is the row that matters. Remove the arm that reads the guide's own prose
 and the grader does not merely fall silent on the Bloomberg pair -- it
@@ -934,7 +1047,9 @@ get from the id oracle: a `contradicted` count that is **still able to be
 nonzero** after the matcher reads the id, because no arm of this grader reads
 one. Expect `matchedById` to rise and the schedule oracle's `confirmed` to
 stay near 90 and its `contradicted` to stay at 0; a `contradicted` above zero
-is the pair to look at, and `--grade --dump` names it.
+is the pair to look at, and `--grade --dump <path>` names it. (`--dump`
+takes a path; without one argparse refuses the command, which is what this
+sentence used to tell a reader to run.)
 
 **Budget (rule 7).** This part changed no shipping code -- `git diff 9ae43cf`
 on the branch touches only the new spike -- so the helper's budgets cannot
@@ -943,3 +1058,326 @@ have moved, and the figure is reported rather than assumed: the shipping
 569 ms** over four runs on this machine, against the 1-second budget, and the
 frozen `epg` run reports `durationMs 566`. The grader itself is not shipped
 and runs the whole 226-pair grade in 0.72 s.
+
+# Part III: the grader re-measured at 265, 2026-10-04
+
+A four-lens adversarial review of the round that added the address strategy
+returned ten findings against this grader and this document. Nine
+reproduced, one reproduced and was worse than filed. They are repaired in
+`a95476f` and the numbers above are restated from the 226-pair pairing to
+the 265 the round ships. Everything here is measured on the frozen inputs
+(`channels.json`, 1,453 rows; `pluto-us.xml.gz`, 427 channels and 8,799
+programmes) with the helper at `ada9220`.
+
+The one sentence that matters most: **the headline change is that the
+oracle's false-confirmation rate is no longer zero.** It is 0.0000 on 265
+random negatives and 0.0038 on 265 nearest-name negatives, and the document
+said 0.0000 on both in two places because nobody re-ran `--negatives` after
+the pairing grew. The reader of 12.2 was told to run it.
+
+## 17. The grader re-measured at 265
+
+### 17.1 What the grader actually confirms FROM
+
+Two halves, measured with `--independence` (1.7 s).
+
+**Proved, by observation rather than by grep.** Every playlist row, guide
+channel and programme dict is wrapped in a key-logging proxy and all 265
+pairs are graded through the shipping `grade_pair`. The fields opened:
+
+| dict | fields read |
+|---|---|
+| playlist row | `group`, `name` |
+| guide channel | `names` (and `desc` once E2 is on) |
+| programme | `category`, `desc`, `title` |
+
+No `url`, no `logo`, no `tvgId`. `cid` is a dict key and never a value the
+grader reads. This is now assertion 1 of `--selftest`, and it is an
+assertion rather than `grep -n url` for the reason rule 14 gives: the file
+contains `row_ids()` and `id_oracle()`, both of which read an id and
+neither of which is on a grading path, so a grep cannot tell compliance
+from violation. The mutation `_ = row.get("url")` inside `grade_pair`
+reddens it (`playlistRow: ["group", "name", "url"]`).
+
+**Weaker than claimed.** 10.1 said "confirmation comes only from the
+schedule". E1 fires when a token of OUR row's name appears in a programme
+title AND at most `ECHO_MAX_CENSUS` guide display-names use that token --
+so two of its three inputs are display-names, which is what the NAME
+strategy keys on. Measured over the 265:
+
+| | count |
+|---|---|
+| confirmations (all `title-echo`) | **110** |
+| of those, matched by ADDRESS / by NAME | **67 / 43** |
+| echoing a token the paired guide channel's own display-name ALSO carries | **109** (66 ADDR, 43 NAME) |
+| echoing at least one token that display-name LACKS | **1** |
+| census of the 142 echoed tokens | 1 x 141, 0 x 1 |
+
+The one exception is `Tennis Channel +2 (720p)` against the guide's
+`TennisChannel 2`, on the token `tennis`.
+
+**Does "not the name" survive? Narrowed, not withdrawn.** What survives is
+the operative half: **the name may not confirm ALONE.** The forbidden
+`--name-oracle` confirms 226 of 226; E1 confirms 90 of those 226 and is
+silent on 37 of the 80 name-matched pairs in the 265. So the rule is doing
+real work -- it withholds confirmation from pairs whose names agree
+perfectly -- and the schedule is a necessary second input that the matcher
+never reads. What does NOT survive is the stronger reading, that a
+confirmation is independent of the name: for 109 of 110 the echoed token is
+a word both names share, and for the 43 name-matched pairs that sharing is
+there by construction, leaving a property of the guide channel alone (its
+schedule repeats its own brand word). On the 67 address-matched pairs the
+name agreement is at least independent of the matcher's decision, which is
+the stronger position of the two and is the half the address strategy
+improved.
+
+So: **the grader confirms from a name token corroborated by the schedule.**
+That sentence is now in 10.1, in the script's docstring, and reproducible
+with `--independence`.
+
+### 17.2 The repairs, with the counts
+
+| | before | after |
+|---|---|---|
+| 265-pair grade | 110 confirmed, 155 unknown, 0 contradicted | **identical** |
+| `--calibrate` | 64 checked, 25 same/confirmed, 18 same/unknown, 0 false confirmations, 1 caught | **identical** |
+| `--negatives` random / nearest | 0 / 1 confirmed, 13 / 6 contradicted | **identical** |
+| pairings a bracket word falsely confirms | **246** | **0** |
+| pairings a resolution tag falsely confirms (probe channel titled `720p Feed`) | **502** | **0** |
+| `--calibrate --pairings <1 pair>` | byte-identical to no `--pairings`: 64 checked | **1 checked, 43 `notInThisPairing`** |
+| `--negatives --pairings <1 pair>` | byte-identical: 265 / 265 | **1 / 1** |
+| `--sample 44 --pairings <1 pair>` | byte-identical: 44 drawn | **1 drawn** |
+| a credentialed URL planted in a channel name | reaches stdout in full from `--grade` | **redacted to scheme and host in all seven modes** |
+| executable checks in the file | **0** | **6, every one seen red** |
+
+1. **E1's mark set folds through `epg_name_key`** (`confirming_marks`).
+   `distinctive()` read the RAW name, so `(720p)`, `(1080p)` and the bracket
+   spans the matcher strips survived as "tokens that could identify a
+   programme" on **1,155 of 1,453 rows** (`1080p` 504, `720p` 502, `not` 82
+   from `[Not 24/7]`, `geo` and `blocked` 60 each, plus smaller
+   resolutions). Every one has guide census **0**, so every one passed the
+   rarity gate that is E1's only defence, and with `ECHO_MIN_TOKENS = 1` one
+   title was enough. **It was not latent.** Four frozen programme titles
+   carry the word `not` -- `I'm Not There` on `Pluto TV Drama`,
+   `Not So Fast With Pabst & Perloff` twice on `NBC Sports NOW`, and
+   `Archie's Weird Mysteries: Reggie or Not` on `Go Go Gadget!` -- so
+   crossing the 82 bracket rows with those 3 channels gave **246 pairings
+   this grader confirmed on the strength of a bracket word**, including
+   `AFV Espanol (720p) [Not 24/7]` as `Pluto TV Drama`. After the fold: 0.
+   The review filed this P3 and latent; it is reachable on the frozen data
+   and the latency claim was wrong.
+   C2 keeps reading the raw name on purpose. It compares our core against a
+   GUIDE display-name's core, and folding both sides there moves a
+   contradiction arm whose firings were each read and called correct
+   (measured: random contradictions 13 -> 17, nearest 6 -> 14). That is a
+   separate decision with its own reading to do, not a free tidy-up, and it
+   is **not made here**.
+2. **The desc-echo arm is now E2, off, documented and measured.** It was on
+   by default, named in no document, test or `--limits` text, gated at a
+   bare `3` rather than `ECHO_MAX_CENSUS` -- the census 10.3 had already
+   priced at 20 false confirmations -- and unreachable on a guide that
+   declares **0** channel-level `<desc>` against 8,799 programme ones. So
+   it had never been seen to fire in either direction, and every
+   "0 false confirmations" figure the project published was silent about it.
+   `--promote-desc` makes it measurable by giving each channel the prose a
+   FAST guide would carry, its own commonest programme `<desc>`:
+
+   | arm | confirmations on the synthetic guide | false confirmations, random | nearest | nearest rate |
+   |---|---|---|---|---|
+   | E1 alone (ships) | 110 | 0 | 1 | 0.0038 |
+   | + E2 at `ECHO_MAX_CENSUS` | **113** | 0 | **3** | **0.0113** |
+   | + E2 as it stood, gate 3, on by default | **115** | **1** | **5** | **0.0189** |
+
+   Two errors for every three gains at the tightened gate, six for five as
+   it stood. That is E3's shape, not E1's, so it is off. Numbers from the
+   synthetic guide are labelled synthetic wherever they appear.
+3. **`HAND_SAME` is keyed by `(tvgId, cid)`** like `HAND_DIFFERENT`, and
+   both are graded on that exact channel. Keyed by tvgId alone, the human's
+   "these are the same channel" was applied to whichever guide channel the
+   matcher married the row to NOW -- a double more forgiving than the thing
+   it stands for (rule 10): it could see a row LEAVE the pairing and not a
+   row being RE-PAIRED, in the round whose whole content is re-pairing.
+   Demonstrated before the fix by forcing `MidsomerMurders.us@SD` (human
+   verdict "Midsomer Murders") onto `PBR RidePass`: `same/confirmed` 25 and
+   `same/unknown` 18 became 24 and 19, the row scored as a judged pair
+   against a channel the reader never saw, and `notInThisPairing` stayed
+   `["Heartland.us@Eastern"]`. After the fix the same forcing reports it in
+   `repairedSinceTheHandRead` and scores it nowhere. The 44 cids are
+   recovered from the 226-pair pairing the worksheet was drawn from, not
+   invented: every one of the 44 guide display-names agrees with the reason
+   the reader wrote beside it, 43 sit on the same cid under the 265, and the
+   one that does not is `Heartland.us@Eastern`, which left the pairing. So
+   the re-keying changes no published number; the hole was latent by luck.
+4. **`--pairings` is honoured by `--sample`, `--calibrate`, `--negatives`
+   and `--independence`, and refused by `--pairs`, `--clusters`,
+   `--findings` and `--selftest`.** The first three used to reconstruct
+   their own pairing and print a result byte-identical with and without the
+   flag -- including a full `--calibrate` error table for a pairing file
+   containing one nonexistent pair. Section 16 offers `--pairings` as one of
+   the two documented ways to point this grader at a new matcher, so a lane
+   whose matcher is not expressible as a `--helper` would have got a
+   trustworthy-looking calibration of something else.
+5. **Rule 5 at the sink.** The docstring claimed every provider-controlled
+   string went through `redact_urls`; only `--sample` did, and only for the
+   prose and the titles -- its own `playlistName` and `guideDisplayNames`
+   were raw, as were `--grade`'s `contradicted` block and `--dump` file,
+   `--negatives`' false-confirmation examples, `--id-split`'s split list and
+   all of `--findings`. Planting
+   `http://user:pass@cdn.example/live/secret.m3u8` in a channel name put it
+   on stdout in full. Everything now leaves through one function, `safe()`.
+   Latent on this data (0 of 1,453 playlist names and 0 of 427 guide
+   display-names contain `http`) and the file does not ship -- but a file
+   that asserts compliance should have it.
+6. **`--id-split` says F-EPG-14**, the id the lead gave that finding at
+   integration; the mode that produces its evidence still announced itself
+   as F-EPG-11, which is now the address strategy. Nothing caught it:
+   `scripts/check-defect-ledger.py` and `scripts/check-board-staleness.py`
+   both build their corpus from `git ls-files -- '*.md'`, so an id that
+   lives only in a script is invisible to the only gates that check ids.
+   **Handed to the lead** (F-EPG-21 below).
+
+### 17.3 Every assertion seen red (rule 11)
+
+`--selftest` is the first executable check this file has ever had. Six
+assertions, run against the frozen inputs in 20 s, and each one shown
+failing against a named one-line mutation of the shipping file. Counts
+verbatim.
+
+As written: `{"checks": 6, "failed": []}`, exit 0.
+
+| mutation | one-line change | result |
+|---|---|---|
+| **MS1** | `marks = confirming_marks(...)` -> `distinctive(helper, name)` | exit 1, **2 failed**: `a resolution tag confirms nothing` (**502** false confirmations of 502 rows probed) and `a bracket word confirms nothing` (**246** false confirmations) |
+| **MS2** | `--desc-echo` argparse default -> `True` | exit 1, **1 failed**: `desc-echo is inert unless asked` (`defaultWhenThisRan: true`) |
+| **MS2b** | the E2 gate back to a bare `3` | exit 1, **1 failed**: same check, `withTheMarkTooCommon: ["confirmed", "desc-echo"]` |
+| **MS3** | `mode_calibrate` looks the HAND_SAME row up in the current pairing | exit 1, **1 failed**: `a re-paired hand-read row is scored nowhere` (`reportedAsRepaired: []`, `readAsTheSameChannel: 43` where 42 is correct) |
+| **MS4** | `grade_all` prints `row.get("name")` raw | exit 1, **1 failed**: `no mode prints a credentialed URL` (`modesThatLeaked: ["grade"]`) |
+| **MS5** | `_ = row.get("url")` added to `grade_pair` | exit 1, **1 failed**: `reads no identifier` (`playlistRow: ["group", "name", "url"]`) |
+
+**Two of the six were green against their own mutation when first written,
+and that is the part worth recording.** The first `a resolution tag`
+assertion compared `confirming_marks(name)` with
+`distinctive(epg_name_key(name))` -- its own definition -- so reverting
+`grade_pair`'s call site left it green: rule 14's exact shape, inside the
+check written to enforce rule 14. The first `HAND_SAME` assertion checked
+the key SHAPE, which a reverted lookup does not change. The first redaction
+assertion planted the URL on one row and passed vacuously, because a mode
+only prints the rows it has something to say about. All three now observe
+the arm or the printer: a synthetic guide channel titled `720p Feed`, a
+forced re-pairing driven through `mode_calibrate`, and a plant on every row
+with the pairing supplied so the doctored names cannot move it -- plus a
+non-vacuity clause requiring the REDACTED form to appear in at least one
+run, so a silent printer cannot pass the check.
+
+### 17.4 Findings this part files, for the lead
+
+**This lane does not own `docs/STATUS.md`.** Each finding gets its id on the
+day it is written (rule 13); the rows are handed to the lead.
+
+**These ids were F-EPG-16 to F-EPG-21 for about a minute, and the checker
+caught the collision.** F-EPG-16 and F-EPG-17 are already on the board,
+taken by the adversarial pass on the bracket ruling that landed in `ada9220`
+the same day. The ledger reported the two colliding ids as having rows and
+the four others as having none, which is the one shape a reader does not
+look twice at, so the renumbering here came from reading
+`grep -o 'F-EPG-[0-9]*' docs/STATUS.md` rather than from the check. **This
+lane claims the block F-EPG-18 to F-EPG-23 and nothing else.** A concurrent
+repair lane coining ids from the same branch point will collide the same way
+and the checker will not say so -- it reports a missing row, never a reused
+id -- which is the rule-13 route F-EPG-11/F-EPG-14 arrived by and the second
+time it has happened in two days. The reserved-block sentence 14.1 ends on
+is still a sentence nothing enforces.
+
+Until the six rows land on the board, `scripts/check-defect-ledger.py`
+reports exactly six problems against this branch and `scripts/check.sh` is
+red on that step and green on every other. Dropping the ids to make the gate
+green is the D-REL-3 failure and is not on the table; it is the same
+arrangement section 15 shipped under.
+
+1. **F-EPG-18: the oracle's false-confirmation rate is 0.0038, not 0.** On
+   the 265-pair pairing the round ships, `--negatives` confirms one pairing
+   that is wrong by construction (`Cheers + Frasier` against the guide's
+   `Cheers`). 10.2 and 12.2 both stated 0.0000 on both sets, which was the
+   226 measurement, and section 16 tells a reader to run the command that
+   now returns otherwise. Restated in 10.2, 12.2 and 17 above. Suggested
+   P2: it is the number the round's precision claim rests on.
+2. **F-EPG-19: "confirmation comes only from the schedule" overstated the
+   grader's independence.** 109 of 110 confirmations echo a token the paired
+   guide channel's own display-name also carries. The operative half of the
+   rule survives (the name may not confirm alone, and E1 is silent on 37 of
+   the 80 name-matched pairs where `--name-oracle` confirms all 226); the
+   stronger reading does not. Restated in 10.1 and 17.1, reproducible with
+   `--independence`. Suggested P2.
+3. **F-EPG-20: an undocumented confirming arm was on by default and
+   unreachable, so no measurement covered it.** The desc-echo arm, at a
+   census the project had already priced at 20 false confirmations, on a
+   guide that declares no channel-level `<desc>`. Now E2: off, flagged,
+   documented and measured on a synthetic guide. Suggested P2 -- not for the
+   arm, which fires on nothing here, but because "0 false confirmations"
+   was published about a grader with an unmeasured arm in it.
+4. **F-EPG-21: an id that lives only in a script is invisible to both id
+   gates.** `check-defect-ledger.py` and `check-board-staleness.py` build
+   their corpus from `git ls-files -- '*.md'`. That is how `--id-split` kept
+   announcing itself as F-EPG-11 after integration renamed the finding
+   F-EPG-14, and it is rule 13's join-by-name failure arriving by a route
+   rule 13 anticipated and the checks do not cover. The fix is a gate
+   change in a file this lane does not own. Suggested P3.
+5. **F-EPG-22: E1 confirms either brand of a row that names two.**
+   `Cheers + Frasier` carries two census-1 marks and E1 confirms it against
+   the guide's `Frasier` (its true partner, 33 of 33 on `frasier`) and
+   against the guide's `Cheers` (a different channel, 33 of 33 on
+   `cheers`). `ECHO_MIN_TOKENS = 1` buys the coverage that makes the arm
+   useful and pays for it here; `--echo-min-tokens 2` closes it and costs
+   54 of the 110 confirmations, measured at 265. Recorded as the mechanism
+   behind F-EPG-18, with the exchange rate, rather than fixed. Suggested P3
+   and a decision for the lead.
+6. **F-EPG-23: 47 of 110 confirmations are not row-unique.** Limit 3 stated
+   this in prose and marked it UNVERIFIED. Measured: 47 of the 110 would be
+   given to at least one other row of the 1,453 against the same guide
+   channel (worst case 92 rivals), and 20 of 110 to at least one other row
+   that is itself in the 265-pair pairing. 63 of 110 are row-unique.
+   Suggested P3, and limit 3's playout half stays UNVERIFIED -- it needs a
+   live pass.
+
+```
+| F-EPG-18 | P2 | M4-01 | docs/QA-EPG-PRECISION.md 12.2 and 17.4 (frozen inputs, --negatives) | open |
+| F-EPG-19 | P2 | M4-01 | docs/QA-EPG-PRECISION.md 10.1, 17.1 and 17.4 (frozen inputs, --independence) | open |
+| F-EPG-20 | P2 | M4-01 | docs/QA-EPG-PRECISION.md 10.2 and 17.2 (frozen inputs, --promote-desc --desc-echo) | open, repaired in a95476f |
+| F-EPG-21 | P3 | M4-01 | docs/QA-EPG-PRECISION.md 17.2 and 17.4 | open |
+| F-EPG-22 | P3 | M4-01 | docs/QA-EPG-PRECISION.md 12.2 and 17.4 | open |
+| F-EPG-23 | P3 | M4-01 | docs/QA-EPG-PRECISION.md 11 limit 3 and 17.4 (frozen inputs, --independence) | open |
+```
+
+### 17.5 Reproducing Part III
+
+```
+F=<directory holding channels.json and pluto-us.xml.gz>
+S=scripts/dev-harness/spikes/epg-oracle/schedule_oracle.py
+
+python3 -B $S --channels $F/channels.json --guide $F/pluto-us.xml.gz --selftest
+python3 -B $S --channels $F/channels.json --guide $F/pluto-us.xml.gz --independence
+python3 -B $S --channels $F/channels.json --guide $F/pluto-us.xml.gz --negatives
+python3 -B $S --channels $F/channels.json --guide $F/pluto-us.xml.gz --calibrate
+
+# the E2 arm, on the synthetic guide that is the only place it can be seen
+python3 -B $S --channels $F/channels.json --guide $F/pluto-us.xml.gz \
+  --grade --promote-desc --desc-echo
+python3 -B $S --channels $F/channels.json --guide $F/pluto-us.xml.gz \
+  --negatives --promote-desc --desc-echo
+
+# the 226 column of any table above, for comparison
+git show 9ae43cf:bin/omarchy-iptv > /tmp/helper-226.py
+python3 -B $S --helper /tmp/helper-226.py --channels $F/channels.json \
+  --guide $F/pluto-us.xml.gz --grade
+```
+
+**Budget (rule 7), measured on this machine, not assumed.** Part III changed
+no shipping code: `git diff ada9220 -- bin/ Guide.qml Model.js` on this
+branch is empty, so the helper's budgets cannot have moved. The grader's own
+modes, one run each: `--pairs` 602 ms, `--grade` 742 ms, `--clusters`
+614 ms, `--calibrate` 673 ms, `--id-split` 654 ms, `--findings` 580 ms,
+`--independence` 1,671 ms, `--negatives` 6,653 ms, `--selftest` 20,063 ms.
+Nothing here is in a user-facing path and no budget in CLAUDE.md applies to
+it; the figures are published so a lane knows what it is waiting for.
+`--selftest` is the slow one because it drives seven modes over a doctored
+copy of the whole playlist.
