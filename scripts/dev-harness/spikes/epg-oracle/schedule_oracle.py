@@ -39,11 +39,32 @@ our row from the guide channel it was married to while the guide declares a
 sibling that carries the marker. That arm CAN fire on a name-matched pair,
 and on the frozen data it does.
 
-Confirmation comes only from the schedule:
+Confirmation is SCHEDULE-CORROBORATED, not schedule-only, and the
+difference is measured rather than glossed -- see "What the confirming arm
+really rests on" below. There are exactly three confirming arms and only
+the first is on:
   E1 title echo    a programme title on the guide channel repeats a token
                    of the playlist row's own name that NO OTHER guide
                    channel uses. This is the only arm on by default, and it
-                   is the only one measured at zero false confirmations.
+                   is the only one measured at zero false confirmations on
+                   the random negative set. On the nearest-name set at the
+                   shipping 265-pair pairing it makes ONE (`Cheers +
+                   Frasier` against the guide's `Cheers`), rate 0.0038.
+  E2 desc echo     the guide channel's own CHANNEL-level <desc> repeats
+                   such a token. OFF by default (--desc-echo), and the
+                   reason is a measurement rather than taste: the frozen
+                   guide declares no channel-level <desc> at all, so the
+                   arm is unreachable on it and --promote-desc exists to
+                   make it measurable (it synthesises a channel <desc> from
+                   each channel's own commonest programme <desc>, which is
+                   how a FAST guide writes one). On that synthetic guide the
+                   arm adds 3 confirmations and buys 2 false confirmations
+                   on the nearest-name set -- about two errors for every
+                   three gains, which is E3's shape, not E1's. Its rarity
+                   gate is ECHO_MAX_CENSUS, the same knob as E1's; it was a
+                   bare `3` while the arm was on by default and unmeasured,
+                   which is the census the sweep in QA-EPG-PRECISION 10.3
+                   had already priced at 20 false confirmations.
   E3 category fit  the schedule's categories fit the playlist group under a
                    fixed, pre-declared table. OFF by default: measured at 7
                    false confirmations on random negatives and 28 on
@@ -57,6 +78,36 @@ Contradiction comes from two arms:
   C2 marker sibling  our row's markers differ from the guide channel's AND
                    the guide declares a sibling that carries ours.
 
+What the confirming arm really rests on (and what the earlier wording here
+overstated). Two halves, one proved and one weaker than it was written:
+
+  PROVED. The grader reads no identifier. Traced at field level by wrapping
+  every row, guide-channel and programme dict in a key-logging proxy and
+  grading all 265 pairs: the only row fields opened are `group` and `name`,
+  the only guide-channel field `names` (and `desc` as well once E2 is on),
+  the only programme fields `category`, `desc` and `title`. No `url`, no
+  `logo`, no `tvgId`; `cid` is a dict key and never a value that is read.
+  `--selftest` keeps that true by running the same trace as an assertion --
+  and it is an assertion rather than a grep because a grep for `url` is
+  exactly what cannot distinguish `id_oracle`, which contains one and is
+  never on a grading path, from a line that reads one.
+
+  WEAKER. "Confirmation comes only from the schedule" was an overstatement.
+  E1 fires on a token of OUR name that a programme title repeats and that at
+  most ECHO_MAX_CENSUS guide display-names use -- so two of its three inputs
+  are display-names, which is what the NAME strategy keys on. Measured over
+  the shipping 265: of 110 confirmations, 109 echo a token that is ALSO in
+  the paired guide channel's own display-name and exactly 1 does not
+  (`Tennis Channel +2 (720p)` against the guide's `TennisChannel 2`, token
+  `tennis`). For the 43 pairs the matcher made BY NAME that shared token is
+  there by construction. So the honest claim is: the evidence is a name
+  token CORROBORATED BY THE SCHEDULE, and what the rule buys is that the
+  corroboration cannot be supplied by the name alone -- E1 is silent on 37
+  of the 80 name-matched pairs, where the forbidden `--name-oracle` confirms
+  226 of 226. On the 67 address-matched pairs the name agreement is at least
+  independent of the matcher's decision. The numbers are reproducible with
+  `--independence`.
+
 What it cannot see is stated in `docs/QA-EPG-PRECISION.md` section 10 and in
 --limits.
 
@@ -68,25 +119,42 @@ Usage (all paths absolute; the frozen inputs are not committed):
     --pairs        reconstruct the shipping pairing and verify it at the sink
     --clusters     simulcast clusters: guide channels no schedule can separate
     --grade        grade the shipping pairing
-    --grade --pairings FILE
-                   grade a pairing supplied as JSON {"pairs": [[tvgId, cid]]}
-                   -- this is how to point it at a NEW matcher
     --sample N     draw the stratified, ID-BLIND hand-check worksheet
-    --calibrate    grade the grader against the 65 hand-read pairings
-                   embedded in this file (HAND_SAME, HAND_DIFFERENT)
+    --calibrate    grade the grader against the hand-read pairings embedded
+                   in this file (HAND_SAME, HAND_DIFFERENT)
     --negatives    false-confirmation rate over two constructed negative
                    sets: a random cross and a nearest-name cross
-    --id-split     ask the OLD id oracle about itself (F-EPG-11)
+    --independence what the confirming arm rests on, measured: the field
+                   trace, and how many confirmations echo a token the paired
+                   guide channel's own display-name already carries
+    --id-split     ask the OLD id oracle about itself (F-EPG-14)
     --findings     the numbers that settle F-EPG-7, F-EPG-8, F-EPG-10
+    --selftest     assert the decisions this file is relied on for, on the
+                   frozen inputs. Every assertion was seen RED against a
+                   named mutation; the mutations are listed in
+                   `docs/QA-EPG-PRECISION.md` 17.3.
     --limits       what this oracle cannot see
+
+  --pairings FILE supplies the pairing as JSON {"pairs": [[tvgId, cid]]},
+  which is how to point ANY of --grade, --sample, --calibrate, --negatives,
+  --independence and --id-split at a NEW matcher. It used to be read by
+  --grade and --id-split only, and the other three silently graded the
+  pairing they reconstructed for themselves instead, so an operator could
+  get a trustworthy-looking calibration of a pairing they had not supplied.
+  A mode that cannot use it refuses it rather than ignoring it.
 
 The id oracle is still computed, in ONE place (`id_oracle`), and only ever
 to be COMPARED with this one. No grading path reads it.
 
 Rule 5: nothing here prints a URL. No output path emits `url` or `logo`,
-and every provider-controlled string that reaches stdout (channel names,
-programme titles, guide prose) goes through the helper's own `redact_urls`
-where it could contain one.
+and every provider-controlled string that reaches stdout -- channel names,
+guide display-names, programme titles, guide prose and every `detail`
+composed from them -- goes through `safe()`, which is the helper's own
+`redact_urls`. This was asserted here and true of `--sample` alone for the
+life of the file: `--grade`, its `--dump`, `--negatives`, `--id-split` and
+`--findings` all printed raw names, and a provider that writes a credentialed
+URL into a channel name reached stdout in full. `--selftest` observes the
+sink rather than grepping for the call.
 """
 from __future__ import annotations
 
@@ -369,6 +437,10 @@ ECHO_MIN_TOKENS = 1
 # with that error rate cannot carry a precision acceptance criterion, so it
 # is reported as a signal and never as a confirmation unless asked for.
 CATEGORY_FIT_CONFIRMS = False
+# The desc-echo arm (E2) is OFF by default, for the reasons in `grade_pair`
+# and in the module docstring. It was ON, unflagged, undocumented and
+# unreachable on the frozen guide for the life of the file.
+DESC_ECHO_CONFIRMS = False
 
 # A marker is a token that DISTINGUISHES two feeds of one brand. These are
 # the forms the frozen data actually carries, named individually: an
@@ -381,8 +453,40 @@ def tokens(helper, text):
     return [t for t in helper.normalize_id_text(text).split(" ") if t]
 
 
+def confirming_marks(helper, name):
+    """The marks E1 and E2 may CONFIRM on.
+
+    Folded through the matcher's own `epg_name_key` first, and that is the
+    whole point: `distinctive()` reads the raw name, so `(720p)`, `(1080p)`
+    and the bracket spans the matcher strips survived into the mark set as
+    "tokens of a channel name that could identify a programme". They are
+    nothing of the kind, and because no guide display-name contains one
+    their census is 0, so they sailed through the rarity gate that is E1's
+    only defence. Measured on the frozen playlist: 1,155 of 1,453 rows
+    carried at least one such mark (`1080p` 504, `720p` 502, `not` 82 from
+    `[Not 24/7]`, `geo`/`blocked` 60 each, and smaller resolutions), and it
+    was NOT latent -- 4 programme titles in the frozen guide carry the word
+    `not` ("I'm Not There", "Not So Fast With Pabst & Perloff" twice,
+    "Archie's Weird Mysteries: Reggie or Not"), so crossing the 82
+    `[Not 24/7]` rows with those 3 guide channels produced 246 pairings
+    that this grader CONFIRMED on the strength of a bracket word. With the
+    fold: 0. Nothing else moves -- the 265-pair grade, `--calibrate` and
+    both negative sets are identical before and after.
+
+    `distinctive()` below keeps reading the raw name because the C2
+    marker-sibling arm compares our core against a GUIDE display-name's
+    core, and folding both sides there changes a contradiction arm whose
+    13/6 firings were each read and called correct. That is a separate
+    decision with its own measurement to do, not a free tidy-up.
+    """
+    return distinctive(helper, helper.epg_name_key(name))
+
+
 def distinctive(helper, name):
-    """The tokens of a channel name that could identify a programme."""
+    """The tokens of a channel name that could identify a programme.
+
+    Raw-name tokens. For a CONFIRMING mark set use `confirming_marks`.
+    """
     out = []
     for tok in tokens(helper, name):
         if tok in GENERIC or len(tok) < 3 or tok.isdigit():
@@ -457,7 +561,7 @@ def grade_pair(helper, row, cid, guide_channels, guide_programmes,
             if want and helper.epg_name_key(raw) == want:
                 return ("confirmed", "name-equal", "the matcher's own key")
         return ("unknown", "name-differs", "")
-    marks = distinctive(helper, name)
+    marks = confirming_marks(helper, name)
     progs = guide_programmes.get(cid, [])
     rec = guide_channels.get(cid) or {"names": [], "desc": ""}
     guide_name = rec["names"][0] if rec["names"] else ""
@@ -518,10 +622,22 @@ def grade_pair(helper, row, cid, guide_channels, guide_programmes,
             return ("confirmed", "title-echo",
                     "%d of %d programmes repeat %s"
                     % (len(hits), len(progs), sorted(set(rare))[:3]))
-    if marks and rec["desc"]:
+    # --- CONFIRMATION E2, from the guide channel's own CHANNEL-level <desc>.
+    # OFF by default (--desc-echo) and that is a measurement. The frozen
+    # guide declares no channel-level <desc> at all, so this arm had never
+    # been seen to fire in either direction while it was on by default and
+    # undocumented, and every "0 false confirmations" figure the project
+    # published was silent about it. --promote-desc makes it measurable, and
+    # the measurement is why it is off: on the promoted guide it adds 3
+    # confirmations and makes 2 false ones on the nearest-name negatives.
+    # Its gate is ECHO_MAX_CENSUS, not the bare `3` it carried -- census 3
+    # is the setting the sweep in QA-EPG-PRECISION 10.3 priced at 20 false
+    # confirmations before this arm ever existed.
+    if DESC_ECHO_CONFIRMS and marks and rec["desc"]:
         dtoks = set(tokens(helper, rec["desc"]))
         shared = [m for m in marks
-                  if m in dtoks and guide_name_tokens.get(m, 0) <= 3]
+                  if m in dtoks
+                  and guide_name_tokens.get(m, 0) <= ECHO_MAX_CENSUS]
         if shared:
             return ("confirmed", "desc-echo",
                     "channel prose repeats %s" % sorted(set(shared))[:3])
@@ -587,51 +703,114 @@ def guide_token_census(helper, guide_channels):
 # The judgement is the reader's, from the playlist name, the group, the
 # guide display-name and the programme titles and categories. No id was on
 # the worksheet, and the reader did not look one up.
+#
+# BOTH dicts are keyed by (tvgId, guide cid). HAND_SAME was keyed by tvgId
+# ALONE, and `mode_calibrate` looked the row up in whatever pairing was
+# current, so a human's "these two are the same channel" was scored against
+# whichever guide channel the matcher happened to marry that row to NOW.
+# That is a double more forgiving than the thing it stands for (rule 10): it
+# could detect a row LEAVING the pairing and not a row being RE-PAIRED, and
+# this round is the round that re-pairs rows. Demonstrated before the fix by
+# forcing `MidsomerMurders.us@SD` (human verdict "Midsomer Murders") onto
+# `PBR RidePass`: the old code bucketed it `same/unknown` -- scoring the
+# human's verdict against a channel the human never read -- and the new
+# code reports it in `repairedSinceTheHandRead` and scores it nowhere.
+# The cids were not invented. They are recovered from the 226-pair pairing
+# the worksheet was actually drawn from (`--helper <9ae43cf:bin/omarchy-iptv>
+# --sample 44`, seed 20261004), and every one of the 44 guide display-names
+# agrees with the reason the reader wrote beside it. 43 of the 44 sit on the
+# same cid under the shipping 265-pair pairing and 1 (`Heartland.us@Eastern`)
+# left it, so the re-keying changes no published number -- it closes a hole
+# that was latent by luck.
 HAND_SAME = {
-    "BETVisionaries.us@SD": "black cinema library on a channel of that name",
-    "BounceXL.us@SD": "Mann & Wife is Bounce TV's own series",
-    "OANPlus.us@SD": "OAN's own presenters by name",
-    "Vevo2K.us@SD": "2000s music video blocks",
-    "SupernaturalDrama.us@SD": "Ghost Whisperer, supernatural drama",
-    "90sKidsTV2.us@SD": "Drake and Josh, Are You Afraid Of The Dark",
-    "ToughJobs.us@SD": "Duck Dynasty, a working-trade reality library",
-    "BETComedyMovies.us@SD": "Friday, Next Friday, BET comedy library",
-    "PlutoTVComedy.us@US": "comedy features",
-    "PlutoTVGameShows.us@SD": "Pictionary",
-    "50CentAction.us@SD": "Arsenal, Primal, The Frozen Ground -- all 50 Cent",
-    "YuGiOh.us@SD": "Yu-Gi-Oh! ZEXAL episodes",
-    "PlutoTVFranchiseFavorites.us@SD": "the Jack Ryan films, one franchise",
-    "LoveHipHop.us@SD": "Love & Hip Hop Atlanta and New York",
-    "NBCSportsNOW.us@SD": "The Dan Patrick Show, NBC Sports talk",
-    "PlutoTVStaffPicks.us@SD": "a curated film run",
-    "MLB.us@SD": "Series Rewind, Great Games, category Sports",
-    "PokerGo.us@US": "PokerGO Tour",
-    "Degrassi.us@US": "Degrassi: The Next Generation",
-    "MST3K.us@US": "Mystery Science Theater 3000",
-    "Heartland.us@Eastern": "Heartland",
-    "Classica.us@SD": "Mahler, Orff, Beethoven; category Classical",
-    "Survivor.us@SD": "Survivor",
-    "RiffTrax.us@US": "RiffTrax shorts and features",
-    "BabySharkTV.us@SD": "Pinkfong and Baby Shark",
-    "CBSNewsDetroit.us@SD": "CBS News Detroit's own 11pm bulletin",
-    "EstrellaNews.us@SD": "Noticias 62 Los Angeles, Estrella News Miami",
-    "AmericasVoiceNews.us@SD": "AVN's own programme names",
-    "GolazoNetwork.us@SD": "soccer highlights, category Sports",
-    "MTVFlowLatino.us@SD": "MTV Flow Latino",
-    "AntiquesRoadTrip.us@SD": "Antiques Road Trip",
-    "48Hours.us@US": "48 Hours",
-    "BeyondtheGates.us@SD": "Beyond the Gates",
-    "WildNOut.us@SD": "Nick Cannon Presents: Wild 'N Out",
-    "BlackInkCrew.us@SD": "Black Ink Crew",
-    "BellatorMMA.us@SD": "Bellator MMA Full Fight Cards",
-    "HogansHeroes.us@SD": "Hogan's Heroes",
-    "BeverlyHills90210.us@SD": "Beverly Hills, 90210",
-    "TheAddamsFamily.us@SD": "The Addams Family",
-    "TheChallenge.us@SD": "The Challenge (the guide's category is wrong, the title is not)",
-    "PlutoTVCompetition.us@SD": "Forged in Fire, Hot Ones, competition reality",
-    "ComedyCentralenEspanol.us@SD": "South Park and La familia del barrio, in Spanish",
-    "MidsomerMurders.us@SD": "Midsomer Murders",
-    "CBSNewsBaltimore.us@SD": "WJZ is Baltimore's CBS station",
+    ("48Hours.us@US", "6176f39e709f160007ec61c3"):
+        '48 Hours',
+    ("50CentAction.us@SD", "68487fb3f212bedacf5a53e3"):
+        'Arsenal, Primal, The Frozen Ground -- all 50 Cent',
+    ("90sKidsTV2.us@SD", "6452c77ed3fdde00080eb3a8"):
+        'Drake and Josh, Are You Afraid Of The Dark',
+    ("AmericasVoiceNews.us@SD", "5e1f7da4bc7d740009831259"):
+        "AVN's own programme names",
+    ("AntiquesRoadTrip.us@SD", "615b8ec39e878900073f419a"):
+        'Antiques Road Trip',
+    ("BETComedyMovies.us@SD", "68c32d88f56983aba40052bd"):
+        'Friday, Next Friday, BET comedy library',
+    ("BETVisionaries.us@SD", "663946c1b18d700008d9c168"):
+        'black cinema library on a channel of that name',
+    ("BabySharkTV.us@SD", "60faffc3fbbc120007fc4376"):
+        'Pinkfong and Baby Shark',
+    ("BellatorMMA.us@SD", "5ebc8688f3697d00072f7cf8"):
+        'Bellator MMA Full Fight Cards',
+    ("BeverlyHills90210.us@SD", "5f4d83e0a382c00007bc02e7"):
+        'Beverly Hills, 90210',
+    ("BeyondtheGates.us@SD", "687ff00ff6bc08130f16ab81"):
+        'Beyond the Gates',
+    ("BlackInkCrew.us@SD", "5d51e2bceca5b4b2c0e06c50"):
+        'Black Ink Crew',
+    ("BounceXL.us@SD", "6176fd25e83a5f0007a464c9"):
+        "Mann & Wife is Bounce TV's own series",
+    ("CBSNewsBaltimore.us@SD", "60f75919718aed0007250d7a"):
+        "WJZ is Baltimore's CBS station",
+    ("CBSNewsDetroit.us@SD", "634f2610d5023700078f7dee"):
+        "CBS News Detroit's own 11pm bulletin",
+    ("Classica.us@SD", "5f779951372da90007fd45e8"):
+        'Mahler, Orff, Beethoven; category Classical',
+    ("ComedyCentralenEspanol.us@SD", "5cf96dad1652631e36d43320"):
+        'South Park and La familia del barrio, in Spanish',
+    ("Degrassi.us@US", "5c6eeb85c05dfc257e5a50c4"):
+        'Degrassi: The Next Generation',
+    ("EstrellaNews.us@SD", "60492e6d7f3f560007ab0f62"):
+        'Noticias 62 Los Angeles, Estrella News Miami',
+    ("GolazoNetwork.us@SD", "63a0e33a45264d000850ed7e"):
+        'soccer highlights, category Sports',
+    ("Heartland.us@Eastern", "61f07513227feb00073ee6bc"):
+        'Heartland',
+    ("HogansHeroes.us@SD", "68939e206727ec919bb39061"):
+        "Hogan's Heroes",
+    ("LoveHipHop.us@SD", "5d51ddf0369acdb278dfb05e"):
+        'Love & Hip Hop Atlanta and New York',
+    ("MLB.us@SD", "5e66968a70f34c0007d050be"):
+        'Series Rewind, Great Games, category Sports',
+    ("MST3K.us@US", "545943f1c9f133a519bbac92"):
+        'Mystery Science Theater 3000',
+    ("MTVFlowLatino.us@SD", "5d3609cd6a6c78d7672f2a81"):
+        'MTV Flow Latino',
+    ("MidsomerMurders.us@SD", "5cbf6a868a1bce4a3d52a5e9"):
+        'Midsomer Murders',
+    ("NBCSportsNOW.us@SD", "6549306c83595c000815a696"):
+        'The Dan Patrick Show, NBC Sports talk',
+    ("OANPlus.us@SD", "5e7cf6c7b156d500078c5f44"):
+        "OAN's own presenters by name",
+    ("PlutoTVComedy.us@US", "5a4d3a00ad95e4718ae8d8db"):
+        'comedy features',
+    ("PlutoTVCompetition.us@SD", "603fde9026ecbf0007752c2c"):
+        'Forged in Fire, Hot Ones, competition reality',
+    ("PlutoTVFranchiseFavorites.us@SD", "68fbf8101d26140175db8b58"):
+        'the Jack Ryan films, one franchise',
+    ("PlutoTVGameShows.us@SD", "6036e7c385749f00075dbd3b"):
+        'Pictionary',
+    ("PlutoTVStaffPicks.us@SD", "5f4d863b98b41000076cd061"):
+        'a curated film run',
+    ("PokerGo.us@US", "5fc54366b04b2300072e31af"):
+        'PokerGO Tour',
+    ("RiffTrax.us@US", "58d947b9e420d8656ee101ab"):
+        'RiffTrax shorts and features',
+    ("SupernaturalDrama.us@SD", "5f24662bebe0f0000767de32"):
+        'Ghost Whisperer, supernatural drama',
+    ("Survivor.us@SD", "5f21e7b24744c60007c1f6fc"):
+        'Survivor',
+    ("TheAddamsFamily.us@SD", "5d81607ab737153ea3c1c80e"):
+        'The Addams Family',
+    ("TheChallenge.us@SD", "5d48685da7e9f476aa8a1888"):
+        "The Challenge (the guide's category is wrong, the title is not)",
+    ("ToughJobs.us@SD", "65c69bf23ef47d0008583967"):
+        'Duck Dynasty, a working-trade reality library',
+    ("Vevo2K.us@SD", "5fd7bca3e0a4ee0007a38e8c"):
+        '2000s music video blocks',
+    ("WildNOut.us@SD", "5d48678d34ceb37d3c458a55"):
+        "Nick Cannon Presents: Wild 'N Out",
+    ("YuGiOh.us@SD", "5f4ec10ed9636f00089b8c89"):
+        'Yu-Gi-Oh! ZEXAL episodes',
 }
 
 # (tvgId, guide cid) -> why the reader called it a different channel.
@@ -698,9 +877,35 @@ def title_only_clusters(guide_programmes, minimum=3):
 
 def load_inputs(args):
     helper = load_helper(args.helper or None)
+    _REDACT[0] = helper.redact_urls
     channels_doc = json.load(open(args.channels))
     guide_channels, guide_programmes = read_guide(args.guide)
+    if args.promote_desc:
+        guide_channels = promote_desc(guide_channels, guide_programmes)
     return helper, channels_doc, guide_channels, guide_programmes
+
+
+def promote_desc(guide_channels, guide_programmes):
+    """A SYNTHETIC guide that declares channel-level <desc>. --promote-desc.
+
+    The frozen guide declares none, which is why the E2 desc-echo arm had
+    never been seen to fire in either direction. Each channel's commonest
+    programme <desc> becomes its channel <desc> -- a FAST channel repeats
+    its own self-description in slot after slot, so this is the prose such a
+    guide would carry, not prose invented to make the arm look good. It is
+    labelled synthetic wherever its numbers are quoted, and it is the only
+    way the arm can be measured at all on these inputs.
+    """
+    promoted = {}
+    for cid, rec in guide_channels.items():
+        if rec.get("desc"):
+            promoted[cid] = rec
+            continue
+        seen = Counter(p["desc"] for p in guide_programmes.get(cid, [])
+                       if p["desc"])
+        best = seen.most_common(1)[0][0] if seen else ""
+        promoted[cid] = {"names": rec["names"], "desc": best}
+    return promoted
 
 
 def row_table(channels_doc):
@@ -715,6 +920,37 @@ def row_table(channels_doc):
 def read_pairings(path):
     doc = json.load(open(path))
     return [(str(a), str(b)) for a, b in doc["pairs"]]
+
+
+def pairs_for(args, helper, channels_doc, guide_channels, guide_programmes):
+    """The pairing under grade: --pairings if given, else the reconstruction.
+
+    One function, so a mode cannot silently drop the flag. `--grade` and
+    `--id-split` read `args.pairings` and `--sample`, `--calibrate` and
+    `--negatives` did not; they reconstructed instead and printed a result
+    that was byte-identical with and without the flag, which is how an
+    operator gets a trustworthy-looking measurement of a pairing nobody
+    asked about.
+    """
+    if args.pairings:
+        return read_pairings(args.pairings)
+    pairs, _, _, _ = reconstruct_pairs(
+        helper, channels_doc, guide_channels, guide_programmes)
+    return pairs
+
+
+# Rule 5's one sink. Every provider-controlled string printed by this file
+# goes through here. A None survives as None so a missing field still reads
+# as missing rather than as "".
+_REDACT = [None]
+
+
+def safe(text):
+    if text is None:
+        return None
+    if isinstance(text, (list, tuple)):
+        return [safe(item) for item in text]
+    return _REDACT[0](str(text))
 
 
 def mode_pairs(args, helper, channels_doc, guide_channels, guide_programmes):
@@ -771,23 +1007,21 @@ def grade_all(helper, pairs, rows, guide_channels, guide_programmes,
         graded.append({
             "tvgId": key,
             "cid": cid,
-            "name": row.get("name"),
+            "name": safe(row.get("name")),
             "group": row.get("group"),
-            "guideName": (guide_channels.get(cid) or {}).get("names", [""])[0],
+            "guideName": safe(
+                (guide_channels.get(cid) or {}).get("names", [""])[0]),
             "verdict": verdict,
             "reason": reason,
-            "detail": detail,
+            "detail": safe(detail),
         })
     return graded, claimed_by
 
 
 def mode_grade(args, helper, channels_doc, guide_channels, guide_programmes):
     rows = row_table(channels_doc)
-    if args.pairings:
-        pairs = read_pairings(args.pairings)
-    else:
-        pairs, _, _, _ = reconstruct_pairs(
-            helper, channels_doc, guide_channels, guide_programmes)
+    pairs = pairs_for(args, helper, channels_doc, guide_channels,
+                      guide_programmes)
     graded, claimed_by = grade_all(helper, pairs, rows, guide_channels,
                                    guide_programmes, args.strict_categories)
     counts = Counter(g["verdict"] for g in graded)
@@ -818,10 +1052,9 @@ def mode_sample(args, helper, channels_doc, guide_channels, guide_programmes):
     cannot be accused of selecting on the answer, and the worksheet carries
     no id for the reader to peek at."""
     rows = row_table(channels_doc)
-    pairs, _, _, _ = reconstruct_pairs(
-        helper, channels_doc, guide_channels, guide_programmes)
+    pairs = pairs_for(args, helper, channels_doc, guide_channels,
+                      guide_programmes)
     graded, _ = grade_all(helper, pairs, rows, guide_channels, guide_programmes)
-    by_key = {g["tvgId"]: g for g in graded}
     exact = simulcast_clusters(guide_programmes)
     in_cluster = {c for cids in exact.values() for c in cids}
     strata = defaultdict(list)
@@ -866,11 +1099,12 @@ def mode_sample(args, helper, channels_doc, guide_channels, guide_programmes):
         progs = guide_programmes.get(g["cid"], [])
         sheet.append({
             "tvgId": g["tvgId"],
-            "playlistName": row.get("name"),
+            "playlistName": safe(row.get("name")),
             "group": row.get("group"),
-            "guideDisplayNames": (guide_channels.get(g["cid"]) or {}).get("names", []),
-            "guideDesc": helper.redact_urls((guide_channels.get(g["cid"]) or {}).get("desc", ""))[:300],
-            "programmeTitles": [helper.redact_urls(p["title"]) for p in progs[:8]],
+            "guideDisplayNames":
+                safe((guide_channels.get(g["cid"]) or {}).get("names", [])),
+            "guideDesc": safe((guide_channels.get(g["cid"]) or {}).get("desc", ""))[:300],
+            "programmeTitles": [safe(p["title"]) for p in progs[:8]],
             "programmeCategories": sorted({p["category"] for p in progs if p["category"]})[:6],
             "judgement": "",
             "why": "",
@@ -881,7 +1115,7 @@ def mode_sample(args, helper, channels_doc, guide_channels, guide_programmes):
 
 
 def mode_id_split(args, helper, channels_doc, guide_channels, guide_programmes):
-    """Ask the OLD oracle about itself. F-EPG-11.
+    """Ask the OLD oracle about itself. F-EPG-14.
 
     "The playlist row already carries that id" is one sentence covering two
     different fields: the stream address and the logo address. They are not
@@ -894,11 +1128,8 @@ def mode_id_split(args, helper, channels_doc, guide_channels, guide_programmes):
     never an input to the new one.
     """
     rows = row_table(channels_doc)
-    if args.pairings:
-        pairs = read_pairings(args.pairings)
-    else:
-        pairs, _, _, _ = reconstruct_pairs(
-            helper, channels_doc, guide_channels, guide_programmes)
+    pairs = pairs_for(args, helper, channels_doc, guide_channels,
+                      guide_programmes)
     claimed_by = Counter(cid for _, cid in pairs)
 
     def one_field(row, field):
@@ -924,8 +1155,9 @@ def mode_id_split(args, helper, channels_doc, guide_channels, guide_programmes):
         by_logo = id_oracle(one_field(row, "logo"), cid, guide_channels, claimed_by)
         cross[(by_url, by_logo)] += 1
         if by_url != by_logo and "D" not in (by_url, by_logo):
-            split.append({"name": row.get("name"),
-                          "guideName": (guide_channels.get(cid) or {}).get("names", [""])[0],
+            split.append({"name": safe(row.get("name")),
+                          "guideName": safe(
+                              (guide_channels.get(cid) or {}).get("names", [""])[0]),
                           "byStream": by_url, "byLogo": by_logo})
     whole = Counter()
     for key, cid in pairs:
@@ -973,14 +1205,14 @@ def mode_negatives(args, helper, channels_doc, guide_channels, guide_programmes)
     """
     import difflib
     rows = row_table(channels_doc)
-    pairs, _, _, _ = reconstruct_pairs(
-        helper, channels_doc, guide_channels, guide_programmes)
+    pairs = pairs_for(args, helper, channels_doc, guide_channels,
+                      guide_programmes)
     census = guide_token_census(helper, guide_channels)
     cids = [cid for cid in guide_channels if guide_programmes.get(cid)]
     guide_first = {cid: (rec["names"][0] if rec["names"] else "")
                    for cid, rec in guide_channels.items()}
     rng = random.Random(args.seed)
-    out = {}
+    report = {}
     for which in ("random", "nearest"):
         verdicts = Counter()
         examples = []
@@ -1016,49 +1248,61 @@ def mode_negatives(args, helper, channels_doc, guide_channels, guide_programmes)
             verdicts[verdict + "/" + reason] += 1
             verdicts[verdict] += 1
             if verdict == "confirmed" and len(examples) < 12:
-                examples.append({"name": row.get("name"),
-                                 "pairedWith": guide_first.get(pick, ""),
-                                 "reason": reason, "detail": detail})
+                examples.append({"name": safe(row.get("name")),
+                                 "pairedWith": safe(guide_first.get(pick, "")),
+                                 "reason": reason, "detail": safe(detail)})
         total = sum(v for k, v in verdicts.items() if "/" not in k)
-        out[which] = {
+        report[which] = {
             "pairings": total,
             "verdicts": {k: v for k, v in sorted(verdicts.items())},
             "falseConfirmationRate":
                 round(verdicts["confirmed"] / float(total or 1), 4),
             "falseConfirmations": examples,
         }
-    print(json.dumps(out, indent=2))
+    print(json.dumps(report, indent=2))
 
 
 def mode_calibrate(args, helper, channels_doc, guide_channels, guide_programmes):
-    """Grade the grader against the 65 hand-read pairings above.
+    """Grade the grader against the hand-read pairings above.
 
     Reports the two errors separately, because they are not symmetrical: a
     false CONFIRMATION lets a wrong programme onto a row, which is what the
     acceptance criterion forbids; a false CONTRADICTION only costs a blank
     row. `unknown` is not an error, it is the oracle's coverage cost, and it
     is reported as such.
+
+    Both HAND_ dicts are keyed by (tvgId, cid) and BOTH are graded on that
+    exact cid. A HAND_SAME row the pairing under grade marries to a
+    different guide channel is reported in `repairedSinceTheHandRead` and
+    scored nowhere: the reader judged one pair, not one row.
     """
     rows = row_table(channels_doc)
-    pairs, _, _, _ = reconstruct_pairs(
-        helper, channels_doc, guide_channels, guide_programmes)
-    graded, claimed_by = grade_all(helper, pairs, rows, guide_channels,
-                                   guide_programmes, args.strict_categories)
-    by_key = {g["tvgId"]: g for g in graded}
+    pairs = pairs_for(args, helper, channels_doc, guide_channels,
+                      guide_programmes)
     census = guide_token_census(helper, guide_channels)
+    now = dict(pairs)
     cross = Counter()
     errors = []
     missing = []
-    for key, why in sorted(HAND_SAME.items()):
-        g = by_key.get(key)
-        if g is None:
+    repaired = []
+    for (key, cid), why in sorted(HAND_SAME.items()):
+        row = rows.get(key)
+        if row is None or key not in now:
             missing.append(key)
             continue
-        cross[("same", g["verdict"])] += 1
-        if g["verdict"] == "contradicted":
+        if now[key] != cid:
+            repaired.append({"tvgId": key, "handRead": cid,
+                             "pairedNowWith": now[key],
+                             "humanSaid": why})
+            continue
+        verdict, reason, detail = grade_pair(
+            helper, row, cid, guide_channels, guide_programmes, census,
+            args.strict_categories)
+        cross[("same", verdict)] += 1
+        if verdict == "contradicted":
             errors.append({"kind": "false contradiction", "tvgId": key,
-                           "humanSaid": why, "reason": g["reason"],
-                           "detail": g["detail"]})
+                           "humanSaid": why, "reason": reason,
+                           "detail": safe(detail)})
     for (key, cid), why in sorted(HAND_DIFFERENT.items()):
         row = rows.get(key)
         if row is None:
@@ -1071,7 +1315,7 @@ def mode_calibrate(args, helper, channels_doc, guide_channels, guide_programmes)
         if verdict == "confirmed":
             errors.append({"kind": "false confirmation", "tvgId": key,
                            "humanSaid": why, "reason": reason,
-                           "detail": detail})
+                           "detail": safe(detail)})
     same = sum(v for (h, _), v in cross.items() if h == "same")
     diff = sum(v for (h, _), v in cross.items() if h == "different")
     print(json.dumps({
@@ -1085,6 +1329,7 @@ def mode_calibrate(args, helper, channels_doc, guide_channels, guide_programmes)
         "caughtAWrongPair": cross[("different", "contradicted")],
         "errors": errors,
         "notInThisPairing": missing,
+        "repairedSinceTheHandRead": repaired,
     }, indent=2))
 
 
@@ -1117,20 +1362,468 @@ def mode_findings(args, helper, channels_doc, guide_channels, guide_programmes):
             "playlistNamesWithAnyParenthetical":
                 len([n for n in names if paren.search(n)]),
             "guideNamesWithAnyParenthetical": sum(guide_paren.values()),
-            "guideParentheticalContents": dict(guide_paren.most_common(10)),
+            "guideParentheticalContents":
+                {safe(k): v for k, v in guide_paren.most_common(10)},
         },
         "F-EPG-8": {
-            "guideTennisChannels": tennis,
-            "scheduleOverlap": tennis_scheds,
+            "guideTennisChannels": {c: safe(r) for c, r in tennis.items()},
+            "scheduleOverlap":
+                {c: safe(t) for c, t in tennis_scheds.items()},
         },
         "F-EPG-10": {
             "playlistNamesWithBracketSpan": len(pl_br),
-            "bracketSpanContents": dict(
-                Counter(m for n in pl_br for m in bracket.findall(n)).most_common(6)),
+            "bracketSpanContents":
+                {safe(m): v for m, v in Counter(
+                    m for n in pl_br for m in bracket.findall(n)).most_common(6)},
             "guideFirstNamesWithBracketSpan": len(guide_br),
             "guideAnyDisplayNameWithBracketSpan": len(guide_br_any),
         },
     }, indent=2))
+
+
+class _Spy(dict):
+    """A dict that records which keys were read. Used by `field_trace`."""
+
+    def __init__(self, inner, log):
+        dict.__init__(self, inner)
+        self._log = log
+
+    def get(self, key, *rest):
+        self._log.add(key)
+        return dict.get(self, key, *rest)
+
+    def __getitem__(self, key):
+        self._log.add(key)
+        return dict.__getitem__(self, key)
+
+
+def field_trace(helper, pairs, rows, guide_channels, guide_programmes,
+                strict_categories=False):
+    """-> (row fields, guide-channel fields, programme fields) actually read.
+
+    Rule 14's answer to "the grader reads no identifier". A grep for `url`
+    cannot establish that -- `id_oracle` contains one and is never called on
+    a grading path -- so this OBSERVES the reads by wrapping every input
+    dict and grading the whole pairing through the shipping `grade_pair`.
+    """
+    rowlog, cidlog, proglog = set(), set(), set()
+    spy_channels = {cid: _Spy(rec, cidlog)
+                    for cid, rec in guide_channels.items()}
+    spy_programmes = {cid: [_Spy(prog, proglog) for prog in progs]
+                      for cid, progs in guide_programmes.items()}
+    census = guide_token_census(helper, guide_channels)
+    for key, cid in pairs:
+        row = rows.get(key)
+        if row is None:
+            continue
+        grade_pair(helper, _Spy(row, rowlog), cid, spy_channels,
+                   spy_programmes, census, strict_categories)
+    return sorted(rowlog), sorted(cidlog), sorted(proglog)
+
+
+def echoed_tokens(helper, row, cid, guide_programmes, census):
+    """The tokens E1 actually confirmed this pair on. Recomputed by calling
+    the same functions `grade_pair` calls, so it cannot drift from the arm."""
+    marks = confirming_marks(helper, str(row.get("name") or ""))
+    progs = guide_programmes.get(cid, [])
+    want = min(ECHO_MIN_TOKENS, len(marks)) if marks else 0
+    found = set()
+    for prog in progs:
+        ptoks = set(tokens(helper, prog["title"]))
+        shared = [m for m in marks
+                  if m in ptoks and census.get(m, 0) <= ECHO_MAX_CENSUS]
+        if marks and len(shared) >= want:
+            found.update(shared)
+    return marks, found
+
+
+def mode_independence(args, helper, channels_doc, guide_channels,
+                      guide_programmes):
+    """What the confirming arm rests on, measured rather than claimed.
+
+    The file used to say "confirmation comes only from the schedule". Half
+    of that is provable and half was an overstatement; this mode prints
+    both halves as numbers. See the module docstring.
+    """
+    rows = row_table(channels_doc)
+    pairs = pairs_for(args, helper, channels_doc, guide_channels,
+                      guide_programmes)
+    census = guide_token_census(helper, guide_channels)
+    rowf, cidf, progf = field_trace(helper, pairs, rows, guide_channels,
+                                    guide_programmes, args.strict_categories)
+    # Which strategy the matcher used for each pair, from the shipping
+    # function, so "by name" is the matcher's own answer and not a guess.
+    index, _ = helper.build_alias(channels_doc)
+    _, _, guide_names, _ = reconstruct_pairs(
+        helper, channels_doc, guide_channels, guide_programmes)
+    ranks = {}
+    for key, cid in pairs:
+        _, rank = helper.match_xmltv_channel(index, cid, guide_names)
+        ranks[key] = rank
+    rank_name = {}
+    for position, attr in enumerate(("matchedById", "matchedByAddr",
+                                     "matchedByFeed", "matchedByName")):
+        rank_name[position] = attr[len("matchedBy"):].upper()
+    shared = Counter()
+    apart = []
+    by_strategy = Counter()
+    token_census = Counter()
+    for key, cid in pairs:
+        row = rows.get(key)
+        if row is None:
+            continue
+        verdict, reason, _ = grade_pair(helper, row, cid, guide_channels,
+                                        guide_programmes, census,
+                                        args.strict_categories)
+        if verdict != "confirmed" or reason != "title-echo":
+            continue
+        label = rank_name.get(ranks.get(key), str(ranks.get(key)))
+        by_strategy[label] += 1
+        marks, found = echoed_tokens(helper, row, cid, guide_programmes,
+                                     census)
+        guide_tokens = set()
+        for raw in (guide_channels.get(cid) or {"names": []})["names"]:
+            guide_tokens.update(tokens(helper, raw))
+        for token in found:
+            token_census[census.get(token, 0)] += 1
+        if found and found <= guide_tokens:
+            shared[label] += 1
+        else:
+            apart.append({
+                "tvgId": key,
+                "name": safe(row.get("name")),
+                "guideNames": safe((guide_channels.get(cid)
+                                    or {"names": []})["names"]),
+                "echoedTokensAbsentFromThatName": safe(sorted(found - guide_tokens)),
+            })
+    # How many confirmations are row-UNIQUE: would this guide channel's
+    # schedule confirm some OTHER playlist row just as well? Limit 3 of
+    # section 11 stated this in prose and marked it UNVERIFIED.
+    #
+    # The verdict for every surviving candidate comes from `grade_pair`
+    # itself (rule 12). What is precomputed is only a SUPERSET filter: E1 is
+    # the only confirming arm on, and it cannot fire unless one of the row's
+    # confirming marks is a rare token of one of the channel's own programme
+    # titles, so a row whose marks miss that set cannot be a rival. Grading
+    # all 1,453 rows against all 110 channels directly is 160,000 calls and
+    # each one walks the whole guide in the C2 arm; this is the same answer
+    # in seconds.
+    paired_rows = {key for key, _ in pairs}
+    marks_by_row = {key: set(confirming_marks(helper, str(row.get("name") or "")))
+                    for key, row in rows.items()}
+    non_unique_all = 0
+    non_unique_paired = 0
+    rivals_all = []
+    for key, cid in pairs:
+        row = rows.get(key)
+        if row is None:
+            continue
+        verdict, reason, _ = grade_pair(helper, row, cid, guide_channels,
+                                        guide_programmes, census,
+                                        args.strict_categories)
+        if verdict != "confirmed" or reason != "title-echo":
+            continue
+        rare_in_titles = set()
+        for prog in guide_programmes.get(cid, []):
+            for token in tokens(helper, prog["title"]):
+                if census.get(token, 0) <= ECHO_MAX_CENSUS:
+                    rare_in_titles.add(token)
+        others_all = 0
+        others_paired = 0
+        for other_key, other_marks in marks_by_row.items():
+            if other_key == key or not (other_marks & rare_in_titles):
+                continue
+            v2, r2, _ = grade_pair(helper, rows[other_key], cid,
+                                   guide_channels, guide_programmes, census,
+                                   args.strict_categories)
+            if v2 == "confirmed" and r2 == "title-echo":
+                others_all += 1
+                if other_key in paired_rows:
+                    others_paired += 1
+        if others_all:
+            non_unique_all += 1
+        if others_paired:
+            non_unique_paired += 1
+        rivals_all.append(others_all)
+    confirmed = sum(by_strategy.values())
+    print(json.dumps({
+        "pairs": len(pairs),
+        "confirmedByTitleEcho": confirmed,
+        "fieldsRead": {
+            "playlistRow": rowf,
+            "guideChannel": cidf,
+            "programme": progf,
+            "anyIdentifier": sorted(
+                set(rowf + cidf + progf) & {"url", "logo", "tvgId", "id"}),
+        },
+        "confirmedByMatcherStrategy": dict(by_strategy),
+        "echoedTokenAlsoInThePairedGuideName": dict(shared),
+        "echoedTokenAlsoInThePairedGuideNameTotal": sum(shared.values()),
+        "confirmationsWithATokenThatGuideNameLacks": len(apart),
+        "thoseConfirmations": apart,
+        "censusOfEchoedTokens": dict(sorted(token_census.items())),
+        "nonUniqueOverTheWholePlaylist": non_unique_all,
+        "nonUniqueAmongPairedRowsOnly": non_unique_paired,
+        "mostRivalRowsForOneConfirmation": max(rivals_all or [0]),
+    }, indent=2))
+
+
+# Every assertion below was seen RED. The mutation that reddens each one is
+# named in its own message and the pair of counts is in
+# `docs/QA-EPG-PRECISION.md` 17.3. Rule 11: a check nobody has seen fail is
+# decoration, and this file had NO executable check at all.
+def mode_selftest(args, helper, channels_doc, guide_channels,
+                  guide_programmes):
+    rows = row_table(channels_doc)
+    pairs = pairs_for(args, helper, channels_doc, guide_channels,
+                      guide_programmes)
+    census = guide_token_census(helper, guide_channels)
+    results = []
+
+    def check(name, ok, detail, reddened_by):
+        results.append({"check": name, "ok": bool(ok), "detail": detail,
+                        "reddenedBy": reddened_by})
+
+    # 1. The grader reads no identifier. Observed, not grepped.
+    rowf, cidf, progf = field_trace(helper, pairs, rows, guide_channels,
+                                    guide_programmes)
+    leaked = sorted(set(rowf + cidf + progf) & {"url", "logo", "tvgId", "id"})
+    check("reads no identifier", not leaked,
+          {"playlistRow": rowf, "guideChannel": cidf, "programme": progf},
+          "add `row.get('url')` to grade_pair")
+
+    # 2. A resolution or bracket token is never a confirming mark, observed
+    # at the ARM and not in the mark builder. The first version of this
+    # check compared `confirming_marks` with `distinctive(epg_name_key(.))`
+    # -- which is its own definition, so reverting `grade_pair`'s call site
+    # left it green. That is rule 14's shape, found by running the mutation.
+    # So: build a synthetic guide channel whose ONLY programme title is the
+    # resolution tag, and ask the shipping `grade_pair` about it.
+    probe_cid = "selftest-720p-feed"
+    probe_channels = dict(guide_channels)
+    probe_channels[probe_cid] = {"names": ["Selftest Feed"], "desc": ""}
+    probe_programmes = dict(guide_programmes)
+    probe_programmes[probe_cid] = [{"start": "", "stop": "",
+                                    "title": "720p Feed", "desc": "",
+                                    "category": ""}]
+    probe_census = guide_token_census(helper, probe_channels)
+    noisy = []
+    for key, row in rows.items():
+        name = str(row.get("name") or "")
+        if "720p" not in distinctive(helper, name):
+            continue
+        verdict, reason, detail = grade_pair(
+            helper, row, probe_cid, probe_channels, probe_programmes,
+            probe_census, False)
+        if verdict == "confirmed":
+            noisy.append({"tvgId": key, "reason": reason,
+                          "detail": safe(detail)})
+    stripped = sum(1 for row in rows.values()
+                   if set(distinctive(helper, str(row.get("name") or "")))
+                   - set(confirming_marks(helper, str(row.get("name") or ""))))
+    check("a resolution tag confirms nothing",
+          not noisy and stripped > 0,
+          {"rowsWhoseRawMarksWereWider": stripped,
+           "rowsProbedWith720p": sum(
+               1 for row in rows.values()
+               if "720p" in distinctive(helper, str(row.get("name") or ""))),
+           "falseConfirmations": len(noisy), "examples": noisy[:3]},
+          "marks = distinctive(helper, name)")
+
+    # 3. The one live false confirmation that fix closed: 82 rows carry
+    # `not` from `[Not 24/7]` and 3 guide channels publish a title with
+    # `not` in it. Crossing them must confirm nothing.
+    bracket_rows = [key for key, row in rows.items()
+                    if "not" in distinctive(helper, str(row.get("name") or ""))]
+    not_cids = [cid for cid, progs in guide_programmes.items()
+                if any("not" in set(tokens(helper, p["title"])) for p in progs)]
+    truth = dict(pairs)
+    bad = []
+    for key in bracket_rows:
+        for cid in not_cids:
+            if truth.get(key) == cid:
+                continue
+            verdict, reason, detail = grade_pair(
+                helper, rows[key], cid, guide_channels, guide_programmes,
+                census, False)
+            if verdict == "confirmed":
+                bad.append({"tvgId": key, "cid": cid, "detail": safe(detail)})
+    check("a bracket word confirms nothing", not bad,
+          {"rowsCarryingNot": len(bracket_rows),
+           "guideChannelsWithNotInATitle": len(not_cids),
+           "falseConfirmations": len(bad), "examples": bad[:3]},
+          "marks = distinctive(helper, name)")
+
+    # 4. E2 observed, not asserted. A synthetic channel whose prose repeats
+    # a rare mark of a real row: silent while the arm is off, confirming
+    # when it is on, and silent again when the mark's census exceeds
+    # ECHO_MAX_CENSUS -- which is the half the bare `3` got wrong. Checking
+    # the DESC_ECHO_CONFIRMS flag alone was not enough: `main` overwrites
+    # the module constant from argparse, so a flipped default left the
+    # check green.
+    global DESC_ECHO_CONFIRMS
+    was = DESC_ECHO_CONFIRMS
+    probe_key, probe_mark = "", ""
+    for key, cid in pairs:
+        row = rows.get(key)
+        if row is None:
+            continue
+        marks, found = echoed_tokens(helper, row, cid, guide_programmes,
+                                     census)
+        if found:
+            probe_key, probe_mark = key, sorted(found)[0]
+            break
+    desc_cid = "selftest-desc-echo"
+    desc_channels = dict(guide_channels)
+    desc_channels[desc_cid] = {"names": ["Selftest Prose"],
+                               "desc": "a channel about %s" % probe_mark}
+    desc_programmes = dict(guide_programmes)
+    desc_programmes[desc_cid] = [{"start": "", "stop": "", "title": "Filler",
+                                  "desc": "", "category": ""}]
+    desc_census = guide_token_census(helper, desc_channels)
+    probe_row = rows.get(probe_key) or {}
+
+    def desc_verdict():
+        return grade_pair(helper, probe_row, desc_cid, desc_channels,
+                          desc_programmes, desc_census, False)
+
+    DESC_ECHO_CONFIRMS = False
+    silent = desc_verdict()
+    DESC_ECHO_CONFIRMS = True
+    fires = desc_verdict()
+    gated = ("", "", "")
+    loud_census = dict(desc_census)
+    loud_census[probe_mark] = ECHO_MAX_CENSUS + 1
+    gated = grade_pair(helper, probe_row, desc_cid, desc_channels,
+                       desc_programmes, loud_census, False)
+    DESC_ECHO_CONFIRMS = was
+    check("desc-echo is inert unless asked, and gated by ECHO_MAX_CENSUS",
+          silent[0] != "confirmed" and fires[1] == "desc-echo"
+          and gated[0] != "confirmed" and not was,
+          {"probeRow": probe_key, "probeMark": probe_mark,
+           "withTheArmOff": silent[:2], "withTheArmOn": fires[:2],
+           "withTheMarkTooCommon": gated[:2],
+           "defaultWhenThisRan": was,
+           "guideChannelsWithAChannelDesc":
+               sum(1 for rec in guide_channels.values() if rec["desc"])},
+          "DESC_ECHO_CONFIRMS = True as the argparse default, "
+          "or the gate back to a bare 3")
+
+    # 5. Every HAND_SAME key is a (tvgId, cid) pair that the hand-read
+    # pairing really contained, and every cid is a channel this guide
+    # declares. A re-keying typo would otherwise read as a re-pairing.
+    badkeys = [k for k in HAND_SAME
+               if not (isinstance(k, tuple) and len(k) == 2)]
+    unknown_cids = sorted({k[1] for k in HAND_SAME
+                           if isinstance(k, tuple) and len(k) == 2
+                           and k[1] not in guide_channels})
+    # And the behaviour, not only the shape: a HAND_SAME row this pairing
+    # marries to a DIFFERENT guide channel must be scored nowhere. Keying by
+    # tvgId alone scored the human's verdict against whatever channel the
+    # matcher picked now, and the shape check above stayed green when the
+    # lookup was reverted -- so drive `mode_calibrate` over a pairing in
+    # which one hand-read row is deliberately re-paired.
+    import copy
+    import io
+    import contextlib
+    moved_key, moved_cid = sorted(HAND_SAME)[0]
+    other_cid = next(cid for cid in guide_channels
+                     if cid != moved_cid and guide_programmes.get(cid))
+    forced = [(key, other_cid if key == moved_key else cid)
+              for key, cid in pairs]
+    forced_path = os.path.join(
+        os.environ.get("TMPDIR", "/tmp"),
+        "schedule_oracle-selftest-%d.json" % os.getpid())
+    with open(forced_path, "w") as handle:
+        json.dump({"pairs": [list(pair) for pair in forced]}, handle)
+    forced_args = copy.copy(args)
+    forced_args.pairings = forced_path
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            mode_calibrate(forced_args, helper, channels_doc, guide_channels,
+                           guide_programmes)
+        forced_out = json.loads(buffer.getvalue())
+    finally:
+        os.unlink(forced_path)
+    reported = [item["tvgId"]
+                for item in forced_out["repairedSinceTheHandRead"]]
+    scored = (forced_out["readAsTheSameChannel"]
+              == sum(1 for _ in HAND_SAME) - 1 - len(
+                  forced_out["notInThisPairing"]))
+    check("a re-paired hand-read row is scored nowhere",
+          not badkeys and not unknown_cids and reported == [moved_key]
+          and scored,
+          {"entries": len(HAND_SAME), "badKeys": badkeys[:3],
+           "cidsThisGuideDoesNotDeclare": unknown_cids,
+           "forcedOffItsHandReadChannel": moved_key,
+           "reportedAsRepaired": reported,
+           "readAsTheSameChannel": forced_out["readAsTheSameChannel"],
+           "notInThisPairing": forced_out["notInThisPairing"]},
+          "key HAND_SAME by tvgId alone and look the row up in the "
+          "current pairing")
+
+    # 6. Rule 5 at the sink, observed through the real printers rather than
+    # grepped for a `redact_urls` call. A credentialed URL is planted in
+    # EVERY channel name -- a single victim row made the check vacuous,
+    # because a mode only prints the rows it has something to say about --
+    # and the pairing is supplied so the doctored names cannot move it. The
+    # check demands both halves: no run may show the raw URL, and at least
+    # one run must show the REDACTED form, which is what proves the planted
+    # string reached a printer at all.
+    planted = "http://user:pass@cdn.example/live/secret.m3u8"
+    redacted_form = "http://cdn.example"
+    doctored = json.loads(json.dumps(channels_doc))
+    for row in doctored.get("channels") or []:
+        row["name"] = str(row.get("name") or "") + " " + planted
+    pairs_path = os.path.join(
+        os.environ.get("TMPDIR", "/tmp"),
+        "schedule_oracle-selftest-pairs-%d.json" % os.getpid())
+    dump_path = os.path.join(
+        os.environ.get("TMPDIR", "/tmp"),
+        "schedule_oracle-selftest-dump-%d.json" % os.getpid())
+    with open(pairs_path, "w") as handle:
+        json.dump({"pairs": [list(pair) for pair in pairs]}, handle)
+    sink_args = copy.copy(args)
+    sink_args.pairings = pairs_path
+    sink_args.dump = dump_path
+    sink_args.strict_categories = True
+    sink_args.sample = 44
+    leaks = []
+    saw_redacted = []
+    try:
+        for label, runner in (("grade", mode_grade),
+                              ("sample", mode_sample),
+                              ("calibrate", mode_calibrate),
+                              ("negatives", mode_negatives),
+                              ("independence", mode_independence),
+                              ("id-split", mode_id_split),
+                              ("findings", mode_findings)):
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                runner(sink_args, helper, doctored, guide_channels,
+                       guide_programmes)
+            text = buffer.getvalue()
+            if label == "grade" and os.path.exists(dump_path):
+                text += open(dump_path).read()
+            if "user:pass" in text or "secret.m3u8" in text:
+                leaks.append(label)
+            if redacted_form in text:
+                saw_redacted.append(label)
+    finally:
+        for path in (pairs_path, dump_path):
+            if os.path.exists(path):
+                os.unlink(path)
+    check("no mode prints a credentialed URL",
+          not leaks and saw_redacted,
+          {"plantedOnEveryRow": True, "modesThatLeaked": leaks,
+           "modesThatPrintedTheRedactedForm": saw_redacted},
+          'print row.get("name") instead of safe(row.get("name"))')
+
+    failed = [r["check"] for r in results if not r["ok"]]
+    print(json.dumps({"checks": len(results), "failed": failed,
+                      "results": results}, indent=2))
+    return 1 if failed else 0
 
 
 def mode_limits(args, *rest):
@@ -1139,6 +1832,7 @@ def mode_limits(args, *rest):
 
 def main(argv=None):
     global ECHO_MAX_CENSUS, ECHO_MIN_TOKENS, CATEGORY_FIT_CONFIRMS, NAME_ORACLE
+    global DESC_ECHO_CONFIRMS
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--channels", help="frozen channels.json")
     parser.add_argument("--guide", help="frozen XMLTV (.xml or .xml.gz)")
@@ -1148,7 +1842,10 @@ def main(argv=None):
                         help="grade the pairing ANOTHER helper makes "
                              "(rule 11: the code as it was)")
     parser.add_argument("--pairings", default="", help='JSON {"pairs": [[tvgId, cid], ...]}')
-    parser.add_argument("--dump", default="", help="write the per-pair grades here")
+    parser.add_argument("--dump", default="", metavar="PATH",
+                        help="write the per-pair grades here. Takes a PATH: "
+                             "`--grade --dump` with none is an argparse error, "
+                             "which is what section 16 used to print.")
     parser.add_argument("--seed", type=int, default=20261004)
     parser.add_argument("--sample", type=int, default=0)
     parser.add_argument("--calibrate", action="store_true",
@@ -1166,7 +1863,25 @@ def main(argv=None):
                              "forbids -- confirm when the names agree under "
                              "the matcher's own key -- so its numbers can be "
                              "shown rather than asserted")
+    parser.add_argument("--desc-echo", action="store_true",
+                        default=DESC_ECHO_CONFIRMS,
+                        help="ALSO confirm when the guide channel's own "
+                             "CHANNEL-level <desc> repeats one of our rare "
+                             "name tokens (arm E2). Off by default and "
+                             "measured -- on the --promote-desc synthetic "
+                             "guide it adds 3 confirmations and makes 2 "
+                             "false ones on the nearest-name negatives. The "
+                             "frozen guide declares no channel <desc>, so "
+                             "without --promote-desc this flag changes "
+                             "nothing.")
+    parser.add_argument("--promote-desc", action="store_true",
+                        help="SYNTHETIC guide: give every channel a "
+                             "channel-level <desc> taken from its own "
+                             "commonest programme <desc>, so the E2 arm can "
+                             "be measured at all. Label any number taken "
+                             "this way as synthetic.")
     parser.add_argument("--category-fit", action="store_true",
+                        default=CATEGORY_FIT_CONFIRMS,
                         help="ALSO confirm on a group/category fit. Off by "
                              "default and measured: 34 real confirmations "
                              "against 7 false ones on random negatives and 28 "
@@ -1180,17 +1895,27 @@ def main(argv=None):
                              "categories Entertainment/Series). Kept behind "
                              "a flag so the measurement is reproducible.")
     for flag in ("pairs", "clusters", "grade", "findings", "limits",
-                 "negatives", "id-split"):
+                 "negatives", "id-split", "independence", "selftest"):
         parser.add_argument("--" + flag, action="store_true")
     args = parser.parse_args(argv)
     ECHO_MAX_CENSUS = args.echo_max_census
     ECHO_MIN_TOKENS = args.echo_min_tokens
     CATEGORY_FIT_CONFIRMS = args.category_fit
+    DESC_ECHO_CONFIRMS = args.desc_echo
     NAME_ORACLE = args.name_oracle
     if args.limits:
         return mode_limits(args)
     if not args.channels or not args.guide:
         parser.error("--channels and --guide are required")
+    # A mode that cannot use --pairings refuses it. Silently reconstructing a
+    # different pairing and reporting that instead is how a measurement
+    # grades something other than what the operator asked about.
+    if args.pairings and (args.pairs or args.clusters or args.findings
+                          or args.selftest):
+        parser.error("--pairings is not read by --pairs, --clusters, "
+                     "--findings or --selftest; it is read by --grade, "
+                     "--sample, --calibrate, --negatives, --independence "
+                     "and --id-split")
     bundle = load_inputs(args)
     if args.pairs:
         mode_pairs(args, *bundle)
@@ -1204,14 +1929,18 @@ def main(argv=None):
         mode_calibrate(args, *bundle)
     elif args.negatives:
         mode_negatives(args, *bundle)
+    elif args.independence:
+        mode_independence(args, *bundle)
     elif args.id_split:
         mode_id_split(args, *bundle)
     elif args.findings:
         mode_findings(args, *bundle)
+    elif args.selftest:
+        return mode_selftest(args, *bundle)
     else:
         parser.error("pick a mode: --pairs --clusters --grade --sample N "
-                     "--calibrate --negatives --id-split --findings "
-                     "--limits")
+                     "--calibrate --negatives --independence --id-split "
+                     "--findings --selftest --limits")
     return 0
 
 
