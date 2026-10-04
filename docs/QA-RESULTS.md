@@ -11253,3 +11253,24 @@ That is five red runs across two days for a claim nobody had meant to make,
 and the thing that settled it was splitting one assertion into two that fail
 for different reasons.
 
+## The board's only P2 was answered, not open, 2026-10-04
+
+F-RWD-3 -- "mpv refuses an over-long backwards seek rather than clamping it,
+and says nothing" -- sat at the top of the board as its only open P2. It was
+never a defect in this plugin. It is the measured fact about mpv that the
+whole M5-01 feature was designed around, and the design answers it: the
+helper reads `seekable-ranges`, clamps a backward target to the floor plus
+2 s and a forward one to the edge minus 0.5 s, decides moved-or-refused from
+its own read rather than from mpv's `success`, and the footer always says
+what happened. Three tests pin it, and the live pass of 2026-10-03 observed
+it on the owner's own channels: `back 600` clamped to position 2.7 with the
+tooltip reading `up to 0:02 back`.
+
+Closed as "not a defect" rather than "fixed", because nothing in this
+repository was ever broken. Worth recording is WHY it stayed open for a day:
+`scripts/check-board-staleness.py` reconciles bare-`open` rows against the
+claims in our own commit messages, and no commit of ours names F-RWD-3 --
+the feature that answers it was called M5-01 everywhere. A row answered by a
+whole milestone rather than by a fix is invisible to that check, which is
+the same join-by-name shape rule 13 is about, one level up again.
+
