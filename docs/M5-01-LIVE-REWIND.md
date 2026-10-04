@@ -473,6 +473,19 @@ files, could not. Each is in the section it amends; this is the list.
    Six node checks were seen red against the helper lane's Model.js.
 5. **The tooltip's window line needs a window**: `up to 0:00 back` in the
    first instant after a zap promised what `b` cannot do.
+6. **The player stub's self-test runs in the gate** (`scripts/check.sh`),
+   so the stub that refuses like mpv cannot drift silently back to one that
+   clamps.
+7. **F-RWD-15, the read that decides waits for the seek to execute.** The
+   reply to mpv's `seek` command means queued; the playloop executes it
+   afterwards, and a `time-pos` read sent at once can be answered first and
+   echo the old position (1 of 12 on the local stream, the fastest read;
+   F-RWD-9's 72 of 72 on real channels were the same race won every time).
+   `player seek` now subscribes to error-level log messages, issues the
+   seek, waits up to 250 ms for the `seek` event or the refusal line, then
+   reads and applies the 0.5 s threshold as before. The measurement is in
+   QA-RESULTS under the M5-01 scenario run. Section 2.1's "reads `time-pos`
+   again" is that read.
 8. **F-RWD-16, no zero point without a range** (2.2), from the live pass.
 9. **F-RWD-17, the verb's argument is the size of the step** (2.4), from
    the review's seek-path lens: `seekBy` had handed the coalescer the
@@ -485,16 +498,17 @@ files, could not. Each is in the section it amends; this is the list.
    refused `live` had said "At the edge of the buffer"; it says "Nothing
    moved" with the number, and the tooltip's window line needs a whole
    second (never `up to 0:00 back`).
-7. **F-RWD-15, the read that decides waits for the seek to execute.** The
-   reply to mpv's `seek` command means queued; the playloop executes it
-   afterwards, and a `time-pos` read sent at once can be answered first and
-   echo the old position (1 of 12 on the local stream, the fastest read;
-   F-RWD-9's 72 of 72 on real channels were the same race won every time).
-   `player seek` now subscribes to error-level log messages, issues the
-   seek, waits up to 250 ms for the `seek` event or the refusal line, then
-   reads and applies the 0.5 s threshold as before. The measurement is in
-   QA-RESULTS under the M5-01 scenario run. Section 2.1's "reads `time-pos`
-   again" is that read.
-6. **The player stub's self-test runs in the gate** (`scripts/check.sh`,
-   floor 14 cases), so the stub that refuses like mpv cannot drift silently
-   back to one that clamps.
+11. **The review's four residuals** (2.3, 2.5), closed after the 0.11.0 cut
+   and riding the next one: `seekLive` refuses a stopping or user-stopped
+   player the way `seekBy` does rather than answering "queued" for a run
+   that never comes; every reply's `rewind` object is stored through
+   `Model.parseRewind` on all four paths, not only the probe's; the QA
+   stub states that it writes the `seek` event to the issuing connection
+   where mpv broadcasts it; and the accessible name composes its own spoken
+   form from the shared threshold rather than calling the composer.
+
+This list was written in the order the amendments landed and for a day
+carried them in the order 1-5, 8, 9, 10, 7, 6 -- the numbers were right and
+the sequence was not, because each insertion chose its anchor by text. The
+same shape as every other join this project makes by name rather than by
+call (rule 13); here the cost was only a reader's time.
