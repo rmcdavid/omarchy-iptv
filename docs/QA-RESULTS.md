@@ -10987,3 +10987,58 @@ Gate all green; the scenario on the display against these changes, run 7:
 **79 passed, 0 failed**, the readout following the argument (15.8), the
 zap emptying it, the restarted shell recovering 28.3 from the player, R15
 median 221 ms. Owner's shell (now 2724554, on 0.11.0) untouched.
+
+## F-MPV-2: the third double delivers events the way mpv does, 2026-10-03
+
+Found by reading, not by a failure, while the lead checked a claim he had
+written the same day. The M5-01 residual round added seek followups to
+`scripts/qa-stub-mpv.py` and the write-up said the stub sends them "to the
+issuing connection only, where mpv broadcasts it (stated in the stub,
+unmodelled by design, since the plugin holds one control connection per
+run)". Two things were wrong with that sentence.
+
+**The premise.** The plugin does not hold one connection. The detached
+player keeps a persistent observer on the socket while control calls come
+and go -- `FakeMpv`'s own docstring says so, and it is why that double is
+threaded. So the real system has two connections and a broadcast event
+reaches a connection that did not cause it.
+
+**The precedent.** This project already filed that exact shape as F-MPV-1,
+in 2026-09, against `STUB_MPV` and `FakeMpv`, and closed it with the rule
+real mpv follows: an EVENT broadcasts to every connected IPC client, a
+command REPLY is point to point, and a log message reaches only the clients
+that subscribed. The third double was never audited against it. F-MPV-1's
+row also records what the gap cost: it made D-PLY-12's triggering input
+inexpressible, because that bug IS an event arriving on a connection that
+did not cause it.
+
+**What follows for the shipped code: nothing, and that was checked rather
+than assumed.** `Model.routePlayerEvent` answers `ignored` for every event
+name but `start-file`, `end-file`, `log-message` and the `idle-active`
+property change, and returns its state unchanged for it, so a broadcast
+`seek` on the service's observer socket moves nothing. The helper's
+`await_seek_outcome` would take a foreign `seek` event as its own, which
+the review already recorded as an accepted residual with the reason in the
+docstring. No defect ships; the double simply could not express one.
+
+**The fix.** `followup_targets(event, issuing, conns, log_conns)` decides
+WHO receives an unsolicited line and is a function the self-test calls
+(rule 12); `dispatch` decides only WHAT follows; the serve loop registers a
+connection on entry and unregisters it in a `finally`, and writes the reply
+point to point before broadcasting. The `issuing` connection carries no
+privilege, which is the whole point.
+
+| Run | Result |
+|---|---|
+| stub self-test, before | Ran 17 tests OK |
+| after | Ran 19 tests OK (a decision case and a two-client socket case) |
+| mutant: `followup_targets` returns the issuing connection alone | 1 red (the decision case) |
+| mutant: the serve loop writes followups to `conn` alone (the pre-fix wiring) | 1 red (the socket case; the decision case cannot see the wiring, which is why both exist) |
+| mutant: a closed connection is never removed from the list | first version 0 red -- an honest gap; the socket case now asserts the list drops to one after a client closes, and the mutant is 1 red |
+| `scripts/qa-player-scenarios.sh run cold --apply` (PLY-H17/H18 phase A, the stub's existing consumer) | 20 pass, 0 fail |
+
+The socket case is the one that matters: two real connections to a real
+serve loop, one subscribed and one silent, and the silent one receives the
+`seek` event with no `request_id` on it. That is the sink rather than the
+decision (rule 14). Gate floor `STUB_TESTS_MIN` 17 -> 19.
+

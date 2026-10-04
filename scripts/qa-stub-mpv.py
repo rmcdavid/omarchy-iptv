@@ -107,6 +107,18 @@ class Stub(object):
         self.lock = threading.RLock()
         self.loads = []
         self.clients = 0
+        # Live connections, and the subset that asked for log messages. Real
+        # mpv BROADCASTS an event to every connected IPC client and answers a
+        # command only to the client that sent it; a log message reaches only
+        # the clients that subscribed. F-MPV-1 is this project's record of
+        # what a double that gets this wrong costs: it made D-PLY-12's
+        # triggering input inexpressible, because the bug was an event
+        # arriving on a connection that did not cause it. The other two
+        # doubles were fixed then; this one was not, and its M5-01 seek
+        # followups went to the issuing connection alone until the lead
+        # noticed the same shape while writing it up.
+        self.conns = []
+        self.log_conns = []
         self.log_path = os.environ.get("STUB_LOG", "")
         self.gate = os.environ.get("STUB_GATE", "")
         # The live-stream timeline (M5-01). `loaded_at` is None until the
@@ -307,10 +319,33 @@ class Stub(object):
         while os.path.exists(self.gate) and time.time() < limit:
             time.sleep(0.01)
 
+    def followup_targets(self, event, issuing, conns, log_conns):
+        """Which connections an unsolicited line goes to, as mpv delivers it:
+        an EVENT to every live client, a log message only to the clients that
+        subscribed. `issuing` is the connection whose command produced it and
+        carries no privilege -- that is the whole point of F-MPV-1, and the
+        reason this is a function the self-test calls rather than a branch
+        inside the writer loop (rule 12)."""
+        live = list(conns)
+        if str(event.get("event")) == "log-message":
+            return [c for c in live if c in log_conns]
+        return live
+
     def serve(self, conn):
         with self.lock:
             self.clients += 1
             first = self.clients == 1
+            self.conns.append(conn)
+        try:
+            self.serve_loop(conn, first)
+        finally:
+            with self.lock:
+                if conn in self.conns:
+                    self.conns.remove(conn)
+                if conn in self.log_conns:
+                    self.log_conns.remove(conn)
+
+    def serve_loop(self, conn, first):
         buf = b""
         subscribed = False   # request_log_messages on THIS connection (mpv is per client)
         while True:
@@ -333,21 +368,34 @@ class Stub(object):
                 self.hold(first)
                 if (req.get("command") or [None])[0] == "request_log_messages":
                     subscribed = True
+                    with self.lock:
+                        if conn not in self.log_conns:
+                            self.log_conns.append(conn)
                 reply = self.dispatch(req, subscribed)
                 if reply is None:
                     return
                 followup = reply.pop("_followup", [])
                 apply = reply.pop("_apply", None)
                 try:
+                    # The REPLY is point to point, as mpv answers the client
+                    # that asked.
                     conn.sendall((json.dumps(reply) + "\n").encode("utf-8"))
-                    # mpv's order: the reply says queued; the playloop moves
-                    # the position and sends the event afterwards.
-                    if apply is not None:
-                        apply()
-                    for event in followup:
-                        conn.sendall((json.dumps(event) + "\n").encode("utf-8"))
                 except OSError:
                     return
+                # mpv's order: the reply says queued; the playloop moves the
+                # position and sends the event afterwards.
+                if apply is not None:
+                    apply()
+                for event in followup:
+                    with self.lock:
+                        targets = self.followup_targets(event, conn, self.conns, self.log_conns)
+                    payload = (json.dumps(event) + "\n").encode("utf-8")
+                    for target in targets:
+                        try:
+                            target.sendall(payload)
+                        except OSError:
+                            if target is conn:
+                                return
                 self.log("REP " + json.dumps(reply))
 
     def dispatch(self, req, subscribed=False):
@@ -384,13 +432,14 @@ class Stub(object):
             with self.lock:
                 moved = self.seek(cmd[1] if len(cmd) > 1 else None, cmd[2] if len(cmd) > 2 else "relative")
             out["_apply"] = self.apply_seek
-            if moved:
-                out["_followup"] = [{"event": "seek"}]
-            elif subscribed:
-                out["_followup"] = [{"event": "log-message", "prefix": "cplayer", "level": "error",
-                                     "text": "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"}]
-            else:
-                out["_followup"] = []
+            # WHAT follows is decided here; WHO receives it is followup_targets
+            # (mpv broadcasts the event and filters only the log line). The
+            # first version filtered the log line here from the issuing
+            # connection's own subscription, which meant a second subscribed
+            # client never heard a refusal -- the F-MPV-1 shape again.
+            out["_followup"] = [{"event": "seek"}] if moved else [
+                {"event": "log-message", "prefix": "cplayer", "level": "error",
+                 "text": "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"}]
         elif verb == "quit":
             try:
                 return out
@@ -437,6 +486,8 @@ def self_test():
 
         def seek(self, target, mode="relative", subscribed=True, apply=True):
             out = self.stub.dispatch({"command": ["seek", target, mode], "request_id": 7}, subscribed)
+            # dispatch decides WHAT follows; followup_targets decides who gets
+            # it, and the self-test drives the two separately.
             fn = out.pop("_apply", None)
             if apply and fn is not None:
                 fn()
@@ -460,16 +511,133 @@ def self_test():
             self.assertIn("Cannot seek in this stream", out["_followup"][0]["text"])
             self.assertEqual(out["_followup"][0]["level"], "error")
 
-        def test_the_refusal_line_reaches_only_a_subscribed_connection_and_the_seek_event_reaches_all(self):
-            # dispatch() filters by the connection's own request_log_messages,
-            # as mpv does; the seek event goes to every client.
+        def test_a_landed_seek_raises_the_event_and_a_dropped_one_the_refusal_line(self):
+            # WHAT follows the reply. WHO receives it is the next case.
             self.load_and_play(20.0)
-            self.assertEqual(self.seek(-5.0, subscribed=False)["_followup"], [{"event": "seek"}])
-            self.assertEqual(self.seek(-5.0, subscribed=True)["_followup"], [{"event": "seek"}])
+            self.assertEqual(self.seek(-5.0)["_followup"], [{"event": "seek"}])
             self.clock.tick(40.0)
-            self.assertEqual(self.seek(1.0, "absolute", subscribed=False)["_followup"], [])
-            dropped = self.seek(1.0, "absolute", subscribed=True)["_followup"]
+            dropped = self.seek(1.0, "absolute")["_followup"]
             self.assertEqual([e["event"] for e in dropped], ["log-message"])
+
+        def test_over_real_sockets_a_second_client_hears_the_seek_it_did_not_cause(self):
+            """The wiring, not the decision: two real connections to a real
+            serve loop. The decision above is a function; this is the sink
+            (rule 14). Everything is torn down by pid-free means -- the
+            server thread is a daemon and both sockets are closed here."""
+            import socket as _socket, tempfile, threading as _threading
+            root = tempfile.mkdtemp(prefix="stub-broadcast-")
+            path = os.path.join(root, "s")
+            stub = Stub(path)
+            stub.window_s, stub.lead_s, stub.startup_s = 600.0, 3.6, 0.0
+            srv = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            srv.bind(path)
+            srv.listen(4)
+            srv.settimeout(0.5)
+            stop = _threading.Event()
+
+            def accept_loop():
+                while not stop.is_set():
+                    try:
+                        conn, _ = srv.accept()
+                    except OSError:
+                        return
+                    _threading.Thread(target=stub.serve, args=(conn,), daemon=True).start()
+            accepter = _threading.Thread(target=accept_loop, daemon=True)
+            accepter.start()
+
+            def connect():
+                c = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+                c.settimeout(3)
+                c.connect(path)
+                return c
+
+            def send(c, *command):
+                c.sendall((json.dumps({"command": list(command), "request_id": 1}) + "\n").encode())
+
+            def lines(c, want, bound=2.0):
+                """Up to `want` JSON objects, or fewer if `bound` elapses."""
+                out, buf, deadline = [], b"", time.time() + bound
+                while len(out) < want and time.time() < deadline:
+                    c.settimeout(max(0.05, deadline - time.time()))
+                    try:
+                        chunk = c.recv(65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while b"\n" in buf:
+                        raw, buf = buf.split(b"\n", 1)
+                        if raw.strip():
+                            out.append(json.loads(raw.decode()))
+                return out
+
+            try:
+                a, b = connect(), connect()
+                send(a, "loadfile", "http://127.0.0.1:9/x.m3u8", "replace")
+                lines(a, 1)
+                for _ in range(40):
+                    send(a, "get_property", "time-pos")
+                    pos = lines(a, 1)
+                    if pos and isinstance(pos[0].get("data"), (int, float)) and pos[0]["data"] > 6:
+                        break
+                    time.sleep(0.1)
+                # Only A subscribes to log messages; both are live clients.
+                send(a, "request_log_messages", "error")
+                lines(a, 1)
+                send(a, "seek", -5.0, "relative")
+                got_a = lines(a, 2)
+                got_b = lines(b, 1)
+                # A gets its reply and the event; B, which asked for nothing,
+                # gets the event alone -- an event it did not cause.
+                self.assertEqual([m.get("error") for m in got_a if "request_id" in m], ["success"])
+                self.assertIn("seek", [m.get("event") for m in got_a])
+                self.assertEqual([m.get("event") for m in got_b], ["seek"])
+                self.assertNotIn("request_id", got_b[0])
+                with stub.lock:
+                    self.assertEqual(len(stub.conns), 2)
+                # A client that goes away stops being a target. Bounded wait:
+                # the serve thread notices the close on its next read.
+                b.close()
+                for _ in range(40):
+                    with stub.lock:
+                        if len(stub.conns) == 1:
+                            break
+                    time.sleep(0.05)
+                with stub.lock:
+                    self.assertEqual(len(stub.conns), 1, "a closed connection is still a broadcast target")
+                a.close()
+            finally:
+                stop.set()
+                srv.close()
+                accepter.join(2)
+                try:
+                    os.unlink(path)
+                    os.rmdir(root)
+                except OSError:
+                    pass
+
+        def test_an_event_reaches_every_client_and_a_log_message_only_the_subscribers(self):
+            # F-MPV-1: real mpv broadcasts an event to every connected client
+            # and answers a command only to the client that sent it; a client
+            # hears an event it did not cause. The two other doubles were
+            # fixed for this; this one delivered its M5-01 seek followups to
+            # the issuing connection alone.
+            issuing, other, quiet = object(), object(), object()
+            conns = [issuing, other, quiet]
+            logs = [issuing, other]
+            seek_event = {"event": "seek"}
+            line = {"event": "log-message", "level": "error", "text": "x"}
+            self.assertEqual(self.stub.followup_targets(seek_event, issuing, conns, logs), conns)
+            self.assertEqual(self.stub.followup_targets(line, issuing, conns, logs), logs)
+            # The issuing connection carries no privilege either way: a client
+            # that never subscribed hears no line even when it asked for the
+            # seek, and a subscriber hears one it did not ask for.
+            self.assertEqual(self.stub.followup_targets(line, quiet, conns, logs), logs)
+            self.assertNotIn(quiet, self.stub.followup_targets(line, quiet, conns, logs))
+            self.assertIn(other, self.stub.followup_targets(line, issuing, conns, logs))
+            # Nobody is listening: no target, and no crash.
+            self.assertEqual(self.stub.followup_targets(seek_event, issuing, [], []), [])
 
         def test_the_position_moves_only_after_the_reply_has_been_written(self):
             # F-RWD-15's ordering: a read sent at once reads the old position.
