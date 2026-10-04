@@ -1006,23 +1006,65 @@ class NameNoiseTest(unittest.TestCase):
         the guide's 427 declarations carry none, so the narrowing was measured
         at zero cost in both directions before it was taken.
 
-        An UNKNOWN marker now stays in the key, so the row does not match by
-        name. That is silence, and silence is the side to fail on: the broad
-        pattern's failure mode was a confident wrong match. This asserts the
-        narrowing is real -- under the old pattern every one of these joined.
+        An UNKNOWN marker stays in the key, which is the point: its words may
+        be identity and deleting them is the failure this finding named. What
+        that costs is asserted in test_an_unknown_span_can_still_land_on_the
+        _wrong_channel below, because the first version of this docstring
+        claimed it costs only silence and an adversarial pass refuted it.
         """
         same = helper.epg_name_key
         # `[]` is deliberately not in this list: an EMPTY span carries no
         # identity to lose, and the brackets themselves fold away as
         # punctuation either way, so no pattern can tell the two readings
         # apart. Asserting on it would be asserting on nothing.
-        for marker in ("[Whatever]", "[New]", "[24/7]", "[Geo blocked]",
-                       "[Not 24-7]", "[Sports]"):
+        for marker in ("[Whatever]", "[New]", "[24/7]", "[Sports]",
+                       "[blocked]", "[Not Now]"):
             self.assertNotEqual(same("Foo " + marker), same("Foo"),
                                 "%s is not a marker this list names" % marker)
         # And the identity inside an unknown span is KEPT rather than deleted,
         # which is the whole point: `Foo [Sports]` is not `Foo`.
         self.assertIn("sports", same("Foo [Sports]"))
+
+    def test_the_two_markers_survive_the_provider_respelling_them(self):
+        """The narrowing names which markers exist, not how they are typed.
+
+        The first version matched the two byte-for-byte modulo case, and an
+        adversarial pass measured what that costs: a trailing space, a double
+        space, a hyphen for the slash or a space for the hyphen each lost
+        every row carrying it -- 82 and 60 rows on the installed list -- for
+        a change the SAME provider can make between two fetches. These are
+        one marker spelled several ways, not several markers.
+        """
+        same = helper.epg_name_key
+        for spelling in ("[Not 24/7]", "[NOT 24/7]", "[Not 24/7 ]", "[ Not 24/7]",
+                         "[Not  24/7]", "[Not 24-7]", "[Not 247]",
+                         "[Geo-blocked]", "[Geo blocked]", "[GeoBlocked]",
+                         "[ geo - blocked ]"):
+            self.assertEqual(same("Foo " + spelling), same("Foo"),
+                             "%s is the same marker, spelled differently" % spelling)
+
+    def test_an_unknown_span_can_still_land_on_the_wrong_channel(self):
+        """What the narrowing COSTS, asserted rather than claimed.
+
+        An adversarial pass refuted the first justification of this ruling,
+        which said an unknown marker means silence. It does not: narrowing
+        makes the key LONGER, and the words inside an unknown span can
+        complete the name of a DIFFERENT guide channel. Both patterns have a
+        wrong-match route and they point opposite ways -- the broad one
+        deletes a span that carried identity and lands on the generic
+        channel, this one keeps a span that was an annotation and lands on
+        the specific one. This test is the record that the second route
+        exists, so nobody re-derives the refuted claim.
+        """
+        same = helper.epg_name_key
+        # The key completes another channel's whole name.
+        self.assertEqual(same("ESPN [Deportes]"), same("ESPN Deportes"))
+        self.assertNotEqual(same("ESPN [Deportes]"), same("ESPN"))
+        self.assertEqual(same("HBO [2]"), same("HBO 2"))
+        # A separator row keys as the word inside it, where the broad pattern
+        # emptied the key and fell out of the index by accident.
+        self.assertEqual(same("===[ SPORTS ]==="), same("Sports"))
+        self.assertEqual(same("[ Kids ]"), same("Kids"))
 
     def test_it_takes_out_the_markers_and_nothing_else(self):
         # A digit that is part of the name survives: "Channel 4" is not

@@ -11436,3 +11436,57 @@ reason rather than asserted: `Foo []` folds to `foo` under either pattern
 because brackets are punctuation, so no pattern can tell the two readings
 apart and asserting on it would be asserting on nothing.
 
+### The adversarial pass refuted the reason, the same day
+
+Two adversaries were set on the two rulings, with "zero findings is a
+legitimate answer" in the brief. They returned four, and the headline one
+refutes the sentence I had just written into the helper and three documents.
+
+**F-EPG-15. "Silence, not a wrong answer" is false.** Narrowing makes the
+key LONGER, and the words inside an unknown span can complete a different
+guide channel's whole name. Run through the real verb on constructed
+inputs, and reproduced by the lead before acting:
+
+| playlist row | narrowed key | lands on | broad key | lands on |
+|---|---|---|---|---|
+| `ESPN [Deportes]` | `espn deportes` | `ESPN Deportes` | `espn` | `ESPN` |
+| `HBO [2]` | `hbo 2` | `HBO 2` | `hbo` | `HBO` |
+| `===[ SPORTS ]===` | `sports` | `Sports` | (empty) | nothing |
+| `[ Kids ]` | `kids` | `Kids` | (empty) | nothing |
+
+So both patterns have a wrong-match route and they point opposite ways: the
+broad one deletes a span that carried identity and lands on the generic
+channel, the narrow one keeps a span that was an annotation and lands on
+the specific one. The adversary labelled the narrowed column WRONG, which
+assumes the brackets are an annotation; on `ESPN [Deportes]` the opposite
+reading is at least as likely, and nothing in the data settles it. What is
+not in doubt is that a separator row now matches a channel, which is not
+silence by any reading.
+
+**The ruling stands and the reason is replaced.** On this data the bracket
+content IS the two markers, and deleting unknown identity is the worse of
+the two failures. The correction is in the helper, on the board, here, and
+in `test_an_unknown_span_can_still_land_on_the_wrong_channel`, which
+asserts the route rather than leaving it to prose.
+
+**F-EPG-16. The literals were brittle.** Byte-for-byte modulo case, so a
+trailing space, a double space, a hyphen for the slash or a space for the
+hyphen each lost every row carrying the marker -- 82 and 60 rows on this
+list -- for a change the same provider can make between fetches. Of the 14
+matches that cost across 29 constructed rows, only 2 were the wrong match
+the narrowing exists to prevent. The two markers now tolerate internal
+whitespace and `-` or `/` separators while still naming only those two:
+eleven spellings assert that they strip, six unknown spans assert that they
+do not, and the grader is unchanged at 265 pairs, 110 confirmed, 0
+contradicted.
+
+**F-EPG-17. The census is scoped to one list.** The 1,453-row installed
+source is not one of the four provider lists (5,221 channels) that the
+sibling id-fold decision forty lines above was measured across, and those
+lists are not in this checkout. Stated as the accepted scope in the
+helper's comment rather than left for a future maintainer to read "the
+owner's data" as all of it.
+
+Each of the three new tests was seen red against the pattern it replaces:
+the respelling test fails against the byte-for-byte literals, and the
+wrong-channel test fails against the broad span.

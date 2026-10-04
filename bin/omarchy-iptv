@@ -568,15 +568,45 @@ _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 # in both directions, every grade unchanged. So the branch was needed by no
 # pair and broke no pair, and narrowing it costs nothing measurable here.
 #
-# What it costs ELSEWHERE is stated rather than hidden: a provider who writes
-# a marker this list does not name keeps it in the key, so the row simply does
-# not match by name. That is silence, not a wrong answer, and it is the side
-# to fail on -- the broad pattern's failure mode was a confident wrong match.
-# A new marker is a one-line addition with a census behind it, which is the
-# same bar the two below were held to.
+# What it costs ELSEWHERE, stated correctly after an adversarial pass refuted
+# the first version of this paragraph. That version said an unknown marker
+# means "silence, not a wrong answer". It does not, and the reason is that
+# narrowing makes the key LONGER: the words inside an unknown span stay in
+# it, and they can complete the name of a DIFFERENT guide channel.
+# Measured through the real verb on constructed inputs:
+#
+#   `ESPN [Deportes]` keys as `espn deportes`, which matches a guide channel
+#   declared `ESPN Deportes`; the broad pattern keyed it `espn` and matched
+#   `ESPN`. Which of those is right depends on what the provider meant by the
+#   brackets, and nothing in the data says.
+#   `===[ SPORTS ]===`, a separator row, keys as `sports` and matches a guide
+#   channel called `Sports`. The broad pattern keyed it empty and matched
+#   nothing, which was silence by accident rather than by design.
+#
+# So BOTH patterns have a wrong-match route and they point opposite ways: the
+# broad one deletes a span that carried identity and lands on the generic
+# channel, this one keeps a span that was an annotation and lands on the
+# specific one. Neither is safe for bracket content nobody has looked at,
+# which is the finding F-EPG-10 made in the first place; the narrowing is
+# taken because the content on this data IS the two markers and because
+# deleting unknown identity is the worse of the two failures, not because
+# this one cannot fail.
+#
+# A new marker is a one-line addition with a census behind it, the bar the
+# two above were held to. The census itself is scoped: it covers the 1,453-row
+# source installed on this machine, not the four provider lists (5,221
+# channels) the id-fold decision below was measured across, which have never
+# been censused for bracket spans and are not in this checkout.
 _EPG_NAME_NOISE = re.compile(
     r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)"
-    r"|\[not 24/7\]|\[geo-blocked\]", re.IGNORECASE)
+    # The two markers, tolerant of how they are SPELLED but not of which
+    # markers exist. A trailing space, a double space, a hyphen for the
+    # slash or a space for the hyphen are the same marker; the first version
+    # of this narrowing matched the two byte-for-byte and lost all 142 rows
+    # to any of those, which is a provider changing its own punctuation
+    # between fetches, not a different provider.
+    r"|\[\s*not\s*24\s*[-/]?\s*7\s*\]"
+    r"|\[\s*geo[\s-]*blocked\s*\]", re.IGNORECASE)
 
 
 def epg_name_key(value: Any) -> str:
