@@ -120,9 +120,12 @@
     "finding": "F-EPG-11",
     "minToken": 12,
     "note": [
-      "On the frozen 1,453-channel list this strategy reaches 193 rows, 40 of",
-      "them reached by nothing else, and matched goes 226 -> 265. The URL",
-      "LAYOUTS here are copied from that list; the ids are synthetic."
+      "On the frozen 1,453-channel list this strategy reaches 185 rows -- a",
+      "census of the STREAM url, the only field it reads -- 40 of them",
+      "reached by nothing else, and matched goes 226 -> 265. The round that",
+      "added it wrote 193 here, which is the stream-OR-LOGO union (stream",
+      "185, logo 64, union 193, logo-only 8). The URL LAYOUTS here are copied",
+      "from that list; the ids are synthetic."
     ],
     "matchedByAddress": {
       "Addr.us": {

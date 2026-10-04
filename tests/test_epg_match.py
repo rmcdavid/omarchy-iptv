@@ -137,6 +137,63 @@ before and after, and they are not counted as reddening anything.
                                                        failures=6
          (reddens test_the_address_match_is_case_sensitive)
 
+The REPAIR round for the four-lens review of F-EPG-11, 2026-10-04. Same
+method again: one isolated copy of this worktree, one thing changed, the
+helper restored in between. Module counts (`python3 -B -m unittest
+test_epg_match` from tests/) are quoted because each mutation is attributed to
+named cases; the whole-suite figure is in the lane report.
+
+  This module: 90 tests OK on the tree (81 at ada9220, so 9 cases added).
+  Whole suite, in a git export: 846 tests before, 855 after, both
+  `FAILED (errors=5, skipped=2)` -- the same five
+  test_marketplace_capabilities git-archive errors in every run below,
+  before and after, counted as reddening nothing. Every mutation below was
+  also run against the WHOLE suite; the module counts are quoted because the
+  whole-suite run adds those five errors to every line and attributes
+  nothing further.
+
+  Against the helper at ada9220 -- this round's tests and fixtures in place,
+  the helper as it shipped -- 90 tests, errors=1: the cap case. The other
+  cases in this round pin
+  behaviour the shipped helper already had, so they CANNOT redden by
+  reverting it, and each has a named mutation instead:
+
+    M-N1. the per-row token cap removed (no `break`)      failures=1
+         (test_the_address_map_is_bounded_per_row)
+    M-N2. the per-row token dedupe removed                failures=1
+         (test_a_row_naming_one_token_twice_is_one_claim -- which did NOT go
+          red under this mutation before this round, because its fixture had
+          one row)
+    M-N3. a token shared by two rows under ONE tvg-id dropped as well
+                                                          failures=1
+         (test_two_rows_under_one_tvg_id_keep_their_shared_address_token --
+          the branch nothing reddened before this round)
+    M-N4. addrDroppedPlaylist counts DISTINCT ROWS, which is what the old
+          docstring claimed it counted                    failures=1
+         (test_addr_dropped_playlist_counts_token_claims_and_not_rows)
+    M-N5noop. the `exact.get(cid.lower())` LOOKUP moved below "addr", the
+          fold left inside `exact`                        90 tests OK
+         (the trap: nothing changes, because `exact.get(cid)` hits the alias)
+    M-N5naive. the `or exact.get(cid.lower())` arm deleted outright
+                                                          failures=1
+         (test_exact_id_still_wins_on_the_old_fixtures, matchedById 8 -> 7:
+          epg-channels.m3u has a guide cid in mixed case against a lower-case
+          tvg-id, where the fold inside `exact` does not help. So this is not
+          a no-op either, and it reddens the wrong case)
+    M-N5. the fold taken out of `exact` and consulted after "addr", built
+          only from the aliases that were free            failures=2
+         (test_a_case_folded_tvg_id_outranks_an_exact_case_address, plus
+          test_exact_id_still_wins_on_the_old_fixtures for an unrelated
+          reason -- matchedById 8 -> 7)
+    M-N5b. the same, folded over EVERY tvg-id and looked up by cid.lower()
+                                                          failures=1
+         (test_a_case_folded_tvg_id_outranks_an_exact_case_address alone:
+          the isolating mutation)
+    M-N6. EPG_ADDR_MIN_TOKEN 12 -> 15            failures=9, errors=1
+         (reddens the three AddressCollisionTest cases that depend on a
+          12-to-14-character token, and six older cases whose fixture ids
+          are 14 characters -- the floor is not isolable on this fixture)
+
 Run: python3 -m unittest discover -s tests
 """
 import contextlib
@@ -441,11 +498,27 @@ class AddressStrategyTest(unittest.TestCase):
     matcher with an identifier the matcher never read: the guide's channel id,
     sitting in the stream URL of the row that streams that channel. Measured
     on the frozen 1,453-channel list against the frozen 427-declaration
-    guide: 193 rows carry such an id, the name matcher already paired 153 of
-    them with THAT SAME guide channel, paired 0 of them with a different one,
-    and left 40 unmatched. So the identifier was never in disagreement with
-    the matcher -- it was simply unread, and reading it takes `matched` from
-    226 to 265.
+    guide, counting the STREAM url and nothing else because that is the only
+    field this strategy reads: 185 rows carry such an id, the name matcher
+    already paired 145 of them with THAT SAME guide channel, paired 0 of them
+    with a different one, and left 40 unmatched. So the identifier was never
+    in disagreement with the matcher -- it was simply unread, and reading it
+    takes `matched` from 226 to 265.
+
+    The round that added the strategy wrote 193 and 153 here. Those are the
+    stream-OR-LOGO union, inherited from the precision audit's id oracle,
+    which read the logo as a fallback without saying so (F-EPG-14), and they
+    were quoted in sentences that name the stream. Re-derived field by field
+    over the frozen inputs by plain substring search for each of the guide's
+    427 declared <channel id> values, and by rebuilding the pre-ADDR pairing
+    from the shipping build_alias / parse_xmltv / match_xmltv_channel /
+    claim_channel with "addr" emptied (byte-identical to the eb89f0f helper's
+    own 226 pairs): STREAM 185 rows, 145 same / 0 different / 40 none; LOGO
+    64 rows; union 193 rows, 153 / 0 / 40; logo-only 8 rows, all 8 same. The
+    safety CONCLUSION -- 0 disagreements -- holds under either definition.
+    The denominator did not.
+
+    So every census in this module names its field.
 
     Each case below pins one decision, and every case first proves the join
     was AVAILABLE -- the id really is in that row's address and the guide
@@ -543,13 +616,32 @@ class AddressStrategyTest(unittest.TestCase):
         self.assertNotIn("AddrLogo.us", self.now["channels"])
 
     def test_a_guide_id_shorter_than_the_floor_claims_nothing(self):
-        """The collision guard, and the whole of it.
+        """The floor is a TRIM, not the collision guard.
 
         A guide declaring id="playlist" would otherwise claim a row for every
-        address containing that word -- 583 of the 1,453 installed rows do.
-        Measured over those addresses: every alphanumeric token shared by two
-        or more of them that is not a 24-hex id is URL vocabulary, and the
-        longest is eight characters.
+        address containing that word -- 583 of the 1,453 installed rows do --
+        and the floor keeps that out of the index. That is all it does.
+
+        The round that shipped it called this "the whole of its collision
+        guard" on a census that is false: it said every alphanumeric token
+        shared by two or more of the real addresses that is not a 24-hex id is
+        URL vocabulary and the longest is eight characters. Re-counted over
+        the 1,453 real STREAM addresses -- the field this strategy reads --
+        with no floor at all: 626 shared tokens, NONE of them 24-hex, longest
+        40 characters, 134 of them longer than eight. Restricted to purely
+        ALPHABETIC tokens, the kindest reading of "URL vocabulary", the
+        longest is `montgomerycommunitymedia` (24 characters) and 32 are at
+        least twelve characters long, so they survive this floor:
+        `sinclairstoryline`, `getstreamhosting`, `lionsgatestudio`,
+        `ewscrippscompan`, `toonamiaftermath`. The guard that makes those
+        harmless is the AMBIGUITY rule, not the floor -- swept through
+        build_alias, the declared guide ids the index reaches is 185 at every
+        floor from 4 to 24, and at 8 the word `playlist` is indexed and then
+        discarded as ambiguous anyway.
+
+        AddressCollisionTest, below, drives the class the floor does not
+        cover: a guide id that is a >= 12-character run belonging to exactly
+        one row.
         """
         entry = ADDR["refused"]["AddrShort.us"]
         guide_id = entry["guideId"]
@@ -577,7 +669,7 @@ class AddressStrategyTest(unittest.TestCase):
     def test_the_address_match_is_case_sensitive(self):
         """A URL path is case-sensitive by the URL spec, so folding case
         would read an identity the address does not assert. It costs nothing:
-        0 of the 193 real rows need the fold."""
+        0 of the 185 real STREAM-field rows need the fold."""
         entry = ADDR["refused"]["AddrCase.us"]
         guide_id = entry["guideId"]
         self.assert_offered(guide_id)
@@ -715,9 +807,17 @@ class AddressIndexTest(unittest.TestCase):
             ("A.us", helper.EPG_MATCH_ADDR))
 
     def test_a_row_naming_one_token_twice_is_one_claim(self):
-        """addrDroppedPlaylist counts ROWS, as nameDroppedPlaylist does, so a
-        token repeated inside ONE address must not look like two rows
-        claiming it."""
+        """A token repeated inside ONE address is one claim by that row, not
+        two, so `addr_rows[token]` counts rows per token.
+
+        TWO ROWS, not one. With a single row `addr_owner` never clears and
+        `addrDroppedPlaylist` is 0 whether or not the dedupe exists, so the
+        one-row version of this case could not fail: removing the dedupe from
+        the shipping function left the module at 78 tests OK and the whole
+        suite at 843 OK. Two rows sharing the token, the first naming it
+        twice, is the smallest shape where the decision is observable -- 2
+        under the dedupe, 3 without it.
+        """
         token = "aaaaaaaaaaaaaaaaaaaa0001"
         index, _ = self.index([
             {"tvgId": "A.us", "name": "Alpha",
@@ -725,11 +825,185 @@ class AddressIndexTest(unittest.TestCase):
         ])
         self.assertEqual(index["addr"], {token: "A.us"})
         self.assertEqual(index["addrDroppedPlaylist"], 0)
+        index, _ = self.index([
+            {"tvgId": "A.us", "name": "Alpha",
+             "url": "http://h.example.test/%s/%s.m3u8" % (token, token)},
+            {"tvgId": "B.us", "name": "Beta",
+             "url": "http://h.example.test/%s/one.m3u8" % token},
+        ])
+        self.assertEqual(index["addr"], {})
+        self.assertEqual(index["addrIndexed"], 0)
+        self.assertEqual(index["addrDroppedPlaylist"], 2)
+
+    def test_addr_dropped_playlist_counts_token_claims_and_not_rows(self):
+        """What that number IS, pinned, because its name reads the other way.
+
+        `addrDroppedPlaylist` sits in the status next to `nameDroppedPlaylist`,
+        which really does count playlist ROWS -- there is one name key per row,
+        so the sum over ambiguous keys is a row count. The address sum is not:
+        a row contributes once per ambiguous TOKEN it names, so three rows can
+        report four. The round that added it asserted the opposite in this
+        module's docstring and in a comment above the loop, on a fixture that
+        could not tell the two readings apart.
+
+        On the owner's frozen list the gap is already live: 301 claims over 70
+        ambiguous tokens spanning 281 distinct rows, while
+        `nameDroppedPlaylist` is 0. Unlike the name counter this one is not
+        bounded by `channelTotal`.
+        """
+        one, two = "aaaaaaaaaaaaaaaaaaaa0001", "aaaaaaaaaaaaaaaaaaaa0002"
+        index, total = self.index([
+            {"tvgId": "A.us", "name": "Alpha",
+             "url": "http://h.example.test/%s/%s.m3u8" % (one, two)},
+            {"tvgId": "B.us", "name": "Beta",
+             "url": "http://h.example.test/%s/b.m3u8" % one},
+            {"tvgId": "C.us", "name": "Gamma",
+             "url": "http://h.example.test/%s/c.m3u8" % two},
+        ])
+        self.assertEqual(total, 3)
+        self.assertEqual(index["addr"], {})
+        # Four claims for three rows. A row count would read 3 here, and
+        # len() of the distinct rows touched would read 3 as well.
+        self.assertEqual(index["addrDroppedPlaylist"], 4)
+        self.assertEqual(index["nameDroppedPlaylist"], 0)
+
+    def test_two_rows_under_one_tvg_id_keep_their_shared_address_token(self):
+        """The address twin of test_rows_sharing_one_tvg_id_are_not_an_ambiguous_name.
+
+        Two rows under one tvg-id are one channel listed twice: they share the
+        key, so the token they share is not ambiguous and the claim stands.
+        `parse_m3u` does not dedupe by tvgId, so the case is reachable from a
+        real playlist; the owner's current list happens to carry 0 duplicate
+        tvgIds, so the frozen data cannot see it either and nothing reddened
+        when the branch was mutated to drop every such claim.
+        """
+        token = "aaaaaaaaaaaaaaaaaaaa0001"
+        index, total = self.index([
+            {"tvgId": "A.us", "name": "Alpha",
+             "url": "http://h.example.test/%s/sd.m3u8" % token},
+            {"tvgId": "A.us", "name": "Alpha HD",
+             "url": "http://h.example.test/%s/hd.m3u8" % token},
+        ])
+        self.assertEqual(total, 2)
+        self.assertEqual(index["addr"], {token: "A.us"})
+        self.assertEqual(index["addrIndexed"], 1)
+        self.assertEqual(index["addrDroppedPlaylist"], 0)
+        self.assertEqual(helper.match_xmltv_channel(index, token, {}),
+                         ("A.us", helper.EPG_MATCH_ADDR))
+
+    def test_the_address_map_is_bounded_per_row(self):
+        """EPG_ADDR_MAX_TOKENS, so the index size is a product of constants.
+
+        The map is linear in address BYTES, not in rows. The build_alias
+        docstring used to state the bound as "bounded by the ADDRESSES, so by
+        MAX_CHANNELS rows of a source that MAX_SOURCE_BYTES already caps at 64
+        MiB", which nobody had measured: at exactly those caps -- 50,000 rows
+        carrying 50 long tokens each, 61.3 MiB of address text -- build_alias
+        went from about 1.5 s and a 20.0 MiB traced peak before the strategy to
+        about 12 s and 379.4 MiB after it, holding 2,500,000 tokens. With the
+        cap it is about 7.5 s, 178.8 MiB and 800,000 tokens, and the bound is
+        MAX_CHANNELS * EPG_ADDR_MAX_TOKENS.
+
+        Asserted as the BOUND and not as a stopwatch: a timing case at those
+        caps would add seven seconds to every suite run and would fail on a
+        loaded machine for reasons that are not this code. What is asserted
+        here is that one row contributes at most EPG_ADDR_MAX_TOKENS entries,
+        that they are the FIRST of its address, and that the recall this cap
+        could have cost is zero on the shape the frozen data actually has --
+        the most qualifying tokens any of the owner's 1,453 addresses holds is
+        six, and every one of the 185 declared guide ids it reaches is the
+        first qualifying token of its row.
+        """
+        cap = helper.EPG_ADDR_MAX_TOKENS
+        tokens = ["%024x" % i for i in range(cap + 8)]
+        index, _ = self.index([
+            {"tvgId": "A.us", "name": "Alpha",
+             "url": "http://h.example.test/" + "/".join(tokens) + ".m3u8"},
+        ])
+        self.assertEqual(index["addrIndexed"], cap)
+        self.assertEqual(sorted(index["addr"]), sorted(tokens[:cap]))
+        for late in tokens[cap:]:
+            self.assertEqual(helper.match_xmltv_channel(index, late, {}), ("", -1))
+        # And a row inside the cap keeps every token it names, which is the
+        # half that proves the cap is a cap and not a truncation to one.
+        index, _ = self.index([
+            {"tvgId": "B.us", "name": "Beta",
+             "url": "http://h.example.test/" + "/".join(tokens[:cap]) + ".m3u8"},
+        ])
+        self.assertEqual(index["addrIndexed"], cap)
+        self.assertGreaterEqual(cap, 6, "the frozen list's busiest address holds six")
 
     def test_a_row_without_a_url_is_in_no_address_map(self):
         index, _ = self.index([{"tvgId": "A.us", "name": "Alpha"}])
         self.assertEqual(index["addr"], {})
         self.assertEqual(index["addrIndexed"], 0)
+
+    def test_a_case_folded_tvg_id_outranks_an_exact_case_address(self):
+        """Which half of the ID map beats ADDR, pinned in both directions.
+
+        `exact` holds two kinds of entry: `exact[tvg] = tvg`, what the playlist
+        author wrote, and `exact[tvg.lower()] = tvg`, a fold build_alias
+        performs. match_xmltv_channel consults BOTH before "addr", so a
+        case-folded tvg-id takes a guide channel away from a row whose address
+        carries that id character for character.
+
+        Nothing pinned that. test_a_declared_tvg_id_is_consulted_before_an_address
+        uses a fixture row whose tvg-id is already lower case, so
+        `exact.get(cid)` hits without the fold, and the whole suite stayed
+        green with the fold moved below "addr".
+
+        Two traps, both measured, because they decide what a mutation of this
+        has to look like. Moving the `exact.get(cid.lower())` LOOKUP below
+        "addr" changes nothing at all, because build_alias writes the fold
+        into `exact` itself and `exact.get(cid)` then hits the alias on the
+        line above (M-N5noop: 90 tests OK, nothing red). And a folded map
+        built only from the aliases that were "free" takes `matchedById` 8 ->
+        7 on tests/fixtures/epg-channels.m3u, reddening a second case for an
+        unrelated reason, as does deleting the `cid.lower()` lookup outright
+        -- that fixture has a guide cid in mixed case against a lower-case
+        tvg-id, where the fold inside `exact` does not help. Only a map folded
+        over EVERY tvg-id, kept OUT of `exact` and looked up by `cid.lower()`
+        after "addr", isolates this decision (M-N5b: failures=1, this case
+        alone).
+
+        The order is KEPT, and "a declaration outranks a deduction" is not the
+        reason -- a fold is a deduction, so that sentence covers the exact-case
+        half only. The reason is what the two fields are for: `tvg-id` exists
+        to name a guide channel, so a row carrying one has asserted which
+        channel it is and the fold discards only the case of an identifier
+        XMLTV authors write inconsistently; a stream address exists to open a
+        stream, and a guide id inside it is an exact equality on a string
+        nobody wrote as an identity assertion.
+
+        UNVERIFIED on the project's inputs: 0 of the frozen guide's 427
+        declarations need the fold, so this is an argued order. It is pinned
+        anyway, because an argument in a comment cannot go red.
+        """
+        token = "abcdefghijkl"
+        index, _ = self.index([
+            {"tvgId": token.upper(), "name": "Declares It",
+             "url": "http://h.example.test/nothing-here.m3u8"},
+            {"tvgId": "STREAMS.us", "name": "Streams It",
+             "url": "http://h.example.test/plu-%s.m3u8" % token},
+        ])
+        # The join really is on offer from both sides before anything is
+        # asserted about which one wins: the second row's address carries the
+        # guide id character for character, and the first row's tvg-id differs
+        # from it only in case.
+        self.assertEqual(index["addr"], {token: "STREAMS.us"})
+        self.assertEqual(token.upper().lower(), token)
+        self.assertNotEqual(token.upper(), token)
+        self.assertEqual(helper.match_xmltv_channel(index, token, {}),
+                         (token.upper(), helper.EPG_MATCH_ID))
+        # And it is the fold inside `exact` that did it.
+        self.assertEqual(index["exact"].get(token), token.upper())
+        # And the exact-case address still wins when no tvg-id folds onto it.
+        index, _ = self.index([
+            {"tvgId": "STREAMS.us", "name": "Streams It",
+             "url": "http://h.example.test/plu-%s.m3u8" % token},
+        ])
+        self.assertEqual(helper.match_xmltv_channel(index, token, {}),
+                         ("STREAMS.us", helper.EPG_MATCH_ADDR))
 
     def test_the_strategies_stay_in_their_declared_order(self):
         """The ranks are an ORDER and claim_channel compares them with `<`, so
@@ -766,6 +1040,115 @@ class AddressIndexTest(unittest.TestCase):
         self.assertEqual(total, 10000)
         self.assertEqual(index["addrIndexed"], 10000)
         self.assertLess(best, 400.0, "build_alias took %d ms for 10,000 rows" % best)
+
+
+def _epg_on(playlist, guide, now=None):
+    """Build a playlist and a guide on disk, run both verbs, -> (status, now).
+
+    The real verbs over real files, because the class below is about what the
+    strategy DOES at a sink and not about what build_alias returns.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        pathlib.Path(tmp, "list.m3u").write_text(playlist, encoding="utf-8")
+        pathlib.Path(tmp, "guide.xml").write_text(guide, encoding="utf-8")
+        code, _, stderr = run("playlist", "--url", os.path.join(tmp, "list.m3u"),
+                              "--cache-dir", tmp)
+        assert code == 0, stderr
+        code, status, stderr = run("epg", "--url", os.path.join(tmp, "guide.xml"),
+                                   "--cache-dir", tmp, "--force",
+                                   "--now", str(NOW if now is None else now))
+        assert code == 0, stderr
+        return status, read(os.path.join(tmp, "epg-now.json"))["channels"]
+
+
+def _guide_xml(*channels):
+    """(cid, display-name, programme title) triples -> a DTD-ordered guide."""
+    parts = ['<?xml version="1.0" encoding="UTF-8"?><tv>']
+    for cid, name, _ in channels:
+        parts.append('<channel id="%s"><display-name>%s</display-name></channel>' % (cid, name))
+    for cid, _, title in channels:
+        if title is None:
+            continue
+        parts.append('<programme start="20260912203000 +0000" stop="20260912213000 +0000" '
+                     'channel="%s"><title>%s</title></programme>' % (cid, title))
+    parts.append("</tv>")
+    return "".join(parts)
+
+
+class AddressCollisionTest(unittest.TestCase):
+    """What the twelve-character floor does NOT buy, driven through the verb.
+
+    The floor's comment used to call itself "the whole of its collision guard"
+    and promise that a provider this strategy cannot serve "gets NOTHING from
+    it ... silence, not a guess". The second half is true only for ids SHORTER
+    than the floor or carrying a non-alphanumeric. The class it does not cover
+    is a guide id that is itself a >= 12-character alphanumeric run occurring
+    in exactly one row's address -- ordinary HLS vocabulary, a signature, an
+    expiry -- and there the answer is wrong rather than absent.
+
+    These cases pin the behaviour as it is, because that is what the code
+    does; what they stop is the comment drifting back to a guarantee the code
+    has never made. Both are observed at the sink (epg-now.json), not read off
+    an index.
+    """
+
+    def test_a_long_vocabulary_word_in_exactly_one_address_is_taken(self):
+        """`masterplaylist` is 14 characters of HLS vocabulary, not an id."""
+        token = "masterplaylist"
+        self.assertGreaterEqual(len(token), helper.EPG_ADDR_MIN_TOKEN)
+        playlist = ("#EXTM3U\n"
+                    '#EXTINF:-1 tvg-id="A.us@SD",Alpha\n'
+                    "http://h.example.test/live/%s.m3u8\n" % token)
+        status, channels = _epg_on(playlist, _guide_xml((token, "Nothing Like Alpha",
+                                                         "SHOW %s" % token)))
+        self.assertEqual((status["matched"], status["matchedByAddr"]), (1, 1))
+        self.assertEqual(channels["A.us@SD"]["now"]["title"], "SHOW %s" % token)
+
+    def test_the_same_word_in_two_addresses_is_silence(self):
+        """The ambiguity rule, which is the guard that actually stands here."""
+        token = "masterplaylist"
+        playlist = ("#EXTM3U\n"
+                    '#EXTINF:-1 tvg-id="A.us@SD",Alpha\n'
+                    "http://h.example.test/a/%s.m3u8\n"
+                    '#EXTINF:-1 tvg-id="B.us@SD",Beta\n'
+                    "http://h.example.test/b/%s.m3u8\n" % (token, token))
+        status, channels = _epg_on(playlist, _guide_xml((token, "Nothing Like Alpha",
+                                                         "SHOW %s" % token)))
+        self.assertEqual((status["matched"], status["addrDroppedPlaylist"]), (0, 2))
+        self.assertEqual(channels, {})
+
+    def test_a_numeric_expiry_in_a_query_string_is_taken_too(self):
+        """A 13-digit millisecond expiry is a >= 12-character run. Nothing in
+        the strategy says a token has to look like an identifier."""
+        token = "1791015219000"
+        playlist = ("#EXTM3U\n"
+                    '#EXTINF:-1 tvg-id="A.us@SD",Alpha\n'
+                    "http://h.example.test/live/a.m3u8?expires=%s\n" % token)
+        status, channels = _epg_on(playlist, _guide_xml((token, "Nothing Like Alpha",
+                                                         "SHOW %s" % token)))
+        self.assertEqual((status["matched"], status["matchedByAddr"]), (1, 1))
+        self.assertEqual(channels["A.us@SD"]["now"]["title"], "SHOW %s" % token)
+
+    def test_an_id_shorter_than_the_floor_really_is_silence(self):
+        """The half of the promise that holds. Same shapes, shorter id."""
+        token = "tv"
+        playlist = ("#EXTM3U\n"
+                    '#EXTINF:-1 tvg-id="A.us@SD",Alpha\n'
+                    "http://h.example.test/%s/a.m3u8\n" % token)
+        status, channels = _epg_on(playlist, _guide_xml((token, "Nothing Like Alpha",
+                                                         "SHOW %s" % token)))
+        self.assertEqual((status["matched"], status["addrIndexed"]), (0, 0))
+        self.assertEqual(channels, {})
+
+    def test_an_id_carrying_a_non_alphanumeric_is_silence_too(self):
+        """`ESPN.us` -- the dot is a token boundary, so the token is `ESPN`."""
+        playlist = ("#EXTM3U\n"
+                    '#EXTINF:-1 tvg-id="A.us@SD",Alpha\n'
+                    "http://h.example.test/ESPN.us/a.m3u8\n")
+        status, channels = _epg_on(playlist, _guide_xml(("ESPN.us", "Nothing Like Alpha",
+                                                         "SHOW ESPN")))
+        self.assertEqual(status["matched"], 0)
+        self.assertEqual(channels, {})
 
 
 class EpisodeSystemTest(unittest.TestCase):
@@ -1375,8 +1758,10 @@ class EpgPrecisionTest(unittest.TestCase):
     URL names" was two independent identifiers agreeing.
 
     F-EPG-11 makes the matcher read that identifier, because the audit that
-    used it as an oracle also measured that it reached 193 rows the matcher
-    was leaving on the table. Eight of this fixture's nine pairs are now
+    used it as an oracle also measured that it reached rows the matcher was
+    leaving on the table -- 185 of them counting the stream url, which is
+    what the strategy reads, and 193 counting the stream or the logo, which
+    is what that oracle read and what the round mistakenly quoted here. Eight of this fixture's nine pairs are now
     matched BY the oracle, so for those eight the agreement proves only that
     the lookup is wired up. That is not a reason to delete the assertions --
     a wiring check is worth keeping -- but it IS a reason to stop calling
