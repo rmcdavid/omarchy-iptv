@@ -43,18 +43,27 @@
 #   R13 a held `b` (20 presses, 60 ms apart, through wtype into the guide in
 #       list mode) is COALESCED: fewer helper runs than presses, and the
 #       position reflects the capped sum
-#   R14 and it never trips the health restart: same pid, intent counter
-#       (playSeq and the lock record) unmoved, healthSkips 0
+#   R14 the burst does not restart the player: same pid, intent counter
+#       (playSeq and the lock record) unmoved, healthSkips 0. A CONTROL on
+#       the burst, NOT evidence for ruling D10 -- see R16 and F-RWD-18
 #   R15 per-press budget: the helper's spawn-to-reply for `player seek`
 #       stays within 300 ms (median of five), the probe's own bound
+#   R16 ruling D10, the health exemption, observed: a seek held in flight
+#       for seconds at a time (a prepared tree whose helper sleeps before
+#       exec-ing the real one) while the shell samples its own
+#       `healthBusy` / `controlRunning` / `controlKind` every 100 ms
 #
 # Evidence rule (CLAUDE.md 10/11): `--baseline <ref>` exports that tree and
 # runs the same checks against it. Against 2d7df1f every check but R0 is
 # red: the verb, the service state and the harness verbs are all absent,
 # and the sentinels (qa-lib.sh) make an absent answer a FAIL, never a pass.
+# `--tree <dir>` is the same lever pointed at a directory instead of a ref,
+# which is how a NAMED MUTATION of a file this lane does not own is proved
+# red: export the tree, edit the export, run against it.
 #
 #   scripts/dev-harness/rewind-scenario.sh
 #   scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f
+#   scripts/dev-harness/rewind-scenario.sh --tree /tmp/tree-without-D10
 #
 # Output: one PASS/FAIL line per assertion and a summary. No URL is printed.
 set -uo pipefail
@@ -74,15 +83,26 @@ PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}
 PLUGIN_ID="io.github.rmcdavid.iptv"
 PORT=8771
 HOST="127.0.0.1:$PORT"
-STREAM_S=540
+STREAM_S=780
 # The names that join the lanes (design 2.1-2.5): the step, the display
 # threshold and the glyph. Spelled here so a drift is a red check.
 STEP=10
 SHOW_S=2
 HISTORY_GLYPH=$'\xf3\xb0\x8b\x9a'   # U+F02DA, UTF-8 bytes (ASCII file, rule 8)
 BASELINE=""
+TREE=""
 EXPORT_DIR=""
 WORK=""
+# R16's window sizes and the slow helper's sleep. The sleep must stay under
+# the service's own controlTimeoutMs (8 s) or the control watchdog kills the
+# helper mid-run and the slot frees for a reason that is not the exemption.
+# HEALTH_TICK_MS mirrors Service.qml's healthCheckMs: it is a NAME joining
+# two files, so R16 asserts the consequence of the value rather than reading
+# it back (CLAUDE.md rule 13 -- a check, not a copy).
+SLOW_MS=4000
+HEALTH_TICK_MS=10000
+QUIET_MS=28000
+BUSY_MS=32000
 pass=0
 fail=0
 checks=0
@@ -93,6 +113,7 @@ checks=0
 while (($# > 0)); do
   case $1 in
     --baseline) BASELINE=$2; shift ;;
+    --tree) TREE=$2; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -119,6 +140,26 @@ fdelta() { python3 -c '
 import sys
 try: print(round(float(sys.argv[2]) - float(sys.argv[1]), 3))
 except Exception: print("x")' "$1" "$2"; }
+# cnt <json> <dotted.path>: one integer out of a `healthLog` tally.
+# 0 when the bucket does not exist, because a tally bucket is created on
+# first sight and its absence means ZERO OBSERVATIONS of that kind -- but
+# NOSTATE when the answer is not a tally at all (no watch, dead IPC,
+# unparseable), because that is NO EVIDENCE and must never read as zero.
+# The two cases are told apart by `samples`, which every tally carries.
+cnt() { python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    print("NOSTATE"); raise SystemExit(0)
+if not isinstance(d, dict) or "samples" not in d:
+    print("NOSTATE"); raise SystemExit(0)
+v = d
+for k in sys.argv[2].split("."):
+    if not isinstance(v, dict) or k not in v:
+        print(0); raise SystemExit(0)
+    v = v[k]
+print(v if isinstance(v, (int, float)) and not isinstance(v, bool) else "NOFIELD")' "$1" "$2"; }
 # ge <a> <b>: "0" when a >= b as numbers, else "1"/"2" as above.
 ge() { python3 -c '
 import sys
@@ -284,6 +325,13 @@ ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use"
 qa_safe_path "$SCRATCH" || { echo "unsafe scratch path" >&2; exit 2; }
 
 # ---- which checkout is under test
+[[ -n $BASELINE && -n $TREE ]] && { echo "--baseline and --tree are the same lever; pass one" >&2; exit 2; }
+if [[ -n $TREE ]]; then
+  PLUGIN_ROOT=$(cd "$TREE" 2>/dev/null && pwd) || { echo "--tree $TREE is not a directory I can enter" >&2; exit 2; }
+  [[ -f $PLUGIN_ROOT/Model.js && -f $PLUGIN_ROOT/Service.qml ]] \
+    || { echo "--tree $PLUGIN_ROOT is not a plugin tree (no Model.js / Service.qml)" >&2; exit 2; }
+  echo "== prepared tree $PLUGIN_ROOT"
+fi
 if [[ -n $BASELINE ]]; then
   EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-rewind-baseline-XXXXXX")
   git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR" || { echo "could not export $BASELINE" >&2; exit 2; }
@@ -551,7 +599,13 @@ ck "R13 the position reflects the capped sum (behind $(rw behindLive) >= 20, win
 printf '   R13 seek helper lifetimes ms (20 ms sampling): %s\n' "$lifetimes"
 ipc close >/dev/null
 
-echo "== R14 and never trips the health restart"
+# R14 is a control on R13's burst and NOTHING MORE (F-RWD-18). It was written
+# as the evidence for ruling D10 and cannot be: three strikes need three
+# consecutive 10 s health ticks to find the slot busy, and R13's burst is
+# 1.2 s of 220 ms runs, so no restart could fire whether or not the exemption
+# exists. The exemption is observed in R16 instead; these five lines stay
+# because "a held key does not restart the player" is still worth asserting.
+echo "== R14 the burst does not restart the player (a control on R13, not evidence for D10)"
 sleep 2
 ck "R14 positive control: seeks were issued ($runs)" '[[ $(ge "$runs" 1) == 0 ]]'
 is "R14 the same player pid" "$(player_pid)" "$pid0"
@@ -574,13 +628,165 @@ med=$(tr ' ' '\n' <<<"$times" | sed '/^$/d' | sort -n | sed -n 3p)
 ck "R15 player seek spawn-to-reply median $med ms within 300 (runs:$times)" '[[ -n "$med" && $(ge 300 "$med") == 0 ]]'
 ck "R15 and the replies were real (ok true on the last)" '[[ "$(rf "d[\"ok\"]" "$(tail -1 "$WORK/replies.jsonl")")" == true ]]'
 
+echo "== R16 ruling D10: a seek run is not busy for the health tick (F-RWD-18)"
+# WHY A PREPARED TREE. The decision is only visible while the control slot is
+# held, and a healthy `player seek` run holds it for about 220 ms. So the
+# honest instrument is a WIDER window, not a luckier sample: stage the tree
+# under test with `bin/omarchy-iptv` replaced by fixtures/slow-helper.py,
+# which sleeps SLOW_MS and then execs the real helper with the same argv. The
+# service spawns `python3 <root>/bin/omarchy-iptv ...`, so the stand-in has to
+# be python. Nothing is stubbed: every reply the service parses is still the
+# real helper's, only later.
+SLOW_TREE="$WORK/slow-tree"
+mkdir -p "$SLOW_TREE/bin"
+staged=1
+for f in manifest.json Model.js Service.qml Guide.qml BarWidget.qml; do
+  cp "$PLUGIN_ROOT/$f" "$SLOW_TREE/$f" 2>/dev/null || staged=0
+done
+cp -R "$PLUGIN_ROOT/contrib" "$SLOW_TREE/contrib" 2>/dev/null || true
+cp "$PLUGIN_ROOT/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || staged=0
+cp "$HERE/fixtures/slow-helper.py" "$SLOW_TREE/bin/omarchy-iptv" 2>/dev/null || staged=0
+chmod +x "$SLOW_TREE/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || true
+ck "R16 control: the slow-helper tree staged from the tree under test" '(( staged ))'
+# Restart the harness against it. `restart-shell` would refuse to mix trees
+# (and rightly), so this is a reap and a fresh detached start; the log is
+# APPENDED to, so readiness is a COUNT of `service loaded` lines going up and
+# never a grep that the previous shell already satisfies.
+"$RUN" reap >/dev/null 2>&1
+"$RUN" clean >/dev/null
+loaded0=$(qa_count 'service loaded' "$HLOG")
+export OMARCHY_IPTV_PLUGIN_ROOT="$SLOW_TREE"
+export OMARCHY_IPTV_SLOW_MS="$SLOW_MS"
+export OMARCHY_IPTV_SLOW_VERBS="seek,status"
+"$RUN" --detach --timeout 0 --playlist "$FIX/rewind.m3u" >>"$LOG" 2>&1
+for ((i = 0; i < 300; i++)); do
+  [[ $(qa_count 'service loaded' "$HLOG") -gt $loaded0 ]] && break
+  sleep 0.1
+done
+ck "R16 control: a second shell loaded on the prepared tree" '[[ $(qa_count "service loaded" "$HLOG") -gt $loaded0 ]]'
+until_eq 2 30 svc "d['channels']" || true
+ipc play "t:rw.a" >/dev/null
+until_eq 1 20 player_count || true
+PID16=$(player_pid)
+until_eq true 15 svc "d['playing']" || true
+probe wait "$SOCK" 25 >/dev/null
+# Let the start's own flurry (play, then its status) finish, so the quiet
+# window below holds nothing but health ticks.
+sleep 8
+
+# ---- the QUIET window: no presses at all. It measures three things the
+# busy window cannot: that the sampler runs, that health ticks are visible to
+# it, and -- the negative control that keeps R16's main check from being
+# vacuous -- that `healthBusy` is TRUE for a control that is NOT a seek. A
+# predicate hard-wired to false would satisfy "a seek is not busy" and fail
+# here.
+ipc healthWatch "$QUIET_MS" >/dev/null
+sleep $((QUIET_MS / 1000 + 2))
+q=$(ipc healthLog)
+qsam=$(cnt "$q" samples)
+qstatus=$(cnt "$q" runs.status)
+qsb=$(cnt "$q" byKind.status.healthBusyTrue)
+qsf=$(cnt "$q" byKind.status.healthBusyFalse)
+qsu=$(cnt "$q" byKind.status.healthBusyUnknown)
+qif=$(cnt "$q" byKind.idle.healthBusyFalse)
+qit=$(cnt "$q" byKind.idle.healthBusyTrue)
+qrun=$(cnt "$q" running.unknown)
+printf '   R16 quiet window: %s samples, status runs %s, marks %s\n' \
+  "$qsam" "$qstatus" "$(rf 'd["marks"]' "$q")"
+ck "R16 control: the shell sampled itself over the ${QUIET_MS} ms quiet window ($qsam >= 200)" '[[ $(ge "$qsam" 200) == 0 ]]'
+ck "R16 control: health ticks are visible to the sampler ($qstatus status runs >= 2)" '[[ $(ge "$qstatus" 2) == 0 ]]'
+ck "R16 NEGATIVE control: healthBusy is TRUE while a status helper runs ($qsb samples >= 20)" '[[ $(ge "$qsb" 20) == 0 ]]'
+is "R16 and never false while a status helper runs" "$qsf" "0"
+is "R16 and never the sentinel while a status helper runs" "$qsu" "0"
+ck "R16 control: healthBusy is false with the slot idle ($qif samples >= 20)" '[[ $(ge "$qif" 20) == 0 ]]'
+is "R16 and never true with the slot idle" "$qit" "0"
+is "R16 controlRunning answers a boolean, never the sentinel (quiet window)" "$qrun" "0"
+
+# ---- the BUSY window: presses driven back to back, each spawning a seek
+# that holds the slot for SLOW_MS. The window spans at least
+# BUSY_MS / HEALTH_TICK_MS health ticks, so a tick lands on a running seek by
+# arithmetic rather than by luck.
+#
+# The presses ALTERNATE back and forward by a few seconds so the position
+# hovers where it started: a one-directional drive walks into the floor,
+# where seekBy refuses `at_floor` LOCALLY and spawns nothing, and the duty
+# cycle this check depends on would collapse for a reason that has nothing
+# to do with the health tick.
+#
+# PRE-ARM. A seek is put in flight BEFORE the watch opens, so sample 1
+# already sees one and no helper started before the window can be mistaken
+# for one of its own runs (the first measurement counted a status run that
+# had opened 100 ms before the watch, which is the whole margin the
+# "a tick landed on a running seek" check below has to spend).
+ipc back 3 >/dev/null 2>&1
+until_eq seek 3 svc "d['controlKind']" || true
+ipc healthWatch "$BUSY_MS" >/dev/null
+deadline=$(( $(date +%s) + BUSY_MS / 1000 ))
+drives=0
+while (( $(date +%s) < deadline )); do
+  if (( drives % 2 )); then ipc back 3 >/dev/null 2>&1; else ipc forward 3 >/dev/null 2>&1; fi
+  drives=$((drives + 1))
+  sleep 0.2
+done
+sleep 1
+b=$(ipc healthLog)
+bseek=$(cnt "$b" byKind.seek.samples)
+bfalse=$(cnt "$b" byKind.seek.healthBusyFalse)
+btrue=$(cnt "$b" byKind.seek.healthBusyTrue)
+bunk=$(cnt "$b" byKind.seek.healthBusyUnknown)
+brun=$(cnt "$b" byKind.seek.runningTrue)
+bstatus=$(cnt "$b" runs.status)
+bskips=$(cnt "$b" healthSkipsMax)
+bunread=$(cnt "$b" healthSkipsUnreadable)
+TICKS=$(( BUSY_MS / HEALTH_TICK_MS ))
+printf '   R16 busy window: %s drives, %s samples, seek samples %s, seek runs %s, status runs %s, marks %s\n' \
+  "$drives" "$(cnt "$b" samples)" "$bseek" "$(cnt "$b" runs.seek)" \
+  "$bstatus" "$(rf 'd["marks"]' "$b")"
+# The control is read from `controlKind`, which EVERY tree has, so a red
+# healthBusy check below names the missing join and not a missing seek.
+ck "R16 control: a seek was really in flight when sampled ($bseek samples >= 100 = 10 s)" '[[ $(ge "$bseek" 100) == 0 ]]'
+ck "R16 D10: healthBusy is FALSE for every sampled running seek ($bfalse of $bseek)" '[[ $(ge "$bfalse" 100) == 0 ]]'
+is "R16 D10: and never true for a running seek" "$btrue" "0"
+is "R16 D10: and never the sentinel for a running seek" "$bunk" "0"
+ck "R16 controlRunning says the slot IS held while the kind is seek ($brun >= 100)" '[[ $(ge "$brun" 100) == 0 ]]'
+# A tick that finds the slot held issues no status (runControl refuses it),
+# whether or not the exemption exists; a tick that finds it free always does.
+# So fewer status runs than ticks is the observation that a tick landed on a
+# running seek -- and healthSkips is then the ONLY thing that differs between
+# a tree with the exemption and one without.
+ck "R16 control: at least one of the $TICKS health ticks landed on a running seek ($bstatus status runs < $TICKS)" \
+  '[[ $(ge "$((TICKS - 1))" "$bstatus") == 0 ]]'
+is "R16 D10: healthSkips never left 0 across the busy window" "$bskips" "0"
+is "R16 and healthSkips was readable on every sample" "$bunread" "0"
+is "R16 the player was not restarted (same pid as before the window)" "$(player_pid)" "$PID16"
+is "R16 the intent counter did not move across the busy window" \
+  "$(qa_delta "$(rf 'd["playSeqFirst"]' "$b")" "$(rf 'd["playSeqLast"]' "$b")")" "0"
+is "R16 still playing" "$(svc "d['playing']")" "true"
+
+echo "== R17 two seek-queue decisions the slow tree makes observable"
+# The press that COALESCES behind a run in flight, and the press refused
+# during the stop ladder. Both decisions are the service's (F-RWD-19) and
+# both are invisible on a fast helper: the first needs a run in flight at the
+# moment of the press, the second needs the ladder to still be running.
+ipc live >/dev/null 2>&1
+until_eq seek 5 svc "d['controlKind']" || true
+p17=$(ipc back 7)
+is "R17 controlKind says a seek is in flight at the moment of the press" "$(svc "d['controlKind']")" "seek"
+is "R17 the press coalesced rather than spawning" "$(rf 'd["state"]' "$p17")" "queued"
+is "R17 and the queue carries this press's own size" "$(rf 'd["pending"]' "$p17")" "-7"
+ipc stop >/dev/null 2>&1
+s17=$(ipc back 10)
+is "R17 a press during the stop ladder is refused" "$(rf 'd["ok"]' "$s17")" "false"
+is "R17 and the refusal names nothing_playing" "$(rf 'd["error"]["code"]' "$s17")" "nothing_playing"
+
 # The floor (player-scenario.sh's rule): assert how many assertions ran so a
 # check that stops executing turns the run red instead of shortening it.
 # Recount after adding or removing one:
 #   grep -cE '^(is|ck) ' scripts/dev-harness/rewind-scenario.sh  plus the two R6
 #   blocks, MINUS the floor line itself below (it is an `is` line the grep
-#   counts and the counter has not yet reached): 77 + 2 - 1 = 78.
-EXPECTED_CHECKS=78
+#   counts and the counter has not yet reached): 103 + 2 - 1 = 104.
+# (78 before R16 and R17; the 26 new ones are F-RWD-18's.)
+EXPECTED_CHECKS=104
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"
 
 printf '\n== rewind-scenario: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"

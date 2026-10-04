@@ -163,6 +163,112 @@ ShellRoot {
     return parts.join(" ")
   }
 
+  // ---- F-RWD-18. The three names ruling D10 is decided by.
+  //
+  // D10: a seek run does not count as busy for the three-strikes health
+  // restart. The service's health timer reads ONE expression for it, the
+  // `healthBusy` property; `controlRunning` is beside it so an observer can
+  // tell "nothing is running" from "a seek is running", which `healthBusy`
+  // alone cannot (it is false in both).
+  //
+  // Read defensively, like addPlayerState's and numberSnapshot's, because
+  // this harness has to drive a tree that has NEITHER new property: that
+  // comparison is what makes a scenario evidence rather than a claim
+  // (CLAUDE.md rule 10). The sentinel is the STRING "undefined", not false
+  // and not null, because the check these feed is "a seek does not count as
+  // busy" -- and a snapshot that answered `false` for an absent property
+  // would make that check PASS on a tree with no exemption in it at all.
+  // `controlKind` is pre-existing on every tree from M2-02 onward, so it is
+  // the one field here that can still say something useful on a tree
+  // missing the other two.
+  function healthSnapshot(s) {
+    if (!s) return { controlKind: null, controlRunning: "undefined", healthBusy: "undefined",
+                     healthSkips: null, playSeq: null, playerPid: null }
+    return {
+      controlKind: s.controlKind === undefined ? null : String(s.controlKind),
+      controlRunning: s.controlRunning === undefined ? "undefined" : s.controlRunning === true,
+      healthBusy: s.healthBusy === undefined ? "undefined" : s.healthBusy === true,
+      healthSkips: s.healthSkips === undefined ? null : s.healthSkips,
+      playSeq: s.playSeq === undefined ? null : s.playSeq,
+      playerPid: s.playerPid === undefined ? null : s.playerPid
+    }
+  }
+
+  // The watcher behind `healthWatch` / `healthLog`.
+  //
+  // WHY IT SAMPLES IN QML. The decision is only visible WHILE a control
+  // helper runs, and a healthy `player seek` run lasts about 220 ms. One
+  // `run.sh ipc state` round trip is of that same order, so a shell-side
+  // poll lands inside the window by luck -- which is exactly why the old R14
+  // could pass without the exemption existing. This samples inside the shell
+  // process every `healthIntervalMs`, so a 4 s run is seen forty times and
+  // the observation is a measurement rather than a coincidence.
+  //
+  // It tallies TWICE over: by `controlRunning` (the reducer lane's name) and,
+  // in parallel, by `controlKind` (which every tree has). The second tally is
+  // what lets a scenario still prove that a seek really WAS in flight on a
+  // tree that has neither new property, so a red check names the missing
+  // join rather than a missing seek.
+  readonly property int healthIntervalMs: 100
+  property var healthTally: null
+
+  function healthBucket(kind) {
+    var by = harness.healthTally.byKind
+    if (by[kind] === undefined) {
+      by[kind] = { samples: 0, runningTrue: 0, healthBusyTrue: 0, healthBusyFalse: 0, healthBusyUnknown: 0 }
+    }
+    return by[kind]
+  }
+
+  function healthSample() {
+    var t = harness.healthTally
+    if (!t) return
+    var s = harness.healthSnapshot(serviceLoader.item)
+    t.samples++
+    t.ms = Date.now() - t.startedAt
+    if (s.controlRunning === true) t.running.yes++
+    else if (s.controlRunning === false) t.running.no++
+    else t.running.unknown++
+    // "" is the idle slot; null means the tree has no controlKind at all.
+    var kind = s.controlKind === null ? "unknown" : (s.controlKind === "" ? "idle" : s.controlKind)
+    var b = harness.healthBucket(kind)
+    b.samples++
+    if (s.controlRunning === true) b.runningTrue++
+    if (s.healthBusy === true) b.healthBusyTrue++
+    else if (s.healthBusy === false) b.healthBusyFalse++
+    else b.healthBusyUnknown++
+    // A RUN is counted on every change INTO a kind that is not idle, not on
+    // an idle sample between two runs: a reply can hand the slot straight to
+    // the next helper with no idle sample in between (handleControlResult
+    // drains a queued play synchronously), and counting idle gaps would
+    // undercount exactly there.
+    //
+    // The FIRST sample sets `prevKind` and counts no run, because a helper
+    // already in flight when the watch opened was started by something
+    // before the window and is not one of the window's own events. Counting
+    // it inflated `runs.status` by one in the first measurement, which is
+    // exactly the margin R16's "a tick landed on a running seek" check
+    // spends.
+    if (kind !== t.prevKind) {
+      if (kind !== "idle" && t.prevKind !== null) {
+        t.runs[kind] = (t.runs[kind] === undefined ? 0 : t.runs[kind]) + 1
+      }
+      if (t.marks.length < 80) t.marks.push(t.ms + ":" + kind + (t.prevKind === null ? "(open)" : ""))
+      t.prevKind = kind
+    }
+    var skips = Number(s.healthSkips)
+    if (s.healthSkips !== null && isFinite(skips)) {
+      if (skips > t.healthSkipsMax) t.healthSkipsMax = skips
+      t.healthSkipsLast = skips
+    } else {
+      t.healthSkipsUnreadable++
+    }
+    if (t.playSeqFirst === null) t.playSeqFirst = s.playSeq
+    if (t.playerPidFirst === null) t.playerPidFirst = s.playerPid
+    t.playSeqLast = s.playSeq
+    t.playerPidLast = s.playerPid
+  }
+
   function pipSnapshot(s) {
     if (!s) return { available: null, on: null, applying: null, reason: null, playerPid: null, lastOutcome: null }
     return {
@@ -914,6 +1020,33 @@ ShellRoot {
       if (!s || typeof s.seekLive !== "function") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
       return JSON.stringify(s.seekLive())
     }
+    // ---- F-RWD-18. `healthWatch <ms>` starts the sampler and returns at
+    // once; `healthLog` returns what it saw. The caller drives the service in
+    // between (presses, or nothing at all for the quiet control) and reads
+    // the tally once, so no decision is inferred from an IPC round trip that
+    // may have missed the window.
+    function healthWatch(ms: int): string {
+      var window = ms > 0 ? ms : 10000
+      harness.healthTally = {
+        windowMs: window, intervalMs: harness.healthIntervalMs, ms: 0, samples: 0,
+        startedAt: Date.now(), prevKind: null,
+        running: { yes: 0, no: 0, unknown: 0 },
+        byKind: {}, runs: {}, marks: [],
+        healthSkipsMax: 0, healthSkipsLast: null, healthSkipsUnreadable: 0,
+        playSeqFirst: null, playSeqLast: null, playerPidFirst: null, playerPidLast: null
+      }
+      healthWatchTimer.restart()
+      return JSON.stringify({ ok: true, windowMs: window, intervalMs: harness.healthIntervalMs })
+    }
+    function healthLog(): string {
+      if (!harness.healthTally) return JSON.stringify({ ok: false, error: { code: "no_watch" } })
+      var t = harness.healthTally
+      t.watching = healthWatchTimer.running
+      return JSON.stringify(t)
+    }
+    // The same three fields as one reading, for a scenario that wants a
+    // single point rather than a window (and for a human at the prompt).
+    function health(): string { return JSON.stringify(harness.healthSnapshot(serviceLoader.item)) }
     function state(): string {
       var g = guideLoader.item
       var s = serviceLoader.item
@@ -1101,6 +1234,15 @@ ShellRoot {
         out.service.canRewind = s.canRewind === undefined ? null : s.canRewind
         out.service.seekPending = s.seekPending === undefined ? null : s.seekPending
         out.service.seekAtFloor = s.seekAtFloor === undefined ? null : s.seekAtFloor
+        // F-RWD-18. The health exemption's three names, through the same one
+        // function `health`, `healthWatch` and the sampler read, so the
+        // snapshot and the watcher cannot drift apart. The sentinel for an
+        // absent property here is the string "undefined", NOT false: see
+        // healthSnapshot.
+        var hb = harness.healthSnapshot(s)
+        out.service.controlKind = hb.controlKind
+        out.service.controlRunning = hb.controlRunning
+        out.service.healthBusy = hb.healthBusy
       }
       // M5-01: the bar as drawn, glyph to clock, so a scenario asserts
       // `<history glyph> 7 BBC One -1:32` as one string rather than four fields.
@@ -1119,5 +1261,18 @@ ShellRoot {
     interval: 600
     repeat: false
     onTriggered: fakeShell.summon(harness.pluginId, "{}")
+  }
+
+  // F-RWD-18's instrument. Bounded by construction: it stops itself at the
+  // window the caller asked for, so a scenario that dies mid-watch leaves no
+  // sampler running in the shell.
+  Timer {
+    id: healthWatchTimer
+    interval: harness.healthIntervalMs
+    repeat: true
+    onTriggered: {
+      harness.healthSample()
+      if (harness.healthTally && harness.healthTally.ms >= harness.healthTally.windowMs) healthWatchTimer.stop()
+    }
   }
 }
