@@ -8932,6 +8932,434 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     ["Playing BBC One", "Playing BBC One", "up to 0:01 back", "Playing BBC One\n1:32 behind live"])
 })()
 
+// ---- F-RWD-19: the seek queue's decisions, one check each ----
+//
+// Every branch the live-rewind queue used to take inside Service.qml, where
+// no node test could drive it. The scenario observes the OUTCOMES on a real
+// player (R7, R9, R12, R13, R14) and that is calling the shipping path, not
+// mirroring it -- but an outcome is not a decision: a branch could be deleted
+// and the scenario still pass, because the player would have answered the
+// same way. These call Model.seekQueueStep / Model.rewindApply /
+// Model.healthBusy, the functions Service.qml now obeys without choosing, so
+// a mutation of a decision reddens a check.
+//
+// Each check names the mutation that was run against it and the count that
+// mutation produced; the ledger is in the lane report and in QA-RESULTS.
+;(function () {
+  // The world as the service sees it at the moment of the event. Defaults are
+  // the healthy case -- something plays, the slot is free, the throttle has
+  // elapsed -- so each vector below states only the field it is about.
+  function ctx(over) {
+    var c = { playing: true, stopping: false, userStopped: false, controlBusy: false,
+              throttled: false, rewind: null, socket: "/run/s", pendingPlayId: "",
+              currentEntryId: 0, stepS: Model.REWIND_STEP_S }
+    for (var k in (over || {})) c[k] = over[k]
+    return c
+  }
+  function st(over) {
+    var s = { pending: 0, liveQueued: false, atFloor: false }
+    for (var k in (over || {})) s[k] = over[k]
+    return s
+  }
+  const range = { position: 300, floor: 44, ceiling: 418, history: 256, ahead: 118,
+                  behindLive: 92.4, zeroed: true, paused: false, pausedForCache: false, entryId: 7 }
+  const byArgv = function (n) { return ["player", "seek", "--socket", "/run/s", "--by", String(n)] }
+  const liveArgv = ["player", "seek", "--socket", "/run/s", "--live"]
+  // What the IPC verbs and the guide actually read off a plan.
+  function said(plan) {
+    return [plan.reply === null ? null : (plan.reply.ok === true ? plan.reply.state : plan.reply.code),
+            plan.argv]
+  }
+
+  // 1. A press with nothing to seek in is REFUSED, never answered "queued"
+  // (CN15: a refusal is never reported as a success). Three states say
+  // "nothing to seek in" and the stop ladder is two of them: `nowPlaying`
+  // still names the channel while `stopping` or `userStopped` holds, so
+  // `playing` alone would let a press through to a player on its way out.
+  // Mutations: drop the `!alive` return from the press branch -> 2 failures;
+  // `alive = ctx.playing` alone, dropping the stop ladder -> 4 failures.
+  checkCall("F-RWD-19: a press with nothing playing, the player down or the stop ladder running is refused nothing_playing and spawns nothing", function () { return (
+    [said(Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ playing: false }) })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ stopping: true }) })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ userStopped: true }) })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: 10, ctx: ctx({ stopping: true }) }))]) },
+    [["nothing_playing", []], ["nothing_playing", []], ["nothing_playing", []], ["nothing_playing", []]])
+  // The same holds for `live`: the review's verifier found this half still
+  // answering "queued" on a stopping player.
+  checkCall("F-RWD-19: a live request on a stopping or stopped player is refused the same way, not queued", function () { return (
+    [said(Model.seekQueueStep(st(), { kind: "live", ctx: ctx({ playing: false }) })),
+     said(Model.seekQueueStep(st(), { kind: "live", ctx: ctx({ stopping: true }) })),
+     said(Model.seekQueueStep(st(), { kind: "live", ctx: ctx({ userStopped: true }) })),
+     said(Model.seekQueueStep(st(), { kind: "live", ctx: ctx() }))]) },
+    [["nothing_playing", []], ["nothing_playing", []], ["nothing_playing", []], ["applying", liveArgv]])
+  // A refusal keeps the queue exactly as it was: a press that was refused
+  // must not have spent the sum a run in flight is going to carry.
+  checkCall("F-RWD-19: a refused press leaves the queue untouched", function () { return (
+    [Model.seekQueueStep(st({ pending: -20 }), { kind: "press", by: -10, ctx: ctx({ playing: false }) }).state,
+     Model.seekQueueStep(st({ pending: -20, liveQueued: true }), { kind: "live", ctx: ctx({ stopping: true }) }).state]) },
+    [st({ pending: -20 }), st({ pending: -20, liveQueued: true })])
+
+  // 2. The seconds. `Math.round` first, so a fractional press is its nearest
+  // second; what rounds to nothing, or is not a number at all, is
+  // bad_seconds -- and the refusal echoes the argument AS GIVEN, which is
+  // what the verbs' JSON shows the caller.
+  // Mutation: `if (!isFinite(n) || n === 0)` -> `if (false)` -> 1 failure.
+  checkCall("F-RWD-19: a press whose seconds are not a non-zero whole number is refused bad_seconds, echoing the argument as given", function () { return (
+    [said(Model.seekQueueStep(st(), { kind: "press", by: 0, ctx: ctx() })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: 0.4, ctx: ctx() })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: "x", ctx: ctx() })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: null, ctx: ctx() })),
+     Model.seekQueueStep(st(), { kind: "press", by: "x", ctx: ctx() }).reply.requested,
+     said(Model.seekQueueStep(st(), { kind: "press", by: -10.4, ctx: ctx() }))]) },
+    [["bad_seconds", []], ["bad_seconds", []], ["bad_seconds", []], ["bad_seconds", []],
+     "x", ["applying", byArgv(-10)]])
+
+  // 3. The at-floor memory. The helper already said there is nothing behind
+  // the floor; spawning it to hear that again at a held key's repeat rate is
+  // a process five times a second for no movement. FORWARD is not refused by
+  // it, and neither is `live`.
+  // Mutation: delete the at_floor return -> 1 failure.
+  checkCall("F-RWD-19: a backward press while the last reply said at-floor is refused at_floor without spawning; forward and live are not", function () { return (
+    [said(Model.seekQueueStep(st({ atFloor: true }), { kind: "press", by: -10, ctx: ctx({ rewind: range }) })),
+     said(Model.seekQueueStep(st({ atFloor: true }), { kind: "press", by: 10, ctx: ctx({ rewind: range }) })),
+     said(Model.seekQueueStep(st({ atFloor: true }), { kind: "live", ctx: ctx({ rewind: range }) }))]) },
+    [["at_floor", []], ["applying", byArgv(10)], ["applying", liveArgv]])
+
+  // 4. A press after `g` was queued is a new intention: the live request
+  // stood for "forget the sum", so this press starts a new one rather than
+  // adding to a sum that is no longer wanted.
+  // Mutation: `var base = st.liveQueued ? 0 : st.pending` -> `st.pending`
+  // -> 1 failure.
+  checkCall("F-RWD-19: a press after a live request was queued forgets the queued live and starts a new sum", function () { return (
+    [Model.seekQueueStep(st({ pending: -30, liveQueued: true }),
+                         { kind: "press", by: -10, ctx: ctx({ rewind: range, throttled: true }) }).state,
+     Model.seekQueueStep(st({ pending: -30, liveQueued: true }),
+                         { kind: "press", by: -10, ctx: ctx({ rewind: range, throttled: true }) }).reply.pending]) },
+    [st({ pending: -10 }), -10])
+
+  // 5. Presses coalesce into ONE signed sum through Model.coalesceSeek, and
+  // the step is THIS request's size: `back 30` is thirty seconds. The first
+  // version handed the coalescer the 10 s constant for every request and
+  // every verb seeked ten seconds whatever its argument (F-RWD-17).
+  // Mutation: `step: Math.abs(n)` -> `step: REWIND_STEP_S` -> 1 failure.
+  checkCall("F-RWD-19: presses coalesce into one signed sum with THIS request's size as the step (F-RWD-17)", function () { return (
+    [Model.seekQueueStep(st({ pending: -10 }), { kind: "press", by: -10, ctx: ctx({ rewind: range, controlBusy: true }) }).reply.pending,
+     Model.seekQueueStep(st({ pending: 0 }), { kind: "press", by: -30, ctx: ctx({ rewind: range, controlBusy: true }) }).reply.pending,
+     Model.seekQueueStep(st({ pending: -20 }), { kind: "press", by: 10, ctx: ctx({ rewind: range, controlBusy: true }) }).reply.pending,
+     // The cap is the last-read history, and one step below it at least: a
+     // sub-second window still runs the helper and hears the floor.
+     Model.seekQueueStep(st({ pending: -250 }), { kind: "press", by: -10, ctx: ctx({ rewind: range, controlBusy: true }) }).reply.pending,
+     Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: { history: 0.4 }, controlBusy: true }) }).reply.pending,
+     // No range read yet is NO cap: the first press after a zap must run.
+     Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: null, controlBusy: true }) }).reply.pending]) },
+    [-20, -30, -10, -256, -10, -10])
+
+  // 6. The spawn gate: the slot must be free AND the throttle elapsed.
+  // Either one shut and the press is QUEUED and says so -- "queued", with
+  // the sum, never "applying" for a run that did not start.
+  // Mutation: drop `ctx.throttled` from the gate -> 3 failures.
+  checkCall("F-RWD-19: a spawn happens only when the slot is free and the throttle has elapsed; otherwise the press is queued and says so", function () { return (
+    [said(Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: range }) })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: range, controlBusy: true }) })),
+     said(Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: range, throttled: true }) })),
+     // An applying press has spent the sum; a queued one still holds it.
+     Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: range }) }).state.pending,
+     Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx({ rewind: range, throttled: true }) }).state.pending]) },
+    [["applying", byArgv(-10)], ["queued", []], ["queued", []], 0, -10])
+
+  // 7. A forward request is a reason to try backward again afterwards; the
+  // reply will say if the floor is still there.
+  // Mutation: `st.pending > 0 ? false : st.atFloor` -> `st.atFloor`
+  // -> 1 failure.
+  //
+  // F-RWD-21 (filed by this lane, see the report): `live` does NOT clear it
+  // at the issue, only its reply does. That asymmetry is the tree as it
+  // shipped and is pinned here as such rather than changed under a refactor.
+  checkCall("F-RWD-19: a forward request clears the at-floor memory at the issue; a live request does not until its reply", function () { return (
+    [Model.seekQueueStep(st({ pending: 10, atFloor: true }), { kind: "issue", ctx: ctx() }).state.atFloor,
+     Model.seekQueueStep(st({ pending: -10, atFloor: true }), { kind: "issue", ctx: ctx() }).state.atFloor,
+     Model.seekQueueStep(st({ liveQueued: true, atFloor: true }), { kind: "issue", ctx: ctx() }).state.atFloor]) },
+    [false, true, true])
+
+  // 8. `live` REPLACES the pending sum rather than adding to it: it is the
+  // one request that is not a sum.
+  // Mutation: `{ pending: 0, liveQueued: true }` -> `{ pending: st.pending,
+  // liveQueued: true }` -> 1 failure.
+  checkCall("F-RWD-19: a live request replaces the pending sum rather than adding to it", function () { return (
+    [Model.seekQueueStep(st({ pending: -30 }), { kind: "live", ctx: ctx({ throttled: true }) }).state,
+     said(Model.seekQueueStep(st({ pending: -30 }), { kind: "live", ctx: ctx({ throttled: true }) })),
+     // And when it does spawn, the argv is --live, not the sum it replaced.
+     said(Model.seekQueueStep(st({ pending: -30 }), { kind: "live", ctx: ctx() }))]) },
+    [st({ liveQueued: true }), ["queued", []], ["applying", liveArgv]])
+
+  // 9. An issue attempt on a player that is gone clears the readout and
+  // spawns nothing: the queue was aimed at a stream that no longer exists,
+  // and a reading of how far behind it we are is a reading of nothing.
+  // Mutation: in the issue branch, `if (!alive)` -> `if (false)`
+  // -> 1 failure.
+  checkCall("F-RWD-19: an issue attempt on a player that is gone clears the readout, empties the queue and spawns nothing", function () { return (
+    [Model.seekQueueStep(st({ pending: -30, atFloor: true }), { kind: "issue", ctx: ctx({ playing: false }) }),
+     Model.seekQueueStep(st({ liveQueued: true }), { kind: "issue", ctx: ctx({ userStopped: true }) }).clearReadout,
+     // Nothing queued is nothing to do, and that is NOT a clear: the readout
+     // belongs to a player that is still there.
+     Model.seekQueueStep(st(), { kind: "issue", ctx: ctx({ playing: false }) }).clearReadout]) },
+    [{ state: st(), reply: null, argv: [], apply: false, announce: false,
+       clearReadout: true, restartThrottle: false, readout: null },
+     true, false])
+
+  // 10. An argv that rounds to nothing spawns nothing: Model.playerSeekArgv
+  // answers [] for a request that asks for nothing, and the helper is never
+  // spawned with no verb. The sum is spent either way, which is what the
+  // tree did before this refactor -- and `pending` in the reply reports what
+  // is STILL waiting, which is how all three answers (spawned, held back,
+  // spent on nothing) stay the ones the tree gave before the move.
+  // Mutations: build the argv inline instead of calling playerSeekArgv
+  // -> 1 failure; `pending: pressIssue.state.pending` -> `pending: sum`
+  // -> 1 failure.
+  checkCall("F-RWD-19: an argv that rounds to nothing spawns nothing, and the sum is spent all the same", function () { return (
+    [Model.seekQueueStep(st({ pending: 0.4 }), { kind: "issue", ctx: ctx() }).argv,
+     Model.seekQueueStep(st({ pending: 0.4 }), { kind: "issue", ctx: ctx() }).state,
+     // And nothing queued at all never reaches the argv builder.
+     said(Model.seekQueueStep(st(), { kind: "issue", ctx: ctx() })),
+     // A press whose sum rounds to nothing is the same case reached from a
+     // key: the sum is spent, nothing runs, and `pending` reports what is
+     // STILL waiting -- 0 -- rather than the 0.4 that was asked for. The
+     // vector is a capped back sum (-9.6, one step below a 9.6 s window) and
+     // then a forward press over it.
+     Model.coalesceSeek({ pending: -5, press: -5, history: 9.6, step: 5 }),
+     said(Model.seekQueueStep(st({ pending: -9.6 }), { kind: "press", by: 10, ctx: ctx({ rewind: { position: 300, history: 9.6 } }) })),
+     Model.seekQueueStep(st({ pending: -9.6 }), { kind: "press", by: 10, ctx: ctx({ rewind: { position: 300, history: 9.6 } }) }).reply.pending]) },
+    [[], st(), [null, []], -9.6, ["queued", []], 0])
+
+  // 11. A reply that describes a stream the user has already left applies
+  // nothing and announces nothing: play() cleared the readout when the zap
+  // was asked for, so writing these numbers back would put the OLD stream's
+  // clock on the new channel's bar for up to a health tick. The throttle
+  // still restarts -- a helper did run, and the next one is 300 ms away
+  // whatever this reply was about.
+  // Mutations: `if (ctx.pendingPlayId !== "" || !ctx.playing)` -> `if (false)`
+  // -> 1 failure; widening it to `|| !alive` -> 1 failure.
+  const okReply = { ok: true, kind: "seek", running: true, mode: "by", requested: -10, applied: -10,
+                    refused: false, atFloor: false, atEdge: false, rewind: range }
+  checkCall("F-RWD-19: a reply that arrives with a zap queued, or with nothing playing, applies nothing and announces nothing", function () { return (
+    [[Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).apply,
+      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).announce,
+      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).readout,
+      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ pendingPlayId: "42" }) }).restartThrottle],
+     [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ playing: false }) }).apply,
+      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ playing: false }) }).announce],
+     [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx() }).apply,
+      Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx() }).announce]]) },
+    [[false, false, null, true], [false, false], [true, true]])
+  // The stop ladder is deliberately NOT part of this gate: `stopping` holds
+  // while the player is still answering, and the reply it answered with is
+  // about a stream that is still on screen. This is the gate the service has
+  // always had on this path, and it is pinned so a later tidy cannot widen it
+  // to `alive` without a reader seeing the change.
+  checkCall("F-RWD-19: a reply during the stop ladder is still applied -- the reply gate is `playing`, not the press gate", function () { return (
+    [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ stopping: true }) }).apply,
+     Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ userStopped: true }) }).apply]) },
+    [true, true])
+
+  // 12. The readout rules, shared by the `status`, `pause`, `probe` and
+  // `seek` paths. The entry-id drop: the object is keyed by the player's
+  // entry id (2.2), and a reply in flight across a zap that has already
+  // landed carries the OLD entry's numbers.
+  // Mutation: delete the entryId mismatch return from rewindApply
+  // -> 1 failure.
+  checkCall("F-RWD-19: a reply whose rewind object carries another entry id is dropped rather than shown on the new channel", function () { return (
+    [Model.rewindApply({ status: okReply, currentEntryId: 9, atFloor: false }),
+     Model.rewindApply({ status: okReply, currentEntryId: 7, atFloor: false }).store,
+     // No entry id on either side is no mismatch to find: an older helper's
+     // reply, and the first reply before any start-file event has landed.
+     Model.rewindApply({ status: { ok: true, rewind: { position: 300 } }, currentEntryId: 9, atFloor: false }).store,
+     Model.rewindApply({ status: okReply, currentEntryId: 0, atFloor: false }).store]) },
+    [{ store: false, rewind: null, clear: false, atFloor: false }, true, true, true])
+  // A `running: false` reply clears the readout -- there is no player to be
+  // behind. A reply that carries no `rewind` field at all leaves the last
+  // reading ALONE rather than inventing one (rule 10): an older helper, or a
+  // refusal with no player, is not a statement that the window is empty.
+  // Mutations: `running === false` -> return idle -> 1 failure;
+  // drop the `status.rewind === undefined` return -> 1 failure.
+  checkCall("F-RWD-19: running false clears the readout; a reply carrying no rewind field leaves the last reading alone", function () { return (
+    [Model.rewindApply({ status: { ok: true, running: false }, currentEntryId: 7, atFloor: false }),
+     Model.rewindApply({ status: { ok: true, running: true }, currentEntryId: 7, atFloor: false }),
+     Model.rewindApply({ status: { ok: false, error: { code: "not_running" } }, currentEntryId: 7, atFloor: false }),
+     Model.rewindApply({ status: null, currentEntryId: 7, atFloor: false }),
+     // A reply that DOES carry the field with no position in it is a reading
+     // of "none": stored as null, which is absent and never zero.
+     Model.rewindApply({ status: { ok: true, running: true, rewind: { floor: 44 } }, currentEntryId: 7, atFloor: false })]) },
+    [{ store: false, rewind: null, clear: true, atFloor: false },
+     { store: false, rewind: null, clear: false, atFloor: false },
+     { store: false, rewind: null, clear: false, atFloor: false },
+     { store: false, rewind: null, clear: false, atFloor: false },
+     { store: true, rewind: null, clear: false, atFloor: false }])
+  // The stored object is COERCED, through Model.parseRewind, on every path:
+  // a string in a numeric field would otherwise reach the composers. The
+  // first version of applyRewind stored the reply object raw (the M5-01
+  // review's sinks lens).
+  // Mutation: `rewind: parsed` -> `rewind: status.rewind` -> 2 failures.
+  checkCall("F-RWD-19: the stored reading is coerced through parseRewind, so no string from the stream reaches the composers", function () { return (
+    Model.rewindApply({ status: { ok: true, running: true,
+                                  rewind: { position: "390.617", behindLive: "10", zeroed: "true", entryId: "7" } },
+                        currentEntryId: 7, atFloor: false }).rewind) },
+    { position: 390.617, floor: null, ceiling: null, history: null, ahead: null,
+      behindLive: 10, zeroed: false, paused: false, pausedForCache: false, entryId: 7 })
+
+  // 13. The at-floor memory after a reply. Two rules, in this order: the
+  // readout clears it when the history has grown back past a step (the
+  // stream filled, or the user moved), and then the helper's OWN verdict
+  // outranks that, because this reply is the newest word on whether there is
+  // room behind.
+  // Mutations: `parsed.history >= step` -> `>= 0` -> 1 failure;
+  // delete `if (status.ok === true) floor = status.atFloor === true` from the
+  // reply branch -> 1 failure.
+  const atFloorReply = { ok: true, kind: "seek", running: true, mode: "by", requested: -10, applied: 0,
+                         refused: true, atFloor: true, atEdge: false,
+                         rewind: { position: 46, floor: 44, ceiling: 418, history: 2, behindLive: 372, entryId: 7 } }
+  checkCall("F-RWD-19: the at-floor memory is set from the reply's own verdict, and the readout clears it only once the history is a step deep again", function () { return (
+    [Model.seekQueueStep(st(), { kind: "reply", status: atFloorReply, ctx: ctx({ currentEntryId: 7 }) }).state.atFloor,
+     Model.seekQueueStep(st({ atFloor: true }), { kind: "reply", status: okReply, ctx: ctx({ currentEntryId: 7 }) }).state.atFloor,
+     // The readout's own clear, in isolation: a step deep clears it, a
+     // shallower window does not, and neither does a reply with no reading.
+     Model.rewindApply({ status: okReply, currentEntryId: 7, atFloor: true, stepS: Model.REWIND_STEP_S }).atFloor,
+     Model.rewindApply({ status: atFloorReply, currentEntryId: 7, atFloor: true, stepS: Model.REWIND_STEP_S }).atFloor,
+     Model.rewindApply({ status: { ok: true, running: true, rewind: { position: 300 } }, currentEntryId: 7, atFloor: true }).atFloor,
+     Model.rewindApply({ status: { ok: true, running: false }, currentEntryId: 7, atFloor: true }).atFloor]) },
+    [true, false, false, true, true, true])
+
+  // 14. The throttle counts from the REPLY, not from the press: a held key
+  // repeats at about 30 Hz and the presses in between coalesce, so the
+  // throttle costs no movement, only processes.
+  // Mutation: `restartThrottle: true` on the reply branch -> `false`
+  // -> 1 failure.
+  checkCall("F-RWD-19: the 300 ms throttle restarts from the reply and from no other event", function () { return (
+    [Model.seekQueueStep(st(), { kind: "reply", status: okReply, ctx: ctx({ currentEntryId: 7 }) }).restartThrottle,
+     Model.seekQueueStep(st(), { kind: "press", by: -10, ctx: ctx() }).restartThrottle,
+     Model.seekQueueStep(st(), { kind: "live", ctx: ctx() }).restartThrottle,
+     Model.seekQueueStep(st({ pending: -10 }), { kind: "issue", ctx: ctx() }).restartThrottle,
+     Model.seekQueueStep(st(), { kind: "clear", ctx: ctx() }).restartThrottle]) },
+    [true, false, false, false, false])
+
+  // 15. `clear` -- play(), stop(), the socket's EOF. Every loadfile empties
+  // the cache and restarts the timeline at zero (spike 11.1), so the readout
+  // goes absent, the at-floor memory goes with it, and a seek that was
+  // waiting its turn was aimed at the stream this one replaces.
+  // Mutation: keep `atFloor: st.atFloor` instead of resetting it
+  // -> 1 failure.
+  checkCall("F-RWD-19: clear empties all three fields and takes the readout with them, whatever the world looks like", function () { return (
+    [Model.seekQueueStep(st({ pending: -40, liveQueued: true, atFloor: true }), { kind: "clear", ctx: ctx() }),
+     Model.seekQueueStep(st({ pending: -40, liveQueued: true, atFloor: true }),
+                         { kind: "clear", ctx: ctx({ playing: false, controlBusy: true, throttled: true }) }).state]) },
+    [{ state: st(), reply: null, argv: [], apply: false, announce: false,
+       clearReadout: true, restartThrottle: false, readout: null },
+     st()])
+
+  // 16. Is anything waiting? One expression, read by the reply handler that
+  // defers a drive of the queue AND by the issue branch's own first gate, so
+  // the deferral and the gate cannot drift apart.
+  // Mutation: `st.liveQueued || st.pending !== 0` -> `st.pending !== 0`
+  // -> 5 failures (the deferral AND the four places a queued live has to
+  // survive: the gate shares this one expression with them).
+  checkCall("F-RWD-19: seekQueuePending is the one answer to `is anything waiting`, and a queued live counts", function () { return (
+    [Model.seekQueuePending(st()), Model.seekQueuePending(st({ pending: -10 })),
+     Model.seekQueuePending(st({ liveQueued: true })), Model.seekQueuePending(st({ pending: 0.4 })),
+     Model.seekQueuePending(null)]) },
+    [false, true, true, true, false])
+
+  // 17. Ruling D10, the health exemption, as a predicate. A running control
+  // slot is a strike against the three-strikes restart UNLESS it is a seek:
+  // the restart guards a helper that never returns, which the 8 s control
+  // watchdog terminates, and a slot re-occupied every few hundred
+  // milliseconds by a sub-second verb under a held key is the benign case it
+  // must not punish. The service exposes this as ONE property the health
+  // timer reads, and `controlRunning` beside it, so an observer can tell
+  // "nothing running" from "a seek running" -- healthBusy is false in both,
+  // and a check that cannot distinguish them cannot go red for a missing
+  // exemption (F-RWD-18).
+  // Mutation: `str(o.kind) !== "seek"` -> `true` -> 2 failures.
+  checkCall("F-RWD-19 / D10: a running seek is not busy for the health tick; a running pause, status, play or tracks is", function () { return (
+    [Model.healthBusy({ running: true, kind: "seek" }),
+     Model.healthBusy({ running: true, kind: "pause" }),
+     Model.healthBusy({ running: true, kind: "status" }),
+     Model.healthBusy({ running: true, kind: "play" }),
+     Model.healthBusy({ running: true, kind: "tracks" }),
+     Model.healthBusy({ running: true, kind: "" }),
+     Model.healthBusy({ running: false, kind: "seek" }),
+     Model.healthBusy({ running: false, kind: "status" }),
+     Model.healthBusy(null)]) },
+    [false, true, true, true, true, true, false, false, false])
+  // And the exemption composed with the tick it feeds: three seek ticks are
+  // three no-ops, three status ticks are the restart. This is the pair
+  // F-RWD-18's R14 cannot distinguish inside a 1.2 s burst.
+  checkCall("F-RWD-19 / D10: three ticks under a held seek never restart the player; three under any other verb do", function () { return (
+    [[0, 1, 2].reduce(function (acc, i) {
+       var t = Model.healthTick(acc.skips, Model.healthBusy({ running: true, kind: "seek" }))
+       return { skips: t.skips, restarts: acc.restarts + (t.restart ? 1 : 0), checks: acc.checks + (t.check ? 1 : 0) }
+     }, { skips: 0, restarts: 0, checks: 0 }),
+     [0, 1, 2].reduce(function (acc, i) {
+       var t = Model.healthTick(acc.skips, Model.healthBusy({ running: true, kind: "status" }))
+       return { skips: t.skips, restarts: acc.restarts + (t.restart ? 1 : 0), checks: acc.checks + (t.check ? 1 : 0) }
+     }, { skips: 0, restarts: 0, checks: 0 })]) },
+    [{ skips: 0, restarts: 0, checks: 3 }, { skips: 0, restarts: 1, checks: 0 }])
+
+  // 18. The refusal reply, and the join to what the guide shows: the IPC
+  // verbs JSON.stringify this object and the footer composes its transient
+  // from it, so the shape is checked by handing it to the composer rather
+  // than by reading its keys back (rule 14). `nothing_playing` is the one
+  // code the composer has a sentence for; the others reach statusReason's
+  // fallback, which is correct for them -- `at_floor` never travels this way
+  // (the guide recomposes it as the floor sentence at the keypress, and the
+  // service never emits an at_floor refusal through seekReplied) and
+  // `bad_seconds` is a verb's answer to its own caller, not a footer line.
+  // Mutation: drop the `error: { code }` member -> 1 failure.
+  checkCall("F-RWD-19: the refusal the verbs serialise is the one the footer can read a sentence out of", function () { return (
+    [Model.seekRefusal(-10, "nothing_playing", null),
+     Model.seekTransientText(Model.seekRefusal(-10, "nothing_playing", null), "The player is busy"),
+     Model.seekTransientText(Model.seekRefusal(-10, "at_floor", range), "The player is busy"),
+     Model.seekTransientText(Model.seekRefusal(0, "bad_seconds", null), "The player is busy"),
+     Model.seekRefusal("live", "nothing_playing").rewind]) },
+    [{ ok: false, kind: "seek", requested: -10, code: "nothing_playing",
+       error: { code: "nothing_playing" }, rewind: null },
+     "Nothing playing", "Unknown error", "Unknown error", null])
+
+  // 19. The two gates the service declares as bindings. `b back` is hinted
+  // whenever something plays and the last range read is non-empty (2.5): a
+  // rewind pressed inside the first seconds of a zap lands on the first
+  // keyframe and moves nothing (spike 11.1). null history is "no range read
+  // yet", which is not a window.
+  // Mutation: `Number(r.history) > 0` -> `>= 0` -> 1 failure.
+  checkCall("F-RWD-19: canRewind needs something playing AND a non-empty range read, and reads a missing history as no window", function () { return (
+    [Model.canRewindNow({ playing: true, rewind: range }),
+     Model.canRewindNow({ playing: false, rewind: range }),
+     Model.canRewindNow({ playing: true, rewind: null }),
+     Model.canRewindNow({ playing: true, rewind: { position: 300, history: 0 } }),
+     Model.canRewindNow({ playing: true, rewind: { position: 300, history: null } }),
+     Model.canRewindNow({ playing: true, rewind: { position: 300 } }),
+     Model.canRewindNow({ playing: true, rewind: { position: 300, history: 0.4 } }),
+     Model.canRewindNow(null)]) },
+    [true, false, false, false, false, false, true, false])
+  // The 1 Hz count-up runs only while paused with a reading to count from;
+  // while playing nothing re-renders at all (2.3).
+  // Mutation: drop the `rewind` term -> 1 failure.
+  checkCall("F-RWD-19: the paused count-up's clock runs only while paused with a reading to count from", function () { return (
+    [Model.behindTickRunning({ paused: true, rewind: range }),
+     Model.behindTickRunning({ paused: true, rewind: null }),
+     Model.behindTickRunning({ paused: false, rewind: range }),
+     Model.behindTickRunning(null)]) },
+    [true, false, false, false])
+
+  // 20. An event the queue does not know does nothing at all -- it does not
+  // clear, spawn or answer. A typo'd kind is a no-op, never a readout wipe.
+  // Mutation: the final fall-through returns a clearing plan -> 1 failure.
+  checkCall("F-RWD-19: an unknown event kind is a no-op: no reply, no argv, no clear", function () { return (
+    [Model.seekQueueStep(st({ pending: -10, atFloor: true }), { kind: "nonsense", ctx: ctx() }),
+     Model.seekQueueStep(st({ pending: -10 }), null).argv]) },
+    [{ state: st({ pending: -10, atFloor: true }), reply: null, argv: [], apply: false,
+       announce: false, clearReadout: false, restartThrottle: false, readout: null },
+     []])
+})()
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")

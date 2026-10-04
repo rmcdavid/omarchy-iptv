@@ -1919,6 +1919,114 @@ TestCase {
     verify(osd.indexOf("5:00") >= 0, "the OSD carries the number: " + osd)
   }
 
+  // F-RWD-19: the seek queue's reducer, inside the Qt QML engine. The node
+  // suite drives every decision (tests/Model.test.js, the F-RWD-19 section);
+  // what this adds is the two things node cannot say.
+  //
+  // One: the functions RUN in the QML engine. Model.js is loaded by node and
+  // by Qt, and a construct node accepts and Qt does not would make the whole
+  // queue a silent no-op in the shipping shell while the node suite stayed
+  // green.
+  //
+  // Two: the plan's field NAMES are the join to Service.qml, and nothing
+  // else verifies it. The service reads `plan.state.pending`,
+  // `.state.liveQueued`, `.state.atFloor`, `.reply`, `.argv`,
+  // `.clearReadout`, `.restartThrottle`, `.readout.store`, `.readout.clear`,
+  // `.readout.rewind` and `.announce` by name; a rename in Model.js reads as
+  // `undefined` in QML and the queue stops working without a single error
+  // (rule 13: wherever two things are joined by a name, nothing verifies the
+  // join). This makes that join a call.
+  //
+  // What it CANNOT do is instantiate Service.qml and call seekBy / seekLive
+  // for real: Quickshell's core plugin lives inside the quickshell binary and
+  // `import Quickshell` fails under qmltestrunner (measured -- "module
+  // \"Quickshell\" plugin \"quickshell-coreplugin\" not found"). So the
+  // service's own obedience to these plans is UNVERIFIED by any test and is
+  // observed by the M5-01 scenario on a real player instead (rule 14).
+  function test_seekQueueReducer() {
+    var ctx = { playing: true, stopping: false, userStopped: false, controlBusy: false,
+                throttled: false, rewind: null, socket: "/run/s", pendingPlayId: "",
+                currentEntryId: 0, stepS: Model.REWIND_STEP_S }
+    var idle = { pending: 0, liveQueued: false, atFloor: false }
+
+    // The plan's shape, exactly as Service.qml reads it.
+    var plan = Model.seekQueueStep(idle, { kind: "press", by: -10, ctx: ctx })
+    compare(JSON.stringify(Object.keys(plan).sort()),
+            JSON.stringify(["announce", "apply", "argv", "clearReadout", "readout", "reply", "restartThrottle", "state"]))
+    compare(JSON.stringify(Object.keys(plan.state).sort()), JSON.stringify(["atFloor", "liveQueued", "pending"]))
+    compare(JSON.stringify(plan.argv), JSON.stringify(["player", "seek", "--socket", "/run/s", "--by", "-10"]))
+    compare(plan.reply.state, "applying")
+    compare(plan.reply.pending, 0)
+
+    // A refusal: no argv, and the reply the IPC verbs serialise.
+    var gone = Model.seekQueueStep(idle, { kind: "press", by: -10,
+                                           ctx: { playing: false, socket: "/run/s" } })
+    compare(gone.argv.length, 0)
+    compare(gone.reply.ok, false)
+    compare(gone.reply.code, "nothing_playing")
+
+    // Queued behind the throttle: the sum survives, the answer says so.
+    var held = Model.seekQueueStep({ pending: -10, liveQueued: false, atFloor: false },
+                                   { kind: "press", by: -10,
+                                     ctx: { playing: true, throttled: true, socket: "/run/s",
+                                            rewind: { position: 300, history: 256 } } })
+    compare(held.reply.state, "queued")
+    compare(held.state.pending, -20)
+    compare(held.argv.length, 0)
+
+    // `live` replaces the sum; the at-floor refusal spawns nothing.
+    var live = Model.seekQueueStep({ pending: -30, liveQueued: false, atFloor: false },
+                                   { kind: "live", ctx: ctx })
+    compare(JSON.stringify(live.argv), JSON.stringify(["player", "seek", "--socket", "/run/s", "--live"]))
+    compare(live.state.pending, 0)
+    compare(Model.seekQueueStep({ pending: 0, liveQueued: false, atFloor: true },
+                                { kind: "press", by: -10, ctx: ctx }).reply.code, "at_floor")
+
+    // `clear` -- play(), stop(), the socket's EOF.
+    var cleared = Model.seekQueueStep({ pending: -40, liveQueued: true, atFloor: true },
+                                      { kind: "clear", ctx: ctx })
+    compare(cleared.clearReadout, true)
+    compare(JSON.stringify(cleared.state), JSON.stringify(idle))
+
+    // A reply: the readout plan and the announcement, and the stale gate.
+    var reply = { ok: true, kind: "seek", running: true, mode: "by", requested: -10, applied: -10,
+                  refused: false, atFloor: false, atEdge: false,
+                  rewind: { position: 300, floor: 44, ceiling: 418, history: 256, ahead: 118,
+                            behindLive: 92.4, zeroed: true, paused: false, pausedForCache: false, entryId: 7 } }
+    var applied = Model.seekQueueStep(idle, { kind: "reply", status: reply,
+                                              ctx: { playing: true, currentEntryId: 7, pendingPlayId: "" } })
+    compare(applied.announce, true)
+    compare(applied.restartThrottle, true)
+    compare(JSON.stringify(Object.keys(applied.readout).sort()),
+            JSON.stringify(["atFloor", "clear", "rewind", "store"]))
+    compare(applied.readout.store, true)
+    compare(applied.readout.rewind.behindLive, 92.4)
+    var stale = Model.seekQueueStep(idle, { kind: "reply", status: reply,
+                                            ctx: { playing: true, currentEntryId: 7, pendingPlayId: "42" } })
+    compare(stale.announce, false)
+    compare(stale.readout, null)
+    compare(stale.restartThrottle, true)
+
+    // The entry-id drop, and the readout's own rules.
+    compare(Model.rewindApply({ status: reply, currentEntryId: 9, atFloor: false }).store, false)
+    compare(Model.rewindApply({ status: { ok: true, running: false }, currentEntryId: 7, atFloor: false }).clear, true)
+    compare(Model.rewindApply({ status: { ok: true, running: true }, currentEntryId: 7, atFloor: false }).clear, false)
+
+    // Ruling D10, the one expression the service declares as `healthBusy`.
+    compare(Model.healthBusy({ running: true, kind: "seek" }), false)
+    compare(Model.healthBusy({ running: true, kind: "status" }), true)
+    compare(Model.healthBusy({ running: false, kind: "status" }), false)
+
+    // The two gates the service declares as bindings.
+    compare(Model.canRewindNow({ playing: true, rewind: { position: 300, history: 256 } }), true)
+    compare(Model.canRewindNow({ playing: true, rewind: { position: 300, history: 0 } }), false)
+    compare(Model.canRewindNow({ playing: false, rewind: { position: 300, history: 256 } }), false)
+    compare(Model.behindTickRunning({ paused: true, rewind: { position: 300 } }), true)
+    compare(Model.behindTickRunning({ paused: true, rewind: null }), false)
+    compare(Model.seekQueuePending({ liveQueued: true, pending: 0 }), true)
+    compare(Model.seekQueuePending(idle), false)
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)
