@@ -764,7 +764,16 @@ Then the C pair itself, which is the entire measured cost of the loosening:
   and on 47 of them the two tokens are different channels** -- 45%. On the
   226 shipping pairs, 79 carry both and **32 disagree**. On the 255-pair
   loosened run, 96 carry both and 43 disagree.
-- **F-EPG-11: "the playlist row already carries that id" is two oracles, not
+(Note on the id: this finding was written as F-EPG-11 by the lane that found
+it, on the same day the matcher lane coined F-EPG-11 for the address strategy
+itself. Two lanes, one afternoon, one number -- the join-by-name failure rule
+13 names, arriving by the one route the ledger cannot catch, because neither
+id existed in a tracked document while either lane was working. The lead gave
+this one F-EPG-14 at integration, the matcher's keeps F-EPG-11 because it is
+embedded in shipped code comments and test names, and the next round that
+spawns parallel lanes hands each a reserved block of ids.)
+
+- **F-EPG-14: "the playlist row already carries that id" is two oracles, not
   one, and they disagree 45% of the time where both exist.** Part I's grade
   table reads the stream first and the logo only as a fallback, which is a
   choice no sentence in Part I defends. Every C grade, and therefore the
@@ -840,7 +849,7 @@ Each gets its id on the day it is written (rule 13). **This lane does not own
 branch until they land. Dropping the ids to make the gate green is the
 D-REL-3 failure and is not on the table.
 
-1. **F-EPG-11: the id oracle is two oracles and they disagree 45% of the
+1. **F-EPG-14: the id oracle is two oracles and they disagree 45% of the
    time.** 105 of 1,453 rows carry a 24-hex token in both the stream and the
    logo address; on 47 of them the two name different channels. Part I's
    grading reads the stream first and the logo as a fallback without saying
@@ -861,7 +870,7 @@ D-REL-3 failure and is not on the table.
    Section 9.
 
 ```
-| F-EPG-11 | P2 | M4-01 | docs/QA-EPG-PRECISION.md 14.1 and 15 (frozen inputs, --id-split) | open |
+| F-EPG-14 | P2 | M4-01 | docs/QA-EPG-PRECISION.md 14.1 and 15 (frozen inputs, --id-split) | open |
 | F-EPG-12 | P3 | M4-01 | docs/QA-EPG-PRECISION.md 13 and 15 | open |
 | F-EPG-13 | P3 | M4-01 | docs/QA-EPG-PRECISION.md 9 and 15 | open, documentation |
 ```

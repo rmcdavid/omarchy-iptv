@@ -11274,3 +11274,121 @@ the feature that answers it was called M5-01 everywhere. A row answered by a
 whole milestone rather than by a fix is invisible to that check, which is
 the same join-by-name shape rule 13 is about, one level up again.
 
+## F-EPG-11: the matcher reads the id the row's own address names, 2026-10-04
+
+The guide-data feature paired 226 of the owner's 1,453 channels, every one
+of them by NAME, while a declared guide channel id sat verbatim in the
+stream URL of 193 rows and nothing read it. Worse, that id was the ORACLE
+the M4-01 precision audit graded the matcher with. Two lanes: one to build
+the strategy, one to build a grader that would still work once the oracle
+became an input.
+
+### What the measurement said before anything was built
+
+Of the 193 rows whose stream address names a declared guide channel:
+
+| | rows |
+|---|---|
+| already paired with THAT SAME guide channel by name | 153 |
+| paired with a DIFFERENT guide channel | **0** |
+| paired with nothing today | 40 |
+
+An empty disagreement set is the strongest safety evidence available: on
+real data the address never overrules the name, it only fills in. The
+mapping is exactly one-to-one in both directions -- no guide id is claimed
+by two rows, no row carries two. The brief's baseline of 227 was wrong and
+both lanes corrected it to 226 before measuring anything (F-EPG-13).
+
+### What landed
+
+An ADDRESS strategy in `match_xmltv_channel`, ranked below the declared
+tvg-id and the feed base and above the name: an alphanumeric run of at
+least twelve characters in the row's STREAM url that equals a declared
+guide id. It names no provider, no host and no id shape; the fixture
+carries a non-hex id on purpose and a test asserts it is not hex before
+asserting it matched. The logo is deliberately not read, which was measured
+rather than argued: recall cost zero, and seven of the eight logo-only rows
+stream from a different distributor than their artwork.
+
+| | before | after |
+|---|---|---|
+| matched, of 1,453 | 226 | **265** |
+| by address | 0 | 185 |
+| by name | 226 | 80 |
+| independently confirmed (schedule oracle) | 90 | **110** |
+| contradicted (schedule oracle) | 0 | **0** |
+| python suite | 825 | 843 |
+
+The twelve-character floor is a collision guard and was chosen from a census
+rather than a hunch: the longest word-like token shared by two or more rows
+is eight characters, and every floor from eight to twenty-four reaches the
+same 193 guide ids, so the guard costs no recall.
+
+One pair MOVED rather than appeared: the guide declares one `Heartland`
+and two rows want it. `Heartland.us@Web` streams the address that IS that
+guide id; `Heartland.us@Eastern` held it by name. The address wins and the
+address is right. So the headline is +40, -1.
+
+Budget, measured not assumed: `parse_m3u` over 10,000 channels is unchanged
+at 512 ms before and 507 ms after, because the new work is not on that
+path; `build_alias`, which runs once per guide fetch, goes 56.5 ms to
+78.7 ms per 10,000 rows, and the `epg` verb on the owner's real data moves
+about 10 ms, inside the run-to-run spread.
+
+### The oracle, which is the half that would have been easy to skip
+
+The moment the matcher reads the id, the id oracle grades 193 of the 265
+pairs by being the thing that produced them -- and because the mapping is
+one-to-one, the other 80 rows carry no declared id at all, so it grades
+them not weakly but NOT AT ALL. The audit would have become a test that
+cannot go red, which is the D-GS-3 shape this project has shipped before.
+
+The replacement reads the PROGRAMME SCHEDULE, the half of the XMLTV file
+the matcher never opens, and never uses a name as a confirming arm -- a
+name-confirming grader can never go red on a name-matched pair. It was
+calibrated against 65 hand-read pairings, proven by three named mutations
+that each disable one arm (turning off the prose-marker arm makes it
+CONFIRM the known-wrong Bloomberg pair; turning off the title-echo arm
+drops confirmations from 226 to 0), and the forbidden name-based grader is
+kept runnable beside it as the anti-pattern, where it scores a flawless
+226 of 226 and confirms the known-wrong pair too.
+
+Graded through it, the new matcher is 265 pairs, 110 confirmed, 0
+contradicted. The old one was 226 pairs, 90 confirmed, 0 contradicted.
+
+### The three findings this round was also meant to settle
+
+- **F-EPG-8 is fixed.** The address joins `Tennis Channel +2 (720p)` to the
+  guide's `TennisChannel 2` without reading either name, and the test still
+  asserts that no name key can join them, so the reason is kept rather than
+  deleted. The oracle lane measured why the obvious fix is wrong: a
+  space-insensitive key puts the guide's channel on the row that carries no
+  id while the row carrying the guide's own id stays blank.
+- **F-EPG-7 is re-priced, not settled.** It used to buy 29 rows for one
+  contradicted pair. Thirty of its rows are now in by address, so it buys
+  ONE row, that row is confirmable by no oracle we have, and its cost is
+  one pair whose wrongness rests on the stream id while the logo id merely
+  shrugs (F-EPG-14). Both lanes recommend not taking it.
+- **F-EPG-10 is measured at zero cost in both directions.** No guide
+  declaration anywhere in the data carries a bracket span, counting every
+  display-name and not just the first, and deleting the bracket branch
+  produces the same 226 pairs with every grade unchanged.
+
+### What the round cost in new findings
+
+F-EPG-14 (the id oracle is two oracles, disagreeing on 47 of 105 rows that
+carry a token in both fields), F-EPG-12 (31 of the shipping pairs are
+confirmed by no oracle at all, which is this project's real residual on
+guide precision and has never been a number), and F-EPG-13 (three numbers
+in the M4-01 audit do not survive re-measurement, and the first of them
+propagated into this round's own briefs).
+
+### An id collision, recorded because it is rule 13 arriving by its one blind route
+
+Both lanes coined **F-EPG-11** on the same afternoon for different
+findings, and neither gate could see it: `check-defect-ledger.py` reads
+tracked markdown, and while the lanes worked neither id existed in any.
+The matcher's keeps the number, because it is embedded in shipped code
+comments and test names; the oracle's became F-EPG-14 at integration. The
+next round that spawns parallel lanes hands each a reserved block of ids.
+
