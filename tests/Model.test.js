@@ -8902,6 +8902,43 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      "Nothing moved" + Model.SEP + "6:52 behind live", "Nothing moved", "Nothing moved" + Model.SEP + "0:30 behind live",
      "Nothing moved" + Model.SEP + "5:00 behind live",
      "Nothing moved", "Nothing moved", "Nothing playing"])
+  // F-RWD-24: a reading that arrives while a play is queued belongs to the
+  // stream the user has already left, and the entry id cannot say so --
+  // currentEntryId still holds the old entry until the new load's start-file
+  // arrives, so the stale reading MATCHES. Measured on the display: 0:16
+  // behind live on a channel 300 ms old. Mutation: drop the zapping gate ->
+  // 1 failure.
+  ;(function () {
+    const live = { ok: true, running: true, rewind: { position: 400, floor: 44, ceiling: 418, history: 356, ahead: 18,
+                                                      behindLive: 16, zeroed: true, paused: false, pausedForCache: false, entryId: 7 } }
+    const base = { currentEntryId: 7, atFloor: false, stepS: 10 }
+    check("F-RWD-24: a reading that arrives while a play is queued is dropped on every reply path, entry id or no entry id",
+      [Model.rewindApply(Object.assign({ status: live }, base)).store,
+       Model.rewindApply(Object.assign({ status: live, zapping: true }, base)).store,
+       Model.rewindApply(Object.assign({ status: live, zapping: true }, base)).rewind,
+       Model.rewindApply(Object.assign({ status: live, zapping: true }, base)).clear,
+       // the entry id matching is exactly the case the guard cannot catch
+       Model.rewindApply(Object.assign({ status: live, zapping: true }, base, { currentEntryId: 7 })).store,
+       // and a running:false reply while zapping does not clear either: play() has
+       Model.rewindApply(Object.assign({ status: { ok: true, running: false }, zapping: true }, base)).clear,
+       // anything but true is not a zap
+       Model.rewindApply(Object.assign({ status: live, zapping: "yes" }, base)).store,
+       Model.rewindApply(Object.assign({ status: live, zapping: false }, base)).store],
+      [true, false, null, false, false, false, true, true])
+    check("F-RWD-24: the at-floor memory survives a dropped reading rather than being invented",
+      [Model.rewindApply(Object.assign({ status: live, zapping: true }, base, { atFloor: true })).atFloor,
+       Model.rewindApply(Object.assign({ status: live, zapping: true }, base, { atFloor: false })).atFloor],
+      [true, false])
+  })()
+
+  // F-RWD-19's unreachable-by-construction refusal: the service's own `busy`
+  // must not borrow the FETCH vocabulary's "Another fetch is running", which
+  // is about the playlist. Mutation: drop the busy case -> 1 failure.
+  check("F-RWD-19: the service's own `busy` refusal says the caller's sentence, not the playlist's",
+    [Model.seekTransientText({ ok: false, kind: "seek", code: "busy", error: { code: "busy" } }, "The player is busy"),
+     Model.statusReason({ ok: false, error: { code: "busy" } }),
+     Model.seekTransientText({ ok: false, kind: "seek", code: "busy", error: { code: "busy" } }, "")],
+    ["The player is busy", "Another fetch is running", ""])
   check("M5-01 integration: a reply that is not ok is its reason, or the fallback, never a verdict about the floor",
     [Model.seekTransientText({ ok: false, kind: "seek", error: { code: "not_running" } }, "busy"),
      Model.seekTransientText({ ok: false, kind: "seek", code: "nothing_playing", error: { code: "nothing_playing" } }, "busy"),
@@ -9075,11 +9112,19 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // F-RWD-21 (filed by this lane, see the report): `live` does NOT clear it
   // at the issue, only its reply does. That asymmetry is the tree as it
   // shipped and is pinned here as such rather than changed under a refactor.
-  checkCall("F-RWD-19: a forward request clears the at-floor memory at the issue; a live request does not until its reply", function () { return (
+  // F-RWD-21: a FORWARD press and a LIVE request both clear the memory at the
+  // issue; a backward one keeps it, because it is the only one the memory is
+  // about. The lane that lifted this found live keeping it and filed rather
+  // than fixed; the lead settled it here, so `g` then `b` inside the window
+  // before the live reply gets the player's answer and not a stale one.
+  // Mutation: the live branch keeping st.atFloor -> 1 failure.
+  checkCall("F-RWD-21: a forward or live request clears the at-floor memory at the issue; a backward one keeps it", function () { return (
     [Model.seekQueueStep(st({ pending: 10, atFloor: true }), { kind: "issue", ctx: ctx() }).state.atFloor,
      Model.seekQueueStep(st({ pending: -10, atFloor: true }), { kind: "issue", ctx: ctx() }).state.atFloor,
-     Model.seekQueueStep(st({ liveQueued: true, atFloor: true }), { kind: "issue", ctx: ctx() }).state.atFloor]) },
-    [false, true, true])
+     Model.seekQueueStep(st({ liveQueued: true, atFloor: true }), { kind: "issue", ctx: ctx() }).state.atFloor,
+     // and the memory a reply sets is the helper's own verdict, unchanged by this
+     Model.seekQueueStep(st({ liveQueued: true, atFloor: true }), { kind: "issue", ctx: ctx() }).argv.length > 0]) },
+    [false, true, false, true])
 
   // 8. `live` REPLACES the pending sum rather than adding to it: it is the
   // one request that is not a sum.

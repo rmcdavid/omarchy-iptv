@@ -197,7 +197,14 @@ rf()   { qa_json_field "$1" "$2"; }
 # is null-not-zero, and a defensive snapshot that maps undefined to null
 # would otherwise pass R9 on a tree with no feature. R9 therefore also
 # requires the readout to come BACK with numbers (positive control).
-snap() {
+snap() { snap_of "$1" "$(ipc state)" "$(ipc widget)"; }
+
+# snap_of <key> <state json> [<widget json>]: the same search, against a
+# snapshot already in hand. Two round trips cannot support one claim about
+# one instant -- R9 passed "rewind is null" on its first read and failed
+# "the text is empty" on its second, with the previous channel's number in
+# it, which is how F-RWD-24 was found.
+snap_of() {
   python3 -c '
 import json, sys
 key = sys.argv[1]
@@ -214,7 +221,7 @@ for part in (st.get("service"), st.get("guide"), w, st):
         v = part[key]
         print("null" if v is None else (json.dumps(v) if isinstance(v, (bool, dict, list)) else v))
         raise SystemExit(0)
-print("undefined")' "$1" "$(ipc state)" "$(ipc widget)"
+print("undefined")' "$1" "$2" "${3:-}"
 }
 rw() {   # rw <field>: one field of the service's rewind object, through the sentinels
   svc "d['rewind']['$1'] if isinstance(d.get('rewind'), dict) else None"
@@ -519,9 +526,14 @@ ck "R8 the bar glyph is the history glyph U+F02DA while behind live" '[[ "$glyph
 
 echo "== R9 a zap resets the readout to ABSENT, never 0"
 ipc zap 1 >/dev/null
-z=$(snap rewind)
-is "R9 rewind is null right after the zap (not 0, not undefined)" "$z" "null"
-is "R9 playbackStateText is empty right after the zap" "$(snap playbackStateText)" ""
+# ONE snapshot for both claims. They were two round trips, and the gap
+# between them was wide enough for a reply to land: R9 passed "rewind is
+# null" at the first read and failed "the text is empty" at the second,
+# with the PREVIOUS channel's number, which is how F-RWD-24 was found. Two
+# samples cannot support one claim about one instant.
+z9=$(ipc state)
+is "R9 rewind is null right after the zap (not 0, not undefined)" "$(snap_of rewind "$z9")" "null"
+is "R9 playbackStateText is empty right after the zap" "$(snap_of playbackStateText "$z9")" ""
 until_eq "t:rw.b" 10 svc "d['nowPlaying']['id'] if d.get('nowPlaying') else None" || true
 is "R9 now playing B" "$(svc "d['nowPlaying']['id'] if d.get('nowPlaying') else None")" "t:rw.b"
 is "R9 the same player" "$(player_pid)" "$PID1"
@@ -548,7 +560,18 @@ ck "R10 the position moved back 10 while paused (before $p0, after $p1)" '[[ $(n
 # so the delta reads 3 to 5.5 for a true 1 s/s (measured 1.8-5.5 over four
 # runs, F-HARNESS-3): the band is [1.5, 6.5], red for a number that holds
 # (0) and for one that doubles (8+).
-b0=$(rw behindLive); sleep 3; b1=$(rw behindLive)
+# One snapshot per END, and the whole state printed with it: when this
+# flakes (F-RWD-22, once in five runs) the run must carry its own
+# diagnosis -- a count that held because the service was not paused reads
+# differently from one that held because the tick never fired.
+s0=$(ipc state); b0=$(snap_of behindLive "$s0")
+sleep 3
+s1=$(ipc state); b1=$(snap_of behindLive "$s1")
+printf '   R10 paused=%s/%s stored=%s/%s shown=%s/%s text=%s\n' \
+  "$(qa_field "d['paused']" "$s0")" "$(qa_field "d['paused']" "$s1")" \
+  "$(qa_field "d['rewind']['behindLive'] if isinstance(d.get('rewind'), dict) else None" "$s0")" \
+  "$(qa_field "d['rewind']['behindLive'] if isinstance(d.get('rewind'), dict) else None" "$s1")" \
+  "$b0" "$b1" "$(qa_guide_field "d['playbackStateText']" "$s1")"
 ck "R10 behindLive counts UP while paused ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
 ck "R10 playbackStateText says paused ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" == paused* && "$(snap playbackStateText)" == *"behind live" ]]'
 is "R10 resumed" "$(pause_toggle)" "playing"

@@ -4863,6 +4863,12 @@ function seekTransientText(reply, fallback) {
     // The service's own refusal for an idle player (design 2.4) says what
     // the PiP verb says for the same state: one copy of the sentence.
     if (r && str(r.code) === "nothing_playing") return pipStatusText("nothing_playing")
+    // `busy` is the service's own refusal for a spawn the control slot
+    // declined (F-RWD-19's unreachable-by-construction path). statusReason
+    // knows a `busy` from the FETCH vocabulary and would answer "Another
+    // fetch is running", which is about the playlist and not about this; the
+    // caller's fallback is the sentence for a player that cannot be asked.
+    if (r && str(r.code) === "busy") return str(fallback)
     var reason = statusReason(r)
     return reason !== "" ? reason : str(fallback)
   }
@@ -5147,6 +5153,18 @@ function rewindApply(opts) {
   var step = finiteOr(o.stepS, REWIND_STEP_S)
   var entry = Math.floor(finiteOr(o.currentEntryId, 0))
   var idle = { store: false, rewind: null, clear: false, atFloor: atFloor }
+  // F-RWD-24. A play the service has asked for and not yet started means
+  // every reading in flight describes the stream the user has ALREADY left,
+  // and the entry id cannot say so: `currentEntryId` still holds the old
+  // entry until the new load's start-file arrives, so the stale reading
+  // matches and passes the guard below. play() has cleared the readout by
+  // now; this keeps it clear. The seek path had this gate from the start
+  // (its own `pendingPlayId === ""` check); the status, pause and probe
+  // paths did not, and a zap that queued behind a status in flight put the
+  // previous channel's clock on the new channel's bar for up to a health
+  // tick -- measured on the display, 0:16 behind live on a stream 300 ms
+  // old, which is the exact case design 2.3 says must not happen.
+  if (o.zapping === true) return idle
   if (!status || status.ok !== true) return idle
   if (status.running === false) return { store: false, rewind: null, clear: true, atFloor: atFloor }
   if (status.rewind === undefined) return idle
@@ -5279,7 +5297,15 @@ function seekQueueStep(state, event) {
     if (!alive) return seekPlanOf({ pending: 0, liveQueued: false, atFloor: false }, { clearReadout: true })
     if (ctx.controlBusy || ctx.throttled) return seekPlanOf(st, {})
     if (st.liveQueued) {
-      return seekPlanOf({ pending: 0, liveQueued: false, atFloor: st.atFloor },
+      // F-RWD-21, filed by the lane that found it and settled here: `live`
+      // clears the at-floor memory exactly as a forward press does. The
+      // memory exists only so a HELD backward key does not spawn a helper
+      // to hear "no" five times a second; a user who asks for live has
+      // asked for something else, and the next `b` deserves the player's
+      // own answer rather than a stale one. Without this, `g` then `b`
+      // inside the ~220 ms before the live reply was refused at_floor
+      // while `w` then `b` in the same window was not.
+      return seekPlanOf({ pending: 0, liveQueued: false, atFloor: false },
                         { argv: playerSeekArgv(ctx.socket, "live") })
     }
     // A forward request is a reason to try backward again afterwards; the

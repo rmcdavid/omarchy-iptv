@@ -375,8 +375,9 @@ The same tree with `textFormat: Text.PlainText` on the caption: 0 and 0,
 ### Live rewind (M5-01)
 
 ```bash
-timeout -k 10 480 scripts/dev-harness/rewind-scenario.sh                     # holds the display; ~4 min
-timeout -k 10 480 scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f  # the pre-rewind tree: every check but R0 red
+timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh                     # holds the display; ~7 min since R16
+timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f  # the pre-rewind tree: every check but R0 red
+timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh --tree /path/to/tree # any prepared tree: how R16 was proven red (F-RWD-18)
 python3 scripts/qa-stub-mpv.py --self-test                                   # the stub's seek semantics, no socket, no display
 ```
 

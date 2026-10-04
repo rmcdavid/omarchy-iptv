@@ -392,7 +392,10 @@ and is now retried a bounded five times.
 - **The stub self-test lives in the stub** (no id: done at integration).
   `tests/` was not this lane's to open, so the cases run through
   `--self-test`; `scripts/check.sh` now runs that command as its own step
-  with a floor of 14 cases.
+  with a floor the gate carries (`STUB_TESTS_MIN`). The number is in
+  `scripts/check.sh` and not repeated here: a count copied into prose is a
+  count that goes stale, and this sentence said 14 for a day after the
+  floor had moved twice.
 
 ## 8. Not covered here
 

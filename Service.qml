@@ -3288,7 +3288,10 @@ Item {
   // floor-clear rule live there (F-RWD-19).
   function applyRewind(status) {
     var readout = Model.rewindApply({ status: status, currentEntryId: root.currentEntryId,
-                                      atFloor: root.seekAtFloor, stepS: Model.REWIND_STEP_S })
+                                      atFloor: root.seekAtFloor, stepS: Model.REWIND_STEP_S,
+                                      // F-RWD-24: a queued play means every reading in
+                                      // flight is the stream the user has left.
+                                      zapping: root.pendingPlayId !== "" })
     root.seekAtFloor = readout.atFloor
     if (readout.clear) { root.rewind = null; return }
     if (!readout.store) return

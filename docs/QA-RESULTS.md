@@ -11042,3 +11042,112 @@ serve loop, one subscribed and one silent, and the silent one receives the
 `seek` event with no `request_id` on it. That is the sink rather than the
 decision (rule 14). Gate floor `STUB_TESTS_MIN` 17 -> 19.
 
+## F-RWD-18 and F-RWD-19 built and integrated, 2026-10-03
+
+The two rows the M5-01 review left open, built in two worktrees off
+56ffba7 and integrated here. Neither is user-visible; both are about
+whether a decision this product already takes can be seen to be right.
+
+### F-RWD-19: the seek queue is a function now
+
+`Model.seekQueueStep(state, event)` takes the queue's own three fields
+(the pending sum, whether a live request is queued, the at-floor memory)
+and an event carrying what the service knows about the world, and returns
+the plan the service obeys: the reply, the argv to spawn now, whether to
+apply and announce a reply, whether to clear the readout, whether the
+throttle restarts. `Model.rewindApply` is what a reply MEANS for the
+readout and is shared by the status, pause, probe and seek paths;
+`Model.healthBusy`, `Model.canRewindNow` and `Model.behindTickRunning` are
+the three remaining gates. Service.qml keeps what Qt owns and nothing else.
+
+| | |
+|---|---|
+| new tests against the shipping tree | node 1852 checks, **27 failures**; spec 70 passed, **1 failed** (`Property 'seekQueueStep' ... is not a function`) |
+| after | node 1852 / 0, spec 71 / 0 |
+| named mutations of the shipping functions | **28**, each applied alone, each red: M1 and M1b the nothing_playing refusal and the stop ladder (2 and 4), M2 bad_seconds, M3 at_floor, M4 a queued live forgotten, M5 the constant step instead of this request's size, M6 the throttle in the spawn gate (3), M7 the forward floor-clear, M8 live replacing the sum, M9 a gone player clearing the readout, M10 the argv builder, M11 and M11b the stale-reply gate, M12 the entry-id drop, M13a/b/c running-false, undefined-rewind and the raw store (2), M14a/b the floor memory, M15 the throttle restart, M16 clear keeping the memory, M17 a queued live counting as pending (5), M18 the D10 exemption (2), M19 the error member the footer reads, M20 an empty window counting as a window, M21 the reading term in the tick gate, M22 the unknown-kind fall-through, M23 the pending the reply reports |
+| spec mutations | 3, each 71 -> 70 passed: two field renames and the D10 exemption, which is how the plan's field names -- a join Service.qml reads BY NAME -- became a call |
+
+Two things the lane handed up rather than deciding, both settled at
+integration with a check seen red:
+
+- **F-RWD-21**, filed by the lane: a `live` request did not clear the
+  at-floor memory where a forward press did, so `g` then `b` inside the
+  window before the live reply was refused from a stale memory. Live clears
+  it now.
+- **The `busy` refusal** on the unreachable-by-construction path borrowed
+  `statusReason`'s fetch vocabulary, "Another fetch is running", which is
+  about the playlist. It answers the caller's own sentence now.
+
+### F-RWD-18: the exemption has an instrument that goes red
+
+R14 could never have failed: three 10 s health strikes cannot occur inside
+a 1.2 s burst. R16 replaces the argument with a measurement. The harness
+samples `healthBusy`, `controlRunning` and `controlKind` at 100 ms through
+a new `healthWatch` verb; the scenario holds `b` for 32 s against a
+prepared tree whose helper sleeps 4 s per seek, so the slot is held 91-92%
+of the window and **every health tick lands on a running seek, on every
+run** (294-296 of 320 samples by kind, 0 status runs in the window) rather
+than by luck.
+
+| Tree | Result |
+|---|---|
+| the QA lane's own branch, without the reducer lane's names | 98 passed, **7 failed** -- every one the missing join, none of them D10 |
+| a prepared tree carrying the two properties | **105 passed, 0 failed** |
+| the same tree with the D10 exemption removed | 100 passed, **5 failed**: `healthSkips` reached 2, **the player pid changed and the intent counter moved** -- the three-strikes restart actually fired |
+
+What stays UNVERIFIED and says so in QA-REWIND 9.8: the step from "the
+predicate is right on a 4 s run" to "the restart never fires under a held
+key on a 220 ms run" is argued from `Model.healthTick` and R13/R14, not
+observed.
+
+Two findings the measurement produced, filed open:
+
+- **F-RWD-22**, filed as "two checks flake and the data cannot say why",
+  and half of it turned out to be a product defect: see the next section.
+- **F-RWD-23**: for up to about 200 ms after a control helper exits the
+  slot reads held while its kind reads empty -- 2 samples of 128. Harmless
+  (`healthBusy` answers true there, the conservative side) but it is why
+  R16's checks key on the slot being HELD rather than on its kind.
+
+## F-RWD-24: the previous channel's clock on the new channel's bar, 2026-10-03
+
+The scenario's first run on the integrated tree was 103 of 105, with the
+two flakes the QA lane had predicted. One of them was not a flake.
+
+**What the run said.** R8 asserted the bar read `-0:16` on channel A.
+R9 then zapped, passed `rewind is null right after the zap`, and failed
+`playbackStateText is empty right after the zap` with `0:16 behind live`
+-- the number from the channel just left, on a stream 300 ms old, which no
+stream can honestly be.
+
+**Why both halves of R9 could disagree.** They were two `ipc state` round
+trips, so they described two instants a few hundred milliseconds apart.
+Between them a reply landed.
+
+**The defect.** `play()` clears the readout, and a `status` or `pause`
+reply already in flight writes it back. The entry-id guard cannot catch it:
+`currentEntryId` still holds the OLD entry until the new load's start-file
+arrives, so the stale reading matches and passes. The seek path has carried
+a `pendingPlayId === ""` gate since it was written -- the comment above it
+says in as many words that writing these numbers back "would put the OLD
+stream's clock on the new channel's bar for up to a health tick" -- and the
+other three reply paths never got one. Design 2.3 names the case.
+
+**The fix.** `Model.rewindApply` drops every reading while a play is
+pending, so the gate is on all four paths at once rather than on the one
+whose author happened to think of it.
+
+| | |
+|---|---|
+| node checks added | 2, both red against the code as integrated (the stale reading stored, `store: true` where false is wanted; the at-floor memory invented) |
+| mutation | the `zapping` gate removed: both red again |
+| instrument | R9 now reads both claims from ONE snapshot, through a new `snap_of` that `snap` itself calls, so the two can no longer straddle an event |
+
+**R10 is still open (F-RWD-22).** It held 12.351 for three seconds. Its
+check now prints the service's `paused`, the stored `rewind.behindLive`
+and the shown `behindLive` at both ends, each from one snapshot, so the
+next occurrence says whether the 1 Hz tick stopped (a `paused` corrected
+false by a reply) or the number is simply late. That is a smaller claim
+than "we cannot tell", and it is the honest one: the instrument that could
+not tell has been replaced rather than the finding being closed.
+
