@@ -11752,3 +11752,12 @@ scouting note before reading the write-up it pointed at, and withdrew it --
 which is its own small lesson about acting on a citation before checking
 what it cites.
 
+Then the gate had the last word, twice. Writing this section named the id in
+markdown, so the ledger demanded a row for it -- correctly, since from the
+ledger's side a `D-` id in a tracked document IS a filed defect. The row
+exists now, stating that the id never named one. And the lead committed
+while that step was red, because the shell chain let `git commit` run on the
+exit status of a cleanup command rather than the gate's: "never commit a red
+check.sh" survived as an intention and not as a mechanism. The commit had
+already reached the remote, so it is fixed forward rather than rewritten --
+`main` is the artifact and `dev` is not rewound for a lead's mistake either.
