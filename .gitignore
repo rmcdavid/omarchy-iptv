@@ -15,3 +15,16 @@ node_modules/
 # generated tree, and neither belongs in the repo.
 tests/a11y/*.log
 tests/a11y/lane2_*.json
+
+# A python environment or a vendored tree dropped in here. These matter more
+# since F-GATE-1 made the byte scans read the WORKING TREE rather than the
+# index: an unignored file is scanned the moment it exists, and third-party
+# python is full of non-ASCII (496 of 1,591 installed packages' .py files on
+# this machine carry it, against 0 of a 4,000-file sample of the stdlib). So
+# without these lines a `python -m venv .venv` would turn the ASCII check red
+# on dozens of files nobody wrote. Measured by the lane that widened the scan.
+.venv/
+venv/
+build/
+dist/
+*.egg-info/

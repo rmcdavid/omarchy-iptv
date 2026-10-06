@@ -11761,3 +11761,75 @@ exit status of a cleanup command rather than the gate's: "never commit a red
 check.sh" survived as an intention and not as a mechanism. The commit had
 already reached the remote, so it is fixed forward rather than rewritten --
 `main` is the artifact and `dev` is not rewound for a lead's mistake either.
+
+## Two gates that could not see what they guard, 2026-10-06
+
+Both findings were the same shape, which is the shape this project keeps
+paying for: a check whose corpus excludes the place the failure lives.
+
+### F-GATE-1: the byte scans read the index, not the tree
+
+`git ls-files` lists what is STAGED. So a contributor could write a new
+`.py` with a non-ASCII byte in it, run the gate, see green, and have the
+violation land at the moment they staged it -- after the check that exists
+to stop it. Both byte scans now read `git ls-files --cached --others
+--exclude-standard`, which is the tree minus what `.gitignore` excludes.
+
+The proof is the lane's own test file, measured live before it was staged:
+
+| | files scanned |
+|---|---|
+| gate as it was | 162 |
+| widened, with the new test file written but not staged | 163, "1 untracked" |
+| after `git add` | 163, "0 untracked" |
+
+Nineteen tests through a new `--byte-scan` door that calls the shipping
+scan rather than a copy of it, and six named mutations. The first mutation
+is the defect itself -- restore `ls-files` -- and it reddens four cases.
+A finding on an unstaged file says so and tells the contributor what to do.
+
+**F-GATE-2, which the fix created and the lane flagged rather than
+shipped quietly.** Reading the tree makes `.gitignore` load-bearing: 496 of
+1,591 installed third-party python files on this machine carry non-ASCII
+bytes, against 0 of a 4,000-file sample of the standard library, so anyone
+running `python -m venv .venv` in the checkout would have turned the gate
+red on dozens of files nobody wrote. `.venv/`, `venv/`, `build/`, `dist/`
+and `*.egg-info/` are ignored now, with the reason beside them, and both
+directions are demonstrated on this tree: the ignored environment is
+skipped, the unignored stray is caught.
+
+### F-EPG-21: the id gates read markdown alone
+
+The ledger's corpus was `git ls-files -- '*.md'`, 47 files. It is now every
+tracked text file, 222. An id cited in QML, python, shell or JavaScript is
+held to the same join as one cited in a document.
+
+The hard part was not the widening but the EXAMPLES: twelve synthetic ids,
+from the `D-AAA`, `D-BBB`, `D-CCC`, `D-FOO`, `D-BAR` and `F-BBB` families,
+live inside the id gates' own fixtures, and a naive widening reports all
+twelve. (Naming them here by family rather than by number is not a style
+choice: the widened gate refuses an example id written out in a document,
+on the ground that a document is where real findings are written up, and it
+refused this very paragraph until the numbers came off. The check caught
+its own author within the hour.) The lane
+rejected a hardcoded list elsewhere in favour of a declaration each file
+makes about itself, one line naming its own example families (the marker is
+in `scripts/check-defect-ledger.py` and is deliberately not spelled out in
+this document, because the gate reads a document that carries it as
+declaring examples) -- an exemption a reader of the citing file cannot see
+is the same invisibility this finding is about. The number of exempted citations prints on every
+run, green included, so a new declaration moves a number in the output
+rather than hiding in a diff.
+
+The staleness checker stays markdown-only, decided and documented rather
+than widened by reflex.
+
+### What the widening caught
+
+One thing, found while scouting and already written up above: a comment in
+shipped QML citing `D-ZAP-1`, an id that never existed, for twelve days.
+The real id is `D-DEAD-1`. Nothing was absent and nothing was red, and a
+reader following the reference would have found a defect that is not there.
+
+The suite goes 861 to 899 tests, 19 from each lane.
+
