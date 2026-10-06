@@ -3174,7 +3174,7 @@ Item {
     root.pruneFailed()
   }
 
-  // D-ZAP-1, found live: this used to pass `Model.knownIdSet(root.channels)`
+  // D-DEAD-1, found live: this used to pass `Model.knownIdSet(root.channels)`
   // straight through. With no channels loaded yet that is `{}` -- an EMPTY
   // object, which is truthy -- so every mark was dropped as "not in the
   // playlist" and the marks silently vanished on every cold start.

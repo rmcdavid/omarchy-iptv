@@ -11728,3 +11728,27 @@ F-EPG-22 (the echo arm confirms either brand of a row naming two, with the
 exchange rate for closing it measured at 54 of 110 confirmations), and
 F-EPG-23.
 
+## The id the gates could not see was a typo, 2026-10-06
+
+Scouting F-EPG-21 -- "an id cited only in a script is invisible to both id
+gates" -- turned up one real citation in shipped code with no board row:
+`D-ZAP-1`, at `Service.qml:3177`, introduced by the comment "found live".
+
+It is not a missing row. The episode it describes is **D-DEAD-1**, which has
+a board row, a write-up here headed "an empty set is not an absent one", and
+citations in `Model.js`, `Guide.qml`, `BarWidget.qml`, three documents and
+the node suite. The comment above the fix simply named the wrong id, and has
+since 2026-09-24.
+
+That is a better demonstration of the finding than a missing row would have
+been. A wrong id in a comment is the join-by-name failure at its purest:
+nothing is absent, nothing is red, and a reader who follows the reference
+finds a defect that does not exist. Both gates read `git ls-files -- '*.md'`,
+so neither could see it, and it survived every review of every round that
+touched that file since.
+
+Corrected in `Service.qml`. The lead briefly filed a `D-ZAP-1` row from the
+scouting note before reading the write-up it pointed at, and withdrew it --
+which is its own small lesson about acting on a citation before checking
+what it cites.
+
