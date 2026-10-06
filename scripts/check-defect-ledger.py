@@ -14,15 +14,99 @@ invisible. It is not hypothetical here. A QA lane filed F-CHNO-4 against
 exactly this ("the board is stale"), the board was patched by hand, and then
 32 more ids drifted off it, including a P2 that was a release gate.
 
-So the join is now a call. Every defect id that appears in a tracked markdown
-file must have a row on the board, and every row on the board must have a
-severity and a state. Findings (`F-`) count as much as defects (`D-`): a
-lane choosing the gentler word does not make the item stop needing an owner. An id you file is an id that shows up here until you
-give it a state, and "the release shipped" is not a state.
+So the join is now a call. Every defect id that appears in any tracked file --
+document, script, QML or fixture -- must have a row on the board, and every row
+on the board must have a severity and a state. Findings (`F-`) count as much as
+defects (`D-`): a lane choosing the gentler word does not make the item stop
+needing an owner. An id you file is an id that shows up here until you give it
+a state, and "the release shipped" is not a state.
 
 WHAT IT DOES NOT DO. It does not check that a state is TRUE. Nothing can:
 "verified fixed" is a claim about a test somebody ran. It checks that the
 claim exists and is attributed, which is the part that was silently missing.
+
+WHY THE CORPUS IS EVERY TRACKED FILE AND NOT ONLY MARKDOWN (F-EPG-21). This
+check read `git ls-files -- '*.md'` for its first month, so an id cited in a
+`.py`, `.js`, `.qml`, `.sh` or fixture file was invisible to it. That is the
+same join-by-name failure one layer down: the EPG grader went on announcing a
+finding by an id integration had renamed, and nothing could see it because the
+citation lived in a script. Measured on d5c2d7a: 47 markdown files against 221
+tracked files that decode as UTF-8 (two do not -- a PNG and a gzipped
+fixture), and 186 distinct ids cited outside markdown, 88 of them in
+`bin/omarchy-iptv`, which has no extension at all. That last number is why the
+corpus is "every tracked file that is text" rather than a list of extensions:
+the helper is the single most id-dense source file in the tree and an
+extension allowlist would have missed it.
+
+Widening it found one real thing, which is the whole argument for the change:
+a single id cited in Service.qml as "found live", with no row on the board and
+no write-up under that id anywhere. (Not quoted here by id. Every numbered id
+written into this file would be a citation like any other, and this file is in
+the corpus it scans -- see the note on the marker token below.)
+
+THE EXAMPLE-ID EXEMPTION, and the trade it makes. Widening the corpus pulls in
+the ids that this check's own tests and the staleness checker's own narrative
+INVENT -- the D-AAA, D-BBB, D-CCC, D-FOO, D-BAR and F-BBB families. They are
+fixtures and illustrations, not findings, and a naive widening reports all
+twelve of them. (Families, not ids, for the same reason as above.)
+
+The rule chosen is a per-file declaration, because the alternatives both put
+the exemption somewhere a reader of the citing file cannot see it:
+
+  * An explicit exclusion of this checker's own test files was rejected. It
+    exempts whole FILES rather than ids, so a real finding cited in one of
+    them is silently unchecked forever; it lives here rather than where the
+    ids are; and the next test file needs an edit to this script, which is the
+    shape every allowlist rots into.
+  * A reserved example namespace hardcoded here (AAA, BBB, FOO, BAR ...) was
+    rejected on a collision this project actually has. `D-BAR` is currently a
+    synthetic family in tests/test_board_staleness.py, and `BAR` is a
+    perfectly plausible real family HERE: the bar widget is one of the
+    plugin's three kinds. A reserved list containing a word from the project's
+    own domain is the "unless it looks harmless" shape, and the day somebody
+    files a real bar-widget defect the gate goes quiet about it.
+
+So a file declares its own examples, on one line, with the literal token
+EXAMPLE-DEFECT-IDS followed by a colon, one or more FAMILIES (prefix and
+family, no number), a `--`, and a reason. Written with the token as a
+placeholder:
+
+    # <MARKER>: D-AAA F-BBB -- synthetic ids; this file is the ledger check's
+    # own test and invents boards to break
+
+The token is a placeholder in that line on purpose: a complete marker in THIS
+file would declare families this file does not cite, and the checks below
+would rightly report it. A convention that cannot be written in its own
+documentation is a convention whose self-check works.
+
+The declaration is honoured only in the file that carries it, and four things
+make it hard to hide a real finding behind it. Each can go red:
+
+  1. A declared family that has a board row is reported. A family the board
+     tracks is a real family, whatever a marker says about it.
+  2. A declared family cited in any markdown file is reported. Markdown is
+     where real findings get written up, so an example id has no business
+     there -- documentation of the convention uses `D-XXX`, which carries no
+     number and is not an id.
+  3. A declared family cited in another tracked file that does not itself
+     declare it is reported as a leak. The citations of an example family are
+     confined to the files that say they are examples.
+  4. A declared family the declaring file never cites is reported. A dead
+     exemption is how an exemption list rots.
+  5. A marker whose family list parses to nothing is reported, rather than
+     ignored: otherwise the author reads "no row on the board" about an id
+     they believe they exempted, and goes looking in the wrong place.
+
+A marker the parser cannot read -- no `--`, or a numbered id where a family
+belongs -- declares NOTHING, which leaves those ids held to the board. That is
+the direction that announces itself.
+
+What this does not stop: a deliberate false declaration. Somebody who names a
+real finding's family in a marker, with a reason, in the file that cites it,
+gets their exemption. That is a lie in a diff, and this check has never
+claimed to grade honesty -- the paragraph above about states says the same
+thing. What it buys is that the exemption is local, named, reasoned, counted
+on every run, and impossible to acquire by accident.
 """
 
 import io
@@ -88,9 +172,74 @@ def tracked_markdown(root):
     return [p for p in out.decode('utf-8').split('\0') if p]
 
 
+def tracked_files(root):
+    """Every tracked path, markdown and source alike. The id scan reads this;
+    the prose scans below still read tracked_markdown, for reasons stated at
+    each one."""
+    out = subprocess.run(
+        ['git', '-C', root, 'ls-files', '-z'],
+        stdout=subprocess.PIPE, check=True).stdout
+    return [p for p in out.decode('utf-8').split('\0') if p]
+
+
 def read(root, rel):
     with io.open(os.path.join(root, rel), encoding='utf-8') as fh:
         return fh.read()
+
+
+def read_text(root, rel):
+    """The file's text, or None when it is not UTF-8 text at all.
+
+    A tracked tree holds binaries -- preview.png, a gzipped EPG fixture -- and
+    a decode error on one of those must not take the gate down with a
+    traceback. Returning None keeps the SKIP visible: main() counts them and
+    prints the count, so a tree where the scan quietly stopped looking at half
+    its files cannot read as full coverage."""
+    try:
+        with io.open(os.path.join(root, rel), encoding='utf-8') as fh:
+            return fh.read()
+    except (IOError, OSError, UnicodeDecodeError):
+        return None
+
+
+def family_of(ident):
+    """`D-AAA-n` -> `D-AAA`. The id pattern guarantees the trailing -<digits>,
+    so the split is total. (Written with `n` rather than a digit because a real
+    id here would be a citation: this file is inside the corpus it scans.)"""
+    return ident.rsplit('-', 1)[0]
+
+
+# ---- the example-id exemption -------------------------------------------
+#
+# See the module docstring for the rule and the two alternatives it beat. The
+# marker is the token, a colon, the families, `--`, and a reason; the reason is
+# mandatory because it is the part a reviewer reads.
+# The token is assembled from halves so that the complete literal never
+# appears in THIS file. The scan below reads every tracked file, this one
+# included, and a complete token here would make the checker carry a marker of
+# its own -- one with no family after it, which check 5 would then report. Same
+# reason the docstring draws the marker with a placeholder.
+_TOKEN = 'EXAMPLE-DEFECT' + '-IDS:'
+EXAMPLE_MARKER = re.compile(re.escape(_TOKEN) + r'([^\n]*?)--')
+# A family, and NOT a numbered id: `D-AAA-n` on a marker line parses to
+# nothing, so a marker that lists ids instead of families exempts nothing and
+# the ids stay held to the board.
+MARKER_FAMILY = re.compile(r'\b([DF]-[A-Z][A-Z0-9]*)\b(?!-[0-9])')
+# A marker-shaped line with no `--` at all. Recognised only so it can be
+# reported: silently ignoring it would leave the author reading "no row on the
+# board" about an id they thought they had exempted.
+MARKER_TOKEN = re.compile(re.escape(_TOKEN))
+
+
+def example_families(text):
+    """(families declared by this text, whether it carries a marker at all).
+
+    Pure, so tests/test_defect_ledger.py exercises the shipping parse rather
+    than a copy of this regex."""
+    families = set()
+    for m in EXAMPLE_MARKER.finditer(text):
+        families |= set(MARKER_FAMILY.findall(m.group(1)))
+    return families, bool(MARKER_TOKEN.search(text))
 
 
 def titled_findings_without_id(text):
@@ -221,26 +370,119 @@ def main(argv=None):
                 '%s state cell is %r, which names no state. Use one of: %s'
                 % (ident, state[:60], ', '.join(STATE_WORDS)))
 
-    # ---- every id mentioned anywhere must have a row ---------------------
-    mentions = {}
-    scanned = 0
-    for rel in tracked_markdown(root):
-        text = read(root, rel)
+    # ---- read the corpus: every tracked file that is text ----------------
+    markdown = set(tracked_markdown(root))
+    texts = {}
+    skipped = []
+    for rel in tracked_files(root):
+        text = read_text(root, rel)
+        if text is None:
+            skipped.append(rel)
+            continue
         if rel == LEDGER_FILE:
             # Mentions INSIDE the ledger do not count as mentions, or every
             # row would justify itself and the orphan check below would be
             # dead. The rest of STATUS.md still counts.
             text = before + after
-        scanned += 1
-        for ident in ID.findall(text):
-            mentions.setdefault(ident, set()).add(rel)
+        texts[rel] = text
+    scanned = len(texts)
 
     if scanned == 0:
-        print('defect ledger check scanned no markdown files at all '
+        print('defect ledger check scanned no tracked files at all '
               '(is this a git checkout?)')
         return 1
 
+    # ---- which families does each file declare as examples? --------------
+    #
+    # A marker belongs in a SOURCE file. A document is where real findings get
+    # written up, so a document carrying example ids -- or declaring them -- is
+    # a contradiction in terms, and documentation of this convention names an
+    # unnumbered family, which is not an id and is invisible to the scan.
+    examples = {}            # rel -> set of families
+    for rel in sorted(texts):
+        families, had_marker = example_families(texts[rel])
+        if had_marker and rel in markdown:
+            problems.append(
+                '%s is a document and carries an example-id marker. A document '
+                'is where real findings are written up; name an unnumbered '
+                'family such as D-XXX, which is not an id, and the marker is '
+                'not needed' % rel)
+            continue
+        if families:
+            examples[rel] = families
+        elif had_marker:
+            problems.append(
+                '%s carries an example-id marker whose family list parses to '
+                'nothing. List FAMILIES and end them with " -- <reason>": '
+                '`D-AAA F-BBB -- why`, not numbered ids and not a bare list. '
+                'Until it parses, nothing in that file is exempt' % rel)
+    example_families_in_use = set()
+    for families in examples.values():
+        example_families_in_use |= families
+
+    # ---- every id mentioned anywhere must have a row ---------------------
+    #
+    # An id whose family THIS file declares is a fixture, not a filing. An id
+    # whose family some OTHER file declares is a leak out of that declaration,
+    # and in a document it is a real finding wearing an example's name. Each
+    # gets exactly one message: reporting one citation twice buries the cause.
+    mentions = {}
+    exempt = {}              # rel -> set of ids the marker in that file covers
+    for rel in sorted(texts):
+        own = examples.get(rel, set())
+        # set(), not the raw findall: a leak reported once per OCCURRENCE
+        # printed the same sentence twice for one citation on the first run.
+        for ident in sorted(set(ID.findall(texts[rel]))):
+            family = family_of(ident)
+            if family in own:
+                exempt.setdefault(rel, set()).add(ident)
+                continue
+            if family in example_families_in_use:
+                declarers = sorted(r for r in examples if family in examples[r])
+                if rel in markdown:
+                    problems.append(
+                        '%s cites %s, whose family is declared an EXAMPLE in '
+                        '%s. A document is where real findings are written up, '
+                        'so either the id is real and the example family must '
+                        'be renamed, or the document should name an unnumbered '
+                        'family instead'
+                        % (rel, ident, ', '.join(declarers)))
+                else:
+                    problems.append(
+                        '%s cites %s, but %s is declared an EXAMPLE family in '
+                        '%s and not here. Either this is a real finding and the '
+                        'family must be renamed where it is used as an '
+                        'example, or this citation is an example too and this '
+                        'file must say so'
+                        % (rel, ident, family, ', '.join(declarers)))
+                continue
+            mentions.setdefault(ident, set()).add(rel)
+
+    # ---- the exemption must not cover anything real ----------------------
+    for rel in sorted(examples):
+        for family in sorted(examples[rel]):
+            rows = sorted(i for i in declared if family_of(i) == family)
+            if rows:
+                problems.append(
+                    '%s declares %s as an example family, and the board '
+                    'carries %s. A family the board tracks is a real family: '
+                    'rename the example, not the finding'
+                    % (rel, family, ', '.join(rows)))
+            if not any(family_of(i) == family
+                       for i in exempt.get(rel, ())):
+                problems.append(
+                    '%s declares %s as an example family and cites no %s-<n> '
+                    'id. Drop the declaration: a dead exemption is how an '
+                    'exemption list rots into one nobody reads'
+                    % (rel, family, family))
+
     # ---- a titled finding with no id is invisible to everything above ---
+    #
+    # Markdown only, deliberately, and unlike the id scan above. The
+    # construction it reads -- a numbered item opening with a bold title,
+    # under a heading that names findings -- is a document convention. A
+    # docstring is not a document section, and a `**bold**` run inside one is
+    # a word the author emphasised.
     titled = 0
     for rel in tracked_markdown(root):
         for line, heading, title in titled_findings_without_id(read(root, rel)):
@@ -263,7 +505,7 @@ def main(argv=None):
     # ---- a row for an id nobody mentions is probably a typo --------------
     for ident in sorted(set(declared) - set(mentions)):
         problems.append(
-            '%s has a board row but appears in no other tracked document. '
+            '%s has a board row but appears in no other tracked file. '
             'Either the id is misspelled on the board or the defect was '
             'never written up' % ident)
 
@@ -280,6 +522,16 @@ def main(argv=None):
     # sizing the contrast work read numbers that were gone. And an ACCEPTANCE
     # CRITERION graded `Model.pipLuaDispatch`, a function that never existed in
     # any commit -- a test specified against a name nobody had checked.
+    #
+    # Markdown only, and unlike the id scan, on a MEASUREMENT rather than a
+    # preference. Widened to every tracked file on d5c2d7a it reports five
+    # unresolved symbols and all five are self-reference: `Model.BAR_IDLE_DARKEN`
+    # and `Model.pipLuaDispatch` are the two renamed symbols the paragraph above
+    # NARRATES, and `Model.realThing`, `Model.ghostThing` and `Model.anything`
+    # are fixtures in tests/test_defect_ledger.py whose job is to be
+    # unresolvable. An id citation survives being quoted; a symbol citation
+    # inside a story about a symbol that was deleted does not. So the symbol
+    # half stays where its corpus is prose that ASSERTS.
     sources = {}
     for name in ('Model.js',):
         try:
@@ -325,8 +577,17 @@ def main(argv=None):
                 % (symbol, ', '.join(sorted(cited[symbol]))))
         print('symbol citations: %d distinct Model.* names checked' % len(cited))
 
-    print('defect ledger: %d rows on the board, %d ids across %d markdown '
-          'files' % (len(declared), len(set(mentions) | set(declared)), scanned))
+    # Printed on every run, green included. An exemption nobody sees is an
+    # exemption that grows, so the census is part of the output a reader of the
+    # gate gets rather than something they have to go looking for.
+    print('example-id exemptions: %d file(s), %d family(ies), %d citation(s) '
+          'not held to the board'
+          % (len(examples), len(example_families_in_use),
+             sum(len(v) for v in exempt.values())))
+    print('defect ledger: %d rows on the board, %d ids across %d tracked '
+          'file(s) (%d markdown, %d not text and skipped)'
+          % (len(declared), len(set(mentions) | set(declared)), scanned,
+             len(markdown & set(texts)), len(skipped)))
     if problems:
         print('')
         for p in problems:

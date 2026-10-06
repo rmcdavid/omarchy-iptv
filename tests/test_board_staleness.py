@@ -16,6 +16,12 @@ acceptance that observes the real thing rather than the string the
 implementation was written to contain.
 """
 
+# EXAMPLE-DEFECT-IDS: D-AAA D-BAR D-BBB D-CCC D-FOO -- every id below is
+# invented. This file builds throwaway boards and commit messages and then
+# asserts what the staleness checker makes of them, so these are fixtures, not
+# findings. The exemption rule, and why it is declared here rather than
+# allowlisted inside the checker, is in scripts/check-defect-ledger.py.
+
 import contextlib
 import importlib.util
 import io
@@ -427,6 +433,64 @@ class StalenessCase(unittest.TestCase):
         rc, out = self.run_checker('--report')
         self.assertEqual(rc, 0, out)
         self.assertNotIn('D-FOO-1', out)
+
+    # -- the corpus stays markdown-only, deliberately (F-EPG-21) ----------
+
+    def test_a_closure_claim_in_a_source_file_is_not_a_claim(self):
+        """The ledger check widened its corpus to every tracked file. This one
+        must not, and the reason is the question each one asks.
+
+        A source file is full of text that LOOKS like a past-tense closure
+        assertion and is not one: this checker's own docstring quotes five such
+        claims while explaining what the signals matched historically, and its
+        own tests hold "Close <id> at the sink" as a string whose entire job is
+        to be matched. Measured on d5c2d7a, widening yields 24 claims, 13 of
+        them from those self-referential sources, and zero new disagreements.
+
+        The widening is also unnecessary: the GATE half reads `git log`, not
+        markdown, so an id cited only in a script is already covered the moment
+        a commit message claims its closure. That is the next case.
+        """
+        self.board([('D-FOO-1', 'P2', 'guide', 'A thing went wrong.', 'open')])
+        self.write('scripts/grade.py',
+                   '# The D-FOO-1 repair is quoted here, not asserted.\n')
+        self.commit('board: file it, and record the quotation')
+        rc, out = self.run_checker('--report')
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('D-FOO-1', out)
+        # Mutation: drop the markdown pathspec from the corpus and the same
+        # tree reports the quotation as a claim about the present board.
+        real_git = checker._git
+
+        def every_tracked_file(root, *args):
+            if args[:2] == ('ls-files', '-z'):
+                return real_git(root, 'ls-files', '-z')
+            return real_git(root, *args)
+
+        with mutated(_git=every_tracked_file):
+            rc2, out2 = self.run_checker('--report')
+        self.assertEqual(rc2, 0, out2)       # the advisory half never fails
+        self.assertIn('D-FOO-1', out2)
+        self.assertIn('1 further disagreement(s)', out2)
+
+    def test_a_commit_claim_reaches_an_id_that_lives_only_in_code(self):
+        """Why widening the document corpus buys nothing the gate needs.
+
+        The id here is cited in no document at all -- only in a .py and in the
+        commit message that claims its closure -- and the gate still refuses
+        the tree. This is the half of F-EPG-21 that was already covered, and
+        the case exists so that nobody widens the corpus believing it was not.
+        """
+        self.board([('D-FOO-1', 'P2', 'guide', 'A thing went wrong.', 'open')])
+        self.write('scripts/grade.py', '# announced by id only here\n')
+        self.commit('Close D-FOO-1 at the sink')
+        rc, out = self.run_checker()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('D-FOO-1', out)
+        with mutated(GATE_SIGNALS=NO_SIGNALS):
+            rc2, out2 = self.run_checker()
+        self.assertEqual(rc2, 0, out2)
+
 
 
 if __name__ == '__main__':

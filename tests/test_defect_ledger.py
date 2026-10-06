@@ -11,6 +11,12 @@ asserts the checker turns red and says why. A case that cannot make the
 checker red is a case the checker does not actually cover.
 """
 
+# EXAMPLE-DEFECT-IDS: D-AAA F-BBB -- every id below is invented. This file
+# writes synthetic repositories to a temporary directory and breaks them one
+# decision at a time, so these are fixtures, not findings. The rule that makes
+# this line exempt them, and the two alternatives it beat, are documented in
+# scripts/check-defect-ledger.py.
+
 import io
 import os
 import re
@@ -57,6 +63,29 @@ class LedgerCase(unittest.TestCase):
         with io.open(path, 'w', encoding='utf-8') as fh:
             fh.write(text)
         subprocess.run(['git', '-C', self.dir, 'add', rel], check=True)
+
+    def write_bytes(self, rel, blob):
+        """A tracked file that is not text at all -- this tree has two."""
+        path = os.path.join(self.dir, rel)
+        d = os.path.dirname(path)
+        if d and not os.path.isdir(d):
+            os.makedirs(d)
+        with open(path, 'wb') as fh:
+            fh.write(blob)
+        subprocess.run(['git', '-C', self.dir, 'add', rel], check=True)
+
+    def marker(self, families, reason='invented for this case'):
+        """An example-id marker line, ASSEMBLED rather than written as a
+        literal.
+
+        This is load-bearing. A complete marker written as a literal in THIS
+        file would declare those families FOR THIS FILE in the real
+        repository's own gate run, and several cases below deliberately declare
+        families this file does not cite -- which the dead-exemption check
+        would then report, correctly, against the test file. Splitting the
+        token keeps the synthetic markers synthetic.
+        """
+        return '# EXAMPLE-DEFECT%s %s -- %s\n' % ('-IDS:', families, reason)
 
     def run_checker(self):
         """Run the real main(), capturing what it printed."""
@@ -207,7 +236,7 @@ class LedgerCase(unittest.TestCase):
         self.assertTrue(
             'does not exist' in out
             or 'no "## Defects"' in out
-            or 'scanned no markdown' in out,
+            or 'scanned no tracked files' in out,
             'expected a loud empty-run failure, got:\n' + out)
         self.assertNotIn('Traceback', out)
 
@@ -341,6 +370,236 @@ class LedgerCase(unittest.TestCase):
         self.good_ledger()
         self.write('scripts/dev-harness/README.md', 'See D-AAA-4 for why.\n')
         self.assertRed(r'D-AAA-4 is filed in scripts/dev-harness/README\.md')
+
+    # -- the corpus is every tracked file, not only markdown (F-EPG-21) ----
+    #
+    # These cases are the "before" half of CLAUDE.md rule 11: each one is
+    # green against the checker as it was, because `git ls-files -- '*.md'`
+    # could not see the file the id is in.
+
+    def test_an_id_cited_only_in_a_python_file_needs_a_row(self):
+        """The finding this round exists for.
+
+        An id cited in a script is a filed id. The grader that went on
+        announcing a renamed finding did it from a .py, and both gates were
+        green the whole time because neither one was looking at .py files.
+        """
+        self.good_ledger()
+        self.write('scripts/grade.py',
+                   '# The premise this grader announces is D-AAA-3.\n')
+        self.assertRed(r'D-AAA-3 is filed in scripts/grade\.py but has no row')
+
+    def test_an_id_cited_only_in_qml_needs_a_row(self):
+        """Where the one real catch on this tree actually lives."""
+        self.good_ledger()
+        self.write('Service.qml',
+                   '  // D-AAA-3, found live: this used to pass the wrong\n'
+                   '  // thing straight through.\n')
+        self.assertRed(r'D-AAA-3 is filed in Service\.qml but has no row')
+
+    def test_an_id_cited_only_in_an_extensionless_file_needs_a_row(self):
+        """No extension, 88 citations.
+
+        `bin/omarchy-iptv` is the most id-dense source file in the tree and has
+        no suffix at all, so a corpus built from a list of extensions would
+        read as widened and still miss it. This case is the one that makes the
+        difference between `git ls-files` and `git ls-files -- '*.py' '*.js'
+        ...` visible.
+        """
+        self.good_ledger()
+        self.write('bin/helper',
+                   '#!/usr/bin/env python3\n'
+                   '# Repair 2 (D-AAA-3): the id as written, plus lower case.\n')
+        self.assertRed(r'D-AAA-3 is filed in bin/helper but has no row')
+
+    def test_a_row_cited_only_in_code_is_not_an_orphan(self):
+        """The other direction of the same widening.
+
+        Before it, a row whose only write-up was a code comment read as "never
+        written up" -- the widening has to satisfy the orphan branch as well as
+        feed the missing-row branch, or it trades one false report for another.
+        """
+        self.write('docs/STATUS.md', HEADER + (
+            '| D-AAA-1 | P2 | M1 | a thing broke | verified fixed at abc1234 |\n'))
+        self.write('docs/QA-RESULTS.md', 'This pass filed nothing.\n')
+        self.write('Model.js', '// D-AAA-1\'s fix: keep the raw list.\n')
+        self.assertGreen()
+
+    def test_an_id_cited_only_in_markdown_is_still_reported(self):
+        """The widening must not move the behaviour it already had.
+
+        Green against the old checker and green against the new one, by
+        design: a regression guard rather than a catch.
+        """
+        self.good_ledger()
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1, D-AAA-2 and D-AAA-3.\n')
+        self.assertRed(r'D-AAA-3 is filed in docs/QA-RESULTS\.md but has no row')
+
+    def test_a_tracked_binary_is_skipped_and_counted(self):
+        """A PNG and a gzipped fixture are tracked here.
+
+        Widening the corpus means reading files that are not text, and a
+        decode error must not take the gate down with a traceback where a
+        sentence belongs -- the same defect this file already caught once, on
+        a missing STATUS.md. The count is printed so a tree where the scan
+        quietly stopped looking cannot read as full coverage.
+        """
+        self.good_ledger()
+        self.write_bytes('preview.png', b'\x89PNG\r\n\x1a\n\xff\xfe\x00D-AAA-3')
+        out = self.assertGreen()
+        self.assertIn('1 not text and skipped', out)
+        self.assertNotIn('Traceback', out)
+
+    # -- the example-id exemption -----------------------------------------
+
+    def test_a_marker_exempts_its_own_families_in_its_own_file(self):
+        """The twelve synthetic ids this widening would otherwise report."""
+        self.good_ledger()
+        self.write('tests/test_thing.py',
+                   self.marker('F-BBB') +
+                   'cases = ["F-BBB-7", "F-BBB-8"]\n')
+        out = self.assertGreen()
+        self.assertIn('example-id exemptions: 1 file(s), 1 family(ies), '
+                      '2 citation(s)', out)
+
+    def test_the_census_is_printed_on_a_green_run(self):
+        """An exemption nobody sees is an exemption that grows.
+
+        The count is in the gate's own output, not in a comment somebody has to
+        go and find, so a declaration that appears in a diff also appears in
+        the number the next green run prints.
+        """
+        self.good_ledger()
+        out = self.assertGreen()
+        self.assertIn('example-id exemptions: 0 file(s), 0 family(ies), '
+                      '0 citation(s)', out)
+
+    def test_a_marker_does_not_exempt_a_family_it_did_not_declare(self):
+        """The exemption is per family, not per file.
+
+        This is the whole reason an explicit exclusion of the checkers' own
+        test files was rejected: that form exempts a FILE, so a real finding
+        cited in it is unchecked forever.
+        """
+        self.good_ledger()
+        self.write('tests/test_thing.py',
+                   self.marker('F-BBB') +
+                   'cases = ["F-BBB-7", "D-AAA-3"]\n')
+        self.assertRed(r'D-AAA-3 is filed in tests/test_thing\.py '
+                       r'but has no row')
+
+    def test_a_marker_in_one_file_does_not_exempt_another_file(self):
+        """A declaration is local, and a leak out of it is reported.
+
+        Without this the example families would be a global namespace by the
+        back door: declare D-AAA once in a test and every citation of it
+        anywhere in the tree goes quiet.
+        """
+        self.good_ledger()
+        self.write('tests/test_thing.py',
+                   self.marker('F-BBB') + 'cases = ["F-BBB-7"]\n')
+        self.write('Service.qml', '  // F-BBB-7, found live.\n')
+        self.assertRed(r'Service\.qml cites F-BBB-7, but F-BBB is declared '
+                       r'an EXAMPLE family in tests/test_thing\.py')
+
+    def test_a_declared_family_that_has_a_board_row_is_red(self):
+        """The anti-abuse half: you cannot declare a real family an example.
+
+        A family the board tracks is a family somebody is acting on. If the
+        marker could cover it, the exemption would be a way to delete a row's
+        write-up from the gate's view without touching the row.
+        """
+        self.good_ledger()
+        self.write('tests/test_thing.py',
+                   self.marker('D-AAA') + 'cases = ["D-AAA-1"]\n')
+        self.assertRed(r'tests/test_thing\.py declares D-AAA as an example '
+                       r'family, and the board carries D-AAA-1, D-AAA-2')
+
+    def test_a_declared_family_cited_in_a_document_is_red(self):
+        """Markdown is where real findings get written up.
+
+        So an example id has no business in one, and a document explaining the
+        convention names an unnumbered family instead. This is the check that
+        makes it hard for a real finding to hide behind the exemption by
+        accident: a finding gets written up, and the write-up is a document.
+        """
+        self.write('docs/STATUS.md', HEADER + (
+            '| F-BBB-7 | P3 | M2 | a thing broke | open |\n'))
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed F-BBB-7 and also D-AAA-4.\n')
+        self.write('tests/test_thing.py',
+                   self.marker('D-AAA') + 'cases = ["D-AAA-4"]\n')
+        self.assertRed(r'docs/QA-RESULTS\.md cites D-AAA-4, whose family is '
+                       r'declared an EXAMPLE in tests/test_thing\.py')
+
+    def test_a_document_may_not_carry_a_marker(self):
+        """The exemption is for source files.
+
+        A document that declares its own example ids would be exempting itself
+        from the one rule that makes a real finding hard to hide: that a
+        finding gets written up, and a write-up is a document.
+        """
+        self.good_ledger()
+        self.write('docs/QA-X.md',
+                   self.marker('F-BBB') + '\nF-BBB-7 is an example.\n')
+        self.assertRed(r'docs/QA-X\.md is a document and carries an '
+                       r'example-id marker')
+
+    def test_a_declared_family_the_file_never_cites_is_red(self):
+        """A dead exemption is how an exemption list rots.
+
+        It is also how one is smuggled in ahead of the citation it was meant
+        for: a marker that covers nothing today covers whatever is written
+        under that family tomorrow, in silence.
+        """
+        self.good_ledger()
+        self.write('tests/test_thing.py',
+                   self.marker('F-BBB') + 'cases = []\n')
+        self.assertRed(r'tests/test_thing\.py declares F-BBB as an example '
+                       r'family and cites no F-BBB-<n> id')
+
+    def test_a_marker_with_no_reason_exempts_nothing(self):
+        """Fail closed, and say so.
+
+        The reason after `--` is mandatory because it is the part a reviewer
+        reads. A marker without one is not a marker, so the ids stay held to
+        the board -- and the author is told why, rather than being left to
+        wonder why an id they believed exempt is still being reported.
+        """
+        self.good_ledger()
+        self.write('tests/test_thing.py',
+                   '# EXAMPLE-DEFECT%s D-AAA\n' % '-IDS:' +
+                   'cases = ["D-AAA-3"]\n')
+        out = self.assertRed(r'tests/test_thing\.py carries an example-id '
+                             r'marker whose family list parses to nothing')
+        self.assertIn('D-AAA-3 is filed in tests/test_thing.py', out)
+
+    def test_a_marker_listing_numbered_ids_exempts_nothing(self):
+        """Families, not ids.
+
+        `D-AAA-3` on a marker line looks like it exempts D-AAA-3 and would
+        quietly exempt the whole D-AAA family if the parse were loose about
+        it. It parses to nothing instead, which is the direction that
+        announces itself.
+        """
+        self.good_ledger()
+        self.write('tests/test_thing.py',
+                   self.marker('D-AAA-3') + 'cases = ["D-AAA-3"]\n')
+        out = self.assertRed(r'family list parses to nothing')
+        self.assertIn('D-AAA-3 is filed in tests/test_thing.py', out)
+
+    def test_the_exemption_parse_is_the_shipping_one(self):
+        """Rule 12: call the shipping function, do not mirror the regex."""
+        families, had = checker.example_families(
+            self.marker('D-AAA F-BBB'))
+        self.assertEqual(families, set(['D-AAA', 'F-BBB']))
+        self.assertTrue(had)
+        families, had = checker.example_families('nothing to declare here\n')
+        self.assertEqual(families, set())
+        self.assertFalse(had)
+        self.assertEqual(checker.family_of('D-A11Y-1'), 'D-A11Y')
+
 
 
 if __name__ == '__main__':

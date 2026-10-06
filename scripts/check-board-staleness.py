@@ -74,6 +74,41 @@ checker: it records a fact a reader of the board wants anyway, and it is
 visible on the line they read first. Historical cost of that discipline: one
 row, once, four commits.
 
+WHY THIS CHECKER'S CORPUS STAYS MARKDOWN-ONLY, unlike the ledger's (F-EPG-21).
+scripts/check-defect-ledger.py widened its corpus from `git ls-files -- '*.md'`
+to every tracked file, because an id cited in a script is a filed id and
+nothing could see it. The same widening is WRONG here, and the reason is the
+question, not the file type.
+
+The ledger asks "does this id have a row?". A citation answers that whoever
+wrote it, however they wrote it: a quote of an id is still a citation. This
+checker asks "does this text ASSERT that the id was closed?" -- and source
+files are full of text that merely LOOKS like that assertion:
+
+  * This very docstring. Widened, `scripts/check-board-staleness.py` becomes a
+    claim source for D-DOC-2, D-EPG-2, D-PLY-10, D-PLY-11 and D-PLY-23 -- the
+    five ids the paragraphs above QUOTE while explaining what the signals
+    matched historically. A checker that reads its own account of a past
+    failure as a fresh claim about the present board is not reading evidence.
+  * This checker's own tests. `tests/test_board_staleness.py` holds strings
+    like "Close <id> at the sink" whose entire job is to be matched, plus a
+    `repairs (...)` list; widened, it claims the closure of seven ids.
+  * A fixture. `tests/fixtures/contrast-calibration.json` says one was fixed.
+
+Measured on d5c2d7a: the widened corpus yields 24 claims, of which 13 come
+from those three sources, and ZERO new disagreements with the board. So the
+widening costs the checker its ability to tell an assertion from a quotation
+and buys nothing measurable. (Measured by dropping the `'*.md'` pathspec from
+document_claims, which also walks straight into a UnicodeDecodeError on
+preview.png: `_read` here has no binary guard, because its corpus has never
+contained a binary. The ledger check grew `read_text` for exactly that.)
+
+What makes it unnecessary rather than merely unwise: the GATE half of this
+check never read markdown at all. It reads `git log`, so an id that exists
+only in a .py is already covered the moment a commit message of ours claims
+its closure -- which is the construction the finding was about. The advisory
+half adds document prose, and document prose is written to assert.
+
 No grace window, because none separates the cases. The false alarm was red
 for 4 commits and the smallest true catch, F-SINK-10, for 6 -- and both
 happened inside a single day, so a day-based window misses F-SINK-10
@@ -127,6 +162,11 @@ REPORT_SIGNALS = GATE_SIGNALS + (
 )
 REPAIR_NOUN = re.compile(r'\b(?:repairs|fixes)\b([^.]{0,160})')
 
+# EXAMPLE-DEFECT-IDS: D-FOO -- illustrations in the comment below, invented so
+# the negation guard can be described in the shapes it has to read. The id gate
+# scans this file like any other source file; see the exemption rule in
+# scripts/check-defect-ledger.py.
+#
 # A negation IMMEDIATELY in front of the construction turns the assertion
 # inside out: "this does not close D-FOO-1", "rather than close D-FOO-1",
 # "would close D-FOO-1". It must be the word before, or the word before that,
