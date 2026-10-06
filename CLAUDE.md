@@ -4,8 +4,8 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.12.0; the marketplace's verified snapshot is v0.11.0
-(bf4ae8f, #9887, approved 2026-10-04 in about 17.5 hours) until 0.12.0's
+Quickshell process. Released through v0.12.1; the marketplace's verified snapshot is v0.12.0
+(f89f748, #10012, approved 2026-10-04 in about an hour) until 0.12.1's
 request is actioned;
 the twelve days it sat on v0.7.1 are explained in the decisions log.
 
