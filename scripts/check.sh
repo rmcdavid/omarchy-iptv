@@ -8,7 +8,13 @@
 #   5. QML spec                  (qmltestrunner on tests/Model.spec.qml)
 #   6. harness predicates        (scripts/qa-lib-test.sh)
 #   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
-#   7. ASCII check on code files (glyphs are allowed in .qml only)
+#   7. ASCII check on code files (glyphs are allowed in .qml only) and the
+#                                control-byte check. BOTH scan the working
+#                                TREE, not the index: `git ls-files --cached
+#                                --others --exclude-standard`, so a file that
+#                                exists but has not been staged is covered
+#                                (F-GATE-1), and the printed count says how
+#                                many of the files it read were untracked
 #   8. defect ledger             (scripts/check-defect-ledger.py: every defect
 #                                id filed in any tracked .md has a row, with a
 #                                severity and a state, in STATUS.md "## Defects")
@@ -152,7 +158,7 @@ fail=0
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-71}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1857}
-PY_TESTS_MIN=${PY_TESTS_MIN:-861}
+PY_TESTS_MIN=${PY_TESTS_MIN:-880}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -178,6 +184,167 @@ STUB_TESTS_MIN=${STUB_TESTS_MIN:-19}
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
 bad()  { printf 'FAIL %s\n' "$*"; fail=1; }
+
+# --- the corpus the two byte scans run over -------------------------------
+#
+# E3, kept because it is the first half of the same story: the ASCII list used
+# to be hand-maintained, and `[[ -f $file ]] || continue` dropped directories -
+# so scripts/gen-playlist.py (a .py source, which CLAUDE.md rule 8 covers),
+# every scripts/*.sh, everything under scripts/dev-harness/ and every fixture
+# SUBdirectory went unscanned. The gate was green partly by accident:
+# tests/fixtures/qa-nonascii/ was skipped because it is a directory, not
+# because anyone excluded it. That is why the list is a pathspec against git
+# and the exclusions are BY NAME.
+#
+# F-GATE-1. Both scans were driven from `git ls-files`, which lists the INDEX.
+# A file that EXISTS in the working tree but has not been staged was therefore
+# not scanned at all -- and a lane adding files is precisely the population
+# these two checks exist to police. Found by the helper lane on itself: its
+# first commit was red for a literal e-acute in a brand-new test file, a byte
+# this gate had called green minutes earlier, because the check that was meant
+# to stop it ran before the `git add` that made it visible. The printed count
+# ("162 files scanned") read as coverage while silently excluding exactly that
+# population, which is CLAUDE.md rule 14's shape: a check that cannot go red
+# for the failure it guards is not a check.
+#
+# `--cached --others --exclude-standard` is the whole fix:
+#   --cached            everything in the index -- ls-files' old default, so
+#                       nothing that used to be scanned stops being scanned
+#   --others            every path present in the working tree that is NOT in
+#                       the index: the new file, BEFORE it is staged
+#   --exclude-standard  apply .gitignore, .git/info/exclude and
+#                       core.excludesFile. This one is load-bearing, not
+#                       tidiness: without it the scan reads __pycache__/*.pyc,
+#                       which are control bytes end to end, and the gate is
+#                       red for everyone who has ever run the python suite.
+# The two sets are disjoint -- a path is in the index or it is an "other",
+# never both -- so the count does not double-count. The untracked share is
+# printed SEPARATELY so the number stays honest about what it scanned.
+#
+# Rejected: `find`, which cannot read .gitignore and would walk .git/ and
+# node_modules/; and `git status --porcelain`, which reports only CHANGED
+# tracked paths and would drop the clean majority of the corpus.
+#
+# Consequence, accepted deliberately: an unignored stray file in the working
+# tree is now scanned, and fails the gate if it carries the bytes rule 8
+# forbids. That is wanted. An unignored file in the tree is a file somebody is
+# about to commit -- `git add -A` cannot tell whose it is (rule 4b) -- and the
+# declaration that a path is scratch belongs in .gitignore, where the next
+# contributor can also see it. The finding line says "untracked" and names
+# that remedy so the diagnosis is one line rather than a puzzle.
+gate_corpus=()
+declare -A gate_is_new=()
+gate_load_corpus() {   # argv: pathspecs. Fills gate_corpus[] and gate_is_new[].
+  local rel
+  gate_corpus=()
+  gate_is_new=()
+  while IFS= read -r -d '' rel; do gate_is_new["$rel"]=1; done \
+    < <(git -C "$ROOT" ls-files --others --exclude-standard -z -- "$@")
+  while IFS= read -r -d '' rel; do gate_corpus+=( "$rel" ); done \
+    < <(git -C "$ROOT" ls-files --cached --others --exclude-standard -z -- "$@")
+}
+gate_new_suffix() {   # $1: repo-relative path. A note if it is not in the index.
+  [[ -v gate_is_new[$1] ]] || return 0
+  printf ' (untracked -- in your tree, not in the index; if it is scratch, .gitignore it)'
+}
+
+gate_ascii_scan() {
+  local rel file suffix bad_any=0 scanned=0 newly=0
+  local -a specs=( '*.js' '*.py' '*.json' 'bin/*' 'scripts/*.sh' \
+                   'scripts/dev-harness/*' 'tests/fixtures/*' 'docs/ARCHITECTURE.md' )
+  local -a exempt_files=( 'tests/fixtures/qa-player/qa-player.m3u' \
+                          'scripts/dev-harness/fixtures/harness.m3u.in' )
+  gate_load_corpus "${specs[@]}"
+  for rel in "${gate_corpus[@]}"; do
+    # Product owner ruling, 2026-09-14. The gate exists so that SOURCE stays
+    # ASCII: escapes stay escapes and no tool silently rewrites a byte. A data
+    # fixture that carries non-ASCII is the opposite case - carrying it IS what
+    # it tests, because channel names are Cyrillic, Japanese and accented Latin
+    # in the real world. So fixtures are exempt, but only BY NAME, one line per
+    # file with the reason. A directory-wide glob would let the next file in
+    # slip past unnoticed, which is how this gate was quietly green before.
+    case $rel in
+      */nonascii/*|tests/fixtures/qa-nonascii/*) continue ;;       # a whole tree, named for the purpose
+      tests/fixtures/qa-player/qa-player.m3u) continue ;;          # channel names in German, Japanese and a check mark
+      scripts/dev-harness/fixtures/harness.m3u.in) continue ;;     # channel names in French and Russian
+    esac
+    file="$ROOT/$rel"
+    [[ -f $file ]] || continue
+    scanned=$(( scanned + 1 ))
+    [[ -v gate_is_new[$rel] ]] && newly=$(( newly + 1 ))
+    if LC_ALL=C grep -n -P '[^\x00-\x7F]' "$file" >/dev/null; then
+      suffix=$(gate_new_suffix "$rel")
+      printf 'non-ASCII bytes in %s%s:\n' "$rel" "$suffix"
+      LC_ALL=C grep -n -P '[^\x00-\x7F]' "$file" | head -5
+      bad_any=1
+    fi
+  done
+  # An exclusion that names a file which no longer exists is a dead line: it
+  # goes on reading like a considered exemption while guarding nothing, and the
+  # next person to move that fixture gets no signal. Same join-by-name failure
+  # as rule 13, inside this very step, so assert the join.
+  for rel in "${exempt_files[@]}"; do
+    if [[ ! -f "$ROOT/$rel" ]]; then
+      printf 'ascii exclusion names a path that does not exist: %s\n' "$rel"
+      bad_any=1
+    fi
+  done
+  if (( scanned == 0 )); then
+    bad "ascii check scanned no files at all (is this a git checkout?)"; return 1
+  elif (( bad_any )); then
+    bad "ascii check ($scanned files scanned, $newly untracked)"; return 1
+  else
+    ok "ascii check ($scanned files scanned, $newly untracked)"; return 0
+  fi
+}
+
+gate_control_scan() {
+  local rel file suffix bad_any=0 scanned=0 newly=0
+  local -a specs=( '*.js' '*.py' '*.qml' '*.json' '*.sh' 'bin/*' 'scripts/dev-harness/*' )
+  gate_load_corpus "${specs[@]}"
+  for rel in "${gate_corpus[@]}"; do
+    case $rel in
+      *.gz|*.png|*.jpg) continue ;;                               # binary by definition
+    esac
+    file="$ROOT/$rel"
+    [[ -f $file ]] || continue
+    scanned=$(( scanned + 1 ))
+    [[ -v gate_is_new[$rel] ]] && newly=$(( newly + 1 ))
+    # -a is load-bearing: without it grep SKIPS the file the moment it holds a
+    # NUL, which is exactly the file this check exists to find.
+    if LC_ALL=C grep -a -q -P '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' "$file" 2>/dev/null; then
+      suffix=$(gate_new_suffix "$rel")
+      printf 'raw control bytes in %s%s (write them as \\uXXXX escapes)\n' "$rel" "$suffix"
+      bad_any=1
+    fi
+  done
+  if (( scanned == 0 )); then
+    bad "control-byte check scanned no files at all"; return 1
+  elif (( bad_any )); then
+    bad "control-byte check ($scanned files scanned, $newly untracked)"; return 1
+  else
+    ok "control-byte check ($scanned files scanned, $newly untracked)"; return 0
+  fi
+}
+
+# One byte scan, against one root, and nothing else. This is the door
+# tests/test_gate_file_scan.py drives: it builds throwaway git repositories in
+# a temp directory and runs the REAL functions above over them, rather than
+# reimplementing the scan in python where it could pass while the gate is
+# broken (CLAUDE.md 12). It must stay above the first `step` so that no other
+# gate runs, and it never touches this repository.
+if [[ ${1:-} == --byte-scan ]]; then
+  if (( $# != 3 )); then
+    printf 'usage: %s --byte-scan ascii|control <root>\n' "$0" >&2; exit 2
+  fi
+  ROOT=$(cd "$3" 2>/dev/null && pwd) || { printf 'no such root: %s\n' "$3" >&2; exit 2; }
+  case $2 in
+    ascii)   gate_ascii_scan ;;
+    control) gate_control_scan ;;
+    *)       printf 'unknown scan: %s\n' "$2" >&2; exit 2 ;;
+  esac
+  exit $?
+fi
 
 step "omarchy plugin validate $ROOT"
 if omarchy plugin validate "$ROOT"; then ok "manifest valid"; else bad "manifest invalid"; fi
@@ -389,47 +556,7 @@ else
 fi
 
 step "ascii check (code files)"
-# E3: the list was hand-maintained, and `[[ -f $file ]] || continue` dropped
-# directories - so scripts/gen-playlist.py (a .py source, which CLAUDE.md rule
-# 8 covers), every scripts/*.sh, everything under scripts/dev-harness/ and
-# every fixture SUBdirectory went unscanned. The gate was green partly by
-# accident: tests/fixtures/qa-nonascii/ was skipped because it is a directory,
-# not because anyone excluded it.
-#
-# Driven from git ls-files now, with the deliberate non-ASCII trees excluded
-# BY NAME so the exclusion is visible rather than incidental.
-ascii_bad=0
-ascii_scanned=0
-while IFS= read -r -d '' rel; do
-  # Product owner ruling, 2026-09-14. The gate exists so that SOURCE stays
-  # ASCII: escapes stay escapes and no tool silently rewrites a byte. A data
-  # fixture that carries non-ASCII is the opposite case - carrying it IS what
-  # it tests, because channel names are Cyrillic, Japanese and accented Latin
-  # in the real world. So fixtures are exempt, but only BY NAME, one line per
-  # file with the reason. A directory-wide glob would let the next file in
-  # slip past unnoticed, which is how this gate was quietly green before.
-  case $rel in
-    */nonascii/*|tests/fixtures/qa-nonascii/*) continue ;;       # a whole tree, named for the purpose
-    tests/fixtures/qa-player/qa-player.m3u) continue ;;          # channel names in German, Japanese and a check mark
-    scripts/dev-harness/fixtures/harness.m3u.in) continue ;;     # channel names in French and Russian
-  esac
-  file="$ROOT/$rel"
-  [[ -f $file ]] || continue
-  ascii_scanned=$(( ascii_scanned + 1 ))
-  if LC_ALL=C grep -n -P '[^\x00-\x7F]' "$file" >/dev/null; then
-    printf 'non-ASCII bytes in %s:\n' "$rel"; LC_ALL=C grep -n -P '[^\x00-\x7F]' "$file" | head -5
-    ascii_bad=1
-  fi
-done < <(git -C "$ROOT" ls-files -z -- \
-           '*.js' '*.py' '*.json' 'bin/*' 'scripts/*.sh' 'scripts/dev-harness/*' \
-           'tests/fixtures/*' 'docs/ARCHITECTURE.md')
-if (( ascii_scanned == 0 )); then
-  bad "ascii check scanned no files at all (is this a git checkout?)"
-elif (( ascii_bad )); then
-  bad "ascii check ($ascii_scanned files scanned)"
-else
-  ok "ascii check ($ascii_scanned files scanned)"
-fi
+gate_ascii_scan
 
 step "control-byte check (source files, .qml included)"
 # M2-03 integration. A raw NUL in tests/Model.test.js and tests/Model.spec.qml
@@ -443,29 +570,7 @@ step "control-byte check (source files, .qml included)"
 # This is NOT the ASCII check and does not overlap it: it covers .qml too
 # (where rule 8 deliberately allows non-ASCII glyphs) and it looks only for C0
 # controls other than tab/newline/CR, plus DEL.
-ctrl_bad=0
-ctrl_scanned=0
-while IFS= read -r -d '' rel; do
-  case $rel in
-    *.gz|*.png|*.jpg) continue ;;                               # binary by definition
-  esac
-  file="$ROOT/$rel"
-  [[ -f $file ]] || continue
-  ctrl_scanned=$(( ctrl_scanned + 1 ))
-  # -a is load-bearing: without it grep SKIPS the file the moment it holds a
-  # NUL, which is exactly the file this check exists to find.
-  if LC_ALL=C grep -a -q -P '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' "$file" 2>/dev/null; then
-    printf 'raw control bytes in %s (write them as \\uXXXX escapes)\n' "$rel"
-    ctrl_bad=1
-  fi
-done < <(git -C "$ROOT" ls-files -z -- '*.js' '*.py' '*.qml' '*.json' '*.sh' 'bin/*' 'scripts/dev-harness/*')
-if (( ctrl_scanned == 0 )); then
-  bad "control-byte check scanned no files at all"
-elif (( ctrl_bad )); then
-  bad "control-byte check ($ctrl_scanned files scanned)"
-else
-  ok "control-byte check ($ctrl_scanned files scanned)"
-fi
+gate_control_scan
 
 step "a11y fidelity guard (scripts under tests/a11y)"
 # These 32 cases landed and the gate could not see them: `unittest discover -s
