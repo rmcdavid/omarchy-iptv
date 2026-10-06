@@ -3,6 +3,24 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.12.1 (2026-10-06)
+
+Nothing you can see. This release exists to carry one corrected word.
+
+### Fixed
+
+- **A comment in the source named a defect that does not exist.** The note
+  above one of the player's functions referenced the wrong internal
+  tracking id, and had since September. No behaviour changes, and there is
+  nothing to look at in the app: the only file that differs from the last
+  release is one line of explanation for whoever reads the code next.
+
+Everything else this release carries is in the project's own checks and
+tests, which do not ship. Two of those checks could not see what they were
+guarding -- one read the staged files instead of the ones on disk, the
+other read only documents -- and both were widened, which is how the wrong
+id above was found at all.
+
 ## 0.12.0 (2026-10-04)
 
 More of your channels show what is on.
