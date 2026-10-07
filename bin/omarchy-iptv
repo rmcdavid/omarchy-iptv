@@ -472,7 +472,23 @@ _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-loo
 # decomposed Latin accent. Marks on other scripts stay (Cyrillic breve in
 # "\u0439" must not fold to "\u0438").
 _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
-_URL_ANYWHERE = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
+# redact_urls' pieces (F-SINK-11). It used to be one pattern,
+# `\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+`, whose scheme run the engine
+# re-read from every word boundary; the scan is anchored on "://" now and these
+# are the parts of that pattern it still needs. The tail is unchanged. `\w` is
+# asked rather than guessed, so the word-boundary rule stays Python's own
+# outside ASCII.
+_URL_TAIL_RE = re.compile(r"[^\s'\"<>]+")
+_WORD_CHAR_RE = re.compile(r"\w")
+# The scheme-legal run that ENDS at a given position: `search(s, lo, j)` leaves
+# `$`/`\Z` at `j`, so the leftmost match starts the maximal run reaching `j`.
+# One native search rather than a python character loop walking back over the
+# same set -- the loop was correct and measurably slower, 168.5 ms against
+# 1 MiB of letters followed by a URL where this is 54.4 ms (3.810 ms against
+# 40,000 where this is 0.363), and the whole point of F-SINK-11 is that the
+# size is the provider's to choose. Both are linear; this one has the smaller
+# constant and neither copies a slice.
+_SCHEME_RUN_RE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_text. Built from the same constant so the two cannot drift:
@@ -591,18 +607,111 @@ def source_host(url: str) -> str:
 
 
 def redact_urls(text: Any) -> str:
-    """Replace every URL inside `text` with scheme://host (R12)."""
+    """Replace every URL inside `text` with scheme://host (R12).
 
-    def replace(match: re.Match[str]) -> str:
-        raw = match.group(0)
+    F-SINK-11. ANCHORED ON "://", because the pattern this replaced was
+    quadratic in a run of scheme-legal characters and every string that
+    reaches here is provider-controlled.
+
+    The old pattern was `\\b([A-Za-z][A-Za-z0-9+.-]*)://[^\\s'"<>]+`. Its `\\b`
+    hid the simplest shape -- a run of plain letters offers only one word
+    boundary -- so the Model.js mirror was measured first and this side read as
+    cheap. It is not: any run that CONTAINS a word boundary every few
+    characters gives the engine a fresh start position for a run that reaches
+    to the end of the text, and `.`, `+` and `-` are scheme-legal and are not
+    word characters. Measured on python 3.14.7 over "aaaa." repeated: 1.6 ms at
+    1,000 characters, 45.0 at 5,000, 174.5 at 10,000, 705.5 at 20,000 and
+    2826.2 at 40,000 -- the same curve as the JS side, on a different vector.
+    After this change, same vector and same machine: 0.001 / 0.002 / 0.003 /
+    0.006 / 0.012 ms. The slowest vector that remains is a single run of
+    letters that ends in a real URL, where the whole run is the "scheme" the
+    old pattern also swallowed: 0.013 / 0.052 / 0.096 / 0.187 / 0.363 ms. That
+    is also the ONE vector this change makes slower, and saying so is the point:
+    0.143 ms against 0.363 at 40,000, and 44.5 ms against 51.7 at 1 MiB. Linear
+    either way. The trade is four orders of magnitude on the shape that was
+    quadratic for a factor of two on the one that never was.
+
+    Why it is the same answer and not a narrower pattern. `:` and `/` are not
+    scheme-legal, so the old pattern's greedy scheme run always ended EXACTLY
+    at the `://` that followed it and there was never a shorter candidate to
+    backtrack to. So the leftmost start the engine took for a given `://` is
+    the first position in the scheme-legal run ending at it that holds an ASCII
+    letter AND satisfies `\\b`; inside the run the only non-word characters are
+    `+`, `.` and `-`, so that test is a character comparison everywhere except
+    the run's own first position, where `\\w` is asked (`_` and every non-ASCII
+    word character are why it has to be asked). The redaction-cost suite (dev
+    branch) drives the OLD pattern as an oracle over the shared fixture and
+    thousands of generated strings and asserts the two agree character for
+    character.
+
+    This makes the caps in front of this sink cheap, not unnecessary:
+    clean_name, clean_field and clean_detail are still what keeps a 64 MiB
+    description out of a renderer, and clean_detail still drops a cut token
+    carrying "://" rather than hand the redactor half a URL.
+    """
+    s = "" if text is None else str(text)
+    j = s.find("://")
+    if j < 0:                       # the old pattern cannot match: same answer
+        return s
+    out: list[str] = []
+    copied = 0                      # everything before this is already in `out`
+    # The engine's pos: no match may start before it. `j` is only ever searched
+    # from `resume` or from a position already at or past it, so there is no
+    # `j < resume` case to guard -- and a guard for a case that cannot happen is
+    # a branch no test can go red for.
+    resume = 0
+    while j >= 0:
+        # The scheme-legal run ending at this "://". Searched over a window
+        # that doubles until the run's start is strictly inside it (or the
+        # window reaches `resume`), so the total work is proportional to the
+        # run and not to the text, and no slice is copied.
+        window = 64
+        while True:
+            lo = j - window
+            if lo < resume:
+                lo = resume
+            b = _SCHEME_RUN_RE.search(s, lo, j).start()
+            if b > lo or lo == resume:
+                break
+            window *= 2
+        # `\b` at a position whose character is a word character (a letter
+        # always is) means "position 0, or the character before is not a word
+        # character". Only the run's first position can be preceded by
+        # something outside the scheme-legal set, so only it needs `\w`.
+        boundary_at_b = b == 0 or _WORD_CHAR_RE.match(s, b - 1) is None
+        start = -1
+        for p in range(b, j):
+            c = s[p]
+            if not (("a" <= c <= "z") or ("A" <= c <= "Z")):
+                continue
+            if p == b:
+                if not boundary_at_b:
+                    continue
+            elif s[p - 1] not in "+.-":
+                continue
+            start = p
+            break
+        tail = _URL_TAIL_RE.match(s, j + 3)
+        if start < 0 or tail is None:
+            # No scheme, or nothing the tail `+` can consume: the old pattern
+            # has no match ending at this `://`. j+1 and j+2 cannot begin one
+            # of their own; +1 keeps that from being load-bearing.
+            j = s.find("://", j + 1)
+            continue
+        end = tail.end()
+        raw = s[start:end]
         trailing = ""
         while raw and raw[-1] in ".,;:!?)]":
             trailing = raw[-1] + trailing
             raw = raw[:-1]
         host = url_host(raw)
-        return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
-
-    return _URL_ANYWHERE.sub(replace, "" if text is None else str(text))
+        out.append(s[copied:start])
+        out.append("%s://%s%s" % (s[start:j].lower(), host or "[redacted]", trailing))
+        copied = end
+        resume = end
+        j = s.find("://", resume)
+    out.append(s[copied:])
+    return "".join(out)
 
 
 def log(message: str) -> None:
@@ -647,14 +756,59 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 
 
-# A channel NAME as the EPG matcher compares it: normalize_text with the
-# distribution markers taken out first. Measured through build_alias ->
-# parse_xmltv -> match_counts on the installed 1,453-channel list against the
-# project's own XMLTV asset: matching on normalize_text alone reaches 126
-# channels, and taking these markers out first reaches 227, because
-# 1,155 of those 1,453 names carry one. `48 Hours (1080p)` and `48 Hours` are
-# the same programme stream; `(1080p)` says how it is encoded and `[Geo-blocked]`
-# says where it works, and neither is part of the channel's identity.
+# A channel NAME as the EPG matcher compares it: normalize_id_text with the
+# distribution markers taken out first (the ID fold, since D-EPG-5; see
+# epg_name_key below). `48 Hours (1080p)` and `48 Hours` are the same programme
+# stream; `(1080p)` says how it is encoded and `[Geo-blocked]` says where it
+# works, and neither is part of the channel's identity.
+#
+# WHAT THE STRIP IS WORTH, AND ON WHICH INPUTS (F-EPG-13). This comment stated
+# one figure in the PRESENT tense through two supersessions, and said
+# `normalize_text` after the fold had already changed under it. Both halves are
+# fixed by saying which run each number came from, because no number here is
+# about today unless it says so.
+#
+# A dated record, not re-runnable from any checkout: matching on normalize_text
+# alone reached 126 channels and taking these markers out first reached 227,
+# measured through build_alias -> parse_xmltv -> match_counts on the frozen
+# 1,453-row source of 2026-10-03 against the project's own XMLTV asset, both
+# arms under the pre-D-EPG-5 SEARCH fold. 1,155 of those 1,453 names carried a
+# marker. That 227 was superseded twice -- 226 by the name-key repair (D-EPG-5)
+# and 265 by the address strategy (F-EPG-11) -- and neither successor re-ran
+# the strip-OFF arm, so the delta above has no current counterpart and the
+# frozen inputs are in no checkout. The strip's own contribution is therefore
+# UNVERIFIED at today's baseline; QA-EPG-PRECISION.md (dev branch) 8 says so
+# and names what is re-runnable instead. Do not restate 126/227 as a live
+# figure.
+#
+# What IS re-derivable, from the install's own cache rather than a re-fetch:
+# on the 1,450-row source installed here on 2026-10-06 the matcher as a whole
+# reaches 264 -- 185 by address, 79 by name -- and 1,153 of those 1,450 names
+# carry a marker this pattern strips.
+#
+# That 264 is ONE number, not three. An earlier version of this paragraph
+# called epg-status.json's `matched`, epg-now.json's channel count and
+# epg-window.txt's line count three artifacts that agree, and invoked rule 14
+# while breaking it: the status's `matched` IS the window header's `matched`
+# read back by load_window, the same field twice; the window's line count is
+# one line per key of the dict match_counts counted; and on this run
+# epg-now.json's key set equals the window's exactly, so its length is
+# `nowCount`, which match_counts' own docstring below says is the RENDER count
+# and a different quantity from the match count. What re-derives the 264 is
+# CALLING match_counts over the cached channels.json with the cached window's
+# channel keys as `seen_ids` -- 264, measured 2026-10-06 -- and that is exact
+# only because `epgChannels` (len(seen_ids)) is 264 too, so no granted claim
+# fell outside the window; where the two differ it is a lower bound.
+# QA-EPG-PRECISION.md (dev branch) 8 carries the command.
+#
+# 1,155 of 1,453 against 1,153 of 1,450 is not a like-for-like pair, and
+# saying so is the point of this paragraph: the 1,155 was taken while the
+# bracket half of this pattern was still the broad `\[[^\]]*\]`, before the
+# F-EPG-10 narrowing (1f940b9, 2026-10-04). The pattern change is worth ZERO
+# rows on the list that exists -- the pre-narrowing pattern and the shipped one
+# both count 1,153 of the live 1,450, measured 2026-10-06 -- so the 2-row drop
+# in markers under a 3-row drop in the source is the provider's drift and not a
+# change here (F-EPG-24). The frozen arm cannot be re-run to close it.
 #
 # Deliberately NOT applied inside normalize_text, which is the SEARCH key: a
 # user who types "1080" is searching for exactly these markers, and the four
@@ -2084,17 +2238,20 @@ def clean_detail(text: str | None, limit: int) -> str:
     IT -- into the panel, into epg-now.json and onto the accessibility bus.
     Measured at every cut offset of all three caps before the fix.
 
-    The cut is still bounded, because the regex cost is quadratic in a run of
-    scheme-legal characters that does not match and the input is
-    provider-controlled up to MAX_SOURCE_BYTES. Measured here on the shape
-    that defeats the `://` guard (`a-a-a-...` plus one real URL): 1.2 ms at
-    400 code points, and four times that for every doubling -- 173 ms at
-    6,400, 694 ms at 12,800, which puts a single 64 MiB description out of
-    reach of any budget. So the bound stays and the SPLIT is what moved: the
-    text is cut at `limit`, and when that cut lands inside a token carrying
-    `://` the whole token is dropped rather than handed to the redactor. A
-    URL cannot contain whitespace (_URL_ANYWHERE excludes it), so the only
-    token the cut can ever have truncated is the last one, and dropping it
+    The cut is still bounded, and the reason has CHANGED -- it used to be the
+    cost. It was measured here on the shape that defeats the `://` guard
+    (`a-a-a-...` plus one real URL): 1.2 ms at 400 code points and four times
+    that for every doubling, 173 ms at 6,400, 694 ms at 12,800, which put a
+    single 64 MiB description out of reach of any budget. F-SINK-11 made
+    redaction linear, so that argument is gone and the bound now stands on what
+    it should have stood on all along: the panel reuses a fixed geometry and
+    the input is provider-controlled up to MAX_SOURCE_BYTES, so a description
+    nobody can read is not worth carrying. The SPLIT stays for a reason the
+    cost never touched: the text is cut at `limit`, and when that cut lands
+    inside a token carrying `://` the whole token is dropped rather than handed
+    to the redactor, because half a URL is what published the username above.
+    A URL cannot contain whitespace (redact_urls' tail excludes it), so the
+    only token the cut can ever have truncated is the last one, and dropping it
     costs a fragment that was unreadable anyway.
 
     What the caller sees: a value at most `limit` code points long -- at most,
@@ -2115,12 +2272,13 @@ def clean_detail(text: str | None, limit: int) -> str:
                 cut = head
         text = cut
     if "://" not in text:
-        # The common case, and the hot one. _URL_ANYWHERE cannot match
-        # without "://", so this guard changes no answer; it is here because
-        # the regex retries at every word boundary and prose is all word
-        # boundaries. Measured over a 48,000-programme fetch with a
-        # 600-character description on every programme: 2.7 s of the 6.3 s
-        # was this sub returning the string it was given.
+        # The common case, and the hot one. redact_urls cannot rewrite text
+        # without "://", so this guard changes no answer. It was worth 2.7 s of
+        # a 6.3 s 48,000-programme fetch with a 600-character description on
+        # every programme, back when the old pattern retried at every word
+        # boundary and prose is all word boundaries; redact_urls takes the same
+        # exit itself now (F-SINK-11), so this one is a call it does not make
+        # rather than a stall it avoids. Kept: one `in` beats one call.
         return text
     return clean_field(redact_urls(text), limit)
 
@@ -3925,6 +4083,16 @@ MPV_RESERVED = frozenset((
     # the alias reserved nothing. Matching is by base name now (see
     # filter_mpv_args), and --include loads a config that can set any of these.
     "--include",
+    # D-SINK-13, and the reason layer 2 is not the whole fix.
+    # `--stream-lavf-o` hands key=value straight to libavformat for the
+    # STREAM, and FFmpeg's own AVOption is `tls_verify` -- a different knob
+    # from mpv's `--tls-verify`, reaching the same place -- so the trailing
+    # re-assertion cannot outvote it. Measured 2026-10-07 with BOTH
+    # tls-verify tokens in place: `--stream-lavf-o=tls_verify=0` PLAYED the
+    # attacker's stream, as did the -add, -append and -set forms.
+    # mpv_option_base strips the list suffixes, so this covers all six.
+    # `--demuxer-lavf-o` is NOT reserved: measured, it does not bypass.
+    "--stream-lavf-o",
     "--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit",
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
     "--term-status-msg", "--screenshot-template",
@@ -3935,7 +4103,33 @@ MPV_RESERVED = frozenset((
     # which is `--stream-record`'s class. `--cache-on-disk` itself stays a
     # user choosing their own disk (PO-5's shape) and is warned about below.
     "--demuxer-cache-unlink-files",
+    # D-SINK-13, layer 3 of four. mpv's `--tls-verify` defaults to NO, so the
+    # plugin was handing provider headers and an HTTPS stream URL to a peer it
+    # never authenticated; measured by the lead on 2026-10-07, the shipped argv
+    # played a self-signed server, exit 0. The TLS peer is a rule 5 sink and
+    # the one that gets the credential unredacted.
+    #
+    # Reserved here AND re-asserted as the final token in mpv_launch_argv. Not
+    # alternatives: the trailing token is what makes verification safe (a later
+    # command-line token beats an earlier one, and `--profile` carries
+    # arbitrary options), this entry is what makes the refusal honest, so a
+    # pasted `--tls-verify=no` is reported dropped instead of silently undone.
+    # Both spellings fall out of the existing `no_form` arm in
+    # filter_mpv_args: it rebuilds `--tls-verify` from `--no-tls-verify` and
+    # finds it here, so no new branch is needed.
+    #
+    # Deliberately NOT reserved: `--tls-ca-file`, the targeted escape for a
+    # provider with a self-signed or private-CA certificate (measured working
+    # behind the trailing token - the `--screenshot-dir` shape, a user choice
+    # that lands after ours and wins); and `--profile`, a legitimate mpv
+    # feature that the trailing token makes harmless. `--tls-cert-file` and
+    # `--tls-key-file` are CLIENT certificates, a different thing, untouched.
+    "--tls-verify",
 ))
+# D-SINK-13, layers 1 and 2: one string, written into the argv twice on
+# purpose. Mirror of Model.MPV_TLS_VERIFY; the two literals are pinned to each
+# other by the shared player-argv.json vectors. See mpv_launch_argv.
+MPV_TLS_VERIFY = "--tls-verify=yes"
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
 # Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
@@ -4111,6 +4305,10 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     the same reason: mpv's shader and ICC caches default into
     $XDG_CACHE_HOME/mpv/, outside this plugin's tree. Neither is reserved -
     both are content-free - so a user token can still point them elsewhere.
+
+    D-SINK-13 breaks the "user tokens land last" shape on purpose, for exactly
+    one option: `--tls-verify=yes` appears in the base argv AND again as the
+    final token, after the user's. See the comment on the return.
     """
     where = dirs or player_dirs(sock_path)
     return [
@@ -4136,7 +4334,33 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
         "--watch-later-dir=%s" % where["watchLater"],
         "--gpu-shader-cache-dir=%s" % where["shaderCache"],
         "--icc-cache-dir=%s" % where["shaderCache"],
-    ] + list(mpv_args or [])
+        # D-SINK-13, LAYER 1: stated here, where a reader looks to find out what
+        # the player is launched with. mpv's own default is `--tls-verify=no`
+        # (`mpv --list-options`, 0.41.0). Layer 1 alone is NOT the fix.
+        MPV_TLS_VERIFY,
+    # D-SINK-13, LAYER 2, and the line that actually guarantees verification.
+    #
+    # THE TWO OCCURRENCES OF MPV_TLS_VERIFY ARE NOT REDUNDANT. Removing either
+    # is a security change, not a tidy-up, and this one is the one that holds.
+    # mpv takes the LAST token for a repeated option, so user mpv_args land
+    # between the base argv and this one and are overridden rather than
+    # overriding. That matters because `--tls-verify` is not the only way off:
+    # `--profile=NAME` applies every option in that profile where the token
+    # appears, and a profile in the user's own mpv.conf can set
+    # `tls-verify=no`. Measured by the lead on 2026-10-07: with layer 1 only,
+    # `--profile=evil` PLAYED a self-signed stream (exit 0); with this trailing
+    # token the same command refused it (exit 2), as did `--tls-verify=no` and
+    # `--no-tls-verify` behind it. So this layer covers the indirections nobody
+    # has enumerated, which is why `--profile` is not reserved. A bare `--`
+    # cannot escape it: MPV_ARG_RE requires `--` followed by a lowercase letter
+    # or digit, so filter_mpv_args puts `--` in the rejected bucket (measured by
+    # calling it). And it leaves the escape hatch intact: `--tls-ca-file` is
+    # unreserved and names a CA for THIS token to verify against.
+    #
+    # Mirror of Model.buildMpvArgv's return; pinned to it by the
+    # `--profile=evil` vector in the player-argv.json fixture (dev branch),
+    # whose user arguments are what make this line visible at all.
+    ] + list(mpv_args or []) + [MPV_TLS_VERIFY]
 
 
 def stop_escalation(stage: str) -> dict[str, Any]:
@@ -6713,6 +6937,70 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
     return key
 
 
+# D-SRC-11. The record fields the RUNNING shell owns, with the flag that writes
+# each and the plugin setting that is its authority.
+#
+# The settings are the source of truth for the ACTIVE source and the history
+# follows them (ruling D3 / SR8, and D-SRC-10 for the EPG half). So
+# `state source update --epg-url` writes the FOLLOWER: the shell's reconcile
+# rewrites the active record's `epgUrl` from the plugin's `epgUrl` setting every
+# time it re-reads state.json -- and it re-reads it because this command just
+# wrote it. Measured on the live install 2026-10-03: exit 0, "ok": true, and the
+# record read "" immediately afterwards. Against an isolated state directory the
+# same command writes the value and it persists, so the helper was never wrong;
+# it was silent about who would win.
+#
+# WHY THIS WARNS RATHER THAN REFUSES. Three options, and two of them are worse.
+#  - Writing the SETTING as well is out of scope. That is shell.json, whose
+#    schema belongs to the host; this helper is stdlib-only and knows nothing
+#    about the shell on purpose -- shell.json is not named anywhere else in this
+#    file, and teaching it that schema is a coupling the architecture refuses.
+#  - Refusing would break the half that WORKS. Reconcile only touches the
+#    record whose url matches the setting's playlistUrl, so an INACTIVE source
+#    keeps what this command wrote, and switching to it calls
+#    persistActive(rec.url, rec.epgUrl) -- the record's value goes INTO the
+#    setting. The command is right for every source but one. It is also how a
+#    machine with no shell running, and the test suite, set a source up at all.
+#  - And the helper cannot tell WHICH source is the active one: the active key
+#    is derived from the setting's playlistUrl, and state.json does not record
+#    it. Nothing here can make that distinction without reading the shell's
+#    config, which is the first option again.
+# So the command says what it wrote, who owns it, and what to change instead.
+# Exit code stays 0 because the write did happen.
+#
+# Scope, stated rather than implied: this fires for `update`, which is what
+# D-SRC-11 is filed against. `add --epg-url` has the same exposure in one narrow
+# case -- the url being added IS the setting's playlistUrl and no record existed
+# for it yet, which only happens on a state file the shell has not reconciled --
+# and it is not warned about, because warning on every add would make the
+# ordinary, correct operation noisy and the ordinary add is a source that is not
+# active yet, where the record is the authority until a switch copies it over.
+SETTING_OWNED_SOURCE_FIELDS = (
+    ("epgUrl", "--epg-url", "epgUrl", "guide (EPG) URL"),
+    ("url", "--url", "playlistUrl", "playlist URL"),
+)
+
+
+def setting_owned_warnings(fields: Any) -> list[str]:
+    """Lines for a `state source update` that writes a field the running shell
+    owns for the active source (D-SRC-11), in a fixed order. Empty when nothing
+    asked for is one, so `--label` on its own says nothing."""
+    asked = [row for row in SETTING_OWNED_SOURCE_FIELDS if row[0] in set(fields or ())]
+    if not asked:
+        return []
+    out = []
+    for field, flag, setting, _human in asked:
+        out.append("%s wrote the record's %s, which the running shell OWNS for the active "
+                   "source: the plugin setting '%s' is the authority and omarchy-shell "
+                   "rewrites the record from it whenever it re-reads state.json (D-SRC-11)."
+                   % (flag, field, setting))
+    out.append("So if this is the source the bar is showing, that value is already gone: set "
+               "the %s from the guide's Sources screen instead. For any other source the "
+               "record keeps it, and switching to that source copies it into the setting."
+               % " and ".join(row[3] for row in asked))
+    return out
+
+
 def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any, label: Any, now: int) -> tuple[str, str]:
     """Edit a record in place. A changed playlist URL re-keys it (fetchedAt
     and the counts reset; the caller moves or removes the cache directory).
@@ -6823,6 +7111,26 @@ def cmd_state(args: argparse.Namespace) -> int:
             elif args.op == "update":
                 extra["key"], extra["replacedKey"] = update_source_record(state, args.key, args.url, args.epg_url, args.label, now)
                 write_json_atomic(path, state)
+                # D-SRC-11: the write happened, and for the active source the
+                # shell owns what was written. Say so on stderr AND in the
+                # payload, so neither a human nor a script can read "ok": true
+                # as "this stuck". Only after the write succeeds: a HelperError
+                # above leaves the record alone and there is nothing to warn
+                # about.
+                # argparse's dest is DERIVED from the flag rather than written
+                # out a second time, because two spellings of one name is how a
+                # join stops being checked (rule 13). And `getattr` is called
+                # with no default on purpose: if the flag is ever renamed, this
+                # raises instead of quietly deciding the flag was not passed and
+                # dropping the warning, which is the failure that would be
+                # invisible.
+                asked = [field for field, flag, _setting, _human in SETTING_OWNED_SOURCE_FIELDS
+                         if getattr(args, flag.lstrip("-").replace("-", "_")) is not None]
+                notes = setting_owned_warnings(asked)
+                if notes:
+                    extra["warnings"] = notes
+                    for note in notes:
+                        log("state source update: %s" % note)
             elif args.op == "remove":
                 extra["removed"] = remove_source_record(state, args.key)["key"]
                 write_json_atomic(path, state)
@@ -6970,8 +7278,12 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     update = ops.add_parser("update", parents=[common], help="change the label, playlist URL or EPG URL of a source")
     update.add_argument("key", help="source key (8 hex digits)")
-    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache)")
-    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it")
+    # D-SRC-11: both of these write a field the running shell owns for the
+    # active source, so both say so here and the command warns when they are
+    # used. The warning is the part a user will actually see; this is so the
+    # help text does not promise more than the command delivers.
+    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache). The running shell's 'playlistUrl' setting owns this for the ACTIVE source and will overwrite it")
+    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it. The running shell's 'epgUrl' setting owns this for the ACTIVE source and will overwrite it; change the setting (Sources screen) instead")
     update.add_argument("--label", default=None, help="new label; an empty string restores the derived one")
     update.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     remove = ops.add_parser("remove", parents=[common], help="drop a source from the history (its cache dir: `cache remove`)")

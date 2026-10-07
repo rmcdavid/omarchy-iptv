@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.12.1"
+var PLUGIN_VERSION = "0.13.0"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -209,7 +209,8 @@ var MPV_RESERVED = {
   "--scripts": true,
   // D-SINK-4. Reserved, not merely defaulted off, and the distinction is the
   // whole fix. `--load-scripts=no` is in the base argv, but user mpvArgs are
-  // concatenated AFTER it (buildMpvArgv's last line), so a pasted
+  // concatenated AFTER it (buildMpvArgv's tail, which since D-SINK-13 only
+  // the trailing TLS re-assertion follows), so a pasted
   // `--load-scripts=yes` would win and silently put the credentialed stream
   // URL back on the session bus. That is the shape of D-SINK-2 again: an
   // option defaulted rather than reserved is an option the user can undo
@@ -241,8 +242,69 @@ var MPV_RESERVED = {
   // path the plugin never listed -- `--stream-record`'s class, reserved
   // above. `--cache-on-disk` itself is the user's own disk and is warned
   // about (MPV_DISK_WARN), not refused.
-  "--demuxer-cache-unlink-files": true
+  "--demuxer-cache-unlink-files": true,
+  // D-SINK-13, layer 3 of four. mpv's `--tls-verify` defaults to NO, so until
+  // this round the plugin handed provider headers and an HTTPS stream URL to
+  // an UNAUTHENTICATED peer: measured by the lead on 2026-10-07 against a
+  // self-signed server, the shipped argv played it, exit 0. The TLS peer is a
+  // sink like any other on the rule 5 list, and it is the one sink that gets
+  // the credential in full rather than redacted.
+  //
+  // Reserved here, and ALSO re-asserted as the final token of the composed
+  // argv (buildMpvArgv). The two are not alternatives and the brief for each
+  // is different: the trailing token is what makes verification SAFE, because
+  // a later command-line token beats an earlier one and `--profile` carries
+  // arbitrary options; this entry is what makes the refusal HONEST, so a user
+  // who writes `--tls-verify=no` is told it was dropped instead of watching it
+  // be silently undone. Both spellings are covered without a new branch: the
+  // `--no-` arm below reconstructs `--tls-verify` from `--no-tls-verify` and
+  // finds it here.
+  //
+  // NOT reserved, on purpose, and both of them matter:
+  //  - `--tls-ca-file` is the targeted escape for a provider presenting a
+  //    self-signed or private-CA certificate. The lead measured it working
+  //    behind the trailing re-assertion (case C, and again in the addendum).
+  //    It is the `--screenshot-dir` shape: a deliberate user choice that lands
+  //    after our token and still wins. The cost of the ruling, stated rather
+  //    than hidden: such a user can no longer disable verification wholesale,
+  //    they must name that provider's CA. Smaller blast radius, same
+  //    capability.
+  //  - `--profile` is a legitimate mpv feature, and reserving it would cost
+  //    users that feature while still leaving whatever indirection nobody has
+  //    thought of yet. The trailing re-assertion is what makes it harmless, so
+  //    this is the list NOT to reach for when someone remembers the profile
+  //    bypass.
+  // `--tls-cert-file` and `--tls-key-file` are CLIENT certificates, a
+  // different thing, and are untouched.
+  // D-SINK-13, and the reason layer 2 is not the whole fix. `--stream-lavf-o`
+  // hands key=value straight to libavformat for the STREAM, and FFmpeg's own
+  // AVOption is `tls_verify` -- a different knob from mpv's `--tls-verify`,
+  // reaching the same place. So the trailing re-assertion cannot outvote it:
+  // measured by the lead on 2026-10-07 against the self-signed server, with
+  // BOTH tls-verify tokens in place, `--stream-lavf-o=tls_verify=0` PLAYED the
+  // attacker's stream (exit 0), and so did the `-add`, `-append` and `-set`
+  // forms, with the GET in the attacker's log each time. Found by all three
+  // reviewers of this round independently, against the four-layer fix.
+  //
+  // This one can ONLY be closed by the reserved list, which is why the list is
+  // load-bearing again here and why "layer 2 covers the indirections nobody has
+  // enumerated" was too strong a sentence. mpvOptionBase strips the list
+  // suffixes, so this single entry covers all six spellings.
+  //
+  // `--demuxer-lavf-o` is NOT reserved: measured on the same server, it does
+  // NOT bypass verification (exit 2, refused), because it configures the
+  // demuxer rather than the protocol. Recorded as measured rather than
+  // reserved on suspicion.
+  "--stream-lavf-o": true,
+  "--tls-verify": true
 }
+
+// D-SINK-13, layers 1 and 2. ONE string, written into the argv TWICE on
+// purpose. See buildMpvArgv for why the second occurrence is load-bearing;
+// the constant exists so the two can never drift apart, the way PIP_CLASS
+// exists. The python mirror keeps its own literal and the two are pinned to
+// each other by the shared player-argv.json vectors.
+var MPV_TLS_VERIFY = "--tls-verify=yes"
 
 // Stable notification replace-ids so a repeated failure replaces its toast
 // instead of stacking (UX.md 6.4).
@@ -4309,9 +4371,44 @@ function buildMpvArgv(params) {
     // runtime directory, ephemeral. Neither option is reserved - both caches
     // are content-free - so user tokens after these can still move them.
     "--gpu-shader-cache-dir=" + str(dirs.shaderCache),
-    "--icc-cache-dir=" + str(dirs.shaderCache)
+    "--icc-cache-dir=" + str(dirs.shaderCache),
+    // D-SINK-13, LAYER 1: stated here, where a reader of the specification
+    // looks to find out what the player is launched with. mpv's own default is
+    // `--tls-verify=no` (`mpv --list-options` on 0.41.0), so without this the
+    // plugin handed provider headers and an HTTPS stream URL to a peer it
+    // never authenticated. Layer 1 alone is NOT the fix - see the return.
+    MPV_TLS_VERIFY
   ]
-  return argv.concat(asList(p.extraArgs))
+  // D-SINK-13, LAYER 2, and the line that actually guarantees verification.
+  //
+  // THE TWO OCCURRENCES OF MPV_TLS_VERIFY ARE NOT REDUNDANT. Removing either
+  // one is a security change, not a tidy-up, and the one below is the one that
+  // holds:
+  //
+  //  - mpv resolves a repeated option by taking the LAST token on the command
+  //    line. User mpvArgs land between the base argv and this line, so
+  //    whatever a user writes is overridden here rather than overriding us.
+  //  - That matters because `--tls-verify` is not the only way to turn
+  //    verification off. `--profile=NAME` applies every option in that profile
+  //    at the point the token appears, and a profile in the user's own
+  //    mpv.conf can set `tls-verify=no`. The lead measured it on 2026-10-07:
+  //    with layer 1 only, `--profile=evil` naming such a profile PLAYED a
+  //    self-signed stream (exit 0); with this trailing token the same command
+  //    refused it (exit 2, "Peer certificate failed verification"). The same
+  //    measurement refused `--tls-verify=no` and `--no-tls-verify` behind it.
+  //  - So this layer covers the indirections nobody has enumerated, which is
+  //    why `--profile` is deliberately not on MPV_RESERVED.
+  //  - It cannot be escaped by a bare `--` (which would make the rest
+  //    filenames): splitMpvArgs cannot emit one, because the token pattern
+  //    requires `--` followed by a lowercase letter or digit.
+  //  - And it does not break the escape hatch: `--tls-ca-file` is unreserved,
+  //    rides in extraArgs, and names a CA for THIS token to verify against.
+  //    Measured playing a private-CA stream with the trailing token in place.
+  //
+  // Mirrored by mpv_launch_argv() in bin/omarchy-iptv and pinned there by the
+  // `--profile=evil` vector in the player-argv.json fixture (dev branch),
+  // whose user arguments are what make this line visible at all.
+  return argv.concat(asList(p.extraArgs)).concat([MPV_TLS_VERIFY])
 }
 
 // ------------------------------------------------------------ player verbs
@@ -6650,10 +6747,126 @@ function hostOf(url) {
 // userinfo before the LAST `@` of the authority, so the group now runs to it
 // and the host excludes `@` entirely. Both changes are needed: either alone
 // still leaks.
+//
+// F-SINK-11. The scan is ANCHORED ON "://" and never re-reads a run of
+// scheme-legal characters, so the cost is linear in the length of the text.
+//
+// What was wrong. The pattern was
+// `/[a-z][a-z0-9+.-]*:\/\/(?:[^\/\s]*@)?([^\/\s?#:@]*)[^\s]*/gi`. On a run of
+// scheme-legal characters the engine consumed the whole run from EVERY start
+// position and backtracked out of it, so the cost was quadratic. Measured on
+// node v26.8.1 over a run of letters: 2.5 ms at 1,000 characters, 40.1 at
+// 5,000, 159.0 at 10,000, 659.3 at 20,000, 2578.5 at 40,000. After this
+// change, same vector and same machine: 0.001 ms at every one of those five
+// sizes. The guarded entry point `sinkText` does NOT cover the case that
+// matters: a long run in the same string as a URL still contains "://", so it
+// still paid the whole cost -- "http://u:p@h.test/x " followed by 40,000
+// letters cost 2575.8 ms through this function and 0.001 ms after this change.
+// The slowest vector that remains is a run of letters ending in a real URL,
+// where the whole run is the "scheme" the old pattern also swallowed: 0.050 /
+// 0.034 / 0.049 / 0.094 / 0.195 ms over the same five sizes. IT IS ALSO THE
+// ONE VECTOR THIS CHANGE MAKES SLOWER, and saying so is the point: the old
+// pattern consumed that run in the engine and this walks it in JS, 0.058 ms
+// against 0.191 at 40,000 characters and 1.5 ms against 8.6 at 1 MiB. Linear
+// either way. The trade is three orders of magnitude on the shapes that were
+// quadratic for a factor of five on the one that never was.
+//
+// Why it is the same answer, rather than a narrower pattern. The old pattern
+// could only match where a `://` follows a run of scheme-legal characters
+// beginning with a letter, and `:` and `/` are not scheme-legal, so the greedy
+// run always ended EXACTLY at that `://`: there was never a shorter candidate
+// to backtrack to. So "walk back from each `://` over the scheme-legal run,
+// then forward to the first letter in it" picks the same leftmost start the
+// engine picked, and the authority rules below (userinfo to the LAST `@`
+// before the first `/`, host excluding `@`) are the old groups transcribed
+// character class by character class. The node suite (dev branch) drives the
+// OLD pattern as an oracle over the shared fixture and thousands of generated
+// strings and asserts the two agree character for character, so the claim is
+// checked rather than argued.
+//
+// This makes the caps that currently stand in front of every sink CHEAP, not
+// unnecessary. The caps are still the reason a 64 MiB description cannot
+// reach a renderer at all; this only stops redaction itself being the thing
+// that stalls when one does.
+var SPACE_RE = /\s/
+
+// `\s` exactly as the old pattern's `[^\s]` and `[^\/\s]` read it: the ASCII
+// cases without a regex call, everything above it by asking the engine, so
+// U+00A0, the Zs block, U+2028/9 and U+FEFF are not quietly reclassified.
+function isSpaceAt(s, i) {
+  var c = s.charCodeAt(i)
+  if (c === 32 || (c >= 9 && c <= 13)) return true
+  if (c < 128) return false
+  return SPACE_RE.test(s.charAt(i))
+}
+
+// `[a-z0-9+.-]` under the `i` flag.
+function isSchemeRestCode(c) {
+  return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+    || c === 43 || c === 46 || c === 45
+}
+
+// `[a-z]` under the `i` flag: the first character of a scheme.
+function isLetterCode(c) {
+  return (c >= 97 && c <= 122) || (c >= 65 && c <= 90)
+}
+
 function redactUrls(text) {
-  return str(text).replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^\/\s]*@)?([^\/\s?#:@]*)[^\s]*/gi, function(all, host) {
-    return host !== "" ? host : "[url]"
-  })
+  var s = str(text)
+  var j = s.indexOf("://")
+  if (j === -1) return s               // the old pattern cannot match: same answer
+  var n = s.length
+  var out = ""
+  var copied = 0                       // everything before this is already in `out`
+  // The engine's lastIndex: no match may start before it. `j` is only ever
+  // searched from `resume` or from a position already at or past it, so there
+  // is no `j < resume` case to guard -- and a guard for a case that cannot
+  // happen is a branch no test can go red for.
+  var resume = 0
+  while (j !== -1) {
+    // The leftmost start the old pattern would have taken for this "://":
+    // back over the scheme-legal run, then forward to its first letter.
+    var b = j
+    while (b > resume && isSchemeRestCode(s.charCodeAt(b - 1))) b--
+    var p = b
+    while (p < j && !isLetterCode(s.charCodeAt(p))) p++
+    if (p >= j) {
+      // No letter in the run, so the pattern has no match ending here.
+      // j+1 and j+2 cannot begin a "://" of their own; +1 keeps that from
+      // being load-bearing.
+      j = s.indexOf("://", j + 1)
+      continue
+    }
+    var end = j + 3                    // the old `[^\s]*` tail
+    while (end < n && !isSpaceAt(s, end)) end++
+    var slash = j + 3                  // `[^\/\s]*` stops at the first `/`
+    while (slash < end && s.charCodeAt(slash) !== 47) slash++
+    // D-SINK-1: userinfo runs to the LAST `@` of the authority (RFC 3986),
+    // which is what the old `(?:[^\/\s]*@)?` resolved to by backtracking.
+    var h0 = j + 3
+    for (var k = j + 3; k < slash; k++) if (s.charCodeAt(k) === 64) h0 = k + 1
+    // `([^\/\s?#:@]*)`. The `@` in that class was half of D-SINK-1 and it is
+    // REDUNDANT here, deliberately: `h0` is already past the last `@` before
+    // the first `/` and the scan stops at that `/`, so nothing in range can be
+    // one. It stayed because the class is the old group transcribed and
+    // because a redactor is the wrong place to shave a branch -- but it cannot
+    // be observed, so no test can go red for it (rule 14) and the line above
+    // is what actually carries the rule. A mutation that breaks `h0` is caught;
+    // a mutation that drops `c === 64` is not, and that is a fact about this
+    // code rather than a gap in the suite.
+    var h1 = h0
+    while (h1 < end) {
+      var c = s.charCodeAt(h1)
+      if (c === 47 || c === 63 || c === 35 || c === 58 || c === 64) break
+      h1++
+    }
+    var host = s.substring(h0, h1)
+    out += s.substring(copied, p) + (host !== "" ? host : "[url]")
+    copied = end
+    resume = end
+    j = s.indexOf("://", resume)
+  }
+  return out + s.substring(copied)
 }
 
 // Older name kept for callers; same behaviour.
@@ -6666,13 +6879,16 @@ function scrubUrls(text) {
 // linear cost.
 //
 // WHY THIS EXISTS AS ITS OWN NAME rather than `redactUrls` at each call site.
-// redactUrls is QUADRATIC in a run of scheme-legal characters (its own
-// comment, and the measurement in epgDetailText below), and these sinks run
-// per instantiated row, on every clock tick and on every keystroke in search
-// mode -- the one place in this plugin where a 0.6 ms call is not free. The
-// exit is EXACT and not an approximation: redactUrls' pattern requires
-// "://", so text without it is returned by redactUrls unchanged, and the
-// node suite asserts the two agree over every input it is given.
+// It was written because redactUrls was QUADRATIC in a run of scheme-legal
+// characters, and these sinks run per instantiated row, on every clock tick
+// and on every keystroke in search mode -- the one place in this plugin where
+// a 0.6 ms call is not free. F-SINK-11 removed that reason: redactUrls is
+// linear now and takes this very exit itself, so what is left here is one
+// `indexOf` instead of one call, and the NAME, which is the part that was
+// always load-bearing -- it is how the four composers below cannot drift
+// about where redaction happens. The exit is EXACT and not an approximation:
+// redactUrls cannot rewrite text with no "://" in it, and the node suite
+// asserts the two agree over every input it is given.
 //
 // WHY AT THE SINK and not at one caller. The strings these sinks compose come
 // from an XMLTV programme title and an M3U channel name, both written by the
@@ -6918,39 +7134,34 @@ var EPG_DETAIL_MAX = 600
 
 // One detail field, redacted and bounded, for the detail panel's sinks.
 //
-// TWO MEASURED REASONS THIS IS NOT JUST `redactUrls(text)`:
+// TWO REASONS THIS IS NOT JUST `redactUrls(text)`:
 //
-//  1. redactUrls is QUADRATIC in the length of a run of scheme-legal
-//     characters. Its pattern is `[a-z][a-z0-9+.-]*://...`, so on a long run
-//     of letters the engine consumes the whole run at every start position
-//     and then backtracks out of it. Re-measured on node v26.8.1,
-//     2026-10-03, through programmeDetail: 0.0141 ms for a 300 character
-//     description, 0.1363 ms for 5,000 characters of words, 40.5 ms for
-//     5,000 no-space characters THAT ALSO CARRY "://", and 648.9 ms for
-//     redactUrls over 20,000 no-space characters.
-//     The "://" is load-bearing in that third figure and the earlier comment
-//     did not say so: 5,000 no-space characters WITHOUT it cost 0.0063 ms,
-//     because this function's own exit takes them. The quadratic case is a
-//     long run plus a URL somewhere in the same field, not a long run alone.
-//     The cheap exit is exact rather than approximate: redactUrls can only
-//     ever rewrite text that contains "://", because its own pattern
-//     requires it. A field without "://" is returned verbatim, same answer,
-//     linear cost, and that half of the adversarial case stops existing.
-//     What REMAINS is a field that is both enormous and contains "://" --
-//     that still pays redactUrls' quadratic cost, and it does so at every
-//     other sink in the plugin too. F-SINK-11 for the board, with the fix
-//     (bound the scheme's repetition in redactUrls' pattern, `{0,30}` rather
-//     than `*`) named there rather than attempted from here: redactUrls
-//     guards every sink and a narrower pattern that MISSED a URL would be
-//     worse than a slow one.
-//     WHAT THE BOARD MUST NOT CARRY IS A KEY-PRESS FREEZE ON THIS PATH. The
-//     producer caps the description at 400 characters before it is written
-//     (EPG_MAX_DESC, bin/omarchy-iptv:234) and this function caps at 600, so
-//     the worst input the panel can be handed costs 0.2859 ms at 400 and
-//     0.6135 ms at 600, both measured in the same run. The 690.9 ms figure
-//     for a 20,000 character field is real and is what F-SINK-11 is about,
-//     but it is reachable only through a sink whose input is NOT capped --
-//     every other redactUrls caller -- and not through this panel.
+//  1. It goes through `sinkText`, which is where this plugin decides whether
+//     redaction is needed at all, so this function and the row sinks cannot
+//     drift about it. THE COST REASON THIS ITEM USED TO GIVE IS SPENT, and it
+//     is recorded rather than deleted because the shape of the mistake is
+//     worth keeping. redactUrls was QUADRATIC in a run of scheme-legal
+//     characters: its pattern was `[a-z][a-z0-9+.-]*://...`, so on a long run
+//     the engine consumed the whole run at every start position and
+//     backtracked out of it. Measured on node v26.8.1, 2026-10-03, through
+//     programmeDetail: 0.0141 ms for a 300 character description, 0.1363 ms
+//     for 5,000 characters of words, 40.5 ms for 5,000 no-space characters
+//     THAT ALSO CARRY "://", and 648.9 ms for redactUrls over 20,000
+//     no-space characters. The `indexOf("://")` exit in sinkText took the
+//     cheap half and NOT the half that mattered, which this item said
+//     plainly: a long run in the same field as a URL still paid the full
+//     cost, and so did every other sink in the plugin, which is what
+//     F-SINK-11 was filed for. It is fixed at the function instead -- the
+//     scan is anchored on "://" and is linear -- and the fix was NOT the one
+//     named here (bounding the scheme's repetition to `{0,30}`), because
+//     that would have changed which strings count as URLs and a narrower
+//     pattern that MISSED one is worse than a slow one. Re-measured through
+//     this function on 2026-10-06, best of 20: 0.0114 ms for 300 characters
+//     of words, 0.0078 at 400 no-space characters plus a URL, 0.0082 at 600,
+//     0.0162 at 5,000 and 0.0167 at 20,000. The producer's caps (EPG_MAX_DESC
+//     = 400, bin/omarchy-iptv) and this function's 600 still bind for the
+//     reasons the cap comment gives; they are no longer what stands between
+//     this panel and a stall.
 //  2. The cut is made AFTER redaction, never before, and the order is a
 //     security property rather than a preference. Truncating first can land
 //     inside a URL: `http://user:pw@host/x` cut after `pw` leaves
@@ -10028,6 +10239,7 @@ if (typeof module !== "undefined") {
     playerDirs: playerDirs,
     buildMpvArgv: buildMpvArgv,
     MPV_RESERVED: MPV_RESERVED,
+    MPV_TLS_VERIFY: MPV_TLS_VERIFY,
     // ---- detached player (M2-02)
     PLAYER_STASH_SCHEMA: PLAYER_STASH_SCHEMA,
     PLAYER_ORPHAN_GRACE_SEC: PLAYER_ORPHAN_GRACE_SEC,
