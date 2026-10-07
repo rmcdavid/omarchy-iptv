@@ -676,12 +676,268 @@ is "the old single-literal lookup is gone" \
 is "the payload carries the view it measured" \
    "$(qa_count 'view: forced' "$SH")" "1"
 
+section "qa_transcript_start / F-M3-1 (b): the evidence a run leaves behind"
+
+# F-M3-1: a live run of m3-scenario.sh answered "17 passed, 14 failed" and
+# WHICH FOURTEEN IS UNKNOWN, because the run was backgrounded and its output
+# piped through `tail -n 3`. No check was missing. The evidence was discarded
+# by the person running it. So the predicate under test here is not a
+# comparison -- it is "the run wrote its evidence down, somewhere private, and
+# said where".
+#
+# Each case below RUNS a throwaway scenario, because the function's whole
+# effect is on a real file descriptor: a test that only read qa-lib.sh would
+# be rule 14's shape exactly.
+
+TDIR="$TMP/tr"
+# scen <name> <dir> <body...> : a one-off scenario that calls the real
+# function and then does what the body says. Its own stdout is discarded;
+# every assertion below reads the TRANSCRIPT or the file system.
+scen() {
+  local name=$1 dir=$2
+  shift 2
+  {
+    printf '#!/bin/bash\nset -uo pipefail\n. %q\n' "$HERE/qa-lib.sh"
+    printf 'qa_transcript_start %q %q || exit 2\n' "$name" "$dir"
+    printf '%s\n' "$@"
+  } >"$TMP/scen.sh"
+  bash "$TMP/scen.sh"
+}
+
+# ---- 1. it redirects for real, and the transcript holds what the run printed
+rm -rf "$TDIR"
+scen run1 "$TDIR" 'echo "PASS first"' 'echo "FAIL second" >&2' \
+  'printf "%s\n" "$QA_TRANSCRIPT" >"'"$TMP"'/path1"' >/dev/null 2>&1
+T1=$(cat "$TMP/path1" 2>/dev/null)
+ck "the run named its own transcript" '[[ -n $T1 && -f $T1 ]]'
+is "stdout reached the transcript" "$(qa_count '^PASS first$' "$T1")" "1"
+is "and STDERR reached it too, which is where a scenario's diagnostics go" \
+   "$(qa_count '^FAIL second$' "$T1")" "1"
+is "the transcript's first line names the transcript (a file that identifies itself)" \
+   "$(head -1 "$T1" | grep -c "^== transcript $T1\$")" "1"
+
+# ---- 2. the mode. THIS is the condition that makes the transcript safe to
+# exist at all: a scenario's stdout can carry a playlist URL with provider
+# credentials (argv-scenario.sh drives one on purpose), so rule 5 and rule 6
+# make 0600-in-0700 the only acceptable landing place. The shipped form that
+# does NOT do this is one line, so it is driven here verbatim.
+is "the transcript is 0600" "$(stat -c '%a' "$T1")" "600"
+is "and its directory is 0700" "$(stat -c '%a' "$(dirname "$T1")")" "700"
+old_tee_transcript() {   # tee left to create the file itself
+  bash -c 'exec > >(tee -a "$1"); echo hello' _ "$1" >/dev/null 2>&1
+  local i
+  for ((i = 0; i < 40; i++)); do [[ -s $1 ]] && break; sleep 0.05; done
+}
+rm -f "$TMP/old.out"
+old_tee_transcript "$TMP/old.out"
+is "a tee left to create its own file leaves the transcript WORLD-READABLE" \
+   "$(stat -c '%a' "$TMP/old.out")" "644"
+ck "which is why the file is created here, under umask 077, before tee opens it" \
+   '[[ $(stat -c "%a" "$T1") == 600 && $(stat -c "%a" "$TMP/old.out") == 644 ]]'
+
+# ---- 3. it REFUSES rather than writing somewhere the transcript would be
+# readable. /tmp is 1777 and owned by root on every machine this runs on, so
+# the chmod cannot fix it -- which is the case the mode check exists for.
+# Listed BEFORE and AFTER rather than counted, because a mutation of the
+# refusal makes this case write a world-readable transcript into /tmp -- the
+# exposure the case is about -- and a red run must not leave it lying there.
+# The difference of the two listings is the only file we may delete: a `$$`
+# pattern would be wrong (the transcript carries the pid of the throwaway
+# scenario's shell, not this one's) and a bare `refuse-*.out` glob is somebody
+# else's file to lose.
+find /tmp -maxdepth 1 -name 'refuse-*.out' 2>/dev/null | sort >"$TMP/refuse.before"
+scen refuse /tmp 'echo "THIS LINE MUST NOT EXIST"' >/dev/null 2>&1
+st=$?
+find /tmp -maxdepth 1 -name 'refuse-*.out' 2>/dev/null | sort >"$TMP/refuse.after"
+leaked=$(comm -13 "$TMP/refuse.before" "$TMP/refuse.after")
+is "a directory group or other can enter is refused, with status 2" "$st" "2"
+is "and no transcript was created there" "${leaked:-none}" "none"
+[[ -z $leaked ]] || printf '%s\n' "$leaked" | while IFS= read -r f; do rm -f "$f"; done
+
+# ---- 4. the name is a FILENAME, never a path, and never empty
+for badname in '../escape' '/abs' 'has space' '' '.hidden'; do
+  ( . "$HERE/qa-lib.sh"; qa_transcript_start "$badname" "$TDIR" ) >/dev/null 2>&1
+  is "a transcript name of '${badname:-<empty>}' is refused" "$?" "2"
+done
+( . "$HERE/qa-lib.sh"; qa_transcript_start ok 'relative/dir' ) >/dev/null 2>&1
+is "a relative directory is refused" "$?" "2"
+( . "$HERE/qa-lib.sh"; qa_transcript_start ok '/tmp/a;rm -rf b' ) >/dev/null 2>&1
+is "a directory carrying shell text is refused (qa_safe_path, F4/C2)" "$?" "2"
+
+# ---- 5. a refusal must redirect NOTHING. A function that refused and left
+# the shell redirected would be the worst of both: no transcript, and the
+# operator's terminal silent.
+out=$( { . "$HERE/qa-lib.sh"; qa_transcript_start bad/name "$TDIR" 2>/dev/null; echo "still on stdout"; } )
+is "a refused start leaves stdout where it was" "$out" "still on stdout"
+is "and leaves QA_TRANSCRIPT empty, so nothing downstream reads a stale path" \
+   "$( . "$HERE/qa-lib.sh"; qa_transcript_start bad/name "$TDIR" >/dev/null 2>&1; printf '[%s]' "$QA_TRANSCRIPT")" "[]"
+
+# ---- 5b. two runs never share one transcript. The stamp is second-resolution
+# and $$ is one shell, so a second start in the same second resolves to the
+# same path; appending one run's evidence into another's, under a filename
+# that claims to name a single run, is F-M3-1's failure with extra steps.
+# The stamp is PINNED, so the collision is driven rather than waited for: two
+# starts in the same second is a timing event, and a check that waits for one
+# passes 499 runs in 500 and reddens on the 500th for no reason. (Measured the
+# flaky way first, and it duly flaked.)
+rm -rf "$TDIR/twice"
+( export QA_TRANSCRIPT_STAMP=pinned
+  scen twice "$TDIR/twice" 'echo "PASS the first run"' \
+    'qa_transcript_start twice "'"$TDIR"'/twice"; printf "%s" "$?" >"'"$TMP"'/twicest"' \
+    >/dev/null 2>&1 )
+is "a second start onto the same path is refused" "$(cat "$TMP/twicest" 2>/dev/null)" "2"
+is "the pinned stamp made both calls choose one path (control)" \
+   "$(ls "$TDIR"/twice/twice-pinned-*.out 2>/dev/null | wc -l)" "1"
+is "and the first run's transcript still holds its own evidence" \
+   "$(qa_count '^PASS the first run$' "$(ls "$TDIR"/twice/twice-pinned-*.out 2>/dev/null | head -1)")" "1"
+is "there is exactly one transcript, not two sharing a name" \
+   "$(ls "$TDIR"/twice/*.out 2>/dev/null | wc -l)" "1"
+
+# ---- 6. THE JOIN THE NAMING CARRIES. rewind-scenario.sh's R18 sweeps the
+# transcript for leaked URLs with the ERE below, and `/rewind/` is one of its
+# alternatives. A transcript at transcripts/rewind/<file> would therefore make
+# the file's OWN PATH a leak hit and turn a privacy check red on itself -- a
+# join by name between a filename pattern in qa-lib.sh and an ERE in a
+# scenario. So it is asserted by running R18's real predicate over a real
+# transcript written under the real name.
+R18_LEAK='://|127\.0\.0\.1:8771|live\.m3u8|/rewind/'
+rm -rf "$TDIR/r18"
+scen rewind "$TDIR/r18" 'echo "PASS R1 back 10"' \
+  'printf "%s\n" "$QA_TRANSCRIPT" >"'"$TMP"'/path18"' >/dev/null 2>&1
+T18=$(cat "$TMP/path18" 2>/dev/null)
+ck "a transcript was written under the name rewind" '[[ -n $T18 && -f $T18 ]]'
+qa_leak_scan 'PASS|FAIL' "$R18_LEAK" "$T18" >/dev/null 2>&1
+is "R18's own sweep reads it as CLEAN: the transcript's path is not a leak hit" "$?" "0"
+# And the counter-case, so the assertion above is not passing for want of a
+# sweep: the same ERE over the same file with one URL in it is a FAILURE.
+printf 'PASS something http://user:secret@127.0.0.1:8771/a/live.m3u8\n' >>"$T18"
+qa_leak_scan 'PASS|FAIL' "$R18_LEAK" "$T18" >/dev/null 2>&1
+is "and the same sweep over the same transcript DOES catch a real URL" "$?" "1"
+
+# ---- 7. nothing lands in the repository. The gate runs three scenarios in
+# check-tree mode on every commit; a transcript under $ROOT would show up as
+# untracked in the git status the next release depends on.
+D=$( . "$HERE/qa-lib.sh"; qa_transcript_dir )
+ck "the default transcript directory is absolute" '[[ $D == /* ]]'
+ck "and is not inside the repository ($D)" '[[ $D != "$ROOT"/* ]]'
+ck "it is under the harness scratch, which run.sh clean does not remove" \
+   '[[ $D == */omarchy-iptv-harness/transcripts ]]'
+is "OMARCHY_IPTV_HARNESS_DIR moves it, the way it moves every other scratch path" \
+   "$(OMARCHY_IPTV_HARNESS_DIR=/run/user/0/elsewhere bash -c '. "$1/qa-lib.sh"; qa_transcript_dir' _ "$HERE")" \
+   "/run/user/0/elsewhere/transcripts"
+
+section "qa_transcript_sync: the sweep that read a file tee had not finished"
+
+# MEASURED 2026-10-06, 30 runs per case. A line printed and then read back by
+# a bash BUILTIN was absent 30 of 30 times: the transcript is written by a tee
+# on the far side of a pipe and the shell does not wait for it. Read back
+# through a `grep` -- where the fork is itself the delay -- it was present
+# 12 of 12 idle and absent 6 of 30 with the cores oversubscribed twice over.
+# rewind-scenario.sh's R18 sweeps its own transcript at the end of the run,
+# which is exactly that shape: under load it swept a file short of its most
+# recent lines, so a URL printed just before the sweep could go unseen by the
+# check that exists to see it.
+#
+# The builtin-read case is the deterministic one, so it is what is driven
+# here: WITHOUT the barrier the line is absent, WITH it the line is there.
+rm -rf "$TDIR/sync"
+scen sync "$TDIR/sync" \
+  'printf "NO-BARRIER-MARKER\n"' \
+  'l=""; read -r l <"$QA_TRANSCRIPT" 2>/dev/null; printf "%s" "$l" >"'"$TMP"'/nobarrier"' \
+  'qa_transcript_sync 5; printf "%s" "$?" >"'"$TMP"'/syncst"' \
+  'l=""; while read -r x; do l=$x; done <"$QA_TRANSCRIPT"; printf "%s" "$l" >"'"$TMP"'/withbarrier"' \
+  >/dev/null 2>&1
+is "without the barrier the just-printed line is NOT on disk yet" \
+   "$(cat "$TMP/nobarrier" 2>/dev/null)" ""
+is "qa_transcript_sync answers 0" "$(cat "$TMP/syncst" 2>/dev/null)" "0"
+ck "and after it the transcript has caught up, marker and all ($(cat "$TMP/withbarrier" 2>/dev/null))" \
+   '[[ $(cat "'"$TMP"'/withbarrier" 2>/dev/null) == *transcript-sync-* ]]'
+
+# A sync with no transcript is VACUOUS, never 0. The whole library exists
+# because "clean" was being reported over nothing at all.
+( . "$HERE/qa-lib.sh"; qa_transcript_sync 1 ) >/dev/null 2>&1
+is "a sync with no transcript started is vacuous (2), not a pass" "$?" "2"
+: >"$TMP/never-written.out"
+( . "$HERE/qa-lib.sh"; QA_TRANSCRIPT="$TMP/never-written.out"; qa_transcript_sync 1 ) >/dev/null 2>&1
+is "a sync whose marker never lands gives up with 1, bounded (rule 3)" "$?" "1"
+is "and says so rather than looping on" \
+   "$( . "$HERE/qa-lib.sh"; QA_TRANSCRIPT="$TMP/never-written.out"; qa_transcript_sync 1 2>&1 >/dev/null | grep -c 'gave up')" "1"
+# The marker itself must not be able to trip a leak sweep: it goes INTO the
+# transcript every time, on a file R18 then sweeps.
+MARKERS=$( . "$HERE/qa-lib.sh"; QA_TRANSCRIPT="$TMP/never-written.out"; qa_transcript_sync 1 2>/dev/null )
+is "the sync marker carries nothing R18's sweep would match" \
+   "$(printf '%s\n' "$MARKERS" | grep -cE "$R18_LEAK")" "0"
+
+section "F-M3-1 (b): EVERY scenario writes a transcript, not just the one"
+
+# This is the half the defect row is about. The pattern existed in exactly ONE
+# scenario -- rewind-scenario.sh, as its own local habit -- and the run that
+# lost its evidence was m3-scenario.sh. A rule that lives in one file is a
+# rule the next file is written without, which is why this counts the
+# POPULATION rather than asserting the shape of any one file.
+SCEN_FILES=( "$ROOT"/scripts/dev-harness/*-scenario.sh )
+is "there are scenarios to check (control: the glob resolved)" \
+   "$(( ${#SCEN_FILES[@]} > 0 ? 1 : 0 ))" "1"
+missing=""
+late=""
+unsourced=""
+for f in "${SCEN_FILES[@]}"; do
+  n=$(qa_count '^ *qa_transcript_start [A-Za-z0-9._-]+ \|\| exit 2$' "$f")
+  [[ $n == 1 ]] || missing="$missing ${f##*/}($n)"
+  # A call is not a call unless the definition is reachable from it. Three of
+  # these scenarios did not source the library at all, and `qa_transcript_start
+  # m3 || exit 2` in one of them is `command not found` followed by `exit 2`:
+  # the scenario refuses to run, and it refuses with a message about a missing
+  # command rather than about a missing transcript. Caught here while writing
+  # this, which is the whole argument for counting the population.
+  src=$(grep -nE '^ *\. +"\$ROOT/scripts/qa-lib\.sh"' "$f" | head -1 | cut -d: -f1)
+  call=$(grep -nE '^ *qa_transcript_start ' "$f" | head -1 | cut -d: -f1)
+  [[ -n $src && -n $call && $src -lt $call ]] || unsourced="$unsourced ${f##*/}"
+  # In a scenario with a check-tree mode the call must sit BELOW the `live|""`
+  # label: scripts/check.sh runs the check-tree halves on every commit, and a
+  # gate step may neither print a path nobody asked for nor leave a file
+  # behind. Scenarios with no such mode have no label and are not in scope.
+  lbl=$(grep -nE '^ *live\|"" *\)' "$f" | head -1 | cut -d: -f1)
+  if [[ -n $lbl ]]; then
+    call=$(grep -nE '^ *qa_transcript_start ' "$f" | head -1 | cut -d: -f1)
+    [[ -n $call && $call -gt $lbl ]] || late="$late ${f##*/}"
+  fi
+done
+is "every scenario opens a transcript, exactly once, and exits if it cannot" \
+   "${missing:-none}" "none"
+is "and sources qa-lib.sh ABOVE the call, so the call resolves to a function" \
+   "${unsourced:-none}" "none"
+is "and in a check-tree scenario the call sits on the live arm only" \
+   "${late:-none}" "none"
+# The three the gate runs, named, because those are the ones where a stray
+# transcript would land on every commit.
+for g in chno-entry pip id-rotate; do
+  lbl=$(grep -nE '^ *live\|"" *\)' "$ROOT/scripts/dev-harness/$g-scenario.sh" | head -1 | cut -d: -f1)
+  ck "$g-scenario.sh (run by check.sh in check-tree mode) has a live arm to gate on" '[[ -n $lbl ]]'
+done
+# And the one that lost its evidence, by name, so this cannot be refactored
+# into a rule that happens to exclude it again.
+is "m3-scenario.sh, the run F-M3-1 happened to, writes one" \
+   "$(qa_count '^qa_transcript_start m3 \|\| exit 2$' "$ROOT/scripts/dev-harness/m3-scenario.sh")" "1"
+# rewind-scenario.sh's R18 must sweep the SHARED transcript now, not the
+# $WORK/run.out its own cleanup() deletes.
+RW="$ROOT/scripts/dev-harness/rewind-scenario.sh"
+is "R18 sweeps the shared transcript" "$(qa_count 'qa_leak_scan .PASS\|FAIL. .*"\$QA_TRANSCRIPT"' "$RW")" "1"
+is "and the run.out it used to sweep, which cleanup deletes, is gone" \
+   "$(qa_count 'RUNOUT' "$RW")" "0"
+is "R18 syncs before it sweeps" "$(qa_count '^if qa_transcript_sync ' "$RW")" "1"
+
 # ============================================================== the floor
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
-EXPECTED=165
+# 165 -> 213 on 2026-10-06: F-M3-1 half (b), the 48 assertions for
+# qa_transcript_start / qa_transcript_sync and for the population of scenarios
+# that call them. scripts/check.sh reports this step's count and sets no floor
+# of its own on it, so this number is the only floor the transcript
+# assertions have.
+EXPECTED=213
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -244,6 +244,14 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# F-M3-1 half (b). The transcript opens HERE: after argument parsing and the
+# traps, and before the first line of evidence -- which includes the line
+# naming WHICH TREE is under test, because a transcript that cannot say that
+# is evidence for nothing. (This file has no refusal preflight of its own;
+# rewind-scenario.sh's call sits below one for the same reason -- a refusal is
+# one line on stderr, not a transcript.)
+qa_transcript_start player || exit 2
+
 # ---- which checkout is under test
 if [[ -n $BASELINE ]]; then
   EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-baseline-XXXXXX")

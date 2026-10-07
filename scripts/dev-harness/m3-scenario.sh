@@ -50,6 +50,8 @@ if [[ -n $BASELINE ]]; then
   PLUGIN_ROOT=$EXPORT_DIR
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT
 fi
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }
 fail() { FAIL=$((FAIL+1)); echo "FAIL $1${2:+ -- $2}"; }
@@ -79,6 +81,13 @@ trap cleanup EXIT
 
 if pgrep -x hyprlock >/dev/null; then echo "screen is locked; refusing to type"; exit 2; fi
 command -v ffmpeg >/dev/null || { echo "ffmpeg missing"; exit 2; }
+
+# F-M3-1 half (b), and this is the scenario it happened to: a live run of THIS
+# FILE answered 17 passed / 14 failed and which fourteen is still unknown,
+# because the run was backgrounded and its output piped through `tail -n 3`.
+# Nothing was missing from the checks. The evidence was discarded downstream.
+# From here on every line is also on disk, and the path is printed.
+qa_transcript_start m3 || exit 2
 
 # ---- fixture: 90 s, two audio tracks (eng titled, spa) and an srt subtitle
 mkdir -p "$FIX"

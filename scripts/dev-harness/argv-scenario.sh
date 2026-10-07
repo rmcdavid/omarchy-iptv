@@ -74,6 +74,8 @@ fi
 # that had no such route. A measurement that can see processes it did not
 # start is rule 4b's concurrent-tree trap in a new form.
 HELPER=$(readlink -f "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}/bin/omarchy-iptv")
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }
 fail() { FAIL=$((FAIL+1)); echo "FAIL $1${2:+ -- $2}"; }
@@ -97,6 +99,12 @@ cleanup() {
 trap cleanup EXIT
 pgrep -x hyprlock >/dev/null && { echo "screen is locked"; exit 2; }
 ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use"; exit 2; }
+
+# F-M3-1 half (b). The transcript matters more here than anywhere: this
+# scenario drives a SYNTHETIC CREDENTIAL through a real source, so its own
+# output is the thing rule 5 is about. qa_transcript_start refuses to write
+# anywhere a transcript would not be 0600 in a 0700 directory.
+qa_transcript_start argv || exit 2
 
 # ---- the slow server: each request sleeps 2.5 s, then answers
 cat >"$WORK/slow.py" <<'PY'

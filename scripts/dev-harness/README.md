@@ -16,6 +16,113 @@ as `scheme://host` only and `updateEntryInline` logs the entry's keys, never
 its values: a real provider URL would carry credentials into the terminal
 scrollback.
 
+## Every scenario writes a transcript. Never summarise one from a tail.
+
+**Read this before you run a scenario, and before you report what one said.**
+
+Every `*-scenario.sh` in this directory calls `qa_transcript_start` (in
+`scripts/qa-lib.sh`) and prints the path it is writing to, as its first line:
+
+```
+== transcript /run/user/1000/omarchy-iptv-harness/transcripts/m3-20261006-201455-48213.out
+```
+
+That file is the run's evidence. It holds every `PASS`/`FAIL` line, every
+diagnostic, stderr as well as stdout, and it outlives the run: it is 0600, in
+a 0700 directory under the harness scratch, and `run.sh clean` does not remove
+it. **Report from the transcript, not from the terminal.** If you want the
+headline, read the summary line out of the transcript; if you want to know
+which checks failed, `grep '^FAIL' <the path it printed>`.
+
+### Why this rule exists, and what it cost
+
+On 2026-09-26 one live run of `m3-scenario.sh` answered **17 passed, 14
+failed** -- and *which fourteen is still unknown*. The scenario was not at
+fault and no assertion was missing. The run was backgrounded and its output
+was piped through `tail -n 3`, so the 31 lines naming every decision it had
+just observed existed only in a pipe that was then thrown away. All that
+survived was a count. The row is F-M3-1; this half of it is (b).
+
+Three things follow, and the first two are the ones people get wrong:
+
+1. **`tail`, `| head`, `2>&1 | grep -c PASS` and "it printed 17/14" are not
+   reports.** A scenario's output is the finding. Summarising it from a tail
+   discards the finding and keeps the arithmetic, which is the one part
+   nobody can act on.
+2. **Backgrounding a scenario is fine; losing its stdout is not.** The
+   transcript is what makes a backgrounded run safe to background -- the
+   evidence is on disk whatever happens to the terminal.
+3. **Do not re-invent this per scenario.** Before F-M3-1 the pattern lived in
+   exactly one file, `rewind-scenario.sh`, as its own local habit, and the run
+   that lost its evidence was a different scenario. `scripts/qa-lib-test.sh`
+   now counts the *population*: every scenario in the glob must source
+   `qa-lib.sh` above the call and then call
+   `qa_transcript_start <name> || exit 2` exactly once, so the next scenario
+   added here cannot be the one that forgets. (Both halves earn their keep:
+   wiring this up, `m3-scenario.sh` got the call without the `.` line, which
+   is `command not found` followed by `exit 2` -- a scenario that refuses to
+   run, complaining about a missing command rather than a missing transcript.)
+
+### Writing a scenario
+
+```bash
+. "$ROOT/scripts/qa-lib.sh"
+...
+qa_transcript_start <name> || exit 2     # after the preflight, before the first evidence
+```
+
+* The call sits **after** argument parsing and the refusals that exit before
+  anything starts (a refusal is one line on stderr, not a transcript), and
+  **before the first line of evidence** -- including the line that names which
+  tree is under test, because a transcript that cannot say that is evidence
+  for nothing.
+* In a scenario with a **`check-tree` mode** the call goes on the `live|""`
+  arm of the dispatch, never above it. `scripts/check.sh` runs
+  `chno-entry-scenario.sh`, `pip-scenario.sh` and `id-rotate-scenario.sh` in
+  `check-tree` mode on every commit, and a gate step may neither print a path
+  nobody asked for nor leave a file behind. It goes on that arm *above*
+  `preflight`, so a live run's transcript covers both halves -- the summary at
+  the bottom counts both, and a transcript holding one of them cannot be
+  summarised from.
+* `<name>` is a filename, not a path: it is refused if it could be one, and
+  the file lands flat as `<name>-<stamp>-<pid>.out` with no per-scenario
+  subdirectory. That is deliberate. `rewind-scenario.sh`'s R18 sweeps the
+  transcript for leaked URLs and `/rewind/` is one of the patterns it sweeps
+  for, so a `transcripts/rewind/` path would make the file's own name a leak
+  hit and turn a privacy check red on itself.
+* A **background process the scenario starts inherits the transcript pipe**
+  unless it redirects its own stdout and stderr. Every scenario here already
+  redirects its harness, its fixture servers and its sweepers; one that did
+  not would keep `tee` alive after the run. Redirect them, the way the
+  existing ones do.
+* **The transcript is a sink (CLAUDE.md rule 5).** A scenario's stdout can
+  carry a playlist URL with provider credentials in it --
+  `argv-scenario.sh` drives a synthetic one on purpose -- so the transcript is
+  0600 in a 0700 directory, and `qa_transcript_start` **refuses** rather than
+  writing into a directory group or other can enter. Left to create its own
+  file, `tee` would use its own umask and leave the transcript at 0644,
+  world-readable; that is measured in `scripts/qa-lib-test.sh`, which drives
+  the unsafe form for real and asserts the 644.
+
+### Reading your own transcript inside a scenario
+
+The transcript is written by a `tee` on the far side of a pipe and the shell
+does not wait for it, so a scenario that scans its own transcript is scanning
+a file that may be short of its most recent lines. Measured 2026-10-06, 30
+runs per case: a line printed and then read back by a bash builtin was absent
+**30 of 30 times**; read back through a `grep`, where the fork is itself the
+delay, it was present 12 of 12 on an idle machine and absent **6 of 30 with
+the cores oversubscribed twice over**. `rewind-scenario.sh`'s R18 is exactly
+that shape -- a privacy sweep over its own transcript -- so under load it
+could sweep a short file and miss the URL it exists to catch.
+
+Call the barrier first. It is bounded and it says so when it gives up:
+
+```bash
+qa_transcript_sync 5 || bad "the transcript did not catch up; the sweep below reads a short file"
+qa_leak_scan 'PASS|FAIL' "$LEAK_ERE" "$QA_TRANSCRIPT"
+```
+
 ## How `qs.Commons` / `qs.Ui` resolve (Quickshell 0.3.1)
 
 Quickshell maps the `qs` import prefix to the **config root** (the
@@ -42,6 +149,8 @@ $OMARCHY_IPTV_HARNESS_DIR   (default $XDG_RUNTIME_DIR/omarchy-iptv-harness)
   runtime/   XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr -> real hypr dir)
   fixtures/  generated harness.m3u (and test.ts with --serve)
   shots/     screenshots from `run.sh shot`
+  transcripts/  one 0600 file per scenario run (0700 dir); NOT removed by
+                `run.sh clean`, because it is the run's evidence (F-M3-1)
 ```
 
 Because `XDG_RUNTIME_DIR` is redirected, `run.sh` exports `WAYLAND_DISPLAY`

@@ -361,3 +361,181 @@ qa_safe_path() {
 qa_env_line() {
   printf 'export %s=%q\n' "$1" "$2"
 }
+
+# ------------------------------------------------------------ transcripts
+
+# F-M3-1, half (b). One live run of m3-scenario.sh answered "17 passed, 14
+# failed" and WHICH FOURTEEN IS UNKNOWN to this day: the run was backgrounded
+# and its output piped through `tail -n 3` by the person running it, so the
+# scenario's own evidence -- 31 PASS/FAIL lines naming every decision it had
+# just observed -- existed only in a pipe that was then thrown away. The
+# scenario was not at fault and no assertion was missing. The EVIDENCE was
+# discarded downstream of it.
+#
+# The fix is that a scenario does not rely on anyone keeping its stdout. It
+# writes a transcript, and it PRINTS where. Lifted out of
+# rewind-scenario.sh, where it was one scenario's local habit, so that every
+# scenario gets it by calling one function and none can forget it.
+#
+# THREE things here are load-bearing and all three were measured on
+# 2026-10-06 (bash 5.3, GNU coreutils tee):
+#
+#   1. The file is created HERE, by us, before tee opens it, and chmod'd
+#      0600. `tee` left to create the file itself uses its own umask: with
+#      the usual 0022 the transcript lands at **0644, world-readable**
+#      (measured: `exec > >(tee -a f); echo hello` leaves f at 644; the same
+#      with `: >f; chmod 0600 f` first leaves it at 600). A scenario's stdout
+#      can carry a playlist URL with provider credentials in it --
+#      argv-scenario.sh deliberately drives one -- so rule 5 and rule 6 make
+#      0600 in a 0700 directory the only acceptable landing place, and this
+#      REFUSES rather than writing a transcript into a directory other users
+#      can enter.
+#
+#   2. `-a`, and this one is MARKED UNVERIFIED (rule 14), because the honest
+#      answer is that nothing here can go red for it. The reasons usually
+#      given are both false, measured: a truncating `tee` loses nothing from
+#      the pipe (3/3 runs, five lines each, all five present), and O_TRUNC
+#      does not change a mode, so the 0600 above survives either spelling.
+#      With the file pre-created and refused if it already exists, `-a` and a
+#      plain `tee` are indistinguishable from outside, and a mutation of
+#      `tee -a` to `tee` turns scripts/qa-lib-test.sh no redder. It is kept
+#      because it is the form rewind-scenario.sh shipped and because it makes
+#      the deliberate truncation above the only one in the arrangement -- not
+#      because any check defends it. If a reason to need it ever appears,
+#      write the check with it.
+#
+#   3. Where the call sits. It must come AFTER argument parsing -- the
+#      transcript's name and the directory it lands in are derived from the
+#      environment, and a usage error should die as a usage error rather than
+#      as a one-line transcript -- and BEFORE the first line of evidence,
+#      because everything printed before the `exec` reaches the terminal
+#      only. In a scenario with a `check-tree` mode it sits on the LIVE path
+#      alone: scripts/check.sh runs the check-tree halves, and a gate step
+#      may neither print a path nobody asked for nor leave a file behind.
+
+# The transcript this shell is writing, or "" before qa_transcript_start.
+# R18 in rewind-scenario.sh sweeps it for leaked URLs at the end of the run,
+# so the NAME of this variable is a join between two files: keep it.
+QA_TRANSCRIPT=""
+
+# qa_transcript_dir: where transcripts go by default. The same expression
+# every scenario and run.sh use for the harness scratch, plus one directory,
+# so a scenario that passes no directory still lands in the right place.
+# `run.sh clean` removes cache/, state/, runtime/ and shots/ and not this.
+qa_transcript_dir() {
+  local runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  printf '%s\n' "${OMARCHY_IPTV_HARNESS_DIR:-$runtime/omarchy-iptv-harness}/transcripts"
+}
+
+# qa_transcript_start <name> [dir]
+#   Sends this shell's stdout AND stderr through `tee` into a private
+#   transcript, prints the path, and sets QA_TRANSCRIPT to it.
+#     0  redirected; QA_TRANSCRIPT names a 0600 file in a 0700 directory
+#     2  redirected NOTHING, and said why on stderr
+#   Status 2 is never "carry on quietly": a scenario whose evidence cannot
+#   be written is the F-M3-1 run again, so every call site is
+#   `qa_transcript_start <name> || exit 2`.
+#
+#   <name> becomes a FILENAME, never a path: it is refused if it could be
+#   one. The file is "<name>-<stamp>-<pid>.out" in ONE flat directory, with
+#   no per-scenario subdirectory, and that is deliberate -- rewind's R18
+#   sweeps the transcript for the ERE `/rewind/` among others, so a
+#   transcripts/rewind/ path would make the file's own name a leak hit and
+#   turn a privacy check red on itself. scripts/qa-lib-test.sh asserts that
+#   the path this produces does not match R18's sweep.
+qa_transcript_start() {
+  local name=${1-} dir=${2-}
+  if [[ ! $name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    printf 'qa_transcript_start: %s is not a transcript name\n' "${name:-<empty>}" >&2
+    return 2
+  fi
+  [[ -n $dir ]] || dir=$(qa_transcript_dir)
+  if ! qa_safe_path "$dir"; then
+    printf 'qa_transcript_start: %s is not a safe absolute path\n' "$dir" >&2
+    return 2
+  fi
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    printf 'qa_transcript_start: cannot create %s\n' "$dir" >&2
+    return 2
+  fi
+  chmod 0700 "$dir" 2>/dev/null
+  # Rule 6, as a refusal rather than a hope, and the two cases differ. A
+  # directory we own is TIGHTENED by the chmod above (a pre-existing 0755
+  # becomes 0700 and the run goes on). A directory we do not own cannot be,
+  # and that is what this refuses: /tmp handed in as the directory is 1777
+  # root-owned on every machine this runs on, the chmod fails silently, and
+  # without this check the transcript would land where anyone can read it.
+  # Measured both ways in scripts/qa-lib-test.sh, which drives /tmp for real.
+  local dmode
+  dmode=$(stat -c '%a' "$dir" 2>/dev/null)
+  if [[ ! $dmode =~ ^[0-7]+$ ]] || (( 0$dmode & 077 )); then
+    printf 'qa_transcript_start: %s is mode %s; a transcript needs 0700\n' "$dir" "${dmode:-unknown}" >&2
+    return 2
+  fi
+  # QA_TRANSCRIPT_STAMP exists so the refusal below is TESTABLE. The stamp is
+  # second-resolution, so two starts colliding is a timing event, and a check
+  # that waits for a timing event is a check that passes 499 runs in 500 and
+  # reddens on the 500th for no reason -- scripts/qa-lib-test.sh pins the stamp
+  # and drives the collision instead. Nothing else sets it.
+  local stamp=${QA_TRANSCRIPT_STAMP:-$(date +%Y%m%d-%H%M%S)}
+  local path="$dir/$name-$stamp-$$.out"
+  # Never write into a transcript we did not create. The stamp is
+  # second-resolution and $$ is one shell, so two starts in the same second
+  # from the same shell resolve to the SAME path -- and then one run's
+  # evidence is appended into the other's, under a filename that claims to
+  # name a single run. Refusing is the only honest answer: there is no second
+  # name for a run that already has one.
+  if [[ -e $path ]]; then
+    printf 'qa_transcript_start: %s already exists; refusing to share a transcript\n' "$path" >&2
+    return 2
+  fi
+  # Created in a subshell under umask 077 so the file is 0600 from its first
+  # byte, with no window at 0644; the chmod covers the one case the umask
+  # cannot, a path that already exists with a looser mode.
+  if ! ( umask 077; : >"$path" ) 2>/dev/null; then
+    printf 'qa_transcript_start: cannot write %s\n' "$path" >&2
+    return 2
+  fi
+  chmod 0600 "$path" 2>/dev/null
+  QA_TRANSCRIPT=$path
+  exec > >(tee -a "$path") 2>&1
+  # Printed AFTER the redirect, so the transcript's first line names itself
+  # and the operator sees the same line on the terminal.
+  printf '== transcript %s\n' "$path"
+  return 0
+}
+
+# qa_transcript_sync [secs]
+#   A bounded barrier: everything printed so far is ON DISK when this
+#   returns 0. Needed because the transcript is written by a tee on the far
+#   side of a pipe, and the shell does not wait for it.
+#     0  the transcript has caught up
+#     1  it had not after <secs>, and said so (never silently)
+#     2  vacuous: no transcript was started, so there is nothing to sync
+#
+#   MEASURED, 2026-10-06, 30 runs per case: a line printed and then read
+#   back by a bash BUILTIN was absent 30 of 30 times -- the pipe had not been
+#   drained at all. Read back through a `grep` (the fork is itself the delay)
+#   it was present 12 of 12 on an idle machine and absent **6 of 30 with the
+#   cores oversubscribed twice over**. rewind-scenario.sh's R18 sweeps its
+#   own transcript for leaked URLs at the end of the run, which is that exact
+#   shape: under load it was sweeping a file that was short of its most
+#   recent lines, so a URL printed just before the sweep could go unseen by
+#   the check that exists to see it. A privacy sweep that reads a short file
+#   is rule 14's shape -- a check that cannot go red for the thing it guards.
+qa_transcript_sync() {
+  local secs=${1:-5} marker i
+  [[ -n ${QA_TRANSCRIPT-} ]] || return 2
+  [[ -f $QA_TRANSCRIPT ]] || return 2
+  # Non-empty, unique, and carrying nothing a leak sweep could match.
+  marker="transcript-sync-$$-$RANDOM$RANDOM"
+  printf '== %s\n' "$marker"
+  for ((i = 0; i < secs * 20; i++)); do
+    grep -qaF -- "$marker" "$QA_TRANSCRIPT" 2>/dev/null && return 0
+    sleep 0.05
+  done
+  # Rule 3: a wait that gives up says so rather than looping on.
+  printf 'qa_transcript_sync: gave up after %s s; %s may be short of its last lines\n' \
+    "$secs" "$QA_TRANSCRIPT" >&2
+  return 1
+}
