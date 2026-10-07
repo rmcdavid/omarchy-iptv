@@ -678,3 +678,42 @@ assigns the id and writes the row, and this file gets the id back.
   tick (section 9.5). Measured, understood, and harmless to everything
   shipped - recorded because the next check keyed on `controlKind` as a
   liveness proxy will be wrong in the same way this one was.
+
+## 10. F-RWD-26: the sibling R10 was repaired and R11 was not (2026-10-06)
+
+Found while proving the F-RWD-14 migration, on dev at `cae9789`, with the
+scenario's output captured to a file rather than tailed (F-M3-1's own rule).
+
+    == rewind-scenario: 111 passed, 1 failed, 110 assertions executed
+    FAIL R11 the PLAYER's own reading rises (35.754 -> 35.754)
+
+Load average at the start of the run was 2.32 and at the end 5.28, on four
+cores, because two lanes were building concurrently. The load makes the
+outcome more likely; it is not the cause.
+
+**What is wrong.** F-RWD-22 established that the STORED reading is written
+only when a control reply lands, and that whether one lands inside any given
+three seconds is chance, because the health tick is 10 s. R10 was changed to
+match: over three seconds it asserts only that the reading never goes
+BACKWARDS, and it takes the rise over a further 12 s window that contains a
+tick by construction. R11 carries the comment "The same pair as R10, for the
+same reason" and then asserts the stored reading rises by 4 s within 2.5 over
+a 3 s sleep. That is the assertion F-RWD-22 removed, still in place one
+screen below the comment that says it was removed.
+
+**Why the other half passed.** `R11 the SHOWN count-up rises` passed in the
+same run, 4 s as expected. `behindLive` is computed from the local 1 Hz clock
+and owes nothing to a reply arriving, so the shown half cannot flake this way
+and the stored half can. The two halves are not the same claim, which is
+exactly what the comment asserts they are.
+
+**The fix.** Make R11 the pair it says it is: never-backwards over the 3 s
+window, and the rise asserted over a window that contains a health tick. The
+scenario file is held by another lane this round, so the change lands at
+integration; the measurement is recorded here on the day it was taken.
+
+**Residual, stated rather than fixed.** This is the second site of one
+defect. Nothing checks that two assertions a comment calls "the same pair"
+are the same pair, and nothing can, short of a human reading both. What the
+project can do is what it did here: when a flake is settled, grep for the
+sibling. F-RWD-22's repair did not.
