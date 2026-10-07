@@ -1,5 +1,24 @@
 # Precision audit of the M4-01 name fallback, 2026-10-03
 
+> **Which pairing Part I audits, and which numbers are current (F-EPG-13).**
+> Every count in sections 1 to 8 describes ONE run: the shipping `epg` verb of
+> 2026-10-03, over the frozen 1,453-row source, pairing **227** rows by name
+> alone. That pairing does not ship any more. It was superseded twice -- to
+> **226** when this audit's own repair landed (D-EPG-5, `b2f944d`, the "Repair
+> applied" note below) and to **265** when the matcher learned to read the
+> guide id in the row's own stream address (F-EPG-11, `2a8e5b2`, Part III) --
+> and the provider's list has drifted underneath all three: on the live install
+> of 2026-10-06 it is 1,450 rows and the matcher reaches **264**.
+>
+> So **"265 of 1,453" is the frozen figure and "264 of 1,450" is the live
+> one**, and a count that does not say which inputs is not a count. Read Part
+> I's 227 as the SIZE OF THE AUDITED SET, never as the matcher's reach: the
+> grades in sections 2 to 7 are still the grades of those 227 pairs and are
+> not restated here, because an audit of 227 pairs did not grade 265. Part III
+> re-measures everything that moves, section 17 carries the current figures,
+> and section 8 says which of all this is still re-runnable (less than it
+> looks: the frozen inputs were never committed).
+
 `docs/PLAN-M4.md` M4-01 repair 2 states the acceptance criterion for the
 whole repair:
 
@@ -10,11 +29,11 @@ The M4 round moved `matched` from **0** to **227 of 1,453** on the frozen real
 inputs and graded nothing about the 227. The review of 2026-10-03 recorded
 that as unmet rather than quietly dropping it. This document runs it.
 
-**Verdict in one line: of the 227 pairs, 226 are right and 1 is wrong**, and
-the wrong one is wrong by a rule this project already wrote down and did not
-point the matcher at. The repair costs exactly that pair and nothing else,
-measured end to end, and it recovers ten channels of index coverage on the
-way.
+**Verdict in one line, on those 227 pairs and that run: 226 are right and 1 is
+wrong**, and the wrong one is wrong by a rule this project already wrote down
+and did not point the matcher at. The repair costs exactly that pair and
+nothing else, measured end to end, and it recovers ten channels of index
+coverage on the way.
 
 ## 1. Method
 
@@ -51,12 +70,24 @@ The installed source is the iptv-org US list and the guide is Pluto's. Where
 iptv-org carries a Pluto channel it streams it from an address containing
 **Pluto's own channel id** (`https://jmp2.uk/plu-<24 hex>.m3u8`), and some rows
 carry the same id in their logo address. The guide declares each channel under
-that same id. **The matcher reads neither** -- it joins on the display name and
-the id strategies contributed 0 of the 227. So when the programme that lands on
-a row is the programme of the channel whose id that row's own URL names, two
-independent identifiers agree, and the agreement was not produced by the thing
-being tested. That is the rule-14 shape: observed at the sink, judged by
-something else.
+that same id. **The matcher of 2026-10-03 read neither** -- it joined on the
+display name and the id strategies contributed 0 of the 227. So when the
+programme that lands on a row is the programme of the channel whose id that
+row's own URL names, two independent identifiers agree, and the agreement was
+not produced by the thing being tested. That is the rule-14 shape: observed at
+the sink, judged by something else.
+
+> **This premise expired, and it is the one that mattered (F-EPG-13).** It read
+> "the matcher reads neither" in the present tense until 2026-10-06. Since
+> F-EPG-11 (`2a8e5b2`) the matcher DOES read the id in the row's stream address
+> -- 185 of the live install's 264 matches come from exactly that field -- so
+> against today's matcher this oracle is no longer independent, it is circular
+> on every address-matched pair. The audit below is not invalidated: it graded a
+> name-only pairing, and for that pairing the oracle was outside the matcher as
+> claimed. What is invalidated is reusing it as-is on the current matcher. Part
+> III replaces it with a grader built on the programme schedule for that reason,
+> section 17.1 derives what that one confirms FROM, and F-EPG-12 carries the
+> residual: 149 of the 265 pairs have no non-circular evidence of any kind.
 
 The oracle is directional and this document does not pretend otherwise.
 Agreement is strong evidence the pair is one channel. Disagreement is weak
@@ -250,12 +281,23 @@ becomes 1.
    else (section 3.1). Suggested P2.
 
 2. **F-EPG-7: a country qualifier the key keeps costs 27 confirmed pairs.**
-   88 of the 1,453 installed names carry a `(United States)`, which
-   `_EPG_NAME_NOISE` does not strip, and 31 of those rows carry a Pluto id
-   this guide declares -- so the oracle names a correct pair that the key
-   refuses. This is recall, not precision, and it is reported here because it
-   was measured on the way and because the obvious loosening is NOT free:
-   see 6.2. Suggested P3, a decision rather than a repair.
+   **87** of the installed names carry a `(United States)` -- not 88, which is
+   a miscount and not drift (F-EPG-13). Re-counted at 87 on the live 1,450-row
+   source of 2026-10-06 by calling the shipping regex over the install's own
+   cached `channels.json`, command in section 8; the board's F-EPG-7 row
+   re-counts 87 on the frozen 1,453 as well, so both inputs give 87 and only
+   this document gave 88. `_EPG_NAME_NOISE` does not strip the span, and 31 of
+   those rows carry a Pluto id this guide declares -- so the oracle names a
+   correct pair that the key refuses. Two cautions on the denominator, because
+   87 is not one number: 87 names CONTAIN the span and only **32** END in it,
+   and those are different populations for different rules -- 6.2's loosening
+   strips any parenthetical, so 87 is its denominator, while `bare_name_key`
+   strips a TRAILING parenthetical and reaches 32. The 31 is this run's; the
+   board re-priced it to 30 on 2026-10-04 against a guide whose matching rows
+   the address strategy had already taken, which is why the loosening now buys
+   one row rather than 27. This is recall, not precision, and it is reported
+   here because it was measured on the way and because the obvious loosening is
+   NOT free: see 6.2. Suggested P3, a decision rather than a repair.
 
 3. **F-EPG-8: a missing space is not a distribution marker.** The guide
    declares `TennisChannel 2` as one word where the playlist writes
@@ -288,6 +330,17 @@ becomes 1.
    married with no evidence either way. Narrowing it to the markers that
    actually occur would cost nothing measurable on these inputs. Suggested
    P3. The fixture added by this audit is its only coverage.
+
+   **Settled, and this item's first sentence no longer describes the shipped
+   pattern (F-EPG-13).** `_EPG_NAME_NOISE` has not stripped `\[[^\]]*\]` since
+   2026-10-04: the owner took the narrowing and the bracket half is now the two
+   literals, case-insensitive and tolerant of respelling (section 14.3, and the
+   helper's own comment above the pattern). The stated reason was then refuted
+   the same day -- an unknown span means a DIFFERENT wrong match, not silence,
+   which is F-EPG-15. The census re-derives on the live source of 2026-10-06:
+   **144 of 1,450** names carry a bracket span, `[Not 24/7]` 82 and
+   `[Geo-blocked]` 62, and still no third spelling; command in section 8, with
+   the span pattern in place of the marker one.
 
 ### 6.1.1 The five board rows these ids need, and why they are not here
 
@@ -387,20 +440,83 @@ Suite counts: python **752 tests OK** (744 -> 752).
 
 ## 8. Reproducing this
 
-The frozen inputs live under the session scratchpad and are not committed:
-`channels.json` (the installed 1,453-channel source) and `pluto-us.xml.gz`
-(the project's own documented XMLTV asset, pulled 2026-10-03). With both in
-place:
+**This section used to promise an answer its own command no longer gives, and
+that is the defect, not the digits (F-EPG-13).** It said the run below
+"reproduces `matched 227`". On the current helper it does not, and on these
+inputs it never will again: `epg_name_key` was repaired (D-EPG-5, `b2f944d`,
+227 -> 226) and then the matcher learned to read the address (F-EPG-11,
+`2a8e5b2`, 226 -> 265). That is F-EPG-18's shape at a second site -- a document
+telling a reader to run a command and stating the wrong result, which teaches
+them to distrust the measurement or to doubt their own tree. Section 16 is the
+live recipe. **There is one recipe, not two; follow 16.**
+
+The frozen inputs were never committed. `channels.json` (the 1,453-row
+installed source) and `pluto-us.xml.gz` (the project's documented XMLTV asset,
+pulled 2026-10-03) lived in a session scratchpad that no longer exists, so
+**nothing in Part I is re-runnable from a checkout today**. The 227 is a record
+of one run, not a prediction about yours. The command is kept verbatim because
+the clock pin is part of the measurement:
 
 ```
-OMARCHY_IPTV_URL=<guide> bin/omarchy-iptv epg --cache-dir <fresh> --force --now 1791015219
+OMARCHY_IPTV_URL=<frozen guide> bin/omarchy-iptv epg --cache-dir <fresh> --force --now 1791015219
 ```
 
-reproduces `matched 227` and an `epg-now.json` byte identical to the frozen
-one. The grading above is a reconstruction of the pair list from the shipping
-`build_alias`, `epg_name_key` and `<display-name>` selection, checked against
-`epg-now.json`'s key set; the Pluto ids are read out of `channels.json`'s own
-`url` and `logo` fields and out of the guide's `<channel id=...>`.
+Which helper answers what, if the two files are ever re-frozen: `matched 227`
+only from `git show b2f944d~1:bin/omarchy-iptv` (search fold, no address
+strategy), `matched 226` from `git show 2a8e5b2~1:bin/omarchy-iptv` (id fold,
+no address strategy), and `matched 265` from the current helper as section 17
+records it. The three refs are checkable in this repository; the 227, 226 and
+265 are not, and are **UNVERIFIED at today's baseline** until someone re-freezes
+a 1,453-row snapshot. Do not restate any of them as a live figure.
+
+**What IS re-runnable, here and now, with no fetch and no write.** The live
+install's cache holds the shipping matcher's own output, and three artifacts of
+that single run agree on the count -- which is the sink, not a restatement of
+it (rule 14):
+
+```
+C=~/.cache/omarchy-iptv/sources/<key>       # one directory per source
+
+jq '.matched, .channelTotal, .matchedByAddr, .matchedByName' "$C"/epg-status.json
+#  264  1450  185  79
+jq '.channels | length' "$C"/epg-now.json   # 264
+head -1 "$C"/epg-window.txt | jq '.matched' # 264, and the file is 1 + 264 lines
+```
+
+and the two censuses the shipped comment above `_EPG_NAME_NOISE` quotes, by
+calling the shipping regex rather than restating it (rule 12). Copy
+`channels.json` OUT of the cache and run against the copy: the install is the
+user's, and importing a helper from inside it writes `__pycache__` into a
+plugin directory the next update diffs (CLAUDE.md, "Never touch").
+
+```
+mkdir -p /tmp/epg13 && cp "$C"/channels.json /tmp/epg13/   # read OUT, never in
+CH=/tmp/epg13/channels.json python3 -B - <<'PY'
+import json, os, sys, importlib.util, importlib.machinery
+sys.dont_write_bytecode = True
+ldr = importlib.machinery.SourceFileLoader('h', 'bin/omarchy-iptv')
+h = importlib.util.module_from_spec(importlib.util.spec_from_loader('h', ldr))
+ldr.exec_module(h)
+names = [r['name'] for r in json.load(open(os.environ['CH']))['channels']]
+print(len(names), 'rows')
+print(sum(1 for n in names if h._EPG_NAME_NOISE.search(n)), 'carry a marker')
+print(sum(1 for n in names if '(United States)' in n), 'carry (United States)')
+print(sum(1 for n in names if n.rstrip().endswith('(United States)')), 'end in it')
+PY
+#  1450 rows / 1153 carry a marker / 87 carry (United States) / 32 end in it
+```
+
+Run on 2026-10-06 against the install's cache, which is where the live figures
+in this document and in the helper's comment come from. Note what this CANNOT
+re-derive: every arm that needs the guide, including the strip-off counterfactual
+the helper's comment used to state as current, because the cache keeps the
+matcher's output and not the 427 declarations it read.
+
+The grading in sections 2 to 7 is a reconstruction of the pair list from the
+shipping `build_alias`, `epg_name_key` and `<display-name>` selection, checked
+against `epg-now.json`'s key set; the Pluto ids are read out of
+`channels.json`'s own `url` and `logo` fields and out of the guide's
+`<channel id=...>`. Section 16 runs that reconstruction as a command.
 
 ## Repair applied, 2026-10-03
 
@@ -992,7 +1108,11 @@ D-REL-3 failure and is not on the table.
 
 The frozen inputs are not committed: `channels.json` (the owner's parsed
 1,453-channel source) and `pluto-us.xml.gz` (the project's documented XMLTV
-asset, pulled 2026-10-03). With both in place, from a worktree root:
+asset, pulled 2026-10-03). As of 2026-10-06 the scratchpad that held them is
+gone, so **every command below needs those two files re-frozen first** and none
+of them runs from a bare checkout; section 8 lists what the install's own cache
+still answers without a re-freeze, and what it cannot. With both in place, from
+a worktree root:
 
 ```
 F=<directory holding channels.json and pluto-us.xml.gz>
@@ -1039,8 +1159,12 @@ python3 $S --channels $F/channels.json --guide $F/pluto-us.xml.gz \
 grader never restates the matcher's logic), so an id-matching matcher is
 graded exactly like a name-matching one. The reconstruction replays only
 `parse_xmltv`'s bookkeeping around those calls, and `--pairs --now-json`
-proves the replay against the shipping `epg-now.json`: same 226 keys, same
-programme title on every one.
+proves the replay against the shipping `epg-now.json`: the same key set, and
+the same programme title on every key. **How many keys that is depends on the
+helper you point it at**, which is the whole point of `--helper` -- 265 for the
+current one, 226 for `2a8e5b2~1`, 227 for `b2f944d~1`. This paragraph said "226
+keys" flatly while the current helper emitted 265 (F-EPG-13); the check is an
+equality between two sets, not a count to match.
 
 What the lead gets from running `--grade` on the new matcher that he cannot
 get from the id oracle: a `contradicted` count that is **still able to be
@@ -1057,7 +1181,9 @@ have moved, and the figure is reported rather than assumed: the shipping
 `playlist` verb parses a synthetic 10,000-channel list in **549, 558, 559 and
 569 ms** over four runs on this machine, against the 1-second budget, and the
 frozen `epg` run reports `durationMs 566`. The grader itself is not shipped
-and runs the whole 226-pair grade in 0.72 s.
+and ran the whole grade in 0.72 s at the 226 pairs of the day this was taken
+(2026-10-04, before the address strategy); it is not re-timed at 265 and the
+figure is a dated one, like every other number over the frozen inputs.
 
 # Part III: the grader re-measured at 265, 2026-10-04
 
