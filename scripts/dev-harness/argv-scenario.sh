@@ -179,7 +179,11 @@ while time.monotonic() < deadline:
     time.sleep(0.05)
 PY
 : >"$SWEEP"
-ARGV_NEEDLE="$NEEDLE" ARGV_HELPER="$HELPER" python3 "$WORK/sweep.py" 40 "$SWEEP" &
+# Both streams redirected: a background process inherits the transcript pipe
+# otherwise, which keeps `tee` alive past the run -- the discipline the harness
+# README states and which this start, one of the two "sweepers" it names, did
+# not follow. A file rather than /dev/null so a traceback is still readable.
+ARGV_NEEDLE="$NEEDLE" ARGV_HELPER="$HELPER" python3 "$WORK/sweep.py" 40 "$SWEEP" >>"$WORK/sweep.err" 2>&1 &
 SWEEP_PID=$!
 
 # ---- the harness, unconfigured; the source arrives over IPC after start

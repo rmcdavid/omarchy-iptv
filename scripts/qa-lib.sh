@@ -87,6 +87,34 @@ qa_delta() {
   return 2
 }
 
+# qa_min_skipped <ticks> [denominator]: how many of <ticks> periodic samples a
+# duty-cycle control must observe as SKIPPED before it has observed anything.
+# Prints the number; prints QA_NO_DELTA and returns 2 for a non-integer.
+#
+# It exists because a bound written as "at least one of the N ticks" WEAKENS
+# when N grows, and the arithmetic hides it. rewind-scenario.sh's R16 held
+# `bstatus <= TICKS - 1` while TICKS went 3 -> 6 with the busy window (F-RWD-25,
+# 32 s -> 62 s): that is 1-in-3 occupancy becoming 1-in-6, a control at half its
+# old strength, under a note saying the bound "follows on its own" -- which is
+# true as arithmetic and false as a statement about strength. Found by the first
+# review of the transcript change. A proportional floor keeps the strength the
+# shorter window had, so the next time the window grows the control grows with
+# it instead of quietly relaxing.
+#
+# Integer division, floored, never below 1: a one-tick window can still only
+# demand one, and demanding zero would make the control vacuous.
+qa_min_skipped() {
+  local ticks=${1-} denom=${2:-3} n
+  if [[ ! $ticks =~ ^[0-9]+$ || ! $denom =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$QA_NO_DELTA"
+    return 2
+  fi
+  n=$(( ticks / denom ))
+  (( n < 1 )) && n=1
+  printf '%s\n' "$n"
+  return 0
+}
+
 # qa_field <python-expr over d> <json>: the service half of the harness state.
 # Prints NOSTATE when the JSON is not there, NOFIELD when the expression does
 # not resolve, booleans as JSON, everything else as python prints it.
@@ -416,14 +444,26 @@ qa_env_line() {
 #      truncation above the only one in the arrangement -- not because any
 #      check defends it.
 #
-#   3. Where the call sits. It must come AFTER argument parsing -- the
-#      transcript's name and the directory it lands in are derived from the
-#      environment, and a usage error should die as a usage error rather than
-#      as a one-line transcript -- and BEFORE the first line of evidence,
+#   3. Where the call sits. It must come AFTER argument parsing AND after
+#      every refusal that exits before anything starts -- the transcript's
+#      name and the directory it lands in are derived from the environment,
+#      and a usage error should die as a usage error rather than as a
+#      one-line transcript -- and BEFORE the first line of evidence,
 #      because everything printed before the `exec` reaches the terminal
 #      only. In a scenario with a `check-tree` mode it sits on the LIVE path
 #      alone: scripts/check.sh runs the check-tree halves, and a gate step
 #      may neither print a path nobody asked for nor leave a file behind.
+#
+#      The second half of that is the one that was false while this comment
+#      asserted it. rewind-scenario.sh opened the transcript above FOUR of
+#      its own argument refusals and player-scenario.sh above one, so a
+#      mistyped `--tree` or `--baseline` printed a path and left an
+#      almost-empty file behind -- and `--tree` is the lever a display pass
+#      is asked to drive. Both now validate above the call and print the line
+#      that NAMES the tree below it, which is the other half of the rule.
+#      Found by the first review of this function. scripts/qa-lib-test.sh
+#      drives both scenarios' refusal paths and asserts no transcript lands,
+#      so the rule is observed at the sink and not only written here.
 
 # The transcript this shell is writing, or "" before qa_transcript_start.
 # R18 in rewind-scenario.sh sweeps it for leaked URLs at the end of the run,
@@ -477,7 +517,16 @@ qa_transcript_start() {
   # and that is what this refuses: /tmp handed in as the directory is 1777
   # root-owned on every machine this runs on, the chmod fails silently, and
   # without this check the transcript would land where anyone can read it.
-  # Measured both ways in scripts/qa-lib-test.sh, which drives /tmp for real.
+  #
+  # The MASK is observed, not just the refusal. /tmp was the only case driven
+  # for a long time, and 1777 trips every candidate mask, so weakening 077 to
+  # 007 (the group half deleted) or to 002 (only world-WRITABLE refused, so a
+  # 0750 directory belonging to someone else is accepted) reddened nothing --
+  # rule 14's shape inside a privacy check, found by the first review of this
+  # function. scripts/qa-lib-test.sh now drives a 0750 and a 0705 directory
+  # with `chmod` shadowed by a function that fails, which is what the real one
+  # does on a directory we do not own, so group and other are refused
+  # separately and the mode is genuinely read by `stat` and judged here.
   local dmode
   dmode=$(stat -c '%a' "$dir" 2>/dev/null)
   if [[ ! $dmode =~ ^[0-7]+$ ]] || (( 0$dmode & 077 )); then

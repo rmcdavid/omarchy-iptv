@@ -131,7 +131,7 @@ chmod 600 "$STATE"
 
 # A silent listener: accepts the TCP handshake and never answers, so a probe
 # against it hangs until the helper's timeout (20 s) -- long enough to cancel.
-python3 - >"$SCRATCH/silent.port" <<'PY' &
+python3 - >"$SCRATCH/silent.port" 2>>"$SCRATCH/silent.err" <<'PY' &
 import socket, sys, time
 s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(4)
 print(s.getsockname()[1]); sys.stdout.flush()

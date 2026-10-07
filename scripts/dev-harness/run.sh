@@ -329,8 +329,21 @@ FOCUS_TIMEOUT=${OMARCHY_IPTV_FOCUS_TIMEOUT:-5}
 # The question goes to the harness over the SAME path `type` already uses for
 # numberState, so it reaches the same instance: `ipc` resolves the config root
 # from $INSTANCE, which for these verbs comes from the environment
-# (OMARCHY_IPTV_HARNESS_INSTANCE) and is inherited by this child. A second
-# `--instance` root is therefore asked about itself, not about the first.
+# (OMARCHY_IPTV_HARNESS_INSTANCE) and is inherited by this child.
+#
+# ONLY the environment variable. `--instance` is a `start` option and is parsed
+# nowhere else, so `run.sh --instance 2 key j` is a usage error ("unknown
+# option: key", exit 2) and `run.sh key --instance 2 j` passes the flag to
+# wtype as TEXT to be typed. That is deliberate, not an oversight: everything
+# after `key` belongs to wtype, so a flag of ours there would be ambiguous
+# with the argv the caller wants delivered. Routing a second instance is
+# `OMARCHY_IPTV_HARNESS_INSTANCE=2 run.sh key j` -- the form
+# player-scenario.sh already uses for its second instance's OTHER verbs
+# (`ipc2`, `shell-stop`, the `--detach` start); no scenario sends a key to a
+# second instance today. An earlier version of this comment said a second
+# `--instance` root was "asked about itself", which read as if the flag
+# reached these verbs at all; measured all three forms and only the variable
+# routes. scripts/qa-lib-test.sh drives them.
 #
 # The reply is URL-free by construction (booleans, counts, two type tokens),
 # so echoing it into the terminal cannot leak a playlist URL (rule 5).
@@ -477,8 +490,19 @@ case $cmd in
     # any state in the guide. It runs once per shell, keyed to the pid file that
     # `start` rewrites, so a fresh shell primes again and a long scenario does
     # not pay for it on every keystroke.
+    #
+    # --to-compositor skips it, and that is the point rather than an
+    # optimisation. The hatch exists for a chord aimed at whatever holds the
+    # keyboard, which is by definition NOT the guide's fresh surface; firing
+    # the primer there sent a Shift into a foreign surface and -- worse --
+    # recorded the shell as primed, so the next legitimate key into the GUIDE
+    # skipped priming and could be the one that gets swallowed. The
+    # compensation was spent without ever having reached the surface it
+    # compensates for, which reopens F-HARNESS-1. Found by the first review of
+    # this guard; scripts/qa-lib-test.sh drives the sequence.
     primed="$SCRATCH/primed$INSTANCE"
-    if [[ ! -f $primed || $(cat "$primed" 2>/dev/null) != $(cat "$(qs_pidfile)" 2>/dev/null) ]]; then
+    if (( ! TO_COMPOSITOR )) \
+       && [[ ! -f $primed || $(cat "$primed" 2>/dev/null) != $(cat "$(qs_pidfile)" 2>/dev/null) ]]; then
       wtype -M shift -m shift 2>/dev/null || true
       cat "$(qs_pidfile)" 2>/dev/null >"$primed" || true
     fi
@@ -501,12 +525,27 @@ case $cmd in
     # the compositor has nothing for it to prove.
     #
     # `"$0" key` below checks again, once per attempt. That is deliberate: the
-    # second check catches focus stolen in between, and the cost is one more
-    # IPC round trip in a dev harness.
+    # second check catches focus stolen in between -- and its VERDICT is now
+    # what `type` ends on. The inner refusal used to be dropped on the loop
+    # body, so a steal after the front check fell through to the two-attempt
+    # message that this very comment calls the wrong diagnosis, and exited 1
+    # rather than 3. A scenario grading `exit 3` as "refused" could not see a
+    # focus refusal at all. Found by the first review of this guard.
+    #
+    # Exit 3 lands on the FIRST inner refusal rather than after a retry: the
+    # inner `key` has already said on stderr which of the two refusals it was,
+    # a 0.25 s wait does not give the keyboard back, and a second refusal only
+    # buries the first. Nothing was typed either way, which is what exit 3
+    # means here.
     refuse_if_locked type || exit 3
     require_guide_focus type || exit 3
     for attempt in 1 2; do
       "$0" key -- "$want"
+      kstatus=$?
+      if (( kstatus == 3 )); then
+        echo "[run.sh] type REFUSED on attempt $attempt: the guard refused the keystroke (see the line above); nothing was typed" >&2
+        exit 3
+      fi
       sleep 0.25
       got=$("$0" ipc numberState 2>/dev/null | python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("queryLive",""))
