@@ -124,8 +124,17 @@ Guide overlay (fullscreen scrim + centered card)
   Body
     Group column  Recent, Favorites, All, GROUPS header, one entry per group
     Channel list  rows for the selected column entry, filtered by the query
+    -- or --
+    Channel wall  the same rows as a grid of tiles, group column hidden (2.4b)
   Footer ........ left: status (count / updated / now playing); right: key hints
 ```
+
+The body draws one of the two channel views at a time and the group column
+only beside the list. `Model.guideSurface` decides, and the one expression it
+decides the column on is `has && !narrow && !wall`: the wall hides the column,
+and so does a card too narrow to hold it (5.1). Everything else in the body is
+the same object in both views -- same rows, same cursor, same scope, same
+search -- which is why 2.4b is a presentation and not a mode.
 
 ### 2.2 Sections in the group column
 
@@ -221,6 +230,14 @@ and did not, so the two tables stated opposite things about the same keys.) All 
 two key paths and the footer all dispatch on, so the three cannot drift.
 Down from a column the partial last row does not have lands on the last item;
 up past the top keeps the column. Everything else is 3.1 unchanged.
+
+The flip says which view it landed on: a footer transient reading `Channel
+wall` or `Channel list` (6.1). The footer's own hint pair flips with it,
+`Ctrl+G wall` against `Ctrl+G list`, from the same `Model.footerHints` table
+(6.2) -- and it is the second pair dropped when the hint row will not fit, so
+on a narrow card the key is unhinted rather than the row being truncated. The
+tile's metrics are in 5.2, its type in 5.3, its accessible name in 7.1, and
+what the wall does to a hidden group's footer notice is in 2.8.
 
 **Not a plate colour the theme picks.** 92 per cent of the real corpus carries
 transparency and its ink runs both ways -- 42 per cent light and 22 per cent
@@ -328,6 +345,32 @@ NAMES, global across sources, capped at 200 (decision 4).
 The footer says what happened and where the group went: `Hid Religious ·
 117 channels · under HIDDEN in the column`, and `Showing Religious · 117
 channels` on the way back. The name is scrubbed like every other sink.
+
+**The last segment names a place the user can actually see, so it is four
+strings and not one** (`Model.hideNotice`, which takes `{ wall, narrow }` --
+the same two facts `showColumn` is decided on, 2.1). Telling someone to look
+under HIDDEN in a column that is not drawn is a direction to nowhere:
+
+| View | Last segment |
+|---|---|
+| The list, column drawn | `under HIDDEN in the column` |
+| The wall (2.4b) | `Ctrl+G for the list to unhide` -- the key back to the view that has the column |
+| A narrow card, list | `h/l to reach it under HIDDEN` -- the column is not drawn but `h`/`l` still ring the scopes, hidden entries included |
+| A narrow wall | `Ctrl+G, then h/l to reach it` -- both at once, because `Ctrl+G` from a narrow wall lands on a narrow list, which has no column either |
+
+Keyed on the two facts rather than on the view that prompted the repair: the
+first fix named the wall alone and still sent a narrow-card user to a column,
+and the second named three views and missed the narrow wall. Each was found by
+a preflight one pass later.
+
+The RULE above is verified by a call, not by this table: `tests/Model.test.js`
+asks `Model.guideSurface` whether the column is drawn and `Model.hideNotice`
+what it says, over all four views, and requires that the notice says "in the
+column" when and only when one is drawn and otherwise names a key that reaches
+it from there -- `Ctrl+G` on a wide wall, `h`/`l` on a narrow list, and BOTH on
+a narrow wall. The exact wording in the right-hand column above is the literal
+in `Model.hideNotice` and nothing joins it to this page; the behaviour is what
+is pinned.
 
 ### 2.9 Audio and subtitles (M3-02)
 
@@ -816,6 +859,29 @@ lives in the tooltip with the name.
 | footer height | `Math.max(Style.space(20), Style.font.caption + Style.space(6))` |
 | scroll edge fades | the menu's top/bottom gradient scrims, `Style.space(28)` tall, `Color.menu.background` to transparent, opacity tracking hidden distance |
 
+**The channel wall (2.4b).** Every number below is one function,
+`Model.wallGeometry`, which the view and the cursor arithmetic both read, so
+they cannot hold different opinions about how many columns there are. The guide
+calls it with the width left after the group column is hidden, `gap` =
+`Style.space(4)` (the list's row spacing) and `caption` =
+`Style.font.bodySmall + Style.space(6)`.
+
+| Element | Value |
+|---|---|
+| columns | `Math.min(4, Math.max(1, Math.floor(width / 120)))`. The cap is `Model.WALL_MAX_COLUMNS`; the 120 px floor is the minimum cell, so a card too narrow for four columns loses a column rather than shrinking the tile past it |
+| cell width | `Math.floor(width / columns)` |
+| grid width | `columns * cellWidth`, and the view is given THIS and centered in the body, not the full width: `GridView` derives its own column count as `floor(width / cellWidth)` and `floor(w / floor(w / n))` is not always `n` (at `w = 10, n = 4` it is 5), so an exact multiple removes the disagreement instead of hoping about it |
+| tile width | `cellWidth - gap` |
+| plate height | `Math.round(tileWidth / (16 / 9))` (`Model.WALL_PLATE_ASPECT`) |
+| cell height | `plateHeight + caption + gap` |
+| plate | `BorderSurface`, `Style.normalFill`; the cursor tile takes the same selected background and border spec as a selected row (5.4) |
+| picture inside the plate | `PreserveAspectFit`, `Math.round(tileWidth * 0.86)` x `Math.round(plateHeight * 0.80)`, `sourceSize` at 1x the drawn size (not the row slot's 2x: at a 223 px tile doubling is four times the bytes for pixels nothing displays) |
+| no-picture mark | `GLYPHS.tv` centered, `Math.round(plateHeight * 0.42)`, opacity 0.38 |
+| plate decorations | `Style.space(4)` from the plate's corners, `Style.font.icon`: playing + favorite top-right, failed top-left |
+| cursor mark | as the row's (5.4): `Style.space(2)` wide, `Math.round(plateHeight * 0.62)` tall, radius `width / 2`, `Style.space(3)` from the plate's leading edge |
+| caption | `Style.space(3)` under the plate, `tileWidth` wide, centered, elide right |
+| `cacheBuffer` | `plateHeight` -- ONE cell row. The list's `rowHeight * 4` copied over buys whole extra grid rows: measured 37 realised delegates at 149-152 ms against the 150 ms budget, where one cell row is 25 at 106 ms. Written as the tile height so it cannot be read as the list's multiple |
+
 ### 5.3 Typography (font family is always `Style.font.menuFamily`)
 
 | Element | Token | Weight / opacity |
@@ -830,6 +896,8 @@ lives in the tooltip with the name.
 | Detail line | `Style.font.bodySmall` | opacity 0.52 (menu detail) |
 | Right meta `until HH:MM` | `Style.font.caption` | opacity 0.52 |
 | Lead / trail glyphs | `Style.font.icon` | favorite star opacity 1; failed glyph opacity 0.8 |
+| Wall tile caption (2.4b) | `Style.font.bodySmall` | the plain foreground, opacity 1, cursor or not. **Not the accent**: 5.4 reserves it for ACTIVE and forbids it on a cursor with no exceptions, and the first build of this tile inked the caption with it. Centered, elide right |
+| Wall tile glyphs (2.4b) | `Style.font.icon` | playing / favorite opacity 1, failed 0.8 -- the row's values, in the plate's corners |
 | Footer status and hints | `Style.font.caption` | opacity 0.7 throughout (was 0.45 with key names at 0.7, ruling SG2) |
 | Empty-state glyph | `Style.font.displayLarge` | `Color.menu.selectedText`, opacity 0.8 |
 | Empty-state title | `Style.font.title` | opacity 0.7 |
@@ -1015,6 +1083,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 | Footer status, playing behind live (M5-01) | `ó° 1:32 behind live - Sky Sports Main Event - s stop`; paused, `ó° paused - 0:42 behind live - Sky Sports Main Event - s stop`. The state LEADS the line: the status elides on the right, and a name can lose its tail where a number cannot (F-UX-5) |
 | Footer status, playing behind live (M5-01) | `1:32 behind live`; paused: `paused · 0:42 behind live` (`Model.playbackStateText`; empty at live, absent until the player reports a zero point) |
 | Footer status, transient | `Refreshing...`, `Refreshed - 1,204 channels`, `Stopped`, `Added to Favorites`, `Removed from Favorites`, `Removed from Recent` |
+| Footer status, view flip (2.4b) | `Channel wall` on the way in, `Channel list` on the way back. The name of the view arrived at, not the key or the verb: `Ctrl+G` is one key doing two things and the transient is the only thing that says which one happened, on a card where the change itself is unmissable |
 | Footer status, rewind transient (M5-01, 3 s) | `Back 10 s · 1:32 behind live`; at the floor `As far back as it goes · 6:52 behind live`; on `g` at the edge `Live`, or after a deep rewind `At the edge of the buffer · 0:27 behind live` |
 | Footer status, bounded search | `First 200 of 1,240 - keep typing` |
 | Footer status, EPG pending | `Guide data loading...` |
@@ -1148,7 +1217,7 @@ marker until something observes it.
 | Group entry | `Accessible.selected` = is the selected entry | -- | **OBSERVED-ONCE.** The prototype asserted the `selected` state on exactly the selected entry. No landed scenario does, so nothing today would notice the binding being lost |
 | Channel list | `Accessible.List` | `Channels in <scope>` | **OBSERVED** (scale scenario, as `Channels in All`); scope text **COMPOSED** (`Model.scopeName`). No scenario yet walks the tree with a group or Favorites scope, so the `<scope>` substitution itself is COMPOSED, not OBSERVED |
 | Channel row | `Accessible.ListItem` | `<name>` (+ `Channel <n>, ` prefix when numbered, M2-03 section 11) | **OBSERVED** (query, scale scenarios) |
-| Channel wall (2.4b) | `Accessible.List` | `Channels in <scope>` | **DECLARED, NOT OBSERVED.** The same role and name the list carries, so an AT is told the same thing about the same rows in either view. No landed scenario walks the tree with the wall presenting; `tests/a11y/host_guide.qml` instantiates the guide in its default view |
+| Channel wall (2.4b) | `Accessible.List` | `Channels in <scope>` | **DECLARED, NOT OBSERVED.** The same role and name the list carries, so an AT is told the same thing about the same rows in either view. Both views exist at all times, so each carries `Accessible.ignored: !visible`: without it a reader is offered two identical channel lists and indexes the one nobody can see. No landed scenario walks the tree with the wall presenting; `tests/a11y/host_guide.qml` instantiates the guide in its default view, so the `ignored` binding is the half of this row that is easiest to lose silently |
 | Wall tile | `Accessible.ListItem` | The row's own composer, `Model.rowAccessibleName`, with the row's arguments MINUS the EPG pair: `Channel <n>, ` prefix when numbered, then the name, then `, favorite` / `, playing` / `, failed` as they apply, then `, row N of M`. `nowTitle` and `until` are deliberately not passed -- the tile draws no EPG, and announcing a programme the tile does not show would describe a different surface | **COMPOSED, NOT OBSERVED.** Deliberately identical to the row's name rather than a tile-specific one: the wall is a presentation of the same rows, and an AT that is told "row N of M" in one view and something else in the other has been told the cursor moved when it did not. Qt Quick exposes no table or position interface for `GridView` (investigation 4.6(d)), so `row N of M` in the NAME is the only carrier available and the reading it gives is a flat sequence, not a grid position -- which is exactly what `h`/`l` traverse |
 | Wall tile picture | -- | -- | `Accessible.ignored`, both the image and the mark. Same reasoning as the row's logo slot (7.2): the name already carries the channel, and announcing "image" before every tile is noise. Not a security control -- the investigation measured that an unannotated `Image` does not reach the tree at all |
 | Group column entry, hidden (2.8) | `Accessible.ListItem` | `Model.scopeEntryAccessibleName`: `<name>, <n> channels, hidden` | **COMPOSED, NOT OBSERVED.** The dimming that tells a sighted user the entry is hidden is not on the bus, so the word is in the name. Same composer as every other column entry, so the three shapes (header, entry, hidden entry) are one function a test calls |
