@@ -6822,6 +6822,70 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
     return key
 
 
+# D-SRC-11. The record fields the RUNNING shell owns, with the flag that writes
+# each and the plugin setting that is its authority.
+#
+# The settings are the source of truth for the ACTIVE source and the history
+# follows them (ruling D3 / SR8, and D-SRC-10 for the EPG half). So
+# `state source update --epg-url` writes the FOLLOWER: the shell's reconcile
+# rewrites the active record's `epgUrl` from the plugin's `epgUrl` setting every
+# time it re-reads state.json -- and it re-reads it because this command just
+# wrote it. Measured on the live install 2026-10-03: exit 0, "ok": true, and the
+# record read "" immediately afterwards. Against an isolated state directory the
+# same command writes the value and it persists, so the helper was never wrong;
+# it was silent about who would win.
+#
+# WHY THIS WARNS RATHER THAN REFUSES. Three options, and two of them are worse.
+#  - Writing the SETTING as well is out of scope. That is shell.json, whose
+#    schema belongs to the host; this helper is stdlib-only and knows nothing
+#    about the shell on purpose -- shell.json is not named anywhere else in this
+#    file, and teaching it that schema is a coupling the architecture refuses.
+#  - Refusing would break the half that WORKS. Reconcile only touches the
+#    record whose url matches the setting's playlistUrl, so an INACTIVE source
+#    keeps what this command wrote, and switching to it calls
+#    persistActive(rec.url, rec.epgUrl) -- the record's value goes INTO the
+#    setting. The command is right for every source but one. It is also how a
+#    machine with no shell running, and the test suite, set a source up at all.
+#  - And the helper cannot tell WHICH source is the active one: the active key
+#    is derived from the setting's playlistUrl, and state.json does not record
+#    it. Nothing here can make that distinction without reading the shell's
+#    config, which is the first option again.
+# So the command says what it wrote, who owns it, and what to change instead.
+# Exit code stays 0 because the write did happen.
+#
+# Scope, stated rather than implied: this fires for `update`, which is what
+# D-SRC-11 is filed against. `add --epg-url` has the same exposure in one narrow
+# case -- the url being added IS the setting's playlistUrl and no record existed
+# for it yet, which only happens on a state file the shell has not reconciled --
+# and it is not warned about, because warning on every add would make the
+# ordinary, correct operation noisy and the ordinary add is a source that is not
+# active yet, where the record is the authority until a switch copies it over.
+SETTING_OWNED_SOURCE_FIELDS = (
+    ("epgUrl", "--epg-url", "epgUrl", "guide (EPG) URL"),
+    ("url", "--url", "playlistUrl", "playlist URL"),
+)
+
+
+def setting_owned_warnings(fields: Any) -> list[str]:
+    """Lines for a `state source update` that writes a field the running shell
+    owns for the active source (D-SRC-11), in a fixed order. Empty when nothing
+    asked for is one, so `--label` on its own says nothing."""
+    asked = [row for row in SETTING_OWNED_SOURCE_FIELDS if row[0] in set(fields or ())]
+    if not asked:
+        return []
+    out = []
+    for field, flag, setting, _human in asked:
+        out.append("%s wrote the record's %s, which the running shell OWNS for the active "
+                   "source: the plugin setting '%s' is the authority and omarchy-shell "
+                   "rewrites the record from it whenever it re-reads state.json (D-SRC-11)."
+                   % (flag, field, setting))
+    out.append("So if this is the source the bar is showing, that value is already gone: set "
+               "the %s from the guide's Sources screen instead. For any other source the "
+               "record keeps it, and switching to that source copies it into the setting."
+               % " and ".join(row[3] for row in asked))
+    return out
+
+
 def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any, label: Any, now: int) -> tuple[str, str]:
     """Edit a record in place. A changed playlist URL re-keys it (fetchedAt
     and the counts reset; the caller moves or removes the cache directory).
@@ -6932,6 +6996,26 @@ def cmd_state(args: argparse.Namespace) -> int:
             elif args.op == "update":
                 extra["key"], extra["replacedKey"] = update_source_record(state, args.key, args.url, args.epg_url, args.label, now)
                 write_json_atomic(path, state)
+                # D-SRC-11: the write happened, and for the active source the
+                # shell owns what was written. Say so on stderr AND in the
+                # payload, so neither a human nor a script can read "ok": true
+                # as "this stuck". Only after the write succeeds: a HelperError
+                # above leaves the record alone and there is nothing to warn
+                # about.
+                # argparse's dest is DERIVED from the flag rather than written
+                # out a second time, because two spellings of one name is how a
+                # join stops being checked (rule 13). And `getattr` is called
+                # with no default on purpose: if the flag is ever renamed, this
+                # raises instead of quietly deciding the flag was not passed and
+                # dropping the warning, which is the failure that would be
+                # invisible.
+                asked = [field for field, flag, _setting, _human in SETTING_OWNED_SOURCE_FIELDS
+                         if getattr(args, flag.lstrip("-").replace("-", "_")) is not None]
+                notes = setting_owned_warnings(asked)
+                if notes:
+                    extra["warnings"] = notes
+                    for note in notes:
+                        log("state source update: %s" % note)
             elif args.op == "remove":
                 extra["removed"] = remove_source_record(state, args.key)["key"]
                 write_json_atomic(path, state)
@@ -7079,8 +7163,12 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     update = ops.add_parser("update", parents=[common], help="change the label, playlist URL or EPG URL of a source")
     update.add_argument("key", help="source key (8 hex digits)")
-    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache)")
-    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it")
+    # D-SRC-11: both of these write a field the running shell owns for the
+    # active source, so both say so here and the command warns when they are
+    # used. The warning is the part a user will actually see; this is so the
+    # help text does not promise more than the command delivers.
+    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache). The running shell's 'playlistUrl' setting owns this for the ACTIVE source and will overwrite it")
+    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it. The running shell's 'epgUrl' setting owns this for the ACTIVE source and will overwrite it; change the setting (Sources screen) instead")
     update.add_argument("--label", default=None, help="new label; an empty string restores the derived one")
     update.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     remove = ops.add_parser("remove", parents=[common], help="drop a source from the history (its cache dir: `cache remove`)")
