@@ -4178,8 +4178,17 @@ check("buildMpvArgv: every token after argv[0] is an option", argv.slice(1).ever
 check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpvWindowTitle("BBC One"), Model.mpvWindowTitle(null)], ["$>", "$>BBC One", "$>"])
 check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
-check("buildMpvArgv user args come last", argv[argv.length - 1], "--profile=low-latency")
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache"])
+// D-SINK-13 changed what this one can say. User args still land after every
+// fixed option, which is what makes --ytdl=yes and --screenshot-dir work, but
+// they are no longer LAST: one token follows them deliberately. Asserted as
+// the relationship rather than as a position, so it keeps meaning what it
+// meant - and the trailing token gets its own assertions below.
+check("buildMpvArgv user args come after every fixed option, and exactly one token follows them", (() => {
+  const user = argv.indexOf("--profile=low-latency")
+  const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
+  return { found: user > 0, afterTheFixedOptions: user > lastFixed, tail: argv.slice(user + 1) }
+})(), { found: true, afterTheFixedOptions: true, tail: ["--tls-verify=yes"] })
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--tls-verify=yes", "--tls-verify=yes"])
 
 // ---- PO-11 / D-PLY-7: the player writes where it is told, not where it ----
 // mpv's own keys are live on its window: `s` writes a screenshot and `Q` a
@@ -4492,6 +4501,80 @@ checkCall("neither cache option is reserved (CL2: the list is a privacy instrume
   return [r.rejected, a.indexOf("--gpu-shader-cache-dir=/shader-cache") < a.lastIndexOf("--gpu-shader-cache-dir=/home/u/.cache/shaders")]
 }, [[], true])
 
+// ---- D-SINK-13: the TLS peer is a sink, and mpv's default is not to check it ----
+//
+// Raised by the marketplace maintainer against the shipped 0.12.1: mpv was
+// launched with verification OFF (`--tls-verify` defaults to no on 0.41.0)
+// while the helper supplies provider headers and an HTTPS stream URL, so an
+// on-path attacker could impersonate the provider and take the credential. The
+// lead measured it on 2026-10-07 - the shipped argv played a self-signed
+// server, exit 0 - and then measured four ways the one-token fix comes undone.
+// None of what follows can prove the attack is stopped: that needs a real mpv
+// against a real TLS server and belongs to the display lane. What these
+// assertions CAN do is hold the four layers in place by calling the shipping
+// functions, so the next author cannot delete one of them quietly.
+//
+// Every assertion here calls splitMpvArgs or buildMpvArgv. None greps the
+// source and none asserts mere membership in the argv, because membership is
+// exactly what the --profile bypass defeats (rule 14).
+checkCall("D-SINK-13 layer 3: both spellings of the user's own --tls-verify are refused, and the refusal is reported", () => {
+  const r = Model.splitMpvArgs("--tls-verify=no --no-tls-verify --tls-verify --tls-verify=yes --no-tls-verify=1")
+  return { kept: r.args, rejectedCount: r.rejected.length }
+}, { kept: [], rejectedCount: 5 })
+// Reserved means reserved whatever the value: a user writing `--tls-verify=yes`
+// is told it was dropped too. That is the shape every other reserved option
+// has (`--idle=once` is dropped as well), and the honest answer, since the
+// plugin already supplies it twice - but it is a deliberate consequence, so it
+// is asserted rather than discovered.
+checkCall("D-SINK-13 layer 3: the token is refused for agreeing with us as well as for disagreeing", () =>
+  Model.splitMpvArgs("--tls-verify=yes").rejected, ["--tls-verify=yes"])
+checkCall("D-SINK-13 layer 4: the two escapes stay open - --tls-ca-file for a private CA, --profile because layer 2 covers it", () => {
+  const r = Model.splitMpvArgs("--tls-ca-file=/etc/ssl/provider-ca.pem --profile=evil --tls-cert-file=/c.pem --tls-key-file=/k.pem")
+  return { kept: r.args, rejected: r.rejected, caFileReserved: Model.MPV_RESERVED["--tls-ca-file"], profileReserved: Model.MPV_RESERVED["--profile"] }
+}, {
+  kept: ["--tls-ca-file=/etc/ssl/provider-ca.pem", "--profile=evil", "--tls-cert-file=/c.pem", "--tls-key-file=/k.pem"],
+  rejected: [], caFileReserved: undefined, profileReserved: undefined
+})
+// LAYER 2, the one that actually guarantees verification. The assertion is
+// about POSITION, not membership: with layer 1 alone the token is present and
+// the self-signed stream still played, because `--profile=evil` applies a
+// profile that sets tls-verify=no at the point the token appears and mpv takes
+// the LAST token for a repeated option. So what has to hold is that nothing a
+// user can get past the filter is able to come after ours.
+checkCall("D-SINK-13 layer 2: the composed argv ENDS with --tls-verify=yes whatever the user wrote", () => {
+  const vectors = [
+    "",                                                   // no setting at all
+    "--profile=evil",                                     // the measured bypass
+    "--tls-verify=no",                                    // refused, and covered anyway
+    "--no-tls-verify",
+    "--tls-ca-file=/etc/ssl/provider-ca.pem",             // the escape hatch
+    "--profile=evil --tls-ca-file=/ca.pem --hwdec=auto",   // the escape behind the bypass
+    "--include=/tmp/evil.conf --config-dir=/tmp/evil",    // config indirection, refused upstream
+    "--profile=a --profile=b --profile=c",                // last profile still loses to us
+    "-- --tls-verify=no"                                  // a bare -- cannot escape the filter
+  ]
+  return vectors.filter(function (text) {
+    const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: Model.splitMpvArgs(text).args })
+    return a[a.length - 1] !== Model.MPV_TLS_VERIFY
+  })
+}, [])
+// And the two occurrences are both there, from one constant, in the two places
+// the fix needs them: one among the fixed options where a reader looks, one
+// after everything the user can contribute.
+checkCall("D-SINK-13 layers 1 and 2 are two occurrences of one constant, not one of either", () => {
+  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: Model.splitMpvArgs("--profile=evil").args })
+  const at = a.reduce(function (acc, t, i) { if (t === Model.MPV_TLS_VERIFY) acc.push(i); return acc }, [])
+  const user = a.indexOf("--profile=evil")
+  return { count: at.length, layer1BeforeTheUser: at[0] < user, layer2AfterTheUser: at[1] > user, isLast: at[1] === a.length - 1 }
+}, { count: 2, layer1BeforeTheUser: true, layer2AfterTheUser: true, isLast: true })
+// The `--no-` arm of the filter is what makes layer 3 cover both spellings
+// without a new branch, so it is asserted over the WHOLE reserved set rather
+// than over a hand-written list that a new entry would quietly fall off.
+checkCall("the --no- form of every reserved option is refused, --tls-verify included", () =>
+  Object.keys(Model.MPV_RESERVED).filter(function (name) {
+    return Model.splitMpvArgs("--no-" + name.substring(2)).args.length !== 0
+  }), [])
+
 
 // ---- MPV_RESERVED (ARCHITECTURE-PLAYER.md 4.12, plus D-SINK-2) ----
 const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit", "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3", "--term-status-msg", "--screenshot-template"]
@@ -4505,7 +4588,9 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // path the plugin never listed, `--stream-record`'s class. `--cache-on-disk`
 // itself is deliberately NOT here: it is the user's own disk, warned about
 // through the handoff mechanism (MPV_DISK_WARN) and never refused.
-check("MPV_RESERVED gained exactly thirteen entries", Object.keys(Model.MPV_RESERVED).length, 22)
+// D-SINK-13 makes it twenty-three: `--tls-verify`. See the D-SINK-13 block
+// below for the four layers and what each one is asked to prove.
+check("MPV_RESERVED gained exactly fourteen entries", Object.keys(Model.MPV_RESERVED).length, 23)
 check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is not",
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
@@ -4881,6 +4966,19 @@ for (const v of playerFixture.mpvArgv) {
   check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args }), v.argv)
   if (v.rejected) check("fixture mpvArgv rejects: " + v.name, filtered.rejected, v.rejected)
 }
+// D-SINK-13. The exact-array checks above already catch a dropped trailing
+// token, but only by accident of transcription: nothing in them says which
+// element matters or why. This says it once, off the fixture's own
+// `tlsTrailing`, over every vector including the one whose user arguments are
+// the measured bypass - and the python mirror asserts the same field.
+check("fixture mpvArgv: every composed argv ends with the fixture's own trailing TLS token (D-SINK-13 layer 2)",
+  { token: playerFixture.tlsTrailing, offenders: playerFixture.mpvArgv.filter(function (v) {
+    const a = Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: Model.splitMpvArgs((v.mpvArgs || []).join(" ")).args })
+    return a[a.length - 1] !== playerFixture.tlsTrailing
+  }).map(function (v) { return v.name }) },
+  { token: Model.MPV_TLS_VERIFY, offenders: [] })
+check("fixture mpvArgv: at least one vector passes user arguments, or the trailing token is invisible to the pinning",
+  playerFixture.mpvArgv.filter(function (v) { return (v.mpvArgs || []).length > 0 && Model.splitMpvArgs(v.mpvArgs.join(" ")).args.length > 0 }).length > 0, true)
 for (const v of playerFixture.stopLadder) {
   check("fixture stopLadder: " + v.name, Model.stopEscalation(v.stage), { action: v.action, signal: v.signal, waitMs: v.waitMs })
 }

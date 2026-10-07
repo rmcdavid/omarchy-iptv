@@ -49,6 +49,22 @@
       }
     ]
   },
+  "tlsTrailing": "--tls-verify=yes",
+  "_tlsTrailingComment": [
+    "D-SINK-13, layer 2. The shape of mpvArgv was extended this round, because",
+    "the old shape could not see the fix: every `argv` here pins an exact token",
+    "order, which catches a DROPPED trailing token, but nothing said WHY the",
+    "last element is what it is, and a case whose `mpvArgs` is empty cannot",
+    "distinguish layer 1 from layer 2 at all. Both suites now assert, once,",
+    "that every mpvArgv case's argv ENDS with this token - membership is",
+    "exactly what the --profile bypass defeats, so the assertion is about",
+    "position - and the `--profile=evil` case below carries the user arguments",
+    "that make the position observable.",
+    "Measured by the lead on 2026-10-07: with this token absent, user",
+    "`--profile=evil` naming a profile that sets `tls-verify=no` played a",
+    "self-signed stream (exit 0); with it present the same command refused it",
+    "(exit 2). mpv's own default is --tls-verify=no."
+  ],
   "mpvArgv": [
     {
       "name": "cold launch carries no channel: no URL, no headers, no title, no trailing --",
@@ -70,7 +86,9 @@
         "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
-        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache"
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--tls-verify=yes",
+        "--tls-verify=yes"
       ]
     },
     {
@@ -99,10 +117,12 @@
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--tls-verify=yes",
         "--profile=low-latency",
         "--ytdl=yes",
         "--screenshot-dir=/home/u/Pictures",
-        "--gpu-shader-cache-dir=/home/u/.cache/shaders"
+        "--gpu-shader-cache-dir=/home/u/.cache/shaders",
+        "--tls-verify=yes"
       ]
     },
     {
@@ -146,7 +166,58 @@
         "--watch-later-dir=/tmp/watch-later",
         "--gpu-shader-cache-dir=/tmp/shader-cache",
         "--icc-cache-dir=/tmp/shader-cache",
-        "--hwdec=auto-safe"
+        "--tls-verify=yes",
+        "--hwdec=auto-safe",
+        "--tls-verify=yes"
+      ]
+    },
+    {
+      "_comment": [
+        "D-SINK-13, all four layers in one vector, and the only case in this",
+        "table whose user arguments are the attack rather than a preference.",
+        "The two direct spellings are REFUSED (layer 3, so the user is told",
+        "rather than silently overridden); --profile is ACCEPTED on purpose",
+        "(layer 2 makes it harmless and profiles are a legitimate mpv feature);",
+        "--tls-ca-file is ACCEPTED on purpose (layer 4, the targeted escape for",
+        "a private-CA provider, measured playing behind the trailing token);",
+        "and the composed argv still ENDS with --tls-verify=yes, which is the",
+        "whole point - the user's accepted --profile=evil sits before it, so a",
+        "profile that sets tls-verify=no is overridden by the last token.",
+        "Both mirrors run this vector."
+      ],
+      "name": "D-SINK-13: the profile bypass is accepted and overridden, the direct spellings are refused, the CA escape survives",
+      "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
+      "mpvArgs": [
+        "--profile=evil",
+        "--tls-verify=no",
+        "--no-tls-verify",
+        "--tls-ca-file=/etc/ssl/provider-ca.pem"
+      ],
+      "rejected": [
+        "--tls-verify=no",
+        "--no-tls-verify"
+      ],
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+        "--load-scripts=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--tls-verify=yes",
+        "--profile=evil",
+        "--tls-ca-file=/etc/ssl/provider-ca.pem",
+        "--tls-verify=yes"
       ]
     }
   ],
@@ -371,6 +442,7 @@
     "--stream-record",
     "--term-status-msg",
     "--title",
+    "--tls-verify",
     "--watch-later-dir",
     "--wayland-app-id"
   ],

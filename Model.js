@@ -209,7 +209,8 @@ var MPV_RESERVED = {
   "--scripts": true,
   // D-SINK-4. Reserved, not merely defaulted off, and the distinction is the
   // whole fix. `--load-scripts=no` is in the base argv, but user mpvArgs are
-  // concatenated AFTER it (buildMpvArgv's last line), so a pasted
+  // concatenated AFTER it (buildMpvArgv's tail, which since D-SINK-13 only
+  // the trailing TLS re-assertion follows), so a pasted
   // `--load-scripts=yes` would win and silently put the credentialed stream
   // URL back on the session bus. That is the shape of D-SINK-2 again: an
   // option defaulted rather than reserved is an option the user can undo
@@ -241,8 +242,49 @@ var MPV_RESERVED = {
   // path the plugin never listed -- `--stream-record`'s class, reserved
   // above. `--cache-on-disk` itself is the user's own disk and is warned
   // about (MPV_DISK_WARN), not refused.
-  "--demuxer-cache-unlink-files": true
+  "--demuxer-cache-unlink-files": true,
+  // D-SINK-13, layer 3 of four. mpv's `--tls-verify` defaults to NO, so until
+  // this round the plugin handed provider headers and an HTTPS stream URL to
+  // an UNAUTHENTICATED peer: measured by the lead on 2026-10-07 against a
+  // self-signed server, the shipped argv played it, exit 0. The TLS peer is a
+  // sink like any other on the rule 5 list, and it is the one sink that gets
+  // the credential in full rather than redacted.
+  //
+  // Reserved here, and ALSO re-asserted as the final token of the composed
+  // argv (buildMpvArgv). The two are not alternatives and the brief for each
+  // is different: the trailing token is what makes verification SAFE, because
+  // a later command-line token beats an earlier one and `--profile` carries
+  // arbitrary options; this entry is what makes the refusal HONEST, so a user
+  // who writes `--tls-verify=no` is told it was dropped instead of watching it
+  // be silently undone. Both spellings are covered without a new branch: the
+  // `--no-` arm below reconstructs `--tls-verify` from `--no-tls-verify` and
+  // finds it here.
+  //
+  // NOT reserved, on purpose, and both of them matter:
+  //  - `--tls-ca-file` is the targeted escape for a provider presenting a
+  //    self-signed or private-CA certificate. The lead measured it working
+  //    behind the trailing re-assertion (case C, and again in the addendum).
+  //    It is the `--screenshot-dir` shape: a deliberate user choice that lands
+  //    after our token and still wins. The cost of the ruling, stated rather
+  //    than hidden: such a user can no longer disable verification wholesale,
+  //    they must name that provider's CA. Smaller blast radius, same
+  //    capability.
+  //  - `--profile` is a legitimate mpv feature, and reserving it would cost
+  //    users that feature while still leaving whatever indirection nobody has
+  //    thought of yet. The trailing re-assertion is what makes it harmless, so
+  //    this is the list NOT to reach for when someone remembers the profile
+  //    bypass.
+  // `--tls-cert-file` and `--tls-key-file` are CLIENT certificates, a
+  // different thing, and are untouched.
+  "--tls-verify": true
 }
+
+// D-SINK-13, layers 1 and 2. ONE string, written into the argv TWICE on
+// purpose. See buildMpvArgv for why the second occurrence is load-bearing;
+// the constant exists so the two can never drift apart, the way PIP_CLASS
+// exists. The python mirror keeps its own literal and the two are pinned to
+// each other by the shared player-argv.json vectors.
+var MPV_TLS_VERIFY = "--tls-verify=yes"
 
 // Stable notification replace-ids so a repeated failure replaces its toast
 // instead of stacking (UX.md 6.4).
@@ -4309,9 +4351,44 @@ function buildMpvArgv(params) {
     // runtime directory, ephemeral. Neither option is reserved - both caches
     // are content-free - so user tokens after these can still move them.
     "--gpu-shader-cache-dir=" + str(dirs.shaderCache),
-    "--icc-cache-dir=" + str(dirs.shaderCache)
+    "--icc-cache-dir=" + str(dirs.shaderCache),
+    // D-SINK-13, LAYER 1: stated here, where a reader of the specification
+    // looks to find out what the player is launched with. mpv's own default is
+    // `--tls-verify=no` (`mpv --list-options` on 0.41.0), so without this the
+    // plugin handed provider headers and an HTTPS stream URL to a peer it
+    // never authenticated. Layer 1 alone is NOT the fix - see the return.
+    MPV_TLS_VERIFY
   ]
-  return argv.concat(asList(p.extraArgs))
+  // D-SINK-13, LAYER 2, and the line that actually guarantees verification.
+  //
+  // THE TWO OCCURRENCES OF MPV_TLS_VERIFY ARE NOT REDUNDANT. Removing either
+  // one is a security change, not a tidy-up, and the one below is the one that
+  // holds:
+  //
+  //  - mpv resolves a repeated option by taking the LAST token on the command
+  //    line. User mpvArgs land between the base argv and this line, so
+  //    whatever a user writes is overridden here rather than overriding us.
+  //  - That matters because `--tls-verify` is not the only way to turn
+  //    verification off. `--profile=NAME` applies every option in that profile
+  //    at the point the token appears, and a profile in the user's own
+  //    mpv.conf can set `tls-verify=no`. The lead measured it on 2026-10-07:
+  //    with layer 1 only, `--profile=evil` naming such a profile PLAYED a
+  //    self-signed stream (exit 0); with this trailing token the same command
+  //    refused it (exit 2, "Peer certificate failed verification"). The same
+  //    measurement refused `--tls-verify=no` and `--no-tls-verify` behind it.
+  //  - So this layer covers the indirections nobody has enumerated, which is
+  //    why `--profile` is deliberately not on MPV_RESERVED.
+  //  - It cannot be escaped by a bare `--` (which would make the rest
+  //    filenames): splitMpvArgs cannot emit one, because the token pattern
+  //    requires `--` followed by a lowercase letter or digit.
+  //  - And it does not break the escape hatch: `--tls-ca-file` is unreserved,
+  //    rides in extraArgs, and names a CA for THIS token to verify against.
+  //    Measured playing a private-CA stream with the trailing token in place.
+  //
+  // Mirrored by mpv_launch_argv() in bin/omarchy-iptv and pinned there by the
+  // `--profile=evil` vector in the player-argv.json fixture (dev branch),
+  // whose user arguments are what make this line visible at all.
+  return argv.concat(asList(p.extraArgs)).concat([MPV_TLS_VERIFY])
 }
 
 // ------------------------------------------------------------ player verbs
@@ -10142,6 +10219,7 @@ if (typeof module !== "undefined") {
     playerDirs: playerDirs,
     buildMpvArgv: buildMpvArgv,
     MPV_RESERVED: MPV_RESERVED,
+    MPV_TLS_VERIFY: MPV_TLS_VERIFY,
     // ---- detached player (M2-02)
     PLAYER_STASH_SCHEMA: PLAYER_STASH_SCHEMA,
     PLAYER_ORPHAN_GRACE_SEC: PLAYER_ORPHAN_GRACE_SEC,

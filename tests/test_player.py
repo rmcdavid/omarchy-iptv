@@ -565,6 +565,50 @@ class StartTest(PlayerTestCase):
         self.assertEqual(argv.count("--input-ipc-server=%s" % self.sock), 1)
         self.assertEqual(payload["warnings"], ["dropped mpvArg --log-file", "dropped mpvArg --input-ipc-server", "dropped mpvArg ; rm -rf"])
 
+    def test_the_profile_bypass_is_overridden_on_the_argv_the_helper_actually_execs(self):
+        """D-SINK-13, observed at the spawn rather than at the builder.
+
+        The two assertions above this one live in ParityTest and call
+        mpv_launch_argv directly. This one goes through the whole shipping path
+        - the `player start` CLI, filter_mpv_args, mpv_launch_argv,
+        spawn_detached, exec - and reads the argv back out of the recording the
+        stub mpv writes about ITSELF. So it is the argv a real mpv would have
+        received, not the argv a builder returned.
+
+        `--profile=evil` is the lead's measured bypass (2026-10-07): with the
+        TLS token only in the base argv, a profile in the user's own mpv.conf
+        setting `tls-verify=no` won and a self-signed stream PLAYED, exit 0.
+        It is accepted here on purpose - profiles are a legitimate mpv feature
+        and reserving them would cost the feature and still miss the next
+        indirection - and it is the trailing token that makes it harmless.
+
+        What this cannot show is mpv refusing the peer: that needs a real TLS
+        server and a real mpv, which is the display lane's.
+        """
+        code, payload, _, stderr = self.player_start(
+            "--mpv-arg=--profile=evil", "--mpv-arg=--tls-ca-file=/etc/ssl/provider-ca.pem",
+            "--mpv-arg=--tls-verify=no", "--mpv-arg=--no-tls-verify")
+        self.assertEqual(code, 0, stderr)
+        argv = self.spawned_argv()[0]
+        # Layer 2: the last token on the command line mpv was given.
+        self.assertEqual(argv[-1], helper.MPV_TLS_VERIFY)
+        # Layer 1 is also there, and the user's bypass sits BETWEEN them, which
+        # is the whole arrangement: nothing the user contributed can come after
+        # ours.
+        self.assertEqual(argv.count(helper.MPV_TLS_VERIFY), 2)
+        self.assertLess(argv.index(helper.MPV_TLS_VERIFY), argv.index("--profile=evil"))
+        self.assertGreater(len(argv) - 1, argv.index("--profile=evil"))
+        # Layer 4: the private-CA escape reached mpv, and after our base token,
+        # so it is the CA this verification uses.
+        self.assertIn("--tls-ca-file=/etc/ssl/provider-ca.pem", argv)
+        self.assertLess(argv.index(helper.MPV_TLS_VERIFY),
+                        argv.index("--tls-ca-file=/etc/ssl/provider-ca.pem"))
+        # Layer 3: the two direct spellings never reached mpv AND the user was
+        # told, rather than having the override happen behind their back.
+        self.assertEqual([t for t in argv if t in ("--tls-verify=no", "--no-tls-verify")], [])
+        self.assertEqual(payload["warnings"],
+                         ["dropped mpvArg --tls-verify", "dropped mpvArg --no-tls-verify"])
+
     def test_an_option_that_hands_the_url_to_another_program_is_kept_and_warned_about(self):
         # PO-10 / D-PLY-5. --ytdl is NOT reserved (PO-5): it reaches mpv, and
         # it also reaches the user as a warning on the line the guide shows.
@@ -1933,10 +1977,22 @@ class ParityTest(unittest.TestCase):
         # lets mpv's on-disk cache file outlive the process at a path the
         # plugin never listed, `--stream-record`'s class. `--cache-on-disk`
         # itself stays allowed and WARNED (the disk-warning vectors below).
-        self.assertEqual(len(names), 22)
+        # D-SINK-13 made it twenty-three: `--tls-verify`, mpv's own default
+        # being NO, so the plugin was handing provider headers and an HTTPS
+        # stream URL to a peer it never authenticated. Reserved for the same
+        # reason `--load-scripts` is - the base argv alone can be undone by a
+        # later token - and re-asserted as the final token besides, because
+        # `--profile` can carry the same change indirectly.
+        self.assertEqual(len(names), 23)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)
+        self.assertIn("--tls-verify", names)
+        # D-SINK-13 layer 4: the escape and the feature, both unreserved on
+        # purpose. These two lines are what should fail if someone "completes"
+        # the reserved list by adding them.
+        self.assertNotIn("--tls-ca-file", names)
+        self.assertNotIn("--profile", names)
         self.assertNotIn("--cache-on-disk", names)
         self.assertNotIn("--ytdl", names)          # PO-5
         # NOT reserved, deliberately: ruling PO-10 / D-PLY-5 keeps --script-opts
@@ -1996,6 +2052,105 @@ class ParityTest(unittest.TestCase):
             self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs), vector["argv"], vector["name"])
             if "rejected" in vector:
                 self.assertEqual(rejected, vector["rejected"], vector["name"])
+
+    def test_the_composed_argv_always_ends_with_the_tls_token(self):
+        """D-SINK-13 layer 2, the layer that actually guarantees verification.
+
+        mpv takes the LAST token for a repeated option, and `--profile=NAME`
+        applies every option in that profile where the token appears, so a
+        profile in the user's own mpv.conf setting `tls-verify=no` beat the base
+        argv: measured by the lead on 2026-10-07, `--profile=evil` PLAYED a
+        self-signed stream (exit 0) with layer 1 alone and was refused (exit 2)
+        behind this trailing token.
+
+        The assertion is therefore about POSITION, not membership - membership
+        is exactly what the bypass defeats - and it is driven off the fixture's
+        own `tlsTrailing` so the JavaScript mirror asserts the same field. What
+        no test here can show is that mpv then refuses the stream; that needs a
+        real TLS peer and belongs to the display lane.
+        """
+        token = self.fixture["tlsTrailing"]
+        self.assertEqual(token, helper.MPV_TLS_VERIFY)
+        self.assertIn('var MPV_TLS_VERIFY = "%s"' % token, self.model)
+        vectors = [
+            [],                                                     # no setting at all
+            ["--profile=evil"],                                     # the measured bypass
+            ["--tls-verify=no"],                                    # refused, and covered anyway
+            ["--no-tls-verify"],
+            ["--tls-ca-file=/etc/ssl/provider-ca.pem"],             # the escape hatch
+            ["--profile=evil", "--tls-ca-file=/ca.pem", "--hwdec=auto"],
+            ["--profile=a", "--profile=b", "--profile=c"],
+            ["--", "--tls-verify=no"],                              # a bare -- cannot escape the filter
+        ]
+        for tokens in vectors:
+            args, _ = helper.filter_mpv_args(tokens)
+            argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", args)
+            self.assertEqual(argv[-1], token, tokens)
+        for case in self.fixture["mpvArgv"]:
+            args, _ = helper.filter_mpv_args(case["mpvArgs"])
+            dirs = helper.player_dirs(case["socketPath"], case["stateDir"])
+            self.assertEqual(helper.mpv_launch_argv(case["socketPath"], args, dirs)[-1],
+                             token, case["name"])
+        # A fixture whose every vector passes an empty user list cannot see
+        # layer 2 at all, which would be a pinning that pins nothing.
+        self.assertTrue(any(helper.filter_mpv_args(case["mpvArgs"])[0]
+                            for case in self.fixture["mpvArgv"]))
+
+    def test_both_layers_are_present_and_are_two_occurrences_of_one_constant(self):
+        """D-SINK-13 layers 1 and 2. Layer 1 is where a reader looks; layer 2 is
+        what binds. Deleting either is a security change, so the count and the
+        two positions are asserted rather than left to a reader's good faith."""
+        args, _ = helper.filter_mpv_args(["--profile=evil"])
+        argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", args)
+        at = [i for i, token in enumerate(argv) if token == helper.MPV_TLS_VERIFY]
+        user = argv.index("--profile=evil")
+        self.assertEqual(len(at), 2, argv)
+        self.assertLess(at[0], user)                 # layer 1: among the fixed options
+        self.assertGreater(at[1], user)              # layer 2: after everything the user gets
+        self.assertEqual(at[1], len(argv) - 1)
+
+    def test_the_tls_filter_refuses_both_spellings_and_keeps_both_escapes(self):
+        """D-SINK-13 layers 3 and 4, by calling the shipping filter.
+
+        Layer 3 is the honest half: a user who writes `--tls-verify=no` is told
+        it was dropped instead of watching layer 2 silently undo it. Both
+        spellings fall out of the existing `no_form` arm of filter_mpv_args,
+        which fires only on a name literally beginning `--no-`, rebuilds the
+        positive name from the five characters after it (so `--no-tls-verify`
+        becomes `--tls-verify`) and looks up both that name and its list-suffix
+        base - which is why no new branch was needed here and why
+        `--no-tls-verify=1` is covered too, the name being split at the `=`
+        first. Before this change both spellings were ACCEPTED.
+
+        Layer 4 is the escape: `--tls-ca-file` names a private CA for the
+        trailing token to verify against (the lead measured such a stream
+        playing), and `--profile` stays a legitimate mpv feature because layer 2
+        makes it harmless. The client-certificate options are a different thing
+        and are untouched.
+        """
+        for token in ("--tls-verify=no", "--no-tls-verify", "--tls-verify",
+                      "--tls-verify=yes", "--no-tls-verify=1"):
+            args, rejected = helper.filter_mpv_args([token])
+            self.assertEqual(args, [], token)
+            self.assertEqual(rejected, [token], token)
+        keep = ["--tls-ca-file=/etc/ssl/provider-ca.pem", "--profile=evil",
+                "--tls-cert-file=/c.pem", "--tls-key-file=/k.pem"]
+        args, rejected = helper.filter_mpv_args(keep)
+        self.assertEqual(args, keep)
+        self.assertEqual(rejected, [])
+        # The addendum's other attack, re-measured by calling the filter: a bare
+        # `--` would make every later token a filename, and MPV_ARG_RE cannot
+        # pass one.
+        self.assertEqual(helper.filter_mpv_args(["--"]), ([], ["--"]))
+
+    def test_the_no_form_arm_covers_every_reserved_option(self):
+        # The arm is what makes layer 3 cover `--no-tls-verify` without a new
+        # branch, so it is asserted over the whole set rather than over a
+        # hand-written list a later entry could fall off.
+        for name in sorted(helper.MPV_RESERVED):
+            args, rejected = helper.filter_mpv_args(["--no" + name[1:]])
+            self.assertEqual(args, [], name)
+            self.assertEqual(rejected, ["--no" + name[1:]], name)
 
     def test_the_launch_argv_never_carries_a_channel(self):
         argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", [])
