@@ -2404,7 +2404,7 @@ never ran at either ref - see **D-PLY-9**.
 
 | Defect | Verdict | QA's own evidence |
 |---|---|---|
-| **D-PLY-1** P1 | **FIXED** | Both original triggers, neither reproduces. Trigger A (`kill -STOP`, two-strike verdict) **3/3**: the wedged player is laddered down and replaced in 22.6 / 22.8 / 22.8 s, and the shell ends `playing true`, `nowPlaying t:qa.live`, `player.up/attached/wanted` **all true**, one player, one window, still true at t+30 s. Trigger B (socket unlink then zap) **2/2**: same end state on the channel asked for, one window at every 100 ms sample (60 samples; the count dips to 0 across the replacement, which PLY-RST-06 allows), socket re-created `600` in a `700` directory, old pid reaped. **The second half of the fix - "a delivered relaunch cancels its timer" - QA measured directly** by counting `omarchy-iptv: mpv unresponsive, restarting player` in the journal across each trigger-A run: **delta exactly 1 every time**, never 2. This is the check the harness silently skips (D-PLY-9), so it rests on QA's measurement alone. |
+| **D-PLY-1** P1 | **FIXED** | Both original triggers, neither reproduces. Trigger A (`kill -STOP`, two-strike verdict) **3/3**: the wedged player is laddered down and replaced in 22.6 / 22.8 / 22.8 s, and the shell ends `playing true`, `nowPlaying t:qa.live`, `player.up/attached/wanted` **all true**, one player, one window, still true at t+30 s. Trigger B (socket unlink then zap) **2/2**: same end state on the channel asked for, one window at every 100 ms sample (60 samples; the count dips to 0 across the replacement, which PLY-RST-06 allows), socket re-created `600` in a `700` directory, old pid reaped. **The second half of the fix - "a delivered relaunch cancels its timer" - QA measured directly** by counting `omarchy-iptv: mpv unresponsive, restarting player` in the journal across each trigger-A run: **delta exactly 1 every time**, never 2. This is the check the harness silently skips (D-PLY-9), so it rests on QA's measurement alone. **SUPERSEDED AS EVIDENCE 2026-09-14, later the same day; measurement, not verdict (marked in place 2026-10-06).** The counts quoted here were really taken; what they cannot do is discriminate. `omarchy-iptv: mpv unresponsive, restarting player` is emitted exactly once by the fixed tree AND by the unfixed one, so a delta of 1 is what both trees produce and counting it proves nothing about the timer being cancelled. Established in "D4. D-PLY-9 - the repaired harness check does NOT discriminate" (the 10:05 pass below), where the same assertion PASSES on both trees, and settled in "L3. The scenario suite, both ways" (the 12:22 pass) by moving the property onto the player lock's intent counter, which reads 1 here and 2 at `396a69a`; the D-PLY-9 board row records it as superseded. The `D-PLY-1 FIXED` verdict in this cell stands on the two reproduction triggers; this sentence is not part of what carries it. |
 | **D-PLY-2** P2 | **CLOSED AS ACCEPTED (PO-8) - recovery verified** | The stranding reproduces and is accepted: `omarchy plugin remove --yes` with a channel playing leaves it alive and windowed at t+12 s and t+32 s, plugin directory gone. The README's recovery then works **exactly as written**. `disable` first stops the player in **6801 ms** ("about seven seconds"). For a stranded player, `pgrep -af -- '^mpv .*--wayland-app-id=omarchy-iptv'` returns **exactly one** line, ours; `pkill -f -- '^mpv .*--wayland-app-id=omarchy-iptv'` reaped it in **145 ms** and this session survived. **The anchor warning is literally true**: without the leading `^mpv `, the same pattern matches **3** processes including QA's own shell (pid confirmed by `$$`), i.e. the session pasting the command. Incidentally confirms the README's "Note on disabling": after `disable`/`enable` the widget's `playlistUrl` was gone and had to be re-set. |
 | **D-PLY-3** P2 | **FIXED** | The full PLY-WEAK-06 procedure end to end **3 times** (play, confirm `session`, kill the supervisor and the shell, `kill -9` mpv with 0 quickshell running, relaunch). All three: `failedAt {"t:qa.live":"HH:MM"}`, `nowPlaying null`, `playing false`, **`jq .session state.json` is `null`**, `state.json` still `0600`, and **0 notifications** on the session bus for the whole procedure. The next shell start re-marks nothing (`failedAt {}`, `session null`). Was 2 of 3 failing; now **0 of 3**. Guide half proven by screenshot (`shots/guide-warning.png`): the row carries the alert glyph in the trail slot and the detail line `QA - Failed 05:53 - Space to retry`, not a red row. |
 | **D-PLY-4** P2 | **FIXED - 30 won, 0 lost, measured by QA** | Re-measured with **QA's own `race-trial.sh` from the `8f9447e` pass**, not the fixing lane's harness scenario. The script was reconstructed and diffed against `qa7/race-trial.sh`: the logic is identical, the differences are comments, a variable for the state path, and one wait loop lengthened from 40 to 60 iterations. **30 trials: 30 WON, 0 LOST, 0 VOID.** The play landed on attempt 3 in 29 trials and attempt 4 in one, the same window as the losing pass, so the narrow point being probed is the same one. At `8f9447e` the same script returned 16 won / **14 lost (47%)**. The lane's "30 of 30" is confirmed independently. |
@@ -5322,6 +5322,26 @@ playing state. `raiseStreamFailure` sets the mark; the only clear runs when a
 play STARTS, not when one succeeds. The hook for the fix already exists and
 already runs every 10 s: the healthy branch of the status check.
 
+> **F-CAL-3 IS WITHDRAWN, 2026-09-22, the same day, by F-CAL-4.**
+> (Marked in place 2026-10-06.) The two paragraphs below are kept because
+> the pass really took these readings and the correction is the lesson, but **the
+> diagnosis is wrong and the live figures are not measurements of a bold
+> caption.** `manifest.json` sets `keepLoaded: true`, so the overlay stayed
+> mounted across the 0.7.3 hot reload and the pass never once rendered the
+> build that carries the bold: the live numbers are REGULAR-weight renders of
+> 0.7.2, which is exactly why they equalled the regular-weight values to two
+> decimals -- the observation this finding built its whole diagnosis on. The
+> live display does NOT rasterise 10 px text worse than headless cage; the
+> same site, re-measured on a confirmed build, reads 6.2377 where this pass
+> recorded 5.6956. The "conclusive" control does not rescue it either: the
+> peak-pixel statistic saturates, its resolution is about 0.05 ratio points,
+> and no valid cross-environment comparison of the same glyphs has ever been
+> made here in either direction. The three of these figures that became
+> fixture rows were REMOVED from `contrast-calibration.json` rather than
+> relabelled, since their surface was never recorded either. See "F-CAL-3
+> withdrawn 2026-09-22: it was never the environment, it was the build"
+> below, and the F-CAL-3 and F-CAL-4 rows on the board.
+
 **F-CAL-3, and it undoes a claim made yesterday.** The four bold caption sites
 measured 6.2377 under headless cage -- model accuracy, which is what D-RUNG-14
 rested on. On the live display, same day, same theme, same code, they read
@@ -5602,6 +5622,25 @@ the cache and `theme.name` all hash-identical to the 22:15 snapshot, the live
 `XDG_STATE_HOME`; the user's own theme stayed catppuccin throughout.
 
 ### 1. D-RUNG-14: the bold captions, measured on our own sites
+
+> **THE VERDICT HERE IS WITHDRAWN 2026-09-22 (marked in place 2026-10-06);
+> the numbers stand as cage readings.** Two things below did not survive.
+> (a) The `-0.0007` agreement is **below the instrument's resolution**: the
+> peak-pixel statistic is a MAX over a glyph run, it returns the 8-bit
+> composite byte-exact once any one pixel is fully covered, and one LSB of
+> green is 0.0535 ratio points -- so an error quoted to four decimals is
+> about a hundred times finer than the thing that produced it, and a max is
+> blind by construction to hinting, subpixel positioning and scale. Settled
+> in "F-CAL-3 withdrawn 2026-09-22" below, and superseded as a method by
+> "Coverage distribution, 2026-09-23: the peak was the tail all along",
+> which names every contrast figure in this project -- this one included --
+> as peak-pixel. (b) **"The UNVERIFIED mark on UX.md 5.4 is lifted" is
+> reversed**: UX.md 5.4's claim that bold "buys the shortfall back" was
+> withdrawn on 2026-09-22, and D-RUNG-14 was REOPENED the same day, because
+> this pass measured catppuccin, the one theme whose 0.7 caption rung
+> already cleared 4.5 before any change. See the F-CAL-3 and F-CAL-4 rows
+> on the board, and "Live pass 2026-09-23: D-RUNG-14 on screen, on a
+> confirmed build" below for the reading that replaces it.
 
 Model for catppuccin at the 0.7 rung on the card: **6.2384**.
 
@@ -6039,6 +6078,24 @@ setsid.
   row, which is filed against the floating-window mode.
 
 ## F-CAL-3 fixed 2026-09-22: the fixture now says which screen it describes
+
+> **THE PREMISE OF THIS SECTION WAS WITHDRAWN THE SAME DAY.**
+> (Marked in place 2026-10-06.) It is kept whole because the schema change
+> it argues for is what shipped and the reasoning about environments is still the reasoning;
+> but it was written while F-CAL-3 was believed, and three of the rows it
+> adds -- catppuccin 0.7 rung, group count 5.4475, Sources count 5.4590,
+> footer status 5.6956 -- are **regular-weight renders of 0.7.2 on a build
+> the shell had never loaded**, not live bold measurements. F-CAL-4 REMOVED
+> them from `contrast-calibration.json` rather than relabelling them, since
+> their surface was never recorded either, so the live/cage comparison table,
+> the "colour and compositing agree, glyph coverage does not" conclusion and
+> the live arm of the -0.376 optimism mean below all rest on figures that are
+> no longer in the fixture. What replaced the `env` idea is `env` PLUS the
+> BUILD that rendered each row and the background it measured, with a bold
+> row on a build known to lack the bold refused outright. "D-RUNG-14 is
+> reopened" below is still true. Read with "F-CAL-3 withdrawn 2026-09-22: it
+> was never the environment, it was the build" immediately after this
+> section, and the F-CAL-4 board row.
 
 Repo-only pass. The display was never touched: no capture, no theme change, no
 keystroke, no shell restart. Every figure below was already measured -- this
@@ -6772,6 +6829,24 @@ the manifest read is one small file at load.
 
 ### PERF-03, the filter — **F-PERF-1, and it is a documentation defect**
 
+> **OVERTURNED 2026-09-23, same day (marked in place 2026-10-06): the bench,
+> not the filter.** The numbers below were really measured, and they are
+> measurements of a channel list this plugin has never written. The bench
+> built its 10,000 channels by hand with four fields, and one of the two it
+> omitted is `id` -- so `filterChannels` fell back to hashing a URL once per
+> matching row, 6,877 hashes per keystroke on `a`, work the shipped code has
+> never done because `assign_ids` has run on every parse since the first
+> commit. Measured on the bytes the helper actually writes, `a` is **26.52 ms
+> against a 30 ms budget**: there is no over-budget case, so "the worst case
+> spends all of it in the filter" does not hold and the single-character
+> residual this finding spawned does not exist. See "F-PERF-1 overturned,
+> 2026-09-23: the residual was the fixture" below, and the F-PERF-1 board
+> row. The `nameKey` defect found in the next section was real and its fix
+> shipped; what is overturned is the magnitude and the verdict against the
+> budget. Rule 10's missing half is the lesson: a double that is HARSHER
+> than the real thing invents a defect, and this one was a commit away from
+> removing a feature.
+
 Calling the shipping `Model.filterChannels` over the same 10,000-channel cache,
 JIT warmed, 50 iterations per query:
 
@@ -6805,6 +6880,23 @@ is real work that should not be started on a node number. Re-measure in the QML
 engine first.
 
 ## F-PERF-1, 2026-09-23: measured in the QML engine, and it was one line
+
+> **THE MAGNITUDES AND THE BUDGET VERDICT ARE OVERTURNED, later the same day
+> (marked in place 2026-10-06).** The missing `nameKey` was real, the cause
+> below is the cause, and the fix shipped -- none of that is withdrawn. What
+> is withdrawn is every number in this section and the sentence "the defect
+> was five to seven times over budget": this measurement used the SAME
+> hand-built 10,000-channel list as the node bench above, missing `id`, so
+> `channelId` hashed a URL per matching row. The overturn's own stage-by-stage
+> profile of that list in the QML engine puts **44 ms of 70 in `channelId`**,
+> a call production never makes -- which is most of what the table below
+> reads as the engine being seven times slower than node. On the list the
+> helper really writes, `a` is 26.52 ms inside a 30 ms budget BEFORE this
+> fix, so the `212.18 -> 64.44` pair is a ratio between two numbers the
+> product never produced. See "F-PERF-1 overturned, 2026-09-23: the
+> residual was the fixture" below, where `scripts/qa-filter-bench.py` replaces the hand-built
+> list by parsing a generated playlist through `bin/omarchy-iptv`, and the
+> F-PERF-1 board row.
 
 The row said not to choose a remedy on a node number. It was right to.
 
@@ -7056,6 +7148,21 @@ extremes, and the open-budget guard -- M2-04-03 through M2-04-07, unchanged by
 this ruling except that the row now has two coverage cases to satisfy.
 
 ## F-PERF-1's residual, 2026-09-23: the proposed remedy does not exist
+
+> **THE RESIDUAL ITSELF WAS OVERTURNED later the same day.**
+> (Marked in place 2026-10-06.) This section refutes one proposed remedy
+> (an approximate total) and then names another as "the real remedy": a prefix index over
+> `searchKey`, "turning the scan into a lookup for the single-character case
+> that is the only one still over budget". **There is no case still over
+> budget.** The 212 ms and 64 ms it quotes came from a bench whose channel
+> list was missing `id`; on the bytes the helper writes, every
+> single-character query is inside the 30 ms budget, so the prefix index has
+> nothing to remove. See "F-PERF-1 overturned, 2026-09-23: the residual was
+> the fixture" and "F-PERF-1: the prefix index priced, 2026-09-23" below --
+> the second remedy this defect proposed that does not survive measurement --
+> and the F-PERF-1 board row. The count-is-not-the-cost measurement in the
+> table below was taken on the same bench and is unaffected by it: it is a
+> ratio between two runs over one list.
 
 The residual was filed as a product decision: `a` costs 64 ms in the QML engine
 because `total` must be exact for the "First 200 of N" footer, so make the count
@@ -8110,6 +8217,18 @@ plays.
 Note what is NOT leaking, because it shows the shape of the gap:
 `xesam:title` reads `IPTV`, so `--force-media-title` is doing its job. The
 title had a guard. The URL has no equivalent option, and nobody looked.
+
+**The reading is right and the generalisation it invites is not (D-DOC-4,
+corrected 2026-10-02; marked in place here 2026-10-06).** `IPTV` is what the
+launch argv sets and it holds only while the player is IDLE: this probe played
+one file straight from argv, so no zap ever ran. On every zap the helper sets
+mpv's `title` (`$>`-prefixed, so mpv expands nothing in it, S-01) and
+`force-media-title` to the channel NAME, by design -- ARCHITECTURE-PLAYER 4.11
+and hard requirements 2 and 3 -- so after the first play `xesam:title` reads
+the channel name, not `IPTV`. That changes nothing about D-SINK-4: a title is a
+name and never a URL, which is the whole reason it is the half that had a
+guard. The sentence version of this claim shipped in CLAUDE.md rule 5 and was
+filed as D-DOC-4; see that board row.
 
 ### Why the existing reasoning did not cover it
 
@@ -10657,7 +10776,7 @@ runs; no mpv or ffmpeg left; the user's files untouched.
 | | resume | behindLive 16.8, held; text `0:16 behind live` |
 | BET Pluto TV | right after the zap | `rewind` null, behindLive null, text "", bar `play-glyph BET Pluto TV` (absent, never 0) |
 | | filled | position 15.9, floor 0, behindLive 0.006, text "" |
-| | `back 30` | clamped to 2.0; the reply's read said 7.6 (F-RWD-8 again, 5.6 s past the target, through the plugin path); behindLive 10.0; text `0:10 behind live` |
+| | `back 30` | clamped to 2.0; the reply's read said 7.6 (~~F-RWD-8 again, 5.6 s past the target, through the plugin path~~ -- **WITHDRAWN 2026-10-03, see the bullet below and F-RWD-17** (marked in place 2026-10-06)); behindLive 10.0; text `0:10 behind live` |
 | | `back 600` | clamped: position 2.7, behindLive 17.1; tooltip `up to 0:02 back` |
 | | `live` | ahead 0.5, behindLive 0 |
 | Blaze Live (720p), run 1 | zap | **`time-pos` 0 and no range for 40 s**; the zero point was taken at that 0; bar `history-glyph Blaze Live (720p) -0:30` then `-0:35`, `-0:40`; text `0:30 behind live`; the seeks refused without a seek (F-RWD-7, correct) -- **F-RWD-16** |
@@ -10680,6 +10799,23 @@ runs; no mpv or ffmpeg left; the user's files untouched.
 - **F-RWD-8**, evidence added: a second channel, through the plugin's own
   verb, landing 5.6 s past a clamped target. Still open; the reply carries
   what the player reports, and every surface agreed with it.
+  **THIS ADDENDUM IS WITHDRAWN, 2026-10-03, hours later, by the review
+  round's seek-path lens.** (D-DOC-5; marked in place 2026-10-06.)
+  It was the lead misreading his own data. The seek was not a landing past
+  its target: `back 30` seeked **one 10 s step**, because `seekBy` handed the coalescer
+  the press's sign and the constant step for every request, so the verb's
+  argument reached nothing (F-RWD-17, P2, fixed the same day). A 10 s step
+  from 17.4 lands at 7.4 -- 0.2 s off the 7.6 the reply read, which is
+  agreement, not drift. (17.4, not the table's 15.9: 15.9 is the earlier
+  `filled` readout and a live stream's position advances between the two
+  lines. The arithmetic is the review's, re-derived from the same reply.)
+  So the sighting belongs to F-RWD-17 and is not a second channel for
+  F-RWD-8; the BET row in the table above carries the same
+  mark. **F-RWD-8 itself stays open on its original A&E (720p) evidence
+  alone -- one channel, up to 5.1 s past the echoed target, not
+  generalised** -- and was re-checked on 2026-10-06 as NOT closed by
+  F-RWD-15. See "F-RWD-17: `back N` seeked ten seconds whatever N was" below,
+  and the F-RWD-8 and F-RWD-17 rows on the board.
 - The service's readout lags the socket by up to one status tick (10 s)
   while playing at live -- by design, the number holds while playing and is
   only shown behind live; noted, not filed.
