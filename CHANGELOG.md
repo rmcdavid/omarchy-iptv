@@ -3,6 +3,56 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.13.0 (2026-10-07)
+
+**Security.** The player did not check the identity of the server it streamed
+from. If you watch over `https`, anyone able to sit between you and your
+provider could have presented any certificate at all, been handed the
+credentials in your stream URL and in the headers the plugin sends, and served
+you whatever they liked in place of the channel. Raised by the marketplace
+maintainer against 0.12.1 and fixed the same day.
+
+Everything else the plugin fetches already checked: the playlist and guide
+fetches refuse an untrusted certificate today and always have. This was the one
+place a stream was handed to mpv, whose own `--tls-verify` is off unless asked.
+
+### Fixed
+
+- **The player now verifies the stream's certificate.** Measured against a
+  server presenting a self-signed certificate: before this release the stream
+  played, now it is refused and the server receives nothing.
+- **It cannot be switched back off by accident.** Verification is set again as
+  the very last option, after anything you put in `mpvArgs`, because mpv lets a
+  later option rewrite an earlier one. A `--profile` of yours naming a profile
+  that disables verification was measured turning it off; it no longer can.
+- **`--tls-verify` and `--stream-lavf-o` are now refused in `mpvArgs`.** The
+  second is there because it passes settings straight to the media library,
+  where the player's own option cannot outvote it; it was measured defeating
+  every other layer of this fix.
+
+### If this release breaks your provider
+
+A provider whose certificate is self-signed, or signed by an authority your
+system does not already trust, will stop playing. The fix is to name that
+authority rather than to switch checking off for everyone:
+
+    mpvArgs: --tls-ca-file=/path/to/provider-ca.pem
+
+That option is deliberately still allowed, and it was measured working. If your
+provider uses a certificate your system already trusts, which is the normal
+case, you will notice nothing.
+
+### Worth knowing
+
+- **A player that is already running keeps the options it started with.** Stop
+  it and start it again after updating, or it goes on without verification.
+- **A refused `mpvArgs` token is written to the shell's log, not shown in the
+  guide.** If something you set appears to do nothing, that is where to look.
+- **Plain `http` is still accepted** for playlists and streams, because many
+  providers offer nothing else. Over `http` there is no certificate to check
+  and your credentials travel in the clear; that is unchanged, and it is now
+  written down rather than left to be discovered.
+
 ## 0.12.1 (2026-10-06)
 
 Nothing you can see. This release exists to carry one corrected word.
