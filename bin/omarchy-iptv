@@ -625,7 +625,11 @@ def redact_urls(text: Any) -> str:
     After this change, same vector and same machine: 0.001 / 0.002 / 0.003 /
     0.006 / 0.012 ms. The slowest vector that remains is a single run of
     letters that ends in a real URL, where the whole run is the "scheme" the
-    old pattern also swallowed: 0.013 / 0.052 / 0.096 / 0.187 / 0.363 ms.
+    old pattern also swallowed: 0.013 / 0.052 / 0.096 / 0.187 / 0.363 ms. That
+    is also the ONE vector this change makes slower, and saying so is the point:
+    0.143 ms against 0.363 at 40,000, and 44.5 ms against 51.7 at 1 MiB. Linear
+    either way. The trade is four orders of magnitude on the shape that was
+    quadratic for a factor of two on the one that never was.
 
     Why it is the same answer and not a narrower pattern. `:` and `/` are not
     scheme-legal, so the old pattern's greedy scheme run always ended EXACTLY

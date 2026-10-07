@@ -6667,7 +6667,12 @@ function hostOf(url) {
 // letters cost 2575.8 ms through this function and 0.001 ms after this change.
 // The slowest vector that remains is a run of letters ending in a real URL,
 // where the whole run is the "scheme" the old pattern also swallowed: 0.050 /
-// 0.034 / 0.049 / 0.094 / 0.195 ms over the same five sizes.
+// 0.034 / 0.049 / 0.094 / 0.195 ms over the same five sizes. IT IS ALSO THE
+// ONE VECTOR THIS CHANGE MAKES SLOWER, and saying so is the point: the old
+// pattern consumed that run in the engine and this walks it in JS, 0.058 ms
+// against 0.191 at 40,000 characters and 1.5 ms against 8.6 at 1 MiB. Linear
+// either way. The trade is three orders of magnitude on the shapes that were
+// quadratic for a factor of five on the one that never was.
 //
 // Why it is the same answer, rather than a narrower pattern. The old pattern
 // could only match where a `://` follows a run of scheme-legal characters
