@@ -2,7 +2,8 @@
 # scripts/dev-harness/rewind-scenario.sh -- live rewind (M5-01, lane Q) on
 # REAL mpv against a LOCAL live-like stream, through the harness IPC.
 # Holds the display: opens a real mpv window and the guide overlay for about
-# four minutes, and reaps everything it starts. Plan: docs/QA-REWIND.md.
+# four and a half minutes (F-RWD-25 lengthened R16's busy window by 30 s),
+# and reaps everything it starts. Plan: docs/QA-REWIND.md.
 #
 # THE STREAM. Two HLS playlists with a sliding window (6 x 2 s segments,
 # ffmpeg -re from lavfi, ~1.4 Mbps on the wire, a burned-in clock in the
@@ -104,7 +105,17 @@ WORK=""
 SLOW_MS=4000
 HEALTH_TICK_MS=10000
 QUIET_MS=28000
-BUSY_MS=32000
+# F-RWD-25: 32000 showed healthSkips at 0 across three ticks, which is ONE
+# window and not a long run. 62000 spans SIX, and nothing else here moves
+# with it: HEALTH_TICK_MS stays 10000 because it mirrors Service.qml's
+# healthCheckMs by NAME and R16 asserts the consequence of the value rather
+# than reading it back, and TICKS is derived (BUSY_MS / HEALTH_TICK_MS), so
+# the "a tick landed on a running seek" bound follows on its own. The run
+# gets about 30 s longer; STREAM_S has the room (every bound in this file
+# summed as its worst case comes to roughly 430 s against 780, and the
+# bounds that dominate it -- R0's 60 s plateau wait and R4's 60 s floor wait
+# -- return early on a healthy stream).
+BUSY_MS=62000
 pass=0
 fail=0
 checks=0
@@ -822,6 +833,10 @@ bstatus=$(cnt "$b" runs.status)
 bskips=$(cnt "$b" healthSkipsMax)
 bunread=$(cnt "$b" healthSkipsUnreadable)
 TICKS=$(( BUSY_MS / HEALTH_TICK_MS ))
+# `marks` is a DIAGNOSTIC, not a check, and shell.qml caps it at 80 entries:
+# over a 62 s window (F-RWD-25) it saturates, so read the printed list as a
+# prefix of the window rather than the whole of it. Every check below reads a
+# tally, which is not capped.
 printf '   R16 busy window: %s drives, %s samples, seek samples %s, seek runs %s, status runs %s, marks %s\n' \
   "$drives" "$(cnt "$b" samples)" "$bseek" "$(cnt "$b" runs.seek)" \
   "$bstatus" "$(rf 'd["marks"]' "$b")"
