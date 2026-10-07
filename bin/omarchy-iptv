@@ -4093,7 +4093,33 @@ MPV_RESERVED = frozenset((
     # which is `--stream-record`'s class. `--cache-on-disk` itself stays a
     # user choosing their own disk (PO-5's shape) and is warned about below.
     "--demuxer-cache-unlink-files",
+    # D-SINK-13, layer 3 of four. mpv's `--tls-verify` defaults to NO, so the
+    # plugin was handing provider headers and an HTTPS stream URL to a peer it
+    # never authenticated; measured by the lead on 2026-10-07, the shipped argv
+    # played a self-signed server, exit 0. The TLS peer is a rule 5 sink and
+    # the one that gets the credential unredacted.
+    #
+    # Reserved here AND re-asserted as the final token in mpv_launch_argv. Not
+    # alternatives: the trailing token is what makes verification safe (a later
+    # command-line token beats an earlier one, and `--profile` carries
+    # arbitrary options), this entry is what makes the refusal honest, so a
+    # pasted `--tls-verify=no` is reported dropped instead of silently undone.
+    # Both spellings fall out of the existing `no_form` arm in
+    # filter_mpv_args: it rebuilds `--tls-verify` from `--no-tls-verify` and
+    # finds it here, so no new branch is needed.
+    #
+    # Deliberately NOT reserved: `--tls-ca-file`, the targeted escape for a
+    # provider with a self-signed or private-CA certificate (measured working
+    # behind the trailing token - the `--screenshot-dir` shape, a user choice
+    # that lands after ours and wins); and `--profile`, a legitimate mpv
+    # feature that the trailing token makes harmless. `--tls-cert-file` and
+    # `--tls-key-file` are CLIENT certificates, a different thing, untouched.
+    "--tls-verify",
 ))
+# D-SINK-13, layers 1 and 2: one string, written into the argv twice on
+# purpose. Mirror of Model.MPV_TLS_VERIFY; the two literals are pinned to each
+# other by the shared player-argv.json vectors. See mpv_launch_argv.
+MPV_TLS_VERIFY = "--tls-verify=yes"
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
 # Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
@@ -4269,6 +4295,10 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     the same reason: mpv's shader and ICC caches default into
     $XDG_CACHE_HOME/mpv/, outside this plugin's tree. Neither is reserved -
     both are content-free - so a user token can still point them elsewhere.
+
+    D-SINK-13 breaks the "user tokens land last" shape on purpose, for exactly
+    one option: `--tls-verify=yes` appears in the base argv AND again as the
+    final token, after the user's. See the comment on the return.
     """
     where = dirs or player_dirs(sock_path)
     return [
@@ -4294,7 +4324,33 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
         "--watch-later-dir=%s" % where["watchLater"],
         "--gpu-shader-cache-dir=%s" % where["shaderCache"],
         "--icc-cache-dir=%s" % where["shaderCache"],
-    ] + list(mpv_args or [])
+        # D-SINK-13, LAYER 1: stated here, where a reader looks to find out what
+        # the player is launched with. mpv's own default is `--tls-verify=no`
+        # (`mpv --list-options`, 0.41.0). Layer 1 alone is NOT the fix.
+        MPV_TLS_VERIFY,
+    # D-SINK-13, LAYER 2, and the line that actually guarantees verification.
+    #
+    # THE TWO OCCURRENCES OF MPV_TLS_VERIFY ARE NOT REDUNDANT. Removing either
+    # is a security change, not a tidy-up, and this one is the one that holds.
+    # mpv takes the LAST token for a repeated option, so user mpv_args land
+    # between the base argv and this one and are overridden rather than
+    # overriding. That matters because `--tls-verify` is not the only way off:
+    # `--profile=NAME` applies every option in that profile where the token
+    # appears, and a profile in the user's own mpv.conf can set
+    # `tls-verify=no`. Measured by the lead on 2026-10-07: with layer 1 only,
+    # `--profile=evil` PLAYED a self-signed stream (exit 0); with this trailing
+    # token the same command refused it (exit 2), as did `--tls-verify=no` and
+    # `--no-tls-verify` behind it. So this layer covers the indirections nobody
+    # has enumerated, which is why `--profile` is not reserved. A bare `--`
+    # cannot escape it: MPV_ARG_RE requires `--` followed by a lowercase letter
+    # or digit, so filter_mpv_args puts `--` in the rejected bucket (measured by
+    # calling it). And it leaves the escape hatch intact: `--tls-ca-file` is
+    # unreserved and names a CA for THIS token to verify against.
+    #
+    # Mirror of Model.buildMpvArgv's return; pinned to it by the
+    # `--profile=evil` vector in the player-argv.json fixture (dev branch),
+    # whose user arguments are what make this line visible at all.
+    ] + list(mpv_args or []) + [MPV_TLS_VERIFY]
 
 
 def stop_escalation(stage: str) -> dict[str, Any]:
