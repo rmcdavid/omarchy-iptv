@@ -18,6 +18,8 @@ Plan of record: `docs/QA.md` v0.2. Defects: `docs/STATUS.md` (D-LIVE-01..15, det
 
 Conventions: microcopy is quoted with ` - ` for U+00B7 and `...` for U+2026; the UI renders the real codepoints (checked in the screenshots). `run<N>` refers to `logs/run<N>.log` and the `harness/shots/run<N>-*.png` files. Results are `pass`, `fail` (defect id in the note), `blocked: needs live shell`, `not run` (reason in the note).
 
+Marking a result or a measurement that was later withdrawn. This file has two forms and they are not the same age. The one it has used since 2026-09-15 is prose: `pass (retracted)` in the result cell, then **RETRACTED <date>, <why>** in the evidence, ending "Result stands as `not run`." -- eight sites carry it, five with that literal word and three with a lower-case "retracted" in running prose, and none of them strikes anything out. Where the withdrawal is of a whole section rather than one row, the form is a blockquote at the top of that section. Strikethrough (`~~...~~`) is NEW here: it was written into this file for the first time on 2026-10-06, at the BET `back 30` readout and in the D-PLY-1 verdict cell, and it is borrowed from `docs/QA-A11Y.md` and `docs/ACCESSIBILITY-INVESTIGATION.md`, which had it first. It is not a convention this file already had, and the earlier claim that it was is withdrawn. If you grep `~~` across `docs/` to check that, note that `docs/UX-GUIDE-AT-SCALE.md` matches too and is not a retraction: there `~~` is ASCII art for a row clipped at the fold. The reason to add it is that in both places the withdrawn text is a clause inside a table cell, not a result that a cell can be relabelled for. In the BET row the clause sits in a 245-character readout between three readings that still stand, so there is nowhere to put a marker that does not read as covering them all. In the D-PLY-1 row the cell is 1,836 characters and the correction was appended 339 characters after the bolded claim it corrects, so a reader met the claim as current and the correction only if they read on. Use the prose form by default; reach for strikethrough only when the withdrawn text cannot be lifted out of live text that still stands.
+
 Two harness pitfalls worth knowing for the next pass: `wtype space` types the letters s-p-a-c-e (use `wtype -k space`; in list mode the `s` stops playback), and `wtype -d 0` is rejected (`-d 1` works). `pgrep -f` with a pattern that also appears in your own shell's command line matches your shell.
 
 ## 2. Summary
@@ -2404,7 +2406,7 @@ never ran at either ref - see **D-PLY-9**.
 
 | Defect | Verdict | QA's own evidence |
 |---|---|---|
-| **D-PLY-1** P1 | **FIXED** | Both original triggers, neither reproduces. Trigger A (`kill -STOP`, two-strike verdict) **3/3**: the wedged player is laddered down and replaced in 22.6 / 22.8 / 22.8 s, and the shell ends `playing true`, `nowPlaying t:qa.live`, `player.up/attached/wanted` **all true**, one player, one window, still true at t+30 s. Trigger B (socket unlink then zap) **2/2**: same end state on the channel asked for, one window at every 100 ms sample (60 samples; the count dips to 0 across the replacement, which PLY-RST-06 allows), socket re-created `600` in a `700` directory, old pid reaped. **The second half of the fix - "a delivered relaunch cancels its timer" - QA measured directly** by counting `omarchy-iptv: mpv unresponsive, restarting player` in the journal across each trigger-A run: **delta exactly 1 every time**, never 2. This is the check the harness silently skips (D-PLY-9), so it rests on QA's measurement alone. **SUPERSEDED AS EVIDENCE 2026-09-14, later the same day; measurement, not verdict (marked in place 2026-10-06).** The counts quoted here were really taken; what they cannot do is discriminate. `omarchy-iptv: mpv unresponsive, restarting player` is emitted exactly once by the fixed tree AND by the unfixed one, so a delta of 1 is what both trees produce and counting it proves nothing about the timer being cancelled. Established in "D4. D-PLY-9 - the repaired harness check does NOT discriminate" (the 10:05 pass below), where the same assertion PASSES on both trees, and settled in "L3. The scenario suite, both ways" (the 12:22 pass) by moving the property onto the player lock's intent counter, which reads 1 here and 2 at `396a69a`; the D-PLY-9 board row records it as superseded. The `D-PLY-1 FIXED` verdict in this cell stands on the two reproduction triggers; this sentence is not part of what carries it. |
+| **D-PLY-1** P1 | **FIXED** | Both original triggers, neither reproduces. Trigger A (`kill -STOP`, two-strike verdict) **3/3**: the wedged player is laddered down and replaced in 22.6 / 22.8 / 22.8 s, and the shell ends `playing true`, `nowPlaying t:qa.live`, `player.up/attached/wanted` **all true**, one player, one window, still true at t+30 s. Trigger B (socket unlink then zap) **2/2**: same end state on the channel asked for, one window at every 100 ms sample (60 samples; the count dips to 0 across the replacement, which PLY-RST-06 allows), socket re-created `600` in a `700` directory, old pid reaped. **SUPERSEDED AS EVIDENCE -- read the end of this cell before the next sentence:** ~~**The second half of the fix - "a delivered relaunch cancels its timer" - QA measured directly** by counting `omarchy-iptv: mpv unresponsive, restarting player` in the journal across each trigger-A run: **delta exactly 1 every time**, never 2. This is the check the harness silently skips (D-PLY-9), so it rests on QA's measurement alone.~~ **SUPERSEDED AS EVIDENCE 2026-09-14, later the same day; measurement, not verdict (marked in place 2026-10-06; struck in place 2026-10-06, because this cell is 1,836 characters and the correction began 339 of them after the bolded claim, which a reader therefore met as current).** The counts quoted here were really taken; what they cannot do is discriminate. `omarchy-iptv: mpv unresponsive, restarting player` is emitted exactly once by the fixed tree AND by the unfixed one, so a delta of 1 is what both trees produce and counting it proves nothing about the timer being cancelled. Established in "D4. D-PLY-9 - the repaired harness check does NOT discriminate" (the 10:05 pass below), where the same assertion PASSES on both trees, and settled in "L3. The scenario suite, both ways" (the 12:22 pass) by moving the property onto the player lock's intent counter, which reads 1 here and 2 at `396a69a`; the D-PLY-9 board row records it as superseded. The `D-PLY-1 FIXED` verdict in this cell stands on the two reproduction triggers; this sentence is not part of what carries it. |
 | **D-PLY-2** P2 | **CLOSED AS ACCEPTED (PO-8) - recovery verified** | The stranding reproduces and is accepted: `omarchy plugin remove --yes` with a channel playing leaves it alive and windowed at t+12 s and t+32 s, plugin directory gone. The README's recovery then works **exactly as written**. `disable` first stops the player in **6801 ms** ("about seven seconds"). For a stranded player, `pgrep -af -- '^mpv .*--wayland-app-id=omarchy-iptv'` returns **exactly one** line, ours; `pkill -f -- '^mpv .*--wayland-app-id=omarchy-iptv'` reaped it in **145 ms** and this session survived. **The anchor warning is literally true**: without the leading `^mpv `, the same pattern matches **3** processes including QA's own shell (pid confirmed by `$$`), i.e. the session pasting the command. Incidentally confirms the README's "Note on disabling": after `disable`/`enable` the widget's `playlistUrl` was gone and had to be re-set. |
 | **D-PLY-3** P2 | **FIXED** | The full PLY-WEAK-06 procedure end to end **3 times** (play, confirm `session`, kill the supervisor and the shell, `kill -9` mpv with 0 quickshell running, relaunch). All three: `failedAt {"t:qa.live":"HH:MM"}`, `nowPlaying null`, `playing false`, **`jq .session state.json` is `null`**, `state.json` still `0600`, and **0 notifications** on the session bus for the whole procedure. The next shell start re-marks nothing (`failedAt {}`, `session null`). Was 2 of 3 failing; now **0 of 3**. Guide half proven by screenshot (`shots/guide-warning.png`): the row carries the alert glyph in the trail slot and the detail line `QA - Failed 05:53 - Space to retry`, not a red row. |
 | **D-PLY-4** P2 | **FIXED - 30 won, 0 lost, measured by QA** | Re-measured with **QA's own `race-trial.sh` from the `8f9447e` pass**, not the fixing lane's harness scenario. The script was reconstructed and diffed against `qa7/race-trial.sh`: the logic is identical, the differences are comments, a variable for the state path, and one wait loop lengthened from 40 to 60 iterations. **30 trials: 30 WON, 0 LOST, 0 VOID.** The play landed on attempt 3 in 29 trials and attempt 4 in one, the same window as the losing pass, so the narrow point being probed is the same one. At `8f9447e` the same script returned 16 won / **14 lost (47%)**. The lane's "30 of 30" is confirmed independently. |
@@ -6836,7 +6838,8 @@ the manifest read is one small file at load.
 > omitted is `id` -- so `filterChannels` fell back to hashing a URL once per
 > matching row, 6,877 hashes per keystroke on `a`, work the shipped code has
 > never done because `assign_ids` has run on every parse since the first
-> commit. Measured on the bytes the helper actually writes, `a` is **26.52 ms
+> commit. Measured on the bytes the helper actually writes -- the SHIPPED
+> code, `id` and `nameKey` both present -- `a` is **26.52 ms
 > against a 30 ms budget**: there is no over-budget case, so "the worst case
 > spends all of it in the filter" does not hold and the single-character
 > residual this finding spawned does not exist. See "F-PERF-1 overturned,
@@ -6884,19 +6887,35 @@ engine first.
 > **THE MAGNITUDES AND THE BUDGET VERDICT ARE OVERTURNED, later the same day
 > (marked in place 2026-10-06).** The missing `nameKey` was real, the cause
 > below is the cause, and the fix shipped -- none of that is withdrawn. What
-> is withdrawn is every number in this section and the sentence "the defect
-> was five to seven times over budget": this measurement used the SAME
-> hand-built 10,000-channel list as the node bench above, missing `id`, so
-> `channelId` hashed a URL per matching row. The overturn's own stage-by-stage
-> profile of that list in the QML engine puts **44 ms of 70 in `channelId`**,
-> a call production never makes -- which is most of what the table below
-> reads as the engine being seven times slower than node. On the list the
-> helper really writes, `a` is 26.52 ms inside a 30 ms budget BEFORE this
-> fix, so the `212.18 -> 64.44` pair is a ratio between two numbers the
-> product never produced. See "F-PERF-1 overturned, 2026-09-23: the
-> residual was the fixture" below, where `scripts/qa-filter-bench.py` replaces the hand-built
+> is withdrawn is every filter timing below -- the node/QML table, the node
+> profile, the before/after table and the 64 ms residual -- and the sentence
+> "the defect was five to seven times over budget": this measurement used the
+> SAME hand-built 10,000-channel list as the node bench above, missing `id`,
+> so `channelId` hashed a URL per matching row. The overturn's own
+> stage-by-stage profile of that list in the QML engine puts **44 ms of 70 in
+> `channelId`**, a call production never makes. That 44 ms is most of what is
+> LEFT once `nameKey` is fixed; it is not most of the node/QML gap. The table
+> below reads 30.09 against 212.18 ms on `a`, a gap of 182.09 ms, and 44.2 ms
+> (61.88 - 17.68 in the overturn's profile) is 24 per cent of it -- 38 per
+> cent even on the most generous reading, the overturn's own 95.28 - 26.52.
+> The dominant term in that gap is the missing-`nameKey` fallback this section
+> diagnoses, whose removal took `a` from 212.18 to 64.44 ms. Both halves of
+> that pair were measured on the same `id`-less list, so the pair is a ratio
+> between two numbers the product never produced. What the product WOULD have
+> measured before this fix -- `id` present, `nameKey` absent -- is benched
+> nowhere in this file, and no figure in the overturn is it: its two columns
+> are the bytes the helper writes, where `a` is 26.52 ms inside a 30 ms
+> budget, and that same list with `id`/`tvgId` stripped and `nameKey` still
+> present. The 26.52 is the SHIPPED code, not a pre-fix reading, and an
+> earlier version of this mark quoted it as one. See "F-PERF-1 overturned,
+> 2026-09-23: the residual was the fixture" below, where
+> `scripts/qa-filter-bench.py` replaces the hand-built
 > list by parsing a generated playlist through `bin/omarchy-iptv`, and the
-> F-PERF-1 board row.
+> F-PERF-1 board row. The closing "Costs, all measured" table is NOT
+> withdrawn: `channels.json` 2,613,772 -> 2,928,310, helper `playlist`
+> 572 -> 632 ms and guide open 71-74 ms were taken on the helper's real output
+> and on the guide itself, touch neither `filterChannels` nor the bench list,
+> and the overturn says nothing against them.
 
 The row said not to choose a remedy on a node number. It was right to.
 
@@ -10804,11 +10823,20 @@ runs; no mpv or ffmpeg left; the user's files untouched.
   It was the lead misreading his own data. The seek was not a landing past
   its target: `back 30` seeked **one 10 s step**, because `seekBy` handed the coalescer
   the press's sign and the constant step for every request, so the verb's
-  argument reached nothing (F-RWD-17, P2, fixed the same day). A 10 s step
-  from 17.4 lands at 7.4 -- 0.2 s off the 7.6 the reply read, which is
-  agreement, not drift. (17.4, not the table's 15.9: 15.9 is the earlier
-  `filled` readout and a live stream's position advances between the two
-  lines. The arithmetic is the review's, re-derived from the same reply.)
+  argument reached nothing (F-RWD-17, P2, fixed the same day). The table's own
+  readouts confirm a 10 s step with no reconstruction needed: the `filled`
+  line has the reader AT live (`behindLive 0.006`), and the `back 30` line
+  ends `behindLive 10.0` -- exactly one step behind live, which is what a 10 s
+  step from live produces and not what a seek to a 2.0 target would. So the
+  reply's 7.6 is where a 10 s step lands from a pre-seek position of 17.6, and
+  the seek agreed with itself: agreement, not drift. (The F-RWD-17 section
+  below instead puts the pre-seek position at 17.4 and the landing 0.2 s off.
+  17.4 is that sentence's own figure and no readout in the live pass records
+  it; 15.9 is the earlier `filled` position, taken before a live stream
+  advanced. Nothing turns on which, because the step is 10 either way.
+  Neither number is corroborated from a second document: docs/STATUS.md's
+  F-RWD-8 and F-RWD-17 rows carry no pre-seek position at all, saying only
+  "landed within 0.2 s of its target" and "`back 30` moving 10".)
   So the sighting belongs to F-RWD-17 and is not a second channel for
   F-RWD-8; the BET row in the table above carries the same
   mark. **F-RWD-8 itself stays open on its original A&E (720p) evidence
@@ -10840,8 +10868,12 @@ table, the CHANGELOG and contrib/bindings.lua all describe the argument as
 the size of the step; it reached nothing. The live pass had recorded BET's
 `back 30` landing "7.6 for a target of 2.0" and the lead filed it under
 F-RWD-8 as a landing past the target -- a 10 s step from 17.4 lands at 7.4,
-0.2 s off. That addendum is withdrawn on the board; the sighting was the
-finding, misread.
+0.2 s off. (17.4 is this sentence's own figure; no readout in the live pass
+records it. The BET row's `behindLive 10.0` against a `filled` line already at
+live puts the step at 10, the pre-seek position at 17.6 and the landing at the
+7.6 the reply read -- exact, not 0.2 s off. Noted 2026-10-06; the step is 10
+on either arithmetic, which is all this finding needs.) That addendum is
+withdrawn on the board; the sighting was the finding, misread.
 
 Fixed with four siblings from the same lens: `seekPending` was an `int`
 (a cap below one second truncated to 0: "queued, pending 0", nothing run),
