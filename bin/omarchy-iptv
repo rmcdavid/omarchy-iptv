@@ -777,18 +777,38 @@ _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 # and 265 by the address strategy (F-EPG-11) -- and neither successor re-ran
 # the strip-OFF arm, so the delta above has no current counterpart and the
 # frozen inputs are in no checkout. The strip's own contribution is therefore
-# UNVERIFIED at today's baseline; QA-EPG-PRECISION 8 says so and names what is
-# re-runnable instead. Do not restate 126/227 as a live figure.
+# UNVERIFIED at today's baseline; QA-EPG-PRECISION.md (dev branch) 8 says so
+# and names what is re-runnable instead. Do not restate 126/227 as a live
+# figure.
 #
 # What IS re-derivable, from the install's own cache rather than a re-fetch:
 # on the 1,450-row source installed here on 2026-10-06 the matcher as a whole
 # reaches 264 -- 185 by address, 79 by name -- and 1,153 of those 1,450 names
-# carry a marker this pattern strips. Three artifacts of that one run agree on
-# the 264 (epg-status.json's `matched`, epg-now.json's channel count, and
-# epg-window.txt's line count less its header); QA-EPG-PRECISION 8 carries the
-# commands. 1,155 of 1,453 against 1,153 of 1,450 is the same list three rows
-# lighter, which is drift in the provider's data and not a change here
-# (F-EPG-24).
+# carry a marker this pattern strips.
+#
+# That 264 is ONE number, not three. An earlier version of this paragraph
+# called epg-status.json's `matched`, epg-now.json's channel count and
+# epg-window.txt's line count three artifacts that agree, and invoked rule 14
+# while breaking it: the status's `matched` IS the window header's `matched`
+# read back by load_window, the same field twice; the window's line count is
+# one line per key of the dict match_counts counted; and on this run
+# epg-now.json's key set equals the window's exactly, so its length is
+# `nowCount`, which match_counts' own docstring below says is the RENDER count
+# and a different quantity from the match count. What re-derives the 264 is
+# CALLING match_counts over the cached channels.json with the cached window's
+# channel keys as `seen_ids` -- 264, measured 2026-10-06 -- and that is exact
+# only because `epgChannels` (len(seen_ids)) is 264 too, so no granted claim
+# fell outside the window; where the two differ it is a lower bound.
+# QA-EPG-PRECISION.md (dev branch) 8 carries the command.
+#
+# 1,155 of 1,453 against 1,153 of 1,450 is not a like-for-like pair, and
+# saying so is the point of this paragraph: the 1,155 was taken while the
+# bracket half of this pattern was still the broad `\[[^\]]*\]`, before the
+# F-EPG-10 narrowing (1f940b9, 2026-10-04). The pattern change is worth ZERO
+# rows on the list that exists -- the pre-narrowing pattern and the shipped one
+# both count 1,153 of the live 1,450, measured 2026-10-06 -- so the 2-row drop
+# in markers under a 3-row drop in the source is the provider's drift and not a
+# change here (F-EPG-24). The frozen arm cannot be re-run to close it.
 #
 # Deliberately NOT applied inside normalize_text, which is the SEARCH key: a
 # user who types "1080" is searching for exactly these markers, and the four
