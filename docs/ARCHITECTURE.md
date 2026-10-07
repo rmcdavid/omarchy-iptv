@@ -255,7 +255,7 @@ bar entry, read by the service through `shell.barConfig`.
 | `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else |
 | `epgUrl` | string | `""` | same rules; empty disables EPG |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
-| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the two later entries worth naming here; `MPV_RESERVED` in `Model.js` and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. `--tls-verify` is the one entry the reserved list does not make safe by itself -- see 4.15 and D-SINK-13. A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
+| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in `Model.js` and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
 | `showChannelName` | boolean | true | widget-only, `!== false` |
 | `maxRecents` | integer | 10 | `clampInt(1..50)` |
 
@@ -422,9 +422,16 @@ carries arbitrary options out of their own mpv config (all three bypasses
 measured playing without the trailing token and refused with it);
 `--tls-verify` reserved in both the `=no` and the `--no-` forms, so a direct
 attempt is refused loudly instead of silently outvoted by the layer above it;
-and `--tls-ca-file` left unreserved as the targeted escape, measured working
-behind the re-assertion. `--profile` is deliberately not reserved, because the
-re-assertion makes it harmless and profiles are a legitimate mpv feature.
+`--tls-ca-file` left unreserved as the targeted escape, measured working
+behind the re-assertion; and `--stream-lavf-o` reserved, the one layer only
+the reserved list can supply, because it forwards `key=value` past mpv to
+libavformat where FFmpeg's own `tls_verify` reaches the same decision and our
+last token does not outvote it -- measured playing the attacker's stream with
+BOTH `tls-verify` tokens in place, in all six spellings, and found by all
+three adversarial reviewers independently against a fix already measured
+working at the sink (D-SINK-15). `--profile` is deliberately not reserved,
+because the re-assertion makes it harmless and profiles are a legitimate mpv
+feature.
 **The residual, named rather than implied.** The sink itself has none once the
 layers are in: a certificate chaining to neither the system store nor a CA the
 user named aborts the connection. What is accepted is the COST, which is not
@@ -438,6 +445,69 @@ server with a self-signed certificate and with one signed by a generated CA,
 driven by the real shipped argv rather than a retyped one, with `curl` as the
 control; the evidence is the D-SINK-13 row in `docs/STATUS.md` and the write-up
 in `docs/QA-RESULTS.md`.
+
+Raised 2026-10-07 (D-SINK-16), hours after the fix above shipped, and written
+here in the round that fixes it -- the state of that fix is the board row in
+`docs/STATUS.md`, not this paragraph. **The same maintainer, the same
+exposure, a second finding, posted on the verification request for the very
+snapshot that was supposed to have closed it** (0.13.0, 5d527d7,
+omacom/omarchy-plugin-marketplace#10389): the reattach path adopts an existing
+player without migrating its TLS setting, and the helper then sends new
+provider headers and new credentialed URLs into that same process, so a player
+started before the update goes on making unverified HTTPS requests after it.
+**Why it survived the first fix.** Every one of the five layers above is a
+layer on the launch argv, and argv is fixed at exec: there is no layer among
+them that can reach a process already running. Adoption is not an edge case
+either -- a player surviving a shell restart is the designed behaviour of
+M2-02 and the reason the feature exists -- so the one path that meets an
+older player was the one path the fix could not touch. **We had this, and we
+described it too kindly.** D-PLY-25 was filed the same day as the first fix,
+by our own review, and it said a player adopted across an update keeps the
+options it was launched with until it is stopped; the remedy it produced was a
+README sentence telling the user to stop and start the player. The maintainer
+named the half that filing missed: the plugin does not merely leave the old
+player alone, it keeps FEEDING it, new headers and new credentialed URLs on
+every zap, into a process that authenticates nobody. That is a live feed, not
+a stale setting, and the difference changes both the severity and the remedy --
+a user advisory was the wrong answer to a thing the product does by itself.
+**That is the lesson, and it is D-SINK-8's lesson in a new costume.** An
+accepted residual written in our own words is invisible to a review that only
+checks whether the documents agree with the decision, because the words agree
+with themselves; what nobody re-asks is whether the decision was right.
+D-SINK-8 was the same shape (a transient argv exposure, reasoned about,
+accepted, and closed only when someone outside asked why), and it was the same
+maintainer who asked both times -- #8998 then #10389, as the two board rows
+record. A residual in our own words can be
+the same defect described too kindly, and the tell is a remedy that asks the
+USER to do something about a behaviour that is ours.
+**What is measured**, by the lead on 2026-10-07 before any lane was briefed,
+over a real IPC socket against a local server with a self-signed certificate:
+`tls-verify` is readable over the socket and reads False on a player launched
+the way 0.12.1 launched one, and a `loadfile` of the attacker URL put the GET
+in the attacker's log; `set_property tls-verify True` answers success, reads
+back True, and the next `loadfile` of that same URL fetched nothing -- GETs 1
+before and 0 after on the SAME process, with a positive control proving the
+migrated player still plays. A stale `stream-lavf-o` clears the same way. So
+runtime migration works, and the fix rests on that rather than on an argument:
+`apply_channel` asserts both properties before every load and REFUSES the load
+if they cannot be made safe (the one element of that sequence that is not best
+effort), and adoption migrates, reads back, re-establishes the current
+channel, and stops the player rather than feeding it when the read-back is not
+clean. Specified in `ARCHITECTURE-PLAYER.md` 4.5.1, with 4.15's table carrying
+the two new layers.
+**What remains, named rather than implied.** Whether a stream ALREADY OPEN
+picks the change up for its ongoing fetches is UNMEASURED -- the probe used a
+short file, not a segmented live stream -- which is exactly why adoption
+reloads instead of trusting the set to reach the open connection; the reload
+may be dropped on a measurement of a real live stream and on nothing else.
+The cost is not nothing: one visible rebuffer on the upgrade that crosses this
+version, and a stopped player when the properties cannot be set, which is
+playback the user did not ask to lose. One ordering gap is accepted and
+recorded in 4.5.1: when a user's own play supersedes the adoption reply, a
+player that could not be secured is refused any further load but is not
+stopped by that path. And the scope sentence from the entry above still holds
+unchanged -- this is verification, not transport, and whether a connection is
+TLS at all remains D-SINK-14.
 
 ## 7. Error handling, offline behavior, performance
 
@@ -497,12 +567,23 @@ Performance budget (10k channels):
     the option name is not the guarantee: user `mpvArgs` land after the base
     argv, a later token wins, and `--profile` can carry the setting
     indirectly, so the composed argv ENDS with `--tls-verify=yes` and the
-    reserved entry exists to make a direct attempt audible. The one supported
-    escape is `--tls-ca-file`, deliberately unreserved. Measured, specified and
-    costed in `ARCHITECTURE-PLAYER.md` 4.15 (D-SINK-13); a check that only
-    greps the base argv for the token cannot see the layer that binds, which is
+    reserved entry exists to make a direct attempt audible. `--stream-lavf-o`
+    is reserved because it reaches the same decision past mpv, in libavformat,
+    where the composed argv's last token has no vote (D-SINK-15). The one
+    supported escape is `--tls-ca-file`, deliberately unreserved. **And none of
+    that reaches a player this shell did not launch**, because argv is fixed at
+    exec while adoption is a designed path, so the standard holds only with the
+    two IPC layers added by D-SINK-16: every load asserts the properties on the
+    process about to receive the URL and refuses to load if they cannot be made
+    safe, and adoption migrates an older player, reads the properties back, and
+    re-establishes the channel rather than letting an unverified connection
+    continue. Measured, specified and costed in `ARCHITECTURE-PLAYER.md` 4.15
+    and 4.5.1 (D-SINK-13, D-SINK-15, D-SINK-16); a check that only greps the
+    base argv for the token cannot see the layer that binds, which is
     engineering rule 14's shape, so it is verified by composing the argv with
-    hostile `mpvArgs` and by observing a refusal from a real TLS peer.
+    hostile `mpvArgs`, by taking the decision from a read-back rather than from
+    a write that answered success, and by observing a refusal from a real TLS
+    peer.
 
 ## 9. Coding standards
 

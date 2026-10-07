@@ -377,14 +377,18 @@ unlink. It runs `find_player()`, then `connect()` + four
 `--owner-pid` it writes the owner claim. **`path` and `media-title` are never
 read into the shell**: `path` is a credentialed URL, and `media-title` is
 verified stale after playback ends (it still returns the previous channel's
-`force-media-title` while `idle-active` is true).
+`force-media-title` while `idle-active` is true). **Amended by D-SINK-16
+(4.5.1):** the call adoption makes also reads two TLS properties and, when
+they do not already read safe, writes them and reads them back. That write is
+opt-in on the call, the same shape as the owner claim, so a bare
+`player probe` run by a human stays a read.
 
 `applyProbe()` in Service.qml, by case:
 
 | Probe result | Behaviour |
 |---|---|
 | `running:false` | Nothing playing. `playerWanted = false` (the retry timer stops; no idle polling). If `state.json.session` names a channel, mark it in `failedAt` and clear `session` (PO-3) |
-| `running:true, responsive:true, stash.playing:true, idle:false` | Restore `nowPlaying` from the stash; `playerPending = true` until the socket connects; arm `healthTimer`; queue `reconcileNowPlaying()` for `channelsLoaded` |
+| `running:true, responsive:true, stash.playing:true, idle:false` | Restore `nowPlaying` from the stash; `playerPending = true` until the socket connects; arm `healthTimer`; queue `reconcileNowPlaying()` for `channelsLoaded`. **4.5.1 runs on this row before any of it**, and its read-back can turn this row into a stop |
 | `running:true, responsive:true, stash absent or `playing:false`, or `idle:true`` | Under `--idle=once` an idle player exists only between spawn and first `loadfile`, so this is either a racing start or a foreign/pre-M2-02 player. Re-probe once after 500 ms; still ambiguous -> `player stop`, show idle |
 | `running:true, responsive:false` | Wedged. `player stop` (ladder from rung 1, pid already known), show idle |
 
@@ -395,6 +399,141 @@ channels cache loads, resolves `id` against `channelIndex`, and fixes the zap
 ring; a playlist that changed while the shell was down degrades to name-only
 rather than resolving to the wrong channel. This is the fix for "the reattach
 resolves against an empty index".
+
+#### 4.5.1 TLS on a player this shell did not launch (D-SINK-16)
+
+Every layer in 4.15 as it shipped is a layer on the argv of a player this
+shell LAUNCHES, and argv is fixed at exec. Adoption is the one path in this
+document that meets a player whose argv is older than the installed plugin,
+and it is not a passive path. Once adopted, that process is driven like any
+other: `apply_channel` sends it the three provider header properties and a
+credentialed `https` URL on every channel change (4.11), and the stream it
+already has open keeps requesting -- a segmented live stream re-requests with
+the credentials the URL carries on every segment, which is how HTTP and HLS
+work rather than something this project has observed. So a player launched by
+0.12.1 and adopted by 0.13.0 did not merely keep a stale option: **the plugin
+went on feeding it.** Raised by the marketplace maintainer against the SHIPPED
+0.13.0 (5d527d7), omacom/omarchy-plugin-marketplace#10389, on the verification
+request for that same snapshot, hours after it was published. This project had
+the first half of it as D-PLY-25 and wrote it up as stale state a user could
+fix by restarting the player; that filing is superseded, and how it came to be
+undersold is in the `ARCHITECTURE.md` register rather than here.
+
+**Measured by the lead on 2026-10-07, before any lane was briefed.** This
+section does not restate those runs as its own: they are the D-SINK-16 row in
+`docs/STATUS.md` and the write-up in `docs/QA-RESULTS.md`. What they
+establish, over a real IPC socket against a local server with a self-signed
+certificate: `tls-verify` is READABLE over the socket and reads False on a
+player launched the way 0.12.1 launched one, and a `loadfile` of the attacker
+URL on that player put the GET in the attacker's log; `set_property tls-verify
+True` answers success, reads back True, and the next `loadfile` of that same
+URL fetched NOTHING -- attacker GETs 1 before and 0 after, on the SAME
+process, with a positive control (a plain-`http` URL from a second local
+server, fetched and played) proving the migrated player is not simply broken.
+`stream-lavf-o` sets and clears the same way. Runtime migration therefore
+works, and this design rests on that measurement and not on an argument.
+
+**What is read.** On the connection the adoption call already holds -- the one
+that reads `idle-active`, `mpv-version` and the two `user-data` nodes --
+`tls-verify` and `stream-lavf-o`, and nothing else is added to that read set.
+`path` is still never read (4.5).
+
+**What is set, and only where the read says it is needed.** `tls-verify` to
+true when it does not already read true; `stream-lavf-o` to the empty map when
+it reads non-empty. The second is wholesale rather than selective on purpose:
+D-SINK-15's finding is that FFmpeg reaches the same TLS decision under its own
+option names and this project has not enumerated them, so "strip the keys we
+recognise" would be that same overclaim a second time. Clearing it leaves the
+adopted player holding what 0.13.0 would have launched it with anyway, because
+the token that carries those keys has been refused by the shipping filter
+since 0.13.0 (4.12).
+
+**What is read back, and why the verdict is the read-back's.** Both
+properties, after the set, on the same connection. The decision is never the
+set's own `success`: "we asked" is not "it is so", which is engineering rule
+14 one property over, and it is exactly the shape of mistake the first fix
+made by trusting a token's presence. A connection that dies anywhere in the
+sequence is a failure, not a silence to be read as consent.
+
+**Rule 5 at this sink.** Neither value is echoed into the shell, the console,
+a tooltip or a notification. `tls-verify` is a boolean. `stream-lavf-o` is
+whatever a pre-update user put on their own `mpvArgs`, which is a place a
+credential can sit (a `headers=` entry, say), so the reply carries WHETHER it
+is empty and not what is in it, and any text about it crosses into QML through
+`redact_urls` like every other helper string. Reasoning, not a measurement
+that a credential has ever been in there.
+
+| Read-back | Behaviour |
+|---|---|
+| Already safe: `tls-verify` true, `stream-lavf-o` empty | Adopt exactly as the 4.5 table says. Nothing is set, nothing is reloaded, no rebuffer. Every player launched by 0.13.0 or later lands here, so the cost below is paid once, on the upgrade that crosses this version |
+| Made safe, and the read-back confirms it | Adopt, then re-establish the current channel before the shell sends that process anything else. The stash names it (`id`, `launchedFrom`, `since`), `Model.zapArgs` composes the `play`, and `player_target` resolves the id against `channels.json` inside the helper, so the reload does not wait for the shell's own cache. One visible rebuffer |
+| NOT made safe: a refusal, a read-back that still reads unsafe, or a connection that died mid-sequence | The player is STOPPED, by the 4.9 ladder, and the shell shows idle: the `stopForeignPlayer()` path, which is already what a wedged or unidentifiable player gets. Loading is the act of handing over the URL and the headers, so a process that could not be secured is not loaded into, it is ended. The channel is NOT marked failed -- PO-3's mark is for a channel that died unattended, and this one was stopped by us |
+| Made safe, but the channel cannot be re-established: `unknown_channel`, because the playlist no longer carries the stash's id | Stopped, for the reason in the row above -- the connection still open is the unverified one, and leaving it running is the thing the finding is about. **This row is this section's reading of the ruling rather than the ruling itself**, which covered the properties and not a reload that cannot be issued; it is raised as a decision request instead of being treated as settled |
+
+**The other adoption, and why it needs nothing of its own.** `player start` is
+idempotent: a live answering player is adopted and ZAPPED rather than
+duplicated (requirement 1). That path ends in a `loadfile`, so layer 6 covers
+it whole -- the properties are asserted on the process before the load and the
+load is refused if they cannot be made safe. What this section is for is the
+adoption that does NOT load: a probe that picks up a player and leaves it
+playing what it was already playing, which is the common case on an upgrade
+and the one the first fix missed.
+
+**Why a reload, and this is the sentence to read twice.** Setting the property
+governs the NEXT `loadfile`. Whether a stream ALREADY OPEN picks the change up
+for its ongoing fetches is **UNMEASURED**: the probe behind this design used a
+short file, not a segmented live stream, and nothing in this project has
+observed it. The reload exists BECAUSE that is unmeasured -- not because it
+was measured not to happen, and the difference is the whole reason this
+paragraph is here. There is a second reason that does not depend on the
+measurement either way: the connection in hand was established without anyone
+checking the peer, and there is no verification that can be applied to it
+after the fact. So the reload is not an optimisation for a later reader who
+finds the `set_property` sufficient to tidy away. It may be dropped on the
+strength of a measurement against a real segmented live stream and on nothing
+else, and if that measurement is ever taken it belongs in this section.
+
+**Ordering, and the one gap it leaves.** The migration and its read-back
+happen on the adoption call, before the shell writes anything to that process;
+the shell's first write to an adopted player is the re-establish, and it is
+issued only on a clean read-back. The 4.10 sequence can supersede the adoption
+reply -- a play the user issued while the probe was in flight is the newer
+word and `applyProbe` returns early -- and that branch is safe for a different
+reason: the user's own `play` goes through `apply_channel`, which is 4.15's
+layer 6 and refuses to load into a player it cannot make safe. What the
+superseded branch does NOT do is stop a player that could not be secured. It
+is left running its old stream, refused any further load, until the user stops
+it or the failure path ends it. Named here rather than papered over, and
+raised with the row above.
+
+**The cost, which is not nothing.** One rebuffer, visible, once, on the
+upgrade that crosses this version, on the player that happened to be running.
+A player that cannot be made safe is stopped, which is playback the user did
+not ask to lose. And for a provider whose certificate needs `--tls-ca-file`,
+whose running player was launched without it, the re-established load fails
+verification and what the user sees is the channel stopping, through 4.8's
+failure path -- 4.15's already-accepted cost arriving at a different moment,
+not a new one. **UNVERIFIED BY ME:** the lane that wrote this section holds no
+display and has run no player; everything outside the measurement paragraph is
+specification, and the live gate for it is QA's.
+
+**What this deliberately does not do.** It does not relaunch the adopted
+player: relaunching is the other option D-PLY-25 left open and it would
+destroy the window whose survival is the entire point of M2-02 (sections 1 and
+2), so the properties are migrated in place instead. It does not migrate any
+other launch option, `--tls-ca-file` included, which stays a user argument
+that takes effect on the next launch. It does not touch `--demuxer-lavf-o`,
+measured by D-SINK-15 as NOT a bypass and therefore neither reserved nor
+cleared here.
+
+**Where the flag and the field names are fixed.** The owner claim is the
+precedent for an opt-in write on a verb documented as a read
+(`Model.playerProbeArgv`'s own comment: "Omitted, the probe is read-only"),
+and the migration follows it, which is what keeps `player probe` from a
+terminal a read. The flag's spelling and the reply's field names are the code
+lane's to choose, and 4.3's frozen-interface table records them when they
+land. What this section fixes is the behaviour, which is the part a renamed
+field cannot invalidate.
 
 ### 4.6 Now-playing recovery
 
@@ -706,6 +845,18 @@ from argv and is the one channel whose headers nothing ever clears.
 `Model.headerArgs` leaves `buildMpvArgv` but stays in `Model.js` with its two
 tests as the validator of record for `^[A-Za-z0-9-]+$` names and CR/LF rejection.
 
+**TLS joins this sequence (D-SINK-16, 4.15 layer 6).** `apply_channel` already
+asserts `pause`, `aid`, `sid` and the three header properties before every
+load, each for the same class of reason: mpv keeps them across a `loadfile`,
+so the load must say what it wants rather than inherit it. `tls-verify` and
+`stream-lavf-o` are asserted on the same line, with one difference that is
+load-bearing and must not be smoothed out into consistency with its
+neighbours: `pause`, `aid` and `sid` go through `try_command` and are best
+effort, and TLS may not be. If those two properties cannot be made safe the
+`loadfile` is REFUSED and reported the way the function reports its other
+failures, because loading is precisely the act of handing a credentialed URL
+and these header values to a process we could not secure.
+
 ### 4.12 mpvArgs filtering
 
 `Model.splitMpvArgs` (`Model.js:1207`) is behaviourally unchanged: same
@@ -820,13 +971,18 @@ this one sink: the helper's own playlist, EPG and probe fetches go through
 refuse a self-signed certificate today (measured). The claim to make is
 therefore "everywhere except the player", not "now verifies everywhere".
 
-**Specification, FIVE layers.** All five are REQUIRED and each answers a
-different question. The lead measured every row cited here on 2026-10-07
+**Specification: FIVE layers on the launch argv, and TWO over IPC.** All
+seven are REQUIRED and each answers a different question. The lead measured
+every row cited here on 2026-10-07
 against a local TLS server (self-signed, and signed by a generated CA) serving
 a 106,220-byte MPEG-TS, driven by the real shipped argv taken out of
 `mpv_launch_argv` rather than retyped, with `curl` as the discriminating
 control; the evidence is the D-SINK-13 row in `docs/STATUS.md` and the
-write-up in `docs/QA-RESULTS.md`.
+write-up in `docs/QA-RESULTS.md`. **Two rigs, not one:** rows 1 to 5 are that
+argv rig, and rows 6 and 7 were measured the same day on a different one -- a
+running player driven over its IPC socket, with an attacker's own request log
+as the discriminator -- so their evidence is the D-SINK-16 row on the board
+and not the runs described in this paragraph.
 
 | # | Layer | Job | Measured basis |
 |---|---|---|---|
@@ -834,6 +990,18 @@ write-up in `docs/QA-RESULTS.md`.
 | 2 | `--tls-verify=yes` re-asserted as the FINAL element of the COMPOSED argv, after the filtered user `mpvArgs` | The layer that actually binds. A later command-line token beats an earlier one, so layer 1 alone is undoable | `yes ... --tls-verify=no ... yes`, `yes ... --no-tls-verify ... yes` and `yes ... --profile=evil ... yes` all exit 2. Without the trailing token all three of those PLAY |
 | 3 | `--tls-verify` in `MPV_RESERVED`, matched in both the `--tls-verify=no` and the `--no-tls-verify` forms | Makes it honest. A direct attempt is refused LOUDLY, with the existing dropped-token warning, instead of being silently outvoted by layer 2 | The existing `--no-` rule in `filter_mpv_args` / `splitMpvArgs` already covers the second form once the name is on the list |
 | 4 | `--tls-ca-file` left UNRESERVED | The targeted escape for a provider with a self-signed or private-CA certificate, and the only one offered | A certificate signed by a generated CA plays with `--tls-verify=yes --tls-ca-file=<that CA>`, and still plays as a user token behind layer 2's trailing re-assertion |
+| 5 | `--stream-lavf-o` in `MPV_RESERVED`, one entry covering all six spellings because `mpvOptionBase` strips the list suffixes (D-SINK-15) | The bypass layer 2 CANNOT reach: it hands `key=value` straight to libavformat for the STREAM, and FFmpeg's own AVOption `tls_verify` is a different knob arriving at the same place, so our last token does not outvote it. This one can only be closed by the reserved list, which is why that list is load-bearing again here | With BOTH `tls-verify` tokens in place, `--stream-lavf-o=tls_verify=0` PLAYED the attacker's self-signed stream (exit 0, the GET in the attacker's log), and so did the `-add`, `-append` and `-set` forms. `--demuxer-lavf-o=tls_verify=0` did NOT bypass (exit 2, refused) and is therefore NOT reserved, recorded as measured rather than reserved on suspicion |
+| 6 | `tls-verify` and `stream-lavf-o` asserted over IPC in `apply_channel` before EVERY `loadfile`, and NOT best effort: a load that cannot be made safe is refused and reported (D-SINK-16, 4.11) | Layers 1 to 5 bind a player this shell launched. This one binds the process actually about to be handed a URL, whoever launched it and whenever that was. It is the one wire sequence `play` and `player start` share | `tls-verify` is readable AND writable over the socket, and after `set_property tls-verify True` the same process fetched nothing from the attacker: GETs 1 before, 0 after, with a positive control still playing |
+| 7 | Adoption migrates both properties, reads them BACK, and re-establishes the current channel; a player that cannot be made safe is stopped rather than fed (D-SINK-16, specified in 4.5.1) | argv is fixed at exec, so no argv layer reaches a player that was already running when the plugin was updated -- the exact case the first fix missed, while the shell went on sending that player new headers and new credentialed URLs | The same migration runs as layer 6. What is NOT measured is whether an already-open stream picks the change up for its ongoing fetches, which is why the reload is in the layer and not an argument that it is unnecessary |
+
+Layers 1 to 5 are blind to a player this shell did not launch, every one of
+them, and that blindness is what D-SINK-16 is: the fix was complete for new
+players and absent for adopted ones, and adoption is a designed path, not an
+edge case (section 1). Layers 6 and 7 are the correction -- 6 at the sink on
+every load, 7 at the only path that meets an older player. Layer 5's row was
+missing from this table while the sentence above it already said five; it
+dates from D-SINK-15 and is added here with 6 and 7 rather than left to be
+inferred from the reserved list.
 
 Layer 2 is not a duplicate of layer 1 and must not be tidied away as one.
 That is the whole finding of the addendum to the measurements: `--profile`
@@ -879,12 +1047,27 @@ does not count under engineering rule 14; what counts is calling the composition
 with hostile `mpvArgs` and asserting the LAST element, and observing the sink
 itself in the harness scenario (QA.md section 3.1).
 
+Layers 6 and 7 cannot be pinned by a vector over an argv, because neither
+touches argv. What pins them is the decision: the verdict taken from the
+read-back, and the refusal that follows an unsafe one, belong in `Model.js`
+with a mirror in the helper and ONE shared fixture, so a test calls the
+shipping decision instead of restating it (engineering rules 12 and 14). The
+fixture has to carry the FAILURE rows as well as the clean ones, and the
+IPC fakes have to answer the way the measurements say mpv does -- a fake whose
+`set_property` always succeeds, or whose read-back echoes whatever was just
+written, is more forgiving than the real thing and proves nothing (engineering
+rule 10). The sink itself is the harness scenario's, against a server
+presenting a certificate nobody signed, on a player launched WITHOUT the
+tokens so that the migration has something to migrate; a scenario that cannot
+be shown red against the code as it shipped in 0.13.0 is not evidence. Which
+scenario and which case ids are QA's to fix, not this section's.
+
 ## 5. Hard requirements
 
 | # | Requirement | Status | Mechanism |
 |---|---|---|---|
 | 1 | Exactly ONE player instance. Never a second window | **kept (strengthened)** | Three layers: a `/proc` scan on the exact `--input-ipc-server=<abspath>` token plus uid is the authoritative existence check (never `connect()`, which succeeds through the listen backlog against a wedged mpv); `flock` with an inode re-check serialises launchers and survives an unlink-and-recreate; `player start` is idempotent - a live answering player is adopted and zapped, not duplicated. Only one code path (`spawn_detached`) ever execs mpv. If the scan ever finds several, the one that answers the socket is kept and the rest are laddered down. A spawn whose socket never binds is reaped by the helper that created it using the pid read back over a pipe, so an un-killable window cannot exist and cannot multiply. QML's `playerUp` is advisory UI state and is **never** a spawn gate |
-| 2 | Zapping reuses the window via `play --id <id> --socket <s>` -> title / force-media-title / UA / referrer / header-fields -> `loadfile <url> replace` | **kept** | `cmd_play`'s wire sequence and CLI surface are unchanged; its body is factored into `apply_channel()` and shared with `player start`, so first-play and zap become one implementation instead of two. All 23 `tests/test_mpv.py` cases pass unmodified. `pendingPlayId` burst coalescing (`Service.qml:314-318`) and the `previousPlaying` rollback are unchanged. `play` gains optional `--scope`/`--since` and returns `entryId`, both additive. Verified: `loadfile ... replace` while playing emits `end-file{reason:"stop"}` then `start-file` on one pid, window intact |
+| 2 | Zapping reuses the window via `play --id <id> --socket <s>` -> title / force-media-title / UA / referrer / header-fields -> `loadfile <url> replace` | **kept** | `cmd_play`'s wire sequence and CLI surface are unchanged; its body is factored into `apply_channel()` and shared with `player start`, so first-play and zap become one implementation instead of two. All 23 `tests/test_mpv.py` cases pass unmodified. `pendingPlayId` burst coalescing (`Service.qml:314-318`) and the `previousPlaying` rollback are unchanged. `play` gains optional `--scope`/`--since` and returns `entryId`, both additive. Verified: `loadfile ... replace` while playing emits `end-file{reason:"stop"}` then `start-file` on one pid, window intact. **Amended by D-SINK-16:** the two TLS properties are asserted on this same sequence before the `loadfile`, and unlike every other element of it they are not best effort -- an assertion that cannot be made safe refuses the load (4.11, 4.15 layer 6) |
 | 3 | Window class `omarchy-iptv`, title = channel name, `$>` raw prefix on `--title` (force-media-title NOT expanded) | **kept** | `--wayland-app-id` stays on argv (app_id is fixed at surface creation); title and force-media-title move to IPC, where the `$>` marker is verified stored literally and `force-media-title` verified non-expanded on 0.41. `Model.MPV_RAW_PREFIX` / `mpvWindowTitle` and the helper mirror untouched; `--title` stays reserved. Hyprland matching and `focusPlayerArgv` are unaffected by who spawned the client |
 | 4 | Stop immediate in the UI; quit -> SIGTERM after 2 s -> SIGKILL after 2 s (D-LIVE-17); never leaves an orphan | **weakened -> PO-2** | The ladder is **strengthened**: `nowPlaying = null` still clears synchronously; the rungs run inside one detached helper so they cannot be starved by a busy control channel and complete even if the shell dies mid-ladder; the pid comes from `/proc`, so a wedged mpv - the case the ladder exists for - is now reachable, where an IPC-only pid source could never signal it; pid + start time + cmdline are re-verified before each signal. Timeline unchanged at quit@0 / TERM@2 s / KILL@4 s. **What weakens:** disabling or removing the plugin no longer kills the player through `~Process()`. Section 4.14's owner-claim orphan-check covers it best-effort; a SIGKILLed shell that never returns leaves the player until logout (not a regression - the same is true today - but it is a longer window). **PO-2 asks whether best-effort plus a documented `player stop` is acceptable** |
 | 5 | Health check every 10 s via helper `status`; two consecutive failures relaunch once; stale sockets unlinked | **kept** | Interval, `Model.healthTick`, the busy-skip counter, `Model.statusHealthy`, the two-strike branch and the one-relaunch-per-player rule are all unchanged. The timer's gate becomes `playerUp \|\| nowPlaying !== null` so it can never be gated off by a stale flag. The verdict issues `player restart --from term` - one lock acquisition, ladder then spawn - removing the stop/start race two detached calls would have. Stale-socket unlinking gains three more callers (probe, start's reconcile, stop's settle) and keeps its `S_ISSOCK` guard and both existing tests. Socket EOF adds a sub-second primary death signal on top of the poll |
@@ -1014,9 +1197,14 @@ left the 0600 files and the 0600 socket on this side and were handed to an
 unauthenticated peer on the other, which is why an enumeration of local sinks
 could be complete and the system still be wrong. The claim at the head of this
 section is unchanged and remains true as written; it was never the whole claim.
-Closed by the five layers in 4.15 -- whether they have landed is the D-SINK-13
-board row's business, not this paragraph's. What remains on this sink, stated
-exactly:
+Closed by the layers in 4.15 -- five on the launch argv in that round, and two
+more over IPC after D-SINK-16 found that not one of the five reaches a player
+that was ALREADY RUNNING when the plugin was updated, while the shell went on
+sending that player new provider headers and new credentialed URLs (4.5.1).
+That is the same lesson one turn further on: an enumeration can be complete
+over the code it audits and still miss the process the code is talking to.
+Whether the layers have landed is the board rows' business, not this
+paragraph's. What remains on this sink, stated exactly:
 a certificate that chains to neither the system store nor a `--tls-ca-file` the
 user named now aborts the connection -- measured as a refusal (exit 2) and not
 as a measurement of what was already on the wire. The request line and the
@@ -1062,6 +1250,20 @@ answers, but `user-data/omarchy-iptv` is absent -> "unknown player" ->
 `player stop` -> idle. The user presses Enter once. This is preferable to a
 degraded "playing but unidentified" mode that would need its own state and its
 own tests. Worth one QA case (PLAYER-MIG-01).
+
+**Upgrade from 0.12.1 or earlier with a player running (D-SINK-16).** The case
+above is the one where the old player is gone or unidentifiable. The case that
+matters for security is the one where everything works: the player survives,
+it carries a stash, and the new service adopts it exactly as designed -- with
+the argv of the version that launched it, so without TLS verification, while
+the new shell goes on zapping it. 4.5.1 is what the adoption does about that:
+read the two properties, set them if they are not already safe, read them
+back, re-establish the current channel, and stop the player rather than feed
+it if the read-back is not clean. The user-visible shape of the upgrade is one
+rebuffer, once, and the README says so in the user's own words. This needs a
+live case of its own, on a player launched from the 0.12.1 argv and adopted by
+an installed build, and the id for it is QA's; it cannot be proved by any fake
+for the reason section 12 gives about this whole feature.
 
 **Contracts.**
 
