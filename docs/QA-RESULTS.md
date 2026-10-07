@@ -12411,3 +12411,70 @@ Refusing `http` is not proposed: a large share of real providers are http-only,
 and that is the PO-5 shape, a user choosing their own exposure. What is missing
 is the disclosure. The asymmetry with the logo ruling is the evidence that this
 was never decided, only inherited.
+
+### The scenario that observes it, and the baseline that proves it can fail
+
+`scripts/dev-harness/tls-scenario.sh` asks the same question through the
+SHIPPING path -- the service, the helper, `player start`, the IPC loadfile --
+rather than through a hand-written mpv command line, and it reads the verdict
+off the attacker's own hit log. One process holds two TLS listeners: one with a
+self-signed certificate, one with a certificate signed by a CA the run
+generates. Both answer every GET with the media, so a zero in the log is a
+refusal and not a dead server, and both log whether an Authorization header
+arrived as a BOOLEAN, because a scenario that wrote the credential into its own
+evidence file would be the same leak one layer along.
+
+Forward pass on the fixed tree, 2026-10-07, load average 2.35:
+
+    == summary: 34 passed, 0 failed, 34 assertions executed
+
+with, among them, `S1 the attacker's stream was REFUSED, not played`,
+`S3 the profile did not reopen the hole: still REFUSED`,
+`S4 a provider with a private CA can still be watched`,
+`S5 layer 3: --tls-verify=no never reached mpv`,
+`S5 layer 2: the LAST token of the composed argv re-asserts verification`, and
+`S5 and S-03 still holds: no URL and no credential on the argv`.
+
+Baseline arm against the pre-fix tree (8e258b6):
+
+    == summary: 24 passed, 10 failed, 34 assertions executed
+    FAIL S1 the attacker's stream was REFUSED, not played (got 'played', want 'refused')
+    FAIL S1 and the attacker's log holds no GET of it (got '1', want '0')
+    FAIL S3 the profile did not reopen the hole: still REFUSED (got 'played', want 'refused')
+    FAIL S3 and still no GET in the attacker's log (got '1', want '0')
+
+and the attacker's own log for the two cases that must refuse:
+
+    s1=[GET 8773 /t26504984542/s1.ts UA=TlsProbeAgent/1.0 AUTH=no;]
+    s3=[GET 8773 /t26504984542/s3.ts UA=TlsProbeAgent/1.0 AUTH=no;]
+
+S2, S4 and the rig's own checks pass on BOTH trees, which is what makes the ten
+failures discriminating rather than a tree that simply does not work.
+
+### The fix measured end to end by the lead, against the committed code
+
+Separately from the scenario, the composed argv was taken from the committed
+`mpv_launch_argv` and run against the same self-signed server:
+
+| tree | user mpvArgs | result |
+|---|---|---|
+| dev before the fix | none | exit 0, played |
+| the fix | none | exit 2, peer certificate failed verification |
+| dev before the fix | `--profile=evil` | exit 0, played |
+| the fix | `--profile=evil` | exit 2, refused |
+| the fix | `--tls-verify=no` | exit 2, refused |
+| the fix | `--no-tls-verify` | exit 2, refused |
+
+The attacker's server logged exactly two GETs across all six runs, both of them
+the "before" rows. The composed argv's last three tokens are
+`['--tls-verify=yes', '--profile=evil', '--tls-verify=yes']`.
+
+And layer 3 by calling the shipping filter, before and after:
+
+| token | before | after |
+|---|---|---|
+| `--tls-verify=no` | kept | REFUSED |
+| `--no-tls-verify` | kept | REFUSED |
+| `--tls-verify` | kept | REFUSED |
+| `--tls-ca-file=/x` | kept | kept |
+| `--profile=evil` | kept | kept |
