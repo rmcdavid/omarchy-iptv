@@ -635,7 +635,15 @@
       "mirroring the reply key for key.",
       "M5-01: `rewind` is the reattach read of `behind live` (design 2.2), the",
       "object parsePlayerProbe hands to parseRewind; the key is pinned here on",
-      "both sides like `pid`, for the same reason."
+      "both sides like `pid`, for the same reason.",
+      "D-SINK-16: `tls` is the probe's two certificate readings, pinned here for",
+      "a third time for the same reason and with more at stake than either. A",
+      "helper that dropped or renamed this node would make every adopted player",
+      "read as `no readings at all`, which Model.playerTlsVerdict answers by",
+      "STOPPING the player - visible, at least - while a node that silently",
+      "became unreadable in the other direction would hand a credentialed URL to",
+      "a process nobody authenticated. The rule over these two values is its own",
+      "shared fixture, tests/fixtures/player-tls.json."
     ],
     "reply": {
       "ok": true,
@@ -676,6 +684,11 @@
         "paused": false,
         "pausedForCache": false,
         "entryId": 2
+      },
+      "tls": {
+        "verify": true,
+        "optionCount": 0,
+        "migrated": false
       }
     },
     "keys": [
@@ -690,7 +703,8 @@
       "rewind",
       "running",
       "seq",
-      "stash"
+      "stash",
+      "tls"
     ],
     "parsed": {
       "valid": true,
@@ -712,6 +726,11 @@
         "paused": false,
         "pausedForCache": false,
         "entryId": 2
+      },
+      "tls": {
+        "verify": true,
+        "optionCount": 0,
+        "migrated": false
       }
     }
   },

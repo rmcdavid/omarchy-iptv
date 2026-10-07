@@ -306,6 +306,16 @@ var MPV_RESERVED = {
 // each other by the shared player-argv.json vectors.
 var MPV_TLS_VERIFY = "--tls-verify=yes"
 
+// D-SINK-16. The same two knobs as D-SINK-13, named as mpv PROPERTIES rather
+// than as command-line options, because an ADOPTED player has no launch argv
+// left to change. All four of D-SINK-13's layers live on the argv, so a
+// process started by 0.12.1 - mpv's own default is `tls-verify=no` - goes on
+// not verifying after the upgrade, and the helper goes on sending it new
+// provider headers and a new credentialed URL on every zap. Mirrored by
+// MPV_TLS_VERIFY_PROP / MPV_STREAM_OPTS_PROP in the helper.
+var MPV_TLS_VERIFY_PROP = "tls-verify"
+var MPV_STREAM_OPTS_PROP = "stream-lavf-o"
+
 // Stable notification replace-ids so a repeated failure replaces its toast
 // instead of stacking (UX.md 6.4).
 var NOTIFY_IDS = {
@@ -2823,6 +2833,9 @@ var PLAYER_OUTCOME_SURVIVES = {
   stopped: false,       // the user stopped it, or a detached stop was confirmed (4.9)
   ended: false,         // socket EOF with no relaunch coming (4.8 signal 3)
   foreign: false,       // a player this shell could not identify, laddered down (4.5)
+  unverified: false,    // D-SINK-16: a player that could not be made to verify
+                        // the stream's certificate, laddered down rather than
+                        // handed another credentialed URL
   failed: false,        // `player start` / `restart` / the first load failed for good
   mpvMissing: false,    // the player program is not installed
   marked: false,        // PO-3's red row has been raised on this record: it is spent
@@ -3269,6 +3282,9 @@ function statusReason(status) {
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
     ipc_error: "mpv did not answer",
+    // D-SINK-16: apply_channel refused to load rather than hand a credentialed
+    // URL to a player it could not make verify the stream's certificate.
+    tls_unverified: "The player would not verify the stream",
     // Source validation and cache verbs (ARCHITECTURE-SOURCES 2.3, 3.1, 4.3)
     empty: "No playlist configured",
     too_long: "URL too long",
@@ -5668,11 +5684,87 @@ function playerOwner(raw) {
   return { schema: PLAYER_STASH_SCHEMA, pid: pid, startTime: str(raw.startTime), at: Math.max(0, Math.floor(Number(raw.at)) || 0) }
 }
 
+// ---- D-SINK-16: is an adopted player safe to feed? ------------------------
+//
+// Raised by the marketplace maintainer against the SHIPPED 0.13.0 (#10389),
+// hours after it was published, and he is sharper than our own D-PLY-25, which
+// called this stale state a user could restart away: the plugin goes on sending
+// NEW provider headers and NEW credentialed URLs into the unverified process,
+// so it is an exposure we keep FEEDING, not one that merely lingers.
+//
+// Two readings decide it, taken over IPC by the helper (`migrate_tls`) AFTER it
+// has tried to set them, because a `success` reply is not evidence of a value:
+//   verify       mpv's `tls-verify`, and strictly the boolean true
+//   optionCount  how many entries `stream-lavf-o` holds. FFmpeg's own
+//                `tls_verify` AVOption reaches the same place as mpv's option
+//                and outvotes it (D-SINK-13's layer 3), so a non-empty map is
+//                not safe whatever is in it; cleared means 0.
+//
+// A COUNT and never the keys or the values: `stream-lavf-o` can hold a proxy
+// address with credentials in it, and this number crosses a process boundary
+// into the shell, which is a rule 5 sink like any other. The count is the whole
+// of what the decision needs.
+//
+// Mirror of tls_properties_safe in the helper; both sides run the shared
+// player-tls.json fixture (dev branch).
+function tlsPropertiesSafe(verify, optionCount) {
+  if (verify !== true) return false
+  return typeof optionCount === "number" && isFinite(optionCount) && optionCount === 0
+}
+
+// The two readings, as the probe reply carries them. Defensive in the same way
+// playerStash and playerOwner are: a helper that dropped or renamed the node
+// must not read as SAFE by accident, so `verify` is three-valued and anything
+// that is not a number leaves `optionCount` null - and tlsPropertiesSafe()
+// refuses null. `false` for a count would otherwise coerce to 0 and pass.
+function playerTls(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var count = raw.optionCount
+  return {
+    verify: raw.verify === true ? true : (raw.verify === false ? false : null),
+    // A WHOLE count, not a rounded one: the helper produces it with len() on a
+    // map, so a fraction is not a small reading, it is a reading from something
+    // that is not the helper -- and Math.floor() would turn 0.5 into the one
+    // value that passes.
+    optionCount: typeof count === "number" && isFinite(count) && count >= 0 && Math.floor(count) === count ? count : null,
+    migrated: raw.migrated === true
+  }
+}
+
+// What the reattach path does with the player it has just identified:
+//
+//   "feed"   it was already verifying (this shell launched it, or an earlier
+//            probe migrated it): adopt it, nothing else to do.
+//   "reload" it was NOT, the helper has made it verify, and the channel must be
+//            re-established before anything else is sent to it. Setting the
+//            property covers the NEXT load; whether an already-open stream
+//            picks the change up for its ongoing segment fetches is UNMEASURED,
+//            so the reload is what makes the answer not matter.
+//   "stop"   the properties could not be made safe, or there are no readings at
+//            all. Then the player is stopped rather than fed, because feeding
+//            it is precisely the act of handing a credentialed URL and the
+//            provider headers to a process we could not secure.
+//
+// `migrated` is the helper's answer to "was this player already safe when I
+// found it", so a second probe over an already-migrated player answers "feed"
+// and costs no further rebuffer. The caller must therefore only ever SET its
+// pending-reload flag from this, never clear it: an ambiguous first probe
+// (idle, or no stash yet) migrates the player and is then retried 500 ms later
+// by a probe that correctly sees nothing left to do.
+function playerTlsVerdict(tls) {
+  var reading = playerTls(tls)
+  if (reading === null) return { safe: false, action: "stop", migrated: false }
+  if (!tlsPropertiesSafe(reading.verify, reading.optionCount)) {
+    return { safe: false, action: "stop", migrated: reading.migrated }
+  }
+  return { safe: true, action: reading.migrated ? "reload" : "feed", migrated: reading.migrated }
+}
+
 // `player probe` stdout -> a shape the service can bind. Garbage, a truncated
 // line, a foreign JSON document or an error reply all return valid:false
 // rather than throwing, so a probe can never break the reattach path.
 function parsePlayerProbe(text) {
-  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null }
+  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null, tls: null }
   var doc = parseJsonObject(text)
   if (!doc || doc.ok !== true || str(doc.kind) !== "player.probe") return empty
   var pid = Math.floor(Number(doc.pid))
@@ -5686,7 +5778,12 @@ function parsePlayerProbe(text) {
     owner: playerOwner(doc.owner),
     seq: Math.max(0, Math.floor(Number(doc.seq)) || 0),
     // M5-01: the reattach read recovers "behind live" from the player.
-    rewind: parseRewind(doc.rewind)
+    rewind: parseRewind(doc.rewind),
+    // D-SINK-16: the two TLS readings of the player this shell is about to
+    // adopt. Absent reads null, which playerTlsVerdict answers "stop" to - an
+    // adopted player whose certificate handling cannot be established is not a
+    // player to feed.
+    tls: playerTls(doc.tls)
   }
 }
 
@@ -10240,6 +10337,12 @@ if (typeof module !== "undefined") {
     buildMpvArgv: buildMpvArgv,
     MPV_RESERVED: MPV_RESERVED,
     MPV_TLS_VERIFY: MPV_TLS_VERIFY,
+    // D-SINK-16: the adopted player's two readings and the verdict over them
+    MPV_TLS_VERIFY_PROP: MPV_TLS_VERIFY_PROP,
+    MPV_STREAM_OPTS_PROP: MPV_STREAM_OPTS_PROP,
+    tlsPropertiesSafe: tlsPropertiesSafe,
+    playerTls: playerTls,
+    playerTlsVerdict: playerTlsVerdict,
     // ---- detached player (M2-02)
     PLAYER_STASH_SCHEMA: PLAYER_STASH_SCHEMA,
     PLAYER_ORPHAN_GRACE_SEC: PLAYER_ORPHAN_GRACE_SEC,
