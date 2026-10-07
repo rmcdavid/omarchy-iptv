@@ -338,15 +338,31 @@ FOCUS_TIMEOUT=${OMARCHY_IPTV_FOCUS_TIMEOUT:-5}
 # Fails CLOSED. Any answer that is not a readable "yes" refuses, because the
 # whole point is that a keystroke into an unknown surface is invisible.
 require_guide_focus() {
-  local what=$1 reply status verdict
-  reply=$(timeout "$FOCUS_TIMEOUT" "$0" ipc focusState 2>&1)
+  local what=$1 reply status verdict diag errfile
+  # The two streams are kept APART, and this is the whole finding of the first
+  # review of this guard. `2>&1` here fed any diagnostic `qs` wrote on stderr
+  # into json.loads, and the guard fails closed, so ONE stray line turned every
+  # key and type into exit 3 -- invisibly, because all eleven call sites are
+  # `>/dev/null 2>&1` with the status dropped, so the scenario would simply
+  # score lower with no cause on screen. That `qs ipc` is noisy in practice is
+  # not a guess: twelve scenario wrappers add `2>/dev/null` to it, and the
+  # sibling read in the `type` verb below does the same. The diagnostic is still
+  # SHOWN on a failure, which `2>/dev/null` alone would have thrown away; it is
+  # only kept out of the parser.
+  errfile=$(mktemp "${TMPDIR:-/tmp}/omarchy-iptv-focus.XXXXXX") || {
+    echo "[run.sh] $what REFUSED: cannot make a temp file to read the harness reply" >&2
+    return 1
+  }
+  reply=$(timeout "$FOCUS_TIMEOUT" "$0" ipc focusState 2>"$errfile")
   status=$?
+  diag=$(tr '\n' ' ' <"$errfile")
+  rm -f "$errfile"
   if (( status == 124 )); then
-    echo "[run.sh] $what REFUSED: the harness did not answer focusState within ${FOCUS_TIMEOUT}s -- giving up rather than typing blind" >&2
+    echo "[run.sh] $what REFUSED: the harness did not answer focusState within ${FOCUS_TIMEOUT}s -- giving up rather than typing blind${diag:+ (stderr: $diag)}" >&2
     return 1
   fi
   if (( status != 0 )); then
-    echo "[run.sh] $what REFUSED: cannot ask the harness where the keyboard is (qs ipc exit $status): ${reply//$'\n'/ }" >&2
+    echo "[run.sh] $what REFUSED: cannot ask the harness where the keyboard is (qs ipc exit $status): ${diag:-${reply//$'\n'/ }}" >&2
     echo "[run.sh] if no harness is running, start one (run.sh --detach --open); if a harness from BEFORE this change is still up it has no focusState verb, so reap and restart it (run.sh reap)" >&2
     echo "[run.sh] if this key is meant for the COMPOSITOR rather than the guide, pass --to-compositor" >&2
     return 1

@@ -391,18 +391,30 @@ qa_env_line() {
 #      REFUSES rather than writing a transcript into a directory other users
 #      can enter.
 #
-#   2. `-a`, and this one is MARKED UNVERIFIED (rule 14), because the honest
-#      answer is that nothing here can go red for it. The reasons usually
-#      given are both false, measured: a truncating `tee` loses nothing from
-#      the pipe (3/3 runs, five lines each, all five present), and O_TRUNC
-#      does not change a mode, so the 0600 above survives either spelling.
-#      With the file pre-created and refused if it already exists, `-a` and a
-#      plain `tee` are indistinguishable from outside, and a mutation of
-#      `tee -a` to `tee` turns scripts/qa-lib-test.sh no redder. It is kept
-#      because it is the form rewind-scenario.sh shipped and because it makes
-#      the deliberate truncation above the only one in the arrangement -- not
-#      because any check defends it. If a reason to need it ever appears,
-#      write the check with it.
+#   2. `-p`, and it is the flag on this line that actually matters. Without
+#      it, `tee` exits when its OWN stdout breaks, and the transcript stops
+#      at that line -- so `scenario | head -3` truncates the FILE as well as
+#      the terminal, which is the exact failure this function exists to
+#      prevent. Measured on this machine (GNU coreutils 9.11), a 20-line
+#      producer at 0.05 s intervals under `| head -3`: plain `tee -a` left 3
+#      of 22 lines in 3 of 3 runs and the scenario aborted at line 3; with
+#      `-p` it left 22 of 22 lines with the summary intact, 3 of 3 runs. The
+#      first version of this comment audited `-a` in forensic detail and
+#      never looked at `-p`, while two sentences in the harness README --
+#      "the evidence is on disk whatever happens to the terminal", and a list
+#      of `| head` as a bad REPORT -- were false because of it. Found by the
+#      first review of this function.
+#
+#      `-a` itself stays MARKED UNVERIFIED (rule 14): nothing here can go red
+#      for it. The reasons usually given are both false, measured -- a
+#      truncating `tee` loses nothing from the pipe (3/3 runs, five lines
+#      each, all five present), and O_TRUNC does not change a mode, so the
+#      0600 above survives either spelling. With the file pre-created and
+#      refused if it already exists, `-a` and a plain `tee` are
+#      indistinguishable from outside. It is kept because it is the form
+#      rewind-scenario.sh shipped and because it makes the deliberate
+#      truncation above the only one in the arrangement -- not because any
+#      check defends it.
 #
 #   3. Where the call sits. It must come AFTER argument parsing -- the
 #      transcript's name and the directory it lands in are derived from the
@@ -504,7 +516,7 @@ qa_transcript_start() {
   fi
   chmod 0600 "$path" 2>/dev/null
   QA_TRANSCRIPT=$path
-  exec > >(tee -a "$path") 2>&1
+  exec > >(tee -pa "$path") 2>&1
   # Printed AFTER the redirect, so the transcript's first line names itself
   # and the operator sees the same line on the terminal.
   printf '== transcript %s\n' "$path"

@@ -723,17 +723,61 @@ is "the transcript's first line names the transcript (a file that identifies its
 # does NOT do this is one line, so it is driven here verbatim.
 is "the transcript is 0600" "$(stat -c '%a' "$T1")" "600"
 is "and its directory is 0700" "$(stat -c '%a' "$(dirname "$T1")")" "700"
+# The control runs under an EXPLICIT umask, and that is a repair, not a
+# flourish. It used to inherit the caller's, and the mode it asserts is
+# `0666 & ~umask` -- so this step went red under `umask 077` (600) and under
+# `umask 002` (664), reddening scripts/check.sh for a reason with nothing to do
+# with the tree. check.sh does not normalise the umask. Found by the first
+# review of this file, measured both ways.
 old_tee_transcript() {   # tee left to create the file itself
-  bash -c 'exec > >(tee -a "$1"); echo hello' _ "$1" >/dev/null 2>&1
+  ( umask 022; bash -c 'exec > >(tee -a "$1"); echo hello' _ "$1" ) >/dev/null 2>&1
   local i
   for ((i = 0; i < 40; i++)); do [[ -s $1 ]] && break; sleep 0.05; done
 }
 rm -f "$TMP/old.out"
 old_tee_transcript "$TMP/old.out"
-is "a tee left to create its own file leaves the transcript WORLD-READABLE" \
+is "a tee left to create its own file leaves the transcript WORLD-READABLE (at the common umask 022)" \
    "$(stat -c '%a' "$TMP/old.out")" "644"
 ck "which is why the file is created here, under umask 077, before tee opens it" \
    '[[ $(stat -c "%a" "$T1") == 600 && $(stat -c "%a" "$TMP/old.out") == 644 ]]'
+# And the property that matters is umask-INDEPENDENT, which is the whole point
+# of creating the file ourselves: the explicit 0600 holds whatever the caller's
+# umask is. Asserted at three, including the two that reddened the step above.
+for _um in 022 077 002; do
+  _umdir=$TMP/um$_um; mkdir -p "$_umdir"
+  _umpath=$( ( umask "$_um"; bash -c '
+    export OMARCHY_IPTV_HARNESS_DIR="$1"; source "$2"
+    qa_transcript_start "umask'"$_um"'" >/dev/null 2>&1 || exit 9
+    printf "%s\n" "$QA_TRANSCRIPT"' _ "$_umdir" "$HERE/qa-lib.sh" ) | tail -1 )
+  is "the transcript is 0600 under umask $_um, because we create it and do not let tee" \
+     "$(stat -c '%a' "$_umpath" 2>/dev/null)" "600"
+done
+
+# ---- 2b. the BROKEN PIPE, which is the failure this whole function exists to
+# prevent and which nothing here could see until the first review of it. A
+# `tee` whose own stdout breaks EXITS, and the transcript stops at that line --
+# so `scenario | head -3` truncated the FILE as well as the terminal, and the
+# harness README's "the evidence is on disk whatever happens to the terminal"
+# was false. `tee -p` (GNU --output-error=warn-nopipe) is what makes it true.
+# Measured here for real: a 12-line producer through `| head -3`.
+_pipedir=$TMP/pipe; mkdir -p "$_pipedir"
+cat >"$TMP/pipe-scn.sh" <<'PIPE_SCN'
+export OMARCHY_IPTV_HARNESS_DIR="$1"
+. "$2"
+qa_transcript_start "pipeprobe" || exit 9
+printf '%s
+' "$QA_TRANSCRIPT" >"$3"
+for _i in 1 2 3 4 5 6 7 8 9 10; do echo "body $_i"; sleep 0.05; done
+echo "SUMMARY REACHED"
+PIPE_SCN
+bash "$TMP/pipe-scn.sh" "$_pipedir" "$HERE/qa-lib.sh" "$TMP/pipe-path" 2>/dev/null | head -3 >/dev/null
+_pipepath=$(cat "$TMP/pipe-path" 2>/dev/null)
+qa_wait_file() { local f=$1 pat=$2 n=${3:-40} i; for ((i = 0; i < n; i++)); do grep -q "$pat" "$f" 2>/dev/null && return 0; sleep 0.05; done; return 1; }
+qa_wait_file "$_pipepath" '^SUMMARY REACHED$' 60
+ck "a transcript survives a broken pipe: the run's SUMMARY is on disk although the terminal got 3 lines" \
+   'grep -q "^SUMMARY REACHED$" "$_pipepath"'
+is "and every body line is there too, not just the three the pipe took" \
+   "$(qa_count '^body ' "$_pipepath")" "10"
 
 # ---- 3. it REFUSES rather than writing somewhere the transcript would be
 # readable. /tmp is 1777 and owned by root on every machine this runs on, so
@@ -929,6 +973,97 @@ is "R18 syncs before it sweeps" "$(qa_count '^if qa_transcript_sync ' "$RW")" "1
 
 # ============================================================== the floor
 
+# ================================ the focus guard's decision table (F-M3-1 a)
+
+section "run.sh key/type: the focus guard, decided from a stubbed reply"
+
+# The first review of the guard found that NOTHING in the gate could go red for
+# any of it: the lane's red proofs were real but lived in a rig that left with
+# the lane, so the next author to delete the `open` check or swap `activeFocus`
+# for `focus` would get a green gate. This section is that gap closed.
+#
+# What it exercises is run.sh's own DECISION from a reply, not whether
+# focusSnapshot measures the reply correctly -- `qs` is stubbed, so the
+# transport is not under test here. The live half (a real Quickshell answering
+# focusState) is in docs/QA-RESULTS.md with the day's measurements; it cannot
+# run in the gate, which holds no display.
+#
+# run.sh derives its ROOT from its own path, so the REAL file is executed and
+# only the two programs it shells out to are stubbed on PATH. Nothing here can
+# reach the live install or a harness the operator has running: the scratch
+# directory is this test's $TMP.
+FG=$TMP/fg; mkdir -p "$FG/bin" "$FG/h/root"; : >"$FG/h/root/shell.qml"
+cat >"$FG/bin/wtype" <<'FG_WTYPE'
+#!/bin/bash
+echo "$@" >>"$WTYPE_LOG"
+FG_WTYPE
+chmod +x "$FG/bin/wtype"
+
+# $1 = what the stub qs writes to stdout, $2 = a line for stderr ("" for none),
+# $3 = the stub's exit code. Writes the reply, then runs the verb.
+fg_stub() {
+  { printf '#!/bin/bash\n'
+    [[ -n $2 ]] && printf 'echo %q >&2\n' "$2"
+    printf 'cat <<%s\n%s\nSTUB_EOF\n' "'STUB_EOF'" "$1"
+    printf 'exit %s\n' "$3"
+  } >"$FG/bin/qs"
+  chmod +x "$FG/bin/qs"
+}
+# Runs `run.sh <verb...>` against the stub and echoes "<exit> <wtype-calls>".
+fg_run() {
+  : >"$FG/wtype.log"
+  rm -f "$FG/h/primed"
+  WTYPE_LOG=$FG/wtype.log PATH="$FG/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$FG/h \
+    timeout 20 "$ROOT/scripts/dev-harness/run.sh" "$@" >"$FG/out" 2>&1
+  printf '%s %s\n' "$?" "$(wc -l <"$FG/wtype.log")"
+}
+FG_OPEN='{"ok":true,"error":"","open":true,"keyboard":true,"role":"catcher","item":"PanelKeyCatcher","blocked":false,"window":"layer","scanned":326,"exhausted":false}'
+
+# A focused guide passes, and the key reaches wtype. Two calls, not one: the
+# F-HARNESS-1 shift primer is the first, the caller's key the second.
+fg_stub "$FG_OPEN" "" 0
+is "a focused guide passes and the key reaches wtype" "$(fg_run key j)" "0 2"
+is "and the argv is passed through untouched" "$(tail -1 "$FG/wtype.log")" "j"
+
+# THE P1 REGRESSION. The guard used to read stdout and stderr together, so one
+# diagnostic line from qs made every key refuse -- invisibly, because every
+# call site drops the status. This is the check that goes red if the streams are
+# ever merged again.
+fg_stub "$FG_OPEN" "QSDIAG: a diagnostic on stderr" 0
+is "a diagnostic on qs's STDERR does not turn a focused guide into a refusal" "$(fg_run key j)" "0 2"
+
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
+is "a CLOSED guide refuses and types nothing" "$(fg_run key j)" "3 0"
+ck "and the refusal says which of the two it was" 'grep -q "the guide is CLOSED" "$FG/out"'
+
+fg_stub "${FG_OPEN/\"keyboard\":true/\"keyboard\":false}" "" 0
+is "an open guide whose keyboard is elsewhere refuses" "$(fg_run key j)" "3 0"
+ck "and says so, rather than naming the closed case" 'grep -q "ANOTHER SURFACE holds the keyboard" "$FG/out"'
+
+# A focused Sources field is still the guide: role is reported, never refused on.
+fg_stub "${FG_OPEN/\"role\":\"catcher\"/\"role\":\"other\"}" "" 0
+is "a focused form field is still the guide and passes" "$(fg_run key j)" "0 2"
+
+fg_stub '{"ok":false,"error":"no_guide","open":false,"keyboard":false}' "" 0
+is "no loaded guide refuses" "$(fg_run key j)" "3 0"
+
+fg_stub 'not json at all' "" 0
+is "an unreadable reply fails CLOSED" "$(fg_run key j)" "3 0"
+
+fg_stub '' "QSFAIL: no running instances" 255
+is "a transport failure refuses" "$(fg_run key j)" "3 0"
+ck "and the diagnostic is still shown, not swallowed" 'grep -q "QSFAIL: no running instances" "$FG/out"'
+
+# The escape hatch skips the FOCUS check only, and it is positional: wtype's
+# own `--` means the rest is text, so our flag may only lead.
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
+is "--to-compositor sends although the guide is closed" "$(fg_run key --to-compositor -k Escape)" "0 2"
+is "a --to-compositor AFTER -- is text to be typed, not a flag" "$(fg_run key -- --to-compositor)" "3 0"
+
+# `type` refuses UP FRONT, so a steal cannot cost two sends into a foreign
+# surface and a message blaming the first-keystroke race.
+is "type refuses before its retry loop, so nothing is sent twice" "$(fg_run type sky)" "3 0"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -937,7 +1072,11 @@ is "R18 syncs before it sweeps" "$(qa_count '^if qa_transcript_sync ' "$RW")" "1
 # that call them. scripts/check.sh reports this step's count and sets no floor
 # of its own on it, so this number is the only floor the transcript
 # assertions have.
-EXPECTED=213
+# 213 -> 216 the same day, at integration: the mode control now runs under an
+# explicit umask instead of the caller's, and the property that actually holds
+# -- 0600 because we create the file rather than letting tee create it -- is
+# asserted at three umasks including the two that used to redden this step.
+EXPECTED=233
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
