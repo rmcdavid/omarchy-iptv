@@ -32,6 +32,12 @@ Environment:
   STUB_IDLE_PROPS  comma-separated property names to report as unavailable
                  until the first loadfile, so a freshly spawned player looks
                  the way mpv 0.41 does (no user-data node of ours).
+  STUB_REFUSE_PROPS  comma-separated property names whose `set_property` is
+                 REFUSED, so the path a caller takes when a property cannot be
+                 made safe is drivable at all. The value is left exactly as it
+                 was: a double that refused and then stored would be more
+                 forgiving than the thing it stands in for, in the direction
+                 that matters.
   STUB_WINDOW_S  seconds of history the back buffer holds before the floor
                  starts to move (default 60). STUB_LEAD_S is the forward
                  cache ahead of the reader (default 3.6, what a 2 s-segment
@@ -72,6 +78,30 @@ HLS stream (docs/QA-REWIND.md section 2):
     than mpv -- the last of them by F-MPV-1's own rule, after a write-up had
     excused it on the false premise that the plugin holds one connection.)
     An EVENT now goes to every live client, as mpv's do.
+
+TLS PROPERTIES (D-SINK-16), and these are the lead's measurements on a real
+player over a real IPC socket on 2026-10-07, not a guess:
+
+  * `tls-verify` is READABLE, and on a player launched with no TLS token on its
+    argv it reads **False** -- not "property unavailable". The stub answered
+    unavailable for every name it did not know, which is LESS forgiving than
+    mpv in a way that matters the wrong way round: a caller that has to assert
+    the property before it loads would take its refusal path against the stub
+    and never exercise the ordinary one.
+  * `set_property tls-verify True` answers success and reads back True, and the
+    next loadfile of a self-signed stream then fetches nothing (attacker GETs 1
+    before, 0 after, on the same process, with a plain-http control still
+    playing).
+  * `stream-lavf-o` reads **{}** on such a player, takes a dict, and can be set
+    back to {}.
+
+What is NOT measured is mpv's error TEXT for a refused `set_property` on these
+two -- the probe only ever saw them succeed. STUB_REFUSE_PROPS therefore injects
+`property unavailable`, a string real mpv does emit for a property that exists
+and cannot be read or written right now, and a caller must branch on
+`error != "success"` rather than on those words. Said here rather than left
+implicit, because a double whose made-up details read as measurements is how a
+test double stops being evidence (CLAUDE.md rule 14).
 
 `python3 scripts/qa-stub-mpv.py --self-test` runs the unittest cases that
 pin these, against a fake clock. Each case was seen red by mutating the rule
@@ -141,6 +171,13 @@ class Stub(object):
             "playlist/current/id": None,
             "pause": False,
             "paused-for-cache": False,
+            # D-SINK-16. Both of these are READABLE on a real player and both
+            # read these values on one launched with no TLS token on its argv
+            # (measured 2026-10-07, see the header). They are not in `unset`:
+            # mpv does not say "unavailable" for them, and a stub that did would
+            # push a caller down its cannot-be-made-safe path on every run.
+            "tls-verify": False,
+            "stream-lavf-o": {},
         }
         # Absent until something sets or loads them - mpv reports
         # "property unavailable" for these on an idle player, and the
@@ -150,6 +187,11 @@ class Stub(object):
         for name in os.environ.get("STUB_IDLE_PROPS", "").split(","):
             if name:
                 self.unset.add(name)
+        # Names whose set_property is refused (D-SINK-16). Fault injection, so
+        # the branch a caller takes when it cannot secure a player is reachable
+        # from a test at all; see the header on what is and is not measured here.
+        self.refuse = set(
+            name for name in os.environ.get("STUB_REFUSE_PROPS", "").split(",") if name)
 
     def log(self, line):
         if not self.log_path:
@@ -273,11 +315,21 @@ class Stub(object):
             return (None, "property unavailable")
 
     def put(self, name, value):
+        """None when it took, an mpv error string when it was refused.
+
+        The refusal returns BEFORE anything is written, so a refused property
+        keeps the value it had. A double that answered an error and stored the
+        value anyway would let a caller's cannot-be-made-safe path look tested
+        while the player it was meant to protect had quietly been changed
+        (CLAUDE.md rule 10).
+        """
         with self.lock:
+            if name in self.refuse:
+                return "property unavailable"
             self.unset.discard(name)
             if name == "pause":
                 self.set_pause(value)
-                return
+                return None
             if name.startswith("user-data/"):
                 node = self.props.get("user-data")
                 if not isinstance(node, dict):
@@ -286,6 +338,7 @@ class Stub(object):
                 self.props["user-data"] = node
                 self.unset.discard("user-data")
             self.props[name] = value
+            return None
 
     def loadfile(self, url):
         with self.lock:
@@ -419,7 +472,12 @@ class Stub(object):
             else:
                 out["data"] = value
         elif verb in ("set_property", "set_property_string"):
-            self.put(cmd[1], cmd[2])
+            # D-SINK-16: a set_property can now ANSWER an error, because a
+            # caller that must refuse to load when a property cannot be made
+            # safe needs that reply to exist before its refusal is testable.
+            err = self.put(cmd[1], cmd[2])
+            if err:
+                out["error"] = err
         elif verb == "loadfile":
             out["data"] = self.loadfile(cmd[1])
         elif verb == "seek":
@@ -779,7 +837,68 @@ def self_test():
             for value in list(state.values()) + list(state["seekable-ranges"][0].values()):
                 self.assertNotIsInstance(value, str)
 
-    suite = unittest.defaultTestLoader.loadTestsFromTestCase(SeekSemantics)
+    class TlsProperties(unittest.TestCase):
+        """D-SINK-16. What a real player answers for the two TLS properties, and
+        what this stub has to answer so it is not more forgiving than mpv in the
+        direction that hides a defect. The measurements are the lead's, on a real
+        player over a real IPC socket on 2026-10-07; they are cited in the header
+        and are not re-taken here.
+        """
+
+        def setUp(self):
+            os.environ.pop("STUB_REFUSE_PROPS", None)
+            self.stub = Stub("/nonexistent/stub.sock", clock=FakeClock())
+
+        def tearDown(self):
+            os.environ.pop("STUB_REFUSE_PROPS", None)
+
+        def refusing(self, names):
+            os.environ["STUB_REFUSE_PROPS"] = names
+            return Stub("/nonexistent/stub.sock", clock=FakeClock())
+
+        def reply(self, stub, *command):
+            return stub.dispatch({"command": list(command), "request_id": 11})
+
+        def test_tls_verify_reads_false_rather_than_unavailable(self):
+            # The whole point: "property unavailable" would push a caller that
+            # asserts TLS before loading down its refusal path on every run.
+            self.assertEqual(self.stub.get("tls-verify"), (False, None))
+
+        def test_stream_lavf_o_reads_an_empty_dict(self):
+            self.assertEqual(self.stub.get("stream-lavf-o"), ({}, None))
+
+        def test_setting_tls_verify_succeeds_and_reads_back(self):
+            out = self.reply(self.stub, "set_property", "tls-verify", True)
+            self.assertEqual(out["error"], "success")
+            self.assertEqual(self.stub.get("tls-verify"), (True, None))
+
+        def test_stream_lavf_o_takes_a_dict_and_can_be_cleared(self):
+            self.reply(self.stub, "set_property", "stream-lavf-o", {"tls_verify": "0"})
+            self.assertEqual(self.stub.get("stream-lavf-o"), ({"tls_verify": "0"}, None))
+            self.reply(self.stub, "set_property", "stream-lavf-o", {})
+            self.assertEqual(self.stub.get("stream-lavf-o"), ({}, None))
+
+        def test_a_refused_set_answers_an_error_and_leaves_the_value_alone(self):
+            stub = self.refusing("tls-verify")
+            out = self.reply(stub, "set_property", "tls-verify", True)
+            self.assertNotEqual(out["error"], "success")
+            # The half that makes the double honest: refused AND unchanged.
+            self.assertEqual(stub.get("tls-verify"), (False, None))
+
+        def test_refusing_one_property_refuses_only_that_one(self):
+            stub = self.refusing("tls-verify")
+            out = self.reply(stub, "set_property", "stream-lavf-o", {})
+            self.assertEqual(out["error"], "success")
+
+        def test_an_unknown_property_is_still_unavailable(self):
+            # The default did not get looser: only the two measured names moved.
+            self.assertEqual(self.stub.get("no-such-mpv-property"),
+                             (None, "property unavailable"))
+
+    suite = unittest.TestSuite([
+        unittest.defaultTestLoader.loadTestsFromTestCase(SeekSemantics),
+        unittest.defaultTestLoader.loadTestsFromTestCase(TlsProperties),
+    ])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     return 0 if result.wasSuccessful() else 1
 

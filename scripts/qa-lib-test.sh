@@ -1330,6 +1330,17 @@ is "tls-scenario.sh --baseline --rig-only does not eat the next flag as a ref" \
    "$(tr_refuse tls-scenario.sh --baseline --rig-only)" "2 0"
 is "tls-scenario.sh with an unknown option likewise" \
    "$(tr_refuse tls-scenario.sh --nonsense)" "2 0"
+# D-SINK-16's lever, the same three shapes. `--pre-tls` names the tree S6's
+# pre-update player is launched from, so a dropped or mistyped value would stage
+# the adoption case against the wrong code -- the one failure in that segment
+# that could make it pass while proving nothing. The ref is resolved in BOTH
+# modes for that reason, which is also why these refusals are reachable here.
+is "tls-scenario.sh --pre-tls with no ref at all refuses rather than staging the wrong tree" \
+   "$(tr_refuse tls-scenario.sh --pre-tls)" "2 0"
+is "tls-scenario.sh --pre-tls --rig-only does not eat the next flag as a ref" \
+   "$(tr_refuse tls-scenario.sh --pre-tls --rig-only)" "2 0"
+is "tls-scenario.sh --pre-tls <no such ref> refuses and writes no transcript" \
+   "$(tr_refuse tls-scenario.sh --pre-tls no-such-ref-for-a-test)" "2 0"
 
 # A refusal must not reap somebody else's port either, and that one bites
 # hardest on the refusal that exists to protect it. rewind-scenario.sh installs
@@ -1489,8 +1500,9 @@ TLS="$ROOT/scripts/dev-harness/tls-scenario.sh"
 HITS="$TMP/hits-frame.sh"
 sed -n '/^hits()     {/,/^tls_refusals()/p' "$TLS" >"$HITS"
 is "the hit counters were extracted from the real scenario, not copied" \
-   "$(qa_count '^(hits|all_hits|ctl_hits)\(\)' "$HITS")" "3"
+   "$(qa_count '^(hits|all_hits|ctl_hits|chunks|closed|self_hits)\(\)' "$HITS")" "6"
 TOKEN=abc123
+PORT_SELF=8773
 REQLOG="$TMP/hits.log"
 {
   printf 'GET 8774 /abc123/s3.ts UA=lavf/62.3.100 AUTH=no\n'
@@ -1499,17 +1511,109 @@ REQLOG="$TMP/hits.log"
   printf 'HEAD 8774 /abc123/s4.ts UA=lavf/62.3.100 AUTH=no\n'
   printf 'GET 8774 /zzz999/s1.ts UA=lavf/62.3.100 AUTH=no\n'
   printf 'TLSREFUSED 8773 SSLError\n'
+  # D-SINK-16: the paced body's lines, which only the attacker's port serves
+  # here. s6 is the stream the pre-update player holds open; the CHUNK lines are
+  # pieces of its body and must never count as fetches of it.
+  printf 'GET 8773 /abc123/s6.ts UA=TlsProbeAgent/1.0 AUTH=yes\n'
+  printf 'CHUNK 8773 /abc123/s6.ts 1\n'
+  printf 'CHUNK 8773 /abc123/s6.ts 2\n'
+  printf 'CLOSED 8773 /abc123/s6.ts 2\n'
 } >"$REQLOG"
 # shellcheck source=/dev/null
 . "$HITS"
 is "two GETs of this run's channel path count twice" "$(hits s3)" "2"
 is "a HEAD of a channel path is not a GET of it" "$(hits s4)" "0"
 is "a GET under ANOTHER run's token counts for no segment of ours" "$(hits s1)" "0"
-is "the per-run total ignores the scenario's own control request" "$(all_hits)" "2"
+# 2 -> 3 when D-SINK-16's stage GET joined the fixture above: the s6 fetch is a
+# channel fetch like any other and the total has to see it.
+is "the per-run total ignores the scenario's own control request" "$(all_hits)" "3"
 is "which is counted on its own, so a live server is provable" "$(ctl_hits)" "1"
 is "a refused handshake is not a GET" "$(tls_refusals)" "1"
 is "and the counters still answer 0, never empty, over a log that is not there" \
    "$(REQLOG=$TMP/absent.log; hits s3)" "0"
+# D-SINK-16's three counters. The first two say whether an already-open stream
+# went on being FED, which no per-GET counter can answer: a single-write response
+# makes an ongoing fetch invisible, so the attacker's server writes the stage
+# body in pieces and logs one line per piece and one when the connection ends.
+is "the pieces of a paced body are counted for the path they belong to" "$(chunks s6)" "2"
+is "and the end of that connection is counted once" "$(closed s6)" "1"
+is "a piece of a body is NOT a fetch of it: CHUNK lines leave the hit count alone" "$(hits s6)" "1"
+is "a path with no paced body has no pieces and no close" "$(chunks s3)$(closed s3)" "00"
+# The bracket S6 puts around the adoption: everything the ATTACKER answered,
+# whatever path it was on, because the fetch a mis-ordered migration makes is on
+# a path the scenario cannot predict. The provider's port must not be in it, and
+# neither must the CHUNK lines that share the attacker's.
+naive_self() { qa_count "^GET [0-9]+ /$TOKEN/" "$REQLOG"; }
+is "the attacker's own total is his GETs: the control probe and the stage stream" "$(self_hits)" "2"
+is "dropping the port from it would count the PROVIDER's fetches as his" "$(naive_self)" "4"
+
+section "qa_adopted: did the upgraded shell MEET the player, or start its own?"
+
+# D-SINK-16. S6 stages a player from the pre-update tree, stops its shell, brings
+# a shell from the tree under test up on the same socket, and then asks what the
+# attacker saw. Every one of those questions is vacuous if the new shell never
+# adopted anything -- a run where it quietly spawned a fresh player re-tests the
+# LAUNCH path (which S1 already covers) and says nothing about the reattach path.
+# Nothing in the scenario can run here, but this decision can, and it is the one
+# the scenario calls rather than a copy of it (CLAUDE.md rule 12).
+#
+# No "before" exists for a new function, so rule 11's other half: the two natural
+# ways to write it are written out and shown to pass a run with no adoption.
+old_adopt_nonempty() { [[ -n ${1-} ]] && printf 'pid\n' || printf 'none\n'; }
+old_adopt_any_pid()  { [[ ${1-} =~ ^[0-9]+$ ]] && printf 'pid\n' || printf 'none\n'; }
+is "the naive 'it reported something' form calls a shell that is not answering an adoption" \
+   "$(old_adopt_nonempty "$QA_NO_STATE")" "pid"
+is "qa_adopted reads NOSTATE as not named, so a dead IPC is never an adoption" \
+   "$(qa_adopted "$QA_NO_STATE" 4242 1)" "none"
+is "a NOFIELD reading is not an adoption either" "$(qa_adopted "$QA_NO_FIELD" 4242 1)" "none"
+is "and neither is an empty one" "$(qa_adopted "" 4242 1)" "none"
+st "none answers 1, so no caller can read it as a pass" 1 qa_adopted "$QA_NO_FIELD" 4242 1
+is "the service naming the staged player's own pid IS the adoption" "$(qa_adopted 4242 4242 1)" "pid"
+st "and that answers 0" 0 qa_adopted 4242 4242 1
+# The case the whole predicate exists for, and the one the second naive form
+# gets wrong: the staged player is still running and the shell is holding a
+# DIFFERENT one, which means it spawned instead of adopting.
+is "the naive 'any pid at all' form calls a freshly spawned player an adoption" \
+   "$(old_adopt_any_pid 9191)" "pid"
+is "qa_adopted calls that what it is" "$(qa_adopted 9191 4242 1)" "other"
+st "and refuses it with 1" 1 qa_adopted 9191 4242 1
+is "a staged player that is GONE is the other adoption, the one that ends it" \
+   "$(qa_adopted "$QA_NO_FIELD" 4242 0)" "gone"
+st "which answers 0" 0 qa_adopted "$QA_NO_FIELD" 4242 0
+# A caller that cannot say whether the process is there gets no answer rather
+# than a reassuring one: an alive flag of "" would otherwise fall through to
+# "gone" and read a measurement nobody made as the fix working.
+is "an alive flag that is neither 0 nor 1 is VACUOUS, not 'gone'" \
+   "$(qa_adopted "$QA_NO_FIELD" 4242 "")" "$QA_NO_DELTA"
+st "and says so with 2" 2 qa_adopted "$QA_NO_FIELD" 4242 ""
+is "a staged pid that is not a pid is vacuous too" "$(qa_adopted 4242 NOFIELD 1)" "$QA_NO_DELTA"
+is "and so is a staged pid of 0, which is what a probe answers for no player" \
+   "$(qa_adopted 0 0 1)" "$QA_NO_DELTA"
+
+section "qa_stream_stopped: an already-open stream must stop being FED"
+
+# D-SINK-16's other half. Setting the properties covers the NEXT load; whether a
+# stream already open picks the change up for its ongoing fetches is UNMEASURED
+# by anyone, which is exactly why the ruling re-establishes the channel and why
+# the scenario reads the connection ENDING rather than assuming it does.
+old_stream_closed_at_all() { [[ ${1-} =~ ^[0-9]+$ ]] && (( $1 > 0 )) && printf 'stopped\n' || printf 'open\n'; }
+is "a connection the attacker saw end, with nothing written after it, stopped" \
+   "$(qa_stream_stopped 1 40 40)" "stopped"
+st "and that answers 0" 0 qa_stream_stopped 1 40 40
+# The counter-case: a tree that re-established the channel BEFORE migrating the
+# properties fetches the same path again, so the body keeps coming while a close
+# has already been logged for the first connection.
+is "a body still being written after a close is 'fed', never stopped" \
+   "$(qa_stream_stopped 1 40 240)" "fed"
+is "the naive 'something closed' form calls that stopped" \
+   "$(old_stream_closed_at_all 1 40 240)" "stopped"
+st "qa_stream_stopped refuses it with 1" 1 qa_stream_stopped 1 40 240
+is "a connection the attacker never saw end is still open, whatever the counts say" \
+   "$(qa_stream_stopped 0 40 40)" "open"
+st "and open is never a pass either" 1 qa_stream_stopped 0 40 40
+is "a count that is not a number is VACUOUS, not a stopped stream" \
+   "$(qa_stream_stopped "$QA_NO_FIELD" 40 40)" "$QA_NO_DELTA"
+st "and says so with 2" 2 qa_stream_stopped 1 40 "$QA_NO_STATE"
 
 # The two floors, the same bookkeeping every other scenario's get. A forgotten
 # bump reddens the gate on THIS machine rather than on the display lane's, weeks
@@ -1561,7 +1665,12 @@ is "and that directory is inside the work tree the run owns and deletes" \
 # form that reads a leak as a refusal), the TLS scenario's hit counters driven
 # over a crafted log, its two floors, and its four argument refusals -- which is
 # all of that scenario a machine with no display can reach.
-EXPECTED=301
+# 301 -> 335 the same day, D-SINK-16: qa_adopted and qa_stream_stopped both ways,
+# each with the naive form that passes a run where nothing was adopted and a run
+# where the attacker kept being fed; the paced body's three counters over the same
+# crafted log; and `--pre-tls`'s three refusals, which matter because a dropped
+# value there would stage the adoption case against the wrong tree.
+EXPECTED=335
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

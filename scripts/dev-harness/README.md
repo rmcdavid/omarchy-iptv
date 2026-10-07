@@ -573,12 +573,14 @@ caption; after the real `Ctrl+G` `channelWall` showed 21 and the log held
 The same tree with `textFormat: Text.PlainText` on the caption: 0 and 0,
 6 passed, 0 failed.
 
-### TLS: the stream's peer is a sink (D-SINK-13)
+### TLS: the stream's peer is a sink (D-SINK-13), and an adopted player is the same sink (D-SINK-16)
 
 ```bash
-scripts/dev-harness/tls-scenario.sh --rig-only            # NO display, no plugin; ~15 s (plus one ffmpeg run, cached)
-scripts/dev-harness/tls-scenario.sh                       # holds the display; five harnesses, ~4 min
-scripts/dev-harness/tls-scenario.sh --baseline <pre-fix>   # the shipped tree: S1 and S3 play, and the GET is logged
+scripts/dev-harness/tls-scenario.sh --rig-only            # NO display, no plugin; ~20 s (plus one ffmpeg run, cached)
+scripts/dev-harness/tls-scenario.sh                       # holds the display; seven harnesses, ~6 min
+scripts/dev-harness/tls-scenario.sh --baseline <pre-fix>   # the pre-D-SINK-13 tree: S1 and S3 play, and the GET is logged
+scripts/dev-harness/tls-scenario.sh --baseline <0.13.0>    # S1..S5 pass and S6 reds: D-SINK-16 on its own
+scripts/dev-harness/tls-scenario.sh --pre-tls <ref>        # which tree launches S6's pre-update player (default b731882^)
 ```
 
 mpv was launched with no TLS verification while the helper supplied provider
@@ -598,14 +600,22 @@ answer every GET with a 60 s MPEG-TS and log one line per request -- method,
 port, path, `User-Agent` and whether an `Authorization` header arrived, as a
 BOOLEAN and never its value. A GET of a channel's path is an attacker holding
 the bytes, the URL's credentials and the provider header; no GET is an attacker
-holding nothing. Each of the five segments has its own channel path, so the log
+holding nothing. Each segment has its own channel path, so the log
 attributes per segment, and each runs its own harness because `mpvArgs` is read
-at launch (`OMARCHY_IPTV_MPV_ARGS`).
+at launch (`OMARCHY_IPTV_MPV_ARGS`). Two paths are served differently, and only
+two: S6's stage channel and the rig's own `stagectl.ts` get a body written in
+pieces a second apart, with a line per piece and a line when the connection
+ends, because a single-write response makes an ONGOING fetch invisible and S6 has
+to ask whether an already-open stream kept being fed. No new port: 8773 and 8774
+are the same two.
 
-G1-G8 are the rig, and they run in both modes: `openssl verify` both ways and
+G1-G10 are the rig, and they run in both modes: `openssl verify` both ways and
 four `curl`s, so that the CA-signed certificate is known to verify against this
 run's CA and NOT against the system store before any stream plays, and both
-servers are known to serve the media before any zero is read as a refusal.
+servers are known to serve the media before any zero is read as a refusal. G9
+and G10 then make the paced body's two signals fire where no display is needed:
+a client reads for four seconds (pieces logged), walks away, and the attacker
+sees the connection END.
 S1 is the plain case (refused). S2 is the positive control and runs BEFORE the
 case it de-vacuums: the CA is named ONLY inside an mpv profile, so a stream that
 plays proves mpv read this run's config and applied the profile. S3 is the
@@ -615,6 +625,38 @@ escape, `--tls-ca-file` on `mpvArgs`. S5 reads `/proc/<pid>/cmdline` of the
 player that is actually playing: both reserved spellings absent, `--profile` and
 `--tls-ca-file` present (the control -- the attack and the escape really were
 delivered), the LAST token `--tls-verify=yes`, and the token twice over.
+
+S6 is D-SINK-16, and it is the only segment that is not about how a player is
+LAUNCHED. The marketplace maintainer raised it against the shipped 0.13.0 on
+#10389, hours after it went out and on the verification request for that very
+commit: the reattach path adopts a player that is already running without
+migrating its TLS setting, and the helper then sends new provider headers and new
+credentialed URLs into that same process. It is staged in two shells. The first
+is the harness run against the PRE-UPDATE TREE -- exported with the same
+`git archive | tar -x` `--baseline` uses, chosen by `--pre-tls` and defaulting to
+`b731882^` (0.12.1, zero occurrences of `tls-verify` or `stream-lavf-o` in either
+mirror) -- so the pre-update argv is composed by the code that composed it, never
+written down here; what this scenario writes down is the assertion that the
+RUNNING player's `/proc/<pid>/cmdline` carries no TLS token of any spelling. Then
+that shell is stopped the way `omarchy restart shell` stops the real one, the
+player is left alone, and a shell from the tree under test comes up on the same
+socket, cache and state and adopts it through `player probe` and `applyProbe`.
+Four questions follow, all at the attacker's log: the adoption happened at all
+(`qa_adopted` -- the service names the staged player's pid, or that player is
+gone, and NOT that it named one of its own, which would mean the segment
+re-tested S1); the already-open stream stopped being fed (`qa_stream_stopped`
+over the paced body, where the wait giving up IS the finding); the attacker
+logged no new request across the adoption, which is what reds if the properties
+are migrated AFTER the reload instead of before it; and a zap issued after the
+adoption reaches him not at all. Then a control that passes on both trees: a zap
+to the CA-signed provider still plays. The mechanism S6 rests on was measured by
+the LEAD over a real IPC socket on 2026-10-07 (`tls-verify` reads False on such a
+player, `set_property` True succeeds and reads back, the next loadfile of the
+attacker's URL fetches nothing, attacker GETs 1 -> 0 on the same process, with a
+plain-http positive control still playing) and is cited, not re-taken. What is
+NOT measured by anyone is whether an already-open stream picks the change up for
+its ongoing fetches, which is why the ruling re-establishes the channel and why
+S6 reads the connection ending rather than assuming it does.
 
 The profile cases need an mpv config and the user's own is not ours to write, so
 the scenario points `MPV_HOME` at a directory under its own work tree and
@@ -632,6 +674,25 @@ listener on 8773, which refused and left the decoy alive and still listening
 `curl` provoked and counting `TLSERROR` as well saw 2 of 2, which is why the
 refusal count is reported and never asserted.
 
+**S6 has not been run end to end by anybody.** The lane that added it holds no
+display either, and S6 needs two quickshells and a real mpv. What HAS been run on
+2026-10-07, same machine: `--rig-only` on the tree with S6 in it, 11 passed / 0
+failed, G9 logging 4 pieces to a client that read for 4 s and G10 seeing that
+connection end; the three `--pre-tls` refusals (exit 2, no transcript, including
+`--pre-tls --rig-only` not eating the next flag as a ref); and `--rig-only`
+against the tree BEFORE the change, 9 passed / 0 failed, which is the other half
+of the count. G9 and G10 were then each seen RED by mutation: with the paced path
+list emptied, both fail and the close wait reports giving up; with only the
+`CLOSED` line removed, G9 passes and G10 fails. `qa_adopted` and
+`qa_stream_stopped`, the two decisions S6 turns on, are driven for real by
+`scripts/qa-lib-test.sh` (335 checks) with the naive forms of each shown passing a
+run where nothing was adopted and a run where the attacker kept being fed; three
+mutations of those two functions took that step from 335/0 to 333/2 each time.
+A live run should expect roughly six minutes rather than four, and on the tree as
+it stands -- the fix for D-SINK-16 is not in it yet -- S6's two discriminators are
+expected RED: that is the finding, reproduced, and it is what the forward run has
+to flip once the fix lands.
+
 ### Live rewind (M5-01)
 
 ```bash
@@ -640,6 +701,18 @@ timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f  # t
 timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh --tree /path/to/tree # any prepared tree: how R16 was proven red (F-RWD-18)
 python3 scripts/qa-stub-mpv.py --self-test                                   # the stub's seek semantics, no socket, no display
 ```
+
+`qa-stub-mpv.py` also answers the two TLS properties the way a real player does
+(D-SINK-16): `tls-verify` reads **False** on a player launched without it, not
+"property unavailable", and `stream-lavf-o` reads `{}` -- both measured by the
+lead over a real socket. A stub that answered "unavailable" would be LESS
+forgiving than mpv in the direction that hides a defect, pushing a caller that
+asserts TLS before loading down its refusal path on every run. `STUB_REFUSE_PROPS`
+is the fault injection for the other side: a named property's `set_property` is
+refused AND its value is left alone, so a caller's cannot-be-made-safe branch is
+reachable from a test. mpv's error TEXT for that case is not measured by anyone,
+so the stub injects `property unavailable` and the header says plainly that a
+caller must branch on `error != "success"` and not on those words.
 
 `rewind-scenario.sh` runs REAL mpv against a LOCAL live-like stream and
 drives the helper verb `player seek`, the service, the bar and the guide

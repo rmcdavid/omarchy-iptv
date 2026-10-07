@@ -1,6 +1,8 @@
 #!/bin/bash
 # scripts/dev-harness/tls-scenario.sh -- D-SINK-13: the stream's TLS PEER is a
-# sink, and the real player path must refuse an unverified one.
+# sink, and the real player path must refuse an unverified one. D-SINK-16 (S6):
+# and a player it ADOPTED is the same sink, because the plugin goes on feeding
+# it.
 #
 # The marketplace maintainer raised it against the shipped 0.12.1
 # (omacom/omarchy-plugin-marketplace#10323): mpv is launched with no TLS
@@ -73,6 +75,52 @@
 #           escape were really delivered); the LAST token must be
 #           `--tls-verify=yes` and the token must appear at least twice, which
 #           is layer 2 and layer 1 respectively.
+#   S6      THE ADOPTION CASE, D-SINK-16, and the one segment here that is not
+#           about how a player is LAUNCHED. The marketplace maintainer raised it
+#           against the shipped 0.13.0 (omacom/omarchy-plugin-marketplace#10389)
+#           hours after S1..S5's fix went out: the reattach path adopts a player
+#           that is already running without migrating its TLS setting, and the
+#           helper then sends new provider headers and new credentialed URLs
+#           into that same process. We had it as D-PLY-25 and read it as stale
+#           state a user could fix by restarting the player; he named the part
+#           that makes it live, which is that we keep FEEDING it. D-PLY-25 is
+#           superseded by D-SINK-16.
+#           Staged as the user would have met it, in two shells:
+#             (a) a shell from the PRE-UPDATE TREE plays a channel on the
+#                 attacker's server. Its player is launched with no TLS token of
+#                 any spelling -- and that argv is not written down here (see
+#                 --pre-tls below).
+#             (b) that shell is stopped the way `omarchy restart shell` stops
+#                 the real one, the player is left alone, and a shell from the
+#                 TREE UNDER TEST comes up on the same socket, cache and state.
+#                 It adopts the player through `player probe` and applyProbe --
+#                 the real reattach path, with no shortcut and nothing injected.
+#           Then four questions, answered at the attacker's own log:
+#             1  the adoption happened at all (qa_adopted: the service names the
+#                staged player's pid, or that player is gone -- and NOT that it
+#                named a player of its own, which would mean this segment
+#                re-tested S1 and said nothing about adoption);
+#             2  the ALREADY-OPEN stream stopped being fed (qa_stream_stopped
+#                over the paced body: see "the attacker's own view" below);
+#             3  the attacker logged no new request across the adoption, which
+#                is what goes red if the properties are migrated AFTER the
+#                reload rather than before it;
+#             4  a zap issued after the adoption -- the new URL and the new
+#                headers the maintainer names -- reaches the attacker's log not
+#                at all.
+#           Then a control that passes on both trees: a zap to the CA-signed
+#           provider still plays, so a zero above is a refusal and not a corpse.
+#           THE MECHANISM S6 RESTS ON WAS MEASURED BY THE LEAD, not here, on
+#           2026-10-07 over a real IPC socket: on a player launched with no TLS
+#           tokens `get_property tls-verify` reads False, `set_property
+#           tls-verify True` succeeds and reads back True, and the next loadfile
+#           of the attacker's URL fetches nothing where before the migration it
+#           fetched (attacker GETs 1 -> 0 on the same process), with a plain-http
+#           positive control still playing on that migrated player. Whether an
+#           ALREADY-OPEN stream picks the change up for its ongoing fetches is
+#           NOT measured, by anyone, which is why the ruling re-establishes the
+#           channel instead of trusting it and why check 2 above reads the
+#           connection ending rather than assuming it does.
 #   privacy The synthetic credential in the fixture URLs reaches neither the
 #           harness log nor this run's transcript, and no URL reaches mpv's
 #           argv (S-03, free regression guard).
@@ -84,10 +132,35 @@
 # S2, S4 and the rig pass on both trees and are labelled as controls in the
 # summary, so a red run reads as evidence rather than as a broken script.
 #
-# `--rig-only` runs G1..G8 and stops: no quickshell, no mpv, no display, no
+# S6 HAS TWO BASELINES, and they are different findings, so say which one you
+# ran. `--baseline <pre-D-SINK-13 ref>` reds S1, S3, S5 and S6 together: that
+# tree does not verify anywhere. `--baseline <the shipped 0.13.0>` is the
+# INTERESTING one and the only one that reproduces D-SINK-16 on its own: S1..S5
+# all pass there, and S6 goes red -- the adopted player keeps streaming from the
+# attacker and the zap after the adoption is logged -- which is exactly the
+# maintainer's report, isolated from the fix that preceded it.
+#
+# `--rig-only` runs G1..G10 and stops: no quickshell, no mpv, no display, no
 # harness. It exists because the rig is the half of this file that can be
 # exercised without a display, and because a rig nobody has seen discriminate
-# is not evidence of anything.
+# is not evidence of anything. G9 and G10 are there because S6's second
+# question -- did the already-open stream stop being fed -- is read off the
+# paced response, and a signal no display-free run has ever seen fire is not a
+# signal.
+#
+# WHERE S6'S PRE-UPDATE ARGV COMES FROM, and it is the design decision in this
+# file. It is NOT the current argv with a token deleted: a hand-written copy of
+# what we think 0.12.1 launched would make S6 a test of this script's memory.
+# `--pre-tls <ref>` (default `b731882^`, the commit before D-SINK-13 landed, which
+# is version 0.12.1 and carries zero occurrences of `tls-verify` or
+# `stream-lavf-o` in either mirror) is exported with the SAME
+# `git archive | tar -x` the `--baseline` machinery already uses, and the staged
+# player is launched by running the harness against that tree: its Service.qml,
+# its Model.js, its helper, composing its own argv. What this script then does is
+# READ the argv off /proc of the player that is running and assert no TLS token
+# of either spelling is on it (rule 14: the observation is of the process, not of
+# the source text). So a `--pre-tls` ref that is not actually pre-fix makes S6
+# refuse loudly rather than quietly prove nothing.
 #
 # WHERE THE MPV CONFIG COMES FROM. $MPV_HOME, pointed at a scratch directory
 # this run creates and deletes. The lead's own measurement used a fake HOME and
@@ -100,10 +173,10 @@
 # not assumed: S2 is the observation, it runs BEFORE the case that depends on it,
 # and S3 is called out as VACUOUS in the run's own output if S2 did not play.
 #
-# HOLDS THE DISPLAY in live mode: it starts five harnesses and each one opens a
-# real mpv window on the current Wayland session. It sends no keystroke, so it
-# needs no focus; it refuses to run under hyprlock anyway, because a player
-# window over a lock screen is nobody's idea of a measurement.
+# HOLDS THE DISPLAY in live mode: it starts seven harnesses (S6 is two of them)
+# and each one opens a real mpv window on the current Wayland session. It sends
+# no keystroke, so it needs no focus; it refuses to run under hyprlock anyway,
+# because a player window over a lock screen is nobody's idea of a measurement.
 #
 # Ports 8773 (the attacker) and 8774 (the CA-signed provider). 8765 is
 # run.sh --serve, 8766 argv-scenario, 8767 text-scenario, 8771 rewind-scenario,
@@ -116,6 +189,7 @@
 #   ./scripts/dev-harness/tls-scenario.sh --rig-only
 #   ./scripts/dev-harness/tls-scenario.sh
 #   ./scripts/dev-harness/tls-scenario.sh --baseline <pre-fix ref>
+#   ./scripts/dev-harness/tls-scenario.sh --pre-tls <ref>   (S6's stage tree)
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -128,7 +202,7 @@ LOG="$SCRATCH/tls-scenario.log"
 HARNESS_LOG="$SCRATCH/harness${OMARCHY_IPTV_HARNESS_INSTANCE:-}.log"
 PORT_SELF=8773
 PORT_CA=8774
-EXPECT_CHANNELS=5
+EXPECT_CHANNELS=8
 # Unique per run, letters and digits only, so it is safe inside a URL path and
 # inside an m3u name with no quoting: a request logged by anything else can
 # never be mistaken for ours.
@@ -150,6 +224,32 @@ BASELINE=""
 EXPORT_DIR=""
 WORK=""
 PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}
+# S6's stage tree (D-SINK-16). The DEFAULT is the commit before D-SINK-13
+# landed -- version 0.12.1, zero occurrences of `tls-verify` or `stream-lavf-o`
+# in the helper or in Model.js -- which is the tree whose players the maintainer
+# is talking about. It is a ref rather than a literal argv on purpose; see the
+# header. Overridable because the ref will age, and because a reader who wants
+# to know what 0.12.1 launched should be able to point this at 0.12.1 and look.
+PRE_TLS_REF="b731882^"
+PRE_TLS_SHA=""
+PRE_DIR=""
+# The paced body S6's "did it keep being fed" question is read from, and the
+# ONLY paths that get it: the stage channel the pre-update player holds open,
+# and the rig's own control path. Everything S1..S5 fetch keeps the single
+# Content-Length response they have always had.
+#
+# A normal response here is one write of a 60 s file, so an already-open stream
+# could never show up as a SECOND GET -- and a check that cannot go red for the
+# thing it guards is not a check (rule 14). So for these two paths the server
+# writes the body in pieces, PACE_SECS apart, and logs one line per piece and
+# one when the connection ends. That also takes the 60 s timer off S6's neck:
+# the staged player has STREAM_CHUNKS * PACE_SECS seconds of stream in flight,
+# which is minutes rather than the one media length, so "the staged player is
+# gone" cannot mean "it reached the end of its file".
+PACE_SECS=1.0
+STREAM_PARTS=15        # the media cut into fifteen pieces: about 4 s of video each
+STREAM_CHUNKS=300      # 300 pieces, PACE_SECS apart: 300 s in flight, 20 loops of the media
+PACED_PATHS="s6.ts,stagectl.ts"
 
 pass=0
 fail=0
@@ -168,6 +268,12 @@ while (($# > 0)); do
     --baseline)
       [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--baseline needs a git ref, and got '${2:-}'" >&2; exit 2; }
       BASELINE=$2; shift ;;
+    # Same refusal as --baseline's, for the same reason: a dropped value here
+    # would silently stage S6 against whatever `--pre-tls` resolved to next,
+    # which on `--pre-tls --rig-only` is the string "--rig-only".
+    --pre-tls)
+      [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--pre-tls needs a git ref, and got '${2:-}'" >&2; exit 2; }
+      PRE_TLS_REF=$2; shift ;;
     --rig-only) MODE=rig ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -187,6 +293,12 @@ done
 for port in "$PORT_SELF" "$PORT_CA"; do
   ss -ltn 2>/dev/null | grep -q ":$port " && { echo "port $port is already in use; refusing to disturb whatever holds it" >&2; exit 2; }
 done
+# S6's stage ref is resolved in BOTH modes, because a typo in it is a usage
+# error and a usage error should be reported by the run that was typed, not by
+# the next one. The EXPORT is live-mode only: --rig-only asks the plugin nothing
+# and has no business unpacking a tree.
+PRE_TLS_SHA=$(git -C "$ROOT" rev-parse --short "$PRE_TLS_REF^{commit}" 2>/dev/null) \
+  || { echo "--pre-tls '$PRE_TLS_REF' does not resolve to a commit in this repository" >&2; exit 2; }
 TREE_LINE=""
 if [[ -n $BASELINE ]]; then
   EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-tls-baseline.XXXXXX") || exit 2
@@ -197,6 +309,23 @@ if [[ -n $BASELINE ]]; then
   fi
   PLUGIN_ROOT="$EXPORT_DIR"
   TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
+fi
+PRE_TLS_LINE=""
+if [[ $MODE != rig ]]; then
+  PRE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-tls-pretls.XXXXXX") || exit 2
+  if ! git -C "$ROOT" archive "$PRE_TLS_REF" | tar -x -C "$PRE_DIR"; then
+    echo "could not export the --pre-tls tree $PRE_TLS_REF" >&2
+    rm -rf "$PRE_DIR"
+    exit 2
+  fi
+  # run.sh refuses a tree with no Model.js, and the stage shell loads the helper
+  # from the same place; say so here rather than at the bottom of a transcript.
+  if [[ ! -f $PRE_DIR/Model.js || ! -f $PRE_DIR/bin/omarchy-iptv ]]; then
+    echo "the --pre-tls tree $PRE_TLS_REF ($PRE_TLS_SHA) holds no Model.js and bin/omarchy-iptv pair; that is not a plugin tree" >&2
+    rm -rf "$PRE_DIR"
+    exit 2
+  fi
+  PRE_TLS_LINE="== S6 stage tree $PRE_TLS_REF ($PRE_TLS_SHA) exported; its own code composes the pre-update player's argv"
 fi
 
 # shellcheck source=scripts/qa-lib.sh
@@ -225,6 +354,7 @@ cleanup() {
   (( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
   ours "$OWN_CHILD" && kill "$OWN_CHILD" 2>/dev/null
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
+  [[ -n $PRE_DIR && -d $PRE_DIR ]] && rm -rf "$PRE_DIR"
   [[ -n $WORK && -d $WORK ]] && rm -rf "$WORK"
   return 0
 }
@@ -234,6 +364,7 @@ trap 'exit 143' TERM
 
 qa_transcript_start tls || exit 2
 [[ -n $TREE_LINE ]] && echo "$TREE_LINE"
+[[ -n $PRE_TLS_LINE ]] && echo "$PRE_TLS_LINE"
 export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
 echo "== mode $MODE   plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
 echo "== the attacker is https://127.0.0.1:$PORT_SELF (self-signed), the provider is https://127.0.0.1:$PORT_CA (signed by this run's CA)"
@@ -285,6 +416,20 @@ hits()     { qa_count "^GET [0-9]+ /$TOKEN/$1\\.ts " "$REQLOG"; }
 hit_lines() { grep -aE -- "^GET [0-9]+ /$TOKEN/$1\\.ts " "$REQLOG" 2>/dev/null | head -2 | tr '\n' ';'; }
 all_hits() { qa_count "^GET [0-9]+ /$TOKEN/s[0-9]+\\.ts " "$REQLOG"; }
 ctl_hits() { qa_count "^GET [0-9]+ /$TOKEN/control\\.ts " "$REQLOG"; }
+# D-SINK-16. The paced body's two signals, per path: how many pieces of it the
+# attacker's kernel ACCEPTED (logged after the flush, so it means bytes left the
+# server, not that a write was attempted), and whether the server has seen that
+# connection END. `chunks` rising after a close is impossible by construction,
+# which is why qa_stream_stopped takes both: a tree that kept the stream fed for
+# another two hundred pieces and then closed it must not read as a tree that
+# stopped it.
+chunks()    { qa_count "^CHUNK [0-9]+ /$TOKEN/$1\\.ts " "$REQLOG"; }
+closed()    { qa_count "^CLOSED [0-9]+ /$TOKEN/$1\\.ts " "$REQLOG"; }
+# Every GET the ATTACKER answered, whatever the path -- the number S6 brackets
+# the adoption with. Per-path counters cannot answer "did anything new reach
+# him", and that is the question: a reload issued BEFORE the properties are
+# migrated fetches from him again, on a path this script never has to predict.
+self_hits() { qa_count "^GET $PORT_SELF /$TOKEN/" "$REQLOG"; }
 # Both spellings, and which one fires is not a detail: the server logs
 # TLSREFUSED when the handshake raises inside its own wrap_socket and TLSERROR
 # when the CLIENT's alert arrives after the server has finished its half, which
@@ -344,6 +489,40 @@ wait_log() {   # wait_log <ere> <secs>
   done
   printf 'gave up after %ss waiting for the harness log to carry %s\n' "$secs" "$re" >&2
   return 1
+}
+# wait_log_count <ere> <want> <secs>: the NTH occurrence, not the first.
+# S6 starts two shells and deliberately does NOT truncate the log between them,
+# so the privacy sweep at the end covers the whole adoption rather than half of
+# it -- and then `wait_log 'service loaded'` would be satisfied by the line the
+# FIRST shell already wrote and let the run race on before the second one is up.
+wait_log_count() {
+  local re=$1 want=$2 secs=$3 i
+  for ((i = 0; i < secs * 10; i++)); do
+    (( $(qa_count "$re" "$HARNESS_LOG") >= want )) && return 0
+    sleep 0.1
+  done
+  printf 'gave up after %ss waiting for the harness log to carry %s %s times\n' "$secs" "$re" "$want" >&2
+  return 1
+}
+wait_closed() {   # wait_closed <stem> <secs>: the attacker saw this connection end
+  local stem=$1 secs=$2 i
+  for ((i = 0; i < secs * 10; i++)); do
+    (( $(closed "$stem") > 0 )) && return 0
+    sleep 0.1
+  done
+  # Rule 3, and here the giving up is itself the finding: on a tree that does
+  # not migrate, nothing ever closes that connection.
+  printf 'gave up after %ss waiting for the attacker to see /%s/%s.ts close\n' "$secs" "$TOKEN" "$stem" >&2
+  return 1
+}
+# Is the process we staged still the mpv on OUR scratch socket? Not `-d /proc`
+# alone: a recycled pid would answer yes. The cmdline has to still name this
+# run's socket, which no other process on the machine carries.
+staged_alive() {
+  local pid=${1-} cmd
+  [[ $pid =~ ^[0-9]+$ ]] || return 1
+  cmd=$(qa_cmdline "$pid") || return 1
+  [[ $cmd == *"input-ipc-server=$SOCK"* ]]
 }
 
 # ---- the certificates. Three openssl runs, every argument a literal or a path
@@ -411,16 +590,31 @@ MEDIA_BYTES=$(stat -c '%s' "$MEDIA" 2>/dev/null || echo 0)
 # never asserted on -- under TLS 1.3 the client's refusal can arrive as an
 # alert the server sees late or not at all, so the DISCRIMINATOR is the absence
 # of a GET, not the presence of a refusal line.
+#
+# D-SINK-16 adds ONE behaviour to it, for the two paths named in PACED: the body
+# is written in pieces, PACE_SECS apart, with no Content-Length (HTTP/1.0, so the
+# response is close-delimited), and the server logs a line per piece it got onto
+# the wire and one when the connection ends. That is how S6 can ask whether an
+# already-open stream went on being fed -- the question a single-write response
+# cannot answer at all. The END is noticed one or two pieces late and that is
+# TCP, not a defect: a client that closes its socket does not fail our next
+# write, it fails the one after, once the peer's RST has come back. G9/G10 are
+# the display-free observation that both signals fire.
 cat >"$WORK/tls_server.py" <<'PY'
 import http.server
 import socketserver
 import ssl
 import sys
 import threading
+import time
 
 LOG = sys.argv[1]
 MEDIA = sys.argv[2]
-SPECS = sys.argv[3:]
+PACED = [name for name in sys.argv[3].split(",") if name]
+PACE = float(sys.argv[4])
+CHUNKS = int(sys.argv[5])
+PARTS = int(sys.argv[6])
+SPECS = sys.argv[7:]
 LOCK = threading.Lock()
 
 
@@ -440,6 +634,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
         log("%s %d %s UA=%s AUTH=%s"
             % (method, port, self.path, self.headers.get("User-Agent") or "-", auth))
 
+    def _paced(self, data):
+        """A response that is still arriving minutes after it started.
+
+        No Content-Length: the protocol version is HTTP/1.0, so the body runs
+        until the connection closes, which is what a live stream looks like and
+        what lets this one be interrupted. One CHUNK line per piece the kernel
+        accepted, logged AFTER the flush; one CLOSED line carrying how many
+        pieces got out, whether the loop finished or the write raised.
+        """
+        port = self.server.server_address[1]
+        size = max(1, len(data) // PARTS)
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp2t")
+        self.end_headers()
+        wrote = 0
+        try:
+            for index in range(CHUNKS):
+                part = index % PARTS
+                start = part * size
+                end = len(data) if part == PARTS - 1 else min(len(data), (part + 1) * size)
+                self.wfile.write(data[start:end])
+                self.wfile.flush()
+                wrote += 1
+                log("CHUNK %d %s %d" % (port, self.path, wrote))
+                time.sleep(PACE)
+        except Exception:
+            pass
+        log("CLOSED %d %s %d" % (port, self.path, wrote))
+
     def do_GET(self):
         self._record("GET")
         try:
@@ -447,6 +670,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data = handle.read()
         except OSError:
             self.send_error(500)
+            return
+        if self.path.rsplit("/", 1)[-1] in PACED:
+            self._paced(data)
             return
         self.send_response(200)
         self.send_header("Content-Type", "video/mp2t")
@@ -508,6 +734,7 @@ PY
 : >"$REQLOG"
 chmod 0600 "$REQLOG"
 python3 "$WORK/tls_server.py" "$REQLOG" "$MEDIA" \
+  "$PACED_PATHS" "$PACE_SECS" "$STREAM_CHUNKS" "$STREAM_PARTS" \
   "$PORT_SELF" "$EVIL_PEM" "$EVIL_KEY" \
   "$PORT_CA" "$SRV_PEM" "$SRV_KEY" >/dev/null 2>&1 &
 OWN_CHILD=$!
@@ -560,6 +787,21 @@ rig "G6 and the attacker's server does serve the stream to a client that stops v
 rigck "G7 the hit log attributes what the server answered (control: $(ctl_hits) control GETs, $(tls_refusals) refused handshakes)" \
    '(( $(ctl_hits) >= 2 ))'
 rig "G8 and no channel path has been fetched by anything yet" "$(all_hits)" "0"
+# G9/G10: the paced body's two signals, fired here where no display is needed,
+# on a control path of their own so neither can be counted as a channel hit
+# (`all_hits` and `ctl_hits` both ignore it, which is why G8 above still reads 0
+# and is asserted BEFORE these run). This is the whole mechanism S6's "the
+# already-open stream stopped being fed" is read from: without it, that check
+# would rest on a signal nobody had ever seen fire. The curl is capped well
+# inside the body's length -- `-m 4` overrides curl_code's own `-m 20` because it
+# lands later on the command line -- so it is a client that WALKS AWAY mid-stream,
+# which is exactly what an adopted player's reload does to this connection.
+stage_ctl=$(curl_code "https://127.0.0.1:$PORT_SELF/$TOKEN/stagectl.ts" -k -m 4)
+rigck "G9 the paced body really streams: $(chunks stagectl) pieces reached a client that read for 4 s (curl said '$stage_ctl', 28 is its timeout)" \
+   '(( $(chunks stagectl) >= 2 ))'
+wait_closed stagectl 10 || true
+rig "G10 and the attacker SEES that connection end when the client walks away, which is the signal S6 reads" \
+   "$(closed stagectl)" "1"
 
 if [[ $MODE == rig ]]; then
   (( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
@@ -570,7 +812,9 @@ if [[ $MODE == rig ]]; then
   # asserts it matches what this file actually has. This line is INDENTED on
   # purpose: both recipes count assertions by prefix at column zero, so a floor
   # line must not count itself.
-  EXPECTED_CHECKS=8
+  # 8 -> 10: G9 and G10, the paced body D-SINK-16 reads an already-open stream
+  # from. They belong in the rig half because they need no display and no player.
+  EXPECTED_CHECKS=10
   ran=$checks
   rig "the rig ran every check it has" "$ran" "$EXPECTED_CHECKS"
   printf '\n== summary (--rig-only, the plugin was not asked anything): %d passed, %d failed, %d assertions executed\n' \
@@ -615,6 +859,15 @@ channel() {   # channel <n> <port>
   channel 3 "$PORT_SELF"
   channel 4 "$PORT_CA"
   channel 5 "$PORT_CA"
+  # S6, D-SINK-16. s6 is the channel the PRE-UPDATE player is left holding: the
+  # attacker's server, and its path is one of PACED_PATHS, so the body is still
+  # arriving when the upgraded shell adopts it. s7 is the zap AFTER the adoption
+  # -- the new URL and the new provider headers going into that same process,
+  # which is the maintainer's sentence. s8 is the control that must play on both
+  # trees, so a zero on s7 is a refusal rather than a dead rig.
+  channel 6 "$PORT_SELF"
+  channel 7 "$PORT_SELF"
+  channel 8 "$PORT_CA"
 } >"$PLAYLIST"
 chmod 0600 "$PLAYLIST"
 
@@ -771,6 +1024,125 @@ wait_log 'ignoring mpvArgs tokens' 10 || true
 s5_warn=$(qa_count 'ignoring mpvArgs tokens.*--tls-verify=no.*--no-tls-verify' "$HARNESS_LOG")
 ck "S5 layer 3 is HEARD: the shell names both refused spellings in its log" '(( s5_warn >= 1 ))'
 
+# ============================================================== S6, the adoption case
+# D-SINK-16. Everything above asks what a player is LAUNCHED with. This asks what
+# happens to one that was already running, which is the maintainer's second
+# finding against the same sink and the one our own D-PLY-25 undersold.
+#
+# Two shells, in the order a user met them. NOTE what is deliberately NOT done
+# between them: no `run.sh reap`, no `--keep`-less start (that would delete
+# $SCRATCH/runtime/omarchy-iptv and with it the socket the player is bound to),
+# and no injection of any kind. The upgraded shell finds the player the way the
+# real one does -- `player probe` on the socket, applyProbe on the reply -- or it
+# does not find it, and then this segment says so instead of quietly passing.
+echo "== S6 D-SINK-16: a player launched BEFORE the update, adopted through the real reattach path, and then fed"
+echo "== S6 stage shell: tree $PRE_TLS_REF ($PRE_TLS_SHA), which composes its own pre-update argv"
+"$RUN" reap >/dev/null 2>&1
+: >"$HARNESS_LOG"
+# The CA is in the user's own mpvArgs for BOTH shells, so the control channel s8
+# can play on either tree and on either player -- the adopted one, launched by
+# the stage tree, or a replacement the upgraded shell spawns. It says nothing
+# about the attacker, whose certificate this CA did not sign (G2, G5).
+export OMARCHY_IPTV_MPV_ARGS="--tls-ca-file=$CA_PEM"
+export OMARCHY_IPTV_PLUGIN_ROOT="$PRE_DIR"
+HARNESS_STARTED=1
+"$RUN" --detach --timeout 0 --playlist "$PLAYLIST" >>"$LOG" 2>&1 || bad "S6 the stage harness did not come up (see $LOG)"
+wait_log_count 'service loaded' 1 20 || bad "S6 the stage shell never loaded"
+until_eq "$EXPECT_CHANNELS" 20 svc "d['channels']" || bad "S6 the stage shell never parsed the playlist"
+ipc play "t:s6" >/dev/null
+s6_stage=$(outcome "t:s6" s6 40)
+stage_pid=$(player_pid)
+stage_cmd=$(qa_cmdline "$stage_pid")
+segment_info S6stage s6
+# The stage, graded before the upgrade touches anything. The first of these is
+# also the positive control for the second: a cmdline nobody managed to read
+# would make "no TLS token on it" true of nothing at all (the qa_cmdline note:
+# an empty pid reads /proc/cmdline and six S-03 sweeps once passed against the
+# KERNEL command line).
+ck "S6 the staged player was launched the pre-update way: its own argv names this socket and carries no tls-verify and no stream-lavf-o of any spelling" \
+   '[[ -n "$stage_cmd" && "$stage_cmd" == *"input-ipc-server=$SOCK"* && "$stage_cmd" != *"--tls-verify"* && "$stage_cmd" != *"--no-tls-verify"* && "$stage_cmd" != *"--stream-lavf-o"* ]]'
+is "S6 and it really did fetch the attacker's stream, which is the exposure as it stood before the upgrade" "$s6_stage" "played"
+# Read immediately before the upgrade, so everything after is attributable to it.
+self_before=$(self_hits)
+stage_chunks_before=$(chunks s6)
+echo "== S6 the upgrade: the stage shell is stopped the way \`omarchy restart shell\` stops the real one, and the player is left alone"
+"$RUN" shell-stop >>"$LOG" 2>&1 || bad "S6 the stage shell would not stop"
+# Without this the whole segment is vacuous: a player that died with its own
+# shell is not a player anybody adopts, and it is also what makes "gone" below
+# mean the UPGRADED shell. The stream has STREAM_CHUNKS * PACE_SECS seconds
+# still to run, so nothing here is near the end of its file.
+ck "S6 the staged player survived its shell going away, so there is something to adopt" \
+   'staged_alive "$stage_pid"'
+export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
+HARNESS_STARTED=1
+"$RUN" --detach --timeout 0 --keep --playlist "$PLAYLIST" >>"$LOG" 2>&1 || bad "S6 the upgraded harness did not come up (see $LOG)"
+wait_log_count 'service loaded' 2 20 || bad "S6 the upgraded shell never loaded"
+# The adoption itself. The DECISION is qa_adopted in scripts/qa-lib.sh, which
+# scripts/qa-lib-test.sh calls for real with no display, including the two
+# natural ways to write it that pass a run where nothing was adopted; what is
+# here is the bounded poll that feeds it. It stops at the first real answer
+# rather than sleeping, because on a tree that migrates and then re-establishes
+# the channel the player's own life is short: `pid` is the window before the
+# refused reload takes it, `gone` is after.
+adopt_witness() {
+  local secs=$1 i verdict alive
+  for ((i = 0; i < secs * 10; i++)); do
+    alive=0; staged_alive "$stage_pid" && alive=1
+    verdict=$(qa_adopted "$(svc "d['pip']['playerPid']")" "$stage_pid" "$alive")
+    case $verdict in
+      pid | gone | other) printf '%s\n' "$verdict"; return 0 ;;
+    esac
+    sleep 0.1
+  done
+  printf 'none\n'
+  printf 'gave up after %ss waiting for the upgraded shell to meet the staged player\n' "$secs" >&2
+  return 1
+}
+s6_adopt=$(adopt_witness 25)
+chunks_at_witness=$(chunks s6)
+ck "S6 the upgraded shell MET the staged player ('$s6_adopt': pid = it named that process, gone = it ended it; 'other' would mean it spawned its own and this segment proves nothing)" \
+   '[[ "$s6_adopt" == pid || "$s6_adopt" == gone ]]'
+# The already-open stream. `wait_closed` giving up IS the finding on a tree that
+# does not migrate: nothing there ever ends that connection, and the player goes
+# on reading a server nobody authenticated. The settle afterwards is four pace
+# intervals and is not about the connection that just closed -- the server writes
+# nothing after its own CLOSED line -- it is about a SECOND fetch of the same
+# path, which is what a reload issued before the properties are migrated looks
+# like from here.
+wait_closed s6 20 || true
+s6_closed=$(closed s6)
+chunks_at_close=$(chunks s6)
+sleep 4
+chunks_after=$(chunks s6)
+s6_stream=$(qa_stream_stopped "$s6_closed" "$chunks_at_close" "$chunks_after")
+printf '   info S6: stage pieces %s -> %s at the adoption -> %s at the close -> %s after a 4 s settle; closes seen %s\n' \
+  "$stage_chunks_before" "$chunks_at_witness" "$chunks_at_close" "$chunks_after" "$s6_closed"
+is "S6 the already-open unverified stream stopped being fed" "$s6_stream" "stopped"
+# The ordering check, from the other side: a reattach that re-establishes the
+# channel BEFORE it migrates the properties fetches from the attacker again, and
+# that fetch lands here whatever path it is on.
+self_after=$(self_hits)
+is "S6 and the attacker logged no new request of any kind across the adoption" \
+   "$(qa_delta "$self_before" "$self_after")" "0"
+# The maintainer's sentence, at the sink: a NEW credentialed URL and NEW provider
+# headers issued after the upgrade.
+echo "== S6 the zap after the adoption: a new channel's URL and headers, into whatever player the upgraded shell now holds"
+ipc play "t:s7" >/dev/null
+s7_outcome=$(outcome "t:s7" s7 40)
+s7_hits=$(hits s7)
+segment_info S6zap s7
+is "S6 the zap issued after the adoption was REFUSED" "$s7_outcome" "refused"
+is "S6 and the attacker's log holds no GET of that channel" "$s7_hits" "0"
+# The control requirement 5 asks for, and it passes on both trees: without it
+# every zero above could be a shell that cannot play anything at all.
+echo "== S6 control: the same shell, the CA-signed provider, which must play on both trees"
+ipc play "t:s8" >/dev/null
+s8_outcome=$(outcome "t:s8" s8 40)
+s8_hits=$(hits s8)
+segment_info S6ctl s8
+is "S6 control: the upgraded shell can still make a player fetch a stream" "$s8_outcome" "played"
+ck "S6 control: and the provider logged that GET (control: $s8_hits)" '(( s8_hits >= 1 ))'
+
 # ============================================================== privacy
 echo "== the credential in the fixture URL reaches no log of ours"
 # qa_leak_scan PRINTS the offending lines, so its output is captured and only
@@ -778,7 +1150,13 @@ echo "== the credential in the fixture URL reaches no log of ours"
 # into this run's transcript, which is the same exposure one layer along. The
 # status is the verdict (0 clean, 1 leak, 2 vacuous) and 2 is never a pass --
 # the control ERE has to match something or the file is not evidence.
-# The harness log covers S5's shell: one whole start, playlist parse and play.
+# The harness log covers S6's TWO shells, which is where it got better rather
+# than worse when S6 was added: the log is truncated once, at the top of S6, and
+# not between its two starts, so this sweeps a whole start, a playlist parse, a
+# play, a shell stop, a reattach, an adoption and three more plays -- every one
+# of them handling a URL that carries the synthetic credential. (The
+# `service loaded` control therefore matches twice here; qa_leak_scan asks only
+# that it match at all, which is what makes the capture evidence.)
 leak_hits=$(qa_leak_scan 'service loaded' "$CRED_PASS|$CRED_USER:" "$HARNESS_LOG"); leak_log=$?
 is "the harness log carries no credential (0 clean, 1 leak, 2 vacuous)" "$leak_log" "0"
 [[ $leak_log == 1 ]] && printf '   %s leaking line(s) in %s; read them there, they are not repeated here\n' \
@@ -800,10 +1178,12 @@ wait_port "$PORT_CA" down 5 || true
 until_eq 0 10 player_count || true
 is "teardown: no player survives the run" "$(player_count)" "0"
 is "teardown: both ports are free again" "$(ss -ltn 2>/dev/null | grep -cE ":($PORT_SELF|$PORT_CA) ")" "0"
-echo "hits: s1=$s1_hits s2=$s2_hits s3=$s3_hits s4=$s4_hits s5=$s5_hits control=$(ctl_hits) refused-handshakes=$(tls_refusals)"
-echo "what the attacker logged for the two cases that must refuse (empty is the point): s1=[$(hit_lines s1)] s3=[$(hit_lines s3)]"
+echo "hits: s1=$s1_hits s2=$s2_hits s3=$s3_hits s4=$s4_hits s5=$s5_hits s6=$(hits s6) s7=$s7_hits s8=$s8_hits control=$(ctl_hits) refused-handshakes=$(tls_refusals)"
+echo "what the attacker logged for the three cases that must refuse (empty is the point): s1=[$(hit_lines s1)] s3=[$(hit_lines s3)] s7=[$(hit_lines s7)]"
+echo "S6: adoption=$s6_adopt stage=$s6_stage stream=$s6_stream attacker GETs across the adoption $self_before -> $self_after"
 if [[ -n $BASELINE ]]; then
-  echo "baseline $BASELINE: S1 and S3 are expected RED here -- 'played', with a GET of the stream in the attacker's own log, is the finding reproduced -- and so are S5's four argv checks and its log check, because --tls-verify is not reserved on that tree and nothing re-asserts it last. S1's 'no player left behind' goes red with them: a player that is playing is not a player a refusal left behind. S2, S4 and G1-G8 pass on both trees; they are controls, not discriminators."
+  echo "baseline $BASELINE: S1 and S3 are expected RED here -- 'played', with a GET of the stream in the attacker's own log, is the finding reproduced -- and so are S5's four argv checks and its log check, because --tls-verify is not reserved on that tree and nothing re-asserts it last. S1's 'no player left behind' goes red with them: a player that is playing is not a player a refusal left behind. S2, S4 and G1-G10 pass on both trees; they are controls, not discriminators."
+  echo "baseline $BASELINE, S6: its two discriminators are expected RED -- the already-open stream reads 'open' (nothing ever closes it, so the wait for a close gives up and says so) and the zap after the adoption reads 'played' with its GET in the attacker's log. D-SINK-16 is reproduced by those two lines alone. S6's stage checks, its adoption witness and its provider control pass on both trees: the stage tree is the same tree either way, and a shell that adopts is a shell that adopts whether or not it migrates anything."
 fi
 
 # The floor, live half. D-PLY-9 was not that an assertion was wrong -- it was
@@ -823,7 +1203,12 @@ fi
 # 33 -> 34: S5's layer-5 check, added at integration when all three
 # reviewers found that --stream-lavf-o reaches FFmpeg's own tls_verify and
 # the trailing re-assertion cannot outvote it.
-EXPECTED_CHECKS=34
+# 34 -> 46, D-SINK-16: G9 and G10 (the paced body, counted by the rig recipe as
+# well) plus S6's ten -- two grading the stage, one that the staged player
+# outlived its shell, the adoption witness, the already-open stream, the
+# attacker's count across the adoption, the zap and its hit log, and the two
+# halves of the provider control.
+EXPECTED_CHECKS=46
 ran=$checks
 is "the scenario ran every check it has" "$ran" "$EXPECTED_CHECKS"
 
