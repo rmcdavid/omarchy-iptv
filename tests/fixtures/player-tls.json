@@ -1,0 +1,164 @@
+{
+  "_comment": [
+    "D-SINK-16. The one rule that decides whether an ADOPTED mpv process is safe",
+    "to hand a credentialed URL and the provider headers to, written once and run",
+    "by both implementations: Model.tlsPropertiesSafe (tests/Model.test.js) and",
+    "tls_properties_safe in bin/omarchy-iptv (tests/test_mpv.py).",
+    "",
+    "`verify` is mpv's `tls-verify` property as its JSON IPC answers it, and",
+    "`optionCount` is how many entries `stream-lavf-o` holds -- a COUNT and never",
+    "the keys or the values, because that map can carry a proxy address with",
+    "credentials in it and the number crosses into the shell (engineering rule 5).",
+    "FFmpeg's own `tls_verify` AVOption outvotes mpv's option (measured,",
+    "D-SINK-13 layer 3), so a non-empty map is unsafe whatever is in it.",
+    "",
+    "The vectors deliberately include the shapes a double would be tempted to",
+    "accept -- 1, \"yes\", false-as-zero -- because mpv answers a flag with a JSON",
+    "boolean and nothing else, and a reader more forgiving than the thing it reads",
+    "is how this exposure survives its own fix.",
+    "",
+    "One shape is deliberately NOT a vector: a count of 0.0. Python's reader",
+    "distinguishes 0.0 from 0 and JavaScript's cannot, so the two mirrors would",
+    "disagree on it. It cannot arise -- the count is len() on a map in the helper",
+    "and the integer that JSON carries in the shell -- and a vector the two",
+    "languages must answer differently would be a vector that teaches the wrong",
+    "lesson. Model.playerTls refuses a fractional count outright for the same",
+    "reason."
+  ],
+  "properties": {
+    "_comment": [
+      "The two mpv property names, which both languages spell as their own",
+      "literal. Nothing joins two literals but a name, so the name is pinned",
+      "here and asserted against each side's constant (CLAUDE.md rule 13): a",
+      "rename on one side only would make every read answer `property not",
+      "found`, which the verdict reads as `stop` - every adopted player in the",
+      "field stopped on reattach."
+    ],
+    "verify": "tls-verify",
+    "streamOptions": "stream-lavf-o"
+  },
+  "cases": [
+    {
+      "name": "verifying and nothing overriding it: the only safe shape",
+      "verify": true,
+      "optionCount": 0,
+      "safe": true
+    },
+    {
+      "name": "a pre-upgrade player: mpv's own default is no",
+      "verify": false,
+      "optionCount": 0,
+      "safe": false
+    },
+    {
+      "name": "verifying, but stream-lavf-o holds something that can outvote it",
+      "verify": true,
+      "optionCount": 1,
+      "safe": false
+    },
+    {
+      "name": "verifying, several stream options",
+      "verify": true,
+      "optionCount": 3,
+      "safe": false
+    },
+    {
+      "name": "the verify reading could not be taken",
+      "verify": null,
+      "optionCount": 0,
+      "safe": false
+    },
+    {
+      "name": "the stream-lavf-o reading could not be taken",
+      "verify": true,
+      "optionCount": null,
+      "safe": false
+    },
+    {
+      "name": "neither reading could be taken",
+      "verify": null,
+      "optionCount": null,
+      "safe": false
+    },
+    {
+      "name": "1 is not true: mpv answers a flag with a boolean",
+      "verify": 1,
+      "optionCount": 0,
+      "safe": false
+    },
+    {
+      "name": "\"yes\" is the command-line spelling, not the property value",
+      "verify": "yes",
+      "optionCount": 0,
+      "safe": false
+    },
+    {
+      "name": "a boolean count must not coerce to zero",
+      "verify": true,
+      "optionCount": false,
+      "safe": false
+    },
+    {
+      "name": "a boolean count must not coerce to one either",
+      "verify": true,
+      "optionCount": true,
+      "safe": false
+    },
+    {
+      "name": "a negative count is not an empty map",
+      "verify": true,
+      "optionCount": -1,
+      "safe": false
+    },
+    {
+      "name": "a fractional count is not a reading len() can produce",
+      "verify": true,
+      "optionCount": 0.5,
+      "safe": false
+    },
+    {
+      "name": "a string count is not a count",
+      "verify": true,
+      "optionCount": "0",
+      "safe": false
+    },
+    {
+      "name": "verify false and options set: the shape the maintainer measured",
+      "verify": false,
+      "optionCount": 1,
+      "safe": false
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "already verifying, nothing to do",
+      "tls": { "verify": true, "optionCount": 0, "migrated": false },
+      "safe": true,
+      "action": "feed"
+    },
+    {
+      "name": "migrated by the probe: the channel is re-established",
+      "tls": { "verify": true, "optionCount": 0, "migrated": true },
+      "safe": true,
+      "action": "reload"
+    },
+    {
+      "name": "the set did not take: stopped rather than fed",
+      "tls": { "verify": false, "optionCount": 0, "migrated": true },
+      "safe": false,
+      "action": "stop"
+    },
+    {
+      "name": "stream options survived the clear: stopped rather than fed",
+      "tls": { "verify": true, "optionCount": 2, "migrated": true },
+      "safe": false,
+      "action": "stop"
+    },
+    {
+      "name": "no readings at all (an older helper, or a player never reached)",
+      "tls": null,
+      "safe": false,
+      "action": "stop"
+    }
+  ]
+}

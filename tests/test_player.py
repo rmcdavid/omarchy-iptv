@@ -824,8 +824,13 @@ class IdempotenceTest(PlayerTestCase):
         # relative order behind it.
         sets = [command[:2] for command in server.commands if command[0] == "set_property"]
         # aid/sid join pause as the properties mpv keeps across a loadfile
-        # and that a new channel must not inherit (M3-02).
-        self.assertEqual(sets[:5], [["set_property", "pause"],
+        # and that a new channel must not inherit (M3-02). D-SINK-16 put the
+        # two certificate properties AHEAD of all of them: they are the only
+        # ones whose failure means "do not load at all", so they are asserted
+        # before the player is told anything about the channel.
+        self.assertEqual(sets[:7], [["set_property", "tls-verify"],
+                                    ["set_property", "stream-lavf-o"],
+                                    ["set_property", "pause"],
                                     ["set_property", "aid"],
                                     ["set_property", "sid"],
                                     ["set_property", "title"],
@@ -1578,6 +1583,126 @@ class ProbeTest(PlayerTestCase):
         self.assertIsNone(payload["pid"])
         self.assertIsNone(payload["stash"])
         self.assertFalse(os.path.exists(self.sock))
+
+
+class ProbeTlsTest(PlayerTestCase):
+    """D-SINK-16's other half: the reattach MIGRATES the player it is about to
+    adopt, and says whether it had to.
+
+    `player probe` is the one moment the shell holds a connection to a process it
+    did not launch and has not yet sent anything to, which is why the migration
+    lives here rather than being left to the next zap. The shell's side of the
+    decision is Model.playerTlsVerdict, run over the same readings in
+    tests/Model.test.js; this class is about what the helper puts in the reply.
+
+    Runtime migration over IPC was MEASURED by the lead on 2026-10-07 (attacker
+    GETs 1 -> 0 on one unchanged process, with a positive control). This lane
+    holds no display and did not re-take that measurement.
+    """
+
+    def probe(self):
+        return run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+
+    def test_a_pre_upgrade_player_is_migrated_and_the_reply_says_so(self):
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False,
+                                   "stream-lavf-o": {"tls_verify": "0"}})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "migrated": True})
+        self.assertIs(server.props["tls-verify"], True)
+        self.assertEqual(server.props["stream-lavf-o"], {})
+        # And it is the first thing the probe does with the player after the
+        # connection handshake (probe_client's own `mpv-version` read, which is
+        # what "is anything answering" means here): whatever else this verb
+        # learns, it does not learn it from a process it has not secured, and it
+        # does not write the owner claim onto one either.
+        names = [c[:2] for c in server.commands]
+        self.assertEqual(names[:2], [["get_property", "mpv-version"], ["get_property", "tls-verify"]])
+        self.assertLess(names.index(["set_property", "tls-verify"]),
+                        names.index(["get_property", helper.USER_DATA_STASH]))
+        self.assertLess(names.index(["set_property", "stream-lavf-o"]),
+                        names.index(["get_property", helper.USER_DATA_STASH]))
+
+    def test_a_player_already_verifying_is_reported_as_nothing_to_do(self):
+        """The upgraded player, and the second probe over a migrated one. It must
+        answer `migrated: False`, or every poll would cost the user a rebuffer."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": True})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "migrated": False})
+        self.assertEqual([c for c in server.commands if c[:2] == ["set_property", "tls-verify"]], [])
+
+    def test_a_set_that_does_not_take_is_reported_unsafe_rather_than_hidden(self):
+        """What the shell turns into a stop. The reply carries the readings it
+        actually ended up with, so `migrated: True` with an unsafe reading is
+        "I had to act and it did not work" rather than "all is well"."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False}, refuse={"tls-verify"})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "migrated": True})
+        self.assertFalse(helper.tls_properties_safe(payload["tls"]["verify"], payload["tls"]["optionCount"]))
+
+    def test_an_unreadable_property_is_reported_as_no_reading(self):
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        self.start(props={"mpv-version": "mpv 0.41.0"}, missing={"tls-verify"})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertIsNone(payload["tls"]["verify"])
+        self.assertFalse(helper.tls_properties_safe(payload["tls"]["verify"], payload["tls"]["optionCount"]))
+
+    def test_a_player_that_was_never_reached_carries_no_readings_at_all(self):
+        """`tls: null`, which Model.playerTlsVerdict answers "stop" to. An absent
+        node must never be the shape that reads as safe."""
+        os.makedirs(self.runtime, 0o700)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(self.sock)
+        listener.close()
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertIsNone(payload["tls"])
+
+    def test_the_reply_carries_a_count_and_never_a_key_or_a_value(self):
+        """Rule 5. `stream-lavf-o` can hold a proxy address with credentials in
+        it, and this reply crosses a process boundary into the shell."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False,
+                          "stream-lavf-o": {"tls_verify": "0", "http_proxy": "http://u:pw@proxy.test/x"}},
+                   refuse={"stream-lavf-o"})
+        code, payload, stdout, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 2, "migrated": True})
+        for secret in ("u:pw", "proxy.test", "http_proxy", "tls_verify"):
+            self.assertNotIn(secret, stdout + stderr, secret)
+
+    def test_mutating_the_migration_into_a_read_lets_the_shell_adopt_it_anyway(self):
+        """Rule 11 where there is no `before`: break the one decision and watch
+        the reply go quiet about it. With migrate_tls reduced to a read, the
+        pre-upgrade player answers `migrated: False` - which the shell reads as
+        `feed`, adopting an unverified player without re-establishing anything.
+        """
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False})
+        original = helper.migrate_tls
+
+        def read_only(client):
+            verify, count = helper.read_tls_state(client)
+            return {"verify": verify, "optionCount": count, "migrated": False}
+        helper.migrate_tls = read_only
+        self.addCleanup(setattr, helper, "migrate_tls", original)
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "migrated": False},
+                         "the mutation must be visible in the reply, or the tests above are decoration")
+        self.assertIs(server.props["tls-verify"], False)
 
 
 class OrphanCheckTest(PlayerTestCase):

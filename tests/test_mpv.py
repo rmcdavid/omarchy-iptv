@@ -73,6 +73,19 @@ class FakeMpv:
     5 of 5). `seek_moves=False` is the underrun case: a target inside the
     range that still moves nothing. `show-text` is recorded in `osd`.
 
+    D-SINK-16 taught it the two certificate properties, and taught it that a
+    `set_property` on an ordinary property is READABLE afterwards -- which is
+    what real mpv does and what this fake used to answer `property not found`
+    to, making it MORE forgiving than mpv in the one direction that matters
+    here (CLAUDE.md rule 10): the shipping code now reads `tls-verify` back
+    rather than trusting the set reply, and a fake that could not answer a
+    read-back would have let that read look impossible. The seeded defaults are
+    mpv 0.41's own (`tls-verify` NO, `stream-lavf-o` empty), so a FakeMpv with
+    no `props` is a player launched the way 0.12.1 launched one; `props` and
+    `refuse` between them express the upgraded player and the player whose set
+    does not take, and `missing` expresses a property that cannot be read at
+    all.
+
     And the ordering mpv really has (F-RWD-15, measured 2026-10-03): the
     reply to `seek` means QUEUED. The position moves, the `seek` event is
     sent to every client and -- for a dropped seek -- the refusal line is
@@ -87,11 +100,20 @@ class FakeMpv:
     """
 
     REFUSAL_LINE = "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"
+    # mpv 0.41's own defaults for the two D-SINK-16 properties: `--tls-verify`
+    # defaults to NO (`mpv --list-options`), and `stream-lavf-o` is an empty
+    # key-value map that the JSON IPC answers as {}.
+    TLS_DEFAULTS = {"tls-verify": False, "stream-lavf-o": {}}
 
     def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True,
-                 entry_ids=True, user_data=None, seek_moves=True, seek_lag_s=0.0, seek_silent=False):
+                 entry_ids=True, user_data=None, seek_moves=True, seek_lag_s=0.0, seek_silent=False,
+                 missing=()):
         self.path = path
-        self.props = props or {}
+        self.props = dict(self.TLS_DEFAULTS)
+        self.props.update(props or {})
+        self.missing = set(missing)
+        for name in self.missing:
+            self.props.pop(name, None)
         self.event_first = event_first
         self.silent = silent
         self.refuse = set(refuse)
@@ -196,8 +218,11 @@ class FakeMpv:
             return {"error": "success", "request_id": request_id}
         if command[0] == "get_property":
             name = command[1]
-            if name in self.props:
-                return {"error": "success", "data": self.props[name], "request_id": request_id}
+            if name in self.missing:
+                return {"error": "property not found", "request_id": request_id}
+            with self.lock:
+                if name in self.props:
+                    return {"error": "success", "data": self.props[name], "request_id": request_id}
             if name.startswith("user-data/"):
                 node = name.split("/", 1)[1]
                 with self.lock:
@@ -219,6 +244,14 @@ class FakeMpv:
                 with self.lock:
                     self.user_data[name.split("/", 1)[1]] = command[2]
                 return {"error": "success", "request_id": request_id}
+            # Real mpv stores it, and a later get_property answers with it. A
+            # fake that answered `property not found` to the read-back of its
+            # own write is more forgiving than mpv in exactly the direction
+            # D-SINK-16's fix depends on (rule 10). A name in `missing` stays
+            # unreadable: that is the wedged / too-old player.
+            if name not in self.missing:
+                with self.lock:
+                    self.props[name] = command[2]
             return {"error": "success", "data": None, "request_id": request_id}
         if command[0] == "loadfile" and self.entry_ids:
             with self.lock:
@@ -320,6 +353,13 @@ class PlayTest(MpvTestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload, {"ok": True, "kind": "play", "id": "t:espn.us", "name": "ESPN"})
         self.assertEqual(server.commands, [
+            # D-SINK-16: asserted and READ BACK before anything else, because
+            # everything below this is the act of telling an unverified process
+            # about a channel.
+            ["set_property", "tls-verify", True],
+            ["set_property", "stream-lavf-o", {}],
+            ["get_property", "tls-verify"],
+            ["get_property", "stream-lavf-o"],
             ["set_property", "pause", False],
             ["set_property", "aid", "auto"],
             ["set_property", "sid", "auto"],
@@ -359,6 +399,10 @@ class PlayTest(MpvTestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload["name"], "BBC One HD")
         self.assertEqual(server.commands, [
+            ["set_property", "tls-verify", True],
+            ["set_property", "stream-lavf-o", {}],
+            ["get_property", "tls-verify"],
+            ["get_property", "stream-lavf-o"],
             ["set_property", "pause", False],
             ["set_property", "aid", "auto"],
             ["set_property", "sid", "auto"],
@@ -476,6 +520,182 @@ class PlayTest(MpvTestCase):
         self.assertIn(["set_property", "force-media-title", "${path} ${options/input-ipc-server}"], server.commands)
         self.assertEqual(sum(1 for c in server.commands if c[:2] == ["set_property", "title"]), 1)
         self.assertNotIn("user:pw", stdout + stderr)
+
+
+class TlsVerificationTest(MpvTestCase):
+    """D-SINK-16: apply_channel asserts the certificate properties, and REFUSES
+    to load when it cannot make them safe.
+
+    The maintainer raised this against the SHIPPED 0.13.0
+    (omacom/omarchy-plugin-marketplace#10389): 0.13.0 made every player this
+    plugin LAUNCHES verify, by four layers that all live on the launch argv, and
+    an adopted player's argv belongs to whatever version started it. Our own
+    filing (D-PLY-25) called that stale state a user could restart away; he named
+    the part that makes it live, which is that the helper goes on sending that
+    same process new provider headers and new credentialed URLs.
+
+    The failure case is the point of this class. `pause`, `aid` and `sid` are
+    best effort because getting them wrong costs a black screen; TLS is not,
+    because loading is the act of handing over the credential. `refuse` is the
+    set that does not take and `missing` is the property that cannot be read -
+    FakeMpv answers both the way mpv does (see its docstring, rule 10).
+    """
+
+    FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "player-tls.json"
+    LOADFILE = ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"]
+
+    def test_the_property_names_are_the_fixture_and_not_a_second_copy(self):
+        """Rule 13: two literals joined by a name are joined by nothing. The
+        shared fixture names them and Model.test.js asserts its own constants
+        against the same two strings."""
+        names = json.loads(self.FIXTURE.read_text(encoding="utf-8"))["properties"]
+        self.assertEqual([helper.MPV_TLS_VERIFY_PROP, helper.MPV_STREAM_OPTS_PROP],
+                         [names["verify"], names["streamOptions"]])
+
+    def test_the_shared_fixture_decides_the_rule_in_both_languages(self):
+        """Rule 12: one fixture, both implementations. tests/Model.test.js runs
+        the same cases through Model.tlsPropertiesSafe."""
+        cases = json.loads(self.FIXTURE.read_text(encoding="utf-8"))["cases"]
+        self.assertGreaterEqual(len(cases), 15)
+        got = ["%s: %s" % (c["name"], helper.tls_properties_safe(c["verify"], c["optionCount"])) for c in cases]
+        want = ["%s: %s" % (c["name"], c["safe"]) for c in cases]
+        self.assertEqual(got, want)
+        # The vectors that matter most are the ones a more forgiving reader would
+        # wave through, so assert the fixture still carries them.
+        self.assertIn(1, [c["verify"] for c in cases])
+        self.assertIn(False, [c["optionCount"] for c in cases])
+        self.assertEqual([c["safe"] for c in cases].count(True), 1)
+
+    def test_both_properties_are_set_and_read_back_before_the_loadfile(self):
+        server = self.start()
+        code, _, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        names = [c[:2] for c in server.commands]
+        load = server.commands.index(self.LOADFILE)
+        for command in (["set_property", "tls-verify"], ["set_property", "stream-lavf-o"],
+                        ["get_property", "tls-verify"], ["get_property", "stream-lavf-o"]):
+            self.assertIn(command, names, command)
+            self.assertLess(names.index(command), load, command)
+        # In that order, and the set before its own read-back: a read taken
+        # first would grade the player as it was found, not as it was left.
+        self.assertLess(names.index(["set_property", "tls-verify"]), names.index(["set_property", "stream-lavf-o"]))
+        self.assertLess(names.index(["set_property", "tls-verify"]), names.index(["get_property", "tls-verify"]))
+        self.assertLess(names.index(["set_property", "stream-lavf-o"]), names.index(["get_property", "stream-lavf-o"]))
+        # And the values are the safe ones, not merely the right properties.
+        self.assertIn(["set_property", "tls-verify", True], server.commands)
+        self.assertIn(["set_property", "stream-lavf-o", {}], server.commands)
+
+    def test_a_pre_upgrade_player_is_migrated_and_then_loaded(self):
+        """The exposure, closed: a player with mpv's own defaults and a stale
+        `tls_verify=0` left in `stream-lavf-o` by a user argument 0.12.1 did not
+        reserve. Both are gone before the URL goes out, and the channel plays."""
+        server = self.start(props={"tls-verify": False, "stream-lavf-o": {"tls_verify": "0"}})
+        code, payload, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["ok"])
+        self.assertIn(self.LOADFILE, server.commands)
+        self.assertIs(server.props["tls-verify"], True)
+        self.assertEqual(server.props["stream-lavf-o"], {})
+
+    def test_a_player_already_verifying_is_left_as_it_is_and_loaded(self):
+        server = self.start(props={"tls-verify": True})
+        code, payload, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["ok"])
+        self.assertIn(self.LOADFILE, server.commands)
+        self.assertIs(server.props["tls-verify"], True)
+
+    def test_a_refused_tls_verify_aborts_before_the_loadfile(self):
+        server = self.start(refuse={"tls-verify"})
+        code, payload, stdout, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["kind"], "play")
+        self.assertEqual(payload["error"]["code"], "tls_unverified")
+        self.assertNotIn(self.LOADFILE, server.commands)
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+        # And nothing about the channel reached it either: the refusal is raised
+        # before the title, so an unsecurable player is not even relabelled.
+        self.assertEqual([c for c in server.commands if c[:2] == ["set_property", "title"]], [])
+        self.assertEqual([c for c in server.commands if c[:2] == ["set_property", "http-header-fields"]], [])
+        # Rule 5: the refusal names no URL and no header value, on either stream.
+        for secret in ("espn.m3u8", "stream.example.test", "VLC/3.0.20", "ref.example.test"):
+            self.assertNotIn(secret, stdout + stderr, secret)
+
+    def test_a_refused_stream_lavf_o_clear_aborts_before_the_loadfile(self):
+        """The layer-3 shape: mpv's own flag says yes while FFmpeg's AVOption
+        says no, and the AVOption wins (measured, D-SINK-13). A clear that does
+        not take is therefore a refusal, not a warning."""
+        server = self.start(props={"tls-verify": True, "stream-lavf-o": {"tls_verify": "0"}},
+                            refuse={"stream-lavf-o"})
+        code, payload, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "tls_unverified")
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+
+    def test_an_unreadable_property_aborts_before_the_loadfile(self):
+        """A set that answers `success` is a statement about the request, not
+        about the value, so the read-back is the judge - and a player that
+        cannot be read is not a player that can be graded safe."""
+        for name in ("tls-verify", "stream-lavf-o"):
+            with self.subTest(property=name):
+                server = self.start(missing={name})
+                code, payload, _, _ = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"]["code"], "tls_unverified")
+                self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+                server.close()
+                self.server = None
+
+    def test_the_refusal_is_a_failed_play_and_not_a_silent_no_op(self):
+        """The caller has to treat it as a failed play: exit 1, an `ok: false`
+        reply with the stable code the shell switches on, and a journal line.
+        Model.playFailureVerdict("tls_unverified") is "failed" on the other side
+        of that boundary (tests/Model.test.js)."""
+        self.start(refuse={"tls-verify"})
+        code, payload, stdout, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 1)
+        self.assertIs(payload["ok"], False)
+        self.assertEqual(payload["error"]["code"], "tls_unverified")
+        self.assertIn("verify", payload["error"]["message"])
+        self.assertIn("tls-verify", stderr)
+        self.assertEqual(len(stdout.strip().splitlines()), 1)
+
+    def test_the_journal_line_carries_the_readings_and_nothing_out_of_the_map(self):
+        """Diagnosable without being a sink: a three-valued flag and a count.
+        `stream-lavf-o` can hold a proxy address with credentials in it."""
+        self.start(props={"stream-lavf-o": {"tls_verify": "0", "http_proxy": "http://u:pw@proxy.test"}},
+                   refuse={"tls-verify", "stream-lavf-o"})
+        code, payload, stdout, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "tls_unverified")
+        self.assertIn("tls-verify reads False", stderr)
+        self.assertIn("stream-lavf-o holds 2 entries", stderr)
+        for secret in ("u:pw", "proxy.test", "http_proxy", "tls_verify"):
+            self.assertNotIn(secret, stdout + stderr, secret)
+
+    def test_mutating_the_refusal_into_best_effort_lets_the_url_out(self):
+        """Rule 11 where there is no `before`: break the one decision this
+        function exists to make and watch the load happen anyway.
+
+        assert_tls_verification() differs from its three neighbours in exactly
+        one way - it raises instead of shrugging - so the mutation is to shrug.
+        If this passes, the test above it is proving nothing.
+        """
+        server = self.start(refuse={"tls-verify"})
+        original = helper.assert_tls_verification
+
+        def best_effort(client, label):
+            try:
+                original(client, label)
+            except helper.HelperError:
+                return
+        helper.assert_tls_verification = best_effort
+        self.addCleanup(setattr, helper, "assert_tls_verification", original)
+        code, payload, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, "the mutation must reach the load, or the test above is decoration")
+        self.assertTrue(payload["ok"])
+        self.assertIn(self.LOADFILE, server.commands)
+        self.assertIs(server.props["tls-verify"], False)
 
 
 class StopTest(MpvTestCase):

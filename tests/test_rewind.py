@@ -642,17 +642,20 @@ class RewindInOtherRepliesTest(RewindPlayerTestCase):
         self.assertTrue(payload["rewind"]["paused"])
         self.assertEqual(payload["rewind"]["position"], 400.617)
         self.assertEqual(server.user_data["omarchy-iptv-rewind"]["pos0"], 400.617)
-        # FakeMpv's `pause` prop does not follow a set (it never has), so the
-        # resume is driven by flipping the prop: a change back, then a no-op.
-        server.props["pause"] = True
-        code, payload, _, _ = run("player", "pause", "--socket", self.sock, "--ipc-timeout", "1", "--state", "off")
-        self.assertEqual(code, 0)
-        self.assertEqual((payload["paused"], payload["changed"]), (False, True))
-        self.assertFalse(payload["rewind"]["paused"])
+        # FakeMpv's `pause` prop FOLLOWS a set now, the way mpv's does: the
+        # fake used to answer its own write with the old value, and D-SINK-16
+        # had to fix that because the shipping code now reads `tls-verify` back
+        # instead of trusting the set reply (rule 10). So the no-op case is
+        # driven by asking for the state the player is already in, rather than
+        # by flipping the property behind the helper's back.
         # Already in the wanted state: still answered, still carrying it.
         code, payload, _, _ = run("player", "pause", "--socket", self.sock, "--ipc-timeout", "1", "--state", "on")
         self.assertEqual((payload["paused"], payload["changed"]), (True, False))
         self.assertTrue(payload["rewind"]["paused"])
+        code, payload, _, _ = run("player", "pause", "--socket", self.sock, "--ipc-timeout", "1", "--state", "off")
+        self.assertEqual(code, 0)
+        self.assertEqual((payload["paused"], payload["changed"]), (False, True))
+        self.assertFalse(payload["rewind"]["paused"])
 
     def test_pause_without_a_player_carries_null(self):
         code, payload, _, _ = run("player", "pause", "--socket", self.sock, "--ipc-timeout", "1", "--state", "on")

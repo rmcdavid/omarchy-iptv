@@ -575,6 +575,13 @@ Item {
   // back - is the newer word and must not be overruled by the older answer.
   property int probeSeq: 0
   property bool reconcilePending: false     // resolve nowPlaying once the cache lands
+  // D-SINK-16: this shell adopted a player that was not verifying the stream's
+  // certificate, the probe has migrated it, and the channel it is already
+  // streaming must be re-established before anything else is sent to it. Set
+  // from the probe's verdict, never cleared by it (an ambiguous first probe
+  // migrates and the retry then has nothing to report), and spent by
+  // reestablishForTls().
+  property bool tlsReloadPending: false
   property string playerSourceKey: ""       // the source the recovered stash belongs to
   property int playerSocketError: 0         // last QLocalSocket::LocalSocketError, diagnostics only
   // A stop whose EOF never came, so the ladder did not end the player. The
@@ -794,6 +801,11 @@ Item {
     // -- not to zero -- until the player reports again, and a seek that was
     // waiting its turn was aimed at the stream this play replaces.
     root.clearRewind()
+    // D-SINK-16: and it subsumes a reload owed for the channel this play
+    // replaces. The load about to go out asserts the same properties and
+    // refuses rather than loads, so re-establishing the old channel afterwards
+    // would buy a second rebuffer and nothing else.
+    root.tlsReloadPending = false
     // A new play puts the last failure behind us: the next guide open is a
     // fresh start, not a come-back.
     root.lastFailedId = ""
@@ -1843,6 +1855,9 @@ Item {
     // A now-playing recovered from the player's stash resolves against the
     // cache the moment it lands (4.5); until then it is name-only.
     root.reconcileNowPlaying()
+    // And D-SINK-16's reload needs the same arrival: the helper resolves the id
+    // against this cache directory, which the reattach ran before.
+    root.reestablishForTls()
   }
 
   // D-ID-3. Move the loaded state onto the id scheme of the channel set that
@@ -2612,6 +2627,27 @@ Item {
       root.stopForeignPlayer()
       return
     }
+    // D-SINK-16, and BEFORE the stash is looked at, for two reasons. The
+    // readings decide whether this player may be fed at all, and that question
+    // outranks which channel it is on; and the ambiguous-stash branch below
+    // RETURNS to be retried 500 ms later, by which time the helper's own
+    // migration has already happened and the second probe would honestly report
+    // nothing to do - so the flag has to be taken on the first answer that
+    // carries it. Only ever set here, never cleared (the property's comment).
+    //
+    // 0.13.0 made every player this plugin LAUNCHES verify (D-SINK-13), but
+    // every one of those four layers lives on the launch argv, and an adopted
+    // player's argv is whatever the version that started it wrote. The
+    // maintainer raised exactly that against the shipped 0.13.0 (#10389): we
+    // were not merely leaving a stale setting there, we were sending that
+    // process new provider headers and new credentialed URLs.
+    var tls = Model.playerTlsVerdict(probe.tls)
+    if (!tls.safe) {
+      console.warn("omarchy-iptv: the player will not verify the stream's certificate, stopping it")
+      root.stopUnadoptedPlayer("unverified")
+      return
+    }
+    if (tls.action === "reload") root.tlsReloadPending = true
     var stash = probe.stash
     if (stash === null || stash.playing !== true || probe.idle === true) {
       // Under --idle=once an idle player exists only between spawn and the
@@ -2664,6 +2700,45 @@ Item {
     root.armPlayerSocket()
     playerWatchdog.restart()
     root.reconcileNowPlaying()
+    root.reestablishForTls()
+  }
+
+  // D-SINK-16's second half: the player has been MIGRATED, and now the channel
+  // it is already streaming is re-established so that nothing continues on a
+  // connection that was opened without verification.
+  //
+  // THE RELOAD IS DELIBERATE AND IT IS NOT BELT-AND-BRACES. Setting
+  // `tls-verify` covers the NEXT load - that much the lead measured on
+  // 2026-10-07, attacker GETs 1 -> 0 on one unchanged process. Whether an
+  // ALREADY-OPEN stream picks the change up for its ongoing segment fetches was
+  // NOT measured, and this does not assume either answer: it closes the
+  // connection and opens a new one, which makes the unmeasured behaviour
+  // irrelevant instead of trusted. The cost is one visible rebuffer, once, on
+  // the first reattach after an upgrade - a player this shell started is
+  // already verifying, so it answers "feed" and nothing here fires.
+  //
+  // It waits for `activeCacheDir`, because the helper resolves a channel id
+  // against the cache DIRECTORY and the reattach deliberately runs before that
+  // exists (the stash names the channel ~130 ms in; the cache lands later). So
+  // this is called from both of reconcileNowPlaying()'s own call sites and
+  // delivers on whichever is late. Residual, stated rather than hidden: if the
+  // cache never lands at all - no source configured - the reload never fires
+  // and that one already-open connection runs to the end of its stream
+  // unverified. Every LATER load on that player is verified by the migration
+  // and by apply_channel's refusal.
+  function reestablishForTls() {
+    if (!root.tlsReloadPending) return false
+    if (root.stopping || root.userStopped || root.nowPlaying === null) {
+      // Nothing of ours is playing any more: whatever replaces it goes through
+      // apply_channel, which asserts the same thing and refuses rather than
+      // loads.
+      root.tlsReloadPending = false
+      return false
+    }
+    if (root.activeCacheDir === "" || !root.playerUp) return false
+    root.tlsReloadPending = false
+    console.warn("omarchy-iptv: re-establishing the channel on an adopted player that was not verifying certificates")
+    return root.reapplyIntent(String(root.nowPlaying.id))
   }
 
   // Ruling PO-3. The probe says nothing is running; if state.json still
@@ -2721,13 +2796,25 @@ Item {
   // a version that did not stash its identity (migration, section 8). It
   // ends in nothing playing, so the session record goes with it.
   function stopForeignPlayer() {
+    return root.stopUnadoptedPlayer("foreign")
+  }
+
+  // The same ladder under a second name, because D-SINK-16 ends in it for a
+  // different reason and the session record should say which: a player that
+  // could not be made to verify the stream's certificate is stopped rather than
+  // fed, and that is not the same event as a player we could not identify.
+  function stopUnadoptedPlayer(outcome) {
     root.playSeq += 1
     root.playerWanted = false
     playerSocketTimer.stop()
     root.playerPending = false
     root.nowPlaying = null
-    root.noteSessionOutcome("foreign")
+    // Nothing of ours plays now, so a reload owed to D-SINK-16 is owed to
+    // nothing.
+    root.tlsReloadPending = false
+    root.noteSessionOutcome(outcome)
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
+    return true
   }
 
   // The second half of the reattach: the stash named the channel, the cache

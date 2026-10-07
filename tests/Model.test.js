@@ -4735,7 +4735,7 @@ check("playerStash reads a record written before the writer was named", Model.pl
 const probeFixture = playerFixture.playerProbe
 const probeBody = JSON.stringify(probeFixture.reply)
 check("parsePlayerProbe: a live player, from the shared vector",
-  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind } })(),
+  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind, tls: p.tls } })(),
   probeFixture.parsed)
 // M5-01: the reattach read. The key is pinned on both sides like `pid`, and a
 // probe without it (an older helper) parses to null rather than to zero.
@@ -4769,6 +4769,111 @@ check("parsePlayerProbe never throws: garbage, truncated, wrong kind, error repl
   Model.parsePlayerProbe("").valid, Model.parsePlayerProbe(null).valid
 ], [false, false, false, false, false, false])
 check("parsePlayerProbe: a foreign or pre-M2-02 player has no stash", (() => { const p = Model.parsePlayerProbe(JSON.stringify({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 7, idle: true, stash: { schema: 1 }, owner: null, seq: 0 })); return [p.valid, p.running, p.idle, p.stash, p.owner] })(), [true, true, true, null, null])
+// ---- D-SINK-16: is an adopted player safe to feed? ----
+//
+// Raised by the marketplace maintainer against the SHIPPED 0.13.0 (#10389): the
+// reattach path adopted a player without migrating its TLS setting, and the
+// helper then sent that same process new provider headers and new credentialed
+// URLs. These call the rule rather than grepping for it (rule 14), and the
+// vectors are the file bin/omarchy-iptv runs too (rule 12).
+const tlsFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-tls.json"), "utf8"))
+checkCall("tlsPropertiesSafe: the shared fixture, every case, by name",
+  () => tlsFixture.cases.map(c => c.name + ": " + Model.tlsPropertiesSafe(c.verify, c.optionCount)),
+  tlsFixture.cases.map(c => c.name + ": " + c.safe))
+// The fixture earns its keep only if it holds both answers and the readings that
+// cannot be taken at all.
+check("tlsPropertiesSafe: the fixture has a safe case, unsafe cases, and both absent readings",
+  [tlsFixture.cases.filter(c => c.safe === true).length, tlsFixture.cases.filter(c => c.safe === false).length,
+   tlsFixture.cases.some(c => c.verify === null), tlsFixture.cases.some(c => c.optionCount === null)],
+  [1, 14, true, true])
+checkCall("playerTlsVerdict: the shared verdicts, every case, by name",
+  () => tlsFixture.verdicts.map(v => { const got = Model.playerTlsVerdict(v.tls); return v.name + ": " + got.safe + "/" + got.action }),
+  tlsFixture.verdicts.map(v => v.name + ": " + v.safe + "/" + v.action))
+// The reading is three-valued and a count is a count. A reader that let `false`
+// coerce to 0 would read an unreadable player as SAFE, which is the one error
+// whose cost is the credential.
+checkCall("playerTls: a missing node, junk, and the shapes that must not read as zero", () => [
+  Model.playerTls(undefined), Model.playerTls(null), Model.playerTls("tls-verify=yes"), Model.playerTls(7),
+  Model.playerTls({ verify: true, optionCount: 0 }),
+  Model.playerTls({ verify: "yes", optionCount: false, migrated: 1 }),
+  Model.playerTls({ verify: true, optionCount: 0.5 }),
+  Model.playerTls({ verify: true, optionCount: -1 })
+], [null, null, null, null,
+  { verify: true, optionCount: 0, migrated: false },
+  { verify: null, optionCount: null, migrated: false },
+  { verify: true, optionCount: null, migrated: false },
+  { verify: true, optionCount: null, migrated: false }])
+// `migrated` is the whole of the difference between "adopt it" and "adopt it and
+// re-establish the channel on it", so it is strict about what counts as true.
+checkCall("playerTlsVerdict: only a true `migrated` asks for the reload", () => [
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: true }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: false }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: "yes" }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0 }).action
+], ["reload", "feed", "feed", "feed"])
+// An unsafe player is "stop" whatever else the node says, including the case
+// where the helper never managed to set anything.
+checkCall("playerTlsVerdict: unsafe is stop, and so is a node that is not there", () => [
+  Model.playerTlsVerdict(null).action, Model.playerTlsVerdict(undefined).action,
+  Model.playerTlsVerdict({}).action,
+  Model.playerTlsVerdict({ verify: false, optionCount: 0, migrated: false }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 1, migrated: true }).action,
+  Model.playerTlsVerdict(null).safe, Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: true }).safe
+], ["stop", "stop", "stop", "stop", "stop", false, true])
+// The node is pinned on both sides like `pid` and `rewind`: a helper that
+// dropped it reads as "stop", never as "feed".
+checkCall("parsePlayerProbe: `tls` comes off the shared vector, and absent reads null", () => [
+  probeFixture.keys.indexOf("tls") >= 0,
+  Model.parsePlayerProbe(probeBody).tls,
+  Model.playerTlsVerdict(Model.parsePlayerProbe(probeBody).tls).action,
+  (() => { const bare = Object.assign({}, probeFixture.reply); delete bare.tls; return Model.parsePlayerProbe(JSON.stringify(bare)).tls })(),
+  Model.playerTlsVerdict(Model.parsePlayerProbe("junk").tls).action
+], [true, { verify: true, optionCount: 0, migrated: false }, "feed", null, "stop"])
+// The property names cross the JS/python boundary as literals on both sides, so
+// they are pinned here the way MPV_TLS_VERIFY is: a rename on one side and not
+// the other would make every read answer "property not found", which reads as
+// "stop" - visible, but it would stop every adopted player in the field.
+check("the two property names the helper and the shell must spell the same",
+  [Model.MPV_TLS_VERIFY_PROP, Model.MPV_STREAM_OPTS_PROP],
+  [tlsFixture.properties.verify, tlsFixture.properties.streamOptions])
+check("and the fixture names them, so the join is a call and not a copy",
+  [tlsFixture.properties.verify, tlsFixture.properties.streamOptions], ["tls-verify", "stream-lavf-o"])
+// WHAT THIS PAIR IS AND IS NOT (rule 14, said out loud rather than implied).
+// Everything above calls the shipping rule. These two read Service.qml as TEXT,
+// because nothing in this suite can run a Quickshell component, and a regex over
+// a file CANNOT go red for the failure the fix exists to prevent - an adopted
+// player that goes on streaming unverified. They are wiring pins: they catch the
+// decision being deleted or routed somewhere else, which is the failure mode this
+// fix's own predecessor had (D-PLY-25 filed it and nothing acted). The behaviour
+// claim belongs to the live end-to-end pass on a real mpv, and is UNVERIFIED by
+// this suite - see the runnable steps left with D-SINK-16.
+check("wiring pin, not a behaviour test: the reattach asks the rule before it adopts", [
+  /var tls = Model\.playerTlsVerdict\(probe\.tls\)/.test(serviceSource),
+  // The verdict is taken BEFORE the stash branch, because that branch returns to
+  // be retried and the second probe honestly has nothing left to report.
+  serviceSource.indexOf("Model.playerTlsVerdict(probe.tls)") < serviceSource.indexOf("var stash = probe.stash"),
+  // Unsafe ends in the ladder, not in an adoption.
+  /if \(!tls\.safe\) \{[\s\S]{0,220}?stopUnadoptedPlayer\("unverified"\)[\s\S]{0,40}?return/.test(serviceSource),
+  // And the flag is only ever SET from the verdict.
+  (serviceSource.match(/root\.tlsReloadPending = true/g) || []).length
+], [true, true, true, 1])
+check("wiring pin, not a behaviour test: the reload is delivered from both places the cache can land", [
+  (serviceSource.match(/root\.reestablishForTls\(\)/g) || []).length,
+  // It re-sends the user's own intent, which is the only repair ruling CL5
+  // allows, rather than inventing a second load path.
+  /function reestablishForTls\(\)[\s\S]{0,900}?root\.reapplyIntent\(String\(root\.nowPlaying\.id\)\)/.test(serviceSource),
+  // It waits for the cache directory the helper resolves the id against.
+  /function reestablishForTls\(\)[\s\S]{0,900}?root\.activeCacheDir === ""/.test(serviceSource)
+], [2, true, true])
+// The helper's refusal has to land as a FAILED play rather than a silent no-op:
+// `tls_unverified` is not retryable (it will not fix itself) and not unreadable
+// (we know exactly what happened), so it takes the rollback branch and the user
+// is told. Called, not asserted about.
+check("a refused load for D-SINK-16 is a failed play, and it has words for the user", [
+  Model.playFailureVerdict("tls_unverified", { playerUp: true, nowPlaying: true, userStopped: false, retriesLeft: true }),
+  Model.playFailureVerdict("tls_unverified", { playerUp: false, nowPlaying: false, userStopped: false, retriesLeft: false }),
+  Model.statusReason({ ok: false, error: { code: "tls_unverified", message: "the player would not verify the stream's certificate" } })
+], ["failed", "failed", "The player would not verify the stream"])
 
 // ---- the event router (4.8) ----
 check("parsePlayerEvent: start-file", Model.parsePlayerEvent('{"event":"start-file","playlist_entry_id":2}'), { kind: "start-file", entryId: 2 })
@@ -5420,12 +5525,24 @@ const noteOutcome = (svc, outcome) => {
 const reattachMarks = (svc) => Model.deadSessionVerdict(svc.userState, true, {}, "21:30").failed
 const playingService = () => ({ userState: sessionState, deadSessionPending: false, writes: 0 })
 
-check("the outcome vocabulary is exactly the thirteen answers Service.qml can get", Model.PLAYER_OUTCOMES.slice().sort(), ["abandoned", "attached", "ended", "failed", "foreign", "loaded", "marked", "mpvMissing", "relaunching", "respawning", "retrying", "stopped", "superseded"])
-check("a player that is still there or still coming keeps the record; every ending retires it", Model.PLAYER_OUTCOMES.map(o => Model.sessionAfterOutcome(sessionState, o).terminal), [false, false, false, false, false, false, true, true, true, true, true, true, true])
+// D-SINK-16 made it fourteen: a player stopped because it could not be made to
+// verify the stream's certificate is its own ending, not a player we failed to
+// identify, and the record has to say which.
+check("the outcome vocabulary is exactly the fourteen answers Service.qml can get", Model.PLAYER_OUTCOMES.slice().sort(), ["abandoned", "attached", "ended", "failed", "foreign", "loaded", "marked", "mpvMissing", "relaunching", "respawning", "retrying", "stopped", "superseded", "unverified"])
+check("a player that is still there or still coming keeps the record; every ending retires it", Model.PLAYER_OUTCOMES.map(o => Model.sessionAfterOutcome(sessionState, o).terminal), [false, false, false, false, false, false, true, true, true, true, true, true, true, true])
+// Written as a map from the WORD, so the counts above cannot pass by having the
+// right number of booleans in the wrong order.
+check("every outcome, by name, and whether the record survives it",
+  Model.PLAYER_OUTCOMES.map(o => o + ":" + (Model.sessionAfterOutcome(sessionState, o).terminal ? "retired" : "kept")).slice().sort(),
+  ["abandoned:retired", "attached:kept", "ended:retired", "failed:retired", "foreign:retired", "loaded:kept",
+   "marked:retired", "mpvMissing:retired", "relaunching:kept", "respawning:kept", "retrying:kept",
+   "stopped:retired", "superseded:kept", "unverified:retired"])
 
-// The six endings, each on its own. Before this change three of them - a
-// failed start, a missing mpv, an abandoned relaunch - left the record.
-for (const ending of ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned"]) {
+// The endings, each on its own. Before this change three of them - a failed
+// start, a missing mpv, an abandoned relaunch - left the record; D-SINK-16's
+// `unverified` joined them as a seventh and goes through the same rule rather
+// than being special-cased at the one call site that raises it.
+for (const ending of ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned", "unverified"]) {
   check("ending '" + ending + "' retires the record, so the next reattach marks nothing", (() => {
     const svc = noteOutcome(playingService(), ending)
     return [svc.userState.session, svc.writes, reattachMarks(svc)]
@@ -5684,10 +5801,16 @@ check("D-PLY-1: every answer arms the observer except the two that must not", ["
 // a word the rule does not know, or a branch that reaches past the decision
 // into the state, is exactly how the defect got in.
 // (`serviceSource` is read once, at the top of the M2-09 section.)
+// D-SINK-16 gave the stop ladder a second caller with a second word, so the
+// word is now a parameter of stopUnadoptedPlayer() at one branch and a literal
+// at noteSessionOutcome() everywhere else. Both spellings are scanned: what this
+// pins is that every word Service.qml SPELLS is one the rule knows, and the
+// parameterised branch spells its two at the call sites instead of inside the
+// ladder.
 const notedOutcomes = []
-serviceSource.replace(/root\.noteSessionOutcome\("([^"]*)"\)/g, (m, word) => { notedOutcomes.push(word); return m })
+serviceSource.replace(/root\.(?:noteSessionOutcome|stopUnadoptedPlayer)\("([^"]*)"\)/g, (m, word) => { notedOutcomes.push(word); return m })
 check("Service.qml spells every outcome in the vocabulary", [notedOutcomes.length > 0, notedOutcomes.filter(o => Model.PLAYER_OUTCOMES.indexOf(o) === -1)], [true, []])
-check("Service.qml routes all seven endings, not three of them", [...new Set(notedOutcomes)].filter(o => Model.sessionAfterOutcome(sessionState, o).terminal).sort(), ["abandoned", "ended", "failed", "foreign", "marked", "mpvMissing", "stopped"])
+check("Service.qml routes all eight endings, not three of them", [...new Set(notedOutcomes)].filter(o => Model.sessionAfterOutcome(sessionState, o).terminal).sort(), ["abandoned", "ended", "failed", "foreign", "marked", "mpvMissing", "stopped", "unverified"])
 check("Service.qml reaches the session record through the one decision and nowhere else", [
   serviceSource.indexOf("Model.clearSession("),
   serviceSource.indexOf(".session ="),
@@ -5833,15 +5956,21 @@ check("CL10: the journal witness is kept, and is NOT what proves the property",
 // without one shows up as a word that belongs to the branch after it. Three
 // of these eight - "mpvMissing", "failed" and "abandoned" - read as NOTHING
 // before this change: those are the branches that left the record behind.
+//
+// One slot reads "outcome" rather than a word, and that is not a hole: D-SINK-16
+// gave the stop ladder a second caller, so its one body takes the word from its
+// caller. What this check is for survives - the very next thing after that drop
+// is still the decision - and WHICH words reach it is pinned by the vocabulary
+// scan above, which reads the two literals at the call sites.
 const serviceTokens = []
-serviceSource.replace(/root\.nowPlaying\s*=\s*null|root\.noteSessionOutcome\("([^"]*)"\)|root\.markDeadSession\(\)/g, (m, word) => {
-  serviceTokens.push(m.indexOf("nowPlaying") !== -1 ? "drop" : (word !== undefined ? word : "markDeadSession"))
+serviceSource.replace(/root\.nowPlaying\s*=\s*null|root\.noteSessionOutcome\(("?)([A-Za-z]*)\1\)|root\.markDeadSession\(\)/g, (m, quote, word) => {
+  serviceTokens.push(m.indexOf("nowPlaying") !== -1 ? "drop" : (word !== undefined && word !== "" ? word : "markDeadSession"))
   return m
 })
 check("every Service.qml branch that drops the channel hands the record to the decision", serviceTokens
   .map((t, i) => t === "drop" ? (serviceTokens[i + 1] === undefined || serviceTokens[i + 1] === "drop" ? "NOTHING" : serviceTokens[i + 1]) : null)
   .filter(x => x !== null),
-  ["stopped", "mpvMissing", "failed", "failed", "markDeadSession", "foreign", "ended", "abandoned"])
+  ["stopped", "mpvMissing", "failed", "failed", "markDeadSession", "outcome", "ended", "abandoned"])
 
 check("every reducer carries the session through (cloneState)", [
   Model.withFavorites(sessionState, ["a"]).session,

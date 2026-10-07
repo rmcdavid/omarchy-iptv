@@ -475,8 +475,11 @@ TestCase {
   // abandoned relaunch each kept it.
   function test_sessionOutcomeRetiresTheRecord() {
     var played = Model.recordPlayed(Model.emptyState(), { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)
-    compare(Model.PLAYER_OUTCOMES.length, 13)
-    var endings = ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned"]
+    // Fourteen since D-SINK-16: a player stopped because it could not be made
+    // to verify the stream's certificate is its own ending, not a player we
+    // failed to identify, and it goes through the same rule as the rest.
+    compare(Model.PLAYER_OUTCOMES.length, 14)
+    var endings = ["stopped", "ended", "foreign", "failed", "mpvMissing", "abandoned", "unverified"]
     for (var i = 0; i < endings.length; i++) {
       var svc = freshSession(played)
       noteOutcome(svc, endings[i])
@@ -2025,6 +2028,36 @@ TestCase {
     compare(Model.behindTickRunning({ paused: true, rewind: null }), false)
     compare(Model.seekQueuePending({ liveQueued: true, pending: 0 }), true)
     compare(Model.seekQueuePending(idle), false)
+  }
+
+  // D-SINK-16. Service.qml calls this one inside the Qt QML engine, on the
+  // reattach path, to decide whether a player it did not launch may be fed at
+  // all - so it is proved loadable and correct HERE and not only under node.
+  // The vectors are the shared fixture's; this is the one engine the decision
+  // actually runs in.
+  function test_adoptedPlayerTlsVerdict() {
+    compare(Model.MPV_TLS_VERIFY_PROP, "tls-verify")
+    compare(Model.MPV_STREAM_OPTS_PROP, "stream-lavf-o")
+    compare(Model.tlsPropertiesSafe(true, 0), true)
+    compare(Model.tlsPropertiesSafe(false, 0), false)
+    compare(Model.tlsPropertiesSafe(true, 1), false)
+    compare(Model.tlsPropertiesSafe(null, 0), false)
+    compare(Model.tlsPropertiesSafe(true, null), false)
+    // The coercions a more forgiving reader would wave through.
+    compare(Model.tlsPropertiesSafe(1, 0), false)
+    compare(Model.tlsPropertiesSafe(true, false), false)
+    // feed / reload / stop, the three answers applyProbe switches on.
+    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: false }).action, "feed")
+    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: true }).action, "reload")
+    compare(Model.playerTlsVerdict({ verify: false, optionCount: 0, migrated: true }).action, "stop")
+    compare(Model.playerTlsVerdict(null).action, "stop")
+    compare(Model.playerTlsVerdict(null).safe, false)
+    // And through the parser the service actually feeds it.
+    var probe = Model.parsePlayerProbe('{"ok":true,"kind":"player.probe","running":true,"responsive":true,'
+      + '"pid":7,"idle":false,"stash":null,"owner":null,"seq":1,'
+      + '"tls":{"verify":false,"optionCount":0,"migrated":true}}')
+    compare(Model.playerTlsVerdict(probe.tls).action, "stop")
+    compare(Model.playerTlsVerdict(Model.parsePlayerProbe("junk").tls).action, "stop")
   }
 
   function test_formatting() {
