@@ -2,7 +2,8 @@
 # scripts/dev-harness/rewind-scenario.sh -- live rewind (M5-01, lane Q) on
 # REAL mpv against a LOCAL live-like stream, through the harness IPC.
 # Holds the display: opens a real mpv window and the guide overlay for about
-# four minutes, and reaps everything it starts. Plan: docs/QA-REWIND.md.
+# four and a half minutes (F-RWD-25 lengthened R16's busy window by 30 s),
+# and reaps everything it starts. Plan: docs/QA-REWIND.md.
 #
 # THE STREAM. Two HLS playlists with a sliding window (6 x 2 s segments,
 # ffmpeg -re from lavfi, ~1.4 Mbps on the wire, a burned-in clock in the
@@ -104,7 +105,17 @@ WORK=""
 SLOW_MS=4000
 HEALTH_TICK_MS=10000
 QUIET_MS=28000
-BUSY_MS=32000
+# F-RWD-25: 32000 showed healthSkips at 0 across three ticks, which is ONE
+# window and not a long run. 62000 spans SIX, and nothing else here moves
+# with it: HEALTH_TICK_MS stays 10000 because it mirrors Service.qml's
+# healthCheckMs by NAME and R16 asserts the consequence of the value rather
+# than reading it back, and TICKS is derived (BUSY_MS / HEALTH_TICK_MS), so
+# the "a tick landed on a running seek" bound follows on its own. The run
+# gets about 30 s longer; STREAM_S has the room (every bound in this file
+# summed as its worst case comes to roughly 430 s against 780, and the
+# bounds that dominate it -- R0's 60 s plateau wait and R4's 60 s floor wait
+# -- return early on a healthy stream).
+BUSY_MS=62000
 pass=0
 fail=0
 checks=0
@@ -340,6 +351,13 @@ command -v wtype >/dev/null || { echo "wtype is required (R13)" >&2; exit 2; }
 ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use" >&2; exit 2; }
 qa_safe_path "$SCRATCH" || { echo "unsafe scratch path" >&2; exit 2; }
 
+# F-M3-1 half (b). The transcript opens HERE: after the preflight that
+# refuses to run at all (a refusal is one line on stderr, not a transcript),
+# and before the first line of evidence -- which includes the line naming
+# WHICH TREE is under test, because a transcript that cannot say that is
+# evidence for nothing.
+qa_transcript_start rewind || exit 2
+
 # ---- which checkout is under test
 [[ -n $BASELINE && -n $TREE ]] && { echo "--baseline and --tree are the same lever; pass one" >&2; exit 2; }
 if [[ -n $TREE ]]; then
@@ -358,10 +376,12 @@ export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
 HELPER=$(readlink -f "$PLUGIN_ROOT/bin/omarchy-iptv")
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-rewind-XXXXXX")
 : >"$WORK/replies.jsonl"
-# Everything from here on is tee'd so R18 can scan what the operator reads.
-RUNOUT="$WORK/run.out"
-: >"$RUNOUT"
-exec > >(tee -a "$RUNOUT") 2>&1
+# R18 below sweeps $QA_TRANSCRIPT, the shared transcript opened above. It used
+# to sweep "$WORK/run.out", which cleanup() rm -rf's at exit: the evidence R18
+# had just sworn was clean went into the bin with the scratch, and the summary
+# line was the only thing that outlived the run. That is F-M3-1 half (b) in
+# the one scenario that already had the habit of writing its output down,
+# which is why the habit is now a function every scenario calls.
 echo "== plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
 
 # ---- the local live stream: a loopback server and two sliding-window HLS
@@ -813,6 +833,10 @@ bstatus=$(cnt "$b" runs.status)
 bskips=$(cnt "$b" healthSkipsMax)
 bunread=$(cnt "$b" healthSkipsUnreadable)
 TICKS=$(( BUSY_MS / HEALTH_TICK_MS ))
+# `marks` is a DIAGNOSTIC, not a check, and shell.qml caps it at 80 entries:
+# over a 62 s window (F-RWD-25) it saturates, so read the printed list as a
+# prefix of the window rather than the whole of it. Every check below reads a
+# tally, which is not capped.
 printf '   R16 busy window: %s drives, %s samples, seek samples %s, seek runs %s, status runs %s, marks %s\n' \
   "$drives" "$(cnt "$b" samples)" "$bseek" "$(cnt "$b" runs.seek)" \
   "$bstatus" "$(rf 'd["marks"]' "$b")"
@@ -866,9 +890,18 @@ echo "== R18 the run's own output carries no URL"
 # R10's diagnostic line, R16's two tallies and R17's state reads, and before
 # the second harness shell R16 starts appends to the log. This scans what a
 # reader actually sees, at the end, plus the log again for the second shell.
-if qa_leak_scan 'PASS|FAIL' "://|$HOST|live\.m3u8|/rewind/" "$RUNOUT"
-then ok "R18 the run's own stdout carries neither a URL nor the fixture host ($(qa_count 'PASS|FAIL' "$RUNOUT") lines)"
-else bad "R18 the run's stdout: leak or vacuous capture (status $?; $(wc -l <"$RUNOUT") lines)"; fi
+# The sweep reads a file a TEE is writing on the far side of a pipe, and the
+# shell does not wait for it: measured on 2026-10-06, a line printed and then
+# grepped back was absent 6 of 30 times with the cores oversubscribed twice
+# over. So the sweep below was able to read a transcript short of its most
+# recent lines -- including, on a bad day, the line carrying the URL it is
+# looking for. The barrier is bounded and says so when it gives up.
+if qa_transcript_sync 5
+then ok "R18 control: the transcript has caught up with the run before it is swept"
+else bad "R18 the transcript did not catch up (status $?): the sweep below would read a short file"; fi
+if qa_leak_scan 'PASS|FAIL' "://|$HOST|live\.m3u8|/rewind/" "$QA_TRANSCRIPT"
+then ok "R18 the run's own stdout carries neither a URL nor the fixture host ($(qa_count 'PASS|FAIL' "$QA_TRANSCRIPT") lines)"
+else bad "R18 the run's stdout: leak or vacuous capture (status $?; $(wc -l <"$QA_TRANSCRIPT") lines)"; fi
 if qa_leak_scan 'service loaded' "://|$HOST|live\.m3u8|/rewind/" "$HLOG"
 then ok "R18 the harness log still carries none after the second shell"
 else bad "R18 the harness log after R16: leak or vacuous capture (status $?)"; fi
@@ -879,13 +912,15 @@ else bad "R18 the harness log after R16: leak or vacuous capture (status $?)"; f
 # The number is what a GREEN run prints, not an arithmetic from the source:
 # the grep below over-counts, because some `is`/`ck` lines sit in branches a
 # normal run does not take (the --tree and --baseline paths), and it
-# under-counts the four if/ok/bad blocks of R6 and R18. Re-level it from the
+# under-counts the five if/ok/bad blocks of R6 and R18. Re-level it from the
 # summary line of a green run and say which run:
 #   grep -cE '^(is|ck) ' scripts/dev-harness/rewind-scenario.sh   # upper bound
 # 109 as of the F-RWD-22 run on 2026-10-03 (108 before R10 gained its third).
-# The summary's "passed" can exceed this: the if/ok/bad blocks count as
-# passes without being assertions, which is why the two numbers differ by
-# two on a green run and why this floor is read off "assertions executed".
+# The summary's "passed" can exceed this: five if/ok/bad blocks count as
+# passes without being assertions, and only R6's two bump `checks` by hand.
+# So on a green run "passed" is "assertions executed" plus THREE -- R18's
+# two, plus the transcript barrier R18 gained with F-M3-1 half (b) -- and
+# this floor is read off "assertions executed", never off "passed".
 # (78 before R16 and R17; the rest are F-RWD-18's and the review's.)
 EXPECTED_CHECKS=109
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"

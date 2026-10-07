@@ -90,6 +90,8 @@ if [[ -n $BASELINE ]]; then
   git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR" || { echo "cannot export $BASELINE"; exit 2; }
   export OMARCHY_IPTV_PLUGIN_ROOT=$EXPORT_DIR
 fi
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }
 fail() { FAIL=$((FAIL+1)); echo "FAIL $1${2:+ -- $2}"; }
@@ -136,6 +138,11 @@ cleanup() {
 trap cleanup EXIT
 pgrep -x hyprlock >/dev/null && { echo "screen is locked"; exit 2; }
 ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use"; exit 2; }
+
+# F-M3-1 half (b): the run's own evidence goes to disk, not only to whatever
+# window it was started in. T1..T6 are observations of a NETWORK sink and the
+# whole point of them is the record.
+qa_transcript_start text || exit 2
 
 # ---- the logging server: every request line to REQLOG, every answer 404
 cat >"$WORK/probe_server.py" <<'PY'

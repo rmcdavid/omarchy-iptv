@@ -564,6 +564,12 @@ trap cleanup EXIT
 case ${1:-live} in
   check-tree) preflight ;;
   live|"")
+    # F-M3-1 half (b): the transcript covers the WHOLE run, preflight and the
+    # skip decision included, so the file says WHY a run that started nothing
+    # stopped. It is NOT opened on the check-tree path, which
+    # scripts/check.sh runs on every commit: a gate step may neither print a
+    # path nobody asked for nor leave a file behind.
+    qa_transcript_start pip || exit 2
     preflight
     # The skip is decided AFTER the preflight, because the preflight needs no
     # display and is worth running anywhere - and BEFORE anything is started,

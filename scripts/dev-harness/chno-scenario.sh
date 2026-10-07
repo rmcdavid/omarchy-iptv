@@ -212,7 +212,17 @@ trap cleanup EXIT
 
 case ${1:-live} in
   check-tree) preflight ;;
-  live|"")    preflight; live ;;
+  live|"")
+    # F-M3-1 half (b): the transcript covers the WHOLE run, preflight
+    # included, because the summary at the bottom counts both halves and a
+    # transcript that holds only one of them cannot be summarised from. It is
+    # NOT opened on the check-tree path: scripts/check.sh runs that half on
+    # every commit, and a gate step may neither print a path nobody asked for
+    # nor leave a file behind.
+    qa_transcript_start chno || exit 2
+    preflight
+    live
+    ;;
   *) echo "usage: chno-scenario.sh [check-tree|live]" >&2; exit 2 ;;
 esac
 

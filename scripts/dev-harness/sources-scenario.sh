@@ -98,6 +98,12 @@ wait_gone() {  # wait_gone <path> <secs>: a queued `cache remove` has run
   return 1
 }
 
+# F-M3-1 half (b). `log_lacks` above already says the quiet part out loud --
+# "a match may be a credentialed URL and the transcript is an artifact" -- and
+# until now there was no transcript for it to be an artifact of. There is one
+# now, 0600 in a 0700 directory, and the path is printed.
+qa_transcript_start sources || exit 2
+
 echo "== setup (scratch $SCRATCH)"
 "$RUN" clean >/dev/null
 mkdir -p "$FIX" "$CACHE" "$(dirname "$STATE")"
