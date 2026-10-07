@@ -12638,3 +12638,41 @@ The difference that matters: those four are best effort, through `try_command`.
 This one is not. If the properties cannot be made safe the function must refuse
 to load, because loading is the act of handing a credentialed URL and the
 provider headers to a process we could not secure.
+
+### The adoption case observed at the sink, forward and baseline
+
+`scripts/dev-harness/tls-scenario.sh` gained S6, which stages the maintainer's
+scenario rather than describing it: a player launched the pre-update way, left
+running when its shell goes away, then met by an upgraded shell.
+
+Forward run on the fix, 2026-10-07, load average 2.02:
+
+    == summary: 47 passed, 0 failed, 47 assertions executed
+
+The segment's own lines, which are the argument:
+
+- `S6 the staged player was launched the pre-update way: its own argv names this socket and carries no tls-verify and no stream-lavf-o of any spelling`
+- `S6 and it really did fetch the attacker's stream, which is the exposure as it stood before the upgrade`
+- `S6 the staged player survived its shell going away, so there is something to adopt`
+- `S6 the upgraded shell MET the staged player ('pid': pid = it named that process, gone = it ended it; 'other' would mean it spawned its own and this segment proves nothing)`
+- `S6 the already-open unverified stream stopped being fed`
+- `S6 and the attacker logged no new request of any kind across the adoption`
+- `S6 the zap issued after the adoption was REFUSED`
+- `S6 control: the upgraded shell can still make a player fetch a stream`
+
+Baseline arm against the SHIPPED 0.13.0 (`5d527d7`):
+
+    == summary: 44 passed, 3 failed, 47 assertions executed
+    FAIL S6 the already-open unverified stream stopped being fed (got 'fed', want 'stopped')
+    FAIL S6 the zap issued after the adoption was REFUSED (got 'played', want 'refused')
+    FAIL S6 and the attacker's log holds no GET of that channel (got '1', want '0')
+
+with the attacker's own log reading
+`s7=[GET 8773 /t288113829810/s7.ts UA=TlsProbeAgent/1.0 AUTH=no;]`.
+
+The discrimination is sharp in a way worth stating: on that baseline S1 through
+S5 all PASS, because 5d527d7 does fix the launch path. Only S6's two
+discriminators go red. The segment therefore tests the thing the maintainer
+named and nothing else, and its stage checks, its adoption witness and its
+provider control pass on both trees because they are controls rather than
+discriminators.
