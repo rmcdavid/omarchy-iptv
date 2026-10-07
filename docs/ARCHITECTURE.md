@@ -255,7 +255,7 @@ bar entry, read by the service through `shell.barConfig`.
 | `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else |
 | `epgUrl` | string | `""` | same rules; empty disables EPG |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
-| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, and their `--no-` forms) are dropped with a console warning. A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
+| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the two later entries worth naming here; `MPV_RESERVED` in `Model.js` and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. `--tls-verify` is the one entry the reserved list does not make safe by itself -- see 4.15 and D-SINK-13. A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
 | `showChannelName` | boolean | true | widget-only, `!== false` |
 | `maxRecents` | integer | 10 | `clampInt(1..50)` |
 
@@ -382,6 +382,63 @@ in section 9 since the scaffold; its acceptance was a grep that could not
 see a missing line (F-TEXT-2), the shape engineering rule 14 had already
 named and refused.
 
+Raised 2026-10-07 (D-SINK-13), and written here in the round that fixes it --
+the state of the fix is the board row in `docs/STATUS.md`, not this paragraph.
+The same maintainer again, the third finding in three weeks, this time
+against the shipped 0.12.1
+(omacom/omarchy-plugin-marketplace#10323): the player was launched without TLS
+verification while the helper supplies the provider headers and the `https`
+stream URL, so an on-path attacker could impersonate the provider, replace the
+media, and collect the credentials carried in the URL and in those headers.
+He was right. **A new class of sink, and that is the lesson of this one.**
+Every exposure in this register until now was a place the URL was WRITTEN --
+an argv, an environment variable, a file, a bus, a text layout -- and each was
+closed by narrowing who could read it locally. This one is not local at all:
+the URL and the headers were sent, correctly and only over TLS, to a peer
+nobody authenticated. An enumeration of local sinks could be complete, and was,
+and the system was still wrong. **The mechanism, named rather than hand-waved**:
+mpv's own `--tls-verify` is a flag whose default is `no` (mpv v0.41.0 here), so
+mpv passes `tls_verify=0` to FFmpeg and the certificate is not checked. mpv does
+not "ignore certificates" -- it was asked not to look, and the base argv is what
+asked. **The scope is exactly one sink.** The helper's own playlist, EPG and
+probe fetches already refuse a self-signed certificate -- measured,
+`[SSL: CERTIFICATE_VERIFY_FAILED] ... self-signed certificate`, redacted to the
+host, which is rule 5 holding -- because `urllib` verifies by default and
+nothing in the helper disables it (a grep for `_create_unverified`, `CERT_NONE`,
+`check_hostname=False`, `verify=False` and `--insecure` over `bin/omarchy-iptv`
+returns nothing). So the precise claim is "the plugin verified TLS everywhere
+except the one place it handed the stream to mpv", never "it now verifies
+everywhere". And "verified" means "checked the certificate on a TLS
+connection": whether a connection is TLS at all is a separate question, and the
+answer is not uniformly yes -- `SOURCE_SCHEMES` and `STREAM_SCHEMES` both
+accept plain `http`, which is D-SINK-14, filed the same day and not settled by
+this round. Verification and transport are two decisions and this entry is only
+about the first. **What changed: four layers, specified in
+`ARCHITECTURE-PLAYER.md` 4.15** -- `--tls-verify=yes` in the base argv where a
+reader looks; the same token re-asserted as the FINAL element of the composed
+argv, after the user's `mpvArgs`, which is the layer that actually binds,
+because a later command-line token beats an earlier one and a user `--profile`
+carries arbitrary options out of their own mpv config (all three bypasses
+measured playing without the trailing token and refused with it);
+`--tls-verify` reserved in both the `=no` and the `--no-` forms, so a direct
+attempt is refused loudly instead of silently outvoted by the layer above it;
+and `--tls-ca-file` left unreserved as the targeted escape, measured working
+behind the re-assertion. `--profile` is deliberately not reserved, because the
+re-assertion makes it harmless and profiles are a legitimate mpv feature.
+**The residual, named rather than implied.** The sink itself has none once the
+layers are in: a certificate chaining to neither the system store nor a CA the
+user named aborts the connection. What is accepted is the COST, which is not
+free for everybody: a provider presenting a self-signed certificate no longer
+plays, and that user must name their provider's CA with `--tls-ca-file`
+instead of switching verification off for every provider at once. That is a
+smaller blast radius for the same capability, it is the reason the escape is
+shaped this way, and the README says so in the user's own words. Established
+by measurement on 2026-10-07 before any lane was briefed, against a local TLS
+server with a self-signed certificate and with one signed by a generated CA,
+driven by the real shipped argv rather than a retyped one, with `curl` as the
+control; the evidence is the D-SINK-13 row in `docs/STATUS.md` and the write-up
+in `docs/QA-RESULTS.md`.
+
 ## 7. Error handling, offline behavior, performance
 
 - Every helper failure produces a status object the guide renders as text
@@ -433,6 +490,19 @@ Performance budget (10k channels):
 9. mpv is started with `--msg-level=all=error`, our own socket path under
    `$XDG_RUNTIME_DIR` (0700 by the session), `--wayland-app-id=omarchy-iptv`.
    User `mpvArgs` cannot override those.
+10. Every network peer is authenticated, the player included. The helper's
+    fetches verify by default through `urllib` and nothing disables it; the
+    player is given `--tls-verify=yes`, because mpv's own default for that flag
+    is `no` and it passes `tls_verify=0` to FFmpeg when left alone. Reserving
+    the option name is not the guarantee: user `mpvArgs` land after the base
+    argv, a later token wins, and `--profile` can carry the setting
+    indirectly, so the composed argv ENDS with `--tls-verify=yes` and the
+    reserved entry exists to make a direct attempt audible. The one supported
+    escape is `--tls-ca-file`, deliberately unreserved. Measured, specified and
+    costed in `ARCHITECTURE-PLAYER.md` 4.15 (D-SINK-13); a check that only
+    greps the base argv for the token cannot see the layer that binds, which is
+    engineering rule 14's shape, so it is verified by composing the argv with
+    hostile `mpvArgs` and by observing a refusal from a real TLS peer.
 
 ## 9. Coding standards
 

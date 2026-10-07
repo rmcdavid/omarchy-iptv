@@ -738,6 +738,21 @@ outside this filter by construction and is documented as such in
 SECURITY-REVIEW.md; the settings panel is the reachable-by-accident path, a
 user's own mpv config is their deliberate choice.
 
+The table above is the M2-02 round, not the whole of `MPV_RESERVED`. Later
+rounds added entries on the same reasoning for different sinks:
+`--load-scripts` (D-SINK-4, the MPRIS session bus),
+`--demuxer-cache-unlink-files` (M5-01 ruling D3, a cache file that outlives the
+player) and `--tls-verify` (D-SINK-13, section 4.15). **The TLS entry is the
+one that is not sufficient on its own**, and 4.15 is where that is specified:
+reserving a name stops the token that spells it and stops nothing that reaches
+the same setting indirectly, and `--profile` reaches it -- measured. So the
+guarantee for that option lives in the composition, as a re-assertion of
+`--tls-verify=yes` after `p.extraArgs`, and the reserved entry exists so the
+user is told rather than silently outvoted. `--tls-ca-file` stays unreserved
+by the same PO-5 shape as `--ytdl`: it is the documented escape, and
+`--screenshot-dir` is the precedent for an option this list deliberately leaves
+alone.
+
 ### 4.13 Health check
 
 Unchanged: `healthTimer.interval = 10 s`, `Model.healthTick` with its
@@ -787,6 +802,83 @@ in v0.2.0 too - and the compositor unit's `KillMode=control-group` reaps it at
 session end. `omarchy-iptv player stop` is added to the README's Uninstall
 section as the manual escape hatch.
 
+### 4.15 TLS verification on the player (D-SINK-13)
+
+**What was wrong.** mpv's `--tls-verify` is a flag whose default is `no`
+(`mpv --list-options`, mpv v0.41.0 / FFmpeg n9.0.1 / OpenSSL 3.6.4 on this
+machine), so mpv passes `tls_verify=0` down to FFmpeg's TLS layer and the peer
+certificate is never checked. The base argv (section 6, and `buildMpvArgv` with
+its helper mirror) never said otherwise, while `apply_channel` (4.11) sets the
+three provider header
+properties and then `loadfile`s the `https` stream URL over exactly that
+connection. An on-path attacker could therefore impersonate the provider,
+replace the media, and collect the credentials carried in the URL and in the
+headers. Raised by the marketplace maintainer against the SHIPPED 0.12.1
+(22ba4ce), omacom/omarchy-plugin-marketplace#10323. The exposure is confined to
+this one sink: the helper's own playlist, EPG and probe fetches go through
+`urllib`, which verifies by default and is not disabled anywhere, and they
+refuse a self-signed certificate today (measured). The claim to make is
+therefore "everywhere except the player", not "now verifies everywhere".
+
+**Specification, four layers.** All four are REQUIRED and each answers a
+different question. The lead measured every row cited here on 2026-10-07
+against a local TLS server (self-signed, and signed by a generated CA) serving
+a 106,220-byte MPEG-TS, driven by the real shipped argv taken out of
+`mpv_launch_argv` rather than retyped, with `curl` as the discriminating
+control; the evidence is the D-SINK-13 row in `docs/STATUS.md` and the
+write-up in `docs/QA-RESULTS.md`.
+
+| # | Layer | Job | Measured basis |
+|---|---|---|---|
+| 1 | `--tls-verify=yes` in the base argv, beside `--load-scripts=no` | The intent is where a reader of the argv looks. Nothing else | Today's argv plays a self-signed certificate (exit 0); the same argv plus this token exits 2 on `tls: Peer certificate failed verification` |
+| 2 | `--tls-verify=yes` re-asserted as the FINAL element of the COMPOSED argv, after the filtered user `mpvArgs` | The layer that actually binds. A later command-line token beats an earlier one, so layer 1 alone is undoable | `yes ... --tls-verify=no ... yes`, `yes ... --no-tls-verify ... yes` and `yes ... --profile=evil ... yes` all exit 2. Without the trailing token all three of those PLAY |
+| 3 | `--tls-verify` in `MPV_RESERVED`, matched in both the `--tls-verify=no` and the `--no-tls-verify` forms | Makes it honest. A direct attempt is refused LOUDLY, with the existing dropped-token warning, instead of being silently outvoted by layer 2 | The existing `--no-` rule in `filter_mpv_args` / `splitMpvArgs` already covers the second form once the name is on the list |
+| 4 | `--tls-ca-file` left UNRESERVED | The targeted escape for a provider with a self-signed or private-CA certificate, and the only one offered | A certificate signed by a generated CA plays with `--tls-verify=yes --tls-ca-file=<that CA>`, and still plays as a user token behind layer 2's trailing re-assertion |
+
+Layer 2 is not a duplicate of layer 1 and must not be tidied away as one.
+That is the whole finding of the addendum to the measurements: `--profile`
+carries arbitrary options, including `tls-verify=no`, from the user's own mpv
+config, and a profile named in `mpvArgs` lands after the base argv. Both
+mechanisms were proved live before being accused -- against a fake `HOME` and
+`XDG_CONFIG_HOME`, an `mpv.conf` saying `tls-verify=yes` with no argv option
+refused the self-signed certificate, and `--profile=good` refused it -- so the
+bypass is a measurement and not an inference. `--profile` is deliberately NOT
+reserved: layer 2 makes it harmless, profiles are a legitimate mpv feature, and
+reserving it would still leave whatever indirection nobody has enumerated.
+Anyone reaching for the reserved list for `--profile` should stop here.
+
+A trailing token has one obvious attack and it is closed by construction: a
+bare `--` would make every later token a FILENAME, and the shipping argument
+filter cannot pass one -- `MPV_ARG_RE` is `^--[a-z0-9][a-z0-9-]*(=.*)?$` and
+calling `filter_mpv_args(["--"])` returns `--` in the rejected bucket
+(measured by calling it). The reverse direction is closed too: a user's own
+`~/.config/mpv/mpv.conf` saying `tls-verify=no` does NOT beat our command line
+(exit 2, refused), so a pre-existing config cannot undo the fix.
+
+**Compatibility, and the cost.** With `--tls-verify=yes` and no
+`--tls-ca-file`, a real public certificate still verifies against the system
+store: against a public `https` host the only remaining failure was the
+demuxer's `Failed to recognize file format`, identical to the control run with
+no TLS options at all. So the fix is free on a normal provider. It is NOT free
+for everyone, and the ruling accepts that rather than hiding it: a user whose
+provider presents a self-signed certificate can no longer play by switching
+verification off wholesale, and must name that provider's CA with
+`--tls-ca-file` instead. That is a smaller blast radius for the same
+capability, which is why the ruling went this way.
+
+`--tls-cert-file` and `--tls-key-file` are CLIENT certificates, a different
+mechanism, and are untouched by this round.
+
+**Where it is pinned.** Both mirrors -- `Model.buildMpvArgv` and the helper's
+`mpv_launch_argv` -- carry layers 1 and 2, and both reserved sets carry layer 3;
+the shared vectors in `tests/fixtures/player-argv.json` are the one pinning for
+all of it, including the composed-argv case where a user token tries to undo it
+(engineering rule 12: one fixture, both implementations). An assertion that the
+token appears somewhere in an array is a restatement of the implementation and
+does not count under engineering rule 14; what counts is calling the composition
+with hostile `mpvArgs` and asserting the LAST element, and observing the sink
+itself in the harness scenario (QA.md section 3.1).
+
 ## 5. Hard requirements
 
 | # | Requirement | Status | Mechanism |
@@ -821,8 +913,23 @@ mpv --input-ipc-server=<runtimeDir>/mpv.sock
     --force-media-title=IPTV
     --msg-level=all=error
     --ytdl=no
+    --tls-verify=yes
     <filtered user mpvArgs...>
+    --tls-verify=yes
 ```
+
+The two `--tls-verify=yes` are both deliberate and section 4.15 is the
+specification: the first states the intent where a reader looks, the second
+binds it, because a later command-line token beats an earlier one and a user
+`--profile` carries arbitrary options. Deleting the trailing one as a
+duplicate re-opens D-SINK-13, measured.
+
+This block is the M2-02 argv. Later rounds added tokens to the same base and
+did not rewrite it here: `--load-scripts=no` (D-SINK-4), `--screenshot-dir`
+and `--watch-later-dir` (PO-11), `--gpu-shader-cache-dir` and
+`--icc-cache-dir` (D-PLY-10 / CL2). `Model.buildMpvArgv` and the helper's
+`mpv_launch_argv` are the current list, pinned to each other by
+`tests/fixtures/player-argv.json`.
 
 Relative to `Model.js:1257-1281` this drops the trailing `"--"` and
 `str(p.url)`, drops the `headerArgs(p.headers)` splice, drops the per-channel
@@ -896,6 +1003,34 @@ the same line was rejected for putting the URL on disk.
 `ARCHITECTURE.md:504-505` is discharged. Two new findings are filed: the
 ten-option `MPV_RESERVED` gap (4.12) and the `--ytdl=yes` / `yt-dlp` argv
 exposure (PO-5).
+
+**The sink class this enumeration had no category for (D-SINK-13, 2026-10-07).**
+Every heading above asks where the URL and the headers are WRITTEN -- a command
+line, a file, a unit name, an environment variable, a log. All of those answers
+stand. The question none of them asks is who the URL and the headers are SENT
+TO, and the answer was "whoever answers on that address", because the player
+did not verify the peer's certificate (section 4.15). The credentials never
+left the 0600 files and the 0600 socket on this side and were handed to an
+unauthenticated peer on the other, which is why an enumeration of local sinks
+could be complete and the system still be wrong. The claim at the head of this
+section is unchanged and remains true as written; it was never the whole claim.
+Closed by the four layers in 4.15 -- whether they have landed is the D-SINK-13
+board row's business, not this paragraph's. What remains on this sink, stated
+exactly:
+a certificate that chains to neither the system store nor a `--tls-ca-file` the
+user named now aborts the connection -- measured as a refusal (exit 2) and not
+as a measurement of what was already on the wire. The request line and the
+header fields are HTTP, written after the TLS handshake, so a handshake that
+fails carries neither; that ordering is protocol, not something this project
+observed, and it is written here as reasoning. What this does NOT defend
+against is unchanged and belongs to whoever holds the certificate: a peer
+presenting a certificate the user's trust store accepts for that host is
+trusted, and a CA the user names through `--tls-ca-file` can vouch for any host
+the player then opens, which is the cost of that escape and the reason it names
+one CA rather than switching verification off. UNVERIFIED: whether
+`--tls-ca-file` REPLACES the system store for that run or adds to it was not
+measured, so the escape is documented as "name your provider's CA" and not as
+"keep everything else as well".
 
 ## 7. Failure modes
 
