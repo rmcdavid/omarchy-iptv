@@ -405,6 +405,138 @@ ShellRoot {
     return null
   }
 
+  // Which window the guide LOADED, read from the loaded object's own type
+  // (String(hostWindow) is "<class>(0x...)"), never from the property that
+  // asked for it: a `harnessFloatingWindow` reading true beside an
+  // instantiated layer window would have said "floating" about a window no
+  // headless capture can see. The address is dropped. The class behind
+  // PanelWindow is platform-specific -- measured under cage it is
+  // qs::wayland::layershell::WaylandPanelInterface, not the
+  // PanelWindowInterface the qmltypes export -- so "Panel" is the token.
+  //
+  // One function, two callers (`theme` and `focusState`). A second copy of
+  // this derivation would be two things joined by a name and nothing else,
+  // which is the shape CLAUDE.md rule 12 forbids.
+  function windowHost(g) {
+    var host = ""
+    try { host = g && g.hostWindow ? String(g.hostWindow).split("(")[0] : "" } catch (e) {}
+    var kind = host.indexOf("FloatingWindow") >= 0 ? "floating"
+             : host.indexOf("Panel") >= 0 ? "layer" : "none"
+    return { kind: kind, type: host }
+  }
+
+  // A QML component instance prints as "<Type>_QMLTYPE_<n>(0x<addr>)". Both
+  // the address and the generated ordinal change between runs, so neither
+  // belongs in a reply a scenario may come to assert on; the component's file
+  // name does not change, so that is what is reported.
+  function typeToken(obj) {
+    var s = ""
+    try { s = String(obj) } catch (e) { return "" }
+    s = s.split("(")[0]
+    var cut = s.indexOf("_QMLTYPE_")
+    return cut >= 0 ? s.substring(0, cut) : s
+  }
+
+  // ---- F-M3-1 half (a): where the keyboard actually is.
+  //
+  // FIRST, so the next author does not reach for the compositor. Measured on
+  // this machine 2026-10-06: `hyprctl -j layers` reports, per layer surface,
+  // address, alpha, w, h, x, y, namespace and pid, and NO keyboard-focus
+  // field of any kind. Verbatim, with the harness guide open:
+  //   lvl 2 pid 1649440 ns 'omarchy-bar'          w 1366 h 26
+  //   lvl 2 pid 1710130 ns 'omarchy-iptv-harness' w 1366 h 26
+  //   lvl 3 pid 1710130 ns 'omarchy-iptv'         w 1366 h 768
+  // With the guide CLOSED the level-3 'omarchy-iptv' layer is absent
+  // entirely. Note that the harness overlay's namespace is the SAME string
+  // production uses, so a namespace match alone cannot tell this guide from
+  // the user's live one -- only the pid can. And `hyprctl -j activewindow`
+  // named the foreground TOPLEVEL (class com.anthropic.Claude) the whole time
+  // the overlay was up and receiving keys, so it is not a signal either way:
+  // toplevel focus does not transfer to a layer surface. m3-scenario.sh
+  // passed 37/37 three times that day with real wtype keys in exactly that
+  // state. The compositor cannot answer the question, so the GUIDE is asked.
+  //
+  // Qt can answer it, because the compositor tells Qt: a wl_keyboard
+  // enter/leave becomes window activation, and QQuickWindow's focusIn /
+  // focusOut set and clear focus on the window's content item. Measured
+  // offscreen on Qt 6.11.2 with a purpose-built probe (two windows, one
+  // leaf), and all three results shape the code below:
+  //   - A second window stealing activation turns the leaf's `activeFocus`
+  //     false, the content item's `activeFocus` false and the window's
+  //     `activeFocusItem` null -- while the leaf's `focus` stays TRUE. So
+  //     `focus` is the INTENT and `activeFocus` is the TRUTH; a guard built
+  //     on `focus` reads as a pass while the keys go somewhere else.
+  //   - `activeFocus` is true on the leaf and on its ancestor FOCUS SCOPES
+  //     ONLY: a plain Item between the window's content item and the leaf
+  //     reads false. So the chain is not contiguous, cannot be followed hop
+  //     by hop, and the leaf has to be WALKED for.
+  //   - Hiding the window did NOT clear activeFocus under the offscreen
+  //     platform (`active` stayed true). So `opened` is asked separately and
+  //     never inferred from focus.
+  //
+  // URL-free by construction: booleans, counts and two type tokens. Nothing
+  // reachable from here ever held a playlist URL.
+  //
+  // The walk is bounded twice over (rule 3): a depth cap, like findById's,
+  // and a node budget, because the number of realised delegates is not
+  // something this function gets to assume. `exhausted` is reported rather
+  // than swallowed, so "I gave up" can never be read as "nothing is focused".
+  //
+  // `scanned` counts VISITS, not distinct objects: it follows the same three
+  // links findById does, and a Flickable's `contentItem` is both its
+  // `contentItem` and one of its `children`, so that subtree is visited
+  // twice. The number is a budget reading, never a tree size.
+  readonly property int focusScanBudget: 20000
+
+  function focusWalk(node, depth, acc) {
+    if (!node || depth > 60) return acc
+    if (acc.scanned >= harness.focusScanBudget) { acc.exhausted = true; return acc }
+    acc.scanned++
+    // The DEEPEST activeFocus item is the one that receives the key; the
+    // shallower ones are its ancestor focus scopes.
+    try { if (node.activeFocus === true && depth > acc.depth) { acc.leaf = node; acc.depth = depth } } catch (e) {}
+    var next = []
+    try { if (node.item) next.push(node.item) } catch (e) {}
+    try { if (node.contentItem) next.push(node.contentItem) } catch (e) {}
+    try {
+      var kids = node.children
+      if (kids) for (var i = 0; i < kids.length; i++) next.push(kids[i])
+    } catch (e) {}
+    for (var k = 0; k < next.length; k++) harness.focusWalk(next[k], depth + 1, acc)
+    return acc
+  }
+
+  function focusSnapshot(g) {
+    if (!g) {
+      return { ok: false, error: "no_guide", open: false, keyboard: false, role: "none",
+               item: "", blocked: null, window: "none", scanned: 0, exhausted: false }
+    }
+    var acc = harness.focusWalk(g, 0, { leaf: null, depth: -1, scanned: 0, exhausted: false })
+    var token = acc.leaf ? harness.typeToken(acc.leaf) : ""
+    // The catcher's own `blocked`, which the guide binds to `!catcherLive`.
+    // Reported, never refused on: in search mode the catcher is blocked and
+    // still holds the keyboard, and typing a query there is the whole point
+    // of `run.sh type`.
+    var blocked = null
+    try { if (acc.leaf && acc.leaf.blocked !== undefined) blocked = acc.leaf.blocked === true } catch (e) {}
+    return {
+      ok: true,
+      error: "",
+      open: g.opened === true,
+      keyboard: acc.leaf !== null,
+      // The leaf is the guide's `keyCatcher`, a PanelKeyCatcher, in every
+      // mode but the Sources form, where a focused field holds the keyboard
+      // instead -- which is still the guide, so it still passes the guard and
+      // is merely named differently here.
+      role: acc.leaf === null ? "none" : (token.indexOf("PanelKeyCatcher") >= 0 ? "catcher" : "other"),
+      item: token,
+      blocked: blocked,
+      window: harness.windowHost(g).kind,
+      scanned: acc.scanned,
+      exhausted: acc.exhausted === true
+    }
+  }
+
   function numberSnapshot(g) {
     if (!g || g.numberEntry === undefined || g.numberEntry === null) {
       return { ok: false, error: "no_verb", active: null, buffer: null, kind: null, label: null,
@@ -782,23 +914,20 @@ ShellRoot {
     // number copied from a theme file; and which window the loaded guide
     // reports hosting it (the harness-only floating mode, or production).
     function theme(): string {
-      var g = guideLoader.item
-      // Which window the guide LOADED, read from the loaded object's own
-      // type (String(hostWindow) is "<class>(0x...)"), never from the
-      // property that asked for it: a `harnessFloatingWindow` reading true
-      // beside an instantiated layer window would have said "floating" about
-      // a window no headless capture can see. The address is dropped. The
-      // class behind PanelWindow is platform-specific -- measured under cage
-      // it is qs::wayland::layershell::WaylandPanelInterface, not the
-      // PanelWindowInterface the qmltypes export -- so "Panel" is the token.
-      var host = g && g.hostWindow ? String(g.hostWindow).split("(")[0] : ""
-      var kind = host.indexOf("FloatingWindow") >= 0 ? "floating"
-               : host.indexOf("Panel") >= 0 ? "layer" : "none"
+      // The window derivation lives in harness.windowHost, which `focusState`
+      // calls too: one function, not two copies joined by a name (rule 12).
+      var w = harness.windowHost(guideLoader.item)
       return JSON.stringify({
         background: String(Color.background), menuBackground: String(Color.menu.background),
-        guideWindow: kind, guideWindowType: host
+        guideWindow: w.kind, guideWindowType: w.type
       })
     }
+    // F-M3-1 half (a). Where the keyboard is, so `run.sh key` and `run.sh
+    // type` can refuse to send a keystroke into the wrong surface instead of
+    // typing blind and letting the loss read as a guide that did not react.
+    // The compositor cannot answer this; see harness.focusSnapshot for the
+    // measurements, including why hyprctl is not the place to look.
+    function focusState(): string { return JSON.stringify(harness.focusSnapshot(guideLoader.item)) }
     function toggle(): string { return fakeShell.toggle(harness.pluginId, "{}") ? "ok" : "no" }
     function query(text: string): string { if (guideLoader.item) guideLoader.item.setQuery(text); return "ok" }
     function mode(): string { if (guideLoader.item) guideLoader.item.switchMode(); return "ok" }
