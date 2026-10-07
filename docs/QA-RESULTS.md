@@ -12676,3 +12676,63 @@ discriminators go red. The segment therefore tests the thing the maintainer
 named and nothing else, and its stage checks, its adoption witness and its
 provider control pass on both trees because they are controls rather than
 discriminators.
+
+### The review of the D-SINK-16 round: 25 findings, one P1 (F-M3-15)
+
+The P1 was a check that could have certified the fix having measured none of it.
+`qa_adopted` decides whether the upgraded shell met the staged player, and it
+tested "the staged process is gone" BEFORE "a different live pid was reported".
+So a run in which the shell REJECTED the staged player, killed it and started
+its own answered `gone`, which is a pass. Reproduced by calling the predicate:
+
+    qa_adopted 9191 4242 0   ->  gone, status 0
+
+That is not a corner case. Three reachable branches in `applyProbe` end in
+`stopUnadoptedPlayer` and only one of them is an adoption; on the other two the
+player pid is never noted, so the witness sees exactly that input. Every
+downstream S6 assertion would then have passed through the LAUNCH fix, and the
+segment would have certified D-SINK-16 having measured `stopForeignPlayer`.
+
+Repaired two ways: the arms are reordered, so a different live reported pid is
+`other` whatever became of the staged process, and S6 now asserts the log line
+that distinguishes an adoption from a rejection. The shell's two vocabularies do
+not overlap, and the scenario already keeps the log untruncated across both
+shells for exactly this kind of question.
+
+**And the re-run settled what the reasoning could not.** The reviewer could not
+run it, so the question of whether the earlier green run had been vacuous was
+open. With the discriminator in place the witness reads `pid` and the new check
+reads `adoption lines 1, rejection lines 0`: the live behaviour had been the
+adoption path all along. The hole was real and the result was not affected, and
+both halves of that are worth recording.
+
+The P2s, each fixed:
+
+- **A pending TLS reload could be cleared before it was delivered.** The guard
+  cleared the flag whenever `nowPlaying === null`, and null there is two things:
+  "the user stopped", for which nothing is owed, and "not assigned yet", which
+  is the reattach-after-upgrade moment itself, because the flag is set before
+  `nowPlaying` is. The flag is armed in exactly one place, so clearing it there
+  dropped the reload for good and the already-open unverified stream ran to the
+  end of its stream. That is a re-opening of this round's own exposure under a
+  timing window. The three conditions are now `Model.tlsReloadDisposition`,
+  with a `hold` arm that did not exist, called by Service.qml and pinned by a
+  test that calls it over all seven cases.
+- **The mpv stub hardcoded a pre-update player**, answering `tls-verify` False
+  for a player launched with `--tls-verify=yes`, which is every player the fixed
+  code starts. So the "already safe, nothing to migrate" path was unreachable
+  without a display. It now derives the value from its own argv with the last
+  token winning, which is the same rule the trailing re-assertion relies on, and
+  two self-test cases go red without it.
+- **A gate floor left at 19** while the stub's suite grew to 26, in a report
+  that said there was no floor on that step. There is; it is now 28.
+- **A documented opt-in that is not one.** The architecture document said the
+  probe's TLS write is opt-in and that a bare `player probe` stays a read. The
+  shipped helper calls `migrate_tls` on every probe with no flag. The behaviour
+  is kept, because a probe that found the exposure and walked past it would be
+  worse than the side effect, and the sentence now says so with the consequence
+  in it.
+
+**F-M3-8 for the twelfth round**, with the sharper version this round adds: the
+two findings that mattered were both checks that could not fail for the thing
+they guarded.

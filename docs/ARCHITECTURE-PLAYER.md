@@ -380,8 +380,16 @@ verified stale after playback ends (it still returns the previous channel's
 `force-media-title` while `idle-active` is true). **Amended by D-SINK-16
 (4.5.1):** the call adoption makes also reads two TLS properties and, when
 they do not already read safe, writes them and reads them back. That write is
-opt-in on the call, the same shape as the owner claim, so a bare
-`player probe` run by a human stays a read.
+UNCONDITIONAL: `player probe` calls `migrate_tls` on every run, with no flag to
+gate it. An earlier draft of this paragraph said it was opt-in on the call,
+"the same shape as the owner claim, so a bare `player probe` run by a human
+stays a read", and that was never true of the shipped helper. It is kept
+unconditional deliberately -- any probe that finds an unverified player should
+leave it verified, and a flag would mean a probe that found the exposure and
+walked past it -- so the honest statement is the one with the consequence in
+it: `player probe` is no longer purely a read, and a human running it against
+their own player will change that player's TLS setting. Corrected 2026-10-07
+by the review of the lane that wrote it.
 
 `applyProbe()` in Service.qml, by case:
 

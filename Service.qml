@@ -2727,15 +2727,32 @@ Item {
   // unverified. Every LATER load on that player is verified by the migration
   // and by apply_channel's refusal.
   function reestablishForTls() {
-    if (!root.tlsReloadPending) return false
-    if (root.stopping || root.userStopped || root.nowPlaying === null) {
+    // D-SINK-16. The three conditions are a FUNCTION (rule 12), because the
+    // first version of this guard cleared the flag whenever `nowPlaying` was
+    // null, and null there means two different things: "the user stopped", for
+    // which nothing is owed, and "not assigned yet", which is the
+    // reattach-after-upgrade moment itself -- the flag is set before
+    // nowPlaying is. Clearing it there dropped the reload for good, since it
+    // is armed in exactly one place, and the already-open unverified stream
+    // then ran to the end of its stream. Found by the review of the lane that
+    // wrote this.
+    var want = Model.tlsReloadDisposition({
+      pending: root.tlsReloadPending, stopping: root.stopping,
+      userStopped: root.userStopped,
+      nowPlayingId: root.nowPlaying === null ? null : String(root.nowPlaying.id),
+      cacheDir: root.activeCacheDir, playerUp: root.playerUp
+    })
+    if (want === "none") return false
+    if (want === "clear") {
       // Nothing of ours is playing any more: whatever replaces it goes through
       // apply_channel, which asserts the same thing and refuses rather than
       // loads.
       root.tlsReloadPending = false
       return false
     }
-    if (root.activeCacheDir === "" || !root.playerUp) return false
+    // "hold": still owed, and the shell is not ready. The flag STAYS set so a
+    // later call delivers it.
+    if (want !== "deliver") return false
     root.tlsReloadPending = false
     console.warn("omarchy-iptv: re-establishing the channel on an adopted player that was not verifying certificates")
     return root.reapplyIntent(String(root.nowPlaying.id))

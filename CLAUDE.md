@@ -314,7 +314,13 @@ requests and raise the batch.
      playlist fetch already refuses a self-signed certificate, because urllib
      verifies by default and nothing disables it. The plugin verified TLS
      everywhere except the one place it handed the stream to mpv.
-     **The fix is four layers and NONE of them is redundant.** mpv applies
+     **The fix is five layers on the launch argv and two more over IPC, and NONE
+     of them is redundant.** Layers one to four are below; the fifth is
+     `--stream-lavf-o`, two paragraphs down, which the trailing token cannot
+     reach. The two over IPC are D-SINK-16: the launch argv is the wrong
+     place entirely for a player this shell ADOPTS rather than starts, and
+     the maintainer raised that against the release that fixed the launch
+     path. See the D-SINK-16 entry after this one. mpv applies
      command-line options in order and a LATER token beats an earlier one, so
      `--tls-verify=yes` followed by a user `--tls-verify=no`, by
      `--no-tls-verify`, or by a `--profile` naming a profile that sets it off,
@@ -358,6 +364,36 @@ requests and raise the batch.
      enough for every earlier sink, and they are not enough when the program
      being configured lets a later argument rewrite an earlier one. Ask what
      the LAST word is, not what the setting is.
+   - **The player we did not start** (D-SINK-16), which is the TLS peer entry's
+     other half and was raised by the maintainer against the release that fixed
+     the first half, on the verification request for that very commit. Every
+     layer above lives on the LAUNCH argv, and an adopted player has no launch
+     argv left to change: the detached player survives a shell restart by
+     design, so after an upgrade the shell reattaches to a process started by
+     the old code, and `apply_channel` then sends it new provider headers and
+     new credentialed URLs. A live feed into an unauthenticated process, not
+     stale state a user can restart away. We had recorded it ourselves as
+     D-PLY-25 and described it too kindly, which is the lesson worth carrying:
+     a residual in our own words can be the same defect, softened.
+     Measured 2026-10-07 over a real IPC socket: a player launched the old way
+     reads `tls-verify` False and fetches from a server nobody authenticated;
+     `set_property tls-verify True` succeeds, reads back True, and the next
+     load of the same URL fetches NOTHING -- attacker GETs 1 before and 0
+     after, on the same process, with a plain-http control proving the migrated
+     player still plays. A stale `stream-lavf-o` clears the same way.
+     So: `apply_channel` asserts both properties before EVERY load, reads them
+     BACK, and REFUSES to load when they are not safe -- and that last part is
+     what separates it from the `pause`, `aid` and `sid` assertions beside it,
+     which are best effort. Loading IS the act of handing over the credential,
+     so a player that cannot be secured gets neither the URL nor the headers.
+     Adoption migrates, reads back, and then RE-ESTABLISHES the current
+     channel, because whether a stream already open picks the change up for its
+     ongoing fetches is UNMEASURED and this must not depend on the answer; a
+     player that cannot be made safe is stopped rather than fed. Cost: one
+     visible rebuffer, once, on the first reattach after an upgrade.
+     `player probe` is therefore no longer purely a read, and that is
+     deliberate: a probe that found the exposure and walked past it would be
+     worse than the side effect.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under

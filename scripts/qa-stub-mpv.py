@@ -129,7 +129,7 @@ def _env_float(name, default):
 
 
 class Stub(object):
-    def __init__(self, path, clock=time.monotonic):
+    def __init__(self, path, clock=time.monotonic, tls_verify=False):
         self.path = path
         self.clock = clock
         self.lock = threading.RLock()
@@ -176,7 +176,15 @@ class Stub(object):
             # (measured 2026-10-07, see the header). They are not in `unset`:
             # mpv does not say "unavailable" for them, and a stub that did would
             # push a caller down its cannot-be-made-safe path on every run.
-            "tls-verify": False,
+            #
+            # The INITIAL value comes from the launch argv, as real mpv's does.
+            # It was hardcoded False, which models a pre-update player and lies
+            # about every player this plugin now starts -- so the "already safe,
+            # nothing to migrate" path could not be reached at all without a
+            # display, which is rule 10 in the direction that hides a case
+            # rather than forgives one. Found by the review of the lane that
+            # taught the stub these properties.
+            "tls-verify": tls_verify,
             "stream-lavf-o": {},
         }
         # Absent until something sets or loads them - mpv reports
@@ -867,6 +875,41 @@ def self_test():
         def test_stream_lavf_o_reads_an_empty_dict(self):
             self.assertEqual(self.stub.get("stream-lavf-o"), ({}, None))
 
+        def test_the_launch_argv_decides_the_initial_reading(self):
+            # Rule 10, in the direction that HIDES a case rather than forgiving
+            # one. This was hardcoded False, which models a pre-update player
+            # and lies about every player the fixed code launches, so the
+            # "already safe, nothing to migrate" path could not be reached in
+            # any test. Real mpv takes the LAST token, which is what the
+            # plugin's trailing re-assertion relies on.
+            self.assertEqual(Stub("/nonexistent/a.sock").get("tls-verify"), (False, None))
+            self.assertEqual(Stub("/nonexistent/b.sock", tls_verify=True).get("tls-verify"), (True, None))
+
+        def test_main_reads_the_tls_token_off_its_own_argv_last_one_winning(self):
+            import types
+            seen = {}
+            def fake_stub(path, tls_verify=False):
+                seen["tls"] = tls_verify
+                raise SystemExit(0)
+            saved = globals()["Stub"]
+            globals()["Stub"] = fake_stub
+            try:
+                for argv, want in (
+                    (["--input-ipc-server=/x"], False),
+                    (["--input-ipc-server=/x", "--tls-verify=yes"], True),
+                    (["--input-ipc-server=/x", "--tls-verify=yes", "--tls-verify=no"], False),
+                    (["--input-ipc-server=/x", "--tls-verify=no", "--tls-verify=yes"], True),
+                    (["--input-ipc-server=/x", "--no-tls-verify"], False),
+                ):
+                    seen.clear()
+                    try:
+                        main(argv)
+                    except SystemExit:
+                        pass
+                    self.assertEqual(seen.get("tls"), want, argv)
+            finally:
+                globals()["Stub"] = saved
+
         def test_setting_tls_verify_succeeds_and_reads_back(self):
             out = self.reply(self.stub, "set_property", "tls-verify", True)
             self.assertEqual(out["error"], "success")
@@ -907,14 +950,24 @@ def main(argv):
     if argv[:1] == ["--self-test"]:
         return self_test()
     path = None
+    # D-SINK-16. mpv resolves a repeated option by taking the LAST token, which
+    # is why the plugin re-asserts --tls-verify=yes after the user's arguments;
+    # a stub that ignored its argv could not model a player launched by the
+    # FIXED code at all, so the "already safe, nothing to migrate" path was
+    # unreachable without a display.
+    tls_verify = False
     for arg in argv:
         if arg.startswith("--input-ipc-server="):
             path = arg.split("=", 1)[1]
+        elif arg in ("--tls-verify", "--tls-verify=yes", "--tls-verify=true"):
+            tls_verify = True
+        elif arg in ("--tls-verify=no", "--tls-verify=false", "--no-tls-verify"):
+            tls_verify = False
     if not path:
         # The "spawned but never binds" shape. Sleep past --spawn-timeout.
         time.sleep(float(os.environ.get("STUB_LIFE", "60")))
         return 0
-    stub = Stub(path)
+    stub = Stub(path, tls_verify=tls_verify)
     try:
         os.unlink(path)
     except OSError:

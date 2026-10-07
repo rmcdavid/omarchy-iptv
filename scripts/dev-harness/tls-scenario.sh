@@ -1102,6 +1102,21 @@ s6_adopt=$(adopt_witness 25)
 chunks_at_witness=$(chunks s6)
 ck "S6 the upgraded shell MET the staged player ('$s6_adopt': pid = it named that process, gone = it ended it; 'other' would mean it spawned its own and this segment proves nothing)" \
    '[[ "$s6_adopt" == pid || "$s6_adopt" == gone ]]'
+# AND it ADOPTED it, rather than rejecting it. The witness above cannot tell
+# those apart on its own: `applyProbe` has three branches that end in
+# stopUnadoptedPlayer and only one of them is an adoption, so a run in which
+# the shell found the staged player unidentifiable, killed it and started its
+# own would leave every check below passing through the LAUNCH fix instead of
+# this one -- certifying D-SINK-16 having measured none of it. Found by the
+# review of the lane that wrote this segment, reasoned rather than run, so it
+# is asserted here instead of argued about.
+#
+# The shell says which it did, and the two vocabularies do not overlap. This
+# is why $HARNESS_LOG is deliberately left untruncated across both shells.
+s6_adopted_log=$(qa_count 're-establishing the channel on an adopted player that was not verifying certificates|the player will not verify the stream.s certificate, stopping it' "$HARNESS_LOG")
+s6_rejected_log=$(qa_count 'found a player this shell cannot identify, stopping it|the player is not answering, stopping it' "$HARNESS_LOG")
+ck "S6 and it ADOPTED it rather than rejecting it (adoption lines $s6_adopted_log, rejection lines $s6_rejected_log)" \
+   '[[ ${s6_adopted_log:-0} -ge 1 && ${s6_rejected_log:-0} -eq 0 ]]'
 # The already-open stream. `wait_closed` giving up IS the finding on a tree that
 # does not migrate: nothing there ever ends that connection, and the player goes
 # on reading a server nobody authenticated. The settle afterwards is four pace
@@ -1208,7 +1223,7 @@ fi
 # outlived its shell, the adoption witness, the already-open stream, the
 # attacker's count across the adoption, the zap and its hit log, and the two
 # halves of the provider control.
-EXPECTED_CHECKS=46
+EXPECTED_CHECKS=47
 ran=$checks
 is "the scenario ran every check it has" "$ran" "$EXPECTED_CHECKS"
 

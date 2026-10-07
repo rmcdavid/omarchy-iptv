@@ -195,13 +195,23 @@ qa_adopted() {
     printf 'pid\n'
     return 0
   fi
-  if (( alive == 0 )); then
-    printf 'gone\n'
-    return 0
-  fi
+  # A DIFFERENT live reported pid is positive evidence that the shell spawned
+  # its own player, and that is true whatever became of the staged process.
+  # This arm used to sit BELOW the `alive == 0` one, so a run in which the
+  # shell REJECTED the staged player -- killing it and starting its own --
+  # answered `gone` and passed: `qa_adopted 9191 4242 0` printed `gone` and
+  # returned 0. Every downstream check then passed through the LAUNCH fix
+  # instead of the adoption fix, which would have certified D-SINK-16 having
+  # measured nothing of it. Found by the review of the lane that wrote this.
+  # Neither legitimate arm is affected: the reload case has reported ==
+  # staged and the stop case has no reported pid at all.
   if [[ $reported =~ ^[1-9][0-9]*$ ]]; then
     printf 'other\n'
     return 1
+  fi
+  if (( alive == 0 )); then
+    printf 'gone\n'
+    return 0
   fi
   printf 'none\n'
   return 1

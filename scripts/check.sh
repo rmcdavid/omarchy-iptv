@@ -157,7 +157,7 @@ fail=0
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-72}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1889}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1890}
 PY_TESTS_MIN=${PY_TESTS_MIN:-941}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
@@ -179,7 +179,11 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # itself; this is the second line of defence, in the gate's own vocabulary.
 TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
 # The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15, 17 with the ordering cases, 19 with the F-MPV-1 broadcast pair.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-19}
+# 19 -> 26 on 2026-10-07: the stub learned tls-verify and stream-lavf-o for
+# D-SINK-16. The lane that grew it reported there was no floor on this step;
+# there is, it sits here, and leaving it at 19 would have let seven cases be
+# deleted without the gate noticing. Found by the review of that lane.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-28}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }

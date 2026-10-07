@@ -4789,6 +4789,23 @@ check("tlsPropertiesSafe: the fixture has a safe case, unsafe cases, and both ab
 checkCall("playerTlsVerdict: the shared verdicts, every case, by name",
   () => tlsFixture.verdicts.map(v => { const got = Model.playerTlsVerdict(v.tls); return v.name + ": " + got.safe + "/" + got.action }),
   tlsFixture.verdicts.map(v => v.name + ": " + v.safe + "/" + v.action))
+// D-SINK-16, the reload the first guard could drop. `nowPlaying === null` was
+// treated as "nothing is owed", and it is also "not assigned yet" -- which is
+// the reattach-after-upgrade moment, because the flag is set before nowPlaying
+// is. Clearing it there dropped the reload for good (it is armed in exactly one
+// place) and the already-open unverified stream ran to the end of its stream.
+// "hold" is the arm that did not exist. Found by the review of that lane.
+checkCall("D-SINK-16: an owed TLS reload is HELD when the shell is not ready, and only cleared by a deliberate stop", () => {
+  return [
+    Model.tlsReloadDisposition({ pending: false }),
+    Model.tlsReloadDisposition({ pending: true, userStopped: true }),
+    Model.tlsReloadDisposition({ pending: true, stopping: true }),
+    Model.tlsReloadDisposition({ pending: true, nowPlayingId: null, cacheDir: "/c", playerUp: true }),
+    Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "", playerUp: true }),
+    Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "/c", playerUp: false }),
+    Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "/c", playerUp: true })
+  ]
+}, ["none", "clear", "clear", "hold", "hold", "hold", "deliver"])
 // The reading is three-valued and a count is a count. A reader that let `false`
 // coerce to 0 would read an unreadable player as SAFE, which is the one error
 // whose cost is the credential.
@@ -4861,9 +4878,13 @@ check("wiring pin, not a behaviour test: the reload is delivered from both place
   (serviceSource.match(/root\.reestablishForTls\(\)/g) || []).length,
   // It re-sends the user's own intent, which is the only repair ruling CL5
   // allows, rather than inventing a second load path.
-  /function reestablishForTls\(\)[\s\S]{0,900}?root\.reapplyIntent\(String\(root\.nowPlaying\.id\)\)/.test(serviceSource),
-  // It waits for the cache directory the helper resolves the id against.
-  /function reestablishForTls\(\)[\s\S]{0,900}?root\.activeCacheDir === ""/.test(serviceSource)
+  /function reestablishForTls\(\)[\s\S]{0,2200}?root\.reapplyIntent\(String\(root\.nowPlaying\.id\)\)/.test(serviceSource),
+  // And it ASKS Model.tlsReloadDisposition rather than deciding inline. The
+  // three conditions used to be written out here, and one of them was wrong in
+  // a way no test could see, so the decision moved to Model.js where the check
+  // above calls it for real. The cache directory is now an argument rather than
+  // a comparison, which is what this line pins.
+  /function reestablishForTls\(\)[\s\S]{0,2200}?Model\.tlsReloadDisposition\(\{[\s\S]{0,400}?cacheDir: root\.activeCacheDir/.test(serviceSource)
 ], [2, true, true])
 // The helper's refusal has to land as a FAILED play rather than a silent no-op:
 // `tls_unverified` is not retryable (it will not fix itself) and not unreadable

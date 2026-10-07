@@ -5751,6 +5751,29 @@ function playerTls(raw) {
 // pending-reload flag from this, never clear it: an ambiguous first probe
 // (idle, or no stash yet) migrates the player and is then retried 500 ms later
 // by a probe that correctly sees nothing left to do.
+// D-SINK-16. What to do with an owed TLS re-establish, as a function rather
+// than as three conditions in a row, because the first version got one of them
+// wrong in a way no test could see: it CLEARED the flag whenever `nowPlaying`
+// was null, and null there is two different things. "The user stopped" means
+// nothing is owed any more. "Not assigned yet" is the reattach-after-upgrade
+// moment itself -- the flag is set before nowPlaying is -- and clearing it
+// there drops the reload for good, because it is armed in exactly one place.
+// The already-open unverified stream then runs to the end of its stream, which
+// is the exposure this whole round is about. Found by the review of the lane
+// that wrote it.
+//
+//   "clear"   nothing is owed: the user's own stop ended it
+//   "hold"    owed, but the shell is not ready to deliver it yet
+//   "deliver" owed and deliverable now
+function tlsReloadDisposition(o) {
+  var s = o || {}
+  if (s.pending !== true) return "none"
+  if (s.stopping === true || s.userStopped === true) return "clear"
+  if (s.nowPlayingId === null || s.nowPlayingId === undefined || s.nowPlayingId === "") return "hold"
+  if (!s.cacheDir || s.playerUp !== true) return "hold"
+  return "deliver"
+}
+
 function playerTlsVerdict(tls) {
   var reading = playerTls(tls)
   if (reading === null) return { safe: false, action: "stop", migrated: false }
@@ -10343,6 +10366,7 @@ if (typeof module !== "undefined") {
     tlsPropertiesSafe: tlsPropertiesSafe,
     playerTls: playerTls,
     playerTlsVerdict: playerTlsVerdict,
+    tlsReloadDisposition: tlsReloadDisposition,
     // ---- detached player (M2-02)
     PLAYER_STASH_SCHEMA: PLAYER_STASH_SCHEMA,
     PLAYER_ORPHAN_GRACE_SEC: PLAYER_ORPHAN_GRACE_SEC,
