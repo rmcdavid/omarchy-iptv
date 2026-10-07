@@ -85,6 +85,9 @@ HLOG="$SCRATCH/harness.log"
 SOCK="$SCRATCH/runtime/omarchy-iptv/mpv.sock"
 PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}
 PORT=8771
+# Set to 1 once our own fixture server is confirmed listening on $PORT; until
+# then cleanup must not kill whatever holds it (see cleanup).
+SERVER_OWNED=0
 HOST="127.0.0.1:$PORT"
 STREAM_S=780
 # The names that join the lanes (design 2.1-2.5): the step, the display
@@ -109,8 +112,12 @@ QUIET_MS=28000
 # window and not a long run. 62000 spans SIX, and nothing else here moves
 # with it: HEALTH_TICK_MS stays 10000 because it mirrors Service.qml's
 # healthCheckMs by NAME and R16 asserts the consequence of the value rather
-# than reading it back, and TICKS is derived (BUSY_MS / HEALTH_TICK_MS), so
-# the "a tick landed on a running seek" bound follows on its own. The run
+# than reading it back, and TICKS is derived (BUSY_MS / HEALTH_TICK_MS).
+# The "a tick landed on a running seek" bound does NOT follow on its own,
+# which an earlier version of this comment claimed: written as "at least one
+# of TICKS", it demanded 1-in-3 occupancy at 32000 and 1-in-6 at 62000, so
+# growing the window halved the control. It is proportional now
+# (qa_min_skipped, at R16 below), so the floor grows with TICKS instead. The run
 # gets about 30 s longer; STREAM_S has the room (every bound in this file
 # summed as its worst case comes to roughly 430 s against 780, and the
 # bounds that dominate it -- R0's 60 s plateau wait and R4's 60 s floor wait
@@ -322,10 +329,20 @@ cleanup() {
     sleep 0.1
   done
   for p in "${STREAM_PIDS[@]}"; do kill -KILL "$p" 2>/dev/null; done
-  # The server's pid is read from the LISTENER, never from $!.
+  # The server's pid is read from the LISTENER, never from $! -- but ONLY if
+  # this run is the one that bound the port. The trap is installed above the
+  # argument refusals, so cleanup runs on a refusal that started nothing, and
+  # this used to kill WHOEVER held 8771: including, on the "port $PORT is
+  # already in use" refusal, the very process the refusal exists to protect.
+  # Measured: with a decoy listener on 8771, `rewind-scenario.sh --tree /etc`
+  # exited 2 and the decoy was gone; with this guard the decoy survives. The
+  # preflight proves the port was free before we bound it, so once our own
+  # start has been confirmed the listener there is ours and nobody else's.
   local lpid
-  lpid=$(ss -ltnp 2>/dev/null | grep ":$PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
-  [[ -n $lpid ]] && kill "$lpid" 2>/dev/null
+  if (( SERVER_OWNED )); then
+    lpid=$(ss -ltnp 2>/dev/null | grep ":$PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+    [[ -n $lpid ]] && kill "$lpid" 2>/dev/null
+  fi
   rm -rf "$FIX"
   # R16 restarted the harness against the slow-helper tree under $WORK, so
   # `last-start.env` now names a directory that is about to go, and the next
@@ -351,27 +368,38 @@ command -v wtype >/dev/null || { echo "wtype is required (R13)" >&2; exit 2; }
 ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use" >&2; exit 2; }
 qa_safe_path "$SCRATCH" || { echo "unsafe scratch path" >&2; exit 2; }
 
-# F-M3-1 half (b). The transcript opens HERE: after the preflight that
-# refuses to run at all (a refusal is one line on stderr, not a transcript),
-# and before the first line of evidence -- which includes the line naming
-# WHICH TREE is under test, because a transcript that cannot say that is
-# evidence for nothing.
-qa_transcript_start rewind || exit 2
-
-# ---- which checkout is under test
+# ---- which checkout is under test. ALL of its refusals sit ABOVE the
+# transcript and only the line that NAMES the tree sits below it. Both halves
+# are the rule, and this file used to break the first: four refusals that exit
+# 2 (the two-levers conflict, a --tree that cannot be entered, a --tree that is
+# not a plugin tree, a --baseline git cannot export) sat below the call, so a
+# mistyped lever printed a transcript path and left an almost-empty file
+# behind, while three documents -- qa-lib.sh, the harness README and this
+# file's own comment -- said the transcript opens after every refusal. These
+# are the levers a baseline comparison is driven with, so they are the
+# refusals a reader hits most. Found by the first review of F-M3-1 (b).
 [[ -n $BASELINE && -n $TREE ]] && { echo "--baseline and --tree are the same lever; pass one" >&2; exit 2; }
+TREE_LINE=""
 if [[ -n $TREE ]]; then
   PLUGIN_ROOT=$(cd "$TREE" 2>/dev/null && pwd) || { echo "--tree $TREE is not a directory I can enter" >&2; exit 2; }
   [[ -f $PLUGIN_ROOT/Model.js && -f $PLUGIN_ROOT/Service.qml ]] \
     || { echo "--tree $PLUGIN_ROOT is not a plugin tree (no Model.js / Service.qml)" >&2; exit 2; }
-  echo "== prepared tree $PLUGIN_ROOT"
+  TREE_LINE="== prepared tree $PLUGIN_ROOT"
 fi
 if [[ -n $BASELINE ]]; then
   EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-rewind-baseline-XXXXXX")
   git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR" || { echo "could not export $BASELINE" >&2; exit 2; }
   PLUGIN_ROOT="$EXPORT_DIR"
-  echo "== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
+  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
 fi
+
+# F-M3-1 half (b). The transcript opens HERE: after the preflight and the
+# argument refusals that exit before anything starts (a refusal is one line on
+# stderr, not a transcript), and before the first line of evidence -- which
+# includes the line naming WHICH TREE is under test, because a transcript that
+# cannot say that is evidence for nothing.
+qa_transcript_start rewind || exit 2
+[[ -n $TREE_LINE ]] && echo "$TREE_LINE"
 export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
 HELPER=$(readlink -f "$PLUGIN_ROOT/bin/omarchy-iptv")
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-rewind-XXXXXX")
@@ -397,6 +425,8 @@ http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])),
 PY
 for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
 ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "the fixture server did not start" >&2; exit 2; }
+# From here the listener on $PORT is OURS, and only now may cleanup kill it.
+SERVER_OWNED=1
 start_stream() {   # start_stream <dir> <size> <tone-hz>
   ffmpeg -hide_banner -loglevel error -re \
     -f lavfi -i "testsrc=size=$2:rate=25" -f lavfi -i "sine=frequency=$3:sample_rate=44100" \
@@ -404,7 +434,7 @@ start_stream() {   # start_stream <dir> <size> <tone-hz>
     -c:v libx264 -preset ultrafast -tune zerolatency -g 50 -keyint_min 50 -sc_threshold 0 \
     -b:v 1000k -maxrate 1000k -bufsize 2000k -pix_fmt yuv420p -c:a aac -b:a 64k -t "$STREAM_S" \
     -f hls -hls_time 2 -hls_list_size 6 -hls_flags delete_segments+independent_segments \
-    -hls_segment_filename "$1/seg%05d.ts" "$1/live.m3u8" 2>>"$WORK/ffmpeg.err" &
+    -hls_segment_filename "$1/seg%05d.ts" "$1/live.m3u8" >>"$WORK/ffmpeg.err" 2>&1 &
   STREAM_PIDS+=("$!")
 }
 start_stream "$FIX/a" 640x360 440
@@ -662,7 +692,9 @@ for i in 1 2 3; do
 done
 is "R13 the guide is open in list mode" "$(qa_guide_field "d['mode']" "$(ipc state)")" "list"
 seq0=$(player_seq); lock0=$(lock_seq); pid0=$(player_pid); skips0=$(svc "d['healthSkips']")
-python3 "$SWEEP" 9 "$HELPER" "$WORK/sweep.json" &
+# Both streams redirected (see argv-scenario.sh): the transcript pipe is not
+# this child's to hold open. A file, not /dev/null, so a traceback survives.
+python3 "$SWEEP" 9 "$HELPER" "$WORK/sweep.json" >>"$WORK/sweep.err" 2>&1 &
 SWEEP_PID=$!
 sleep 0.3
 "$RUN" key -d 60 -- bbbbbbbbbbbbbbbbbbbb >/dev/null 2>&1
@@ -852,8 +884,21 @@ ck "R16 controlRunning says the slot IS held while the kind is seek ($brun >= 10
 # So fewer status runs than ticks is the observation that a tick landed on a
 # running seek -- and healthSkips is then the ONLY thing that differs between
 # a tree with the exemption and one without.
-ck "R16 control: at least one of the $TICKS health ticks landed on a running seek ($bstatus status runs < $TICKS)" \
-  '[[ $(ge "$((TICKS - 1))" "$bstatus") == 0 ]]'
+#
+# The floor is PROPORTIONAL, not the constant 1: the presses run back to back
+# for the whole window and each holds the slot for SLOW_MS, so nearly every
+# tick should land on a running seek, and "at least one of six" is a weaker
+# demand than the "at least one of three" this check shipped with at
+# BUSY_MS 32000. qa_min_skipped is the shared arithmetic; scripts/qa-lib-test.sh
+# drives it, so the strength of this bound is observed without a display.
+SKIP_MIN=$(qa_min_skipped "$TICKS")
+# D-PLY-9's shape, closed rather than relied upon: a non-numeric SKIP_MIN would
+# kill the $(( )) below as an EXPANSION, and a failed expansion runs neither the
+# pass nor the fail. TICKS comes from $(( )) just above so this cannot fire, and
+# if it ever does it says so in the transcript rather than skipping a check.
+qa_value "$SKIP_MIN" || { echo "   R16 WARNING: qa_min_skipped could not read TICKS=$TICKS; falling back to 1" >&2; SKIP_MIN=1; }
+ck "R16 control: at least $SKIP_MIN of the $TICKS health ticks landed on a running seek ($bstatus status runs <= $((TICKS - SKIP_MIN)))" \
+  '[[ $(ge "$((TICKS - SKIP_MIN))" "$bstatus") == 0 ]]'
 is "R16 D10: healthSkips never left 0 across the busy window" "$bskips" "0"
 is "R16 and healthSkips was readable on every sample" "$bunread" "0"
 is "R16 the player was not restarted (same pid as before the window)" "$(player_pid)" "$PID16"

@@ -244,21 +244,26 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# F-M3-1 half (b). The transcript opens HERE: after argument parsing and the
-# traps, and before the first line of evidence -- which includes the line
-# naming WHICH TREE is under test, because a transcript that cannot say that
-# is evidence for nothing. (This file has no refusal preflight of its own;
-# rewind-scenario.sh's call sits below one for the same reason -- a refusal is
-# one line on stderr, not a transcript.)
-qa_transcript_start player || exit 2
-
-# ---- which checkout is under test
+# ---- which checkout is under test. The one refusal in it (git cannot export
+# the ref --baseline names) sits ABOVE the transcript, and only the line that
+# NAMES the tree sits below: a mistyped lever should die as a usage error
+# rather than as an almost-empty transcript with a path printed for it. It
+# used to sit below, as rewind-scenario.sh's four did -- found by the first
+# review of F-M3-1 (b), which also found this comment claiming the opposite.
+TREE_LINE=""
 if [[ -n $BASELINE ]]; then
   EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-baseline-XXXXXX")
   git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR" || { echo "could not export $BASELINE" >&2; exit 2; }
   PLUGIN_ROOT="$EXPORT_DIR"
-  echo "== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
+  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
 fi
+
+# F-M3-1 half (b). The transcript opens HERE: after argument parsing, the traps
+# and the refusals above, and before the first line of evidence -- which
+# includes the line naming WHICH TREE is under test, because a transcript that
+# cannot say that is evidence for nothing.
+qa_transcript_start player || exit 2
+[[ -n $TREE_LINE ]] && echo "$TREE_LINE"
 export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
 echo "== plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
 

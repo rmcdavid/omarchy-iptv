@@ -12,8 +12,12 @@
 # asserted to misbehave, so the evidence does not depend on anyone's memory of
 # what the bug was.
 #
-# Pure bash plus python3/jq. No harness, no display, no network, under a
-# second. Run by scripts/check.sh.
+# Bash plus python3/jq, and `node` for the one section that drives shell.qml's
+# own focusWalk by extracting it (the gate already depends on node for
+# tests/Model.test.js). No harness, no display, no network. A few seconds
+# rather than one: three sections now RUN something -- run.sh against a stubbed
+# transport, and two scenarios' refusal paths, which start nothing. Run by
+# scripts/check.sh.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -844,6 +848,13 @@ is "there is exactly one transcript, not two sharing a name" \
 # join by name between a filename pattern in qa-lib.sh and an ERE in a
 # scenario. So it is asserted by running R18's real predicate over a real
 # transcript written under the real name.
+#
+# ONE assertion defends that join -- the `0` below -- and its counter-case. A
+# mutation that interposes a per-scenario subdirectory reddens four checks here
+# (measured: 229 passed, 4 failed), but three of the four are the `twice`
+# collision case above losing its `ls .../twice/twice-pinned-*.out` glob, which
+# says nothing about the join. Recorded because the opposite was written down:
+# the count was read as four assertions defending it.
 R18_LEAK='://|127\.0\.0\.1:8771|live\.m3u8|/rewind/'
 rm -rf "$TDIR/r18"
 scen rewind "$TDIR/r18" 'echo "PASS R1 back 10"' \
@@ -1000,9 +1011,12 @@ FG_WTYPE
 chmod +x "$FG/bin/wtype"
 
 # $1 = what the stub qs writes to stdout, $2 = a line for stderr ("" for none),
-# $3 = the stub's exit code. Writes the reply, then runs the verb.
+# $3 = the stub's exit code. Writes the reply, then runs the verb. Every call
+# the stub receives is logged, so the ROUTING (which config root was asked) is
+# observable and not just the verdict.
 fg_stub() {
   { printf '#!/bin/bash\n'
+    printf 'printf "%%s\\n" "$*" >>%q\n' "$FG/qs.argv"
     [[ -n $2 ]] && printf 'echo %q >&2\n' "$2"
     printf 'cat <<%s\n%s\nSTUB_EOF\n' "'STUB_EOF'" "$1"
     printf 'exit %s\n' "$3"
@@ -1010,14 +1024,26 @@ fg_stub() {
   chmod +x "$FG/bin/qs"
 }
 # Runs `run.sh <verb...>` against the stub and echoes "<exit> <wtype-calls>".
-fg_run() {
+# fg_run starts from an UNPRIMED shell (F-HARNESS-1's per-shell state);
+# fg_run_keep leaves whatever the previous call left, which is how the primer's
+# bookkeeping across two invocations is observed.
+fg_run_keep() {
   : >"$FG/wtype.log"
-  rm -f "$FG/h/primed"
+  : >"$FG/qs.argv"
   WTYPE_LOG=$FG/wtype.log PATH="$FG/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$FG/h \
     timeout 20 "$ROOT/scripts/dev-harness/run.sh" "$@" >"$FG/out" 2>&1
   printf '%s %s\n' "$?" "$(wc -l <"$FG/wtype.log")"
 }
+fg_run() {
+  rm -f "$FG"/h/primed*
+  fg_run_keep "$@"
+}
 FG_OPEN='{"ok":true,"error":"","open":true,"keyboard":true,"role":"catcher","item":"PanelKeyCatcher","blocked":false,"window":"layer","scanned":326,"exhausted":false}'
+# The two integers in that reply are the lead's live reading of the real guide
+# on 2026-10-06 (220 visits closed, 326 open), not invented ones -- but nothing
+# in this section MEASURES them: `qs` is a stub, so every field here is a value
+# this file chose. Read them as the inputs to a decision, never as evidence
+# about the guide's tree.
 
 # A focused guide passes, and the key reaches wtype. Two calls, not one: the
 # F-HARNESS-1 shift primer is the first, the caller's key the second.
@@ -1054,15 +1080,325 @@ fg_stub '' "QSFAIL: no running instances" 255
 is "a transport failure refuses" "$(fg_run key j)" "3 0"
 ck "and the diagnostic is still shown, not swallowed" 'grep -q "QSFAIL: no running instances" "$FG/out"'
 
+# A walk that GAVE UP is not a walk that found nothing. keyboard=false with
+# exhausted=true must not be rendered as the confident "another surface has
+# it": the bound was hit, so the honest answer is "I cannot tell". Both halves
+# of the message are asserted, because the two cases differ only in the words.
+fg_stub "${FG_OPEN/\"keyboard\":true,\"role\":\"catcher\",\"item\":\"PanelKeyCatcher\",\"blocked\":false,\"window\":\"layer\",\"scanned\":326,\"exhausted\":false/\"keyboard\":false,\"role\":\"none\",\"item\":\"\",\"blocked\":null,\"window\":\"layer\",\"scanned\":326,\"exhausted\":true}" "" 0
+is "a walk that EXHAUSTED its bound refuses" "$(fg_run key j)" "3 0"
+ck "and says it cannot tell, not that another surface has the keyboard" \
+   'grep -q "the focus walk gave up" "$FG/out" && ! grep -q "ANOTHER SURFACE" "$FG/out"'
+
 # The escape hatch skips the FOCUS check only, and it is positional: wtype's
 # own `--` means the rest is text, so our flag may only lead.
 fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
-is "--to-compositor sends although the guide is closed" "$(fg_run key --to-compositor -k Escape)" "0 2"
 is "a --to-compositor AFTER -- is text to be typed, not a flag" "$(fg_run key -- --to-compositor)" "3 0"
 
+# ...and the hatch skips the F-HARNESS-1 PRIMER too, which is the point rather
+# than an optimisation. The hatch aims a chord at whatever holds the keyboard,
+# which is by definition not the guide's fresh surface; the primer used to fire
+# into it anyway AND record the shell as primed, so the next legitimate key into
+# the guide skipped priming -- F-HARNESS-1's compensation spent without ever
+# having reached the surface it compensates for. ONE wtype call, not two, and
+# the next real key still pays for the primer. The three run in sequence and
+# the middle one reads the state the first left.
+is "--to-compositor sends although the guide is closed, and sends ONLY the chord" \
+   "$(fg_run key --to-compositor -k Escape)" "0 1"
+ck "the hatch leaves the shell UNPRIMED, so the priming is not burnt" '[[ ! -f $FG/h/primed ]]'
+fg_stub "$FG_OPEN" "" 0
+is "so the next real key into the guide still primes (primer + key)" "$(fg_run_keep key j)" "0 2"
+
+# WHICH INSTANCE the guard asks about. Only the environment variable routes
+# these verbs; `--instance` is a `start` option and is parsed nowhere else.
+# The comment above require_guide_focus used to read as if the flag worked
+# here, which is the claim these three drive.
+mkdir -p "$FG/h/root2"; : >"$FG/h/root2/shell.qml"
+fg_stub "$FG_OPEN" "" 0
+is "OMARCHY_IPTV_HARNESS_INSTANCE routes the guard and the key goes through" \
+   "$(OMARCHY_IPTV_HARNESS_INSTANCE=2 fg_run key j)" "0 2"
+is "and it is the SECOND config root that was asked about focus" \
+   "$(grep -c -- "-p $FG/h/root2 call harness focusState" "$FG/qs.argv")" "1"
+is "--instance before the verb is a usage error, not a routed guard" "$(fg_run --instance 2 key j)" "2 0"
+ck "and it says which word it could not place" 'grep -q "unknown option: key" "$FG/out"'
+is "--instance AFTER key is wtype's text, like every other word there" \
+   "$(fg_run key --instance 2 j; tail -1 "$FG/wtype.log")" "0 2
+--instance 2 j"
+
 # `type` refuses UP FRONT, so a steal cannot cost two sends into a foreign
-# surface and a message blaming the first-keystroke race.
+# surface and a message blaming the first-keystroke race. The stub is set HERE
+# rather than inherited from the case above: every case in this table states
+# its own reply, so inserting one cannot silently change another's input.
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
 is "type refuses before its retry loop, so nothing is sent twice" "$(fg_run type sky)" "3 0"
+
+# And a steal AFTER the front check ends on the GUARD's verdict. The inner
+# `"$0" key` refusal used to be dropped on the loop body, so `type` fell
+# through to the two-attempt message that run.sh's own comment calls the wrong
+# diagnosis, and exited 1 -- so a scenario grading exit 3 as "refused" could
+# not see a focus refusal at all. The stub answers focused for the FRONT check
+# and stolen for every call after it.
+{ printf '#!/bin/bash\n'
+  printf 'printf "%%s\\n" "$*" >>%q\n' "$FG/qs.argv"
+  printf 'n=$(cat %q 2>/dev/null || echo 0); n=$((n + 1)); printf "%%s" "$n" >%q\n' "$FG/n" "$FG/n"
+  printf 'if (( n > 1 )); then cat <<%s\n%s\nSTUB_EOF\nelse cat <<%s\n%s\nSTUB_EOF\nfi\n' \
+    "'STUB_EOF'" "${FG_OPEN/\"keyboard\":true/\"keyboard\":false}" "'STUB_EOF'" "$FG_OPEN"
+} >"$FG/bin/qs"
+chmod +x "$FG/bin/qs"
+rm -f "$FG/n"
+is "a steal after the front check refuses with 3 and types nothing" "$(fg_run type sky)" "3 0"
+ck "and the diagnosis is the guard's, not the two-attempt message" \
+   'grep -q "type REFUSED" "$FG/out" && ! grep -q "did not arrive after two attempts" "$FG/out"'
+
+# ============ shell.qml focusWalk: the two bounds, driven for real (F-M3-1 a)
+
+section "shell.qml focusWalk: a bound that gives up says so"
+
+# The guard's verdict above is decided from a REPLY. This decides the reply.
+# focusWalk is plain JavaScript inside a QML object, so it cannot be reached
+# from a bash predicate and it cannot be reached from the qml spec either (that
+# runs the plugin's Model.js, not the harness shell). What can be done without a
+# display is to take the function's own TEXT out of shell.qml and run it -- the
+# shipping characters, not a copy of its decisions -- over trees built here.
+# Both bounds are read out of the file the same way, so a bound that moves moves
+# the test with it; a bound that is RENAMED fails the extraction loudly rather
+# than passing vacuously.
+#
+# What this catches: `exhausted` is what tells run.sh "I gave up" apart from
+# "nothing is focused", and run.sh renders the second as the confident "ANOTHER
+# SURFACE holds the keyboard". The depth bound used to return without setting it
+# while the comment above it promised that could not happen.
+cat >"$TMP/focuswalk.js" <<'FW_JS'
+var fs = require('fs');
+var src = fs.readFileSync(process.argv[2], 'utf8');
+var start = src.indexOf('\n  function focusWalk(');
+if (start < 0) { console.log('EXTRACT-FAIL function focusWalk'); process.exit(0); }
+var end = src.indexOf('\n  }\n', start);
+if (end < 0) { console.log('EXTRACT-FAIL focusWalk body'); process.exit(0); }
+var body = src.slice(start + 1, end + 4);
+// The bound as a named property, or -- for a tree that still spells it inline --
+// the literal in the condition, so this runs against before-code as well.
+function bound(name, inlineRe) {
+  var m = src.match(new RegExp('readonly\\s+property\\s+int\\s+' + name + ':\\s*(\\d+)'));
+  if (m) return parseInt(m[1], 10);
+  m = body.match(inlineRe);
+  if (m) return parseInt(m[1], 10);
+  console.log('EXTRACT-FAIL bound ' + name);
+  process.exit(0);
+}
+var harness = { focusScanBudget: bound('focusScanBudget', /scanned\s*>=\s*(\d+)/),
+                focusDepthCap: bound('focusDepthCap', /depth\s*>\s*(\d+)/) };
+harness.focusWalk = eval('(' + body.trim() + ')');
+function chain(n) {   // n nested Items, only the deepest with activeFocus
+  var node = { activeFocus: true, children: [] };
+  for (var i = 1; i < n; i++) node = { activeFocus: false, children: [node] };
+  return node;
+}
+function walk(root) {
+  return harness.focusWalk(root, 0, { leaf: null, depth: -1, scanned: 0, exhausted: false });
+}
+var s = walk(chain(8));
+console.log('SHALLOW leaf=' + (s.leaf !== null) + ' depth=' + s.depth + ' exhausted=' + s.exhausted);
+var d = walk(chain(harness.focusDepthCap + 5));
+console.log('DEEP leaf=' + (d.leaf !== null) + ' exhausted=' + d.exhausted);
+var n = walk({ activeFocus: false, children: [null, null], item: null, contentItem: null });
+console.log('NULLS leaf=' + (n.leaf !== null) + ' exhausted=' + n.exhausted);
+var wide = { activeFocus: false, children: [] };
+for (var i = 0; i < harness.focusScanBudget + 10; i++) wide.children.push({ activeFocus: false, children: [] });
+var b = walk(wide);
+console.log('BUDGET exhausted=' + b.exhausted + ' scanned=' + b.scanned);
+FW_JS
+FW=$(node "$TMP/focuswalk.js" "$ROOT/scripts/dev-harness/shell.qml" 2>&1)
+fwline() { printf '%s\n' "$FW" | grep "^$1 " | head -1; }
+is "the real guide path (8 levels) finds the leaf and did NOT give up" \
+   "$(fwline SHALLOW)" "SHALLOW leaf=true depth=7 exhausted=false"
+is "a leaf past the DEPTH cap reports exhausted, so 'I gave up' is not 'nothing is focused'" \
+   "$(fwline DEEP)" "DEEP leaf=false exhausted=true"
+is "a branch that simply ENDS is not giving up (a null child must not set exhausted)" \
+   "$(fwline NULLS)" "NULLS leaf=false exhausted=false"
+is "and the NODE budget reports it too, at the budget" \
+   "$(fwline BUDGET)" "BUDGET exhausted=true scanned=$(grep -oE 'focusScanBudget: [0-9]+' "$ROOT/scripts/dev-harness/shell.qml" | grep -oE '[0-9]+')"
+
+# =========== qa_transcript_start: the directory mode the REFUSAL actually sees
+
+section "qa_transcript_start: the directory-mode mask, group and other apart"
+
+# The refusal reads `(( 0$dmode & 077 ))`, and qa-lib.sh's comment and the
+# harness README both state the property as "refuses a directory group OR other
+# can enter". Only /tmp was driven, which is 1777 and trips every candidate
+# mask, so two thirds of that sentence had nothing behind it: weakening the mask
+# to `& 007` (the group half deleted) or `& 002` (only world-WRITABLE refused,
+# so a 0750 directory belonging to someone else is accepted) left this file at
+# 213 passed, 0 failed. Rule 14's shape inside a privacy check. Found by the
+# first review of this function.
+#
+# The case the mask is for is a directory we cannot TIGHTEN -- our own is
+# chmod 0700'd two lines above the check, which is why /tmp was the only case
+# anyone could reach. So `chmod` is shadowed by a function that fails, which is
+# exactly what the real chmod does on a directory we do not own, and stricter
+# than it in every other way (rule 10). The mode is then genuinely read by
+# `stat` and genuinely judged by the shipping condition.
+cat >"$TMP/mode-probe.sh" <<'MODE_PROBE'
+#!/bin/bash
+set -uo pipefail
+. "$1"
+chmod() { return 1; }   # a directory this run cannot tighten
+qa_transcript_start probe "$2" >/dev/null 2>&1
+printf '%s %s\n' "$?" "$(ls -A "$2" | wc -l)"
+MODE_PROBE
+mode_probe() {   # mode_probe <octal-mode> -> "<status> <files-in-dir>"
+  local d=$TMP/dm$1
+  rm -rf "$d"; mkdir -p "$d"; command chmod "0$1" "$d"
+  bash "$TMP/mode-probe.sh" "$HERE/qa-lib.sh" "$d"
+}
+is "a 0750 directory we cannot tighten is refused, and nothing is written there" \
+   "$(mode_probe 750)" "2 0"
+is "a 0705 directory we cannot tighten is refused too (the OTHER half)" \
+   "$(mode_probe 705)" "2 0"
+# The control, so the two refusals are not passing for want of a working
+# function: 0700 goes through WITH the chmod still dead, which also isolates the
+# umask half of the deliberately redundant 0600 (the chmod cannot be what made
+# it private here).
+is "and a 0700 directory is accepted with the same chmod dead" "$(mode_probe 700)" "0 1"
+is "the transcript it wrote is 0600 from the umask alone" \
+   "$(stat -c '%a' "$(ls "$TMP"/dm700/* 2>/dev/null | head -1)" 2>/dev/null)" "600"
+
+# ============ the transcript opens after the REFUSALS, observed at the sink
+
+section "scenarios: a refusal leaves no transcript"
+
+# qa-lib.sh item 3, the harness README and two scenarios' own comments all say
+# the call sits after the refusals that exit before anything starts. Four of
+# rewind-scenario.sh's exited BELOW it (the two-levers conflict, a --tree that
+# cannot be entered, a --tree that is not a plugin tree, a --baseline git cannot
+# export) and one of player-scenario.sh's did, so a mistyped lever printed a
+# path and left an almost-empty file behind. Found by the first review.
+#
+# Observed at the sink: the real scenario is run with a bad lever against a
+# throwaway harness directory, and the transcript directory must not exist
+# afterwards. Robust to machine state on purpose -- if the preflight above
+# refuses first (a locked screen, a busy port) that is also a refusal and must
+# also leave nothing. The ORDER check below cannot be made vacuous that way, so
+# the two together are not.
+# `ss` is stubbed to report no listeners, and that is a SAFETY measure, not a
+# convenience. rewind-scenario.sh installs its EXIT trap above these refusals,
+# and its cleanup reads the pid holding port 8771 out of `ss -ltnp` and KILLS
+# it -- so a gate step that drove the real `ss` would kill a fixture server a
+# live rewind pass was using, on every commit. The stub also makes the preflight
+# deterministic: it never refuses for "port in use" and so always reaches the
+# refusals under test. Nothing here depends on what `ss` can see. The harness
+# directory is a throwaway under $TMP, so every other path cleanup touches
+# (`run.sh reap`'s patterns, $FIX, last-start.env) resolves inside it.
+tr_refuse() {   # tr_refuse <scenario> <args...> -> "<status> <transcripts>"
+  local s=$1; shift
+  local d=$TMP/trr$$-$RANDOM
+  mkdir -p "$TMP/safebin"
+  { printf '#!/bin/bash\n'
+    printf 'printf "%%s\\n" "$*" >>%q\n' "$TMP/ss.argv"
+    printf 'exit 0\n'
+  } >"$TMP/safebin/ss"
+  chmod +x "$TMP/safebin/ss"
+  : >"$TMP/ss.argv"
+  PATH="$TMP/safebin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$d \
+    timeout 120 "$ROOT/scripts/dev-harness/$s" "$@" >/dev/null 2>&1
+  printf '%s %s\n' "$?" "$(ls -1 "$d/transcripts" 2>/dev/null | wc -l)"
+}
+is "rewind-scenario.sh --baseline X --tree Y refuses and writes no transcript" \
+   "$(tr_refuse rewind-scenario.sh --baseline HEAD --tree /tmp)" "2 0"
+is "rewind-scenario.sh --tree <not a plugin tree> likewise" \
+   "$(tr_refuse rewind-scenario.sh --tree /etc)" "2 0"
+is "player-scenario.sh --baseline <no such ref> likewise" \
+   "$(tr_refuse player-scenario.sh --baseline no-such-ref-for-a-test)" "2 0"
+
+# A refusal must not reap somebody else's port either, and that one bites
+# hardest on the refusal that exists to protect it. rewind-scenario.sh installs
+# its EXIT trap above these refusals and its cleanup reads the pid holding 8771
+# out of `ss -ltnp` and kills it, so a refusal that started NOTHING killed
+# whoever was there -- including on "port 8771 is already in use". Measured with
+# a decoy listener: the decoy was gone after `--tree /etc`; with the ownership
+# guard it survives, and survives the port-in-use refusal too.
+#
+# Observed here without binding anything: the kill is reachable only through
+# `ss -ltnp`, and the stub above logs every `ss` call, so a run that refuses
+# must make none. (`kill` is a bash builtin, so it cannot be stubbed on PATH --
+# the call that precedes it can.)
+tr_refuse rewind-scenario.sh --tree /etc >/dev/null
+is "a refusing rewind run never asks which pid holds the port, so it kills nobody" \
+   "$(qa_count '[-]ltnp' "$TMP/ss.argv")" "0"
+ck "control: the run really did reach cleanup (it asked about the port at all)" \
+   '(( $(qa_count "[-]ltn" "$TMP/ss.argv") >= 1 ))'
+
+# And the order in the file, which no machine state can make vacuous.
+tr_line() { grep -n "$2" "$ROOT/scripts/dev-harness/$1" | head -1 | cut -d: -f1; }
+tr_last() { grep -n "$2" "$ROOT/scripts/dev-harness/$1" | tail -1 | cut -d: -f1; }
+ck "rewind's transcript call sits BELOW every one of its tree refusals" \
+   '(( $(tr_line rewind-scenario.sh "^qa_transcript_start rewind") > $(tr_last rewind-scenario.sh "could not export \$BASELINE") ))'
+ck "and below the two-levers refusal" \
+   '(( $(tr_line rewind-scenario.sh "^qa_transcript_start rewind") > $(tr_line rewind-scenario.sh "are the same lever") ))'
+ck "player's sits below its export refusal" \
+   '(( $(tr_line player-scenario.sh "^qa_transcript_start player") > $(tr_line player-scenario.sh "could not export \$BASELINE") ))'
+
+# ======== every background start redirects both streams (the README's claim)
+
+section "scenarios: a background start does not keep tee alive"
+
+# README.md said "Every scenario here already redirects its harness, its fixture
+# servers and its sweepers". Four starts did not, and two of them were the
+# sweepers the sentence names: argv-scenario.sh's and rewind-scenario.sh's
+# redirected neither stream, rewind's ffmpeg redirected stderr only and
+# sources-scenario.sh's silent listener stdout only. A background process that
+# does not redirect inherits the transcript pipe and keeps `tee` alive past the
+# run. Counted over the POPULATION rather than asserted in prose, so the next
+# scenario added here cannot be the one that forgets.
+bg_unredirected=0
+bg_total=0
+while IFS= read -r hit; do
+  bg_total=$((bg_total + 1))
+  line=${hit#*:}
+  # stderr first: `2>`, `2>>` or `&>`. Then STRIP those spellings and ask
+  # whether any `>` is left -- that is stdout. Written this way because the
+  # obvious regex for "a > not preceded by 2" matches the SECOND > of `2>>`,
+  # which read rewind's ffmpeg start (stderr only) as fully redirected and left
+  # one of the four findings invisible. Measured both ways against the
+  # pre-change tree: 3 flagged with the regex, 4 with this.
+  has_out=0; has_err=0
+  [[ $line == *"2>"* || $line == *"&>"* ]] && has_err=1
+  stripped=${line//2>>/ }; stripped=${stripped//2>/ }; stripped=${stripped//&>/ }
+  [[ $stripped == *">"* ]] && has_out=1
+  if (( ! has_out || ! has_err )); then
+    bg_unredirected=$((bg_unredirected + 1))
+    printf '     unredirected background start: %s\n' "$hit"
+  fi
+done < <(grep -nE '[^&|]&[[:space:]]*$' "$ROOT"/scripts/dev-harness/*-scenario.sh)
+ck "there are background starts to judge at all (control: $bg_total found)" '(( bg_total >= 8 ))'
+is "every background start in every scenario redirects BOTH streams" "$bg_unredirected" "0"
+
+# ============ qa_min_skipped: a duty-cycle floor that does not relax
+
+section "qa_min_skipped: a control that keeps its strength when the window grows"
+
+# rewind-scenario.sh's R16 asserted "at least one of the TICKS health ticks
+# landed on a running seek" while TICKS went 3 -> 6 with the busy window
+# (F-RWD-25). That is 1-in-3 becoming 1-in-6: the control at half strength,
+# under a note saying the bound "follows on its own" -- true as arithmetic,
+# false as a statement about strength. Found by the first review of the
+# transcript change. The floor is proportional now, and it lives here rather
+# than in the scenario so its strength is observed without a display.
+is "three ticks demand one skipped, which is what R16 shipped with" "$(qa_min_skipped 3)" "1"
+is "six demand two, so the 62 s window is as strong as the 32 s one was" "$(qa_min_skipped 6)" "2"
+is "nine demand three" "$(qa_min_skipped 9)" "3"
+is "and one still demands one: a floor of zero would be no control at all" "$(qa_min_skipped 1)" "1"
+is "a non-integer is refused rather than silently floored" "$(qa_min_skipped NOFIELD)" "$QA_NO_DELTA"
+st "and says so with 2" 2 qa_min_skipped NOFIELD
+# The JOIN, and it is a name join rather than a call -- said plainly, because
+# rule 14 does not let a grep stand in for an observation. The six assertions
+# above observe the shipping arithmetic for real; what no gate step can observe
+# is R16 USING it, since R16 needs a player, a stream and a display. A live
+# rewind pass is the only thing that observes that, and until one runs the two
+# lines below are bookkeeping that catches a revert, not evidence of strength.
+is "R16's floor comes from qa_min_skipped, not a second copy of the arithmetic" \
+   "$(qa_count 'SKIP_MIN=\$\(qa_min_skipped' "$ROOT/scripts/dev-harness/rewind-scenario.sh")" "1"
+is "and the constant-1 bound it replaced is not still there beside it" \
+   "$(qa_count 'ge "\$\(\(TICKS - 1\)\)"' "$ROOT/scripts/dev-harness/rewind-scenario.sh")" "0"
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
@@ -1076,7 +1412,15 @@ is "type refuses before its retry loop, so nothing is sent twice" "$(fg_run type
 # explicit umask instead of the caller's, and the property that actually holds
 # -- 0600 because we create the file rather than letting tee create it -- is
 # asserted at three umasks including the two that used to redden this step.
-EXPECTED=233
+# 233 -> 268 the same day, repairing the closing round's P3s: the focus guard's
+# exhausted verdict, which instance the guard asks about, the primer the
+# --to-compositor hatch used to burn and the mid-type steal that ended on the
+# wrong diagnosis; shell.qml's focusWalk bounds, driven by extracting the real
+# function; the directory-mode mask with group and other driven apart; the
+# refusals that must leave no transcript (and the port-holder a refusing run
+# must not kill, found while verifying them); the background starts that must
+# redirect both streams; and qa_min_skipped.
+EXPECTED=270
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

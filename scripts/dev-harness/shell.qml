@@ -477,19 +477,37 @@ ShellRoot {
   // URL-free by construction: booleans, counts and two type tokens. Nothing
   // reachable from here ever held a playlist URL.
   //
-  // The walk is bounded twice over (rule 3): a depth cap, like findById's,
-  // and a node budget, because the number of realised delegates is not
-  // something this function gets to assume. `exhausted` is reported rather
-  // than swallowed, so "I gave up" can never be read as "nothing is focused".
+  // The walk is bounded twice over (rule 3): a depth cap and a node budget,
+  // because the number of realised delegates is not something this function
+  // gets to assume. BOTH bounds set `exhausted`, so "I gave up" can never be
+  // read as "nothing is focused" -- run.sh renders keyboard=false with
+  // exhausted=false as the confident "ANOTHER SURFACE holds the keyboard",
+  // which for a walk that stopped early is a wrong diagnosis, not a cautious
+  // one. The depth bound used to return without touching it while the
+  // sentence above claimed otherwise; found by the first review of this
+  // function, and the reason both caps are named properties now rather than
+  // literals in the condition (the same comment also said the depth cap was
+  // "like findById's", which is 40, not 60).
+  //
+  // A null node is NOT giving up: a child slot that holds nothing is an
+  // ordinary end of a branch, and setting `exhausted` for it would make every
+  // walk of every tree report that it had stopped early.
   //
   // `scanned` counts VISITS, not distinct objects: it follows the same three
   // links findById does, and a Flickable's `contentItem` is both its
   // `contentItem` and one of its `children`, so that subtree is visited
-  // twice. The number is a budget reading, never a tree size.
+  // twice. The number is a budget reading, never a tree size. For scale, the
+  // real guide measured 220 visits closed and 326 open on 2026-10-06; the
+  // budget below is headroom over that, chosen rather than measured.
   readonly property int focusScanBudget: 20000
+  // Deeper than the real path needs (traced at 7-8 levels from the guide item
+  // to the key catcher) and deeper than findById's 40, because this walk
+  // descends into realised delegates that findById stops at.
+  readonly property int focusDepthCap: 60
 
   function focusWalk(node, depth, acc) {
-    if (!node || depth > 60) return acc
+    if (!node) return acc
+    if (depth > harness.focusDepthCap) { acc.exhausted = true; return acc }
     if (acc.scanned >= harness.focusScanBudget) { acc.exhausted = true; return acc }
     acc.scanned++
     // The DEEPEST activeFocus item is the one that receives the key; the

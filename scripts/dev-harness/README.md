@@ -75,7 +75,13 @@ qa_transcript_start <name> || exit 2     # after the preflight, before the first
   anything starts (a refusal is one line on stderr, not a transcript), and
   **before the first line of evidence** -- including the line that names which
   tree is under test, because a transcript that cannot say that is evidence
-  for nothing.
+  for nothing. Both halves bite, and the first was false here while this page
+  asserted it: `rewind-scenario.sh` opened the transcript above four of its
+  own `--baseline` / `--tree` refusals and `player-scenario.sh` above one, so
+  a mistyped lever printed a path and left an almost-empty file behind. Both
+  validate above the call now and print the line that *names* the tree below
+  it. `scripts/qa-lib-test.sh` drives both refusal paths and asserts that no
+  transcript lands, so this bullet is observed rather than promised.
 * In a scenario with a **`check-tree` mode** the call goes on the `live|""`
   arm of the dispatch, never above it. `scripts/check.sh` runs
   `chno-entry-scenario.sh`, `pip-scenario.sh` and `id-rotate-scenario.sh` in
@@ -91,18 +97,30 @@ qa_transcript_start <name> || exit 2     # after the preflight, before the first
   for, so a `transcripts/rewind/` path would make the file's own name a leak
   hit and turn a privacy check red on itself.
 * A **background process the scenario starts inherits the transcript pipe**
-  unless it redirects its own stdout and stderr. Every scenario here already
-  redirects its harness, its fixture servers and its sweepers; one that did
-  not would keep `tee` alive after the run. Redirect them, the way the
-  existing ones do.
+  unless it redirects **both** its own stdout and its own stderr; one that did
+  not would keep `tee` alive after the run. Redirect them to a file rather
+  than to `/dev/null` where a traceback would be worth having. This page used
+  to say every scenario here already did -- naming the harness, the fixture
+  servers and the sweepers -- while four starts did not, and two of them were
+  the sweepers: `argv-scenario.sh`'s and `rewind-scenario.sh`'s redirected
+  neither stream, `rewind-scenario.sh`'s `ffmpeg` only stderr and
+  `sources-scenario.sh`'s silent listener only stdout. So the sentence is a
+  count now, not a claim: `scripts/qa-lib-test.sh` scans every `&`-terminated
+  line in every `*-scenario.sh` and fails if any of them leaves a stream
+  attached (11 starts, 0 unredirected; 4 of the 11 before this).
 * **The transcript is a sink (CLAUDE.md rule 5).** A scenario's stdout can
   carry a playlist URL with provider credentials in it --
   `argv-scenario.sh` drives a synthetic one on purpose -- so the transcript is
   0600 in a 0700 directory, and `qa_transcript_start` **refuses** rather than
-  writing into a directory group or other can enter. Left to create its own
-  file, `tee` would use its own umask and leave the transcript at 0644,
-  world-readable; that is measured in `scripts/qa-lib-test.sh`, which drives
-  the unsafe form for real and asserts the 644.
+  writing into a directory group or other can enter -- *both* halves of that,
+  driven separately: a 0750 and a 0705 directory the run cannot tighten are
+  each refused in `scripts/qa-lib-test.sh`, which is what makes the mask
+  itself observed and not just the existence of a check. Left to create its
+  own file, `tee` would use its own umask and leave the transcript at 0644,
+  world-readable; that is measured there too, driving the unsafe form for real
+  at an explicit umask 022, and the 0600 the shipped form produces is asserted
+  at three umasks because it comes from creating the file ourselves rather
+  than from whatever the caller happened to have set.
 
 ### Reading your own transcript inside a scenario
 
@@ -236,6 +254,15 @@ the 20 fixture rows to 3. So a headless keystroke scenario must:
 2. before grading, either send a throwaway key first, or reset with
    `ipc query ""` and retry the typing once.
 
+`run.sh key` and `run.sh type` now carry both of those, once, so a scenario
+cannot get it wrong by forgetting: `key` sends one Shift press per shell before
+its first real key (keyed to the pid file, so a fresh shell primes again), and
+`type` reads the query back and retries once. `--to-compositor` deliberately
+skips the primer -- its chord is not aimed at the guide's fresh surface, and
+firing the primer there used to mark the shell primed and leave the next real
+key unprotected. The list above stays because it is still what a scenario
+asserting a keystroke by hand has to do.
+
 Drive a running harness from another terminal:
 
 ```bash
@@ -253,14 +280,58 @@ $H ipc tooltip            # last tooltip text the widget asked the bar to show
 $H ipc pip toggle         # M2-05: the service's own verb (on | off | toggle)
 $H ipc pipKey             # M2-05: the guide's p key, through the same entry point
 $H ipc pipState           # M2-05: { available, on, applying, reason, provider, playerPid }
-$H key -k Tab             # real key events via wtype (overlay has exclusive focus)
+$H ipc focusState         # F-M3-1: where the keyboard is -- { ok, open, keyboard, role, item,
+                          #   blocked, window, scanned, exhausted }. What `key` and `type` ask.
+$H key -k Tab             # real key events via wtype -- REFUSES unless the guide has the keyboard
 $H key j j f              # e.g. list mode: down, down, favorite
+$H key --to-compositor -k F13   # a chord for the COMPOSITOR: skips the focus check (not the lock one)
+$H type sky               # type text and prove it arrived, by reading the query back
 $H shot search            # grim screenshot -> shots/search.png
 ```
 
+### `key` and `type` refuse rather than type blind (F-M3-1 half (a))
+
 `run.sh key` uses `wtype`, which delivers real key events through the
-compositor, so both keyboard modes can be verified end to end
-(`wtype -k Escape`, `wtype -k Return`, `wtype bbc`).
+compositor -- to whatever surface holds the keyboard, which on a bad day is
+the terminal the scenario runs in, the editor behind it, or a lock prompt,
+where every keystroke registers as a failed unlock attempt. Neither failure is
+visible in a scenario's own assertions: a key that landed elsewhere reads
+exactly like a guide that did not react, and `sky` arriving as `ky` still
+filters 20 rows to 3. So both verbs ask first and **exit 3** naming what they
+found, rather than typing into an unknown surface. Two refusals:
+
+* **`hyprlock` is up.** Never escapable, no flag. `pgrep -x hyprlock` -- `-x`,
+  the process *name*, because `-f` matched an ancestor shell whose command line
+  merely contained the word and refused every keystroke with nothing locked.
+* **The guide has not got the keyboard.** Asked over `ipc focusState`, which
+  walks the guide for the deepest `activeFocus` item; `activeFocus`, not
+  `focus`, because a window that loses activation keeps `focus` true while the
+  keys go elsewhere. The reply distinguishes "the guide is CLOSED", "another
+  surface holds the keyboard" and "the walk gave up, so I cannot tell"
+  (`exhausted`), and it fails **closed**: anything unreadable refuses.
+  Escapable with `--to-compositor`, which **must come first** -- everything
+  after it belongs to `wtype`, whose own `--` means "the rest is text" -- and
+  which exists for a chord aimed at the compositor, not for making a failing
+  scenario pass. It skips the focus check only, never the lock one, and it also
+  skips the F-HARNESS-1 shift primer, so it cannot spend the guide's priming on
+  a foreign surface.
+
+`type` has no `--to-compositor`: it proves the text reached the *guide* by
+reading the query back, so a chord aimed at the compositor has nothing for it
+to prove. It also carries the F-HARNESS-1 compensation so a scenario cannot
+forget it: the first `wtype` keystroke into a fresh shell is intermittently
+swallowed (1 fresh shell in 4), so `key` sends one Shift press per shell
+before the first real key, and `type` asserts the query it read back and
+retries once. A steal *after* the front check ends on the guard's verdict too
+-- exit 3, nothing typed -- not on a two-attempt failure message.
+
+Operationally: `OMARCHY_IPTV_FOCUS_TIMEOUT` (default 5 s) bounds the wait for
+the reply and a timeout refuses rather than typing blind; a harness started
+*before* this change has no `focusState` verb, so `run.sh reap` and restart it
+or every key refuses; and `--instance` does **not** reach `key` or `type` --
+route a second instance with `OMARCHY_IPTV_HARNESS_INSTANCE=2`, because a flag
+after `key` is argv for `wtype` to type. The decision table is driven in
+`scripts/qa-lib-test.sh` against a stubbed transport.
 
 ### Sources (M2-01)
 
