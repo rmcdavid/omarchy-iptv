@@ -327,7 +327,24 @@ requests and raise the batch.
      reserved, because it is the targeted escape for a provider with a
      self-signed or private certificate and it is measured working behind the
      trailing re-assertion. `--profile` is not reserved either: the last token
-     makes it harmless. Do not "tidy away" the duplicate token -- removing
+     makes it harmless.
+     **The trailing token does NOT cover everything, and the first version of
+     this entry said it did.** `--stream-lavf-o` hands `key=value` straight to
+     libavformat for the stream, and FFmpeg's own AVOption is `tls_verify` --
+     a different knob from mpv's `--tls-verify`, reaching the same place -- so
+     our last word is not the last word. Measured with BOTH tls-verify tokens
+     in place: `--stream-lavf-o=tls_verify=0` played the attacker's stream,
+     and so did its `-add`, `-append` and `-set` forms, with the GET in the
+     attacker's log each time. It is reserved, which is the only thing that
+     closes it, and `mpvOptionBase` strips the list suffixes so one entry
+     covers all six spellings. `--demuxer-lavf-o` is measured NOT to bypass
+     (it configures the demuxer, not the protocol) and stays unreserved rather
+     than reserved on suspicion.
+     The lesson, and it is the one worth carrying: an option that forwards
+     arbitrary options to a LIBRARY is not covered by winning an argument with
+     the program. Ask what the library is configured with, not only what the
+     program was told. Three independent reviewers found this against a fix
+     that had already been measured working. Do not "tidy away" the duplicate token -- removing
      either occurrence is a security change, and the one that matters is the
      last.
      A user's own `mpv.conf` does NOT beat the command line (measured), so a

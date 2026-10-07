@@ -4535,6 +4535,22 @@ checkCall("D-SINK-13 layer 4: the two escapes stay open - --tls-ca-file for a pr
   kept: ["--tls-ca-file=/etc/ssl/provider-ca.pem", "--profile=evil", "--tls-cert-file=/c.pem", "--tls-key-file=/k.pem"],
   rejected: [], caFileReserved: undefined, profileReserved: undefined
 })
+// D-SINK-13, LAYER 5, and the one that proves layer 2 is not enough on its
+// own. `--stream-lavf-o` forwards key=value to libavformat for the STREAM, and
+// FFmpeg's own AVOption `tls_verify` is a different knob reaching the same
+// place, so the trailing re-assertion cannot outvote it: measured by the lead
+// on 2026-10-07 with BOTH tls-verify tokens in place, `--stream-lavf-o=
+// tls_verify=0` played the attacker's self-signed stream (exit 0, the GET in
+// the attacker's log), and so did -add, -append and -set. The reserved list is
+// the only thing that closes it. `--demuxer-lavf-o` is measured NOT to bypass
+// and stays open, so this also pins that we did not reserve on suspicion.
+checkCall("D-SINK-13 layer 5: every --stream-lavf-o spelling is refused and --demuxer-lavf-o stays open", () => {
+  const r = Model.splitMpvArgs("--stream-lavf-o=tls_verify=0 --stream-lavf-o-add=tls_verify=0 --stream-lavf-o-append=a=1 --stream-lavf-o-set=b=2 --stream-lavf-o-del=c --demuxer-lavf-o=tls_verify=0")
+  return { kept: r.args, rejectedCount: r.rejected.length, streamReserved: Model.MPV_RESERVED["--stream-lavf-o"], demuxerReserved: Model.MPV_RESERVED["--demuxer-lavf-o"] }
+}, {
+  kept: ["--demuxer-lavf-o=tls_verify=0"], rejectedCount: 5,
+  streamReserved: true, demuxerReserved: undefined
+})
 // LAYER 2, the one that actually guarantees verification. The assertion is
 // about POSITION, not membership: with layer 1 alone the token is present and
 // the self-signed stream still played, because `--profile=evil` applies a
@@ -4588,9 +4604,19 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // path the plugin never listed, `--stream-record`'s class. `--cache-on-disk`
 // itself is deliberately NOT here: it is the user's own disk, warned about
 // through the handoff mechanism (MPV_DISK_WARN) and never refused.
-// D-SINK-13 makes it twenty-three: `--tls-verify`. See the D-SINK-13 block
-// below for the four layers and what each one is asked to prove.
-check("MPV_RESERVED gained exactly fourteen entries", Object.keys(Model.MPV_RESERVED).length, 23)
+// D-SINK-13 makes it twenty-FOUR, in two steps on one day. `--tls-verify`
+// first; then `--stream-lavf-o`, because the trailing re-assertion that was
+// supposed to make the reserved list unnecessary for this cannot reach it --
+// that option hands key=value straight to libavformat and FFmpeg's own
+// AVOption `tls_verify` is a different knob reaching the same place. Measured
+// with both tls-verify tokens in place, it played the attacker's stream, and
+// so did its -add, -append and -set forms; mpvOptionBase strips the suffixes
+// so the one entry covers all six. See the D-SINK-13 block below.
+//
+// The LABEL below is a count, not a word: it said "thirteen" when the number
+// was 22 and "fourteen" when it was 23, because the word was never re-read
+// when the number moved. It names the number now.
+check("MPV_RESERVED holds exactly 24 entries", Object.keys(Model.MPV_RESERVED).length, 24)
 check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is not",
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",

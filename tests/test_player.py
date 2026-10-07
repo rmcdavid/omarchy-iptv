@@ -1983,7 +1983,12 @@ class ParityTest(unittest.TestCase):
         # reason `--load-scripts` is - the base argv alone can be undone by a
         # later token - and re-asserted as the final token besides, because
         # `--profile` can carry the same change indirectly.
-        self.assertEqual(len(names), 23)
+        # 24 since D-SINK-13, which added two on one day: --tls-verify, and
+        # then --stream-lavf-o when all three reviewers found that the
+        # trailing re-assertion cannot outvote an option forwarded to
+        # libavformat. Measured: it played the attacker's stream with both
+        # tls-verify tokens in place.
+        self.assertEqual(len(names), 24)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)
@@ -2108,6 +2113,30 @@ class ParityTest(unittest.TestCase):
         self.assertLess(at[0], user)                 # layer 1: among the fixed options
         self.assertGreater(at[1], user)              # layer 2: after everything the user gets
         self.assertEqual(at[1], len(argv) - 1)
+
+    def test_every_stream_lavf_o_spelling_is_refused_and_demuxer_lavf_o_is_not(self):
+        """D-SINK-13 layer 5: the bypass the trailing token cannot reach.
+
+        `--stream-lavf-o` forwards key=value to libavformat for the stream, and
+        FFmpeg's own AVOption `tls_verify` is a different knob reaching the same
+        place, so the re-assertion cannot outvote it. Measured 2026-10-07 with
+        both tls-verify tokens in place: it PLAYED the attacker's self-signed
+        stream, as did -add, -append and -set. `--demuxer-lavf-o` is measured
+        NOT to bypass, so it stays open and that is pinned here too rather than
+        reserved on suspicion.
+        """
+        kept, rejected = helper.filter_mpv_args([
+            "--stream-lavf-o=tls_verify=0",
+            "--stream-lavf-o-add=tls_verify=0",
+            "--stream-lavf-o-append=a=1",
+            "--stream-lavf-o-set=b=2",
+            "--stream-lavf-o-del=c",
+            "--demuxer-lavf-o=tls_verify=0",
+        ])
+        self.assertEqual(kept, ["--demuxer-lavf-o=tls_verify=0"])
+        self.assertEqual(len(rejected), 5)
+        self.assertIn("--stream-lavf-o", helper.MPV_RESERVED)
+        self.assertNotIn("--demuxer-lavf-o", helper.MPV_RESERVED)
 
     def test_the_tls_filter_refuses_both_spellings_and_keeps_both_escapes(self):
         """D-SINK-13 layers 3 and 4, by calling the shipping filter.

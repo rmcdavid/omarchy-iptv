@@ -12478,3 +12478,69 @@ And layer 3 by calling the shipping filter, before and after:
 | `--tls-verify` | kept | REFUSED |
 | `--tls-ca-file=/x` | kept | kept |
 | `--profile=evil` | kept | kept |
+
+### D-SINK-15: the fix for D-SINK-13 had a bypass of its own
+
+All three adversarial reviewers found this independently, against a fix that
+had already been measured working at the sink. The four-layer fix rested on a
+trailing `--tls-verify=yes` being the last word on the command line. It is not.
+
+`--stream-lavf-o` forwards `key=value` straight to libavformat for the stream,
+and FFmpeg's own AVOption is `tls_verify` -- a different knob from mpv's
+`--tls-verify`, reaching the same place. Our last token does not outvote it.
+Measured on 2026-10-07 against the same self-signed server, with BOTH
+tls-verify tokens in place:
+
+| case | result |
+|---|---|
+| control: trailing `--tls-verify=yes`, no user token | exit 2, refused |
+| `--stream-lavf-o=tls_verify=0` between the two tokens | **exit 0, played** |
+| `--stream-lavf-o=tls_verify=0` after the last token | **exit 0, played** |
+| `--stream-lavf-o-add=tls_verify=0` | **exit 0, played** |
+| `--stream-lavf-o-append=tls_verify=0` | **exit 0, played** |
+| `--stream-lavf-o-set=tls_verify=0` | **exit 0, played** |
+| `--demuxer-lavf-o=tls_verify=0` | exit 2, refused |
+
+The attacker's log held a GET for each of the rows that played. The shipped
+filter accepted every one of those tokens before this change.
+
+`--demuxer-lavf-o` is the interesting negative: it is the same mechanism one
+layer up and it does NOT bypass, because it configures the demuxer rather than
+the protocol. It stays unreserved on that measurement rather than reserved on
+suspicion.
+
+This one can only be closed by the reserved list, which is why the list is
+load-bearing again here and why "layer 2 covers the indirections nobody has
+enumerated" was too strong a sentence to have written. `mpvOptionBase` strips
+the list suffixes, so the single entry covers all six spellings; removing it
+reddens three node checks and two python tests, including a behavioural one in
+each language, and the scenario's S5 now reads the token's absence off the argv
+the player is actually running.
+
+**The lesson.** An option that forwards arbitrary options to a LIBRARY is not
+covered by winning an argument with the PROGRAM. Ask what the library is
+configured with, not only what the program was told.
+
+### F-UX-7: the refusal nobody sees
+
+The first draft of the README said a refused `mpvArgs` token is "refused with a
+warning rather than quietly overridden, so you find out". It is not. The only
+report is `console.warn` in `Service.qml`, which reaches the shell's log and no
+surface the user ever looks at, and the footer warning list is built from KEPT
+tokens only. That has been true of every reserved option since the list
+existed; D-SINK-13 is just the first time a document claimed otherwise. The
+README now says where the refusal actually goes.
+
+### D-PLY-25: the player that keeps the old options
+
+The detached player survives a plugin update by design, and the service adopts
+a running one rather than relaunching it. So a player started by 0.12.1 keeps
+the argv it was launched with and goes on running without TLS verification
+until it is stopped: the update does not reach it. Raised by the review of the
+code lane, against a fix whose own claims said nothing about it.
+
+The README now tells the user to stop and start the player to pick the change
+up. What is not done is making the product notice for itself, which would mean
+either relaunching an adopted player whose argv lacks the token, or saying so
+in the guide. Both are changes to adoption, which is M2-02's most carefully
+reasoned path, and neither belongs in a same-day security fix.

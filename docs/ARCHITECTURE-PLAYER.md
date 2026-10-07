@@ -820,7 +820,7 @@ this one sink: the helper's own playlist, EPG and probe fetches go through
 refuse a self-signed certificate today (measured). The claim to make is
 therefore "everywhere except the player", not "now verifies everywhere".
 
-**Specification, four layers.** All four are REQUIRED and each answers a
+**Specification, FIVE layers.** All five are REQUIRED and each answers a
 different question. The lead measured every row cited here on 2026-10-07
 against a local TLS server (self-signed, and signed by a generated CA) serving
 a 106,220-byte MPEG-TS, driven by the real shipped argv taken out of
@@ -1014,7 +1014,7 @@ left the 0600 files and the 0600 socket on this side and were handed to an
 unauthenticated peer on the other, which is why an enumeration of local sinks
 could be complete and the system still be wrong. The claim at the head of this
 section is unchanged and remains true as written; it was never the whole claim.
-Closed by the four layers in 4.15 -- whether they have landed is the D-SINK-13
+Closed by the five layers in 4.15 -- whether they have landed is the D-SINK-13
 board row's business, not this paragraph's. What remains on this sink, stated
 exactly:
 a certificate that chains to neither the system store nor a `--tls-ca-file` the

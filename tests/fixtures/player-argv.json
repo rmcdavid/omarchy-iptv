@@ -439,6 +439,7 @@
     "--screenshot-template",
     "--script",
     "--scripts",
+    "--stream-lavf-o",
     "--stream-record",
     "--term-status-msg",
     "--title",

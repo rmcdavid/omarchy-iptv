@@ -731,7 +731,7 @@ ck "S4 and the stream really was fetched (control: $s4_hits)" '(( s4_hits >= 1 )
 
 # ============================================================== S5, the reservation and the argv
 echo "== S5 the reservation and the composed argv, read off the player that is playing"
-segment "--tls-verify=no --no-tls-verify --profile=evil --tls-ca-file=$CA_PEM" \
+segment "--tls-verify=no --no-tls-verify --stream-lavf-o=tls_verify=0 --profile=evil --tls-ca-file=$CA_PEM" \
   || bad "S5 the harness did not come up (see $LOG)"
 ipc play "t:s5" >/dev/null
 s5_outcome=$(outcome "t:s5" s5 40)
@@ -753,6 +753,16 @@ ck "S5 the hostile profile really was delivered to mpv (control for S3)" '[[ "$s
 ck "S5 the CA file really was delivered to mpv (control for S4)" '[[ "$s5_cmd" == *"--tls-ca-file="* ]]'
 ck "S5 layer 3: --tls-verify=no never reached mpv" '[[ "$s5_cmd" != *"--tls-verify=no"* ]]'
 ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ "$s5_cmd" != *"--no-tls-verify"* ]]'
+# D-SINK-13 layer 5, the bypass the trailing token CANNOT reach and so the one
+# the reserved list has to. `--stream-lavf-o` forwards key=value to
+# libavformat for the stream, and FFmpeg's own AVOption `tls_verify` is a
+# different knob reaching the same place: measured by the lead on 2026-10-07
+# with BOTH tls-verify tokens in place, `--stream-lavf-o=tls_verify=0` PLAYED
+# the attacker's self-signed stream, with the GET in the attacker's own log.
+# Found by all three reviewers of the round, against a fix already measured
+# working. Asserted on the argv the player is actually running, like its
+# siblings above.
+ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ "$s5_cmd" != *"--stream-lavf-o"* ]]'
 is "S5 layer 2: the LAST token of the composed argv re-asserts verification" "$s5_last" "--tls-verify=yes"
 ck "S5 layer 1 and 2 are both there: $s5_yes occurrences of --tls-verify=yes" '(( s5_yes >= 2 ))'
 ck "S5 and S-03 still holds: no URL and no credential on the argv" \
@@ -810,7 +820,10 @@ fi
 # scripts/qa-lib-test.sh asserts both numbers against those greps, so a
 # forgotten bump reddens the gate on this machine rather than on the display
 # lane's, weeks later. Never lower one to make a run green.
-EXPECTED_CHECKS=33
+# 33 -> 34: S5's layer-5 check, added at integration when all three
+# reviewers found that --stream-lavf-o reaches FFmpeg's own tls_verify and
+# the trailing re-assertion cannot outvote it.
+EXPECTED_CHECKS=34
 ran=$checks
 is "the scenario ran every check it has" "$ran" "$EXPECTED_CHECKS"
 

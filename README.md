@@ -138,11 +138,21 @@ and an `https` provider could have presented their own certificate, served you
 their own video, and kept the username and password your stream address and
 your provider's headers carry. A marketplace maintainer reported it; it is on
 now. Verification is set in the player's own options and set AGAIN as the very
-last option, after yours, so no token of yours can switch it back off -- not
-`--tls-verify=no`, and not a `--profile` naming a profile in your own mpv
-config that turns it off, which is why that second one is there and is not a
-duplicate to be tidied away. A direct `--tls-verify` is refused with a warning
-rather than quietly overridden, so you find out.
+last option, after yours, so an ordinary token of yours cannot switch it back
+off -- not `--tls-verify=no`, and not a `--profile` naming a profile in your
+own mpv config that turns it off, which is why that second one is there and is
+not a duplicate to be tidied away. One kind of token the last word cannot
+reach, because it configures the media library rather than the player:
+`--stream-lavf-o` forwards settings straight through, and it is refused for
+that reason.
+
+`--tls-verify` and `--stream-lavf-o` are refused rather than quietly
+overridden. Be aware of where that refusal goes: it is written to the shell's
+log, not shown to you in the guide, so if a token of yours seems to do nothing,
+that log is where to look.
+
+If a player is already running when you update, it keeps the options it was
+started with. Stop it and start it again to pick this up.
 
 The cost, because it is not free for everyone: a provider whose certificate is
 self-signed, or signed by a CA your system does not already trust, stops

@@ -4083,6 +4083,16 @@ MPV_RESERVED = frozenset((
     # the alias reserved nothing. Matching is by base name now (see
     # filter_mpv_args), and --include loads a config that can set any of these.
     "--include",
+    # D-SINK-13, and the reason layer 2 is not the whole fix.
+    # `--stream-lavf-o` hands key=value straight to libavformat for the
+    # STREAM, and FFmpeg's own AVOption is `tls_verify` -- a different knob
+    # from mpv's `--tls-verify`, reaching the same place -- so the trailing
+    # re-assertion cannot outvote it. Measured 2026-10-07 with BOTH
+    # tls-verify tokens in place: `--stream-lavf-o=tls_verify=0` PLAYED the
+    # attacker's stream, as did the -add, -append and -set forms.
+    # mpv_option_base strips the list suffixes, so this covers all six.
+    # `--demuxer-lavf-o` is NOT reserved: measured, it does not bypass.
+    "--stream-lavf-o",
     "--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit",
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
     "--term-status-msg", "--screenshot-template",

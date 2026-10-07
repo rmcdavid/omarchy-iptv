@@ -411,7 +411,7 @@ output is empty unless stated.
 
 What is under test, and why the obvious test is not one. The standard is
 `ARCHITECTURE.md` section 8.10 and the specification is
-`ARCHITECTURE-PLAYER.md` 4.15: four layers, of which the base-argv token is the
+`ARCHITECTURE-PLAYER.md` 4.15: five layers, of which the base-argv token is the
 one a test naturally reaches for and the one that proves least. Asserting that
 `--tls-verify=yes` appears somewhere in the argv array is a restatement of the
 line that was written to contain it -- engineering rule 14 -- and it stays green

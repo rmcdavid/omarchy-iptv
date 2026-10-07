@@ -276,6 +276,26 @@ var MPV_RESERVED = {
   //    bypass.
   // `--tls-cert-file` and `--tls-key-file` are CLIENT certificates, a
   // different thing, and are untouched.
+  // D-SINK-13, and the reason layer 2 is not the whole fix. `--stream-lavf-o`
+  // hands key=value straight to libavformat for the STREAM, and FFmpeg's own
+  // AVOption is `tls_verify` -- a different knob from mpv's `--tls-verify`,
+  // reaching the same place. So the trailing re-assertion cannot outvote it:
+  // measured by the lead on 2026-10-07 against the self-signed server, with
+  // BOTH tls-verify tokens in place, `--stream-lavf-o=tls_verify=0` PLAYED the
+  // attacker's stream (exit 0), and so did the `-add`, `-append` and `-set`
+  // forms, with the GET in the attacker's log each time. Found by all three
+  // reviewers of this round independently, against the four-layer fix.
+  //
+  // This one can ONLY be closed by the reserved list, which is why the list is
+  // load-bearing again here and why "layer 2 covers the indirections nobody has
+  // enumerated" was too strong a sentence. mpvOptionBase strips the list
+  // suffixes, so this single entry covers all six spellings.
+  //
+  // `--demuxer-lavf-o` is NOT reserved: measured on the same server, it does
+  // NOT bypass verification (exit 2, refused), because it configures the
+  // demuxer rather than the protocol. Recorded as measured rather than
+  // reserved on suspicion.
+  "--stream-lavf-o": true,
   "--tls-verify": true
 }
 

@@ -413,7 +413,7 @@ connection": whether a connection is TLS at all is a separate question, and the
 answer is not uniformly yes -- `SOURCE_SCHEMES` and `STREAM_SCHEMES` both
 accept plain `http`, which is D-SINK-14, filed the same day and not settled by
 this round. Verification and transport are two decisions and this entry is only
-about the first. **What changed: four layers, specified in
+about the first. **What changed: five layers, specified in
 `ARCHITECTURE-PLAYER.md` 4.15** -- `--tls-verify=yes` in the base argv where a
 reader looks; the same token re-asserted as the FINAL element of the composed
 argv, after the user's `mpvArgs`, which is the layer that actually binds,
