@@ -251,3 +251,41 @@ The daemon that owns `org.freedesktop.Notifications` here is the shell
 itself (`busctl --user status org.freedesktop.Notifications` names the
 quickshell pid), not mako or dunst, so Pango markup rules do not apply.
 
+
+## `omarchy-refresh-shell` RESETS the user's config (verified 2026-10-07)
+
+Its name reads like "reload the shell". It is not. Its own header says
+`omarchy:summary=Reset shell.json to Omarchy defaults`, and its body is two
+lines:
+
+```
+omarchy-refresh-config omarchy/shell.json
+omarchy-bar defaults
+```
+
+Run during the 0.13.0 install update, it replaced `~/.config/omarchy/shell.json`
+with the stock file. Measured by diffing against a snapshot taken minutes
+earlier: it removed this plugin's bar entry together with its `playlistUrl`,
+`epgUrl` and `showLogos` settings, removed three other third-party widgets, and
+substituted the default `omarchy.tailscale` and `omarchy.power`. It printed
+`"plugins": []` and `Restored the default Omarchy bar` while doing it. The
+shell then restarted on its own, because the config write is what triggers a
+reload.
+
+**Never use it to restart the shell.** It is a destructive reset of user
+configuration, and for a plugin whose settings live in `shell.json` it destroys
+exactly the thing the plugin is configured by. Restoring the snapshot and
+waiting a few seconds was enough: the running shell re-read the file and the
+plugin came back reporting its channels and EPG, with no second restart.
+
+The neighbouring commands, by their own summary lines:
+
+| command | what it says it does |
+|---|---|
+| `omarchy-refresh-shell` | Reset shell.json to Omarchy defaults |
+| `omarchy-launch-shell` | Launch the Omarchy shell with its log kept in the journal |
+| `omarchy-restart-app` | Restart an application by killing it and relaunching via uwsm |
+
+Which of the last two is the supported way to restart the shell in place is
+NOT established here and is marked UNVERIFIED; what is established is that the
+first one must not be used for it. See D-HOST-3.

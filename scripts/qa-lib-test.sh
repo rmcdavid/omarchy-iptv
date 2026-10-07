@@ -714,6 +714,15 @@ scen run1 "$TDIR" 'echo "PASS first"' 'echo "FAIL second" >&2' \
   'printf "%s\n" "$QA_TRANSCRIPT" >"'"$TMP"'/path1"' >/dev/null 2>&1
 T1=$(cat "$TMP/path1" 2>/dev/null)
 ck "the run named its own transcript" '[[ -n $T1 && -f $T1 ]]'
+# F-HARNESS-8 is the same race one layer along, and it reddened the GATE on
+# 2026-10-07: `tee` is a separate process, so a transcript grepped straight
+# back after the run can be short. The scenario's own sweep was given
+# qa_transcript_sync for exactly this; these three assertions never were, and
+# three of them failed together in a gate run that passed 3/3 on re-run. A
+# bounded wait, which reports giving up rather than looping, so a transcript
+# that never arrives still fails the assertion below instead of hanging.
+qa_wait_file() { local f=$1 pat=$2 n=${3:-60} i; for ((i = 0; i < n; i++)); do grep -q "$pat" "$f" 2>/dev/null && return 0; sleep 0.05; done; return 1; }
+qa_wait_file "$T1" '^FAIL second$' 60 || printf 'qa-lib-test: gave up waiting for the transcript to be written\n' >&2
 is "stdout reached the transcript" "$(qa_count '^PASS first$' "$T1")" "1"
 is "and STDERR reached it too, which is where a scenario's diagnostics go" \
    "$(qa_count '^FAIL second$' "$T1")" "1"
@@ -776,7 +785,6 @@ echo "SUMMARY REACHED"
 PIPE_SCN
 bash "$TMP/pipe-scn.sh" "$_pipedir" "$HERE/qa-lib.sh" "$TMP/pipe-path" 2>/dev/null | head -3 >/dev/null
 _pipepath=$(cat "$TMP/pipe-path" 2>/dev/null)
-qa_wait_file() { local f=$1 pat=$2 n=${3:-40} i; for ((i = 0; i < n; i++)); do grep -q "$pat" "$f" 2>/dev/null && return 0; sleep 0.05; done; return 1; }
 qa_wait_file "$_pipepath" '^SUMMARY REACHED$' 60
 ck "a transcript survives a broken pipe: the run's SUMMARY is on disk although the terminal got 3 lines" \
    'grep -q "^SUMMARY REACHED$" "$_pipepath"'

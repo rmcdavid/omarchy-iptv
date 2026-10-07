@@ -12544,3 +12544,28 @@ up. What is not done is making the product notice for itself, which would mean
 either relaunching an adopted player whose argv lacks the token, or saying so
 in the guide. Both are changes to adoption, which is M2-02's most carefully
 reasoned path, and neither belongs in a same-day security fix.
+
+### F-HARNESS-15: the gate reddened on the release run, for nothing in the tree
+
+The gate run after the 0.13.0 cut came back FAILED on the harness predicates:
+
+    FAIL stdout reached the transcript (got '0', want '1')
+    FAIL and STDERR reached it too, which is where a scenario's diagnostics go (got '0', want '1')
+    FAIL the transcript's first line names the transcript (got '0', want '1')
+
+Every other step was green, and three immediate re-runs were 301 passed, 0
+failed. The sibling assertion that PASSED is what identifies it: `the run named
+its own transcript` checks that the file exists, and it did. Only the content
+had not landed.
+
+That is F-HARNESS-8 one layer along. `tee` is a separate process, so a
+transcript grepped straight back after a run can be short, measured earlier at
+6 absences in 30 with the cores oversubscribed. The scenario's own sweep was
+given `qa_transcript_sync` for exactly this; these three assertions in
+`qa-lib-test.sh` never were, because the fix was applied where the defect was
+found rather than everywhere the shape occurs.
+
+Fixed with a bounded wait that reports giving up, so a transcript that never
+arrives still fails the assertion instead of hanging. Second time in two days
+that a gate step reddened for a reason with nothing to do with the tree, and
+both were in this file.
