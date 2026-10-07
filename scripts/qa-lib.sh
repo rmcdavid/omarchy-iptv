@@ -490,8 +490,14 @@ qa_transcript_start() {
     return 2
   fi
   # Created in a subshell under umask 077 so the file is 0600 from its first
-  # byte, with no window at 0644; the chmod covers the one case the umask
-  # cannot, a path that already exists with a looser mode.
+  # byte, with no window at 0644, and then chmod'd. The two are DELIBERATELY
+  # REDUNDANT, and the mutation table says so: removing either one alone
+  # reddens nothing, because the other still gives 0600; removing BOTH turns
+  # scripts/qa-lib-test.sh red with the measured 644. The redundancy is kept
+  # rather than trimmed because the property is a privacy one and the cost is
+  # one line. What it is NOT is a fix for a pre-existing looser mode -- the
+  # refusal above makes that path unreachable, and an earlier version of this
+  # comment claimed otherwise.
   if ! ( umask 077; : >"$path" ) 2>/dev/null; then
     printf 'qa_transcript_start: cannot write %s\n' "$path" >&2
     return 2
