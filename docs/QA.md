@@ -407,6 +407,50 @@ output is empty unless stated.
 | SEC-20 | 8.4 redirects | A* mock `http://` source that redirects to `file:///etc/passwd` and to `ftp://` | `urllib` refuses non-http redirects -> `network` error; https -> http downgrade is allowed by urllib (document) |
 | SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials |
 
+### 3.1 TLS verification on the player (D-SINK-13)
+
+What is under test, and why the obvious test is not one. The standard is
+`ARCHITECTURE.md` section 8.10 and the specification is
+`ARCHITECTURE-PLAYER.md` 4.15: four layers, of which the base-argv token is the
+one a test naturally reaches for and the one that proves least. Asserting that
+`--tls-verify=yes` appears somewhere in the argv array is a restatement of the
+line that was written to contain it -- engineering rule 14 -- and it stays green
+against the three bypasses the lead measured, all of which PLAY a self-signed
+certificate while that assertion passes. A plan for this feature has to ask two
+different questions, and neither of them is "is the token there".
+
+**Question one: does the composition still end with it?** This is pure logic and
+belongs with the existing argv vectors, called rather than mirrored (rule 12:
+one fixture, both implementations). The cases that matter are the composed argv
+with hostile user `mpvArgs` -- `--tls-verify=no`, `--no-tls-verify`,
+`--profile=whatever`, and a legitimate `--tls-ca-file=/path` -- where what is
+asserted is the LAST element of the result, plus the reserved-set behaviour for
+the two direct spellings and the warning the user gets for them, plus the
+mirrors agreeing. A case worth having for its own sake: a bare `--` is rejected
+by the argument filter, so nothing can turn the trailing token into a filename;
+the lead measured that by calling `filter_mpv_args`, and a vector pins it.
+
+**Question two: does a real TLS peer refuse?** That is the sink, and only
+observing it answers 8.10. The shape is a local TLS server, one certificate
+self-signed and one signed by a generated CA, and a player that is expected to
+refuse the first, to refuse it still when the user's `mpvArgs` try all three
+bypasses, and to play the second when the user names that CA with
+`--tls-ca-file`. A control run against a public host with verification on and
+with no TLS options at all must fail identically, which is what makes the fix
+safe to ship rather than merely strict. Per engineering rule 11 the same checks
+are run with a baseline flag against the pre-fix ref and must go RED there; a
+TLS scenario that has never been seen failing proves nothing, and this is the
+one feature where it can fail green in three separate ways.
+
+Ownership and evidence. The harness scenario and its file name are the harness
+lane's to name and to confirm here -- do not cite a path for it from this
+document until that lane has landed one, because a scenario joined to a plan by
+a name nobody checked is engineering rule 13's failure mode. The lead's own
+measurements, which the two questions above are derived from and which no lane
+may restate as its own work, are the D-SINK-13 row in `docs/STATUS.md` and the
+write-up in `docs/QA-RESULTS.md`. Anything that needs a real player window, a
+running shell, or the live install belongs to whoever holds the display.
+
 ## 4. Performance gate (PLAN G3, ARCHITECTURE.md section 7, QB4)
 
 Inputs: `https://iptv-org.github.io/iptv/index.m3u` (11,041 entries, 2.5 MB)

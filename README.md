@@ -108,7 +108,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist |
 | `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional. If your playlist names its own guide and you leave this empty, that one is used and the Sources screen says so. Channels are matched by id and, when the ids do not agree, by name -- which is usually what happens, because playlists and guides rarely come from the same place |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate; a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
@@ -130,6 +130,28 @@ program, and that program puts it on its own command line where other local
 accounts can read it for as long as it runs. The plugin keeps the option
 available because it is the only way some sources work. Use it knowing the
 cost, and prefer a direct stream address when you have one.
+
+**The player checks your provider's certificate.** Up to and including 0.12.1
+it did not. mpv leaves its own `--tls-verify` off unless something turns it
+on, so the player asked FFmpeg not to check, and anyone able to sit between you
+and an `https` provider could have presented their own certificate, served you
+their own video, and kept the username and password your stream address and
+your provider's headers carry. A marketplace maintainer reported it; it is on
+now. Verification is set in the player's own options and set AGAIN as the very
+last option, after yours, so no token of yours can switch it back off -- not
+`--tls-verify=no`, and not a `--profile` naming a profile in your own mpv
+config that turns it off, which is why that second one is there and is not a
+duplicate to be tidied away. A direct `--tls-verify` is refused with a warning
+rather than quietly overridden, so you find out.
+
+The cost, because it is not free for everyone: a provider whose certificate is
+self-signed, or signed by a CA your system does not already trust, stops
+playing until you name that CA with `--tls-ca-file=/path/to/ca.pem` in
+`mpvArgs`. That is the supported way round it, and it is deliberately the only
+one -- trusting one named CA is a far smaller exposure than switching
+verification off for every provider you ever add. The plugin's own playlist and
+guide downloads over `https` always verified; this was the player, and only the
+player.
 
 ## Using it
 
