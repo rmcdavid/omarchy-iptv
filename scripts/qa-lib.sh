@@ -115,6 +115,49 @@ qa_min_skipped() {
   return 0
 }
 
+# qa_outcome <stream-hits> <failure-mark>
+# D-SINK-13. What the ATTACKER saw, in one word, from two observations: how
+# many GETs of this channel's path its server logged, and whether the service
+# reached its own failure verdict for that channel.
+#   0  played    the hit count is a positive integer. The attacker has the
+#                bytes, the URL's credentials and the provider headers, and
+#                nothing the service decides AFTERWARDS takes that back -- so a
+#                logged GET wins any tie with a failure mark.
+#   0  refused   no GET, and the service marked the channel failed.
+#   1  undecided neither yet. NEVER a pass: a zero measured after a timeout is
+#                not evidence that anything was refused, which is the whole
+#                reason tls-scenario.sh waits for one of these two signals
+#                instead of sleeping and reading a counter.
+#   2  VACUOUS   the hit count is not a number at all. qa_count always prints
+#                one integer, so this cannot happen through it -- and it is
+#                refused anyway, because the one thing this predicate must
+#                never do is read "I could not count" as "nothing was fetched".
+#
+# It lives here rather than inside the scenario because the scenario needs a
+# display, a server and five harnesses to run, and this decision needs none of
+# them: scripts/qa-lib-test.sh calls THIS function, the one the scenario calls,
+# rather than a copy of its logic (CLAUDE.md rule 12). The obvious way to write
+# it -- ask about the failure mark first -- reports `refused` for a tree that
+# served the stream and then failed, which is exactly the tree D-SINK-13 is
+# about; that counter-case is driven in qa-lib-test.sh.
+qa_outcome() {
+  local hits=${1-} mark=${2-}
+  if [[ ! $hits =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$QA_NO_DELTA"
+    return 2
+  fi
+  if (( hits > 0 )); then
+    printf 'played\n'
+    return 0
+  fi
+  if qa_value "$mark"; then
+    printf 'refused\n'
+    return 0
+  fi
+  printf 'undecided\n'
+  return 1
+}
+
 # qa_field <python-expr over d> <json>: the service half of the harness state.
 # Prints NOSTATE when the JSON is not there, NOFIELD when the expression does
 # not resolve, booleans as JSON, everything else as python prints it.

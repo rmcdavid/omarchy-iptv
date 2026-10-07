@@ -544,7 +544,8 @@ The wall caption rendered provider text under Qt's AutoText default, so an
 the marketplace maintainer on #9628; the measurement is in `QA-RESULTS`
 "Marketplace finding at 2d3cee3"). This scenario observes the sink on the
 shipping `Guide.qml`: it runs its own logging server on `127.0.0.1:8767`
-(8765 is `--serve`, 8766 is `argv-scenario.sh`), generates a playlist of 40
+(8765 is `--serve`, 8766 is `argv-scenario.sh`, 8773 and 8774 are
+`tls-scenario.sh`), generates a playlist of 40
 probe names carrying a per-run token in each path plus one plain control,
 starts the harness with the guide closed, opens it in list view, switches
 to the wall through a real `Ctrl+G` (`wtype -M ctrl g -m ctrl`) and reads
@@ -572,6 +573,65 @@ caption; after the real `Ctrl+G` `channelWall` showed 21 and the log held
 The same tree with `textFormat: Text.PlainText` on the caption: 0 and 0,
 6 passed, 0 failed.
 
+### TLS: the stream's peer is a sink (D-SINK-13)
+
+```bash
+scripts/dev-harness/tls-scenario.sh --rig-only            # NO display, no plugin; ~15 s (plus one ffmpeg run, cached)
+scripts/dev-harness/tls-scenario.sh                       # holds the display; five harnesses, ~4 min
+scripts/dev-harness/tls-scenario.sh --baseline <pre-fix>   # the shipped tree: S1 and S3 play, and the GET is logged
+```
+
+mpv was launched with no TLS verification while the helper supplied provider
+headers and HTTPS stream URLs, so an on-path attacker could impersonate the
+provider, replace the media and collect the credentials in the URL
+(the marketplace maintainer on #10323, against the shipped 0.12.1; the lead's
+measurements, including the four ways the fix can be undone, are in
+`QA-RESULTS`). The fix is four layers -- the token in the base argv, the same
+token re-asserted as the LAST token after the user's `mpvArgs`,
+`--tls-verify` reserved in both spellings, and `--tls-ca-file` deliberately
+left unreserved -- and this scenario observes all four at the sink.
+
+It watches from the ATTACKER's side. One python process holds two TLS
+listeners: `127.0.0.1:8773` with a self-signed certificate (the attacker) and
+`127.0.0.1:8774` with one signed by a CA the run generates (the provider). Both
+answer every GET with a 60 s MPEG-TS and log one line per request -- method,
+port, path, `User-Agent` and whether an `Authorization` header arrived, as a
+BOOLEAN and never its value. A GET of a channel's path is an attacker holding
+the bytes, the URL's credentials and the provider header; no GET is an attacker
+holding nothing. Each of the five segments has its own channel path, so the log
+attributes per segment, and each runs its own harness because `mpvArgs` is read
+at launch (`OMARCHY_IPTV_MPV_ARGS`).
+
+G1-G8 are the rig, and they run in both modes: `openssl verify` both ways and
+four `curl`s, so that the CA-signed certificate is known to verify against this
+run's CA and NOT against the system store before any stream plays, and both
+servers are known to serve the media before any zero is read as a refusal.
+S1 is the plain case (refused). S2 is the positive control and runs BEFORE the
+case it de-vacuums: the CA is named ONLY inside an mpv profile, so a stream that
+plays proves mpv read this run's config and applied the profile. S3 is the
+profile bypass -- `--profile=evil` with `tls-verify=no` in it -- which plays
+without the trailing re-assertion and must refuse with it. S4 is the documented
+escape, `--tls-ca-file` on `mpvArgs`. S5 reads `/proc/<pid>/cmdline` of the
+player that is actually playing: both reserved spellings absent, `--profile` and
+`--tls-ca-file` present (the control -- the attack and the escape really were
+delivered), the LAST token `--tls-verify=yes`, and the token twice over.
+
+The profile cases need an mpv config and the user's own is not ours to write, so
+the scenario points `MPV_HOME` at a directory under its own work tree and
+deletes it; `HOME` is never touched. It sends no keystroke. The verdict every
+segment turns on is `qa_outcome` in `scripts/qa-lib.sh`, so that the one
+decision in here that needs no display is driven by `scripts/qa-lib-test.sh`
+for real rather than extracted.
+
+**The live half has not been run by the lane that wrote it** -- that lane holds
+no display, and every live segment starts a quickshell and an mpv window. What
+HAS been run, on 2026-10-07: `--rig-only`, 9 passed / 0 failed; all four
+argument refusals (exit 2, no transcript); and the port refusal with a decoy
+listener on 8773, which refused and left the decoy alive and still listening
+(F-HARNESS-14). Counting only `TLSREFUSED` saw 0 of the 2 handshake refusals
+`curl` provoked and counting `TLSERROR` as well saw 2 of 2, which is why the
+refusal count is reported and never asserted.
+
 ### Live rewind (M5-01)
 
 ```bash
@@ -587,8 +647,9 @@ key `b` through the harness; the plan with every check named is
 `docs/QA-REWIND.md`. The stream is two HLS playlists with a sliding window
 (ffmpeg `-re` from lavfi, 6 x 2 s segments, a burned-in clock in the
 picture) served from the scenario's own loopback server on `127.0.0.1:8771`
-(8765 is `--serve`, 8766 `argv-scenario.sh`, 8767 `text-scenario.sh`). mpv
-reads it as it reads a provider's channel -- `seekable` false,
+(8765 is `--serve`, 8766 `argv-scenario.sh`, 8767 `text-scenario.sh`, 8773 and
+8774 `tls-scenario.sh`). mpv reads it as it reads a provider's channel --
+`seekable` false,
 `file-format` hls, history growing one second per second -- which was
 measured before the scenario was written (QA-REWIND section 2). The
 player's cache is shrunk to 2 MiB back + 4 MiB forward through the plugin's
