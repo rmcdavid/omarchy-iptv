@@ -83,7 +83,6 @@ LOG="$SCRATCH/rewind-scenario.log"
 HLOG="$SCRATCH/harness.log"
 SOCK="$SCRATCH/runtime/omarchy-iptv/mpv.sock"
 PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}
-PLUGIN_ID="io.github.rmcdavid.iptv"
 PORT=8771
 HOST="127.0.0.1:$PORT"
 STREAM_S=780
@@ -170,13 +169,12 @@ try: print(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)
 except Exception: print(2)' "$1" "$2"; }
 
 ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
-# The PLUGIN's own IpcHandler, reachable with the harness environment
-# (SPIKE-LIVE-REWIND 12.5 measured the form): the verbs a user binds.
-pipc() {
-  local wl=${WAYLAND_DISPLAY:-wayland-1}
-  [[ $wl == /* ]] || wl="$REAL_RUNTIME/$wl"
-  XDG_RUNTIME_DIR="$SCRATCH/runtime" WAYLAND_DISPLAY="$wl" qs ipc -p "$SCRATCH/root" call "$PLUGIN_ID" "$@" 2>/dev/null
-}
+# The PLUGIN's own IpcHandler: the verbs a user binds. `run.sh plugin-ipc`
+# applies the environment SPIKE-LIVE-REWIND 12.5 measured (F-RWD-14);
+# this used to compose the call here, and every scenario after it would have
+# composed another. The `2>/dev/null` stays at the call site, mirroring the
+# `ipc` wrapper above: run.sh does not swallow its own stderr.
+pipc() { "$RUN" plugin-ipc "$@" 2>/dev/null; }
 svc()  { qa_field "$1" "$(ipc state)"; }
 # pause_toggle: the plugin's `pause` verb through the single control slot,
 # which answers `busy` while a status tick or a seek holds it. That is a
