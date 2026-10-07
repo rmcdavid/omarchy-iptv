@@ -49,6 +49,19 @@ as the absolute socket path (libwayland accepts that) and symlinks the real
 `hypr/` directory so `hyprctl` keeps working. `run.sh ipc` re-exports the
 same runtime dir so `qs ipc` can find the instance.
 
+**Two IPC targets, two subcommands.** The harness shell declares its own
+`IpcHandler` under the target `harness` -- the inspection verbs (`state`,
+`widget`, `numberState`, `query`, ...) that exist only here -- and the plugin's
+`Service.qml` declares its own under `io.github.rmcdavid.iptv`, the verbs a
+user actually binds. `run.sh ipc <fn>` reaches the first,
+`run.sh plugin-ipc <fn>` the second; both apply the same environment, because
+reaching either needs the scratch `XDG_RUNTIME_DIR` **and** the absolute
+Wayland socket path (`SPIKE-LIVE-REWIND.md` 12.5 measured each variant,
+including the two that fail). `plugin-ipc` can only ever reach the harness: the
+config root it passes is the scratch root, and the live install answers the
+same target name under a different one. Before it existed every scenario
+needing a plugin verb carried the incantation by hand (F-RWD-14).
+
 Environment read by `shell.qml` (all set by `run.sh`): `OMARCHY_IPTV_ROOT`,
 `OMARCHY_IPTV_PLAYLIST`, `OMARCHY_IPTV_EPG`, `OMARCHY_IPTV_OPEN`,
 `OMARCHY_IPTV_VERTICAL`, `OMARCHY_IPTV_SHOW_NAME`, `OMARCHY_IPTV_LABEL_MAX`,
@@ -65,8 +78,15 @@ scripts/dev-harness/run.sh --open --vertical         # glyph-only bar widget
 scripts/dev-harness/run.sh --open --order number      # channelOrder=number (M2-03)
 scripts/dev-harness/run.sh --open --entry-ms 3000 --no-bar-number
 scripts/dev-harness/run.sh --open --window floating   # harness-only window mode (headless cage)
+scripts/dev-harness/run.sh ipc state                 # the harness's own target
+scripts/dev-harness/run.sh plugin-ipc status         # the plugin's target: the verbs a user binds
+scripts/dev-harness/run.sh plugin-ipc back 10        # argv is passed through untouched
 scripts/dev-harness/run.sh clean
 ```
+
+`run.sh` with no recognised subcommand prints its own header block and exits
+2; the header is scanned to the first non-comment line rather than cut at a
+line number, so a new option is listed by existing.
 
 ### Headless: `--window floating`
 
@@ -409,7 +429,10 @@ intent counter the way `player-scenario.sh` P11 does. The plugin's own IPC
 verbs (`back`, `forward`, `live`, `pause`) are reached with the harness
 environment (`XDG_RUNTIME_DIR=<scratch>/runtime WAYLAND_DISPLAY=<absolute
 socket> qs ipc -p <scratch>/root call io.github.rmcdavid.iptv ...`), the
-form SPIKE-LIVE-REWIND 12.5 measured.
+form SPIKE-LIVE-REWIND 12.5 measured. That incantation is now
+`run.sh plugin-ipc` (F-RWD-14) and the scenario's own `pipc` is the last copy
+of it; the form stays recorded here because it is what the subcommand does,
+and a scenario debugging a dead target needs to see it.
 
 `scripts/qa-stub-mpv.py` learned seek semantics for the service's logic
 tests, no more forgiving than mpv 0.41 as measured: `seek` always replies

@@ -3,6 +3,10 @@
 #
 #   run.sh [options]                 start the harness (foreground, killed after --timeout)
 #   run.sh ipc <fn> [args...]        call the running harness (IpcHandler target "harness")
+#   run.sh plugin-ipc <fn> [args...] call the PLUGIN's own IpcHandler inside the harness
+#                                    (target io.github.rmcdavid.iptv): toggle, stop, next,
+#                                    previous, refresh, play, channel, pip, pause, back,
+#                                    forward, live -- the verbs a user binds (F-RWD-14)
 #   run.sh shot [name]               screenshot the focused output into the scratch dir
 #   run.sh key <wtype args...>       send keys to the focused surface (wtype)
 #   run.sh type <text>               type text and PROVE it arrived (F-HARNESS-1)
@@ -102,6 +106,41 @@ fixture_server_pattern() {
 # The config root of this instance ("" = the default one) and its pid file.
 qs_root()    { echo "$SCRATCH/root$INSTANCE"; }
 qs_pidfile() { echo "$SCRATCH/qs$INSTANCE.pid"; }
+
+# The PLUGIN's own IpcHandler target, as opposed to `harness`, which is
+# shell.qml's: the verbs a user binds (`toggle`, `channel`, `pause`, `back`).
+# SPIKE-LIVE-REWIND 12.5 measured what reaching it inside the harness costs --
+# the scratch runtime directory AND the absolute Wayland socket path, which is
+# exactly what harness_env already exports -- and said run.sh should carry it
+# so a scenario does not. F-RWD-14.
+#
+# The string is joined to two other files by a NAME, with nothing calling it:
+# `manifest.json`'s `id`, which the production Service.qml reads into
+# `pluginId`, and `shell.qml`'s own `pluginId` literal, which is what the
+# harness actually registers. The manifest half is CHECKED below rather than
+# trusted. The shell.qml half cannot be read from here without grepping QML
+# for a literal, and its failure mode is loud anyway: `qs ipc` refuses a
+# target it cannot find instead of answering for the wrong one.
+PLUGIN_TARGET="io.github.rmcdavid.iptv"
+# Prints the target, or fails with the disagreement named. An UNREADABLE
+# manifest falls back to the literal rather than failing, because that is what
+# Service.qml's own `pluginId` does (`manifest && manifest.id ? ... : "<lit>"`)
+# and a test double -- which is what the harness is -- must not be stricter
+# than the thing it stands in for any more than it may be more forgiving.
+plugin_target() {
+  local id
+  id=$(python3 -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("id", ""))
+except Exception:
+    print("")' "$PLUGIN_ROOT/manifest.json" 2>/dev/null)
+  if [[ -n $id && $id != "$PLUGIN_TARGET" ]]; then
+    echo "[run.sh] $PLUGIN_ROOT/manifest.json says the plugin id is '$id', this script says '$PLUGIN_TARGET'." >&2
+    echo "[run.sh] One of them is the IpcHandler target and run.sh cannot guess which; fix PLUGIN_TARGET here and shell.qml's pluginId together." >&2
+    return 2
+  fi
+  printf '%s\n' "$PLUGIN_TARGET"
+}
 
 # The player is a setsid'd grandchild of the helper now (M2-02), so it is not
 # in any process group this script owns: it is reaped by its command line,
@@ -241,6 +280,27 @@ case $cmd in
     shift
     harness_env
     exec qs ipc -p "$(qs_root)" call harness "$@"
+    ;;
+  plugin-ipc)
+    # F-RWD-14. Identical to `ipc` except the target, which is the plugin's own
+    # rather than the harness's. The environment is harness_env's, which is the
+    # measured form (SPIKE-LIVE-REWIND 12.5): the scratch runtime directory
+    # alone gets "No running instances ... present on the current display",
+    # because run.sh hands the shell the ABSOLUTE socket path.
+    #
+    # It can only ever reach the harness, never the user's live shell: the
+    # config root is this scratch root, and the spike measured that the live
+    # instance answers the same target name under /usr/share/omarchy/shell.
+    #
+    # The empty call is refused HERE rather than by `qs`, so a scenario that
+    # drops its argument is told what it dropped without needing quickshell
+    # installed to find out. Everything past the function name is passed
+    # through untouched.
+    shift
+    (( $# > 0 )) || die "plugin-ipc needs a function name (e.g. plugin-ipc status)"
+    if ! target=$(plugin_target); then exit 2; fi
+    harness_env
+    exec qs ipc -p "$(qs_root)" call "$target" "$@"
     ;;
   shot)
     name=${2:-guide}
@@ -462,10 +522,15 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     echo "[run.sh] quickshell exited with $status (124 = timeout, expected)"
     ;;
   *)
-    # The header block, through the environment paragraph. Keep this in step
-    # with the comment above when options are added, or the usage silently
-    # stops listing the newest ones.
-    sed -n '2,51p' "$0"
+    # The whole leading comment block, SCANNED rather than counted. A line
+    # range here is a magic number joined to the header by nothing, and the
+    # comment that used to sit here asked a human to keep it in step -- which
+    # had already failed: `2,51p` stopped inside the scratch-layout list, eight
+    # lines short, so the usage had silently stopped naming `runtime/`,
+    # `fixtures/`, the 127.0.0.1 rule and what gets reaped. awk stops at the
+    # first line that is not a comment, so a new option or paragraph is listed
+    # by existing rather than by being counted.
+    awk 'NR == 1 { next } /^#/ { print; next } { exit }' "$0"
     exit 2
     ;;
 esac
