@@ -158,6 +158,88 @@ qa_outcome() {
   return 1
 }
 
+# qa_adopted <reported-pid> <staged-pid> <staged-alive 0|1>
+# D-SINK-16. Did the shell that came up after the upgrade MEET the player that
+# was already running, or did it start one of its own? Nothing else in the
+# adoption scenario means anything until that is settled: a run where the new
+# shell quietly spawned a fresh player is a run that re-tested the launch path
+# and called it the reattach path.
+#   0  pid    the service names the staged player's own pid. Adoption, observed
+#             directly, and the player is still there.
+#   0  gone    the staged player is no longer running. Within the window the
+#             caller establishes, nothing but the new shell can have ended it,
+#             and both rulings for a player that cannot be made safe end this
+#             way (reload it, or stop it). THE CALLER OWES THAT WINDOW: it must
+#             have seen the process alive after the old shell went away, and the
+#             stream it is reading must outlast the measurement, or "gone" is
+#             just a player that reached the end of its file.
+#   1  other   the service names a DIFFERENT live pid while the staged one is
+#             still running: it spawned instead of adopting. Never a pass --
+#             this is the vacuous run the predicate exists to catch.
+#   1  none    neither yet. Keep waiting; never a pass.
+#   2  VACUOUS the staged pid is not a pid, or the alive flag is not 0/1. A
+#             caller that cannot say whether the process is there gets no
+#             answer rather than a reassuring one.
+#
+# Every sentinel qa_field can produce -- NOSTATE, NOFIELD, "" -- has to read as
+# "not named", for the F1 reason: a shell that is not answering must not look
+# like a shell that adopted. qa-lib-test.sh drives all three, and drives the two
+# natural ways to write this that pass a run with no adoption in it.
+qa_adopted() {
+  local reported=${1-} staged=${2-} alive=${3-}
+  if [[ ! $staged =~ ^[1-9][0-9]*$ || ! $alive =~ ^[01]$ ]]; then
+    printf '%s\n' "$QA_NO_DELTA"
+    return 2
+  fi
+  if [[ $reported == "$staged" ]]; then
+    printf 'pid\n'
+    return 0
+  fi
+  if (( alive == 0 )); then
+    printf 'gone\n'
+    return 0
+  fi
+  if [[ $reported =~ ^[1-9][0-9]*$ ]]; then
+    printf 'other\n'
+    return 1
+  fi
+  printf 'none\n'
+  return 1
+}
+
+# qa_stream_stopped <closed-count> <chunks-at-close> <chunks-after-settle>
+# D-SINK-16, the other half: an adopted player's ALREADY-OPEN stream must stop
+# being fed, not merely stop being chosen. The three numbers come from the
+# attacker's own log -- how many times it saw this connection end, and how many
+# paced pieces of the body it had written at that moment and after a settle.
+#   0  stopped  the server saw the connection end, and wrote nothing more.
+#   1  fed      it went on writing. Never a pass, and this is the case the
+#               obvious form gets wrong: a connection that was fed for another
+#               two hundred pieces and THEN closed satisfies "closed > 0".
+#   1  open     the server never saw it end: the player is still reading the
+#               stream nobody authenticated.
+#   2  VACUOUS  a count is not a number.
+# It decides nothing about WHY the connection ended -- a reload, a stop and the
+# process exiting all read the same here, and all three are the fix doing its
+# job.
+qa_stream_stopped() {
+  local closed=${1-} at=${2-} after=${3-}
+  if [[ ! $closed =~ ^[0-9]+$ || ! $at =~ ^[0-9]+$ || ! $after =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$QA_NO_DELTA"
+    return 2
+  fi
+  if (( after > at )); then
+    printf 'fed\n'
+    return 1
+  fi
+  if (( closed > 0 )); then
+    printf 'stopped\n'
+    return 0
+  fi
+  printf 'open\n'
+  return 1
+}
+
 # qa_field <python-expr over d> <json>: the service half of the harness state.
 # Prints NOSTATE when the JSON is not there, NOFIELD when the expression does
 # not resolve, booleans as JSON, everything else as python prints it.
