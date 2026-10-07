@@ -12376,3 +12376,38 @@ The cost is a user whose provider presents a self-signed certificate, who can
 no longer play by disabling verification for everything and must name that
 provider's CA instead. That is a smaller exposure for the same capability,
 which is why the ruling went that way rather than warning and allowing.
+
+### The neighbourhood audit, same day (D-DOC-7, D-SINK-14)
+
+A maintainer who has just found one TLS gap will look at the others, so the
+scheme rules around it were audited before the reply was written.
+
+**The plugin does not choose cleartext for a user who did not ask for it**, and
+the document said it did. `docs/ARCHITECTURE-SOURCES.md` D10 described Xtream
+server normalization as defaulting to `http://` when no scheme was given.
+Measured by calling the shipping function, `Model.xtreamUrls` refuses a bare
+host:
+
+    xtreamUrls("panel.example.test:8080", "alice", "<pw>")
+      -> {"ok": false, "code": "server_scheme",
+          "message": "Server must start with http:// or https://"}
+
+The guard is `/^[A-Za-z][A-Za-z0-9+.-]*:\/\//` and neither caller prepends a
+scheme. The code is the safer of the two, which is why nobody noticed the
+document was wrong for the whole life of the feature. That is D-DOC-7,
+corrected in place.
+
+**The asymmetry that is left is real and is D-SINK-14.** A channel logo must be
+`https` by ruling, and the ruling says why: an `http` logo fetch puts the
+request in cleartext for anyone on the path. D-LOGO-1 was a P1 filed because an
+https logo could redirect into cleartext. Meanwhile the playlist and the stream,
+which carry the provider's username and password, accept plain `http`, and
+nothing in the product or the documents says what that costs. An Xtream
+playlist over `http://` puts the credentials in a query string in the clear,
+which is the same exposure D-SINK-13 was raised for and needs no certificate at
+all.
+
+Refusing `http` is not proposed: a large share of real providers are http-only,
+and that is the PO-5 shape, a user choosing their own exposure. What is missing
+is the disclosure. The asymmetry with the logo ruling is the evidence that this
+was never decided, only inherited.
