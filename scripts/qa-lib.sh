@@ -572,6 +572,33 @@ qa_transcript_start() {
   return 0
 }
 
+# qa_key <run.sh path> <wtype args...>
+#   F-HARNESS-5. `run.sh key` refuses with exit 3 when the screen is locked or
+#   the guide does not hold the keyboard. Every call site was written
+#   `"$RUN" key x >/dev/null 2>&1`, which discards the message AND drops the
+#   status on the semicolon, so the refusal was SILENT: the scenario carried on
+#   and a later assertion failed for a reason nobody could see, which is the
+#   invisible failure F-M3-1 exists to close. Half (a) made the refusal exist;
+#   this is what makes it heard.
+#
+#   The keystroke's own stdout is still dropped -- it is noise -- and only the
+#   refusal is surfaced, as a FAIL line in the same shape every scenario's own
+#   helper prints, so the transcript and the operator get the cause. The count
+#   is kept as well as printed, because a FAIL line no summary reads is the
+#   same defect one layer along: each caller asserts QA_KEY_REFUSALS is 0.
+QA_KEY_REFUSALS=0
+qa_key() {
+  local run=$1; shift
+  local err rc
+  # `2>&1 >/dev/null` in this order captures stderr and discards stdout.
+  err=$("$run" key "$@" 2>&1 >/dev/null); rc=$?
+  (( rc == 0 )) && return 0
+  QA_KEY_REFUSALS=$((QA_KEY_REFUSALS + 1))
+  printf 'FAIL run.sh key %s was REFUSED (exit %s) -- %s\n' \
+    "$*" "$rc" "$(printf '%s' "$err" | tr '\n' ' ')"
+  return "$rc"
+}
+
 # qa_transcript_sync [secs]
 #   A bounded barrier: everything printed so far is ON DISK when this
 #   returns 0. Needed because the transcript is written by a tee on the far

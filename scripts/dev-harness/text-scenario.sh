@@ -214,12 +214,12 @@ list_hits=$(probe_hits)
 # ---- WALL view: the real chord, then the same instrument
 pgrep -x hyprlock >/dev/null && { fail "T4" "screen locked before the keystroke; refusing to type"; echo "text-scenario: $PASS passed, $FAIL failed"; exit 1; }
 via="key"
-"$RUN" key -M ctrl g -m ctrl >/dev/null 2>&1; sleep 0.6
+qa_key "$RUN" -M ctrl g -m ctrl; sleep 0.6
 if [[ $(gf 'g["wallView"]') != true ]]; then
   # One retry for the first-keystroke race run.sh primes against; a second
   # miss falls back to the harness setter so the SINK is still measured,
   # and the line below says the key path was not what reached it.
-  "$RUN" key -M ctrl g -m ctrl >/dev/null 2>&1; sleep 0.6
+  qa_key "$RUN" -M ctrl g -m ctrl; sleep 0.6
   if [[ $(gf 'g["wallView"]') != true ]]; then via="ipc-fallback"; ipc wall true >/dev/null; sleep 0.3; fi
 fi
 sleep 1.5
@@ -266,5 +266,9 @@ echo "requests: before-open=$before_open after-list=$list_hits after-wall=$wall_
 if [[ -n $BASELINE ]]; then
   echo "baseline $BASELINE: T3 and T4 are expected RED here; T3 red means the captions fetched on the LIST open, T4-only red means they fetched only once the wall showed"
 fi
+# F-HARNESS-5, as in m3-scenario.sh: a FAIL line no summary reads is the same
+# defect one layer along.
+if (( QA_KEY_REFUSALS == 0 )); then pass "no keystroke was refused by the focus guard"
+else fail "the focus guard refused $QA_KEY_REFUSALS keystroke(s)" "each one is a FAIL line above"; fi
 echo "text-scenario: $PASS passed, $FAIL failed"
 (( FAIL == 0 ))

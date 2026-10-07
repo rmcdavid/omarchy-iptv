@@ -141,9 +141,9 @@ k=$(gf 'g["scopeKinds"]'); h=$(gf 'g["hiddenGroups"]'); t=$(gf 'g["footer"]')
 [[ $k == '["favorites:Favorites", "all:All", "header:GROUPS", "group:News", "group:Religious", "group:Movies"]' && $h == '[]' ]] && pass "H5b x on it brings it back" || fail "H5b" "$k $h"
 [[ $t == *"Showing Religious"* ]] && pass "H5c and says so" || fail "H5c" "$t"
 # H6: the real key. Cursor is on Bravo in g:Religious (list mode).
-"$RUN" key x >/dev/null 2>&1; sleep 0.5
+qa_key "$RUN" x; sleep 0.5
 [[ $(gf 'g["hiddenGroups"]') == '["Religious"]' ]] && pass "H6a a real x through the catcher hides" || fail "H6a" "$(gf 'g["hiddenGroups"]')"
-"$RUN" key x >/dev/null 2>&1; sleep 0.5
+qa_key "$RUN" x; sleep 0.5
 [[ $(gf 'g["hiddenGroups"]') == '[]' ]] && pass "H6b and a second real x unhides" || fail "H6b" "$(gf 'g["hiddenGroups"]')"
 
 # ---- T: the picker, against a real mpv
@@ -184,14 +184,14 @@ wait_sf 's["tracks"]' '["audio1", "audio2*", "sub1*"]' 40 && pass "T4b the subti
 ipc trackMove -1 >/dev/null; sleep 0.2; ipc trackSelect >/dev/null
 wait_sf 's["tracks"]' '["audio1", "audio2*", "sub1"]' 40 && pass "T4d Off turns it off" || fail "T4d" "$(sf 's["tracks"]')"
 # T5: real keys through the catcher
-"$RUN" key -k Escape >/dev/null 2>&1; sleep 0.4
+qa_key "$RUN" -k Escape; sleep 0.4
 [[ $(gf 'g["inTracks"]') == false && $(gf 'g["mode"]') == '"list"' ]] && pass "T5a a real Esc closes the picker to the list" || fail "T5a" "$(gf 'g["mode"]')"
-"$RUN" key t >/dev/null 2>&1; sleep 0.6
+qa_key "$RUN" t; sleep 0.6
 [[ $(gf 'g["inTracks"]') == true ]] && pass "T5b a real t reopens it" || fail "T5b" "$(gf 'g["mode"]')"
 wait_sf 's["tracksState"]' '"ready"' 40
-c0=$(gf 'g["trackCursor"]'); "$RUN" key j >/dev/null 2>&1; sleep 0.3; c1=$(gf 'g["trackCursor"]')
+c0=$(gf 'g["trackCursor"]'); qa_key "$RUN" j; sleep 0.3; c1=$(gf 'g["trackCursor"]')
 [[ $c0 == 2 && $c1 == 4 ]] && pass "T5c reopened on the selected track (Spanish); a real j steps over the header to Off" || fail "T5c" "$c0 -> $c1"
-"$RUN" key t >/dev/null 2>&1; sleep 0.4
+qa_key "$RUN" t; sleep 0.4
 [[ $(gf 'g["inTracks"]') == false ]] && pass "T5d a real t closes it" || fail "T5d" "$(gf 'g["mode"]')"
 ipc stop >/dev/null; sleep 0.8
 [[ $(sf 's["tracksState"]') == '"idle"' && $(sf 's["tracks"]') == '[]' ]] && pass "T6a stop clears the tracks" || fail "T6a" "$(sf 's["tracksState"]') $(sf 's["tracks"]')"
@@ -209,7 +209,7 @@ ipc listKey t >/dev/null; sleep 0.3
 # change either. Naming the id removes the question.
 ipc setScope all >/dev/null; sleep 0.3
 ipc move 0 >/dev/null; sleep 0.2
-"$RUN" key x >/dev/null 2>&1; sleep 0.6   # cursor is on Alpha News in All
+qa_key "$RUN" x; sleep 0.6   # cursor is on Alpha News in All
 hid=$(gf 'g["hiddenGroups"]')
 [[ $hid == '["News"]' ]] && pass "P1a x in All hides the cursor row group" || fail "P1a" "$hid"
 rows=$(gf 'g["rows"]')
@@ -243,7 +243,11 @@ for i in $(seq 1 40); do [[ $(sf 's["nowPlaying"]["id"]') == '"t:alpha"' ]] && b
 wait_sf 's["tracksState"]' '"ready"' 60 || fail "P3-setup" "not ready after the change"
 tr=$(sf 's["tracks"]')
 [[ $tr == '["audio1*", "audio2", "sub1"]' ]] && pass "P3 the track choice did not follow the channel, as the README says" || fail "P3" "$tr"
-"$RUN" key -k Escape >/dev/null 2>&1; sleep 0.3
+qa_key "$RUN" -k Escape; sleep 0.3
 
+# F-HARNESS-5. A FAIL line no summary reads is the same defect one layer
+# along, so the refusal count is asserted rather than only printed.
+if (( QA_KEY_REFUSALS == 0 )); then pass "no keystroke was refused by the focus guard"
+else fail "the focus guard refused $QA_KEY_REFUSALS keystroke(s)" "each one is a FAIL line above"; fi
 echo "m3-scenario: $PASS passed, $FAIL failed"
 (( FAIL == 0 ))

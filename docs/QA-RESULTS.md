@@ -12001,3 +12001,217 @@ reader following the reference would have found a defect that is not there.
 
 The suite goes 861 to 899 tests, 19 from each lane.
 
+
+## The closing round, 2026-10-06: 41 review findings, one P1, and the frozen inputs gone (F-M3-13)
+
+Seven lanes over one day, in three waves, closing the board's remaining work.
+Every number below was taken by the lead on this machine unless it says
+otherwise.
+
+### What shipped into `dev`
+
+`F-SINK-11` made both redactors linear; `D-SRC-11` made `state source update`
+name the fields the shell owns; `F-RWD-14` gave `run.sh` the `plugin-ipc` verb
+and migrated its only caller; `F-WALL-1` documented the wall's remaining
+surfaces; `F-EPG-13` fixed the present-tense stale counts including the one in
+shipped code; `D-DOC-5` marked ten retracted measurements in place; and
+`F-M3-1`'s two halves were built.
+
+### The redaction rewrite, differentialled independently (F-SINK-11)
+
+The lane reported a 24,029-input differential. The lead did not take that on
+trust and ran his own, 21 hand-written credential shapes per language chosen
+to break a URL parser -- a password containing `@`, a userinfo with no host, a
+scheme run with no URL after it, an `<img src>` tag, a non-breaking space
+before the scheme, upper case, two URLs in one string, a bare `://`.
+
+| vector | before | after |
+|---|---|---|
+| 21 shapes, output differences | - | 0 |
+| 21 shapes, credential leaks | - | 0 |
+| 40,000 letters, no URL | 1.362 ms | 0.011 ms |
+| 40,000 characters of `aaaa.` | 2776.110 ms | 0.015 ms |
+| URL then 40,000 letters | 1.464 ms | 0.018 ms |
+
+### The focus guard, observed live (F-M3-1 half a)
+
+The compositor cannot answer the question, and this is why the guard asks the
+guide. `hyprctl -j layers` reports address, alpha, geometry, namespace and pid
+per layer surface and NO keyboard-focus field. With the harness guide open:
+
+    lvl 2 pid 1649440 ns 'omarchy-bar'          w 1366 h 26
+    lvl 2 pid 1710130 ns 'omarchy-iptv-harness' w 1366 h 26
+    lvl 3 pid 1710130 ns 'omarchy-iptv'         w 1366 h 768
+
+With it closed the level-3 layer is absent. The harness overlay's namespace is
+the SAME string production uses, so only the pid distinguishes this guide from
+the user's live one. `hyprctl -j activewindow` named the foreground toplevel
+throughout, while `m3-scenario.sh` passed 37/37 three times that day on real
+`wtype` keys in exactly that state.
+
+Observed against a live harness, which the lane that built it could not do:
+
+| state | `ipc focusState` | `run.sh key j` |
+|---|---|---|
+| never opened | `open=false keyboard=false role=none scanned=220` | exit 3, "the guide is CLOSED" |
+| open, search mode | `open=true keyboard=true role=catcher blocked=true scanned=326` | exit 0 |
+| after a real `ipc close` | `open=false keyboard=false scanned=326` | exit 3 |
+
+`run.sh type sky` exited 0 and the guide's query read back as `sky`, which is
+the arrival proof. A real `Escape` through the guard reached the guide and
+closed it. `--to-compositor` with the guide closed printed its SKIPPED line and
+sent. `blocked=true` in search mode is reported and not refused on, which is
+correct: typing a query there is the whole point of `type`.
+
+One false alarm, recorded because it was the lead's: an `ipc close '{}'` was
+rejected by the harness ("Too many arguments provided"), the guide therefore
+stayed open, and the guard's correct pass was read for a moment as a hole in
+it. `close` takes no argument.
+
+### The P1: a guard that would have refused everything, invisibly
+
+`require_guide_focus` read stdout and stderr together and fails closed, so one
+diagnostic line from `qs` turned every `key` and `type` into exit 3. It would
+not have been seen: all eleven call sites are `>/dev/null 2>&1` with the status
+dropped, so the scenarios would have scored lower with nothing on screen saying
+why. That `qs ipc` is noisy in practice is not a guess -- twelve scenario
+wrappers add `2>/dev/null` to it.
+
+Measured with a stub `qs` writing one stderr line and valid focused JSON:
+
+| code | exit | wtype calls |
+|---|---|---|
+| as merged | 3 | 0 |
+| streams separated | 0 | 2 (the primer, then the key) |
+
+The diagnostic is still SHOWN on a real failure, which the one-token
+`2>/dev/null` fix would have discarded.
+
+### The transcript's load-bearing flag was not the one audited (F-HARNESS-9 and the tee)
+
+`qa_transcript_start` used `tee -a`. The first version of its comment audited
+`-a` in forensic detail and marked it UNVERIFIED, correctly, and never looked
+at `-p`. Without `-p` a `tee` exits when its own stdout breaks, so a scenario
+piped into `head` truncates the FILE as well as the terminal -- the exact
+failure the function exists to prevent, under a README sentence reading "the
+evidence is on disk whatever happens to the terminal".
+
+Reproduced by the lead, a 20-line producer at 0.05 s intervals:
+
+| form | piped into `head -3` | no pipe |
+|---|---|---|
+| `tee -a` | 3 of 22 lines, 3 of 3 runs | 22 of 22, 3 of 3 |
+| `tee -pa` | 22 of 22 lines, 3 of 3 runs | 22 of 22, 3 of 3 |
+
+### The gate could not go red for any of it, and now can
+
+A twelve-case decision table drives the REAL `run.sh` through a stubbed
+transport. Predicates 213 -> 233. The mutations:
+
+| mutation | failures |
+|---|---|
+| the `open` check removed | 4 |
+| the `keyboard` check removed | 2 |
+| stdout and stderr re-merged (the P1) | 1 |
+| the transport diagnostic swallowed | 1 |
+| `tee -pa` back to `tee -a` | 2 |
+| the explicit 0600 dropped, umask 022 | 4 |
+| the explicit 0600 dropped, umask 002 | 4 |
+| the explicit 0600 dropped, umask 077 | 2 |
+
+The last row is why the first version of the mode check was unsound: at
+`umask 077` the unsafe form happens to be safe, so a single-umask assertion
+cannot see the defect. The check asserts the property at three umasks now, and
+the control that drives the unsafe form runs under an explicit 022 -- before
+that it inherited the caller's and reddened `check.sh` under any umask but
+0022, which is a gate going red for a reason with nothing to do with the tree.
+
+### F-RWD-26: a flake settled in one check and left in its sibling
+
+Proving the `plugin-ipc` migration ran `rewind-scenario.sh` end to end:
+111 passed, 1 failed, the failure `R11 the PLAYER's own reading rises
+(35.754 -> 35.754)`. Load average 2.32 at the start and 5.28 at the end on
+four cores, which makes the outcome likelier and is not its cause. R10's
+sibling pair was softened under F-RWD-22 because the stored reading is written
+only when a control reply lands and the health tick is 10 s; R11 carries the
+comment "The same pair as R10, for the same reason" one screen above the
+assertion that proves it is not. Detail in `docs/QA-REWIND.md` section 10.
+
+### The frozen inputs are gone (F-EPG-26)
+
+The 1,453-row `channels.json` and the 427-declaration `pluto-us.xml.gz` lived
+in a session scratch directory on a RAM disk and have been reclaimed. So 265,
+226, 227, the 110 confirmations, the 0.0038 false-confirmation rate, the
+calibration tables and the 0.72 s grade are now permanently unverifiable, and
+section 16's recipe cannot be run by anyone. Ruled the same day: they are not
+re-frozen into the repository, because the rows carry credentialed provider
+URLs and `main` ships what the repository holds; the document states the cost
+instead.
+
+Found because a lane was handed that path as live input and said so rather
+than restating numbers it could not take (F-M3-14, written against the lead's
+own brief).
+
+### The bug nobody was looking for (F-HARNESS-14)
+
+The lane sent to fix nine prose findings found this while verifying one of
+them. `rewind-scenario.sh` installs its EXIT trap above its argument refusals,
+and `cleanup` read the pid holding port 8771 out of `ss -ltnp` and killed it --
+so any refusal that had started nothing killed whoever held the port, including
+on the `port 8771 is already in use` refusal, whose entire purpose is to leave
+that process alone. Measured with a decoy listener: gone after a `--tree`
+refusal, alive with the new guard, alive after the port-in-use refusal.
+
+CLAUDE.md's parallel rule 3 says to kill by a pid this run recorded. A pid read
+out of `ss` at exit is a pattern wearing a pid's clothes, and the rule did not
+read as covering it. The hazard class -- a cleanup installed above a refusal
+that reaps by pattern or by port -- is unswept in the other nine scenarios.
+
+### What the round says about the project (F-M3-8, eleventh round)
+
+Thirty-one of the 41 findings were sentences. The three that could have
+reached a user were all in places no check could see: a guard the gate never
+executed, a `tee` flag no assertion read, and a mode the test asserted at
+exactly one umask. The pattern is not that the reviews find prose. It is that
+the executable findings live wherever nothing executes.
+
+### What the round raised and did not close
+
+Each of these was written on 2026-10-06 and carries its id from that day, so
+none of them is a remark waiting to become a defect.
+
+1. **F-HARNESS-5** (P2): the guard refuses and nothing hears it. All eleven
+   `key` call sites discard both the message and the status, so an exit 3 is
+   silent at every one. Half (a) makes the refusal exist; this is what makes
+   it heard, and the transcript does not help because the redirection is at
+   the call site rather than at the scenario's stdout.
+2. **F-HARNESS-6** (P3): `type` and `--to-compositor` have no scenario caller.
+   `type` is the verb that PROVES arrival, which is what F-HARNESS-1 was for.
+3. **F-HARNESS-7** (P3, fixed): R18 certified a transcript its own cleanup had
+   deleted -- F-M3-1's failure inside the one scenario that had already solved
+   half of it.
+4. **F-HARNESS-8** (P2, fixed): a scenario sweeping its own transcript read a
+   file the `tee` had not finished writing. A line printed and grepped straight
+   back was absent 6 times in 30 with the cores oversubscribed twice over, and
+   30 of 30 for a bash builtin read. R18 is that shape, so a credentialed URL
+   printed just before the sweep could go unseen by the privacy check that
+   exists to catch it.
+5. **F-HARNESS-10** (P3): R16's seek-occupancy floors were about 31 per cent of
+   a 32 s window and are about 16 per cent of the 62 s one F-RWD-25 asked for,
+   and F-RWD-25's close condition asks for a per-TICK count where the scenario
+   asserts a window total. Raised rather than changed by the lane that widened
+   the window, because calibrating a floor needs a real run.
+6. **F-HARNESS-11** (P4, accepted): `healthLog`'s `marks` saturates at 80, so
+   over a 62 s window the printed list is a prefix. Every R16 assertion reads
+   an uncapped tally, so it is a diagnostic and not a check.
+7. **F-HARNESS-12** (P3): `run.sh shot` has no equivalent guard, and a
+   screenshot of the wrong output is as invisible as a keystroke into the wrong
+   surface -- on the one verb whose output a human reads as proof.
+8. **F-HARNESS-13** (P3): the unmarked-retraction sweep covered one file of
+   seven, and the transcript rule reached CLAUDE.md and the harness README but
+   not `docs/QA.md`, where a test plan's author looks first.
+9. **F-EPG-25** (P2, fixed): the audit's oracle-independence premise was stated
+   in the present tense and has been false since F-EPG-11 -- the matcher reads
+   the stream-address id for 185 of 264 live matches, so that oracle is
+   circular on every address-matched pair. Filed separately from F-EPG-13
+   because that row is about numbers and this is about a method.

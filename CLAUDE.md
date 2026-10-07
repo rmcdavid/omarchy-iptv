@@ -455,7 +455,27 @@ This project is built by role lanes running in separate git worktrees.
    source record and save its in-memory state over the copy you just wrote.
    Seen on 2026-09-21; the restore script was corrected mid-pass.
 6. Check `pgrep -x hyprlock` before any keystroke. Typing into a lock prompt
-   registers as failed unlock attempts.
+   registers as failed unlock attempts. The harness checks this for you now:
+   `run.sh key` and `run.sh type` refuse with exit 3 if hyprlock is running,
+   and that refusal has no escape hatch. They also refuse unless the GUIDE
+   holds the keyboard, which it answers itself over `ipc focusState` -- the
+   compositor cannot be asked, because `hyprctl layers` carries no
+   keyboard-focus field and `hyprctl activewindow` names the foreground
+   toplevel while the overlay is receiving keys (measured 2026-10-06).
+7. A scenario's output is its evidence, and evidence is never summarised from
+   a tail. Every scenario opens a transcript through `qa_transcript_start`
+   (`scripts/qa-lib.sh`) and prints the path as its own first line; report
+   from that file. F-M3-1 is one live run of `m3-scenario.sh` that answered
+   17 passed / 14 failed with WHICH FOURTEEN UNKNOWN, because the run was
+   backgrounded and its output piped through `tail -n 3` by the person
+   running it: every check was there and the scenario was not at fault -- the
+   evidence was thrown away downstream of it. `tail`, `| head` and
+   `grep -c PASS` keep the arithmetic and discard the finding. The transcript
+   is a SINK (rule 5), so it is 0600 inside a 0700 directory and the function
+   refuses a directory others can enter rather than writing into it; a
+   scenario that sweeps its own transcript calls `qa_transcript_sync` first,
+   because a line printed and grepped straight back was absent 6 times in 30
+   under load.
 
 ## Commits
 

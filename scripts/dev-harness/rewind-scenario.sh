@@ -663,7 +663,20 @@ sleep 3
 s1=$(ipc state); b1=$(snap_of behindLive "$s1"); r1=$(stored_of "$s1")
 printf '   R11 stored=%s/%s shown=%s/%s\n' "$r0" "$r1" "$b0" "$b1"
 ck "R11 the SHOWN count-up rises ($b0 -> $b1)" '[[ $(near "$(fdelta "$b0" "$b1")" 4 2.5) == 0 ]]'
-ck "R11 the PLAYER's own reading rises ($r0 -> $r1)" '[[ $(near "$(fdelta "$r0" "$r1")" 4 2.5) == 0 ]]'
+# F-RWD-26. This used to assert the STORED reading rises by 4 s within 2.5 over
+# the 3 s sleep above -- precisely the assertion F-RWD-22 removed from R10, one
+# screen up, under a comment here claiming the two were the same pair. They were
+# not: the stored reading is written only when a control reply lands and the
+# health tick is 10 s, so three seconds of it is chance, and it came back
+# 35.754 -> 35.754 on 2026-10-06. The SHOWN half above cannot flake that way --
+# behindLive is computed from the local 1 Hz clock and owes nothing to a reply
+# arriving -- which is why the two halves were never one claim.
+#
+# The honest claim over 3 s is that it never goes BACKWARDS. The arrival itself
+# is not re-asserted here: R10 already takes it over a 12 s window containing a
+# tick by construction, and paying another 12 s to prove the same thing twice in
+# one run buys nothing.
+ck "R11 the PLAYER's own reading never goes backwards while paused ($r0 -> $r1)" '[[ $(ge "$(fdelta "$r0" "$r1")" 0) == 0 ]]'
 is "R11 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
 ck "R11 resumed from the held position ($(rf 'd["pos"]' "$w") vs $p1)" '[[ "$(rf "d[\"ok\"]" "$w")" == true && $(near "$(rf "d[\"pos\"]" "$w")" "$p1" 4.0) == 0 ]]'
@@ -697,7 +710,7 @@ seq0=$(player_seq); lock0=$(lock_seq); pid0=$(player_pid); skips0=$(svc "d['heal
 python3 "$SWEEP" 9 "$HELPER" "$WORK/sweep.json" >>"$WORK/sweep.err" 2>&1 &
 SWEEP_PID=$!
 sleep 0.3
-"$RUN" key -d 60 -- bbbbbbbbbbbbbbbbbbbb >/dev/null 2>&1
+qa_key "$RUN" -d 60 -- bbbbbbbbbbbbbbbbbbbb
 PRESSES=20
 for ((i = 0; i < 120; i++)); do kill -0 "$SWEEP_PID" 2>/dev/null || break; sleep 0.1; done
 kill "$SWEEP_PID" 2>/dev/null; wait "$SWEEP_PID" 2>/dev/null
@@ -967,7 +980,10 @@ else bad "R18 the harness log after R16: leak or vacuous capture (status $?)"; f
 # two, plus the transcript barrier R18 gained with F-M3-1 half (b) -- and
 # this floor is read off "assertions executed", never off "passed".
 # (78 before R16 and R17; the rest are F-RWD-18's and the review's.)
-EXPECTED_CHECKS=109
+# F-HARNESS-5. The guard's refusals are counted, not only printed.
+ck "no keystroke was refused by the focus guard" '(( QA_KEY_REFUSALS == 0 ))' "$QA_KEY_REFUSALS refusal(s), each a FAIL line above"
+# 109 -> 111: the F-HARNESS-5 refusal count and F-RWD-26's replacement pair.
+EXPECTED_CHECKS=111
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"
 
 printf '\n== rewind-scenario: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"
