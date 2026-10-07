@@ -12250,3 +12250,129 @@ none of them is a remark waiting to become a defect.
    the stream-address id for 185 of 264 live matches, so that oracle is
    circular on every address-matched pair. Filed separately from F-EPG-13
    because that row is about numbers and this is about a method.
+
+## Marketplace finding at 22ba4ce, 2026-10-07: mpv verified no certificate (D-SINK-13)
+
+HANCORE-linux raised this on omacom/omarchy-plugin-marketplace#10323, against
+the shipped 0.12.1, naming `Model.js:4257-4314`, `bin/omarchy-iptv:4095-4139`
+and `bin/omarchy-iptv:4839-4843`: mpv is launched without enabling TLS
+verification while the helper supplies provider headers and HTTPS stream URLs,
+so an on-path attacker can impersonate the provider, replace the media, and
+receive the credentials carried in the URL or the headers.
+
+He is right. Everything below was measured on this machine before any lane was
+briefed, so the fix was specified from observation rather than from the report.
+
+### The environment
+
+    mpv v0.41.0, FFmpeg n9.0.1, OpenSSL 3.6.4
+    --tls-ca-file    String (default: ) [file]
+    --tls-verify     Flag   (default: no)
+
+The default is the whole finding. mpv hands `tls_verify=0` to FFmpeg unless
+told otherwise, and the base argv never told it otherwise.
+
+### The rig
+
+A local TLS server on 127.0.0.1:8799 serving a 106,220-byte MPEG-TS, run with
+a self-signed certificate and then with one signed by a CA generated for the
+test. The argv under test is the real shipped argv, taken by calling
+`mpv_launch_argv` out of the helper rather than retyped, plus `--vo=null
+--ao=null --frames=1` so nothing opened a window.
+
+Control, to show the rig discriminates: `curl` refused the self-signed
+certificate with `SSL certificate ... self-signed certificate (18)` and
+accepted it with `-k`, status 200.
+
+### The six cases
+
+| case | result |
+|---|---|
+| A. the shipped argv, self-signed certificate | **exit 0, it played** |
+| B. the shipped argv plus `--tls-verify=yes` | exit 2, `tls: Peer certificate failed verification` |
+| C. B plus `--tls-ca-file` naming the signing CA | exit 0, plays |
+| D. `--tls-verify=yes`, no CA file, our CA's certificate | exit 2, refused |
+| E. `--tls-verify=yes`, no CA file, a real public host | TLS verified; fails later at `Failed to recognize file format` |
+| F. no TLS options, same public host, as E's control | the same `Failed to recognize file format` |
+
+A is the finding. B is the fix. C is the escape the ruling rests on. D shows
+the system store is genuinely consulted and our private CA is genuinely not in
+it. E and F together are the compatibility answer and the reason one token is
+enough: a real public certificate still verifies with no CA file named, and
+the only failure left against that host is the demuxer's, identical to the
+control.
+
+### The scope, measured rather than assumed
+
+The helper's own playlist fetch already refuses:
+
+    omarchy-iptv: playlist: could not reach 127.0.0.1: [SSL: CERTIFICATE_VERIFY_FAILED]
+      certificate verify failed: self-signed certificate (_ssl.c:1082)
+
+Python's urllib verifies by default and nothing in the helper disables it: a
+search for `_create_unverified`, `CERT_NONE`, `check_hostname=False`,
+`verify=False` and `--insecure` over the helper returns nothing. The message
+also redacts to the host, which is rule 5 holding on the way out.
+
+So the precise claim, and the one worth making to the maintainer, is that the
+plugin verified TLS everywhere except the single place it handed the stream to
+mpv.
+
+### The addendum that changed the fix: one token is not enough
+
+The lead kept probing for ways verification could fail to be in effect. One
+works, so the obvious fix would have shipped a hole.
+
+Positive controls first, because without them the rows below prove nothing.
+All of this used a fake HOME and XDG_CONFIG_HOME, so nothing of the user's was
+touched.
+
+| control | result |
+|---|---|
+| the fake `mpv.conf` says `tls-verify=yes`, no argv option | exit 2, refused, so the config is read |
+| no argv option, user `--profile=good` whose profile says yes | exit 2, refused, so profiles apply |
+
+Then the bypasses:
+
+| case | result |
+|---|---|
+| `--tls-verify=yes` then `--tls-verify=no` | **exit 0, played** |
+| `--tls-verify=yes` then `--no-tls-verify` | **exit 0, played** |
+| `--tls-verify=yes` then `--profile=evil` | **exit 0, played** |
+| the user's own `mpv.conf` says no, our argv says yes | exit 2, refused |
+
+The last row is the good news: a config file does not beat our command line, so
+a pre-existing user configuration cannot undo the fix. The other three are the
+problem, and the third is the one a reserved list would never catch, because
+`--profile` carries arbitrary options and nobody can enumerate what a future
+mpv lets a later token do.
+
+The defence is to make our token the last word:
+
+| case | result |
+|---|---|
+| yes, then `--profile=evil`, then yes | exit 2, refused |
+| yes, then `--tls-verify=no`, then yes | exit 2, refused |
+| yes, then `--no-tls-verify`, then yes | exit 2, refused |
+| CA-signed certificate, user `--tls-ca-file`, then yes | exit 0, plays |
+
+And the obvious attack on a trailing token does not exist here. A bare `--`
+would make everything after it a filename, but the shipping `filter_mpv_args`
+rejects one: `MPV_ARG_RE` is `^--[a-z0-9][a-z0-9-]*(=.*)?$`, and calling the
+function returns `--` in the rejected bucket.
+
+### The ruling
+
+`--tls-verify=yes` joins the base argv in both mirrors, and is RE-ASSERTED as
+the final element after the user's arguments, which is the layer that actually
+binds. `--tls-verify` joins
+the reserved list in both, because user arguments are concatenated after the
+base argv and a pasted `--tls-verify=no` would silently reopen the hole, which
+is the `--load-scripts=no` reasoning of D-SINK-4 word for word.
+`--tls-ca-file` stays unreserved on purpose: it is the targeted escape for a
+provider with a self-signed or private certificate, measured working in case C.
+
+The cost is a user whose provider presents a self-signed certificate, who can
+no longer play by disabling verification for everything and must name that
+provider's CA instead. That is a smaller exposure for the same capability,
+which is why the ruling went that way rather than warning and allowing.

@@ -298,6 +298,48 @@ requests and raise the batch.
      bus. Enlarging the window, in RAM or on disk, is refused this round
      (D2), and the README names the `mpvArgs` lever with its RAM cost
      rather than pretending the lever does not exist.
+   - **The TLS peer** (D-SINK-13), which is the sink that is not a place the
+     plugin writes but a party it talks to. mpv's `--tls-verify` defaults to
+     `no`, so mpv hands `tls_verify=0` to FFmpeg and the base argv never said
+     otherwise: measured on mpv 0.41.0 against a local server with a
+     self-signed certificate, today's shipped argv exits 0 and PLAYS the
+     stream, where `--tls-verify=yes` exits 2 on `tls: Peer certificate failed
+     verification`. So an on-path attacker could present any certificate,
+     receive the credentials in the stream URL and in the headers
+     `apply_channel` sets before the loadfile, and serve back whatever media
+     it liked. Raised by the marketplace maintainer against the shipped
+     0.12.1, the third such finding in three weeks.
+     The scope was one sink, measured rather than assumed: the helper's own
+     playlist fetch already refuses a self-signed certificate, because urllib
+     verifies by default and nothing disables it. The plugin verified TLS
+     everywhere except the one place it handed the stream to mpv.
+     **The fix is four layers and NONE of them is redundant.** mpv applies
+     command-line options in order and a LATER token beats an earlier one, so
+     `--tls-verify=yes` followed by a user `--tls-verify=no`, by
+     `--no-tls-verify`, or by a `--profile` naming a profile that sets it off,
+     all PLAYED the self-signed stream -- the last being the one no reserved
+     list can catch, because a profile carries arbitrary options. So: the
+     option is in the base argv where a reader looks; it is RE-ASSERTED as the
+     final element after the user's `mpvArgs`, which is the layer that
+     actually binds and closes all three; `--tls-verify` is RESERVED in both
+     its `=no` and `--no-` forms so a direct attempt is refused loudly rather
+     than silently overridden; and `--tls-ca-file` is deliberately NOT
+     reserved, because it is the targeted escape for a provider with a
+     self-signed or private certificate and it is measured working behind the
+     trailing re-assertion. `--profile` is not reserved either: the last token
+     makes it harmless. Do not "tidy away" the duplicate token -- removing
+     either occurrence is a security change, and the one that matters is the
+     last.
+     A user's own `mpv.conf` does NOT beat the command line (measured), so a
+     pre-existing configuration cannot undo this. A bare `--` would make
+     everything after it a filename, which would defeat a trailing token, but
+     `MPV_ARG_RE` is `^--[a-z0-9][a-z0-9-]*(=.*)?$` and the shipping
+     `filter_mpv_args` rejects a bare `--`; that is measured by calling it,
+     and it is load-bearing for layer two.
+     The lesson this one adds: a defaulted option and a reserved option were
+     enough for every earlier sink, and they are not enough when the program
+     being configured lets a later argument rewrite an earlier one. Ask what
+     the LAST word is, not what the setting is.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
