@@ -108,12 +108,25 @@ Four repairs to one pipeline, in this order, each independently gradeable:
    (`Name.us@SD` and `Name.us` are the same channel). +153 channels of
    possible id coverage, measured.
 2. **Fall back to a normalised channel name** when no id matches, and only
-   when the normalised name is unique on both sides. 0 -> 227 measured on the
-   frozen inputs (the proposal said 232 from a research probe that normalises
-   slightly differently from the shipping key; the ceiling on these inputs is
-   229). Precision is the acceptance criterion, not recall: a wrong programme
-   on a channel is worse than a blank row, and the precision half of this
-   criterion has NOT been run -- see the 2026-10-03 review.
+   when the normalised name is unique on both sides. 0 -> 227 as this item was
+   planned and measured, on the frozen 1,453-row inputs of 2026-10-03 (the
+   proposal said 232 from a research probe that normalises slightly differently
+   from the shipping key; the ceiling on those inputs is 229). Precision is the
+   acceptance criterion, not recall: a wrong programme on a channel is worse
+   than a blank row, and the precision half of this criterion has NOT been run
+   -- see the 2026-10-03 review.
+
+   **What shipped is no longer 227, and this line is the plan rather than the
+   record (F-EPG-13).** The name fallback alone reaches 226 once the key folds
+   on `normalize_id_text` (D-EPG-5, `b2f944d`), and the pipeline as a whole
+   reaches 265 on those same frozen inputs once it also reads the guide id in
+   the row's stream address (F-EPG-11, `2a8e5b2`) -- a fifth repair this plan
+   never proposed, and the one that carries most of the coverage. On the live
+   install of 2026-10-06 the source has drifted to 1,450 rows and the matcher
+   reaches 264, of which the name path contributes 79 and the address 185. The
+   current figures and what is still re-runnable are in
+   `docs/QA-EPG-PRECISION.md` 8 and 17; the frozen numbers above are a dated
+   record and no longer re-derivable from any checkout.
 3. **Read the guide URL the playlist declares** (`#EXTM3U url-tvg`) and
    default a source's empty guide URL to it, saying in Sources where it came
    from. `channels.json` already carries `epgUrlHint`, so this is nearly

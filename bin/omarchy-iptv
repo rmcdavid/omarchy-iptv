@@ -756,14 +756,39 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 
 
-# A channel NAME as the EPG matcher compares it: normalize_text with the
-# distribution markers taken out first. Measured through build_alias ->
-# parse_xmltv -> match_counts on the installed 1,453-channel list against the
-# project's own XMLTV asset: matching on normalize_text alone reaches 126
-# channels, and taking these markers out first reaches 227, because
-# 1,155 of those 1,453 names carry one. `48 Hours (1080p)` and `48 Hours` are
-# the same programme stream; `(1080p)` says how it is encoded and `[Geo-blocked]`
-# says where it works, and neither is part of the channel's identity.
+# A channel NAME as the EPG matcher compares it: normalize_id_text with the
+# distribution markers taken out first (the ID fold, since D-EPG-5; see
+# epg_name_key below). `48 Hours (1080p)` and `48 Hours` are the same programme
+# stream; `(1080p)` says how it is encoded and `[Geo-blocked]` says where it
+# works, and neither is part of the channel's identity.
+#
+# WHAT THE STRIP IS WORTH, AND ON WHICH INPUTS (F-EPG-13). This comment stated
+# one figure in the PRESENT tense through two supersessions, and said
+# `normalize_text` after the fold had already changed under it. Both halves are
+# fixed by saying which run each number came from, because no number here is
+# about today unless it says so.
+#
+# A dated record, not re-runnable from any checkout: matching on normalize_text
+# alone reached 126 channels and taking these markers out first reached 227,
+# measured through build_alias -> parse_xmltv -> match_counts on the frozen
+# 1,453-row source of 2026-10-03 against the project's own XMLTV asset, both
+# arms under the pre-D-EPG-5 SEARCH fold. 1,155 of those 1,453 names carried a
+# marker. That 227 was superseded twice -- 226 by the name-key repair (D-EPG-5)
+# and 265 by the address strategy (F-EPG-11) -- and neither successor re-ran
+# the strip-OFF arm, so the delta above has no current counterpart and the
+# frozen inputs are in no checkout. The strip's own contribution is therefore
+# UNVERIFIED at today's baseline; QA-EPG-PRECISION 8 says so and names what is
+# re-runnable instead. Do not restate 126/227 as a live figure.
+#
+# What IS re-derivable, from the install's own cache rather than a re-fetch:
+# on the 1,450-row source installed here on 2026-10-06 the matcher as a whole
+# reaches 264 -- 185 by address, 79 by name -- and 1,153 of those 1,450 names
+# carry a marker this pattern strips. Three artifacts of that one run agree on
+# the 264 (epg-status.json's `matched`, epg-now.json's channel count, and
+# epg-window.txt's line count less its header); QA-EPG-PRECISION 8 carries the
+# commands. 1,155 of 1,453 against 1,153 of 1,450 is the same list three rows
+# lighter, which is drift in the provider's data and not a change here
+# (F-EPG-24).
 #
 # Deliberately NOT applied inside normalize_text, which is the SEARCH key: a
 # user who types "1080" is searching for exactly these markers, and the four
