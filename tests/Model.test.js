@@ -3500,6 +3500,132 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
           Model.resolveEpgUrl({ userUrl: "", hint: u }).host]
 }, ["http://host.example.test", "host.example.test", "host.example.test", "host.example.test"])
 
+// ---- F-SINK-11: redaction is linear, and says the same thing it said ----
+//
+// The pattern redactUrls used to be, kept here and ONLY here as the oracle.
+// It is the thing this change is measured against: "the cost is linear" is
+// worth nothing unless "the answer is unchanged" is checked at the same time,
+// and the only honest way to check that is to run the code that shipped.
+// Deliberately a copy rather than an import -- the shipping file must not
+// carry a second redactor for a test's benefit, and a copy that drifts is
+// caught the moment a vector disagrees.
+function redactUrlsAsShipped(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^\/\s]*@)?([^\/\s?#:@]*)[^\s]*/gi, function (all, host) {
+      return host !== "" ? host : "[url]"
+    })
+}
+;(function () {
+  // An alphabet that reaches every branch of the scan: scheme characters, the
+  // authority delimiters the host class excludes, the `@` D-SINK-1 is about,
+  // several kinds of whitespace (`\s` is not just the space), and non-ASCII.
+  const ALPHABET = "ahHt p:/@?#.+-_019\t\n\u00a0\u2028\ufeffx[]%&=,;'\"<>"
+  function generated(length, seed) {
+    let out = ""
+    let x = seed
+    for (let i = 0; i < length; i++) {
+      x = (x * 1103515245 + 12345) & 0x7fffffff
+      out += ALPHABET.charAt(x % ALPHABET.length)
+    }
+    return out
+  }
+  const corpus = redactionVectors.vectors.map(function (v) { return v.text })
+  // Hand-picked edges the generator is unlikely to produce: a run swallowed
+  // as a scheme, a scheme with no letter in it, a `://` with nothing a host
+  // could come from, adjacent URLs, and whitespace that is not a space.
+  const edges = ["", "a://", "a://h", "://h", ".://h", "-a://h", "123http://h",
+    "_aaa://h", "http://u:p@h/x", "http://u:p@q@h/x", "aaahttp://h/x",
+    "a://://b", "://://x", "HTTP://H.TEST/A", "ht+tp://h", "ht.tp://h",
+    "http://h:8080/a?b#c", "http://@h/x", "http://h@/x", "http://a@b@c.test/x",
+    "x http://a.test/1 y http://b.test/2 z", "a://b c://d", "file:///etc/x",
+    "see http://h.test, then https://i.test.", "\u00a0http://h.test\u00a0y",
+    "aaa://\u2028x", "no urls here", "http://", "http://?x", "'http://h.test'",
+    // A "://" the pattern cannot match, followed by one it can. The scan has
+    // to keep looking past the first; stopping there leaves a live credential
+    // in the text, and nothing shorter in this list reaches that branch.
+    "://x http://u:p@h.test/a", "1://x http://u:p@h.test/a",
+    "://h http://a.test/b ://c https://u:p@d.test/e",
+    // An `@` in the PATH, which is not userinfo. RFC 3986 ends the authority
+    // at the first `/`, so the host here is `h.test` and not `b`; letting the
+    // userinfo search cross that `/` moves the host to a path segment, which
+    // is the same class of mistake as D-SINK-1 pointing the other way.
+    "http://h.test/a@b/c", "http://u:p@h.test/a@b/c", "http://h.test?a@b"]
+  for (let i = 0; i < corpus.length; i++) edges.push(corpus[i])
+  for (let seed = 1; seed <= 3000; seed++) {
+    for (let len = 0; len <= 40; len += 7) edges.push(generated(len, seed))
+  }
+  // Longer strings as well as short ones, because the interesting difference
+  // between a linear scan and a bounded pattern only shows up on a run longer
+  // than the bound: the `{0,30}` fix the old comment proposed passes every
+  // 40-character vector above and fails here.
+  for (let seed = 1; seed <= 200; seed++) {
+    edges.push(generated(200, seed))
+    edges.push(generated(2000, seed))
+    edges.push("a".repeat(200) + generated(60, seed))
+    edges.push(generated(60, seed) + "a".repeat(200) + "http://u:p@h.test/x")
+  }
+  checkCall("F-SINK-11: the linear scan answers exactly what the old quadratic pattern answered", function () {
+    const bad = []
+    for (let i = 0; i < edges.length; i++) {
+      if (Model.redactUrls(edges[i]) !== redactUrlsAsShipped(edges[i])) {
+        if (bad.length < 4) bad.push(JSON.stringify(edges[i]))
+      }
+    }
+    // The corpus size is asserted too: a generator that silently produced
+    // nothing would make this check pass by testing no input at all, which is
+    // the rule 14 shape this whole file is about.
+    return [edges.length > 18000, bad]
+  }, [true, []])
+})()
+// The pathological inputs, with their OUTPUT pinned rather than only their
+// timing. A fix that got fast by dropping a redaction would pass a budget.
+;(function () {
+  const run = function (n) { return new Array(n + 1).join("a") }
+  const dotted = function (n) { return new Array(Math.floor(n / 5) + 1).join("aaaa.") }
+  const CRED = "http://u5er:p4ss@prov.example.test/live/1.ts"
+  const DOUBLED = "http://u5er:p4@ss@prov.example.test/live/1.ts"
+  checkCall("F-SINK-11: a 20,000 character run with no URL in it is returned verbatim", function () {
+    return Model.redactUrls(run(20000)) === run(20000)
+  }, true)
+  checkCall("F-SINK-11: a 20,000 character run is swallowed as the scheme, exactly as before", function () {
+    // The old pattern read the whole run plus `http` as one scheme and
+    // replaced the lot by the host. Pinned because it is surprising, not
+    // because it is desirable: changing it is a behaviour change and belongs
+    // in its own finding, not in a performance fix.
+    return Model.redactUrls(run(20000) + CRED)
+  }, "prov.example.test")
+  checkCall("F-SINK-11: a run AFTER a URL keeps the run and loses the credentials", function () {
+    return Model.redactUrls(CRED + " " + run(20000)) === "prov.example.test " + run(20000)
+  }, true)
+  checkCall("F-SINK-11: the dotted run, which is the shape the helper's pattern was slow on", function () {
+    return [Model.redactUrls(dotted(20000)) === dotted(20000),
+            Model.redactUrls(dotted(20000) + " " + CRED) === dotted(20000) + " prov.example.test"]
+  }, [true, true])
+  checkCall("F-SINK-11: D-SINK-1 still holds when the credential sits inside a pathological run", function () {
+    const out = Model.redactUrls(run(20000) + " " + DOUBLED)
+    return [out === run(20000) + " prov.example.test",
+            out.indexOf("u5er") < 0, out.indexOf("p4@ss") < 0, out.indexOf("1.ts") < 0]
+  }, [true, true, true, true])
+  // Best of 5 against a ceiling 100 times the measured cost, because a
+  // wall-clock assertion on a shared machine has to be loose to be useful.
+  // The code it replaced spent 2578.5 ms on the first of these and 2575.8 ms
+  // on the third, so this goes red on the old implementation by a factor of
+  // fifty even on a machine fifty times slower than the one it was written on.
+  checkCall("F-SINK-11: four 40,000 character shapes, each under 50 ms (the old pattern took 2.5 s)", function () {
+    const shapes = [run(40000), run(40000) + CRED, CRED + " " + run(40000), dotted(40000)]
+    return shapes.map(function (s) {
+      let best = Infinity
+      for (let i = 0; i < 5; i++) {
+        const t0 = process.hrtime.bigint()
+        Model.redactUrls(s)
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6
+        if (ms < best) best = ms
+      }
+      return best < 50
+    })
+  }, [true, true, true, true])
+})()
+
 // ---- F-SINK-10: the LIST's own sinks, with a credential in the data ----
 //
 // Engineering rule 5 lists guide text AND the accessibility bus as sinks, and

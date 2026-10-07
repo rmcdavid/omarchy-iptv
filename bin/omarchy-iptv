@@ -472,7 +472,23 @@ _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-loo
 # decomposed Latin accent. Marks on other scripts stay (Cyrillic breve in
 # "\u0439" must not fold to "\u0438").
 _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
-_URL_ANYWHERE = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
+# redact_urls' pieces (F-SINK-11). It used to be one pattern,
+# `\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+`, whose scheme run the engine
+# re-read from every word boundary; the scan is anchored on "://" now and these
+# are the parts of that pattern it still needs. The tail is unchanged. `\w` is
+# asked rather than guessed, so the word-boundary rule stays Python's own
+# outside ASCII.
+_URL_TAIL_RE = re.compile(r"[^\s'\"<>]+")
+_WORD_CHAR_RE = re.compile(r"\w")
+# The scheme-legal run that ENDS at a given position: `search(s, lo, j)` leaves
+# `$`/`\Z` at `j`, so the leftmost match starts the maximal run reaching `j`.
+# One native search rather than a python character loop walking back over the
+# same set -- the loop was correct and measurably slower, 168.5 ms against
+# 1 MiB of letters followed by a URL where this is 54.4 ms (3.810 ms against
+# 40,000 where this is 0.363), and the whole point of F-SINK-11 is that the
+# size is the provider's to choose. Both are linear; this one has the smaller
+# constant and neither copies a slice.
+_SCHEME_RUN_RE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_text. Built from the same constant so the two cannot drift:
@@ -591,18 +607,107 @@ def source_host(url: str) -> str:
 
 
 def redact_urls(text: Any) -> str:
-    """Replace every URL inside `text` with scheme://host (R12)."""
+    """Replace every URL inside `text` with scheme://host (R12).
 
-    def replace(match: re.Match[str]) -> str:
-        raw = match.group(0)
+    F-SINK-11. ANCHORED ON "://", because the pattern this replaced was
+    quadratic in a run of scheme-legal characters and every string that
+    reaches here is provider-controlled.
+
+    The old pattern was `\\b([A-Za-z][A-Za-z0-9+.-]*)://[^\\s'"<>]+`. Its `\\b`
+    hid the simplest shape -- a run of plain letters offers only one word
+    boundary -- so the Model.js mirror was measured first and this side read as
+    cheap. It is not: any run that CONTAINS a word boundary every few
+    characters gives the engine a fresh start position for a run that reaches
+    to the end of the text, and `.`, `+` and `-` are scheme-legal and are not
+    word characters. Measured on python 3.14.7 over "aaaa." repeated: 1.6 ms at
+    1,000 characters, 45.0 at 5,000, 174.5 at 10,000, 705.5 at 20,000 and
+    2826.2 at 40,000 -- the same curve as the JS side, on a different vector.
+    After this change, same vector and same machine: 0.001 / 0.002 / 0.003 /
+    0.006 / 0.012 ms. The slowest vector that remains is a single run of
+    letters that ends in a real URL, where the whole run is the "scheme" the
+    old pattern also swallowed: 0.013 / 0.052 / 0.096 / 0.187 / 0.363 ms.
+
+    Why it is the same answer and not a narrower pattern. `:` and `/` are not
+    scheme-legal, so the old pattern's greedy scheme run always ended EXACTLY
+    at the `://` that followed it and there was never a shorter candidate to
+    backtrack to. So the leftmost start the engine took for a given `://` is
+    the first position in the scheme-legal run ending at it that holds an ASCII
+    letter AND satisfies `\\b`; inside the run the only non-word characters are
+    `+`, `.` and `-`, so that test is a character comparison everywhere except
+    the run's own first position, where `\\w` is asked (`_` and every non-ASCII
+    word character are why it has to be asked). The redaction-cost suite (dev
+    branch) drives the OLD pattern as an oracle over the shared fixture and
+    thousands of generated strings and asserts the two agree character for
+    character.
+
+    This makes the caps in front of this sink cheap, not unnecessary:
+    clean_name, clean_field and clean_detail are still what keeps a 64 MiB
+    description out of a renderer, and clean_detail still drops a cut token
+    carrying "://" rather than hand the redactor half a URL.
+    """
+    s = "" if text is None else str(text)
+    j = s.find("://")
+    if j < 0:                       # the old pattern cannot match: same answer
+        return s
+    out: list[str] = []
+    copied = 0                      # everything before this is already in `out`
+    # The engine's pos: no match may start before it. `j` is only ever searched
+    # from `resume` or from a position already at or past it, so there is no
+    # `j < resume` case to guard -- and a guard for a case that cannot happen is
+    # a branch no test can go red for.
+    resume = 0
+    while j >= 0:
+        # The scheme-legal run ending at this "://". Searched over a window
+        # that doubles until the run's start is strictly inside it (or the
+        # window reaches `resume`), so the total work is proportional to the
+        # run and not to the text, and no slice is copied.
+        window = 64
+        while True:
+            lo = j - window
+            if lo < resume:
+                lo = resume
+            b = _SCHEME_RUN_RE.search(s, lo, j).start()
+            if b > lo or lo == resume:
+                break
+            window *= 2
+        # `\b` at a position whose character is a word character (a letter
+        # always is) means "position 0, or the character before is not a word
+        # character". Only the run's first position can be preceded by
+        # something outside the scheme-legal set, so only it needs `\w`.
+        boundary_at_b = b == 0 or _WORD_CHAR_RE.match(s, b - 1) is None
+        start = -1
+        for p in range(b, j):
+            c = s[p]
+            if not (("a" <= c <= "z") or ("A" <= c <= "Z")):
+                continue
+            if p == b:
+                if not boundary_at_b:
+                    continue
+            elif s[p - 1] not in "+.-":
+                continue
+            start = p
+            break
+        tail = _URL_TAIL_RE.match(s, j + 3)
+        if start < 0 or tail is None:
+            # No scheme, or nothing the tail `+` can consume: the old pattern
+            # has no match ending at this `://`. j+1 and j+2 cannot begin one
+            # of their own; +1 keeps that from being load-bearing.
+            j = s.find("://", j + 1)
+            continue
+        end = tail.end()
+        raw = s[start:end]
         trailing = ""
         while raw and raw[-1] in ".,;:!?)]":
             trailing = raw[-1] + trailing
             raw = raw[:-1]
         host = url_host(raw)
-        return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
-
-    return _URL_ANYWHERE.sub(replace, "" if text is None else str(text))
+        out.append(s[copied:start])
+        out.append("%s://%s%s" % (s[start:j].lower(), host or "[redacted]", trailing))
+        copied = end
+        resume = end
+        j = s.find("://", resume)
+    out.append(s[copied:])
+    return "".join(out)
 
 
 def log(message: str) -> None:
@@ -2084,17 +2189,20 @@ def clean_detail(text: str | None, limit: int) -> str:
     IT -- into the panel, into epg-now.json and onto the accessibility bus.
     Measured at every cut offset of all three caps before the fix.
 
-    The cut is still bounded, because the regex cost is quadratic in a run of
-    scheme-legal characters that does not match and the input is
-    provider-controlled up to MAX_SOURCE_BYTES. Measured here on the shape
-    that defeats the `://` guard (`a-a-a-...` plus one real URL): 1.2 ms at
-    400 code points, and four times that for every doubling -- 173 ms at
-    6,400, 694 ms at 12,800, which puts a single 64 MiB description out of
-    reach of any budget. So the bound stays and the SPLIT is what moved: the
-    text is cut at `limit`, and when that cut lands inside a token carrying
-    `://` the whole token is dropped rather than handed to the redactor. A
-    URL cannot contain whitespace (_URL_ANYWHERE excludes it), so the only
-    token the cut can ever have truncated is the last one, and dropping it
+    The cut is still bounded, and the reason has CHANGED -- it used to be the
+    cost. It was measured here on the shape that defeats the `://` guard
+    (`a-a-a-...` plus one real URL): 1.2 ms at 400 code points and four times
+    that for every doubling, 173 ms at 6,400, 694 ms at 12,800, which put a
+    single 64 MiB description out of reach of any budget. F-SINK-11 made
+    redaction linear, so that argument is gone and the bound now stands on what
+    it should have stood on all along: the panel reuses a fixed geometry and
+    the input is provider-controlled up to MAX_SOURCE_BYTES, so a description
+    nobody can read is not worth carrying. The SPLIT stays for a reason the
+    cost never touched: the text is cut at `limit`, and when that cut lands
+    inside a token carrying `://` the whole token is dropped rather than handed
+    to the redactor, because half a URL is what published the username above.
+    A URL cannot contain whitespace (redact_urls' tail excludes it), so the
+    only token the cut can ever have truncated is the last one, and dropping it
     costs a fragment that was unreadable anyway.
 
     What the caller sees: a value at most `limit` code points long -- at most,
@@ -2115,12 +2223,13 @@ def clean_detail(text: str | None, limit: int) -> str:
                 cut = head
         text = cut
     if "://" not in text:
-        # The common case, and the hot one. _URL_ANYWHERE cannot match
-        # without "://", so this guard changes no answer; it is here because
-        # the regex retries at every word boundary and prose is all word
-        # boundaries. Measured over a 48,000-programme fetch with a
-        # 600-character description on every programme: 2.7 s of the 6.3 s
-        # was this sub returning the string it was given.
+        # The common case, and the hot one. redact_urls cannot rewrite text
+        # without "://", so this guard changes no answer. It was worth 2.7 s of
+        # a 6.3 s 48,000-programme fetch with a 600-character description on
+        # every programme, back when the old pattern retried at every word
+        # boundary and prose is all word boundaries; redact_urls takes the same
+        # exit itself now (F-SINK-11), so this one is a call it does not make
+        # rather than a stall it avoids. Kept: one `in` beats one call.
         return text
     return clean_field(redact_urls(text), limit)
 
