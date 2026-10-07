@@ -570,5 +570,135 @@ class StateSourceCommandTest(unittest.TestCase):
         self.assertIn("secretpw", self.path.read_text(encoding="utf-8"))   # the file is the 0600 store
 
 
+class SettingOwnedWarningTest(unittest.TestCase):
+    """D-SRC-11: `state source update` must not let a user believe a write
+    stuck when the running shell is about to undo it.
+
+    The helper writes the source record and the record is the FOLLOWER: the
+    settings are the authority for the active source and reconcile rewrites the
+    active record's `epgUrl` from the plugin's `epgUrl` setting every time it
+    re-reads state.json -- which the CLI's own write causes. Measured live on
+    2026-10-03: exit 0, "ok": true, record "" immediately afterwards.
+
+    These run the SHIPPING VERB through helper.main and read what a user would
+    read, on stderr and in the payload. Grepping the --help text for the word
+    "setting" would pass against a command that still said nothing where it
+    counts, which is the acceptance rule 14 forbids.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        self.path = pathlib.Path(self.dir) / "state.json"
+        code, payload, err = run("state", "--state-dir", self.dir, "source", "add",
+                                 "--url", "http://a.test/list.m3u", "--now", "100")
+        self.assertEqual(code, 0, err)
+        self.key = payload["key"]
+
+    def source(self, *args):
+        return run("state", "--state-dir", self.dir, "source", *args)
+
+    def disk(self):
+        return json.loads(self.path.read_text(encoding="utf-8"))
+
+    def test_epg_url_is_written_and_the_user_is_told_who_owns_it(self):
+        code, payload, err = self.source("update", self.key, "--epg-url",
+                                         "http://guide.test/x.xml.gz")
+        # The write still happens and still succeeds. The defect was silence,
+        # not the write.
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.disk()["sources"][0]["epgUrl"], "http://guide.test/x.xml.gz")
+        # ...and the user is told, on stderr and in the payload. Both, because
+        # one is for a human at a prompt and the other for anything parsing the
+        # JSON, and "ok": true on its own is what misled the owner.
+        self.assertEqual(len(payload["warnings"]), 2)
+        self.assertEqual(payload["warnings"], helper.setting_owned_warnings(["epgUrl"]))
+        for note in payload["warnings"]:
+            self.assertIn(note, err)
+        # The remedy has to be actionable: the SETTING is named, and so is
+        # where to change it.
+        joined = " ".join(payload["warnings"])
+        self.assertIn("'epgUrl'", joined)
+        self.assertIn("Sources screen", joined)
+        self.assertIn("D-SRC-11", joined)
+        # Flag-specific, so the line matches what the user actually typed.
+        self.assertIn("--epg-url", joined)
+        self.assertNotIn("--url ", joined)
+
+    def test_url_says_playlist_url_instead(self):
+        code, payload, err = self.source("update", self.key, "--url", "http://b.test/list.m3u")
+        self.assertEqual(code, 0, err)
+        joined = " ".join(payload["warnings"])
+        self.assertIn("'playlistUrl'", joined)
+        self.assertIn("playlist URL", joined)
+        self.assertNotIn("'epgUrl'", joined)
+        self.assertIn("--url", joined)
+
+    def test_both_flags_warn_once_each_and_share_one_remedy_line(self):
+        code, payload, err = self.source("update", self.key, "--url", "http://b.test/list.m3u",
+                                         "--epg-url", "http://guide.test/x.xml.gz")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(payload["warnings"]), 3)
+        self.assertIn("'epgUrl'", payload["warnings"][0])
+        self.assertIn("'playlistUrl'", payload["warnings"][1])
+        self.assertIn("guide (EPG) URL and playlist URL", payload["warnings"][2])
+
+    def test_a_field_the_shell_does_not_own_says_nothing(self):
+        """--label is the record's own. A warning on every update would be
+        noise, and noise is how a real warning stops being read."""
+        code, payload, err = self.source("update", self.key, "--label", "Home")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("warnings", payload)
+        self.assertEqual(err, "")
+        self.assertEqual(self.disk()["sources"][0]["label"], "Home")
+
+    def test_clearing_the_epg_url_warns_too(self):
+        """An empty --epg-url is still a write to a field the shell owns, so
+        "I cleared it and it came back" gets the same explanation."""
+        code, payload, err = self.source("update", self.key, "--epg-url", "")
+        self.assertEqual(code, 0, err)
+        self.assertIn("'epgUrl'", " ".join(payload["warnings"]))
+
+    def test_a_refused_update_warns_about_nothing(self):
+        """Nothing was written, so there is nothing for the shell to undo. A
+        warning here would be the mirror of the defect: text about a write that
+        did not happen."""
+        for args, expected in (((self.key, "--epg-url", "ftp://h.test/x"), "scheme"),
+                               ((self.key, "--url", "http://:80/"), "invalid"),
+                               (("0badc0de", "--epg-url", "http://guide.test/x"), "unknown_source")):
+            code, payload, err = self.source("update", *args)
+            self.assertEqual(payload["error"]["code"], expected, args)
+            self.assertNotEqual(code, 0, args)
+            self.assertNotIn("warnings", payload, args)
+            self.assertNotIn("D-SRC-11", err, args)
+
+    def test_the_warning_carries_no_url_at_all(self):
+        """Rule 5. The text is composed from literals and the setting names, so
+        nothing provider-controlled can reach stderr or the payload through it
+        -- and stderr is a sink like any other."""
+        secret = "http://user:secretpw@guide.test/g.xml?password=P4SS"
+        code, payload, err = self.source("update", self.key, "--epg-url", secret)
+        self.assertEqual(code, 0, err)
+        text = json.dumps(payload) + err
+        for needle in ("secretpw", "P4SS", "password=", "g.xml", "://"):
+            self.assertNotIn(needle, text, needle)
+        # It did store the real value, in the 0600 file.
+        self.assertEqual(self.disk()["sources"][0]["epgUrl"], secret)
+
+    def test_the_flag_names_are_derived_from_argparse_and_not_retyped(self):
+        """The table joins a record field to a flag to a setting. The flag is
+        what argparse is asked for, by derivation, so a renamed flag raises
+        instead of silently dropping the warning (rule 13)."""
+        parser = helper.build_parser()
+        for field, flag, _setting, _human in helper.SETTING_OWNED_SOURCE_FIELDS:
+            dest = flag.lstrip("-").replace("-", "_")
+            args = parser.parse_args(["state", "source", "update", self.key, flag, "x"])
+            self.assertEqual(getattr(args, dest), "x", flag)
+            self.assertIn(field, [row[0] for row in helper.SETTING_OWNED_SOURCE_FIELDS])
+        self.assertEqual(helper.setting_owned_warnings([]), [])
+        self.assertEqual(helper.setting_owned_warnings(["label", "kind"]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
