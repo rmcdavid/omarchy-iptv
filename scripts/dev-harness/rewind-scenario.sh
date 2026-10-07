@@ -982,8 +982,12 @@ else bad "R18 the harness log after R16: leak or vacuous capture (status $?)"; f
 # (78 before R16 and R17; the rest are F-RWD-18's and the review's.)
 # F-HARNESS-5. The guard's refusals are counted, not only printed.
 ck "no keystroke was refused by the focus guard" '(( QA_KEY_REFUSALS == 0 ))' "$QA_KEY_REFUSALS refusal(s), each a FAIL line above"
-# 109 -> 111: the F-HARNESS-5 refusal count and F-RWD-26's replacement pair.
-EXPECTED_CHECKS=111
+# 109 -> 110: the F-HARNESS-5 refusal count, and that alone. F-RWD-26 replaced
+# one `ck` with one `ck`, so it moves this by nothing -- the first version of
+# this line said 111 for "the refusal count and F-RWD-26's replacement pair",
+# counted a one-for-one swap as an addition, and the guard above caught it on
+# the first run (got 110, want 111). Which is what the guard is for.
+EXPECTED_CHECKS=110
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"
 
 printf '\n== rewind-scenario: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"

@@ -12167,6 +12167,41 @@ out of `ss` at exit is a pattern wearing a pid's clothes, and the rule did not
 read as covering it. The hazard class -- a cleanup installed above a refusal
 that reaps by pattern or by port -- is unswept in the other nine scenarios.
 
+### The display pass that closed the round
+
+Three scenarios, each with its output captured to a file and summarised from
+that file, which is the rule the round wrote (CLAUDE.md parallel rule 7).
+
+| scenario | result | note |
+|---|---|---|
+| `m3-scenario.sh` | 38 passed, 0 failed | eight real keys through the new guard |
+| `text-scenario.sh` | 7 passed, 0 failed | two `ctrl g` chords through it |
+| `rewind-scenario.sh` | 114 passed, 0 failed, 111 assertions | at the widened 62 s health window |
+
+**F-RWD-25** is closed by the rewind runs. Two foreground passes at load
+average 2.0 to 2.5 on four cores:
+
+| run | samples | seek samples | seek runs | status runs |
+|---|---|---|---|---|
+| 1 | 620 | 561 | 13 | 0 |
+| 2 | 621 | 531 | 12 | 1 |
+
+`healthSkips never left 0 across the busy window` and `the intent counter did
+not move` in both. The second run is the stronger evidence: a health tick DID
+land inside the window and ran, and the counter still did not move, which is
+the D10 exemption being exercised rather than merely not provoked.
+
+**F-RWD-26** is proven on the data that failed. `R11 the PLAYER's own reading
+never goes backwards while paused (36.403 -> 36.403)` passes where the old
+assertion failed on exactly that pair, and the shown half rose 37.426 to
+40.426 beside it in the earlier run, which is why the two were never one claim.
+
+One mistake of the lead's, caught by the scenario's own guard on the first run:
+`EXPECTED_CHECKS` was set to 111 for "the refusal count and F-RWD-26's
+replacement pair", counting a one-for-one `ck` swap as an addition. The run
+answered `got '110', want '111'`. A count in a comment that the code does not
+have, caught by the one check whose job is to catch it.
+
 ### What the round says about the project (F-M3-8, eleventh round)
 
 Thirty-one of the 41 findings were sentences. The three that could have
