@@ -12569,3 +12569,72 @@ Fixed with a bounded wait that reports giving up, so a transcript that never
 arrives still fails the assertion instead of hanging. Second time in two days
 that a gate step reddened for a reason with nothing to do with the tree, and
 both were in this file.
+
+## Second maintainer finding against 0.13.0, 2026-10-07: the adopted player (D-SINK-16)
+
+HANCORE-linux replied on #10389, the verification request for 5d527d7 itself,
+hours after it was filed:
+
+> new player launches enable TLS verification, but `Service.qml:2561-2667`
+> reattaches to an existing player without migrating its TLS setting, and
+> `bin/omarchy-iptv:5029-5067` sends new provider headers and URLs to that same
+> process. A player started before the update can therefore continue making new
+> HTTPS requests with `tls_verify=0`, preserving the on-path credential exposure
+> after an upgrade.
+
+He is right, and he is sharper than our own filing. D-PLY-25 had recorded this
+as a player keeping stale options, with "stop it and start it again" as the
+remedy. What that framing missed is that the plugin does not merely leave the
+old player alone: it keeps SENDING it new provider headers and new credentialed
+URLs. A live feed into an unauthenticated process is a different thing from a
+stale setting, and it needs a different fix.
+
+### The exposure, confirmed over a real socket
+
+A player launched the way 0.12.1 launched one, with no TLS tokens at all, driven
+over its IPC socket:
+
+    get_property tls-verify     -> False
+    get_property stream-lavf-o  -> {}
+    loadfile the attacker's URL -> the attacker's log records the GET
+
+### Runtime migration works, and the fix rests on it
+
+    set_property tls-verify True   -> success
+    get_property tls-verify        -> True
+    loadfile the same URL again    -> the attacker's log records nothing
+
+| measurement | before migration | after |
+|---|---|---|
+| attacker GETs, same process | 1 | 0 |
+
+Positive control on that same migrated player, so a zero is a refusal and not a
+broken player: a plain `http://` URL from a second local server was fetched and
+that server logged it.
+
+The other residue clears too. `set_property stream-lavf-o {"tls_verify": "0"}`
+succeeds and reads back, and setting it to `{}` succeeds and reads back empty,
+so a stale value left on a pre-update player by a user argument can be cleared
+at runtime as well.
+
+### What is not measured, and why the design is conservative because of it
+
+Whether a stream ALREADY OPEN picks the change up for its ongoing segment
+fetches is UNMEASURED. The probe used a short file, not a segmented live stream.
+The design therefore does not rely on it: adoption migrates, reads back, and
+re-establishes the current channel so nothing continues on a connection opened
+without verification, and stops the player rather than feeding it when the
+properties cannot be made safe. One visible rebuffer, once, after an upgrade.
+
+### Where the assertion goes
+
+`apply_channel` is the one wire sequence `play` and `player start` share, and it
+already asserts four properties before every load for exactly this class of
+reason, with the reason written beside each: mpv keeps `pause`, `aid` and `sid`
+across a loadfile, and the three header properties are always sent so a channel
+without headers actively resets the previous one's. TLS belongs on that line.
+
+The difference that matters: those four are best effort, through `try_command`.
+This one is not. If the properties cannot be made safe the function must refuse
+to load, because loading is the act of handing a credentialed URL and the
+provider headers to a process we could not secure.
