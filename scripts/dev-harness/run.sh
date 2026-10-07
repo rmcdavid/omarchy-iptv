@@ -8,8 +8,12 @@
 #                                    previous, refresh, play, channel, pip, pause, back,
 #                                    forward, live -- the verbs a user binds (F-RWD-14)
 #   run.sh shot [name]               screenshot the focused output into the scratch dir
-#   run.sh key <wtype args...>       send keys to the focused surface (wtype)
-#   run.sh type <text>               type text and PROVE it arrived (F-HARNESS-1)
+#   run.sh key [--to-compositor] <wtype args...>
+#                                    send keys to the guide (wtype). REFUSES, exit 3,
+#                                    unless the harness guide holds the keyboard, and
+#                                    always refuses while hyprlock is up (F-M3-1)
+#   run.sh type <text>               type text and PROVE it arrived (F-HARNESS-1). Same
+#                                    two refusals; no --to-compositor (see below)
 #   run.sh clean                     wipe the scratch dirs (cache, state, runtime)
 #   run.sh scenario                  scripted Sources verification (sources-scenario.sh)
 #   run.sh player-scenario           scripted detached-player verification (player-scenario.sh)
@@ -43,6 +47,26 @@
 #   --window MODE       layer (default): the production PanelWindow + layer-shell. floating: host
 #                       the guide in a FloatingWindow (xdg toplevel) so it maps under a compositor
 #                       with no layer-shell, e.g. headless cage (docs/SPIKE-CAGE-HEADLESS.md). Harness-only.
+#
+# Why `key` and `type` refuse (F-M3-1 half (a)). wtype types into whatever
+# surface holds the keyboard, which on a bad day is the terminal the scenario is
+# running in, the editor behind it, or -- worst -- a lock prompt, where every
+# keystroke registers as a failed unlock attempt. NEITHER failure is visible in
+# a scenario's own assertions: a key that landed somewhere else reads exactly
+# like a guide that did not react, and `sky` arriving as `ky` still filters 20
+# rows to 3. So both verbs ask the harness where the keyboard is first
+# (`ipc focusState`) and exit 3 naming what they found. Two kinds of refusal:
+#   hyprlock is up      -- never escapable, no flag, nothing to pass.
+#   the guide has not got the keyboard -- escapable with --to-compositor, which
+#     must come FIRST (everything after it is wtype's, and wtype's own `--`
+#     means "the rest is text") and exists for a chord aimed at the COMPOSITOR
+#     rather than at a surface. It is not a way to make a failing scenario pass.
+# `type` has no escape hatch: it proves the text reached the GUIDE by reading it
+# back, so a keystroke aimed at the compositor has nothing for it to prove.
+# The compositor cannot answer "who holds the keyboard" at all -- `hyprctl
+# layers` has no such field and `hyprctl activewindow` names a toplevel while
+# an overlay is taking keys -- so the question goes to the guide. The numbers
+# behind that are in scripts/dev-harness/shell.qml, at harness.focusSnapshot.
 #
 # Environment: OMARCHY_IPTV_PLUGIN_ROOT overrides which checkout the harness
 # loads Service.qml / Guide.qml / BarWidget.qml / bin/omarchy-iptv from
@@ -274,6 +298,103 @@ start_server() {
   echo "[run.sh] serving $SCRATCH/fixtures on http://127.0.0.1:$SERVE_PORT (pid $SERVER_PID)"
 }
 
+# ---- F-M3-1 half (a). Nothing sends a keystroke without first proving where
+# it will land. Both checks below guard `key` and `type`.
+
+# Is the screen locked? Checked before EVERY keystroke and never escapable:
+# CLAUDE.md's parallel rule 6 says a key typed at a lock prompt registers as a
+# failed unlock attempt, and until now that rule was prose each scenario author
+# had to remember -- text-scenario.sh:208 did it, every other scenario did not.
+# A rule joined to its callers by nothing is the F-HARNESS-1 and F-RWD-14
+# shape, and the repair is the same one: handle it HERE, once.
+#
+# `-x` matches the process NAME, and nothing else. `-f` matches any command
+# line that merely MENTIONS the name, which CLAUDE.md rule 3 records has bitten
+# this project three times, once in a brief that was quoting the rule. Measured
+# here: with `-f` in place of `-x`, and nothing locked at all, `key` refused --
+# the match was an ancestor shell whose own command line contained the word
+# `hyprlock`. A check that can refuse every keystroke forever because of what
+# some parent process is called is not a check.
+screen_locked() { pgrep -x hyprlock >/dev/null 2>&1; }
+
+# How long to wait for the harness to say where the keyboard is. BOUNDED,
+# because an unbounded wait is a bug and not patience (rule 3): `qs ipc`
+# against an instance that is simply not there fails fast, but a half-dead one
+# need not, and the answer to "I cannot tell" is to refuse and say so.
+FOCUS_TIMEOUT=${OMARCHY_IPTV_FOCUS_TIMEOUT:-5}
+
+# Refuse unless the harness guide holds the keyboard, naming what was found so
+# an operator can tell "the guide is closed" from "another surface has it".
+#
+# The question goes to the harness over the SAME path `type` already uses for
+# numberState, so it reaches the same instance: `ipc` resolves the config root
+# from $INSTANCE, which for these verbs comes from the environment
+# (OMARCHY_IPTV_HARNESS_INSTANCE) and is inherited by this child. A second
+# `--instance` root is therefore asked about itself, not about the first.
+#
+# The reply is URL-free by construction (booleans, counts, two type tokens),
+# so echoing it into the terminal cannot leak a playlist URL (rule 5).
+#
+# Fails CLOSED. Any answer that is not a readable "yes" refuses, because the
+# whole point is that a keystroke into an unknown surface is invisible.
+require_guide_focus() {
+  local what=$1 reply status verdict
+  reply=$(timeout "$FOCUS_TIMEOUT" "$0" ipc focusState 2>&1)
+  status=$?
+  if (( status == 124 )); then
+    echo "[run.sh] $what REFUSED: the harness did not answer focusState within ${FOCUS_TIMEOUT}s -- giving up rather than typing blind" >&2
+    return 1
+  fi
+  if (( status != 0 )); then
+    echo "[run.sh] $what REFUSED: cannot ask the harness where the keyboard is (qs ipc exit $status): ${reply//$'\n'/ }" >&2
+    echo "[run.sh] if no harness is running, start one (run.sh --detach --open); if a harness from BEFORE this change is still up it has no focusState verb, so reap and restart it (run.sh reap)" >&2
+    echo "[run.sh] if this key is meant for the COMPOSITOR rather than the guide, pass --to-compositor" >&2
+    return 1
+  fi
+  verdict=$(python3 - "$reply" <<'PY'
+import json, sys
+raw = sys.argv[1]
+try:
+    d = json.loads(raw)
+except Exception:
+    print("no the harness reply was not JSON: " + " ".join(raw.split())[:200])
+    sys.exit(0)
+if not isinstance(d, dict):
+    print("no the harness reply was not a JSON object")
+    sys.exit(0)
+if not d.get("ok"):
+    print("no the harness has loaded no guide (error=%s)" % (d.get("error"),))
+    sys.exit(0)
+where = ("window=%s open=%s keyboard=%s role=%s item=%s blocked=%s scanned=%s exhausted=%s"
+         % (d.get("window"), d.get("open"), d.get("keyboard"), d.get("role"),
+            d.get("item"), d.get("blocked"), d.get("scanned"), d.get("exhausted")))
+if not d.get("open"):
+    print("no the guide is CLOSED, so a key would land in whatever is behind it; " + where)
+elif d.get("exhausted") and not d.get("keyboard"):
+    print("no the focus walk gave up before it found a focused item, so I cannot tell; " + where)
+elif not d.get("keyboard"):
+    print("no the guide is open but ANOTHER SURFACE holds the keyboard; " + where)
+else:
+    print("yes " + where)
+PY
+)
+  if [[ -z $verdict ]]; then
+    echo "[run.sh] $what REFUSED: could not read the harness focus reply at all (python3 produced nothing)" >&2
+    return 1
+  fi
+  [[ ${verdict%% *} == yes ]] && return 0
+  echo "[run.sh] $what REFUSED: ${verdict#* }" >&2
+  echo "[run.sh] pass --to-compositor ONLY if this key is meant for the compositor rather than the guide" >&2
+  return 1
+}
+
+# The lock refusal, shared by both verbs so the message cannot drift.
+refuse_if_locked() {
+  screen_locked || return 0
+  echo "[run.sh] $1 REFUSED: hyprlock is running. A keystroke now registers as a FAILED UNLOCK ATTEMPT (CLAUDE.md parallel rule 6), so this refusal has no escape hatch." >&2
+  return 1
+}
+
 cmd=${1:-start}
 case $cmd in
   ipc)
@@ -310,6 +431,22 @@ case $cmd in
     ;;
   key)
     shift
+    # F-M3-1 half (a), the escape hatch. It must come FIRST: everything after
+    # it belongs to wtype, and wtype's own `--` means "the rest is text", so a
+    # flag of ours appearing later is text the caller asked to TYPE.
+    TO_COMPOSITOR=0
+    while (( $# > 0 )) && [[ $1 == --to-compositor ]]; do TO_COMPOSITOR=1; shift; done
+    (( $# > 0 )) || die "key needs at least one wtype argument (e.g. key j, key -k Escape)"
+    # (1) The lock prompt, first and not escapable.
+    refuse_if_locked key || exit 3
+    # (2) Where the keyboard is. This runs BEFORE the shift primer below,
+    # because the primer is ITSELF a keystroke: a guard that ran after it would
+    # already have typed into the wrong surface before deciding not to.
+    if (( TO_COMPOSITOR )); then
+      echo "[run.sh] key --to-compositor: focus guard SKIPPED; this chord goes to whatever holds the keyboard, guide or not" >&2
+    else
+      require_guide_focus key || exit 3
+    fi
     # F-HARNESS-1. The FIRST wtype keystroke into a fresh shell is
     # intermittently swallowed -- 1 fresh shell in 4 during verification, where
     # `sky` arrived as `ky`. A row-count assertion cannot tell the two apart
@@ -339,6 +476,19 @@ case $cmd in
     shift
     want=${1:-}
     if [[ -z $want ]]; then echo "[run.sh] type needs text" >&2; exit 2; fi
+    # F-M3-1 half (a). The same two refusals as `key`, and up FRONT: without
+    # them `type` enters its retry loop, sends the text TWICE into whatever
+    # surface has the keyboard, and then reports a two-attempt failure whose
+    # own message says "this is not the first-keystroke race" -- which is true,
+    # and still the wrong diagnosis. There is no --to-compositor here: `type`
+    # proves the text reached the GUIDE by reading it back, so a chord aimed at
+    # the compositor has nothing for it to prove.
+    #
+    # `"$0" key` below checks again, once per attempt. That is deliberate: the
+    # second check catches focus stolen in between, and the cost is one more
+    # IPC round trip in a dev harness.
+    refuse_if_locked type || exit 3
+    require_guide_focus type || exit 3
     for attempt in 1 2; do
       "$0" key -- "$want"
       sleep 0.25
