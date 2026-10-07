@@ -1308,6 +1308,20 @@ is "rewind-scenario.sh --tree <not a plugin tree> likewise" \
    "$(tr_refuse rewind-scenario.sh --tree /etc)" "2 0"
 is "player-scenario.sh --baseline <no such ref> likewise" \
    "$(tr_refuse player-scenario.sh --baseline no-such-ref-for-a-test)" "2 0"
+# D-SINK-13's scenario, whose refusals are the only part of it a machine with no
+# display can reach. The third one is not hypothetical: `--baseline` with its
+# value dropped read as `BASELINE=""` and ran the whole LIVE half -- five
+# harnesses and five mpv windows for an operator who typed one word too few.
+# Driven on 2026-10-07, and it had already started a harness before it was
+# caught, which is why it is a refusal now and why it is driven here.
+is "tls-scenario.sh --baseline <no such ref> refuses and writes no transcript" \
+   "$(tr_refuse tls-scenario.sh --baseline no-such-ref-for-a-test)" "2 0"
+is "tls-scenario.sh --baseline with no ref at all refuses rather than running live" \
+   "$(tr_refuse tls-scenario.sh --baseline)" "2 0"
+is "tls-scenario.sh --baseline --rig-only does not eat the next flag as a ref" \
+   "$(tr_refuse tls-scenario.sh --baseline --rig-only)" "2 0"
+is "tls-scenario.sh with an unknown option likewise" \
+   "$(tr_refuse tls-scenario.sh --nonsense)" "2 0"
 
 # A refusal must not reap somebody else's port either, and that one bites
 # hardest on the refusal that exists to protect it. rewind-scenario.sh installs
@@ -1336,6 +1350,22 @@ ck "and below the two-levers refusal" \
    '(( $(tr_line rewind-scenario.sh "^qa_transcript_start rewind") > $(tr_line rewind-scenario.sh "are the same lever") ))'
 ck "player's sits below its export refusal" \
    '(( $(tr_line player-scenario.sh "^qa_transcript_start player") > $(tr_line player-scenario.sh "could not export \$BASELINE") ))'
+# The same two properties for the TLS scenario, which takes TWO ports and whose
+# "already in use" refusal is the one F-HARNESS-14 was found on. The decoy half
+# was driven by hand on 2026-10-07 by the lane that wrote the scenario, and the
+# figures are in scripts/dev-harness/README.md beside it: with a listener on
+# 8773, `--rig-only` refused ("port 8773 is already in use"), wrote no
+# transcript, and the decoy was still alive and still listening afterwards.
+# What is observable HERE without binding anything is the mechanism behind
+# that: a refusing run never asks which pid holds a port. The refusal
+# driven is the BASELINE one, deliberately -- it is the only one that sits below
+# the port preflight, so the control below can prove the run really got that far
+# instead of refusing before it ever looked at a port.
+tr_refuse tls-scenario.sh --baseline no-such-ref-for-a-test >/dev/null
+is "a refusing tls run never asks which pid holds either port" \
+   "$(qa_count '[-]ltnp' "$TMP/ss.argv")" "0"
+ck "control: it did reach the port preflight (it asked about both ports)" \
+   '(( $(qa_count "[-]ltn" "$TMP/ss.argv") >= 2 ))'
 
 # ======== every background start redirects both streams (the README's claim)
 
@@ -1400,6 +1430,105 @@ is "R16's floor comes from qa_min_skipped, not a second copy of the arithmetic" 
 is "and the constant-1 bound it replaced is not still there beside it" \
    "$(qa_count 'ge "\$\(\(TICKS - 1\)\)"' "$ROOT/scripts/dev-harness/rewind-scenario.sh")" "0"
 
+# ============ qa_outcome and the TLS scenario's counters (D-SINK-13)
+
+section "qa_outcome: what the attacker saw, and the obvious way to get it wrong"
+
+# scripts/dev-harness/tls-scenario.sh is the observation of the TLS sink: five
+# segments, each one asking whether a server that is impersonating the provider
+# logged a GET of the stream. It needs a display, two TLS listeners and five
+# harnesses, so no gate step can run it. What a gate step CAN run is the
+# decision all five segments turn on, which is the whole reason that decision
+# lives in qa-lib.sh and is CALLED by the scenario instead of being written
+# inside it (CLAUDE.md rule 12).
+#
+# There is no "before" for a new function, so rule 11's other half applies: the
+# naive form is written out and shown to misbehave. Asking about the service's
+# failure mark FIRST is the natural way to write this, and it answers `refused`
+# for a tree that served the whole stream to the attacker and only then failed
+# -- which is precisely the tree D-SINK-13 is about, so the naive form could not
+# tell the finding from the fix.
+old_outcome() {   # the mark first, the hit log second
+  qa_value "$2" && { printf 'refused\n'; return 0; }
+  [[ $1 =~ ^[0-9]+$ ]] && (( $1 > 0 )) && { printf 'played\n'; return 0; }
+  printf 'undecided\n'
+  return 1
+}
+is "the naive form calls a leak a refusal when the service also marked the channel" \
+   "$(old_outcome 1 2026-10-07T05:00)" "refused"
+is "qa_outcome reports what the attacker actually got" \
+   "$(qa_outcome 1 2026-10-07T05:00)" "played"
+is "a GET with no mark at all is played" "$(qa_outcome 3 NOFIELD)" "played"
+is "no GET and a mark is a refusal" "$(qa_outcome 0 2026-10-07T05:00)" "refused"
+is "no GET and no mark is UNDECIDED, never a refusal" "$(qa_outcome 0 NOFIELD)" "undecided"
+st "and undecided answers 1, so no caller can read it as a pass" 1 qa_outcome 0 NOFIELD
+st "a logged GET answers 0" 0 qa_outcome 2 NOFIELD
+# F1's shape inside this predicate: every sentinel the state helpers can produce
+# has to read as "no mark", or a dead IPC would look like a refusal -- the
+# tooling answering a question with the value a healthy run produces.
+is "a NOSTATE mark (the IPC did not answer) is not a refusal" "$(qa_outcome 0 "$QA_NO_STATE")" "undecided"
+is "a NOFIELD mark is not a refusal either" "$(qa_outcome 0 "$QA_NO_FIELD")" "undecided"
+is "and an empty mark is not a refusal" "$(qa_outcome 0 "")" "undecided"
+# And the other direction: a count that is not a number is VACUOUS. The one
+# thing this must never do is read "I could not count" as "nothing was fetched".
+is "a non-numeric hit count is vacuous, not a zero" "$(qa_outcome NOFIELD 2026-10-07T05:00)" "$QA_NO_DELTA"
+st "and says so with 2" 2 qa_outcome NOFIELD 2026-10-07T05:00
+
+# qa_outcome is only as good as the number handed to it, so the counters that
+# produce it are driven here too -- EXTRACTED from the shipped scenario rather
+# than retyped, the way the counting frame and shell.qml's focusWalk are.
+TLS="$ROOT/scripts/dev-harness/tls-scenario.sh"
+HITS="$TMP/hits-frame.sh"
+sed -n '/^hits()     {/,/^tls_refusals()/p' "$TLS" >"$HITS"
+is "the hit counters were extracted from the real scenario, not copied" \
+   "$(qa_count '^(hits|all_hits|ctl_hits)\(\)' "$HITS")" "3"
+TOKEN=abc123
+REQLOG="$TMP/hits.log"
+{
+  printf 'GET 8774 /abc123/s3.ts UA=lavf/62.3.100 AUTH=no\n'
+  printf 'GET 8774 /abc123/s3.ts UA=lavf/62.3.100 AUTH=yes\n'
+  printf 'GET 8773 /abc123/control.ts UA=tls-scenario AUTH=no\n'
+  printf 'HEAD 8774 /abc123/s4.ts UA=lavf/62.3.100 AUTH=no\n'
+  printf 'GET 8774 /zzz999/s1.ts UA=lavf/62.3.100 AUTH=no\n'
+  printf 'TLSREFUSED 8773 SSLError\n'
+} >"$REQLOG"
+# shellcheck source=/dev/null
+. "$HITS"
+is "two GETs of this run's channel path count twice" "$(hits s3)" "2"
+is "a HEAD of a channel path is not a GET of it" "$(hits s4)" "0"
+is "a GET under ANOTHER run's token counts for no segment of ours" "$(hits s1)" "0"
+is "the per-run total ignores the scenario's own control request" "$(all_hits)" "2"
+is "which is counted on its own, so a live server is provable" "$(ctl_hits)" "1"
+is "a refused handshake is not a GET" "$(tls_refusals)" "1"
+is "and the counters still answer 0, never empty, over a log that is not there" \
+   "$(REQLOG=$TMP/absent.log; hits s3)" "0"
+
+# The two floors, the same bookkeeping every other scenario's get. A forgotten
+# bump reddens the gate on THIS machine rather than on the display lane's, weeks
+# later. The rig floor's own line is indented inside the --rig-only arm so that
+# neither floor line can count itself; the live recipe subtracts the one that
+# sits at column zero.
+is "the tls scenario declares exactly two floors" \
+   "$(qa_count '^ *EXPECTED_CHECKS=[0-9]+$' "$TLS")" "2"
+tdeclared_rig=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$TLS" | sed -n 1p | cut -d= -f2)
+tdeclared_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$TLS" | sed -n 2p | cut -d= -f2)
+is "the tls --rig-only floor matches the rig assertions it actually has" \
+   "$tdeclared_rig" "$(qa_count '^(rig|rigck) ' "$TLS")"
+is "the tls live floor matches every assertion it actually has" \
+   "$tdeclared_live" "$(( $(qa_count '^(rig|rigck) ' "$TLS") + $(qa_count '^(is|ck) ' "$TLS") - 1 ))"
+# The join that makes the live half safe to run at all: the profile cases need an
+# mpv config, and the user's own config directory is not ours to write, so the
+# scenario's only lever is MPV_HOME and it must point inside the work tree that
+# run created and deletes. These two lines are a NAME join, not an observation --
+# bookkeeping that catches a revert (the live run is the only thing that can
+# observe mpv reading that file, and its S3 control is what does). Said plainly
+# here rather than left to read as evidence, because rule 14 does not let a grep
+# stand in for a measurement.
+is "the tls scenario points mpv at its own scratch config and nowhere else" \
+   "$(qa_count '^export MPV_HOME="\$MPV_CONF_DIR"$' "$TLS")" "1"
+is "and that directory is inside the work tree the run owns and deletes" \
+   "$(qa_count '^MPV_CONF_DIR="\$WORK/mpv"$' "$TLS")" "1"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -1420,7 +1549,11 @@ is "and the constant-1 bound it replaced is not still there beside it" \
 # refusals that must leave no transcript (and the port-holder a refusing run
 # must not kill, found while verifying them); the background starts that must
 # redirect both streams; and qa_min_skipped.
-EXPECTED=270
+# 270 -> 301 on 2026-10-07, D-SINK-13: qa_outcome both ways (including the naive
+# form that reads a leak as a refusal), the TLS scenario's hit counters driven
+# over a crafted log, its two floors, and its four argument refusals -- which is
+# all of that scenario a machine with no display can reach.
+EXPECTED=301
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
