@@ -4130,6 +4130,15 @@ MPV_RESERVED = frozenset((
 # purpose. Mirror of Model.MPV_TLS_VERIFY; the two literals are pinned to each
 # other by the shared player-argv.json vectors. See mpv_launch_argv.
 MPV_TLS_VERIFY = "--tls-verify=yes"
+# D-SINK-16. The same two knobs, named as mpv PROPERTIES rather than as
+# command-line options, because an ADOPTED player has no launch argv left to
+# change: all four of D-SINK-13's layers live on the argv, so a process started
+# by 0.12.1 -- mpv's own default is `tls-verify=no` -- goes on not verifying
+# after the upgrade while this helper goes on sending it new provider headers
+# and a new credentialed URL on every zap. Mirrors Model.MPV_TLS_VERIFY_PROP /
+# Model.MPV_STREAM_OPTS_PROP.
+MPV_TLS_VERIFY_PROP = "tls-verify"
+MPV_STREAM_OPTS_PROP = "stream-lavf-o"
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
 # Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
@@ -5026,16 +5035,126 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     return {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group}
 
 
+def tls_properties_safe(verify: Any, option_count: Any) -> bool:
+    """Is this player's certificate handling safe to hand a credentialed URL to?
+
+    Mirror of Model.tlsPropertiesSafe; both sides run the shared
+    player-tls.json fixture (dev branch).
+
+    `verify` is mpv's `tls-verify` and must be the boolean True -- not 1, not
+    "yes": those are not shapes mpv's IPC produces, and accepting them would
+    make this reader more forgiving than the thing it reads. `option_count` is
+    how many entries `stream-lavf-o` holds, which must be zero: FFmpeg's own
+    `tls_verify` AVOption reaches the same place as mpv's option and OUTVOTES
+    it (measured, D-SINK-13 layer 3), so a non-empty map is not safe whatever
+    happens to be in it. None means the reading could not be taken, which is
+    not safe either.
+    """
+    if verify is not True:
+        return False
+    if isinstance(option_count, bool) or not isinstance(option_count, int):
+        return False
+    return option_count == 0
+
+
+def read_tls_state(client: MpvIpc) -> tuple[Any, Any]:
+    """The two D-SINK-16 readings, taken OFF the player.
+
+    Read back rather than inferred from a set_property reply, because a
+    `success` reply is a statement about the request and not about the value;
+    the lead measured the read-back working on a real player over IPC on
+    2026-10-07. An unreadable property answers None, and tls_properties_safe
+    refuses None.
+
+    A COUNT, never the keys or the values: `stream-lavf-o` can hold a proxy
+    address with credentials in it, and this number travels out of here into a
+    reply the shell reads (engineering rule 5). The count is the whole of what
+    the decision needs.
+    """
+    ok, verify = client.try_command("get_property", MPV_TLS_VERIFY_PROP)
+    verify = verify if ok and isinstance(verify, bool) else None
+    ok, options = client.try_command("get_property", MPV_STREAM_OPTS_PROP)
+    count = len(options) if ok and isinstance(options, dict) else None
+    return verify, count
+
+
+def assert_tls_verification(client: MpvIpc, label: str) -> None:
+    """Make this player verify the stream's certificate, or REFUSE to load.
+
+    D-SINK-16. The security-critical difference from this sequence's other
+    pre-load assertions: `pause`, `aid` and `sid` go out through try_command
+    and are best effort, because getting them wrong costs a black screen or
+    the wrong audio track. TLS may not be best effort. Loading is precisely
+    the act of handing a credentialed URL and the provider headers to the
+    process, so a player that cannot be made to verify gets neither -- the
+    caller turns this HelperError into a failed play, exactly as it does the
+    header refusal two lines further down.
+
+    Set, then READ BACK, then judge. The set replies are deliberately not
+    consulted: the measurement that this fix rests on is a read-back, and a
+    `success` reply says nothing about the value that ended up there.
+    """
+    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
+    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
+    verify, count = read_tls_state(client)
+    if tls_properties_safe(verify, count):
+        return
+    # Diagnosable without being a sink: a three-valued flag and a count, never
+    # a key or a value out of that map.
+    log("%s: %s reads %r and %s holds %r entries after being set"
+        % (label, MPV_TLS_VERIFY_PROP, verify, MPV_STREAM_OPTS_PROP, count))
+    raise HelperError("tls_unverified", "the player would not verify the stream's certificate")
+
+
+def migrate_tls(client: MpvIpc) -> dict[str, Any]:
+    """Make an ADOPTED player verify, and say whether it had to be changed.
+
+    D-SINK-16, the half `apply_channel` cannot reach: a player started before
+    the upgrade is already streaming, and the shell has to decide whether to
+    adopt it before it sends it anything. So the probe -- the reattach read --
+    migrates it here and reports the readings it ends up with.
+
+    `migrated` means "this player was NOT already safe when I found it", which
+    is the shell's signal to re-establish the channel: setting the property
+    covers the next load, and whether an already-open stream picks the change
+    up for its ongoing segment fetches is UNMEASURED. It stays True even when
+    the set did not take, so the shell can tell "nothing to do" from "I had to
+    act" independently of whether the acting worked; the readings are what say
+    whether it worked.
+
+    Runtime migration over IPC was measured by the lead on 2026-10-07: on one
+    unchanged process, `set_property tls-verify True` read back True and the
+    attacker's log went from one GET to none, with a plain http:// stream from
+    a second local server still playing as the positive control.
+    """
+    verify, count = read_tls_state(client)
+    if tls_properties_safe(verify, count):
+        return {"verify": verify, "optionCount": count, "migrated": False}
+    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
+    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
+    verify, count = read_tls_state(client)
+    return {"verify": verify, "optionCount": count, "migrated": True}
+
+
 def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
                   owner: dict[str, Any] | None = None, label: str = "play") -> int | None:
     """The wire sequence of a zap, shared verbatim by `play` and
     `player start` so first play and every later zap are one implementation.
 
-    title -> force-media-title -> the three header properties (always all
-    three, so a channel without headers actively resets the previous one's,
-    which is requirement 7's clearing mechanism) -> the stash -> loadfile ->
-    the stash again with the entry id -> the owner claim.
+    the TLS assertion -> title -> force-media-title -> the three header
+    properties (always all three, so a channel without headers actively resets
+    the previous one's, which is requirement 7's clearing mechanism) -> the
+    stash -> loadfile -> the stash again with the entry id -> the owner claim.
     """
+    # D-SINK-16, and the FIRST thing this sequence does, because every line
+    # below it is a line that tells the player something about a channel. mpv
+    # keeps `tls-verify` across a loadfile the way it keeps `pause`, `aid` and
+    # `sid` -- and an adopted player may never have had it set at all. Unlike
+    # its three neighbours this one is not best effort: it raises, and both
+    # callers turn that into a failed play. Raised BEFORE the title, so a
+    # player that cannot be secured is not even relabelled with a channel it
+    # will never load.
+    assert_tls_verification(client, label)
     # PAUSE LIVE TV: mpv keeps `pause` across a loadfile, so tuning a new
     # channel while paused would load it PAUSED while every surface said
     # playing -- a black screen the user has no reason to suspect. Cleared
@@ -5463,9 +5582,18 @@ def player_stop(args: argparse.Namespace) -> int:
 
 
 def player_probe(args: argparse.Namespace) -> int:
-    """Lock-free and side-effect-free but for one stale-socket unlink and the
-    owner claim. `path` and `media-title` are never read into the shell: one
-    is a credentialed URL, the other is verified stale after playback ends."""
+    """Lock-free, and side-effect-free but for one stale-socket unlink, the
+    owner claim and the TLS migration. `path` and `media-title` are never read
+    into the shell: one is a credentialed URL, the other is verified stale
+    after playback ends.
+
+    D-SINK-16 is what added the third exception, and it is a deliberate widening
+    of this verb's contract. The probe IS the reattach: it is the one moment the
+    shell holds a connection to a player it did not launch and has not yet sent
+    anything to, which makes it the only place a pre-upgrade player can be made
+    to verify before it is fed. The write is idempotent and it is a security
+    assertion, so a later probe over the same player changes nothing and reports
+    nothing to do."""
     sock = socket_path(args.socket)
     try:
         found = find_player(sock)
@@ -5474,6 +5602,9 @@ def player_probe(args: argparse.Namespace) -> int:
             "pid": int(found[0]["pid"]) if found else None, "idle": None, "mpvVersion": None,
             "stash": None, "owner": None, "seq": record_seq(read_lock_file(sock)), "claimed": False,
             "rewind": None,
+            # D-SINK-16. Read by Model.playerTlsVerdict; null for a player that
+            # was never reached, which that verdict reads as "do not feed it".
+            "tls": None,
         }
         client = probe_client(sock, args.ipc_timeout) if found else None
         if client is None:
@@ -5488,6 +5619,10 @@ def player_probe(args: argparse.Namespace) -> int:
             return EXIT_OK
         try:
             payload["responsive"] = True
+            # D-SINK-16, before any other property is touched: whatever else
+            # this probe learns, a player that is not verifying stops being one
+            # here rather than at the next zap.
+            payload["tls"] = migrate_tls(client)
             payload["pid"] = _connected_pid(client, found)
             ok, idle = client.try_command("get_property", "idle-active")
             payload["idle"] = bool(idle) if ok and idle is not None else None

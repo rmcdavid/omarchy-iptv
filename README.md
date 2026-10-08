@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.13.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.13.1. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -151,8 +151,13 @@ overridden. Be aware of where that refusal goes: it is written to the shell's
 log, not shown to you in the guide, so if a token of yours seems to do nothing,
 that log is where to look.
 
-If a player is already running when you update, it keeps the options it was
-started with. Stop it and start it again to pick this up.
+If a player is already running when you update, the plugin does not leave it
+that way. The first time the new shell picks that player up it turns
+verification on inside it and then tunes your channel again, because the
+stream already open was opened without it -- so expect one short rebuffer,
+once, and nothing for you to do. If that player will not accept the change it
+is stopped instead of being handed your stream address again: press Enter on
+the channel and a fresh, verified player starts.
 
 The cost, because it is not free for everyone: a provider whose certificate is
 self-signed, or signed by a CA your system does not already trust, stops

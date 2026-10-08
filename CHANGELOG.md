@@ -3,6 +3,38 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.13.1 (2026-10-08)
+
+**Security.** 0.13.0 made the player check the identity of the server it
+streams from, but only for players it starts. If one was already running when
+you upgraded, the plugin reattached to it and carried on sending it new
+channels and your provider credentials without that check ever being turned on.
+Raised by the marketplace maintainer against 0.13.0, on the verification
+request for that release.
+
+### Fixed
+
+- **A player the plugin adopts is now secured before it is used.** Verification
+  is turned on, the setting is read back to confirm it took, and the channel you
+  were watching is re-established so nothing carries on over a connection opened
+  without checking. You will see one brief rebuffer, once, the first time the
+  plugin reattaches after upgrading.
+- **If it cannot be secured, it is stopped rather than used.** The plugin will
+  not send a channel, a URL or your provider headers to a player it could not
+  verify.
+- **Every channel change now asserts it, not just the first.** The check sits in
+  the one step every play and every zap goes through, and that step refuses to
+  load if the player will not verify.
+
+### Worth knowing
+
+- **The player you have running right now is not affected by this bug if you
+  started it on 0.13.0 or later.** It only ever applied to a player carried
+  across an upgrade from an older version.
+- `player probe`, the diagnostic command, is no longer purely a read: it turns
+  verification on when it finds a player without it. That is deliberate. A
+  check that noticed the problem and walked past it would be worse.
+
 ## 0.13.0 (2026-10-07)
 
 **Security.** The player did not check the identity of the server it streamed
