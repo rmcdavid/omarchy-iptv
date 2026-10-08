@@ -286,6 +286,26 @@ The neighbouring commands, by their own summary lines:
 | `omarchy-launch-shell` | Launch the Omarchy shell with its log kept in the journal |
 | `omarchy-restart-app` | Restart an application by killing it and relaunching via uwsm |
 
-Which of the last two is the supported way to restart the shell in place is
-NOT established here and is marked UNVERIFIED; what is established is that the
-first one must not be used for it. See D-HOST-3.
+**ANSWERED 2026-10-08, and the answer was a command this table did not
+list.** `omarchy-restart-shell`, whose own summary is "Restart the Omarchy
+shell", is the supported one. Its body contains no reference to `shell.json`,
+`omarchy-refresh-config` or `omarchy-bar defaults` at all, and
+`omarchy-launch-shell` names it in a comment as the thing that performs a
+deliberate stop: "a clean exit is a deliberate stop (omarchy-restart-shell
+starts its own replacement)". Used for the 0.13.1 install update it restarted
+the shell in 250 ms and left `~/.config/omarchy/shell.json` byte-identical to a
+snapshot taken immediately before, with the plugin reporting the new version
+and its channels and EPG intact.
+
+So the pair to keep straight is:
+
+| command | what it does |
+|---|---|
+| `omarchy-restart-shell` | restarts the shell, touches no configuration |
+| `omarchy-refresh-shell` | RESETS `shell.json` to Omarchy defaults |
+
+The names differ by one word and the outcomes differ by every plugin setting
+the user has. The reason the wrong one was reached for is worth recording: a
+listing of `omarchy-restart*` and `omarchy-launch*` was read as if it were
+complete when it had been truncated, so the right command was never seen. See
+D-HOST-3.
