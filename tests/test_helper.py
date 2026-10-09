@@ -150,7 +150,7 @@ class PlaylistCommandTest(unittest.TestCase):
 
 
 class CliContractTest(unittest.TestCase):
-    SUBCOMMANDS = ("playlist", "epg", "play", "stop", "status", "state", "cache")
+    SUBCOMMANDS = ("playlist", "epg", "play", "stop", "status", "state", "cache", "config")
 
     def test_every_subcommand_is_implemented(self):
         # Exit 3 (not implemented) must never appear; failures are structured errors.
@@ -177,13 +177,21 @@ class CliContractTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(payload["kind"], "cache")
             self.assertEqual(payload["error"]["code"], "bad_key")
+            # D-SINK-18. No path to give it, so the scratch config home is
+            # named through the environment; it has no shell.json, which is a
+            # structured refusal and not an exit 3.
+            code, payload, _ = run("config", "shield", env={"XDG_CONFIG_HOME": os.path.join(tmp, "config")})
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["kind"], "config")
+            self.assertEqual(payload["error"]["code"], "config_absent")
 
     def test_usage_errors_exit_2_without_json(self):
         # A bare `playlist` is no longer a usage error: --url is optional
         # since D-SINK-8 (the shell passes the URL in $OMARCHY_IPTV_URL), and
         # neither given is a JSON `bad_url` status (tests/test_url_env.py).
         for args in (["play"], ["play", "--id", "a", "--url", "b"], ["state"], ["state", "favorite", "add"],
-                     ["state", "source"], ["state", "source", "add"], ["cache"], ["cache", "remove"], ["bogus"]):
+                     ["state", "source"], ["state", "source", "add"], ["cache"], ["cache", "remove"],
+                     ["config"], ["config", "shield", "/etc/passwd"], ["bogus"]):
             code, payload, _ = run(*args)
             self.assertEqual(code, 2, args)
             self.assertIsNone(payload, args)

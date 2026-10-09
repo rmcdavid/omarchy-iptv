@@ -2060,6 +2060,30 @@ TestCase {
     compare(Model.playerTlsVerdict(Model.parsePlayerProbe("junk").tls).action, "stop")
   }
 
+  // D-SINK-18. The same three answers, inside the Qt QML engine: this is the
+  // engine the shipping decision actually runs in, and the node suite proves
+  // nothing about it. Same functions, called for real -- not a mirror.
+  function test_configShieldDecision() {
+    var url = "https://user:pass@provider.test/list.m3u"
+    // The three answers, which are three.
+    compare(Model.configShieldDecision(Model.CONFIG_SHIELD_PRIVATE, url, ""), Model.CONFIG_PERSIST)
+    compare(Model.configShieldDecision(Model.CONFIG_SHIELD_EXPOSED, url, ""), Model.CONFIG_REFUSE)
+    compare(Model.configShieldDecision(Model.CONFIG_SHIELD_UNKNOWN, url, ""), Model.CONFIG_DEFER)
+    compare(Model.CONFIG_SHIELD_UNKNOWN, "")
+    // Clearing the active source is never gated, whatever the file is.
+    compare(Model.configShieldDecision(Model.CONFIG_SHIELD_EXPOSED, "", ""), Model.CONFIG_PERSIST)
+    compare(Model.persistCarriesSecret("", ""), false)
+    compare(Model.persistCarriesSecret("", url), true)
+    // Fail closed: only an unambiguous private reply persists a credential.
+    compare(Model.configShieldState('{"ok":true,"kind":"config","verdict":"private","private":true}'),
+            Model.CONFIG_SHIELD_PRIVATE)
+    compare(Model.configShieldState('{"ok":true,"kind":"config","verdict":"shielded","private":true}'),
+            Model.CONFIG_SHIELD_EXPOSED)
+    compare(Model.configShieldState(""), Model.CONFIG_SHIELD_EXPOSED)
+    compare(Model.configShieldArgv("/p/bin/omarchy-iptv").join(" "),
+            "python3 /p/bin/omarchy-iptv config shield")
+  }
+
   function test_formatting() {
     compare(Model.formatCount(1204), "1,204")
     compare(Model.epgFraction(150, 100, 200), 0.5)

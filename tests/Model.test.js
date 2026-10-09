@@ -9886,6 +9886,116 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      []])
 })()
 
+// ---- D-SINK-18: the decision in front of a persist ----
+//
+// The container the host settings file IS, before a provider URL goes into
+// it. The helper's `config shield` verb does the chmod; these are the three
+// answers the service acts on, lifted into Model.js so a test can call them
+// (rule 12) rather than reimplementing them beside a QML component.
+//
+// Every row and every verdict here comes from the shared fixture that the
+// python suite also runs, so the string vocabulary is checked from both ends
+// (rule 13): the helper's CONFIG_SHIELD_VERDICTS tuple on one side, this file
+// on the other, one list in the middle.
+;(function () {
+  const shield = JSON.parse(require("fs").readFileSync(
+    require("path").join(__dirname, "fixtures/config-shield.json"), "utf8"))
+
+  // How the helper prints a verdict, reproduced from the fixture row. `ok`
+  // mirrors `private` because that is the verb's contract, and the python
+  // suite asserts the real verb honours it rather than this test assuming so.
+  function reply(verdict, isPrivate, extra) {
+    const payload = { ok: !!isPrivate, kind: "config", action: "shield", verdict: verdict,
+                      private: !!isPrivate, changed: false, modeBefore: "0600",
+                      modeAfter: "0600", attempts: 1, file: "omarchy/shell.json" }
+    if (extra) Object.keys(extra).forEach(function (k) { payload[k] = extra[k] })
+    return JSON.stringify(payload) + "\n"
+  }
+
+  checkCall("D-SINK-18: every verdict the helper can print maps to one privacy answer", function () {
+    const wrong = []
+    shield.verdicts.forEach(function (v) {
+      const want = v.private ? Model.CONFIG_SHIELD_PRIVATE : Model.CONFIG_SHIELD_EXPOSED
+      if (Model.configShieldState(reply(v.verdict, v.private)) !== want) wrong.push(v.verdict)
+    })
+    return [shield.verdicts.length, wrong]
+  }, [8, []])
+
+  // The property that makes this fail CLOSED rather than open. Each of these
+  // is a run that answered something, and none of them answered "private" the
+  // three ways the verb does, so each must read as exposed.
+  // Mutation (measured): drop the `verdict` term from configShieldState and
+  // this check goes red -- 1902 checks, 1 failure. Both the unknown verdict
+  // and the payload whose verdict contradicts its own `ok` pass without it.
+  checkCall("D-SINK-18: anything that is not an unambiguous private reads as exposed", function () { return (
+    [Model.configShieldState(""),
+     Model.configShieldState("not json at all"),
+     Model.configShieldState("{}"),
+     // a verdict a FUTURE helper invents, reaching an older guide
+     Model.configShieldState(reply(shield.unknownVerdict, true)),
+     // ok and private claim success, the verdict does not: believe the verdict
+     Model.configShieldState(JSON.stringify({ ok: true, kind: "config", private: true, verdict: "exposed" })),
+     // private claims success, ok does not
+     Model.configShieldState(JSON.stringify({ ok: false, kind: "config", private: true, verdict: "private" })),
+     // the helper's own structured failure
+     Model.configShieldState(JSON.stringify({ ok: false, kind: "config", verdict: "absent", private: false,
+                                              error: { code: "config_absent", message: "the host settings file does not exist" } }))]) },
+    ["exposed", "exposed", "exposed", "exposed", "exposed", "exposed", "exposed"])
+
+  checkCall("D-SINK-18: a real private reply is the one thing that reads as private", function () {
+    return [Model.configShieldState(reply("private", true)),
+            // and a changed-mode run says the same thing
+            Model.configShieldState(reply("private", true, { changed: true, modeBefore: "0644" }))]
+  }, ["private", "private"])
+
+  // The decision table, called row by row. `secret` is asserted alongside the
+  // decision: a row where persistCarriesSecret and the decision disagree is a
+  // gate standing open for a write it believes carries a credential.
+  // Mutations (each measured at 1902 checks, 1 failure): return
+  // CONFIG_PERSIST instead of CONFIG_DEFER for the unknown state; have
+  // persistCarriesSecret look for an at-sign instead of for emptiness, which
+  // is the plausible wrong rule and loses the path-credential rows; and drop
+  // configShieldDecision's persistCarriesSecret early return, which gates the
+  // write that takes the URL back OUT.
+  checkCall("D-SINK-18: every decision row answers persist, refuse or defer as agreed", function () {
+    const wrong = []
+    shield.decisions.forEach(function (row) {
+      const got = Model.configShieldDecision(row.state, row.playlistUrl, row.epgUrl)
+      const secret = Model.persistCarriesSecret(row.playlistUrl, row.epgUrl)
+      if (got !== row.expect || secret !== row.secret) {
+        wrong.push(row.name + ": " + got + "/" + secret)
+      }
+    })
+    return [shield.decisions.length, wrong]
+  }, [14, []])
+
+  // The three answers are three, and they are distinct. A fixture that lost
+  // its defer rows would still pass the loop above.
+  checkCall("D-SINK-18: the fixture exercises all three answers", function () {
+    const seen = {}
+    shield.decisions.forEach(function (row) { seen[row.expect] = true })
+    return [Object.keys(seen).sort(),
+            [Model.CONFIG_PERSIST, Model.CONFIG_REFUSE, Model.CONFIG_DEFER].sort()]
+  }, [["defer", "persist", "refuse"], ["defer", "persist", "refuse"]])
+
+  // The argv: no path argument exists to pass, which is the capability the
+  // verb deliberately does not own.
+  checkCall("D-SINK-18: the shield argv names the verb and nothing else", function () {
+    const argv = Model.configShieldArgv("/plugin/bin/omarchy-iptv")
+    return [argv, argv.filter(function (a) { return /shell\.json|--path|\.config/.test(a) })]
+  }, [["python3", "/plugin/bin/omarchy-iptv", "config", "shield"], []])
+
+  // The sentence. NOT the persist_failed one: that sends the user to
+  // `omarchy bar set`, which writes the credentialed URL into their shell
+  // history permanently -- the durable exposure rule 5 refuses.
+  checkCall("D-SINK-18: the refusal sentence names the chmod, never omarchy bar set", function () {
+    const line = Model.sourceErrorMessage("config_unsafe")
+    return [line.indexOf("chmod 600") >= 0, line.indexOf("omarchy bar set") >= 0,
+            line !== Model.sourceErrorMessage("persist_failed"),
+            Model.statusReason({ ok: false, error: { code: "config_unsafe", message: "" } })]
+  }, [true, false, true, "Settings file is not private"])
+})()
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")

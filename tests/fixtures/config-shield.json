@@ -1,0 +1,32 @@
+{
+  "note": "D-SINK-18. The verdict vocabulary of the helper's `config shield` verb and the decision table of Model.configShieldDecision, in ONE file because the two sides are joined by a STRING and nothing else would check the join (CLAUDE.md rule 13). tests/test_config_shield.py asserts `verdicts` against the helper's CONFIG_SHIELD_VERDICTS / CONFIG_SHIELD_PRIVATE_VERDICTS and drives the real verb; tests/Model.test.js runs `verdicts` through Model.configShieldState and `decisions` through Model.configShieldDecision and Model.persistCarriesSecret. Rename a verdict on one side only and both suites go red.",
+  "verdicts": [
+    {"verdict": "private", "private": true, "why": "the file denies group and other, either already or because the verb just made it so"},
+    {"verdict": "exposed", "private": false, "why": "a regular file we own whose group/other bits could not be cleared"},
+    {"verdict": "absent", "private": false, "why": "there is no file at that path"},
+    {"verdict": "not_regular", "private": false, "why": "a directory, FIFO or device node sits at that path"},
+    {"verdict": "symlink", "private": false, "why": "the final component is a symbolic link, refused at open by O_NOFOLLOW"},
+    {"verdict": "foreign", "private": false, "why": "the file is owned by another uid, so it is not ours to tighten"},
+    {"verdict": "replaced", "private": false, "why": "something renamed a different file over the path while it was being secured"},
+    {"verdict": "error", "private": false, "why": "the open failed for any other reason"}
+  ],
+  "unknownVerdict": "shielded",
+  "unknownVerdictNote": "A verdict string neither side knows: a future helper version's answer reaching an older Model.js. It must read as NOT private, which is what makes configShieldState fail closed instead of fail open.",
+  "decisions": [
+    {"name": "known private, playlist URL", "state": "private", "playlistUrl": "https://user:pass@provider.test/list.m3u", "epgUrl": "", "secret": true, "expect": "persist"},
+    {"name": "known private, EPG URL only", "state": "private", "playlistUrl": "", "epgUrl": "https://provider.test/xmltv.php?username=u&password=p", "secret": true, "expect": "persist"},
+    {"name": "known private, credential in the path", "state": "private", "playlistUrl": "http://provider.test/live/USER/PASS/123.ts", "epgUrl": "", "secret": true, "expect": "persist"},
+    {"name": "known exposed, playlist URL", "state": "exposed", "playlistUrl": "https://user:pass@provider.test/list.m3u", "epgUrl": "", "secret": true, "expect": "refuse"},
+    {"name": "known exposed, EPG URL only", "state": "exposed", "playlistUrl": "", "epgUrl": "https://provider.test/xmltv.php", "secret": true, "expect": "refuse"},
+    {"name": "known exposed, credential in the path", "state": "exposed", "playlistUrl": "http://provider.test/live/USER/PASS/123.ts", "epgUrl": "", "secret": true, "expect": "refuse"},
+    {"name": "known exposed, local playlist path", "state": "exposed", "playlistUrl": "/home/someone/list.m3u", "epgUrl": "", "secret": true, "expect": "refuse"},
+    {"name": "no answer yet, playlist URL", "state": "", "playlistUrl": "https://user:pass@provider.test/list.m3u", "epgUrl": "", "secret": true, "expect": "defer"},
+    {"name": "no answer yet, EPG URL only", "state": "", "playlistUrl": "", "epgUrl": "https://provider.test/xmltv.php", "secret": true, "expect": "defer"},
+    {"name": "a state string from nowhere is still no answer", "state": "maybe", "playlistUrl": "https://user:pass@provider.test/list.m3u", "epgUrl": "", "secret": true, "expect": "defer"},
+    {"name": "clearing the active source is never gated, exposed", "state": "exposed", "playlistUrl": "", "epgUrl": "", "secret": false, "expect": "persist"},
+    {"name": "clearing the active source is never gated, no answer yet", "state": "", "playlistUrl": "", "epgUrl": "", "secret": false, "expect": "persist"},
+    {"name": "clearing the active source is never gated, private", "state": "private", "playlistUrl": "", "epgUrl": "", "secret": false, "expect": "persist"},
+    {"name": "whitespace is not a secret", "state": "exposed", "playlistUrl": "   ", "epgUrl": "\t", "secret": false, "expect": "persist"}
+  ],
+  "decisionsNote": "The `secret` column is Model.persistCarriesSecret of the same two URLs, asserted alongside the decision: a row where persistCarriesSecret and the decision disagree would be a gate that is open for a write it believes carries a credential."
+}
