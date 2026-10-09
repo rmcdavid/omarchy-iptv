@@ -31,6 +31,10 @@ Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
       the source history (state.json version 2); output carries hosts, never URLs
   cache [--cache-dir D] migrate [--key K] | remove --key K | prune [--keep K ...] [--active K]
       per-source cache directories under <cache-dir>/sources/<key>/ (M2-01, D5/D6)
+  config shield
+      deny group and other on $XDG_CONFIG_HOME/omarchy/shell.json, the host
+      file the shell persists source URLs into (D-SINK-18). Takes no path:
+      it computes the one path it may touch. Prints modes and a verdict.
 """
 from __future__ import annotations
 
@@ -91,6 +95,7 @@ import io
 import json
 import math
 import os
+import pwd
 import re
 import select
 import signal
@@ -169,6 +174,32 @@ EPG_STATUS_FILE = "epg-status.json"
 # 10k-channel window loads with str.split instead of a JSON parse.
 EPG_WINDOW_FILE = "epg-window.txt"
 STATE_FILE = "state.json"
+# D-SINK-18. The host's own settings file, the ONE path `config shield` may
+# touch, and the only two names this helper needs to know about the shell.
+# Its SCHEMA still belongs to the host and is still refused here (see the
+# D-SRC-11 note above setting_owned_warnings): the shield changes the file's
+# MODE and never opens it for writing, so it learns a path and not a schema.
+HOST_CONFIG_DIR = "omarchy"
+HOST_CONFIG_FILE = "shell.json"
+# Group and other, all three bits each. Clearing exactly these is the whole
+# authorised change: owner bits and the setuid / setgid / sticky bits are
+# left alone, because "make this file private" is the ruling and nothing
+# wider was asked for.
+CONFIG_GROUP_OTHER = 0o077
+# Every verdict `config shield` can print, and the subset that means the
+# container is private. Model.js switches on these strings, so the join is
+# made by a call rather than by a name (engineering rule 13, dev branch): one
+# shared config-shield JSON fixture (dev branch) is the single list, asserted
+# against this tuple by the python suite and against Model.js by the node
+# suite.
+CONFIG_SHIELD_VERDICTS = ("private", "exposed", "absent", "not_regular",
+                          "symlink", "foreign", "replaced", "error")
+CONFIG_SHIELD_PRIVATE_VERDICTS = ("private",)
+# A rename over the path between our open and our read-back is a race with
+# the host's own atomic writer, not a failure: re-open and look again. Three
+# is a bound, not patience -- an unbounded retry is the bug the project's
+# parallel-working rules (dev branch) name.
+CONFIG_SHIELD_ATTEMPTS = 3
 # Per-source cache layout (ARCHITECTURE-SOURCES.md D5/D6): every source keeps
 # the five file names above inside <cache-dir>/sources/<key>/. The key is
 # fnv1a32 of the normalized playlist URL (8 hex digits, "-2", "-3" on a
@@ -557,6 +588,79 @@ def socket_path(explicit: str | None = None) -> str:
     if explicit:
         return os.path.abspath(os.path.expanduser(explicit))
     return default_socket_path()
+
+
+def config_home() -> str:
+    """$XDG_CONFIG_HOME, else ~/.config.
+
+    A RELATIVE $XDG_CONFIG_HOME is IGNORED, which the XDG basedir spec
+    requires and which matters more here than it would anywhere else in this
+    file: this one value decides which file `config shield` changes the mode
+    of, and a relative value would aim it at whatever directory the shell
+    happened to be started in. cache_dir() and state_dir() accept a relative
+    value today; for them the cost is a cache in the wrong place, and the
+    difference is exactly that this function feeds a chmod.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or ""
+    if base and os.path.isabs(base):
+        return base
+    return os.path.join(home_dir(), ".config")
+
+
+def host_config_path() -> str:
+    """The one file `config shield` is allowed to touch (D-SINK-18).
+
+    There is deliberately NO path argument and no override flag. A verb that
+    chmods whatever path it is handed is a capability this plugin has no
+    reason to own, it is the first thing a reviewer looks for, and the shell
+    does not need it.
+
+    DERIVED FROM $HOME, NOT FROM $XDG_CONFIG_HOME, because that is what the
+    HOST does. The first version of this used config_home() and its docstring
+    said "$XDG_CONFIG_HOME is honoured because the host honours it", which is
+    the opposite of the truth and was the lead's own instruction. Measured on
+    this machine: /usr/share/omarchy/shell/shell.qml:32 reads
+
+        readonly property string userConfigPath: home + "/.config/omarchy/shell.json"
+
+    with `home` from Quickshell.env("HOME") at line 23, and the file contains
+    no other reference to XDG_CONFIG_HOME. So on any machine where
+    XDG_CONFIG_HOME points somewhere other than $HOME/.config -- a supported,
+    ordinary configuration -- the shield would have tightened a file the host
+    never writes and reported success, while the credential went into the
+    host's real file untouched. Two reviewers found this independently.
+
+    The join between this path and the host's is a NAME, which rule 13 says
+    nothing verifies, so the host-config-path test (dev branch) reads that line
+    out of the host's own source and goes red if it ever moves. The measured
+    host facts are in the plugin contract document (dev branch).
+
+    The home must be ABSOLUTE, and that guard is not decoration. The version
+    of this function that first dropped config_home() also dropped its
+    relative-value check, and the tests caught it the same minute: with
+    HOME="." the verb changed the mode of ./.config/omarchy/shell.json, a file
+    chosen by whatever directory the shell happened to be started in, and with
+    HOME="" it built a relative path at all. A verb that changes a file mode
+    may not take its target from a value meaning "wherever we happen to be".
+    Returns "" when nothing names a home, and the caller refuses rather than
+    guessing.
+    """
+    home = os.environ.get("HOME") or ""
+    if not os.path.isabs(home):
+        try:
+            home = pwd.getpwuid(os.getuid()).pw_dir or ""
+        except (KeyError, OSError):
+            home = ""
+    if not os.path.isabs(home):
+        # Nothing names a home, so nothing names the file. The caller reports
+        # this the way it reports any other refusal; it never guesses.
+        return ""
+    return os.path.join(home, ".config", HOST_CONFIG_DIR, HOST_CONFIG_FILE)
+
+
+def mode_text(mode: int) -> str:
+    """A file mode as the four-digit octal a human reads, e.g. "0644"."""
+    return "0%03o" % stat.S_IMODE(mode)
 
 
 def ensure_private_dir(path: str) -> None:
@@ -7315,6 +7419,196 @@ def cmd_state(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
+# ----------------------------------------------------- host config shield
+#
+# D-SINK-18, raised by the marketplace maintainer against the shipped 0.13.2.
+# The plugin persists the active source's playlist and EPG URLs onto its bar
+# entry, and the host writes that into ~/.config/omarchy/shell.json -- a file
+# this plugin does not own, whose packaged default is 0644, and whose writer
+# (Quickshell's FileView with atomicWrites) was MEASURED by the lead to
+# neither reset nor tighten the mode of an existing file: 0644 in, 0644 out.
+# So the plugin cannot assume the container it is putting a provider
+# credential into is private, and rule 6 shows it already knows better for
+# the containers it owns (state.json 0600 inside a 0700 directory).
+#
+# The owner's ruling: the plugin takes responsibility for the CONTAINER it
+# puts a secret into. Make that one file private before a URL goes into it,
+# and refuse to persist if it cannot be made private. Explicitly NOT the
+# parent directories -- a 0600 file is sufficient whatever the directory
+# modes are, and ~/.config is shared with everything on the system, so
+# tightening it is not ours to do. This verb therefore reports no directory
+# mode either: a number in the output is an invitation to act on it.
+#
+# The precedent in this repository is init_state_file (S-02), which exists
+# for the same reason one file up: FileView creates a missing file 0644 and
+# keeps the mode of an existing one, so the helper gets there first.
+
+
+def _shield_open_failure(path: str, error: OSError) -> dict[str, Any]:
+    """Classify a failed open of the host settings file.
+
+    `os.path.islink` here is a SECOND resolution of the same name, and
+    D-LOGO-10 paid for treating one of those as a decision. It is used for
+    the verdict's wording only: nothing is opened, changed or chmod-ed on the
+    strength of it, and every verdict below is already "not private".
+    """
+    if error.errno == errno.ENOENT:
+        return _shield_result("absent", 0, 0, False, "config_absent",
+                              "the host settings file does not exist")
+    if error.errno == errno.ELOOP and os.path.islink(path):
+        return _shield_result("symlink", 0, 0, False, "config_symlink",
+                              "the host settings file is a symbolic link")
+    return _shield_result("error", 0, 0, False, "config_unreadable",
+                          "could not open the host settings file: %s"
+                          % (error.strerror or errno.errorcode.get(error.errno or 0, "error")))
+
+
+def _shield_result(verdict: str, before: int, after: int, changed: bool,
+                   code: str = "", message: str = "") -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "verdict": verdict,
+        "modeBefore": mode_text(before),
+        "modeAfter": mode_text(after),
+        "changed": bool(changed),
+    }
+    if verdict not in CONFIG_SHIELD_PRIVATE_VERDICTS:
+        out["code"] = code or "config_unsafe"
+        out["message"] = message or "the host settings file is not private"
+    return out
+
+
+def _same_inode(path: str, st: os.stat_result) -> bool:
+    """Is `path` still the inode we just tightened?
+
+    lstat, not stat: a symlink put at the path pointing back at our own
+    inode would pass a stat comparison and is exactly the thing O_NOFOLLOW
+    refused one step earlier.
+    """
+    try:
+        now = os.lstat(path)
+    except OSError:
+        return False
+    return (now.st_dev, now.st_ino) == (st.st_dev, st.st_ino)
+
+
+def _shield_host_config_once(path: str) -> dict[str, Any]:
+    """One attempt at making the host settings file private.
+
+    Everything after the open is done through the FILE DESCRIPTOR, which is
+    D-LOGO-10's lesson applied to a chmod instead of an unlink: a check on a
+    NAME followed by an operation on the same NAME is two resolutions of that
+    name, and whatever swaps the file in between gets the operation. So:
+
+      * O_NOFOLLOW refuses a symlink AT OPEN, atomically, and yields a handle
+        on the inode that was checked;
+      * O_NONBLOCK is load-bearing, not hygiene: a FIFO at that path would
+        make a plain O_RDONLY open block until someone opened the other end,
+        and this runs on the service's startup path, where an unbounded wait
+        is the bug those rules name;
+      * fstat decides regular-file and ownership, fchmod changes the mode and
+        a second fstat READS BACK what the kernel actually stored rather than
+        trusting the mode we asked for;
+      * and the final lstat asks whether that inode is still the one at the
+        path, because the host's own writer renames a new file over it -- a
+        verdict about an inode that has just been replaced would be a true
+        statement about the wrong file.
+
+    What this does NOT do is walk the ancestors. O_NOFOLLOW covers the last
+    component; a symlinked ~/.config (what every dotfile manager builds) is
+    followed, deliberately, because refusing it would break ordinary installs.
+    The bound on that is the operation itself: this only ever SUBTRACTS group
+    and other permission bits from a regular file the invoking euid owns, so
+    the worst a redirected call can achieve is making one of the user's own
+    files private. It cannot disclose anything, and it cannot grant anything.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as error:
+        return _shield_open_failure(path, error)
+    try:
+        st = os.fstat(fd)
+        before = stat.S_IMODE(st.st_mode)
+        if not stat.S_ISREG(st.st_mode):
+            return _shield_result("not_regular", before, before, False, "config_not_regular",
+                                  "the host settings file is not a regular file")
+        if st.st_uid != os.geteuid():
+            return _shield_result("foreign", before, before, False, "config_foreign",
+                                  "the host settings file is owned by another user")
+        changed = False
+        if before & CONFIG_GROUP_OTHER:
+            try:
+                os.fchmod(fd, before & ~CONFIG_GROUP_OTHER)
+            except OSError as error:
+                return _shield_result("exposed", before, stat.S_IMODE(os.fstat(fd).st_mode), False,
+                                      "config_unsafe",
+                                      "could not make the host settings file private: %s"
+                                      % (error.strerror or "chmod failed"))
+            changed = True
+        after = stat.S_IMODE(os.fstat(fd).st_mode)
+        if after & CONFIG_GROUP_OTHER:
+            return _shield_result("exposed", before, after, changed, "config_unsafe",
+                                  "the host settings file is still readable by group or other")
+        if not _same_inode(path, st):
+            return _shield_result("replaced", before, after, changed, "config_replaced",
+                                  "the host settings file was replaced while it was being secured")
+        return _shield_result("private", before, after, changed)
+    finally:
+        os.close(fd)
+
+
+def shield_host_config() -> dict[str, Any]:
+    """Make the host settings file private, or say why it is not.
+
+    Idempotent: a file that already denies group and other is not written,
+    not chmod-ed and reported with `changed: false`.
+    """
+    path = host_config_path()
+    attempts = 0
+    result: dict[str, Any] = {}
+    while attempts < CONFIG_SHIELD_ATTEMPTS:
+        attempts += 1
+        result = _shield_host_config_once(path)
+        if result["verdict"] != "replaced":
+            break
+    result["attempts"] = attempts
+    result["file"] = os.path.join(HOST_CONFIG_DIR, HOST_CONFIG_FILE)
+    result["private"] = result["verdict"] in CONFIG_SHIELD_PRIVATE_VERDICTS
+    return result
+
+
+def cmd_config(args: argparse.Namespace) -> int:
+    """`config shield`: one JSON object the shell can switch on.
+
+    Rule 5: the only strings here are a verdict, two octal modes, a count and
+    the file's last two path components -- never the file's CONTENTS, never
+    the absolute path (which carries the user's name), and never a URL. The
+    file is opened read-only and never read.
+    """
+    result = shield_host_config()
+    payload: dict[str, Any] = {
+        "ok": bool(result["private"]),
+        "kind": "config",
+        "action": args.action,
+        "verdict": result["verdict"],
+        "private": bool(result["private"]),
+        "changed": bool(result["changed"]),
+        "modeBefore": result["modeBefore"],
+        "modeAfter": result["modeAfter"],
+        "attempts": result["attempts"],
+        "file": result["file"],
+    }
+    if payload["ok"]:
+        # A mode we changed on a file we do not own is worth one line of
+        # audit; an already-private file says nothing at all.
+        if payload["changed"]:
+            log("config shield: %s %s -> %s" % (result["file"], result["modeBefore"], result["modeAfter"]))
+    else:
+        payload["error"] = {"code": result["code"], "message": redact_urls(result["message"])}
+        log("config shield: %s (%s, mode %s)" % (result["message"], result["verdict"], result["modeBefore"]))
+    emit(payload)
+    return EXIT_OK if payload["ok"] else EXIT_ERROR
+
+
 # -------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
@@ -7478,6 +7772,14 @@ def build_parser() -> argparse.ArgumentParser:
     prune.add_argument("--active", default="", help="the active key: its EPG files are never aged")
     prune.add_argument("--epg-max-age", type=float, default=DEFAULT_EPG_MAX_AGE, help="seconds after which inactive EPG files are deleted (default %d)" % DEFAULT_EPG_MAX_AGE)
     cache.set_defaults(func=cmd_cache)
+
+    # D-SINK-18. No path argument, by design: see host_config_path(). The
+    # action is spelled out rather than implied so that a second, read-only
+    # action can be added later without changing what `config shield` means.
+    config = sub.add_parser("config", help="make the host settings file private before a source URL is persisted into it")
+    config_actions = config.add_subparsers(dest="action", required=True)
+    shield = config_actions.add_parser("shield", help="deny group and other on $XDG_CONFIG_HOME/omarchy/shell.json (no-op when it already does); prints the modes and a verdict, never the contents")
+    shield.set_defaults(func=cmd_config)
     return parser
 
 

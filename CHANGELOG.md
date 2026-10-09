@@ -3,6 +3,34 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.13.3 (2026-10-09)
+
+**Security.** Your provider's web address, which usually contains your username
+and password, is stored in `~/.config/omarchy/shell.json`. That file can be
+created readable by everyone on the machine, and nothing was making it private.
+Raised by the marketplace maintainer against 0.13.2.
+
+### Fixed
+
+- **The plugin now makes that one file readable only by you, before it writes
+  your provider address into it.** Nothing else is changed: not the folders it
+  sits in, not its contents, not any other file.
+- **If it cannot be made private, the source is not saved and you are told.**
+  The plugin will not put your credentials into a file it could not secure.
+
+### Worth knowing
+
+- This is a change to a file your whole desktop uses, so it is worth saying
+  plainly: the only thing altered is who can read it, and the answer becomes
+  "only you".
+- If you see the message about the settings file and fix the permissions
+  yourself, saving works again straight away. You do not need to restart.
+- If the file does not exist yet, saving still works. It is created by the
+  desktop and made private immediately afterwards.
+- This has also been reported upstream to Omarchy, because the default settings
+  file ships readable by everyone. If that is fixed there, this becomes a step
+  that finds nothing to do.
+
 ## 0.13.2 (2026-10-09)
 
 **Security.** If your playlist URL has an `@` inside the username or password,

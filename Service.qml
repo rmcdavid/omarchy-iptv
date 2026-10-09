@@ -532,6 +532,28 @@ Item {
   property bool epgTimedOut: false
   property bool dirsReady: false
   property bool stateSavePending: false
+  // D-SINK-18. What the last `config shield` run said about the file the host
+  // persists our source URLs into: Model.CONFIG_SHIELD_UNKNOWN ("") until the
+  // first run exits, then "private" or "exposed" for ever after -- a RE-check
+  // never puts it back to unknown, because the previous answer still holds
+  // until a new one contradicts it, and resetting it would make every persist
+  // defer behind a re-check it did not need to wait for.
+  property string hostConfigShield: Model.CONFIG_SHIELD_UNKNOWN
+  // The one deferred persist, held while the first shield run is in flight.
+  // One slot, collapsed to the LAST intent for the same reason persistFailed
+  // collapses: replaying an older pair would write back a source the user has
+  // already moved off. { playlistUrl, epgUrl } or null.
+  property var pendingPersist: null
+  property bool configShieldRerun: false
+  // Which of the two persist failures happened last, for the caller that has
+  // just been handed `false` by persistActive. Read immediately after that
+  // `false` and nowhere else: "persist_failed" (no writable bar entry, which
+  // is the only case that existed before D-SINK-18) or "config_unsafe" (the
+  // host settings file could not be made private, so the URL was withheld).
+  // The distinction is worth carrying because the two sentences give opposite
+  // advice -- persist_failed sends the user to `omarchy bar set`, which is
+  // precisely what must not happen with a credentialed URL.
+  property string lastPersistFailure: "persist_failed"
   // D-LIVE-15: a `play` over IPC that finds no socket (player just
   // relaunched) or no answer is retried with backoff.
   property int playRetries: 0
@@ -736,7 +758,9 @@ Item {
   //     never-fetched switch / retry probe; on ok the switch is committed.
   //   sourceSwitched(id) once the new source's cache (or its absence) is in
   //     `channels`. sourceRemoved(id). sourcesPersistFailed(reason) when
-  //     updateEntryInline refused a change ("persist_failed").
+  //     updateEntryInline refused a change ("persist_failed") or the host
+  //     settings file could not be made private ("config_unsafe",
+  //     D-SINK-18); either way the guide shows its persist-failure line.
   signal sourceProbeFinished(var result)
   signal sourceSwitched(string id)
   signal sourceRemoved(string id)
@@ -1648,7 +1672,9 @@ Item {
   // the existing record), too_many, label_taken, label_too_long,
   // server_empty, server_scheme, server_path, server_userinfo,
   // server_too_long, user_empty, pass_empty, user_too_long, pass_too_long,
-  // busy, unknown_source, not_ready, persist_failed. Messages are
+  // busy, unknown_source, not_ready, persist_failed, config_unsafe
+  // (D-SINK-18: the host settings file could not be made private, so the URL
+  // was not written into it). Messages are
   // Model.sourceErrorMessage sentences. Asynchronous outcomes arrive through
   // sourceProbeFinished.
 
@@ -1656,6 +1682,15 @@ Item {
     var out = { ok: ok, code: code, message: message || "", id: id || "" }
     if (field) out.field = field
     return out
+  }
+
+  // The result for a persist that was refused, carrying WHICH refusal it was
+  // (D-SINK-18). One builder rather than the same pair of literals at three
+  // call sites: the code and the sentence have to agree, and they agreed by
+  // being typed out together, which is the join rule 13 is about.
+  function persistFailureResult(id) {
+    return root.sourceResult(false, root.lastPersistFailure,
+                             Model.sourceErrorMessage(root.lastPersistFailure), id)
   }
 
   function sourcesReady() {
@@ -1709,7 +1744,7 @@ Item {
         root.queueCacheJob(["epg-clear", "--key", key], null)
       }
       if (next && key === root.activeSourceKey && next.epgUrl !== root.epgUrl) {
-        if (!root.persistActive(rec.url, next.epgUrl)) return root.sourceResult(false, "persist_failed", Model.sourceErrorMessage("persist_failed"), key)
+        if (!root.persistActive(rec.url, next.epgUrl)) return root.persistFailureResult(key)
       }
       return root.sourceResult(true, "ok", "", key)
     }
@@ -1736,7 +1771,7 @@ Item {
     root.queueCacheJob(["remove", "--key", key], null)
     if (wasActive && !root.persistActive("", "")) {
       root.sourceRemoved(key)
-      return root.sourceResult(false, "persist_failed", Model.sourceErrorMessage("persist_failed"), key)
+      return root.persistFailureResult(key)
     }
     root.sourceRemoved(key)
     return root.sourceResult(true, "ok", "", key)
@@ -1758,7 +1793,7 @@ Item {
     root.beginSwitch()
     if (!root.persistActive(rec.url, rec.epgUrl)) {
       root.abortSwitch()
-      return root.sourceResult(false, "persist_failed", Model.sourceErrorMessage("persist_failed"), key)
+      return root.persistFailureResult(key)
     }
     return root.sourceResult(true, "ok", "", key)
   }
@@ -3152,20 +3187,77 @@ Item {
 
   // ------------------------------------------------------------ sources internals
 
+  // D-SINK-18. The gate in front of the write, and the ORDER is the fix: the
+  // file is made private BEFORE the URL goes into it, never after. Three
+  // answers (Model.configShieldDecision):
+  //
+  //   persist  write now -- the file is known private, or this write carries
+  //            no URL at all (clearing the active source must never be
+  //            blocked, or an exposed file could not be emptied)
+  //   refuse   do not write; the file is known not private and the helper
+  //            could not make it so. Surfaced exactly like every other
+  //            persist failure, through sourcesPersistFailed -- F-UX-7 was
+  //            filed two days ago for a refusal nobody saw
+  //   defer    hold the pair and let the shield's exit decide. Only reachable
+  //            before the first run exits, because QML cannot block on a
+  //            Process; `true` is returned, which is "accepted, not refused",
+  //            and NOTHING has been written at that point
+  //
+  // A deferred persist returns true, so callers proceed. The one piece of
+  // caller state that outlives the decision is `switching` (switchSource and
+  // the probe commit both call beginSwitch before this), so a deferred
+  // persist that is later refused unwinds it in onConfigShieldExit.
+  function persistActive(playlistUrl, epgUrl) {
+    if (root.playlistUrl === playlistUrl && root.epgUrl === epgUrl) return true
+    var decision = Model.configShieldDecision(root.hostConfigShield, playlistUrl, epgUrl)
+    if (decision === Model.CONFIG_REFUSE) {
+      root.refuseUnsafePersist()
+      // D-SINK-18, found by the review: without this the refusal is PERMANENT
+      // until the shell restarts. The state is only ever refreshed after a
+      // successful write and at start-up, so a user who reads the message,
+      // runs the chmod it names and tries again was refused again, by an
+      // answer taken before they fixed anything. Telling someone to do a thing
+      // and then ignoring that they did it is worse than not telling them.
+      // Re-arming here costs one short-lived process per refusal, and a
+      // refusal is already the rare path.
+      root.runConfigShield()
+      return false
+    }
+    if (decision === Model.CONFIG_DEFER) {
+      root.pendingPersist = { playlistUrl: playlistUrl, epgUrl: epgUrl }
+      root.runConfigShield()
+      return true
+    }
+    return root.writeActive(playlistUrl, epgUrl)
+  }
+
+  // The refusal, in one place so the deferred path and the immediate path say
+  // the same thing. No URL in either message (rule 5): the guide's sentence
+  // comes from Model.sourceErrorMessage("config_unsafe") and names the chmod,
+  // not `omarchy bar set`, which would write the credential into the user's
+  // shell history for ever.
+  function refuseUnsafePersist() {
+    root.lastPersistFailure = "config_unsafe"
+    console.warn("omarchy-iptv: refusing to save a source URL into settings other users can read; see the config shield warning above")
+    root.sourcesPersistFailed("config_unsafe")
+  }
+
   // Write the active source through the host (D1): the full entry is passed
   // because updateEntryInline replaces it wholesale (entryWith keeps the
-  // keys we do not own).
+  // keys we do not own). Reached only through persistActive, which is what
+  // decides whether this write is allowed to happen at all (D-SINK-18), and
+  // from onConfigShieldExit for the write persistActive deferred.
   //
   // The write is applied LOCALLY on success and the guide redraws from that;
   // the plugin never waits for the host to echo its own settings back
-  // (D-LIVE-20 / D-LIVE-21, see `settings` above). A persist failure is only
+  // (D-LIVE-20 / D-LIVE-21, see `settings` above). The failure HERE is only
   // a missing host or an entry updateEntryInline cannot rewrite: `false`
   // from a writable entry is its `!dirty` branch (shell.qml:1114), i.e. the
   // host already stores exactly what we asked for, which is success.
-  function persistActive(playlistUrl, epgUrl) {
-    if (root.playlistUrl === playlistUrl && root.epgUrl === epgUrl) return true
+  function writeActive(playlistUrl, epgUrl) {
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
         || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
+      root.lastPersistFailure = "persist_failed"
       console.warn("omarchy-iptv: no writable bar entry for the settings change")
       root.sourcesPersistFailed("persist_failed")
       return false
@@ -3180,6 +3272,38 @@ Item {
     var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch)
     root.shell.updateEntryInline(root.pluginId, entry)
     root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, { playlistUrl: playlistUrl, epgUrl: epgUrl }))
+    // D-SINK-18. Re-arm for the NEXT write. The file can be recreated 0644
+    // while the shell runs -- omarchy-refresh-config copies the 0644 package
+    // default with `cp -f`, which keeps an existing file's mode but gives a
+    // file it CREATES the umask's -- and nothing tells a plugin that happened.
+    // This run is not what protects the write above (the shield at service
+    // start, or the deferred one, did that); it is what makes sure the gate in
+    // front of the next one is answering about the file as it is now.
+    //
+    // THE RESIDUAL, which is not zero and must never be written as zero.
+    // `hostConfigShield` answers about the file as of the last shield run, so
+    // a recreation that lands after that run and before this write is not
+    // seen, and ONE write reaches a 0644 file before the shield below
+    // tightens it. Two windows, and they are different sizes:
+    //   - the shield's own latency, measured on this machine (4 cores, one
+    //     `config shield` per run, n=12 each): 194-213 ms idle, median 197;
+    //     271-1076 ms with eight CPU spinners on four cores, median 919. It
+    //     is a process start, so it scales with load exactly as D-SINK-9's
+    //     shield does. NOTHING is written during it -- a persist that lands
+    //     here defers -- and after a write it is how long the gate stays one
+    //     run behind.
+    //   - the gap from that run's exit to the next persist, which is however
+    //     long the user goes between source edits and is therefore UNBOUNDED
+    //     in time. It is bounded in EVENTS: the answer is at most one shield
+    //     run old, and a run follows service start, every persist and every
+    //     logo toggle.
+    // What closes the second window is making every persist wait for its own
+    // fresh answer -- the defer machinery already exists, so it is a one-line
+    // change from "consult the cached state" to "always defer" -- at the cost
+    // of the latency above on each source add, edit and switch. Not taken
+    // this round: the brief says shield at start and after each persist, and
+    // the trade is the product owner's to make rather than this lane's.
+    root.runConfigShield()
     return true
   }
 
@@ -3190,6 +3314,48 @@ Item {
   // as the host reports anything other than the value it had when we wrote.
   function applyOwnWrite(playlistUrl, epgUrl) {
     root.ownWrite = Model.ownWriteFor(root.hostSettings, playlistUrl, epgUrl)
+  }
+
+  // D-SINK-18. Start the shield, or remember to start it again. Setting
+  // `running = true` on a Process that is already running is not a queue, so
+  // a second request while one is in flight is folded into one re-run on exit
+  // -- the same shape as playlistRerun / epgRerun above.
+  function runConfigShield() {
+    if (configShieldProc.running) {
+      root.configShieldRerun = true
+      return
+    }
+    configShieldProc.running = true
+  }
+
+  // The verb's answer. `hostConfigShield` moves from unknown to private or
+  // exposed and never back to unknown: Model.configShieldState fails closed,
+  // so a helper that did not run, crashed or printed nothing reads as exposed
+  // rather than leaving every future persist deferred for ever.
+  function onConfigShieldExit(out) {
+    root.hostConfigShield = Model.configShieldState(out)
+    var pending = root.pendingPersist
+    root.pendingPersist = null
+    if (pending) {
+      if (root.hostConfigShield === Model.CONFIG_SHIELD_PRIVATE) {
+        root.writeActive(pending.playlistUrl, pending.epgUrl)
+      } else {
+        // The caller was told `true` and has already moved on, so the one
+        // piece of its state that outlives it has to be unwound here:
+        // switchSource and the probe commit both open a switch before
+        // persisting, and a switch nothing finishes would leave the sources
+        // API answering `busy` until switchTimeout fires.
+        if (root.switching) root.abortSwitch()
+        root.refuseUnsafePersist()
+      }
+    }
+    // Drained through a Timer, not by starting the Process from inside its
+    // own exit handler: the same shape as playlistRerun / epgRerun, which
+    // restart their debounce rather than re-entering the slot they are in.
+    if (root.configShieldRerun) {
+      root.configShieldRerun = false
+      configShieldDebounce.restart()
+    }
   }
 
   // M2-04. The logo switch, written through the host the same way the source
@@ -3214,6 +3380,17 @@ Item {
     var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch)
     root.shell.updateEntryInline(root.pluginId, entry)
     root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, { showLogos: want }))
+    // D-SINK-18, found by the sibling search rather than by the report. This
+    // is the SECOND updateEntryInline in this file, and `ownedEntryPatch`
+    // names every owned key -- playlistUrl and epgUrl included (D-LOGO-2, and
+    // the whole reason it does) -- so the logo toggle writes the provider URLs
+    // into the host config too. It is NOT gated, and the reason is specific
+    // rather than convenient: the values it writes come from `root.settings`,
+    // which is what the host already stores, so this write puts nothing in
+    // the file that is not in it already, and refusing a logo toggle would
+    // cost a feature for no privacy gained. What it DOES get is the re-arm,
+    // which shortens the drift window by one more event.
+    root.runConfigShield()
     return true
   }
 
@@ -3994,6 +4171,13 @@ Item {
     // FileView write or mpv socket bind can need them (open risk 2), then
     // state.json itself with mode 0600 (stateInitProc, S-02).
     mkdirProc.running = true
+    // D-SINK-18, and it is FIRST among the things that must happen before a
+    // URL can be persisted, not merely early: the shield decides whether a
+    // persist is allowed at all, and a persist that arrives before this run
+    // exits is held rather than written (persistActive's defer branch). It is
+    // independent of mkdirProc's chain on purpose -- it touches none of the
+    // plugin's own directories and must not wait on them.
+    root.runConfigShield()
     whichProc.running = true
     // M2-05 G-8: is there a compositor to talk to at all, and which dispatch
     // spelling can it parse? Both answers are read once, here, so the `p`
@@ -4564,6 +4748,39 @@ Item {
       if (root.stateSavePending) root.saveState()
       root.runNextCacheJob()
     }
+  }
+
+  Process {
+    // D-SINK-18: deny group and other on the HOST's settings file before any
+    // source URL is persisted into it. The twin of stateInitProc one file up,
+    // for the same reason (a writer that keeps whatever mode it finds) over a
+    // file this plugin does not own, which is why it refuses rather than
+    // creates. Argv only, and no path argument exists to pass: the helper
+    // computes the one file it may touch from $XDG_CONFIG_HOME.
+    id: configShieldProc
+    command: Model.configShieldArgv(root.helperPath)
+    stdout: StdioCollector { id: configShieldStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      // Worth a line both ways: a refusal is the reason a later persist
+      // fails, and a mode this plugin CHANGED on a file it does not own is
+      // something the user should be able to find afterwards. Redacted like
+      // every other helper channel even though this verb prints no URL.
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv config shield:", Model.redactUrls(text.trim()))
+    }
+  }
+  Connections {
+    target: configShieldProc
+    function onExited(exitCode, exitStatus) { root.onConfigShieldExit(configShieldStdout.text) }
+  }
+
+  Timer {
+    // Drains configShieldRerun (see onConfigShieldExit): a re-check asked for
+    // while a run was in flight, started once the Process is idle again.
+    id: configShieldDebounce
+    interval: 150
+    repeat: false
+    onTriggered: root.runConfigShield()
   }
 
   // ---- logos (M2-04). ONE process, and it only ever runs after the user has
