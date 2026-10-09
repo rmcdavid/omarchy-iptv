@@ -157,7 +157,7 @@ fail=0
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-73}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1902}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1903}
 PY_TESTS_MIN=${PY_TESTS_MIN:-986}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}

@@ -28,7 +28,8 @@ the lead's measurements of 2026-10-09):
     write into a user's own config is its own small harm;
   * nothing it prints carries a URL (CLAUDE.md rule 5).
 
-Python 3 stdlib only, ASCII only, argv only, no sudo -- the same constraints
+Python 3 stdlib only, ASCII only, argv only, and no privilege escalation of
+any kind -- the same constraints
 the real helper is held to, so a decision that cannot be made under them is
 not proposed here either.
 """
@@ -39,8 +40,14 @@ import sys
 
 MUTATION = os.environ.get("STUB_MUTATION", "none")
 
-# The one path this verb is allowed to touch, relative to XDG_CONFIG_HOME.
-REL = os.path.join("omarchy", "shell.json")
+# The one path this verb is allowed to touch, relative to the HOME the host
+# reads. Derived from $HOME and NOT from $XDG_CONFIG_HOME, because the HOST
+# does: shell.qml:23 takes `home` from Quickshell.env("HOME") and :32 appends
+# a literal "/.config/omarchy/shell.json", with no mention of the XDG variable
+# anywhere in the file. This stub followed the XDG rule while the real verb
+# was repaired to follow the host, which left the whole mutation table failing
+# unmutated and proving nothing.
+REL = os.path.join(".config", "omarchy", "shell.json")
 
 # Everyone but the owner. The mask is 077 and not 004: see the ruling above.
 EXPOSED = stat.S_IRWXG | stat.S_IRWXO
@@ -54,15 +61,10 @@ def fail(message):
 
 def config_path():
     """The file this verb may act on, computed and never accepted."""
-    base = os.environ.get("XDG_CONFIG_HOME") or ""
-    if not base:
-        home = os.environ.get("HOME") or ""
-        if not home:
-            return None
-        base = os.path.join(home, ".config")
-    if not os.path.isabs(base):
+    home = os.environ.get("HOME") or ""
+    if not os.path.isabs(home):
         return None
-    return os.path.join(base, REL)
+    return os.path.join(home, REL)
 
 
 def shield(argv):

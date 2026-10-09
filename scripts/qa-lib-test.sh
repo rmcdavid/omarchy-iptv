@@ -1785,8 +1785,14 @@ is "run.sh points XDG_CONFIG_HOME inside the scratch tree" \
    "$(qa_count '^  export XDG_CONFIG_HOME="\$SCRATCH/config"$' "$RS")" "1"
 is "and a clean removes it, so one run cannot inherit the last run's fix" \
    "$(qa_count '"\$SCRATCH/config"' "$RS")" "2"
-is "the config-mode scenario passes XDG_CONFIG_HOME explicitly on every verb run" \
-   "$(qa_count '^  env "XDG_CONFIG_HOME=\$cfg"' "$CMS")" "1"
+# D-SINK-18 repair: the verb derives its path from $HOME, because the HOST
+# does, so HOME is what isolates a run. This pinned XDG_CONFIG_HOME, which the
+# verb now ignores -- a scenario isolated by a variable nothing reads is a
+# scenario aimed at the developer's own config, which is exactly what happened.
+is "the config-mode scenario passes HOME explicitly on every verb run" \
+   "$(qa_count '^  env "HOME=\$cfg"' "$CMS")" "1"
+is "and sets XDG_CONFIG_HOME somewhere that does not exist, so every run re-proves it is ignored" \
+   "$(qa_count 'XDG_CONFIG_HOME=\$WORK/xdg-must-be-ignored' "$CMS")" "1"
 # And the seeding itself is OBSERVED rather than grepped: the function is
 # EXTRACTED from the shipped run.sh -- the way the counting frame and
 # shell.qml's focusWalk are -- and RUN against a scratch SCRATCH, so what is
@@ -1864,7 +1870,7 @@ is "a umask-created file here would have been private, which is why the mode is 
 # where the attacker kept being fed; the paced body's three counters over the same
 # crafted log; and `--pre-tls`'s three refusals, which matter because a dropped
 # value there would stage the adoption case against the wrong tree.
-EXPECTED=384
+EXPECTED=385
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

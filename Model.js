@@ -4580,6 +4580,13 @@ function logoFetchArgv(helperPath, cacheDir) {
 var CONFIG_SHIELD_UNKNOWN = ""
 var CONFIG_SHIELD_PRIVATE = "private"
 var CONFIG_SHIELD_EXPOSED = "exposed"
+// D-SINK-18, found by the review: everything that was not exactly "private"
+// collapsed to "exposed", so an ABSENT settings file refused every save
+// permanently. There is no file, so there is no credential in it and nothing
+// to tighten; the host creates it on the write and the re-arm that follows
+// every write tightens it then. Refusing instead made the plugin
+// unconfigurable on a machine that simply had no user config yet.
+var CONFIG_SHIELD_ABSENT = "absent"
 
 var CONFIG_PERSIST = "persist"
 var CONFIG_REFUSE = "refuse"
@@ -4606,8 +4613,15 @@ function configShieldArgv(helperPath) {
 // for ever.
 function configShieldState(text) {
   var status = parseHelperStatus(text, "config")
-  var ok = status.ok === true && status.private === true && str(status.verdict) === CONFIG_SHIELD_PRIVATE
-  return ok ? CONFIG_SHIELD_PRIVATE : CONFIG_SHIELD_EXPOSED
+  if (status.ok === true && status.private === true && str(status.verdict) === CONFIG_SHIELD_PRIVATE) {
+    return CONFIG_SHIELD_PRIVATE
+  }
+  // An absent file is its own answer and not an exposure. Everything else --
+  // a symlink, a device, someone else's file, a failed chmod, an unreadable
+  // reply -- still fails CLOSED to "exposed", because each of those means we
+  // could not establish that the file is private.
+  if (str(status.verdict) === CONFIG_SHIELD_ABSENT) return CONFIG_SHIELD_ABSENT
+  return CONFIG_SHIELD_EXPOSED
 }
 
 // Does this persist put a secret into the file?
@@ -4641,6 +4655,11 @@ function configShieldDecision(state, playlistUrl, epgUrl) {
   if (!persistCarriesSecret(playlistUrl, epgUrl)) return CONFIG_PERSIST
   var s = str(state)
   if (s === CONFIG_SHIELD_PRIVATE) return CONFIG_PERSIST
+  // No file means no credential in it. The host creates it on this write and
+  // the re-arm after every write tightens it; the residual is that one gap,
+  // which is stated in ARCHITECTURE and is smaller than refusing every save
+  // on a machine that has no user config yet.
+  if (s === CONFIG_SHIELD_ABSENT) return CONFIG_PERSIST
   if (s === CONFIG_SHIELD_EXPOSED) return CONFIG_REFUSE
   return CONFIG_DEFER
 }
@@ -8903,7 +8922,14 @@ function sourceErrorMessage(code, opts) {
     // into their shell history permanently -- the durable exposure engineering
     // rule 5 (dev branch) says is not accepted. This one names the real fix
     // instead, and the command it names carries no secret.
-    config_unsafe: "Settings file is readable by other users" + SEP + "chmod 600 ~/.config/omarchy/shell.json",
+    // D-SINK-18, reworded after the review: the refusing verdicts are no
+    // longer only "readable by other users". `absent` no longer refuses at
+    // all, and what is left is a symlink, a device, someone else's file, a
+    // file replaced mid-change, or a chmod that failed -- for which "is
+    // readable by other users" is a misdiagnosis. "Could not be made
+    // private" is true of every one of them and still names the fix for the
+    // common one.
+    config_unsafe: "Settings file could not be made private" + SEP + "chmod 600 ~/.config/omarchy/shell.json",
     cancelled: "Cancelled"
   }
   var text = table[c] || ""
@@ -10488,6 +10514,7 @@ if (typeof module !== "undefined") {
     CONFIG_SHIELD_UNKNOWN: CONFIG_SHIELD_UNKNOWN,
     CONFIG_SHIELD_PRIVATE: CONFIG_SHIELD_PRIVATE,
     CONFIG_SHIELD_EXPOSED: CONFIG_SHIELD_EXPOSED,
+    CONFIG_SHIELD_ABSENT: CONFIG_SHIELD_ABSENT,
     CONFIG_PERSIST: CONFIG_PERSIST,
     CONFIG_REFUSE: CONFIG_REFUSE,
     CONFIG_DEFER: CONFIG_DEFER,

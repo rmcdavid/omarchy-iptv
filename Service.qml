@@ -3212,6 +3212,15 @@ Item {
     var decision = Model.configShieldDecision(root.hostConfigShield, playlistUrl, epgUrl)
     if (decision === Model.CONFIG_REFUSE) {
       root.refuseUnsafePersist()
+      // D-SINK-18, found by the review: without this the refusal is PERMANENT
+      // until the shell restarts. The state is only ever refreshed after a
+      // successful write and at start-up, so a user who reads the message,
+      // runs the chmod it names and tries again was refused again, by an
+      // answer taken before they fixed anything. Telling someone to do a thing
+      // and then ignoring that they did it is worse than not telling them.
+      // Re-arming here costs one short-lived process per refusal, and a
+      // refusal is already the rare path.
+      root.runConfigShield()
       return false
     }
     if (decision === Model.CONFIG_DEFER) {

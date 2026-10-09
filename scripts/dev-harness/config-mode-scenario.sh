@@ -189,7 +189,9 @@ OUT="$WORK/out"; ERR="$WORK/err"; ALL="$WORK/all"
 # the OUTER environment, which this scenario never modifies: the overrides
 # below travel to the child through `env` and leave this shell's own
 # XDG_CONFIG_HOME alone. Read-only, by stamp, and never passed to the verb.
-REAL_CONFIG="${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/omarchy/shell.json"
+# The HOST names this from $HOME and ignores XDG_CONFIG_HOME, so the guard
+# below must name it the same way or it would stamp a file nothing writes.
+REAL_CONFIG="${HOME:-/nonexistent}/.config/omarchy/shell.json"
 REAL_BEFORE=$(qa_file_stamp "$REAL_CONFIG")
 echo "== real config $REAL_CONFIG"
 echo "== real config before: mode $(qa_mode_private "$REAL_CONFIG") stamp ${REAL_BEFORE:0:16}..."
@@ -203,11 +205,19 @@ mkcfg() {
   # substitution, which surfaces as "cannot create a scratch config" and not
   # as the real cause. Cost this scenario one run to find.
   local name=$1 mode=$2
+  # D-SINK-18 repair: the helper derives the path from $HOME, because the HOST
+  # does (shell.qml:23 and :32, pinned by the host-config-path test). This
+  # fixture built an XDG_CONFIG_HOME layout and the scenario passed
+  # XDG_CONFIG_HOME to the verb, which after the repair the verb IGNORES -- so
+  # every check aimed at the developer's own ~/.config/omarchy/shell.json and
+  # the five mode checks failed because the decoy was never touched. The
+  # layout is the host's now: <scratch>/.config/omarchy/shell.json, and what is
+  # handed to the verb is HOME.
   local dir="$WORK/$name"
-  mkdir -p "$dir/omarchy" || return 1
+  mkdir -p "$dir/.config/omarchy" || return 1
   printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"io.github.rmcdavid.iptv"}]}}}' \
-    >"$dir/omarchy/shell.json" || return 1
-  chmod "$mode" "$dir/omarchy/shell.json" || return 1
+    >"$dir/.config/omarchy/shell.json" || return 1
+  chmod "$mode" "$dir/.config/omarchy/shell.json" || return 1
   printf '%s\n' "$dir"
 }
 
@@ -221,7 +231,10 @@ shield() {
   # argv only (rule 2): the verb words are split deliberately and nothing here
   # is interpolated into a shell string.
   # shellcheck disable=SC2086
-  env "XDG_CONFIG_HOME=$cfg" "OMARCHY_IPTV_URL=$PROBE_URL" \
+  # HOME is what the verb reads; XDG_CONFIG_HOME is set to a path that does
+  # not exist on purpose, so every run re-proves the verb ignores it. Neither
+  # is ever inherited, so no run of this scenario can reach the real file.
+  env "HOME=$cfg" "XDG_CONFIG_HOME=$WORK/xdg-must-be-ignored" "OMARCHY_IPTV_URL=$PROBE_URL" \
     python3 "$HELPER" $VERB "$@" >"$OUT" 2>"$ERR"
   rc=$?
   cat "$OUT" "$ERR" >>"$ALL"
@@ -247,16 +260,16 @@ ck V1 "$v1" "present"
 # ---- M1: the packaged default's mode, which is the whole finding.
 m1cfg=$(mkcfg m1 0644) || exit 2
 m1rc=$(shield "$m1cfg")
-ck M1 "$m1rc $(qa_mode_private "$m1cfg/omarchy/shell.json")" "rc=0 private"
+ck M1 "$m1rc $(qa_mode_private "$m1cfg/.config/omarchy/shell.json")" "rc=0 private"
 
 # ---- M2 / M3: the mask's two halves, driven apart.
 m2cfg=$(mkcfg m2 0640) || exit 2
 m2rc=$(shield "$m2cfg")
-ck M2 "$m2rc $(qa_mode_private "$m2cfg/omarchy/shell.json")" "rc=0 private"
+ck M2 "$m2rc $(qa_mode_private "$m2cfg/.config/omarchy/shell.json")" "rc=0 private"
 
 m3cfg=$(mkcfg m3 0604) || exit 2
 m3rc=$(shield "$m3cfg")
-ck M3 "$m3rc $(qa_mode_private "$m3cfg/omarchy/shell.json")" "rc=0 private"
+ck M3 "$m3rc $(qa_mode_private "$m3cfg/.config/omarchy/shell.json")" "rc=0 private"
 
 # ---- M4: an already-private container is left completely alone. The stamp is
 # taken, then a bounded pause, so that a chmod during the run lands on a
@@ -264,10 +277,10 @@ ck M3 "$m3rc $(qa_mode_private "$m3cfg/omarchy/shell.json")" "rc=0 private"
 # fast enough chmod would be indistinguishable and the check would be the kind
 # that cannot go red.
 m4cfg=$(mkcfg m4 0600) || exit 2
-m4before=$(qa_file_stamp "$m4cfg/omarchy/shell.json")
+m4before=$(qa_file_stamp "$m4cfg/.config/omarchy/shell.json")
 sleep 0.05
 m4rc=$(shield "$m4cfg")
-ck M4 "$m4rc $(qa_file_untouched "$m4cfg/omarchy/shell.json" "$m4before")" "rc=0 untouched"
+ck M4 "$m4rc $(qa_file_untouched "$m4cfg/.config/omarchy/shell.json" "$m4before")" "rc=0 untouched"
 
 # ---- R1: the ordering, as the counterfactual. A container that can NEVER be
 # made private: shell.json is a symlink to itself, so every chmod and every

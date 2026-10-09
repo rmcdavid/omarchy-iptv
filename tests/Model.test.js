@@ -4789,6 +4789,46 @@ check("tlsPropertiesSafe: the fixture has a safe case, unsafe cases, and both ab
 checkCall("playerTlsVerdict: the shared verdicts, every case, by name",
   () => tlsFixture.verdicts.map(v => { const got = Model.playerTlsVerdict(v.tls); return v.name + ": " + got.safe + "/" + got.action }),
   tlsFixture.verdicts.map(v => v.name + ": " + v.safe + "/" + v.action))
+// D-SINK-18, THE ORDERING, which is the entire security value and which a
+// review found had no check that could go red: the gate passed with the
+// persist gate deleted and with the write moved ahead of the shield, because
+// the END STATE is identical either way and only the order differs.
+//
+// This is a STRUCTURAL pin and it is labelled as one rather than dressed up.
+// The behaviour it guards lives in Service.qml, which cannot be instantiated
+// here -- it imports the host's Quickshell types -- so the strongest thing
+// available from node is the shape of the function, and the two mutations the
+// review named both change that shape. What CALLS the shipping logic is the
+// decision itself (Model.configShieldDecision, exercised over every state
+// above and again inside the Qt engine in Model.spec.qml), and what OBSERVES
+// the real file is config-mode-scenario.sh. This pin is the third leg: it is
+// what notices if the decision stops standing in front of the write.
+checkCall("D-SINK-18: the write is reached only through the shield decision, and only after it", () => {
+  const body = (serviceSource.match(/function persistActive\(playlistUrl, epgUrl\)[\s\S]*?\n  \}/) || [""])[0]
+  const decide = body.indexOf("Model.configShieldDecision(")
+  const write = body.indexOf("root.writeActive(")
+  const refuse = body.indexOf("Model.CONFIG_REFUSE")
+  const defer = body.indexOf("Model.CONFIG_DEFER")
+  return {
+    // The gate exists at all.
+    decides: decide !== -1,
+    // The write is in there, so an empty match cannot pass this check.
+    writes: write !== -1,
+    // And the decision is taken BEFORE the write, which is the property.
+    decidesFirst: decide !== -1 && write !== -1 && decide < write,
+    // Both refusing answers are handled, and both before the write.
+    refusesFirst: refuse !== -1 && refuse < write,
+    defersFirst: defer !== -1 && defer < write,
+    // writeActive is called from exactly two places in the file: this gate
+    // and the deferred completion. A third would be a way round the gate.
+    writeSites: (serviceSource.match(/root\.writeActive\(/g) || []).length,
+    // D-SINK-18, the review's "a refusal is permanent until the shell
+    // restarts": the refuse branch must re-arm, or the chmod the message tells
+    // the user to run has no effect on the next attempt.
+    refuseReArms: /Model\.CONFIG_REFUSE[\s\S]{0,900}?root\.runConfigShield\(\)[\s\S]{0,80}?return false/.test(body)
+  }
+}, { decides: true, writes: true, decidesFirst: true, refusesFirst: true, defersFirst: true, writeSites: 2, refuseReArms: true })
+
 // D-SINK-16, the reload the first guard could drop. `nowPlaying === null` was
 // treated as "nothing is owed", and it is also "not assigned yet" -- which is
 // the reattach-after-upgrade moment, because the flag is set before nowPlaying
@@ -9914,9 +9954,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 
   checkCall("D-SINK-18: every verdict the helper can print maps to one privacy answer", function () {
     const wrong = []
+    // The mapping is in the FIXTURE now, not recomputed here from `private`.
+    // It used to be "private or exposed", which is what made an absent file
+    // refuse every save for ever: the test agreed with the code because both
+    // derived the answer the same wrong way.
     shield.verdicts.forEach(function (v) {
-      const want = v.private ? Model.CONFIG_SHIELD_PRIVATE : Model.CONFIG_SHIELD_EXPOSED
-      if (Model.configShieldState(reply(v.verdict, v.private)) !== want) wrong.push(v.verdict)
+      if (Model.configShieldState(reply(v.verdict, v.private)) !== v.state) wrong.push(v.verdict)
     })
     return [shield.verdicts.length, wrong]
   }, [8, []])
@@ -9927,7 +9970,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // Mutation (measured): drop the `verdict` term from configShieldState and
   // this check goes red -- 1902 checks, 1 failure. Both the unknown verdict
   // and the payload whose verdict contradicts its own `ok` pass without it.
-  checkCall("D-SINK-18: anything that is not an unambiguous private reads as exposed", function () { return (
+  checkCall("D-SINK-18: anything unreadable, and any verdict but absent, reads as exposed", function () { return (
     [Model.configShieldState(""),
      Model.configShieldState("not json at all"),
      Model.configShieldState("{}"),
@@ -9937,10 +9980,17 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
      Model.configShieldState(JSON.stringify({ ok: true, kind: "config", private: true, verdict: "exposed" })),
      // private claims success, ok does not
      Model.configShieldState(JSON.stringify({ ok: false, kind: "config", private: true, verdict: "private" })),
-     // the helper's own structured failure
+     // the helper's own structured failure, with a verdict we do not know
+     Model.configShieldState(JSON.stringify({ ok: false, kind: "config", verdict: "error", private: false,
+                                              error: { code: "config_error", message: "the open failed" } })),
+     // ABSENT is the one non-private verdict that is not an exposure, and it
+     // stays that way even inside a structured failure: there is no file, so
+     // there is no credential in it. The row below used to be here expecting
+     // "exposed", which is what refused every save for ever on a machine with
+     // no user config yet.
      Model.configShieldState(JSON.stringify({ ok: false, kind: "config", verdict: "absent", private: false,
                                               error: { code: "config_absent", message: "the host settings file does not exist" } }))]) },
-    ["exposed", "exposed", "exposed", "exposed", "exposed", "exposed", "exposed"])
+    ["exposed", "exposed", "exposed", "exposed", "exposed", "exposed", "exposed", "absent"])
 
   checkCall("D-SINK-18: a real private reply is the one thing that reads as private", function () {
     return [Model.configShieldState(reply("private", true)),
