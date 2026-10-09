@@ -13058,3 +13058,143 @@ the sentence no longer says "readable by other users" about a symlink.
 **F-M3-8 for the fourteenth round**, in its sharpest form: the brief was the
 defect, and the only reason it did not ship is that three reviewers were asked
 to attack it.
+
+## Fifth maintainer finding, 2026-10-09: D-LOGO-11, a provider logo chooses how much memory the shell allocates
+
+Raised by HANCORE-linux on omacom/omarchy-plugin-marketplace#10802, against the
+SHIPPED 0.13.3 snapshot `159da94`, hours after it was published and on the
+verification request for that very commit. The fifth finding in five days and
+the fifth raised on the request for the commit that fixed the previous one.
+
+> At 159da947a9ab652038397e269e6a24ba73fe2df0, provider-supplied JPEG logos
+> pass only the 256 KiB/MIME/magic checks in bin/omarchy-iptv:3744-3805 before
+> Guide.qml:3977 renders them inside the shell. Qt's thumbnail scaling and
+> image allocation limit do not bound libjpeg's full-resolution progressive
+> coefficient buffers, so a small malformed logo can exhaust shell memory;
+> please limit source dimensions/pixel count before rendering or use a decoder
+> with an enforced memory bound.
+
+**The finding is correct, and the measurements below say it is correct for a
+sharper reason than the report gives.** Taken before any lane was briefed, on
+this machine, Qt 6.11.2, offscreen, with the cap around the Qt process only so
+that a bomb kills the probe and not the user's desktop. The probe is an
+`Image` declared exactly as `Guide.qml:3958-3988` declares the row logo slot --
+`asynchronous`, `cache`, `sourceSize` twice the 22 px draw width,
+`PreserveAspectFit`, `mipmap` -- and nothing else. Peak RSS is
+`ru_maxrss` of the child; the cap is a transient systemd scope with
+`MemoryMax=1500M` and `MemorySwapMax=0`.
+
+| the file | bytes on disk | header declares | peak RSS | outcome |
+|---|---|---|---|---|
+| control, baseline | 176 | 64x64 | 72 MB | Ready |
+| control, progressive | 304 | 64x64 | 72 MB | Ready |
+| valid progressive, grayscale | 706,780 | 12000x12000 | **348 MB** | Ready, `implicit=44x44` |
+| baseline, SOF rewritten | 176 | 20000x20000 | 105 MB | |
+| baseline, SOF rewritten | 176 | 65500x65500 | **455 MB** | |
+| progressive, SOF rewritten | **304** | 20000x20000 | **840 MB** | |
+| progressive 3-component, SOF rewritten | **555** | 20000x20000 | **1,239 MB** | |
+| progressive, SOF rewritten | 304 | 65500x65500 | **SIGKILL** | the 1.5 GB cap, 1.5 s in |
+| progressive 3-component, SOF rewritten | 555 | 65500x65500 | **SIGKILL** | the 1.5 GB cap, 1.5 s in |
+
+Every row below the controls passes every check the helper has: the
+content type is `image/jpeg`, the first three bytes are `FF D8 FF`, and the
+largest of them is 555 bytes against a 256 KiB cap. The byte cap is not a
+bound on anything the decoder does, because **the cost is quadratic in a number
+the header states and the bytes do not have to honour.** 304 bytes buy 840 MB;
+the ratio is 2.9 million to one.
+
+### Qt's allocation limit cannot refuse a JPEG here, and that is arithmetic rather than opinion
+
+The report says the allocation limit does not bound the decoder. Measured, the
+limit is consulted -- it is just consulted about the wrong number. Bracketing
+it on the 20000x20000 grayscale progressive file with the row slot's
+`sourceSize` of 44:
+
+| `QT_IMAGEIO_MAXALLOC` | status | peak RSS |
+|---|---|---|
+| 5 MiB | Error | 72 MB |
+| 7 MiB | Error | 72 MB |
+| 10 MiB | Error | 72 MB |
+| 20 MiB | Error | 72 MB |
+| 26 MiB | **Ready** | **840 MB** |
+| 30 MiB | **Ready** | **840 MB** |
+| 256 MiB (the Qt 6 default) | **Ready** | **840 MB** |
+
+The threshold sits between 20 and 26 MiB. `ceil(20000/8)` is 2500, and
+2500 x 2500 x 4 is 23.8 MiB. So the limit is compared against the image
+**already divided by libjpeg's scale denominator**, and 8 is the largest
+denominator libjpeg has. The JPEG format's own maximum dimension is 65535;
+`ceil(65535/8)` is 8192, and 8192 x 8192 x 4 is 268,435,456 bytes, which is
+exactly 256 MiB -- the default limit, to the byte. **No JPEG that the format
+can express can exceed Qt's default allocation limit on this path.** The
+guard is not weak here, it is unreachable, and it is unreachable *because*
+`sourceSize` is set. The option that was added to keep the decode cheap
+(`Guide.qml:3975-3979`, whose comment says a 256 KB image must not be decoded
+to draw it at 22 px) is the option that disarms the only bound Qt has.
+
+Both `Image` elements in the shipped tree are affected, and they are the only
+two: the wall tile at `Guide.qml:3591-3610`, whose `sourceSize` is the drawn
+223 px rather than the row's 44, measured **840 MB on the same file**. There is
+no `AnimatedImage`, no `icon.source` and no SVG anywhere in the four shipped
+QML files, so the sink surface is those two elements and the bytes the helper
+writes into the logo cache.
+
+### What the numbers mean on a real machine, stated rather than extrapolated
+
+The 840 MB and 1,239 MB figures are what the process actually resident-set,
+measured. The two SIGKILLs are the cap doing its job, so the real figure for
+65500x65500 is **not measured and is not claimed**: the request is
+65500 x 65500 x 2 bytes per coefficient, 8.6 GB for one component and about
+12.9 GB for three at 4:2:0, and what a machine does with a request that size
+depends on its commit policy. This machine runs `vm.overcommit_memory=0` with
+7.8 GB of RAM and 15.4 GB of swap, so a request of that size is granted by the
+heuristic and then paged -- which is worse than a clean failure, not better.
+That reasoning is labelled as reasoning. What is measured is that a 304-byte
+file took the process past 1.5 GB in 1.5 seconds.
+
+### The siblings, because the rule says to look for them (D-LOGO-11 covers all four allowed types)
+
+`LOGO_TYPES` admits PNG, GIF and WEBP as well, and each was given the same two
+treatments -- a rewritten header with a repaired checksum, and a *valid* file
+that is honestly huge -- so that the answer is observed rather than assumed:
+
+| the file | bytes | declares | peak RSS | outcome |
+|---|---|---|---|---|
+| PNG, IHDR rewritten + CRC repaired | 284 | 20000x20000 | 72 MB | Error |
+| PNG, IHDR rewritten + CRC repaired | 284 | 65500x65500 | 72 MB | Error |
+| **PNG, entirely valid**, 1 bit per pixel | 76,298 | 20000x20000 | 72 MB | Error |
+| **PNG, entirely valid**, 1 bit per pixel | 665,286 | 65500x65500 | 72 MB | Error |
+| GIF, both descriptors rewritten | 110 | 20000x20000 | 71 MB | Error |
+| **GIF, entirely valid**: huge canvas, 64x64 frame | 110 | 65500x65500 | 72 MB | Error |
+| WEBP, VP8 keyframe dimensions rewritten | 64 | 16383x16383 | 72 MB | Error |
+
+All seven refuse at the control's memory. They refuse for the reason JPEG does
+not: their handlers decode at full resolution and scale afterwards, so the
+number Qt's allocation limit is handed IS the full image, and 1.6 GB is over
+256 MiB. **JPEG is the only one of the four that can be scaled by the decoder,
+and that is exactly why it is the only one exposed.** The bound this project
+adds must still cover all four, because that asymmetry is upstream behaviour
+nobody here controls: a Qt that learns to scale PNG during decode would open
+this again, silently, in a dependency bump.
+
+### The lead's ruling on the fix
+
+The bound goes in the HELPER, at `write_logo`, beside the magic-byte check
+that is already there and already refuses before anything touches the disk --
+one gate, on the one path that puts a provider's bytes into the cache, in the
+process that is allowed to die. Not in QML: `Image` has no lever for this, and
+a guard there would also have to live inside the 150 ms open budget.
+
+Two numbers, both stated in the README and both checkable by calling the
+shipping function: **no side over 4096, and no more than 4,194,304 pixels**.
+At the bound, a 4:4:4 progressive JPEG costs about 25 MB of coefficients,
+which is the same order as the 23.8 MiB Qt was already willing to allocate
+before any of this, and a 1920x1080 provider banner -- the largest shape a
+real logo plausibly takes -- is 2.07 Mpx and passes. The dimensions are read
+from the header for all four types, not only JPEG.
+
+**The cache written by 0.13.3 and earlier was never dimension-checked, so the
+fix is not complete without a sweep.** A logo that an affected install already
+holds is still a bomb, the guide still loads it by name, and the user cannot
+see why. The sweep reads headers only, unlinks what is over the bound, and is
+the same parser the gate uses, so there is one implementation and one fixture.
