@@ -1089,7 +1089,7 @@ TestCase {
   }
 
   function test_stateV2AndReducers() {
-    compare(Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] })
+    compare(Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" })
     var v1 = Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[],"lastPlayed":null}')
     compare(v1.version, 2)
     compare(v1.favorites, ["t:bbc1.uk"])
@@ -1113,10 +1113,26 @@ TestCase {
     var rec = Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 5)
     compare(rec.added, "d5977d8a")
     compare(rec.state.sources[0].origin, "migrated")
-    compare(Model.activeSourceKey(rec.state, "HTTPS://iptv-org.github.io:443/iptv/countries/us.m3u"), "d5977d8a")
+    // D-SINK-19 deleted Model.activeSourceKey. Identity by URL survives as the
+    // composition below; the active source is Model.activeKeyOf(state).
+    compare(String(Model.findSourceByUrl(rec.state.sources, Model.normalizeSourceUrl("HTTPS://iptv-org.github.io:443/iptv/countries/us.m3u", { origin: "cli" })).key), "d5977d8a")
     compare(Model.sourceForEdit(added.state, "d990c2e4").playlistMasked, "http://provider.example.test/get.php?username=****&password=****&type=m3u_plus&output=ts")
     compare(JSON.stringify(Model.sourcesSummary(added.state, "d990c2e4")).indexOf("://"), -1)
-    compare(Model.entryWith({ id: "x", refreshMinutes: 30 }, { playlistUrl: "u" }), { id: "x", refreshMinutes: 30, playlistUrl: "u" })
+    compare(Model.entryWith({ id: "x", refreshMinutes: 30 }, { sourceKey: "d990c2e4" }), { id: "x", refreshMinutes: 30, sourceKey: "d990c2e4" })
+    // D-SINK-19, inside the Qt engine as well as in node: a URL the host
+    // still holds does not survive an owned write. `for (var k in ...)` over
+    // a QJSValue-backed object is the part that cannot be assumed from node.
+    compare(Model.entryWith({ id: "x", playlistUrl: "http://h.test/a.m3u", epgUrl: "http://h.test/a.xml", refreshMinutes: 30 },
+                            { sourceKey: "d990c2e4" }),
+            { id: "x", refreshMinutes: 30, sourceKey: "d990c2e4" })
+    // ... and the active key round-trips through state.json in this engine.
+    var activeRound = Model.parseState(JSON.stringify(Model.withActiveKey(added.state, "d990c2e4")))
+    compare(activeRound.activeKey, "d990c2e4")
+    compare(Model.activeKeyOf(activeRound), "d990c2e4")
+    compare(Model.activeKeyOf(Model.withActiveKey(added.state, "deadbeef")), "")
+    compare(Model.withActiveKey(added.state, "../../etc").activeKey, "")
+    // The reducers carry it, which is the fifth whitelist (cloneState).
+    compare(Model.withFavorites(Model.withActiveKey(added.state, "d990c2e4"), ["c1"]).activeKey, "d990c2e4")
     compare(Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 900), true)
     compare(Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 899), false)
   }
@@ -1188,7 +1204,7 @@ TestCase {
     var tilde = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "~/list.m3u", "", "", 1)
     compare(tilde.invalid, null)
     compare(tilde.state.sources[0].kind, "file")
-    compare(Model.activeSourceKey(tilde.state, "~/list.m3u"), tilde.added)
+    compare(String(Model.findSourceByUrl(tilde.state.sources, Model.normalizeSourceUrl("~/list.m3u", { origin: "cli" })).key), tilde.added)
     compare(Model.addSource(tilde.state, { playlistUrl: "~/x.m3u" }).code, "relative_path")
     compare(Model.sourceTransient("added", { label: "list.m3u", host: "local file", channelCount: 20, groupCount: 9 }), "Added list.m3u · 20 channels in 9 groups")
     compare(Model.validateUrlForm({ label: "", playlist: "x.test/a", epg: "" }, [], "").error.code, "scheme")
@@ -1279,7 +1295,7 @@ TestCase {
     compare(after.state.sources.length, 1)
     compare(after.activeKey, "")
     compare(after.invalid, null)
-    compare(Model.activeSourceKey(after.state, ""), "")
+    compare(Model.activeKeyOf(after.state), "")
     // The rest of the state machine is as shipped.
     compare(Model.guideSurface({ serviceReady: false }).empty, "service")
     compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "loading" }).empty, "loading")
@@ -1330,23 +1346,31 @@ TestCase {
   }
 
   function test_ownSettingsWriteAppliesLocally() {
-    var hostA = Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/a.m3u", epgUrl: "", refreshMinutes: 45 })
-    var hostB = Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/b.m3u", epgUrl: "", refreshMinutes: 45 })
-    var write = Model.ownWriteFor(hostA, "http://h.test/b.m3u", "")
+    // D-SINK-19: a source write carries the active KEY, not the URL pair.
+    var hostA = Model.settingsFrom({ id: "p", sourceKey: "d990c2e4", refreshMinutes: 45 })
+    var hostB = Model.settingsFrom({ id: "p", sourceKey: "b0eed9fb", refreshMinutes: 45 })
+    var write = Model.ownWriteForKey(hostA, "b0eed9fb")
     // Applied at once, against the host value we wrote on.
     compare(Model.ownWriteInForce(hostA, write), true)
-    compare(Model.settingsWithOwnWrite(hostA, write).playlistUrl, "http://h.test/b.m3u")
+    compare(Model.settingsWithOwnWrite(hostA, write).sourceKey, "b0eed9fb")
     compare(Model.settingsWithOwnWrite(hostA, write).refreshMinutes, 45)
     // The late echo of our own value lapses it and changes nothing.
     compare(Model.ownWriteInForce(hostB, write), false)
-    compare(Model.settingsWithOwnWrite(hostB, write).playlistUrl, "http://h.test/b.m3u")
+    compare(Model.settingsWithOwnWrite(hostB, write).sourceKey, "b0eed9fb")
     // A foreign write wins.
-    var hostC = Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/c.m3u" })
-    compare(Model.settingsWithOwnWrite(hostC, write).playlistUrl, "http://h.test/c.m3u")
+    var hostC = Model.settingsFrom({ id: "p", sourceKey: "11111111" })
+    compare(Model.settingsWithOwnWrite(hostC, write).sourceKey, "11111111")
     // Clearing the active source is the same mechanism (D-LIVE-21).
-    compare(Model.settingsWithOwnWrite(hostB, Model.ownWriteFor(hostB, "", "")).playlistUrl, "")
+    compare(Model.settingsWithOwnWrite(hostB, Model.ownWriteForKey(hostB, "")).sourceKey, "")
+    // The patch a write actually carries, in this engine: owned keys only,
+    // and no URL even when the host entry still holds one.
+    var patch = Model.ownedEntryPatch(Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/a.m3u", epgUrl: "http://h.test/a.xml", sourceKey: "d990c2e4", showLogos: true }),
+                                      { sourceKey: "b0eed9fb" })
+    compare(patch, { sourceKey: "b0eed9fb", showLogos: true })
+    compare(Model.entryShieldDecision(Model.CONFIG_SHIELD_EXPOSED, patch), Model.CONFIG_PERSIST)
+    compare(Model.entryShieldDecision(Model.CONFIG_SHIELD_EXPOSED, { playlistUrl: "http://h.test/a.m3u" }), Model.CONFIG_REFUSE)
     // Only an entry updateEntryInline can rewrite counts as writable.
-    compare(Model.barEntryWritable({ layout: { right: [{ id: "p", playlistUrl: "x" }] } }, "p"), true)
+    compare(Model.barEntryWritable({ layout: { right: [{ id: "p", sourceKey: "d990c2e4" }] } }, "p"), true)
     compare(Model.barEntryWritable({ layout: { right: ["p"] } }, "p"), false)
   }
 

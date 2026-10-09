@@ -2464,34 +2464,83 @@ checkCall("D-LOGO-2: a settings write states every owned key, so neither writer 
   // of the others back to disk: turn logos off, then edit a source URL, and
   // `showLogos: true` was written again -- the setting came back on by
   // itself and the fetch resumed.
-  const effective = { playlistUrl: "p", epgUrl: "e", showLogos: false, maxRecents: 10 }
-  const urlWrite = Model.ownedEntryPatch(effective, { playlistUrl: "p2", epgUrl: "e2" })
+  //
+  // D-SINK-19 moved the owned keys from {playlistUrl, epgUrl, showLogos} to
+  // {sourceKey, showLogos}, which is exactly the edit this test exists to
+  // police: the rule is about the LIST, not about the two names it used to
+  // hold.
+  const effective = { sourceKey: "d990c2e4", showLogos: false, maxRecents: 10 }
+  const keyWrite = Model.ownedEntryPatch(effective, { sourceKey: "b0eed9fb" })
   const logoWrite = Model.ownedEntryPatch(effective, { showLogos: true })
   return [
-    // the URL write carries the CURRENT showLogos, not a stale one
-    urlWrite.showLogos, urlWrite.playlistUrl, urlWrite.epgUrl,
-    // the logo write carries the CURRENT urls
-    logoWrite.showLogos, logoWrite.playlistUrl, logoWrite.epgUrl,
+    // the key write carries the CURRENT showLogos, not a stale one
+    keyWrite.showLogos, keyWrite.sourceKey,
+    // the logo write carries the CURRENT key
+    logoWrite.showLogos, logoWrite.sourceKey,
     // and neither invents a key it does not own
-    Object.keys(urlWrite).sort().join(","),
+    Object.keys(keyWrite).sort().join(","),
     Model.OWNED_SETTINGS.join(",")
   ]
-}, [false, "p2", "e2", true, "p", "e", "epgUrl,playlistUrl,showLogos", "playlistUrl,epgUrl,showLogos"])
+}, [false, "b0eed9fb", true, "d990c2e4", "showLogos,sourceKey", "sourceKey,showLogos"])
+
+checkCall("D-SINK-19: no owned write can put a URL in the host's file, and the gate still goes red for one that would", function () {
+  // Rule 14. The claim is "the plugin no longer writes a provider URL into
+  // shell.json", and it is asserted by running the REAL patch builder over a
+  // host entry that holds both URLs and reading what comes out, not by
+  // grepping Service.qml for the key names.
+  const host = Model.settingsFrom({ id: "x", playlistUrl: "http://p.test/a.m3u?password=s3cret",
+                                    epgUrl: "http://p.test/a.xml?password=s3cret",
+                                    showLogos: true, sourceKey: "d990c2e4", barLabelMaxWidth: 240 })
+  const keyPatch = Model.ownedEntryPatch(host, { sourceKey: "b0eed9fb" })
+  const logoPatch = Model.ownedEntryPatch(host, { sourceKey: "b0eed9fb", showLogos: false })
+  const entry = Model.entryWith({ id: "x", playlistUrl: "http://p.test/a.m3u?password=s3cret",
+                                  epgUrl: "http://p.test/a.xml?password=s3cret",
+                                  showLogos: true, barLabelMaxWidth: 240 }, keyPatch)
+  const text = JSON.stringify(entry)
+  return [
+    // no retired key is in either patch
+    Model.RETIRED_SETTINGS.filter(function (k) { return keyPatch[k] !== undefined }).length,
+    Model.RETIRED_SETTINGS.filter(function (k) { return logoPatch[k] !== undefined }).length,
+    // the entry handed to updateEntryInline has them REMOVED, not emptied:
+    // the host stores exactly what we pass (shell.qml:1092)
+    Object.prototype.hasOwnProperty.call(entry, "playlistUrl"),
+    Object.prototype.hasOwnProperty.call(entry, "epgUrl"),
+    text.indexOf("s3cret"), text.indexOf("http"),
+    // keys the plugin does not own survive the wholesale replace
+    entry.barLabelMaxWidth, entry.sourceKey,
+    // and the shield's gate is not dead: a patch that DID carry a URL is
+    // refused against an exposed file, while the shipping patch persists
+    Model.entryShieldDecision(Model.CONFIG_SHIELD_EXPOSED, keyPatch),
+    Model.entryShieldDecision(Model.CONFIG_SHIELD_EXPOSED, logoPatch),
+    Model.entryShieldDecision(Model.CONFIG_SHIELD_EXPOSED, { playlistUrl: "http://p.test/a.m3u" }),
+    Model.entryShieldDecision(Model.CONFIG_SHIELD_EXPOSED, { epgUrl: "http://p.test/a.xml" }),
+    Model.entryShieldDecision(Model.CONFIG_SHIELD_UNKNOWN, { playlistUrl: "http://p.test/a.m3u" })
+  ]
+}, [0, 0, false, false, -1, -1, 240, "b0eed9fb",
+    Model.CONFIG_PERSIST, Model.CONFIG_PERSIST, Model.CONFIG_REFUSE, Model.CONFIG_REFUSE, Model.CONFIG_DEFER])
+
+checkCall("D-SINK-19: an explicit retired key in the patch still wins, so the removal is a default and not a ban", function () {
+  // The removal lives in entryWith and applies to what it CARRIES OVER. A
+  // caller that deliberately names a retired key is writing it on purpose,
+  // and nothing in this repository does -- which is the assertion above.
+  const entry = Model.entryWith({ id: "x", playlistUrl: "old" }, { playlistUrl: "new" })
+  return [entry.playlistUrl, Model.RETIRED_SETTINGS.join(",")]
+}, ["new", "playlistUrl,epgUrl"])
 
 checkCall("D-LOGO-2: the whole round trip -- off, then an unrelated write, stays off", function () {
   // The defect as a sequence, through the same functions the service calls.
-  const host = { playlistUrl: "p", epgUrl: "e", showLogos: true }
+  const host = { sourceKey: "d990c2e4", showLogos: true }
   // 1. the user turns logos OFF
   const offPatch = Model.ownedEntryPatch(Model.settingsWithOwnWrite(host, null), { showLogos: false })
   const own = Model.ownWriteOf(host, offPatch)
   const afterOff = Model.settingsWithOwnWrite(host, own)
   // 2. the host has not echoed yet, so barConfig still says true -- and the
-  //    user now edits a source URL
-  const urlPatch = Model.ownedEntryPatch(afterOff, { playlistUrl: "p2" })
-  return [afterOff.showLogos, urlPatch.showLogos, urlPatch.playlistUrl,
+  //    user now switches source
+  const keyPatch = Model.ownedEntryPatch(afterOff, { sourceKey: "b0eed9fb" })
+  return [afterOff.showLogos, keyPatch.showLogos, keyPatch.sourceKey,
           // what the OLD code wrote: the stale host value
           Model.findBarEntry({ layout: { left: [{ id: "x", showLogos: true }] } }, "x").showLogos]
-}, [false, false, "p2", true])
+}, [false, false, "b0eed9fb", true])
 
 checkCall("D-LOGO-6: all-http logos say so, instead of claiming there are none", function () {
   const allHttp = Model.logoConsentLines(Model.logoSurvey(
@@ -4082,7 +4131,7 @@ check("trimRecents", Model.trimRecents({ version: 1, favorites: [], recents: [{ 
 check("trimRecents returns same object when within cap", (() => { const st = Model.emptyState(); return Model.trimRecents(st, 5) === st })(), true)
 check("parseState tolerates garbage", Model.parseState("not json"), Model.emptyState())
 check("parseState sanitizes", Model.parseState('{"favorites":["a","a",""],"recents":[{"id":"x","name":"X","at":"7"},{"bad":1}],"lastPlayed":{"id":"x"}}'),
-  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, session: null, sources: [], savedSearches: [], hiddenGroups: [] })
+  { version: 2, cacheLayout: 0, favorites: ["a"], recents: [{ id: "x", name: "X", at: 7 }], lastPlayed: { id: "x", name: "", at: 0 }, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" })
 check("parseState tolerates unknown keys", Model.parseState('{"version":9,"favorites":["a"],"future":true}').favorites, ["a"])
 check("isFavorite", [Model.isFavorite(state, "5"), Model.isFavorite(state, "4"), Model.isFavorite(null, "5")], [true, false, false])
 check("withFailed / withoutFailed are copies", (() => { const a = {}; const b = Model.withFailed(a, "x", "21:12"); const c = Model.withoutFailed(b, "x"); return [Object.keys(a).length, b.x, Object.keys(c).length] })(), [0, "21:12", 0])
@@ -4130,8 +4179,8 @@ check("clampInt parses and clamps", [Model.clampInt("15", 60, 5, 1440), Model.cl
 // The whole settings object, pinned: a new key is only ever added here on
 // purpose. M2-03 7.1 added three; M2-05 section 6 adds the last three.
 check("settingsFrom applies R2 clamps and trims", Model.settingsFrom(Model.findBarEntry(barConfig, "io.github.rmcdavid.iptv")),
-  { playlistUrl: "http://x/y.m3u", epgUrl: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, showLogos: false, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
-check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, showLogos: false, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
+  { playlistUrl: "http://x/y.m3u", epgUrl: "", sourceKey: "", refreshMinutes: 15, mpvArgs: "", showChannelName: false, maxRecents: 1, barLabelMaxWidth: 600, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, showLogos: false, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
+check("settingsFrom defaults", Model.settingsFrom({}), { playlistUrl: "", epgUrl: "", sourceKey: "", refreshMinutes: 360, mpvArgs: "", showChannelName: true, maxRecents: 10, barLabelMaxWidth: 180, channelOrder: "playlist", numberEntryMs: 2000, barShowChannelNumber: true, showLogos: false, pipCorner: "top-right", pipSizePercent: 30, pipMargin: 16 })
 check("settingsFrom null", Model.settingsFrom(null).refreshMinutes, 360)
 check("clampSetting refreshMinutes range", [Model.clampSetting("refreshMinutes", 5), Model.clampSetting("refreshMinutes", 99999), Model.clampSetting("refreshMinutes", "abc")], [15, 1440, 360])
 check("clampSetting barLabelMaxWidth range", [Model.clampSetting("barLabelMaxWidth", 10), Model.clampSetting("barLabelMaxWidth", 601)], [60, 600])
@@ -4804,8 +4853,11 @@ checkCall("playerTlsVerdict: the shared verdicts, every case, by name",
 // the real file is config-mode-scenario.sh. This pin is the third leg: it is
 // what notices if the decision stops standing in front of the write.
 checkCall("D-SINK-18: the write is reached only through the shield decision, and only after it", () => {
-  const body = (serviceSource.match(/function persistActive\(playlistUrl, epgUrl\)[\s\S]*?\n  \}/) || [""])[0]
-  const decide = body.indexOf("Model.configShieldDecision(")
+  // D-SINK-19 moved the gate from persistActive to persistEntryKey, because
+  // persistActive now writes the STATE first (our own 0600 file, which cannot
+  // be refused) and only then asks about the host's entry.
+  const body = (serviceSource.match(/function persistEntryKey\(key\)[\s\S]*?\n  \}/) || [""])[0]
+  const decide = body.indexOf("Model.entryShieldDecision(")
   const write = body.indexOf("root.writeActive(")
   const refuse = body.indexOf("Model.CONFIG_REFUSE")
   const defer = body.indexOf("Model.CONFIG_DEFER")
@@ -4828,6 +4880,38 @@ checkCall("D-SINK-18: the write is reached only through the shield decision, and
     refuseReArms: /Model\.CONFIG_REFUSE[\s\S]{0,900}?root\.runConfigShield\(\)[\s\S]{0,80}?return false/.test(body)
   }
 }, { decides: true, writes: true, decidesFirst: true, refusesFirst: true, defersFirst: true, writeSites: 2, refuseReArms: true })
+
+// D-SINK-19 / rule 15. The structural half of "no owned write can put a URL in
+// the host's file": there is exactly ONE place that calls updateEntryInline.
+// D-LOGO-2 is what two cost -- each writer decided for itself what the entry
+// contained and each reverted the other -- and the patch rule fixed the
+// symptom while leaving the shape. The shape is what this pins.
+//
+// Labelled a structural pin for the same reason as the one above: Service.qml
+// cannot be instantiated from node. What CALLS the shipping logic is the
+// ownedEntryPatch / entryWith / entryShieldDecision test further up, which
+// runs the real functions over a host entry that holds real URLs.
+checkCall("D-SINK-19: one writer for the bar entry, and the shield re-armed after it", () => {
+  const sites = (serviceSource.match(/\.updateEntryInline\(/g) || []).length
+  const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce\)[\s\S]*?\n  \}/) || [""])[0]
+  return {
+    // One call site, inside the funnel. `typeof ... !== "function"` guards
+    // are not calls, so the count is of writes.
+    entryWriteSites: sites,
+    funnelExists: funnel !== "",
+    funnelWrites: funnel.indexOf(".updateEntryInline(") !== -1,
+    // Every write goes through the patch builder, so no caller can decide for
+    // itself which keys the entry carries.
+    funnelPatches: funnel.indexOf("Model.ownedEntryPatch(") !== -1,
+    funnelStrips: funnel.indexOf("Model.entryWith(") !== -1,
+    // The own-write override is recorded in the same place, which is what
+    // keeps rule 9 (never wait for the host's echo) true for both writers.
+    funnelOwnWrite: funnel.indexOf("Model.ownWriteOf(") !== -1,
+    // D-SINK-18's re-arm: the shield runs after a write, from both callers.
+    reArms: (funnel.match(/root\.runConfigShield\(\)/g) || []).length
+  }
+}, { entryWriteSites: 1, funnelExists: true, funnelWrites: true, funnelPatches: true,
+     funnelStrips: true, funnelOwnWrite: true, reArms: 1 })
 
 // D-SINK-16, the reload the first guard could drop. `nowPlaying === null` was
 // treated as "nothing is owed", and it is also "not assigned yet" -- which is
@@ -5516,11 +5600,11 @@ check("sourceDetail never carries error text (SR26): errorReason stays on the vi
 check("sourceAccessibleName", [Model.sourceAccessibleName(views4[0]), Model.sourceAccessibleName(Model.sourceView(recCli, "", nowSep))], ["Provider, tv.example.net:8080, 1,475 channels in 28 groups, active, EPG, last used 21:30", "iptv-org, iptv-org.github.io, not loaded yet, never used"])
 
 // ---- state v2 and reducers (ARCHITECTURE-SOURCES 2.1, 2.2, 3.5) ----
-check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] })
-check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, session: null, sources: [recFile], savedSearches: [], hiddenGroups: [] })
+check("emptyState is v2", Model.emptyState(), { version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" })
+check("cloneState carries sources and cacheLayout, applies the patch, forces the version", Model.cloneState({ version: 1, cacheLayout: 2, favorites: ["a"], sources: [recFile] }, { favorites: ["b"], version: 7 }), { version: 2, cacheLayout: 2, favorites: ["b"], recents: [], lastPlayed: null, session: null, sources: [recFile], savedSearches: [], hiddenGroups: [], activeKey: "" })
 check("cloneState copies the arrays", (() => { const src = { sources: [recFile] }; const out = Model.cloneState(src); out.sources.push(recNas); return src.sources.length })(), 1)
 check("withCacheLayout", [Model.withCacheLayout(state4, 0).cacheLayout, Model.withCacheLayout(Model.emptyState(), 2).cacheLayout, Model.withCacheLayout(Model.emptyState(), 5).cacheLayout], [0, 2, 0])
-check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] })
+check("parseState v1 -> v2 keeps favorites and recents, sources empty, cacheLayout 0", Model.parseState('{"version":1,"favorites":["t:bbc1.uk"],"recents":[{"id":"x","name":"X","at":1}],"lastPlayed":null}'), { version: 2, cacheLayout: 0, favorites: ["t:bbc1.uk"], recents: [{ id: "x", name: "X", at: 1 }], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" })
 check("parseState v2 round-trips records", Model.parseState(JSON.stringify(state4)).sources, state4.sources)
 check("parseState drops invalid records, duplicate urls and keys keep the first", Model.parseState(JSON.stringify({ version: 2, sources: [recNas, { key: "bad key", url: "http://x.test/" }, { key: "22222222", url: recNas.url }, { key: "11111111", url: "http://other.test/" }, { key: "33333333", url: "" }, "junk"] })).sources.map(s => s.key), ["11111111"])
 check("parseState coerces and defaults a sparse record", Model.parseState(JSON.stringify({ version: 2, sources: [{ key: "abcdef12", url: "http://h.test/x", channelCount: "7", origin: "weird", labelCustom: "yes" }] })).sources[0], { key: "abcdef12", url: "http://h.test/x", epgUrl: "", kind: "http", label: "h.test", labelCustom: false, origin: "guide", addedAt: 0, lastUsed: 0, fetchedAt: 0, channelCount: 7, groupCount: 0 })
@@ -6118,7 +6202,16 @@ check("removeSource", (() => { const r = Model.removeSource(twoState, "b0eed9fb"
 check("touchSource bumps lastUsed, unknown key is a no-op", [Model.touchSource(twoState, "b0eed9fb", 9000).sources[1].lastUsed, Model.touchSource(twoState, "nope", 9000).sources[1].lastUsed], [9000, 2000])
 check("withSourceStats copies the counts of an ok status", Model.withSourceStats(twoState, "d990c2e4", { ok: true, fetchedAt: 5000, channelCount: "1475", groupCount: 28 }).sources[0], { ...twoState.sources[0], fetchedAt: 5000, channelCount: 1475, groupCount: 28 })
 check("withSourceStats ignores a failed status, falls back to nowSec", [Model.withSourceStats(twoState, "d990c2e4", { ok: false }).sources[0].fetchedAt, Model.withSourceStats(twoState, "d990c2e4", { ok: true, channelCount: 3 }, 777).sources[0].fetchedAt], [0, 777])
-check("activeSourceKey normalizes before matching", [Model.activeSourceKey(twoState, "HTTP://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts"), Model.activeSourceKey(twoState, "file:///srv/tv/local.m3u"), Model.activeSourceKey(twoState, "http://other.test/"), Model.activeSourceKey(twoState, ""), Model.activeSourceKey(null, "x")], ["d990c2e4", "b0eed9fb", "", "", ""])
+// D-SINK-19 deleted Model.activeSourceKey (see the comment where it was): the
+// active source is no longer named from a URL. What survives is "which record
+// holds this URL", which is identity (D4's untouched half) and is a
+// composition of two exported functions rather than one of its own. The
+// SR11 cases below still assert exactly what they asserted.
+function recordKeyForUrl(state, url) {
+  const rec = Model.findSourceByUrl((state && state.sources) || [], Model.normalizeSourceUrl(url, { origin: "cli" }))
+  return rec ? String(rec.key) : ""
+}
+check("D-SINK-19: identity by URL survives as findSourceByUrl + normalizeSourceUrl, and normalizes before matching", [recordKeyForUrl(twoState, "HTTP://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts"), recordKeyForUrl(twoState, "file:///srv/tv/local.m3u"), recordKeyForUrl(twoState, "http://other.test/"), recordKeyForUrl(twoState, ""), recordKeyForUrl(null, "x")], ["d990c2e4", "b0eed9fb", "", "", ""])
 
 // reconcile (D3 / SR8)
 check("reconcileSources: empty playlistUrl is a no-op", Model.reconcileSources(twoState, "", "", "", 1), { state: twoState, changed: false, activeKey: "", added: "", evicted: [], invalid: null })
@@ -6136,8 +6229,8 @@ check("reconcileSources does not mutate the input", twoState.sources.length, 2)
 // reconciles into the history and becomes active; the forms keep refusing `~`.
 const tildeRec = Model.reconcileSources(twoState, "~/list.m3u", "~/epg.xml", "d990c2e4", 7000)
 check("reconcileSources: a CLI `~` path is accepted verbatim (kind file, label from the file name, origin cli), never settingsInvalid", (() => { const s = tildeRec.state.sources[2]; return [tildeRec.invalid, tildeRec.changed, tildeRec.added !== "", tildeRec.activeKey === tildeRec.added, s.url, s.epgUrl, s.kind, s.label, s.origin, s.fetchedAt] })(), [null, true, true, true, "~/list.m3u", "~/epg.xml", "file", "list.m3u", "cli", 0])
-check("activeSourceKey resolves the CLI `~` record; a second reconcile of the same value is a no-op", [Model.activeSourceKey(tildeRec.state, "~/list.m3u"), Model.activeSourceKey(tildeRec.state, " ~/list.m3u "), Model.reconcileSources(tildeRec.state, "~/list.m3u", "~/epg.xml", tildeRec.activeKey, 8000).changed, Model.sourceView(tildeRec.state.sources[2], tildeRec.activeKey, 8000, "").host], [tildeRec.added, tildeRec.added, false, "local file"])
-check("the forms still refuse `~` (SR11): addSource, updateSource, validateUrlForm", [Model.addSource(tildeRec.state, { playlistUrl: "~/other.m3u" }).code, Model.updateSource(tildeRec.state, "d990c2e4", { playlistUrl: "~/other.m3u" }).code, Model.validateUrlForm({ label: "", playlist: "~/list.m3u", epg: "" }, [], "").error.code, Model.activeSourceKey(tildeRec.state, "./list.m3u")], ["relative_path", "relative_path", "relative_path", ""])
+check("SR11: a CLI `~` record still resolves by URL; a second reconcile of the same value is a no-op", [recordKeyForUrl(tildeRec.state, "~/list.m3u"), recordKeyForUrl(tildeRec.state, " ~/list.m3u "), Model.reconcileSources(tildeRec.state, "~/list.m3u", "~/epg.xml", tildeRec.activeKey, 8000).changed, Model.sourceView(tildeRec.state.sources[2], tildeRec.activeKey, 8000, "").host], [tildeRec.added, tildeRec.added, false, "local file"])
+check("the forms still refuse `~` (SR11): addSource, updateSource, validateUrlForm", [Model.addSource(tildeRec.state, { playlistUrl: "~/other.m3u" }).code, Model.updateSource(tildeRec.state, "d990c2e4", { playlistUrl: "~/other.m3u" }).code, Model.validateUrlForm({ label: "", playlist: "~/list.m3u", epg: "" }, [], "").error.code, recordKeyForUrl(tildeRec.state, "./list.m3u")], ["relative_path", "relative_path", "relative_path", ""])
 check("reconcileSources: a `~` path that is a form-only refusal elsewhere still fails the CLI rules it shares (relative ./, unsafe /proc)", [Model.reconcileSources(twoState, "./list.m3u", "", "", 1).invalid.code, Model.reconcileSources(twoState, "/proc/x", "", "", 1).invalid.code], ["relative_path", "unsafe_path"])
 
 check("sourceForEdit is the only URL carrier: masked and raw forms", Model.sourceForEdit(twoState, "d990c2e4"), { id: "d990c2e4", key: "d990c2e4", label: "provider.example.test", labelCustom: false, kind: "xtream", host: "provider.example.test", origin: "xtream", playlistUrl: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", playlistMasked: "http://provider.example.test/get.php?username=****&password=****&type=m3u_plus&output=ts", epgMasked: "http://provider.example.test/xmltv.php?username=****&password=****" })
@@ -6259,22 +6352,23 @@ checkCall("M2-04: the own-write override covers the keys the write carried, not 
   // Before M2-04 this compared host.playlistUrl and host.epgUrl by name. A
   // third writable key would have been held in force while the host changed
   // it underneath, which is the opposite of what the override is for.
-  const host = { playlistUrl: "p", epgUrl: "e", showLogos: false, maxRecents: 10 }
+  const host = { sourceKey: "d990c2e4", showLogos: false, maxRecents: 10 }
   const w = Model.ownWriteOf(host, { showLogos: true })
   return [
     Model.settingsWithOwnWrite(host, w).showLogos,
     // untouched keys still come from the host
-    Model.settingsWithOwnWrite(host, w).playlistUrl,
+    Model.settingsWithOwnWrite(host, w).sourceKey,
     // the host changing the key we wrote drops the override, so external
     // changes win
-    Model.ownWriteInForce({ playlistUrl: "p", epgUrl: "e", showLogos: true }, w),
+    Model.ownWriteInForce({ sourceKey: "d990c2e4", showLogos: true }, w),
     // the host changing something else does NOT drop it: it is not ours
-    Model.ownWriteInForce({ playlistUrl: "p", epgUrl: "e", showLogos: false, maxRecents: 20 }, w),
-    // and the URL pair keeps working exactly as it did
-    Model.settingsWithOwnWrite(host, Model.ownWriteFor(host, "p2", "e2")).playlistUrl,
-    Model.ownWriteInForce({ playlistUrl: "changed", epgUrl: "e" }, Model.ownWriteFor(host, "p2", "e2"))
+    Model.ownWriteInForce({ sourceKey: "d990c2e4", showLogos: false, maxRecents: 20 }, w),
+    // and the source write keeps working exactly as it did, on the key it
+    // carries since D-SINK-19
+    Model.settingsWithOwnWrite(host, Model.ownWriteForKey(host, "b0eed9fb")).sourceKey,
+    Model.ownWriteInForce({ sourceKey: "11111111", showLogos: false }, Model.ownWriteForKey(host, "b0eed9fb"))
   ]
-}, [true, "p", false, true, "p2", false])
+}, [true, "d990c2e4", false, true, "b0eed9fb", false])
 
 check("footerHints confirmRemove", Model.footerHints({ mode: "confirmRemove" }), [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]])
 check("footerHints error empty state adds o sources when sources exist", [Model.footerHints({ empty: "error", sourcesExist: true }), Model.footerHints({ empty: "error", sourcesExist: false }), Model.footerHints({ empty: "loading", sourcesExist: true })], [[["r", "retry"], ["o", "sources"], ["Esc", "close"]], [["r", "retry"], ["Esc", "close"]], [["Esc", "close"]]])
@@ -6325,6 +6419,274 @@ check("D-SRC-01: statusFetchedAt prefers fetchedAt, then generatedAt, else 0", [
 check("D-SRC-01: sourceStatsDiffer is true for a never-fetched record and a loaded status, false once adopted", (() => { const status = { ok: true, kind: "playlist", fetchedAt: 1789244100, channelCount: 8, groupCount: 3 }; const rec = { key: "584a58e5", url: "http://127.0.0.1:8765/qa-src-a.m3u", fetchedAt: 0, channelCount: 0, groupCount: 0 }; const st = Model.withSourceStats({ version: 2, sources: [rec] }, "584a58e5", status, 9); return [Model.sourceStatsDiffer(rec, status), Model.sourceStatsDiffer(st.sources[0], status), st.sources[0].fetchedAt, st.sources[0].channelCount, st.sources[0].groupCount] })(), [true, false, 1789244100, 8, 3])
 check("D-SRC-01: sourceStatsDiffer ignores failed statuses and missing records; a status without a timestamp only fills an empty record", [Model.sourceStatsDiffer(recNas, { ok: false, error: { code: "network" } }), Model.sourceStatsDiffer(null, { ok: true }), Model.sourceStatsDiffer(recNas, { ok: true, channelCount: 84, groupCount: 6 }), Model.sourceStatsDiffer({ key: "k", fetchedAt: 0 }, { ok: true, channelCount: 0, groupCount: 0 }), Model.sourceStatsDiffer(recNas, { ok: true, fetchedAt: 210, channelCount: 85, groupCount: 6 })], [false, false, false, true, true])
 
+// ---- D-SINK-19: the active source is named by KEY, and the migration ----
+//
+// The marketplace maintainer raised four findings in four days, four of the
+// last five in this area. D-SINK-18 shipped containment: the host's
+// shell.json is made private before a provider URL is written into it. This
+// removes the cause -- the plugin identified the active source BY that URL,
+// so the credential HAD to be in a file the plugin does not own, whose
+// packaged default is 0644 and whose writer preserves whatever mode it finds.
+//
+// The exposure is REDUCED, not closed, and every claim here says which.
+// What is in the host's file now is the source's key, which is fnv1a32 of the
+// normalized URL: it cannot carry a URL back, and it CONFIRMS a guessed one.
+// Model.entryShieldDecision is where that trade is accepted in writing.
+const activeKeyFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/active-key.json"), "utf8"))
+checkCall("D-SINK-19: the shared activeKey fixture, through activeKeyText AND through parseState",
+  () => activeKeyFixture.parse.map(c => c.name + ": " + JSON.stringify(Model.activeKeyText(c.raw))
+        + "/" + JSON.stringify(Model.parseState(JSON.stringify({ activeKey: c.raw })).activeKey)),
+  activeKeyFixture.parse.map(c => c.name + ": " + JSON.stringify(c.key) + "/" + JSON.stringify(c.key)))
+// The fixture earns its keep only if it holds both answers and the shapes
+// that are not strings at all.
+check("D-SINK-19: the fixture has keys, non-keys, a traversal and non-string shapes",
+  [activeKeyFixture.parse.filter(c => c.key !== "").length > 3,
+   activeKeyFixture.parse.filter(c => c.key === "").length > 3,
+   activeKeyFixture.parse.some(c => String(c.raw).indexOf("..") === 0),
+   activeKeyFixture.parse.some(c => typeof c.raw === "number"),
+   activeKeyFixture.parse.some(c => c.raw === null)],
+  [true, true, true, true, true])
+// activeKeyOf: the stored key only while it names a record this state carries.
+function keyState(activeKey, keys) {
+  const sources = keys.map(k => ({ key: k, url: "http://h.test/" + k + ".m3u", epgUrl: "", kind: "http",
+                                   label: k, labelCustom: false, origin: "guide", addedAt: 1, lastUsed: 1,
+                                   fetchedAt: 1, channelCount: 1, groupCount: 1 }))
+  return Model.cloneState(Model.emptyState(), { sources: sources, activeKey: activeKey })
+}
+checkCall("D-SINK-19: activeKeyOf resolves a dangling key to no active source",
+  () => activeKeyFixture.resolve.map(c => c.name + ": " + JSON.stringify(Model.activeKeyOf(keyState(c.activeKey, c.keys)))),
+  activeKeyFixture.resolve.map(c => c.name + ": " + JSON.stringify(c.key)))
+check("D-SINK-19: activeKeyOf and activeSourceRecord agree, and neither throws on nothing",
+  [Model.activeKeyOf(null), Model.activeKeyOf(undefined), Model.activeSourceRecord(null),
+   Model.activeKeyOf(Model.emptyState()), Model.activeSourceRecord(Model.emptyState()),
+   String(Model.activeSourceRecord(keyState("d990c2e4", ["d990c2e4"])).key),
+   Model.activeSourceRecord(keyState("d990c2e4", ["b0eed9fb"]))],
+  ["", "", null, "", null, "d990c2e4", null])
+// withActiveKey is a reducer like every other one, which is what makes the
+// fifth whitelist entry (cloneState) load-bearing: a favourites write must not
+// drop the pointer.
+checkCall("D-SINK-19: the fifth whitelist -- every reducer carries activeKey through", () => {
+  const base = Model.withActiveKey(keyState("", ["d990c2e4"]), "d990c2e4")
+  const after = [
+    Model.withFavorites(base, ["c1"]),
+    Model.recordPlayed(base, { id: "c1", name: "C" }, 10, 5),
+    Model.trimRecents(base, 3),
+    Model.toggleHiddenGroup(base, "Religious"),
+    Model.withCacheLayout(base, 2),
+    Model.touchSource(base, "d990c2e4", 99),
+    Model.cloneState(base, { favorites: ["z"] }),
+    Model.parseState(JSON.stringify(base))
+  ]
+  return after.map(st => st.activeKey)
+}, ["d990c2e4", "d990c2e4", "d990c2e4", "d990c2e4", "d990c2e4", "d990c2e4", "d990c2e4", "d990c2e4"])
+check("D-SINK-19: withActiveKey normalizes, clears, and returns the SAME object when nothing moves", (() => {
+  const base = keyState("d990c2e4", ["d990c2e4"])
+  return [Model.withActiveKey(base, "d990c2e4") === base,
+          Model.withActiveKey(base, "").activeKey,
+          Model.withActiveKey(base, "  d990c2e4 ") === base,
+          Model.withActiveKey(base, "/etc/passwd").activeKey,
+          Model.withActiveKey(null, "d990c2e4").activeKey]
+})(), [true, "", true, "", "d990c2e4"])
+
+// ---- the migration, which is the part most likely to eat a configuration ----
+//
+// The old shape is a bar entry carrying a provider URL and a state with no
+// activeKey. adoptActiveSource takes the decision in a fixed order and each
+// step is why the next is safe; these are the six cases the brief named, plus
+// what the entry has to be rewritten to afterwards.
+const OLD_URL = "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"
+const OLD_KEY = "d990c2e4"
+function oldShape(sources, activeKey) {
+  // A state written by 0.13.3: sources, cacheLayout 2, and no activeKey at all.
+  const doc = { version: 2, cacheLayout: 2, favorites: ["t:bbc1.uk"], recents: [], sources: sources }
+  const st = Model.parseState(JSON.stringify(doc))
+  return activeKey === undefined ? st : Model.cloneState(st, { activeKey: activeKey })
+}
+const srcProvider = { key: OLD_KEY, url: OLD_URL, epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", kind: "http", label: "provider.example.test", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }
+const srcSecond = { key: "42839dd5", url: "http://second.example.test/list.m3u", epgUrl: "", kind: "http", label: "second.example.test", labelCustom: false, origin: "guide", addedAt: 11, lastUsed: 21, fetchedAt: 31, channelCount: 5, groupCount: 1 }
+
+checkCall("D-SINK-19 migration 1: the old shape -- a URL on the entry and no activeKey -- adopts the record it names", () => {
+  const before = oldShape([srcProvider, srcSecond])
+  const out = Model.adoptActiveSource(before, { playlistUrl: OLD_URL, epgUrl: srcProvider.epgUrl, sourceKey: "" }, 1000, "")
+  return [before.activeKey, out.key, out.changed, out.adoptedUrl, out.invalid, out.added,
+          out.state.sources.length, out.state.activeKey, out.state.favorites.join(","),
+          // nothing moved in the history: the URL was already known
+          out.state.sources.map(r => r.key).join(",")]
+}, ["", OLD_KEY, true, true, null, "", 2, OLD_KEY, "t:bbc1.uk", OLD_KEY + ",42839dd5"])
+
+checkCall("D-SINK-19 migration 2: idempotent -- the second run reads the state's own key and consults nothing else", () => {
+  const before = oldShape([srcProvider, srcSecond])
+  const first = Model.adoptActiveSource(before, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "" }, 1000, "")
+  // The entry has been rewritten by now: key in, URL out.
+  const second = Model.adoptActiveSource(first.state, { playlistUrl: "", epgUrl: "", sourceKey: OLD_KEY }, 2000, "")
+  // ... and a third run where the host has not caught up and STILL reports the
+  // old URL. The key wins; the URL is not re-read.
+  const third = Model.adoptActiveSource(second.state, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: OLD_KEY }, 3000, "")
+  return [second.key, second.changed, second.adoptedUrl, JSON.stringify(second.state) === JSON.stringify(first.state),
+          third.key, third.changed, third.adoptedUrl, JSON.stringify(third.state) === JSON.stringify(first.state)]
+}, [OLD_KEY, false, false, true, OLD_KEY, false, false, true])
+
+checkCall("D-SINK-19 migration 3: two sources, and the one the entry names is the one that becomes active", () => {
+  const a = Model.adoptActiveSource(oldShape([srcProvider, srcSecond]), { playlistUrl: srcSecond.url, epgUrl: "", sourceKey: "" }, 1000, "")
+  const b = Model.adoptActiveSource(oldShape([srcProvider, srcSecond]), { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "" }, 1000, "")
+  return [a.key, a.state.sources.length, b.key, b.state.sources.length,
+          // and neither loses the other source
+          a.state.sources.map(r => r.key).sort().join(","), b.state.sources.map(r => r.key).sort().join(",")]
+}, ["42839dd5", 2, OLD_KEY, 2, "42839dd5,d990c2e4", "42839dd5,d990c2e4"])
+
+checkCall("D-SINK-19 migration 4: a URL the history has never seen is ADDED, not dropped (SR8 unchanged)", () => {
+  const unknown = "https://iptv-org.github.io/iptv/countries/us.m3u"
+  const out = Model.adoptActiveSource(oldShape([srcSecond]), { playlistUrl: unknown, epgUrl: "http://e.test/x.xml", sourceKey: "" }, 1000, "")
+  const rec = Model.findSource(out.state.sources, out.key)
+  // ... and on a state with NO history at all, which is the first-v2-run case
+  // reconcileSources marks `migrated` rather than `cli`.
+  const fresh = Model.adoptActiveSource(Model.parseState('{"version":2}'), { playlistUrl: unknown, epgUrl: "", sourceKey: "" }, 1000, "")
+  return [out.key, out.added, out.adoptedUrl, out.state.sources.length, rec.url, rec.epgUrl, rec.origin,
+          fresh.key, Model.findSource(fresh.state.sources, fresh.key).origin,
+          // the source that was already there survives
+          out.state.sources.map(r => r.key).indexOf("42839dd5") >= 0]
+}, ["d5977d8a", "d5977d8a", true, 2, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://e.test/x.xml", "cli", "d5977d8a", "migrated", true])
+
+checkCall("D-SINK-19 migration 5: an entry with a KEY and a stale URL -- the key wins and the URL is never read", () => {
+  // This is the host one write behind: we have already written the key and
+  // the URL is still in the published copy. Reading the URL here would
+  // resurrect a source the user may have just removed.
+  const st = Model.cloneState(oldShape([srcSecond]), { activeKey: "" })
+  const out = Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "42839dd5" }, 1000, "")
+  // ... and the same with a key that is a non-key: that falls THROUGH to the
+  // URL, because a value that is not a key is not a pointer.
+  const junk = Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "not-a-key" }, 1000, "")
+  return [out.key, out.adoptedUrl, out.state.sources.length, out.added,
+          junk.key, junk.adoptedUrl, junk.state.sources.length, junk.added]
+}, ["42839dd5", false, 1, "", OLD_KEY, true, 2, OLD_KEY])
+
+checkCall("D-SINK-19 migration 6: an activeKey naming a source that no longer exists falls through, and the dangling value is cleared", () => {
+  const dangling = oldShape([srcSecond], "d990c2e4")
+  // (a) nothing else to go on: no active source, and the stale key does not
+  //     stay in the file for the next reader to resolve again.
+  const none = Model.adoptActiveSource(dangling, { playlistUrl: "", epgUrl: "", sourceKey: "" }, 1000, "")
+  // (b) the entry still names a real record: that one is adopted.
+  const viaKey = Model.adoptActiveSource(dangling, { playlistUrl: "", epgUrl: "", sourceKey: "42839dd5" }, 1000, "")
+  // (c) the entry carries the old URL: it is adopted and re-added.
+  const viaUrl = Model.adoptActiveSource(dangling, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "" }, 1000, "")
+  return [none.key, none.changed, none.state.activeKey, none.state.sources.length,
+          viaKey.key, viaKey.state.activeKey,
+          viaUrl.key, viaUrl.added, viaUrl.state.sources.length]
+}, ["", true, "", 1, "42839dd5", "42839dd5", OLD_KEY, OLD_KEY, 2])
+
+checkCall("D-SINK-19 migration: an empty install stays empty, and an INVALID CLI URL leaves the active source alone (D16)", () => {
+  const empty = Model.adoptActiveSource(Model.emptyState(), { playlistUrl: "", epgUrl: "", sourceKey: "" }, 1000, "")
+  const bad = Model.adoptActiveSource(oldShape([srcSecond]), { playlistUrl: "ftp://h.test/x.m3u", epgUrl: "", sourceKey: "" }, 1000, "")
+  const tooLong = Model.adoptActiveSource(oldShape([srcSecond]), { playlistUrl: "http://h.test/" + new Array(2100).join("a"), epgUrl: "", sourceKey: "" }, 1000, "")
+  return [empty.key, empty.changed, empty.invalid,
+          bad.key, bad.invalid.code, bad.state.sources.length,
+          tooLong.invalid.code,
+          // a state with an active source is NOT cleared by a bad CLI value
+          Model.adoptActiveSource(oldShape([srcSecond], "42839dd5"), { playlistUrl: "ftp://h.test/x", epgUrl: "", sourceKey: "" }, 1000, "").key]
+}, ["", false, null, "", "scheme", 1, "too_long", "42839dd5"])
+
+checkCall("D-SINK-19 migration: whatever the route in, the entry written afterwards carries the key and no URL", () => {
+  // The migration is only finished when the credential is OUT of the host's
+  // file, so the two halves are asserted together: the pointer resolved, and
+  // the entry the service then writes.
+  const out = Model.adoptActiveSource(oldShape([srcProvider]), { playlistUrl: OLD_URL, epgUrl: srcProvider.epgUrl, sourceKey: "" }, 1000, "")
+  const hostEntry = { id: "io.github.rmcdavid.iptv", playlistUrl: OLD_URL, epgUrl: srcProvider.epgUrl, showLogos: true, barLabelMaxWidth: 240 }
+  const patch = Model.ownedEntryPatch(Model.settingsFrom(hostEntry), { sourceKey: out.key })
+  patch.id = "io.github.rmcdavid.iptv"
+  const entry = Model.entryWith(hostEntry, patch)
+  const text = JSON.stringify(entry)
+  return [out.key, entry.sourceKey,
+          Object.prototype.hasOwnProperty.call(entry, "playlistUrl"),
+          Object.prototype.hasOwnProperty.call(entry, "epgUrl"),
+          text.indexOf("password"), text.indexOf("://"),
+          // untouched keys survive; the record still holds the real URLs
+          entry.barLabelMaxWidth, entry.showLogos,
+          Model.findSource(out.state.sources, out.key).url,
+          Model.findSource(out.state.sources, out.key).epgUrl]
+}, [OLD_KEY, OLD_KEY, false, false, -1, -1, 240, true, OLD_URL, "http://provider.example.test/xmltv.php?username=u&password=p"])
+
+check("D16/D-SINK-19: a refused INPUT is the guide's error state only when there is no active source to show instead",
+  [Model.invalidInputBlocks({ code: "scheme" }, ""),
+   Model.invalidInputBlocks({ code: "scheme" }, "d990c2e4"),
+   Model.invalidInputBlocks({ code: "too_long" }, "d990c2e4-2"),
+   Model.invalidInputBlocks(null, ""),
+   Model.invalidInputBlocks(null, "d990c2e4"),
+   Model.invalidInputBlocks(undefined, ""),
+   // a key that is not a key is not an active source
+   Model.invalidInputBlocks({ code: "scheme" }, "not-a-key")],
+  [true, false, false, false, false, false, true])
+
+// ---- SR8: `omarchy bar set ... playlistUrl <url>` still adopts ----
+//
+// It becomes INPUT ONLY (cost 1 of the change) and the adoption path is the
+// same reconcile that runs today. The decision about WHAT a settings change
+// means is Model.reconcileAction, lifted out of Service.qml so this can call
+// it instead of grepping the component for a branch (rules 12 and 14).
+checkCall("SR8/D-SINK-19: a changed, non-empty playlistUrl adopts; an input that went away is NOT a command", () => {
+  const A = "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"
+  const B = "http://second.example.test/list.m3u"
+  return [
+    // a state load, and the first reconcile of a service: migrate
+    Model.reconcileAction({ first: true, playlist: A, epg: "" }).act,
+    Model.reconcileAction({ force: true, playlist: A, epg: "", lastPlaylist: A }).act,
+    // SR8: the user sets a URL, or changes it
+    Model.reconcileAction({ playlist: A, epg: "", lastPlaylist: "" }).act,
+    Model.reconcileAction({ playlist: B, epg: "", lastPlaylist: A }).act,
+    // THE ONE THAT MATTERS. The plugin strips the URL keys from the entry on
+    // every write, so the host comes to report them absent. Under the old
+    // rule that meant "no active source" and the host catching up would have
+    // un-configured the plugin.
+    Model.reconcileAction({ playlist: "", epg: "", lastPlaylist: A }).act,
+    Model.reconcileAction({ playlist: "", epg: "", lastPlaylist: A, lastEpg: "x" }).act,
+    // nothing changed at all
+    Model.reconcileAction({ playlist: A, epg: "", lastPlaylist: A }).act,
+    // an epgUrl change alone, with a playlist that is already empty: still
+    // not a command about the active source
+    Model.reconcileAction({ playlist: "", epg: "http://e.test/x.xml", lastPlaylist: "" }).act,
+    // an epgUrl change beside an unchanged playlist adopts (D-SRC-02)
+    Model.reconcileAction({ playlist: A, epg: "http://e.test/x.xml", lastPlaylist: A }).act,
+    // nothing at all
+    Model.reconcileAction(null).act, Model.reconcileAction({}).act
+  ]
+}, ["migrate", "migrate", "adopt", "adopt", "ignore", "ignore", "ignore", "ignore", "adopt", "ignore", "ignore"])
+checkCall("SR8/D-SINK-19: adoptEpg is D-SRC-10 unchanged -- an epgUrl that did not move in the write that moved the playlist is the PREVIOUS source's", () => {
+  const A = "http://h.test/a.m3u", B = "http://h.test/b.m3u", E = "http://h.test/a.xml"
+  return [
+    // the playlist changed and the epgUrl did not: not adopted
+    Model.reconcileAction({ playlist: B, epg: E, lastPlaylist: A, lastEpg: E }).adoptEpg,
+    // both changed in one write: adopted
+    Model.reconcileAction({ playlist: B, epg: "http://h.test/b.xml", lastPlaylist: A, lastEpg: E }).adoptEpg,
+    // the epgUrl alone changed: adopted
+    Model.reconcileAction({ playlist: A, epg: "http://h.test/c.xml", lastPlaylist: A, lastEpg: E }).adoptEpg,
+    // a state load takes the settings as they are
+    Model.reconcileAction({ first: true, playlist: A, epg: E }).adoptEpg,
+    Model.reconcileAction({ force: true, playlist: A, epg: E, lastPlaylist: A, lastEpg: E }).adoptEpg
+  ]
+}, [false, true, true, true, true])
+checkCall("SR8/D-SINK-19: the adopt path really is the same reconcile, and it is what sets the active key", () => {
+  const A = "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"
+  const base = Model.withCacheLayout(Model.emptyState(), 2)
+  // the CLI sets a URL nobody has seen
+  const first = Model.reconcileSources(base, A, "", "", 1000, "", { adoptEpg: true })
+  const active = Model.withActiveKey(first.state, first.activeKey)
+  // the host has not caught up: the same value arrives again
+  const again = Model.reconcileSources(active, A, "", first.activeKey, 2000, "", { adoptEpg: true })
+  // and then the host reports the key gone, which must change nothing
+  const empty = Model.reconcileAction({ playlist: "", epg: "", lastPlaylist: A })
+  return [first.added, first.activeKey, Model.findSource(first.state.sources, first.activeKey).origin,
+          Model.activeKeyOf(active), again.changed, again.activeKey, again.added,
+          empty.act, Model.activeKeyOf(active)]
+  // `cli`, not `migrated`: the cache layout marker is already 2, so this is
+  // not the first v2 run (reconcileSources' origin rule, unchanged).
+}, ["d990c2e4", "d990c2e4", "cli", "d990c2e4", false, "d990c2e4", "", "ignore", "d990c2e4"])
+
+check("D-SINK-19: the state the migration writes is the only place the URL is, and the IPC summary still carries none",
+  [JSON.stringify(Model.sourcesSummary(oldShape([srcProvider]), OLD_KEY)).indexOf("://"),
+   JSON.stringify(Model.sourcesSummary(oldShape([srcProvider]), OLD_KEY)).indexOf("password"),
+   JSON.stringify(Model.sourceViews(oldShape([srcProvider], OLD_KEY), OLD_KEY, 1000, null)).indexOf("://"),
+   JSON.stringify(Model.sourceViews(oldShape([srcProvider], OLD_KEY), OLD_KEY, 1000, null)).indexOf("password")],
+  [-1, -1, -1, -1])
+
 // ---- M1.2 cosmetics: D-LIVE-19 (docs/STATUS.md) ----
 // The guide body is one surface at a time and Model.guideSurface is the whole
 // decision (Guide.qml binds emptyKind, hasChannels, showColumn and the footer
@@ -6338,7 +6700,13 @@ check("D-LIVE-19: a configured guide with channels renders the list, the column 
 check("D-LIVE-19: clearing playlistUrl takes the rows, the group column and the counts with it", (() => { const s = Model.guideSurface(clearedBody); return [s.empty, s.hasChannels, s.showList, s.showColumn, s.channelCount, s.setup] })(), ["unconfigured", false, false, false, 0, true])
 check("D-LIVE-19: the setup surface offers the `Saved sources (n)` path (the record outlives the setting)", [Model.guideSurface(clearedBody).savedSources, Model.guideSurface(Object.assign({}, clearedBody, { sources: 0 })).savedSources, Model.guideSurface(loadedBody).savedSources], [3, 0, 0])
 check("D-LIVE-19: no counts behind the setup surface, counts as shipped once configured", [Model.footerStatus({ configured: false, count: Model.guideSurface(clearedBody).channelCount, lastUpdated: "15:13" }), Model.footerStatus({ configured: true, count: Model.guideSurface(loadedBody).channelCount, lastUpdated: "15:13" })], ["", "10 channels" + SEP + "updated 15:13"])
-check("D-LIVE-19: clearing the setting keeps the source record and leaves no active key (Sources still lists it)", (() => { const first = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/a.m3u", "", "", 1); const after = Model.reconcileSources(first.state, "", "", first.added, 2); return [first.state.sources.length, after.state.sources.length, after.activeKey, after.invalid, after.changed, Model.activeSourceKey(after.state, "")] })(), [1, 1, "", null, false, ""])
+// D-LIVE-19 as a MODEL fact, and D-SINK-19 changed what the service does with
+// it rather than what reconcileSources answers: an empty input still adds
+// nothing, changes nothing and names no active key here -- and the service no
+// longer reads that as "clear the active source", because the plugin itself
+// empties the key (Model.reconcileAction: "ignore"). The CLI lever
+// `omarchy bar set ... playlistUrl ""` is GONE, which is in the release notes.
+check("D-LIVE-19: clearing the setting keeps the source record and leaves no active key (Sources still lists it)", (() => { const first = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/a.m3u", "", "", 1); const after = Model.reconcileSources(first.state, "", "", first.added, 2); return [first.state.sources.length, after.state.sources.length, after.activeKey, after.invalid, after.changed, recordKeyForUrl(after.state, "")] })(), [1, 1, "", null, false, ""])
 check("D-LIVE-19: every other empty kind is unchanged", [Model.guideSurface({ serviceReady: false }).empty, Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "loading" }).empty, Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "error" }).empty, Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "sky", scopeId: "all" }).empty, Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "", scopeId: "favorites" }).empty, Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 0, query: "", scopeId: "g:UK" }).empty], ["service", "loading", "error", "noMatches", "noFavorites", "emptyScope"])
 check("D-LIVE-19: a narrow card still hides only the column (UX 2.2), and a service-less guide nothing but the message", [Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showList, Model.guideSurface({ serviceReady: true, configured: true, channelCount: 7, rowCount: 7, narrow: true }).showColumn, Model.guideSurface({ serviceReady: false, configured: true, channelCount: 7, rowCount: 7 }).showList], [true, false, false])
 check("D-LIVE-19: garbage counts never become a body", [Model.guideSurface({ serviceReady: true, configured: true, channelCount: -5, status: "ready" }).empty, Model.guideSurface({ serviceReady: true, configured: true, channelCount: "10", status: "ready", rowCount: "10" }).empty, Model.guideSurface(null).empty, Model.guideSurface({}).empty], ["loading", "", "unconfigured", "unconfigured"])
@@ -6368,16 +6736,21 @@ check("EPG warnings: a playlist warning still outranks an EPG one in the same fo
 // plugin lays its own successful write over the host's value until the host
 // reports something else, so its UI is right at once and the echo, when it
 // does arrive, changes nothing.
-const hostA = Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/a.m3u", epgUrl: "" })
-const hostB = Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/b.m3u", epgUrl: "http://h.test/b.xml" })
-const writeB = Model.ownWriteFor(hostA, "http://h.test/b.m3u", "http://h.test/b.xml")
-check("own write: recorded against the host value it was made on", writeB, { base: { playlistUrl: "http://h.test/a.m3u", epgUrl: "" }, value: { playlistUrl: "http://h.test/b.m3u", epgUrl: "http://h.test/b.xml" } })
-check("own write: in force while the host still reports the base", [Model.ownWriteInForce(hostA, writeB), Model.settingsWithOwnWrite(hostA, writeB).playlistUrl, Model.settingsWithOwnWrite(hostA, writeB).epgUrl], [true, "http://h.test/b.m3u", "http://h.test/b.xml"])
-check("own write: every other setting still comes from the host", [Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/a.m3u", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).refreshMinutes, Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/a.m3u", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).mpvArgs], [45, "--mute"])
-check("own write: the host echoing our own value back lapses it, and the result is unchanged (idempotent)", [Model.ownWriteInForce(hostB, writeB), Model.settingsWithOwnWrite(hostB, writeB).playlistUrl, Model.settingsWithOwnWrite(hostB, writeB).epgUrl], [false, "http://h.test/b.m3u", "http://h.test/b.xml"])
-check("own write: a foreign change (omarchy bar set) lapses it and wins", (() => { const hostC = Model.settingsFrom({ id: "x", playlistUrl: "http://h.test/c.m3u", epgUrl: "" }); return [Model.ownWriteInForce(hostC, writeB), Model.settingsWithOwnWrite(hostC, writeB).playlistUrl] })(), [false, "http://h.test/c.m3u"])
-check("own write: clearing the active source is an ordinary write (D-LIVE-21)", (() => { const cleared = Model.ownWriteFor(hostB, "", ""); return [Model.settingsWithOwnWrite(hostB, cleared).playlistUrl, Model.settingsWithOwnWrite(hostB, cleared).epgUrl, Model.ownWriteInForce(hostB, cleared)] })(), ["", "", true])
-check("own write: no record, or a malformed one, leaves the host untouched", [Model.settingsWithOwnWrite(hostA, null).playlistUrl, Model.settingsWithOwnWrite(hostA, {}).playlistUrl, Model.settingsWithOwnWrite(hostA, { base: null, value: { playlistUrl: "x" } }).playlistUrl, Model.ownWriteInForce(hostA, undefined)], ["http://h.test/a.m3u", "http://h.test/a.m3u", "http://h.test/a.m3u", false])
+//
+// D-SINK-19: what a source write CARRIES is the active key now, not the URL
+// pair. The override machinery is unchanged and so is every property it has;
+// the values it is exercised over are keys.
+const hostA = Model.settingsFrom({ id: "x", sourceKey: "d990c2e4" })
+const hostB = Model.settingsFrom({ id: "x", sourceKey: "b0eed9fb" })
+const writeB = Model.ownWriteForKey(hostA, "b0eed9fb")
+check("own write: recorded against the host value it was made on", writeB, { base: { sourceKey: "d990c2e4" }, value: { sourceKey: "b0eed9fb" } })
+check("own write: in force while the host still reports the base", [Model.ownWriteInForce(hostA, writeB), Model.settingsWithOwnWrite(hostA, writeB).sourceKey], [true, "b0eed9fb"])
+check("own write: every other setting still comes from the host", [Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", sourceKey: "d990c2e4", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).refreshMinutes, Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", sourceKey: "d990c2e4", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).mpvArgs], [45, "--mute"])
+check("own write: the host echoing our own value back lapses it, and the result is unchanged (idempotent)", [Model.ownWriteInForce(hostB, writeB), Model.settingsWithOwnWrite(hostB, writeB).sourceKey], [false, "b0eed9fb"])
+check("own write: a foreign change (omarchy bar set) lapses it and wins", (() => { const hostC = Model.settingsFrom({ id: "x", sourceKey: "11111111" }); return [Model.ownWriteInForce(hostC, writeB), Model.settingsWithOwnWrite(hostC, writeB).sourceKey] })(), [false, "11111111"])
+check("own write: clearing the active source is an ordinary write (D-LIVE-21)", (() => { const cleared = Model.ownWriteForKey(hostB, ""); return [Model.settingsWithOwnWrite(hostB, cleared).sourceKey, Model.ownWriteInForce(hostB, cleared)] })(), ["", true])
+check("own write: a junk key written through ownWriteForKey is normalized, never stored raw", (() => { const w = Model.ownWriteForKey(hostA, "../../etc/passwd"); return [w.value.sourceKey, Model.settingsWithOwnWrite(hostA, w).sourceKey] })(), ["", ""])
+check("own write: no record, or a malformed one, leaves the host untouched", [Model.settingsWithOwnWrite(hostA, null).sourceKey, Model.settingsWithOwnWrite(hostA, {}).sourceKey, Model.settingsWithOwnWrite(hostA, { base: null, value: { sourceKey: "x" } }).sourceKey, Model.ownWriteInForce(hostA, undefined)], ["d990c2e4", "d990c2e4", "d990c2e4", false])
 check("own write: reconcile treats the echo of our own value as no change at all", (() => { const st = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/b.m3u", "", "", 10); const again = Model.reconcileSources(st.state, "http://h.test/b.m3u", "", st.activeKey, 20); return [again.changed, again.activeKey === st.activeKey, again.added] })(), [false, true, ""])
 
 // A `false` return from updateEntryInline is only a failure when the entry
@@ -6848,8 +7221,38 @@ check("settings parity: the model's defaults ARE the manifest's defaults",
 // other are one unit). They land together at integration, and the exception
 // that stood in for that - a by-name exclusion list here - is gone with them:
 // the equality below is total again, in both directions.
-check("settings parity: the model knows every key the manifest declares, and no others",
-  Object.keys(defaulted).slice().sort(), Object.keys(manifestDefaults).slice().sort())
+// D-SINK-19 breaks the total equality in ONE direction, deliberately and by
+// name. `sourceKey` is a key the plugin writes and reads and the manifest does
+// NOT declare, because declaring it would draw a text field in the host's
+// settings UI inviting a user to type a cache directory name -- and a
+// hand-typed key is either a source they already have (which the Sources
+// screen switches to properly) or a dangling pointer. It is not user
+// configuration; it is where the plugin keeps a pointer that happens to live
+// in the host's file.
+//
+// The join stays CHECKED rather than exempted: every manifest key must still
+// be a model key, and the model's extra keys must be exactly this list. Add
+// another undeclared key, or drop a declared one, and this goes red.
+const modelOnlySettings = ["sourceKey"]
+check("settings parity: the model knows every key the manifest declares, and its extra keys are the declared exceptions",
+  Object.keys(defaulted).slice().sort(),
+  Object.keys(manifestDefaults).concat(modelOnlySettings).slice().sort())
+check("settings parity: the model-only keys really are absent from the manifest, in both halves of it",
+  modelOnlySettings.map(function (key) {
+    return key + ": defaults=" + Object.prototype.hasOwnProperty.call(manifestDefaults, key)
+      + " schema=" + manifestSchema.some(function (row) { return row.key === key })
+  }),
+  modelOnlySettings.map(function (key) { return key + ": defaults=false schema=false" }))
+// And the retired keys are still DECLARED, because the input path is still
+// documented and supported (SR8, cost 1): `omarchy bar set ... playlistUrl
+// <url>` adopts. What changed is that the plugin never writes one back.
+check("settings parity: D-SINK-19 retired the URL keys from what the plugin WRITES, not from what the manifest offers",
+  Model.RETIRED_SETTINGS.map(function (key) {
+    return key + ": declared=" + Object.prototype.hasOwnProperty.call(manifestDefaults, key)
+      + " owned=" + (Model.OWNED_SETTINGS.indexOf(key) !== -1)
+      + " read=" + Object.prototype.hasOwnProperty.call(defaulted, key)
+  }),
+  Model.RETIRED_SETTINGS.map(function (key) { return key + ": declared=true owned=false read=true" }))
 
 const integerKeys = manifestSchema.filter(function (entry) { return entry.type === "integer" }).map(function (entry) { return entry.key })
 // The count is stated AND the property it stands for: every integer control
