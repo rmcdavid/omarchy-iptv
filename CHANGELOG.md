@@ -3,6 +3,31 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.13.2 (2026-10-09)
+
+**Security.** If your playlist URL has an `@` inside the username or password,
+the Sources list showed part of your password, and could show all of it. The
+row's host and its name were both built by cutting the URL at the first `@`
+instead of the last, so `https://user:p@ss@host.example/list.m3u` appeared as
+`ss@host.example`, and a username containing an `@` left the whole password on
+screen. Raised by the marketplace maintainer against 0.13.1.
+
+### Fixed
+
+- **The Sources row's host and name now stop at the real end of your
+  credentials**, whatever those credentials contain.
+- **A name that was already saved wrong is repaired when the plugin starts.**
+  The name is rebuilt from the URL each time, unless you typed it yourself, in
+  which case it is left exactly as you wrote it. Nothing you have to do.
+
+### Worth knowing
+
+If you had an affected source, the password was in the saved name and could
+have appeared in the guide's header and in the toast shown when you switch
+source. Rebuilding the name removes it from all of them. It cannot be
+retrieved from anywhere else the plugin writes, because every other place
+masks the URL, and that masking was never affected.
+
 ## 0.13.1 (2026-10-08)
 
 **Security.** 0.13.0 made the player check the identity of the server it

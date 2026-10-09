@@ -1175,9 +1175,25 @@ def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
 
 
 def host_port_of(url: str) -> str:
-    """Model.hostPortOf: host[:port] of a URL, lower-cased; "" for paths."""
-    match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://(?:[^@/?#]*@)?([^/?#]+)", url)
-    return match.group(1).lower() if match else ""
+    """Model.hostPortOf: host[:port] of a URL, lower-cased; "" for paths.
+
+    D-SINK-17. The userinfo ends at the LAST at-sign in the authority, not the
+    first. This matched `(?:[^@/?#]*@)?`, which cannot cross an at-sign, so
+    `https://user:p@ss@host.example/list.m3u` returned `ss@host.example` and
+    `https://u@er:pass@host.example/list.m3u` returned `er:pass@host.example`
+    -- the whole password, into the Sources row's host and default label, on a
+    source whose URL is masked everywhere else. D-SINK-1 was the same defect in
+    `redact_urls`; `url_host` and `validate_source_url` have been right all
+    along because they hand the string to a real parser or cut at the last
+    at-sign, and this now does the same.
+    """
+    match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", url)
+    if not match:
+        return ""
+    authority = match.group(1)
+    at = authority.rfind("@")
+    hostport = authority if at == -1 else authority[at + 1:]
+    return hostport.lower()
 
 
 def derive_label(url: str, kind: str) -> str:
@@ -6994,6 +7010,25 @@ def normalize_state(raw: Any) -> dict[str, Any]:
                 continue
             if find_source(state["sources"], record["key"]) or find_source_by_url(state["sources"], record["url"]):
                 continue
+            # D-SINK-17, the half the first fix missed. derive_label's output
+            # is STORED, so repairing the derivation does nothing for a record
+            # written before the repair: an install that added
+            # https://u@er:pass@host.example/list.m3u on 0.13.1 or earlier
+            # holds er:pass@host.example as its label, and the label is a wider
+            # sink than the host beside it -- public_source emits it verbatim
+            # next to the host it correctly redacts, and redact_urls cannot
+            # help because a bare er:pass@host has no "://" in it. A label the
+            # USER did not choose is therefore re-derived on every load. It is
+            # deterministic, so an unaffected record gets the string it already
+            # had; an affected one heals itself the first time the file is
+            # read. labelCustom is the whole of the distinction. Re-derived
+            # here rather than in normalize_source because uniqueness is a
+            # property of the LIST: two sources on one host must not both come
+            # back as that host.
+            if not record.get("labelCustom"):
+                record["label"] = unique_label(
+                    derive_label(record["url"], record["kind"]),
+                    [s2.get("label", "") for s2 in state["sources"]])
             state["sources"].append(record)
     return state
 

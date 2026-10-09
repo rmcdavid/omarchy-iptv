@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.13.1"
+var PLUGIN_VERSION = "0.13.2"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -2608,6 +2608,25 @@ function parseState(text) {
       continue
     }
     if (seenUrl[rec.url] || seenKey[rec.key]) continue
+    // D-SINK-17, the half the first fix missed. `deriveLabel`'s output is
+    // STORED, so repairing the derivation does nothing for a record written
+    // before the repair: an install that added
+    // `https://u@er:pass@host.example/list.m3u` on 0.13.1 or earlier holds
+    // `er:pass@host.example` in state.json as its label, and that label is a
+    // WIDER sink than the host beside it -- the guide header, the switched
+    // toast, the IPC status payload and the helper's own source listing all
+    // carry it, and `redactUrls` cannot help because a bare `er:pass@host`
+    // has no `://` for it to find. So a label the USER did not choose is
+    // re-derived on every load. It is deterministic, so an unaffected record
+    // gets the same string it already had and nothing moves; an affected one
+    // heals itself the first time the file is read. `labelCustom` is the
+    // whole of the distinction: a name the user typed is theirs, and this
+    // never touches it.
+    //
+    // Re-derived HERE rather than in normalizeSourceRecord, because
+    // uniqueness is a property of the list and not of a record: two sources
+    // on one host must not both come back as that host.
+    if (rec.labelCustom !== true) rec.label = uniqueLabel(deriveLabel(rec.url, rec.kind), state.sources)
     seenUrl[rec.url] = true
     seenKey[rec.key] = true
     state.sources.push(rec)
@@ -9039,9 +9058,40 @@ function sourceCacheDir(cacheDir, key) {
 
 // ---- labels (UX-SOURCES 5.6)
 
+// D-SINK-17. The userinfo ends at the LAST `@` in the authority, not the first,
+// and this took the first: `[^@/?#]*@` cannot cross an at-sign, so
+// `https://user:p@ss@host.example/list.m3u` gave `ss@host.example` and
+// `https://u@er:pass@host.example/list.m3u` gave `er:pass@host.example` -- the
+// whole password, in the Sources row's host and its default label, on a source
+// whose URL is masked everywhere else. Raised by the marketplace maintainer
+// against the shipped 0.13.1; the username case is worse than the report and
+// was found by measuring it.
+//
+// This is D-SINK-1 exactly, one function along: that was `redactUrls` leaking
+// the password tail when the password contained an at-sign, and its repair was
+// to cut at the LAST at-sign rather than the first. `validateSourceUrl` does
+// that over a properly isolated authority (bounded by `/`, `?` and `#`) and is
+// the model for the shape below.
+//
+// Do NOT read that as "the neighbours are all already safe", which an earlier
+// version of this comment implied and a review refuted by calling them.
+// `redactUrls` and `sourceLabel` bound the userinfo scan at `/` and whitespace
+// only, never at `?` or `#`, so on a URL with no path an at-sign in the QUERY
+// is taken as the delimiter: `redactUrls("http://h.test?a=b@c")` returns `"c"`.
+// They never UNDER-redact -- whatever they emit starts after an at-sign, so no
+// userinfo survives -- and anything that has been through `validateSourceUrl`
+// always carries a path of at least `/`, which is why the Sources path is
+// closed. `url_host` in the helper is a third shape again: it hands the string
+// to a real parser. Three implementations, three bounds; that spread is the
+// condition D-SINK-17 grew in, and it is recorded rather than tidied because
+// tidying it is a change with its own measurements to take.
 function hostPortOf(url) {
-  var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@\/?#]*@)?([^\/?#]+)/i)
-  return m ? m[1].toLowerCase() : ""
+  var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
+  if (!m) return ""
+  var authority = m[1]
+  var at = authority.lastIndexOf("@")
+  var hostport = at === -1 ? authority : authority.substring(at + 1)
+  return hostport.toLowerCase()
 }
 
 // Default label: the host (lowercase, leading `www.` dropped, `:port` kept
