@@ -5291,8 +5291,34 @@ checkCall("D-SINK-17: and neither does the default label", () =>
 check("D-SINK-17: the fixture actually carries the cases that broke it, so it cannot be trimmed to green", [
   labelFixture.cases.filter(c => /:[^@\/]*@[^@\/]*@/.test(c.url)).length >= 1,
   labelFixture.cases.filter(c => /\/\/[^:\/]*@[^@\/]*:[^@\/]*@/.test(c.url)).length >= 1,
-  labelFixture.cases.length
-], [true, true, 11])
+  labelFixture.cases.length >= 11
+], [true, true, true])
+// The fixture is the ORACLE for the two checks above, so on its own it can be
+// made green by reverting the parser and editing the expectations to match --
+// which a reviewer did, in a scratch copy, and node passed while python failed.
+// The python half had an invariant that holds whatever the fixture says; this
+// is that invariant, so the two halves are equally hard to fool. Counting
+// `>= 11` rather than `== 11` above for the same reason in reverse: adding a
+// twelfth case should not redden two suites in two languages.
+check("D-SINK-17: and no expectation in it may contain an at-sign, whatever the fixture is edited to say", [
+  labelFixture.cases.filter(c => String(c.hostPort).indexOf("@") !== -1).length,
+  labelFixture.cases.filter(c => String(c.label).indexOf("@") !== -1).length
+], [0, 0])
+
+// D-SINK-17, the half the first fix missed and a reviewer found: deriveLabel's
+// output is STORED, so repairing the derivation leaves every record written
+// before it. A label the user did not choose is re-derived on load, which
+// heals an affected install the first time its state file is read.
+checkCall("D-SINK-17: a stored label the user did not choose is re-derived on load, so an affected install heals itself", () => {
+  const mk = (k, url, label, custom) => ({ key: k, url: url, epgUrl: "", kind: "http", label: label,
+    labelCustom: custom === true, origin: "form", addedAt: 1, lastUsed: 1, fetchedAt: 0, channelCount: 0, groupCount: 0 })
+  const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: "sources", favorites: [], recents: [], savedSearches: [], hiddenGroups: [], sources: [
+    mk("d5977d8a", "https://u@er:pass@host.example/list.m3u", "er:pass@host.example"),
+    mk("aaaaaaa1", "https://user:p@ss@host.example/other.m3u", "ss@host.example"),
+    mk("aaaaaaa2", "https://u@er:pass@third.example/y.m3u", "My Provider", true)
+  ] }))
+  return st.sources.map(r => r.key + "=" + r.label)
+}, ["d5977d8a=host.example", "aaaaaaa1=host.example 2", "aaaaaaa2=My Provider"])
 check("fixture has every UX 5.4 URL code plus unsafe_path", [...new Set(fixture.filter(c => !c.ok).map(c => c.code))].sort(), ["empty", "invalid", "relative_path", "scheme", "too_long", "unsafe_path"])
 check("fixture covers files, IDN, IPv6, userinfo, fragments, control characters and the cap", fixture.length >= 75, true)
 for (const c of fixture) {

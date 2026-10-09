@@ -129,7 +129,10 @@ class ValidateSourceUrlTest(unittest.TestCase):
         self.assertTrue(fixture.exists(), "tests/fixtures/source-labels.json is missing")
         data = json.loads(fixture.read_text(encoding="utf-8"))
         cases = data["cases"]
-        self.assertEqual(len(cases), 11)
+        self.assertGreaterEqual(len(cases), 11)
+        for c in cases:
+            self.assertNotIn("@", c["hostPort"], c["url"])
+            self.assertNotIn("@", c["label"], c["url"])
         # The cases that BROKE it must still be in the fixture, or a later
         # trim could make this green by deleting the evidence.
         self.assertTrue(any(re.search(r":[^@/]*@[^@/]*@", c["url"]) for c in cases))
@@ -139,6 +142,32 @@ class ValidateSourceUrlTest(unittest.TestCase):
             self.assertEqual(helper.derive_label(case["url"], "http"), case["label"], case["url"])
             self.assertNotIn("@", helper.host_port_of(case["url"]), case["url"])
             self.assertNotIn("@", helper.derive_label(case["url"], "http"), case["url"])
+
+    def test_d_sink_17_a_stored_label_the_user_did_not_choose_is_re_derived(self):
+        """The half the first fix missed, found by a reviewer.
+
+        derive_label's output is STORED, so repairing the derivation leaves
+        every record written before it: an install that added
+        https://u@er:pass@host.example/list.m3u on 0.13.1 or earlier holds
+        er:pass@host.example as its label, and public_source emits that
+        verbatim beside the host it correctly redacts. redact_urls cannot
+        help, because a bare er:pass@host has no "://" in it. So a label the
+        USER did not choose is re-derived on load and an affected install
+        heals the first time its state file is read.
+        """
+        def mk(key, url, label, custom=False):
+            return {"key": key, "url": url, "epgUrl": "", "kind": "http", "label": label,
+                    "labelCustom": custom, "origin": "form", "addedAt": 1, "lastUsed": 1,
+                    "fetchedAt": 0, "channelCount": 0, "groupCount": 0}
+        state = helper.normalize_state({"version": 2, "cacheLayout": "sources", "sources": [
+            mk("d5977d8a", "https://u@er:pass@host.example/list.m3u", "er:pass@host.example"),
+            mk("aaaaaaa1", "https://user:p@ss@host.example/other.m3u", "ss@host.example"),
+            mk("aaaaaaa2", "https://u@er:pass@third.example/y.m3u", "My Provider", True),
+        ]})
+        labels = [s["label"] for s in state["sources"]]
+        self.assertEqual(labels, ["host.example", "host.example 2", "My Provider"])
+        for src in state["sources"]:
+            self.assertNotIn("@", helper.public_source(src)["label"])
 
     def test_shared_fixture_when_present(self):
         if not FIXTURE.exists():

@@ -12790,3 +12790,74 @@ fixture, `tests/fixtures/source-labels.json`, carries 11 cases including the
 two that broke it and is run by both languages against both callers, with a
 check that the fixture cannot be trimmed to green. Reverting either mirror
 reddens 2 node checks and 1 python test.
+
+### The review of D-SINK-17: the fix repaired the derivation and left the artifact (F-M3-16)
+
+Three reviewers over one small fix, with different lenses. One found the half
+that mattered.
+
+**`deriveLabel`'s output is PERSISTED.** It is written into the record's
+`label` with `labelCustom: false` and never re-derived, so an install that had
+already added `https://u@er:pass@host.example/list.m3u` holds
+`er:pass@host.example` in its state file, and repairing the derivation would
+have left it there forever. Confirmed by calling both mirrors on a record of
+the real shape:
+
+    parseState        -> label "er:pass@host.example", labelCustom false
+    sourceView        -> host "host.example", label "er:pass@host.example"
+    public_source     -> {"host": "host.example", "label": "er:pass@host.example"}
+    redactUrls on it  -> "er:pass@host.example"   (unchanged: no "://" to find)
+
+The label is a wider sink than the host beside it: the guide header, the
+switched toast, the IPC status payload and the helper's own source listing all
+carry it. And the user could not have worked it out, because the URL that
+explains the label is masked everywhere.
+
+So a label the user did not choose is re-derived on load, in the loop that can
+see its siblings so uniqueness survives:
+
+| stored | after load |
+|---|---|
+| `er:pass@host.example` on host.example | `host.example` |
+| `ss@host.example` on the same host | `host.example 2` |
+| `My Provider`, `labelCustom: true` | `My Provider` |
+
+It is deterministic, so an unaffected record gets the string it already had.
+Removing it from either mirror reddens that language's test. The lead's own
+state file was read read-only and holds no userinfo.
+
+**Two P3s, both real.** The new comment said `redactUrls` cuts over an isolated
+authority; it does not. It bounds the userinfo scan at `/` and whitespace only,
+never at `?` or `#`, so `redactUrls("http://h.test?a=b@c")` returns `"c"` and
+`sourceLabel` agrees. It never under-redacts, and anything through
+`validateSourceUrl` carries a path, so the Sources path is closed; but the
+sentence told the next reader a neighbour was safe in a way it is not, which is
+the reasoning that let D-SINK-1 sit three thousand lines from D-SINK-17. And the
+node half of the shared fixture could be made green by reverting the parser and
+editing the expectations to match, which a reviewer did in a scratch copy: node
+passed, python failed, because only the python half asserted an invariant that
+holds whatever the fixture says. Both halves carry it now.
+
+**F-M3-8 for the thirteenth round.** The lesson is rule 15's other half: when a
+value is derived AND stored, fixing the derivation is half the fix.
+
+### D-SRC-12: the two mirrors lower-case with different Unicode tables
+
+Found by the parser lens of the D-SINK-17 review, which was asked to compare
+the two implementations against each other rather than against the fixture.
+
+`hostPortOf` and `validateSourceUrl` normalize case with `toLowerCase()` in
+JavaScript and `.lower()` in Python, and node's Unicode data is ahead of this
+Python's for 28 codepoints: U+A7CE, U+A7D2, U+A7D4 and the 25 Medefaidrin
+capitals U+16EA0 to U+16EB8. None of them is whitespace, a control character,
+zero-width, a backslash or one of `:[]`, so all 28 pass the host rules and are
+storable.
+
+The disagreement reaches the host, the label and the cache key, which means the
+two implementations can resolve one source to different cache directories. No
+credential is involved and no provider uses these characters, which is why this
+is recorded rather than fixed in a security round: a change to case folding is
+a change to the cache key, and that has its own migration to think about.
+
+Recorded here so the next person who sees two cache directories for one source
+has somewhere to start.
