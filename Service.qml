@@ -3270,6 +3270,30 @@ Item {
     // This run is not what protects the write above (the shield at service
     // start, or the deferred one, did that); it is what makes sure the gate in
     // front of the next one is answering about the file as it is now.
+    //
+    // THE RESIDUAL, which is not zero and must never be written as zero.
+    // `hostConfigShield` answers about the file as of the last shield run, so
+    // a recreation that lands after that run and before this write is not
+    // seen, and ONE write reaches a 0644 file before the shield below
+    // tightens it. Two windows, and they are different sizes:
+    //   - the shield's own latency, measured on this machine (4 cores, one
+    //     `config shield` per run, n=12 each): 194-213 ms idle, median 197;
+    //     271-1076 ms with eight CPU spinners on four cores, median 919. It
+    //     is a process start, so it scales with load exactly as D-SINK-9's
+    //     shield does. NOTHING is written during it -- a persist that lands
+    //     here defers -- and after a write it is how long the gate stays one
+    //     run behind.
+    //   - the gap from that run's exit to the next persist, which is however
+    //     long the user goes between source edits and is therefore UNBOUNDED
+    //     in time. It is bounded in EVENTS: the answer is at most one shield
+    //     run old, and a run follows service start, every persist and every
+    //     logo toggle.
+    // What closes the second window is making every persist wait for its own
+    // fresh answer -- the defer machinery already exists, so it is a one-line
+    // change from "consult the cached state" to "always defer" -- at the cost
+    // of the latency above on each source add, edit and switch. Not taken
+    // this round: the brief says shield at start and after each persist, and
+    // the trade is the product owner's to make rather than this lane's.
     root.runConfigShield()
     return true
   }
