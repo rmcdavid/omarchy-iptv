@@ -8,8 +8,19 @@ Quickshell process. Released through v0.13.3. Four of the last releases were cut
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
 request for that very commit; the
-verified snapshot is v0.12.0 (f89f748, #10012, approved 2026-10-04 in about
-an hour) until the 0.12.1 and 0.13.0 requests are actioned;
+verified snapshot is STILL v0.12.0 (f89f748, approved 2026-10-04), five
+releases behind, and that is worth knowing rather than assuming: the catalog
+read on 2026-10-09 gives `verificationCommit f89f748`,
+`verificationCheckedAt 2026-10-04T17:51:07Z`, beside `version 0.13.1`, so the
+two fields do not mean the same thing. The requests for 0.12.1, 0.13.0,
+0.13.1 and 0.13.2 were all CLOSED by the maintainer carrying `validated` and
+`plugin-update` but NOT `approved-and-verified`, i.e. superseded rather than
+approved, while he raised a finding on each. Only 0.13.3's (#10802) is open.
+Consequence, and it is the reason this is in this file: an existing install
+updates immediately, because `omarchy-plugin-update` is `git merge --ff-only`,
+but what the marketplace SERVES to a new install is the verified snapshot --
+so a fresh install today gets 0.12.0, which predates every TLS and credential
+fix of this week. Re-read the catalog before repeating any of this;
 the twelve days it sat on v0.7.1 are explained in the decisions log.
 
 ## Branches: `dev` is the tree, `main` is the artifact
