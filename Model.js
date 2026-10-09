@@ -3318,6 +3318,12 @@ function statusReason(status) {
     unknown_source: "Unknown source",
     not_ready: "Sources not loaded yet",
     persist_failed: "Could not save settings",
+    // D-SINK-18. The ONE code the shield surfaces. The verb's finer verdicts
+    // (absent, symlink, foreign, not_regular, replaced, error) stay inside
+    // the helper and the console: configShieldState collapses all of them to
+    // "not private", and a user-facing sentence per filesystem accident
+    // would be vocabulary nothing acts on.
+    config_unsafe: "Settings file is not private",
     cancelled: "Cancelled"
   }
   if (table[code]) return table[code]
@@ -4545,6 +4551,98 @@ function failedArgv(helperPath, action, id, cacheDir) {
 
 function logoFetchArgv(helperPath, cacheDir) {
   return helperArgv(helperPath, ["logos", "--fetch", "--cache-dir", str(cacheDir)])
+}
+
+// ---- D-SINK-18: the container the host settings file is, before a URL goes
+// into it.
+//
+// `persistActive` writes the active source's playlist and EPG URLs onto the
+// plugin's bar entry and the host persists that into
+// ~/.config/omarchy/shell.json. The lead MEASURED (2026-10-09) that the
+// packaged default of that file is 0644, that `omarchy-refresh-config`
+// copies it with `cp -f` (so a first creation under the ordinary umask leaves
+// it 0644), and that Quickshell's FileView with `atomicWrites: true` neither
+// resets nor tightens the mode of a file that already exists: 0644 in, 0644
+// out, content changed. So the plugin cannot assume the file it is putting a
+// provider credential into is private -- while its OWN files are 0600 inside
+// 0700 directories (rule 6).
+//
+// The owner's ruling: make that one file private BEFORE the URL goes in, and
+// REFUSE to persist if it cannot be made private. QML cannot chmod, so the
+// work is the helper's `config shield` verb; these three functions are the
+// decision, lifted here so a test can call it (rule 12) instead of a QML
+// component holding it where nothing can reach it.
+//
+// Deliberately NOT widened: nothing here looks at, reports or acts on the
+// mode of ~/.config or ~/.config/omarchy. A 0600 file is sufficient whatever
+// the directory modes are, and ~/.config is shared with everything on the
+// system.
+var CONFIG_SHIELD_UNKNOWN = ""
+var CONFIG_SHIELD_PRIVATE = "private"
+var CONFIG_SHIELD_EXPOSED = "exposed"
+
+var CONFIG_PERSIST = "persist"
+var CONFIG_REFUSE = "refuse"
+var CONFIG_DEFER = "defer"
+
+function configShieldArgv(helperPath) {
+  return helperArgv(helperPath, ["config", "shield"])
+}
+
+// The verb's answer, collapsed to the only distinction the service acts on.
+//
+// FAIL CLOSED, and that is the whole shape of this function: `private` is
+// returned only when the run said so three ways at once -- `ok`, `private`
+// and the verdict string. Everything else is `exposed`: a crashed helper, no
+// output at all, an unparseable line, one of the verb's other verdicts
+// (absent, symlink, foreign, not_regular, replaced, error) and -- the case
+// this is really written for -- a verdict string this version of Model.js has
+// never heard of. A helper that learns a new verdict later cannot have it
+// read as "private" by an older guide.
+//
+// There is no "unknown" return. Unknown means "the run has not answered
+// yet", which is a fact about the SERVICE and not about the file, and
+// conflating the two is how a broken helper would come to defer every write
+// for ever.
+function configShieldState(text) {
+  var status = parseHelperStatus(text, "config")
+  var ok = status.ok === true && status.private === true && str(status.verdict) === CONFIG_SHIELD_PRIVATE
+  return ok ? CONFIG_SHIELD_PRIVATE : CONFIG_SHIELD_EXPOSED
+}
+
+// Does this persist put a secret into the file?
+//
+// ANY non-empty URL does. Not "does it look like it has a password in it":
+// a provider path token (`/live/USER/PASS/123.ts`) is a credential as surely
+// as a query parameter is, which is why rule 5 treats whole URLs as secrets
+// rather than trying to find the secret inside one.
+//
+// And the write that must NEVER be gated is the one that takes the URL OUT.
+// `removeSource` persists ("", ""), and if that could be refused because the
+// file is exposed then a user whose shell.json is 0644 could not remove the
+// credential that is sitting in it -- the fix would hold the defect in place.
+function persistCarriesSecret(playlistUrl, epgUrl) {
+  return str(playlistUrl).trim() !== "" || str(epgUrl).trim() !== ""
+}
+
+// Three answers, because QML cannot block on a Process.
+//
+//   persist  the file is known private, or this write carries no secret
+//   refuse   the file is known NOT private and could not be made private
+//   defer    no answer yet -- hold the write, do not guess either way
+//
+// `defer` exists for one window: the shield runs at service start, and a
+// persist that arrives before its first exit must neither write blind (which
+// is the defect) nor fail the user (which would be a refusal we cannot
+// justify, since the file may well be fine). After the first exit the state
+// is always private or exposed, so this answer is reachable only in that
+// window; see Service.qml's pendingPersist for what holding it means.
+function configShieldDecision(state, playlistUrl, epgUrl) {
+  if (!persistCarriesSecret(playlistUrl, epgUrl)) return CONFIG_PERSIST
+  var s = str(state)
+  if (s === CONFIG_SHIELD_PRIVATE) return CONFIG_PERSIST
+  if (s === CONFIG_SHIELD_EXPOSED) return CONFIG_REFUSE
+  return CONFIG_DEFER
 }
 
 function seqArg(seq) {
@@ -8800,6 +8898,12 @@ function sourceErrorMessage(code, opts) {
     unknown_source: "Source not found",
     not_ready: "Not ready yet" + SEP + "try again in a moment",
     persist_failed: "Could not save settings" + SEP + "try omarchy bar set",
+    // D-SINK-18. Deliberately NOT the persist_failed sentence: that one sends
+    // the user to `omarchy bar set`, which would write the credentialed URL
+    // into their shell history permanently -- the durable exposure engineering
+    // rule 5 (dev branch) says is not accepted. This one names the real fix
+    // instead, and the command it names carries no secret.
+    config_unsafe: "Settings file is readable by other users" + SEP + "chmod 600 ~/.config/omarchy/shell.json",
     cancelled: "Cancelled"
   }
   var text = table[c] || ""
@@ -10376,6 +10480,17 @@ if (typeof module !== "undefined") {
     confirmLogosMessage: confirmLogosMessage,
     logoFetchArgv: logoFetchArgv,
     failedArgv: failedArgv,
+    // D-SINK-18
+    configShieldArgv: configShieldArgv,
+    configShieldState: configShieldState,
+    configShieldDecision: configShieldDecision,
+    persistCarriesSecret: persistCarriesSecret,
+    CONFIG_SHIELD_UNKNOWN: CONFIG_SHIELD_UNKNOWN,
+    CONFIG_SHIELD_PRIVATE: CONFIG_SHIELD_PRIVATE,
+    CONFIG_SHIELD_EXPOSED: CONFIG_SHIELD_EXPOSED,
+    CONFIG_PERSIST: CONFIG_PERSIST,
+    CONFIG_REFUSE: CONFIG_REFUSE,
+    CONFIG_DEFER: CONFIG_DEFER,
     optInSetting: optInSetting,
     logoSurvey: logoSurvey,
     logoConsentLines: logoConsentLines,

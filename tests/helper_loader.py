@@ -14,6 +14,10 @@ imports all of them before it runs any test, so this runs first. What it does
 is asserted by tests/test_live_state_guard.py rather than trusted: that module
 calls the shipping path resolvers and fails if any of them still answers with
 a path under the user's real home.
+
+Since D-SINK-18 the helper can also CHMOD a file -- the host's own
+shell.json -- so XDG_CONFIG_HOME is redirected with the rest and the live
+file's mode is fingerprinted beside its bytes.
 """
 import atexit
 import hashlib
@@ -22,6 +26,7 @@ import importlib.util
 import os
 import pathlib
 import shutil
+import stat as stat_module
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -33,6 +38,15 @@ REAL_HOME = pathlib.Path(os.path.expanduser("~")).resolve()
 REAL_STATE_FILE = REAL_HOME / ".local" / "state" / "omarchy-iptv" / "state.json"
 if "XDG_STATE_HOME" in os.environ:
     REAL_STATE_FILE = pathlib.Path(os.environ["XDG_STATE_HOME"]).resolve() / "omarchy-iptv" / "state.json"
+
+# D-SINK-18 brought a second live file within reach: the HOST's settings file,
+# which the suite must leave alone in BOTH its bytes and its MODE. A chmod
+# does not move mtime, so a bytes-only fingerprint would miss exactly the
+# thing the new verb changes -- captured here as (fingerprint, mode) before
+# any test module is imported.
+REAL_CONFIG_FILE = REAL_HOME / ".config" / "omarchy" / "shell.json"
+if "XDG_CONFIG_HOME" in os.environ:
+    REAL_CONFIG_FILE = pathlib.Path(os.environ["XDG_CONFIG_HOME"]).resolve() / "omarchy" / "shell.json"
 
 
 def fingerprint_of(path):
@@ -51,8 +65,22 @@ def live_state_fingerprint():
     return fingerprint_of(REAL_STATE_FILE)
 
 
-# What the file looked like before a single test ran.
+def mode_of(path):
+    """The permission bits of a file, or None when it does not exist."""
+    try:
+        return stat_module.S_IMODE(pathlib.Path(path).lstat().st_mode)
+    except OSError:
+        return None
+
+
+def live_config_fingerprint():
+    """(bytes fingerprint, mode) of the HOST's settings file (D-SINK-18)."""
+    return (fingerprint_of(REAL_CONFIG_FILE), mode_of(REAL_CONFIG_FILE))
+
+
+# What the files looked like before a single test ran.
 LIVE_STATE_BEFORE = live_state_fingerprint()
+LIVE_CONFIG_BEFORE = live_config_fingerprint()
 
 SANDBOX = pathlib.Path(tempfile.mkdtemp(prefix="omarchy-iptv-test-home-"))
 atexit.register(shutil.rmtree, str(SANDBOX), True)
