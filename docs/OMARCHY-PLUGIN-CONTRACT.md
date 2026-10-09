@@ -309,3 +309,29 @@ the user has. The reason the wrong one was reached for is worth recording: a
 listing of `omarchy-restart*` and `omarchy-launch*` was read as if it were
 complete when it had been truncated, so the right command was never seen. See
 D-HOST-3.
+
+## The host's settings file is named from `$HOME`, not `$XDG_CONFIG_HOME` (verified 2026-10-09)
+
+`/usr/share/omarchy/shell/shell.qml`:
+
+```
+line 23:  property string home: Quickshell.env("HOME")
+line 32:  readonly property string userConfigPath: home + "/.config/omarchy/shell.json"
+```
+
+The file contains no other reference to `XDG_CONFIG_HOME`. So the host writes
+`$HOME/.config/omarchy/shell.json` and nothing else, whatever the XDG variable
+says.
+
+This matters because D-SINK-18 has the helper change that file's mode. A helper
+that derived the path from `$XDG_CONFIG_HOME` would, on a machine where that
+variable points elsewhere, tighten a file the host never writes and report
+success while the credential went into the host's real file untouched. That is
+what the first version did, on the lead's own instruction, and two reviewers
+found it independently.
+
+`tests/test_host_config_path.py` makes the join a call rather than a name: it
+reads the property out of the host's own source, asserts the expression, asserts
+the host still takes its home from `$HOME`, and asserts the helper's path equals
+the host's on this machine including with `XDG_CONFIG_HOME` moved. It skips
+where Omarchy is not installed, so it constrains this machine and never a CI box.

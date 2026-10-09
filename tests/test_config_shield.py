@@ -57,7 +57,13 @@ class ShieldTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.config_home = pathlib.Path(self.tmp.name) / "config"
+        # D-SINK-18 repair: the helper derives the path from $HOME, not from
+        # $XDG_CONFIG_HOME, because the HOST does (shell.qml:23 and :32, pinned
+        # by tests/test_host_config_path.py). The first version of this fixture
+        # isolated by XDG_CONFIG_HOME, which was testing a path the host never
+        # writes. The layout below is the host's: $HOME/.config/omarchy/.
+        self.home = pathlib.Path(self.tmp.name) / "home"
+        self.config_home = self.home / ".config"
         self.dir = self.config_home / "omarchy"
         self.dir.mkdir(mode=0o755, parents=True)
         self.path = self.dir / "shell.json"
@@ -76,7 +82,12 @@ class ShieldTestCase(unittest.TestCase):
     def shield(self, config_home=None, cwd=None, env=None):
         """Run the real verb as a child process, the way the service does."""
         merged = dict(os.environ)
-        merged["XDG_CONFIG_HOME"] = str(self.config_home if config_home is None else config_home)
+        base = self.config_home if config_home is None else pathlib.Path(str(config_home))
+        merged["HOME"] = str(base.parent if str(base) not in ("", ".") else base)
+        # Set deliberately WRONG, so every run of every case re-proves that the
+        # helper ignores it. If it ever starts honouring it again, these go red
+        # rather than silently testing the wrong file.
+        merged["XDG_CONFIG_HOME"] = str(pathlib.Path(self.tmp.name) / "xdg-must-be-ignored")
         if env:
             merged.update(env)
         completed = subprocess.run([sys.executable, str(HELPER), "config", "shield"],
@@ -91,8 +102,10 @@ class ShieldTestCase(unittest.TestCase):
         """Call the shipping function directly, for the races a child cannot
         be made to lose on command. The patches below are on `os`, so what
         runs is the real shield_host_config over a real file."""
+        base = self.config_home if config_home is None else pathlib.Path(str(config_home))
         with mock.patch.dict(os.environ,
-                             {"XDG_CONFIG_HOME": str(self.config_home if config_home is None else config_home)}):
+                             {"HOME": str(base.parent),
+                              "XDG_CONFIG_HOME": str(pathlib.Path(self.tmp.name) / "xdg-must-be-ignored")}):
             return helper.shield_host_config()
 
 
@@ -240,15 +253,25 @@ class ShieldRefusalTest(ShieldTestCase):
     @unittest.skipUnless(packaged_is_foreign(),
                          "needs the root-owned packaged default at %s" % PACKAGED_FILE)
     def test_a_file_owned_by_another_user_is_refused_untouched(self):
-        before = stat.S_IMODE(PACKAGED_FILE.lstat().st_mode)
-        code, payload, _ = self.shield(config_home=PACKAGED_CONFIG_HOME)
-        self.assertEqual(code, 1)
-        self.assertEqual(payload["verdict"], "foreign")
-        self.assertEqual(payload["error"]["code"], "config_foreign")
-        self.assertFalse(payload["changed"])
-        # /usr/share is package-owned: read freely, never written.
-        self.assertEqual(stat.S_IMODE(PACKAGED_FILE.lstat().st_mode), before)
+        """Driven in process, because the path comes from $HOME now and a
+        root-owned file cannot be placed at $HOME/.config/omarchy/shell.json
+        without root. The patch is on the fstat the shipping code performs, so
+        the real shield runs over a real file and only the reported owner is
+        forced."""
+        self.write(0o644)
+        real_fstat = os.fstat
 
+        def foreign_fstat(fd):
+            st = real_fstat(fd)
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                                   st.st_uid + 1, st.st_gid, st.st_size,
+                                   int(st.st_atime), int(st.st_mtime), int(st.st_ctime)))
+
+        with mock.patch.object(os, "fstat", side_effect=foreign_fstat):
+            payload = self.in_process()
+        self.assertEqual(payload["verdict"], "foreign")
+        self.assertFalse(payload["changed"])
+        self.assertEqual(self.mode(), 0o644, "a file we refused was modified anyway")
     def test_ownership_is_decided_by_the_effective_uid(self):
         # The same refusal without needing a root-owned file: our own file
         # seen by a process whose euid is somebody else's.
@@ -383,54 +406,73 @@ class ShieldPathTest(ShieldTestCase):
                                    capture_output=True, text=True, timeout=30)
         self.assertEqual(completed.returncode, 2)
 
-    def test_xdg_config_home_decides_the_path(self):
+    def test_home_decides_the_path_and_xdg_config_home_does_not(self):
+        """The D-SINK-18 repair as the case that would otherwise have shipped.
+        The HOST names its settings file from $HOME (shell.qml:23 and :32,
+        pinned by tests/test_host_config_path.py), so the helper must too. On a
+        machine where $XDG_CONFIG_HOME points elsewhere the first version
+        tightened a decoy, reported success, and left the host's real file
+        exposed."""
         self.write(0o644)
-        other = pathlib.Path(self.tmp.name) / "other"
-        (other / "omarchy").mkdir(mode=0o755, parents=True)
-        decoy = other / "omarchy" / "shell.json"
+        decoy_home = pathlib.Path(self.tmp.name) / "xdg-must-be-ignored"
+        (decoy_home / "omarchy").mkdir(mode=0o755, parents=True)
+        decoy = decoy_home / "omarchy" / "shell.json"
         decoy.write_text("{}", encoding="utf-8")
         os.chmod(decoy, 0o644)
-        code, payload, _ = self.shield(config_home=other)
-        self.assertEqual(code, 0)
-        self.assertEqual(stat.S_IMODE(decoy.lstat().st_mode), 0o600)
-        # The one that was NOT named is untouched.
-        self.assertEqual(self.mode(), 0o644)
-
-    def test_a_relative_xdg_config_home_is_ignored(self):
-        # The XDG basedir spec says to ignore a relative value, and for this
-        # verb it is the difference between the user's config and whatever
-        # directory the shell happened to be started in. HOME is redirected
-        # with it, so the fallback lands in this test's own tree.
-        home = pathlib.Path(self.tmp.name) / "home"
-        fallback_dir = home / ".config" / "omarchy"
-        fallback_dir.mkdir(mode=0o755, parents=True)
-        fallback = fallback_dir / "shell.json"
-        fallback.write_text("{}", encoding="utf-8")
-        os.chmod(fallback, 0o644)
-        self.write(0o644)
-        trap = pathlib.Path(self.tmp.name) / "cwd"
-        (trap / "config" / "omarchy").mkdir(mode=0o755, parents=True)
-        decoy = trap / "config" / "omarchy" / "shell.json"
-        decoy.write_text("{}", encoding="utf-8")
-        os.chmod(decoy, 0o644)
-        code, payload, _ = self.shield(config_home="config", cwd=str(trap),
-                                       env={"HOME": str(home)})
+        code, payload, _ = self.shield()
         self.assertEqual(code, 0, payload)
-        self.assertEqual(stat.S_IMODE(fallback.lstat().st_mode), 0o600)
-        self.assertEqual(stat.S_IMODE(decoy.lstat().st_mode), 0o644)
+        self.assertEqual(payload["verdict"], "private")
+        self.assertEqual(self.mode(), 0o600)
+        self.assertEqual(stat.S_IMODE(decoy.lstat().st_mode), 0o644,
+                         "a moved XDG_CONFIG_HOME still steered the shield")
+    def test_a_relative_home_does_not_resolve_against_the_working_directory(self):
+        """What a relative value costs a verb that chmods: the file it changes
+        would be chosen by whatever directory the shell was started in. The
+        helper takes $HOME now, so the guard moves with it."""
+        trap = pathlib.Path(self.tmp.name) / "cwd"
+        (trap / ".config" / "omarchy").mkdir(mode=0o755, parents=True)
+        bait = trap / ".config" / "omarchy" / "shell.json"
+        bait.write_text("{}", encoding="utf-8")
+        os.chmod(bait, 0o644)
+        merged = dict(os.environ)
+        merged["HOME"] = "."
+        completed = subprocess.run([sys.executable, str(HELPER), "config", "shield"],
+                                   capture_output=True, text=True, env=merged,
+                                   cwd=str(trap), timeout=30)
+        self.assertEqual(stat.S_IMODE(bait.lstat().st_mode), 0o644,
+                         "a relative HOME was resolved against the working directory")
+        self.assertIsNotNone(completed.returncode)
+    def test_an_empty_home_falls_back_to_an_absolute_path_or_to_nothing(self):
+        """Driven IN PROCESS with the password database patched, deliberately.
 
-    def test_an_empty_xdg_config_home_falls_back_to_home(self):
-        home = pathlib.Path(self.tmp.name) / "home2"
-        target_dir = home / ".config" / "omarchy"
-        target_dir.mkdir(mode=0o755, parents=True)
-        target = target_dir / "shell.json"
-        target.write_text("{}", encoding="utf-8")
-        os.chmod(target, 0o644)
-        code, _, _ = self.shield(config_home="", env={"HOME": str(home)})
-        self.assertEqual(code, 0)
-        self.assertEqual(stat.S_IMODE(target.lstat().st_mode), 0o600)
+        Running the verb with HOME="" would fall back to the real passwd home
+        and aim it at the developer's own ~/.config/omarchy/shell.json, which
+        is the one file these tests must never touch. The first version of this
+        test did exactly that. What matters is the rule, and the rule is
+        checkable without going near it: an unusable HOME never yields a
+        RELATIVE target, it yields an absolute one or none at all.
+        """
+        import pwd as pwdmod
 
+        class Fake:
+            pw_dir = "/somewhere/absolute"
 
+        with mock.patch.dict(os.environ, {"HOME": ""}), \
+             mock.patch.object(pwdmod, "getpwuid", return_value=Fake()):
+            self.assertEqual(helper.host_config_path(),
+                             "/somewhere/absolute/.config/omarchy/shell.json")
+
+        class Relative:
+            pw_dir = "relative/home"
+
+        with mock.patch.dict(os.environ, {"HOME": ""}), \
+             mock.patch.object(pwdmod, "getpwuid", return_value=Relative()):
+            self.assertEqual(helper.host_config_path(), "",
+                             "a relative passwd home produced a target anyway")
+
+        with mock.patch.dict(os.environ, {"HOME": ""}), \
+             mock.patch.object(pwdmod, "getpwuid", side_effect=KeyError("no such uid")):
+            self.assertEqual(helper.host_config_path(), "")
 class ShieldOutputTest(ShieldTestCase):
     """Rule 5 at this sink: a verdict and two modes, nothing else."""
 
@@ -496,10 +538,11 @@ class ShieldOutputTest(ShieldTestCase):
 class ShieldHelperApiTest(ShieldTestCase):
     """The pieces Service.qml and the verb are built out of."""
 
-    def test_host_config_path_is_the_hosts_file_under_the_config_home(self):
-        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config_home)}):
+    def test_host_config_path_is_the_hosts_file_under_home(self):
+        """And $XDG_CONFIG_HOME does not move it, which is the whole repair."""
+        with mock.patch.dict(os.environ, {"HOME": str(self.home),
+                                          "XDG_CONFIG_HOME": "/tmp/not-where-the-host-writes"}):
             self.assertEqual(helper.host_config_path(), str(self.path))
-            self.assertEqual(helper.config_home(), str(self.config_home))
 
     def test_mode_text_is_four_octal_digits(self):
         self.assertEqual([helper.mode_text(m) for m in (0o600, 0o644, 0o7, 0, 0o100644)],

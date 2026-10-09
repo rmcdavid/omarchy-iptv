@@ -95,6 +95,7 @@ import io
 import json
 import math
 import os
+import pwd
 import re
 import select
 import signal
@@ -612,11 +613,49 @@ def host_config_path() -> str:
     There is deliberately NO path argument and no override flag. A verb that
     chmods whatever path it is handed is a capability this plugin has no
     reason to own, it is the first thing a reviewer looks for, and the shell
-    does not need it: the shell and the helper derive the same path from the
-    same environment, so handing it over would add a parameter and no
-    information. $XDG_CONFIG_HOME is honoured because the host honours it.
+    does not need it.
+
+    DERIVED FROM $HOME, NOT FROM $XDG_CONFIG_HOME, because that is what the
+    HOST does. The first version of this used config_home() and its docstring
+    said "$XDG_CONFIG_HOME is honoured because the host honours it", which is
+    the opposite of the truth and was the lead's own instruction. Measured on
+    this machine: /usr/share/omarchy/shell/shell.qml:32 reads
+
+        readonly property string userConfigPath: home + "/.config/omarchy/shell.json"
+
+    with `home` from Quickshell.env("HOME") at line 23, and the file contains
+    no other reference to XDG_CONFIG_HOME. So on any machine where
+    XDG_CONFIG_HOME points somewhere other than $HOME/.config -- a supported,
+    ordinary configuration -- the shield would have tightened a file the host
+    never writes and reported success, while the credential went into the
+    host's real file untouched. Two reviewers found this independently.
+
+    The join between this path and the host's is a NAME, which rule 13 says
+    nothing verifies, so the host-config-path test (dev branch) reads that line
+    out of the host's own source and goes red if it ever moves. The measured
+    host facts are in the plugin contract document (dev branch).
+
+    The home must be ABSOLUTE, and that guard is not decoration. The version
+    of this function that first dropped config_home() also dropped its
+    relative-value check, and the tests caught it the same minute: with
+    HOME="." the verb changed the mode of ./.config/omarchy/shell.json, a file
+    chosen by whatever directory the shell happened to be started in, and with
+    HOME="" it built a relative path at all. A verb that changes a file mode
+    may not take its target from a value meaning "wherever we happen to be".
+    Returns "" when nothing names a home, and the caller refuses rather than
+    guessing.
     """
-    return os.path.join(config_home(), HOST_CONFIG_DIR, HOST_CONFIG_FILE)
+    home = os.environ.get("HOME") or ""
+    if not os.path.isabs(home):
+        try:
+            home = pwd.getpwuid(os.getuid()).pw_dir or ""
+        except (KeyError, OSError):
+            home = ""
+    if not os.path.isabs(home):
+        # Nothing names a home, so nothing names the file. The caller reports
+        # this the way it reports any other refusal; it never guesses.
+        return ""
+    return os.path.join(home, ".config", HOST_CONFIG_DIR, HOST_CONFIG_FILE)
 
 
 def mode_text(mode: int) -> str:
