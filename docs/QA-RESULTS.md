@@ -12995,3 +12995,66 @@ identifies a source, it adds a field to the state file that has never existed,
 and `playlistUrl` on the bar entry is a documented way for a user to configure
 the plugin directly. It is filed rather than rushed into a security release,
 which is what an id is for.
+
+### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
+
+Three reviewers over one fix. They found three P1s.
+
+**The path was wrong, and the brief said to make it wrong.** The shield
+computed `$XDG_CONFIG_HOME/omarchy/shell.json`. The host does not read that
+variable:
+
+    /usr/share/omarchy/shell/shell.qml:23  property string home: Quickshell.env("HOME")
+    /usr/share/omarchy/shell/shell.qml:32  readonly property string userConfigPath: home + "/.config/omarchy/shell.json"
+
+and the file mentions `XDG_CONFIG_HOME` nowhere. On a machine with that
+variable moved, the shield would have tightened a file the host never writes,
+reported success, and left the credential where it was. Two reviewers found it
+independently. The path comes from `$HOME` now and the join is a test that
+reads the property out of the host's own source.
+
+**The ordering had no check that could go red.** The gate passed with the
+persist gate deleted and with the write moved ahead of the shield, because the
+end state is identical and only the order differs. That is the whole security
+value, so it now has a pin, labelled a structural pin because Service.qml
+cannot be instantiated from node, and both of the review's mutations redden it.
+It also pins that `writeActive` has exactly two call sites.
+
+**A lane committed a red gate and reported it green.** Verified by running it.
+Its spike carried a word the marketplace capability scan reads as a privilege
+request.
+
+### The repair created two more, and the new tests caught both immediately
+
+Dropping the old path helper also dropped its absolute-path guard, so
+`HOME="."` aimed the chmod at the working directory and `HOME=""` built a
+relative target. An unusable home now yields an absolute path or none at all.
+
+And one of the new tests was dangerous rather than wrong: it ran the verb with
+`HOME=""`, which falls back to the password database and would have aimed it at
+the developer's own config. It is in process with the database patched now. The
+live file was byte-identical and mode-identical throughout, against a baseline
+taken before any lane started.
+
+The same mistake was in the scenario, the stub and a predicate: all three
+isolated by `XDG_CONFIG_HOME`, so the scenario's five mode checks were aimed at
+the real config and failed because the decoy was never touched. All now name
+`HOME`, and `XDG_CONFIG_HOME` is set somewhere nonexistent so each run
+re-proves it is ignored. The scenario is 11 passed 0 failed, and its mutation
+table is 11/0 clean with each mutation reddening its own checks.
+
+### Two things a user would have hit
+
+A refusal was permanent until the shell restarted. The message tells the user
+to run a chmod; the next attempt was refused by an answer taken before they ran
+it. The refuse branch re-arms.
+
+An absent settings file read as exposed, which refused every save for ever on a
+machine that simply had no user config yet. It is its own state now and it
+persists: no file means no credential in it, and the re-arm after every write
+tightens what the host then creates. Everything else still fails closed, and
+the sentence no longer says "readable by other users" about a symlink.
+
+**F-M3-8 for the fourteenth round**, in its sharpest form: the brief was the
+defect, and the only reason it did not ship is that three reviewers were asked
+to attack it.
