@@ -12972,3 +12972,26 @@ source is still playlistUrl / epgUrl on the bar entry" and `activeSourceKey`
 (Service.qml:247) IDENTIFIES the active source by matching that URL against
 state.json, and state.json has no activeKey at all. It also changes a
 documented configuration surface. It gets its own id and its own round.
+
+### D-SINK-19: the reason the credential is there at all
+
+D-SINK-18 is contained by making the host's config file private before writing
+to it. That is the right thing to ship today and the wrong thing to still be
+doing in a year, because the credential should not be in a file this plugin
+does not own whatever its mode is.
+
+The reason it is there is structural and the code says so plainly.
+`Service.qml:200`: "the active source is still `playlistUrl` / `epgUrl` on the
+bar entry". `Service.qml:247` derives `activeSourceKey` by matching that URL
+against the records in `state.json`, and `state.json` carries no `activeKey` of
+its own, which was confirmed by reading the live file: its top-level keys are
+version, cacheLayout, favorites, recents, lastPlayed, session, sources,
+savedSearches and hiddenGroups. So the URL has to be on the bar entry for the
+plugin to know which source is active, and the bar entry is what the host
+persists.
+
+Moving to a key is therefore a migration rather than an edit: it changes what
+identifies a source, it adds a field to the state file that has never existed,
+and `playlistUrl` on the bar entry is a documented way for a user to configure
+the plugin directly. It is filed rather than rushed into a security release,
+which is what an id is for.
