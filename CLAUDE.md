@@ -465,6 +465,33 @@ requests and raise the batch.
    the string builders, proving a name composes correctly and never that it
    becomes a node. Applied retroactively this rule would have caught that, the
    credential leak on the same sink, and the row announcement, on day one.
+15. When you fix a defect, FIND ITS SIBLINGS before you close it. Not the
+   file you were in: every other place that does the same job, by the shape of
+   the code and not by the name of the function. This project has now paid for
+   the same omission three times, and the third was found by someone outside
+   it.
+   - F-RWD-22 softened an assertion in R10 that was asserting chance. Its
+     twin in R11, one screen below, carried a comment saying the two were the
+     same pair and kept the old assertion. Found when it flaked (F-RWD-26).
+   - F-HARNESS-8 gave the scenario's own sweep a barrier because a transcript
+     grepped straight back after a run can be short. The predicates in the
+     same repository did the same read with no barrier. Found when it
+     reddened the gate (F-HARNESS-15).
+   - D-SINK-1 taught that the userinfo of a URL ends at the LAST `@`, and
+     `redactUrls` and `validateSourceUrl` have cut it correctly ever since,
+     with the lesson in a comment beside them. `hostPortOf` sat three
+     thousand lines below with `[^@/?#]*@`, which cannot cross an at-sign,
+     and put the password into the Sources row's host and default label. The
+     marketplace maintainer found it in a shipped release (D-SINK-17), and
+     1,890 node checks and 941 python tests were green: the defect was not
+     missed by a weak check, it was never reached by one.
+   The search is cheap and it is a GREP OVER SHAPE, which is the one job a
+   grep is good at -- not "does this string appear", which rule 14 forbids as
+   a criterion, but "where else does this pattern live". For a parser, the
+   pattern; for a timing assumption, the other readers of that value; for a
+   wrong default, the other places the default is taken. Write what you
+   searched for in the write-up, including the places you cleared, so the
+   next person inherits the search instead of repeating the defect.
 
 ## Never touch
 

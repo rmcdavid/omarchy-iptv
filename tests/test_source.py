@@ -15,6 +15,7 @@ Run: python3 -m unittest discover -s tests
 import contextlib
 import io
 import json
+import re
 import os
 import pathlib
 import tempfile
@@ -111,6 +112,33 @@ class ValidateSourceUrlTest(unittest.TestCase):
     def test_inline_vectors(self):
         for text, ok, code_or_kind, url, host in VECTORS:
             self.check(text, ok, code_or_kind, url, host)
+
+    def test_d_sink_17_the_label_path_carries_no_userinfo(self):
+        """ONE fixture, both languages (rule 12), because the defect was one
+        regex that existed TWICE and was wrong in both copies.
+
+        `host_port_of` cut the userinfo at the FIRST at-sign. A password
+        containing one leaked its tail into the Sources row's host and default
+        label, and a USERNAME containing one leaked the whole password -- on a
+        source whose URL is masked everywhere else. D-SINK-1 was the same
+        defect in `redact_urls`. Raised by the marketplace maintainer against
+        the shipped 0.13.1; the username case is worse than the report and was
+        found by measuring it rather than by reading it.
+        """
+        fixture = FIXTURE.parent / "source-labels.json"
+        self.assertTrue(fixture.exists(), "tests/fixtures/source-labels.json is missing")
+        data = json.loads(fixture.read_text(encoding="utf-8"))
+        cases = data["cases"]
+        self.assertEqual(len(cases), 11)
+        # The cases that BROKE it must still be in the fixture, or a later
+        # trim could make this green by deleting the evidence.
+        self.assertTrue(any(re.search(r":[^@/]*@[^@/]*@", c["url"]) for c in cases))
+        self.assertTrue(any(re.search(r"//[^:/]*@[^@/]*:[^@/]*@", c["url"]) for c in cases))
+        for case in cases:
+            self.assertEqual(helper.host_port_of(case["url"]), case["hostPort"], case["url"])
+            self.assertEqual(helper.derive_label(case["url"], "http"), case["label"], case["url"])
+            self.assertNotIn("@", helper.host_port_of(case["url"]), case["url"])
+            self.assertNotIn("@", helper.derive_label(case["url"], "http"), case["url"])
 
     def test_shared_fixture_when_present(self):
         if not FIXTURE.exists():

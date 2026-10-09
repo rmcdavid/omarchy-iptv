@@ -1175,9 +1175,25 @@ def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
 
 
 def host_port_of(url: str) -> str:
-    """Model.hostPortOf: host[:port] of a URL, lower-cased; "" for paths."""
-    match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://(?:[^@/?#]*@)?([^/?#]+)", url)
-    return match.group(1).lower() if match else ""
+    """Model.hostPortOf: host[:port] of a URL, lower-cased; "" for paths.
+
+    D-SINK-17. The userinfo ends at the LAST at-sign in the authority, not the
+    first. This matched `(?:[^@/?#]*@)?`, which cannot cross an at-sign, so
+    `https://user:p@ss@host.example/list.m3u` returned `ss@host.example` and
+    `https://u@er:pass@host.example/list.m3u` returned `er:pass@host.example`
+    -- the whole password, into the Sources row's host and default label, on a
+    source whose URL is masked everywhere else. D-SINK-1 was the same defect in
+    `redact_urls`; `url_host` and `validate_source_url` have been right all
+    along because they hand the string to a real parser or cut at the last
+    at-sign, and this now does the same.
+    """
+    match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", url)
+    if not match:
+        return ""
+    authority = match.group(1)
+    at = authority.rfind("@")
+    hostport = authority if at == -1 else authority[at + 1:]
+    return hostport.lower()
 
 
 def derive_label(url: str, kind: str) -> str:

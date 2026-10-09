@@ -9039,9 +9039,27 @@ function sourceCacheDir(cacheDir, key) {
 
 // ---- labels (UX-SOURCES 5.6)
 
+// D-SINK-17. The userinfo ends at the LAST `@` in the authority, not the first,
+// and this took the first: `[^@/?#]*@` cannot cross an at-sign, so
+// `https://user:p@ss@host.example/list.m3u` gave `ss@host.example` and
+// `https://u@er:pass@host.example/list.m3u` gave `er:pass@host.example` -- the
+// whole password, in the Sources row's host and its default label, on a source
+// whose URL is masked everywhere else. Raised by the marketplace maintainer
+// against the shipped 0.13.1; the username case is worse than the report and
+// was found by measuring it.
+//
+// This is D-SINK-1 exactly, one function along: that was `redactUrls` leaking
+// the password tail when the password contained an at-sign. The repair there
+// was `lastIndexOf("@")` over an isolated authority, which is what
+// `validateSourceUrl` and `redactUrls` both do today -- so the shape below is
+// not a new idea, it is the one already in this file twice, finally used here.
 function hostPortOf(url) {
-  var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@\/?#]*@)?([^\/?#]+)/i)
-  return m ? m[1].toLowerCase() : ""
+  var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
+  if (!m) return ""
+  var authority = m[1]
+  var at = authority.lastIndexOf("@")
+  var hostport = at === -1 ? authority : authority.substring(at + 1)
+  return hostport.toLowerCase()
 }
 
 // Default label: the host (lowercase, leading `www.` dropped, `:port` kept

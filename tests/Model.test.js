@@ -5271,6 +5271,28 @@ check("sanitizeTyping still caps and strips controls", Model.sanitizeTyping("a\u
 
 // ---- validateSourceUrl: every case of the shared fixture (SR6) ----
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-urls.json"), "utf8"))
+
+// D-SINK-17. The Sources row's HOST and its DEFAULT LABEL, which are the two
+// things hostPortOf feeds. They are pinned by their own shared fixture, run by
+// the python mirror too, because the defect was one regex that existed twice
+// and was wrong in both copies: the userinfo was cut at the FIRST at-sign, so a
+// password containing one leaked its tail and a USERNAME containing one leaked
+// the whole password -- into a row whose URL is masked everywhere else. That is
+// D-SINK-1 one function along, and neither 1890 node checks nor 941 python
+// tests put an at-sign in a password here, which is why it survived to be found
+// by the marketplace maintainer against a shipped release.
+const labelFixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-labels.json"), "utf8"))
+checkCall("D-SINK-17: the Sources row's host carries no userinfo, whatever the userinfo contains", () =>
+  labelFixture.cases.map(c => c.url + " -> " + Model.sourceView({ key: "k", url: c.url, label: "" }, "k", 0, "", false).host),
+  labelFixture.cases.map(c => c.url + " -> " + c.hostPort))
+checkCall("D-SINK-17: and neither does the default label", () =>
+  labelFixture.cases.map(c => c.url + " -> " + Model.deriveLabel(c.url, "http")),
+  labelFixture.cases.map(c => c.url + " -> " + c.label))
+check("D-SINK-17: the fixture actually carries the cases that broke it, so it cannot be trimmed to green", [
+  labelFixture.cases.filter(c => /:[^@\/]*@[^@\/]*@/.test(c.url)).length >= 1,
+  labelFixture.cases.filter(c => /\/\/[^:\/]*@[^@\/]*:[^@\/]*@/.test(c.url)).length >= 1,
+  labelFixture.cases.length
+], [true, true, 11])
 check("fixture has every UX 5.4 URL code plus unsafe_path", [...new Set(fixture.filter(c => !c.ok).map(c => c.code))].sort(), ["empty", "invalid", "relative_path", "scheme", "too_long", "unsafe_path"])
 check("fixture covers files, IDN, IPv6, userinfo, fragments, control characters and the cap", fixture.length >= 75, true)
 for (const c of fixture) {

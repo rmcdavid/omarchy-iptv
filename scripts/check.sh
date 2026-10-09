@@ -157,8 +157,8 @@ fail=0
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-72}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1890}
-PY_TESTS_MIN=${PY_TESTS_MIN:-941}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-1893}
+PY_TESTS_MIN=${PY_TESTS_MIN:-942}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -1,0 +1,27 @@
+{
+  "note": "D-SINK-17. hostPortOf / host_port_of and the two things that render their output: the Sources row's host (sourceView) and its default label (deriveLabel). ONE fixture, both languages, because the defect was a regex that existed twice and was wrong twice. The userinfo of a URL ends at the LAST at-sign in the authority; a password or a username containing one is legal and both parsers that matter (urllib, and this file's own validateSourceUrl) read it that way.",
+  "cases": [
+    { "url": "https://user:pass@host.example/list.m3u", "hostPort": "host.example", "label": "host.example",
+      "why": "the ordinary case, and the control: if this ever changes the rest mean nothing" },
+    { "url": "https://user:p@ss@host.example/list.m3u", "hostPort": "host.example", "label": "host.example",
+      "why": "an at-sign in the PASSWORD. Returned 'ss@host.example' before D-SINK-17: the password tail, in a row whose URL is masked" },
+    { "url": "https://u@er:pass@host.example/list.m3u", "hostPort": "host.example", "label": "host.example",
+      "why": "an at-sign in the USERNAME, which is worse and was not in the report: returned 'er:pass@host.example', the WHOLE password. Email-shaped usernames are ordinary with IPTV providers" },
+    { "url": "https://user:p@s@s@host.example/list.m3u", "hostPort": "host.example", "label": "host.example",
+      "why": "several at-signs: the LAST one is the delimiter, not the second" },
+    { "url": "https://user:p@ss@host.example:8080/list.m3u", "hostPort": "host.example:8080", "label": "host.example:8080",
+      "why": "the port survives the repair. hostPortOf keeps it where validateSourceUrl's host does not, which is why this function exists at all" },
+    { "url": "https://user:p@ss@WWW.Host.Example/list.m3u", "hostPort": "www.host.example", "label": "host.example",
+      "why": "lower-cased by hostPortOf, and the leading www. dropped by deriveLabel and not before it" },
+    { "url": "https://host.example/list.m3u", "hostPort": "host.example", "label": "host.example",
+      "why": "no userinfo at all: nothing to cut" },
+    { "url": "https://@host.example/list.m3u", "hostPort": "host.example", "label": "host.example",
+      "why": "an empty userinfo still ends at its at-sign" },
+    { "url": "https://user:p@ss@host.example", "hostPort": "host.example", "label": "host.example",
+      "why": "no path after the authority" },
+    { "url": "https://user:p@ss@host.example?a=1", "hostPort": "host.example", "label": "host.example",
+      "why": "a query ends the authority as surely as a slash does" },
+    { "url": "https://user:p@ss@host.example#f", "hostPort": "host.example", "label": "host.example",
+      "why": "and so does a fragment" }
+  ]
+}

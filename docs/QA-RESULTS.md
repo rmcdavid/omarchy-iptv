@@ -12736,3 +12736,57 @@ The P2s, each fixed:
 **F-M3-8 for the twelfth round**, with the sharper version this round adds: the
 two findings that mattered were both checks that could not fail for the thing
 they guarded.
+
+## Third maintainer finding in three days, 2026-10-09: the Sources row (D-SINK-17)
+
+HANCORE-linux, on #10616, against the shipped 0.13.1:
+
+> `Model.js`'s `hostPortOf()` still strips userinfo only through the first `@`:
+> an accepted URL such as `https://user:p@ss@host.example/list.m3u` produces
+> `ss@host.example`. `sourceView()` and `deriveLabel()` then expose that
+> password tail in the Sources row's host and default label, even when the
+> credentialed URL is masked.
+
+He is right, and measuring it found a case worse than the report.
+
+### Before the fix, by calling the two functions he named
+
+| URL | row host and default label |
+|---|---|
+| `https://user:pass@host.example/list.m3u` | `host.example` |
+| `https://user:p@ss@host.example/list.m3u` | `ss@host.example` |
+| `https://u@er:pass@host.example/list.m3u` | **`er:pass@host.example`** |
+| `https://user:p@s@s@host.example/list.m3u` | `s@s@host.example` |
+| `https://user:p@ss@host.example:8080/list.m3u` | `ss@host.example:8080` |
+
+The third row is the one the report did not name and it is the worst: an
+at-sign in the USERNAME leaks the entire password, and email-shaped usernames
+are ordinary with IPTV providers. `validateSourceUrl` accepts all of these.
+
+### The scope, measured
+
+`redactUrls` returns `host.example` for every one of them. So do
+`validate_source_url`, `url_host` and `source_host`. The defect was confined to
+`hostPortOf` and to the python mirror's `host_port_of`, which carried the same
+regex, and to their two callers.
+
+### Why this one stings
+
+It is D-SINK-1 one function along. That finding was `redactUrls` leaking the
+password tail when the password contained an at-sign, and its repair was to cut
+at the LAST at-sign over an isolated authority. That shape is in `Model.js`
+twice today, in `validateSourceUrl` and in `redactUrls`, with D-SINK-1's lesson
+written in a comment beside it. `hostPortOf` sat three thousand lines below
+with the old shape and nothing connected them.
+
+**Both suites were green before the fix was written.** 1,890 node checks and
+941 python tests, and not one put an at-sign in a password on this path. The
+defect was not missed by a weak check; it was never reached by any check.
+
+### The fix
+
+Both mirrors isolate the authority and cut at the last at-sign. A new shared
+fixture, `tests/fixtures/source-labels.json`, carries 11 cases including the
+two that broke it and is run by both languages against both callers, with a
+check that the fixture cannot be trimmed to green. Reverting either mirror
+reddens 2 node checks and 1 python test.
