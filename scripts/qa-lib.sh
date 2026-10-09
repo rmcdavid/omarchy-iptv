@@ -525,6 +525,111 @@ qa_env_line() {
   printf 'export %s=%q\n' "$1" "$2"
 }
 
+# -------------------------------------------------------- container modes
+#
+# D-SINK-18. The plugin writes provider URLs into ~/.config/omarchy/shell.json,
+# a file it does not own. The packaged default is 0644, and the host's atomic
+# `FileView` writer preserves whatever mode the file already has -- both
+# MEASURED by the lead on 2026-10-09 with a purpose-built probe, recorded in
+# docs/QA-RESULTS.md under "Fourth maintainer finding". Neither measurement is
+# this lane's; this lane holds no display and could not retake them. What they
+# settle is that "is the container private?" is a question the plugin has to
+# ASK rather than assume, and these three predicates are how a test asks it.
+#
+# THE MASK IS 077 AND ITS TWO HALVES ARE REPORTED APART. That is the
+# qa_transcript_start lesson repeated rather than relearned: its first version
+# was graded only against /tmp, which is 1777 and so trips every candidate
+# mask, and weakening 077 to 004 reddened nothing. A 0640 shell.json is
+# exactly as exposed to everyone in the owning group as a 0644 one is to the
+# world, and a predicate that reads only the world bit calls it private.
+
+# qa_mode_private <path>
+#   private  mode & 077 == 0 -- nobody but the owner can read it
+#   group    only the group half is set (0640, 0660, ...)
+#   other    only the world half is set (0604, 0606, ...)
+#   both     both halves (0644, 0666, ...)
+#   NOFIELD  no such file, or stat answered something that is not an octal mode
+# A vacuous answer is never a pass: a file that is not there is not a private
+# one, and a credential must not be written into a container nobody measured.
+qa_mode_private() {
+  local p=${1-} m g o
+  m=$(stat -c '%a' -- "$p" 2>/dev/null)
+  if [[ -z $m || ! $m =~ ^[0-7]+$ ]]; then
+    printf '%s\n' "$QA_NO_FIELD"
+    return 2
+  fi
+  g=$(( 0$m & 070 ))
+  o=$(( 0$m & 007 ))
+  if (( g && o )); then printf 'both\n';  return 1; fi
+  if (( g ));      then printf 'group\n'; return 1; fi
+  if (( o ));      then printf 'other\n'; return 1; fi
+  printf 'private\n'
+  return 0
+}
+
+# qa_file_stamp <path>: one line of four fields -- sha256, octal mode, mtime
+# and ctime at nanosecond resolution -- or NOFIELD for anything that is not a
+# readable regular file. Handed to qa_file_untouched to say that a run left a
+# file completely alone.
+qa_file_stamp() {
+  local p=${1-} s line
+  [[ -f $p ]] || { printf '%s\n' "$QA_NO_FIELD"; return 2; }
+  s=$(sha256sum -- "$p" 2>/dev/null | cut -d' ' -f1)
+  if [[ ! $s =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s\n' "$QA_NO_FIELD"
+    return 2
+  fi
+  line=$(stat -c "%a %.9Y %.9Z" -- "$p" 2>/dev/null)
+  if [[ ! $line =~ ^[0-7]+\ [0-9.]+\ [0-9.]+$ ]]; then
+    printf '%s\n' "$QA_NO_FIELD"
+    return 2
+  fi
+  printf '%s %s\n' "$s" "$line"
+  return 0
+}
+
+# qa_file_untouched <path> <stamp-from-qa_file_stamp>
+#   untouched  all four fields match
+#   content    the bytes changed
+#   mode       the mode changed
+#   mtime      the contents' clock moved
+#   ctime      ONLY the inode's clock moved
+#   NOFIELD    the file is gone, or either stamp is unreadable
+#
+# WHY ctime IS A FIELD, AND WHY IT IS THE ONE THAT MATTERS HERE. Measured in
+# this worktree on 2026-10-09: `chmod 0600` on a file that is ALREADY 0600
+# leaves the bytes and mtime byte-identical and moves ctime every single time
+# -- three chmods, one mtime, three different ctimes. So the obvious pair to
+# watch, content and mtime, CANNOT GO RED for an unconditional chmod of an
+# already-private file, which is exactly the needless write into a user's own
+# config that this is here to catch. ctime is the only clock that sees it.
+# Rule 14: a check that cannot go red for the failure it guards is not a check.
+qa_file_untouched() {
+  local p=${1-} want=${2-} now ns nm nmt nct ws wm wmt wct
+  now=$(qa_file_stamp "$p")
+  if [[ $now == "$QA_NO_FIELD" || -z $want || $want == "$QA_NO_FIELD" ]]; then
+    printf '%s\n' "$QA_NO_FIELD"
+    return 2
+  fi
+  # Four fields, or the comparison below would silently compare nothing.
+  if [[ $want != *' '*' '*' '* ]]; then
+    printf '%s\n' "$QA_NO_FIELD"
+    return 2
+  fi
+  if [[ $now == "$want" ]]; then printf 'untouched\n'; return 0; fi
+  read -r ns nm nmt nct <<<"$now"
+  read -r ws wm wmt wct <<<"$want"
+  if [[ $ns != "$ws" ]];   then printf 'content\n'; return 1; fi
+  if [[ $nm != "$wm" ]];   then printf 'mode\n';    return 1; fi
+  if [[ $nmt != "$wmt" ]]; then printf 'mtime\n';   return 1; fi
+  # Named rather than left as a fallthrough: the four fields are compared one
+  # by one so that a FIFTH field added here later cannot be read as a ctime
+  # move, which is the only difference this line is entitled to claim.
+  if [[ $nct != "$wct" ]]; then printf 'ctime\n';   return 1; fi
+  printf '%s\n' "$QA_NO_FIELD"
+  return 2
+}
+
 # ------------------------------------------------------------ transcripts
 
 # F-M3-1, half (b). One live run of m3-scenario.sh answered "17 passed, 14

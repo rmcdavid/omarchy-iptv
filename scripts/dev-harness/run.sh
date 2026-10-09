@@ -77,6 +77,7 @@
 #   root/     scratch Quickshell config root: shell.qml + Commons/ Ui/ symlinks (the `qs` prefix)
 #   cache/    XDG_CACHE_HOME  -> cache/omarchy-iptv/{channels,playlist-status,epg-now}.json
 #   state/    XDG_STATE_HOME  -> state/omarchy-iptv/state.json
+#   config/   XDG_CONFIG_HOME -> config/omarchy/shell.json (D-SINK-18; see harness_env)
 #   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr symlink so hyprctl works)
 #   fixtures/ generated playlist / test.ts (MPEG-TS, like a live stream; an MP4 with a trailing moov is not seekable over HTTP)
 # Never run against a real network stream from here; the fixture uses 127.0.0.1 only.
@@ -185,6 +186,30 @@ cleanup() {
   return 0
 }
 
+# D-SINK-18. The scratch stand-in for ~/.config/omarchy/shell.json, seeded at
+# the mode the PACKAGED default carries -- 0644, measured off
+# /usr/share/omarchy/config/omarchy/shell.json by the lead on 2026-10-09 --
+# rather than at the mode this machine happens to hold. The harness's own
+# shell.qml models the host config IN MEMORY (persistShellConfig, line 655:
+# one deep copy, no FileView), so nothing here READS this file; it exists
+# because the helper's D-SINK-18 verb computes its path from XDG_CONFIG_HOME
+# and needs a container to act on. Seeding the exposed mode means an ordinary
+# harness run exercises the tightening rather than inheriting a pass.
+#
+# It carries NO playlistUrl and NO epgUrl, which is what lets a scenario tell
+# a URL ARRIVING from a URL that was always there.
+#
+# Re-seeded on every prepare_root so one run cannot inherit the mode the
+# previous run's fix left behind, which would make the second run's green
+# mean nothing.
+seed_scratch_config() {
+  local cfg="$SCRATCH/config/omarchy/shell.json"
+  printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"io.github.rmcdavid.iptv"}]}}}' \
+    >"$cfg" || die "could not seed the scratch host config at $cfg"
+  chmod 0644 "$cfg" || die "could not seed the scratch host config mode"
+  return 0
+}
+
 # C1. Every status here used to be discarded. A failed `cp Model.js` left the
 # PREVIOUS run's Model.js in the scratch root while OMARCHY_IPTV_ROOT still
 # pointed Service.qml and Guide.qml at the new tree - a silently MIXED tree,
@@ -193,7 +218,9 @@ cleanup() {
 prepare_root() {
   local root; root=$(qs_root)
   mkdir -p "$root" "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime" "$SCRATCH/fixtures" \
+    "$SCRATCH/config/omarchy" \
     || die "could not create the scratch tree under $SCRATCH"
+  seed_scratch_config
   ln -sfn "$SHELL_DIR/Commons" "$root/Commons" || die "could not link $SHELL_DIR/Commons"
   ln -sfn "$SHELL_DIR/Ui" "$root/Ui"           || die "could not link $SHELL_DIR/Ui"
   [[ -e $root/Commons && -e $root/Ui ]]        || die "the qs.Commons / qs.Ui links do not resolve"
@@ -247,6 +274,20 @@ harness_env() {
   export XDG_RUNTIME_DIR="$SCRATCH/runtime"
   export XDG_CACHE_HOME="$SCRATCH/cache"
   export XDG_STATE_HOME="$SCRATCH/state"
+  # D-SINK-18, and this one is a SAFETY isolation, not a convenience. Until
+  # now the harness replaced three XDG directories and left the fourth alone,
+  # because nothing the plugin ran had ever read XDG_CONFIG_HOME: the helper
+  # names XDG_CACHE_HOME, XDG_STATE_HOME and XDG_RUNTIME_DIR and no other.
+  # The D-SINK-18 fix changes that -- the helper now computes
+  # $XDG_CONFIG_HOME/omarchy/shell.json and chmods it -- so WITHOUT this line
+  # every harness run that adds or switches a source would reach into the
+  # developer's own ~/.config/omarchy/shell.json and change its mode. The
+  # harness exists so that a scenario touches nothing the user owns; a
+  # scenario that tightens somebody's live config has already failed, however
+  # green it prints. Seeded by prepare_root at the EXPOSED mode on purpose,
+  # so an ordinary harness run exercises the tightening instead of assuming
+  # it.
+  export XDG_CONFIG_HOME="$SCRATCH/config"
   # M2-05. $SCRATCH/bin goes in FRONT of PATH when a scenario has put
   # something there, which is how pip-scenario.sh hands the shell a stub
   # `hyprctl` (scripts/dev-harness/stub-hyprctl.py). That indirection is not
@@ -562,7 +603,11 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     exit 1
     ;;
   clean)
-    rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"
+    # $SCRATCH/config goes too (D-SINK-18): a clean that left it behind would
+    # leave the mode the last run's fix tightened, and the next run's green
+    # would be inherited rather than earned. prepare_root re-seeds it at 0644.
+    rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/config" \
+      "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"
     echo "[run.sh] cleaned $SCRATCH"
     ;;
   scenario)
