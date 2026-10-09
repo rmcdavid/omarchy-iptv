@@ -12861,3 +12861,114 @@ a change to the cache key, and that has its own migration to think about.
 
 Recorded here so the next person who sees two cache directories for one source
 has somewhere to start.
+
+## Fourth maintainer finding, 2026-10-09: D-SINK-18, the plugin writes provider URLs into a file it does not own and cannot assume is private
+
+Raised by HANCORE-linux on omacom/omarchy-plugin-marketplace#10735, against the
+SHIPPED 0.13.2 (eb7fdff), hours after it was filed. His fourth finding in four
+days, and the fourth raised on the verification request for the commit that
+fixed the previous one.
+
+  "adding or switching an Xtream source stores username/password URLs in
+  ~/.config/omarchy/shell.json through Service.qml:1770-1774 and 3165-3182.
+  The supported Quattro upgrade can create that file as 0644, and the native
+  atomic writer preserves its existing mode, exposing provider credentials to
+  other local users when the parent directories are searchable."
+
+HE IS RIGHT, and it is broader than Xtream. Everything below was MEASURED by
+the lead on 2026-10-09 before any lane was briefed. You hold no display and may
+not run quickshell or mpv: cite these, never restate them as your own.
+
+## The container
+
+| path | mode on this machine |
+|---|---|
+| `/home/ricky` | 0700 |
+| `/home/ricky/.config` | 0755 |
+| `/home/ricky/.config/omarchy` | 0755 |
+| `/home/ricky/.config/omarchy/shell.json` | 0600 |
+
+So on THIS machine only the home directory's 0700 stands between the file and
+another local user, and the parents are searchable. A home directory of 0755 is
+the default on many systems.
+
+The packaged default is **0644**:
+
+    /usr/share/omarchy/config/omarchy/shell.json  ->  644
+
+and `omarchy-refresh-config` copies it with `cp -f`. Reproduced into a scratch
+directory, reading the real source read-only:
+
+    cp under umask 022 -> 644
+    cp under umask 077 -> 600
+
+So a machine whose shell.json was first created under the ordinary umask holds
+it at 0644. `cp -f` onto an EXISTING file keeps that file's mode, which is why
+this machine is 0600 and stayed there.
+
+## The writer preserves the mode, measured
+
+Quickshell's `FileView` with `atomicWrites: true` is what the host uses
+(`/usr/share/omarchy/shell/shell.qml:138`). A purpose-built probe, one FileView
+writing one scratch file, run twice:
+
+| file mode before the write | after |
+|---|---|
+| 0644 | **0644** |
+| 0600 | 0600 |
+
+The content changed both times, so the write happened. The atomic rename does
+not reset the mode to the writer's umask and does not tighten it. **The plugin
+therefore cannot assume the file it is writing a secret into is private.**
+
+## What the plugin puts there, and it is not only Xtream
+
+`Service.qml`'s `persistActive(playlistUrl, epgUrl)` writes both URLs into the
+host's bar entry through `updateEntryInline`, which the host persists to
+shell.json. Its callers are the ordinary paths, not an Xtream special case:
+
+- `addSource` (Service.qml:1759) - EVERY source added
+- the source switch (Service.qml:3653) - EVERY switch
+- `buildXtreamSource` reaches them through `addSource`
+
+So a plain `https://user:pass@host/list.m3u`, a provider URL with the
+credential in the path (`/live/USER/PASS/123.ts`, which is an ordinary IPTV
+shape) and an Xtream `get.php?username=U&password=P` all land there. Xtream is
+simply the case that ALWAYS carries a credential. The report named the
+narrowest instance; the finding is every source.
+
+## The contrast that makes it a defect rather than a design
+
+The plugin's OWN files are already right, and rule 6 says so:
+
+    ~/.local/state/omarchy-iptv        0700
+    ~/.local/state/omarchy-iptv/state.json  0600
+    ~/.cache/omarchy-iptv              0700
+
+`state.json` holds the same URLs, at 0600, inside a 0700 directory. The plugin
+is careful with the container it owns and careless with the one it borrows.
+
+## The lead's ruling on the fix
+
+TWO things, and they are deliberately different in size.
+
+**1. Ship now: the plugin takes responsibility for the container it puts a
+secret into.** Before a URL is persisted to the host config, make sure that
+file is not readable by group or other; if it cannot be made private, REFUSE to
+persist and say so, rather than writing the credential anyway. The precedent is
+in this repository: `qa_transcript_start` refuses to write a transcript into a
+directory others can enter rather than writing it and hoping. QML cannot
+chmod, so this belongs in the helper, and the helper must NOT take an arbitrary
+path - it computes the one path it is allowed to touch from the environment and
+refuses anything else. Any non-empty URL triggers it: a provider path token is
+a credential as surely as a password field is, which is why rule 5 treats whole
+URLs as secrets rather than trying to spot the secret inside them.
+
+**2. File, do not build: move the credential out of the host config
+entirely.** The real answer is that the active source should be named in the
+bar entry by a KEY, with the URL living only in the plugin's own 0600 state.
+That is a migration, not a patch: today `Service.qml:200` says "the active
+source is still playlistUrl / epgUrl on the bar entry" and `activeSourceKey`
+(Service.qml:247) IDENTIFIES the active source by matching that URL against
+state.json, and state.json has no activeKey at all. It also changes a
+documented configuration surface. It gets its own id and its own round.
