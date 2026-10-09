@@ -45,7 +45,7 @@ under ~/.config or /usr/share/omarchy was modified.
 
 | # | Decision | Options | Choice | Rationale (evidence) |
 |---|---|---|---|---|
-| D1 | Where the active source lives | (a) shell.json entry (today); (b) state.json `activeKey`; (c) both | **(a) unchanged: `playlistUrl` / `epgUrl` on the bar entry** (M2-SOURCES decision 1) | `updateEntryInline` replaces the entry with `{id} + settings` in a clone of `shellConfig`, then `persistShellConfig` sets `shellConfig = payload` synchronously and writes the file with an atomic `FileView` (lines 1078-1112, 109-114, `userConfigFile` 134-141). `onShellConfigChanged` (67-71) fires `pluginsChanged()`, whose `Connections` handler calls `syncPluginApis()` (1053-1058), which reassigns `shellApi.barConfig` (879) -- the same object our `settings` binding already reads (`Service.qml:56`). So a write from QML propagates to the service in the same event loop turn, with no file watcher in the path, and `omarchy bar set` arrives through the identical chain (`omarchy-bar:361` -> IPC `setBarWidget` 1654-1663 -> `PluginRegistry.setBarWidget` -> `shellConfigMutator` -> `mutateShellConfig` 162-166 -> `persistShellConfig`). Storing an `activeKey` in state would create a second writer for one fact. |
+| D1 | Where the active source lives | (a) shell.json entry (today); (b) state.json `activeKey`; (c) both | **(a) unchanged: `playlistUrl` / `epgUrl` on the bar entry** (M2-SOURCES decision 1) | `updateEntryInline` replaces the entry with `{id} + settings` in a clone of `shellConfig`, then `persistShellConfig` sets `shellConfig = payload` synchronously and writes the file with an atomic `FileView` (lines 1078-1112, 109-114, `userConfigFile` 134-141). `onShellConfigChanged` (67-71) fires `pluginsChanged()`, whose `Connections` handler calls `syncPluginApis()` (1053-1058), which reassigns `shellApi.barConfig` (879) -- the same object our `settings` binding already reads (`Service.qml:56`). So a write from QML propagates to the service in the same event loop turn, with no file watcher in the path, and `omarchy bar set` arrives through the identical chain (`omarchy-bar:361` -> IPC `setBarWidget` 1654-1663 -> `PluginRegistry.setBarWidget` -> `shellConfigMutator` -> `mutateShellConfig` 162-166 -> `persistShellConfig`). Storing an `activeKey` in state would create a second writer for one fact. **Amended 2026-10-09 (D-SINK-18): this row is now understood to be the ROOT of that defect, and the choice it records is no longer the one that would be made today.** Identifying the active source by its URL means a provider credential MUST live in the host's `shell.json` for the plugin to know which source is active -- a file this plugin does not own, whose packaged default is 0644, and whose writer the lead measured on 2026-10-09 to preserve whatever mode it finds (0644 in, 0644 out, content changed), so the plugin cannot assume the container is private. The reasoning above is not wrong about its own question: a second writer for one fact is a real cost, and the shell.json entry really is the one place the host and `omarchy bar set` already agree on. What it never weighed is that this particular fact IS the credential, so the cheapest identifier available was also the one that forced the secret into the borrowed container. **The containment that ships now is the mode shield** (`ARCHITECTURE.md` section 6, D-SINK-18; standard 11): the helper's `config shield` makes that one file deny group and other BEFORE a URL is persisted into it, and a persist that carries a URL is refused when it cannot. That narrows who can read the file; it does not stop the credential being there, and it is not presented as the answer. **The answer is to name the active source by its KEY and keep the URL only in the plugin's own 0600 state, and that is FILED SEPARATELY by the lead with its own id and its own round -- do not start it from a D-SINK-18 lane.** It is a migration rather than a patch: `Service.qml:199-201` still says the active source is `playlistUrl` / `epgUrl` on the bar entry, `activeSourceKey` (`Service.qml:247`) IDENTIFIES the active source by matching that URL against `state.json`, `state.json` has no `activeKey` at all (section 2.1), and the change touches a documented configuration surface that `omarchy bar set` and D16 both write through. The id of that filing is not assigned in this round and is UNVERIFIED from this document: read it off the board in `docs/STATUS.md`. |
 | D2 | Where the history lives | (a) state.json v2; (b) extra keys on the shell.json entry; (c) a file in the plugin dir | **(a) `state.json` version 2, key `sources`** (M2-SOURCES decision 2) | Already 0600 in a 0700 dir (S-02 fixed: `state init`, `Service.qml:933-953`), already read and written by both QML (`Model.parseState`) and the helper (`normalize_state`, `bin/omarchy-iptv:1557-1576`). shell.json is host-owned and schema-declared (manifest `barWidget.schema`); the plugin dir is never written at runtime (PRODUCT.md decision 6). |
 | D3 | Reconciling settings with history | (a) service observes settings; (b) helper scans shell.json; (c) guide-only | **(a) `Model.reconcileSources` runs in the service on state load and on every `playlistUrl` / `epgUrl` change** | The service already re-evaluates `settings` on every shell.json change (decision 7, `Service.qml:53-68`, `onPlaylistUrlChanged` 671-678). Reconcile is pure and idempotent: a URL already in history bumps `lastUsed` (only when the active key actually changed) and adopts a changed `epgUrl`; an unknown URL is added with a host-derived label and `origin: "cli"` (S5). No helper run, no extra IPC. |
 | D4 | Source identity and key | identity: raw string / normalized URL; key: fnv1a32 / fnv1a64 / sha256[:16] | **Identity = normalized playlist URL (section 3.1). Key = `fnv1a32(normalized)`, 8 lowercase hex, suffixed `-2`, `-3`... if that key is already used by a different URL** | `fnv1a32` exists in both languages with pinned vectors (`Model.js:194-229`, `bin/omarchy-iptv:269-275`); channel ids already use it. sha256 in QML JS would mean ~60 new lines of hand-rolled hashing in `Model.js` (no `Qt.sha256` in node, no `crypto` in the Qt engine). 32 bits is enough because the key is only a directory name: identity is the URL string, lookups compare URLs, and the suffix rule makes a collision harmless. P(collision) at the 50-source cap is ~3e-7. |
@@ -443,7 +443,12 @@ synchronously (`key` = the record concerned, `""` when none). Codes:
 `duplicate` (key = existing record; the guide offers "switch instead"
 [UX-ASSUMPTION]), `too_many`, `busy` (a probe or switch is in flight),
 `unknown_source`, `not_ready` (state not loaded yet), `bad_server`,
-`bad_credentials`, `persist_failed`. Asynchronous outcomes (fetch errors)
+`bad_credentials`, `persist_failed`, `config_unsafe` (D-SINK-18: the host's
+`shell.json` could not be made private, so the URL was withheld rather than
+written into a file other accounts can read; a distinct code from
+`persist_failed` because the two sentences give opposite advice -- that one
+sends the user to `omarchy bar set`, which is exactly what must not happen
+with a credentialed URL). Asynchronous outcomes (fetch errors)
 arrive through `sourceProbeFinished` with the helper's codes
 (`network`, `http_403`, `not_a_playlist`, `timeout`, ...).
 
@@ -462,7 +467,16 @@ arrive through `sourceProbeFinished` with the helper's codes
 compares with the current settings (skip when equal) and calls
 `shell.updateEntryInline(pluginId, entry)` (`services/PluginShellApi.qml:62-64`,
 scoped to our own id at `shell.qml:648-653`). A `false` return while a change
-was needed emits `sourcesPersistFailed("persist_failed")` (risk R2). The full
+was needed emits `sourcesPersistFailed("persist_failed")` (risk R2).
+**Gated since D-SINK-18**: when the pair carries a non-empty URL the write
+happens only after `config shield` has reported that `shell.json` denies group
+and other -- private BEFORE the write, which is the fix -- otherwise the call
+returns `false` and emits `sourcesPersistFailed("config_unsafe")`. A pair of
+two empty strings is never gated, so `removeSource`'s `persistActive("", "")`
+always proceeds. Before the shield's first run has exited the pair is held in
+one slot and resolved by that exit; `persistActive` returns `true` for a held
+pair, meaning accepted-not-refused, and nothing has been written at that
+point. The full
 entry is passed because `updateEntryInline` replaces the entry wholesale
 (1093-1098): keys we do not own (`refreshMinutes`, `mpvArgs`, ...) survive
 only because `entryWith` copies them.
@@ -471,7 +485,14 @@ only because `entryWith` copies them.
 
 1. `Component.onCompleted`: `mkdirProc` (`mkdir -p -m 700` of `cacheDir`,
    `cacheDir/sources`, `stateDir`, `runtimeDir`) -> `stateInitProc`
-   (`state init`, now v2) -> `dirsReady`.
+   (`state init`, now v2) -> `dirsReady`. Alongside it, and deliberately NOT
+   in that chain: `config shield` (D-SINK-18). It touches none of the plugin's
+   own directories and must not wait on them, and it is first among the things
+   that have to happen before a URL can be persisted rather than merely early
+   -- a persist arriving before its first exit is held, not written. Running
+   it unconditionally here is also what repairs an install whose `shell.json`
+   is already 0644 with a URL in it, at the next shell start rather than at
+   the next source change.
 2. `stateFile.onLoaded` -> `applyUserState` -> `stateLoaded = true` ->
    `reconcile()`.
 3. `reconcile()` (also from `onPlaylistUrlChanged`, `onEpgUrlChanged`):
@@ -513,7 +534,7 @@ otherwise set `pendingFreshness = true` and reset the same fields to the
 | Step | Where | Cost |
 |---|---|---|
 | 1. `switchSource(key)`: guards, `switching = true`, `userState = touchSource(...)`, `saveState()` (async atomic write of ~30 KB) | service | < 1 ms |
-| 2. `persistActive(rec.url, rec.epgUrl)` -> `updateEntryInline`: two `JSON.parse(JSON.stringify(shellConfig))` of a few-KB object + one pretty `stringify` + `FileView.setText` (async) | host, lines 1078-1112, 109-114 | ~1-3 ms |
+| 2. `persistActive(rec.url, rec.epgUrl)` -> `updateEntryInline`: two `JSON.parse(JSON.stringify(shellConfig))` of a few-KB object + one pretty `stringify` + `FileView.setText` (async) | host, lines 1078-1112, 109-114 | ~1-3 ms. The D-SINK-18 gate adds no process to this step: the verdict is already in hand from the startup run or the previous write's re-arm, and the decision is a pure function. The re-arm run starts AFTER the write and is not on the switch's path. The one exception is a persist issued before the shield's first exit, which is held until it: the shield starts at `Component.onCompleted`, so in practice that means a switch in the first moments of a shell start and not an ordinary one. The wait is a `python3` start, which section 6 of `ARCHITECTURE.md` measured at 98-113 ms idle for this file before any import; the verb's own work on top of that has not been timed, so the total is UNVERIFIED |
 | 3. `shellConfig` assignment -> `onShellConfigChanged` -> `pluginsChanged()` -> `syncPluginApis()` -> `shellApi.barConfig` -> our `settings` binding -> `playlistUrl` / `epgUrl` change -> `reconcile()` (no-op) -> `activeSourceKey` -> `activeCacheDir` | host + service | < 1 ms |
 | 4. Four `FileView` paths rebind; Quickshell reads the new files (2 MB `channels.json`) | Quickshell | ~5-10 ms (2 ms for a small file in the scratch run) |
 | 5. `channelsFile.onLoaded` -> `applyChannels`: `parseChannels` + `prepareChannels` + `indexById` | service | node: 11-17 + 10-32 + 3-6 ms; Qt V4 is 2-3x slower: ~60-90 ms |
@@ -646,7 +667,18 @@ Both paths run the pasted text through `Model.sanitizeInput` and the
    keeps an existing mode); `sources/` and every `sources/<key>/` are 0700
    (`mkdir -p -m 700` and `ensure_private_dir`); every helper write is the
    existing `O_EXCL` temp + `chmod 0600` + `os.replace`. Removal deletes
-   known file names only.
+   known file names only. **The host's `shell.json` is not in that list and
+   was the gap (D-SINK-18, 2026-10-09).** The parenthesis above gives the
+   reason `state init` exists -- `FileView` keeps an existing mode -- and the
+   same sentence is true of the file the host persists our active URLs into,
+   whose packaged default is 0644. Since the plugin cannot create that file,
+   it does the other half: the helper's `config shield` denies group and other
+   on `$XDG_CONFIG_HOME/omarchy/shell.json` (default `~/.config`) BEFORE a URL
+   is persisted into it, on a file descriptor opened `O_NOFOLLOW`, reading the
+   mode back from the kernel, and refuses rather than writes when it cannot.
+   Exactly that one file: no parent directory is touched, because a 0600 file
+   is sufficient whatever the directory modes are and `~/.config` is shared
+   with everything on the system. Specified in `ARCHITECTURE.md` section 6.
 6. IPC: `status` gains `sources` (label/host/key/counts) and `activeSource`;
    no verb takes a URL or a path; no new verbs.
 7. Hostile playlist vs the Sources screen: nothing. The screen renders
@@ -657,10 +689,17 @@ Both paths run the pasted text through `Model.sanitizeInput` and the
    surfaced in v0.2). A hostile *label* (`${path}`, `--urgency=x`) is
    PlainText on screen and never reaches mpv or `omarchy-notification-send`.
 8. Credentials at rest: `state.json` now holds every known playlist/EPG URL
-   (0600, 0700 dir), shell.json holds the active one (0600), each
+   (0600, 0700 dir), shell.json holds the active one (0600 **because the
+   plugin makes it so before each write, not because it arrives that way** --
+   D-SINK-18; this clause asserted 0600 as a property of the file and it is a
+   property of one machine), each
    `channels.json` holds stream URLs (0600). README settings section gains
-   the sentence. Removing a source deletes its cache and record; the
-   shell.json entry is cleared when it was active.
+   the sentence, and now also says what the plugin changes about `shell.json`
+   and what happens when it cannot. Removing a source deletes its cache and
+   record; the
+   shell.json entry is cleared when it was active -- and that clearing persist
+   carries no URL, so it is never gated by the shield: an exposed file must
+   still be emptiable, or the fix would hold the credential in place.
 9. Concurrency bounds: one probe, one playlist refresh, one EPG run, one
    cache job at a time; each helper under the 180 s watchdog; at most 50
    sources; `cache prune` argv carries at most 50 keys.
@@ -796,6 +835,18 @@ sed -n 109,114p /usr/share/omarchy/shell/shell.qml          # persistShellConfig
 sed -n 1078,1112p /usr/share/omarchy/shell/shell.qml        # updateEntryInline: full-entry replace, object entries only
 sed -n 1654,1663p /usr/share/omarchy/shell/shell.qml        # IPC setBarWidget (omarchy bar set) -> PluginRegistry.setBarWidget
 sed -n 55,140p /usr/share/omarchy/bin/omarchy-shell-config  # commit(): jq + mv + `omarchy-shell shell reloadConfig`
+# the container the host config is (D-SINK-18, 2026-10-09). Read-only, and the
+# three facts the shield exists for. The lead's own FileView mode probe and the
+# cp-under-umask reproduction are NOT here: they need a display and a scratch
+# tree, and the measurements are carried by the D-SINK-18 row on the board.
+# Re-read on 2026-10-09 by the docs lane: 700 / 755 / 755 / 600 and 644,
+# matching the lead's table.
+stat -c '%a %U %n' ~ ~/.config ~/.config/omarchy ~/.config/omarchy/shell.json
+stat -c '%a %U %n' /usr/share/omarchy/config/omarchy/shell.json   # 644 root: the packaged default
+grep -n 'cp -f' /usr/share/omarchy/bin/omarchy-refresh-config     # lines 32-33, 42: default -> user config
+# and the verb that answers for it, run against a SCRATCH config so the real
+# file is never touched (it prints a verdict and two modes, never the contents):
+XDG_CONFIG_HOME=<scratch>/config python3 bin/omarchy-iptv config shield
 # clipboard
 grep -n clipboardText /usr/lib/qt6/qml/Quickshell/quickshell-core.qmltypes
 timeout 3 wl-paste --list-types                             # works from a background process (no focus)

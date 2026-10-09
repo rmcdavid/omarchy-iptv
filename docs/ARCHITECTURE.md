@@ -260,7 +260,11 @@ bar entry, read by the service through `shell.barConfig`.
 | `maxRecents` | integer | 10 | `clampInt(1..50)` |
 
 Credentials caveat: Xtream-style URLs embed username/password. They live in
-`shell.json` (mode 0600), in `state.json` (mode 0600; the Sources history
+`shell.json` (mode 0600 only because the plugin now makes it so before it
+writes one: the packaged default is 0644 and the host's writer keeps whatever
+mode it finds, which is D-SINK-18 below -- this line said 0600 flatly for the
+life of the project and was describing one machine), in `state.json`
+(mode 0600; the Sources history
 keeps each source's URLs, D-SINK-6) and, for the life of a fetch, in the
 helper's environment as `OMARCHY_IPTV_URL` -- readable through
 `/proc/<pid>/environ` by root only, because the fetch verbs make themselves
@@ -509,6 +513,211 @@ stopped by that path. And the scope sentence from the entry above still holds
 unchanged -- this is verification, not transport, and whether a connection is
 TLS at all remains D-SINK-14.
 
+Raised 2026-10-09 (D-SINK-18), and written here in the round that fixes it --
+the state of that fix is the board row in `docs/STATUS.md`, not this
+paragraph. **The same maintainer, the fourth finding in four days, and the
+fourth posted on the verification request for the commit that closed the
+previous one** (against the shipped 0.13.2, eb7fdff,
+omacom/omarchy-plugin-marketplace#10735): adding or switching a source stores
+the playlist and EPG URLs in `~/.config/omarchy/shell.json` through
+`persistActive` -> `updateEntryInline`, the supported upgrade path can create
+that file 0644, and the host's atomic writer preserves whatever mode it finds,
+so a provider credential comes to rest in a file other local accounts can read
+whenever the directories above it are searchable. He was right.
+**A new class again, and naming it is the point: this is not a sink but a
+CONTAINER.** Every entry above this one is a place the URL was written or sent
+-- an argv, an environment variable, a session bus, a text layout, a TLS
+connection to a peer nobody authenticated -- and each was closed by narrowing
+who could read or impersonate that one channel. Here nothing leaked. The
+plugin asked the host to store a setting, the host stored it, in the host's
+own file, exactly as designed. What was never checked is the WALLS of the box
+the secret was put in, because the box was not ours. So an enumeration of
+sinks can be complete, and was, and the credential still sat in a
+world-readable file -- the same shape as D-SINK-13 one step further out: the
+list was the right list and the question was the wrong question.
+**Measured by the lead on 2026-10-09 before any lane was briefed. This lane
+holds no display and cites those measurements rather than restating them as
+its own.** The packaged default `/usr/share/omarchy/config/omarchy/shell.json`
+is 0644, and `omarchy-refresh-config` copies it with `cp -f`: reproduced into
+a scratch directory, reading the real source read-only, a fresh copy is 644
+under umask 022 and 600 under umask 077, while a copy onto an EXISTING file
+keeps that file's mode. A purpose-built Quickshell `FileView` probe with
+`atomicWrites: true`, the setting `shell.qml:138` uses, left a 0644 file at
+0644 and a 0600 file at 0600, with the content changed both times: the atomic
+rename neither resets the mode to the writer's umask nor tightens it. On this
+machine the file is 0600, but `~/.config` and `~/.config/omarchy` are both
+0755, so only the home directory's own 0700 stands between it and another
+account -- and a 0755 home is the default on many systems. The conclusion is
+the one sentence that matters: **the plugin cannot assume the file it is
+writing a secret into is private.**
+**It is every source, and Xtream is only the case that always carries a
+credential.** `persistActive`'s callers are `addSource` and the source switch,
+the two ordinary paths; `buildXtreamSource` reaches them through `addSource`
+like anything else. A plain `https://user:pass@host/list.m3u`, a provider URL
+carrying the credential as a path token (`/live/USER/PASS/123.ts`, an ordinary
+IPTV shape) and an Xtream `get.php?username=U&password=P` land there alike.
+The report named the narrowest instance and the finding is wider than the
+report, which is the third time in four days that measuring the claim found
+more than reading it.
+**What makes it a defect rather than a design** is the contrast with the
+plugin's own files. `state.json` holds the same URLs at 0600 inside a 0700
+directory, each `channels.json` likewise, and standard 5 has said so since M1.
+The plugin was careful with every container it owns and careless with the one
+it borrows -- and the borrowed one is the container this document's own
+credentials caveat pointed at, describing it as 0600 because that is what one
+machine happened to be.
+**What changed, and the ORDERING is the whole fix.** The plugin takes
+responsibility for the container it puts a secret into: the file is made
+private BEFORE a URL goes into it, never afterwards, because a tightening that
+follows the write is a window with a credential sitting in it. QML cannot
+chmod, so the work is a helper verb, `config shield`, and the service gates
+every persist that carries a URL on its verdict:
+- The verb takes **no path argument and has no override flag**. It computes
+  the one file it may touch from the environment -- `$XDG_CONFIG_HOME`, else
+  `~/.config`, with a relative `$XDG_CONFIG_HOME` ignored as the XDG spec
+  requires, which matters more here than for `cache_dir` because this value
+  feeds a chmod -- and joins the two constant names `omarchy/shell.json`. A
+  verb that chmods whatever path it is handed is a capability this plugin has
+  no reason to own and the first thing a reviewer looks for.
+- It operates on a **file descriptor, not a name**, which is D-LOGO-10's
+  lesson applied to a chmod: `O_NOFOLLOW` refuses a symlink at open,
+  atomically, and yields a handle on the inode that was checked; `O_NONBLOCK`
+  is load-bearing rather than hygiene, because a FIFO at that path would make
+  a plain `O_RDONLY` block for ever on the service's startup path; `fstat`
+  decides regular-file and ownership by the invoking euid; `fchmod` clears
+  exactly `0o077`, leaving the owner bits and the setuid/setgid/sticky bits
+  alone; a second `fstat` READS BACK what the kernel stored rather than
+  trusting the mode that was asked for; and a final `lstat` asks whether that
+  inode is still the one at the path, because the host's own writer renames a
+  new file over it and a verdict about a replaced inode is a true statement
+  about the wrong file. A `replaced` verdict is retried, three times, a bound
+  and not patience. The file is opened read-only and never read.
+- Its output is one JSON object: a verdict, two octal modes, an attempt count
+  and the file's last two path components. Never the contents, never the
+  absolute path (which carries the user's name), never a URL. That is rule 5
+  holding over a new verb rather than being remembered about one later.
+- The verdict is read **fail-closed**, and that is the shape of the reader:
+  private is concluded only when the run said so three ways at once (`ok`,
+  `private`, and the verdict string), so a crashed helper, empty output, an
+  unparseable line, any of the verb's other verdicts (`absent`, `symlink`,
+  `foreign`, `not_regular`, `replaced`, `error`) and -- the case it is really
+  written for -- a verdict string this version has never heard of all read as
+  exposed. A helper that learns a new verdict cannot have it read as safe by
+  an older guide. The two mirrors agree about that vocabulary by a CALL and
+  not by a name (rule 13): one shared JSON fixture lists every verdict and
+  which of them mean private, the python suite asserts it against the
+  helper's own tuple and the node suite against the reader's.
+- The decision in front of a persist is a pure function in `Model.js`,
+  unit-tested from node rather than stranded in a QML component (rule 12),
+  and it answers three ways: **persist** when the file is known private or
+  the write carries no URL, **refuse** when it is known not private, **defer**
+  when no run has answered yet. `defer` exists for exactly one window --
+  QML cannot block on a `Process`, and the shield is started on the service's
+  startup path, so a persist arriving before its first exit must neither write
+  blind nor fail a user whose file is probably fine. It is held in one slot,
+  collapsed to the last intent, and resolved in the shield's exit handler.
+  The two function names are deliberately NOT cited here: they land with the
+  code lane's commit in this round, and the gate's symbol check settles
+  whether a `Model.*` name in a document resolves, so a document written in a
+  worktree where it does not yet exist would be asserting something the check
+  cannot grade. Read them off `Model.js`.
+- **A persist that carries no URL is never gated**, and that is deliberate
+  rather than convenient: `removeSource` persists `("", "")`, and if an
+  exposed file could block that, a user whose `shell.json` is 0644 could not
+  remove the credential sitting in it. The fix would be holding the defect in
+  place.
+- Any non-empty URL triggers the gate. Not "does this URL look like it has a
+  password in it": a path token is a credential as surely as a query value is,
+  which is why rule 5 treats whole URLs as secrets instead of trying to find
+  the secret inside one.
+- The refusal is **surfaced, not swallowed**: `sourcesPersistFailed` carries
+  the new code `config_unsafe`, the guide shows
+  `Settings file is readable by other users -- chmod 600
+  ~/.config/omarchy/shell.json`, and a deferred persist that is later refused
+  unwinds the switch the caller opened. The sentence deliberately does NOT
+  reuse `persist_failed`, which sends the user to `omarchy bar set` -- that
+  would answer a credential exposure by writing the credential into the
+  user's shell history for ever, the durable form rule 5 refuses.
+**The scope is deliberately one file, and the ruling says so.** Nothing looks
+at, reports or acts on the mode of `~/.config` or `~/.config/omarchy`. A 0600
+file is sufficient whatever the directory modes are; `~/.config` is shared
+with everything on the system and tightening it is not this plugin's to do;
+and the verb reports no directory mode either, because a number in the output
+is an invitation to act on it. `O_NOFOLLOW` covers the last component only --
+a symlinked `~/.config`, which is what every dotfile manager builds, is
+followed on purpose, since refusing it would break ordinary installs. The
+bound on that is the operation itself: this only ever SUBTRACTS group and
+other bits from a regular file the invoking euid owns, so the worst a
+redirected call can achieve is making one of the user's own files private. It
+cannot disclose anything and it cannot grant anything.
+**The residual, with its size rather than a claim of zero.** The check is not
+atomic with the write, and cannot be: the verdict comes from a process exit,
+the write happens later in the QML event loop, and the mode could be loosened
+in between. Three windows, each stated as the code makes it rather than as a
+measurement this lane could take:
+1. *Verified-then-written.* On the immediate path the state was established by
+   an earlier run -- the startup shield, or the re-arm after the previous
+   write -- so the gap is however long the shell has been running since that
+   run, not a sub-millisecond race. On the deferred path the write happens
+   inside the shield's own exit handler, one event-loop turn after the
+   read-back. Both are derived from the code; neither interval has been timed,
+   and the wall-clock figure is UNVERIFIED because it is a property of the
+   user's session rather than of the program.
+2. *Loosened after a write.* A URL already in the file becomes readable again
+   the moment something changes the mode back, and nothing tells a plugin that
+   happened: there is no watcher on the file's mode, by choice. The cost is
+   named rather than minimised -- the credential stays readable by other local
+   accounts until the next persist or the next shell start re-runs the shield.
+   The containing fact, and it is a real one, is that the supported command
+   which can produce a 0644 `shell.json` produces it by CREATING the file, and
+   a newly created file carries the package default contents and therefore no
+   URL (`cp -f` onto an existing file keeps that file's mode); what remains is
+   a mode changed by hand, or by a tool nobody here has enumerated. The
+   mitigation is the re-arm: the shield runs again after every successful
+   write and after the logo toggle's write, so the gate in front of the next
+   persist is answering about the file as it is now rather than as it was at
+   login.
+3. *Installs that are already exposed.* The shield runs on the startup path
+   unconditionally, independent of `mkdirProc`'s chain and independent of
+   whether any persist happens, so an install whose `shell.json` is 0644 with
+   a URL already in it is tightened at the next shell start rather than at the
+   next source change. That is F-M3-16's lesson one defect later: repairing
+   only the path that writes new secrets would have left every affected
+   install exposed indefinitely, and the artifact needs the fix as much as the
+   derivation does.
+**The siblings, asked before closing (engineering rule 15).** What else does
+this plugin put into a container it does not own? Swept over the tree at
+982b693 and stated as cleared or not:
+- **`updateEntryInline`, the second call site.** There are exactly two on
+  `dev`: `persistActive` and the logo toggle. `ownedEntryPatch` names every
+  owned key, `playlistUrl` and `epgUrl` included (D-LOGO-2, and the reason it
+  does), so the logo toggle writes the provider URLs into the host config too.
+  Found by this sweep and not by the report. It is deliberately NOT gated: the
+  values it writes come from `root.settings`, which is what the host already
+  stores, so it puts nothing in the file that is not in it already, and
+  refusing a logo toggle would cost a feature for no privacy gained. It does
+  get the re-arm.
+- **Every helper write.** Each is the existing `O_EXCL` temp + 0600 +
+  `os.replace` into a directory the helper creates 0700 through
+  `ensure_private_dir`, so no other borrowed container takes a URL. Cleared.
+- **mpv's own directories.** The shader/ICC cache and the watch-later records
+  are pointed at `$XDG_RUNTIME_DIR/omarchy-iptv/`, a directory the plugin
+  creates and owns, instead of `~/.cache/mpv/` and `~/.local/state/mpv/`,
+  which it does not. Already true before this round; it is the same principle
+  one feature along, which is why it reads as consistent rather than as luck.
+  `$XDG_RUNTIME_DIR` itself is a container the plugin does not own and does
+  not tighten; it is 0700 by the session, which is the one borrowed container
+  that is private by construction. Cleared, with the caveat that
+  `--screenshot-dir` stays unreserved by ruling (PO-5), so a user can still
+  send screenshots into a container of their own choosing.
+- **The host's notification and OSD surfaces** are not containers and are
+  already in this register as sinks; nothing new. Cleared.
+The root cause is not the mode at all: it is that the active source is
+identified by its URL on the bar entry, so a credential has to live in the
+host's config for the plugin to know which source is active.
+`ARCHITECTURE-SOURCES.md` D1 records that, and the migration to a key is filed
+separately by the lead; the shield is the containment, not the answer.
+
 ## 7. Error handling, offline behavior, performance
 
 - Every helper failure produces a status object the guide renders as text
@@ -554,7 +763,9 @@ Performance budget (10k channels):
 6. No symlinks in the repo (validator rejects them); no sudo, no pkexec, no
    network from QML.
 7. Credentials: never printed; `sourceHost` instead of URL in caches and
-   errors. README warns that `shell.json` and the cache contain them.
+   errors. README warns that `shell.json` and the cache contain them, and
+   says plainly what the plugin changes about `shell.json` so that a user
+   meets that fact in the README rather than in `ls -l`.
 8. IPC surface is minimal (`play/stop/next/prev/refresh/status`) and only acts
    on ids from the loaded cache.
 9. mpv is started with `--msg-level=all=error`, our own socket path under
@@ -584,6 +795,23 @@ Performance budget (10k channels):
     hostile `mpvArgs`, by taking the decision from a read-back rather than from
     a write that answered success, and by observing a refusal from a real TLS
     peer.
+11. A secret goes only into a container this plugin has made private, and that
+    includes a container it does not own. Standard 5 covers the plugin's own
+    files; D-SINK-18 is what happens when the same credential goes into the
+    host's `shell.json`, whose packaged default is 0644 and whose writer keeps
+    whatever mode it finds. So the mode of that one file is checked and
+    tightened BEFORE a URL is written into it -- the helper's `config shield`,
+    a verb with no path argument that operates on a file descriptor rather
+    than a name -- and a persist that carries a URL is REFUSED when it cannot
+    be, surfaced to the user with the chmod rather than with `omarchy bar
+    set`. Exactly one file: the parent directories are not touched, because a
+    0600 file is sufficient whatever they allow and `~/.config` is shared with
+    everything on the system. A persist that carries no URL is never gated, so
+    clearing the active source always works. The check is not atomic with the
+    write and is not claimed to be; section 6's entry carries the three
+    windows and their sizes. Verified by observing the real mode of a scratch
+    file through `$XDG_CONFIG_HOME` -- a mode is observable, so rule 14 admits
+    no grep here.
 
 ## 9. Coding standards
 
