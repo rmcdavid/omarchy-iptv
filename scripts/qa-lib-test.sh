@@ -1641,6 +1641,187 @@ is "the tls scenario points mpv at its own scratch config and nowhere else" \
 is "and that directory is inside the work tree the run owns and deletes" \
    "$(qa_count '^MPV_CONF_DIR="\$WORK/mpv"$' "$TLS")" "1"
 
+# ======================================== container modes (D-SINK-18)
+
+section "qa_mode_private / D-SINK-18: the mask, with its two halves apart"
+CM="$TMP/cm"
+mkdir -p "$CM"
+# One real file per mode, so every answer below is `stat` reading a mode off a
+# filesystem and not a string this file chose.
+cmfile() { : >"$CM/$1"; chmod "$2" "$CM/$1"; printf '%s\n' "$CM/$1"; }
+is "0600 is private" "$(qa_mode_private "$(cmfile p600 0600)")" "private"
+is "0400 is private too" "$(qa_mode_private "$(cmfile p400 0400)")" "private"
+is "0644 -- the packaged default -- is exposed to both" \
+   "$(qa_mode_private "$(cmfile p644 0644)")" "both"
+is "0640 is exposed to the GROUP, and names which half" \
+   "$(qa_mode_private "$(cmfile p640 0640)")" "group"
+is "0604 is exposed to the WORLD, and names which half" \
+   "$(qa_mode_private "$(cmfile p604 0604)")" "other"
+is "a file that is not there is VACUOUS, never private" \
+   "$(qa_mode_private "$CM/absent")" "$QA_NO_FIELD"
+st "0600 answers 0" 0 qa_mode_private "$CM/p600"
+st "0640 answers 1 -- group alone is not a pass" 1 qa_mode_private "$CM/p640"
+st "0604 answers 1" 1 qa_mode_private "$CM/p604"
+st "a missing file answers 2, and vacuous is never a pass" 2 qa_mode_private "$CM/absent"
+# The counter-case, and it is the exact mask qa_transcript_start's first version
+# was graded with: world-readable only. That function was driven against /tmp,
+# which is 1777 and trips every candidate mask, so weakening 077 to 004
+# reddened nothing. A 0640 shell.json is as exposed to everyone in the owning
+# group as a 0644 one is to the world, and this form calls it private.
+old_world_readable_only() {
+  local m
+  m=$(stat -c '%a' -- "$1" 2>/dev/null)
+  if (( 0$m & 004 )); then printf 'exposed\n'; return 1; fi
+  printf 'private\n'
+  return 0
+}
+is "the world-only form calls a 0640 config private" \
+   "$(old_world_readable_only "$CM/p640")" "private"
+st "and answers 0, so a check built on it cannot go red" 0 old_world_readable_only "$CM/p640"
+is "qa_mode_private refuses the same file" "$(qa_mode_private "$CM/p640")" "group"
+is "the two forms agree on 0644, which is why one mode proves nothing" \
+   "$(old_world_readable_only "$CM/p644")|$(qa_mode_private "$CM/p644")" "exposed|both"
+
+section "qa_file_untouched / D-SINK-18: the clock that sees a needless chmod"
+SF="$CM/stamp.json"
+printf '{"version":1}\n' >"$SF"; chmod 0600 "$SF"
+S0=$(qa_file_stamp "$SF")
+is "a stamp is four fields" "$(printf '%s\n' "$S0" | awk '{print NF}')" "4"
+is "and a file nobody touched reads as untouched" "$(qa_file_untouched "$SF" "$S0")" "untouched"
+st "untouched answers 0" 0 qa_file_untouched "$SF" "$S0"
+# The form anyone writes first: content plus mtime.
+old_content_and_mtime() {
+  printf '%s %s\n' "$(sha256sum -- "$1" 2>/dev/null | cut -d' ' -f1)" \
+    "$(stat -c '%.9Y' -- "$1" 2>/dev/null)"
+}
+CMT0=$(old_content_and_mtime "$SF")
+# THE MEASUREMENT THIS SECTION EXISTS FOR. chmod to the mode the file ALREADY
+# has: the bytes and mtime come back byte-identical and ctime moves, every
+# time. So a predicate watching content and mtime cannot go red for a needless
+# chmod of an already-private file, which is the harm M4 in
+# config-mode-scenario.sh is there to catch. Rule 14, inside a privacy check.
+sleep 0.02
+chmod 0600 "$SF"
+is "a same-mode chmod leaves the content and mtime form seeing NOTHING" \
+   "$(old_content_and_mtime "$SF")" "$CMT0"
+is "qa_file_untouched sees it, and names ctime" "$(qa_file_untouched "$SF" "$S0")" "ctime"
+st "and a ctime move is not a pass" 1 qa_file_untouched "$SF" "$S0"
+# The other three differences, each named rather than lumped into "touched",
+# because which field moved is the difference between a chmod and a rewrite.
+FM="$CM/mode.json"; printf 'x\n' >"$FM"; chmod 0600 "$FM"; FM0=$(qa_file_stamp "$FM")
+chmod 0644 "$FM"
+is "a mode change is named" "$(qa_file_untouched "$FM" "$FM0")" "mode"
+FC="$CM/content.json"; printf 'x\n' >"$FC"; chmod 0600 "$FC"; FC0=$(qa_file_stamp "$FC")
+sleep 0.02; printf 'y\n' >"$FC"
+is "a rewrite is named content, which outranks the clocks it also moved" \
+   "$(qa_file_untouched "$FC" "$FC0")" "content"
+FT="$CM/mtime.json"; printf 'x\n' >"$FT"; chmod 0600 "$FT"; FT0=$(qa_file_stamp "$FT")
+touch -m -d '2020-01-01 00:00:00' "$FT"
+is "an mtime move with the same bytes is named" "$(qa_file_untouched "$FT" "$FT0")" "mtime"
+# Vacuity, every door. A C1 that passes because it measured nothing is the
+# vacuous pass this library exists to stop.
+is "a file that has gone is vacuous" "$(qa_file_untouched "$CM/absent" "$S0")" "$QA_NO_FIELD"
+st "and answers 2" 2 qa_file_untouched "$CM/absent" "$S0"
+is "a baseline that is not four fields is vacuous, not a match" \
+   "$(qa_file_untouched "$SF" "deadbeef 600")" "$QA_NO_FIELD"
+is "a NOFIELD baseline is vacuous rather than compared" \
+   "$(qa_file_untouched "$SF" "$QA_NO_FIELD")" "$QA_NO_FIELD"
+is "an empty baseline is vacuous" "$(qa_file_untouched "$SF" "")" "$QA_NO_FIELD"
+is "a stamp of a directory is vacuous" "$(qa_file_stamp "$CM")" "$QA_NO_FIELD"
+is "a stamp of a missing file is vacuous" "$(qa_file_stamp "$CM/absent")" "$QA_NO_FIELD"
+st "and that answers 2" 2 qa_file_stamp "$CM/absent"
+
+section "config-mode-scenario / D-SINK-18: its floor, its refusals, its joins"
+CMS="$ROOT/scripts/dev-harness/config-mode-scenario.sh"
+is "the config-mode scenario declares exactly one floor" \
+   "$(qa_count '^EXPECTED_CHECKS=[0-9]+$' "$CMS")" "1"
+cmdeclared=$(grep -oE '^EXPECTED_CHECKS=[0-9]+' "$CMS" | cut -d= -f2)
+is "and it matches the assertions it actually has" \
+   "$cmdeclared" "$(qa_count '^ck [A-Z]' "$CMS")"
+# The argument refusals, RUN. They start nothing, need no display and touch no
+# config, and they matter for the tls lane's reason: a dropped --verb value
+# would leave every mode check below grading an argument-less helper run, which
+# is a green nobody asked for.
+st "config-mode refuses a --verb with no value" 2 bash "$CMS" --verb
+# Shell metacharacters refused as DATA: `st` runs the scenario through argv, so
+# this string is never shell text anywhere, and the regex is what rejects it.
+st "config-mode refuses a --verb carrying shell metacharacters" 2 bash "$CMS" --verb 'config shield; id'
+st "config-mode refuses a --helper that is not there" 2 bash "$CMS" --helper "$TMP/nope"
+st "config-mode refuses a mode it does not have" 2 bash "$CMS" sideways
+st "config-mode SKIPS its live half with 77 rather than pretending to run it" \
+   77 bash "$CMS" live
+# F-HARNESS-14, as the pip and tls lanes learned it: a refusal must happen
+# BEFORE the run owns anything, or its cleanup reaches for something it did not
+# create. Here the proof is that a refusing run leaves no transcript behind.
+CMTR="$TMP/cmharness"
+mkdir -p "$CMTR/transcripts"
+OMARCHY_IPTV_HARNESS_DIR="$CMTR" bash "$CMS" --verb >/dev/null 2>&1
+OMARCHY_IPTV_HARNESS_DIR="$CMTR" bash "$CMS" live >/dev/null 2>&1
+# `-type f` deliberately: qa_tree_count with no find args counts the directory
+# itself, so an empty transcripts/ would answer 1 and this check would be
+# comparing against the wrong zero.
+is "a refusing or skipping config-mode run leaves no transcript" \
+   "$(qa_tree_count "$CMTR/transcripts" -type f)" "0"
+# Rule 4, made a check: the grading stub is not a shim and must not become the
+# default. If the scenario ever defaults to it, every mode assertion grades a
+# file this lane wrote instead of the helper that ships.
+is "the config-mode scenario defaults to the SHIPPING helper" \
+   "$(qa_count '^HELPER="\$ROOT/bin/omarchy-iptv"$' "$CMS")" "1"
+is "and the grading stub appears only in its comment table, never in its code" \
+   "$(qa_count 'stub-config-verb' "$CMS")" "1"
+# The join that makes this scenario -- and every OTHER scenario, once the
+# D-SINK-18 verb exists -- safe to run at all. run.sh replaced three XDG
+# directories and left XDG_CONFIG_HOME alone, which was harmless only while
+# nothing the plugin ran read it: the helper names XDG_CACHE_HOME,
+# XDG_STATE_HOME and XDG_RUNTIME_DIR and no other. The verb computes
+# $XDG_CONFIG_HOME/omarchy/shell.json and chmods it, so an un-isolated harness
+# run would reach into the developer's own config and change its mode. These
+# three are NAME joins, not observations -- bookkeeping that catches a revert
+# -- and rule 14 does not let a grep stand in for a measurement, so they are
+# said to be bookkeeping here rather than left to read as evidence. What
+# OBSERVES the isolation is config-mode-scenario.sh's own C1.
+RS="$ROOT/scripts/dev-harness/run.sh"
+is "run.sh points XDG_CONFIG_HOME inside the scratch tree" \
+   "$(qa_count '^  export XDG_CONFIG_HOME="\$SCRATCH/config"$' "$RS")" "1"
+is "and a clean removes it, so one run cannot inherit the last run's fix" \
+   "$(qa_count '"\$SCRATCH/config"' "$RS")" "2"
+is "the config-mode scenario passes XDG_CONFIG_HOME explicitly on every verb run" \
+   "$(qa_count '^  env "XDG_CONFIG_HOME=\$cfg"' "$CMS")" "1"
+# And the seeding itself is OBSERVED rather than grepped: the function is
+# EXTRACTED from the shipped run.sh -- the way the counting frame and
+# shell.qml's focusWalk are -- and RUN against a scratch SCRATCH, so what is
+# asserted below is a mode `stat` read off a file run.sh's own code created.
+# Rule 14: the two lines above are bookkeeping and say so; this is the
+# measurement.
+SEED="$TMP/seed-frame.sh"
+sed -n '/^seed_scratch_config() {/,/^}/p' "$RS" >"$SEED"
+is "seed_scratch_config was extracted from the real run.sh, not retyped" \
+   "$(qa_count '^seed_scratch_config\(\) \{$' "$SEED")" "1"
+SEEDROOT="$TMP/seedscratch"
+mkdir -p "$SEEDROOT/config/omarchy"
+(
+  SCRATCH="$SEEDROOT"
+  die() { printf 'die: %s\n' "$*" >&2; exit 1; }
+  # shellcheck source=/dev/null
+  . "$SEED"
+  seed_scratch_config
+) >/dev/null 2>&1
+SEEDED="$SEEDROOT/config/omarchy/shell.json"
+is "run.sh's own seeding code creates the scratch host config" \
+   "$([[ -f $SEEDED ]] && echo yes || echo no)" "yes"
+is "and leaves it at the packaged default's EXPOSED mode, not this machine's" \
+   "$(qa_mode_private "$SEEDED")" "both"
+# The seed must carry no URL, or a scenario could not tell a credential
+# ARRIVING from one that was there all along.
+is "and the seed carries no playlistUrl and no epgUrl" \
+   "$(grep -c -E 'playlistUrl|epgUrl' "$SEEDED" 2>/dev/null || true)" "0"
+# The counter-case for the mode: a seed that inherited the caller's umask
+# would be 0600 on a machine like this one and the tightening would never be
+# exercised. That is the "green because the fixture was already right" shape,
+# so the seeded mode is asserted to be the exposed one and not merely "a mode".
+is "a umask-created file here would have been private, which is why the mode is forced" \
+   "$(umask 077; : >"$TMP/umaskprobe"; qa_mode_private "$TMP/umaskprobe")" "private"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -1665,12 +1846,25 @@ is "and that directory is inside the work tree the run owns and deletes" \
 # form that reads a leak as a refusal), the TLS scenario's hit counters driven
 # over a crafted log, its two floors, and its four argument refusals -- which is
 # all of that scenario a machine with no display can reach.
+# 335 -> 384 on 2026-10-09, D-SINK-18: qa_mode_private over a real file at each
+# of the five modes that matter, with the world-readable-only form that calls a
+# 0640 config private shown answering 0 beside it; qa_file_stamp /
+# qa_file_untouched naming each field that can move, including the ctime case
+# that the content-and-mtime form provably cannot see; and the config-mode
+# scenario's floor, its five argument and mode refusals, the transcript a
+# refusing run must not leave, and the XDG_CONFIG_HOME isolation that keeps
+# every harness run out of the developer's own ~/.config -- with run.sh's own
+# seeding function EXTRACTED and RUN, so the 0644 it seeds is a mode stat read
+# off a file that code created rather than a string grepped out of it. That
+# isolation is why the number jumped on a machine with no display: the
+# scenario's own C1 is what OBSERVES it, and this step is what stops it being
+# reverted quietly.
 # 301 -> 335 the same day, D-SINK-16: qa_adopted and qa_stream_stopped both ways,
 # each with the naive form that passes a run where nothing was adopted and a run
 # where the attacker kept being fed; the paced body's three counters over the same
 # crafted log; and `--pre-tls`'s three refusals, which matter because a dropped
 # value there would stage the adoption case against the wrong tree.
-EXPECTED=335
+EXPECTED=384
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
