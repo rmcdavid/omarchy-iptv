@@ -68,15 +68,44 @@ one-line copies you make yourself):
 ## Settings
 
 Settings live inline on the widget's entry in `~/.config/omarchy/shell.json`
-(mode 0600) and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
+and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
 The guide, the bar widget, and the service all read that one entry. Playlist
 and guide-data URLs from paid providers embed credentials, and they rest in
-three files, all mode 0600 and readable only by you: that `shell.json` entry,
-the channel cache, and `~/.local/state/omarchy-iptv/state.json`, which keeps
-the Sources history and each source's URLs. They are never shown or logged
+three files, readable only by you: that `shell.json` entry, the channel cache,
+and `~/.local/state/omarchy-iptv/state.json`, which keeps the Sources history
+and each source's URLs. The last two are the plugin's own files and it creates
+them mode 0600. `shell.json` is not — it belongs to the shell, it can arrive
+readable by everyone on the machine, and the plugin makes it private before it
+puts a URL in it, which is the next paragraph. They are never shown or logged
 beyond their host name. Two sentences in this file used to say two files,
 which mattered because the third is the one you might think safe to copy into
 a dotfiles repository.
+
+**One permission the plugin changes on a file that is not its own.**
+`shell.json` is the shell's settings file, shared by every bar widget you
+have, and it does not always arrive private. The copy Omarchy ships is
+readable by everyone on the machine; a `shell.json` created from it keeps
+whatever your umask gives it, which is usually readable by everyone too, and
+rewriting a file that already exists leaves its permissions alone — so a
+machine that started out readable stays readable. Your provider URL goes into
+that file, so before the plugin writes one it takes group and other access
+away from that single file: on an ordinary 644 file that leaves it 600, which
+is what `chmod 600 ~/.config/omarchy/shell.json` would do. Your own access is
+not changed.
+If the file is already private, nothing is changed and nothing is said.
+Nothing else is touched: not `~/.config` or `~/.config/omarchy`, which are
+shared with everything on your system and are not the plugin's business, not
+any other file, and not one byte inside `shell.json`. A file only you can read
+is enough on its own, whatever the directories around it allow.
+If it cannot be made private — the file belongs to another account, or it is a
+symlink, or the permissions will not change — then the source is **not saved**
+and the guide says `Settings file is readable by other users`, with the command
+to run yourself. Losing the setting is the better of the two outcomes. This is
+not a one-off repair: the file can be recreated readable again later, by
+`omarchy-refresh-config` among other things, and nothing tells a plugin when
+that happens, so the check runs at every shell start and again before each
+write. Between those moments the plugin is not watching, and a URL already in
+the file would stay readable until the next one.
 
 One place they can escape that, worth knowing, and one that used to:
 
@@ -101,7 +130,7 @@ One place they can escape that, worth knowing, and one that used to:
   carries it. That is true of all three fetches that take a URL -- your
   playlist, your guide data, and the check the Sources screen makes before it
   accepts a source. Nothing else on the plugin's side writes
-  either URL anywhere but the three 0600 files above.
+  either URL anywhere but the three files above.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -330,7 +359,8 @@ You no longer need the terminal to configure a playlist. On first run the
 guide shows an input: type or paste (`Ctrl+V`) a playlist URL or absolute
 path, optionally an EPG URL, and press `Enter`. The guide fetches it and
 shows the result inline (`1,475 channels in 28 groups`, or the reason it
-failed). Nothing is saved if the fetch fails.
+failed). Nothing is saved if the fetch fails, and nothing is saved if the
+shell's settings file cannot be made private first (see Settings above).
 
 Press `o` in list mode (or pick the `Sources` row at the bottom of the group
 column) to open the Sources screen: every playlist you have used, with its
@@ -492,6 +522,16 @@ itself unavailable rather than half working.
   This is a default rather than a guarantee: neither path is reserved, so
   an `mpvArgs` token of your own can still send them elsewhere.
 
+One file in this list is not the plugin's:
+
+- `~/.config/omarchy/shell.json` : the shell's own settings file, which holds
+  this plugin's entry along with every other widget's. The plugin writes its
+  entry through the shell, the same way any widget does, and it changes one
+  thing about the file itself — the permissions, so that only your account can
+  read it, because your playlist and guide-data URLs are stored there. Not the
+  contents beyond its own entry, and not the directories around it. See
+  Settings above for what happens when that cannot be done.
+
 Nothing inside the plugin directory is written at runtime.
 
 ## Troubleshooting
@@ -501,6 +541,13 @@ Nothing inside the plugin directory is written at runtime.
   never reaches your shell history, which `omarchy bar set` cannot avoid;
   use the command line only for a free public list you do not mind storing
   in plain text.
+- "Settings file is readable by other users": the guide would not save your
+  source, because it could not make `~/.config/omarchy/shell.json` private and
+  your provider URL would have gone into a file other accounts can read.
+  `ls -l ~/.config/omarchy/shell.json` first. If it is yours and a regular
+  file, `chmod 600 ~/.config/omarchy/shell.json` and add the source again.
+  If it belongs to another account or is a symlink, the plugin refuses to
+  change it rather than guess, and that is yours to sort out.
 - The guide's status line shows the helper's own error text (host name only,
   never the URL). To see the same JSON in a terminal, for a free list:
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`.
