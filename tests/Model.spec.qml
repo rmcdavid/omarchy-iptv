@@ -3,6 +3,7 @@ import QtTest
 import "../Model.js" as Model
 import "fixtures/chno-cases.js" as ChnoCases
 import "fixtures/pip-cases.js" as PipCases
+import "fixtures/form-edit.js" as FormEdit
 
 // Proves Model.js loads inside the Qt QML engine (no ES module syntax, no
 // node-only globals) and that the QML-side results match the node tests:
@@ -12,6 +13,11 @@ import "fixtures/pip-cases.js" as PipCases
 TestCase {
   id: spec
   name: "IptvModel"
+  // D-CLIP-1: a TestCase is `visible: false` by default, and Keys.forwardTo
+  // skips a target that is not effectively visible (measured: the chord
+  // sink below never fired until this line). Production's formKeys is a
+  // visible child of the guide, which is why the form works there.
+  visible: true
 
   // The chno values (M2-03 10.2) cover a duplicate pair (12 on two rows), a
   // subchannel (7.1 between 7 and 12), leading zeros (007 is 7), a channel
@@ -2091,5 +2097,214 @@ TestCase {
     compare(Model.rowDetail({ showGroup: true, group: "UK", nowTitle: "X", nextTitle: "Y" }), "UK · Now: X · Next: Y")
     compare(Model.footerStatus({ count: 5, truncated: true, resultTotal: 1240, cap: 200 }), "First 200 of 1,240 · keep typing")
     compare(Model.barGlyph({ playing: true }), Model.GLYPHS.tvPlay)
+  }
+
+  // ---- D-CLIP-1: the plugin's own form editing, against the real control ----
+  //
+  // The form's TextFields are read-only while the form is open (Guide.qml,
+  // the D-CLIP-1 comment on the field): an editable QtQuick TextInput reads
+  // the whole clipboard offer on every change by any application. So the
+  // key handler edits the model value itself (Model.editInsert / editDelete)
+  // with the caret and selection the read-only control still keeps. These
+  // tests drive the base type the host's qs.Ui.TextField is: a read-only
+  // TextInput for Qt's word boundaries and for every premise the handler
+  // rests on, an editable one for what Qt deletes and inserts, which is the
+  // only way to see it. tests/fixtures/form-edit.js is the transcript these
+  // produced, and node holds the model to the same rows.
+  TextInput { id: roInput; readOnly: true; width: 300 }
+  TextInput { id: edInput; readOnly: false; width: 300 }
+  TextInput { id: pwInput; readOnly: false; echoMode: TextInput.Password; width: 300 }
+  Item {
+    id: chordSink
+    property var seen: []
+    Keys.onPressed: function(event) {
+      chordSink.seen.push([event.matches(StandardKey.Paste), event.matches(StandardKey.Cut)])
+      event.accepted = event.matches(StandardKey.Paste)
+    }
+  }
+  TextInput { id: chordInput; readOnly: true; width: 300; Keys.forwardTo: [chordSink] }
+  QtObject { id: boundHolder; property string value: "" }
+  TextInput { id: boundInput; readOnly: true; width: 300; text: boundHolder.value }
+
+  function focusInput(item) {
+    tryCompare(spec, "windowShown", true)
+    item.forceActiveFocus()
+    tryCompare(item, "activeFocus", true)
+  }
+
+  function pair() { return String.fromCharCode(0xd83d) + String.fromCharCode(0xde00) }
+
+  function test_formEditBoundaries() {
+    verify(roInput.readOnly)
+    var rows = FormEdit.BOUNDARIES
+    verify(rows.length >= 20)
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r]
+      var back = [], fwd = [], modelBack = [], modelFwd = []
+      roInput.text = row.text
+      focusInput(roInput)
+      for (var p = 0; p <= row.text.length; p++) {
+        roInput.cursorPosition = p
+        keyClick(Qt.Key_Left, Qt.ControlModifier)
+        back.push(roInput.cursorPosition)
+        roInput.cursorPosition = p
+        keyClick(Qt.Key_Right, Qt.ControlModifier)
+        fwd.push(roInput.cursorPosition)
+        modelBack.push(Model.wordBoundary(row.text, p, -1, false))
+        modelFwd.push(Model.wordBoundary(row.text, p, 1, false))
+      }
+      var name = JSON.stringify(row.text)
+      compare(JSON.stringify(back), JSON.stringify(row.back), "Qt Ctrl+Left on " + name)
+      compare(JSON.stringify(fwd), JSON.stringify(row.fwd), "Qt Ctrl+Right on " + name)
+      compare(JSON.stringify(modelBack), JSON.stringify(row.back), "Model backward on " + name)
+      compare(JSON.stringify(modelFwd), JSON.stringify(row.fwd), "Model forward on " + name)
+    }
+    // A Password field's Ctrl+Left / Ctrl+Right are home and end: its word
+    // is the whole line, which is what `opaque` says.
+    pwInput.text = "foo bar baz"
+    focusInput(pwInput)
+    pwInput.cursorPosition = 7
+    keyClick(Qt.Key_Left, Qt.ControlModifier)
+    compare(pwInput.cursorPosition, Model.wordBoundary("foo bar baz", 7, -1, true))
+    compare(pwInput.cursorPosition, 0)
+    pwInput.cursorPosition = 4
+    keyClick(Qt.Key_Right, Qt.ControlModifier)
+    compare(pwInput.cursorPosition, Model.wordBoundary("foo bar baz", 4, 1, true))
+    compare(pwInput.cursorPosition, 11)
+  }
+
+  function deleted(item) { return JSON.stringify([item.text, item.cursorPosition]) }
+  function expected(edit) { return JSON.stringify([edit.value, edit.caret]) }
+
+  function test_formEditDeletes() {
+    var texts = FormEdit.WORD_DELETE_TEXTS
+    verify(texts.length >= 4)
+    focusInput(edInput)
+    for (var t = 0; t < texts.length; t++) {
+      var text = texts[t]
+      for (var p = 0; p <= text.length; p++) {
+        var where = " at " + p + " in " + JSON.stringify(text)
+        edInput.text = text; edInput.cursorPosition = p
+        keyClick(Qt.Key_Backspace, Qt.ControlModifier)
+        compare(deleted(edInput), expected(Model.editDelete(text, p, p, -1, true, false)), "Ctrl+Backspace" + where)
+        edInput.text = text; edInput.cursorPosition = p
+        keyClick(Qt.Key_Delete, Qt.ControlModifier)
+        compare(deleted(edInput), expected(Model.editDelete(text, p, p, 1, true, false)), "Ctrl+Delete" + where)
+        edInput.text = text; edInput.cursorPosition = p
+        keyClick(Qt.Key_Backspace)
+        compare(deleted(edInput), expected(Model.editDelete(text, p, p, -1, false, false)), "Backspace" + where)
+        edInput.text = text; edInput.cursorPosition = p
+        keyClick(Qt.Key_Delete)
+        compare(deleted(edInput), expected(Model.editDelete(text, p, p, 1, false, false)), "Delete" + where)
+      }
+    }
+    // Password: the whole line is the word.
+    pwInput.text = "foo bar baz"
+    focusInput(pwInput)
+    pwInput.cursorPosition = 7
+    keyClick(Qt.Key_Backspace, Qt.ControlModifier)
+    compare(deleted(pwInput), expected(Model.editDelete("foo bar baz", 7, 7, -1, true, true)), "Password Ctrl+Backspace")
+    pwInput.text = "foo bar baz"
+    pwInput.cursorPosition = 4
+    keyClick(Qt.Key_Delete, Qt.ControlModifier)
+    compare(deleted(pwInput), expected(Model.editDelete("foo bar baz", 4, 4, 1, true, true)), "Password Ctrl+Delete")
+    // A surrogate pair goes whole both ways.
+    var astral = "a" + pair() + "b"
+    focusInput(edInput)
+    edInput.text = astral; edInput.cursorPosition = 3
+    keyClick(Qt.Key_Backspace)
+    compare(deleted(edInput), expected(Model.editDelete(astral, 3, 3, -1, false, false)), "Backspace over a pair")
+    compare(edInput.text, "ab")
+    edInput.text = astral; edInput.cursorPosition = 1
+    keyClick(Qt.Key_Delete)
+    compare(deleted(edInput), expected(Model.editDelete(astral, 1, 1, 1, false, false)), "Delete over a pair")
+    // Selections: Backspace, Delete and Ctrl+Backspace take the selection
+    // alone and the model agrees. Ctrl+Delete in Qt ALSO eats to the next
+    // boundary, and the model does not follow (editDelete's comment); both
+    // sides are pinned so a change on either is seen.
+    var sel = "foo bar baz"
+    var keys = [[Qt.Key_Backspace, Qt.NoModifier], [Qt.Key_Delete, Qt.NoModifier], [Qt.Key_Backspace, Qt.ControlModifier]]
+    for (var k = 0; k < keys.length; k++) {
+      edInput.text = sel; edInput.select(4, 7)
+      keyClick(keys[k][0], keys[k][1])
+      var m = Model.editDelete(sel, 4, 7, keys[k][0] === Qt.Key_Backspace ? -1 : 1, keys[k][1] === Qt.ControlModifier, false)
+      compare(deleted(edInput), expected(m), "selection, key " + k)
+      compare(edInput.text, "foo  baz")
+    }
+    edInput.text = sel; edInput.select(4, 7)
+    keyClick(Qt.Key_Delete, Qt.ControlModifier)
+    compare(edInput.text, "foo baz", "Qt: Ctrl+Delete over a selection also eats the space")
+    compare(Model.editDelete(sel, 4, 7, 1, true, false).value, "foo  baz", "ours: the selection alone, on purpose")
+    // Typing over a selection replaces it.
+    edInput.text = sel; edInput.select(4, 7)
+    keyClick("x")
+    compare(deleted(edInput), expected(Model.editInsert(sel, 4, 7, "x", 100)), "typing over a selection")
+    compare(edInput.text, "foo x baz")
+  }
+
+  function test_formEditCap() {
+    focusInput(edInput)
+    edInput.maximumLength = 5
+    edInput.text = "abcde"; edInput.cursorPosition = 2
+    keyClick("x")
+    var refused = Model.editInsert("abcde", 2, 2, "x", 5)
+    compare(JSON.stringify([edInput.text, edInput.cursorPosition, refused.changed]), JSON.stringify(["abcde", 2, false]), "one key at the cap is refused")
+    edInput.text = "abc"; edInput.cursorPosition = 1
+    edInput.insert(1, "XYZW")
+    compare(deleted(edInput), expected(Model.editInsert("abc", 1, 1, "XYZW", 5)), "a long insert keeps what fits")
+    compare(edInput.text, "aXYbc")
+    edInput.maximumLength = 32767
+  }
+
+  function test_readOnlyFieldPremises() {
+    // What handleFormKey in Guide.qml rests on, each measured on the control
+    // rather than read from Qt's sources.
+    roInput.text = "hello"
+    focusInput(roInput)
+    roInput.cursorPosition = 5
+    keyClick("x")
+    keyClick(Qt.Key_Backspace)
+    keyClick(Qt.Key_V, Qt.ControlModifier)
+    compare(roInput.text, "hello", "a read-only input never edits itself: typing, Backspace, Ctrl+V")
+    compare(roInput.cursorVisible, false, "Qt draws no caret on a read-only input; the form draws its own")
+    keyClick(Qt.Key_Left)
+    compare(JSON.stringify([roInput.cursorPosition, roInput.selectionStart, roInput.selectionEnd, roInput.selectedText]), JSON.stringify([4, 4, 4, ""]), "Left moves; selectionStart/End follow the caret with no selection")
+    keyClick(Qt.Key_Left, Qt.ShiftModifier)
+    compare(JSON.stringify([roInput.cursorPosition, roInput.selectionStart, roInput.selectionEnd, roInput.selectedText]), JSON.stringify([3, 3, 4, "l"]), "Shift+Left selects")
+    keyClick(Qt.Key_Home)
+    compare(JSON.stringify([roInput.cursorPosition, roInput.selectionStart, roInput.selectionEnd]), JSON.stringify([0, 0, 0]), "Home")
+    keyClick(Qt.Key_A, Qt.ControlModifier)
+    compare(JSON.stringify([roInput.selectionStart, roInput.selectionEnd]), JSON.stringify([0, 5]), "Ctrl+A")
+    keyClick(Qt.Key_End)
+    compare(JSON.stringify([roInput.cursorPosition, roInput.selectionStart, roInput.selectionEnd]), JSON.stringify([5, 5, 5]), "End")
+    // cursorRectangle follows the caret on a read-only input, which is what
+    // the drawn caret binds to.
+    roInput.cursorPosition = 0
+    var x0 = roInput.cursorRectangle.x
+    roInput.cursorPosition = 5
+    verify(roInput.cursorRectangle.x > x0, "cursorRectangle moves with the caret")
+    // Keys.forwardTo sees the paste and cut chords before the input: Ctrl+V
+    // and Shift+Insert are Paste, Ctrl+X and Shift+Delete are Cut, a bare
+    // Insert is neither.
+    focusInput(chordInput)
+    chordSink.seen = []
+    keyClick(Qt.Key_V, Qt.ControlModifier)
+    keyClick(Qt.Key_Insert, Qt.ShiftModifier)
+    keyClick(Qt.Key_Insert)
+    keyClick(Qt.Key_X, Qt.ControlModifier)
+    keyClick(Qt.Key_Delete, Qt.ShiftModifier)
+    var flagged = chordSink.seen.filter(function (row) { return row[0] || row[1] })
+    compare(JSON.stringify(flagged), JSON.stringify([[true, false], [true, false], [false, true], [false, true]]), "paste and cut chords through Keys.forwardTo")
+    compare(chordSink.seen.length >= 5, true)
+    // A bound write re-renders synchronously and moves Qt's caret to the
+    // end; putting it back is synchronous too, which is what applyEdit does.
+    focusInput(boundInput)
+    boundHolder.value = "abc"
+    boundInput.cursorPosition = 3
+    boundHolder.value = "abXc"
+    compare(JSON.stringify([boundInput.text, boundInput.cursorPosition]), JSON.stringify(["abXc", 4]), "a bound write lands at once and parks the caret at the end")
+    boundInput.cursorPosition = 3
+    compare(boundInput.cursorPosition, 3, "the caret restore is synchronous")
+    verify(boundInput.readOnly)
   }
 }

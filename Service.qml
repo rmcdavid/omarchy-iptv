@@ -768,8 +768,10 @@ Item {
   signal sourceSwitched(string id)
   signal sourceRemoved(string id)
   signal sourcesPersistFailed(string reason)
-  // Answer to requestClipboard() (the wl-paste fallback of D9): the raw
-  // clipboard text for the guide to sanitize; never logged.
+  // Answer to requestClipboard() (D9; the ONLY paste path since D-CLIP-1):
+  // the raw clipboard text for the guide to sanitize; never logged. Emitted
+  // only when wl-paste exited 0 -- a failure or a watchdog kill answers
+  // nothing, so a paste can never clear a field by accident.
   signal clipboardText(string text)
 
   // ------------------------------------------------------------ public API (R9)
@@ -1842,11 +1844,14 @@ Item {
     return root.sourceResult(true, "ok", "", key)
   }
 
-  // wl-paste fallback of D9 (Guide.qml pasteInto): argv only, the text
-  // comes back through clipboardText(text) and is never logged.
+  // The paste path (D9; the only one since D-CLIP-1; Guide.qml pasteInto):
+  // wl-paste as argv, bounded by clipboardWatchdog, the text back through
+  // clipboardText(text), never logged. This child is the one clipboard
+  // reader the plugin has: the shell process itself never asks Qt.
   function requestClipboard() {
     if (clipboardProc.running) return false
     clipboardProc.running = true
+    clipboardWatchdog.restart()
     return true
   }
 
@@ -5163,8 +5168,10 @@ Item {
   }
 
   Process {
-    // Clipboard fallback (D9): the text is data for the guide's field only;
-    // capped here so a huge selection never becomes a binding value.
+    // The paste path (D9; the only one since D-CLIP-1): the text is data for
+    // the guide's field only; capped here so a huge selection never becomes
+    // a binding value. Runs only on a user paste, never on a clipboard
+    // change -- the change-driven read was the defect.
     id: clipboardProc
     command: ["wl-paste", "--no-newline", "--type", "text"]
     stdout: StdioCollector { id: clipboardStdout; waitForEnd: true }
@@ -5173,7 +5180,23 @@ Item {
   Connections {
     target: clipboardProc
     function onExited(exitCode, exitStatus) {
-      root.clipboardText(exitCode === 0 ? String(clipboardStdout.text).substring(0, Model.LIMITS.url * 4) : "")
+      clipboardWatchdog.stop()
+      if (exitCode !== 0) return
+      root.clipboardText(String(clipboardStdout.text).substring(0, Model.LIMITS.url * 4))
+    }
+  }
+  Timer {
+    // D-CLIP-1 (R2): a foreign producer that drips bytes at the protocol's
+    // 1 s per-read timeout would hold wl-paste open for as long as it liked.
+    // The bound kills the CHILD; the shell never waited on it. The number
+    // lives in Model so it is testable.
+    id: clipboardWatchdog
+    interval: Model.CLIPBOARD_TIMEOUT_MS
+    repeat: false
+    onTriggered: {
+      if (!clipboardProc.running) return
+      console.warn("omarchy-iptv: wl-paste exceeded " + Math.floor(Model.CLIPBOARD_TIMEOUT_MS / 1000) + " s, terminating it")
+      clipboardProc.signal(15)
     }
   }
 
