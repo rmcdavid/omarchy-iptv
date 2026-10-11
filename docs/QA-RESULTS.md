@@ -13097,8 +13097,12 @@ that a bomb kills the probe and not the user's desktop. The probe is an
 | progressive 3-component, SOF rewritten | 555 | 65500x65500 | **SIGKILL** | the 1.5 GB cap, 1.5 s in |
 
 Every row below the controls passes every check the helper has: the
-content type is `image/jpeg`, the first three bytes are `FF D8 FF`, and the
-largest of them is 555 bytes against a 256 KiB cap. The byte cap is not a
+content type is `image/jpeg` and the first three bytes are `FF D8 FF`, and
+every rewritten-header row is under 555 bytes against a 256 KiB cap. (The
+one honestly-huge row, 706,780 bytes, is OVER that cap and was refused on
+bytes by 0.13.3 already; it is in the table for the cost of the decode, not
+as a file that passed. A review caught this sentence counting it -- the
+D-SINK-7 shape, in the lead's own file.) The byte cap is not a
 bound on anything the decoder does, because **the cost is quadratic in a number
 the header states and the bytes do not have to honour.** 304 bytes buy 840 MB;
 the ratio is 2.9 million to one.
@@ -13177,27 +13181,47 @@ adds must still cover all four, because that asymmetry is upstream behaviour
 nobody here controls: a Qt that learns to scale PNG during decode would open
 this again, silently, in a dependency bump.
 
-### The lead's ruling on the fix
+### The lead's ruling on the fix, R1-R6
 
-The bound goes in the HELPER, at `write_logo`, beside the magic-byte check
-that is already there and already refuses before anything touches the disk --
-one gate, on the one path that puts a provider's bytes into the cache, in the
-process that is allowed to die. Not in QML: `Image` has no lever for this, and
-a guard there would also have to live inside the 150 ms open budget.
+These are the rulings the helper's comments and `tests/test_logo_dimensions.py`
+cite by number. They were written into the lane brief first and into this
+file only after a review found the pointers resolving to nothing (rule 13: a
+join by NAME that nothing verifies).
 
-Two numbers, both stated in the README and both checkable by calling the
-shipping function: **no side over 4096, and no more than 4,194,304 pixels**.
-At the bound, a 4:4:4 progressive JPEG costs about 25 MB of coefficients,
-which is the same order as the 23.8 MiB Qt was already willing to allocate
-before any of this, and a 1920x1080 provider banner -- the largest shape a
-real logo plausibly takes -- is 2.07 Mpx and passes. The dimensions are read
-from the header for all four types, not only JPEG.
+- **R1.** The bound lives in the HELPER, at `write_logo`, beside the magic-byte
+  check that already refuses before anything touches the disk -- one gate, on
+  the one path that puts a provider's bytes into the cache, in the process
+  that is allowed to die. Not in QML: `Image` has no lever for this, and a
+  guard there would sit inside the 150 ms open budget.
+- **R2.** Two numbers, both in the README, both checkable by calling the
+  shipping function: `MAX_LOGO_SIDE = 4096` and `MAX_LOGO_PIXELS = 4194304`
+  (2048 x 2048). At the bound a 4:4:4 progressive JPEG holds about 24 MiB of
+  coefficients, the same order as the 23.8 MiB Qt was already willing to
+  allocate for a logo; a 1920x1080 provider banner is 2.07 Mpx and passes.
+- **R3.** The dimensions are read from the header for ALL FOUR allowed types,
+  not only JPEG. The JPEG-only asymmetry is upstream Qt behaviour nobody here
+  controls; a dependency bump that taught Qt to scale PNG during decode would
+  reopen this in silence.
+- **R4.** The gate REFUSES UNLESS IT CAN PROVE the file is within the bound. A
+  header it cannot read is a refusal, not a pass. The cost of a false refusal
+  is a blank slot in a best-effort decorative feature; the cost of a false
+  pass is the user's desktop shell.
+- **R5.** The cache written by 0.13.3 and earlier was never dimension-checked,
+  so a fix without a sweep is not a fix. The sweep is not a separate pass:
+  the "already on disk" branch of `cmd_logos` proves a cached file's header
+  before announcing its name, because the guide points an `Image` only at a
+  name the helper announced. A file that fails is unlinked, not announced,
+  and falls through to the fetch, where the gate refuses the bytes again and
+  the reason is counted -- the way a dead logo host already behaves.
+- **R6.** Nothing new reaches a sink: the refusal reason is a code and a host,
+  never a URL (engineering rule 5).
 
-**The cache written by 0.13.3 and earlier was never dimension-checked, so the
-fix is not complete without a sweep.** A logo that an affected install already
-holds is still a bomb, the guide still loads it by name, and the user cannot
-see why. The sweep reads headers only, unlinks what is over the bound, and is
-the same parser the gate uses, so there is one implementation and one fixture.
+The numbers in R2 and the parser in R3 are why the sink is bounded; R5 is why
+an affected install is bounded too, and the review of the fix found the one
+case R5 did not cover on its own: the guide's `logoHave` set survives a source
+switch while the directory under it changes, so a name announced for one
+source could point an `Image` at the other source's never-swept file. That is
+repaired in the same release and recorded under the review section below.
 
 ### D-LOGO-12: `MAX_LOGO_FILES` bounds fetches per run, not the cache (found by the D-LOGO-11 helper lane, rule 15)
 
