@@ -972,12 +972,27 @@ is "and sources qa-lib.sh ABOVE the call, so the call resolves to a function" \
    "${unsourced:-none}" "none"
 is "and in a check-tree scenario the call sits on the live arm only" \
    "${late:-none}" "none"
-# The three the gate runs, named, because those are the ones where a stray
-# transcript would land on every commit.
-for g in chno-entry pip id-rotate; do
+# The four the gate runs, named, because those are the ones where a stray
+# transcript would land on every commit. The list is literal and so it
+# drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
+# not learn it until a review read the two lists side by side.
+for g in chno-entry pip id-rotate logo; do
   lbl=$(grep -nE '^ *live\|"" *\)' "$ROOT/scripts/dev-harness/$g-scenario.sh" | head -1 | cut -d: -f1)
   ck "$g-scenario.sh (run by check.sh in check-tree mode) has a live arm to gate on" '[[ -n $lbl ]]'
 done
+# The logo scenario's floor, joined to check.sh's the way the chno-entry and
+# pip floors are above, and to its own recipe: the column-zero ck calls plus
+# the P loop, whose one indented ck runs once per bomb in BOMBS. A floor
+# that does not reproduce from the recipe is the off-by-one the scenario's
+# footer warns about, and a check.sh floor that is not the scenario's plus
+# one is a gate that is either permanently red or quietly short.
+LS="$ROOT/scripts/dev-harness/logo-scenario.sh"
+ldeclared=$(grep -oE '^EXPECTED_CHECKS=[0-9]+' "$LS" | head -1 | cut -d= -f2)
+lbombs=$(sed -n '/^BOMBS=(/,/)$/p' "$LS" | grep -oE '[a-z0-9-]+\.(jpg|png|gif|webp)' | wc -l | tr -d ' ')
+is "the logo scenario's floor matches its recipe (column-zero ck lines + one per bomb)" \
+   "$ldeclared" "$(( $(qa_count '^ck "?[A-Z]' "$LS") + lbombs ))"
+is "check.sh's logo preflight floor matches the scenario's own" \
+   "$(grep -oE 'LOGO_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( ldeclared + 1 ))"
 # And the one that lost its evidence, by name, so this cannot be refactored
 # into a rule that happens to exclude it again.
 is "m3-scenario.sh, the run F-M3-1 happened to, writes one" \
@@ -1870,7 +1885,9 @@ is "a umask-created file here would have been private, which is why the mode is 
 # where the attacker kept being fed; the paced body's three counters over the same
 # crafted log; and `--pre-tls`'s three refusals, which matter because a dropped
 # value there would stage the adoption case against the wrong tree.
-EXPECTED=385
+# 385 -> 388 on 2026-10-11, D-LOGO-11 round two: logo-scenario.sh joins the
+# gate's named list, and its floor is joined to its recipe and to check.sh.
+EXPECTED=388
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
