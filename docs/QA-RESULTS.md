@@ -13340,6 +13340,37 @@ gate, forward 33 / 0 and `--baseline 159da94` 9 / 24 with K2 carrying
 lifecycle on the real shell is taken after the install update, under the
 release notes below, by reading `ipc status` with logos on.
 
+**Released as 0.13.4 (`d55149b`, 2026-10-11) and observed on the real shell
+the same day**, on the lead's own install (updated by
+`omarchy-plugin-update --yes`, then `omarchy-restart-shell`; `shell.json` and
+`state.json` hashed before and after and byte-identical). The user's setting is
+`showLogos: false`, so the observation turned it ON through the host
+(`omarchy bar set io.github.rmcdavid.iptv showLogos true --json`), read the
+service's `status` over IPC, opened the guide with the bare `toggle` verb (the
+qs layer answers `toggle ""` with the function's signature and does nothing;
+a no-argument verb is called bare), took a screenshot, closed it, and set the
+switch back OFF the same way:
+
+- `status.logos` read **35 one second after the switch and 164 four seconds
+  later**, with the cache's 1,173 files all still on disk: that is the R5
+  sweep running over a real cache written by earlier versions, announcing
+  each file as its header proves within the bound, and nothing swept.
+- **The guide drew the logos** in the row slot -- 3ABN's four channels, 24
+  Hour Free Movies, 30A Darcizzle and the rest of the first page -- which is
+  the one observation the two review rounds could not take headless: the
+  tag the service writes equals the directory the guide compares, on the
+  shipping wiring, with the service's own values. (The first repair would
+  have drawn nothing here.) The screenshot shows the lead's desktop and is
+  kept in the session scratch, not the repository.
+- OFF read **0 within a second**, and the switch, the file and the state
+  were restored to the snapshot's bytes.
+
+What this does NOT observe, so F-M3-18's open half stays open: the three
+`Service.qml`-only decisions (the restart flag read once, the caller's
+summary guard, the `clearSourceData` reset) across a SOURCE SWITCH, which
+needs two sources and a harness scenario reading the fake shell's
+`logoCount` / `logoHaveDir` / `logoDir`.
+
 ### D-LOGO-12: `MAX_LOGO_FILES` bounds fetches per run, not the cache (found by the D-LOGO-11 helper lane, rule 15)
 
 The lane that built the bound was asked whether any OTHER number the helper
