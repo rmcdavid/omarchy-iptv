@@ -406,7 +406,7 @@ output is empty unless stated.
 | SEC-19 | XMLTV entity expansion / external entities | A* small XML with a 10x10 nested entity (`<!ENTITY a "aaaa..."><!ENTITY b "&a;&a;...">`) and an external entity `<!ENTITY x SYSTEM "file:///etc/passwd">` as EPG source | parse error or bounded memory; external entity never read (`xml.etree` does not resolve them); `bad_xml`/`network` style error surfaced |
 | SEC-20 | 8.4 redirects | A* mock `http://` source that redirects to `file:///etc/passwd` and to `ftp://` | `urllib` refuses non-http redirects -> `network` error; https -> http downgrade is allowed by urllib (document) |
 | SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials |
-| SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` / `cmd_logos` over `tests/fixtures/logo-dimensions.json` (55 header cases at lane commit ddc0a7b, up from 44 at 995c6be: all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049 and their transposes, an EXIF thumbnail before the real frame header, a 64x65535 column, a two-frame GIF); M section 3.2 observes both sinks through `scripts/dev-harness/logo-scenario.sh` | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached file that is over the bound, unreadable, not one of the four types, or over the byte cap with its header past the first read, swept and never announced, past the per-run fetch cap included; the within-bound control reaches `Image.Ready` at control memory |
+| SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` / `cmd_logos` over `tests/fixtures/logo-dimensions.json` (56 header cases at integration (55 at lane commit ddc0a7b, up from 44 at 995c6be): all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049 and their transposes, an EXIF thumbnail before the real frame header, a 64x65535 column, a two-frame GIF); M section 3.2 observes both sinks through `scripts/dev-harness/logo-scenario.sh` | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached file that is over the bound, unreadable, not one of the four types, or over the byte cap with its header past the first read, swept and never announced, past the per-run fetch cap included; the within-bound control reaches `Image.Ready` at control memory |
 
 ### 3.1 TLS verification on the player (D-SINK-13)
 
@@ -465,8 +465,7 @@ the byte cap a proxy -- the lead's table has 304 bytes costing 840 MB -- so a
 plan that checked file sizes would stay green against the finding.
 
 **Question one: does the gate refuse on the header alone?** Pure logic,
-called rather than mirrored. `tests/test_logo_dimensions.py` runs the 44
-header cases of `tests/fixtures/logo-dimensions.json` through the shipping
+called rather than mirrored. `tests/test_logo_dimensions.py` runs the 56 header cases of `tests/fixtures/logo-dimensions.json` through the shipping
 parsers and the shipping predicate; the cases that carry the weight are the
 boundary shapes a wrong comparison operator gets wrong (4096x1024 exactly on
 both bounds, 4097x1024 one pixel over one bound, 2048x2049 inside both side

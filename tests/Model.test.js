@@ -2440,8 +2440,10 @@ checkCall("D-LOGO-8: the service reads the stream, batches it, and the summary w
     // the restart is drained through a Timer, never from inside onExited
     /\bid: logoRerunDebounce\b/.test(src),
     /logoRerunDebounce\.restart\(\)/.test(src),
-    // and a trailing line cannot repopulate the set after the switch went off
-    /if \(root\.showLogos\) root\.flushLogoNames\(\)/.test(src)
+    // and a trailing line cannot repopulate the set after the switch went
+    // off -- on BOTH flush paths, the exit and the 250 ms timer (the final
+    // review found the timer unguarded a turn after the exit was guarded)
+    (src.match(/if \(root\.showLogos\) root\.flushLogoNames\(\)/g) || []).length === 2
   ]
 }, [true, true, true, true, true, true, true, true, true, true,
     true, true, true, true, true, true, true, true])

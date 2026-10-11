@@ -415,8 +415,9 @@ requests and raise the batch.
      20000x20000 took a Qt `Image` declared exactly as the row slot is to
      840 MB; 555 bytes with three components, 1,239 MB; the 65500x65500 pair
      were refused by the allocator at a 2.5 GB address-space limit (and
-     killed outright under a 1.5 GB memory scope). Measured 2026-10-09 on
-     Qt 6.11.2, offscreen, with the cap around the Qt process only. Raised
+     killed outright under a 1.5 GB memory scope). Measured on Qt 6.11.2,
+     offscreen, with the cap around the Qt process only: the scope figures
+     on 2026-10-09, the rlimit figures on 2026-10-11. Raised
      by the marketplace maintainer against the shipped 0.13.3.
      Qt's own allocation limit is NOT a bound here, and that is arithmetic:
      it is compared against `ceil(dim/8)^2 * 4`, the image already divided

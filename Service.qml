@@ -4881,7 +4881,13 @@ Item {
     id: logoFlushTimer
     interval: 250
     repeat: false
-    onTriggered: root.flushLogoNames()
+    // The same guard the exit path has (rule 15: a sibling found by the
+    // final review): a line delivered after the switch went OFF must not
+    // repopulate the set through this timer either.
+    onTriggered: {
+      if (root.showLogos) root.flushLogoNames()
+      else root.logoPending = []
+    }
   }
 
   function flushLogoNames() {

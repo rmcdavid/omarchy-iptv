@@ -13227,7 +13227,7 @@ repaired in the same release and recorded under the review section below.
 
 ### The review of D-LOGO-11: the fix was right and its coverage was not, twice (F-M3-18)
 
-Two adversarial rounds, four lenses each, over the helper bound, the tests,
+Two adversarial rounds, four lenses then three, over the helper bound, the tests,
 the harness and the documents. Nineteen findings each round; the shape of
 every one worth recording is the same shape this project keeps paying for --
 a check that could not go red for the thing it guarded.
@@ -13309,7 +13309,8 @@ three lenses, nineteen findings again, one of them the one that matters:
   restored.
 - **P2 x3, the lifecycle lens, accepted as residuals with the observation
   owed:** three decisions still live only in `Service.qml` and no node test
-  can see them -- the restart flag read once (left unclearing, every exit
+  can see them (each of these, MUTATED, stays green; the tree has all three
+  right) -- the restart flag read once (left unclearing, every exit
   would re-fetch, which is the disclosure the ruling bounds), the caller's
   old `names.length > 0` guard re-added, and the `clearSourceData` reset
   dropped (the tag keeps the slot blank; `ipc status` would count the old

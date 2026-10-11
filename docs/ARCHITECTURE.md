@@ -854,7 +854,7 @@ planted past the cap (two sound, one bomb) and two more URLs after them;
 both sound names announced, the bomb swept and off disk, `deferred` 3,
 5,002 names; then the real helper as a subprocess over the cache that run
 left, `cached` 5,002 and the same names. Red against the 995c6be helper
-(that one test fails; 85 of 85 green on the fix, lane commit ddc0a7b).
+(that one test fails; 85 of 85 green on the fix across tests.test_logo_dimensions and tests.test_logos together, lane commit ddc0a7b; the dimension file alone is 38 at integration).
 D-LOGO-12 stays open: the cap bounds fetches per run and nothing yet bounds
 what is ON DISK.
 **What the fix rests on in the guide, and the blocker the review found
@@ -892,10 +892,7 @@ indexes it. (The five functions new in that commit -- `logoHaveIsSet`,
 are cited here WITHOUT the `Model.` prefix on purpose: the defect ledger
 resolves every `Model.X` citation against this tree's `Model.js`,
 and the docs lane's tree predates lane R1's. Once the lanes are merged the
-prefix belongs on them, so that check pins the join.) The seven "D-LOGO-11 blocker" checks in `tests/Model.test.js`
-call each decision (1,903 -> 1,910 node checks; with Model.js and
-Service.qml stashed back to 995c6be the same file prints 9 failures, the
-seven plus two re-shaped D-LOGO-8 and M2-04 checks). Not observed by any
+prefix belongs on them, so that check pins the join.) The eight "D-LOGO-11 blocker" checks in `tests/Model.test.js` call each decision (1,903 -> 1,911 node checks, the eighth being check (f) from the integration; with Model.js and Service.qml stashed back to 995c6be the same file prints 10 failures, the eight plus the two re-shaped D-LOGO-8 and M2-04 checks; the lane commit 1a05214 had seven and printed 9). Not observed by any
 test: the restart of the live Process on a switch (signal, exit, re-fetch),
 which needs the dev harness and is UNVERIFIED. A transient the lane
 recorded rather than hid: between a switch and the new playlist loading, a
@@ -998,12 +995,22 @@ playlist and EPG bytes are parsed in the helper and arrive as JSON.
   4. A cached file whose URL has left the playlist is neither checked nor
      swept nor announced -- never drawn, so never decoded, and `cache
      logos-clear` removes it; it is the on-disk growth D-LOGO-12 leaves open.
-  5. Nine other scenario scripts (argv-, chno-, chno-entry-, config-mode-,
-     id-rotate-, m3-, pip-, player-, sources-scenario.sh) keep the
+  5. Twelve of the thirteen scenario scripts (every one but logo-scenario.sh;
+     tls-scenario.sh among them, with a tool check for the dirname to sit
+     above, where argv-, chno-, chno-entry-, id-rotate-, player- and
+     sources-scenario.sh have no tool check at all) keep the
      `HERE=$(dirname ...)`-above-the-tool-checks shape that logo-scenario.sh
      and the spike's run.sh repaired; cosmetic (a shell error line before the
      SKIP reason on a machine with no PATH) and listed for the next harness
      round rather than widened into a security release.
+  6. A fetch planned by the 50 ms rerun Timer can start for a source whose
+     `channels.json` has not landed yet (the helper then runs over no
+     channel list, for milliseconds), and when the playlist lands while that
+     helper is still running the `onLoaded` plan reads "skip" for the same
+     directory, so that source's logos wait for the next trigger. Narrow,
+     fail-closed, and narrower than before this release, when the old fetch
+     was never stopped at all. Found by the final review; the live
+     observation that would pin it is listed under F-M3-18.
 
 ## 7. Error handling, offline behavior, performance
 
