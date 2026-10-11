@@ -407,7 +407,7 @@ output is empty unless stated.
 | SEC-20 | 8.4 redirects | A* mock `http://` source that redirects to `file:///etc/passwd` and to `ftp://` | `urllib` refuses non-http redirects -> `network` error; https -> http downgrade is allowed by urllib (document) |
 | SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials |
 | SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` / `cmd_logos` over `tests/fixtures/logo-dimensions.json` (56 header cases at integration (55 at lane commit ddc0a7b, up from 44 at 995c6be): all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049 and their transposes, an EXIF thumbnail before the real frame header, a 64x65535 column, a two-frame GIF); M section 3.2 observes both sinks through `scripts/dev-harness/logo-scenario.sh` | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached file that is over the bound, unreadable, not one of the four types, or over the byte cap with its header past the first read, swept and never announced, past the per-run fetch cap included; the within-bound control reaches `Image.Ready` at control memory |
-| SEC-23 | 8.13 the shell never subscribes to the clipboard (D-CLIP-1) | A `node tests/Model.test.js` (the D-CLIP-1 block: `editInsert` / `editDelete` / `wordBoundary` over `tests/fixtures/form-edit.js`, 115 checks at lane commit 44b250b) and `qmltestrunner tests/Model.spec.qml` (`test_formEditBoundaries`, `test_formEditDeletes`, `test_formEditCap`, `test_readOnlyFieldPremises`, which re-measures Qt's word boundary and pins that a read-only input never edits itself); M section 3.3 observes the sink | the model edits agree with a real `TextInput` position by position; the form field reads `readOnly: true` and Qt draws no caret on it; under a foreign 100 MB offer inside a nested compositor the shell's RSS and an IPC round-trip are unchanged on the fixed tree and the read shows on `--baseline d55149b` |
+| SEC-23 | 8.13 the shell never subscribes to the clipboard (D-CLIP-1) | A `node tests/Model.test.js` (the D-CLIP-1 block: `editInsert` / `editDelete` / `wordBoundary` over `tests/fixtures/form-edit.js`, 115 checks at lane commit 44b250b, +48 at 51866a3 for R8: `clipboardArgv`, 17 `parseClipboardReply` vectors from `tests/fixtures/clipboard.json`, `clipboardCut`, `editRangeFor`, `cutApplies`), `tests/test_clipboard.py` (20 tests at 51866a3: the helper's `clipboard` verb run as a subprocess against a stub `wl-paste` on PATH that streams 4 MiB, hangs, ignores SIGTERM, fails or is absent -- the byte cap, the deadline, the kill grace, the character-boundary cut, an empty stderr and a reaped child are each observed, never grepped) and `qmltestrunner tests/Model.spec.qml` (`test_formEditBoundaries`, `test_formEditDeletes`, `test_formEditCap`, `test_readOnlyFieldPremises`, `test_passwordCutIsNativelyANoOp`, which re-measure Qt's word boundary and pin that a read-only input never edits itself); M section 3.3 observes the sink | the model edits agree with a real `TextInput` position by position; the form field reads `readOnly: true` and Qt draws no caret on it; under a foreign 100 MB offer inside a nested compositor the shell's RSS and an IPC round-trip are unchanged on the fixed tree and the read shows on `--baseline d55149b` |
 
 ### 3.1 TLS verification on the player (D-SINK-13)
 
@@ -607,15 +607,42 @@ on: a read-only input never edits itself under typing, `Backspace` or
 native; `selectionStart` / `selectionEnd` follow the caret; `Ctrl+V` and
 `Shift+Insert` both reach `Keys.forwardTo` as Paste and `Ctrl+X` /
 `Shift+Delete` as Cut, a bare `Insert` as neither; a bound write re-renders
-synchronously and parks Qt's caret at the end; and Qt draws NO caret on a
+synchronously and parks Qt's caret at the end; Qt draws NO caret on a
 read-only input (`cursorVisible` false, no `cursorDelegate` instantiated),
-which is why the form draws its own. Seen red (the lane's counts, in its
-commit message): against f9144f5's `Model.js` 114 of the 115 node checks
+which is why the form draws its own; and, since 51866a3, `Ctrl+C` copies
+natively (the selection pasted back into the editable control reads `ell`)
+and a mouse click places the caret while a drag selects, on a dedicated
+read-only control at `y: 120` that no other spec input overlaps, with
+`selectByMouse` at the default the host's `TextField` inherits. The last
+two were CLAIMED as pinned at 44b250b and were not (the review's rule-14
+finding); the spec of that commit sent no `Key_C` and no mouse event.
+`test_passwordCutIsNativelyANoOp` (51866a3) pins Qt's own gate: `Ctrl+X`
+with `ecr` selected leaves `secret` on a Password control and `set` on a
+Normal one, which is what `Model.cutApplies` mirrors. The spec's
+`cleanup()` resets `maximumLength` and the shared controls after EVERY
+test, so a red `test_formEditCap` no longer leaks its cap of 5 into
+`test_formEditDeletes` as a second, misleading failure about
+`Ctrl+Backspace` (the review's P3). Seen red (the lanes' counts, in their
+commit messages): against f9144f5's `Model.js` 114 of the 115 node checks
 fail (the one that passes reads only the fixture); `@` dropped from the
 separator set 5 node / 2 spec; the forward space-skip dropped 13 / 2; the
 insert cap dropped 5 node; the premise control made editable -- the
 defect's own shape -- 4 spec failures including "one key at the cap is
-refused" and "Qt draws no caret on a read-only input".
+refused" and "Qt draws no caret on a read-only input". For the second
+round: `editRangeFor` with the masked branch removed (the review's
+mutation, now reachable) 4 node failures where the gate had stayed green;
+`cutApplies` with the echo gate removed 1 node / 1 spec; `selectByMouse:
+false` on the pinned control 1 spec; the read-only control given a
+`Keys.onPressed` that accepts `StandardKey.Copy` 1 spec; the insert cap
+removed from `editInsert` with the new `cleanup()` 1 spec
+(`test_formEditCap` alone) against 2 with the old spec; the 48 new node
+checks against 96f5261's `Model.js` 47 failures (the 48th pins
+`CLIPBOARD_TIMEOUT_MS`, which already existed); `tests/test_clipboard.py`
+against 96f5261's helper 20 of 20 red (no verb), and one mutation per
+decision in the verb -- the byte cap removed 4, `reap_child` never
+terminating 4 failures and 3 errors, the decoder finalised at the cap 1,
+the child's stderr inherited 14, the timeout reply carrying the partial
+text 3.
 
 **Question two: does a foreign clipboard change leave the SHELL alone?**
 That is the sink, and only observing it answers 8.13. What the scenario
@@ -648,7 +675,10 @@ run aimed at the live display is refused):
 - Asserted on the fixed tree: the shell's RSS, sampled from outside every
   100 ms, within noise of its pre-offer value through at least the window
   in which the baseline grows (the lead saw the last growth 600 ms after
-  the offer; lane A 6.9 s under cage), and an IPC round-trip (`ipc status`
+  the offer; lane A's editable probe under cage 438 ms, in four steps --
+  the 6.9 s this line once quoted was a 4 KB blip in the heartbeat probe's
+  run, not the editable one's, re-derived by the review from the raw
+  samples), and an IPC round-trip (`ipc status`
   or the harness's `state()`) answering within its usual time while the
   offer is up -- the stall is the maintainer's other half and RSS alone
   does not see it. Asserted on `--baseline d55149b`: the growth, by at
@@ -657,28 +687,82 @@ run aimed at the live display is refused):
   small offer puts the sanitized text in the field, and an offer that
   sanitizes to nothing or a `wl-paste` that fails leaves the field as it
   was. A dripping producer (one byte per 900 ms) is OPTIONAL and, if run,
-  must show the `wl-paste` child dying at the watchdog with the shell's IPC
-  still answering.
-- Cleanup bounded and by pid: the qml and wtype pids read from the files
-  they wrote, the cage under `timeout`, no `pkill -f` (the shape
-  `scripts/qa-sources-scenarios.sh:160` has and this scenario must not
-  copy), and no stale nested `wayland-0` socket left behind.
+  must show the helper answering `timeout` at its 5 s deadline with the
+  `wl-paste` child gone and the shell's IPC still answering (since R8 the
+  child is the helper's; the shell's 8 s watchdog is the outer bound).
+- Since R8 (51866a3), the user-initiated paste is bounded in BYTES and the
+  scenario must observe that too: a `Ctrl+V` over the 100 MB offer leaves
+  the shell's RSS within noise, the clipboard helper is seen as the shell's
+  child and is gone afterwards, and the field holds `formCapacity`
+  characters of the paste. Lane A's scratch variant of the scenario does
+  this (two `DR1` checks, 20 in all, with L9 asking for no `omarchy-iptv
+  clipboard` child of the shell rather than no `wl-paste` child, which
+  since R8 pins less than it says): 96f5261 `FAIL DR1 ... grew +304 MB`,
+  51866a3 `PASS DR1 ... unchanged` with the helper peaking at 32 MB. On the
+  tree at 51866a3 the scenario does not yet carry it; lifting it is the
+  harness round's.
+- Cleanup bounded and by pid, honestly described: the qml and wtype pids
+  read from the files they wrote, the cage under `timeout`, the detached
+  shell by the pid `run.sh` recorded; the scenario file itself has no
+  `pkill -f` (the shape `scripts/qa-sources-scenarios.sh:160` has and this
+  scenario must not copy), and the `run.sh reap` it delegates to sweeps,
+  after the pid-file kill, by patterns anchored to the harness directory
+  (`quickshell -p <harness>/root`, the fixture server, the mpv socket
+  path), which cannot match the scenario's own shell or the user's
+  `quickshell -n -p /usr/share/omarchy/shell` -- so the header's "by
+  recorded pid" is true of the file and not of the reap, and should say
+  so. `INT` and `TERM` must be trapped as `player-`, `rewind-` and
+  `tls-scenario.sh` trap them (`exit 130` / `exit 143`), because bash runs
+  no `EXIT` trap when a signal kills it while it waits on a foreground
+  child: at 824ced4 the scenario traps `EXIT` only and a `timeout -s TERM`
+  on a live run left the cage, the detached shell, a `sleep 120` and the
+  nested `wayland-0` socket behind (the review's P2; the harness round's
+  fix). No stale nested `wayland-0` socket left behind.
 
 What the scenario must not do: run `wl-copy` on the user's session, run
 `wtype` outside the nested display, leave a producer or a cage alive, write
 the 100 MB payload to the shared scratch, or touch the live install.
 
-Ownership and evidence, **UNVERIFIED at this writing (2026-10-11)**: the
-harness lane's branch `lane-clip-harness` carries no commit past
-`lane-clip-code` (44b250b), so the scenario's file name, its check names, its
-`check-tree` arm, its `check.sh` floor and its red run on `--baseline
-d55149b` do not exist to be cited. This section is the specification the
-lane meets and the clause it replaces when it lands, with its own counts, as
-3.2's "Ownership and evidence" paragraph did on the day its scenario was
-run. Until then the only observations of the sink are the lead's three
-probes on the live session and lane A's re-run of them under cage, both of
-a throwaway `TextField` and not of `Guide.qml`, and they are attributed as
-such in `ARCHITECTURE.md` section 6.
+Ownership and evidence. The scenario is `scripts/dev-harness/clip-scenario.sh`
+(the harness lane, 824ced4 on `lane-clip-harness`, integrated into `dev` as
+85b7fe3 on 2026-10-11; `OMARCHY_IPTV_HEADLESS_ONLY=1`, the harness's
+floating-window mode, `wtype` held on the nested seat). `check-tree` is the
+probe arm P1-P6 under `timeout -k 5 70`, the gate step
+"scripts/dev-harness/clip-scenario.sh check-tree (D-CLIP-1)" with
+`CLIP_PREFLIGHT_MIN` 7, printed as "clip preflight (7 checks)"; `live` adds
+L1-L11 (18 checks) and the `--baseline <ref>` lever; both check their own
+count (`EXPECTED_CHECKS` 6 and 17) so a dropped line is a failure. The
+counts, each from the transcript a run prints as its first line. This
+author's own, on the docs lane's tree at 2b3e847 (lane-clip-r1 51866a3 plus
+documents), live mode, 2026-10-11: 18 passed / 0 failed in 29.3 s, the
+consumer reading 104,857,600 bytes, the shell 348 -> 348 MB (+0) after the
+100 MB offer, twelve IPC round trips with the worst at 105 ms, L7 pasting
+10 bytes and L8 landing 2,112 characters through the helper verb, nothing
+left behind (no cage, no second quickshell, no `wl-paste` but the host's
+`--watch`, no harness scratch directory); transcript
+`/run/user/1000/omarchy-iptv-clip/transcripts/clip-20261011-182035-3389538.out`,
+and the gate's own check-tree arm on the same commit "clip preflight (7
+checks)". The rest are other runs, attributed: the adversarial review of
+824ced4, check-tree
+7 / 0 (the editable probe +259 MB, read-only +0, no-field +0, the consumer
+reading 104,857,600 bytes), live 18 / 0 with the shell at +0 MB and the
+worst of twelve IPC round trips 124 ms after a 100 MB offer, `--baseline
+d55149b` 16 / 2 with L4 red at +240 MB (peak 589) and L5 red at 746 ms,
+and the full gate exiting 0 in 2 m 42 s; its mutations every one red
+(`readOnly` flipped back in a copy, L4 `+252 MB` and L5 `793 ms`; a P line
+dropped, `ran 5 checks, expected 6`; an L line dropped, `ran 16, expected
+17`); the review's second reviewer from its own worktree, fixed +0 MB /
+146 ms and baseline +264 MB / 729 ms; lane A's live run on 51866a3, 18 / 0
+in 24.8 s with L7 and L8 pasting through the helper verb. The baseline's
+L4 has read +240, +254, +264 and +297 MB over the runs recorded, about 2.5x
+the payload and never inside the 16 MB band; the scenario's footer quotes
+`+254..+297`, which the review's +240 fell under, and should say the range
+seen. The user-paste number (DR-1, R8) is in the bullet above and in
+`ARCHITECTURE.md` section 6: +298 / +304 MB on the first fix, +0 on 51866a3.
+The lead's three probes on the live session and lane A's re-run of them
+under cage, of a throwaway `TextField` and not of `Guide.qml`, remain the
+attribution of the mechanism and are cited as such in `ARCHITECTURE.md`
+section 6.
 
 ## 4. Performance gate (PLAN G3, ARCHITECTURE.md section 7, QB4)
 

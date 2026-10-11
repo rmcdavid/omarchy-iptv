@@ -1014,8 +1014,9 @@ playlist and EPG bytes are parsed in the helper and arrive as JSON.
 
 Raised 2026-10-11 (D-CLIP-1), and written here in the round that fixes it --
 the state of that fix is the board row in `docs/STATUS.md`, not this
-paragraph. **The same maintainer, the sixth finding in six days, on the
-verification request for the commit that fixed the fifth** (0.13.4, d55149b,
+paragraph. **The same maintainer, the sixth finding in five calendar days
+(2026-10-07 to 2026-10-11, inclusive), on the verification request for the
+commit that fixed the fifth** (0.13.4, d55149b,
 omacom/omarchy-plugin-marketplace#11077): the first-run and add-source forms
 instantiate editable `qs.Ui.TextField` controls, and a clipboard change makes
 Qt read the offer before any `maximumLength` or paste handling applies, with
@@ -1057,15 +1058,25 @@ inherits -- and a foreign `wl-copy` offering 100 MB of `text/plain`, resident
 set sampled every 100 ms from outside: `readOnly: false` 164 -> 403 MB,
 +238 MB, last growth 600 ms after the offer; `readOnly: true` +0; a window
 with no field at all +52 MB, which a gdb catchpoint on `pipe2` then showed
-was the toolkit starting and not the clipboard -- ten hits on the editable
-probe, every one `QMimeData::text()` called from
-`QQuickTextInput::q_canPasteChanged` out of `QPlatformClipboard::emitChanged`,
-and zero on the no-field probe. Lane A, the same three probes unmodified,
+was the toolkit starting and not the clipboard -- eighteen `pipe2` stops on
+the editable probe, four of them the toolkit's own thread-start pipes that
+the no-field run has too, and the other FOURTEEN all after the offer and
+every one `QMimeData::text()` called from
+`QQuickTextInput::q_canPasteChanged` out of `QPlatformClipboard::emitChanged`
+(the signal fires once per mode and `text()` tries two MIME types), and zero
+after the offer on the no-field probe. An earlier version of this sentence
+said "ten"; the count is from the lead's `gdb-editable.log`, re-counted by
+the adversarial review. Lane A, the same three probes unmodified,
 INSIDE a nested headless cage so the user's clipboard was never touched (the
 run directories under the lane's scratch, `cage-run-{readonly,editable,
 probe}`, summarised by this lane from their `rss` and `offer` files):
-`readonly.qml` 281 -> 281 MB, +0; `editable.qml` 281 -> 566 MB, +284 MB, last
-growth 6.9 s after the offer; the heartbeat probe +204 MB. The number is
+`readonly.qml` 282 -> 282 MB, +0; `editable.qml` 282 -> 566 MB, +284 MB, its
+growth over in four steps at 117, 224, 331 and 438 ms after the offer and
+nothing in the 52 samples after; the heartbeat probe 285 -> 489 MB, +204 MB,
+with one 4 KB blip at 6,495 ms that an earlier version of this sentence
+misattributed to the editable run as "last growth 6.9 s after the offer"
+(re-derived from the same `rss` and `offer` files by the adversarial
+review; the direction was harmless, the attribution was wrong). The number is
 stable across compositors and the sign is the same; the magnitude is about
 twice the payload (the bytes and the decoded string) and is NOT a floor,
 since the pipe read has no limit at all. One condition lane A found that is
@@ -1101,36 +1112,73 @@ are that tree's).** The fix is at the SUBSCRIPTION, not at the paste:
 focused or not, masked or not, revealed or not -- with no binding, because a
 binding is a way back. A read-only control still keeps its caret, its
 selection, Home / End, `Ctrl+A`, `Ctrl+C` and mouse selection natively
-(pinned by `test_readOnlyFieldPremises` in the QML spec), so the plugin does
-the rest itself: `handleFormKey` (`Guide.qml:2669`), which already saw every
+(pinned by `test_readOnlyFieldPremises` in the QML spec -- and that clause
+was FALSE for `Ctrl+C` and the mouse at 44b250b, where the spec pinned
+neither and both were true by source alone, rule 14's shape, found by the
+adversarial review; since 51866a3 `Ctrl+C` is measured by pasting the
+copied selection into the editable control and a click and a drag are
+measured on a dedicated non-overlapping read-only control, with
+`selectByMouse` at the default the host's `TextField` inherits), so the
+plugin does the rest itself: `handleFormKey` (`Guide.qml:2669`), which already saw every
 key first through `Keys.forwardTo`, applies printable insertion, Backspace,
 Delete, their Ctrl word variants and cut to the MODEL value through
-`Model.editInsert` / `Model.editDelete` (`Model.js:10409`, `:10425`) and
-`applyEdit` (`Guide.qml:2737`) writes it back through `Model.withFormValue`
-and restores the caret synchronously, because a bound write parks Qt's caret
-at the end (measured). The word boundary is Qt's own, taken position by
+`Model.editInsert` / `Model.editDelete` (`Model.js:10484`, `:10500` at
+51866a3) and `applyEdit` (`Guide.qml:2737`) writes it back through
+`Model.withFormValue` and restores the caret synchronously, because a bound
+write parks Qt's caret at the end (measured). The RANGE an edit applies to
+-- the selection, or the whole value of a masked field, which is how "a
+masked field is fully selected" is implemented -- is `Model.editRangeFor`
+(`Model.js:10399`), called at both sites (`Guide.qml:2647` and `:2698`);
+at 44b250b that decision sat in `Guide.qml` alone at the two sites and the
+whole gate stayed green with the branch deleted (the review's P2, rule 12),
+which is why it was lifted. `Ctrl+X` is gated on the field's echo by
+`Model.cutApplies` (`Model.js:10411`, `Guide.qml:2706`), so the password
+field's cut is the no-op it is natively (Qt's own `cut()` is gated on
+`echoMode == Normal`), measured in the spec as
+`test_passwordCutIsNativelyANoOp`; at 44b250b it deleted the selection with
+nothing on the clipboard to paste back. The word boundary is Qt's own, taken position by
 position from a real `TextInput` into `tests/fixtures/form-edit.js`, which the
 spec re-measures on every run. Paste is the process path ONLY:
-`pasteViaProcess` is `true` (`Guide.qml:592`), `Ctrl+V` and `Shift+Insert`
+`pasteViaProcess` is `true` (`Guide.qml:593`), `Ctrl+V` and `Shift+Insert`
 reach the handler as `StandardKey.Paste` (measured, both), and
-`Service.requestClipboard` (`Service.qml:1851`) runs
-`["wl-paste", "--no-newline", "--type", "text"]` as argv (`:5176`), cuts its
-output at `Model.LIMITS.url * 4` = 8,192 UTF-16 units (`:5185`), answers only
-on exit 0 so a failed paste never clears a field, and a `clipboardWatchdog`
-`Timer` (`:5193`, `Model.CLIPBOARD_TIMEOUT_MS` = 5,000 ms, `Model.js:10307`)
-SIGTERMs the CHILD when a producer drips -- the child dies, never the shell.
-The guide then runs the text through `Model.sanitizeInput` at the field's
-`Model.formCapacity` and `Model.editInsert` over the selection, or over the
-whole value of a masked field (`pasteFromProcess`, `Guide.qml:2643`). Qt
+`Service.requestClipboard` (`Service.qml:1856`) runs the HELPER, not
+`wl-paste`: `Model.clipboardArgv` (`Model.js:10329`) is
+`["python3", <helper>, "clipboard"]`, and the helper's `read_clipboard`
+(`bin/omarchy-iptv:8100`, R8, lane commit 51866a3) runs
+`["wl-paste", "--no-newline", "--type", "text"]` with a pipe on its stdout,
+reads at most `MAX_CLIPBOARD_BYTES` = 32,768 bytes from it (8,192 UTF-16
+units, `Model.LIMITS.url * 4`, times the 4 bytes a UTF-8 character can
+need), terminates the child the moment the cap, EOF or its 5 s deadline
+(`CLIPBOARD_TIMEOUT`, `Model.CLIPBOARD_TIMEOUT_MS`, one shared fixture
+`tests/fixtures/clipboard.json`) is reached -- SIGTERM, a 1 s grace,
+SIGKILL -- and prints ONE JSON line, nothing on stderr, with the text cut at
+a character boundary to at most 8,192 units; a timeout, a failed or a
+missing `wl-paste` is `{"ok": false, "code": ...}` with no text, and no
+error names what the clipboard held. The shell parses that line with
+`Model.parseClipboardReply` (`Model.js:10348`; null for anything that is
+not an ok reply with a string text, the cut re-applied) and emits
+`clipboardText` only then, so a failed paste never clears a field; the
+`clipboardWatchdog` `Timer` (`Service.qml:5208`,
+`Model.CLIPBOARD_WATCHDOG_MS` = 5,000 + 1,000 + 2,000 = 8,000 ms) is the
+OUTER bound and SIGTERMs the helper that has not answered by then -- a
+child dies, never the shell. The helper is the process allowed to hold the
+bytes briefly and die; the shell holds only the bounded reply. The guide
+then runs the text through `Model.sanitizeInput` at the field's
+`Model.formCapacity` and `Model.editInsert` over the range
+`Model.editRangeFor` returns (`pasteFromProcess`, `Guide.qml:2638`). Qt
 draws no caret on a read-only input and never instantiates its
 `cursorDelegate` there (measured: dark-pixel count 0 against 20 editable), so
 the field draws its own `Rectangle` on the native `cursorRectangle`
 (`Guide.qml:4833`, `Style.spacing.hairline` wide, `field.color`, blinking at
 half `Application.styleHints.cursorFlashTime`). Nothing in the shell process
-asks Qt for the clipboard any more: `Guide.qml`'s `clipboardText()` is kept
-unreachable only because `tests/a11y/fidelity.py` pins its line, and the two
-are to be dropped together. Counts: node 1,911 -> 2,026, QML spec 73 -> 77,
-python 1,026 unchanged; the red proofs are the lane's commit message.
+asks Qt for the clipboard any more: `Guide.qml`'s `clipboardText()` was kept
+unreachable at 44b250b only because `tests/a11y/fidelity.py` pinned its
+line, and the two were dropped together at 51866a3 (five transform rules
+remain, were six; the a11y test count, 34, is unchanged). Counts: node
+1,911 -> 2,026 at 44b250b -> 2,074 at 51866a3; QML spec 73 -> 77 -> 78;
+python 1,026 unchanged -> 1,046 (`tests/test_clipboard.py`, the verb as a
+subprocess against a stub `wl-paste` that streams, hangs, ignores SIGTERM,
+fails or is absent); the red proofs are the two lanes' commit messages.
 **The residuals, each with its size or marked.**
 - **The host kit's own field is exposed in every host form, and that is
   Omarchy and Quickshell business, upstream.** `Ui/TextField.qml` on omarchy
@@ -1158,25 +1206,73 @@ python 1,026 unchanged; the red proofs are the lane's commit message.
 - **The read-only field loses input-method composition** (ruling 5, stated
   rather than hidden): dead keys, Compose and CJK input never reach a
   read-only `TextInput`, so accented or non-Latin characters cannot be TYPED
-  into the label field. ASCII typing is unaffected; a paste carries any
-  Unicode; URLs, server, username and password are ASCII by nature. Native
-  undo (`Ctrl+Z`) is gated by `readOnly` as well and is gone with it. The
-  README and UX-SOURCES say so.
+  into the label field. What arrives instead, MEASURED by the adversarial
+  review under a nested cage (Qt 6.11.2, QT_QPA_PLATFORM=wayland, `wtype -k
+  dead_acute -k e` then `x` into a read-only `TextField` logging
+  `Keys.onPressed`): the dead key as a bare press with empty text
+  (`Qt::Key_Dead_Acute`), then `e` and `x` as ordinary text -- so the base
+  letter is inserted and the accent is dropped, where the same rig's
+  editable control received e-acute. Both platform input contexts refuse to
+  compose when the item does not accept input method
+  (`qcomposeplatforminputcontext.cpp:72`, `qwaylandinputcontext.cpp:260`).
+  An earlier version of the QA expectation said the sequence inserts
+  NOTHING; it was wrong, and is corrected where it stands (SRC-KEY-03).
+  ASCII typing is unaffected; a paste carries any Unicode; URLs, server,
+  username and password are ASCII by nature. Native undo (`Ctrl+Z`) is
+  gated by `readOnly` as well and is gone with it. The README and
+  UX-SOURCES say so.
 - **Middle-click paste of the primary selection is gone**, since it was Qt's
   and the control no longer edits; `Ctrl+V` and `Shift+Insert` remain.
-- **A USER paste of a huge clipboard still pulls the whole offer into the
-  shell before the cap** (lane A's DR-1): `clipboardProc`'s stdout is a
-  `StdioCollector` with `waitForEnd`, so the 8,192-unit cut is applied to a
-  string the shell has already received in full. The watchdog bounds TIME
-  (5 s), not bytes, and the read is user-initiated and once, not
-  change-driven and unbounded, which is the whole of the difference from the
-  finding. A byte cap needs a helper verb or a different collector and is a
-  decision the lead has been asked for; UNVERIFIED what a 100 MB
-  user-initiated paste costs the shell on the fixed tree.
-- **`wl-paste` is now the paste path and not a fallback**, so paste needs
-  `wl-clipboard` on PATH (an Omarchy default, present here at 2.3.0); without
-  it a paste changes nothing, silently. A `Clipboard unavailable` transient
-  is a UX decision (lane A's DR-4), not made in this round.
+- **The primary-selection WRITE is a sink this list had not named, and it
+  is pre-existing, user-initiated and unchanged.** `readOnly` gates the
+  middle-button PASTE in `QQuickTextInput::mouseReleaseEvent` (v6.11.2) but
+  not the left-button half of the same handler: on every left release, when
+  the platform supports a selection (Wayland does), the control copies its
+  selection to `QClipboard::Selection`. So a drag across a REVEALED
+  playlist, EPG or server field publishes the raw credentialed URL to every
+  client that reads the primary selection, exactly as it did on d55149b and
+  as any Qt text field does; the password field is exempt (`copy()` is a
+  no-op under `echoMode` Password), a masked field shows `****` and a
+  selection of that is `****`. The host's own clipboard plugin (`wl-paste
+  --type text --watch`) reads the CLIPBOARD and not the primary, so it is
+  not that reader. Recorded by the adversarial review of 44b250b (source
+  read, not measured) so the sink list is complete; not a defect of this
+  change and not changed by it. The lesson is the one D-SINK-4 taught, one
+  level down: a sink can be opened by code we did not write, and here by a
+  gesture, not an API.
+- **A USER paste of a huge clipboard pulled the whole offer into the shell
+  before the cap** (lane A's DR-1) -- CLOSED by R8 (51866a3), measured both
+  ways. At 44b250b and 96f5261 `clipboardProc`'s stdout was a
+  `StdioCollector` with `waitForEnd`, so the 8,192-unit cut was applied to a
+  string the shell had already received in full: the watchdog bounded TIME,
+  not bytes. The adversarial review measured it first (nested cage, the
+  harness shell in the first-run form, a 100 MB `wl-copy` on the nested
+  display, `Ctrl+V` through the harness, RSS sampled from outside): the
+  fixed shell 343 -> 642 MB, +298, and 621 MB (+278) at the end of the
+  window, with the retention run flat at 627 MB from +10 s to +30 s -- the
+  memory did not come back when the paste completed. Lane A on its own rig,
+  the same scenario variant on both trees: 96f5261 before 334 MB, peak 639,
+  +304, last growth at +6,883 ms, +292 kept at the end of the window, no
+  helper child (the shell ran `wl-paste` itself); 51866a3 before 329, peak
+  330, +0, 327 at the end of the window, the clipboard helper seen as the
+  shell's child with a peak RSS of 32 MB and gone afterwards, the field
+  holding 2,112 characters of the paste (`Model.formCapacity`), so the
+  paste landed. The exhaust half of the maintainer's finding is no longer
+  reachable by a keypress. What the helper does is in "What changed" above;
+  the ruling is (8) below. The scenario variant that measures it is in lane
+  A's scratch for the harness round to lift (`DR1`, 20 checks, L9 moved to
+  the helper child); at 51866a3 the tree's own `clip-scenario.sh` L9 still
+  asks for a `wl-paste` child of the SHELL, which since R8 pins less than
+  it says.
+- **`wl-paste` is now the paste path and not a fallback**, run by the
+  helper's `clipboard` verb, so paste needs `wl-clipboard` on PATH (an
+  Omarchy default, present here at 2.3.0); without it the verb answers
+  `{"ok": false, "code": "no_wl_paste"}` and the paste changes nothing,
+  silently. A `Clipboard unavailable` transient is a UX decision (lane A's
+  DR-4: a failed paste stays silent this release), and so is surfacing the
+  reply's `truncated` flag, which the verb reports and the shell parses but
+  nothing shows (lane A's OQ-4): a clipboard longer than 8,192 characters
+  silently keeps its first 8,192, then `formCapacity`.
 - **A shell not restarted after the upgrade runs the old `Guide.qml`** and
   keeps the editable field until it is; the README's install section already
   says to restart with `omarchy-restart-shell`.
@@ -1189,13 +1285,25 @@ sweep (R6): `Guide.qml:4779` is the only `TextInput`-derived element in the
 shipped QML; the search line is a plain `Text`; the host kit's
 `qs.Ui.NumberField` is not used. Lane A's: a grep for
 `TextField|TextInput|NumberField|clipboardText|Quickshell\.clipboard` over the
-shipped QML finds the one field and the one (now unreachable) Qt clipboard
-read; the dev-harness fake and the accessibility fakes stub `requestClipboard`
-and never bind `clipboardText`. This lane's: the host-side list above, which
-is the same shape in files this plugin does not own. Every other subscription
-a shipped element makes to a global that any process can change is the
-question this entry leaves open as a shape, not as a list: none other is
-known, and "known" is what the previous five entries also said.
+shipped QML finds the one field and, at 44b250b, the one unreachable Qt
+clipboard read, deleted at 51866a3; the dev-harness fake and the
+accessibility fakes stub `requestClipboard` and never bind `clipboardText`.
+This lane's: the host-side list above, which is the same shape in files this
+plugin does not own. Lane A's second sweep for R8, "where else does the
+shell collect a child's whole output" (`StdioCollector` with `waitForEnd`
+over `Service.qml`; `Guide.qml` owns no `Process`): every provider-fed
+collector reads a one-line status JSON the helper composes, with the
+provider bytes going to a cache file capped at `MAX_SOURCE_BYTES` (64 MiB)
+in the helper, under a 180 s, 8 s or 12 s watchdog; the one byte-bound
+observation is the `playlist` status line's `warnings` list, one entry per
+channel with an option-looking or unsafe-header key and capped only by
+`MAX_CHANNELS` (50,000) times the name length, so a hostile playlist can
+make the one line `playlistStdout` collects a few MB -- a count cap with a
+tail line is the sibling-shaped fix, listed and not done (lane A's OQ-6,
+decision requested). Every other subscription a shipped element makes to a
+global that any process can change is the question this entry leaves open
+as a shape, not as a list: none other is known, and "known" is what the
+earlier maintainer-raised entries also said.
 **The gate observes the sink (ruling 7; lane B).** A scenario that runs the
 REAL `Guide.qml` through the dev-harness fake shell under a nested headless
 cage in the harness's `FloatingWindow` mode (the layer-shell window never
@@ -1203,10 +1311,31 @@ maps there, `docs/SPIKE-CAGE-HEADLESS.md`), holds a virtual keyboard on the
 nested seat, opens the form, has a foreign producer offer 100 MB of
 `text/plain` inside that compositor, and asserts the shell's RSS and an IPC
 round-trip unchanged on the fixed tree and the read on `--baseline d55149b`;
-its compositor-free half runs in `scripts/check.sh`. At this writing the
-branch `lane-clip-harness` carries no commit past `lane-clip-code`, so the
-scenario's name, its counts and its red run are UNVERIFIED here and are
-specified in `docs/QA.md` section 3.3 for the lane to meet.
+its compositor-free half runs in `scripts/check.sh`. It landed as
+`scripts/dev-harness/clip-scenario.sh` (824ced4, integrated into `dev` as
+85b7fe3 on 2026-10-11): `check-tree` is the probe arm alone, P1-P6 under
+`timeout`, reported by the gate as "clip preflight (7 checks)" with
+`CLIP_PREFLIGHT_MIN` 7; `live` adds L1-L11 (18 checks) and takes
+`--baseline d55149b`. The counts, each from a transcript the run prints as
+its first line: the adversarial review on 824ced4, check-tree 7 / 0 (the
+editable probe +259 MB, read-only +0, no-field +0, the consumer reading
+104,857,600 bytes), live 18 / 0 at +0 MB with the worst IPC round trip
+124 ms after a 100 MB offer, baseline 16 / 2 with L4 red at +240 MB (peak
+589) and L5 red at 746 ms; its second reviewer's own worktree, fixed +0 MB
+/ 146 ms and baseline +264 MB / 729 ms; lane A on 51866a3, live 18 / 0 in
+24.8 s with L7 and L8 pasting through the helper verb. The offer in the
+gate arm is 100 MB on the tree at 51866a3 and the lead has ruled it drops
+to 25 MB there (DR-B1, `CLIP_OFFER_MB`; 100 stays in `live`), the harness
+round's change. Two things the review found in the scenario, both the
+harness round's and neither on the tree yet: it traps `EXIT` only, so a
+`TERM` or `INT` while it waits on a child strands the cage, the detached
+shell and a stale nested socket where `player-`, `rewind-` and
+`tls-scenario.sh` carry `trap 'exit 130' INT` and `trap 'exit 143' TERM`
+(parallel rule 3; rule 15, the siblings had it); and its header's "by
+recorded pid" is true of the file and not of the `run.sh reap` it
+delegates to, which after the pid-file kill sweeps by patterns anchored to
+the harness directory. The specification it met is `docs/QA.md` section
+3.3.
 **Ruling, as briefed by the lead for this round (numbered 1-7 here; the lane
 briefs called them R1-R7).** (1) While the form is open no editable
 `TextInput` exists in the shell: every field `readOnly: true`, always.
@@ -1216,7 +1345,16 @@ unchanged. (4) The edit logic is in `Model.js` and called from node, with
 Qt's own word boundary measured, not assumed; the over-cap behaviour is
 refused, never cut. (5) The input-method loss is stated where the user reads
 and where the design lives. (6) The sibling sweep above. (7) The gate observes
-the sink, with the compositor-free half in `check.sh`.
+the sink, with the compositor-free half in `check.sh`. (8) Added by the
+lead for the second round (R8, after DR-1 was measured): the shell never
+holds more than the bounded reply -- the helper's `clipboard` verb runs
+`wl-paste` with a pipe, reads at most `MAX_CLIPBOARD_BYTES` and terminates
+the child at the cap, EOF or its deadline, prints one JSON object and
+nothing on stderr, never logs the text and never names the clipboard
+contents in an error; the shell runs it through the same `Process`, parses
+with `Model.parseClipboardReply`, keeps its watchdog as the outer bound and
+emits `clipboardText` only on ok. The helper is the process allowed to hold
+the bytes briefly and die; the shell is not.
 **Upstream, drafted here for the lead to file.** Two reports, because the
 two parties can each act and neither can act for the other.
 
@@ -1237,9 +1375,11 @@ two parties can each act and neither can act for the other.
 > Measured on 2026-10-11 (Qt 6.11.2, Hyprland 0.56.2, `wl-copy` offering
 > 100 MB of text/plain to a throwaway `qml` client): one
 > `TextField { readOnly: false }` 164 -> 403 MB within 600 ms of the offer;
-> the same with `readOnly: true` +0; a window with no field made no pipe read
-> at all (gdb catchpoint on `pipe2`; every hit is `QMimeData::text()` called
-> from `QQuickTextInput::q_canPasteChanged`). Upstream: qtdeclarative
+> the same with `readOnly: true` +0; a window with no field created no pipe
+> after the offer (gdb catchpoint on `pipe2`: zero hits after it, and the
+> 52 MB that window grew by is toolkit startup; on the editable field every
+> hit after the offer is `QMimeData::text()` called from
+> `QQuickTextInput::q_canPasteChanged`). Upstream: qtdeclarative
 > `c82ef988` added the read on the 6.11 branch on 2026-02-18 (shipped in
 > 6.11.2) and `7d0a433a` removed it on 2026-09-15 (`Fixes: QTBUG-149610`);
 > as of 2026-10-11 no released Qt carries the removal. `readOnly` is the only
@@ -1250,7 +1390,8 @@ two parties can each act and neither can act for the other.
 > (`io.github.rmcdavid.iptv`) has done the former for its own form after a
 > marketplace review raised it (omarchy-plugin-marketplace#11077): every
 > field read-only to Qt, editing applied by the plugin, paste through a
-> `wl-paste` child with a size cap and a watchdog. Reproduction: three
+> helper process that reads at most 32 KiB of `wl-paste`'s output under a
+> deadline and hands the shell one bounded reply. Reproduction: three
 > ten-line QML files (editable, read-only, no field) and one `wl-copy`,
 > available on request.
 
@@ -1394,10 +1535,12 @@ Performance budget (10k channels):
     subscribes to `QClipboard::dataChanged` and the released Qt reads the
     whole offer in that slot, so every form field is `readOnly: true`
     always, the plugin applies edits to the model itself, and the one
-    clipboard read the plugin makes is a user-initiated `wl-paste` child
-    with a size cut (`Model.LIMITS.url * 4`) and a watchdog
-    (`Model.CLIPBOARD_TIMEOUT_MS`) that kills the child and never waits in
-    the shell. Verified by calling `Model.editInsert` / `editDelete` from
+    clipboard read the plugin makes is user-initiated and out of process:
+    the helper's `clipboard` verb reads at most `Model.CLIPBOARD_MAX_BYTES`
+    (32 KiB) of a `wl-paste` child's output under `Model.CLIPBOARD_TIMEOUT_MS`
+    and answers one bounded JSON line, and the shell -- which holds only
+    that reply, never the output -- kills a helper that has not answered by
+    `Model.CLIPBOARD_WATCHDOG_MS` and never waits in itself (R8). Verified by calling `Model.editInsert` / `editDelete` from
     node against a word boundary measured on a real `TextInput`, by pinning
     the read-only premises in the QML spec, and by observing the shell's
     memory and an IPC round-trip while a foreign producer offers 100 MB

@@ -407,14 +407,20 @@ and no prefix is guessed.
 text boxes, but Qt does not edit them: the plugin handles every keystroke
 itself -- typing, `Backspace`, `Delete`, their `Ctrl` word variants, cut --
 and the control only draws the result, your caret and your selection. Paste
-is `Ctrl+V` or `Shift+Insert` only. It runs `wl-paste` as a separate process,
-keeps at most 8,192 characters of what comes back, gives up after 5 seconds,
-and changes nothing if that process fails. Middle-click paste of the primary
-selection no longer works in these fields. The reason is the Qt the shell
-runs on, 6.11.2: an editable Qt text field reads the ENTIRE clipboard, inside
-the shell process and on its main thread, every time any program on your
-desktop changes the clipboard, with no size limit and no deadline, whether or
-not you are typing in it. Qt added that read on its 6.11 branch in February
+is `Ctrl+V` or `Shift+Insert` only. It asks the plugin's helper to run
+`wl-paste` as a separate process; the helper reads at most 32 KiB of what
+comes back, stops the read there, gives up after 5 seconds, and hands the
+shell at most 8,192 characters. The shell itself never holds more than that
+reply: measured with a 100 MB clipboard, one paste left the shell's memory
+unchanged, where the first version of this fix had the shell take the whole
+clipboard in and keep about 300 MB of it. A paste changes nothing if the
+helper or `wl-paste` fails, and nothing is written anywhere else.
+Middle-click paste of the primary selection no longer works in these
+fields. The reason is the Qt the shell runs on, 6.11.2: an editable Qt text
+field reads the ENTIRE clipboard, inside the shell process and on its main
+thread, every time any program on your desktop changes the clipboard, with
+no size limit and no deadline, whether or not you are typing in it. Qt
+added that read on its 6.11 branch in February
 2026 (commit `c82ef988`) and removed it in September 2026 (`7d0a433a`), after
 6.11.2 was cut; as of 2026-10-11 no released Qt carries the removal, and
 6.12.0 reads too. A read-only field does not subscribe to that read, so every
@@ -422,8 +428,9 @@ field in these forms is read-only to Qt and editable only through the plugin.
 A marketplace reviewer raised it against 0.13.4. One loss, stated plainly:
 input-method composition (dead keys, Compose, CJK input) does not reach a
 read-only field, so accented or non-Latin characters cannot be TYPED into the
-label field. Plain ASCII typing is unaffected, and pasting carries any
-character.
+label field: a dead key followed by a letter inserts the plain letter (an
+acute dead key then `e` types `e`), measured. Plain ASCII typing is
+unaffected, and pasting carries any character.
 
 `omarchy bar set ... playlistUrl` still works and shows up in the Sources
 list as well; the two stay in sync. Up to 50 sources are kept.
@@ -581,12 +588,14 @@ Nothing inside the plugin directory is written at runtime.
   never reaches your shell history, which `omarchy bar set` cannot avoid;
   use the command line only for a free public list you do not mind storing
   in plain text.
-- Paste does nothing in a form: the plugin pastes by running `wl-paste`, so
-  it must be installed (`wl-clipboard`, an Omarchy default). A clipboard
-  that takes more than 5 seconds to deliver is abandoned and anything past
-  8,192 characters is dropped. Accented characters typed through dead keys
-  or an input method do not reach the fields at all; paste them instead
-  (see Sources above for why).
+- Paste does nothing in a form: the plugin pastes by having its helper run
+  `wl-paste`, so that must be installed (`wl-clipboard`, an Omarchy
+  default). The helper reads at most 32 KiB of the clipboard and gives up
+  after 5 seconds; the field keeps at most 8,192 characters of that, and
+  then its own limit applies. Accented characters typed through dead keys
+  arrive as the plain letter (the accent is dropped) and an input method
+  does not reach the fields at all; paste them instead (see Sources above
+  for why).
 - "Settings file is readable by other users": the guide would not save your
   source, because it could not make `~/.config/omarchy/shell.json` private and
   your provider URL would have gone into a file other accounts can read.

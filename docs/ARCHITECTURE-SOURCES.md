@@ -53,7 +53,7 @@ under ~/.config or /usr/share/omarchy was modified.
 | D6 | Cache removal and pruning | (a) `rm -rf` argv from QML; (b) helper verb; (c) leave orphans | **(b) helper verbs `cache remove --key K` (on removal, S7) and `cache prune --keep K...` (once per service start; also ages EPG files of inactive sources)** | The helper validates the key (`^[0-9a-f]{8}(-[0-9]{1,3})?$`), builds the path with `os.path.join` under `sources/`, refuses anything whose realpath escapes, deletes only the five known file names plus temp files and then `rmdir`s -- no recursive delete of unknown content. QML never composes a delete. |
 | D7 | What `switch` does | commit first vs fetch first | **Warm source (`fetchedAt > 0`): commit immediately, redraw from cache, refresh in the background if stale. Never-fetched source: probe first (D8)** | S3 asks for an instant redraw; a source with a cache can always be shown. Steps and budget in section 4.5. |
 | D8 | Adding a source (S1, S8) | (a) write settings, let the normal refresh fail; (b) fetch into the new dir, commit on success | **(b) probe-then-commit through a dedicated `sourceProbeProc`** | S8: "a fetch failure keeps the previous active source and shows the reason". With (a) the failing URL would already be active and the guide would show the error empty state. With (b) the previous source keeps playing and refreshing; the new record stays in history with `fetchedAt: 0` and a session-only error so the user can edit and retry. Same code path for S1 (no previous source). |
-| D9 | How paste reaches the field | (a) Qt clipboard through a `qs.Ui` `TextField`; (b) `Quickshell.clipboardText`; (c) `wl-paste` via `Process` argv | **(a) primary: real `TextField`s (locked decision 5) get Ctrl+V / Shift+Insert from `QQuickTextInput` (`QKeySequence::Paste`) through Qt's Wayland clipboard; (c) `["wl-paste", "--no-newline", "--type", "text"]` is the fallback behind one function** | Precedent in the shell: the network panel's passphrase `TextField`s sit on a layer-shell surface with keyboard focus (`Ui/KeyboardPanel.qml:98`, `plugins/panels/network/Panel.qml:1841-1870`) and users paste passphrases there; `Ui/TextField.qml:18` is a Qt Quick Controls `TextField`. Qt receives `wl_data_device.selection` when our surface has keyboard focus, which the guide holds exclusively while open (`Guide.qml:617`). Verified here: `wl-paste --list-types` works from a background process (wlr-data-control, no focus needed), so (c) is a reliable fallback; `Quickshell.clipboardText` (quickshell-core.qmltypes:998-1002) is the same Qt clipboard as (a) and is only useful for a synthetic field. The harness scenario H4 (section 8.4) verifies (a) on the live shell; if it pastes empty, Lane 1 flips `pasteViaProcess` to true. Either way the pasted text is data: sanitized by `Model.sanitizeInput` before it enters the field (section 6). **Overturned 2026-10-11 (D-CLIP-1): (a) is withdrawn and (c) is the ONLY path -- `pasteViaProcess` is `true` for good (`Guide.qml:592` on lane commit 44b250b), and not because H4 pasted empty.** The reasoning above was right about its own question and silent on a cost nobody priced: a real `TextField` does not merely RECEIVE the Wayland clipboard on a paste, it SUBSCRIBES to it, and on the released Qt 6.11.2 (and 6.12.0) that subscription reads the whole offer into `omarchy-shell` synchronously on every clipboard change by any application, with a 1 s per-read timeout and no total limit (`docs/ARCHITECTURE.md` section 6, D-CLIP-1; measured +238 MB inside 600 ms of a 100 MB offer, +0 with `readOnly: true`). Locked decision 5 still holds -- the fields ARE real `TextField`s, for the kit's chrome, caret, selection and navigation -- but they are `readOnly: true` always, the plugin applies every edit to the model itself (`Model.editInsert` / `editDelete`, with Qt's word boundary measured into `tests/fixtures/form-edit.js`), and paste is `Service.requestClipboard`: the argv above, cut at `Model.LIMITS.url * 4`, bounded by a 5 s watchdog that kills the child, answering only on exit 0. `Quickshell.clipboardText` (b) is the same read as (a) in the same process and is likewise withdrawn; `Guide.qml`'s `clipboardText()` survives only as the line the accessibility fidelity transform pins, unreachable. The precedent cited -- the network panel's passphrase fields -- is not a counter-argument but the same exposure in the host, reported upstream. |
+| D9 | How paste reaches the field | (a) Qt clipboard through a `qs.Ui` `TextField`; (b) `Quickshell.clipboardText`; (c) `wl-paste` via `Process` argv | **(a) primary: real `TextField`s (locked decision 5) get Ctrl+V / Shift+Insert from `QQuickTextInput` (`QKeySequence::Paste`) through Qt's Wayland clipboard; (c) `["wl-paste", "--no-newline", "--type", "text"]` is the fallback behind one function** | Precedent in the shell: the network panel's passphrase `TextField`s sit on a layer-shell surface with keyboard focus (`Ui/KeyboardPanel.qml:98`, `plugins/panels/network/Panel.qml:1841-1870`) and users paste passphrases there; `Ui/TextField.qml:18` is a Qt Quick Controls `TextField`. Qt receives `wl_data_device.selection` when our surface has keyboard focus, which the guide holds exclusively while open (`Guide.qml:617`). Verified here: `wl-paste --list-types` works from a background process (wlr-data-control, no focus needed), so (c) is a reliable fallback; `Quickshell.clipboardText` (quickshell-core.qmltypes:998-1002) is the same Qt clipboard as (a) and is only useful for a synthetic field. The harness scenario H4 (section 8.4) verifies (a) on the live shell; if it pastes empty, Lane 1 flips `pasteViaProcess` to true. Either way the pasted text is data: sanitized by `Model.sanitizeInput` before it enters the field (section 6). **Overturned 2026-10-11 (D-CLIP-1): (a) is withdrawn and (c) is the ONLY path -- `pasteViaProcess` is `true` for good (`Guide.qml:592` on lane commit 44b250b), and not because H4 pasted empty.** The reasoning above was right about its own question and silent on a cost nobody priced: a real `TextField` does not merely RECEIVE the Wayland clipboard on a paste, it SUBSCRIBES to it, and on the released Qt 6.11.2 (and 6.12.0) that subscription reads the whole offer into `omarchy-shell` synchronously on every clipboard change by any application, with a 1 s per-read timeout and no total limit (`docs/ARCHITECTURE.md` section 6, D-CLIP-1; measured +238 MB inside 600 ms of a 100 MB offer, +0 with `readOnly: true`). Locked decision 5 still holds -- the fields ARE real `TextField`s, for the kit's chrome, caret, selection and navigation -- but they are `readOnly: true` always, the plugin applies every edit to the model itself (`Model.editInsert` / `editDelete`, with Qt's word boundary measured into `tests/fixtures/form-edit.js`), and paste is `Service.requestClipboard`: since R8 (51866a3) the helper's `clipboard` verb, which runs the argv above with a pipe, reads at most 32 KiB from it (`Model.CLIPBOARD_MAX_BYTES`: 8,192 UTF-16 units x 4 bytes) under a 5 s deadline, terminates the child at the cap, EOF or the deadline, and prints one JSON line the shell parses with `Model.parseClipboardReply`, emitting the text only on an ok reply; the shell's 8 s `Model.CLIPBOARD_WATCHDOG_MS` is the outer bound and kills a helper that has not answered. The shell holds only the reply, never the output (measured +0 MB over a paste of a 100 MB offer, against +298..+304 MB when the shell ran `wl-paste` itself at 44b250b). `Quickshell.clipboardText` (b) is the same read as (a) in the same process and is likewise withdrawn; `Guide.qml`'s `clipboardText()` survived at 44b250b only as the line the accessibility fidelity transform pinned, unreachable, and both were deleted at 51866a3. The precedent cited -- the network panel's passphrase fields -- is not a counter-argument but the same exposure in the host, reported upstream. |
 | D10 | Xtream URL construction | build in QML / in helper | **`Model.xtreamUrls` (JS only; the helper never builds Xtream URLs)** | Rules in section 3.4: server normalized to `scheme://host[:port][/base]` **an explicit scheme is REQUIRED** -- `xtreamUrls` refuses a bare host with `server_scheme`, "Server must start with http:// or https://", and no caller prepends one. This row said "default `http://` when no scheme -- Xtream panels are plain http on :8080 far more often than not" until 2026-10-07, when D-DOC-7 found the code had never done that. The refusal is the safer behaviour and it is the shipped one: the plugin does not choose cleartext for a user who did not ask for it. A user who types `http://` still gets it, with the password in a cleartext query string, which is D-SINK-14, `get.php?username=U&password=P&type=m3u_plus&output=ts` and `xmltv.php?username=U&password=P`, values percent-encoded with the RFC 3986 unreserved set so node, the Qt engine and Python `quote(safe="")` agree. Saved as a normal source (`origin: "xtream"`); the password exists only inside the URL. |
 | D11 | URL validation shared with the helper | duplicate rules / one spec | **One algorithm, `Model.validateSourceUrl` and helper `validate_source_url`, pinned by `tests/fixtures/source-urls.json` read by both suites; `resolve_source` calls the Python one** | The helper's `resolve_source` (`bin/omarchy-iptv:544-558`) already defines the accepted set (`~`/`/` paths, `http(s)://` with a host, `file://`); the JS side mirrors it and both gain the same two additions: a 2,048-character cap (`too_long`) and refusal of control characters (`bad_url`). The guide rejects inline (S8) with the same code the helper would return. |
 | D12 | Masking for display | host only / mask query / mask all | **Lists: label + host (`Model.hostOf`). Edit field: `Model.maskUrl` = `scheme://[***@]host[:port]/path?name=***&...` with every query value masked except `type` and `output`; a reveal key shows the raw URL; paths shown as-is** | M2-SOURCES decision 4. Credentials of Xtream and most providers are query values or userinfo; parameter names and the path let the user recognise the URL. Local paths are the user's own filesystem. |
@@ -638,10 +638,13 @@ it runs on `StandardKey.Paste` (`Ctrl+V` and `Shift+Insert` both, measured
 through `Keys.forwardTo`), it asks the service rather than owning a
 `Process`, and the answer arrives through the `clipboardText(text)` signal
 into `pasteFromProcess`, which sanitizes at `Model.formCapacity(id)` and
-inserts through `Model.editInsert` over the selection (or the whole of a
-masked value). The `maximumLength` on the control still mirrors the capacity
-but bounds nothing by itself, because the control never edits; the bounds
-are the service's `LIMITS.url * 4` cut and the guide's `sanitizeInput`. The
+inserts through `Model.editInsert` over the range `Model.editRangeFor`
+returns (the selection, or the whole of a masked value -- lifted out of
+`Guide.qml` at 51866a3 so node reaches the decision). The `maximumLength`
+on the control still mirrors the capacity but bounds nothing by itself,
+because the control never edits; the bounds are the helper's 32 KiB /
+8,192-unit cut on the `wl-paste` read (R8), re-applied by
+`Model.parseClipboardReply`, and the guide's `sanitizeInput`. The
 `field.insert(...)` call named above is gone with the native path -- not
 because a read-only input refuses it (v6.11.2's `insert()` has no
 `readOnly` guard, read at `qquicktextinput.cpp:2229`; `paste()`, `cut()` and
@@ -663,10 +666,14 @@ edit the control's copy and the next bound write would overwrite it.
    field's `formCapacity`; a typed or pasted insert is fitted to that
    capacity by `Model.editInsert`, and what exceeds the field's limit still
    reaches the validator as `too_long` rather than being cut silently
-   (SR18). What the shell holds in memory for a user-initiated paste of a
-   huge clipboard before that cut is the service's `StdioCollector` string,
-   the whole output, bounded in time by the watchdog and not in bytes --
-   recorded as lane A's DR-1, decision pending.]**
+   (SR18). What the shell held in memory for a user-initiated paste of a
+   huge clipboard before that cut, at 44b250b, was the service's
+   `StdioCollector` string, the whole output, bounded in time by the
+   watchdog and not in bytes -- lane A's DR-1, measured at +298..+304 MB
+   and mostly kept over a 100 MB offer, and CLOSED by R8 (51866a3): the
+   helper's `clipboard` verb reads at most `Model.CLIPBOARD_MAX_BYTES`
+   (32 KiB) and the shell holds only its one-line reply, +0 MB over the
+   same paste.]**
 2. Scheme allow-list: `http`, `https`, `file`, absolute or `~` paths --
    the helper's `SOURCE_SCHEMES` (`bin/omarchy-iptv:61`) -- enforced by
    `validateSourceUrl` before any state write and again by
@@ -674,7 +681,8 @@ edit the control's copy and the next bound write would overwrite it.
    `/proc`, `/sys`, `/dev` are refused in both places; realpath, regular
    file, 64 MB cap stay in `read_local_source`.
 3. No shell anywhere: every process is an argv array (`playlist`, `cache`,
-   `state`, `wl-paste`); the URL is not an argv item at all but travels in
+   `state`, `clipboard` -- and inside that verb `wl-paste`, a
+   `subprocess.Popen` of `CLIPBOARD_ARGV` with no shell); the URL is not an argv item at all but travels in
    the helper's environment as `OMARCHY_IPTV_URL` (D-SINK-8; `--url` stays
    for a human running the helper by hand); keys follow `--key` /
    `--keep` and match `^[0-9a-f]{8}(-[0-9]{1,3})?$` before they become a
@@ -735,9 +743,12 @@ edit the control's copy and the next bound write would overwrite it.
    instantiates subscribes to it (D-CLIP-1, added 2026-10-11). Every form
    `TextField` is `readOnly: true` always, which is the one switch on
    `QQuickTextInput`'s `dataChanged` slot; the plugin edits the model value
-   itself; the only clipboard read is `Service.requestClipboard`, a
-   `wl-paste` child, argv only, cut at `Model.LIMITS.url * 4`, bounded by
-   `Model.CLIPBOARD_TIMEOUT_MS`, run on a user paste and never on a change.
+   itself; the only clipboard read is `Service.requestClipboard`, the
+   helper's `clipboard` verb as argv, which reads at most
+   `Model.CLIPBOARD_MAX_BYTES` of a `wl-paste` child under
+   `Model.CLIPBOARD_TIMEOUT_MS` and answers one bounded line, the shell's
+   `Model.CLIPBOARD_WATCHDOG_MS` the outer bound, run on a user paste and
+   never on a change (R8).
    The register of the sink, the measurement and the residuals is
    `docs/ARCHITECTURE.md` section 6; the gate is `docs/QA.md` 3.3.
 
@@ -844,7 +855,7 @@ New harness IPC verbs (target `harness`): `addSource(playlistUrl, epgUrl, label)
 | R4 | Hash collisions (32-bit key). | Identity is the URL; `allocateSourceKey` suffixes; both lookups (`findSourceByUrl`, `findSource`) are tested with a forced collision; the helper only ever sees keys. |
 | R5 | Cache disk usage grows with history (EPG windows can reach tens of MB per source). | 50-record cap; startup prune ages EPG files of inactive sources after 24 h and deletes orphan directories; removal deletes immediately; typical footprint stays a few MB per source. |
 | R6 | Two helpers at once (probe + refresh) double CPU/network for a moment. | Both bounded (64 MB, 180 s); one probe at a time; probes are user-initiated; acceptable. |
-| R7 | Qt clipboard on the layer-shell overlay pastes empty in some compositor states (focus race right after open). | H4 verifies on Hyprland 0.56.2; the `wl-paste` argv fallback is one constant away and works without focus (wlr-data-control, verified). **[Moot 2026-10-11, D-CLIP-1: the Qt clipboard is not read at all; the "fallback" is the path. The risk that replaced it is a missing or stalled `wl-paste`, answered by the watchdog and by a paste that changes nothing on failure.]** |
+| R7 | Qt clipboard on the layer-shell overlay pastes empty in some compositor states (focus race right after open). | H4 verifies on Hyprland 0.56.2; the `wl-paste` argv fallback is one constant away and works without focus (wlr-data-control, verified). **[Moot 2026-10-11, D-CLIP-1: the Qt clipboard is not read at all; the "fallback" is the path. The risk that replaced it is a missing or stalled `wl-paste`, answered by the helper's deadline and `no_wl_paste` reply, the shell's outer watchdog, and a paste that changes nothing on failure.]** |
 | R8 | 10k+ switch over the 150 ms budget in the V4 engine (estimate 100-130 ms). | H8 measures; the prepared-cache LRU (section 4.5) is the ready mitigation; the 50,000-channel cap bounds the worst case. |
 | R9 | `refreshTimer.triggeredOnStart` becomes false (freshness-driven first fetch). | Documented in README/CHANGELOG; H1/H6 cover "fresh cache -> no fetch" and "stale -> fetch"; `r` and middle click still force a fetch. |
 | R10 | The helper's `state` verbs rewrite state.json while the service holds a newer in-memory copy (both writers existed in M1; `stateFile.watchChanges` reloads the file, `Service.qml:757-766`). | Unchanged M1 behaviour; the helper carries `sources` through, so a CLI `favorite add` can no longer drop history; the service reload after `fileChanged` re-runs reconcile. |
@@ -972,7 +983,12 @@ is amended where it stands.
 2. Paste is the out-of-process path ONLY: `pasteViaProcess` true, `Ctrl+V`
    and `Shift+Insert` to `Service.requestClipboard`, `wl-paste --type text`
    as argv, cut at `Model.LIMITS.url * 4`, the child bounded by a watchdog
-   that kills the CHILD, never the shell.
+   that kills the CHILD, never the shell. Tightened by R8 (second round,
+   51866a3, after DR-1 measured the shell taking the whole output in): the
+   `wl-paste` child is the HELPER's, the helper reads at most
+   `Model.CLIPBOARD_MAX_BYTES` under `Model.CLIPBOARD_TIMEOUT_MS` and
+   answers one bounded JSON line, and the shell never holds more than that
+   reply.
 3. The password field keeps `echoMode` Password; `readOnly` does not change
    masking; `fieldDisplay` / `maskUrl` are unchanged.
 4. Pure logic lives in `Model.js` and is called from node: `editInsert`,
@@ -993,4 +1009,6 @@ is amended where it stands.
    from a foreign producer inside that compositor, and asserts the shell's
    RSS and an IPC round-trip unchanged on the fixed tree and the read on
    `--baseline d55149b`; its compositor-free half runs in `scripts/check.sh`
-   (`docs/QA.md` 3.3; UNVERIFIED until the harness lane lands).
+   (`docs/QA.md` 3.3; landed as `scripts/dev-harness/clip-scenario.sh` at
+   824ced4: live 18 / 0 at +0 MB, baseline 16 / 2 with L4 at +240 MB and L5
+   at 746 ms, "clip preflight (7 checks)" in the gate).

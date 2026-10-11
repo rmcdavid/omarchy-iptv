@@ -458,26 +458,60 @@ The plugin cannot change any of these; the draft report to Omarchy is the
 first quoted block in `docs/ARCHITECTURE.md` section 6's D-CLIP-1 entry.
 
 **What the plugin relies on, measured in the QML spec rather than assumed
-(`test_readOnlyFieldPremises`, lane commit 44b250b):** a `readOnly: true`
+(`test_readOnlyFieldPremises`, lane commit 51866a3):** a `readOnly: true`
 `TextInput` on Qt 6.11.2 keeps its caret, `cursorRectangle`, selection,
-Home / End, `Ctrl+A` and `Ctrl+C` native; refuses typing, `Backspace` and
-`Ctrl+V`; parks its caret at the end on every bound `text` write,
-synchronously; draws NO caret and never instantiates a `cursorDelegate`;
-and delivers `Ctrl+V` and `Shift+Insert` as `StandardKey.Paste` and
-`Ctrl+X` / `Shift+Delete` as `StandardKey.Cut` through `Keys.forwardTo`, a
-bare `Insert` as neither. By the v6.11.2 source (same file): `paste()`
-(`:2184`), `cut()` (`:2155`) and `undo()` (`:2200`) are each gated on
-`!m_readOnly`; the programmatic `insert()` (`:2229`) is NOT, so a read-only
-input can still be edited by a caller, which is why the plugin writes the
-model and never `insert`s. Input-method composition does not reach it by
-construction: `setReadOnly(true)` clears `ItemAcceptsInputMethod` (`:729`)
-and `inputMethodQuery(ImEnabled)` returns that flag (`:2054`), so the input
-method is told the field is disabled. Read from the source, not observed:
-no IME is installed on this machine, so the loss is UNVERIFIED by
-observation.
+Home / End and `Ctrl+A` native; `Ctrl+C` copies natively (measured by
+pasting the copied selection into an editable control under the offscreen
+platform, whose clipboard is the test process's own); a mouse click places
+the caret and a drag selects, with `selectByMouse` at its default, which is
+`true` on this Qt and is what the host's `TextField` inherits (measured on
+a dedicated read-only control that no other spec input overlaps -- every
+other one sits at (0, 0), where a synthetic click lands on the topmost);
+refuses typing, `Backspace` and `Ctrl+V`; parks its caret at the end on
+every bound `text` write, synchronously; draws NO caret and never
+instantiates a `cursorDelegate`; and delivers `Ctrl+V` and `Shift+Insert`
+as `StandardKey.Paste` and `Ctrl+X` / `Shift+Delete` as `StandardKey.Cut`
+through `Keys.forwardTo`, a bare `Insert` as neither. At 44b250b this
+paragraph already claimed `Ctrl+C` and mouse selection were pinned; they
+were true by source and pinned by nothing (rule 14's shape, found by the
+adversarial review), and the two pins were added at 51866a3. By the
+v6.11.2 source (same file): `paste()` (`:2184`), `cut()` (`:2155`, gated
+on `echoMode == Normal` as well, which `Model.cutApplies` mirrors so the
+password field's `Ctrl+X` stays the no-op it is natively,
+`test_passwordCutIsNativelyANoOp`) and `undo()` (`:2200`) are each gated
+on `!m_readOnly`; the programmatic `insert()` (`:2229`) is NOT, so a
+read-only input can still be edited by a caller, which is why the plugin
+writes the model and never `insert`s. The input-method COMMIT is the same
+shape one function over, and belongs beside `insert()` here:
+`QQuickTextInputPrivate::processInputMethodEvent` (`:3583`-`:3714`) inserts
+the commit string (`:3625`, `internalInsert(event->commitString())`) with
+no `m_readOnly` check anywhere in it. What keeps it out is the input
+context, not the control: `setReadOnly(true)` clears
+`ItemAcceptsInputMethod` (`:729`), `inputMethodQuery(ImEnabled)` returns
+that flag (`:2054`), and Qt's compose plugin and the Wayland text-input
+path both refuse to compose when it is false
+(`qcomposeplatforminputcontext.cpp:72`, `qwaylandinputcontext.cpp:260`).
+So "only the plugin edits it" holds for every input context that honours
+`ImEnabled`, and would not for one that does not: a commit reaching the
+item would change the control's text without the model, and the binding
+would silently re-assert the model on the next write. What a dead key
+actually does on this rig was measured by the adversarial review under a
+nested cage (QT_QPA_PLATFORM=wayland, `wtype -k dead_acute -k e`): the dead
+key arrives as a bare press with empty text and the next key as ordinary
+text, so the base letter is typed and the accent dropped. A composed
+commit from a real IME is still UNVERIFIED by observation: none is
+installed on this machine, and QtTest QML cannot construct a
+`QInputMethodEvent`.
 
 **What the plugin uses instead.** `wl-paste` 2.3.0 (`wl-clipboard`, present
-here) read through wlr-data-control from a child process, which needs no
-keyboard focus; the host does not provide a clipboard verb of its own, and
-`Quickshell.clipboardText` (quickshell-core.qmltypes) is the same
-`QClipboard::text()` read in the same process and is not used.
+here) read through wlr-data-control, which needs no keyboard focus, from a
+child of the plugin's HELPER and not of the shell (R8, 51866a3): the
+helper's `clipboard` verb reads at most 32 KiB of it under a 5 s deadline,
+terminates it at the cap, and hands the shell one JSON line of at most
+8,192 characters, so the shell never holds the clipboard's size (measured:
++0 MB over a paste of a 100 MB offer, where the shell's own `wl-paste`
+child at 44b250b cost it +298..+304 MB and kept most of it). The host does
+not provide a clipboard verb of its own; `Quickshell.clipboardText`
+(quickshell-core.qmltypes) is the same `QClipboard::text()` read in the same
+process and is not used, and the plugin's own unreachable `clipboardText()`
+in `Guide.qml` was deleted at 51866a3.

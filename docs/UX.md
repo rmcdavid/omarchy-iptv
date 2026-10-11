@@ -922,6 +922,19 @@ calls it with the width left after the group column is hidden, `gap` =
   Every list with a cursor has one: the channel list and the Sources list.
   This paragraph exists because the mark shipped in 0.7.0 while this section
   did not mention it, which made 5.4 a criterion nothing could observe.
+- **The form field's caret is drawn by the plugin, not by Qt** (added
+  2026-10-11, D-CLIP-1, for the same reason as the paragraph above). Every
+  Sources form field is `readOnly: true` to Qt, and Qt draws no caret on a
+  read-only input and never instantiates its `cursorDelegate` there
+  (measured in the QML spec, `test_readOnlyFieldPremises`), so the field
+  paints its own: a `Rectangle` on the control's native `cursorRectangle`,
+  `Style.spacing.hairline` wide, in `field.color`, blinking at half
+  `Application.styleHints.cursorFlashTime` (steady when the hint is 0), lit
+  again on every caret move, hidden while the field is masked or unfocused.
+  The selection highlight stays the kit's. The full spec is `UX-SOURCES.md`
+  4.2 (the `caret` row); this is the visuals register's entry so that a
+  screenshot with no caret in a focused, revealed field is a finding and
+  not a convention.
 - **The accent means ACTIVE, never CURSOR.** `Color.menu.selectedText` marks
   which group is filtering the list and which button a dialog has chosen. It
   never inks the cursor row, with no exceptions. The EPG progress fill (5.6)
