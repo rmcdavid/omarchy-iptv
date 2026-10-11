@@ -270,10 +270,49 @@ types, rewritten headers and honestly huge valid files alike, refused at the
 control's 72 MB. `Image` loads a local file by content and not by its name
 (`RULING-LOGOS.md`), and offers no property that bounds the dimensions a
 header declares; the plugin's bound is in the helper (`ARCHITECTURE.md`
-8.12). There is no automated pin on this Qt behaviour, unlike the host text
-formats above: re-measure on a Qt bump with the lead's probe, recorded under
-"Fifth maintainer finding, 2026-10-09" in `docs/QA-RESULTS.md`. The bound
-covers all four types so that a change here is not a regression in silence.
+8.12).
+
+**Which cap each figure was measured under, because the two mechanisms give
+different answers for the files that exceed them.** The lead's figures above
+(2026-10-09) were taken with a user-session memory scope of 1.5 GB around the
+Qt process, which SIGKILLs a process at the cap: the 20000x20000 rows
+finished under it (840 MB and 1,239 MB) and the two 65500x65500 progressive
+rows did not (killed at 1.5 GB, 1.5 s in, peak unmeasured). Everything in
+this repository that decodes an over-bound file now runs instead under an
+ADDRESS-SPACE rlimit of 2.5 GB on the qml process alone -- util-linux
+`prlimit --as=2500000000 -- env QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qml <probe>`,
+which sets `RLIMIT_AS` on itself and execs the runtime in place, so the limit
+holds exactly that process and the reporter reads `ru_maxrss` from outside it
+(harness lane, 2026-10-11). Under `RLIMIT_AS` an allocation the limit cannot
+hold fails inside the process and Qt reports `Image.Error` (the probe exits
+1) rather than being killed: the grayscale 65500x65500 progressive JPEG is
+refused 325 MB in after 0.6 s, the 3-component one at the 72 MB control
+before anything is touched. Every other row reproduces to the megabyte under
+both (72 control, 839 and 1,239 for the two 20000x20000 progressive bombs,
+454 for the 176-byte baseline 65500x65500, 347 for the honestly-huge valid
+12000x12000; 37 rows judged, 0 DIFF, `scripts/dev-harness/spikes/logo-decode-bomb/run.sh`
+and its README). The control reads 72 MB at `--as` 1.5, 2.5 and 4.0 GB
+alike (lead, 2026-10-11); 2.5 GB is the value because Qt offscreen maps
+about a gigabyte of address space before it decodes anything and the
+1,239 MB bomb has to fit for the finding to be measured rather than cut off.
+The reason the rlimit is the mechanism and not the scope is in
+`ARCHITECTURE.md` section 6 (the marketplace capability scan reads the scope
+tool's name as a service-management capability wherever it appears in a
+tracked file).
+
+There is no automated pin on this Qt behaviour, unlike the host text formats
+above, but there is a gate that observes the sink on every commit:
+`scripts/dev-harness/logo-scenario.sh check-tree`, run by `scripts/check.sh`
+with a floor of 33 `PASS` lines, decodes the announced control under the
+rlimit and must read `Image.Ready` under 160 MB, and reports which of three
+things happened to the 304-byte bomb (withheld and gone, withheld but the
+file survived, or announced). A Qt that started scaling PNG during decode
+would not redden it, because the shipping helper withholds every bomb before
+the probe sees one; re-measure on a Qt bump with
+`scripts/dev-harness/spikes/logo-decode-bomb/run.sh`, which judges every row
+against a band and exits 1 on a DIFF, recorded under "Fifth maintainer
+finding, 2026-10-09" in `docs/QA-RESULTS.md`. The bound covers all four types
+so that a change here is not a regression in silence.
 
 
 ## `omarchy-refresh-shell` RESETS the user's config (verified 2026-10-07)

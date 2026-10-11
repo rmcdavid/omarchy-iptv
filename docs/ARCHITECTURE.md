@@ -729,12 +729,41 @@ long-running shell. **A new class, and naming it is the point: a sink whose
 cost is set by a number the bytes do not have to honour.** The byte cap was
 the protection the documents named, and it bounds the download: the decoder's
 cost is quadratic in the width and height the header states, so 304 bytes
-whose SOF says 20000x20000 took a Qt process to 840 MB, 555 bytes to
-1,239 MB, and the 65500x65500 pair past a 1.5 GB cap in 1.5 s (measured by
-the lead on 2026-10-09 before any lane was briefed, Qt 6.11.2 offscreen, an
-`Image` declared as the row slot declares it, the cap around the Qt process
-alone; the tables are in `docs/QA-RESULTS.md`). The ratio is 2.9 million to
-one.
+whose SOF says 20000x20000 took a Qt process standing in for the shell to
+840 MB, 555 bytes to 1,239 MB, and the 65500x65500 pair past a 1.5 GB cap in
+1.5 s (measured by the lead on 2026-10-09 before any lane was briefed, Qt
+6.11.2 offscreen, the qml runtime drawing one `Image` declared as the row
+slot declares it, capped by a user-session memory scope around the Qt
+process alone; the tables are in `docs/QA-RESULTS.md`). The shell itself was
+never fed one; that it allocates the same is inference from the probe being
+the slot's own declaration. The ratio is 2.9 million to one.
+**The cap, re-ruled on 2026-10-11, and why the mechanism matters.** Anything
+in this repository that might decode an over-bound image runs under an
+ADDRESS-SPACE rlimit on the qml process alone -- util-linux
+`prlimit --as=2500000000 -- env QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qml <probe>`,
+which sets the limit on itself and execs the runtime in place (measured by
+the harness lane: the pid the command runs under is the pid the reporter
+spawned) -- and not under the memory scope the first measurement used. Two
+reasons, neither taste. `scripts/check-marketplace-capabilities.py`
+reproduces the marketplace security baseline over every tracked
+`.sh`/`.py`/`.js`/`.qml` file with no allowlist by design, and its
+service-management rule matches the scope tool's name wherever it appears,
+comments and READMEs included; the harness lane's first commit carried those
+tokens and turned that gate red without noticing, because it ran the gate
+before `git add` and the scanner enumerates `git ls-files`. And under the
+rlimit an allocation the limit cannot hold is refused inside the process,
+so Qt reports `Image.Error` at a measured peak where the scope SIGKILLed it
+at the cap with the figure unmeasured. Figures by mechanism, so a reader
+knows which is which: under the scope (lead, 2026-10-09) control 72 MB,
+the 304-byte 20000x20000 progressive 840 MB, the 555-byte 3-component
+1,239 MB, the 176-byte baseline 65500x65500 455 MB, the valid 12000x12000
+348 MB, and both 65500x65500 progressive files SIGKILLed at 1.5 GB; under
+the rlimit (harness lane, 2026-10-11, `scripts/dev-harness/spikes/logo-decode-bomb/run.sh`,
+37 rows judged, 0 DIFF) the same rows read 72, 839, 1,239, 454 and 347, and
+the two the scope could not measure read `Image.Error` -- the grayscale
+65500x65500 refused by the allocator 325 MB in after 0.6 s, the 3-component
+one refused at 72 MB before anything was touched. The control is 72 MB at
+`--as` 1.5, 2.5 and 4.0 GB alike (lead, 2026-10-11).
 **Why Qt's own limit does not catch it, measured rather than argued.** Qt's
 image allocation limit (256 MiB by default) IS consulted; bracketing it with
 `QT_IMAGEIO_MAXALLOC` puts the threshold between 20 and 26 MiB on that file,
@@ -770,13 +799,26 @@ numbers, never the URL (rule 5). `MAX_LOGO_BYTES` stays, bounding the axis
 it always bounded.
 **The cache written by 0.13.3 and earlier was never checked, so the fix is
 not complete without a sweep.** The guide points an `Image` at a cache file
-only when the helper announced that name (`Model.logoSlot`, `Model.wallTile`,
-`Service.qml` `logoHave`), and there are exactly two `Image` elements in the
-shipped tree, the wall tile and the row slot, both fed that way. So the
-"already on disk" branch of `logos --fetch` proves each cached file with
-`logo_file_within_bounds` BEFORE announcing it; a failure is unlinked, not
-announced, counted as `swept`, and falls through to the fetch, which refuses
-the same bytes at the gate under `reasons.logo_dimensions`. The summary
+only when the helper announced that name, FOR THE DIRECTORY IT ANNOUNCED IT
+FOR (`Model.logoSlot`, `Model.wallTile`, `Service.qml` `logoHave`), and
+there are exactly two `Image` elements in the shipped tree, the wall tile
+and the row slot, both fed that way. So the "already on disk" branch of
+`logos --fetch` proves each cached file with `logo_file_within_bounds`
+BEFORE announcing it; a file that fails is unlinked, not announced, counted
+as `swept`, and falls through to the fetch, which refuses the same bytes at
+the gate under `reasons.logo_dimensions`. A cached file fails that check
+when its header declares a size over the bound, when its header cannot be
+read, when its bytes are none of the four allowed types (a file on disk is
+not evidence it went through the magic check), and in one case a new
+download never reaches, because the download is refused over 256 KiB before
+`write_logo` runs: a cached file over 256 KiB whose header is not within
+the first 128 KiB, which the second read refuses rather than reading past
+the byte cap. The sweep removes a file for each of those. Called on the
+lane-R2 helper on 2026-10-11: the 304-byte bomb, a text file, `FF D8 FF`
+followed by zeros, and an empty file all answer False, and the 304-byte
+64x64 control True; the over-cap case is `LogoSecondReadTest` in
+`tests/test_logo_dimensions.py`, a 266,990-byte file whose first 256 KiB
+parse as 64x64 and which is refused on size. The summary
 replaces `logoHave` rather than adding to it, at 159da94 as now, so a swept
 name drops out of the guide at the end of the run. Observed through the
 subprocess on 2026-10-11 with a bomb seeded under its hashed name: at
@@ -784,10 +826,98 @@ subprocess on 2026-10-11 with a bomb seeded under its hashed name: at
 name announced, the file still there. The sweep is one header read per
 cached file -- `LOGO_HEADER_BYTES`, 128 KiB, and the rest only when the
 small read cannot prove a larger file -- through the same parser as the
-gate, so the two cannot disagree about one file. Cost, measured by the
-helper lane over 5,000 real cached logos with the page cache warm: the whole
-`logos --fetch` subprocess went from a median 375 ms to 601 ms, about 45 us
-per file, in the helper and off the UI thread. **Cold cache is unmeasured.**
+gate, so for a file the gate wrote the two give one answer: the gate saw
+every byte of a download it capped at 256 KiB, and the second read covers
+the same bytes under the same cap (the reviewer's 131,445-byte valid 64x64
+JPEG whose frame header sits at offset 131,076, four bytes past the first
+read, parses as nothing from that read and True from the second; called
+2026-10-11). Cost, measured by the helper lane over 5,000 real cached logos
+with the page cache warm: the whole `logos --fetch` subprocess went from a
+median 375 ms to 601 ms, about 45 us per file, in the helper and off the UI
+thread. **Cold cache is unmeasured.**
+**The sweep covers the whole cache, not the first 5,000 files a run would
+download.** `MAX_LOGO_FILES` used to be checked as a `break` at the top of
+the loop, and `fetched` counts new downloads, so in a run that fetched
+5,000 new files every cached file later in channel order was neither
+validated nor announced -- the guide drew blank slots for logos it already
+had and a cached bomb past the cap was never swept, while the comment
+beside the sweep claimed the branch was not bounded by the cap (true only
+while `fetched < 5000`; the review found the claim). The cap check now sits
+BELOW the cached-file branch and `continue`s rather than breaking: a cached
+file past the cap is validated and announced, a URL past it is not fetched
+this run and is counted in a new summary field, `deferred`, so a run that
+stopped short says so. The shell reads only `names` from the summary
+(`logoSummaryNames` in `Model.js`), so the field is inert there. Proved by
+`LogoFetchCapTest` in `tests/test_logo_dimensions.py`, at the real cap with
+a double standing in for the network only: 5,000 new URLs, three files
+planted past the cap (two sound, one bomb) and two more URLs after them;
+`fetched` 5,000 and exactly the first 5,000 URLs served, `cached` 2 with
+both sound names announced, the bomb swept and off disk, `deferred` 3,
+5,002 names; then the real helper as a subprocess over the cache that run
+left, `cached` 5,002 and the same names. Red against the 995c6be helper
+(that one test fails; 85 of 85 green on the fix, lane commit ddc0a7b).
+D-LOGO-12 stays open: the cap bounds fetches per run and nothing yet bounds
+what is ON DISK.
+**What the fix rests on in the guide, and the blocker the review found
+there.** The sweep protects a user only because nothing in the shell decodes
+a cache file the helper did not announce -- and at 995c6be the announced set
+was a flat `{ name: true }` with no memory of which cache directory it was
+announced for. A name is the fnv1a32 of a logo URL, two sources that share a
+provider (an Xtream account beside the M3U of the same subscription, which
+Sources supports by design) share every URL, and `logoDir` changes on a
+source switch while `logoHave` did not: so a name announced for source A
+resolved to the SAME file name in source B's directory, a file no fetch had
+looked at, which after this fix means a file nobody has bounded. Worse, a
+fetch still running for A refused to start one for B, for minutes on a first
+enable, so B got no sweep of its own. The repair (lane commit 1a05214) makes
+the directory part of the contract: `logoHave` is `{ dir, names }`, tagged
+by the service with `logoFetchDir`, the directory the running fetch was
+STARTED for and never `activeCacheDir` (`Model.logoHaveSet`); `logoSlot`,
+and `wallTile` through it, answer a blank slot for a set tagged for any
+other directory, for the old flat shape, and for anything that is not a
+tagged set, so a producer still writing the old shape draws nothing
+(`logoHaveIsSet`); a
+streamed batch merges only into a set for the same directory and otherwise
+starts a fresh one, as a COPY, since the rows bind to it
+(`logoHaveMerge`); a summary whose `names` is `[]` -- a whole cache swept --
+REPLACES the set rather than being ignored for being short, which a
+`length > 0` guard used to do (`logoSummaryNames` answers `[]` for it and
+`null` for anything that is not the summary); `clearSourceData` resets the
+set and the pending batch on every switch; and `fetchLogos` asks
+`logoFetchPlan` -- `restart` when a fetch is running for another
+directory (signal 15, re-called from `onExited`), `skip` for the same one or
+while the setting is off, `start` otherwise -- so the new source gets its
+own sweep. `Guide.qml` needed no edit: it hands `have` to Model and never
+indexes it. (The five functions new in that commit -- `logoHaveIsSet`,
+`logoHaveMerge`, `logoHaveCount`, `logoFetchPlan`, `logoSummaryNames` --
+are cited here WITHOUT the `Model.` prefix on purpose: the defect ledger
+resolves every `Model.X` citation against this tree's `Model.js`,
+and the docs lane's tree predates lane R1's. Once the lanes are merged the
+prefix belongs on them, so that check pins the join.) The seven "D-LOGO-11 blocker" checks in `tests/Model.test.js`
+call each decision (1,903 -> 1,910 node checks; with Model.js and
+Service.qml stashed back to 995c6be the same file prints 9 failures, the
+seven plus two re-shaped D-LOGO-8 and M2-04 checks). Not observed by any
+test: the restart of the live Process on a switch (signal, exit, re-fetch),
+which needs the dev harness and is UNVERIFIED. A transient the lane
+recorded rather than hid: between a switch and the new playlist loading, a
+fetch still running for the OLD directory flushes names tagged for it, blank
+in every slot but counted by `ipc status`.
+**The gate observes both sinks (harness lane, lane commit e3ffdab).**
+`scripts/dev-harness/logo-scenario.sh check-tree` runs the shipping helper
+as a subprocess over a loopback https provider and the row slot's `Image`
+under the rlimit above, 32 checks plus its own "ran every check" line, in
+about 3 s with no bomb decoded; `scripts/check.sh` runs it with a floor of
+33 `PASS` lines and `scripts/qa-lib-test.sh` pins that floor to the
+scenario's recipe. Observed by the docs lane on 2026-10-11: `check-tree`
+33 passed, 0 failed; `--baseline 159da94` 9 passed, 24 failed, K2 reading
+`announced rc=0 peak_mb=839` -- the shipped helper announcing the 304-byte
+bomb and the probe decoding it. **A skipped gate is red.** A machine without
+python3, openssl, util-linux `prlimit` or `/usr/lib/qt6/bin/qml` makes the
+scenario exit 77 with the reason as its first line, and `check.sh` treats
+77 as a FAIL unless `LOGO_PREFLIGHT_SKIP_OK=1` is set, printing the reason
+either way; the first version printed SKIP and went on to `all green`, a
+gate that had observed neither sink calling itself green (rule 14's shape).
+Details and the mutation table are `docs/QA.md` section 3.2.
 **The residuals, each with its size or marked unmeasured.**
 - A logo within the bound still costs real memory. Measured by the docs lane
   on 2026-10-11 through the same row-slot probe under the same cap: control
@@ -800,23 +930,49 @@ per file, in the helper and off the UI thread. **Cold cache is unmeasured.**
   Qt refuses PNG, GIF and WEBP bombs today and the plugin bounds them anyway,
   because a Qt that learns to scale PNG during decode would reopen this in a
   dependency bump, silently.
-- A shell not restarted after the upgrade runs the old `Service.qml`. That
-  service invokes the helper by path, so the sweep runs on its next fetch --
-  on cache load, which is shell start, a source switch, or a playlist
-  refresh at `refreshMinutes` -- and the old service replaces `logoHave`
-  from the summary too (159da94 `Service.qml:4832`). Until that run, a row
-  scrolling into view decodes whatever the old cache holds; a row already
-  drawn has already paid.
-- The real peak of a 65500x65500 progressive JPEG is unmeasured: both were
-  SIGKILLed at the 1.5 GB cap. The request is 8.6 GB for one component and
-  about 12.9 GB for three at 4:2:0, and what this machine
-  (`vm.overcommit_memory=0`, 7.8 GB RAM, 15.4 GB swap) does with that is
-  reasoning, not measurement.
-- `MAX_LOGO_FILES` bounds fetches per run and not the cache, so the sweep
-  validates every cached file and not at most 5,000 (D-LOGO-12, open).
-- The window `LOGO_HEADER_BYTES` leaves: a JPEG whose frame header sits past
-  128 KiB of APPn metadata inside a 256 KiB file costs a second read, not a
-  wrong answer.
+- A shell not restarted after the upgrade runs the old `Service.qml`,
+  `Guide.qml` and `Model.js` until it is. That service invokes the helper by
+  path, so the sweep runs on its next fetch -- on cache load, which is shell
+  start, a source switch, or a playlist refresh at `refreshMinutes` -- and
+  the old service replaces `logoHave` from the summary too (159da94
+  `Service.qml:4832`). Until that run, a row scrolling into view decodes
+  whatever the old cache holds; a row already drawn has already paid. And
+  until the RESTART, the directory tag above is not in place either: the old
+  `logoSlot` draws any announced name against whatever `logoDir` is current,
+  so the source-switch hole stays open on a shell that has updated and not
+  restarted. The README's install section now says to restart with
+  `omarchy-restart-shell` after an update, and names `omarchy-refresh-shell`
+  as the one not to use (D-HOST-3: it resets `shell.json`). `omarchy plugin
+  update` itself ends in a plugin rescan, not a restart, and the guide
+  footer reads `Updated`, then `restart the shell to see the new version`,
+  until the restart happens (D-HOST-1).
+- The real peak of a 65500x65500 progressive JPEG is unmeasured and is not
+  claimed. Under the user-session memory scope both were SIGKILLed at
+  1.5 GB (lead, 2026-10-09); under the 2.5 GB address-space rlimit the
+  allocator refuses the request and Qt reports `Image.Error`, the grayscale
+  one at a 325 MB peak after 0.6 s and the 3-component one at 72 MB (harness
+  lane, 2026-10-11). What is measured is that the request -- 8.6 GB of
+  coefficients for one component, about 12.9 GB for three at 4:2:0 -- is one
+  no limit near this size holds; what this machine (`vm.overcommit_memory=0`,
+  7.8 GB RAM, 15.4 GB swap) would do with it uncapped is reasoning, not
+  measurement.
+- `MAX_LOGO_FILES` bounds fetches per run and not the cache. The sweep is no
+  longer bounded by it (above), so every cached file is validated on every
+  run; what remains open is the cache's size on disk, which nothing bounds
+  (D-LOGO-12, open).
+- The windows `LOGO_HEADER_BYTES` and the byte cap leave, stated exactly
+  (called on the lane-R2 helper, 2026-10-11). A JPEG whose frame header sits
+  past the first 128 KiB costs a second read, not a wrong answer, and the
+  comment beside the constant now carries the arithmetic -- a maximal APPn
+  segment is 65,537 bytes, two of them put the frame marker at 131,076, so
+  the read covers one maximal segment and nearly two, not two. The byte cap
+  is enforced on the SECOND read only: a cached file over 256 KiB whose
+  header the first read proves within the bound is announced (a 300 KiB
+  file with a sound 64x64 header answers True). The shipping gate does not
+  write such a file, because `fetch_logo` refuses a download over 256 KiB
+  before `write_logo` runs; it is the shape of a file put into the cache by
+  something other than this helper, and for it the sweep bounds the
+  dimensions and not the bytes. Recorded, not fixed.
 **The siblings, asked before closing (engineering rule 15).** Every `Image`
 in the four shipped QML files: two, both fed by an announced name, and no
 `AnimatedImage`, `icon.source` or SVG anywhere (the lead's census). Every
@@ -926,11 +1082,15 @@ Performance budget (10k channels):
     image types, a header that declares a side over 4096 px or more than
     4,194,304 px, or that cannot be read, before anything touches the disk;
     and a cached file is proved the same way before its name is announced,
-    because the guide decodes only what the helper names (D-LOGO-11).
-    Verified by calling the shipping predicate over a header fixture and by
-    observing the sweep through the subprocess; a grep for the constant is
-    rule 14's shape and is not the check. Section 6 carries the measurement
-    and the residuals.
+    because the guide decodes only what the helper names, and only for the
+    cache directory it named them for: the announced set carries that
+    directory, a set for any other directory draws nothing, and a source
+    switch clears it and restarts a fetch still running for the old one
+    (D-LOGO-11). Verified by calling the shipping predicate over a header
+    fixture, by calling the Model decisions from node, and by observing the
+    sweep and the row slot's `Image` through `logo-scenario.sh`; a grep for
+    the constant is rule 14's shape and is not the check. Section 6 carries
+    the measurement and the residuals.
 
 ## 9. Coding standards
 

@@ -406,7 +406,7 @@ output is empty unless stated.
 | SEC-19 | XMLTV entity expansion / external entities | A* small XML with a 10x10 nested entity (`<!ENTITY a "aaaa..."><!ENTITY b "&a;&a;...">`) and an external entity `<!ENTITY x SYSTEM "file:///etc/passwd">` as EPG source | parse error or bounded memory; external entity never read (`xml.etree` does not resolve them); `bad_xml`/`network` style error surfaced |
 | SEC-20 | 8.4 redirects | A* mock `http://` source that redirects to `file:///etc/passwd` and to `ftp://` | `urllib` refuses non-http redirects -> `network` error; https -> http downgrade is allowed by urllib (document) |
 | SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials |
-| SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` over `tests/fixtures/logo-dimensions.json` (44 header cases, all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049); M section 3.2 observes the sink | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached over-bound file swept and never announced; the within-bound control reaches `Image.Ready` at control memory |
+| SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` / `cmd_logos` over `tests/fixtures/logo-dimensions.json` (55 header cases at lane commit ddc0a7b, up from 44 at 995c6be: all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049 and their transposes, an EXIF thumbnail before the real frame header, a 64x65535 column, a two-frame GIF); M section 3.2 observes both sinks through `scripts/dev-harness/logo-scenario.sh` | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached file that is over the bound, unreadable, not one of the four types, or over the byte cap with its header past the first read, swept and never announced, past the per-run fetch cap included; the within-bound control reaches `Image.Ready` at control memory |
 
 ### 3.1 TLS verification on the player (D-SINK-13)
 
@@ -494,27 +494,83 @@ by rule 3, so the server the TLS scenario already builds is the shape):
 - The positive control is within the bound, is fetched, is announced, and
   reaches `Image.Ready` through an `Image` declared as `Guide.qml` declares
   the row slot, at control memory. Peak RSS is read as `ru_maxrss` of the Qt
-  process, and the memory cap (`systemd-run --user --scope -p MemoryMax`)
-  wraps the Qt process ONLY: a cap around the reporter takes the measurement
-  with it when a bomb is killed.
+  process, and the cap wraps the Qt process ONLY: a cap around the reporter
+  takes the measurement with it when a bomb is refused or killed. The cap is
+  an ADDRESS-SPACE rlimit of 2.5 GB on the qml process alone (util-linux
+  `prlimit --as=2500000000 -- env QT_QPA_PLATFORM=offscreen
+  /usr/lib/qt6/bin/qml <probe>`, which sets the limit on itself and execs
+  the runtime in place), and NOT a user-session memory scope, which is what
+  the lead's first measurement used: the marketplace capability scan
+  (`scripts/check-marketplace-capabilities.py`, no allowlist by design)
+  reads the scope tool's name as a service-management capability wherever
+  it appears in a tracked file, and under the rlimit an over-bound decode is
+  a clean allocator refusal (`Image.Error`, exit 1) where the scope killed
+  the process with the figure unmeasured.
 - The `--baseline 159da94` arm must go RED (engineering rule 11): the same
   bombs announced in `names`, the seeded bomb kept, and, if the arm also
-  observes the sink, the probe over control memory or killed at the cap.
+  observes the sink, the probe over control memory or refused at the cap.
 
 What the scenario must not do: decode an over-bound image anywhere but under
 that cap, build a corpus of more than a few megabytes in the shared scratch
 directory, or touch the live install, its cache, or the network.
 
-Ownership and evidence. The lead assigned the scenario the name
-`scripts/dev-harness/logo-scenario.sh`; UNVERIFIED at 3c8cd65, where no file
-of that name exists and the harness lane's worktree held only an untracked
-corpus builder under `scripts/dev-harness/spikes/logo-decode-bomb/`. Until
-that lane lands it and confirms the name here, this section describes what it
-must observe and not what it does, for the reason 3.1 gives. The lead's own
-measurements, which the two questions are derived from, are the D-LOGO-11 row
-in `docs/STATUS.md` and "Fifth maintainer finding, 2026-10-09" in
-`docs/QA-RESULTS.md`; the per-type sibling table there is why question two
-runs all four types and not JPEG alone.
+Ownership and evidence, VERIFIED on 2026-10-11 by this section's author
+running the scenario from the harness lane's worktree at lane commit e3ffdab
+(`lane-logo-r3`; the earlier text here marked the name UNVERIFIED at 3c8cd65,
+where no file of that name existed). `scripts/dev-harness/logo-scenario.sh`
+exists and observes both sinks: the helper as the subprocess the service
+runs, over a loopback https provider with a self-signed certificate
+(`spikes/logo-decode-bomb/serve-and-fetch.py`, the helper as its child with
+`SSL_CERT_FILE` pointed at the certificate, nothing detached), and the
+shell's `Image` as `spikes/logo-decode-bomb/probe-tmpl.qml` declares it,
+under the rlimit above. The corpus comes from
+`spikes/logo-decode-bomb/make-corpus.py`, stdlib only, 32 files. What it
+answered on this machine:
+
+- `bash scripts/dev-harness/logo-scenario.sh check-tree` (the gate's arm: no
+  transcript, no bomb decoded): `logo-scenario: 33 passed, 0 failed`, 33
+  `PASS` lines, which is the scenario's 32 checks plus its own "ran every
+  check it has (32)" line, in about 3 s. K1 reads `ready control-memory`
+  (under 160 MB) and K2 reads `withheld-and-gone`.
+- `bash scripts/dev-harness/logo-scenario.sh --baseline 159da94` (the live
+  arm, transcript first line per parallel rule 7): `9 passed, 24 failed`.
+  V1, V2, C1, C2, C3, C4, T2 and K1 pass as controls; P1..P10, S1, G1, F1,
+  F2, R1, R2, R3, E1, E2, E3, M1, M2, T1 and K2 go red, and K2's line reads
+  `announced rc=0 peak_mb=839` -- the finding at the sink, the shipped
+  0.13.3 helper announcing the 304-byte bomb and the row slot decoding it to
+  839 MB under the rlimit. That is the RED this section asked for.
+- The gate: `scripts/check.sh` runs the `check-tree` arm under the banner
+  `scripts/dev-harness/logo-scenario.sh check-tree (D-LOGO-11)` with a floor
+  of `LOGO_PREFLIGHT_MIN=33` `PASS` lines, and `scripts/qa-lib-test.sh`
+  asserts that floor equals the scenario's `EXPECTED_CHECKS` plus one (388
+  checks there, up from 385). A machine without python3, openssl, util-linux
+  `prlimit` or `/usr/lib/qt6/bin/qml` makes the scenario exit 77 with the
+  reason as its first line, and the gate treats 77 as RED unless
+  `LOGO_PREFLIGHT_SKIP_OK=1` is set in the environment; the SKIP reason is
+  printed either way. The first version of the gate step printed the SKIP
+  and went on to `all green`, so a machine with no qml runtime reported a
+  green gate having observed neither sink (the harness lane's finding 2;
+  proof: `LOGO_QML_BIN=/nonexistent ./scripts/check.sh` exits 1 with the one
+  FAIL on this step, and with `LOGO_PREFLIGHT_SKIP_OK=1` exits 0 with the
+  SKIP line -- the lane's run, not re-run here).
+- Mutations the lane ran against the scenario, each reddening it (the
+  lane's counts, 2026-10-11): the helper's sweep unlink made a no-op, K2
+  reads `withheld-but-file-survived`, 21 passed 12 failed; one `ck` line
+  commented out, the floor line fails `ran 31 checks, expected 32`; one bomb
+  dropped from the corpus list, S1, G1, R1, R2 and the floor red (27/5) and
+  the `qa-lib-test.sh` recipe join red; the check.sh floor moved to 34, the
+  join red; the scenario dropped from `qa-lib-test.sh`'s gate list,
+  `ran 387 checks, expected 388`.
+
+Three of the numbers above are this author's own run (33/0, 9/24, K2
+`peak_mb=839`); the rest are the harness lane's report at e3ffdab and are
+attributed to it. The lead's own measurements, which the two questions are
+derived from, are the D-LOGO-11 row in `docs/STATUS.md` and "Fifth
+maintainer finding, 2026-10-09" in `docs/QA-RESULTS.md`; the per-type
+sibling table there is why question two runs all four types and not JPEG
+alone. The re-measured table under the rlimit, 37 rows judged and 0 DIFF
+against the lead's figures except the two 65500x65500 progressive rows the
+scope could not measure, is `scripts/dev-harness/spikes/logo-decode-bomb/README.md`.
 
 ## 4. Performance gate (PLAN G3, ARCHITECTURE.md section 7, QB4)
 
