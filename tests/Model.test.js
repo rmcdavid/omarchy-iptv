@@ -2364,7 +2364,7 @@ checkCall("M2-04: the slot says off, blank or image, and nothing else", function
   const has = { logo: "https://ok.test/a.png" }
   const none = { name: "plain" }
   const name = Model.logoFile(has, dir).split("/").pop()
-  const have = Model.logoHaveSet([name])
+  const have = Model.logoHaveSet([name], dir)
   return [Model.logoSlot({ enabled: false, channel: has, logoDir: dir, have: have }).kind,
           Model.logoSlot({ enabled: true, channel: none, logoDir: dir, have: have }).kind,
           Model.logoSlot({ enabled: true, channel: has, logoDir: dir, have: have }).kind,
@@ -2415,12 +2415,18 @@ checkCall("D-LOGO-8: the service reads the stream, batches it, and the summary w
     /\bid: logoFlushTimer\b/.test(src),
     /logoFlushTimer\.restart\(\)/.test(src),
     /root\.logoPending\.push\(name\)/.test(src),
-    // the summary replaces rather than adds
-    /root\.logoHave = Model\.logoHaveSet\(names\)/.test(src),
+    // the summary replaces rather than adds, and it is tagged with the
+    // directory the fetch was STARTED for, never the current one (the
+    // D-LOGO-11 blocker: the two differ across a source switch)
+    /root\.logoHave = Model\.logoHaveSet\(names, root\.logoFetchDir\)/.test(src),
+    /Model\.logoHaveMerge\(root\.logoHave, pending, root\.logoFetchDir\)/.test(src),
+    // and no producer tags with the current directory
+    !/logoHaveSet\(names, root\.activeCacheDir\)/.test(src),
+    !/logoHaveMerge\([^)]*root\.activeCacheDir\)/.test(src),
     // and nothing reads the old collected-at-exit text any more
     src.indexOf("logoFetchProc.stdout.text") === -1
   ]
-}, [true, true, true, true, true, true, true])
+}, [true, true, true, true, true, true, true, true, true, true])
 
 checkCall("M2-04: the fetch report is read defensively, and names carry no URLs", function () {
   const good = JSON.stringify({ ok: true, kind: "logos", names: ["ab12cd34", "ff00ff00"] })
@@ -2429,9 +2435,116 @@ checkCall("M2-04: the fetch report is read defensively, and names carry no URLs"
           Model.logoNamesFrom(""),
           Model.logoNamesFrom(JSON.stringify({ ok: true })),
           Model.logoNamesFrom(JSON.stringify({ names: ["ok", "", 7, null] })),
-          Model.logoHaveSet(["a", "b"]).a,
-          Model.logoHaveSet(["a"]).zzz === undefined]
+          Model.logoHaveSet(["a", "b"], "/d").names.a,
+          Model.logoHaveSet(["a"], "/d").names.zzz === undefined]
 }, [["ab12cd34", "ff00ff00"], [], [], [], ["ok"], true, true])
+
+// ---- the D-LOGO-11 blocker: a name announced for one directory is not a
+// file in another. Every decision below used to live in Service.qml, where
+// node 1903 / python 1015 stayed green with the hole present (rule 12).
+checkCall("D-LOGO-11 blocker: the set carries the directory it was announced for", function () {
+  const have = Model.logoHaveSet(["ab12cd34", "", null, "ff00ff00"], "/cache/A")
+  return [have.dir, Object.keys(have.names).sort(), have.names.ab12cd34,
+          // the tag is a string whatever was passed
+          Model.logoHaveSet([], undefined).dir, Model.logoHaveSet([], null).dir,
+          Model.logoHaveSet(null, "/x").names]
+}, ["/cache/A", ["ab12cd34", "ff00ff00"], true, "", "", {}])
+
+checkCall("D-LOGO-11 blocker (a): a set announced for A, offered to a slot for B, is blank", function () {
+  // Two sources sharing a provider -- an Xtream account beside the M3U of
+  // the same subscription -- share every logo URL, so the NAME is the same
+  // in both directories. Before the tag, A's set made B's row an Image over
+  // B/<name>, a file no fetch had bounded.
+  const ch = { logo: "https://ok.test/a.png" }
+  const name = Model.logoFile(ch, "/cache/A/logos").split("/").pop()
+  const forA = Model.logoHaveSet([name], "/cache/A/logos")
+  return [Model.logoSlot({ enabled: true, channel: ch, logoDir: "/cache/A/logos", have: forA }).kind,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/cache/B/logos", have: forA }).kind,
+          Model.wallTile({ enabled: true, channel: ch, logoDir: "/cache/A/logos", have: forA }).kind,
+          Model.wallTile({ enabled: true, channel: ch, logoDir: "/cache/B/logos", have: forA }).kind,
+          // the same name IS the same file name in both directories, which is
+          // the whole reason the tag has to exist
+          Model.logoFile(ch, "/cache/B/logos").split("/").pop() === name,
+          // and an untagged set ("" is the tag of a fetch nobody started)
+          // draws nothing for a real directory
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/cache/A/logos",
+                           have: Model.logoHaveSet([name], "") }).kind]
+}, ["image", "blank", "image", "mark", true, "blank"])
+
+checkCall("D-LOGO-11 blocker (b): a flush tagged for A after the set moved to B does not land", function () {
+  const forB = Model.logoHaveSet(["b1"], "/B")
+  const late = Model.logoHaveMerge(forB, ["a9"], "/A")
+  const same = Model.logoHaveMerge(forB, ["b2", "b1"], "/B")
+  const fresh = Model.logoHaveMerge({}, ["c1"], "/C")
+  const flat = Model.logoHaveMerge({ old: true }, ["c1"], "/C")
+  return [late.dir, Object.keys(late.names).sort(),
+          same.dir, Object.keys(same.names).sort(),
+          // a COPY: the set the rows are bound to is never mutated in place
+          Object.keys(forB.names).sort(), same !== forB, same.names !== forB.names,
+          fresh.dir, Object.keys(fresh.names),
+          // the old flat shape has no tag and contributes nothing
+          flat.dir, Object.keys(flat.names)]
+}, ["/A", ["a9"], "/B", ["b1", "b2"], ["b1"], true, true, "/C", ["c1"], "/C", ["c1"]])
+
+checkCall("D-LOGO-11 blocker (c): an empty summary replaces the set, and only the summary is one", function () {
+  const empty = JSON.stringify({ ok: true, kind: "logos", action: "fetch", names: [], swept: 1436 })
+  const full = JSON.stringify({ ok: true, kind: "logos", action: "fetch", names: ["ab12cd34", "", 3] })
+  const progress = JSON.stringify({ ok: true, kind: "logo", name: "ab12cd34" })
+  const before = Model.logoHaveSet(["ab12cd34", "ff00ff00"], "/A")
+  const names = Model.logoSummaryNames(empty)
+  // the service's own decision, as it ships: a non-null answer REPLACES
+  const after = names !== null ? Model.logoHaveSet(names, "/A") : before
+  return [names, Model.logoSummaryNames(full),
+          Model.logoSummaryNames(progress), Model.logoSummaryNames("not json"),
+          Model.logoSummaryNames(""), Model.logoSummaryNames(null),
+          Model.logoSummaryNames(JSON.stringify({ ok: true, kind: "logos" })),
+          Model.logoSummaryNames(JSON.stringify({ ok: true, kind: "status", names: ["x"] })),
+          Model.logoSummaryNames("[1,2]"),
+          Model.logoHaveCount(before), Model.logoHaveCount(after)]
+}, [[], ["ab12cd34"], null, null, null, null, null, null, null, 2, 0])
+
+checkCall("D-LOGO-11 blocker (d): a fetch running for another directory restarts, for the same one it is skipped", function () {
+  return [Model.logoFetchPlan({ showLogos: true, wantDir: "/B", running: true, runningDir: "/A" }),
+          Model.logoFetchPlan({ showLogos: true, wantDir: "/A", running: true, runningDir: "/A" }),
+          Model.logoFetchPlan({ showLogos: true, wantDir: "/A", running: false, runningDir: "" }),
+          Model.logoFetchPlan({ showLogos: true, wantDir: "/A", running: false, runningDir: "/B" }),
+          // off, or no source: skipped whatever is running
+          Model.logoFetchPlan({ showLogos: false, wantDir: "/B", running: true, runningDir: "/A" }),
+          Model.logoFetchPlan({ showLogos: true, wantDir: "", running: true, runningDir: "/A" }),
+          Model.logoFetchPlan({ showLogos: true, wantDir: "", running: false }),
+          // the opt-in reader fails closed, and so does this
+          Model.logoFetchPlan({ showLogos: "true", wantDir: "/A", running: false }),
+          Model.logoFetchPlan({})]
+}, ["restart", "skip", "start", "start", "skip", "skip", "skip", "skip", "skip"])
+
+checkCall("D-LOGO-11 blocker (e): the old flat shape is blank, so a stale producer cannot reopen it", function () {
+  const ch = { logo: "https://ok.test/a.png" }
+  const name = Model.logoFile(ch, "/d").split("/").pop()
+  const flat = {}; flat[name] = true
+  // a tagged set with the wrong inner shape is not a set either
+  const listNames = { dir: "/d", names: [name] }
+  const noDir = { names: flat }
+  const falseName = { dir: "/d", names: {} }; falseName.names[name] = "true"
+  return [Model.logoSlot({ enabled: true, channel: ch, logoDir: "/d", have: flat }).kind,
+          Model.wallTile({ enabled: true, channel: ch, logoDir: "/d", have: flat }).kind,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/d", have: listNames }).kind,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/d", have: noDir }).kind,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/d", have: falseName }).kind,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/d", have: [name] }).kind,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/d", have: null }).kind,
+          // and the properly tagged set, same name, is the image
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: "/d", have: Model.logoHaveSet([name], "/d") }).kind]
+}, ["blank", "mark", "blank", "blank", "blank", "blank", "blank", "image"])
+
+checkCall("D-LOGO-11 blocker: the IPC count reads the tagged set and nothing else", function () {
+  return [Model.logoHaveCount(Model.logoHaveSet(["a", "b", "c"], "/d")),
+          Model.logoHaveCount(Model.logoHaveSet([], "/d")),
+          Model.logoHaveCount({}), Model.logoHaveCount(undefined), Model.logoHaveCount(null),
+          // the old flat shape counted 1 under Object.keys; it is nothing now
+          Model.logoHaveCount({ a: true }),
+          Model.logoHaveCount({ dir: "/d", names: { a: true, b: false, c: "true" } }),
+          Model.logoHaveCount(["a"])]
+}, [3, 0, 0, 0, 0, 0, 1, 0])
 
 checkCall("M2-04: the column appears at 98 per cent coverage and at 27, and not at 0", function () {
   // The ruling's two extremes, which the row design has to satisfy BOTH of:
@@ -7544,7 +7657,7 @@ check("the hint is present in both views and never duplicated",
 check("a channel with a cached file draws the picture",
   (function () {
     var ch = { logo: "https://h.test/a.png" }
-    var have = {}; have[Model.logoFile(ch, "/d").split("/").pop()] = true
+    var have = Model.logoHaveSet([Model.logoFile(ch, "/d").split("/").pop()], "/d")
     var t = Model.wallTile({ enabled: true, channel: ch, logoDir: "/d", have: have })
     return [t.kind, t.path, t.glyph]
   })(), ["image", "/d/" + Model.logoFile({ logo: "https://h.test/a.png" }, "/d").split("/").pop(), ""])
@@ -7555,7 +7668,7 @@ check("a channel with no logo url at all draws the mark",
 check("with logos OFF every tile is the mark, so the wall works on a default install",
   (function () {
     var ch = { logo: "https://h.test/a.png" }
-    var have = {}; have[Model.logoFile(ch, "/d").split("/").pop()] = true
+    var have = Model.logoHaveSet([Model.logoFile(ch, "/d").split("/").pop()], "/d")
     return Model.wallTile({ enabled: false, channel: ch, logoDir: "/d", have: have }).kind
   })(), "mark")
 check("the mark is the plugin's own television glyph, the one the bar shows idle",
@@ -7563,7 +7676,7 @@ check("the mark is the plugin's own television glyph, the one the bar shows idle
 check("a tile is never both, and never neither",
   (function () {
     var ch = { logo: "https://h.test/a.png" }
-    var have = {}; have[Model.logoFile(ch, "/d").split("/").pop()] = true
+    var have = Model.logoHaveSet([Model.logoFile(ch, "/d").split("/").pop()], "/d")
     var cases = [
       Model.wallTile({ enabled: true, channel: ch, logoDir: "/d", have: have }),
       Model.wallTile({ enabled: true, channel: ch, logoDir: "/d", have: {} }),
