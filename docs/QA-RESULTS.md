@@ -13462,3 +13462,45 @@ each one subscribes to the change signal separately. A clipboard change by
 ANY application on the desktop during that window is a synchronous, unbounded
 read inside `omarchy-shell`. Found by the marketplace maintainer; measured
 here before any lane was briefed.
+
+### Attributed, the same afternoon: the released 6.11.2 reads the TEXT, and upstream has already taken that out
+
+The sources on the branch heads say the type check reads nothing, and the
+measurement said the editable field reads everything. Both are true. A gdb
+catchpoint on `pipe2` (the offer read creates its pipe there) in the
+throwaway client, backtrace at every hit after the offer:
+
+```
+#0  pipe2
+#2  QInternalMimeData::retrieveData(QString const&, QMetaType) const
+#4  QMimeData::text() const
+#5  QQuickTextInput::q_canPasteChanged
+#7  QQuickTextInput::qt_metacall
+#8  QQuickTextField::qt_metacall
+#10 QPlatformClipboard::emitChanged
+#16 wl_display_dispatch_queue_pending
+#17 QtWaylandClient::QWaylandDisplay::flushRequests
+```
+
+Ten `pipe2` hits after one offer on the editable probe, every one through
+that path -- `QMimeData::text()` tries `text/plain;charset=utf-8` and then
+`text/plain`, and the signal fires per mode -- and **zero on the no-field
+probe**, so the 52 MB that window grew by was never the clipboard (it is
+the toolkit starting up; attributed, not assumed). The join the sources did
+not show is in the RELEASED 6.11.2: its `q_canPasteChanged` calls
+`mimeData()->text()`. The upstream log of `qquicktextinput.cpp` on the 6.11
+branch says exactly when that came and went:
+
+- `c82ef988`, 2026-02-18, "QQuickTextInput: check if text is empty in
+  q_canPasteChanged" -- the read ARRIVES, so that an empty clipboard reads
+  as not pasteable. Shipped in 6.11.2.
+- `7d0a433a`, 2026-09-15, "QQuickTextInput: don't call QMimeData::text() for
+  canPaste" -- the read LEAVES. After 6.11.2's cut; on the 6.11 and 6.12
+  branch heads, not in any package this machine has.
+
+So the maintainer's sentence has its versions inverted and its mechanism
+right: it is the released Qt that reads, every editable `TextInput` does it
+on every clipboard change by any application, and the Wayland read beneath
+it has a 1 s per-read timeout, no total limit and no deadline. `readOnly`
+is the one switch on it, in every version of the slot since January
+(`a026cb69`, "check read-only first"), which is what the fix rests on.
