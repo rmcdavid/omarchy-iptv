@@ -88,6 +88,7 @@ SHIELDED = shield_environment()
 
 import argparse
 import bisect
+import codecs
 import errno
 import fcntl
 import gzip
@@ -235,6 +236,24 @@ CACHE_LAYOUT = 2
 MAX_SOURCES = 50
 MAX_SOURCE_URL = 2048
 MAX_LABEL = 64
+# D-CLIP-1 (R8): the `clipboard` verb is the ONE process allowed to hold
+# clipboard bytes, briefly, and die. The shell used to collect wl-paste's
+# whole output before cutting it (a user Ctrl+V over a 100 MB foreign offer
+# cost the shell +298 MB and kept most of it); now the helper reads at most
+# MAX_CLIPBOARD_BYTES from the pipe and terminates the child at the cap.
+# The arithmetic: the shell keeps LIMITS.url * 4 characters (2048 * 4 =
+# 8192 UTF-16 units, the cut Service.qml always applied), and a UTF-8
+# character is at most 4 bytes, so 8192 * 4 = 32768 bytes (32 KiB) is the
+# most any reply can need. The deadline mirrors Model.CLIPBOARD_TIMEOUT_MS;
+# the shared fixture clipboard.json pins both sides to one number. Tests
+# shrink the deadline through CLIPBOARD_TIMEOUT_ENV; the service never sets it.
+CLIPBOARD_ARGV = ["wl-paste", "--no-newline", "--type", "text"]
+MAX_CLIPBOARD_CHARS = MAX_SOURCE_URL * 4
+MAX_CLIPBOARD_BYTES = MAX_CLIPBOARD_CHARS * 4
+CLIPBOARD_TIMEOUT = 5.0
+CLIPBOARD_KILL_GRACE = 1.0
+CLIPBOARD_CHUNK = 4096
+CLIPBOARD_TIMEOUT_ENV = "OMARCHY_IPTV_CLIPBOARD_DEADLINE"
 SOURCE_ORIGINS = ("guide", "xtream", "cli", "migrated")
 SOURCE_KINDS = ("http", "file")
 UNSAFE_PATH_PREFIXES = ("/proc", "/sys", "/dev")
@@ -8032,6 +8051,156 @@ def cmd_config(args: argparse.Namespace) -> int:
     return EXIT_OK if payload["ok"] else EXIT_ERROR
 
 
+# ----------------------------------------------------------- clipboard (R8)
+
+def clipboard_deadline() -> float:
+    """Seconds the clipboard read may take (CLIPBOARD_TIMEOUT unless a test
+    shrinks it through CLIPBOARD_TIMEOUT_ENV)."""
+    override = os.environ.get(CLIPBOARD_TIMEOUT_ENV, "")
+    if override:
+        try:
+            return max(0.05, float(override))
+        except ValueError:
+            pass
+    return CLIPBOARD_TIMEOUT
+
+
+def utf16_cut(text: str, limit: int) -> tuple[str, bool]:
+    """`text` cut to at most `limit` UTF-16 units, never inside a surrogate
+    pair -- the unit the shell's `substring` counts in, so both sides agree
+    on what 8192 characters are. The flag says whether anything was cut."""
+    units = 0
+    for index, char in enumerate(text):
+        width = 2 if ord(char) > 0xFFFF else 1
+        if units + width > limit:
+            return text[:index], True
+        units += width
+    return text, False
+
+
+def reap_child(child: Any, grace: float) -> int | None:
+    """Make sure the child is gone: SIGTERM, a bounded wait, then SIGKILL and
+    one more bounded wait. Returns its exit status, or None if it survived
+    even that (which only a process stuck in the kernel can)."""
+    import subprocess
+    if child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            try:
+                child.wait(timeout=grace)
+            except subprocess.TimeoutExpired:
+                pass
+    child.stdout.close()
+    return child.returncode
+
+
+def read_clipboard(argv: list[str], max_bytes: int, timeout: float, grace: float) -> dict[str, Any]:
+    """Run `argv` (wl-paste) with a pipe on its stdout and read at most
+    `max_bytes` from it under a wall-clock `timeout`, terminating the child
+    the moment the cap, EOF or the deadline is reached.
+
+    Rule 5: the bytes go into the reply's `text` and NOWHERE else -- never a
+    log line, never stderr, never an error message. The child's stderr is
+    discarded (wl-paste names nothing useful there and a hostile producer
+    could), its stdin is /dev/null, and this process starts no other child.
+    The read is non-blocking behind select() so a producer that drips bytes
+    at the protocol's 1 s per-read timeout runs into the deadline, not into
+    an unbounded read; `truncated` is true when the cap stopped the read
+    before EOF (a clipboard of exactly max_bytes reads as truncated, which
+    errs toward saying something was cut) or when the character cut below
+    dropped anything. The result never carries text on a failure.
+    """
+    import subprocess
+    try:
+        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, close_fds=True)
+    except FileNotFoundError:
+        return {"ok": False, "code": "no_wl_paste"}
+    except OSError:
+        return {"ok": False, "code": "spawn_failed"}
+    deadline = time.monotonic() + timeout
+    fd = child.stdout.fileno()
+    os.set_blocking(fd, False)
+    parts: list[bytes] = []
+    total = 0
+    capped = False
+    eof = False
+    timed_out = False
+    status: int | None = None
+    try:
+        while True:
+            if total >= max_bytes:
+                capped = True
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            ready, _, _ = select.select([fd], [], [], remaining)
+            if not ready:
+                timed_out = True
+                break
+            try:
+                chunk = os.read(fd, min(CLIPBOARD_CHUNK, max_bytes - total))
+            except BlockingIOError:
+                continue
+            if not chunk:
+                eof = True
+                break
+            parts.append(chunk)
+            total += len(chunk)
+        if eof:
+            # The producer is done; its exit status is the one signal that
+            # distinguishes an empty clipboard ("Nothing is copied", exit 1)
+            # from an empty string on it. Bounded by what is left of the
+            # deadline so a child that closes its pipe and lingers cannot
+            # hold this process either.
+            try:
+                status = child.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+    finally:
+        reaped = reap_child(child, grace)
+        if status is None:
+            status = reaped
+    if timed_out:
+        return {"ok": False, "code": "timeout"}
+    if eof and status != 0:
+        return {"ok": False, "code": "failed", "status": status if status is not None else -1}
+    if not eof and status is None:
+        return {"ok": False, "code": "child_stuck"}
+    data = b"".join(parts)
+    # A cut at the byte cap can land inside a UTF-8 sequence: the incremental
+    # decoder holds an incomplete tail back (final=False) rather than
+    # replacing it, so the text always ends on a character boundary. Invalid
+    # bytes anywhere else become U+FFFD, the way the shell's collector read them.
+    text = codecs.getincrementaldecoder("utf-8")("replace").decode(data, final=not capped)
+    text, cut = utf16_cut(text, MAX_CLIPBOARD_CHARS)
+    return {"ok": True, "text": text, "truncated": bool(capped or cut), "bytes": len(data)}
+
+
+def cmd_clipboard(args: argparse.Namespace) -> int:
+    """`clipboard`: ONE JSON object on stdout and nothing on stderr.
+
+    {"ok": true, "kind": "clipboard", "text": ..., "truncated": bool,
+    "bytes": n} when wl-paste answered, with `text` cut at a character
+    boundary to at most MAX_CLIPBOARD_CHARS UTF-16 units; {"ok": false,
+    "kind": "clipboard", "code": "no_wl_paste" | "spawn_failed" | "timeout"
+    | "failed" | "child_stuck"} otherwise, with no text at all. The text is
+    never logged and no error names what the clipboard held (rule 5).
+    """
+    result = read_clipboard(CLIPBOARD_ARGV, MAX_CLIPBOARD_BYTES, clipboard_deadline(), CLIPBOARD_KILL_GRACE)
+    payload: dict[str, Any] = {"ok": bool(result["ok"]), "kind": "clipboard"}
+    for key in ("text", "truncated", "bytes", "code", "status"):
+        if key in result:
+            payload[key] = result[key]
+    emit(payload)
+    return EXIT_OK if payload["ok"] else EXIT_ERROR
+
+
 # -------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
@@ -8203,6 +8372,9 @@ def build_parser() -> argparse.ArgumentParser:
     config_actions = config.add_subparsers(dest="action", required=True)
     shield = config_actions.add_parser("shield", help="deny group and other on $XDG_CONFIG_HOME/omarchy/shell.json (no-op when it already does); prints the modes and a verdict, never the contents")
     shield.set_defaults(func=cmd_config)
+    # D-CLIP-1 (R8): the bounded clipboard read the shell's paste runs.
+    clipboard = sub.add_parser("clipboard", help="read the Wayland clipboard through wl-paste, at most 32 KiB, under a deadline; prints one JSON object and never logs the text")
+    clipboard.set_defaults(func=cmd_clipboard)
     return parser
 
 

@@ -583,8 +583,9 @@ Item {
     return Model.sourceErrorMessage(String(root.service.settingsInvalid.code || "invalid"))
   }
   // The D9 lever, thrown for good by D-CLIP-1: paste is the out-of-process
-  // path ONLY. The service runs `wl-paste --type text` as argv and answers
-  // through `clipboardText(text)`; nothing in this process reads Qt's
+  // path ONLY. The service runs the helper's bounded `clipboard` verb as
+  // argv (R8: it reads at most 32 KiB from wl-paste under a deadline) and
+  // answers through `clipboardText(text)`; nothing in this process reads Qt's
   // clipboard, and every form field is read-only, so Qt's own paste (Ctrl+V,
   // Shift+Insert, the middle-click selection) cannot fire inside one. The
   // in-process branches this flag used to select are gone; it stays as the
@@ -2614,20 +2615,14 @@ Item {
     })
   }
 
-  // NOT a paste path since D-CLIP-1, and nothing calls it: Quickshell's
-  // clipboardText is QClipboard::text() in this process, the very read the
-  // defect is. It stays only because the accessibility fidelity transform T4 (a11y/fidelity.py, dev branch)
-  // pins the line below as the shim point of the accessibility probe and
-  // that file is not this lane's to change; drop both together.
-  function clipboardText() {
-    var text = Quickshell.clipboardText
-    return text === undefined || text === null ? "" : String(text)
-  }
-
   // Paste (D9, the only path since D-CLIP-1): asks the service, which runs
-  // wl-paste as argv, bounded by its watchdog, and answers through the
-  // `clipboardText(text)` signal -- pasteFromProcess below. Guarded because
-  // the verb may not exist on an older service.
+  // the helper's bounded `clipboard` verb as argv (R8: at most 32 KiB read
+  // from wl-paste, under a deadline; the shell never holds more than the
+  // reply) and answers through the `clipboardText(text)` signal --
+  // pasteFromProcess below. Nothing in this process reads Qt's clipboard:
+  // Quickshell.clipboardText is QClipboard::text() in this process, the
+  // very read the defect is, and the function that wrapped it is gone.
+  // Guarded because the verb may not exist on an older service.
   function pasteInto(id) {
     if (root.serviceReady && typeof root.service.requestClipboard === "function") root.service.requestClipboard()
   }
@@ -2645,9 +2640,12 @@ Item {
     var id = root.formFocus
     var item = root.fieldItem(id)
     var value = root.formValue(id)
-    var range = root.fieldMasked(id) || !item
-      ? Model.fullRange(value)
-      : Model.editRange(item.cursorPosition, item.selectionStart, item.selectionEnd, item.selectionStart !== item.selectionEnd)
+    // The range is the model's decision (Model.editRangeFor): a masked field
+    // is fully selected by rule; a field whose control is not realised is
+    // treated as masked, which replaces the value rather than guessing a caret.
+    var range = item
+      ? Model.editRangeFor(root.fieldMasked(id), value, item.cursorPosition, item.selectionStart, item.selectionEnd)
+      : Model.editRangeFor(true, value, 0, 0, 0)
     var cap = Model.formCapacity(id)
     var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeInput(text, cap), cap)
     if (!edit.changed) return
@@ -2695,15 +2693,17 @@ Item {
     var value = root.formValue(focus)
     // Masked = fully selected (UX-SOURCES 2.3): typing replaces the whole
     // value, Backspace / Delete / Ctrl+Backspace clear it, navigation is a
-    // no-op. Unmasked: the control's own caret and selection.
-    var range = masked
-      ? Model.fullRange(value)
-      : Model.editRange(item.cursorPosition, item.selectionStart, item.selectionEnd, item.selectionStart !== item.selectionEnd)
+    // no-op. Unmasked: the control's own caret and selection. The decision
+    // is Model.editRangeFor's, where a test reaches it; it was made here.
+    var range = Model.editRangeFor(masked, value, item.cursorPosition, item.selectionStart, item.selectionEnd)
     var opaque = item.echoMode !== TextInput.Normal
     if (!masked && event.matches(StandardKey.Cut)) {
-      // Native cut is gated by readOnly; native copy is not, and it is Qt's
-      // own (it writes nothing for a Password field, as before).
-      if (range.start !== range.end) {
+      // Native cut is gated by readOnly AND by echoMode (Qt's cut() is a
+      // no-op on a Password field, measured in the spec); native copy is
+      // Qt's own. Model.cutApplies keeps the echo gate: a Password field's
+      // Ctrl+X does nothing, as it did natively, rather than deleting a
+      // selection with nothing on the clipboard to paste back.
+      if (Model.cutApplies(opaque, range)) {
         item.copy()
         root.applyEdit(focus, item, Model.editDelete(value, range.start, range.end, 1, false, opaque))
       }
