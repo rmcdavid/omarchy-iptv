@@ -2424,9 +2424,27 @@ checkCall("D-LOGO-8: the service reads the stream, batches it, and the summary w
     !/logoHaveSet\(names, root\.activeCacheDir\)/.test(src),
     !/logoHaveMerge\([^)]*root\.activeCacheDir\)/.test(src),
     // and nothing reads the old collected-at-exit text any more
-    src.indexOf("logoFetchProc.stdout.text") === -1
+    src.indexOf("logoFetchProc.stdout.text") === -1,
+    // THE TAG AND THE BINDING ARE THE SAME CALL. The first repair tagged
+    // logoFetchDir with the CACHE directory while `logoDir` was bound to
+    // the LOGOS directory; Model.logoSlot compares the two, so every slot
+    // was blank, and 1910 checks were green because the tests tagged with
+    // the logos directory on both sides. A review found it by calling the
+    // shipping functions with the service's own values. Both sites now go
+    // through Model.logoDirFor, and the bare cache directory tags nothing.
+    /root\.logoFetchDir = Model\.logoDirFor\(root\.activeCacheDir\)/.test(src),
+    /readonly property string logoDir: root\.showLogos \? Model\.logoDirFor\(root\.activeCacheDir\) : ""/.test(src),
+    /wantDir: Model\.logoDirFor\(root\.activeCacheDir\)/.test(src),
+    !/root\.logoFetchDir = root\.activeCacheDir\b/.test(src),
+    !/root\.logoFetchDir = root\.logoDir\b/.test(src),
+    // the restart is drained through a Timer, never from inside onExited
+    /\bid: logoRerunDebounce\b/.test(src),
+    /logoRerunDebounce\.restart\(\)/.test(src),
+    // and a trailing line cannot repopulate the set after the switch went off
+    /if \(root\.showLogos\) root\.flushLogoNames\(\)/.test(src)
   ]
-}, [true, true, true, true, true, true, true, true, true, true])
+}, [true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true])
 
 checkCall("M2-04: the fetch report is read defensively, and names carry no URLs", function () {
   const good = JSON.stringify({ ok: true, kind: "logos", names: ["ab12cd34", "ff00ff00"] })
@@ -2438,6 +2456,23 @@ checkCall("M2-04: the fetch report is read defensively, and names carry no URLs"
           Model.logoHaveSet(["a", "b"], "/d").names.a,
           Model.logoHaveSet(["a"], "/d").names.zzz === undefined]
 }, [["ab12cd34", "ff00ff00"], [], [], [], ["ok"], true, true])
+
+checkCall("D-LOGO-11 blocker (f): the directory a set is tagged with is the directory the guide compares it with", function () {
+  // The service's own values, end to end: the cache directory it holds, the
+  // logos directory it binds, the tag it writes, and the slot the guide
+  // asks for. Fails against the first repair, which tagged with cacheDir.
+  const cacheDir = "/home/u/.cache/omarchy-iptv/sources/0a1b2c3d"
+  const logoDir = Model.logoDirFor(cacheDir)
+  const ch = { logo: "https://ok.test/a.png" }
+  const name = Model.logoFile(ch, logoDir).split("/").pop()
+  const tagged = Model.logoHaveSet([name], logoDir)
+  const wrong = Model.logoHaveSet([name], cacheDir)
+  return [logoDir,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: logoDir, have: tagged }).kind,
+          Model.wallTile({ enabled: true, channel: ch, logoDir: logoDir, have: tagged }).kind,
+          Model.logoSlot({ enabled: true, channel: ch, logoDir: logoDir, have: wrong }).kind,
+          Model.logoDirFor(""), Model.logoDirFor(undefined), Model.logoDirFor(cacheDir + "/")]
+}, ["/home/u/.cache/omarchy-iptv/sources/0a1b2c3d/logos", "image", "image", "blank", "", "", "/home/u/.cache/omarchy-iptv/sources/0a1b2c3d/logos"])
 
 // ---- the D-LOGO-11 blocker: a name announced for one directory is not a
 // file in another. Every decision below used to live in Service.qml, where

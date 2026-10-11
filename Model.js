@@ -3987,6 +3987,18 @@ function wallStep(index, dir, count, columns) {
 //
 // The lookup `logoSlot` wants, from the `names` array the helper prints, tagged
 // with the directory the fetch that printed it was started for.
+// The ONE place the logo directory is derived from a source's cache
+// directory. The service binds `logoDir` through it and tags every announced
+// set through it, so the two cannot drift: the first version of the D-LOGO-11
+// repair tagged the set with the CACHE directory and the guide compared it
+// with the LOGOS directory, and every slot was blank, for every user, with
+// node 1910 / 0 -- the tests tagged with the logos directory on both sides.
+// A join by name (rule 13); this makes it a call.
+function logoDirFor(cacheDir) {
+  var dir = str(cacheDir)
+  return dir === "" ? "" : dir.replace(/\/+$/, "") + "/logos"
+}
+
 function logoHaveSet(names, dir) {
   var list = asList(names)
   var out = {}
@@ -10624,6 +10636,7 @@ if (typeof module !== "undefined") {
     logoConsentLines: logoConsentLines,
     logoFile: logoFile,
     logoSlot: logoSlot,
+    logoDirFor: logoDirFor,
     logoHaveSet: logoHaveSet,
     logoHaveMerge: logoHaveMerge,
     logoHaveCount: logoHaveCount,

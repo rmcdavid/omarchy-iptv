@@ -39,9 +39,11 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -94,6 +96,19 @@ def padded_jpeg(base, segments, trailing=0):
     file past MAX_LOGO_BYTES, without storing 131 KB of hex in a fixture."""
     assert base[:2] == b"\xff\xd8"
     return base[:2] + MAXIMAL_SEGMENT * segments + base[2:] + b"\x00" * trailing
+
+
+def _private_tmpdir(case):
+    """A temp directory removed when the case ends.
+
+    A review found these tests leaving their directories behind -- the cap
+    test alone leaves 5,002 files a run -- on a /tmp that is a quota-bound
+    tmpfs, where a full /tmp turns a gate red for a reason that says nothing
+    about the tree.
+    """
+    path = tempfile.mkdtemp()
+    case.addCleanup(shutil.rmtree, path, True)
+    return path
 
 
 class LogoDimensionParserTest(unittest.TestCase):
@@ -300,6 +315,17 @@ class LogoFixtureCoverageTest(unittest.TestCase):
                             for c in CASES),
                         "no case is over the area bound while height squared is not")
 
+    def test_a_gif_bomb_past_the_second_descriptor_is_covered(self):
+        """Rule 14, one notch over: the second-frame case cannot see a walk
+        that stops after the SECOND descriptor, and a review showed that
+        mutation passing every test. The fixture carries a third-frame bomb
+        and the dimension and verdict tests above read it through the
+        shipping parser; this only keeps the case from being trimmed."""
+        case = next(c for c in CASES if c["id"] == "gif-bomb-third-frame-65500")
+        self.assertEqual(case["dimensions"], [65500, 65500])
+        self.assertFalse(case["withinBounds"])
+        self.assertEqual(case["bytes"].count(b"\x2c\x00\x00\x00\x00"), 3)
+
     def test_a_gif_bomb_in_the_second_frame_is_reached(self):
         """The only frame bomb in the first fixture was in the FIRST image
         descriptor, so a walk that returned at the first descriptor stayed
@@ -462,7 +488,7 @@ class WriteLogoBoundTest(unittest.TestCase):
 
     def logo_dir(self):
         import tempfile
-        return os.path.join(tempfile.mkdtemp(), "logos")
+        return os.path.join(_private_tmpdir(self), "logos")
 
     def test_an_over_bound_logo_is_refused_and_writes_nothing(self):
         for cid in ("jpeg-bomb-progressive-20000", "jpeg-bomb-baseline-65500",
@@ -546,7 +572,7 @@ class WriteLogoBoundTest(unittest.TestCase):
         formula here.
         """
         import tempfile
-        root = tempfile.mkdtemp()
+        root = _private_tmpdir(self)
         compared = 0
         for case in CASES:
             if not case["bytes"] or helper.logo_sniff_type(case["bytes"]) != case["contentType"]:
@@ -565,7 +591,7 @@ class WriteLogoBoundTest(unittest.TestCase):
         the same bytes under `image/jpeg` because there the caller's claim is
         evidence of a confused response, not of a confused file."""
         import tempfile
-        root = tempfile.mkdtemp()
+        root = _private_tmpdir(self)
         case = BY_ID["png-bytes-offered-as-jpeg"]
         self.assertFalse(helper.logo_within_bounds(case["bytes"], "image/jpeg"),
                          "the gate must refuse PNG bytes offered as JPEG")
@@ -577,7 +603,7 @@ class WriteLogoBoundTest(unittest.TestCase):
         """The magic check has guarded the write path since M2-04, but a file
         on disk is not evidence that it went through it."""
         import tempfile
-        root = tempfile.mkdtemp()
+        root = _private_tmpdir(self)
         for name, blob in (("empty", b""), ("text", b"not an image at all"),
                            ("svg", b"<svg xmlns='http://www.w3.org/2000/svg'/>"),
                            ("elf", b"\x7fELF" + b"\x00" * 64),
@@ -618,7 +644,7 @@ class LogoCacheSweepTest(unittest.TestCase):
         id to bytes for a file built by the test rather than read from the
         fixture (the padded JPEGs of LogoSecondReadTest)."""
         import tempfile
-        cache = tempfile.mkdtemp()
+        cache = _private_tmpdir(self)
         logo_dir = os.path.join(cache, helper.LOGO_SUBDIR)
         os.makedirs(logo_dir, mode=0o700)
         channels, names = [], {}
@@ -753,7 +779,7 @@ class LogoSecondReadTest(unittest.TestCase):
 
     def setUp(self):
         import tempfile
-        self.root = tempfile.mkdtemp()
+        self.root = _private_tmpdir(self)
 
     def on_disk(self, name, blob):
         path = os.path.join(self.root, name)
@@ -859,7 +885,7 @@ class LogoFetchCapTest(unittest.TestCase):
         import contextlib
         import io
         import tempfile
-        cache = tempfile.mkdtemp()
+        cache = _private_tmpdir(self)
         logo_dir = os.path.join(cache, helper.LOGO_SUBDIR)
         os.makedirs(logo_dir, mode=0o700)
         dead = "https://127.0.0.1:1/%s.png"

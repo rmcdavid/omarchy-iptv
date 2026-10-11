@@ -1454,7 +1454,8 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     name = clean_name(title) or clean_name(tvg_name) or clean_name(tvg_id) or GENERATED_NAME_FORMAT % index
     group_text = attrs.get("group-title", "").strip() or extgrp
     groups = split_groups(group_text) if group_text else []
-    # Ruling R5: multi-group entries list under the FIRST group; the whole
+    # Sources ruling R5 (groups; not the D-LOGO-11 logo ruling of the same
+    # number): multi-group entries list under the FIRST group; the whole
     # group string stays searchable through searchKey and `groups`.
     group = groups[0] if groups else UNGROUPED
     channel: dict[str, Any] = {

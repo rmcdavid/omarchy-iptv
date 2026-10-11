@@ -134,8 +134,11 @@ Item {
   // no active source, or the setting off. The guide binds its column to this,
   // so turning the setting off empties the column in the same turn rather
   // than leaving the last playlist's pictures on screen.
-  readonly property string logoDir: (root.showLogos && root.activeCacheDir !== "")
-    ? root.activeCacheDir + "/logos" : ""
+  // Derived through Model.logoDirFor and NOWHERE else: the set a fetch
+  // announces is tagged through the same call (fetchLogos), and the guide
+  // compares the two. The first D-LOGO-11 repair tagged with the cache
+  // directory while this bound the logos directory, and every slot was blank.
+  readonly property string logoDir: root.showLogos ? Model.logoDirFor(root.activeCacheDir) : ""
   // What enabling logos would disclose, counted from the cache and contacting
   // nothing. The guide shows these numbers BEFORE the switch is thrown
   // (ruling rule 6): a generic "may contact third parties" is not informed
@@ -4820,15 +4823,22 @@ Item {
       // directory THIS process was started for, which is why a batch from a
       // fetch that outlived a source switch cannot land in the new source's
       // set (Model.logoHaveMerge).
-      root.flushLogoNames()
+      // ...unless the setting went OFF while the process was dying: the
+      // off-path cleared the set, and a trailing line delivered on the way
+      // out must not repopulate it (a review found `ipc status` counting
+      // logos with the switch off).
+      if (root.showLogos) root.flushLogoNames()
+      else root.logoPending = []
       // A fetch that was stopped because the source changed underneath it is
-      // started again here, for the directory that is current NOW, and never
-      // before the old process is gone: one Process object, one run at a
-      // time, and the plan (Model.logoFetchPlan) says "skip" if the setting
-      // was turned off meanwhile.
+      // started again, for the directory that is current NOW, and never
+      // before the old process is gone. Drained through a Timer, not by
+      // starting the Process from inside its own exit handler: the same
+      // shape as playlistRerun / epgRerun / configShieldRerun. The plan
+      // (Model.logoFetchPlan) says "skip" if the setting was turned off
+      // meanwhile.
       if (root.logoFetchAgain) {
         root.logoFetchAgain = false
-        root.fetchLogos()
+        logoRerunDebounce.restart()
       }
     }
   }
@@ -4860,6 +4870,13 @@ Item {
   // Batched, because every assignment to `logoHave` re-evaluates the source
   // binding of every visible row. A quarter of a second is far below the eye
   // and far above the fetch rate.
+  Timer {
+    id: logoRerunDebounce
+    interval: 50
+    repeat: false
+    onTriggered: root.fetchLogos()
+  }
+
   Timer {
     id: logoFlushTimer
     interval: 250
@@ -4906,7 +4923,7 @@ Item {
     // directory's names for minutes while the rows were the new source's,
     // and the new directory got no sweep of its own. The decision is
     // Model.logoFetchPlan, so a node test can reach it.
-    var plan = Model.logoFetchPlan({ showLogos: root.showLogos, wantDir: root.activeCacheDir,
+    var plan = Model.logoFetchPlan({ showLogos: root.showLogos, wantDir: Model.logoDirFor(root.activeCacheDir),
                                      running: logoFetchProc.running, runningDir: root.logoFetchDir })
     if (plan === "skip") return false
     if (plan === "restart") {
@@ -4915,7 +4932,9 @@ Item {
       logoFetchProc.signal(15)
       return false
     }
-    root.logoFetchDir = root.activeCacheDir
+    // The tag is the LOGOS directory, through the same call `logoDir` is
+    // bound through, so the guide's comparison (Model.logoSlot) can match.
+    root.logoFetchDir = Model.logoDirFor(root.activeCacheDir)
     logoFetchProc.command = Model.logoFetchArgv(root.helperPath, root.activeCacheDir)
     logoFetchProc.running = true
     return true

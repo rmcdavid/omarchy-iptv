@@ -1338,7 +1338,13 @@ ShellRoot {
           playbackStateText: g.playbackStateText === undefined ? null : String(g.playbackStateText),
           // D-LOGO-8: how many logos the shell knows are on disk RIGHT NOW.
           // The defect was that this stayed 0 until the fetch exited.
-          logoCount: s2 && s2.logoHave ? Object.keys(s2.logoHave).length : null,
+          // The set is tagged with its directory since D-LOGO-11, so a key
+          // count would read 2 for every set; the count is the Model's, and
+          // the tag is exposed so a live run can see the join the guide
+          // compares (service.logoDir === logoHave.dir, or no logo draws).
+          logoCount: s2 && s2.logoHave ? Model.logoHaveCount(s2.logoHave) : null,
+          logoHaveDir: s2 && s2.logoHave && typeof s2.logoHave.dir === "string" ? s2.logoHave.dir : null,
+          logoDir: s2 && typeof s2.logoDir === "string" ? s2.logoDir : null,
           // M2-13. The view and the geometry it derived, so a scenario can
           // assert the column cap held rather than infer it from a picture.
           wallView: g.wallView === undefined ? null : g.wallView,

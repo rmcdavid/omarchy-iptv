@@ -565,6 +565,17 @@
         2048
       ],
       "withinBounds": false
+    },
+    {
+      "id": "gif-bomb-third-frame-65500",
+      "contentType": "image/gif",
+      "note": "a 64x64 canvas with THREE image descriptors: 64x64, 64x64, then 65500x65500. The second-frame case pins a walk that stops at the first descriptor; this one pins a walk that stops at the second, which a review found survived every test. The walk has to reach the trailer, whatever the frame count",
+      "hex": "474946383961400040000000002c00000000400040000002024401002c00000000400040000002024401002c00000000dcffdcff0002024401003b",
+      "dimensions": [
+        65500,
+        65500
+      ],
+      "withinBounds": false
     }
   ]
 }
