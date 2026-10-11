@@ -480,8 +480,10 @@ requests and raise the batch.
      rule is: **while the plugin's form is open, no editable `TextInput`
      exists in the shell.** The form's fields are `readOnly: true`
      unconditionally; the plugin does the editing itself in
-     `handleFormKey` over the model value (`Model.editInsert`,
-     `Model.editDelete`, node-tested), and paste is the out-of-process path
+     `handleFormKey` over the model value (editInsert and editDelete in
+     Model.js, node-tested; cited without the prefix until the lane that
+     adds them lands, because the ledger resolves a prefixed citation
+     against the tree), and paste is the out-of-process path
      only -- `wl-paste` as argv, capped at `Model.LIMITS.url * 4`, in a
      child that can be killed -- which also closes the middle-click
      Selection paste, a second unbounded read on the same object. The
