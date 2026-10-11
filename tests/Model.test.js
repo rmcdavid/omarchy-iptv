@@ -10294,6 +10294,116 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, [Model.LIMITS.url + 64, true, false])
 })()
 
+// ---- D-CLIP-1 round 2: the byte bound (R8), the masked range, the cut gate ----
+//
+// tests/fixtures/clipboard.json is the shared fixture: tests/test_clipboard.py
+// runs the helper's `clipboard` verb against a stub wl-paste and pins the
+// same numbers on the python side.
+;(function () {
+  const clip = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/clipboard.json"), "utf8"))
+
+  // One number per bound, read by both sides from the fixture.
+  checkCall("D-CLIP-1 R8: the helper deadline and the shell's are one number", function () {
+    return Model.CLIPBOARD_TIMEOUT_MS
+  }, clip.timeoutMs)
+  checkCall("D-CLIP-1 R8: the kill grace is the fixture's", function () {
+    return Model.CLIPBOARD_KILL_GRACE_MS
+  }, clip.killGraceMs)
+  checkCall("D-CLIP-1 R8: the character cap is LIMITS.url * 4, as the fixture says", function () {
+    return [Model.CLIPBOARD_MAX_CHARS, Model.LIMITS.url * 4]
+  }, [clip.maxChars, clip.maxChars])
+  checkCall("D-CLIP-1 R8: the byte cap is four bytes per character of the character cap", function () {
+    return [Model.CLIPBOARD_MAX_BYTES, Model.CLIPBOARD_MAX_CHARS * 4]
+  }, [clip.maxBytes, clip.maxBytes])
+  checkCall("D-CLIP-1 R8: the shell's watchdog is the OUTER bound, beyond the helper's deadline plus its kill grace", function () {
+    return Model.CLIPBOARD_WATCHDOG_MS > Model.CLIPBOARD_TIMEOUT_MS + Model.CLIPBOARD_KILL_GRACE_MS
+  }, true)
+  checkCall("D-CLIP-1 R8: the watchdog is still short", function () {
+    return Model.CLIPBOARD_WATCHDOG_MS <= 30 * 1000
+  }, true)
+
+  // The shell runs the HELPER, never wl-paste: the helper is the process
+  // allowed to hold the bytes briefly and die.
+  checkCall("D-CLIP-1 R8: clipboardArgv is the helper's clipboard verb, argv only", function () {
+    return Model.clipboardArgv("/opt/p/bin/omarchy-iptv")
+  }, ["python3", "/opt/p/bin/omarchy-iptv", "clipboard"])
+  checkCall("D-CLIP-1 R8: the shell's argv never names wl-paste", function () {
+    return Model.clipboardArgv("/opt/p/bin/omarchy-iptv").indexOf(clip.argv[0])
+  }, -1)
+
+  // What the helper prints, and what the shell makes of it.
+  clip.replies.forEach(function (c) {
+    checkCall("D-CLIP-1 R8: parseClipboardReply: " + c.why, function () { return Model.parseClipboardReply(c.line) }, c.expect)
+  })
+
+  // The cut, re-applied in the shell so the bound holds against any helper:
+  // at most CLIPBOARD_MAX_CHARS UTF-16 units, never inside a surrogate pair.
+  const pair = String.fromCharCode(0xd83d) + String.fromCharCode(0xde00)
+  checkCall("D-CLIP-1 R8: clipboardCut leaves a text at the cap alone", function () {
+    const t = "a".repeat(Model.CLIPBOARD_MAX_CHARS)
+    return Model.clipboardCut(t) === t
+  }, true)
+  checkCall("D-CLIP-1 R8: clipboardCut cuts one past the cap", function () {
+    return Model.clipboardCut("a".repeat(Model.CLIPBOARD_MAX_CHARS + 1)).length
+  }, Model.CLIPBOARD_MAX_CHARS)
+  checkCall("D-CLIP-1 R8: clipboardCut never splits a surrogate pair at the cap", function () {
+    const t = "a".repeat(Model.CLIPBOARD_MAX_CHARS - 1) + pair + "b"
+    const cut = Model.clipboardCut(t)
+    return [cut.length, cut.charCodeAt(cut.length - 1) === 0x61]
+  }, [Model.CLIPBOARD_MAX_CHARS - 1, true])
+  checkCall("D-CLIP-1 R8: a pair that fits is kept whole", function () {
+    const t = "a".repeat(Model.CLIPBOARD_MAX_CHARS - 2) + pair
+    return Model.clipboardCut(t) === t
+  }, true)
+  checkCall("D-CLIP-1 R8: parseClipboardReply re-applies the cut and says so", function () {
+    const r = Model.parseClipboardReply(JSON.stringify({ ok: true, text: "x".repeat(Model.CLIPBOARD_MAX_CHARS + 5), truncated: false, bytes: 1 }))
+    return [r.text.length, r.truncated]
+  }, [Model.CLIPBOARD_MAX_CHARS, true])
+  checkCall("D-CLIP-1 R8: a reply with a bad byte count still carries its text", function () {
+    return Model.parseClipboardReply('{"ok": true, "text": "ok", "bytes": "many"}')
+  }, { text: "ok", truncated: false, bytes: 0 })
+
+  // The masked-field range decision, lifted out of Guide.qml (rule 12): a
+  // masked field is fully selected whatever the control's caret says,
+  // because that caret is an offset into the masked DISPLAY string.
+  const RANGE_FOR = [
+    { why: "masked: the whole value, whatever the caret", args: [true, "http://u:p@h/x", 3, 3, 3], expect: { start: 0, end: 14 } },
+    { why: "masked: the whole value, whatever the selection", args: [true, "abcdef", 5, 1, 4], expect: { start: 0, end: 6 } },
+    { why: "masked: an empty value is the empty range", args: [true, "", 7, 2, 5], expect: { start: 0, end: 0 } },
+    { why: "unmasked, no selection: the caret twice", args: [false, "abcdef", 4, 4, 4], expect: { start: 4, end: 4 } },
+    { why: "unmasked, a selection: the selection", args: [false, "abcdef", 4, 1, 4], expect: { start: 1, end: 4 } },
+    { why: "unmasked, a backwards selection: ordered", args: [false, "abcdef", 1, 4, 1], expect: { start: 1, end: 4 } },
+    { why: "unmasked, a selection beats the caret", args: [false, "abcdef", 0, 2, 3], expect: { start: 2, end: 3 } },
+    { why: "unmasked, an undefined masked flag is unmasked", args: [undefined, "abcdef", 2, 2, 2], expect: { start: 2, end: 2 } },
+    { why: "unmasked, a non-numeric caret is 0", args: [false, "abcdef", null, undefined, undefined], expect: { start: 0, end: 0 } }
+  ]
+  RANGE_FOR.forEach(function (c) {
+    checkCall("D-CLIP-1: editRangeFor: " + c.why, function () {
+      return Model.editRangeFor(c.args[0], c.args[1], c.args[2], c.args[3], c.args[4])
+    }, c.expect)
+  })
+  checkCall("D-CLIP-1: editRangeFor on an unmasked field IS editRange", function () {
+    return Model.editRangeFor(false, "abcdef", 4, 1, 4)
+  }, Model.editRange(4, 1, 4, true))
+  checkCall("D-CLIP-1: editRangeFor on a masked field IS fullRange", function () {
+    return Model.editRangeFor(true, "abcdef", 4, 1, 4)
+  }, Model.fullRange("abcdef"))
+
+  // Ctrl+X edits only with a selection and only when the echo is Normal:
+  // Qt's own gate on cut(), measured on a Password control in the spec.
+  const CUT = [
+    { why: "a selection on a normal field cuts", args: [false, { start: 1, end: 4 }], expect: true },
+    { why: "no selection cuts nothing", args: [false, { start: 2, end: 2 }], expect: false },
+    { why: "a Password field never cuts, selection or not", args: [true, { start: 1, end: 4 }], expect: false },
+    { why: "a Password field with no selection cuts nothing", args: [true, { start: 2, end: 2 }], expect: false },
+    { why: "no range cuts nothing", args: [false, null], expect: false },
+    { why: "an undefined echo flag is Normal", args: [undefined, { start: 0, end: 3 }], expect: true }
+  ]
+  CUT.forEach(function (c) {
+    checkCall("D-CLIP-1: cutApplies: " + c.why, function () { return Model.cutApplies(c.args[0], c.args[1]) }, c.expect)
+  })
+})()
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")

@@ -10301,10 +10301,60 @@ function withFormReveal(st, field, revealed) {
 var WORD_SEPARATOR_RE = /[.,?!@#$:;\-<>\[\]{}()=\/+%&^*'"`~|\\]/
 var WORD_SPACE_RE = /[\t\n\u000b\u000c\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/
 
-// The wl-paste child's bound (Service.qml clipboardWatchdog). Its whole job
-// is a few KB across a pipe; a producer that drips bytes at the 1 s per-read
-// timeout is the attack, and the bound kills the CHILD, never the shell.
+// The paste path (D-CLIP-1, R8). The shell never holds more than the
+// bounded reply: the helper's `clipboard` verb runs wl-paste with a pipe,
+// reads at most CLIPBOARD_MAX_BYTES, terminates the child at the cap, EOF
+// or its deadline, and prints one JSON object. The first fix collected
+// wl-paste's whole output in the shell and cut it afterwards -- measured, a
+// user Ctrl+V over a 100 MB foreign offer cost the shell +298 MB and kept
+// most of it; the bound was time, not bytes.
+//
+// The arithmetic, mirrored by MAX_CLIPBOARD_* in bin/omarchy-iptv and
+// pinned on both sides by the shared clipboard fixture: the shell keeps
+// LIMITS.url * 4 = 8192 UTF-16 units; a UTF-8 character is at most 4
+// bytes, so 32768 bytes (32 KiB) is the most a reply can need. The helper's
+// deadline is CLIPBOARD_TIMEOUT_MS; the shell's watchdog (Service.qml
+// clipboardWatchdog) is the OUTER bound and sits beyond the helper's
+// deadline plus its kill grace, so a helper that answers "timeout" on time
+// is read rather than killed mid-reply, and a helper that cannot answer at
+// all is still killed. A producer that drips bytes at the protocol's 1 s
+// per-read timeout runs into the helper's deadline; the bound kills a
+// CHILD, never the shell.
 var CLIPBOARD_TIMEOUT_MS = 5 * 1000
+var CLIPBOARD_KILL_GRACE_MS = 1000
+var CLIPBOARD_WATCHDOG_MS = CLIPBOARD_TIMEOUT_MS + CLIPBOARD_KILL_GRACE_MS + 2000
+var CLIPBOARD_MAX_CHARS = MAX_SOURCE_URL * 4
+var CLIPBOARD_MAX_BYTES = CLIPBOARD_MAX_CHARS * 4
+
+function clipboardArgv(helperPath) {
+  return helperArgv(helperPath, ["clipboard"])
+}
+
+// `text` cut to at most CLIPBOARD_MAX_CHARS UTF-16 units, never inside a
+// surrogate pair (the helper's utf16_cut counts the same units).
+function clipboardCut(text) {
+  var t = str(text)
+  if (t.length <= CLIPBOARD_MAX_CHARS) return t
+  var end = CLIPBOARD_MAX_CHARS
+  if (isHighSurrogate(t.charCodeAt(end - 1)) && isLowSurrogate(t.charCodeAt(end))) end--
+  return t.substring(0, end)
+}
+
+// The helper's reply, or null for anything that is not an `ok` reply with
+// a string text: a failure code, a killed helper's partial line, a blank
+// stdout, a non-object. The caller emits nothing for null, so a failed
+// paste can never clear a field (R2). The cut is re-applied here so the
+// bound holds even against a helper that did not apply it.
+function parseClipboardReply(stdout) {
+  var line = str(stdout).trim()
+  if (line === "") return null
+  var reply
+  try { reply = JSON.parse(line) } catch (e) { return null }
+  if (!reply || typeof reply !== "object" || Array.isArray(reply)) return null
+  if (reply.ok !== true || typeof reply.text !== "string") return null
+  var text = clipboardCut(reply.text)
+  return { text: text, truncated: reply.truncated === true || text.length !== reply.text.length, bytes: Math.max(0, Math.floor(Number(reply.bytes)) || 0) }
+}
 
 function isWordSpace(ch) { return WORD_SPACE_RE.test(ch) }
 function isWordSeparator(ch) { return WORD_SEPARATOR_RE.test(ch) }
@@ -10336,6 +10386,31 @@ function editRange(cursor, selStart, selEnd, hasSelection) {
 // whole value and Backspace clears it.
 function fullRange(value) {
   return { start: 0, end: str(value).length }
+}
+
+// The range an edit acts on, for the field as it is: a MASKED field is
+// fully selected by rule (fullRange), so typing replaces the whole value
+// and Backspace clears it; an unmasked field edits the control's own
+// selection or caret (editRange). The decision used to sit in Guide.qml at
+// both call sites, where no check could reach it: on a masked field the
+// control's caret is an offset into the masked DISPLAY string, not into the
+// raw value, so an edit through editRange there splices typed characters
+// into the credential at a meaningless offset while the user sees `****`.
+function editRangeFor(masked, value, cursor, selStart, selEnd) {
+  if (masked === true) return fullRange(value)
+  var a = Math.floor(Number(selStart)) || 0
+  var b = Math.floor(Number(selEnd)) || 0
+  return editRange(cursor, a, b, a !== b)
+}
+
+// Whether Ctrl+X edits: only with a selection and only on a field whose
+// echo is Normal, which is Qt's own gate on cut() (measured in the QML
+// spec on the dev branch: a Password field's Ctrl+X is a no-op natively).
+// The first D-CLIP-1 cut deleted the selection on the password field with
+// nothing on the clipboard to paste back, where native did nothing.
+function cutApplies(opaque, range) {
+  if (opaque === true) return false
+  return !!range && range.start !== range.end
 }
 
 function orderedRange(text, selStart, selEnd) {
@@ -11077,6 +11152,15 @@ if (typeof module !== "undefined") {
     MASK_CLEAR_PARAMS: MASK_CLEAR_PARAMS,
     LIMITS: LIMITS,
     CLIPBOARD_TIMEOUT_MS: CLIPBOARD_TIMEOUT_MS,
+    CLIPBOARD_KILL_GRACE_MS: CLIPBOARD_KILL_GRACE_MS,
+    CLIPBOARD_WATCHDOG_MS: CLIPBOARD_WATCHDOG_MS,
+    CLIPBOARD_MAX_CHARS: CLIPBOARD_MAX_CHARS,
+    CLIPBOARD_MAX_BYTES: CLIPBOARD_MAX_BYTES,
+    clipboardArgv: clipboardArgv,
+    clipboardCut: clipboardCut,
+    parseClipboardReply: parseClipboardReply,
+    editRangeFor: editRangeFor,
+    cutApplies: cutApplies,
     SOURCE_KEYS: SOURCE_KEYS,
     PAUSE_KEY: PAUSE_KEY,
     TRACKS_KEY: TRACKS_KEY,

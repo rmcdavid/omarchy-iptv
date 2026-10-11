@@ -2125,11 +2125,28 @@ TestCase {
   TextInput { id: chordInput; readOnly: true; width: 300; Keys.forwardTo: [chordSink] }
   QtObject { id: boundHolder; property string value: "" }
   TextInput { id: boundInput; readOnly: true; width: 300; text: boundHolder.value }
+  // The mouse pins need a control nothing overlaps: every input above sits
+  // at (0, 0) and a synthetic click lands on the topmost one, where a key
+  // goes to the focused one. selectByMouse is left at its default, as the
+  // host's TextField leaves it (true on this Qt, measured by the pin).
+  TextInput { id: mouseInput; readOnly: true; width: 300; y: 120; text: "hello" }
 
   function focusInput(item) {
     tryCompare(spec, "windowShown", true)
     item.forceActiveFocus()
     tryCompare(item, "activeFocus", true)
+  }
+
+  // QtTest runs this after EVERY test function, failed or not. A failed
+  // compare aborts the function in QtTest, so a reset at the END of a test
+  // (test_formEditCap's maximumLength used to be) never runs on the red
+  // path and the next test alphabetically inherits the cap -- a second,
+  // misleading red about Ctrl+Backspace. The shared controls are reset here.
+  function cleanup() {
+    edInput.maximumLength = 32767
+    edInput.text = ""
+    pwInput.text = ""
+    roInput.text = ""
   }
 
   function pair() { return String.fromCharCode(0xd83d) + String.fromCharCode(0xde00) }
@@ -2253,7 +2270,29 @@ TestCase {
     edInput.insert(1, "XYZW")
     compare(deleted(edInput), expected(Model.editInsert("abc", 1, 1, "XYZW", 5)), "a long insert keeps what fits")
     compare(edInput.text, "aXYbc")
-    edInput.maximumLength = 32767
+  }
+
+  function test_passwordCutIsNativelyANoOp() {
+    // Qt's cut() is gated on echoMode Normal (and on readOnly): Ctrl+X on
+    // a Password field deletes nothing and copies nothing, measured here on
+    // the editable control where the gate is the only thing in the way.
+    // Model.cutApplies keeps that gate for the plugin's own cut, so the
+    // password field's Ctrl+X stays the no-op it always was rather than
+    // deleting a selection with nothing on the clipboard to paste back.
+    pwInput.text = "secret"
+    focusInput(pwInput)
+    pwInput.select(1, 4)
+    compare(pwInput.selectedText, "ecr")
+    keyClick(Qt.Key_X, Qt.ControlModifier)
+    compare(pwInput.text, "secret", "Qt: Ctrl+X on a Password field is a no-op")
+    compare(Model.cutApplies(true, { start: 1, end: 4 }), false, "ours: the gate is kept")
+    edInput.text = "secret"
+    focusInput(edInput)
+    edInput.select(1, 4)
+    keyClick(Qt.Key_X, Qt.ControlModifier)
+    compare(edInput.text, "set", "Qt: Ctrl+X on a Normal field cuts")
+    compare(Model.cutApplies(false, { start: 1, end: 4 }), true, "ours: a Normal field with a selection cuts")
+    compare(Model.cutApplies(false, { start: 2, end: 2 }), false, "ours: no selection, no cut")
   }
 
   function test_readOnlyFieldPremises() {
@@ -2306,5 +2345,33 @@ TestCase {
     boundInput.cursorPosition = 3
     compare(boundInput.cursorPosition, 3, "the caret restore is synchronous")
     verify(boundInput.readOnly)
+    // Ctrl+C stays native on a read-only input (QQuickTextInput::copy has
+    // no readOnly gate): the selection reaches the clipboard, measured by
+    // pasting it into the editable control. Under the offscreen platform
+    // the clipboard is this process's own, so nothing here touches a
+    // Wayland clipboard.
+    focusInput(roInput)
+    roInput.text = "hello"
+    roInput.select(1, 4)
+    keyClick(Qt.Key_C, Qt.ControlModifier)
+    edInput.text = ""
+    focusInput(edInput)
+    keyClick(Qt.Key_V, Qt.ControlModifier)
+    compare(edInput.text, "ell", "Ctrl+C on a read-only input copies natively")
+    // Mouse selection stays native: a click places the caret, a drag
+    // selects (mousePressEvent is gated on selectByMouse, not on readOnly).
+    verify(mouseInput.readOnly)
+    compare(mouseInput.selectByMouse, true, "the default the host's TextField inherits")
+    mouseInput.cursorPosition = 1
+    var x1 = mouseInput.cursorRectangle.x
+    mouseInput.cursorPosition = 4
+    var x4 = mouseInput.cursorRectangle.x
+    var y = mouseInput.height / 2
+    mouseInput.cursorPosition = 0
+    mouseClick(mouseInput, x4 + 1, y)
+    compare(mouseInput.cursorPosition, 4, "a click places the caret on a read-only input")
+    mouseDrag(mouseInput, x1 + 1, y, x4 - x1, 0)
+    compare(mouseInput.selectedText, "ell", "a drag selects on a read-only input")
+    compare(mouseInput.text, "hello", "and none of it edited the field")
   }
 }

@@ -101,9 +101,12 @@ TRANSFORM_RULES = [
     },
     {
         "id": "T2-clipboard-shim",
-        "why": "Two Quickshell singletons are reachable from ordinary "
-               "functions. Neither is an accessibility sink; both would fail "
-               "to resolve outside the shell. A local object stands in.",
+        "why": "One Quickshell singleton call is reachable from an ordinary "
+               "function (the wl-copy write). Not an accessibility sink; it "
+               "would fail to resolve outside the shell. A local object "
+               "stands in. The clipboard READ this shim also stood in for "
+               "(T4) is gone with D-CLIP-1: nothing in the guide asks Qt for "
+               "the clipboard any more.",
         "before": [
             "Item {",
             "  id: root",
@@ -114,7 +117,6 @@ TRANSFORM_RULES = [
             "",
             "  QtObject {",
             "    id: probeShim",
-            "    property string clipboardText: \"\"",
             "    function execDetached(argv) { }",
             "  }",
         ],
@@ -124,12 +126,6 @@ TRANSFORM_RULES = [
         "why": "Clipboard write. Not an accessibility sink.",
         "before": ["    Quickshell.execDetached([\"wl-copy\", String(text)])"],
         "after": ["    probeShim.execDetached([\"wl-copy\", String(text)])"],
-    },
-    {
-        "id": "T4-clipboardText",
-        "why": "Clipboard read. Not an accessibility sink.",
-        "before": ["    var text = Quickshell.clipboardText"],
-        "after": ["    var text = probeShim.clipboardText"],
     },
     {
         "id": "T5-window",

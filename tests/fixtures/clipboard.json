@@ -1,0 +1,41 @@
+{
+  "comment": [
+    "The paste path's bounds (D-CLIP-1, R8), run by BOTH tests/Model.test.js and tests/test_clipboard.py.",
+    "A number implemented in two languages gets one fixture (engineering rule, dev branch).",
+    "",
+    "`timeoutMs` is the helper's deadline on the wl-paste read (CLIPBOARD_TIMEOUT, seconds)",
+    "and the shell's Model.CLIPBOARD_TIMEOUT_MS; `killGraceMs` is what the helper waits after",
+    "SIGTERM before SIGKILL (CLIPBOARD_KILL_GRACE), and the shell's outer watchdog must sit",
+    "beyond their sum. `maxChars` is LIMITS.url * 4 in UTF-16 units; `maxBytes` is maxChars",
+    "times 4, the most bytes a UTF-8 text of that many units can need. `argv` is what the",
+    "helper runs; the shell runs the helper, never wl-paste, since R8.",
+    "",
+    "`replies` are lines the helper could print, and what Model.parseClipboardReply must make",
+    "of each: null for anything that is not an ok reply with a string text. Node runs them;",
+    "the python test proves the verb prints lines of the accepted shape by running it."
+  ],
+  "timeoutMs": 5000,
+  "killGraceMs": 1000,
+  "maxChars": 8192,
+  "maxBytes": 32768,
+  "argv": ["wl-paste", "--no-newline", "--type", "text"],
+  "replies": [
+    { "why": "an ok reply carries its text", "line": "{\"ok\": true, \"kind\": \"clipboard\", \"text\": \"hello\", \"truncated\": false, \"bytes\": 5}\n", "expect": { "text": "hello", "truncated": false, "bytes": 5 } },
+    { "why": "an ok reply keeps control characters for the guide to sanitize", "line": "{\"ok\": true, \"kind\": \"clipboard\", \"text\": \"a\\u0001b\\n\", \"truncated\": false, \"bytes\": 4}", "expect": { "text": "a\u0001b\n", "truncated": false, "bytes": 4 } },
+    { "why": "a truncated reply says so", "line": "{\"ok\": true, \"kind\": \"clipboard\", \"text\": \"abc\", \"truncated\": true, \"bytes\": 32768}", "expect": { "text": "abc", "truncated": true, "bytes": 32768 } },
+    { "why": "a timeout answers nothing", "line": "{\"ok\": false, \"kind\": \"clipboard\", \"code\": \"timeout\"}", "expect": null },
+    { "why": "a missing wl-paste answers nothing", "line": "{\"ok\": false, \"kind\": \"clipboard\", \"code\": \"no_wl_paste\"}", "expect": null },
+    { "why": "a failed wl-paste answers nothing", "line": "{\"ok\": false, \"kind\": \"clipboard\", \"code\": \"failed\", \"status\": 1}", "expect": null },
+    { "why": "a failure that smuggles a text is still a failure", "line": "{\"ok\": false, \"code\": \"failed\", \"text\": \"secret\"}", "expect": null },
+    { "why": "an ok without a string text answers nothing", "line": "{\"ok\": true, \"text\": 42}", "expect": null },
+    { "why": "an ok with a null text answers nothing", "line": "{\"ok\": true, \"text\": null}", "expect": null },
+    { "why": "ok must be the boolean true", "line": "{\"ok\": \"true\", \"text\": \"x\"}", "expect": null },
+    { "why": "a blank stdout (a killed helper) answers nothing", "line": "", "expect": null },
+    { "why": "whitespace alone answers nothing", "line": "  \n", "expect": null },
+    { "why": "a partial line (killed mid-write) answers nothing", "line": "{\"ok\": true, \"text\": \"abc", "expect": null },
+    { "why": "a JSON array answers nothing", "line": "[true, \"x\"]", "expect": null },
+    { "why": "a JSON string answers nothing", "line": "\"ok\"", "expect": null },
+    { "why": "a raw text that is not JSON answers nothing", "line": "hello world", "expect": null },
+    { "why": "the helper's internal-error payload answers nothing", "line": "{\"ok\": false, \"kind\": \"clipboard\", \"error\": {\"code\": \"internal\", \"message\": \"x\"}}", "expect": null }
+  ]
+}
