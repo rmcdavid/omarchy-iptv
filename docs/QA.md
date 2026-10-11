@@ -406,6 +406,7 @@ output is empty unless stated.
 | SEC-19 | XMLTV entity expansion / external entities | A* small XML with a 10x10 nested entity (`<!ENTITY a "aaaa..."><!ENTITY b "&a;&a;...">`) and an external entity `<!ENTITY x SYSTEM "file:///etc/passwd">` as EPG source | parse error or bounded memory; external entity never read (`xml.etree` does not resolve them); `bad_xml`/`network` style error surfaced |
 | SEC-20 | 8.4 redirects | A* mock `http://` source that redirects to `file:///etc/passwd` and to `ftp://` | `urllib` refuses non-http redirects -> `network` error; https -> http downgrade is allowed by urllib (document) |
 | SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials |
+| SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` over `tests/fixtures/logo-dimensions.json` (44 header cases, all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049); M section 3.2 observes the sink | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached over-bound file swept and never announced; the within-bound control reaches `Image.Ready` at control memory |
 
 ### 3.1 TLS verification on the player (D-SINK-13)
 
@@ -450,6 +451,70 @@ measurements, which the two questions above are derived from and which no lane
 may restate as its own work, are the D-SINK-13 row in `docs/STATUS.md` and the
 write-up in `docs/QA-RESULTS.md`. Anything that needs a real player window, a
 running shell, or the live install belongs to whoever holds the display.
+
+### 3.2 A provider logo's declared dimensions (D-LOGO-11)
+
+What is under test. The standard is `ARCHITECTURE.md` section 8.12 and the
+ruling is `RULING-LOGOS.md` rule 7: a logo is refused at `write_logo` when its
+header declares a side over 4096 px or more than 4,194,304 px, or when the
+header cannot be read, for all four allowed types; and the cached-file branch
+of `logos --fetch` proves a file's header before announcing its name, removing
+what fails. The obvious test is not one, for the reason 3.1 gives: asserting
+that `MAX_LOGO_SIDE` is 4096 restates the line written to contain it. Nor is
+the byte cap a proxy -- the lead's table has 304 bytes costing 840 MB -- so a
+plan that checked file sizes would stay green against the finding.
+
+**Question one: does the gate refuse on the header alone?** Pure logic,
+called rather than mirrored. `tests/test_logo_dimensions.py` runs the 44
+header cases of `tests/fixtures/logo-dimensions.json` through the shipping
+parsers and the shipping predicate; the cases that carry the weight are the
+boundary shapes a wrong comparison operator gets wrong (4096x1024 exactly on
+both bounds, 4097x1024 one pixel over one bound, 2048x2049 inside both side
+checks and over the area), the unreadable headers that are refusals rather
+than passes, and `write_logo` on a bomb creating nothing on disk, not even
+the directory. Fifteen mutations of the shipping functions each redden at
+least one test (the fb2acdc commit message carries the counts; python
+986 -> 1015).
+
+**Question two: does the shipping path leave the shell at control memory?**
+That is the sink, and only observing it answers 8.12. What the harness
+scenario must observe, through the real `logos --fetch` subprocess and a
+playlist whose logos are served by a local TLS server (logos are `https` only
+by rule 3, so the server the TLS scenario already builds is the shape):
+
+- The bombs are refused: over-bound headers of all four types, rewritten and
+  honestly huge, counted under `reasons.logo_dimensions` in the summary, with
+  none of their names in `names` and no file of theirs under `logos/`.
+- A bomb seeded into the cache before the run, under the name the helper
+  would give it, is swept: `swept` counts it, the file is gone afterwards, and
+  its name is absent from `names`. Observed by this section's author on
+  2026-10-11 through the subprocess at 3c8cd65 (`swept: 1`, `names: []`, zero
+  files) and at the shipped 159da94 (`cached: 1`, the name announced, the file
+  still there), which is the RED the baseline arm must reproduce.
+- The positive control is within the bound, is fetched, is announced, and
+  reaches `Image.Ready` through an `Image` declared as `Guide.qml` declares
+  the row slot, at control memory. Peak RSS is read as `ru_maxrss` of the Qt
+  process, and the memory cap (`systemd-run --user --scope -p MemoryMax`)
+  wraps the Qt process ONLY: a cap around the reporter takes the measurement
+  with it when a bomb is killed.
+- The `--baseline 159da94` arm must go RED (engineering rule 11): the same
+  bombs announced in `names`, the seeded bomb kept, and, if the arm also
+  observes the sink, the probe over control memory or killed at the cap.
+
+What the scenario must not do: decode an over-bound image anywhere but under
+that cap, build a corpus of more than a few megabytes in the shared scratch
+directory, or touch the live install, its cache, or the network.
+
+Ownership and evidence. The lead assigned the scenario the name
+`scripts/dev-harness/logo-scenario.sh`; UNVERIFIED at 3c8cd65, where no file
+of that name exists and the harness lane's worktree held only an untracked
+corpus builder under `scripts/dev-harness/spikes/logo-decode-bomb/`. Until
+that lane lands it and confirms the name here, this section describes what it
+must observe and not what it does, for the reason 3.1 gives. The lead's own
+measurements, which the two questions are derived from, are the D-LOGO-11 row
+in `docs/STATUS.md` and "Fifth maintainer finding, 2026-10-09" in
+`docs/QA-RESULTS.md`; the per-type sibling table there is why question two
+runs all four types and not JPEG alone.
 
 ## 4. Performance gate (PLAN G3, ARCHITECTURE.md section 7, QB4)
 

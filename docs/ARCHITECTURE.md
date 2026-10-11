@@ -718,6 +718,112 @@ host's config for the plugin to know which source is active.
 `ARCHITECTURE-SOURCES.md` D1 records that, and the migration to a key is filed
 separately by the lead; the shield is the containment, not the answer.
 
+Raised 2026-10-09 (D-LOGO-11), and written here in the round that fixes it --
+the state of that fix is the board row in `docs/STATUS.md`, not this
+paragraph. **The same maintainer, the fifth finding in five days, on the
+verification request for the commit that fixed the fourth** (0.13.3, 159da94,
+omacom/omarchy-plugin-marketplace#10802): a provider JPEG passes `write_logo`
+on content type, magic bytes and the 256 KiB cap, and nothing bounds the
+dimensions its header declares, while `Guide.qml` decodes it inside the
+long-running shell. **A new class, and naming it is the point: a sink whose
+cost is set by a number the bytes do not have to honour.** The byte cap was
+the protection the documents named, and it bounds the download: the decoder's
+cost is quadratic in the width and height the header states, so 304 bytes
+whose SOF says 20000x20000 took a Qt process to 840 MB, 555 bytes to
+1,239 MB, and the 65500x65500 pair past a 1.5 GB cap in 1.5 s (measured by
+the lead on 2026-10-09 before any lane was briefed, Qt 6.11.2 offscreen, an
+`Image` declared as the row slot declares it, the cap around the Qt process
+alone; the tables are in `docs/QA-RESULTS.md`). The ratio is 2.9 million to
+one.
+**Why Qt's own limit does not catch it, measured rather than argued.** Qt's
+image allocation limit (256 MiB by default) IS consulted; bracketing it with
+`QT_IMAGEIO_MAXALLOC` puts the threshold between 20 and 26 MiB on that file,
+which is `ceil(20000/8)^2 * 4`: the image already divided by libjpeg's
+largest scale denominator, because `sourceSize` is set. The format's largest
+side is 65535 and `ceil(65535/8)^2 * 4` is exactly 256 MiB, so no JPEG the
+format can express exceeds the default on this path. The option added to
+keep the decode cheap is the option that disarms the only bound Qt has. PNG,
+GIF and WEBP refuse at control memory, rewritten and honestly huge alike,
+because their handlers decode at full size and hand the limit the real
+number -- an asymmetry that is upstream behaviour, not a property of the
+plugin. The contract file carries this as a verified Qt fact with no
+automated pin.
+**What changed, and where.** Two numbers at the one gate that puts a
+provider's bytes into the cache: `write_logo` refuses, after the magic check
+and before `ensure_private_dir`, any logo whose header declares a side over
+`MAX_LOGO_SIDE` (4096) or more than `MAX_LOGO_PIXELS` (4,194,304), and
+refuses a header it cannot read, for all four allowed types, so a refusal
+creates nothing on disk -- not the file, not the directory (called on the
+shipping function on 2026-10-11: `logo_dimensions`, directory absent). In
+the helper and not in QML, for three reasons that are each sufficient:
+`Image` has no lever for this, its allocation limit being measured
+unreachable above; the helper is the process that is allowed to die and the
+shell is not; and a guard in the guide would have to live inside the 150 ms
+open budget, where a header parse per visible row is exactly the work
+section 7 keeps off that path. The numbers are the cost at the bound: a
+4:4:4 progressive JPEG of 4,194,304 px holds 25,165,824 bytes of
+coefficients, 24 MiB, the order Qt was already willing to allocate for a
+logo (the 23.8 MiB above), and the side cap exists because area alone
+admits 65535x64. A 1920x1080 banner passes; 4097x1024, 2048x2049 and
+65535x64 do not (called, 2026-10-11). The refusal names a host and the
+numbers, never the URL (rule 5). `MAX_LOGO_BYTES` stays, bounding the axis
+it always bounded.
+**The cache written by 0.13.3 and earlier was never checked, so the fix is
+not complete without a sweep.** The guide points an `Image` at a cache file
+only when the helper announced that name (`Model.logoSlot`, `Model.wallTile`,
+`Service.qml` `logoHave`), and there are exactly two `Image` elements in the
+shipped tree, the wall tile and the row slot, both fed that way. So the
+"already on disk" branch of `logos --fetch` proves each cached file with
+`logo_file_within_bounds` BEFORE announcing it; a failure is unlinked, not
+announced, counted as `swept`, and falls through to the fetch, which refuses
+the same bytes at the gate under `reasons.logo_dimensions`. The summary
+replaces `logoHave` rather than adding to it, at 159da94 as now, so a swept
+name drops out of the guide at the end of the run. Observed through the
+subprocess on 2026-10-11 with a bomb seeded under its hashed name: at
+3c8cd65 `swept: 1`, `names: []`, zero files; at 159da94 `cached: 1`, the
+name announced, the file still there. The sweep is one header read per
+cached file -- `LOGO_HEADER_BYTES`, 128 KiB, and the rest only when the
+small read cannot prove a larger file -- through the same parser as the
+gate, so the two cannot disagree about one file. Cost, measured by the
+helper lane over 5,000 real cached logos with the page cache warm: the whole
+`logos --fetch` subprocess went from a median 375 ms to 601 ms, about 45 us
+per file, in the helper and off the UI thread. **Cold cache is unmeasured.**
+**The residuals, each with its size or marked unmeasured.**
+- A logo within the bound still costs real memory. Measured by the docs lane
+  on 2026-10-11 through the same row-slot probe under the same cap: control
+  74.0 MB; a 1920x1080 progressive 4:4:4 JPEG 83.1 MB; 2048x2048 and
+  4096x1024 progressive 4:4:4 JPEGs 95.6 and 95.5 MB, so about 21.5 MB over
+  control at the bound, consistent with the coefficient arithmetic. That is
+  per image; the row slot decodes about twenty asynchronously and how many
+  are resident at once is unmeasured, so the sum is not stated.
+- The bound is defence in depth for three types and the only bound for one:
+  Qt refuses PNG, GIF and WEBP bombs today and the plugin bounds them anyway,
+  because a Qt that learns to scale PNG during decode would reopen this in a
+  dependency bump, silently.
+- A shell not restarted after the upgrade runs the old `Service.qml`. That
+  service invokes the helper by path, so the sweep runs on its next fetch --
+  on cache load, which is shell start, a source switch, or a playlist
+  refresh at `refreshMinutes` -- and the old service replaces `logoHave`
+  from the summary too (159da94 `Service.qml:4832`). Until that run, a row
+  scrolling into view decodes whatever the old cache holds; a row already
+  drawn has already paid.
+- The real peak of a 65500x65500 progressive JPEG is unmeasured: both were
+  SIGKILLed at the 1.5 GB cap. The request is 8.6 GB for one component and
+  about 12.9 GB for three at 4:2:0, and what this machine
+  (`vm.overcommit_memory=0`, 7.8 GB RAM, 15.4 GB swap) does with that is
+  reasoning, not measurement.
+- `MAX_LOGO_FILES` bounds fetches per run and not the cache, so the sweep
+  validates every cached file and not at most 5,000 (D-LOGO-12, open).
+- The window `LOGO_HEADER_BYTES` leaves: a JPEG whose frame header sits past
+  128 KiB of APPn metadata inside a 256 KiB file costs a second read, not a
+  wrong answer.
+**The siblings, asked before closing (engineering rule 15).** Every `Image`
+in the four shipped QML files: two, both fed by an announced name, and no
+`AnimatedImage`, `icon.source` or SVG anywhere (the lead's census). Every
+other number the helper enforces that could bound the wrong axis: one found,
+D-LOGO-12. Every other place provider bytes are decoded in the shell: none;
+playlist and EPG bytes are parsed in the helper and arrive as JSON.
+
 ## 7. Error handling, offline behavior, performance
 
 - Every helper failure produces a status object the guide renders as text
@@ -742,6 +848,7 @@ Performance budget (10k channels):
 | `channels.json` | ~2 MB at 10k | omit empty keys, compact separators |
 | `epg-now.json` | < 1 MB at 10k | now/next only |
 | JSON.parse of channels in QML | ~50 ms, off the open path | happens on file load, not on summon |
+| Helper `logos --fetch`, cached-file check | ~45 us per cached file; the whole subprocess 375 -> 601 ms median over 5,000 cached logos, page cache warm (D-LOGO-11, helper lane) | one `LOGO_HEADER_BYTES` read per file, no decode, in the helper; cold cache unmeasured |
 
 ## 8. Security standards
 
@@ -812,6 +919,18 @@ Performance budget (10k channels):
     windows and their sizes. Verified by observing the real mode of a scratch
     file through `$XDG_CONFIG_HOME` -- a mode is observable, so rule 14 admits
     no grep here.
+12. A provider's bytes are bounded on every axis the decoder's cost depends
+    on, not only on their count. A byte cap bounds a download; a decoder's
+    cost is quadratic in the dimensions the header declares and the bytes
+    need not honour them, so `write_logo` also refuses, for all four allowed
+    image types, a header that declares a side over 4096 px or more than
+    4,194,304 px, or that cannot be read, before anything touches the disk;
+    and a cached file is proved the same way before its name is announced,
+    because the guide decodes only what the helper names (D-LOGO-11).
+    Verified by calling the shipping predicate over a header fixture and by
+    observing the sweep through the subprocess; a grep for the constant is
+    rule 14's shape and is not the check. Section 6 carries the measurement
+    and the residuals.
 
 ## 9. Coding standards
 

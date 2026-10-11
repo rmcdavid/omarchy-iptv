@@ -252,6 +252,30 @@ itself (`busctl --user status org.freedesktop.Notifications` names the
 quickshell pid), not mako or dunst, so Pango markup rules do not apply.
 
 
+## QML `Image` and Qt's allocation limit on a JPEG behind `sourceSize` (verified 2026-10-09)
+
+Qt 6.11.2. The image allocation limit (`QImageReader::setAllocationLimit`,
+`QT_IMAGEIO_MAXALLOC`, default 256 MiB) is consulted when a QML `Image` loads
+a file, but for a JPEG with `sourceSize` set it is compared against the image
+AFTER libjpeg's scale denominator, not before. Measured by the lead on a
+304-byte progressive JPEG whose header declares 20000x20000, through an
+`Image` declared as `Guide.qml` declares the row slot (`sourceSize` 44):
+`Image.Error` at 5, 7, 10 and 20 MiB; `Image.Ready` and 840 MB peak RSS at
+26 MiB and at the default. `ceil(20000/8)^2 * 4` is 23.8 MiB, between the
+two. The format's largest side is 65535 and `ceil(65535/8)^2 * 4` is
+268,435,456 bytes, exactly the default, so no JPEG the format can express
+exceeds the default on this path. The PNG, GIF and WEBP handlers decode at
+full size and hand the limit the real number: seven over-bound files of those
+types, rewritten headers and honestly huge valid files alike, refused at the
+control's 72 MB. `Image` loads a local file by content and not by its name
+(`RULING-LOGOS.md`), and offers no property that bounds the dimensions a
+header declares; the plugin's bound is in the helper (`ARCHITECTURE.md`
+8.12). There is no automated pin on this Qt behaviour, unlike the host text
+formats above: re-measure on a Qt bump with the lead's probe, recorded under
+"Fifth maintainer finding, 2026-10-09" in `docs/QA-RESULTS.md`. The bound
+covers all four types so that a change here is not a regression in silence.
+
+
 ## `omarchy-refresh-shell` RESETS the user's config (verified 2026-10-07)
 
 Its name reads like "reload the shell". It is not. Its own header says
