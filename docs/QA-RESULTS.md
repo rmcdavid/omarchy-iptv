@@ -13392,3 +13392,73 @@ each, so about 1.1-2.3 s at 50,000, in the helper and off the UI thread --
 and its comment says so rather than repeating the per-run claim. Filed open
 rather than fixed in the D-LOGO-11 release: bounding the cache by what is on
 disk changes what the number means, and that change gets its own measurements.
+
+## Sixth maintainer finding, 2026-10-11: D-CLIP-1, an editable form field makes the shell read the whole clipboard on every change
+
+Raised by HANCORE-linux on omacom/omarchy-plugin-marketplace#11077, against
+the SHIPPED 0.13.4 (`d55149b`), about an hour after the request was filed.
+The sixth finding in six days, the sixth on the request for the commit that
+fixed the previous one.
+
+> At d55149b…, opening the first-run or add-source form instantiates
+> editable `qs.Ui.TextField` controls in `Guide.qml:4714-4763`; `readOnly`
+> is false for the new empty fields. On the supported Qt 6.12 path,
+> clipboard changes trigger an automatic synchronous text read before
+> `maximumLength` or paste handling applies, allowing a foreign Wayland
+> clipboard producer to stall or exhaust the shared shell because that read
+> has no total byte limit or deadline.
+
+**Measured on this machine first, 2026-10-11, and it is live on Qt 6.11.2 --
+not only on "the 6.12 path".** A throwaway Wayland client (`qml`, never the
+user's shell) under the user's own compositor, one `QtQuick.Controls`
+`TextField` -- the base type the host's `qs.Ui.TextField` inherits -- and a
+foreign producer (`wl-copy`) offering 100 MB of `text/plain` 2.5 s after
+the window was up. Resident set sampled every 100 ms from outside:
+
+| the probe | RSS before | RSS peak | growth | last growth at |
+|---|---|---|---|---|
+| `TextField { readOnly: false }` | 164 MB | **403 MB** | **+238 MB** | 600 ms after the offer |
+| `TextField { readOnly: true }` | 163 MB | 163 MB | +0 | none |
+| no field at all (a `Rectangle`) | 105 MB | 157 MB | +52 MB | 600 ms, one sample in `pipe_read` |
+
+So the editable field reads the offer in full on the change, synchronously,
+with no user action, and holds roughly twice the payload (bytes plus the
+decoded string); the read-only field reads nothing; and a window with no
+field still reads something, which is attributed below rather than assumed.
+A reader asking for the offer as a consumer would (`wl-paste`) received
+104,857,601 bytes, so the producer served what it offered.
+
+**Where the read is, by the sources, and the one place it is not.** Read
+from code.qt.io for both 6.11 and 6.12:
+
+- `QQuickTextInput` connects `QClipboard::dataChanged` to
+  `q_canPasteChanged()` at construction, and that slot does
+  `if (!m_readOnly) canPaste = clipboard()->mimeData()->hasText()`. Identical
+  on 6.11 and 6.12. `readOnly` is the only switch on it.
+- `QWaylandMimeData::hasFormat_sys` (qtbase 6.12,
+  `src/plugins/platforms/wayland/qwaylanddataoffer.cpp`; the plugin moved
+  from qtwayland into qtbase at 6.10) consults only the offered type list,
+  and `retrieveData_sys` is the read: a pipe, `poll` with a **1 s timeout
+  per read**, 4 KB per read, **no total byte limit and no overall
+  deadline**, and the result cached in `m_data` until the next offer. So a
+  producer that writes one byte every 900 ms holds the shell's main thread
+  for as long as it likes, and one that writes fast grows it by whatever it
+  sends -- exactly the maintainer's two halves.
+- What joins `hasText()` to that read on 6.11.2 is NOT settled by the
+  sources read so far (`hasText` is a type check in both branches read);
+  the measurement says the join exists on this machine, and the no-field
+  row says part of it sits below the control. The attribution is the
+  review's first job; the fix does not depend on it.
+- Nothing in the host shell or in this plugin binds Quickshell's
+  `clipboardText` (which would re-read `text()` on every change), and the
+  plugin's own `wl-paste` fallback runs only on a user paste
+  (`pasteViaProcess` is false anyway).
+
+**Scope.** The form's fields exist while the first-run or add-source form is
+open; `readOnly: fieldRow.masked` is true only for a masked URL, so every
+other field -- name, server, username, the password, an unmasked URL -- is
+editable the whole time the form is up, whether or not it has focus, and
+each one subscribes to the change signal separately. A clipboard change by
+ANY application on the desktop during that window is a synchronous, unbounded
+read inside `omarchy-shell`. Found by the marketplace maintainer; measured
+here before any lane was briefed.
