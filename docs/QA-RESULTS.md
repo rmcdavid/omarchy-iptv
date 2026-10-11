@@ -13397,8 +13397,9 @@ disk changes what the number means, and that change gets its own measurements.
 
 Raised by HANCORE-linux on omacom/omarchy-plugin-marketplace#11077, against
 the SHIPPED 0.13.4 (`d55149b`), about an hour after the request was filed.
-The sixth finding in six days, the sixth on the request for the commit that
-fixed the previous one.
+The sixth finding since 2026-10-07 -- five calendar days -- and the fifth in a row raised on
+the request for the commit that fixed the one before it (the first of the six, D-SINK-13,
+was raised on 0.12.1's request, which was not a fix).
 
 > At d55149b…, opening the first-run or add-source form instantiates
 > editable `qs.Ui.TextField` controls in `Guide.qml:4714-4763`; `readOnly`
@@ -13482,8 +13483,9 @@ throwaway client, backtrace at every hit after the offer:
 #17 QtWaylandClient::QWaylandDisplay::flushRequests
 ```
 
-Ten `pipe2` hits after one offer on the editable probe, every one through
-that path -- `QMimeData::text()` tries `text/plain;charset=utf-8` and then
+Eighteen `pipe2` stops on the editable probe, four of them the toolkit's own
+thread-start pipes that the no-field run has too, and the other FOURTEEN all
+after the offer and every one through that path -- `QMimeData::text()` tries `text/plain;charset=utf-8` and then
 `text/plain`, and the signal fires per mode -- and **zero on the no-field
 probe**, so the 52 MB that window grew by was never the clipboard (it is
 the toolkit starting up; attributed, not assumed). The join the sources did
@@ -13491,16 +13493,19 @@ not show is in the RELEASED 6.11.2: its `q_canPasteChanged` calls
 `mimeData()->text()`. The upstream log of `qquicktextinput.cpp` on the 6.11
 branch says exactly when that came and went:
 
-- `c82ef988`, 2026-02-18, "QQuickTextInput: check if text is empty in
+- `c82ef988`, integrated 2026-02-18 (authored 2026-02-16, a cherry-pick), "QQuickTextInput: check if text is empty in
   q_canPasteChanged" -- the read ARRIVES, so that an empty clipboard reads
   as not pasteable. Shipped in 6.11.2.
-- `7d0a433a`, 2026-09-15, "QQuickTextInput: don't call QMimeData::text() for
-  canPaste" -- the read LEAVES. After 6.11.2's cut; on the 6.11 and 6.12
-  branch heads, not in any package this machine has.
+- `7d0a433a`, integrated 2026-09-15 (authored 2026-08-29, a cherry-pick), "QQuickTextInput: don't
+  call QMimeData::text() for canPaste" -- the read LEAVES. After 6.11.2's cut,
+  on the 6.11 and 6.12 branch HEADS only: the released v6.12.0 still carries
+  the read (its `qquicktextinput.cpp` line 3009, read at the tag), no 6.11.3
+  exists, and no package this machine has is without it.
 
 So the maintainer's sentence has its versions inverted and its mechanism
 right: it is the released Qt that reads, every editable `TextInput` does it
 on every clipboard change by any application, and the Wayland read beneath
 it has a 1 s per-read timeout, no total limit and no deadline. `readOnly`
-is the one switch on it, in every version of the slot since January
-(`a026cb69`, "check read-only first"), which is what the fix rests on.
+is the one switch on it, in every version of the slot (the January commit
+`a026cb69`, "check read-only first", only moved that check ahead of the
+read), which is what the fix rests on.
