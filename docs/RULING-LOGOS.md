@@ -106,7 +106,7 @@ made to hosts neither we nor the user chose — the playlist author did.
    another directory is stopped and started again for the current one
    (`Model.logoHaveSet`, `logoSlot`, `logoHaveMerge`, `logoSummaryNames`,
    `logoFetchPlan`; `Service.qml` `clearSourceData` and `fetchLogos`; called
-   by the seven "D-LOGO-11 blocker" checks in `tests/Model.test.js`, which
+   by the seven "D-LOGO-11 blocker" checks in `tests/Model.test.js` plus two re-shaped older ones (the D-LOGO-8 call-site inventory and the M2-04 defensive-report check), which together
    read 9 failures against the Model.js and Service.qml of 995c6be and 0
    against the fix, lane commit 1a05214).
 

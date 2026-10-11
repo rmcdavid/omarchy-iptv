@@ -13098,7 +13098,7 @@ that a bomb kills the probe and not the user's desktop. The probe is an
 
 Every row below the controls passes every check the helper has: the
 content type is `image/jpeg` and the first three bytes are `FF D8 FF`, and
-every rewritten-header row is under 555 bytes against a 256 KiB cap. (The
+every rewritten-header row is at most 555 bytes against a 256 KiB cap. (The
 one honestly-huge row, 706,780 bytes, is OVER that cap and was refused on
 bytes by 0.13.3 already; it is in the table for the cost of the decode, not
 as a file that passed. A review caught this sentence counting it -- the
@@ -13212,7 +13212,9 @@ join by NAME that nothing verifies).
   before announcing its name, because the guide points an `Image` only at a
   name the helper announced. A file that fails is unlinked, not announced,
   and falls through to the fetch, where the gate refuses the bytes again and
-  the reason is counted -- the way a dead logo host already behaves.
+  the reason is counted (or, once the per-run fetch cap is reached, is
+  counted as `deferred` and fetched on a later run -- the review moved the
+  cap off the cached branch) -- the way a dead logo host already behaves.
 - **R6.** Nothing new reaches a sink: the refusal reason is a code and a host,
   never a URL (engineering rule 5).
 
@@ -13223,12 +13225,127 @@ switch while the directory under it changes, so a name announced for one
 source could point an `Image` at the other source's never-swept file. That is
 repaired in the same release and recorded under the review section below.
 
+### The review of D-LOGO-11: the fix was right and its coverage was not, twice (F-M3-18)
+
+Two adversarial rounds, four lenses each, over the helper bound, the tests,
+the harness and the documents. Nineteen findings each round; the shape of
+every one worth recording is the same shape this project keeps paying for --
+a check that could not go red for the thing it guarded.
+
+**Round one, against the fix as built.**
+
+- **P1, the sink lens: the fix had a hole the helper could not see.** It
+  rested on "the guide points an `Image` only at a name the helper
+  announced", and that was false across a source switch. `logoHave` was a
+  bare set of file names with no record of which cache directory announced
+  them; `clearSourceData()` reset everything per-source except that set;
+  `fetchLogos()` refused while a fetch was running and nothing stopped the
+  running one on a switch; and when the OLD fetch finished, its summary
+  replaced the set with the old source's names and bumped `logoFetchSeq`,
+  re-evaluating every `Image` against the NEW directory. A user with the same
+  provider added twice (Xtream beside the M3U of one subscription, which
+  Sources supports by design) shares every logo URL, so the name resolves to
+  a file in the other source's never-swept cache. Reproduced by calling the
+  shipping functions with the service's own values. Nothing could go red for
+  it: the three decisions lived only in `Service.qml` (rule 12).
+- **P1, the tests lens: the harness branch was red under the gate it added.**
+  Its memory cap used a service-manager scope command that the marketplace
+  capability scanner reads as a capability. The lane's "all green" gate run
+  was timestamped before its commits; the scanner enumerates `git ls-files`,
+  so an untracked file is invisible to it. The replacement is an
+  address-space rlimit on the qml process alone (util-linux `prlimit`),
+  measured by the lead first: the same 840 MB on the 304-byte file, and the
+  65500x65500 pair refused by the allocator at 2.5 GB (`Image.Error`,
+  325 MB) rather than killed.
+- **P2, the tests lens, five holes in the fixture**, each a mutation of the
+  shipping parser that stayed green: a naive scan for the first SOF bytes
+  (no case carried an APP1 EXIF thumbnail before the real frame header -- the
+  reviewer built one, and under that mutant the row slot took 1,239 MB);
+  the offending dimension never in HEIGHT (dropping the height half of the
+  side check, or computing the area as height squared); the second read of
+  `logo_file_within_bounds` never executed (no on-disk case over
+  `LOGO_HEADER_BYTES`); the GIF walk pinned only to the first frame.
+- **P2, the docs lens: a skipped scenario printed `check.sh: all green`.**
+  Exit 77 was a green SKIP, so a machine without the qml runtime observed
+  nothing and passed. Policy now: 77 is RED unless
+  `LOGO_PREFLIGHT_SKIP_OK=1`.
+- **P3s, sentences**, two of them the lead's own in this section: the
+  counting sentence included the one row over the byte cap, and the helper's
+  comments cited rulings R1-R6 "in the QA results" that existed only in the
+  lane brief (fixed above, verbatim).
+
+What held, with its own evidence: 1.3 million fuzz cases without a raise;
+37 of 37 real files agreeing with ImageMagick; the sweep unable to unlink
+outside its directory (a symlink named like a logo loses the link, never
+the target); the worst case still allowed -- a 4:4:4 progressive JPEG at
+either bound shape -- 21-23 MB over control at both `sourceSize` values; and
+the lead's `ceil(dim/8)^2 * 4` inference re-bracketed on a second dimension
+(12000x12000: predicted 8.58 MiB, `QT_IMAGEIO_MAXALLOC=8` Error and `=9`
+Ready).
+
+**Round two, against the repair.** Four lanes: the directory tag and the
+lifted decisions (R1); the cap moved off the cached branch, eleven fixture
+cases and the on-disk second-read tests (R2); the rlimit, the skip policy,
+three new corpus shapes and the gate floors (R3); the documents (R4). Then
+three lenses, nineteen findings again, one of them the one that matters:
+
+- **P1, the lifecycle lens: the repair tagged the set with the CACHE
+  directory and the guide compared it with the LOGOS directory.**
+  `Service.qml` set `logoFetchDir = root.activeCacheDir`; `logoDir` was
+  bound to `activeCacheDir + "/logos"`; `Model.logoSlot` compares the two.
+  Every slot blank, every wall tile a mark, for every user, always --
+  fail-closed, so not a sink, but a dead feature in the release whose point
+  is that feature. **1,910 node checks were green**, because the lane's seven
+  tests tagged with the logos directory on both sides, and the reviewer's
+  own mutation in the FIX direction left them green too: no test could tell
+  the two tags apart. Rule 13's join-by-name failure, one layer down from
+  where it was fixed. Found by calling the shipping functions with the
+  service's own values. Repaired by the lead: `Model.logoDirFor(cacheDir)`
+  is the ONE derivation, used by the `logoDir` binding and the tag and the
+  plan alike; the D-LOGO-8 call-site inventory asserts all three sites and
+  refuses the bare cache directory; and check (f) builds the whole chain
+  from the service's own values. Seen red: the inventory reads 1 failure
+  with the tag reverted to `activeCacheDir` (1,911 checks), 0 with it
+  restored.
+- **P2 x3, the lifecycle lens, accepted as residuals with the observation
+  owed:** three decisions still live only in `Service.qml` and no node test
+  can see them -- the restart flag read once (left unclearing, every exit
+  would re-fetch, which is the disclosure the ruling bounds), the caller's
+  old `names.length > 0` guard re-added, and the `clearSourceData` reset
+  dropped (the tag keeps the slot blank; `ipc status` would count the old
+  names). The observation that closes them is a live harness run reading
+  the fake shell's `logoCount` / `logoHaveDir` / `logoDir` across a switch,
+  which this round added to `scripts/dev-harness/shell.qml` and no scenario
+  yet asserts. Filed under F-M3-18 as the open half.
+- **P3s fixed in the same integration:** the exit flush repopulating the
+  set after the switch went OFF (now skipped while off); the restart
+  re-entering the Process from inside its own exit slot against the
+  written convention (now a debounce Timer like `playlistRerun`); the
+  harness fake counting the tagged set with `Object.keys` (2 for every set);
+  a GIF walk stopping after the SECOND descriptor surviving every test (a
+  three-frame case); test temp directories never removed on a quota-bound
+  tmpfs; and eleven sentences across six documents -- the scanner described
+  as catching comments and READMEs it does not read, "every cached file"
+  where it is every cached file for a URL still in the playlist, a count of
+  seven checks reporting nine failures, eight named passers for "9 passed",
+  "37 rows judged" for a run that needs a file outside the tree, and the
+  lead's own R5 and D-LOGO-12 paragraphs gone stale against R2's `deferred`.
+
+**Where it ends, at integration on 2026-10-11:** node 1,911 / 0; python
+1,026 / 0; qml 73; harness predicates 388; logo preflight 33 checks in the
+gate, forward 33 / 0 and `--baseline 159da94` 9 / 24 with K2 carrying
+`rc=0 peak_mb=839` for the announced 304 bytes; marketplace capability scan
+59 files, 0 hits; `check.sh: all green`. The live observation of the
+lifecycle on the real shell is taken after the install update, under the
+release notes below, by reading `ipc status` with logos on.
+
 ### D-LOGO-12: `MAX_LOGO_FILES` bounds fetches per run, not the cache (found by the D-LOGO-11 helper lane, rule 15)
 
 The lane that built the bound was asked whether any OTHER number the helper
 enforces has `MAX_LOGO_BYTES`'s property -- that it bounds the wrong axis and
 so cannot fail for the thing it looks like it guards -- and found one.
-`cmd_logos` breaks on `fetched >= MAX_LOGO_FILES`, and `fetched` counts NEW
+`cmd_logos` stopped at `fetched >= MAX_LOGO_FILES` (since the D-LOGO-11 review it
+steps past the fetch and goes on validating cached files), and `fetched` counts NEW
 downloads in THIS run, so the cap bounds fetches per run and not the number
 of files in the cache. Measured by lowering the cap to 2 in a scratch copy of
 the helper and offering 7 safe logos over a local TLS server: run 1

@@ -290,15 +290,14 @@ refused 325 MB in after 0.6 s, the 3-component one at the 72 MB control
 before anything is touched. Every other row reproduces to the megabyte under
 both (72 control, 839 and 1,239 for the two 20000x20000 progressive bombs,
 454 for the 176-byte baseline 65500x65500, 347 for the honestly-huge valid
-12000x12000; 37 rows judged, 0 DIFF, `scripts/dev-harness/spikes/logo-decode-bomb/run.sh`
+12000x12000; 36 rows judged from the tree (37 with `--extra`), 0 DIFF, `scripts/dev-harness/spikes/logo-decode-bomb/run.sh`
 and its README). The control reads 72 MB at `--as` 1.5, 2.5 and 4.0 GB
 alike (lead, 2026-10-11); 2.5 GB is the value because Qt offscreen maps
 about a gigabyte of address space before it decodes anything and the
 1,239 MB bomb has to fit for the finding to be measured rather than cut off.
 The reason the rlimit is the mechanism and not the scope is in
 `ARCHITECTURE.md` section 6 (the marketplace capability scan reads the scope
-tool's name as a service-management capability wherever it appears in a
-tracked file).
+tool's name as a service-management capability in any command line of a tracked .sh/.py/.js/.qml file, or a shell fence of the root README (comment-only lines are skipped, as upstream skips them, and no other .md file is read)).
 
 There is no automated pin on this Qt behaviour, unlike the host text formats
 above, but there is a gate that observes the sink on every commit:

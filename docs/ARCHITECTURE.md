@@ -747,8 +747,7 @@ spawned) -- and not under the memory scope the first measurement used. Two
 reasons, neither taste. `scripts/check-marketplace-capabilities.py`
 reproduces the marketplace security baseline over every tracked
 `.sh`/`.py`/`.js`/`.qml` file with no allowlist by design, and its
-service-management rule matches the scope tool's name wherever it appears,
-comments and READMEs included; the harness lane's first commit carried those
+service-management rule matches the scope tool's name in any command line of a tracked .sh/.py/.js/.qml file, or a shell fence of the root README (comment-only lines are skipped, as upstream skips them, and no other .md file is read); the harness lane's first commit carried those
 tokens and turned that gate red without noticing, because it ran the gate
 before `git add` and the scanner enumerates `git ls-files`. And under the
 rlimit an allocation the limit cannot hold is refused inside the process,
@@ -759,7 +758,7 @@ the 304-byte 20000x20000 progressive 840 MB, the 555-byte 3-component
 1,239 MB, the 176-byte baseline 65500x65500 455 MB, the valid 12000x12000
 348 MB, and both 65500x65500 progressive files SIGKILLed at 1.5 GB; under
 the rlimit (harness lane, 2026-10-11, `scripts/dev-harness/spikes/logo-decode-bomb/run.sh`,
-37 rows judged, 0 DIFF) the same rows read 72, 839, 1,239, 454 and 347, and
+36 rows judged from the tree, 37 with `--extra` for the lead's valid 12000x12000 file, 0 DIFF) the same rows read 72, 839, 1,239, 454 and 347, and
 the two the scope could not measure read `Image.Error` -- the grayscale
 65500x65500 refused by the allocator 325 MB in after 0.6 s, the 3-component
 one refused at 72 MB before anything was touched. The control is 72 MB at
@@ -957,7 +956,7 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   7.8 GB RAM, 15.4 GB swap) would do with it uncapped is reasoning, not
   measurement.
 - `MAX_LOGO_FILES` bounds fetches per run and not the cache. The sweep is no
-  longer bounded by it (above), so every cached file is validated on every
+  longer bounded by it (above), so every cached file for a URL in the current playlist is validated on every
   run; what remains open is the cache's size on disk, which nothing bounds
   (D-LOGO-12, open).
 - The windows `LOGO_HEADER_BYTES` and the byte cap leave, stated exactly
@@ -979,6 +978,32 @@ in the four shipped QML files: two, both fed by an announced name, and no
 other number the helper enforces that could bound the wrong axis: one found,
 D-LOGO-12. Every other place provider bytes are decoded in the shell: none;
 playlist and EPG bytes are parsed in the helper and arrive as JSON.
+
+- Five smaller things the repair round left open, each stated rather than
+  rounded away (the review found them recorded in no document):
+  1. Turning logos OFF while a fetch is dying sets the same restart flag a
+     source switch sets, so OFF-then-ON before the process exits fetches
+     again (the plan says "skip" while off, so nothing starts while it is
+     off). Confirmed by the lead as intended: it closes a pre-existing gap
+     where a quick off/on left no fetch running.
+  2. `fetchLogos()` returns `false` on the "restart" plan, where nothing has
+     started yet and the re-fetch comes from `onExited` through a debounce
+     Timer; no caller reads the value today, and `false` now also means
+     "queued".
+  3. Once the per-run fetch cap is reached the loop walks the rest of the
+     channel list -- one `os.path.exists` per unseen URL, up to
+     `MAX_CHANNELS` -- so that cached files past the cap are still validated
+     and announced. Untimed; of the order of 10,000 stats at the maximum,
+     well under the per-file header read the sweep already costs.
+  4. A cached file whose URL has left the playlist is neither checked nor
+     swept nor announced -- never drawn, so never decoded, and `cache
+     logos-clear` removes it; it is the on-disk growth D-LOGO-12 leaves open.
+  5. Nine other scenario scripts (argv-, chno-, chno-entry-, config-mode-,
+     id-rotate-, m3-, pip-, player-, sources-scenario.sh) keep the
+     `HERE=$(dirname ...)`-above-the-tool-checks shape that logo-scenario.sh
+     and the spike's run.sh repaired; cosmetic (a shell error line before the
+     SKIP reason on a machine with no PATH) and listed for the next harness
+     round rather than widened into a security release.
 
 ## 7. Error handling, offline behavior, performance
 

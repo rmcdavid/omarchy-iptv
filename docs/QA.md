@@ -502,8 +502,7 @@ by rule 3, so the server the TLS scenario already builds is the shape):
   the runtime in place), and NOT a user-session memory scope, which is what
   the lead's first measurement used: the marketplace capability scan
   (`scripts/check-marketplace-capabilities.py`, no allowlist by design)
-  reads the scope tool's name as a service-management capability wherever
-  it appears in a tracked file, and under the rlimit an over-bound decode is
+  reads the scope tool's name as a service-management capability in any command line of a tracked .sh/.py/.js/.qml file, or a shell fence of the root README (comment-only lines are skipped, as upstream skips them, and no other .md file is read), and under the rlimit an over-bound decode is
   a clean allocator refusal (`Image.Error`, exit 1) where the scope killed
   the process with the figure unmeasured.
 - The `--baseline 159da94` arm must go RED (engineering rule 11): the same
@@ -534,7 +533,7 @@ answered on this machine:
   (under 160 MB) and K2 reads `withheld-and-gone`.
 - `bash scripts/dev-harness/logo-scenario.sh --baseline 159da94` (the live
   arm, transcript first line per parallel rule 7): `9 passed, 24 failed`.
-  V1, V2, C1, C2, C3, C4, T2 and K1 pass as controls; P1..P10, S1, G1, F1,
+  V1, V2, C1, C2, C3, C4, T2 and K1 pass as controls, and the ninth PASS line is the scenario's own "ran every check it has (32)" floor; P1..P10, S1, G1, F1,
   F2, R1, R2, R3, E1, E2, E3, M1, M2, T1 and K2 go red, and K2's line reads
   `announced rc=0 peak_mb=839` -- the finding at the sink, the shipped
   0.13.3 helper announcing the 304-byte bomb and the row slot decoding it to
@@ -568,7 +567,7 @@ attributed to it. The lead's own measurements, which the two questions are
 derived from, are the D-LOGO-11 row in `docs/STATUS.md` and "Fifth
 maintainer finding, 2026-10-09" in `docs/QA-RESULTS.md`; the per-type
 sibling table there is why question two runs all four types and not JPEG
-alone. The re-measured table under the rlimit, 37 rows judged and 0 DIFF
+alone. The re-measured table under the rlimit, 36 rows judged from the tree (37 with `--extra`) and 0 DIFF
 against the lead's figures except the two 65500x65500 progressive rows the
 scope could not measure, is `scripts/dev-harness/spikes/logo-decode-bomb/README.md`.
 

@@ -49,14 +49,14 @@ Measured at `--as=1500000000`, `2500000000` and `4000000000`, the control is
 
 The lead's first measurement, 2026-10-09, capped the probe with a
 user-session memory scope at 1.5 GB, and the harness lane's first commit
-(`8f10bae`) reproduced the table under the same scope. Two things were
+(`e2ce7ac`, then `8f10bae`) reproduced the table under the same scope. Two things were
 wrong with that for files under `scripts/`:
 
 - `scripts/check-marketplace-capabilities.py` reproduces the marketplace's
   security baseline over every tracked `.sh`/`.py`/`.js`/`.qml` file, and
   its service-management rule matches the scope tool's name wherever it
-  appears -- a comment and a README line included -- with no allowlist by
-  design. The first commit carried six such lines and turned that gate red,
+  appears in any command line of a tracked .sh/.py/.js/.qml file, or a shell fence of the root README (comment-only lines are skipped, as upstream skips them, and no other .md file is read) -- with no allowlist by
+  design. The first commit carried four such lines and the second six and turned that gate red,
   unnoticed, because the gate had been run over an untracked tree (the
   scanner enumerates `git ls-files`).
 - A kill is a worse answer than a refusal. Under the scope the two
@@ -79,7 +79,7 @@ measured the table first, on 2026-10-09, on files crafted by hand in the
 lead's scratch directory, under a user-session memory scope; the harness
 lane re-measured every row on 2026-10-11 on the files `make-corpus.py`
 generates, under the scope, and then re-measured EVERY row again the same
-day under the rlimit, with `run.sh`, in one run of 27 s: 37 rows judged,
+day under the rlimit, with `run.sh`, in one run of 27 s: 36 rows judged from the tree, 37 with `--extra`,
 0 DIFF. The JPEG fixtures are byte-identical to the lead's (checked with
 `cmp`: the controls, the four 20000 bombs and the two 65500 progressive
 bombs); the PNG, GIF and WEBP fixtures are not byte-identical (a different

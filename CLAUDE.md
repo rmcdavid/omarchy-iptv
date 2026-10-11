@@ -407,6 +407,56 @@ requests and raise the batch.
      `player probe` is therefore no longer purely a read, and that is
      deliberate: a probe that found the exposure and walked past it would be
      worse than the side effect.
+   - **The image decoder** (D-LOGO-11), which is the sink that is not a
+     place a string goes but a place a NUMBER goes: a provider's logo is
+     decoded inside the long-running shell, and the decoder's cost is
+     quadratic in the dimensions the file's HEADER declares, which the bytes
+     do not have to honour. A 304-byte progressive JPEG whose header says
+     20000x20000 took a Qt `Image` declared exactly as the row slot is to
+     840 MB; 555 bytes with three components, 1,239 MB; the 65500x65500 pair
+     were refused by the allocator at a 2.5 GB address-space limit (and
+     killed outright under a 1.5 GB memory scope). Measured 2026-10-09 on
+     Qt 6.11.2, offscreen, with the cap around the Qt process only. Raised
+     by the marketplace maintainer against the shipped 0.13.3.
+     Qt's own allocation limit is NOT a bound here, and that is arithmetic:
+     it is compared against `ceil(dim/8)^2 * 4`, the image already divided
+     by libjpeg's largest scale denominator, and at the format's own maximum
+     that is 8192 * 8192 * 4 = exactly the 256 MiB default. No JPEG the
+     format can express can exceed it on this path, and it is unreachable
+     BECAUSE `sourceSize` is set -- the option added to keep the decode cheap
+     is the option that disarms the only bound Qt has. PNG, GIF and WEBP are
+     refused by that same limit because their handlers decode full size and
+     hand it the real number; JPEG is the one of the four the decoder can
+     scale, which is the whole reason it is the one exposed -- and the bound
+     covers all four anyway, because that asymmetry is upstream behaviour a
+     dependency bump could end in silence.
+     The bound lives in the HELPER (`write_logo`, `MAX_LOGO_SIDE = 4096`,
+     `MAX_LOGO_PIXELS = 4194304`, `logo_dimensions` for all four types),
+     refuses unless it can PROVE the file is within it, and the cached-file
+     branch of `logos --fetch` proves a header before announcing a name,
+     because the guide points an `Image` only at a name the helper announced
+     -- FOR THE DIRECTORY IT ANNOUNCED IT FOR. That qualifier is the review's
+     finding: `logoHave` used to be a bare set of names that survived a
+     source switch while the directory under it changed, so the set is
+     tagged with its directory (`Model.logoHaveSet(names, dir)`), derived
+     through `Model.logoDirFor` at BOTH the binding and the tag (the first
+     repair tagged with the cache directory and compared with the logos
+     directory, and every slot was blank with 1,910 node checks green), and
+     `Model.logoSlot` refuses a set for another directory. A byte cap
+     (`MAX_LOGO_BYTES`) bounds the download and nothing the decoder does;
+     the README used to present it as the protection.
+     The gate observes the sink: `scripts/dev-harness/logo-scenario.sh
+     check-tree` runs the shipping helper over a generated corpus and a QML
+     `Image` probe under an address-space rlimit on the qml process alone
+     (never a service-manager scope: the marketplace capability scanner
+     reads that command's name as a capability, and a harness commit once
+     turned the gate red with it while its own gate run, taken before `git
+     add`, read clean). A skipped scenario is RED unless
+     `LOGO_PREFLIGHT_SKIP_OK=1` says the machine cannot run it.
+     The lesson (rule 15's shape, found by the parser lane): `MAX_LOGO_FILES`
+     has the same property the byte cap had -- it bounds fetches per run, not
+     the cache -- and is filed open as D-LOGO-12. A number that cannot fail
+     for the thing it looks like it guards is the defect, whatever the number.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
