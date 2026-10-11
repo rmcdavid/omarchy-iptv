@@ -38,7 +38,7 @@ Omarchy precedents this design maps onto (read them before implementing):
 | Switch | `Enter` switches and returns to the guide; `Space` switches and stays. Cached source: instant redraw, silent background refresh when stale. Uncached: commit, then the shipped loading state. |
 | Remove | `x` / `X` / `Delete` -> `ConfirmDialog` -> cache deleted. Active removed: settings cleared, guide behind is first-run; Sources stays open while other sources remain. |
 | Xtream | `c` in Sources, the `Add Xtream login` row, or the link row in the add / first-run forms. Four fields, password echo-masked, never re-shown. |
-| Editing (added 2026-10-11, D-CLIP-1) | Every form field is read-only to Qt, always. The plugin applies typing, `Backspace`, `Delete`, their `Ctrl` word variants and cut to the model value itself and puts the caret back; navigation, selection, `Ctrl+A`, `Ctrl+C` and mouse selection stay native. Paste is `Ctrl+V` / `Shift+Insert` through a `wl-paste` process only. Lost, and said so: input-method composition in the label field, native undo, middle-click paste. Rows below that say Qt edits the field are overturned where they stand, not rewritten. |
+| Editing (added 2026-10-11, D-CLIP-1) | Every form field is read-only to Qt, always. The plugin applies typing, `Backspace`, `Delete`, their `Ctrl` word variants and cut to the model value itself and puts the caret back; navigation, selection, `Ctrl+A`, `Ctrl+C` and mouse selection stay native. Paste is `Ctrl+V` / `Shift+Insert` only, through the helper's `clipboard` verb, which bounds a `wl-paste` child to 32 KiB and 5 s and hands the shell at most 8,192 characters (R8). `Ctrl+X` on the password field does nothing, as it does natively (`Model.cutApplies`). Lost, and said so: input-method composition in the label field (a dead key then a letter types the plain letter), native undo, middle-click paste. Rows below that say Qt edits the field are overturned where they stand, not rewritten. |
 
 ---
 
@@ -297,8 +297,8 @@ Model: the shipped two-layer handler, extended.
   Qt's native editing (caret, selection, `Ctrl+Backspace` word delete,
   `Ctrl+V` and `Shift+Insert` paste, `Ctrl+A` select all).
   **[Amended 2026-10-11, D-CLIP-1: the field is `readOnly: true` always, so
-  "Qt's native editing" is now caret, selection, Home / End, `Ctrl+A` and
-  `Ctrl+C` only. The form handler (`handleFormKey`) also does printable
+  "Qt's native editing" is now caret, selection, Home / End, `Ctrl+A`,
+  `Ctrl+C` and mouse click / drag selection only. The form handler (`handleFormKey`) also does printable
   insertion, `Backspace`, `Delete`, `Ctrl+Backspace`, `Ctrl+Delete`, cut and
   paste, over the model value, with the caret and selection the read-only
   control still keeps. The word boundary is Qt's own, measured on a real
@@ -361,17 +361,26 @@ field's capacity refused rather than cut, and the masked-field replacement
 unchanged; `Backspace` / `Delete` -> one UTF-16 unit, a surrogate pair whole
 (`Model.editDelete`); `Ctrl+Backspace` / `Ctrl+Delete` -> to the previous /
 next word boundary, Qt's own boundary measured and pinned; `Ctrl+X` /
-`Shift+Delete` -> native copy of the selection, then the plugin deletes it
-(nothing is copied from a password field, as before); `Ctrl+V` /
-`Shift+Insert` -> `Service.requestClipboard`, a `wl-paste` child, cut at
-`LIMITS.url * 4`, bounded by a 5 s watchdog, sanitized at the field's
-capacity, inserted over the selection or over the whole of a masked value
-and re-masked; a failed or timed-out paste changes nothing. Middle click
-pastes nothing. `Ctrl+A`, `Ctrl+C`, `Left` / `Right` / `Home` / `End`,
-`Shift`-selection and mouse selection stay native and unchanged. Lost with
-`readOnly`: native undo (`Ctrl+Z`), and input-method composition, so dead
-keys and CJK input cannot type into the label field (paste carries any
-Unicode). Two deliberate divergences from Qt, pinned on both sides in the
+`Shift+Delete` -> native copy of the selection, then the plugin deletes it,
+on every field but the password: there `Ctrl+X` does nothing at all, as
+Qt's own `cut()` does nothing under `echoMode` Password (`Model.cutApplies`;
+at lane commit 44b250b it deleted the selection with nothing copied, which
+the review caught); `Ctrl+V` / `Shift+Insert` -> `Service.requestClipboard`,
+which runs the helper's `clipboard` verb: a `wl-paste` child the HELPER
+bounds to 32 KiB and a 5 s deadline, one JSON reply of at most
+`LIMITS.url * 4` characters, the shell's 8 s watchdog the outer bound (R8;
+the shell holds the reply and never the clipboard's size), sanitized at the
+field's capacity, inserted over the selection or over the whole of a masked
+value (`Model.editRangeFor`) and re-masked; a failed or timed-out paste
+changes nothing. Middle click pastes nothing. `Ctrl+A`, `Ctrl+C`, `Left` /
+`Right` / `Home` / `End`, `Shift`-selection and mouse selection stay native
+and unchanged -- including the one thing every Qt field does on a mouse
+selection, writing it to the PRIMARY selection, so a drag across a REVEALED
+URL publishes it there as before (recorded in `ARCHITECTURE.md` section 6;
+pre-existing, user-initiated, not changed). Lost with `readOnly`: native
+undo (`Ctrl+Z`), and input-method composition, so dead keys and CJK input
+cannot type into the label field -- a dead key followed by a letter inserts
+the plain letter, measured (paste carries any Unicode). Two deliberate divergences from Qt, pinned on both sides in the
 QML spec: `Ctrl+Delete` over a selection deletes the selection alone (Qt
 also eats to the next boundary), and `Delete` over a combining sequence
 removes one unit (Qt removes the grapheme). The caret on a read-only control
@@ -1205,8 +1214,10 @@ See 7.1; they reuse the strings above.
    echoed anywhere but the field it landed in. Paste into a masked field
    replaces the value and the result is masked again before the next frame.
    **Added 2026-10-11 (D-CLIP-1): and the clipboard is read ONLY when the
-   user pastes, by a `wl-paste` child the service bounds, never by the shell
-   process and never on a clipboard change.** An editable `TextInput` would
+   user pastes, by a `wl-paste` child of the plugin's HELPER, which bounds
+   it in bytes (32 KiB) and time (5 s) and answers the shell with at most
+   8,192 characters, never by the shell process and never on a clipboard
+   change (R8: the shell holds the reply, not the clipboard).** An editable `TextInput` would
    make the shell read the whole offer on every change by any application,
    so no form field is editable to Qt.
 7. `Accessible.description` of a URL field is the masked rendering even while
@@ -1348,7 +1359,7 @@ by accident.
 | 2 | Xtream entry key | `c` (credentials) in Sources; `Add Xtream login` row for the mouse; a link row inside the URL forms so first run reaches it without a printable key. |
 | 3 | `r` rename? | No. `e` opens the form with `Label` focused; rename is `e`, type, `Enter`. `r` stays refresh in the guide and is ignored in Sources. |
 | 4 | Masking scope | Userinfo, all query values, fragment -> `****`. Path stays visible (some providers put credentials in the path; the user must still be able to edit it; the PO rule names the query string). Fixed length, never per-character. |
-| 5 | How does one edit a masked value? | Masked = fully selected: typing, paste, Backspace, Ctrl+U replace it; `Ctrl+R` / eye reveals for caret editing; re-masked on blur, save, cancel, paste. **[Amended 2026-10-11, D-CLIP-1: the behaviour stands; the hand is the plugin's, since the field is read-only to Qt in both states.]** |
+| 5 | How does one edit a masked value? | Masked = fully selected: typing, paste, Backspace, Ctrl+U replace it; `Ctrl+R` / eye reveals for caret editing; re-masked on blur, save, cancel, paste. **[Amended 2026-10-11, D-CLIP-1: the behaviour stands; the hand is the plugin's, since the field is read-only to Qt in both states. The "fully selected" range is `Model.editRangeFor`'s, reached from node: at lane commit 44b250b it was decided in `Guide.qml` at two sites and no check in the gate could see it go wrong (rule 12), which the review found by deleting the branch under a green gate.]** |
 | 6 | Reveal: hold or toggle? | Toggle, scoped to the focused field, reset on blur. A hold gesture cannot be typed into. |
 | 7 | Esc in forms | One press cancels in forms opened from Sources (network precedent; `Ctrl+U` clears). First run keeps the search-line "clear first, then close" rule and never closes while any field has text. |
 | 8 | Paste semantics | Plain / revealed fields: insert at caret (Qt default, as the uptime monitor). Masked fields: replace. Always sanitized in `onTextChanged`. **[Overturned 2026-10-11, D-CLIP-1: not Qt's paste and not `onTextChanged`. `Ctrl+V` / `Shift+Insert` ask the service for a `wl-paste` read, capped and bounded, and the plugin inserts the sanitized text over the selection (plain / revealed) or over the whole value (masked, then re-masked). Middle click is gone with the native path.]** |
