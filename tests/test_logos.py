@@ -93,16 +93,71 @@ class LogoSurveyTest(unittest.TestCase):
             self.assertNotIn(forbidden, source)
 
 
-# Real first bytes for each allowed type. The suite used to write b"x" and
-# call it a PNG; write_logo now checks the payload against the content type,
-# so a double that hands it nonsense would be testing the refusal rather than
-# the write.
-SAMPLE = {
-    "image/png": b"\x89PNG\r\n\x1a\n" + b"\x00" * 8,
-    "image/jpeg": b"\xff\xd8\xff\xe0" + b"\x00" * 8,
-    "image/gif": b"GIF89a" + b"\x00" * 8,
-    "image/webp": b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 8,
-}
+# One minimal REAL image per allowed type, read from the D-LOGO-11 fixture so
+# there is one corpus and not two.
+#
+# This has been loosened twice and tightened twice, and the shape of the
+# mistake was the same each time (CLAUDE.md rule 10: a test double must never
+# be more forgiving than the real thing). First the suite wrote b"x" and called
+# it a PNG, until `write_logo` began checking the payload against the content
+# type. Then it wrote correct magic bytes followed by eight zeros -- which is
+# not a readable header, so when the D-LOGO-11 dimension gate landed it
+# refused all four and 11 cases in this file went red. The doubles were
+# asserting that `write_logo` ACCEPTS bytes the shell cannot display: measured
+# on the real sink, Qt 6.11.2, all four of those payloads reach `Image.Error`
+# at control memory (73.2-73.5 MB peak RSS). Fixing the gate to accept them
+# would have been fixing the wrong end.
+#
+# So these are 64x64 images from ImageMagick, 78 to 1,025 bytes, each one a
+# file Qt actually renders. A double that is a real image cannot drift away
+# from reality again, which is the only reason it is worth reading a fixture
+# to build one.
+def _sample_payloads():
+    import binascii
+    import json
+    import pathlib
+    document = json.loads(
+        (pathlib.Path(__file__).resolve().parent / "fixtures" / "logo-dimensions.json")
+        .read_text(encoding="ascii"))
+    smallest = {}
+    for case in document["cases"]:
+        if not case["withinBounds"]:
+            continue
+        blob = binascii.unhexlify(case["hex"])
+        ctype = case["contentType"]
+        if ctype not in smallest or len(blob) < len(smallest[ctype]):
+            smallest[ctype] = blob
+    missing = [t for t in helper.LOGO_TYPES if t not in smallest]
+    assert not missing, "fixtures/logo-dimensions.json has no usable %r case" % missing
+    return smallest
+
+
+SAMPLE = _sample_payloads()
+
+
+class SampleDoubleTest(unittest.TestCase):
+    """The doubles this file writes are held to the shipping gate (rule 10).
+
+    Without this, the next person to need "some bytes that look like a PNG"
+    writes magic plus padding, every test in this file still passes, and the
+    suite is once again asserting that the helper accepts a file the shell
+    cannot render. The assertion is cheap and it is the one that was missing
+    both times.
+    """
+
+    def test_every_double_is_a_real_image_the_shipping_gate_accepts(self):
+        for ctype, blob in SAMPLE.items():
+            self.assertIn(ctype, helper.LOGO_TYPES)
+            self.assertTrue(helper.logo_bytes_match_type(blob, ctype), ctype)
+            # A READABLE header, which magic bytes plus padding is not.
+            self.assertIsNotNone(helper.logo_dimensions(blob, ctype),
+                                 "%s: the double's header cannot be read" % ctype)
+            self.assertTrue(helper.logo_within_bounds(blob, ctype), ctype)
+            self.assertEqual(helper.logo_sniff_type(blob), ctype, ctype)
+            self.assertLess(len(blob), helper.MAX_LOGO_BYTES, ctype)
+
+    def test_there_is_one_double_per_allowed_type(self):
+        self.assertEqual(sorted(SAMPLE), sorted(helper.LOGO_TYPES))
 
 
 class LogoFetchGuardsTest(unittest.TestCase):

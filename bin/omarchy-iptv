@@ -3644,6 +3644,43 @@ def logo_survey(channels: Any) -> dict[str, Any]:
 MAX_LOGO_BYTES = 256 * 1024
 MAX_LOGO_FILES = 5000
 
+# The DIMENSION bound, D-LOGO-11. MAX_LOGO_BYTES bounds the wrong axis: the
+# decoder's cost is quadratic in a number the HEADER declares and the bytes do
+# not have to honour, so a 304-byte progressive JPEG whose SOF says
+# 20000x20000 took the shell process to 840 MB and a 555-byte 3-component one
+# to 1,239 MB (measured 2026-10-09 on Qt 6.11.2; the table is in the QA
+# results on the dev branch). Qt's own allocation limit cannot refuse a JPEG
+# on that path at all: it is compared against ceil(dim/8)^2 * 4 -- the image
+# already divided by libjpeg's largest scale denominator -- and the format's own
+# largest dimension, 65535, gives ceil(65535/8) = 8192 with
+# 8192 * 8192 * 4 = 268,435,456 bytes, exactly the 256 MiB default, so the
+# guard is unreachable rather than weak.
+#
+# What these two numbers cost AT the bound, which is the reason they are these
+# numbers: the largest area either of them admits is MAX_LOGO_PIXELS, and a
+# 4:4:4 progressive JPEG of that area holds
+# 4,194,304 px x 3 components x 2 bytes per coefficient = 25,165,824 bytes,
+# 24 MiB of coefficients -- the same order as the 23.8 MiB Qt was already
+# willing to allocate before any of this existed. The side cap is the second
+# half because area alone would admit 65535x64, which is 4.2 Mpx laid out as
+# one enormous row. A 1920x1080 provider banner is 2,073,600 px with both
+# sides under the side cap and passes, as does every square logo up to
+# 2048x2048.
+MAX_LOGO_SIDE = 4096
+MAX_LOGO_PIXELS = 4194304         # 2048 * 2048
+
+# How much of a logo the cached-file sweep reads before asking the parsers
+# (R5). Every header they read sits either at a fixed offset -- PNG, GIF and
+# WEBP all declare their size inside the first 30 bytes -- or within the APPn
+# metadata a JPEG puts before its first frame header, and one maximal APPn
+# segment is 65,533 bytes, so this covers two of them before the SOF. It is a
+# fixed read rather than the whole file so that 5,000 of them stay cheap. It
+# is not a window on the PARSERS: `write_logo` hands them every byte it holds,
+# and `logo_file_within_bounds` reads the rest of a larger file when the small
+# read cannot prove it, so the sweep and the gate can never disagree about the
+# same file and sweep it on every run.
+LOGO_HEADER_BYTES = 128 * 1024
+
 
 def logo_filename(url: str) -> str:
     """A name derived from the URL, never FROM the URL.
@@ -3788,6 +3825,319 @@ def logo_bytes_match_type(data: bytes, ctype: str) -> bool:
     return any(data.startswith(prefix) for prefix in prefixes)
 
 
+def logo_sniff_type(data: bytes) -> str | None:
+    """Which allowed type these bytes actually are, or None.
+
+    The cache file name is the fnv1a32 of the URL and nothing else, so a file
+    on disk carries no record of the content type it arrived with. The sweep
+    has to ask the bytes. Deliberately the same predicate the gate uses, so
+    there is one answer to "what is this" and not two.
+    """
+    for ctype in LOGO_TYPES:
+        if logo_bytes_match_type(data, ctype):
+            return ctype
+    return None
+
+
+# A JPEG frame header is SOF0..SOF15, which is 0xC0..0xCF MINUS the three
+# markers that share that range and are not frames: 0xC4 DHT, 0xC8 JPG and
+# 0xCC DAC. Listed rather than ranged so the exclusions are readable. A reader
+# that takes only 0xC0..0xC2 -- baseline plus the two common progressive
+# frames -- cannot see SOF3 or any of the arithmetic-coded and lossless
+# frames, and a frame header this cannot find means None, which R4 turns into
+# a refusal: the narrow reader refuses real images rather than passing bombs.
+JPEG_SOF_MARKERS = frozenset(
+    (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF)
+)
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Walk the markers from the SOI and read the first frame header."""
+    size = len(data)
+    if size < 4 or data[0] != 0xFF or data[1] != 0xD8:
+        return None
+    pos = 2
+    while pos < size:
+        if data[pos] != 0xFF:
+            # Not standing on a marker. Entropy-coded bytes only follow an
+            # SOS and this returns at the SOS, so the stream is malformed:
+            # refuse rather than hunting forward for the next 0xFF, which is
+            # how a reader ends up reading a number out of image data.
+            return None
+        while pos < size and data[pos] == 0xFF:
+            pos += 1                      # fill bytes are legal before a marker
+        if pos >= size:
+            return None
+        marker = data[pos]
+        pos += 1
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            continue                      # TEM, RSTn, a repeated SOI: no payload
+        if marker in (0xD9, 0xDA):
+            # EOI or the first scan, with no frame header seen. A conforming
+            # file puts the SOF before the SOS, so there is nothing to read.
+            return None
+        if pos + 2 > size:
+            return None
+        length = (data[pos] << 8) | data[pos + 1]
+        if length < 2:
+            return None
+        if marker in JPEG_SOF_MARKERS:
+            # length(2) precision(1) height(2) width(2) components(1)
+            if length < 8 or pos + 7 > size:
+                return None
+            height = (data[pos + 3] << 8) | data[pos + 4]
+            width = (data[pos + 5] << 8) | data[pos + 6]
+            return (width, height)
+        if pos + length > size:
+            return None                   # truncated segment: refuse, do not guess
+        pos += length
+    return None
+
+
+def _png_dimensions(data: bytes) -> tuple[int, int] | None:
+    """IHDR, which the spec requires to be the first chunk."""
+    if not data.startswith(PNG_SIGNATURE) or len(data) < 24:
+        return None
+    # Fixed offsets, and a chunk that is not IHDR here is not a chunk this
+    # will read dimensions out of: trusting the first chunk's NAME rather
+    # than its position is how a crafted file gets a second opinion.
+    if data[12:16] != b"IHDR" or int.from_bytes(data[8:12], "big") != 13:
+        return None
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    if width > 0x7FFFFFFF or height > 0x7FFFFFFF:
+        return None                       # the spec's own ceiling
+    return (width, height)
+
+
+def _gif_skip_subblocks(data: bytes, pos: int) -> int | None:
+    """Step over a data sub-block chain; None when it runs off the end."""
+    size = len(data)
+    while True:
+        if pos >= size:
+            return None
+        count = data[pos]
+        pos += 1
+        if count == 0:
+            return pos
+        pos += count
+
+
+def _gif_dimensions(data: bytes) -> tuple[int, int] | None:
+    """The logical screen, widened by any frame that declares more.
+
+    The LOGICAL SCREEN is the allocation: the lead's measurement includes a
+    110-byte GIF whose canvas is 65500x65500 and whose only frame is 64x64,
+    and it refused at the control's memory for the canvas, not the frame. A
+    frame descriptor can declare a rectangle larger than the canvas, so the
+    answer is the maximum over both.
+
+    The walk has to reach the trailer. Whether Qt's handler clips a frame to
+    the canvas is NOT measured here, so a later frame this did not reach is a
+    frame whose size is unproven, and R4 makes unproven a refusal. The cost is
+    stated rather than hidden: a GIF whose block structure does not complete
+    inside the bytes handed to this function is refused, and for the sweep
+    that is the whole file (see logo_file_within_bounds).
+    """
+    size = len(data)
+    if size < 13 or data[:6] not in (b"GIF87a", b"GIF89a"):
+        return None
+    width = data[6] | (data[7] << 8)
+    height = data[8] | (data[9] << 8)
+    flags = data[10]
+    pos = 13
+    if flags & 0x80:
+        pos += 3 * (1 << ((flags & 0x07) + 1))     # global colour table
+    while True:
+        if pos >= size:
+            return None
+        block = data[pos]
+        pos += 1
+        if block == 0x3B:                          # trailer: the walk is complete
+            return (width, height)
+        if block == 0x21:                          # extension: label, sub-blocks
+            pos += 1
+            nxt = _gif_skip_subblocks(data, pos)
+            if nxt is None:
+                return None
+            pos = nxt
+            continue
+        if block == 0x2C:                          # image descriptor
+            # left(2) top(2) width(2) height(2) packed(1) after the separator.
+            if pos + 9 > size:
+                return None
+            frame_w = data[pos + 4] | (data[pos + 5] << 8)
+            frame_h = data[pos + 6] | (data[pos + 7] << 8)
+            packed = data[pos + 8]
+            pos += 9
+            if packed & 0x80:
+                pos += 3 * (1 << ((packed & 0x07) + 1))   # local colour table
+            if pos >= size:
+                return None
+            pos += 1                               # LZW minimum code size
+            nxt = _gif_skip_subblocks(data, pos)
+            if nxt is None:
+                return None
+            pos = nxt
+            width = max(width, frame_w)
+            height = max(height, frame_h)
+            continue
+        return None                                # not a block this format defines
+
+
+def _webp_dimensions(data: bytes) -> tuple[int, int] | None:
+    """All three variants: VP8 lossy, VP8L lossless, VP8X extended.
+
+    All three, because R4 refuses what it cannot read, so skipping a variant
+    would refuse real lossless and real animated logos rather than failing
+    open. The container is validated the way logo_bytes_match_type validates
+    it -- RIFF....WEBP -- before any chunk is believed.
+    """
+    size = len(data)
+    if size < 16 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return None
+    # The RIFF size counts everything after the first 8 bytes. It is used only
+    # as an upper bound: a file may carry trailing bytes, and the bytes handed
+    # to this function may be a prefix of a larger file.
+    end = min(size, 8 + int.from_bytes(data[4:8], "little"))
+    pos = 12
+    while pos + 8 <= end:
+        fourcc = data[pos:pos + 4]
+        length = int.from_bytes(data[pos + 4:pos + 8], "little")
+        body = pos + 8
+        if body + length > end:
+            return None                   # truncated chunk
+        if fourcc == b"VP8X":
+            # 24-bit canvas width-1 and height-1 after 4 bytes of flags. VP8X
+            # states the CANVAS, which is what an extended file -- alpha,
+            # animation, or a plain still -- is composed into and allocated at,
+            # so it is the number that matters and the inner frame cannot
+            # enlarge it.
+            if length < 10:
+                return None
+            width = int.from_bytes(data[body + 4:body + 7], "little") + 1
+            height = int.from_bytes(data[body + 7:body + 10], "little") + 1
+            return (width, height)
+        if fourcc == b"VP8 ":
+            if length < 10:
+                return None
+            if data[body] & 0x01:
+                return None               # not a keyframe: carries no dimensions
+            if data[body + 3:body + 6] != b"\x9d\x01\x2a":
+                return None               # start code absent
+            width = int.from_bytes(data[body + 6:body + 8], "little") & 0x3FFF
+            height = int.from_bytes(data[body + 8:body + 10], "little") & 0x3FFF
+            return (width, height)
+        if fourcc == b"VP8L":
+            if length < 5 or data[body] != 0x2F:
+                return None
+            # 14 bits of width-1 then 14 bits of height-1, bit-packed little
+            # endian after the signature byte.
+            bits = int.from_bytes(data[body + 1:body + 5], "little")
+            return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+        pos = body + length + (length & 1)         # chunks pad to even length
+    return None
+
+
+def logo_dimensions(data: bytes, ctype: str) -> tuple[int, int] | None:
+    """The size the header DECLARES, or None when it cannot be read.
+
+    D-LOGO-11. Nothing here decodes anything: these are the provider's own
+    claims about its bytes, read out of the header, which is exactly the
+    number Qt's cost is quadratic in.
+
+    None means "cannot tell", never "small". A bounds check that cannot tell
+    those two apart IS the defect, so every caller treats None as a refusal
+    (R4): a blank slot in a decorative feature against the user's shell.
+
+    All four allowed types, not only JPEG. JPEG is the only one of the four
+    that Qt's decoder can scale, which is the only reason it is the only one
+    exposed today -- and that asymmetry is upstream behaviour nobody here
+    controls, so a Qt that learns to scale PNG during decode must not reopen
+    this in silence (R3).
+    """
+    if not isinstance(data, (bytes, bytearray)) or not data:
+        return None
+    raw = bytes(data)
+    if ctype == "image/jpeg":
+        dims = _jpeg_dimensions(raw)
+    elif ctype == "image/png":
+        dims = _png_dimensions(raw)
+    elif ctype == "image/gif":
+        dims = _gif_dimensions(raw)
+    elif ctype == "image/webp":
+        dims = _webp_dimensions(raw)
+    else:
+        return None
+    if dims is None:
+        return None
+    width, height = dims
+    if width <= 0 or height <= 0:
+        return None                       # a zero side is not an image
+    return (width, height)
+
+
+def logo_within_bounds(data: bytes, ctype: str) -> bool:
+    """True ONLY when the dimensions parse and both bounds hold."""
+    dims = logo_dimensions(data, ctype)
+    if dims is None:
+        return False
+    width, height = dims
+    if width > MAX_LOGO_SIDE or height > MAX_LOGO_SIDE:
+        return False
+    return width * height <= MAX_LOGO_PIXELS
+
+
+def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
+    """The refusal text: a HOST and numbers, never a URL (rule 5, R6)."""
+    host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+    dims = logo_dimensions(data, ctype)
+    if dims is None:
+        return "refused a logo from %s: its header could not be read" % host
+    return ("refused a logo from %s: its header declares %dx%d, over the %d px side "
+            "or %d pixel bound" % (host, dims[0], dims[1], MAX_LOGO_SIDE, MAX_LOGO_PIXELS))
+
+
+def _read_logo_prefix(path: str, limit: int) -> bytes | None:
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(limit)
+    except OSError:
+        return None
+
+
+def logo_file_within_bounds(path: str) -> bool:
+    """Is a file ALREADY in the cache within the bound (R5)?
+
+    Reads LOGO_HEADER_BYTES first, which is every header the parsers know how
+    to read. The second read is what keeps this and `write_logo` from
+    disagreeing about one file: the gate sees all the bytes, so when the small
+    read cannot prove a file that has MORE bytes on disk, the rest is read --
+    under the same MAX_LOGO_BYTES the gate enforces -- rather than refusing
+    something the gate would accept and sweeping it again on every run. The
+    common case, and every case for a logo under 128 KiB, is one read.
+
+    A file whose bytes are none of the four allowed types is refused too. The
+    magic check has guarded the write path since M2-04, but a file on disk is
+    not evidence that it went through it.
+    """
+    head = _read_logo_prefix(path, LOGO_HEADER_BYTES)
+    if not head:
+        return False
+    ctype = logo_sniff_type(head)
+    if ctype is None:
+        return False
+    if logo_within_bounds(head, ctype):
+        return True
+    if len(head) < LOGO_HEADER_BYTES:
+        return False                      # that was the whole file
+    whole = _read_logo_prefix(path, MAX_LOGO_BYTES + 1)
+    if whole is None or len(whole) > MAX_LOGO_BYTES:
+        return False                      # over the byte cap as well
+    return logo_within_bounds(whole, ctype)
+
+
 def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
     """Write one logo 0600 into a 0700 directory. Returns the file name.
 
@@ -3803,6 +4153,13 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
         raise HelperError("logo_type", "refused an unlisted content type")
     if not logo_bytes_match_type(data, ctype):
         raise HelperError("logo_bytes", "refused bytes that are not %s" % ctype)
+    # D-LOGO-11, and deliberately HERE: after the magic check, before
+    # ensure_private_dir, so a refusal still creates nothing on disk -- not
+    # the file, not the directory. The helper is the process that is allowed
+    # to die; the shell, which renders this, is not, and `Image` has no lever
+    # for this anyway (R1).
+    if not logo_within_bounds(data, ctype):
+        raise HelperError("logo_dimensions", logo_dimension_refusal(url, data, ctype))
     ensure_private_dir(logo_dir)
     name = logo_filename(url)
     path = os.path.join(logo_dir, name)
@@ -3906,7 +4263,7 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # ruling's first line) and this flag is off by default here, so nothing
     # contacts anyone because a command was run without reading it.
     logo_dir = os.path.join(directory, LOGO_SUBDIR)
-    fetched, cached, refused, failed = 0, 0, 0, 0
+    fetched, cached, refused, failed, swept = 0, 0, 0, 0, 0
     reasons: dict[str, int] = {}
     seen: set[str] = set()
     names: list[str] = []
@@ -3924,11 +4281,41 @@ def cmd_logos(args: argparse.Namespace) -> int:
         # exists to bound. The file name is a pure function of the URL, so
         # "have we got this one" is a stat and not a lookup.
         name = logo_filename(url)
-        if os.path.exists(os.path.join(logo_dir, name)):
-            cached += 1
-            names.append(name)
-            emit({"ok": True, "kind": "logo", "name": name})
-            continue
+        path = os.path.join(logo_dir, name)
+        if os.path.exists(path):
+            # D-LOGO-11 / R5: the cache written by 0.13.3 and earlier was
+            # never dimension-checked, so "already on disk" is not evidence
+            # that this file is safe to hand the shell. The header is proved
+            # BEFORE the name is announced, because the guide points an Image
+            # at a file only when this command names it (Model.logoSlot,
+            # Service.qml logoHave). Reading a header is a small read and it
+            # happens in the HELPER, off the UI thread and nowhere near the
+            # guide's 150 ms open budget. Measured on this machine with 5,000
+            # real 220x120 logos all already cached: the whole `logos --fetch`
+            # subprocess went from a median 375 ms to 601 ms, so the check
+            # costs about 45 us per cached file end to end (22 us per call in
+            # isolation, 37 us on 44 KB files). Note that this branch is NOT
+            # bounded by MAX_LOGO_FILES -- `fetched` counts new downloads, so
+            # the cap bounds fetches per run and not the size of the cache or
+            # the number of files this validates.
+            if logo_file_within_bounds(path):
+                cached += 1
+                names.append(name)
+                emit({"ok": True, "kind": "logo", "name": name})
+                continue
+            # Not announced, and NOT counted as `cached`: it is not on disk
+            # any more. The pass falls through to the fetch below, which
+            # refuses the same bytes at the gate and counts the reason there,
+            # so one bomb is one refusal rather than two -- and a provider
+            # that has since replaced the file with a sane one gets it. If the
+            # unlink fails the name is still withheld; the fetch may yet
+            # replace the bytes, and a name the guide is never given is a file
+            # the shell never decodes.
+            swept += 1
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         try:
             data, ctype = fetch_logo(url, args.timeout)
             names.append(write_logo(logo_dir, url, data, ctype))
@@ -3949,7 +4336,8 @@ def cmd_logos(args: argparse.Namespace) -> int:
             # Hosts and codes only, never the URL (rule 5).
             reasons[error.code] = reasons.get(error.code, 0) + 1
             if error.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
-                              "logo_type", "logo_bytes", "logo_too_large"):
+                              "logo_type", "logo_bytes", "logo_too_large",
+                              "logo_dimensions"):
                 refused += 1
             else:
                 failed += 1
@@ -3961,9 +4349,15 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # Seen live 2026-09-23 before this existed.
     #
     # It carries no URLs, only their hashes, so it is safe on stdout.
+    #
+    # `swept` is the number of files the dimension check removed from the
+    # cache (D-LOGO-11, R5). It is reported because a removal that appeared in
+    # no number at all would be invisible whenever the refetch then succeeded,
+    # and because `cached` had to stop counting those files to stay true.
     emit(dict(survey, ok=True, kind="logos", action="fetch", fetched=fetched,
               cached=cached, refusedOnPolicy=refused, failed=failed, reasons=reasons,
-              names=names, cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES))
+              names=names, swept=swept, cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES,
+              maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
     return 0
 
 
