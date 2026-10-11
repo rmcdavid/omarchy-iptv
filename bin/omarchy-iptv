@@ -3647,9 +3647,11 @@ MAX_LOGO_FILES = 5000
 # The DIMENSION bound, D-LOGO-11. MAX_LOGO_BYTES bounds the wrong axis: the
 # decoder's cost is quadratic in a number the HEADER declares and the bytes do
 # not have to honour, so a 304-byte progressive JPEG whose SOF says
-# 20000x20000 took the shell process to 840 MB and a 555-byte 3-component one
-# to 1,239 MB (measured 2026-10-09 on Qt 6.11.2; the table is in the QA
-# results on the dev branch). Qt's own allocation limit cannot refuse a JPEG
+# 20000x20000 took a Qt process standing in for the shell -- the lead's probe,
+# an Image declared exactly as the guide's row slot declares it -- to 840 MB,
+# and a 555-byte 3-component one to 1,239 MB (measured 2026-10-09 on Qt
+# 6.11.2; the table is in the QA results on the dev branch). The shell itself
+# was never fed one, deliberately. Qt's own allocation limit cannot refuse a JPEG
 # on that path at all: it is compared against ceil(dim/8)^2 * 4 -- the image
 # already divided by libjpeg's largest scale denominator -- and the format's own
 # largest dimension, 65535, gives ceil(65535/8) = 8192 with
@@ -3672,13 +3674,19 @@ MAX_LOGO_PIXELS = 4194304         # 2048 * 2048
 # How much of a logo the cached-file sweep reads before asking the parsers
 # (R5). Every header they read sits either at a fixed offset -- PNG, GIF and
 # WEBP all declare their size inside the first 30 bytes -- or within the APPn
-# metadata a JPEG puts before its first frame header, and one maximal APPn
-# segment is 65,533 bytes, so this covers two of them before the SOF. It is a
-# fixed read rather than the whole file so that 5,000 of them stay cheap. It
-# is not a window on the PARSERS: `write_logo` hands them every byte it holds,
-# and `logo_file_within_bounds` reads the rest of a larger file when the small
-# read cannot prove it, so the sweep and the gate can never disagree about the
-# same file and sweep it on every run.
+# metadata a JPEG puts before its first frame header. The arithmetic for that
+# second case, stated exactly because an earlier version of this comment got
+# it wrong by four bytes: a segment's length field is at most 65,535 and
+# counts itself, so a maximal APPn segment is 65,537 bytes with its marker,
+# and two of them after the 2-byte SOI put the frame marker at offset
+# 131,076 -- four bytes PAST this read. So this covers one maximal segment and
+# nearly two, not two; a file with two (a reviewer built one, 131,445 bytes,
+# a valid 64x64) parses as None from this read alone and is proved by the
+# second read below. It is a fixed read rather than the whole file so that
+# 5,000 of them stay cheap. It is not a window on the PARSERS: `write_logo`
+# hands them every byte it holds, and `logo_file_within_bounds` reads the
+# rest of a larger file when the small read cannot prove it, so the sweep and
+# the gate can never disagree about the same file and sweep it on every run.
 LOGO_HEADER_BYTES = 128 * 1024
 
 
@@ -4263,13 +4271,19 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # ruling's first line) and this flag is off by default here, so nothing
     # contacts anyone because a command was run without reading it.
     logo_dir = os.path.join(directory, LOGO_SUBDIR)
-    fetched, cached, refused, failed, swept = 0, 0, 0, 0, 0
+    fetched, cached, refused, failed, swept, deferred = 0, 0, 0, 0, 0, 0
     reasons: dict[str, int] = {}
     seen: set[str] = set()
     names: list[str] = []
     for channel in channels:
-        if fetched >= MAX_LOGO_FILES:
-            break
+        # MAX_LOGO_FILES is checked BELOW the cached-file branch, not here.
+        # It used to be the first line of this loop, as a `break`, which
+        # bounded the wrong thing: in a run that fetched 5,000 new files,
+        # every cached file later in channel order was neither validated nor
+        # announced that run, so the guide drew blank slots for logos it
+        # already had and a cached bomb past the cap was never swept (R5). A
+        # review found the comment beside the sweep claiming the branch was
+        # not bounded by the cap, which was true only while fetched < 5000.
         url = channel.get("logo") if isinstance(channel, dict) else None
         if not isinstance(url, str) or not url or url in seen:
             continue
@@ -4294,10 +4308,12 @@ def cmd_logos(args: argparse.Namespace) -> int:
             # real 220x120 logos all already cached: the whole `logos --fetch`
             # subprocess went from a median 375 ms to 601 ms, so the check
             # costs about 45 us per cached file end to end (22 us per call in
-            # isolation, 37 us on 44 KB files). Note that this branch is NOT
-            # bounded by MAX_LOGO_FILES -- `fetched` counts new downloads, so
-            # the cap bounds fetches per run and not the size of the cache or
-            # the number of files this validates.
+            # isolation, 37 us on 44 KB files). This branch is NOT bounded by
+            # MAX_LOGO_FILES, and since the cap check moved below it that is
+            # true for the whole run and not only while fetched < 5000:
+            # `fetched` counts new downloads, so the cap bounds fetches per
+            # run and not the size of the cache or the number of files this
+            # validates (D-LOGO-12 records the consequence for the cache).
             if logo_file_within_bounds(path):
                 cached += 1
                 names.append(name)
@@ -4316,6 +4332,15 @@ def cmd_logos(args: argparse.Namespace) -> int:
                 os.unlink(path)
             except OSError:
                 pass
+        if fetched >= MAX_LOGO_FILES:
+            # The cap bounds NEW FETCHES ONLY. A cached file past it was
+            # validated and announced above; a URL past it is not fetched this
+            # run and is counted here rather than vanishing, so a run that
+            # stopped short says so (the same reason `swept` is a number). A
+            # swept bomb past the cap stays off the disk and off the stream,
+            # and is refused at the gate on the run that reaches it.
+            deferred += 1
+            continue
         try:
             data, ctype = fetch_logo(url, args.timeout)
             names.append(write_logo(logo_dir, url, data, ctype))
@@ -4354,10 +4379,13 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # cache (D-LOGO-11, R5). It is reported because a removal that appeared in
     # no number at all would be invisible whenever the refetch then succeeded,
     # and because `cached` had to stop counting those files to stay true.
+    # `deferred` is the number of URLs the per-run cap held back from a fetch;
+    # the cached-file branch above is never held back, so a cached logo past
+    # the cap is in `names` and a cached bomb past it is in `swept`.
     emit(dict(survey, ok=True, kind="logos", action="fetch", fetched=fetched,
               cached=cached, refusedOnPolicy=refused, failed=failed, reasons=reasons,
-              names=names, swept=swept, cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES,
-              maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
+              names=names, swept=swept, deferred=deferred, cap=MAX_LOGO_FILES,
+              maxBytes=MAX_LOGO_BYTES, maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
     return 0
 
 
