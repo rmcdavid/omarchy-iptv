@@ -3,6 +3,47 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.13.4 (2026-10-11)
+
+**Security.** A channel logo is a picture your provider serves, and the plugin
+draws it inside your desktop shell. A picture file carries its own size in its
+header, and the bytes do not have to honour it: a logo of a few hundred bytes
+can declare itself 20,000 pixels square, and the decoder then sets aside
+memory for the size declared, not the size delivered. Measured: a 304-byte
+file took a test copy of the drawing code to 840 MB, and larger declared sizes
+run out of memory entirely. Raised by the marketplace maintainer against
+0.13.3. Logos are off by default; this only matters if you turned them on.
+
+### Fixed
+
+- **A logo is now refused before it is saved if its header declares a side
+  over 4096 pixels or more than 4,194,304 pixels in all, or if its header
+  cannot be read.** For all four image types the plugin accepts. The 256 KiB
+  size cap stays, but it bounds the download, not the drawing, and it never
+  did.
+- **Logos already on disk from earlier versions are checked the same way the
+  next time logos are fetched, and removed if they fail.** You may see a logo
+  disappear; it comes back only if the provider's file passes when fetched
+  again. The check reads each file's header, never decodes it, and is not
+  limited to the first 5,000 downloads of a run.
+- **Switching sources no longer carries the previous source's logo list across
+  to the new one.** A name the helper announced for one source's cache is
+  never used to draw from another's, which closed the one way a never-checked
+  file could still reach the screen.
+
+### Worth knowing
+
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration). Until the
+  shell restarts it is still running the previous version's code, and the
+  check above only runs on the next logo fetch.
+- The limits are not arbitrary: at the bound, the costliest JPEG the plugin
+  will accept needs about 24 MiB to decode, roughly what a logo could already
+  cost before this change, and a 1920x1080 banner passes with room to spare.
+- The number of logos a single run will DOWNLOAD is capped at 5,000, as
+  before; that cap has never bounded how many files the cache holds across
+  runs, and that is recorded as an open item rather than changed here.
+
 ## 0.13.3 (2026-10-09)
 
 **Security.** Your provider's web address, which usually contains your username

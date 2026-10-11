@@ -134,8 +134,11 @@ Item {
   // no active source, or the setting off. The guide binds its column to this,
   // so turning the setting off empties the column in the same turn rather
   // than leaving the last playlist's pictures on screen.
-  readonly property string logoDir: (root.showLogos && root.activeCacheDir !== "")
-    ? root.activeCacheDir + "/logos" : ""
+  // Derived through Model.logoDirFor and NOWHERE else: the set a fetch
+  // announces is tagged through the same call (fetchLogos), and the guide
+  // compares the two. The first D-LOGO-11 repair tagged with the cache
+  // directory while this bound the logos directory, and every slot was blank.
+  readonly property string logoDir: root.showLogos ? Model.logoDirFor(root.activeCacheDir) : ""
   // What enabling logos would disclose, counted from the cache and contacting
   // nothing. The guide shows these numbers BEFORE the switch is thrown
   // (ruling rule 6): a generic "may contact third parties" is not informed
@@ -1629,7 +1632,7 @@ Item {
       // exists so the streaming fix can be OBSERVED rather than inferred --
       // the defect was precisely that this number stayed 0 until the fetch
       // exited, and nothing outside the guide could see that.
-      logos: Object.keys(root.logoHave).length,
+      logos: Model.logoHaveCount(root.logoHave),
       build: {
         running: Model.PLUGIN_VERSION,
         onDisk: root.onDiskVersion,
@@ -4027,6 +4030,15 @@ Item {
     root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
     root.epgWarnings = []
     root.lastError = ""
+    // The announced logo set belongs to the directory it was announced for,
+    // and that directory is the one being left. Clearing it here is belt to
+    // the tag's braces: a set tagged for the old directory is blank in every
+    // slot already (Model.logoSlot), but it would still be COUNTED on the IPC
+    // status. What a still-running fetch prints after this lands tagged for
+    // ITS directory (flushLogoNames), blank in every slot, until the new
+    // playlist loads and fetchLogos() stops it and starts one for this one.
+    root.logoHave = ({})
+    root.logoPending = []
     root.applyInvalidStatus()
   }
 
@@ -4807,8 +4819,27 @@ Item {
       // it is logged and the rows keep their blank slots.
       if (exitCode !== 0) console.log("[iptv] logo fetch exited", exitCode)
       // Whatever the stream did not deliver, the summary already did; this
-      // just makes sure the last partial batch lands.
-      root.flushLogoNames()
+      // just makes sure the last partial batch lands -- tagged for the
+      // directory THIS process was started for, which is why a batch from a
+      // fetch that outlived a source switch cannot land in the new source's
+      // set (Model.logoHaveMerge).
+      // ...unless the setting went OFF while the process was dying: the
+      // off-path cleared the set, and a trailing line delivered on the way
+      // out must not repopulate it (a review found `ipc status` counting
+      // logos with the switch off).
+      if (root.showLogos) root.flushLogoNames()
+      else root.logoPending = []
+      // A fetch that was stopped because the source changed underneath it is
+      // started again, for the directory that is current NOW, and never
+      // before the old process is gone. Drained through a Timer, not by
+      // starting the Process from inside its own exit handler: the same
+      // shape as playlistRerun / epgRerun / configShieldRerun. The plan
+      // (Model.logoFetchPlan) says "skip" if the setting was turned off
+      // meanwhile.
+      if (root.logoFetchAgain) {
+        root.logoFetchAgain = false
+        logoRerunDebounce.restart()
+      }
     }
   }
 
@@ -4825,11 +4856,13 @@ Item {
       return
     }
     // The summary: authoritative, and it replaces rather than adds, so a file
-    // that went away between the stream and the end is not claimed.
-    var names = Model.logoNamesFrom(line)
-    if (names.length > 0) {
+    // that went away between the stream and the end is not claimed. An EMPTY
+    // summary replaces too: everything swept (D-LOGO-11) means nothing
+    // announced, and a length guard here once let a stale set outlive it.
+    var names = Model.logoSummaryNames(line)
+    if (names !== null) {
       root.logoPending = []
-      root.logoHave = Model.logoHaveSet(names)
+      root.logoHave = Model.logoHaveSet(names, root.logoFetchDir)
       root.logoFetchSeq += 1
     }
   }
@@ -4838,34 +4871,76 @@ Item {
   // binding of every visible row. A quarter of a second is far below the eye
   // and far above the fetch rate.
   Timer {
+    id: logoRerunDebounce
+    interval: 50
+    repeat: false
+    onTriggered: root.fetchLogos()
+  }
+
+  Timer {
     id: logoFlushTimer
     interval: 250
     repeat: false
-    onTriggered: root.flushLogoNames()
+    // The same guard the exit path has (rule 15: a sibling found by the
+    // final review): a line delivered after the switch went OFF must not
+    // repopulate the set through this timer either.
+    onTriggered: {
+      if (root.showLogos) root.flushLogoNames()
+      else root.logoPending = []
+    }
   }
 
   function flushLogoNames() {
     if (root.logoPending.length === 0) return
-    var out = {}
-    for (var k in root.logoHave) out[k] = true
-    for (var i = 0; i < root.logoPending.length; i++) out[root.logoPending[i]] = true
+    // Tagged with the directory the RUNNING fetch was started for, never the
+    // current one: after a source switch those differ, and the merge then
+    // answers a set for the old directory, which no slot draws.
+    var pending = root.logoPending
     root.logoPending = []
-    root.logoHave = out
+    root.logoHave = Model.logoHaveMerge(root.logoHave, pending, root.logoFetchDir)
     root.logoFetchSeq += 1
   }
   // Bumped when a fetch finishes, so the guide's Image sources can be asked
   // to reload: a file that was missing when the row was built is on disk now.
   property int logoFetchSeq: 0
-  // { <file name>: true } for every logo the last fetch found on disk, cached
-  // ones included. Empty means "nothing fetched yet", and every slot stays
-  // blank until the fetch answers.
+  // `{ dir, names: { <file name>: true } }` for every logo the last fetch
+  // found on disk, cached ones included, tagged with the cache directory the
+  // fetch was started for (Model.logoHaveSet). `({})` means "nothing fetched
+  // yet", and every slot stays blank until a fetch for THIS directory
+  // answers: a set tagged for another directory is blank too, which is what
+  // keeps a switch between two sources sharing a provider from pointing an
+  // Image at a file in the new directory that no fetch has bounded.
   property var logoHave: ({})
+  // The cache directory the fetch in `logoFetchProc` was started for. Every
+  // line that process prints is tagged with THIS, not with activeCacheDir,
+  // because the two differ for as long as a fetch outlives a source switch.
+  property string logoFetchDir: ""
+  // Set when a running fetch is signalled to make way for another directory;
+  // read once by onExited, which starts the fetch again for whatever
+  // directory is current then.
+  property bool logoFetchAgain: false
 
   function fetchLogos() {
     // Guarded three times over, because this is the one function in the
     // plugin that contacts hosts the user did not choose: the setting must be
-    // on, a source must be active, and a fetch must not already be running.
-    if (!root.showLogos || root.activeCacheDir === "" || logoFetchProc.running) return false
+    // on, a source must be active, and a fetch must not already be running
+    // FOR THIS DIRECTORY. One running for another directory is stopped and
+    // started again on its exit: letting it run on announced the old
+    // directory's names for minutes while the rows were the new source's,
+    // and the new directory got no sweep of its own. The decision is
+    // Model.logoFetchPlan, so a node test can reach it.
+    var plan = Model.logoFetchPlan({ showLogos: root.showLogos, wantDir: Model.logoDirFor(root.activeCacheDir),
+                                     running: logoFetchProc.running, runningDir: root.logoFetchDir })
+    if (plan === "skip") return false
+    if (plan === "restart") {
+      root.logoFetchAgain = true
+      root.logoPending = []
+      logoFetchProc.signal(15)
+      return false
+    }
+    // The tag is the LOGOS directory, through the same call `logoDir` is
+    // bound through, so the guide's comparison (Model.logoSlot) can match.
+    root.logoFetchDir = Model.logoDirFor(root.activeCacheDir)
     logoFetchProc.command = Model.logoFetchArgv(root.helperPath, root.activeCacheDir)
     logoFetchProc.running = true
     return true
@@ -4881,7 +4956,15 @@ Item {
       root.fetchLogos()
     } else {
       root.logoHave = ({})
-      if (logoFetchProc.running) logoFetchProc.signal(15)
+      root.logoPending = []
+      if (logoFetchProc.running) {
+        // Through the same flag the source switch uses, so a user who throws
+        // the switch off and on again before the process has died gets a
+        // fetch after all: onExited asks the plan, and the plan says "skip"
+        // while the setting is off and "start" once it is on again.
+        root.logoFetchAgain = true
+        logoFetchProc.signal(15)
+      }
     }
   }
 
