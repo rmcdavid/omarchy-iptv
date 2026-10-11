@@ -10196,6 +10196,104 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, [true, false, true, "Settings file is not private"])
 })()
 
+// ---- D-CLIP-1: the plugin's own form editing (tests/fixtures/form-edit.js) ----
+//
+// The form's TextFields are read-only while the form is open (an editable
+// QtQuick TextInput reads the whole clipboard offer on every change by any
+// application; docs/QA-RESULTS.md, "Sixth maintainer finding"), so the key
+// handler edits the model value itself through these functions. The
+// fixture's BOUNDARIES rows are a transcript of the real control; the QML
+// spec re-measures them, node holds the model to them.
+;(function () {
+  const edit = require("./fixtures/form-edit.js")
+
+  edit.BOUNDARIES.forEach(function (row) {
+    checkCall("D-CLIP-1: wordBoundary backward matches Qt on " + JSON.stringify(row.text), function () {
+      const back = []
+      for (let p = 0; p <= row.text.length; p++) back.push(Model.wordBoundary(row.text, p, -1, false))
+      return back
+    }, row.back)
+    checkCall("D-CLIP-1: wordBoundary forward matches Qt on " + JSON.stringify(row.text), function () {
+      const fwd = []
+      for (let p = 0; p <= row.text.length; p++) fwd.push(Model.wordBoundary(row.text, p, 1, false))
+      return fwd
+    }, row.fwd)
+  })
+  // The transcript is only worth holding to if it covers the set: one row
+  // carries every character of Qt's separator list, and the length is the
+  // list's (30 separators between 31 word characters).
+  checkCall("D-CLIP-1: the boundary transcript carries the whole separator set", function () {
+    const row = edit.BOUNDARIES.filter(function (r) { return r.text.length === 61 && r.text.indexOf("a.b,c?d!e@f#g$h") === 0 })[0]
+    const seps = row.text.split("").filter(function (ch, i) { return i % 2 === 1 })
+    return [seps.length, seps.every(function (ch) { return Model.wordBoundary("x" + ch + "y", 2, -1, false) === 1 })]
+  }, [30, true])
+  checkCall("D-CLIP-1: an opaque (Password) field has one word", function () {
+    return [Model.wordBoundary("foo bar", 4, -1, true), Model.wordBoundary("foo bar", 4, 1, true)]
+  }, [0, 7])
+  checkCall("D-CLIP-1: a position past the end is clamped", function () {
+    return [Model.wordBoundary("foo bar", 99, -1, false), Model.wordBoundary("foo bar", -3, 1, false)]
+  }, [4, 4])
+
+  edit.EDITS.forEach(function (c) {
+    checkCall("D-CLIP-1: " + c.why, function () {
+      return c.op === "insert"
+        ? Model.editInsert(c.value, c.sel[0], c.sel[1], c.text, c.cap)
+        : Model.editDelete(c.value, c.sel[0], c.sel[1], c.direction, c.word, c.opaque)
+    }, c.expect)
+  })
+  // The fixture exercises both operations and both verdicts; a fixture that
+  // lost its refusals would still pass the loop above.
+  checkCall("D-CLIP-1: the edit vectors cover insert and delete, changed and refused", function () {
+    const seen = {}
+    edit.EDITS.forEach(function (c) { seen[c.op + ":" + c.expect.changed] = true })
+    return Object.keys(seen).sort()
+  }, ["delete:false", "delete:true", "insert:false", "insert:true"])
+
+  // What the WORD_DELETE_TEXTS sweep in the spec compares against is this
+  // function, so a sample of it is held here too: every position of the
+  // first text, both directions, is a (value, caret) the fixture's EDITS
+  // already state for the ends and the model states consistently inside.
+  checkCall("D-CLIP-1: word deletes are consistent with the boundary at every position", function () {
+    const text = edit.WORD_DELETE_TEXTS[0]
+    let ok = true
+    for (let p = 0; p <= text.length; p++) {
+      const b = Model.editDelete(text, p, p, -1, true, false)
+      const d = Model.editDelete(text, p, p, 1, true, false)
+      const wb = Model.wordBoundary(text, p, -1, false)
+      const wf = Model.wordBoundary(text, p, 1, false)
+      if (b.value !== text.substring(0, wb) + text.substring(p) || b.caret !== (p === 0 ? 0 : wb)) ok = false
+      if (d.value !== text.substring(0, p) + text.substring(wf) || d.caret !== p) ok = false
+    }
+    return ok
+  }, true)
+
+  edit.TYPED.forEach(function (c) {
+    checkCall("D-CLIP-1: typedText: " + c.why, function () { return Model.typedText(c.text, c.ctrlOnly) }, c.expect)
+  })
+  edit.RANGES.forEach(function (c) {
+    checkCall("D-CLIP-1: editRange: " + c.why, function () { return Model.editRange(c.cursor, c.selStart, c.selEnd, c.hasSelection) }, c.expect)
+  })
+  checkCall("D-CLIP-1: fullRange spans the value", function () { return Model.fullRange("abc") }, { start: 0, end: 3 })
+  checkCall("D-CLIP-1: fullRange of nothing is empty", function () { return Model.fullRange(null) }, { start: 0, end: 0 })
+
+  // The paste path's bound (Service.qml clipboardWatchdog): a bound, so
+  // positive, and short -- a clipboard read is a few KB across a pipe, and
+  // the helper's 180 s would be a very long time to hold a form.
+  checkCall("D-CLIP-1: the wl-paste bound is positive and short", function () {
+    return [Model.CLIPBOARD_TIMEOUT_MS > 0, Model.CLIPBOARD_TIMEOUT_MS <= 30 * 1000]
+  }, [true, true])
+
+  // The insert cap is the field's CAPACITY, so a value over the LIMIT
+  // survives to be refused on submit (SR18): a 2049th character into a
+  // playlist field at the limit is accepted, and the 2113th is refused.
+  checkCall("D-CLIP-1: the cap is capacity, not limit, so an over-limit value survives to its error", function () {
+    const cap = Model.formCapacity("playlist")
+    const atLimit = "a".repeat(Model.LIMITS.url)
+    const atCap = "a".repeat(cap)
+    return [cap, Model.editInsert(atLimit, atLimit.length, atLimit.length, "b", cap).changed, Model.editInsert(atCap, atCap.length, atCap.length, "b", cap).changed]
+  }, [Model.LIMITS.url + 64, true, false])
+})()
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All Model.js tests passed.")

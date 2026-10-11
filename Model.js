@@ -10270,6 +10270,176 @@ function withFormReveal(st, field, revealed) {
   return cur
 }
 
+// ---- form editing (D-CLIP-1) ----
+//
+// Every form field is a read-only TextInput for as long as the form is open.
+// An EDITABLE QtQuick TextInput subscribes to QClipboard::dataChanged, and on
+// the released Qt 6.11.2 that slot calls QMimeData::text(): on Wayland that
+// reads the whole foreign offer through a pipe, synchronously, on the shell's
+// main thread, with a 1 s timeout per read and no total limit or deadline
+// (QA-RESULTS on the dev branch, "Sixth maintainer finding"; measured
+// +238 MB inside 600 ms of a 100 MB offer, +0 with readOnly true). readOnly
+// is the one switch on that slot in every version of it, so the plugin edits
+// the model value itself from the form key handler and the control only
+// renders it. Navigation, selection and the caret stay native -- readOnly
+// removes none of them -- so the handler reads caret and selection from the
+// control, computes the new value and caret here, writes the value through
+// withFormValue and puts the caret back. Paste is the out-of-process path
+// only (wl-paste as argv, Service.requestClipboard): nothing in the shell
+// process reads Qt's clipboard.
+//
+// The word boundary is Qt's own, MEASURED rather than read: the QML spec
+// drives Ctrl+Left / Ctrl+Right on a read-only TextInput and Ctrl+Backspace /
+// Ctrl+Delete on an editable one, position by position, against
+// the form-edit fixture (fixtures/form-edit.js, both on the dev branch), and
+// node runs the same table through these
+// functions. The rule that came out: backward, skip spaces, then one run of
+// either separators or word characters; forward, one such run, then skip
+// spaces. `_` is a word character. The space set is QChar::isSpace -- U+3000,
+// U+2028, U+0085 and NBSP are spaces; U+FEFF, U+200B and U+00AD are not. A
+// Password field has no words: its word is the whole line (`opaque`).
+var WORD_SEPARATOR_RE = /[.,?!@#$:;\-<>\[\]{}()=\/+%&^*'"`~|\\]/
+var WORD_SPACE_RE = /[\t\n\u000b\u000c\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/
+
+// The wl-paste child's bound (Service.qml clipboardWatchdog). Its whole job
+// is a few KB across a pipe; a producer that drips bytes at the 1 s per-read
+// timeout is the attack, and the bound kills the CHILD, never the shell.
+var CLIPBOARD_TIMEOUT_MS = 5 * 1000
+
+function isWordSpace(ch) { return WORD_SPACE_RE.test(ch) }
+function isWordSeparator(ch) { return WORD_SEPARATOR_RE.test(ch) }
+
+function clampIndex(n, len) {
+  var i = Math.floor(Number(n))
+  if (!isFinite(i) || i < 0) return 0
+  return i > len ? len : i
+}
+
+function editCapacity(cap) {
+  var n = Number(cap)
+  return n > 0 ? Math.floor(n) : MAX_SOURCE_URL
+}
+
+// The range an edit acts on, from what the control reports: the selection
+// when there is one, else the caret twice. Ordered; clamping is the edit's.
+function editRange(cursor, selStart, selEnd, hasSelection) {
+  if (hasSelection !== true) {
+    var c = Math.max(0, Math.floor(Number(cursor)) || 0)
+    return { start: c, end: c }
+  }
+  var a = Math.max(0, Math.floor(Number(selStart)) || 0)
+  var b = Math.max(0, Math.floor(Number(selEnd)) || 0)
+  return a <= b ? { start: a, end: b } : { start: b, end: a }
+}
+
+// A masked field is fully selected (UX-SOURCES 2.3): typing replaces the
+// whole value and Backspace clears it.
+function fullRange(value) {
+  return { start: 0, end: str(value).length }
+}
+
+function orderedRange(text, selStart, selEnd) {
+  var a = clampIndex(selStart, text.length)
+  var b = clampIndex(selEnd, text.length)
+  return a <= b ? { start: a, end: b } : { start: b, end: a }
+}
+
+// Qt's own word boundary (see the header). `direction` -1 looks backward
+// from `pos`, +1 forward. `opaque` is a Password field.
+function wordBoundary(text, pos, direction, opaque) {
+  var t = str(text)
+  var len = t.length
+  var p = clampIndex(pos, len)
+  var back = Number(direction) < 0
+  if (opaque === true) return back ? 0 : len
+  if (back) {
+    while (p > 0 && isWordSpace(t.charAt(p - 1))) p--
+    if (p > 0 && isWordSeparator(t.charAt(p - 1))) {
+      p--
+      while (p > 0 && isWordSeparator(t.charAt(p - 1))) p--
+    } else {
+      while (p > 0 && !isWordSpace(t.charAt(p - 1)) && !isWordSeparator(t.charAt(p - 1))) p--
+    }
+    return p
+  }
+  if (p < len && isWordSeparator(t.charAt(p))) {
+    p++
+    while (p < len && isWordSeparator(t.charAt(p))) p++
+  } else {
+    while (p < len && !isWordSpace(t.charAt(p)) && !isWordSeparator(t.charAt(p))) p++
+  }
+  while (p < len && isWordSpace(t.charAt(p))) p++
+  return p
+}
+
+function isHighSurrogate(code) { return code >= 0xd800 && code <= 0xdbff }
+function isLowSurrogate(code) { return code >= 0xdc00 && code <= 0xdfff }
+
+// One code point either side of `pos`: a surrogate pair goes as one, the
+// way Qt's backspace() and del() take it. A combining mark is its own unit
+// here (Qt's backspace agrees; its del() eats the grapheme -- recorded in
+// the fixture rather than imitated).
+function codePointStart(text, pos) {
+  if (pos >= 2 && isLowSurrogate(text.charCodeAt(pos - 1)) && isHighSurrogate(text.charCodeAt(pos - 2))) return pos - 2
+  return pos - 1
+}
+
+function codePointEnd(text, pos) {
+  if (pos + 1 < text.length && isHighSurrogate(text.charCodeAt(pos)) && isLowSurrogate(text.charCodeAt(pos + 1))) return pos + 2
+  return pos + 1
+}
+
+// What a key press may insert, by Qt's own acceptance rule for a TextInput
+// (QInputControl::isAcceptableInput, QTBUG-35734): nothing when the
+// modifiers are exactly Control or exactly Control+Shift, so chords never
+// type; otherwise the text with control characters removed. AltGr text
+// (Control+Alt) types, as it did natively.
+function typedText(text, ctrlOnly) {
+  if (ctrlOnly === true) return ""
+  return str(text).replace(CONTROL_RE, "")
+}
+
+// Insert `text` over [selStart, selEnd) of `value`, capped at `cap` UTF-16
+// units the way Qt's maximumLength caps an insert: the inserted text is cut
+// to what fits (`s.left(remaining)`, measured), so one key at the cap is
+// refused and a long paste keeps what fits. The cap is the field's CAPACITY
+// (limit plus slack, formCapacity), so an over-limit value survives long
+// enough to be refused with its error on submit (SR18, SR22). `caret` is
+// meaningful only when `changed`.
+function editInsert(value, selStart, selEnd, text, cap) {
+  var v = str(value)
+  var r = orderedRange(v, selStart, selEnd)
+  var ins = str(text).replace(CONTROL_RE, "")
+  var room = editCapacity(cap) - (v.length - (r.end - r.start))
+  if (ins.length > room) ins = ins.substring(0, Math.max(0, room))
+  if (ins === "") return { value: v, caret: r.start, changed: false }
+  return { value: v.substring(0, r.start) + ins + v.substring(r.end), caret: r.start + ins.length, changed: true }
+}
+
+// Delete from `value`: the selection when [selStart, selEnd) is non-empty
+// (any variant), else one code point (`word` false) or to Qt's word boundary
+// (`word` true, the Ctrl variants) in `direction` (-1 Backspace, +1 Delete).
+// With a selection the Ctrl variants delete the selection ALONE: measured
+// Qt extends Ctrl+Delete to the next boundary as well, and that is not
+// imitated (the QML spec on the dev branch pins both sides).
+function editDelete(value, selStart, selEnd, direction, word, opaque) {
+  var v = str(value)
+  var r = orderedRange(v, selStart, selEnd)
+  var a = r.start
+  var b = r.end
+  if (a === b) {
+    if (Number(direction) < 0) {
+      if (a === 0) return { value: v, caret: a, changed: false }
+      a = word === true ? wordBoundary(v, b, -1, opaque) : codePointStart(v, b)
+    } else {
+      if (b >= v.length) return { value: v, caret: a, changed: false }
+      b = word === true ? wordBoundary(v, a, 1, opaque) : codePointEnd(v, a)
+    }
+  }
+  if (a === b) return { value: v, caret: a, changed: false }
+  return { value: v.substring(0, a) + v.substring(b), caret: a, changed: true }
+}
+
 // Error line + focus on the offending field (UX 5.4: one error at a time).
 function withFormError(st, error) {
   var cur = copyGuide(st)
@@ -10906,6 +11076,7 @@ if (typeof module !== "undefined") {
     MASK: MASK,
     MASK_CLEAR_PARAMS: MASK_CLEAR_PARAMS,
     LIMITS: LIMITS,
+    CLIPBOARD_TIMEOUT_MS: CLIPBOARD_TIMEOUT_MS,
     SOURCE_KEYS: SOURCE_KEYS,
     PAUSE_KEY: PAUSE_KEY,
     TRACKS_KEY: TRACKS_KEY,
@@ -11017,6 +11188,12 @@ if (typeof module !== "undefined") {
     fieldRevealed: fieldRevealed,
     fieldMasked: fieldMasked,
     toggleReveal: toggleReveal,
+    wordBoundary: wordBoundary,
+    editRange: editRange,
+    fullRange: fullRange,
+    editInsert: editInsert,
+    editDelete: editDelete,
+    typedText: typedText,
     withFormReveal: withFormReveal,
     withFormError: withFormError,
     withFormProbing: withFormProbing,
