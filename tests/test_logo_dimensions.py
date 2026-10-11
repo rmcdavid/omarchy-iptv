@@ -188,11 +188,11 @@ class LogoDimensionParserTest(unittest.TestCase):
         -- and the port is not part of the answer, because `cdn.test` and
         `cdn.test:8443` are one party."""
         bomb = BY_ID["jpeg-bomb-progressive-20000"]
-        url = "https://logos.provider.test:8443/sub/SECRET-TOKEN/a.jpg?k=v"
+        url = "https://logos.provider.test:8443/sub/priv-seg/a.jpg?k=v"
         text = helper.logo_dimension_refusal(url, bomb["bytes"], "image/jpeg")
         self.assertIn("logos.provider.test", text)
         self.assertIn("20000x20000", text)
-        for leak in ("://", "SECRET-TOKEN", "/sub/", "?k=v", "8443"):
+        for leak in ("://", "priv-seg", "/sub/", "?k=v", "8443"):
             self.assertNotIn(leak, text, text)
         # An unreadable header still says something, without inventing a size.
         text = helper.logo_dimension_refusal(url, b"\xff\xd8", "image/jpeg")
@@ -209,12 +209,12 @@ class LogoDimensionParserTest(unittest.TestCase):
         here as well -- that is the shape that put a password into a Sources
         row in a shipped release (D-SINK-17)."""
         bomb = BY_ID["jpeg-bomb-progressive-20000"]["bytes"]
-        for url in ("https://user:SECRET@logos.provider.test/a.jpg",
+        for url in ("https://user:pwx@logos.provider.test/a.jpg",
                     "https://user:p@ss@logos.provider.test/a.jpg",
                     "https://logos.provider.test@evil.test/a.jpg"):
             text = helper.logo_dimension_refusal(url, bomb, "image/jpeg")
             self.assertIn("unnamed host", text, url)
-            for leak in ("SECRET", "@", "://", "user", "evil.test",
+            for leak in ("pwx", "@", "://", "user", "evil.test",
                          "logos.provider.test"):
                 self.assertNotIn(leak, text, "%s leaked %r: %s" % (url, leak, text))
             self.assertIn("20000x20000", text, url)
