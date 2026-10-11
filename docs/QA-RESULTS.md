@@ -13198,3 +13198,24 @@ fix is not complete without a sweep.** A logo that an affected install already
 holds is still a bomb, the guide still loads it by name, and the user cannot
 see why. The sweep reads headers only, unlinks what is over the bound, and is
 the same parser the gate uses, so there is one implementation and one fixture.
+
+### D-LOGO-12: `MAX_LOGO_FILES` bounds fetches per run, not the cache (found by the D-LOGO-11 helper lane, rule 15)
+
+The lane that built the bound was asked whether any OTHER number the helper
+enforces has `MAX_LOGO_BYTES`'s property -- that it bounds the wrong axis and
+so cannot fail for the thing it looks like it guards -- and found one.
+`cmd_logos` breaks on `fetched >= MAX_LOGO_FILES`, and `fetched` counts NEW
+downloads in THIS run, so the cap bounds fetches per run and not the number
+of files in the cache. Measured by lowering the cap to 2 in a scratch copy of
+the helper and offering 7 safe logos over a local TLS server: run 1
+`fetched=2` and 2 files on disk, run 2 `fetched=2 cached=2` and 4, run 3 and
+6, run 4 `fetched=1` and all 7. The helper's own comments beside
+`CACHE_SUBDIRS` and inside `cache_logos_clear` call `MAX_LOGO_FILES *
+MAX_LOGO_BYTES` "a documented ceiling ... 1.28 GB for a single source"; at the
+shipped numbers a playlist at `MAX_CHANNELS` reaches 50,000 logo files over ten
+service runs, ten times that ceiling. The D-LOGO-11 cached-file validation
+inherits the same shape -- one header read per cached file, about 22-45 us
+each, so about 1.1-2.3 s at 50,000, in the helper and off the UI thread --
+and its comment says so rather than repeating the per-run claim. Filed open
+rather than fixed in the D-LOGO-11 release: bounding the cache by what is on
+disk changes what the number means, and that change gets its own measurements.
