@@ -196,13 +196,15 @@ STUB_TESTS_MIN=${STUB_TESTS_MIN:-28}
 LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-33}
 # The D-CLIP-1 clipboard preflight (scripts/dev-harness/clip-scenario.sh
 # check-tree): 6 checks over the lead's three probes inside a nested headless
-# cage -- the editable TextField reads a 100 MB foreign offer in full, the
+# cage -- the editable TextField reads a 25 MB foreign offer in full, the
 # read-only one and the no-field window read nothing, a consumer on that
 # display gets every byte, and everything started is gone by its pid -- plus
-# its own "ran every check" line. The shell arm (the real Guide.qml, red on
-# --baseline d55149b at +254 MB and a 673 ms stall) is the live mode's, for a
-# human. scripts/qa-lib-test.sh asserts this number is the scenario's
-# check-tree EXPECTED_CHECKS plus one.
+# its own "ran every check" line. The shell arm (the real Guide.qml over
+# 100 MB: red on --baseline d55149b at +286 MB with a 723 ms stall, and red
+# on --baseline 96f5261 at +310 MB over one Ctrl+V, the shell collecting
+# wl-paste's whole output before the cut) is the live mode's, for a human.
+# scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
+# EXPECTED_CHECKS plus one.
 CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
 
 step() { printf '\n== %s\n' "$*"; }
@@ -625,13 +627,16 @@ step "scripts/dev-harness/clip-scenario.sh check-tree (D-CLIP-1)"
 # that slot. This half re-measures the fact the fix rests on, on THIS
 # machine, on every commit: the lead's three probes run inside a nested
 # headless cage on a display of its own, a foreign producer there offers
-# 100 MB of text/plain with a virtual keyboard held on the seat (without
-# one the compositor hands the selection to nobody and the measurement is
-# vacuous), and the resident set is sampled from outside: the editable
-# probe grows by the payload or more, the read-only probe and the no-field
-# window by nothing. Nothing touches the user's session or clipboard; the
-# nested display is read from cage's own child and refused if it names the
-# live one. About 13 s.
+# 25 MB of text/plain (DR-B1: a quarter of the live run's 100 MB, so the
+# editable probe's transient stays under 100 MB on a machine short of
+# memory; +58..+80 MB measured at 20 ms sampling, settling to +36 kept)
+# with a virtual keyboard held on the seat (without one the compositor
+# hands the selection to nobody and the measurement is vacuous), and the
+# resident set is sampled from outside: the editable probe grows by the
+# payload or more, the read-only probe and the no-field window by nothing.
+# Nothing touches the user's session or clipboard; the nested display is
+# read from cage's own child and refused if it names the live one. About
+# 9 s.
 #
 # A machine without cage, wl-copy, wl-paste, wtype, python3, node or the
 # qml runtime answers 77 with the reason, and so does a cage that brings up

@@ -1007,6 +1007,54 @@ is "the clip live floor matches its recipe (the P and L lines)" \
    "$cl_live" "$(qa_count '^ *ck "[PL][0-9]' "$CLS")"
 is "check.sh's clip preflight floor matches the scenario's own" \
    "$(grep -oE 'CLIP_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( cl_tree + 1 ))"
+# A --baseline run asserts one check fewer: L5 (the stall) is reported there
+# and not asserted (DR-B2), so the floor steps down by one on that path and
+# the reported line exists. Both halves, or a baseline run is permanently
+# red by one or silently short by one.
+is "the clip live floor steps down by one on a baseline" \
+   "$(qa_count '^ *\[\[ -n \$BASELINE \]\] && EXPECTED_CHECKS=\$\(\(EXPECTED_CHECKS - 1\)\)$' "$CLS")" "1"
+is "because L5 is reported there, not asserted" \
+   "$(qa_count '^ *echo "   L5 reported, not asserted, on a baseline:' "$CLS")" "1"
+# The offer size by mode (DR-B1, the lead's numbers): 25 MB in the gate so
+# the editable probe's transient stays under 100 MB on a machine short of
+# memory, 100 MB live (the maintainer's number). Pinned so neither drifts
+# without this line moving with it, and the selector that joins them to the
+# mode, so a pinned number is the one the run uses.
+is "the clip scenario offers 25 MB in check-tree (DR-B1)" \
+   "$(grep -oE '^OFFER_MB_CHECK_TREE=[0-9]+' "$CLS" | cut -d= -f2)" "25"
+is "and 100 MB live" \
+   "$(grep -oE '^OFFER_MB_LIVE=[0-9]+' "$CLS" | cut -d= -f2)" "100"
+is "and selects between them by mode" \
+   "$(qa_count '^ *\[\[ \$MODE == check-tree \]\] && OFFER_MB=\$OFFER_MB_CHECK_TREE \|\| OFFER_MB=\$OFFER_MB_LIVE$' "$CLS")" "1"
+# The console-sink sweep (L12) names every letter the scenario offers as a
+# payload of 64 bytes or more: the producer's default letter, every letter
+# handed to producer_start, and every inline `write("X" * N)` with N at
+# least 64. A payload letter the sweep does not know is a sink it cannot
+# see; derived from the offers, not copied from the sweep.
+cl_letters=$( {
+  grep -oE 'letter=\$\{2:-[A-Z]\}' "$CLS" | grep -oE '[A-Z]\}' | tr -d '}'
+  grep -oE '^ *producer_start [^#]* [A-Z]$' "$CLS" | grep -oE '[A-Z]$'
+  grep -oE 'write\("[A-Z]" \* [0-9]+\)' "$CLS" | awk -F'"' '{ split($3, n, " "); if (n[2] + 0 >= 64) print $2 }'
+} | sort -u | tr -d '\n')
+cl_swept=$(grep -oE "qa_count '([A-Z]\{64\}\|?)+' \"\\\$SCRATCH/harness.log\"" "$CLS" | grep -oE '[A-Z]\{64\}' | tr -d '{64}' | sort -u | tr -d '\n')
+is "the clip console-sink sweep names every payload letter the scenario offers" \
+   "$cl_swept" "$cl_letters"
+is "and that derivation found the offers (non-vacuity)" "${#cl_letters}" "3"
+# INT and TERM trapped into an exit, beside the EXIT trap, in every scenario
+# that detaches a shell and has been PROVEN to clean up on a signal (clip:
+# `timeout -s TERM` after L3 and in the probe arm, and `-s INT`, measured
+# 2026-10-11 leaving no cage, shell, socket or work directory; the three
+# others carried the lines first). bash runs no EXIT trap for a signal that
+# kills it while it waits on a foreground child, so a scenario with the EXIT
+# trap alone strands what it detached (the review's finding against
+# clip-scenario.sh). Rule 15: argv-, chno-, chno-entry-, id-rotate-, m3-,
+# pip-, sources- and text-scenario.sh also detach and carry the EXIT trap
+# alone; they are not in this list because none has been signalled mid-run
+# and proven, and a list of the proven is what this asserts.
+for sc in clip player rewind tls; do
+  is "$sc-scenario.sh traps INT and TERM into an exit beside its EXIT trap" \
+     "$(qa_count "^trap cleanup EXIT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 130' INT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 143' TERM$" "$ROOT/scripts/dev-harness/$sc-scenario.sh")" "1 1 1"
+done
 # Its 77 path, DRIVEN rather than grepped: with the cage binary pointed at
 # nothing it must refuse with 77 from both modes, name the tool as its first
 # line out, start nothing, and leave no transcript -- the refusal sits above
@@ -1917,7 +1965,11 @@ is "a umask-created file here would have been private, which is why the mode is 
 # 388 -> 397 on 2026-10-11, D-CLIP-1: clip-scenario.sh joins the gate's named
 # list, its two floors are joined to its recipe and to check.sh, and its 77
 # path is driven from both modes with the transcript directory watched.
-EXPECTED=397
+# 397 -> 408 the same day, D-CLIP-1 round two: the baseline floor steps down
+# by one with L5 reported there, the offer size is pinned by mode (DR-B1),
+# the console-sink sweep is derived from the payload letters, and the four
+# scenarios proven to clean up on INT/TERM carry the two traps.
+EXPECTED=408
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
