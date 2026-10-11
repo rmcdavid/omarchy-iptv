@@ -185,11 +185,15 @@ TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
 # deleted without the gate noticing. Found by the review of that lane.
 STUB_TESTS_MIN=${STUB_TESTS_MIN:-28}
 # The D-LOGO-11 logo preflight (scripts/dev-harness/logo-scenario.sh
-# check-tree): 28 checks over the shipping helper as a subprocess and the
-# shell's Image as a capped probe, plus its own "ran every check" line. The
-# red run against the shipped 0.13.3 (159da94) answers 8 passed, 21 failed;
-# recipe in the scenario's footer.
-LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-29}
+# check-tree): 32 checks over the shipping helper as a subprocess and the
+# shell's Image as a probe under an address-space rlimit, plus its own "ran
+# every check" line. 28 -> 32 on 2026-10-11: three reviewer-crafted bombs
+# (an EXIF thumbnail before the real frame header, a 64x65535 column, a
+# two-frame GIF) and the EXIF control. The red run against the shipped
+# 0.13.3 (159da94) answers 9 passed, 24 failed; recipe in the scenario's
+# footer, and scripts/qa-lib-test.sh asserts this number is the scenario's
+# EXPECTED_CHECKS plus one.
+LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-33}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -571,21 +575,32 @@ step "scripts/dev-harness/logo-scenario.sh check-tree (D-LOGO-11)"
 # docs/QA-RESULTS.md 2026-10-09). The unit tests prove the parsers; this
 # half observes the two sinks -- the helper as the subprocess the service
 # runs, over a loopback https provider, and the shell's Image as an offscreen
-# probe under a 1.5 GB systemd scope -- so the gate goes red if the sweep,
-# the refusal or the announcement stops happening, not only if a function
-# changes its answer. It needs no network beyond loopback, no display, and
-# it never decodes a bomb: on the fixed tree the helper withholds every one,
-# and the 840 MB arm is `--baseline 159da94`, which a human runs. A machine
-# without `systemd-run --user` or the qml runtime answers 77, and that is a
-# visible SKIP here rather than a pass: a scenario that measured nothing has
-# proved nothing, and the line says so.
+# probe under a 2.5 GB address-space rlimit (util-linux prlimit, on the qml
+# process alone) -- so the gate goes red if the sweep, the refusal or the
+# announcement stops happening, not only if a function changes its answer.
+# It needs no network beyond loopback, no display, and it never decodes a
+# bomb: on the fixed tree the helper withholds every one, and the 840 MB arm
+# is `--baseline 159da94`, which a human runs.
+#
+# A machine without python3, openssl, prlimit or the qml runtime answers 77
+# with the reason, and that is RED here unless LOGO_PREFLIGHT_SKIP_OK=1 is
+# set in the environment. The first version printed the SKIP and went on to
+# `all green`, so a machine with no qml runtime reported a green gate having
+# observed neither sink; a scenario that measured nothing has proved nothing,
+# and a gate that calls that green is the rule-14 shape. The reason prints
+# either way, so the SKIP is never silent.
 logo_log=$CHECK_TMP/logo-scenario.log
 "$ROOT/scripts/dev-harness/logo-scenario.sh" check-tree >"$logo_log" 2>&1; logo_rc=$?
 if (( logo_rc == 0 )); then
   logo_n=$(grep -c '^PASS' "$logo_log" || true)
   if (( logo_n < LOGO_PREFLIGHT_MIN )); then cat "$logo_log"; bad "logo preflight ran $logo_n checks, expected at least $LOGO_PREFLIGHT_MIN"; else ok "logo preflight ($logo_n checks)"; fi
 elif (( logo_rc == 77 )); then
-  printf 'SKIP logo preflight: %s\n' "$(grep -a '^SKIP' "$logo_log" | head -1 | sed 's/^SKIP logo-scenario: //')"
+  logo_why=$(grep -a '^SKIP' "$logo_log" | head -1 | sed 's/^SKIP logo-scenario: //')
+  if [[ ${LOGO_PREFLIGHT_SKIP_OK:-0} == 1 ]]; then
+    printf 'SKIP logo preflight (LOGO_PREFLIGHT_SKIP_OK=1): %s\n' "$logo_why"
+  else
+    bad "logo preflight SKIPPED, which is not green: $logo_why (set LOGO_PREFLIGHT_SKIP_OK=1 to accept a gate that observed neither sink)"
+  fi
 else
   cat "$logo_log"; bad "logo preflight (exit $logo_rc)"
 fi

@@ -7,17 +7,25 @@ Prints the child's combined stdout/stderr, then ONE line:
 
     PEAKRUN rc=<n> peak_rss_kb=<n> wall_ms=<n>
 
-rc is the child's exit status (negative is the signal that ended it: -9 is
-the memory cap's SIGKILL); peak_rss_kb is ru_maxrss over the waited-for
-children, which with `systemd-run --scope` in front of the command is the
-command itself, because --scope execs it in place rather than forking (the
-child's parent pid is this process; measured 2026-10-11).
+rc is the child's exit status (negative is the signal that ended it);
+peak_rss_kb is ru_maxrss over the waited-for children, which with util-linux
+`prlimit` in front of the command is the command itself, because prlimit
+sets the limit on itself and execs the command in place rather than forking
+(measured 2026-10-11: the pid the command runs under is the pid this process
+spawned; `env` execs in place as well).
 
-The cap wraps ONLY the child, never this reporter: an OOM kill that took the
-reporter with it would take the measurement too. So the shape is always
+The limit wraps ONLY the child, never this reporter: a refused allocation in
+the reporter would end the measurement rather than report it. So the shape
+is always
 
-    python3 peakrun.py systemd-run --user --scope -q -p MemoryMax=1500M \\
-        -p MemorySwapMax=0 -- env QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qml probe.qml
+    python3 peakrun.py prlimit --as=2500000000 -- \\
+        env QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qml probe.qml
+
+RLIMIT_AS rather than a service-manager memory scope, for the two reasons
+run.sh gives: the marketplace capability scan reads the scope tool's name as
+service management anywhere in a tracked file, and under the rlimit an
+over-bound decode is a clean allocator refusal (Qt reports Image.Error, rc 1)
+rather than a kill.
 
 The child is given PEAKRUN_TIMEOUT seconds (default 60) before this reporter
 kills it and reports rc=-15: the probe's own 20 s Timer is the normal bound,

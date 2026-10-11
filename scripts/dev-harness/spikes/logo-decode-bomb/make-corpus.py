@@ -47,6 +47,29 @@ file for an encoder's output:
          control. Pass --with-encoder to add encoder-made WEBP and JPEG
          files when ImageMagick is on the machine.
 
+THREE SHAPES A REVIEWER ADDED, each aimed at a way a header reader can be
+made to answer the wrong question, and each kept here because the helper's
+parser was mutated against them (the review's MD, MN, MU and MV mutations):
+
+  EXIF thumbnail   an APP1 segment holding a WHOLE small JPEG -- its own SOI,
+                   its own 64x64 SOF, its own EOI -- before the real frame
+                   header says 20000x20000. A reader that scans for the
+                   first SOF marker byte-wise finds the thumbnail's and
+                   passes the file; the helper walks segments by length and
+                   never looks inside an APPn, so it finds the real one. The
+                   control beside it carries the same thumbnail over a real
+                   64x64 frame and must PASS, or a parser that refuses any
+                   APP1 would get the bomb right for the wrong reason.
+  the column       64x65535 baseline: 4,194,240 pixels, which is UNDER the
+                   pixel bound by 64, with one side over the side bound. The
+                   side cap alone refuses it; a parser that checked area
+                   only, or only the width, would pass it.
+  two-frame GIF    a 64x64 canvas, a 64x64 first frame, and a SECOND frame
+                   whose descriptor declares 65500x65500. A reader that stops
+                   at the first image descriptor answers 64x64; the helper
+                   walks to the trailer and takes the maximum over every
+                   frame, which is why it refuses this one.
+
 USAGE
   python3 make-corpus.py <outdir> [--with-encoder] [--only <name>,...]
   python3 make-corpus.py --list
@@ -167,10 +190,13 @@ def sof_body(width, height, components):
     return body
 
 
-def build_jpeg(width, height, kind):
+def build_jpeg(width, height, kind, app1=None):
     """A JPEG whose SOF says width x height, over a 64x64 scan.
 
-    kind is "baseline", "progressive" or "progressive-rgb".
+    kind is "baseline", "progressive" or "progressive-rgb". `app1`, when
+    given, is the body of an APP1 segment written straight after the SOI,
+    where EXIF puts it: that is how a whole thumbnail JPEG, SOF and all, gets
+    to sit in the file before the frame header that counts.
     """
     if kind == "baseline":
         marker, tail, comps, tables = SOF_BASELINE, BASE_GRAY_TAIL, 1, [DQT_LUMA]
@@ -186,6 +212,8 @@ def build_jpeg(width, height, kind):
     def segment(code, body):
         out.append(bytes([0xFF, code]) + struct.pack(">H", len(body) + 2) + body)
 
+    if app1 is not None:
+        segment(0xE1, app1)
     segment(0xE0, APP0_JFIF)
     for table in tables:
         segment(0xDB, table)
@@ -210,6 +238,18 @@ def build_jpeg_no_sof():
     body = APP0_JFIF
     return (b"\xff\xd8" + bytes([0xFF, 0xE0]) + struct.pack(">H", len(body) + 2)
             + body + DQT_LUMA[:16])
+
+
+def exif_thumbnail():
+    """An APP1 body: the EXIF tag, then a WHOLE 64x64 baseline JPEG.
+
+    Real EXIF wraps the thumbnail in a TIFF structure; what matters to a
+    header reader is only that a complete JPEG with its own SOF sits inside
+    a segment the reader is supposed to step over, so the TIFF is omitted and
+    the thumbnail follows the tag directly. The reviewer's proof file has the
+    same layout.
+    """
+    return b"Exif\x00\x00" + build_jpeg(64, 64, "baseline")
 
 
 # ---- PNG
@@ -306,7 +346,7 @@ def gif_lzw(pixels, min_code_size=2):
     return packer.flush()
 
 
-def build_gif(frame_w, frame_h, canvas=None, declared_frame=None):
+def build_gif(frame_w, frame_h, canvas=None, declared_frame=None, extra_frames=None):
     """A GIF that carries dimensions in TWO places, and can lie in either.
 
     `frame_w`/`frame_h` are the pixels actually encoded. `canvas` is the
@@ -314,11 +354,14 @@ def build_gif(frame_w, frame_h, canvas=None, declared_frame=None):
     small frame is not malformed in any way -- it is what an animation that
     pans a sprite around looks like -- so canvas-only is the ENTIRELY VALID
     huge GIF, and it costs 2 KB. `declared_frame` additionally lies in the
-    image descriptor, which is the rewritten-header case.
+    image descriptor, which is the rewritten-header case. `extra_frames` is
+    a list of (width, height) pairs, each written as a FURTHER image
+    descriptor declaring that size over another encoded frame_w x frame_h
+    of pixels: a reader that stops at the first descriptor never sees them.
 
-    Both levers exist because the first version of this function encoded a
-    real 20000x20000 frame for the bomb and produced a 226 MB file: a bomb
-    that is only dangerous if you can afford to store it is not this
+    The first two levers exist because the first version of this function
+    encoded a real 20000x20000 frame for the bomb and produced a 226 MB file:
+    a bomb that is only dangerous if you can afford to store it is not this
     finding's bomb, and it filled the scratch directory proving it.
     """
     canvas_w, canvas_h = canvas if canvas else (frame_w, frame_h)
@@ -327,20 +370,22 @@ def build_gif(frame_w, frame_h, canvas=None, declared_frame=None):
     out += struct.pack("<HH", canvas_w, canvas_h)
     out += bytes([0xF0, 0x00, 0x00])            # global table, 2 entries, 8 bpp
     out += bytes([0x7F, 0x7F, 0x7F, 0x00, 0x00, 0x00])
-    # Graphic Control Extension: introducer, label, block size 4, four data
-    # bytes, then the BLOCK TERMINATOR. The first version of this left the
-    # terminator off, and the file still read as 64x64 to file(1) while
-    # ImageMagick refused it with "negative or zero image size" -- a fixture
-    # that a header reader accepts and a decoder does not is exactly the
-    # fixture that would have made this scenario lie.
-    out += bytes([0x21, 0xF9, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00])
-    out += bytes([0x2C]) + struct.pack("<HHHH", 0, 0, desc_w, desc_h) + bytes([0x00])
-    out += bytes([0x02])                        # LZW minimum code size
     data = gif_lzw([0] * (frame_w * frame_h), 2)
-    for start in range(0, len(data), 255):
-        block = data[start:start + 255]
-        out += bytes([len(block)]) + block
-    out += bytes([0x00, 0x3B])                  # block terminator, trailer
+    for desc in [(desc_w, desc_h)] + list(extra_frames or []):
+        # Graphic Control Extension: introducer, label, block size 4, four
+        # data bytes, then the BLOCK TERMINATOR. The first version of this
+        # left the terminator off, and the file still read as 64x64 to
+        # file(1) while ImageMagick refused it with "negative or zero image
+        # size" -- a fixture that a header reader accepts and a decoder does
+        # not is exactly the fixture that would have made this scenario lie.
+        out += bytes([0x21, 0xF9, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00])
+        out += bytes([0x2C]) + struct.pack("<HHHH", 0, 0, desc[0], desc[1]) + bytes([0x00])
+        out += bytes([0x02])                    # LZW minimum code size
+        for start in range(0, len(data), 255):
+            block = data[start:start + 255]
+            out += bytes([len(block)]) + block
+        out += bytes([0x00])                    # block terminator
+    out += bytes([0x3B])                        # trailer
     return bytes(out)
 
 
@@ -422,6 +467,16 @@ CORPUS = [
                        declared_frame=(65500, 65500))),
     ("bomb-webp-16383.webp", "16383x16383",
      lambda: build_webp_header_only(16383, 16383)),
+    # ---- the reviewer's three shapes (module docstring), and the control
+    # that keeps the first of them honest.
+    ("ctl-exif-thumb-64.jpg", "64x64",
+     lambda: build_jpeg(64, 64, "baseline", app1=exif_thumbnail())),
+    ("bomb-exif-thumb-20000.jpg", "20000x20000",
+     lambda: build_jpeg(20000, 20000, "progressive", app1=exif_thumbnail())),
+    ("bomb-column-64x65535.jpg", "64x65535",
+     lambda: build_jpeg(64, 65535, "baseline")),          # 4,194,240 px: under
+    ("bomb-gif-second-frame-65500.gif", "65500x65500",
+     lambda: build_gif(64, 64, extra_frames=[(65500, 65500)])),
     # ---- honestly huge and entirely valid, which is the half of the finding
     # that cannot be waved away as "malformed input".
     ("valid-png-20000.png", "20000x20000", lambda: build_png(20000, 20000, bit_depth=1)),

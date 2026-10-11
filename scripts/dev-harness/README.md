@@ -783,22 +783,41 @@ child, nothing detached and nothing to kill. The corpus comes from
 `spikes/logo-decode-bomb/make-corpus.py` (stdlib only, so the gate depends
 on nothing installed). Then whatever the helper ANNOUNCED is handed to the
 shell's `Image`, declared exactly as `Guide.qml` declares the row slot, under
-`systemd-run --user --scope -p MemoryMax=1500M` around the qml process alone.
+an address-space rlimit of 2.5 GB (util-linux `prlimit --as`) on the qml
+process alone -- an rlimit rather than a service-manager memory scope,
+because the marketplace capability scan reads the scope tool's name as
+service management anywhere in a tracked file, and because under the rlimit
+an over-bound decode is a clean allocator refusal rather than a kill.
 
-Twenty-eight checks and the floor: the verb exists (V1); the rig's names are
+Thirty-two checks and the floor: the verb exists (V1); the rig's names are
 the helper's names (V2); the 512x512 logo is fetched, announced, written and
 reaches `Image.Ready` at 72 MB (C1, K1 -- the positive control, because a
 scenario where everything is refused passes against a helper that refuses
 everything); a file at the bound exactly is accepted (C2); a sound cached
-file is announced with no request (C3); seven planted bombs are swept
-(P1..P7, S1), refetched once each (G1), refused under
+file is announced with no request (C3); a 64x64 JPEG carrying a whole
+thumbnail JPEG in its APP1 is accepted (C4, so a parser that refused every
+APP1 could not pass the bomb below for the wrong reason); ten planted bombs
+are swept (P1..P10, S1) -- the seven from the first round plus the three a
+reviewer crafted against the parser: an EXIF thumbnail with its own 64x64
+SOF before the real 20000x20000 one, a 64x65535 column whose pixel count is
+UNDER the bound by 64, and a two-frame GIF whose second frame declares
+65500x65500 -- refetched once each (G1), refused under
 `reasons.logo_dimensions` with nothing on disk (F1, F2, R1..R3); the two
 bounds are driven apart (E1, E2) and an unreadable header is refused rather
 than passed (E3); the summary carries both numbers (M1, M2); the refusal
 text names a host and no URL (T1, T2); and the 304-byte bomb never reaches
-the sink (K2). On `--baseline 159da94` it reads 8 passed, 21 failed, and K2's
-red line carries `rc=0 peak_mb=839`: the finding, observed. check-tree never
-decodes a bomb, even capped; the 840 MB arm is the baseline's, for a human.
+the sink (K2, whose evidence line says which of `withheld-and-gone`,
+`withheld-but-file-survived` or `announced` it saw). On `--baseline 159da94`
+it reads 9 passed, 24 failed, and K2's red line carries `rc=0 peak_mb=839`:
+the finding, observed. check-tree never decodes a bomb, even capped; the
+840 MB arm is the baseline's, for a human.
+
+The tool checks (python3, openssl, prlimit, the qml binary) run before any
+external command, so an empty PATH prints the SKIP reason and nothing else,
+and the exit is 77. `scripts/check.sh` treats that 77 as RED unless
+`LOGO_PREFLIGHT_SKIP_OK=1` is set, printing the reason either way: a gate
+that observed neither sink is not green by default. `LOGO_QML_BIN` overrides
+the qml path, which is how that branch is driven on a machine that has qml.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
@@ -877,11 +896,13 @@ None is part of the gate.
 - `spikes/logo-decode-bomb/run.sh`: how much memory the row logo slot's
   `Image` allocates for a file whose header declares a size its bytes never
   deliver (D-LOGO-11). The corpus is generated (`make-corpus.py`, stdlib
-  only: 28 files, every declared dimension an argument in the call), each
-  row is a fresh offscreen qml process under a 1.5 GB systemd scope, and
-  every row is judged against a band so a Qt that changes the answer is a
-  red exit. Its README holds the table: 72 MB control, 840 MB for 304
-  bytes, 1,239 MB for 555, SIGKILL for the 65500 pair, PNG/GIF/WEBP at
-  control memory, and the `QT_IMAGEIO_MAXALLOC` bracket that puts the
-  threshold at ceil(dim/8)^2 x 4. It decodes bombs on purpose and is never
-  part of the gate; `logo-scenario.sh check-tree` is.
+  only: 32 files, every declared dimension an argument in the call), each
+  row is a fresh offscreen qml process under a 2.5 GB address-space rlimit
+  (util-linux `prlimit --as`), and every row is judged against a band so a
+  Qt that changes the answer is a red exit. Its README holds the table: 72
+  MB control, 840 MB for 304 bytes, 1,239 MB for 555, a clean allocator
+  refusal for the 65500 progressive pair (Image.Error at 325 MB and at 72
+  MB, where a user-session memory scope measured earlier had SIGKILLed
+  both), PNG/GIF/WEBP at control memory, and the `QT_IMAGEIO_MAXALLOC`
+  bracket that puts the threshold at ceil(dim/8)^2 x 4. It decodes bombs on
+  purpose and is never part of the gate; `logo-scenario.sh check-tree` is.
