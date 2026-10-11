@@ -732,8 +732,18 @@ probe arm P1-P6 under `timeout -k 5 70`, the gate step
 `CLIP_PREFLIGHT_MIN` 7, printed as "clip preflight (7 checks)"; `live` adds
 L1-L11 (18 checks) and the `--baseline <ref>` lever; both check their own
 count (`EXPECTED_CHECKS` 6 and 17) so a dropped line is a failure. The
-counts, each from the transcript a run prints as its first line and none of
-them this author's own run: the adversarial review of 824ced4, check-tree
+counts, each from the transcript a run prints as its first line. This
+author's own, on the docs lane's tree at 2b3e847 (lane-clip-r1 51866a3 plus
+documents), live mode, 2026-10-11: 18 passed / 0 failed in 29.3 s, the
+consumer reading 104,857,600 bytes, the shell 348 -> 348 MB (+0) after the
+100 MB offer, twelve IPC round trips with the worst at 105 ms, L7 pasting
+10 bytes and L8 landing 2,112 characters through the helper verb, nothing
+left behind (no cage, no second quickshell, no `wl-paste` but the host's
+`--watch`, no harness scratch directory); transcript
+`/run/user/1000/omarchy-iptv-clip/transcripts/clip-20261011-182035-3389538.out`,
+and the gate's own check-tree arm on the same commit "clip preflight (7
+checks)". The rest are other runs, attributed: the adversarial review of
+824ced4, check-tree
 7 / 0 (the editable probe +259 MB, read-only +0, no-field +0, the consumer
 reading 104,857,600 bytes), live 18 / 0 with the shell at +0 MB and the
 worst of twelve IPC round trips 124 ms after a 100 MB offer, `--baseline
