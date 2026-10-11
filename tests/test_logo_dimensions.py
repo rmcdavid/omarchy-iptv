@@ -66,6 +66,36 @@ CASES = DOCUMENT["cases"]
 BY_ID = {case["id"]: case for case in CASES}
 
 
+def run_logos_subprocess(cache, *args):
+    """`logos --fetch` over `cache`, run the way the plugin runs it: as a
+    subprocess of the real helper, never a function call that resembles it.
+    Returns (CompletedProcess, the summary object, the per-logo lines)."""
+    done = subprocess.run(
+        [sys.executable, str(HELPER_BIN), "logos", "--fetch",
+         "--cache-dir", cache, "--timeout", "2", *args],
+        capture_output=True, text=True, env=dict(os.environ), timeout=120)
+    lines = [json.loads(line) for line in done.stdout.strip().splitlines() if line.strip()]
+    return done, lines[-1] if lines else None, [l for l in lines if l.get("kind") == "logo"]
+
+
+# One maximal JPEG segment: a marker, a length field of 65,535 that counts
+# itself, and 65,533 bytes of payload -- 65,537 bytes in all. APP9 is used
+# because no decoder assigns it a meaning, so a real image padded with these
+# is still the same real image to Qt; the parser steps over it by length.
+MAXIMAL_SEGMENT = b"\xff\xe9\xff\xff" + b"\x00" * 65533
+assert len(MAXIMAL_SEGMENT) == 65537
+
+
+def padded_jpeg(base, segments, trailing=0):
+    """`base` with `segments` maximal APP9 segments inserted after its SOI,
+    and `trailing` zero bytes after its EOI. The frame header moves to
+    2 + 65,537 * segments + (its offset in `base` minus 2), which is the only
+    thing this is for: putting the SOF past LOGO_HEADER_BYTES, or the whole
+    file past MAX_LOGO_BYTES, without storing 131 KB of hex in a fixture."""
+    assert base[:2] == b"\xff\xd8"
+    return base[:2] + MAXIMAL_SEGMENT * segments + base[2:] + b"\x00" * trailing
+
+
 class LogoDimensionParserTest(unittest.TestCase):
     """The parser, over the whole fixture, calling the shipping functions."""
 
@@ -187,12 +217,120 @@ class LogoFixtureCoverageTest(unittest.TestCase):
 
     def test_the_case_count_does_not_quietly_shrink(self):
         self.assertTrue(FIXTURE.exists(), "tests/fixtures/logo-dimensions.json is missing")
-        self.assertGreaterEqual(len(CASES), 44)
+        # 44 when the fixture was built; 55 after the review round added the
+        # EXIF-thumbnail pair, the height-side quartet for JPEG and for PNG,
+        # and the two-frame GIF (the three tests below name every one).
+        self.assertGreaterEqual(len(CASES), 55)
         self.assertEqual(len(BY_ID), len(CASES), "the case ids must be unique")
         for case in CASES:
             self.assertTrue(case["note"].strip(), "%s has no note" % case["id"])
             self.assertTrue(case["hex"] == "" or re.fullmatch(r"[0-9a-f]+", case["hex"]),
                             "%s: hex must be lowercase hex (rule 8, ASCII only)" % case["id"])
+
+    def test_an_exif_thumbnail_before_the_frame_header_is_walked_past_not_read(self):
+        """A review mutation replaced the segment walk with a scan for the
+        first 0xFF+SOF byte pair, and 75 tests stayed green: no case put a
+        whole JPEG -- an EXIF thumbnail inside APP1 -- in front of the real
+        frame header. The reviewer built one. The scan reads the thumbnail's
+        64x64 and passes a file the probe took to 1,239 MB; the walk steps
+        over APP1 by its declared length and reads the frame.
+
+        The shape is asserted on the bytes so the case cannot be swapped for
+        one that no longer carries the thumbnail: an APP1 segment whose
+        payload contains an SOI, sitting BEFORE the first SOF marker.
+        """
+        for cid, dims, within in (("jpeg-exif-thumbnail-before-a-bomb", (20000, 20000), False),
+                                  ("jpeg-exif-thumbnail-control", (64, 64), True)):
+            case = BY_ID.get(cid)
+            self.assertIsNotNone(case, "%s has been removed" % cid)
+            blob = case["bytes"]
+            self.assertEqual(blob[2:4], b"\xff\xe1", "%s: no APP1 segment after the SOI" % cid)
+            app1_len = (blob[4] << 8) | blob[5]
+            app1 = blob[6:4 + app1_len]
+            self.assertIn(b"\xff\xd8\xff", app1, "%s: APP1 carries no embedded JPEG" % cid)
+            # The thumbnail's own SOF sits inside APP1, which is what a naive
+            # scan finds first; the real one sits after it.
+            inner_sof = next(i for i in range(len(app1) - 1)
+                             if app1[i] == 0xFF and app1[i + 1] in helper.JPEG_SOF_MARKERS)
+            self.assertLess(6 + inner_sof, 4 + app1_len, cid)
+            self.assertEqual(helper.logo_dimensions(blob, "image/jpeg"), dims, cid)
+            self.assertIs(helper.logo_within_bounds(blob, "image/jpeg"), within, cid)
+            self.assertEqual(tuple(case["dimensions"]), dims, cid)
+            self.assertIs(case["withinBounds"], within, cid)
+
+    def test_the_offending_dimension_is_put_in_height_for_two_types(self):
+        """The first fixture put every over-bound number in WIDTH, so the
+        height half of the side check could be dropped, or the area computed
+        as height squared, and nothing reddened. These are the boundary
+        quartet transposed: 64x65535 (inside the pixel bound, over the side
+        bound in height ONLY), 1024x4096 (at both bounds, passes), 1024x4097
+        (one over in height) and 2049x2048 (both sides legal, 2,048 px over
+        the area -- and height squared is exactly the bound, so an area
+        computed that way passes it). For JPEG and for PNG, because the bound
+        is a property of the comparison and not of one parser."""
+        expected = {
+            "jpeg-one-enormous-column": ([64, 65535], False),
+            "jpeg-tall-at-the-pixel-bound": ([1024, 4096], True),
+            "jpeg-tall-one-over-the-side": ([1024, 4097], False),
+            "jpeg-tall-one-over-the-pixels": ([2049, 2048], False),
+            "png-one-enormous-column": ([64, 65535], False),
+            "png-tall-at-the-pixel-bound": ([1024, 4096], True),
+            "png-tall-one-over-the-side": ([1024, 4097], False),
+            "png-tall-one-over-the-pixels": ([2049, 2048], False),
+        }
+        for cid, (dims, within) in expected.items():
+            case = BY_ID.get(cid)
+            self.assertIsNotNone(case, "the transposed boundary case %s has been removed" % cid)
+            self.assertEqual(case["dimensions"], dims, cid)
+            self.assertIs(case["withinBounds"], within, cid)
+            self.assertEqual(helper.logo_dimensions(case["bytes"], case["contentType"]),
+                             tuple(dims), cid)
+            self.assertIs(helper.logo_within_bounds(case["bytes"], case["contentType"]),
+                          within, cid)
+        # The two shapes that only a HEIGHT-aware comparison refuses, stated
+        # as properties so they survive a renamed id.
+        self.assertTrue(any(c["dimensions"] and c["dimensions"][1] > helper.MAX_LOGO_SIDE
+                            and c["dimensions"][0] <= helper.MAX_LOGO_SIDE
+                            and c["dimensions"][0] * c["dimensions"][1] <= helper.MAX_LOGO_PIXELS
+                            for c in CASES),
+                        "no case is over the side bound in height alone")
+        self.assertTrue(any(c["dimensions"] and max(c["dimensions"]) <= helper.MAX_LOGO_SIDE
+                            and c["dimensions"][0] * c["dimensions"][1] > helper.MAX_LOGO_PIXELS
+                            and c["dimensions"][1] ** 2 <= helper.MAX_LOGO_PIXELS
+                            for c in CASES),
+                        "no case is over the area bound while height squared is not")
+
+    def test_a_gif_bomb_in_the_second_frame_is_reached(self):
+        """The only frame bomb in the first fixture was in the FIRST image
+        descriptor, so a walk that returned at the first descriptor stayed
+        green. The walk has to reach the trailer: a GIF may carry any number
+        of frames and the allocation is the largest of them."""
+        case = BY_ID.get("gif-bomb-second-frame-65500")
+        self.assertIsNotNone(case, "the two-frame GIF has been removed")
+        blob = case["bytes"]
+        # Walk the descriptors by hand so the shape is pinned: exactly two
+        # image descriptors, the first 64x64 and the second 65500x65500.
+        frames, pos = [], 13 + (3 * (1 << ((blob[10] & 0x07) + 1)) if blob[10] & 0x80 else 0)
+        while pos < len(blob) and blob[pos] != 0x3B:
+            if blob[pos] == 0x21:
+                pos += 2
+                while blob[pos]:
+                    pos += blob[pos] + 1
+                pos += 1
+            elif blob[pos] == 0x2C:
+                frames.append((blob[pos + 5] | (blob[pos + 6] << 8),
+                               blob[pos + 7] | (blob[pos + 8] << 8)))
+                packed = blob[pos + 9]
+                pos += 10 + (3 * (1 << ((packed & 0x07) + 1)) if packed & 0x80 else 0) + 1
+                while blob[pos]:
+                    pos += blob[pos] + 1
+                pos += 1
+            else:
+                self.fail("unexpected block 0x%02x at %d" % (blob[pos], pos))
+        self.assertEqual(frames, [(64, 64), (65500, 65500)])
+        self.assertEqual(blob[6] | (blob[7] << 8), 64, "the canvas is small on purpose")
+        self.assertEqual(helper.logo_dimensions(blob, "image/gif"), (65500, 65500))
+        self.assertFalse(helper.logo_within_bounds(blob, "image/gif"))
 
     def test_the_boundary_quartet_is_present_with_its_exact_expectations(self):
         """The four shapes a wrong comparison operator gets wrong. Spelled out
@@ -472,17 +610,13 @@ class LogoCacheSweepTest(unittest.TestCase):
     DEAD = "https://127.0.0.1:1/%s.png"
 
     def run_logos(self, cache, *args):
-        env = dict(os.environ)
-        done = subprocess.run(
-            [sys.executable, str(HELPER_BIN), "logos", "--fetch",
-             "--cache-dir", cache, "--timeout", "2", *args],
-            capture_output=True, text=True, env=env, timeout=120)
-        lines = [json.loads(line) for line in done.stdout.strip().splitlines() if line.strip()]
-        return done, lines[-1] if lines else None, [l for l in lines if l.get("kind") == "logo"]
+        return run_logos_subprocess(cache, *args)
 
-    def plant(self, planted):
-        """A cache directory holding `planted` = [(case id, ...)] already on
-        disk under the exact names `cmd_logos` will look for."""
+    def plant(self, planted, blobs=None):
+        """A cache directory holding `planted` = [case id, ...] already on
+        disk under the exact names `cmd_logos` will look for. `blobs` maps an
+        id to bytes for a file built by the test rather than read from the
+        fixture (the padded JPEGs of LogoSecondReadTest)."""
         import tempfile
         cache = tempfile.mkdtemp()
         logo_dir = os.path.join(cache, helper.LOGO_SUBDIR)
@@ -493,7 +627,7 @@ class LogoCacheSweepTest(unittest.TestCase):
             name = helper.logo_filename(url)
             names[cid] = name
             with open(os.path.join(logo_dir, name), "wb") as handle:
-                handle.write(BY_ID[cid]["bytes"])
+                handle.write(blobs[cid] if blobs and cid in blobs else BY_ID[cid]["bytes"])
             os.chmod(os.path.join(logo_dir, name), 0o600)
             channels.append({"id": "c%d" % index, "name": "C%d" % index,
                              "group": "G", "url": "http://127.0.0.1/%d" % index,
@@ -601,6 +735,207 @@ class LogoCacheSweepTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(logo_dir, "not-ours")),
                         "a file the command never named was removed")
         self.assertEqual(summary["swept"], 1, summary)
+
+
+class LogoSecondReadTest(unittest.TestCase):
+    """The second read in `logo_file_within_bounds` had never executed under a
+    test: no on-disk case exceeded LOGO_HEADER_BYTES, so dropping it, shrinking
+    the constant, or dropping the byte cap on it all stayed green. These files
+    are GENERATED -- a real 64x64 JPEG padded with maximal APP9 segments so its
+    frame header sits past the first read -- rather than stored as 131 KB of
+    hex. The arithmetic the padding relies on is asserted here, because the
+    helper's own comment once had it wrong by four bytes: two maximal segments
+    after the SOI put the SOF at 131,076, past a 131,072-byte read.
+    """
+
+    SMALL = "jpeg-small-baseline"
+    BOMB = "jpeg-bomb-progressive-20000"
+
+    def setUp(self):
+        import tempfile
+        self.root = tempfile.mkdtemp()
+
+    def on_disk(self, name, blob):
+        path = os.path.join(self.root, name)
+        with open(path, "wb") as handle:
+            handle.write(blob)
+        return path
+
+    def test_two_maximal_segments_put_the_frame_header_past_the_first_read(self):
+        far = padded_jpeg(BY_ID[self.SMALL]["bytes"], 2)
+        head = far[:helper.LOGO_HEADER_BYTES]
+        self.assertEqual(2 + 2 * len(MAXIMAL_SEGMENT), 131076)
+        self.assertGreater(131076, helper.LOGO_HEADER_BYTES,
+                           "the SOF must sit past the first read for this test to mean anything")
+        self.assertLess(len(far), helper.MAX_LOGO_BYTES, "and under the byte cap")
+        # The head alone cannot prove it; the whole file can.
+        self.assertIsNone(helper.logo_dimensions(head, "image/jpeg"))
+        self.assertEqual(helper.logo_dimensions(far, "image/jpeg"), (64, 64))
+
+    def test_the_first_read_alone_proves_a_logo_with_one_maximal_segment(self):
+        """The helper's comment says the first read covers ONE maximal APPn
+        segment before the frame header, which is the common camera-JPEG
+        shape and the reason the sweep is one read for nearly every file.
+        That is a claim about the constant, so it is called rather than
+        read: the prefix the sweep reads first must prove such a file on its
+        own. (A constant shrunk to 16 bytes still answers every verdict
+        correctly through the second read; what it loses is this, one read
+        per file, and this is the assertion that sees it go.)"""
+        near = padded_jpeg(BY_ID[self.SMALL]["bytes"], 1)
+        head = helper._read_logo_prefix(self.on_disk("near-ok", near), helper.LOGO_HEADER_BYTES)
+        self.assertEqual(helper.logo_dimensions(head, "image/jpeg"), (64, 64),
+                         "the first read no longer covers one maximal segment")
+        self.assertTrue(helper.logo_within_bounds(head, "image/jpeg"))
+
+    def test_a_valid_logo_whose_header_sits_past_the_first_read_is_proved_by_the_second(self):
+        far = padded_jpeg(BY_ID[self.SMALL]["bytes"], 2)
+        self.assertTrue(helper.logo_file_within_bounds(self.on_disk("far-ok", far)),
+                        "a legitimate 131 KB logo was refused: the second read is not running")
+        # And the gate agrees, which is the reason the second read exists: a
+        # file write_logo accepts must not be swept on every run.
+        self.assertTrue(helper.logo_within_bounds(far, "image/jpeg"))
+
+    def test_a_far_header_that_declares_a_bomb_is_still_refused(self):
+        far = padded_jpeg(BY_ID[self.BOMB]["bytes"], 2)
+        self.assertLess(len(far), helper.MAX_LOGO_BYTES)
+        self.assertEqual(helper.logo_dimensions(far, "image/jpeg"), (20000, 20000))
+        self.assertFalse(helper.logo_file_within_bounds(self.on_disk("far-bomb", far)))
+
+    def test_a_file_over_the_byte_cap_is_refused_even_when_its_header_would_pass(self):
+        """R4 at the byte axis. The second read is capped at MAX_LOGO_BYTES
+        plus one, so a file bigger than that is refused whatever its header
+        says -- and the header here is deliberately a GOOD one that the
+        capped read can see, so the refusal is on the size alone. The gate
+        could never have written such a file (fetch_logo stops reading at the
+        cap), which is exactly why the sweep must not believe it."""
+        big = padded_jpeg(BY_ID[self.SMALL]["bytes"], 3, trailing=70000)
+        self.assertGreater(len(big), helper.MAX_LOGO_BYTES)
+        self.assertEqual(helper.logo_dimensions(big[:helper.MAX_LOGO_BYTES + 1], "image/jpeg"),
+                         (64, 64), "the capped read must be able to see the frame header, "
+                         "or this is testing a parse failure and not the byte cap")
+        self.assertIsNone(helper.logo_dimensions(big[:helper.LOGO_HEADER_BYTES], "image/jpeg"))
+        self.assertFalse(helper.logo_file_within_bounds(self.on_disk("too-big", big)))
+
+    def test_the_sweep_announces_the_far_logo_and_removes_the_far_bomb_and_the_oversize(self):
+        """The same three files through the real command as a subprocess:
+        the cached-file branch names the legitimate one and sweeps the two
+        it cannot prove. A cached file past the first read is the shape a
+        camera-style JPEG with a big embedded colour profile takes."""
+        sweep = LogoCacheSweepTest()
+        blobs = {"far-ok": padded_jpeg(BY_ID[self.SMALL]["bytes"], 2),
+                 "far-bomb": padded_jpeg(BY_ID[self.BOMB]["bytes"], 2),
+                 "too-big": padded_jpeg(BY_ID[self.SMALL]["bytes"], 3, trailing=70000)}
+        cache, logo_dir, names = sweep.plant(list(blobs), blobs)
+        done, summary, announced = run_logos_subprocess(cache)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(summary["names"], [names["far-ok"]], summary)
+        self.assertEqual([line["name"] for line in announced], [names["far-ok"]])
+        self.assertEqual(summary["cached"], 1, summary)
+        self.assertEqual(summary["swept"], 2, summary)
+        self.assertEqual(sorted(os.listdir(logo_dir)), [names["far-ok"]])
+
+
+class LogoFetchCapTest(unittest.TestCase):
+    """MAX_LOGO_FILES bounds NEW FETCHES only; a cached file past it is still
+    validated and announced.
+
+    The cap check used to be the first line of the loop, as a `break`, so in
+    a run that fetched 5,000 new files every cached file later in channel
+    order was neither validated nor announced that run: blank slots for logos
+    the guide already had, and a cached bomb past the cap left on disk (R5).
+
+    The state is CONSTRUCTED rather than the cap lowered, because the helper
+    has no lever for the cap and a lever that could also raise it would be a
+    disclosure lever. 5,000 new URLs are served by a double standing in for
+    the network only -- `fetch_logo` is the one function replaced, the way
+    every fetch test in tests/test_logos.py replaces it -- and `cmd_logos`
+    itself runs for real, at the real cap, over a real cache directory. The
+    second half then runs the REAL HELPER AS A SUBPROCESS over the cache the
+    capped run left, which is the run an upgraded install's next start is.
+    """
+
+    def test_a_cached_logo_past_the_cap_is_validated_and_announced_and_a_bomb_is_swept(self):
+        import argparse
+        import contextlib
+        import io
+        import tempfile
+        cache = tempfile.mkdtemp()
+        logo_dir = os.path.join(cache, helper.LOGO_SUBDIR)
+        os.makedirs(logo_dir, mode=0o700)
+        dead = "https://127.0.0.1:1/%s.png"
+        cap = helper.MAX_LOGO_FILES
+        self.assertEqual(cap, 5000, "the constructed state assumes the shipped cap")
+        # Channel order: `cap` new URLs, then three cached files (two safe,
+        # one bomb), then two more new URLs the cap must defer.
+        new_urls = [dead % ("new-%d" % i) for i in range(cap)]
+        planted = ["png-small", "jpeg-bomb-progressive-20000", "gif-small"]
+        planted_names = {}
+        for cid in planted:
+            name = helper.logo_filename(dead % cid)
+            planted_names[cid] = name
+            with open(os.path.join(logo_dir, name), "wb") as handle:
+                handle.write(BY_ID[cid]["bytes"])
+        after_urls = [dead % "late-0", dead % "late-1"]
+        urls = new_urls + [dead % cid for cid in planted] + after_urls
+        channels = [{"id": "c%d" % i, "name": "C%d" % i, "group": "G",
+                     "url": "http://127.0.0.1/%d" % i, "logo": url}
+                    for i, url in enumerate(urls)]
+        with open(os.path.join(cache, helper.CHANNELS_FILE), "w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "count": len(channels), "channels": channels}, handle)
+
+        served = []
+
+        def network_double(url, timeout):
+            served.append(url)
+            return BY_ID["webp-small-vp8l"]["bytes"], "image/webp"
+
+        real = helper.fetch_logo
+        helper.fetch_logo = network_double
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                helper.cmd_logos(argparse.Namespace(cache_dir=cache, fetch=True,
+                                                    survey=False, timeout=1))
+        finally:
+            helper.fetch_logo = real
+        lines = [json.loads(l) for l in out.getvalue().splitlines() if l.strip()]
+        summary, announced = lines[-1], [l["name"] for l in lines if l.get("kind") == "logo"]
+
+        self.assertEqual(summary["fetched"], cap)
+        self.assertEqual(served, new_urls, "exactly the first `cap` URLs were fetched, "
+                         "nothing past the cap and never the cached ones")
+        # The cached files PAST the cap: validated, the safe ones announced.
+        safe = sorted([planted_names["png-small"], planted_names["gif-small"]])
+        self.assertEqual(summary["cached"], 2, summary)
+        self.assertEqual(sorted(n for n in announced if n in planted_names.values()), safe)
+        self.assertTrue(set(safe) <= set(summary["names"]), "a cached logo past the cap "
+                        "was not announced, so the guide draws a blank slot it need not")
+        self.assertNotIn(planted_names["jpeg-bomb-progressive-20000"], summary["names"])
+        self.assertNotIn(planted_names["jpeg-bomb-progressive-20000"], announced)
+        # The bomb past the cap is swept, not left for the shell.
+        self.assertEqual(summary["swept"], 1, summary)
+        self.assertFalse(os.path.exists(os.path.join(
+            logo_dir, planted_names["jpeg-bomb-progressive-20000"])), "a cached bomb past "
+            "the cap survived the run")
+        # And what the cap held back is a number: the two late URLs plus the
+        # swept bomb that fell through to a fetch the cap refused.
+        self.assertEqual(summary["deferred"], 3, summary)
+        self.assertEqual(summary["cap"], cap)
+        self.assertEqual(len(summary["names"]), cap + 2)
+
+        # Second half: the real helper, as a subprocess, over the cache this
+        # run left behind. Everything is cached now, so the cap is not reached
+        # and the three deferred URLs go to the dead host and fail; what must
+        # hold is that every file the capped run wrote or kept is announced.
+        done, again, announced_again = run_logos_subprocess(cache)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(again["cached"], cap + 2, again)
+        self.assertEqual(again["fetched"], 0)
+        self.assertEqual(again["deferred"], 0)
+        self.assertEqual(again["swept"], 0)
+        self.assertEqual(again["failed"], 3, "the two late URLs and the swept bomb's URL")
+        self.assertEqual(sorted(again["names"]), sorted(summary["names"]))
+        self.assertEqual(sorted(l["name"] for l in announced_again), sorted(summary["names"]))
 
 
 if __name__ == "__main__":
