@@ -194,6 +194,16 @@ STUB_TESTS_MIN=${STUB_TESTS_MIN:-28}
 # footer, and scripts/qa-lib-test.sh asserts this number is the scenario's
 # EXPECTED_CHECKS plus one.
 LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-33}
+# The D-CLIP-1 clipboard preflight (scripts/dev-harness/clip-scenario.sh
+# check-tree): 6 checks over the lead's three probes inside a nested headless
+# cage -- the editable TextField reads a 100 MB foreign offer in full, the
+# read-only one and the no-field window read nothing, a consumer on that
+# display gets every byte, and everything started is gone by its pid -- plus
+# its own "ran every check" line. The shell arm (the real Guide.qml, red on
+# --baseline d55149b at +254 MB and a 673 ms stall) is the live mode's, for a
+# human. scripts/qa-lib-test.sh asserts this number is the scenario's
+# check-tree EXPECTED_CHECKS plus one.
+CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -603,6 +613,45 @@ elif (( logo_rc == 77 )); then
   fi
 else
   cat "$logo_log"; bad "logo preflight (exit $logo_rc)"
+fi
+
+step "scripts/dev-harness/clip-scenario.sh check-tree (D-CLIP-1)"
+# An editable QtQuick TextInput subscribes to QClipboard::dataChanged, and
+# on the released Qt 6.11.2 that slot reads the whole foreign offer -- 1 s
+# per read, no byte limit, no deadline -- on the shell's main thread, at
+# every clipboard change by any application while the form is open (the
+# sixth maintainer finding, docs/QA-RESULTS.md 2026-10-11). The fix is
+# `readOnly: true` on every form field, and `readOnly` is the one switch on
+# that slot. This half re-measures the fact the fix rests on, on THIS
+# machine, on every commit: the lead's three probes run inside a nested
+# headless cage on a display of its own, a foreign producer there offers
+# 100 MB of text/plain with a virtual keyboard held on the seat (without
+# one the compositor hands the selection to nobody and the measurement is
+# vacuous), and the resident set is sampled from outside: the editable
+# probe grows by the payload or more, the read-only probe and the no-field
+# window by nothing. Nothing touches the user's session or clipboard; the
+# nested display is read from cage's own child and refused if it names the
+# live one. About 13 s.
+#
+# A machine without cage, wl-copy, wl-paste, wtype, python3, node or the
+# qml runtime answers 77 with the reason, and so does a cage that brings up
+# no display: RED here unless CLIP_PREFLIGHT_SKIP_OK=1 is set, printing the
+# reason either way, for the same reason as the logo step above -- a gate
+# that measured nothing has proved nothing.
+clip_log=$CHECK_TMP/clip-scenario.log
+"$ROOT/scripts/dev-harness/clip-scenario.sh" check-tree >"$clip_log" 2>&1; clip_rc=$?
+if (( clip_rc == 0 )); then
+  clip_n=$(grep -c '^PASS' "$clip_log" || true)
+  if (( clip_n < CLIP_PREFLIGHT_MIN )); then cat "$clip_log"; bad "clip preflight ran $clip_n checks, expected at least $CLIP_PREFLIGHT_MIN"; else ok "clip preflight ($clip_n checks)"; fi
+elif (( clip_rc == 77 )); then
+  clip_why=$(grep -a '^SKIP' "$clip_log" | head -1 | sed 's/^SKIP clip-scenario: //')
+  if [[ ${CLIP_PREFLIGHT_SKIP_OK:-0} == 1 ]]; then
+    printf 'SKIP clip preflight (CLIP_PREFLIGHT_SKIP_OK=1): %s\n' "$clip_why"
+  else
+    bad "clip preflight SKIPPED, which is not green: $clip_why (set CLIP_PREFLIGHT_SKIP_OK=1 to accept a gate that observed no probe)"
+  fi
+else
+  cat "$clip_log"; bad "clip preflight (exit $clip_rc)"
 fi
 
 step "ascii check (code files)"
