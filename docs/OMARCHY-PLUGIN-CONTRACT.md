@@ -7,9 +7,9 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
 
 | Thing | Value |
 |---|---|
-| Omarchy | 4.0.3 (`pacman -Qi omarchy`) |
+| Omarchy | 4.0.4-1 (`pacman -Q omarchy`, 2026-10-11; 4.0.3 when this table was first written) |
 | Quickshell | 0.3.1 |
-| Qt | 6.11.2 (`qt6-declarative`, `qt6-base`) |
+| Qt | 6.11.2 (`qt6-declarative`, `qt6-base`, `qt6-wayland`, all 6.11.2 on 2026-10-11) |
 | Hyprland | 0.56.2 |
 | mpv | 0.41.0 |
 | python3 | 3.14.7, stdlib only (no pytest → use `python3 -m unittest`) |
@@ -397,3 +397,87 @@ reads the property out of the host's own source, asserts the expression, asserts
 the host still takes its home from `$HOME`, and asserts the helper's path equals
 the host's on this machine including with `XDG_CONFIG_HOME` moved. It skips
 where Omarchy is not installed, so it constrains this machine and never a CI box.
+
+## The host kit's `TextField` reads the whole clipboard on every change while editable (verified 2026-10-11)
+
+Found during D-CLIP-1 (omarchy-plugin-marketplace#11077). The register of
+the sink, the measurements and the plugin's fix are `docs/ARCHITECTURE.md`
+section 6; this section holds the HOST and Qt facts the plugin cannot
+change and relies on.
+
+**The Qt fact, read at the release tags, not at branch heads.** On the Qt
+this machine runs, `QQuickTextInput::q_canPasteChanged()` -- the slot every
+`TextInput` connects to `QClipboard::dataChanged` at construction -- is,
+in v6.11.2 (`src/quick/items/qquicktextinput.cpp:3010`, code.qt.io `plain`
+endpoint, 2026-10-11):
+
+```
+    if (!d->m_readOnly) {
+        if (const QMimeData *mimeData = QGuiApplication::clipboard()->mimeData())
+            canPaste = mimeData->hasText() && !mimeData->text().isEmpty();
+    }
+```
+
+v6.12.0 (`:3009`) is identical. `text()` reads the entire offer; on Wayland
+that is a pipe with a 1 s timeout per read, no total limit and no deadline
+(the lead's read of qtbase 6.12 `qwaylanddataoffer.cpp`). `m_readOnly` is
+the only switch. History, each date checked against code.qt.io on
+2026-10-11: `c82ef988` added the `text()` call on the 6.11 branch
+(authored 2026-02-16, committed 2026-02-18, pick of `6c07e2a7`; shipped in
+6.11.2); `7d0a433a` removed it (authored 2026-08-29, committed to 6.11 on
+2026-09-15, pick of `ef692a52` / `bcbfae67`, `Fixes: QTBUG-149610`). The
+`6.11`, `6.12` and `dev` branch heads read `canPaste = mimeData->hasText();`
+today; no v6.11.3 tag exists and v6.12.0 carries the read. So the fix lands
+here only when Arch ships a Qt built past 2026-09-15 on 6.11, or a 6.12.1;
+`pacman -Q qt6-declarative` is the check, and the spec's
+`test_readOnlyFieldPremises` keeps the plugin's own field read-only
+whatever it says.
+
+**The host fact.** `/usr/share/omarchy/shell/Ui/TextField.qml` (omarchy
+4.0.4) is `TextField { ... }` from `QtQuick.Controls` with the kit's chrome
+and `echoMode: password ? TextInput.Password : TextInput.Normal`; it never
+sets `readOnly`, so every instance is editable unless its caller says
+otherwise, and the plugin's field inherits that default. The kit's
+`NumberField.qml:80` sets `readOnly: !spin.editable`. Editable instances the
+host itself declares (a grep over shape, `TextField {` and `readOnly`,
+2026-10-11; which of them exist while their panel is closed is UNVERIFIED):
+
+| host file | line | field |
+|---|---|---|
+| `plugins/panels/network/Panel.qml` | 1841, 1865 | the passphrase prompts (the precedent D9 cited) |
+| `plugins/panels/clock/Panel.qml` | 381, 404 | two fields |
+| `plugins/panels/weather/Panel.qml` | 615 | one field |
+| `plugins/panels/tailscale/Panel.qml` | 601 | one field |
+| `Ui/MultiSelect.qml` | 407 | the filter field |
+| `Ui/SearchableDropdown.qml` | 205 | the filter field |
+| `plugins/dev-gallery/GalleryPanel.qml` | 1337, 1358 | demo fields |
+| `plugins/lock/LockView.qml` | 146 | `readOnly: root.authenticatingPassword` -- editable while LOCKED |
+| `plugins/polkit/PolkitAgent.qml` | 323 | `readOnly: root.submitted \|\| root.errorFlash` |
+
+The plugin cannot change any of these; the draft report to Omarchy is the
+first quoted block in `docs/ARCHITECTURE.md` section 6's D-CLIP-1 entry.
+
+**What the plugin relies on, measured in the QML spec rather than assumed
+(`test_readOnlyFieldPremises`, lane commit 44b250b):** a `readOnly: true`
+`TextInput` on Qt 6.11.2 keeps its caret, `cursorRectangle`, selection,
+Home / End, `Ctrl+A` and `Ctrl+C` native; refuses typing, `Backspace` and
+`Ctrl+V`; parks its caret at the end on every bound `text` write,
+synchronously; draws NO caret and never instantiates a `cursorDelegate`;
+and delivers `Ctrl+V` and `Shift+Insert` as `StandardKey.Paste` and
+`Ctrl+X` / `Shift+Delete` as `StandardKey.Cut` through `Keys.forwardTo`, a
+bare `Insert` as neither. By the v6.11.2 source (same file): `paste()`
+(`:2184`), `cut()` (`:2155`) and `undo()` (`:2200`) are each gated on
+`!m_readOnly`; the programmatic `insert()` (`:2229`) is NOT, so a read-only
+input can still be edited by a caller, which is why the plugin writes the
+model and never `insert`s. Input-method composition does not reach it by
+construction: `setReadOnly(true)` clears `ItemAcceptsInputMethod` (`:729`)
+and `inputMethodQuery(ImEnabled)` returns that flag (`:2054`), so the input
+method is told the field is disabled. Read from the source, not observed:
+no IME is installed on this machine, so the loss is UNVERIFIED by
+observation.
+
+**What the plugin uses instead.** `wl-paste` 2.3.0 (`wl-clipboard`, present
+here) read through wlr-data-control from a child process, which needs no
+keyboard focus; the host does not provide a clipboard verb of its own, and
+`Quickshell.clipboardText` (quickshell-core.qmltypes) is the same
+`QClipboard::text()` read in the same process and is not used.

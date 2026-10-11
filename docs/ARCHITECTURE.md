@@ -1012,6 +1012,272 @@ playlist and EPG bytes are parsed in the helper and arrive as JSON.
      was never stopped at all. Found by the final review; the live
      observation that would pin it is listed under F-M3-18.
 
+Raised 2026-10-11 (D-CLIP-1), and written here in the round that fixes it --
+the state of that fix is the board row in `docs/STATUS.md`, not this
+paragraph. **The same maintainer, the sixth finding in six days, on the
+verification request for the commit that fixed the fifth** (0.13.4, d55149b,
+omacom/omarchy-plugin-marketplace#11077): the first-run and add-source forms
+instantiate editable `qs.Ui.TextField` controls, and a clipboard change makes
+Qt read the offer before any `maximumLength` or paste handling applies, with
+no total byte limit and no deadline, so a foreign Wayland clipboard producer
+can stall or exhaust the shared shell. He was right, with his Qt versions
+inverted, which is settled below.
+**A new class once more, and naming it is the point: an INPUT sink that
+BLOCKS.** Every entry above this one is a place a secret of ours was written
+or sent, and each was closed by narrowing where it went. Here nothing of ours
+leaves. The exposure runs the other way: a byte stream chosen by any other
+program on the desktop is pulled INTO the long-running shell, on its main
+thread, synchronously, whenever that program changes the clipboard -- a read
+the plugin never asked for, that no user action precedes, and whose size and
+duration the producer sets. The sink is not a channel but a SUBSCRIPTION. An
+editable `TextInput` connects `QClipboard::dataChanged` to its own
+`q_canPasteChanged` at construction, so the cost is paid by existing, not by
+being used: focus, visibility and the user's hands have nothing to do with
+it. The sink list had only ever asked where our bytes go; it had never asked
+what a control we instantiate agrees to receive.
+**Mechanism, by the RELEASED sources, read by this lane on 2026-10-11 from
+code.qt.io's `plain` endpoint at the tag, not at a branch head.**
+`QQuickTextInput::q_canPasteChanged` on v6.11.2
+(`src/quick/items/qquicktextinput.cpp:3010`) reads
+`canPaste = mimeData->hasText() && !mimeData->text().isEmpty();` under
+`if (!d->m_readOnly)`; v6.12.0 (line 3009) is character for character the
+same. `text()` is the whole-offer read: on Wayland
+`QWaylandMimeData::retrieveData_sys` reads the offer through a pipe, `poll`
+with a 1 s timeout per read, 4 KB per read, no total limit and no overall
+deadline, and caches the result until the next offer (the lead's read of
+qtbase 6.12 `qwaylanddataoffer.cpp`, recorded in `docs/QA-RESULTS.md`
+"Sixth maintainer finding"; not re-read here). `m_readOnly` is the only
+switch on the slot, in every version of it read.
+**Measured, three times, by two lanes, and attributed rather than inferred.**
+The lead, on the live session on 2026-10-11 before any lane was briefed
+(`docs/QA-RESULTS.md`, the table under "Sixth maintainer finding"): a
+throwaway Wayland client (`qml`, never the shell) holding one
+`QtQuick.Controls` `TextField` -- the base type the host's `qs.Ui.TextField`
+inherits -- and a foreign `wl-copy` offering 100 MB of `text/plain`, resident
+set sampled every 100 ms from outside: `readOnly: false` 164 -> 403 MB,
++238 MB, last growth 600 ms after the offer; `readOnly: true` +0; a window
+with no field at all +52 MB, which a gdb catchpoint on `pipe2` then showed
+was the toolkit starting and not the clipboard -- ten hits on the editable
+probe, every one `QMimeData::text()` called from
+`QQuickTextInput::q_canPasteChanged` out of `QPlatformClipboard::emitChanged`,
+and zero on the no-field probe. Lane A, the same three probes unmodified,
+INSIDE a nested headless cage so the user's clipboard was never touched (the
+run directories under the lane's scratch, `cage-run-{readonly,editable,
+probe}`, summarised by this lane from their `rss` and `offer` files):
+`readonly.qml` 281 -> 281 MB, +0; `editable.qml` 281 -> 566 MB, +284 MB, last
+growth 6.9 s after the offer; the heartbeat probe +204 MB. The number is
+stable across compositors and the sign is the same; the magnitude is about
+twice the payload (the bytes and the decoded string) and is NOT a floor,
+since the pipe read has no limit at all. One condition lane A found that is
+load-bearing for the gate (R7): the cage's headless seat has no keyboard, a
+compositor hands `wl_data_device.selection` only to the client with keyboard
+focus, and on the first run NOT EVEN the editable probe read (+0 on both);
+the sink opened only with a virtual keyboard (`wtype`) held open on the
+nested display across the offer. A scenario that omits that passes
+vacuously on the baseline.
+**Where it came from and where it has gone, every date checked by this lane
+against code.qt.io on 2026-10-11.** qtdeclarative `c82ef988` ("QQuickTextInput:
+check if text is empty in q_canPasteChanged"; authored 2026-02-16 by Assam
+Boudjelthia, committed to the 6.11 branch 2026-02-18 by the cherry-pick bot
+as a pick of `6c07e2a7`) ADDED the `text()` call, so that an offer advertising
+text with an empty payload reads as not pasteable; it shipped in 6.11.2.
+`7d0a433a` ("QQuickTextInput: don't call QMimeData::text() for canPaste
+[6.11]"; authored 2026-08-29 by Will Rose, committed to 6.11 on 2026-09-15
+as a pick of `ef692a52` and `bcbfae67`, `Fixes: QTBUG-149610`,
+`Task-number: QTBUG-121594`) REMOVED it, restoring the format-only check
+`QQuickTextEdit` always had, and its message names the harm: blocking on an
+unresponsive clipboard owner in a synchronous IPC call. The branch heads of
+`6.11`, `6.12` and `dev` all read `canPaste = mimeData->hasText();` today.
+The RELEASES do not: v6.11.2 is the newest 6.11 tag (no v6.11.3 exists as of
+this reading) and v6.12.0, tagged in the last two weeks, carries the read at
+line 3009. So the maintainer's "supported Qt 6.12 path" is right about the
+released 6.12.0 and wrong only in implying 6.11.2 is spared: EVERY released
+Qt this shell could run on reads, and the removal exists on branches alone.
+The Jira page for QTBUG-149610 could not be read without a login and its
+status is UNVERIFIED from here; the trailer is cited from the commit.
+**What changed (lane A, commit 44b250b on `lane-clip-code`; the line numbers
+are that tree's).** The fix is at the SUBSCRIPTION, not at the paste:
+`Guide.qml:4779` declares the form `TextField` `readOnly: true`, always --
+focused or not, masked or not, revealed or not -- with no binding, because a
+binding is a way back. A read-only control still keeps its caret, its
+selection, Home / End, `Ctrl+A`, `Ctrl+C` and mouse selection natively
+(pinned by `test_readOnlyFieldPremises` in the QML spec), so the plugin does
+the rest itself: `handleFormKey` (`Guide.qml:2669`), which already saw every
+key first through `Keys.forwardTo`, applies printable insertion, Backspace,
+Delete, their Ctrl word variants and cut to the MODEL value through
+`Model.editInsert` / `Model.editDelete` (`Model.js:10409`, `:10425`) and
+`applyEdit` (`Guide.qml:2737`) writes it back through `Model.withFormValue`
+and restores the caret synchronously, because a bound write parks Qt's caret
+at the end (measured). The word boundary is Qt's own, taken position by
+position from a real `TextInput` into `tests/fixtures/form-edit.js`, which the
+spec re-measures on every run. Paste is the process path ONLY:
+`pasteViaProcess` is `true` (`Guide.qml:592`), `Ctrl+V` and `Shift+Insert`
+reach the handler as `StandardKey.Paste` (measured, both), and
+`Service.requestClipboard` (`Service.qml:1851`) runs
+`["wl-paste", "--no-newline", "--type", "text"]` as argv (`:5176`), cuts its
+output at `Model.LIMITS.url * 4` = 8,192 UTF-16 units (`:5185`), answers only
+on exit 0 so a failed paste never clears a field, and a `clipboardWatchdog`
+`Timer` (`:5193`, `Model.CLIPBOARD_TIMEOUT_MS` = 5,000 ms, `Model.js:10307`)
+SIGTERMs the CHILD when a producer drips -- the child dies, never the shell.
+The guide then runs the text through `Model.sanitizeInput` at the field's
+`Model.formCapacity` and `Model.editInsert` over the selection, or over the
+whole value of a masked field (`pasteFromProcess`, `Guide.qml:2643`). Qt
+draws no caret on a read-only input and never instantiates its
+`cursorDelegate` there (measured: dark-pixel count 0 against 20 editable), so
+the field draws its own `Rectangle` on the native `cursorRectangle`
+(`Guide.qml:4833`, `Style.spacing.hairline` wide, `field.color`, blinking at
+half `Application.styleHints.cursorFlashTime`). Nothing in the shell process
+asks Qt for the clipboard any more: `Guide.qml`'s `clipboardText()` is kept
+unreachable only because `tests/a11y/fidelity.py` pins its line, and the two
+are to be dropped together. Counts: node 1,911 -> 2,026, QML spec 73 -> 77,
+python 1,026 unchanged; the red proofs are the lane's commit message.
+**The residuals, each with its size or marked.**
+- **The host kit's own field is exposed in every host form, and that is
+  Omarchy and Quickshell business, upstream.** `Ui/TextField.qml` on omarchy
+  4.0.4 inherits Qt Quick Controls `TextField` and never touches `readOnly`.
+  A grep over shape on this machine (engineering rule 15; 2026-10-11) finds
+  editable `TextField`s at `plugins/panels/network/Panel.qml:1841` and
+  `:1865` (the passphrase prompts), `plugins/panels/clock/Panel.qml:381` and
+  `:404`, `plugins/panels/weather/Panel.qml:615`,
+  `plugins/panels/tailscale/Panel.qml:601`, `Ui/MultiSelect.qml:407`,
+  `Ui/SearchableDropdown.qml:205` and the dev gallery; and three that gate
+  `readOnly` on something other than "not being edited":
+  `Ui/NumberField.qml:80` (`readOnly: !spin.editable`),
+  `plugins/lock/LockView.qml:146` (read-only only while authenticating, so
+  the LOCKED screen's password field subscribes) and
+  `plugins/polkit/PolkitAgent.qml:323`. Which of those exist while their
+  panel is closed is UNVERIFIED: the grep finds declarations, not instances.
+  The draft report is quoted below; the facts are in
+  `docs/OMARCHY-PLUGIN-CONTRACT.md`.
+- **The host's Qt is what the user has.** The plugin cannot ship a Qt. When
+  a Qt carrying `7d0a433a` reaches this distribution the read stops for the
+  host's fields too; the plugin's fields stay read-only regardless (ruling 1
+  below says always), because the subscription remains even when its slot
+  is cheap, and a rule with a version number in it is the rule the next
+  cherry-pick breaks.
+- **The read-only field loses input-method composition** (ruling 5, stated
+  rather than hidden): dead keys, Compose and CJK input never reach a
+  read-only `TextInput`, so accented or non-Latin characters cannot be TYPED
+  into the label field. ASCII typing is unaffected; a paste carries any
+  Unicode; URLs, server, username and password are ASCII by nature. Native
+  undo (`Ctrl+Z`) is gated by `readOnly` as well and is gone with it. The
+  README and UX-SOURCES say so.
+- **Middle-click paste of the primary selection is gone**, since it was Qt's
+  and the control no longer edits; `Ctrl+V` and `Shift+Insert` remain.
+- **A USER paste of a huge clipboard still pulls the whole offer into the
+  shell before the cap** (lane A's DR-1): `clipboardProc`'s stdout is a
+  `StdioCollector` with `waitForEnd`, so the 8,192-unit cut is applied to a
+  string the shell has already received in full. The watchdog bounds TIME
+  (5 s), not bytes, and the read is user-initiated and once, not
+  change-driven and unbounded, which is the whole of the difference from the
+  finding. A byte cap needs a helper verb or a different collector and is a
+  decision the lead has been asked for; UNVERIFIED what a 100 MB
+  user-initiated paste costs the shell on the fixed tree.
+- **`wl-paste` is now the paste path and not a fallback**, so paste needs
+  `wl-clipboard` on PATH (an Omarchy default, present here at 2.3.0); without
+  it a paste changes nothing, silently. A `Clipboard unavailable` transient
+  is a UX decision (lane A's DR-4), not made in this round.
+- **A shell not restarted after the upgrade runs the old `Guide.qml`** and
+  keeps the editable field until it is; the README's install section already
+  says to restart with `omarchy-restart-shell`.
+- **The accessible role stays `Accessible.EditableText` on a control that is
+  read-only to Qt.** What the bridge would publish for that (the `readOnly`
+  state, the role) is UNVERIFIED and moot while D-GS-3 keeps every node off
+  the bus.
+**The siblings, asked before closing (engineering rule 15).** The lead's
+sweep (R6): `Guide.qml:4779` is the only `TextInput`-derived element in the
+shipped QML; the search line is a plain `Text`; the host kit's
+`qs.Ui.NumberField` is not used. Lane A's: a grep for
+`TextField|TextInput|NumberField|clipboardText|Quickshell\.clipboard` over the
+shipped QML finds the one field and the one (now unreachable) Qt clipboard
+read; the dev-harness fake and the accessibility fakes stub `requestClipboard`
+and never bind `clipboardText`. This lane's: the host-side list above, which
+is the same shape in files this plugin does not own. Every other subscription
+a shipped element makes to a global that any process can change is the
+question this entry leaves open as a shape, not as a list: none other is
+known, and "known" is what the previous five entries also said.
+**The gate observes the sink (ruling 7; lane B).** A scenario that runs the
+REAL `Guide.qml` through the dev-harness fake shell under a nested headless
+cage in the harness's `FloatingWindow` mode (the layer-shell window never
+maps there, `docs/SPIKE-CAGE-HEADLESS.md`), holds a virtual keyboard on the
+nested seat, opens the form, has a foreign producer offer 100 MB of
+`text/plain` inside that compositor, and asserts the shell's RSS and an IPC
+round-trip unchanged on the fixed tree and the read on `--baseline d55149b`;
+its compositor-free half runs in `scripts/check.sh`. At this writing the
+branch `lane-clip-harness` carries no commit past `lane-clip-code`, so the
+scenario's name, its counts and its red run are UNVERIFIED here and are
+specified in `docs/QA.md` section 3.3 for the lane to meet.
+**Ruling, as briefed by the lead for this round (numbered 1-7 here; the lane
+briefs called them R1-R7).** (1) While the form is open no editable
+`TextInput` exists in the shell: every field `readOnly: true`, always.
+(2) Paste is the out-of-process path only, capped where it was, with a
+bounded child. (3) The password field keeps `echoMode` Password; masking is
+unchanged. (4) The edit logic is in `Model.js` and called from node, with
+Qt's own word boundary measured, not assumed; the over-cap behaviour is
+refused, never cut. (5) The input-method loss is stated where the user reads
+and where the design lives. (6) The sibling sweep above. (7) The gate observes
+the sink, with the compositor-free half in `check.sh`.
+**Upstream, drafted here for the lead to file.** Two reports, because the
+two parties can each act and neither can act for the other.
+
+> **To Omarchy (omacom/omarchy), against `Ui/TextField.qml` on 4.0.4.**
+> `Ui/TextField.qml` inherits Qt Quick Controls `TextField` and leaves
+> `readOnly` false, as every caller of it does while a panel is open. On the
+> Qt Omarchy ships (6.11.2; released 6.12.0 behaves the same), every editable
+> `QQuickTextInput` connects `QClipboard::dataChanged` to
+> `q_canPasteChanged()`, which calls `QMimeData::text()` -- the entire offer
+> -- synchronously on the shell's main thread, every time ANY client changes
+> the clipboard. On Wayland that read is a pipe with a 1 s timeout per read,
+> no total limit and no deadline. So while a host panel with an editable
+> field is open -- the network passphrase prompt, the clock and weather
+> panels, tailscale, `MultiSelect`, `SearchableDropdown`, and the lock
+> screen's password field, which is read-only only while authenticating --
+> a producer offering N bytes grows `omarchy-shell` by about 2N, and one that
+> drips a byte every 900 ms holds its main thread for as long as it likes.
+> Measured on 2026-10-11 (Qt 6.11.2, Hyprland 0.56.2, `wl-copy` offering
+> 100 MB of text/plain to a throwaway `qml` client): one
+> `TextField { readOnly: false }` 164 -> 403 MB within 600 ms of the offer;
+> the same with `readOnly: true` +0; a window with no field made no pipe read
+> at all (gdb catchpoint on `pipe2`; every hit is `QMimeData::text()` called
+> from `QQuickTextInput::q_canPasteChanged`). Upstream: qtdeclarative
+> `c82ef988` added the read on the 6.11 branch on 2026-02-18 (shipped in
+> 6.11.2) and `7d0a433a` removed it on 2026-09-15 (`Fixes: QTBUG-149610`);
+> as of 2026-10-11 no released Qt carries the removal. `readOnly` is the only
+> switch on the slot in every version. Ask: until a Qt with `7d0a433a`
+> ships, keep the kit's fields `readOnly: true` whenever they are not being
+> edited (or always, and edit through the key handler the panels already
+> have), or bound what the shell will read. The IPTV plugin
+> (`io.github.rmcdavid.iptv`) has done the former for its own form after a
+> marketplace review raised it (omarchy-plugin-marketplace#11077): every
+> field read-only to Qt, editing applied by the plugin, paste through a
+> `wl-paste` child with a size cap and a watchdog. Reproduction: three
+> ten-line QML files (editable, read-only, no field) and one `wl-copy`,
+> available on request.
+
+> **To Qt, as a comment on QTBUG-149610 (or a new report if that bug turns
+> out not to be this one): released 6.11.2 and 6.12.0 read the whole
+> clipboard synchronously on every `dataChanged`; please ship `7d0a433a`.**
+> `QQuickTextInput::q_canPasteChanged()` in v6.11.2
+> (`qquicktextinput.cpp:3010`) and v6.12.0 (`:3009`) evaluates
+> `mimeData->hasText() && !mimeData->text().isEmpty()` for every editable
+> `TextInput`, on every `QClipboard::dataChanged`, with no user action. On
+> Wayland `text()` reads the entire foreign offer through a pipe with a 1 s
+> per-read timeout, no total byte limit and no deadline, so any client on
+> the seat can grow a Qt Quick application by the size of an offer or hold
+> its GUI thread indefinitely, merely by having an editable field exist in
+> it. Measured on 6.11.2 with a 100 MB text/plain offer from `wl-copy`: one
+> `TextField { readOnly: false }` +238 MB within 600 ms; `readOnly: true`
+> +0; attributed by a `pipe2` catchpoint to `QMimeData::text()` called from
+> `q_canPasteChanged`. The read arrived in `c82ef988` (6.11, 2026-02-18, a
+> pick of `6c07e2a7`) and `7d0a433a` (6.11, 2026-09-15, a pick of `ef692a52`
+> / `bcbfae67`) restores the `hasText()`-only check, but no release contains
+> it: the newest 6.11 tag is v6.11.2 and v6.12.0 still carries the read. A
+> desktop shell written in Qt Quick (Omarchy's, on Quickshell) is exposed in
+> every form it opens, including its lock screen's password field. Ask: a
+> 6.11.3 and a 6.12.1 carrying the fix, and, if `QTBUG-149610` is not this,
+> a tracking bug for the denial-of-service aspect, which the commit message
+> describes as a responsiveness issue.
+
 ## 7. Error handling, offline behavior, performance
 
 - Every helper failure produces a status object the guide renders as text
@@ -1123,6 +1389,20 @@ Performance budget (10k channels):
     sweep and the row slot's `Image` through `logo-scenario.sh`; a grep for
     the constant is rule 14's shape and is not the check. Section 6 carries
     the measurement and the residuals.
+13. The shell process never subscribes to a global that another process can
+    fill. The clipboard is the instance (D-CLIP-1): an editable `TextInput`
+    subscribes to `QClipboard::dataChanged` and the released Qt reads the
+    whole offer in that slot, so every form field is `readOnly: true`
+    always, the plugin applies edits to the model itself, and the one
+    clipboard read the plugin makes is a user-initiated `wl-paste` child
+    with a size cut (`Model.LIMITS.url * 4`) and a watchdog
+    (`Model.CLIPBOARD_TIMEOUT_MS`) that kills the child and never waits in
+    the shell. Verified by calling `Model.editInsert` / `editDelete` from
+    node against a word boundary measured on a real `TextInput`, by pinning
+    the read-only premises in the QML spec, and by observing the shell's
+    memory and an IPC round-trip while a foreign producer offers 100 MB
+    inside a nested compositor (section 6's entry; `docs/QA.md` 3.3). A
+    grep for `readOnly: true` is rule 14's shape and is not the check.
 
 ## 9. Coding standards
 
