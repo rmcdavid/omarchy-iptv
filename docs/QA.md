@@ -407,6 +407,7 @@ output is empty unless stated.
 | SEC-20 | 8.4 redirects | A* mock `http://` source that redirects to `file:///etc/passwd` and to `ftp://` | `urllib` refuses non-http redirects -> `network` error; https -> http downgrade is allowed by urllib (document) |
 | SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials |
 | SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` / `cmd_logos` over `tests/fixtures/logo-dimensions.json` (56 header cases at integration (55 at lane commit ddc0a7b, up from 44 at 995c6be): all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049 and their transposes, an EXIF thumbnail before the real frame header, a 64x65535 column, a two-frame GIF); M section 3.2 observes both sinks through `scripts/dev-harness/logo-scenario.sh` | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached file that is over the bound, unreadable, not one of the four types, or over the byte cap with its header past the first read, swept and never announced, past the per-run fetch cap included; the within-bound control reaches `Image.Ready` at control memory |
+| SEC-23 | 8.13 the shell never subscribes to the clipboard (D-CLIP-1) | A `node tests/Model.test.js` (the D-CLIP-1 block: `editInsert` / `editDelete` / `wordBoundary` over `tests/fixtures/form-edit.js`, 115 checks at lane commit 44b250b) and `qmltestrunner tests/Model.spec.qml` (`test_formEditBoundaries`, `test_formEditDeletes`, `test_formEditCap`, `test_readOnlyFieldPremises`, which re-measures Qt's word boundary and pins that a read-only input never edits itself); M section 3.3 observes the sink | the model edits agree with a real `TextInput` position by position; the form field reads `readOnly: true` and Qt draws no caret on it; under a foreign 100 MB offer inside a nested compositor the shell's RSS and an IPC round-trip are unchanged on the fixed tree and the read shows on `--baseline d55149b` |
 
 ### 3.1 TLS verification on the player (D-SINK-13)
 
@@ -569,6 +570,115 @@ sibling table there is why question two runs all four types and not JPEG
 alone. The re-measured table under the rlimit, 36 rows judged from the tree (37 with `--extra`) and 0 DIFF
 against the lead's figures except the two 65500x65500 progressive rows the
 scope could not measure, is `scripts/dev-harness/spikes/logo-decode-bomb/README.md`.
+
+### 3.3 The clipboard as an input the shell blocks on (D-CLIP-1)
+
+What is under test. The standard is `ARCHITECTURE.md` section 8.13 and the
+lead's ruling 1 (section 6's D-CLIP-1 entry): no editable `TextInput` exists
+in the shell while the plugin's form is open, because on the released Qt
+(6.11.2 here; 6.12.0 the same) an editable `QQuickTextInput` answers every
+`QClipboard::dataChanged` by reading the WHOLE offer -- `QMimeData::text()`,
+a Wayland pipe with a 1 s per-read timeout, no total limit and no deadline
+-- synchronously on the shell's main thread, with no user action. The
+obvious test is not one, for the reason 3.1 and 3.2 give: asserting that
+`Guide.qml` contains `readOnly: true` restates the line written to contain
+it, and a grep cannot see a binding that flips it, a second field added
+without it, or a Qt that moves the read somewhere `readOnly` does not gate.
+
+**Question one: does the plugin edit the field the way Qt would have?** Pure
+logic, called rather than mirrored, and measured against Qt rather than
+read from it. Lane A's `tests/fixtures/form-edit.js` is a transcript of a
+real `TextInput`: `Ctrl+Left` / `Ctrl+Right` at every position of 24 strings
+on a read-only input and `Ctrl+Backspace` / `Ctrl+Delete` on an editable
+one, generated once and re-measured by `test_formEditBoundaries` on every
+spec run, so a Qt whose boundary changes reddens the spec and not only the
+fixture. Node holds `Model.wordBoundary`, `editInsert` and `editDelete` to
+the same table (115 checks). The cases that carry the weight are the
+separator set character by character (`@` in `user:p@ss@h`, which is also
+the userinfo lesson of D-SINK-1 and D-SINK-17), the forward space-skip, the
+surrogate pair taken whole, the insert fitted to the CAPACITY rather than to
+the limit (Qt refuses one key at `maximumLength` and truncates a longer
+insert; the field's capacity is the limit plus slack so an over-limit value
+reaches the validator as `too_long`, SR18), and the two recorded divergences
+pinned on BOTH sides (`Ctrl+Delete` over a selection; `Delete` over a
+combining mark). `test_readOnlyFieldPremises` pins what the handler rests
+on: a read-only input never edits itself under typing, `Backspace` or
+`Ctrl+V`; navigation, `Shift`-selection, Home / End and `Ctrl+A` stay
+native; `selectionStart` / `selectionEnd` follow the caret; `Ctrl+V` and
+`Shift+Insert` both reach `Keys.forwardTo` as Paste and `Ctrl+X` /
+`Shift+Delete` as Cut, a bare `Insert` as neither; a bound write re-renders
+synchronously and parks Qt's caret at the end; and Qt draws NO caret on a
+read-only input (`cursorVisible` false, no `cursorDelegate` instantiated),
+which is why the form draws its own. Seen red (the lane's counts, in its
+commit message): against f9144f5's `Model.js` 114 of the 115 node checks
+fail (the one that passes reads only the fixture); `@` dropped from the
+separator set 5 node / 2 spec; the forward space-skip dropped 13 / 2; the
+insert cap dropped 5 node; the premise control made editable -- the
+defect's own shape -- 4 spec failures including "one key at the cap is
+refused" and "Qt draws no caret on a read-only input".
+
+**Question two: does a foreign clipboard change leave the SHELL alone?**
+That is the sink, and only observing it answers 8.13. What the scenario
+must observe, through the REAL `Guide.qml` hosted by the dev-harness fake
+shell (`scripts/dev-harness/shell.qml`) under a nested headless cage
+(`docs/SPIKE-CAGE-HEADLESS.md`, `docs/QA-HEADLESS-2026-09-21.md`; the
+recipe `id-rotate-scenario.sh` follows, `OMARCHY_IPTV_HEADLESS_ONLY=1` so a
+run aimed at the live display is refused):
+
+- The guide must MAP, which under cage means the harness's
+  `OMARCHY_IPTV_HARNESS_WINDOW=floating` mode: cage has no layer shell and
+  the production `PanelWindow` never maps there, and a window that never
+  maps never holds keyboard focus.
+- The nested seat must have a keyboard. Lane A measured (2026-10-11, its
+  `cage-probe.sh`) that the cage's headless seat has none, that a
+  compositor hands `wl_data_device.selection` only to the client with
+  keyboard focus, and that on a first run NOT EVEN the editable control
+  read (+0 on both probes); a virtual keyboard (`wtype -s 12000 ''`) held
+  open on the NESTED display across the offer reproduced the lead's
+  numbers (+284 MB editable, +0 read-only). The baseline arm must therefore
+  prove the editable read HAPPENS before the fixed arm's +0 means anything;
+  a scenario that cannot show red on `--baseline d55149b` has not opened
+  the sink and passes vacuously.
+- The form is open (first-run, `--playlist none`, which is the state the
+  maintainer named), then a FOREIGN producer on the nested display --
+  `wl-copy --type text/plain` fed by `python3 -c` writing 100 MB, never a
+  file in the shared scratch -- offers once. The user's clipboard is never
+  touched: the producer lives on the cage's socket, and `wl-paste
+  --list-types` on the live session reads the same before and after.
+- Asserted on the fixed tree: the shell's RSS, sampled from outside every
+  100 ms, within noise of its pre-offer value through at least the window
+  in which the baseline grows (the lead saw the last growth 600 ms after
+  the offer; lane A 6.9 s under cage), and an IPC round-trip (`ipc status`
+  or the harness's `state()`) answering within its usual time while the
+  offer is up -- the stall is the maintainer's other half and RSS alone
+  does not see it. Asserted on `--baseline d55149b`: the growth, by at
+  least the payload, which is the RED this section asks for.
+- The paste path still works: `Ctrl+V` through the virtual keyboard with a
+  small offer puts the sanitized text in the field, and an offer that
+  sanitizes to nothing or a `wl-paste` that fails leaves the field as it
+  was. A dripping producer (one byte per 900 ms) is OPTIONAL and, if run,
+  must show the `wl-paste` child dying at the watchdog with the shell's IPC
+  still answering.
+- Cleanup bounded and by pid: the qml and wtype pids read from the files
+  they wrote, the cage under `timeout`, no `pkill -f` (the shape
+  `scripts/qa-sources-scenarios.sh:160` has and this scenario must not
+  copy), and no stale nested `wayland-0` socket left behind.
+
+What the scenario must not do: run `wl-copy` on the user's session, run
+`wtype` outside the nested display, leave a producer or a cage alive, write
+the 100 MB payload to the shared scratch, or touch the live install.
+
+Ownership and evidence, **UNVERIFIED at this writing (2026-10-11)**: the
+harness lane's branch `lane-clip-harness` carries no commit past
+`lane-clip-code` (44b250b), so the scenario's file name, its check names, its
+`check-tree` arm, its `check.sh` floor and its red run on `--baseline
+d55149b` do not exist to be cited. This section is the specification the
+lane meets and the clause it replaces when it lands, with its own counts, as
+3.2's "Ownership and evidence" paragraph did on the day its scenario was
+run. Until then the only observations of the sink are the lead's three
+probes on the live session and lane A's re-run of them under cage, both of
+a throwaway `TextField` and not of `Guide.qml`, and they are attributed as
+such in `ARCHITECTURE.md` section 6.
 
 ## 4. Performance gate (PLAN G3, ARCHITECTURE.md section 7, QB4)
 

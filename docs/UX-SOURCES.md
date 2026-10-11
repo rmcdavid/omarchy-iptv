@@ -38,6 +38,7 @@ Omarchy precedents this design maps onto (read them before implementing):
 | Switch | `Enter` switches and returns to the guide; `Space` switches and stays. Cached source: instant redraw, silent background refresh when stale. Uncached: commit, then the shipped loading state. |
 | Remove | `x` / `X` / `Delete` -> `ConfirmDialog` -> cache deleted. Active removed: settings cleared, guide behind is first-run; Sources stays open while other sources remain. |
 | Xtream | `c` in Sources, the `Add Xtream login` row, or the link row in the add / first-run forms. Four fields, password echo-masked, never re-shown. |
+| Editing (added 2026-10-11, D-CLIP-1) | Every form field is read-only to Qt, always. The plugin applies typing, `Backspace`, `Delete`, their `Ctrl` word variants and cut to the model value itself and puts the caret back; navigation, selection, `Ctrl+A`, `Ctrl+C` and mouse selection stay native. Paste is `Ctrl+V` / `Shift+Insert` through a `wl-paste` process only. Lost, and said so: input-method composition in the label field, native undo, middle-click paste. Rows below that say Qt edits the field are overturned where they stand, not rewritten. |
 
 ---
 
@@ -79,7 +80,10 @@ case the source record and its cache survive, so this surface shows the
    arrival is sanitized (2.3): trimmed, newlines and control characters
    removed, capped at `LIMITS.url`. A pasted value that has a query string or
    userinfo is shown masked immediately (4.4); text the user types is never
-   masked while they type it.
+   masked while they type it. **[Amended 2026-10-11, D-CLIP-1: `Ctrl+V` and
+   `Shift+Insert` only, through the plugin's `wl-paste` process; middle click
+   pastes nothing, because the primary-selection paste was Qt's and the field
+   is read-only to Qt. Sanitize on arrival and mask at once stand.]**
 3. `Tab` / `Down` moves to `EPG` (optional). `Enter` in either field submits;
    `Enter` on the `Load` button too.
 4. Validation is synchronous (5.4). On failure the error line appears under
@@ -292,6 +296,13 @@ Model: the shipped two-layer handler, extended.
   rules before the field sees the event; everything else falls through to
   Qt's native editing (caret, selection, `Ctrl+Backspace` word delete,
   `Ctrl+V` and `Shift+Insert` paste, `Ctrl+A` select all).
+  **[Amended 2026-10-11, D-CLIP-1: the field is `readOnly: true` always, so
+  "Qt's native editing" is now caret, selection, Home / End, `Ctrl+A` and
+  `Ctrl+C` only. The form handler (`handleFormKey`) also does printable
+  insertion, `Backspace`, `Delete`, `Ctrl+Backspace`, `Ctrl+Delete`, cut and
+  paste, over the model value, with the caret and selection the read-only
+  control still keeps. The word boundary is Qt's own, measured on a real
+  `TextInput` into `tests/fixtures/form-edit.js`.]**
 - `confirmRemove` routes every key to `ConfirmDialog.handleKey` first, as
   the clipboard does.
 
@@ -340,8 +351,37 @@ No `r` rename: `e` opens the form with `Label` focused, so renaming is
 | `Enter` | Submit the form (`onAccepted` precedent). On a focused button or link row: activate it. | Same. |
 | `Esc` | See below. | Same. |
 
+**Amended 2026-10-11 (D-CLIP-1): the cells above that say "(Qt)" for an EDIT
+are overturned where they stand; the behaviour the user sees is the same and
+the hand that does it is not.** Every field is `readOnly: true`, always,
+because an editable `TextInput` makes the shell read the whole clipboard on
+every change (`docs/ARCHITECTURE.md` section 6). So: printable -> inserted
+over the selection by the plugin (`Model.editInsert`), an insert past the
+field's capacity refused rather than cut, and the masked-field replacement
+unchanged; `Backspace` / `Delete` -> one UTF-16 unit, a surrogate pair whole
+(`Model.editDelete`); `Ctrl+Backspace` / `Ctrl+Delete` -> to the previous /
+next word boundary, Qt's own boundary measured and pinned; `Ctrl+X` /
+`Shift+Delete` -> native copy of the selection, then the plugin deletes it
+(nothing is copied from a password field, as before); `Ctrl+V` /
+`Shift+Insert` -> `Service.requestClipboard`, a `wl-paste` child, cut at
+`LIMITS.url * 4`, bounded by a 5 s watchdog, sanitized at the field's
+capacity, inserted over the selection or over the whole of a masked value
+and re-masked; a failed or timed-out paste changes nothing. Middle click
+pastes nothing. `Ctrl+A`, `Ctrl+C`, `Left` / `Right` / `Home` / `End`,
+`Shift`-selection and mouse selection stay native and unchanged. Lost with
+`readOnly`: native undo (`Ctrl+Z`), and input-method composition, so dead
+keys and CJK input cannot type into the label field (paste carries any
+Unicode). Two deliberate divergences from Qt, pinned on both sides in the
+QML spec: `Ctrl+Delete` over a selection deletes the selection alone (Qt
+also eats to the next boundary), and `Delete` over a combining sequence
+removes one unit (Qt removes the grapheme). The caret on a read-only control
+is the plugin's own drawing (4.2).
+
 Sanitize (Model.js `sanitizeInput(text, limit)`, applied in
-`onTextChanged` so it covers every paste path, including primary selection):
+`onTextChanged` so it covers every paste path, including primary selection
+**[overturned 2026-10-11, D-CLIP-1: there is no `onTextChanged` and no
+native paste path; sanitize runs in `pasteFromProcess` on the `wl-paste`
+text, and typed text goes through `Model.typedText` and `editInsert`]**):
 strip `\r`, `\n` and other C0/C1 control characters; cap at the field's
 limit (`LIMITS.url` 2048, `LIMITS.label` 40, `LIMITS.server` 256,
 `LIMITS.user` / `LIMITS.pass` 128). URL fields are also trimmed on paste;
@@ -901,7 +941,8 @@ notification, timer-refresh rules); failure shows the shipped banner
 | title (forms from Sources) | in the header slot: `Add source` / `Edit source` / `Add Xtream login`, `Style.font.heading`; first run keeps the shipped empty-state title in the column |
 | label column | `Style.space(96)` wide, labels left-aligned, vertically centered on their field; a `PanelSectionHeader` (`Style.font.caption`, bold, `Qt.darker(Color.menu.text, 1.4)`) with `fontFamily: Style.font.menuFamily` |
 | label -> field gap | `Style.spacing.controlGap` |
-| field | `Ui.TextField { foreground: Color.menu.text; accent: Color.accent; font.family: Style.font.menuFamily; font.pixelSize: Style.font.body; horizontalPadding: Style.spacing.controlPaddingX; verticalPadding: Style.spacing.inputPaddingY }`; height is its `implicitHeight`, never set |
+| field | `Ui.TextField { foreground: Color.menu.text; accent: Color.accent; font.family: Style.font.menuFamily; font.pixelSize: Style.font.body; horizontalPadding: Style.spacing.controlPaddingX; verticalPadding: Style.spacing.inputPaddingY }`; height is its `implicitHeight`, never set; `readOnly: true` always (D-CLIP-1, added 2026-10-11) |
+| caret (added 2026-10-11, D-CLIP-1) | Qt draws no caret on a read-only input and never instantiates its `cursorDelegate` there (measured in the QML spec), so the field draws its own: a `Rectangle` on the control's `cursorRectangle`, `Style.spacing.hairline` wide, `field.color`, blinking every half `Application.styleHints.cursorFlashTime` (steady when the hint is 0), lit again on every caret move, hidden while the field is masked or unfocused |
 | field width | column width - label column - `controlGap` - eye slot (`Style.space(22) + Style.spacing.controlGap`), reserved on every row so all fields align |
 | error state on a field | `accent: Color.urgent` while the field carries the current error (focus border and fill follow the kit tokens); reset on the next edit |
 | eye button | `PanelActionButton` default size, in the reserved slot, `foreground: Color.menu.text`, visible only when `maskUrl(value) !== value` |
@@ -951,7 +992,9 @@ Rules (Model.js `maskUrl(url)`, `MASK = "****"`, unit-tested):
   start so scheme and host are always readable.
 - Reveal toggles on `Ctrl+R` or the eye button while the field has focus;
   on reveal the field gets the real value, `readOnly: false`, caret at the
-  end. Re-mask on: focus leaving the field, `Enter`, `Esc`, the form closing,
+  end. **[Overturned 2026-10-11, D-CLIP-1: `readOnly` stays `true` on
+  reveal and everywhere else; reveal changes only what the control renders,
+  and the caret goes to the end as before.]** Re-mask on: focus leaving the field, `Enter`, `Esc`, the form closing,
   a paste (new value, masked again), `Ctrl+R` again.
 - Eye glyphs: masked -> eye (`Show query - Ctrl+R` tooltip), revealed ->
   eye-off (`Hide query - Ctrl+R`).
@@ -1161,6 +1204,11 @@ See 7.1; they reuse the strings above.
 6. Clipboard content is data: sanitized on arrival, never executed, never
    echoed anywhere but the field it landed in. Paste into a masked field
    replaces the value and the result is masked again before the next frame.
+   **Added 2026-10-11 (D-CLIP-1): and the clipboard is read ONLY when the
+   user pastes, by a `wl-paste` child the service bounds, never by the shell
+   process and never on a clipboard change.** An editable `TextInput` would
+   make the shell read the whole offer on every change by any application,
+   so no form field is editable to Qt.
 7. `Accessible.description` of a URL field is the masked rendering even while
    revealed. **That sentence used to end "a screen reader never gets the
    query", which was false and is corrected here.** The description is masked;
@@ -1229,6 +1277,11 @@ harness's own: `bar`, `firstrun`, `banner`, `query`, `scale`, `xtream`.
 | Confirm dialog | `Accessible.Dialog` | the message; its buttons `Accessible.Button` `Cancel` / `Remove` | **UNVERIFIED**, dialog and both buttons |
 | Footer status | `Accessible.StaticText` | shipped | **OBSERVED** (banner scenario); text **COMPOSED** (`Model.footerStatus`) |
 
+Since 2026-10-11 (D-CLIP-1) every form field above is `readOnly: true` to Qt
+while keeping `Accessible.EditableText`. What the bridge publishes for a
+read-only editable -- the `readOnly` state flag, and whether the role
+survives -- is **UNVERIFIED**, and moot until D-GS-3 lands.
+
 ### 7.2 No color-only state
 
 Active: check glyph + bold + `active`. Error: alert glyph + words + the
@@ -1295,10 +1348,10 @@ by accident.
 | 2 | Xtream entry key | `c` (credentials) in Sources; `Add Xtream login` row for the mouse; a link row inside the URL forms so first run reaches it without a printable key. |
 | 3 | `r` rename? | No. `e` opens the form with `Label` focused; rename is `e`, type, `Enter`. `r` stays refresh in the guide and is ignored in Sources. |
 | 4 | Masking scope | Userinfo, all query values, fragment -> `****`. Path stays visible (some providers put credentials in the path; the user must still be able to edit it; the PO rule names the query string). Fixed length, never per-character. |
-| 5 | How does one edit a masked value? | Masked = fully selected: typing, paste, Backspace, Ctrl+U replace it; `Ctrl+R` / eye reveals for caret editing; re-masked on blur, save, cancel, paste. |
+| 5 | How does one edit a masked value? | Masked = fully selected: typing, paste, Backspace, Ctrl+U replace it; `Ctrl+R` / eye reveals for caret editing; re-masked on blur, save, cancel, paste. **[Amended 2026-10-11, D-CLIP-1: the behaviour stands; the hand is the plugin's, since the field is read-only to Qt in both states.]** |
 | 6 | Reveal: hold or toggle? | Toggle, scoped to the focused field, reset on blur. A hold gesture cannot be typed into. |
 | 7 | Esc in forms | One press cancels in forms opened from Sources (network precedent; `Ctrl+U` clears). First run keeps the search-line "clear first, then close" rule and never closes while any field has text. |
-| 8 | Paste semantics | Plain / revealed fields: insert at caret (Qt default, as the uptime monitor). Masked fields: replace. Always sanitized in `onTextChanged`. |
+| 8 | Paste semantics | Plain / revealed fields: insert at caret (Qt default, as the uptime monitor). Masked fields: replace. Always sanitized in `onTextChanged`. **[Overturned 2026-10-11, D-CLIP-1: not Qt's paste and not `onTextChanged`. `Ctrl+V` / `Shift+Insert` ask the service for a `wl-paste` read, capped and bounded, and the plugin inserts the sanitized text over the selection (plain / revealed) or over the whole value (masked, then re-masked). Middle click is gone with the native path.]** |
 | 9 | Auto-prefix `https://` on a bare host? | No. Xtream servers are commonly plain `http` on a port; guessing would produce silent TLS failures. Error `scheme` says what to type. |
 | 10 | Auto-parse a pasted `get.php?username=...` into the Xtream fields? | No (v0.2). `server_path` error tells the user to paste just the server; the URL form accepts the full `get.php` URL anyway. |
 | 11 | Probe before commit, or commit and let the refresh fail? | Probe first for add and playlist-URL edits (S8: a bad source never replaces a working one). Switching to an already-saved but uncached source commits and uses the shipped loading state. |
