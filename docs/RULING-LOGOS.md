@@ -63,6 +63,58 @@ made to hosts neither we nor the user chose — the playlist author did.
    countable. The plugin can survey the configured playlist without making a
    single request, and the setting must say what it found: *"turning this on
    will contact 63 hosts, including i.imgur.com (999 channels)"*.
+7. **A logo's declared dimensions are bounded, for all four allowed types.**
+   Added 2026-10-11 for D-LOGO-11, in the shape of the rules above. No side
+   over 4096 px and no more than 4,194,304 px in all, read from the header
+   before a byte reaches the disk, and a header that cannot be read is a
+   refusal rather than a pass. Rule 5's per-file byte cap bounds the
+   download and nothing the decoder does: the decoder's cost is quadratic in
+   a number the header states and the bytes need not honour, and a 304-byte
+   progressive JPEG whose header says 20000x20000 took a Qt process standing
+   in for the shell to 840 MB of resident memory -- the lead's probe, which
+   is the qml runtime drawing one `Image` declared exactly as the guide's row
+   slot declares it and nothing else (measured by the lead on 2026-10-09,
+   Qt 6.11.2 offscreen, `docs/QA-RESULTS.md` under the fifth maintainer
+   finding; reproduced by the harness lane on 2026-10-11 at 839 MB under an
+   address-space rlimit, `scripts/dev-harness/spikes/logo-decode-bomb/`).
+   The shell itself was never fed one, deliberately; that it would allocate
+   the same is inference from the probe being the slot's own declaration,
+   and it is stated as inference. Qt's own allocation limit does not refuse
+   a JPEG on that path, measured by bracketing it: it is compared against
+   the image already divided by libjpeg's largest scale denominator, and the
+   format's largest dimension lands exactly on the default limit. The numbers are the
+   cost at the bound: a 4:4:4 progressive JPEG of 4,194,304 px holds
+   25,165,824 bytes of coefficients, 24 MiB, the same order as the 23.8 MiB
+   Qt was already willing to allocate for a logo, and a 1920x1080 provider
+   banner passes (called on the shipping `logo_within_bounds`, 2026-10-11).
+   The side cap is the second half because area alone admits 65535x64. It
+   covers PNG, GIF and WEBP although only JPEG is exposed today, because that
+   asymmetry is Qt's and a dependency bump could end it in silence. The cache
+   written before this rule is checked by the same parser on the next fetch
+   and a file that fails -- over the bound, header unreadable, bytes that
+   are none of the four types, or over the byte cap with its header past the
+   first read -- is removed rather than announced, since the
+   guide draws only a name the helper announced, AND ONLY FOR THE DIRECTORY
+   IT ANNOUNCED IT FOR. That second clause is the review's blocker and it is
+   part of the rule: a name is a hash of a logo URL, two sources that share a
+   provider share every URL, so a set of names announced for source A would
+   resolve to files in source B's directory that no fetch has looked at. The
+   announced set therefore carries the cache directory it was announced for,
+   the guide draws nothing from a set tagged for any other directory or from
+   the old untagged shape, an empty summary replaces the set rather than
+   being ignored, a source switch clears it, and a fetch still running for
+   another directory is stopped and started again for the current one
+   (`Model.logoHaveSet`, `logoSlot`, `logoHaveMerge`, `logoSummaryNames`,
+   `logoFetchPlan`; `Service.qml` `clearSourceData` and `fetchLogos`; called
+   by the seven "D-LOGO-11 blocker" checks in `tests/Model.test.js`, which
+   read 9 failures against the Model.js and Service.qml of 995c6be and 0
+   against the fix, lane commit 1a05214).
+
+   Annotation, not a rewrite: rule 5's "a total cap" is `MAX_LOGO_FILES *
+   MAX_LOGO_BYTES`, and measured on 2026-10-11 it is not a cap on the cache,
+   because the file count bounds fetches per run and not files on disk
+   (D-LOGO-12, open on the board). Rule 5 stands as the owner wrote it until
+   the owner rules on that.
 
 Rule 6 is the part this ruling adds to the plan rather than merely approving.
 It is implemented as `omarchy-iptv logos --survey`, which reads the cache and
@@ -189,6 +241,14 @@ The list instantiates only its visible delegates plus `cacheBuffer`, so the
 column costs about twenty image loads and not ten thousand; each is
 `asynchronous`, with `sourceSize` capped at twice the slot so a 256 KB image is
 not decoded at full size to be drawn at 22 px.
+
+That last sentence is true of a well-formed image and was the whole exposure
+for a malformed one (D-LOGO-11, 2026-10-09): `sourceSize` lets libjpeg scale
+during decode, which is what makes a JPEG cheap to draw small, and it is also
+what Qt's allocation limit is then measured against, so the limit never sees
+the full-resolution coefficient buffers a progressive JPEG allocates from the
+header's numbers. The bound is rule 7 above, in the helper, not a change to
+this slot.
 
 ## Seven defects the 0.7.9 preflight found, all in this feature
 
