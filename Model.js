@@ -3724,9 +3724,20 @@ function logoSlot(opts) {
   // than guessing -- the fetch that populates it runs on every channel load,
   // so this is a few hundred milliseconds after the guide first opens and it
   // costs no requests when the files are already cached.
-  if (!o.have || typeof o.have !== "object") return { kind: "blank", path: "" }
+  //
+  // And `have` must have been announced FOR THIS DIRECTORY. The names are
+  // fnv1a32 hashes of logo URLs, and two sources that share a provider (an
+  // Xtream account beside the M3U of the same subscription, which Sources
+  // supports by design) share every URL, so a name announced for source A
+  // resolves to a file in source B's directory that no fetch has looked at
+  // -- which after D-LOGO-11 means a file nobody has bounded. The set the
+  // service holds therefore carries the directory it was announced for, and a
+  // set tagged for any other directory, a set with no tag at all (the old
+  // flat `{ name: true }` shape, so a stale producer cannot reopen this), or
+  // anything else that is not a tagged set, is the blank slot.
+  if (!logoHaveIsSet(o.have) || o.have.dir !== str(o.logoDir)) return { kind: "blank", path: "" }
   var name = path.substring(path.lastIndexOf("/") + 1)
-  return o.have[name] === true ? { kind: "image", path: path } : { kind: "blank", path: "" }
+  return o.have.names[name] === true ? { kind: "image", path: path } : { kind: "blank", path: "" }
 }
 
 // ------------------------------------------------------------ channel wall
@@ -3960,15 +3971,83 @@ function wallStep(index, dir, count, columns) {
   return at < cols ? at : at % cols
 }
 
-// The lookup `logoSlot` wants, from the `names` array the helper prints.
-function logoHaveSet(names) {
+// ---- the announced set (M2-04, re-shaped for the D-LOGO-11 blocker)
+//
+// What the fetch announced is on disk, AND WHICH DIRECTORY IT ANNOUNCED IT
+// FOR: `{ dir: <cache dir>, names: { <fnv1a32>: true } }`. The directory is
+// the whole point. `logoSlot` draws an Image only for a name in here, and a
+// name is a hash of a URL that two sources can share, so without the tag a
+// source switch left source A's names standing while the rows and `logoDir`
+// became source B's, and every shared logo resolved to a file in B's cache
+// that B's fetch -- which refuses to start while A's is still running, for
+// minutes on a first enable -- had never swept. The decisions that used to be
+// four lines of QML (replace or merge, what an empty summary means, what a
+// switch clears, whether a running fetch restarts) are the functions below,
+// so a node test can reach them (rule 12).
+//
+// The lookup `logoSlot` wants, from the `names` array the helper prints, tagged
+// with the directory the fetch that printed it was started for.
+function logoHaveSet(names, dir) {
   var list = asList(names)
   var out = {}
   for (var i = 0; i < list.length; i++) {
     var name = str(list[i])
     if (name !== "") out[name] = true
   }
+  return { dir: str(dir), names: out }
+}
+
+// Is this a tagged set at all? The old flat shape, `{}`, undefined, a list and
+// a set whose `names` is not an object all answer no, and every consumer treats
+// no as "nothing announced".
+function logoHaveIsSet(have) {
+  return !!have && typeof have === "object" && !Array.isArray(have)
+    && typeof have.dir === "string"
+    && !!have.names && typeof have.names === "object" && !Array.isArray(have.names)
+}
+
+// A streamed batch landing. A COPY with the names added when the batch is
+// tagged for the directory the set already holds; otherwise a fresh set for
+// `dir`, so a flush tagged for another directory never lands in the current
+// set. Never mutates `have`: the service binds rows to it, and a mutation in
+// place is invisible to the bindings.
+function logoHaveMerge(have, names, dir) {
+  var out = logoHaveSet(names, dir)
+  if (logoHaveIsSet(have) && have.dir === out.dir) {
+    for (var k in have.names) {
+      if (have.names[k] === true) out.names[k] = true
+    }
+  }
   return out
+}
+
+// How many names the set carries, for the IPC status (D-LOGO-8 made this
+// number observable so the streaming fix could be seen rather than inferred).
+// 0 for anything that is not a tagged set.
+function logoHaveCount(have) {
+  if (!logoHaveIsSet(have)) return 0
+  var n = 0
+  for (var k in have.names) {
+    if (have.names[k] === true) n += 1
+  }
+  return n
+}
+
+// What fetchLogos() does when asked, given the setting, the directory a fetch
+// is wanted for, and whether one is running and for which directory.
+//   "skip"    -- logos are off, no source is active, or the running fetch is
+//                already the one wanted;
+//   "restart" -- a fetch is running for ANOTHER directory: stop it and start
+//                this one when it has exited (the service's job), because a
+//                fetch that outlives a source switch announces for the wrong
+//                directory and the new directory gets no sweep of its own;
+//   "start"   -- nothing is running.
+function logoFetchPlan(opts) {
+  var o = opts || {}
+  var want = str(o.wantDir)
+  if (o.showLogos !== true || want === "") return "skip"
+  if (o.running === true) return str(o.runningDir) === want ? "skip" : "restart"
+  return "start"
 }
 
 // Is the logo column present at all?
@@ -4024,6 +4103,28 @@ function logoNamesFrom(stdoutText) {
     return asList(doc.names).filter(function (n) { return typeof n === "string" && n !== "" })
   } catch (e) {
     return []
+  }
+}
+
+// Is this line the fetch's summary, and if so what did it announce? `null` for
+// any line that is not the summary -- a progress line, junk, an empty line --
+// and the names list when it is, POSSIBLY EMPTY. The distinction is what the
+// service needs: a summary whose names are [] means the fetch found nothing on
+// disk, which after a D-LOGO-11 sweep of a whole cache is a real answer, and
+// it must REPLACE the set rather than be ignored for being short. A guard of
+// `names.length > 0` on the caller's side kept a stale set alive through
+// exactly that summary.
+function logoSummaryNames(line) {
+  var text = str(line).replace(/^\s+|\s+$/g, "")
+  if (text === "") return null
+  try {
+    var doc = JSON.parse(text)
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null
+    if (str(doc.kind) !== "logos") return null
+    if (!doc.names || typeof doc.names !== "object") return null
+    return asList(doc.names).filter(function (n) { return typeof n === "string" && n !== "" })
+  } catch (e) {
+    return null
   }
 }
 
@@ -10524,6 +10625,10 @@ if (typeof module !== "undefined") {
     logoFile: logoFile,
     logoSlot: logoSlot,
     logoHaveSet: logoHaveSet,
+    logoHaveMerge: logoHaveMerge,
+    logoHaveCount: logoHaveCount,
+    logoFetchPlan: logoFetchPlan,
+    logoSummaryNames: logoSummaryNames,
     logoNamesFrom: logoNamesFrom,
     logoStreamName: logoStreamName,
     wallGeometry: wallGeometry,
