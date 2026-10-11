@@ -1,0 +1,13 @@
+set pagination off
+set debuginfod enabled off
+set confirm off
+set breakpoint pending on
+handle SIGPIPE nostop noprint
+catch syscall pipe2
+commands 1
+  silent
+  printf "PIPE2\n"
+  bt 18
+  continue
+end
+run

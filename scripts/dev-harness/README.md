@@ -84,8 +84,8 @@ qa_transcript_start <name> || exit 2     # after the preflight, before the first
   transcript lands, so this bullet is observed rather than promised.
 * In a scenario with a **`check-tree` mode** the call goes on the `live|""`
   arm of the dispatch, never above it. `scripts/check.sh` runs
-  `chno-entry-scenario.sh`, `pip-scenario.sh`, `id-rotate-scenario.sh` and
-  `logo-scenario.sh` in
+  `chno-entry-scenario.sh`, `pip-scenario.sh`, `id-rotate-scenario.sh`,
+  `logo-scenario.sh` and `clip-scenario.sh` in
   `check-tree` mode on every commit, and a gate step may neither print a path
   nobody asked for nor leave a file behind. It goes on that arm *above*
   `preflight`, so a live run's transcript covers both halves -- the summary at
@@ -819,6 +819,86 @@ and the exit is 77. `scripts/check.sh` treats that 77 as RED unless
 that observed neither sink is not green by default. `LOGO_QML_BIN` overrides
 the qml path, which is how that branch is driven on a machine that has qml.
 
+### Clipboard: an editable field is a reader (D-CLIP-1)
+
+```
+scripts/dev-harness/clip-scenario.sh check-tree            # the probe arm, inside a nested cage; run by check.sh
+scripts/dev-harness/clip-scenario.sh                       # the probe arm, then the real Guide.qml, with a transcript
+scripts/dev-harness/clip-scenario.sh --baseline d55149b    # the red run: the shipped 0.13.4
+```
+
+Every editable QtQuick `TextInput` subscribes to `QClipboard::dataChanged`,
+and on the released Qt 6.11.2 that slot calls `QMimeData::text()`, which on
+Wayland reads the whole foreign offer through a pipe -- 1 s timeout per
+read, no total limit, no deadline -- synchronously, on the main thread of
+the process that owns the field: for this plugin, `omarchy-shell`, whenever
+the first-run or add-source form is open and any application changes the
+clipboard (the sixth maintainer finding, `docs/QA-RESULTS.md` 2026-10-11).
+The fix is `readOnly: true` on every form field -- `readOnly` is the one
+switch on that slot -- with the plugin editing the model value itself and
+paste going through `wl-paste` as a bounded child. This scenario observes
+the sink, in two arms, both inside a nested headless cage on a display of
+its own (`docs/SPIKE-CAGE-HEADLESS.md`), so the user's clipboard is never
+offered to, read from or replaced:
+
+* **The probe arm** (check-tree): the lead's three probes, verbatim from
+  `spikes/clip-offer/` (an editable `TextField`, a read-only one, a window
+  with no field), each started on the nested display, offered 100 MB of
+  `text/plain` by `wl-copy` on that display, and sampled for resident set
+  from outside. The editable probe grows by the payload or more (P3: +235
+  to +305 MB, 2.3 to 3.0x; it is the CONTROL that the rig delivers offers
+  at all), the read-only probe and the no-field window by nothing (P4, P5,
+  +0 every run); a consumer on that display receives every byte (P2); the
+  display is cage's and not the caller's (P1); and every process started is
+  gone by its recorded pid with the socket removed (P6). About 13 s.
+* **The shell arm** (live): the fake shell with the real `Guide.qml` and
+  `Service.qml` under the same cage in the floating window, started with no
+  playlist so the guide opens straight into the first-run form with the
+  playlist field focused -- confirmed over IPC (L1, L2). Typing through
+  `run.sh key` lands in the model value of the read-only field (L3, the
+  positive control). Then the same producer offers 100 MB: the shell's RSS
+  is sampled 1 s before and 3 s after, concurrently with twelve IPC round
+  trips timed from the instant of the offer. On the fixed tree the growth is
+  +0 MB (L4, band 16) and the slowest round trip 96..159 ms (L5, bound 400,
+  the first call carrying a process cold start); on `--baseline d55149b` L4
+  reads +254..+297 MB with a peak of 600..642 MB and L5 catches a 673..685
+  ms call when one lands inside the read, which the twelve back-to-back
+  calls did on every run measured and are not promised to -- L4 is the
+  discriminator, L5 the stall half of the finding when timing allows. The
+  offer alone changes nothing in the field (L6); Shift+Insert and Ctrl+V
+  both paste through the process path, the second landing a 5,000-byte
+  offer at exactly `Model.formCapacity("playlist")` read from the tree
+  under test by calling it (L7, L8; on the baseline Qt's own paste truncates
+  to the same number, so both are controls); no `wl-paste` child of the
+  shell survives the answer (L9); the harness log carries no run of the
+  payload (L10); and the shell, the keyboard, the producer and the
+  compositor are gone (L11). About 25 s in all.
+
+**The seat.** cage's headless seat has no keyboard, and a compositor hands
+`wl_data_device.selection` only to the client holding keyboard focus, so
+with nothing on the seat not even the editable probe reads (+0 on both;
+found by lane A re-running the lead's rig under cage). The scenario holds a
+virtual keyboard (`wtype -s`) open on the nested display across every offer;
+P3 is asserted in both arms so that a +0 elsewhere means "did not read" and
+never "was never offered". `wl-copy` also maps a surface of its own for an
+instant to obtain a serial, and a chord sent in that instant is refused by
+`run.sh key`'s focus guard rather than typed into it; and a producer
+restarted within milliseconds of the previous one's death leaves the guide
+with no focus item at all until the next surface maps (2 runs in 10). Every
+chord therefore waits on the harness's own `focusState` first, and when it
+is not held, nudges it back with a `wl-paste -l` on the nested display
+(measured: back within 100 ms, every time) and says so in the transcript.
+
+The tool checks (cage, wl-copy, wl-paste, wtype, python3, node, the qml
+binary) run before any external command and exit 77 with the reason, as does
+a cage that brings up no display within 10 s. `scripts/check.sh` treats that
+77 as RED unless `CLIP_PREFLIGHT_SKIP_OK=1` is set, printing the reason
+either way. `CLIP_CAGE_BIN` and `CLIP_QML_BIN` override the two binaries;
+`scripts/qa-lib-test.sh` drives the 77 path through the first and asserts
+that no transcript lands. The scenario uses its own harness directory
+(`$XDG_RUNTIME_DIR/omarchy-iptv-clip`), not the shared one, so a display
+lane's running harness is never reaped by a clip run.
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape
@@ -906,3 +986,11 @@ None is part of the gate.
   both), PNG/GIF/WEBP at control memory, and the `QT_IMAGEIO_MAXALLOC`
   bracket that puts the threshold at ceil(dim/8)^2 x 4. It decodes bombs on
   purpose and is never part of the gate; `logo-scenario.sh check-tree` is.
+- `spikes/clip-offer/`: the lead's D-CLIP-1 rig, verbatim -- three probe
+  windows (`editable.qml`, `readonly.qml`, `nofield.qml`) and the gdb
+  catchpoint on `pipe2` (`gdb.cmds`) that attributed the read to
+  `QQuickTextInput::q_canPasteChanged -> QMimeData::text()`. Its README
+  holds the lead's table under the user's compositor and the same three rows
+  re-measured under a nested cage, with the seat requirement that makes the
+  measurement non-vacuous. `clip-scenario.sh check-tree` IS the re-run and
+  is part of the gate; the gdb half is for a human.

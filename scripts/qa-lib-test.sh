@@ -976,7 +976,7 @@ is "and in a check-tree scenario the call sits on the live arm only" \
 # transcript would land on every commit. The list is literal and so it
 # drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
 # not learn it until a review read the two lists side by side.
-for g in chno-entry pip id-rotate logo; do
+for g in chno-entry pip id-rotate logo clip; do
   lbl=$(grep -nE '^ *live\|"" *\)' "$ROOT/scripts/dev-harness/$g-scenario.sh" | head -1 | cut -d: -f1)
   ck "$g-scenario.sh (run by check.sh in check-tree mode) has a live arm to gate on" '[[ -n $lbl ]]'
 done
@@ -993,6 +993,33 @@ is "the logo scenario's floor matches its recipe (column-zero ck lines + one per
    "$ldeclared" "$(( $(qa_count '^ck "?[A-Z]' "$LS") + lbombs ))"
 is "check.sh's logo preflight floor matches the scenario's own" \
    "$(grep -oE 'LOGO_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( ldeclared + 1 ))"
+# D-CLIP-1's scenario (clip-scenario.sh, joined the gate 2026-10-11): the
+# same two joins, and its own recipe -- every assertion is one `ck "P<n>` or
+# `ck "L<n>` line, none in a loop, the probe arm being the P lines.
+CLS="$ROOT/scripts/dev-harness/clip-scenario.sh"
+is "the clip scenario declares exactly two floors" \
+   "$(qa_count '^ *EXPECTED_CHECKS=[0-9]+$' "$CLS")" "2"
+cl_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CLS" | sed -n 1p | cut -d= -f2)
+cl_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CLS" | sed -n 2p | cut -d= -f2)
+is "the clip check-tree floor matches its recipe (the P lines)" \
+   "$cl_tree" "$(qa_count '^ *ck "P[0-9]' "$CLS")"
+is "the clip live floor matches its recipe (the P and L lines)" \
+   "$cl_live" "$(qa_count '^ *ck "[PL][0-9]' "$CLS")"
+is "check.sh's clip preflight floor matches the scenario's own" \
+   "$(grep -oE 'CLIP_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( cl_tree + 1 ))"
+# Its 77 path, DRIVEN rather than grepped: with the cage binary pointed at
+# nothing it must refuse with 77 from both modes, name the tool as its first
+# line out, start nothing, and leave no transcript -- the refusal sits above
+# qa_transcript_start, and this is what observes that.
+CLT=$TMP/clip77; mkdir -p "$CLT"
+cl_out=$(CLIP_CAGE_BIN=/nonexistent/cage OMARCHY_IPTV_HARNESS_DIR="$CLT/h" "$CLS" check-tree 2>&1); cl_st=$?
+is "a machine without cage answers 77 from clip check-tree, never 0" "$cl_st" "77"
+is "and names the tool it lacks as the first line out" \
+   "$(printf '%s\n' "$cl_out" | head -1)" "SKIP clip-scenario: /nonexistent/cage is not on PATH"
+cl_out=$(CLIP_CAGE_BIN=/nonexistent/cage OMARCHY_IPTV_HARNESS_DIR="$CLT/h" "$CLS" live 2>&1); cl_st=$?
+is "and the same 77 from live, above the transcript" "$cl_st" "77"
+is "so a run that observed nothing leaves no transcript behind" \
+   "$([[ -d $CLT/h/transcripts ]] && ls "$CLT/h/transcripts" | wc -l | tr -d ' ' || echo 0)" "0"
 # And the one that lost its evidence, by name, so this cannot be refactored
 # into a rule that happens to exclude it again.
 is "m3-scenario.sh, the run F-M3-1 happened to, writes one" \
@@ -1887,7 +1914,10 @@ is "a umask-created file here would have been private, which is why the mode is 
 # value there would stage the adoption case against the wrong tree.
 # 385 -> 388 on 2026-10-11, D-LOGO-11 round two: logo-scenario.sh joins the
 # gate's named list, and its floor is joined to its recipe and to check.sh.
-EXPECTED=388
+# 388 -> 397 on 2026-10-11, D-CLIP-1: clip-scenario.sh joins the gate's named
+# list, its two floors are joined to its recipe and to check.sh, and its 77
+# path is driven from both modes with the transcript directory watched.
+EXPECTED=397
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
