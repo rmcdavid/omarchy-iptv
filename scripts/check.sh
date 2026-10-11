@@ -184,6 +184,12 @@ TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
 # there is, it sits here, and leaving it at 19 would have let seven cases be
 # deleted without the gate noticing. Found by the review of that lane.
 STUB_TESTS_MIN=${STUB_TESTS_MIN:-28}
+# The D-LOGO-11 logo preflight (scripts/dev-harness/logo-scenario.sh
+# check-tree): 28 checks over the shipping helper as a subprocess and the
+# shell's Image as a capped probe, plus its own "ran every check" line. The
+# red run against the shipped 0.13.3 (159da94) answers 8 passed, 21 failed;
+# recipe in the scenario's footer.
+LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-29}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -557,6 +563,31 @@ if "$ROOT/scripts/dev-harness/id-rotate-scenario.sh" check-tree >"$idrot_log" 2>
   if (( idrot_n < ID_ROTATE_MIN )); then cat "$idrot_log"; bad "id-rotate preflight ran $idrot_n checks, expected at least $ID_ROTATE_MIN"; else ok "id-rotate preflight ($idrot_n checks)"; fi
 else
   cat "$idrot_log"; bad "id-rotate preflight"
+fi
+
+step "scripts/dev-harness/logo-scenario.sh check-tree (D-LOGO-11)"
+# A provider logo's HEADER chose how much memory the shell allocated: 304
+# bytes took the row slot's Image to 840 MB (the fifth maintainer finding,
+# docs/QA-RESULTS.md 2026-10-09). The unit tests prove the parsers; this
+# half observes the two sinks -- the helper as the subprocess the service
+# runs, over a loopback https provider, and the shell's Image as an offscreen
+# probe under a 1.5 GB systemd scope -- so the gate goes red if the sweep,
+# the refusal or the announcement stops happening, not only if a function
+# changes its answer. It needs no network beyond loopback, no display, and
+# it never decodes a bomb: on the fixed tree the helper withholds every one,
+# and the 840 MB arm is `--baseline 159da94`, which a human runs. A machine
+# without `systemd-run --user` or the qml runtime answers 77, and that is a
+# visible SKIP here rather than a pass: a scenario that measured nothing has
+# proved nothing, and the line says so.
+logo_log=$CHECK_TMP/logo-scenario.log
+"$ROOT/scripts/dev-harness/logo-scenario.sh" check-tree >"$logo_log" 2>&1; logo_rc=$?
+if (( logo_rc == 0 )); then
+  logo_n=$(grep -c '^PASS' "$logo_log" || true)
+  if (( logo_n < LOGO_PREFLIGHT_MIN )); then cat "$logo_log"; bad "logo preflight ran $logo_n checks, expected at least $LOGO_PREFLIGHT_MIN"; else ok "logo preflight ($logo_n checks)"; fi
+elif (( logo_rc == 77 )); then
+  printf 'SKIP logo preflight: %s\n' "$(grep -a '^SKIP' "$logo_log" | head -1 | sed 's/^SKIP logo-scenario: //')"
+else
+  cat "$logo_log"; bad "logo preflight (exit $logo_rc)"
 fi
 
 step "ascii check (code files)"

@@ -84,7 +84,8 @@ qa_transcript_start <name> || exit 2     # after the preflight, before the first
   transcript lands, so this bullet is observed rather than promised.
 * In a scenario with a **`check-tree` mode** the call goes on the `live|""`
   arm of the dispatch, never above it. `scripts/check.sh` runs
-  `chno-entry-scenario.sh`, `pip-scenario.sh` and `id-rotate-scenario.sh` in
+  `chno-entry-scenario.sh`, `pip-scenario.sh`, `id-rotate-scenario.sh` and
+  `logo-scenario.sh` in
   `check-tree` mode on every commit, and a gate step may neither print a path
   nobody asked for nor leave a file behind. It goes on that arm *above*
   `preflight`, so a live run's transcript covers both halves -- the summary at
@@ -761,6 +762,44 @@ case was seen red by a named mutation (QA-REWIND section 5). The
 PLY-H17/H18 cold half (`qa-player-scenarios.sh run cold --apply`) still
 passes 20/20 on the changed stub.
 
+### Logos: a header is not a size (D-LOGO-11)
+
+```
+scripts/dev-harness/logo-scenario.sh check-tree            # no display, loopback only; run by check.sh
+scripts/dev-harness/logo-scenario.sh                       # the same checks, with a transcript
+scripts/dev-harness/logo-scenario.sh --baseline 159da94    # the red run: the shipped 0.13.3
+```
+
+A provider logo's header chose how much memory the shell allocated: 304
+bytes declaring 20000x20000 took the row slot's `Image` to 840 MB (the fifth
+maintainer finding, `docs/QA-RESULTS.md` 2026-10-09). The fix is in the
+helper -- a dimension bound at `write_logo` and a sweep of the cache the
+shipped releases wrote unchecked -- and this scenario observes it at BOTH
+sinks rather than at a string. The helper runs as the subprocess the service
+runs, `logos --fetch --cache-dir <scratch>`, against a provider that is
+`spikes/logo-decode-bomb/serve-and-fetch.py`: an https server with a
+self-signed certificate in a thread of that process, the helper as its
+child, nothing detached and nothing to kill. The corpus comes from
+`spikes/logo-decode-bomb/make-corpus.py` (stdlib only, so the gate depends
+on nothing installed). Then whatever the helper ANNOUNCED is handed to the
+shell's `Image`, declared exactly as `Guide.qml` declares the row slot, under
+`systemd-run --user --scope -p MemoryMax=1500M` around the qml process alone.
+
+Twenty-eight checks and the floor: the verb exists (V1); the rig's names are
+the helper's names (V2); the 512x512 logo is fetched, announced, written and
+reaches `Image.Ready` at 72 MB (C1, K1 -- the positive control, because a
+scenario where everything is refused passes against a helper that refuses
+everything); a file at the bound exactly is accepted (C2); a sound cached
+file is announced with no request (C3); seven planted bombs are swept
+(P1..P7, S1), refetched once each (G1), refused under
+`reasons.logo_dimensions` with nothing on disk (F1, F2, R1..R3); the two
+bounds are driven apart (E1, E2) and an unreadable header is refused rather
+than passed (E3); the summary carries both numbers (M1, M2); the refusal
+text names a host and no URL (T1, T2); and the 304-byte bomb never reaches
+the sink (K2). On `--baseline 159da94` it reads 8 passed, 21 failed, and K2's
+red line carries `rc=0 peak_mb=839`: the finding, observed. check-tree never
+decodes a bomb, even capped; the 840 MB arm is the baseline's, for a human.
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape
@@ -835,3 +874,14 @@ None is part of the gate.
   run is compared with the table in its header, so a Qt that changes the
   answer is a red exit rather than a stale comment. On Qt 6.11.2 every
   format but PlainText fetches, with `Mozilla/5.0` as the client.
+- `spikes/logo-decode-bomb/run.sh`: how much memory the row logo slot's
+  `Image` allocates for a file whose header declares a size its bytes never
+  deliver (D-LOGO-11). The corpus is generated (`make-corpus.py`, stdlib
+  only: 28 files, every declared dimension an argument in the call), each
+  row is a fresh offscreen qml process under a 1.5 GB systemd scope, and
+  every row is judged against a band so a Qt that changes the answer is a
+  red exit. Its README holds the table: 72 MB control, 840 MB for 304
+  bytes, 1,239 MB for 555, SIGKILL for the 65500 pair, PNG/GIF/WEBP at
+  control memory, and the `QT_IMAGEIO_MAXALLOC` bracket that puts the
+  threshold at ceil(dim/8)^2 x 4. It decodes bombs on purpose and is never
+  part of the gate; `logo-scenario.sh check-tree` is.
