@@ -458,6 +458,41 @@ requests and raise the batch.
      has the same property the byte cap had -- it bounds fetches per run, not
      the cache -- and is filed open as D-LOGO-12. A number that cannot fail
      for the thing it looks like it guards is the defect, whatever the number.
+   - **The clipboard, as an INPUT that blocks** (D-CLIP-1). Every editable
+     QtQuick `TextInput` subscribes to `QClipboard::dataChanged` at
+     construction, and on the RELEASED Qt 6.11.2 that slot calls
+     `QMimeData::text()`: on Wayland that is a synchronous read of the
+     whole offer on the shell's main thread through a pipe with a 1 s
+     per-read timeout, NO total byte limit and NO overall deadline, cached
+     until the next offer. Any application's clipboard change is the
+     trigger; no user action is needed. Measured 2026-10-11 on this machine
+     with a throwaway client under the user's own compositor: one editable
+     `TextField` grew by 238 MB within 600 ms of a foreign 100 MB
+     `text/plain` offer; the same field `readOnly: true` grew by nothing; a
+     window with no field made zero pipe reads. Attributed by a gdb
+     catchpoint on `pipe2`: `q_canPasteChanged -> QMimeData::text() ->
+     QInternalMimeData::retrieveData`. Upstream added that read on
+     2026-02-18 (`c82ef988`, in 6.11.2) and removed it on 2026-09-15
+     (`7d0a433a`, after the cut), so the marketplace maintainer's "6.12
+     path" had the versions inverted and the mechanism right. Raised on
+     the verification request for 0.13.4, the sixth finding in six days.
+     `readOnly` is the one switch on the slot in every version, so the
+     rule is: **while the plugin's form is open, no editable `TextInput`
+     exists in the shell.** The form's fields are `readOnly: true`
+     unconditionally; the plugin does the editing itself in
+     `handleFormKey` over the model value (`Model.editInsert`,
+     `Model.editDelete`, node-tested), and paste is the out-of-process path
+     only -- `wl-paste` as argv, capped at `Model.LIMITS.url * 4`, in a
+     child that can be killed -- which also closes the middle-click
+     Selection paste, a second unbounded read on the same object. The
+     stated loss: input-method composition (dead keys, CJK) does not reach
+     a read-only field, so accents cannot be TYPED into the name field;
+     ASCII typing and any paste are unaffected.
+     The lesson, which is D-LOGO-11's again one layer up: the host kit's
+     `qs.Ui.TextField` is exposed in every host form too, and a Qt
+     subscription made at construction is a sink opened by an object's
+     mere existence, not by anything it is asked to do. Reported upstream
+     to Omarchy and Qt with the measurements.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
