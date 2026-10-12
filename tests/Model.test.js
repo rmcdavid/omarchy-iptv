@@ -8883,6 +8883,25 @@ checkCall("R18b: sameOwnWrite is equality over exactly what ownWriteInForce and 
       next.switchSource(r13.KA); settle(next)
       return [epgOf(next, r13.KA), heldIn(next), has(next, "epgUrl"), svc.inputLost.concat(next.inputLost)]
     }, ["E", "none", false, []])
+    // The round-9 lens matrix's LV:epg (A_A_epg, events held): the record
+    // already holds E; the same E is set again (a no-op for the record), the
+    // source is removed, and E is set once more -- all before any state
+    // write reports. A re-stamp of the equal value cost a state write that
+    // deferred the strip, so the last re-set changed no bytes and was never
+    // seen: E ended on no record and off the entry.
+    checkCall("R19c (" + mode + " host): an EPG input equal to the active record's own is not re-stamped -- set again, the source removed, and set once more with every state write still in flight: the last input is held (or on the entry), never lost", () => {
+      const recE = Object.assign(r13.rec(r13.A), { epgUrl: E })
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([recE, r13.rec(r13.B)], r13.KA), mode)
+      const before = r13.fileOf(svc).sources.find(x => x.key === r13.KA)
+      svc.host.externalSet("epgUrl", E); svc.runLater()
+      const restamped = svc.disk.events.length > 0
+      svc.removeSource(r13.KA); svc.runLater()
+      svc.host.externalSet("epgUrl", E); svc.runLater()
+      svc.drain()
+      const next = r13.restart(svc, mode)
+      const where = [heldIn(next) === "E" ? "held" : "", has(next, "epgUrl") ? "entry" : ""].filter(Boolean).join("+") || "nowhere"
+      return [("epgSetAt" in before), restamped, where, svc.inputLost.concat(next.inputLost)]
+    }, [false, false, "held", []])
     // R19d, D-SRC-18: an input whose adoption's state write FAILED stays on
     // the entry (R11's drop); the user then edits the guide URL in the app,
     // and that save LANDS -- the owed mirror strips the older input then, so
