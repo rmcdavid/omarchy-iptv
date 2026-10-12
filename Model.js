@@ -4269,7 +4269,17 @@ var OWNED_SETTINGS = ["sourceKey", "showLogos"]
 // `updateEntryInline` call sites go through, rather than in either caller: a
 // rule written at one of two sites is the shape D-LOGO-2 and rule 15 are
 // both about. The consequence is deliberate and is what makes the migration
-// cheap -- ANY owned write heals an old entry, including the logo toggle.
+// cheap -- an owned write heals an old entry.
+//
+// R16 (D-SINK-19 round 5) narrows WHICH owned write: healing is the KEY
+// MIRROR's job and happens only once the file agrees with memory (writeActive
+// under R13). The logo toggle heals too while nothing of ours is outstanding,
+// and while a state write is parked, in flight or failed it writes
+// `showLogos` ALONE and leaves these two keys and `sourceKey` as the host
+// holds them (`ownedWriteMode`; `entryWith` with `keepRetired`). The round-4
+// review measured the old rule losing the record: after a failed state write
+// the URL on the entry is the only copy, and "any owned write heals" meant one
+// `g` in Sources stripped it and mirrored a key the file did not have.
 var RETIRED_SETTINGS = ["playlistUrl", "epgUrl"]
 
 // The patch for a settings write: every owned key, at the value it should
@@ -9139,6 +9149,23 @@ function sourceReason(code) {
   return sourceErrorMessage(code)
 }
 
+// Every reason Service.sourcesPersistFailed can carry (SR25 as amended
+// 2026-10-12). The guide renders the sentence for THE reason it was given:
+// `state_write_failed` names the state directory, `config_unsafe` names the
+// chmod, and only `persist_failed` -- a host entry updateEntryInline could
+// not rewrite -- says `omarchy bar set`, because that write carries no
+// credential. An unknown reason falls back to persist_failed's sentence. The
+// round-4 review's P2: the guide rendered persist_failed's copy for every
+// reason, so a failed write in ~/.local/state told the user to put the URL
+// into their shell history, the durable sink rule 5 forbids advising.
+var PERSIST_FAILURE_REASONS = ["state_write_failed", "config_unsafe", "persist_failed"]
+
+function persistFailureMessage(reason) {
+  var r = str(reason)
+  if (PERSIST_FAILURE_REASONS.indexOf(r) === -1) r = "persist_failed"
+  return sourceErrorMessage(r)
+}
+
 // ---- URL validation (ARCHITECTURE-SOURCES 3.1 with the UX 5.4 codes, SR6)
 //
 // Accepted: absolute paths, `file://` URLs (normalized to the path) and
@@ -10431,6 +10458,38 @@ function entryFlushDisposition(ctx) {
   return { act: "flush", reason: "saved" }
 }
 
+// R16 (D-SINK-19 round 5). What an owned-entry write that is NOT the key
+// mirror may carry. writeOwnedEntry has two callers, and R13 gated one: the
+// logo toggle (Service.setShowLogos) mirrored `sourceKey` from MEMORY with no
+// plan and stripped the retired URL keys, so after a failed state write --
+// the state R13 leaves on purpose, the URL on the entry being the only copy
+// -- one `g` in Sources wrote a key the file did not have and took the URL
+// off; the record then existed nowhere durable and the next start lost it
+// (round-4 review, measured live and at the Model layer: losses 4 of 4 on
+// every D-SINK-19 tree). Rule 15's shape: the second writer.
+//
+//   heal   nothing of ours is outstanding: the file agrees with memory, so
+//          the write may name every owned key at its effective value and
+//          drop the retired ones, as the mirror does
+//   patch  a state write is parked, in flight or failed: the write carries
+//          `showLogos` alone, with `sourceKey`, `playlistUrl` and `epgUrl`
+//          exactly as the host holds them (`entryWith` with `keepRetired`;
+//          the patch's sourceKey is the host's own value through
+//          `ownedEntryPatch` over `settings`, never memory's). Healing is
+//          the key mirror's job, through writeActive under R13, once the
+//          file agrees with memory again
+//
+// Takes the three flags and nothing else; the reason names which one. In
+// Model.js so node can call it (rule 12) and the fixture's `ownedWrite`
+// section pins every combination.
+function ownedWriteMode(flags) {
+  var f = flags || {}
+  if (f.savePending === true) return { mode: "patch", reason: "save-parked" }
+  if ((Number(f.savesInFlight) || 0) > 0) return { mode: "patch", reason: "save-in-flight" }
+  if (f.saveFailed === true) return { mode: "patch", reason: "save-failed" }
+  return { mode: "heal", reason: "settled" }
+}
+
 // `activeSourceKey(state, playlistUrl)` USED TO BE HERE and is deliberately
 // gone (D-SINK-19, rule 15). It was the one function whose job was "name the
 // active source from a URL", and leaving it behind with no caller would leave
@@ -10546,10 +10605,19 @@ function sourcesSummary(state, activeKey) {
 // old entry had. A `patch` may name a retired key explicitly and that value
 // wins; nothing in this repository does, and the test that proves it calls
 // `ownedEntryPatch` rather than grepping for the names.
-function entryWith(entry, patch) {
+//
+// R16: `opts.keepRetired === true` carries the retired keys over UNCHANGED.
+// That is the patch-only write (Service.setShowLogos while a state write is
+// outstanding, `ownedWriteMode`): the URL on the entry may be the only copy
+// of a source whose state write has not landed, and a write that takes it
+// off is the key mirror's to make, after the save lands. The default is
+// still removal, because the default is what the mirror and the settled
+// toggle use.
+function entryWith(entry, patch, opts) {
   var out = {}
   var src = entry && typeof entry === "object" ? entry : {}
-  for (var k in src) if (RETIRED_SETTINGS.indexOf(k) === -1) out[k] = src[k]
+  var keep = !!(opts && opts.keepRetired === true)
+  for (var k in src) if (keep || RETIRED_SETTINGS.indexOf(k) === -1) out[k] = src[k]
   var p = patch || {}
   for (var q in p) out[q] = p[q]
   if (str(out.id) === "" && str(src.id) !== "") out.id = str(src.id)
@@ -11451,6 +11519,7 @@ if (typeof module !== "undefined") {
     logoColumnShown: logoColumnShown,
     splitLogoUrl: splitLogoUrl,
     ownWriteInForce: ownWriteInForce,
+    ownedWriteMode: ownedWriteMode,
     settingsWithOwnWrite: settingsWithOwnWrite,
     RETIRED_SETTINGS: RETIRED_SETTINGS,
     barEntryWritable: barEntryWritable,
@@ -11744,6 +11813,8 @@ if (typeof module !== "undefined") {
     looksLikeHost: looksLikeHost,
     formCapacity: formCapacity,
     sourceErrorMessage: sourceErrorMessage,
+    persistFailureMessage: persistFailureMessage,
+    PERSIST_FAILURE_REASONS: PERSIST_FAILURE_REASONS,
     sourceReason: sourceReason,
     validateSourceUrl: validateSourceUrl,
     normalizeSourceUrl: normalizeSourceUrl,

@@ -159,5 +159,16 @@
     {"name": "R13: the last save FAILED but a new one is IN FLIGHT -- wait for its own verdict; checked the other way round a switch after any earlier failure dropped its mirror before its write reported", "ctx": {"pendingKey": "d990c2e4", "dirsReady": true, "initOk": true, "saveFailed": true, "savesInFlight": 1}, "act": "wait", "reason": "save-in-flight"},
     {"name": "R13: the last save failed and another is PARKED -- wait; the parked one reports when issued", "ctx": {"pendingKey": "d990c2e4", "dirsReady": true, "initOk": true, "saveFailed": true, "savePending": true}, "act": "wait", "reason": "save-in-flight"},
     {"name": "R11 still: init failed outranks a save in flight (R11 as ruled: the mirror needs init 0 AND the save landed)", "ctx": {"pendingKey": "d990c2e4", "dirsReady": true, "initOk": false, "savesInFlight": 1}, "act": "drop", "reason": "init-failed"}
+  ],
+  "ownedWriteNote": "R16 (D-SINK-19 round 5): Model.ownedWriteMode over the three flags an owned-entry write that is NOT the key mirror is handed. `patch` whenever a state write is parked, in flight or failed (the file is older than memory and the URL on the entry may be the only copy, so the write carries showLogos alone and leaves sourceKey and the retired URL keys as the host holds them); `heal` only when nothing of ours is outstanding. The reason names the first flag that decided, in the order entryFlushDisposition reads them.",
+  "ownedWrite": [
+    {"name": "nothing outstanding -> heal", "savePending": false, "savesInFlight": 0, "saveFailed": false, "mode": "heal", "reason": "settled"},
+    {"name": "failed -> patch", "savePending": false, "savesInFlight": 0, "saveFailed": true, "mode": "patch", "reason": "save-failed"},
+    {"name": "in flight -> patch", "savePending": false, "savesInFlight": 1, "saveFailed": false, "mode": "patch", "reason": "save-in-flight"},
+    {"name": "in flight failed -> patch", "savePending": false, "savesInFlight": 1, "saveFailed": true, "mode": "patch", "reason": "save-in-flight"},
+    {"name": "parked -> patch", "savePending": true, "savesInFlight": 0, "saveFailed": false, "mode": "patch", "reason": "save-parked"},
+    {"name": "parked failed -> patch", "savePending": true, "savesInFlight": 0, "saveFailed": true, "mode": "patch", "reason": "save-parked"},
+    {"name": "parked in flight -> patch", "savePending": true, "savesInFlight": 1, "saveFailed": false, "mode": "patch", "reason": "save-parked"},
+    {"name": "parked in flight failed -> patch", "savePending": true, "savesInFlight": 1, "saveFailed": true, "mode": "patch", "reason": "save-parked"}
   ]
 }

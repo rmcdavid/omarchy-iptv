@@ -837,11 +837,18 @@ Item {
   //     `channels`. sourceRemoved(id). sourcesPersistFailed(reason) when
   //     the plugin's own state.json could not be written
   //     ("state_write_failed", R13: the state write is the switch, so this
-  //     is the failure a switch, a remove or an adoption can have), when
-  //     the logo toggle's entry write was refused ("persist_failed") or the
+  //     is the failure a switch, a remove or an adoption can have) or the
   //     host settings file could not be made private ("config_unsafe",
-  //     D-SINK-18). A refused KEY mirror is logged and repaired on the next
-  //     start, not signalled (SR25 as amended 2026-10-12).
+  //     D-SINK-18, reachable only through a URL-bearing patch, which no
+  //     shipping write composes). "persist_failed" -- a bar entry
+  //     updateEntryInline cannot rewrite -- is raised by writeOwnedEntry
+  //     ONLY for a caller that does not pass `announce` false, and BOTH
+  //     callers pass it (writeActive, setShowLogos): a refused KEY mirror is
+  //     logged and repaired on the next start, and a refused logo write
+  //     reports through its return value, which the guide renders itself
+  //     (SR25 as amended 2026-10-12; the round-4 review's DQ-C7). The reason
+  //     set is Model.PERSIST_FAILURE_REASONS and the guide renders the
+  //     sentence for THE reason it is handed (Model.persistFailureMessage).
   signal sourceProbeFinished(var result)
   signal sourceSwitched(string id)
   signal sourceRemoved(string id)
@@ -3529,10 +3536,19 @@ Item {
   // `announce` is false for the logo toggle, which reports its own failure
   // through its return value: `sourcesPersistFailed` is the SOURCES screen's
   // error channel and raising it for a logo switch would put a source error
-  // on screen for something that is not one. That is the only difference
-  // between the two writers, and it is about reporting rather than about what
-  // reaches the file.
-  function writeOwnedEntry(overrides, what, announce) {
+  // on screen for something that is not one. (R13 made it false for the key
+  // mirror as well; see writeActive.)
+  //
+  // R16: `keepRetired` true is the PATCH-ONLY write, and it is the one
+  // difference between the two writers about what reaches the file. The
+  // caller (setShowLogos, under Model.ownedWriteMode) passes it while a state
+  // write is parked, in flight or failed: the entry then keeps the retired
+  // URL keys it carries -- the only copy of a source whose state write has
+  // not landed -- and the patch's `sourceKey` is the host's own value
+  // (ownedEntryPatch over `settings`), never memory's. Healing the entry is
+  // the key mirror's job once the file agrees with memory again (writeActive
+  // under R13), and the mirror never passes this.
+  function writeOwnedEntry(overrides, what, announce, keepRetired) {
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
         || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
       console.warn("omarchy-iptv: no writable bar entry for the " + what)
@@ -3544,7 +3560,7 @@ Item {
     }
     var patch = Model.ownedEntryPatch(root.settings, overrides)
     patch.id = root.pluginId
-    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch)
+    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch, { keepRetired: keepRetired === true })
     root.shell.updateEntryInline(root.pluginId, entry)
     root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, overrides))
     // D-SINK-18. Re-arm for the NEXT write. The file can be recreated 0644
@@ -3656,13 +3672,33 @@ Item {
     // an older build left in the entry instead of carrying it forward.
     //
     // D-SINK-18: still not gated, and the reason is sharper than it was. The
-    // patch carries `sourceKey` and `showLogos` and strips the URL keys, so
-    // this write can only ever take a credential OUT of that file, and the
-    // one write that must never be refused is the one that does that. What it
-    // DOES get is the shield re-arm, which tightens the file and shortens the
-    // drift window by one more event.
-    // writeOwnedEntry re-arms the shield itself, so there is no second call
-    // here: one write, one re-arm, for both writers.
+    // settled write carries `sourceKey` and `showLogos` and strips the URL
+    // keys, so it can only ever take a credential OUT of that file, and the
+    // one write that must never be refused is the one that does that; the
+    // patch-only write below carries the entry's URL keys over UNCHANGED, so
+    // it puts into the file nothing the file does not already hold. What
+    // both get is the shield re-arm, which tightens the file and shortens
+    // the drift window by one more event. writeOwnedEntry re-arms the shield
+    // itself, so there is no second call here: one write, one re-arm.
+    //
+    // R16 (round-4 review P1, rule 15: this is writeOwnedEntry's SECOND
+    // caller, and R13 gated only the first). While a state write is parked,
+    // in flight or failed, the file is older than memory and the URL on the
+    // entry may be the only copy of a source whose write did not land; this
+    // write used to mirror the in-memory key and strip that URL, and the
+    // next start found the record nowhere. Model.ownedWriteMode decides from
+    // the three flags: "patch" writes `showLogos` alone and leaves
+    // `sourceKey`, `playlistUrl` and `epgUrl` exactly as the host holds them
+    // (ownedEntryPatch takes the key from `settings`, entryWith keeps the
+    // retired keys); "heal" is today's write. The mirror itself is written
+    // by writeActive once the file agrees with memory, under R13.
+    var mode = Model.ownedWriteMode({ savePending: root.stateSavePending,
+                                      savesInFlight: root.stateSavesInFlight,
+                                      saveFailed: root.stateSaveFailed })
+    if (mode.mode === "patch") {
+      console.warn("omarchy-iptv: logo setting written alone; the bar entry's source keys are left as they are (" + mode.reason + ")")
+      return root.writeOwnedEntry({ showLogos: want }, "logo setting", false, true)
+    }
     return root.writeOwnedEntry({ sourceKey: root.activeSourceKey, showLogos: want }, "logo setting", false)
   }
 

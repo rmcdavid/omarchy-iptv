@@ -2062,11 +2062,17 @@ Item {
   }
 
   // SR25: a persist failure lands on the result line while a form is open,
-  // in the footer otherwise.
-  function showPersistFailed() {
+  // in the footer otherwise. The sentence is THE reason's own
+  // (Model.persistFailureMessage, round-4 review P2): `state_write_failed`
+  // names the state directory and `config_unsafe` the chmod; only
+  // `persist_failed` says `omarchy bar set`, and rendering that one for a
+  // write that failed in ~/.local/state sent the user to the durable sink
+  // rule 5 forbids advising, for a directory it cannot fix.
+  function showPersistFailed(reason) {
     if (!root.opened) return
-    if (root.formActive) root.failForm({ code: "persist_failed", field: "", message: Model.sourceErrorMessage("persist_failed") })
-    else root.showTransient(Model.sourceErrorMessage("persist_failed"))
+    var message = Model.persistFailureMessage(reason)
+    if (root.formActive) root.failForm({ code: "persist_failed", field: "", message: message })
+    else root.showTransient(message)
   }
 
   function cancelForm() {
@@ -2813,7 +2819,7 @@ Item {
     function onSourceProbeFinished(result) { root.onProbeFinished(result) }
     function onSourcesChanged() { root.syncSourceCursor() }
     function onSourceSwitched(id) { root.showSwitched(id) }
-    function onSourcesPersistFailed(reason) { root.showPersistFailed() }
+    function onSourcesPersistFailed(reason) { root.showPersistFailed(reason) }
     function onConfiguredChanged() { root.onConfiguredFlip() }
     function onClipboardText(text) { root.pasteFromProcess(text) }
     // M2-05: the outcome of a toggle, once the service has dispatched and

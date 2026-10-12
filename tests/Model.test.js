@@ -5044,7 +5044,7 @@ checkCall("D-SINK-18: the write is reached only through the shield decision, and
 // runs the real functions over a host entry that holds real URLs.
 checkCall("D-SINK-19: one writer for the bar entry, and the shield re-armed after it", () => {
   const sites = (serviceSource.match(/\.updateEntryInline\(/g) || []).length
-  const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce\)[\s\S]*?\n  \}/) || [""])[0]
+  const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\)[\s\S]*?\n  \}/) || [""])[0]
   return {
     // One call site, inside the funnel. `typeof ... !== "function"` guards
     // are not calls, so the count is of writes.
@@ -7166,6 +7166,9 @@ const r13 = (() => {
       this.assign(copy)
       if (this.mode === "lag") this.assign(copy)
     }
+    // The lagging host catching up: it publishes what it stores (the echo of
+    // our own write, which under lag arrives only with the NEXT write).
+    publishStored() { this.published = clone(this.stored.bar); this.listeners.forEach(l => l()) }
   }
   // The FileView as measured (Model.stateSaveLanded): a write started sets
   // the view's text; `coalesce` models a burst, where a write queued behind
@@ -7196,7 +7199,7 @@ const r13 = (() => {
       this.dirsReady = false; this.stateSavePending = false; this.stateSavesInFlight = 0
       this.stateSaveFailed = false; this.stateInitOk = false; this.stateReloadsByReason = {}
       this.pendingEntryKey = null; this.ownWrite = null; this.recentSaves = []; this.lastSaveText = ""
-      this.later = []; this.warnings = []; this.signals = []; this.entryWrites = []; this.now = 1000
+      this.later = []; this.warnings = []; this.signals = []; this.entryWrites = []; this.entryAudits = []; this.now = 1000
       host.listeners.push(() => this.onHostChanged())
     }
     get hostSettings() { return Model.settingsFrom(Model.findBarEntry(this.host.barConfig, PID)) }
@@ -7298,17 +7301,41 @@ const r13 = (() => {
       }
       return true
     }
-    persistEntryKey(key) {
+    persistEntryKey(key) { return this.writeOwnedEntry({ sourceKey: Model.activeKeyText(key) }, false) }
+    // Service.writeOwnedEntry, the one funnel, with its two callers above and
+    // below. `keepRetired` is R16's patch-only write (entryWith's third
+    // argument; a tree without it strips, and fails on the loss).
+    writeOwnedEntry(overrides, keepRetired) {
       if (!Model.barEntryWritable(this.host.barConfig, PID)) { this.warnings.push("no writable bar entry"); return false }
-      const patch = Model.ownedEntryPatch(this.settings, { sourceKey: Model.activeKeyText(key) })
+      const patch = Model.ownedEntryPatch(this.settings, overrides)
       patch.id = PID
-      const entry = Model.entryWith(Model.findBarEntry(this.host.barConfig, PID), patch)
+      const entry = Model.entryWith(Model.findBarEntry(this.host.barConfig, PID), patch, { keepRetired: keepRetired === true })
       this.entryWrites.push(clone(entry))
+      // The round-4 lens's L12 audit, at the sink: at the moment the entry is
+      // handed to the host, its sourceKey is the FILE's own pointer and the
+      // file holds that record (or the key is the cleared one).
+      const file = Model.parseState(this.disk.text)
+      const key = String(entry.sourceKey || "")
+      this.entryAudits.push({ entryKey: key, fileKey: Model.activeKeyOf(file), memKey: this.activeSourceKey,
+                              fileHas: key === "" || file.sources.some(r => r.key === key), urlKept: Object.prototype.hasOwnProperty.call(entry, "playlistUrl") })
       const before = JSON.stringify(this.settings)
       this.host.updateEntryInline(PID, entry)
-      this.ownWrite = Model.ownWriteOf(this.hostSettings, Model.ownedEntryPatch(this.settings, { sourceKey: Model.activeKeyText(key) }))
+      this.ownWrite = Model.ownWriteOf(this.hostSettings, Model.ownedEntryPatch(this.settings, overrides))
       if (JSON.stringify(this.settings) !== before) this.reconcile(false)
       return true
+    }
+    // Service.setShowLogos (R16): the SECOND owned-entry writer. A tree
+    // without R16 (lane-key-t2) wrote the in-memory key with no mode and
+    // stripped the retired keys: modelled as that tree did it, so a run over
+    // it fails on the LOSS this drives, not on the missing symbol.
+    setShowLogos(on) {
+      const want = on === true
+      if ((this.settings.showLogos === true) === want) return true
+      const mode = typeof Model.ownedWriteMode === "function"
+        ? Model.ownedWriteMode({ savePending: this.stateSavePending, savesInFlight: this.stateSavesInFlight, saveFailed: this.stateSaveFailed })
+        : { mode: "heal", reason: "no R16 on this tree" }
+      if (mode.mode === "patch") { this.warnings.push("logo setting written alone (" + mode.reason + ")"); return this.writeOwnedEntry({ showLogos: want }, true) }
+      return this.writeOwnedEntry({ sourceKey: this.activeSourceKey, showLogos: want }, false)
     }
     removeSource(key) {
       const removed = Model.removeSource(this.userState, key)
@@ -7545,6 +7572,211 @@ checkCall("R15 (structural): applyUserState counts every reload by reason throug
     warnIsALiteral: !/pendingEntryKey !== null\) console\.warn\([^\n]*\+/.test(destruction)
   }
 }, { declared: true, countsBeforeDeciding: true, countsOnce: true, warnsOnHeldAtExit: true, warnIsALiteral: true })
+
+// ---- R16: an owned-entry write that is NOT the key mirror writes only the
+// fields it owns while a state write is outstanding ----
+//
+// The round-4 review's P1, measured live on lane-key-t2 (rule 15's shape:
+// writeOwnedEntry has two callers and R13 gated one). Service.setShowLogos
+// mirrored `sourceKey` from MEMORY and entryWith stripped the retired URL
+// keys on every write, so after a failed state write -- the URL on the entry
+// being the only copy of the record -- one logo toggle wrote a key the file
+// did not have and took the URL off; the next start found the record
+// nowhere. Every check below was seen red on lane-key-t2 (the driver cases on
+// the loss itself, the structural pins on the missing shape).
+checkCall("R16: ownedWriteMode over every `ownedWrite` case of the shared fixture -- patch whenever a save is parked, in flight or failed; heal only when nothing is outstanding", () => {
+  return activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify(Model.ownedWriteMode({ savePending: c.savePending, savesInFlight: c.savesInFlight, saveFailed: c.saveFailed })))
+}, activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify({ mode: c.mode, reason: c.reason })))
+checkCall("R16: the fixture covers the whole cube, the mode is `patch` exactly when any flag is raised, and the decision takes the three flags and nothing else", () => {
+  const combos = new Set(activeKeyFixture.ownedWrite.map(c => [c.savePending, c.savesInFlight > 0, c.saveFailed].join("/")))
+  const cube = activeKeyFixture.ownedWrite.every(c => Model.ownedWriteMode(c).mode === ((c.savePending || c.savesInFlight > 0 || c.saveFailed) ? "patch" : "heal"))
+  const body = (modelSource.match(/function ownedWriteMode\(flags\) \{[\s\S]*?\n\}/) || [""])[0]
+  const reads = Array.from(new Set((body.match(/f\.([A-Za-z]+)/g) || []).map(x => x.slice(2)))).sort()
+  return [combos.size, cube, reads, Model.ownedWriteMode(null).mode, Model.ownedWriteMode({ savesInFlight: "2" }).reason, Model.ownedWriteMode({ saveFailed: "true" }).mode,
+          Model.ownedWriteMode({ savePending: true, savesInFlight: 1, saveFailed: true }).reason]
+}, [8, true, ["saveFailed", "savePending", "savesInFlight"], "heal", "save-in-flight", "heal", "save-parked"])
+checkCall("R16: entryWith with keepRetired carries the retired URL keys over unchanged, the patch still wins over them, the id is still forced, and the default still removes them", () => {
+  const host = { id: "x", playlistUrl: "http://p.test/a.m3u?password=s3cret", epgUrl: "http://p.test/a.xml", sourceKey: "d990c2e4", showLogos: false, barLabelMaxWidth: 240 }
+  const kept = Model.entryWith(host, { showLogos: true, id: "x" }, { keepRetired: true })
+  const stripped = Model.entryWith(host, { showLogos: true, id: "x" })
+  const explicit = Model.entryWith(host, { playlistUrl: "new" }, { keepRetired: true })
+  return [kept, stripped, explicit.playlistUrl, explicit.epgUrl,
+          Model.entryWith(host, {}, { keepRetired: "yes" }).playlistUrl, Model.entryWith(host, {}, null).playlistUrl, Model.entryWith({ playlistUrl: "u" }, null, { keepRetired: true }).id]
+}, [{ id: "x", playlistUrl: "http://p.test/a.m3u?password=s3cret", epgUrl: "http://p.test/a.xml", sourceKey: "d990c2e4", showLogos: true, barLabelMaxWidth: 240 },
+    { id: "x", sourceKey: "d990c2e4", showLogos: true, barLabelMaxWidth: 240 },
+    "new", "http://p.test/a.xml", undefined, undefined, undefined])
+for (const mode of ["lag", "echo"]) {
+  // The P1 itself: the state R13 leaves after a failed write (URL on the
+  // entry, mirror untouched, failure signalled), then the toggle through the
+  // same funnel the service uses. The entry keeps the URL and the file's own
+  // pointer; showLogos lands, locally at once and durably; the next start
+  // re-adopts the record.
+  checkCall("R16 (" + mode + " host): a failed state write, then setShowLogos -- the stored entry keeps playlistUrl, every entry write names the file's own pointer (L12), showLogos lands and applies locally at once, and the next start re-adopts the record", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.writeFails = true
+    svc.host.externalSet("playlistUrl", r13.NEW); svc.runLater(); svc.drain()
+    const s0 = svc.host.storedEntry()
+    const before = { urlStored: r13.has(s0, "playlistUrl"), mirror: s0.sourceKey, memKey: svc.activeSourceKey, fileKey: Model.activeKeyOf(r13.fileOf(svc)), writes: svc.entryWrites.length }
+    const toggled = svc.setShowLogos(true)
+    const local = svc.settings.showLogos      // rule 9: applied in the same turn, before any echo
+    svc.drain()
+    const stored = svc.host.storedEntry()
+    const audits = svc.entryAudits.map(a => [a.entryKey === a.fileKey, a.fileHas, a.urlKept])
+    svc.disk.writeFails = false
+    const next = r13.restart(svc, mode)
+    const nextFile = r13.fileOf(next)
+    return { before, toggled, local,
+             stored: { urlKept: r13.has(stored, "playlistUrl"), mirror: stored.sourceKey, showLogos: stored.showLogos }, writes: svc.entryWrites.length, audits,
+             patched: svc.warnings.filter(w => w.indexOf("logo setting written alone (save-failed)") === 0).length, signals: svc.signals, memKey: svc.activeSourceKey,
+             afterRestart: { memKey: next.activeSourceKey, fileKey: Model.activeKeyOf(nextFile), fileSources: nextFile.sources.length,
+                             urlStored: r13.has(next.host.storedEntry(), "playlistUrl"), mirror: next.host.storedEntry().sourceKey, showLogos: next.settings.showLogos,
+                             audits: next.entryAudits.map(a => [a.entryKey === a.fileKey, a.fileHas]) } }
+  }, { before: { urlStored: true, mirror: r13.KA, memKey: r13.KNEW, fileKey: r13.KA, writes: 0 }, toggled: true, local: true,
+       stored: { urlKept: true, mirror: r13.KA, showLogos: true }, writes: 1, audits: [[true, true, true]],
+       patched: 1, signals: ["state_write_failed"], memKey: r13.KNEW,
+       afterRestart: { memKey: r13.KNEW, fileKey: r13.KNEW, fileSources: 3, urlStored: false, mirror: r13.KNEW, showLogos: true, audits: [[true, true]] } })
+  // The own-write override recognises the patch-only write as ours: under
+  // the lagging host the published entry still says showLogos false and the
+  // plugin reads true; when the host catches up (the echo) the override
+  // lapses to the same value, nothing is written again and nothing is
+  // re-adopted.
+  checkCall("R16 (" + mode + " host): the patch-only write is recognised as our own -- the override holds showLogos while the host lags, lapses on the echo to the same value, and the echo re-adopts nothing and writes nothing", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.writeFails = true
+    svc.host.externalSet("playlistUrl", r13.NEW); svc.runLater(); svc.drain()
+    svc.setShowLogos(true); svc.drain()
+    // the record is over the keys the write carried: sourceKey at the HOST's value (never memory's), showLogos at ours
+    const override = { inForce: Model.ownWriteInForce(svc.hostSettings, svc.ownWrite), value: svc.ownWrite ? svc.ownWrite.value : null }
+    const held = { showLogos: svc.settings.showLogos, sourceKey: svc.settings.sourceKey, published: Model.findBarEntry(svc.host.barConfig, "io.github.rmcdavid.iptv").showLogos }
+    const writesBefore = svc.entryWrites.length, warnsBefore = svc.warnings.length, savesBefore = svc.recentSaves.length
+    svc.host.publishStored(); svc.runLater(); svc.drain()
+    // under lag the host now reports our value, which is not the base: the override lapses (null); the
+    // echoing host reported it at the write itself, so the record was made against it and is inert (base == value)
+    const inert = svc.ownWrite === null || JSON.stringify(svc.ownWrite.base) === JSON.stringify(svc.ownWrite.value)
+    return { held, override,
+             afterEcho: { showLogos: svc.settings.showLogos, sourceKey: svc.settings.sourceKey, inert, lapsed: svc.ownWrite === null, writes: svc.entryWrites.length - writesBefore,
+                          warns: svc.warnings.length - warnsBefore, saves: svc.recentSaves.length - savesBefore, memKey: svc.activeSourceKey, urlStored: r13.has(svc.host.storedEntry(), "playlistUrl") } }
+  }, { held: { showLogos: true, sourceKey: r13.KA, published: mode === "lag" ? false : true },
+       override: { inForce: true, value: { sourceKey: r13.KA, showLogos: true } },
+       afterEcho: { showLogos: true, sourceKey: r13.KA, inert: true, lapsed: mode === "lag", writes: 0, warns: 0, saves: 0, memKey: r13.KNEW, urlStored: true } })
+  // The start-up route (the lens's (b)): a URL set while the shell was down,
+  // whose parked save fails at the dirs' exit, then the toggle.
+  checkCall("R16 (" + mode + " host): a URL set while the shell was down whose parked save FAILS, then setShowLogos -- the entry keeps the URL and the stale pointer, and the next start re-adopts", () => {
+    const disk = new r13.Disk(r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA)); disk.writeFails = true
+    const svc = new r13.Svc(new r13.Host({ playlistUrl: r13.NEW, sourceKey: r13.KA, showLogos: false }, mode), disk).start()
+    svc.setShowLogos(true); svc.drain()
+    const stored = svc.host.storedEntry()
+    disk.writeFails = false
+    const next = r13.restart(svc, mode)
+    return [svc.activeSourceKey, Model.activeKeyOf(r13.fileOf(svc)), r13.has(stored, "playlistUrl"), stored.sourceKey, stored.showLogos, svc.entryWrites.length,
+            svc.entryAudits.every(a => a.entryKey === a.fileKey && a.fileHas), svc.signals,
+            next.activeSourceKey, Model.activeKeyOf(r13.fileOf(next)), r13.fileOf(next).sources.length, r13.has(next.host.storedEntry(), "playlistUrl")]
+  }, [r13.KNEW, r13.KA, true, r13.KA, true, 1, true, ["state_write_failed"], r13.KNEW, r13.KNEW, 3, false])
+  // The other two paths through the same writer, so narrowing it moved
+  // nothing else: a switch that failed (no URL in play: the stale mirror is
+  // kept and the file's), and a toggle with NOTHING outstanding, which heals
+  // exactly as before -- a retired key an older build left on the entry is
+  // removed and the mirror names the memory key, which is the file's.
+  checkCall("R16 (" + mode + " host): after a failed switch the toggle keeps the file's pointer; with nothing outstanding it HEALS as before (retired key removed, memory key mirrored)", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.writeFails = true; svc.switchSource(r13.KB); svc.drain()
+    svc.setShowLogos(true); svc.drain()
+    const s1 = svc.host.storedEntry()
+    const afterFailedSwitch = [svc.activeSourceKey, Model.activeKeyOf(r13.fileOf(svc)), s1.sourceKey, s1.showLogos, svc.entryAudits.every(a => a.entryKey === a.fileKey && a.fileHas)]
+    // the disk recovers and the next switch lands: the mirror catches up through writeActive (R13), the toggle was never that write
+    svc.disk.writeFails = false; svc.switchSource(r13.KA); svc.drain()
+    const s2 = svc.host.storedEntry()
+    const recovered = [svc.stateSaveFailed, s2.sourceKey, Model.activeKeyOf(r13.fileOf(svc)), s2.showLogos]
+    // an older build's leftover, put on the HOST's entry by hand (nothing to adopt: it is the active record's own URL)
+    svc.host.stored.bar.layout.right[0].playlistUrl = r13.A; svc.host.published = JSON.parse(JSON.stringify(svc.host.stored.bar))
+    svc.setShowLogos(false); svc.drain()
+    const s3 = svc.host.storedEntry()
+    const healed = [r13.has(s3, "playlistUrl"), s3.sourceKey, s3.showLogos, svc.warnings.filter(w => w.indexOf("logo setting written alone") === 0).length,
+                    svc.entryAudits.every(a => a.entryKey === a.fileKey && a.fileHas)]
+    return { afterFailedSwitch, recovered, healed }
+  }, { afterFailedSwitch: [r13.KB, r13.KA, r13.KA, true, true], recovered: [false, r13.KA, r13.KA, true], healed: [false, r13.KA, false, 1, true] })
+  // Under the lagging host the published entry is one write behind the
+  // stored one, so after a heal the host still publishes the PRE-heal entry
+  // (old key, the URL the heal removed). A patch-only write then takes its
+  // sourceKey from `settings` -- the own-write override, i.e. the healed key,
+  // which is the file's pointer -- and carries the published URL back, which
+  // is the active record's own: the file holds it, the next start re-adopts
+  // it idempotently. The echo host has no such lag. Recorded, not hidden.
+  checkCall("R16 (" + mode + " host): heal, then a failed switch, then the toggle -- the patch names the healed key from the override (the file's pointer), not the stale published one; what it carries back is the file's own record", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.host.externalSet("playlistUrl", r13.NEW); svc.runLater(); svc.drain()      // adopted, saved, healed: stored {KNEW}
+    const published = Model.findBarEntry(svc.host.barConfig, "io.github.rmcdavid.iptv")
+    const afterHeal = [svc.host.storedEntry().sourceKey, r13.has(svc.host.storedEntry(), "playlistUrl"), published.sourceKey, r13.has(published, "playlistUrl"), svc.settings.sourceKey]
+    svc.disk.writeFails = true; svc.switchSource(r13.KB); svc.drain()
+    svc.setShowLogos(true); svc.drain()
+    const stored = svc.host.storedEntry()
+    const file = r13.fileOf(svc)
+    svc.disk.writeFails = false
+    const next = r13.restart(svc, mode)
+    return { afterHeal, stored: [stored.sourceKey, stored.showLogos, r13.has(stored, "playlistUrl"), stored.playlistUrl === r13.NEW ? "the file's active record" : "none"],
+             fileKey: Model.activeKeyOf(file), fileHasStoredKey: file.sources.some(r => r.key === stored.sourceKey), audits: svc.entryAudits.every(a => a.entryKey === a.fileKey && a.fileHas),
+             restart: [next.activeSourceKey, Model.activeKeyOf(r13.fileOf(next)), r13.fileOf(next).sources.length, r13.has(next.host.storedEntry(), "playlistUrl"), next.host.storedEntry().sourceKey] }
+  }, { afterHeal: [r13.KNEW, false, mode === "lag" ? r13.KA : r13.KNEW, mode === "lag", r13.KNEW],
+       stored: [r13.KNEW, true, mode === "lag", mode === "lag" ? "the file's active record" : "none"],
+       fileKey: r13.KNEW, fileHasStoredKey: true, audits: true, restart: [r13.KNEW, r13.KNEW, 3, false, r13.KNEW] })
+}
+// R16, THE WIRING. Structural pins (Service.qml and Guide.qml cannot be
+// instantiated here); the driver above CALLS the decisions in this order, the
+// live arm (key-scenario.sh) observes the sink. Each seen red by deleting
+// the line it names.
+checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the three flags, writes showLogos ALONE with keepRetired on `patch`, heals on the other branch, and the funnel hands keepRetired to entryWith; the key mirror never passes it", () => {
+  const fn = (serviceSource.match(/function setShowLogos\(on\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const decide = fn.indexOf("Model.ownedWriteMode(")
+  const patchBranch = (fn.match(/if \(mode\.mode === "patch"\) \{[\s\S]*?\n    \}/) || [""])[0]
+  const callers = (serviceSource.match(/root\.writeOwnedEntry\([^\n]*\)/g) || [])
+  return {
+    found: fn !== "" && funnel !== "",
+    decides: decide !== -1,
+    handsTheThreeFlags: /Model\.ownedWriteMode\(\{ savePending: root\.stateSavePending,\s*savesInFlight: root\.stateSavesInFlight,\s*saveFailed: root\.stateSaveFailed \}\)/.test(fn),
+    decidesBeforeWriting: decide !== -1 && decide < fn.indexOf("root.writeOwnedEntry("),
+    patchWritesShowLogosAlone: /return root\.writeOwnedEntry\(\{ showLogos: want \}, "logo setting", false, true\)/.test(patchBranch),
+    patchNamesNoKey: patchBranch !== "" && patchBranch.indexOf("sourceKey") === -1 && patchBranch.indexOf("activeSourceKey") === -1,
+    patchLogsTheReason: /console\.warn\("omarchy-iptv: logo setting written alone[^\n]*mode\.reason/.test(patchBranch),
+    healIsTheOldWrite: /\n    return root\.writeOwnedEntry\(\{ sourceKey: root\.activeSourceKey, showLogos: want \}, "logo setting", false\)\n  \}$/.test(fn),
+    funnelKeeps: funnel.indexOf("Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch, { keepRetired: keepRetired === true })") !== -1,
+    // rule 9: the own-write record is made for EVERY write through the funnel, the patch-only one included,
+    // directly after the write and over the same patch -- not behind a condition on the mode
+    overrideRecordedForEveryWrite: /root\.shell\.updateEntryInline\(root\.pluginId, entry\)\n\s*root\.ownWrite = Model\.ownWriteOf\(root\.hostSettings, Model\.ownedEntryPatch\(root\.settings, overrides\)\)/.test(funnel),
+    // three call sites: writeActive (no fourth argument), the patch branch (true), the heal branch (none)
+    callers: callers.length,
+    onlyThePatchPassesIt: callers.filter(c => /, true\)$/.test(c)).length === 1 && callers.filter(c => c.indexOf("{ showLogos: want }") !== -1 && /, true\)$/.test(c)).length === 1
+  }
+}, { found: true, decides: true, handsTheThreeFlags: true, decidesBeforeWriting: true, patchWritesShowLogosAlone: true, patchNamesNoKey: true, patchLogsTheReason: true,
+     healIsTheOldWrite: true, funnelKeeps: true, overrideRecordedForEveryWrite: true, callers: 3, onlyThePatchPassesIt: true })
+checkCall("R16 / round-4 P2: persistFailureMessage renders THE reason's sentence; every reason Service.qml emits is in PERSIST_FAILURE_REASONS; no sentence names a URL and only persist_failed's says `omarchy bar set`; an unknown reason falls back to it", () => {
+  const emitted = Array.from(new Set((serviceSource.match(/root\.sourcesPersistFailed\("[a-z_]+"\)/g) || []).map(m => m.replace(/^root\.sourcesPersistFailed\("|"\)$/g, "")))).sort()
+  const table = {}
+  for (const r of Model.PERSIST_FAILURE_REASONS) table[r] = Model.persistFailureMessage(r)
+  return {
+    emitted,
+    everyEmittedIsKnown: emitted.every(r => Model.PERSIST_FAILURE_REASONS.indexOf(r) !== -1),
+    distinct: new Set(Object.keys(table).map(k => table[k])).size === Model.PERSIST_FAILURE_REASONS.length,
+    noUrl: Object.keys(table).every(k => table[k].indexOf("://") === -1 && table[k].indexOf("password") === -1),
+    barSetOnlyFor: Object.keys(table).filter(k => table[k].indexOf("omarchy bar set") !== -1),
+    stateWriteNamesTheDirectory: table.state_write_failed.indexOf("~/.local/state/omarchy-iptv") !== -1,
+    configUnsafeNamesTheChmod: table.config_unsafe.indexOf("chmod 600") !== -1,
+    sameAsTheTable: Model.PERSIST_FAILURE_REASONS.every(r => table[r] === Model.sourceErrorMessage(r)),
+    fallback: [Model.persistFailureMessage("bogus"), Model.persistFailureMessage(""), Model.persistFailureMessage(undefined), Model.persistFailureMessage(null)].every(t => t === Model.sourceErrorMessage("persist_failed"))
+  }
+}, { emitted: ["config_unsafe", "persist_failed", "state_write_failed"], everyEmittedIsKnown: true, distinct: true, noUrl: true, barSetOnlyFor: ["persist_failed"],
+     stateWriteNamesTheDirectory: true, configUnsafeNamesTheChmod: true, sameAsTheTable: true, fallback: true })
+checkCall("R16 / round-4 P2 (structural): the guide hands the signal's reason through and renders Model.persistFailureMessage(reason) on both surfaces, never persist_failed's sentence by name", () => {
+  const fn = (guideSource.match(/function showPersistFailed\(reason\) \{[\s\S]*?\n  \}/) || [""])[0]
+  return {
+    found: fn !== "",
+    routes: /function onSourcesPersistFailed\(reason\) \{ root\.showPersistFailed\(reason\) \}/.test(guideSource),
+    rendersTheReason: fn.indexOf("Model.persistFailureMessage(reason)") !== -1,
+    bothSurfaces: /root\.failForm\(\{ code: "persist_failed", field: "", message: message \}\)/.test(fn) && /root\.showTransient\(message\)/.test(fn),
+    noSentenceByName: fn.indexOf('sourceErrorMessage("persist_failed")') === -1,
+    noOtherCaller: (guideSource.match(/root\.showPersistFailed\(/g) || []).length === 1
+  }
+}, { found: true, routes: true, rendersTheReason: true, bothSurfaces: true, noSentenceByName: true, noOtherCaller: true })
 
 // ---- SR8: `omarchy bar set ... playlistUrl <url>` still adopts ----
 //
