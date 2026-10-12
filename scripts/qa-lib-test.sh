@@ -1099,13 +1099,43 @@ is "and shell.qml stages nothing of its own: entryKey is the lifted function" \
 # the sleeping child stranded for the rest of its sleep: only the O
 # segment's own recording, taken just before its deliberate SIGKILL, fed
 # ORPHANS. cleanup() now records the shell's children by PARENT pid while
-# the shell is alive, before `reap`, and the pin below is that seam).
+# the shell is alive, before `reap`, and the pin below is that seam). One
+# window is outside that seam and is covered by something else: a TERM in
+# the ~100 ms between `h --detach` returning and qs.pid being read finds
+# SHELL_STARTED 0 (stop_shell cleared it at the previous segment's end),
+# so cleanup() runs no `reap` and SHELL_PID names the previous, dead
+# shell; the freshly detached quickshell dies because cleanup() ends the
+# nested compositor it is a client of, measured by the round-3 review
+# (alive at the TERM, gone 0.2 s after, with cage, work directory and
+# socket). The first account of that window said `reap` handled it; it
+# does not, and nothing needs it to.
 for sc in clip player rewind tls key; do
   is "$sc-scenario.sh traps INT and TERM into an exit beside its EXIT trap" \
      "$(qa_count "^trap cleanup EXIT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 130' INT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 143' TERM$" "$ROOT/scripts/dev-harness/$sc-scenario.sh")" "1 1 1"
 done
 is "key-scenario.sh's cleanup records the live shell's children by parent pid (never a pattern) before it reaps" \
    "$(qa_count '^ +if \(\( SHELL_STARTED \)\) && \[\[ -n \$SHELL_PID \]\] && kill -0 "\$SHELL_PID" 2>/dev/null; then$' "$KS") $(qa_count '^ +ORPHANS="\$ORPHANS \$\(pgrep -P "\$SHELL_PID" 2>/dev/null \| tr ' "$KS")" "1 1"
+# Round 4 (R15, the round-3 review's P2 against D3): the service's plain
+# ignored total is satisfied by the own-write echo after every start, so a
+# check reading it cannot go red for the chmod reload it names. The
+# scenario reads the per-reason counter for the reason it means, and no
+# lettered check reads the total; shell.qml's pointerState reports that
+# object and does NOT report `lastSaveText`, the service's copy of the
+# state.json text (URLs included) that sits beside it.
+# Three reads of the per-reason counter (D3, W3, W6; a got-string sits on
+# the line after its `ck "<letter><n>`), and the only reads of the plain
+# total are the two informational `echo` lines beside D and N.
+is "key-scenario D3 and W read the per-reason counter (save-parked), and only informational lines read the ignored total" \
+   "$(qa_count 'save-parked:\$\(reason_some save-parked\)' "$KS") $(qa_count '\$\(pf "\[.stateReloadsIgnored.\]"\)' "$KS") $(qa_count '^ *echo .*\$\(pf "\[.stateReloadsIgnored.\]"\)' "$KS")" "3 2 2"
+is "shell.qml's pointerState reports stateReloadsByReason and never the service's lastSaveText" \
+   "$(qa_count 'stateReloadsByReason: s\.stateReloadsByReason === undefined \? null : s\.stateReloadsByReason' "$ROOT/scripts/dev-harness/shell.qml") $(qa_count 's\.lastSaveText' "$ROOT/scripts/dev-harness/shell.qml")" "1 0"
+# sources-scenario.sh's already-stored check (round-2 live lens, fixed in
+# round 4): the stored side is seeded with the KEY the switch will mirror,
+# and the host's `!dirty` line is what the check waits for -- a
+# `playlistUrl` seed could never make the host hold a D-SINK-19 write, and
+# the check then passed on `ok` alone.
+is "sources-scenario seeds sourceKey on the stored side and waits for the host's already-stored line" \
+   "$(qa_count '^ipc setStored sourceKey "\$K2" >/dev/null$' "$SS") $(qa_count '^ipc setStored playlistUrl' "$SS") $(qa_count 'wait_for "\$\(\(n_already \+ 1\)\)" 5 already_stored' "$SS")" "1 0 1"
 # Its 77 path, DRIVEN rather than grepped: with the cage binary pointed at
 # nothing it must refuse with 77 from both modes, name the tool as its first
 # line out, start nothing, and leave no transcript -- the refusal sits above
@@ -2027,7 +2057,12 @@ is "a umask-created file here would have been private, which is why the mode is 
 # 416 -> 417 on 2026-10-11, D-SINK-19 round three: key-scenario.sh's cleanup
 # records the live shell's children by parent pid before it reaps (1), the
 # seam behind the TERM-inside-O proof.
-EXPECTED=417
+# 417 -> 420 on 2026-10-12, D-SINK-19 round four: D3 and W read the
+# per-reason reload counter and no lettered check reads the total (1),
+# shell.qml reports that object and never lastSaveText (1), and
+# sources-scenario's already-stored check seeds the key and waits for the
+# host's line (1).
+EXPECTED=420
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

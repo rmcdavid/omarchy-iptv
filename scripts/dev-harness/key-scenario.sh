@@ -72,8 +72,12 @@
 #   D2  the adopted key SURVIVES the start-up dirs becoming ready: still in
 #       memory and now in the file           <- D-SRC-15, the drop this file found
 #   D3  the file went in at 0644; the helper tightened it to 0600 and the
-#       reload that chmod fired was IGNORED, read off the service's own
-#       counter (stateReloadsIgnored >= 1)      <- R9 observed, not inferred
+#       reload that chmod fired was IGNORED for the reason R9 names, read
+#       off the service's own per-reason counter
+#       (stateReloadsByReason['save-parked'] >= 1)  <- R9 observed, not inferred
+#       (the round-3 review: the plain ignored TOTAL is satisfied by the
+#       own-write echo that follows every start, so the first D3 could not
+#       go red for the chmod reload it named; R15 counts by reason)
 #   N1  a FRESH install (no state directory, no state.json, no cache): the
 #       first start adopts the entry's URL in memory with no file to load
 #       (control)
@@ -84,7 +88,8 @@
 #       (N2..N4 are CONTROLS on every tree measured: see STATUS)
 #   M1  two-source migration: state.json `activeKey` = the entry URL's key
 #   M2  ... and the file still holds the TWO records it went in with, as does
-#       `sources()`                                                  <- R7, SRC-MIG-09
+#       `sources()`                     <- R7, SRC-MIG-12 (docs/QA-SOURCES.md on lane-key-s3;
+#                                          cited SRC-MIG-09 before lane C's renumbering)
 #   M3  the stored entry carries `sourceKey` = that key and NO playlistUrl /
 #       epgUrl                                                       <- the fix
 #   M4  the published entry (one write behind, rule 9) still carries the URL:
@@ -94,7 +99,8 @@
 #       fetch ran, nothing was moved
 #   J1  a start over the MIGRATED shape (key on the entry, no URL, key in the
 #       file) makes NO entry write
-#   J2  ... and the file's key and count are unchanged (idempotent, SRC-MIG-08)
+#   J2  ... and the file's key and count are unchanged (idempotent, SRC-MIG-11
+#       on lane-key-s3; SRC-MIG-08 before the renumbering)
 #   J3  ... configured with the same 20 channels
 #   C1  a URL set while the shell was down, beside the surviving mirror: a
 #       record for it, origin cli                                 <- R1, review P1
@@ -123,6 +129,36 @@
 #   O5  the next start RECOVERS: the new source is in the file, active,
 #       configured, fetched                                 <- R5, the loss
 #   O6  ... and the migration then completes: key on the entry, URL off it
+#   W1  the D-SRC-15 SIBLING (SRC-MIG-16 on lane-key-s3): an IPC switch
+#       INSIDE the start-up window, over a 0644 file, so the helper's chmod
+#       reload lands AFTER the call carrying the pre-switch text: the switch
+#       is accepted, in memory, held, the file still naming A (control)
+#   W2  after the dirs are ready the switch SURVIVED that reload: C in
+#       memory and in the file, mode 600                    <- R9, the sibling
+#   W3  the reload was counted for the reason R9 names (save-parked) and the
+#       mirror followed the LANDED save: stored C, no URL   <- R11 at the sink
+#   W4  both caches survive; configured on C's 7 channels (control)
+#   W5  the same window, a REMOVE of the active source: accepted, pointer
+#       cleared in memory and held, the file still naming A (control)
+#   W6  after the dirs are ready the removal survived the reload: the file's
+#       pointer empty with one record, the mirror empty, A's cache gone, C's
+#       kept, unconfigured, the reload counted save-parked  <- R9 / R3
+#   F1  the state write FAILS with the dirs ready (round-3 review P1, R13):
+#       configured on A, nothing in flight, no failure recorded (control)
+#   F2  the state directory made unwritable, a CLI playlistUrl is adopted in
+#       memory and its state write FAILED: failure recorded, nothing in
+#       flight, nothing held                                (control: the
+#       rig made the write fail at all)
+#   F3  the stored entry was NOT rewritten: the URL is still on it, the only
+#       copy of the input, beside the OLD mirror           <- R13, the loss
+#   F4  state.json on disk untouched; the failure logged with no URL;
+#       sourcesPersistFailed(state_write_failed) signalled ONCE
+#   F5  a switch on the failed disk is accepted (the write is issued), lands
+#       in memory only, holds no mirror, the entry left as it is, no second
+#       signal for the same episode                        <- R13 / SR25 amended
+#   F6  the next start RE-ADOPTS the URL the failed write left on the entry:
+#       its record in the file, active, fetched, URL off the entry  <- R1
+#   F7  the history holds the three records and nothing carries B's path
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -162,9 +198,41 @@
 # the helper never chmods, the reload never fires, and D2 is green with R9
 # never deciding anything (lane A proved R9 alone by reverting R10 in a
 # scratch copy; this file makes the ordinary run do it). D3 then reads the
-# decision off `stateReloadsIgnored`, which `pointerState` reports beside
-# the in-flight count, the sticky save failure and the helper's exit
-# (numbers and booleans; null on a tree without them).
+# decision off `stateReloadsByReason['save-parked']`, which `pointerState`
+# reports beside the plain ignored total, the in-flight count, the sticky
+# save failure and the helper's exit (numbers and booleans; null on a tree
+# without them). BY REASON, because the round-3 review showed the total
+# cannot go red for the mechanism D3 names: the service's own atomic write
+# of the parked save raises a reload that is ignored as `own-write` after
+# EVERY D start, so `stateReloadsIgnored >= 1` held whether or not the
+# chmod reload was applied (a Service.qml mutated to apply every reload but
+# its own write read `PASS D3` beside `FAIL D2`). The per-reason number is
+# the decision itself: a tree that applies the chmod reload counts it as
+# `file-newer` and never as `save-parked`, which is the mutation D3 was
+# seen red against (Model.reloadDisposition's save-parked clause deleted:
+# D2, D3, W2, W3 and W6 red, the rest of the run green). What the counter
+# does NOT see is a Service.qml that counts the reason and applies the
+# reload anyway; that is the `return` R14 pins in tests/Model.test.js, and
+# D2 beside D3 is the sink.
+#
+# W AND F, ROUND 4. The round-3 live lens measured two things in scratch
+# that no segment observed. W lifts its D-SRC-15 SIBLING driver: an IPC
+# switch or remove made INSIDE the start-up window (cacheReady before
+# dirsReady, the O staging) over a 0644 file, so the helper's chmod reload
+# arrives AFTER the call carrying the pre-call text -- the fixture's named
+# case (tests/fixtures/active-key.json), now joined to a live observation
+# (rule 13). F is the round-3 P1 at the sink: with the dirs READY the first
+# version of persistActive wrote the entry straight after setText and
+# before the FileView reported, so a state write that failed (an unwritable
+# ~/.local/state, a full disk) stripped the URL from the host's entry while
+# the record existed in memory only -- the input lost with no copy anywhere.
+# R13 makes the entry wait for the write to LAND on every route; F makes
+# the state directory 0500 under a running shell, sets a CLI playlistUrl
+# (the adoption route) and then switches (the switch route), and asserts
+# the entry still carries the URL, the file is untouched, the failure is
+# signalled once as `state_write_failed`, and the next start re-adopts
+# what the failed write left behind. The directory is 0700 again before the
+# shell is stopped; it is this scenario's own scratch, never the user's.
 #
 # N, THE CREATED-FILE SHAPE, IS A CONTROL, AND THAT IS A MEASUREMENT. The
 # round-2 live lens wrote that the drop is "present in the no-state.json
@@ -180,27 +248,61 @@
 # RULE 11, THE RED RUN. `--baseline lane-key-r2` exports the round-2 tree
 # (lane-key-r1's code under this harness's predecessor, the tree D-SRC-15
 # was found on) and runs its Model.js, Service.qml and helper through the
-# same rig, with this tree's harness. Measured 2026-10-11, both trees,
-# recipe in the footer the run prints:
-#   lane-key-s2 (this tree, lane-key-s1's code):  49 passed,  0 failed
-#   --baseline lane-key-r2:                       36 passed, 13 failed
-#       D2, D3, M1, M3, M5, C1..C5, E1, O5, O6
-# D2 is the drop at the sink ("got [dirs:true memory: file:]"); D3 reads
-# NOFIELD there (no counter to read: an instrument absence, not the
-# mechanism, and D2 beside it is the mechanism); M1, M3, M5, C1..C5, E1,
-# O5 and O6 are everything that rests on an adoption made at START-UP, all
-# dropped the same way. E1 was red on EVERY tree until this round because
-# its own `want` was wrong (`kind=x` where Model.maskUrl masks every query
-# value); corrected, it is a discriminator (the baseline reads
-# "file:other"). D1, N1..N4, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1..O4,
-# P1, P2, T1 and every I and S check pass on both trees: controls. R1 and
+# same rig, with this tree's harness. Measured 2026-10-12 on this harness
+# (round 4: W and F added, D3 by reason), recipe in the footer the run
+# prints; the counts of 2026-10-11 (49 / 0 forward, 36 / 13 on r2) were
+# the harness before W, F and the by-reason D3 existed:
+#   lane-key-t2 (this tree, lane-key-t1's code):  62 passed,  0 failed
+#   --baseline lane-key-s2 (round 3's code):      54 passed,  8 failed
+#       D3, W3, W6, F3, F4, F5, F6, F7
+#   --baseline lane-key-r2 (the D-SRC-15 tree):   38 passed, 24 failed
+#       D2, D3, M1, M3, M5, C1..C5, E1, O5, O6, W2, W3, W4, W6, F1..F7
+#   --baseline f275bde (the first build):         39 passed, 23 failed
+#       D3, C1..C5, E1, O2, O5, O6, W1..W6, F1..F7
+# On lane-key-s2 the reds are this round's: D3 (NOFIELD: no per-reason
+# counter there), F3 (the stored entry read with NO playlistUrl and the
+# mirror moved -- the loss at the sink), F4 (no state_write_failed signal),
+# F6 (no record for B after the restart: the input is gone), F7 (two
+# records, not three) and F5 (the mirror moved to C and nothing was
+# signalled); W2, W4 and W5 are green there, because lane-key-s2 carries
+# R9-R11 and the sibling holds under them (the lens measured the same),
+# and W3 and W6 read NOFIELD for the per-reason counter they also assert.
+# On lane-key-r2 D2 is the drop at the sink ("got [dirs:true memory:
+# file:]"), D3 reads NOFIELD (no counter to read), W2, W3, W4 and W6 are
+# the sibling dropping the same way (W2 "memory:A file:A" after a switch to
+# C; W6 the pointer back on A with both records and the cache kept), F
+# follows s2's reds with F1 and F2 reading NOFIELD for fields r2 lacks,
+# and M1, M3, M5,
+# C1..C5, E1, O5 and O6 are everything that rests on an adoption made at
+# START-UP. E1 was red on EVERY tree until round 3 because its own `want`
+# was wrong (`kind=x` where Model.maskUrl masks every query value);
+# corrected, it is a discriminator (the baseline reads "file:other"). D1,
+# N1..N4, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and
+# every I and S check pass on every tree: controls (W1 and W5 need the
+# held key R5 added, so they are instrument absences on f275bde only). R1 and
 # R2 are controls live because Service.removeSource reaches
 # persistActive("") on either tree; lane A's R3 (Model.removeSource
 # clearing the key in what IT returns) is reached by the node and python
-# fixtures. The earlier red run, `--baseline f275bde` (the first build),
-# read 35 passed / 9 failed with O2 its one discriminator (the entry
-# rewritten while the save was parked, the review's P2); it is still a
-# valid ref for that one. The instrument's own red is against the two
+# fixtures. On f275bde (the first build) O2 is still the one check red
+# there and green on every later tree (the entry rewritten while the save
+# was parked, the review's P2); D2, M1, M3, M5 pass there by accident, and
+# the rest of its reds are instrument absences (no held key, no counters,
+# no in-flight count) and the start-up-adoption reds C1..C5 / O5 / O6 it
+# shares with r2. The header used to cite 35 / 9 for it, the count of a
+# harness two versions older; the number above is this one's.
+# TWO MUTATIONS, both on this tree's code with this harness, each a
+# throwaway commit exported through --baseline (never merged):
+#   Model.reloadDisposition's save-parked clause deleted (a reload over a
+#   parked save applied as file-newer):          56 passed,  6 failed
+#       D2, D3, W2, W3, W4, W6 -- the counter reads {"file-newer": 1,
+#       "first-load": 1, "own-write": 1} and `save-parked` is absent
+#   Service.applyUserState's R14 `return` deleted (counted, then applied
+#   anyway):                                      57 passed,  5 failed
+#       D2, W2, W3, W4, W6 -- and D3 GREEN, the counter reading
+#       {"save-parked": 1, ...} beside the loss at the sink. That is the
+#       honest limit of a counter: it observes the DECISION, and the
+#       `return` is pinned structurally in tests/Model.test.js (R14); D2
+#       and W2 beside it observe the sink. The instrument's own red is against the two
 # instruments before it, not a tree: f275bde's entryKey hashed the URL
 # alone (I1 reads the URL's key where the mirror names another source) and
 # the first repair iterated every entry value (I3 reads "cafebabe"). Both
@@ -232,6 +334,20 @@
 # slow helper for the rest of its sleep: only the segment's own recording,
 # taken just before its deliberate SIGKILL, fed ORPHANS. The recipe is in
 # scripts/qa-lib-test.sh's trap list.
+# One window is not covered by `reap`, and the round-3 review corrected
+# what this file's author had said about it: a TERM landing in the ~100 ms
+# between `h --detach` returning and qs.pid being read. In every segment
+# after the first, SHELL_STARTED is 0 at that instant (stop_shell cleared
+# it), so cleanup() skips `reap` and SHELL_PID still names the PREVIOUS
+# segment's dead shell -- not an empty value, and not one `reap` handles.
+# The freshly detached quickshell dies anyway, and the mechanism is the
+# nested display: cleanup() TERMs cage's child and cage, and a Wayland
+# client whose compositor goes away exits. Measured by the review with a
+# marker and a 3 s sleep inserted in that gap and a TERM sent on the
+# marker: the new shell was alive at the TERM and gone 0.2 s after, with
+# cage, the work directory and the nested socket. No residue, so the
+# window stays as it is; what this paragraph corrects is the claim, not
+# the behaviour. A helper child cannot exist before the shell does.
 #
 # Holds no display: everything this starts lives on the nested display cage
 # creates, read from cage's own child and refused if it names the caller's
@@ -422,9 +538,14 @@ ipc()  { h ipc "$@" 2>/dev/null; }
 svc()  { qa_field "d$1" "$(ipc state)"; }
 hf()   { qa_json_field "d$1" "$(ipc hostEntry)"; }
 pf()   { qa_json_field "d$1" "$(ipc pointerState)"; }
-# Did the service IGNORE at least one reload (R9's counter)? yes | no, and
-# the sentinel itself (null, NOFIELD) on a tree that has no counter.
-ignored_some() { local n; n=$(pf "['stateReloadsIgnored']"); case $n in 0) echo no ;; [1-9]*) echo yes ;; *) echo "$n" ;; esac; }
+# Did the service IGNORE at least one reload for THIS reason (R9's counter,
+# by reason: R15)? yes | no, and the sentinel itself (NOFIELD) on a tree
+# that has no per-reason counter or never counted that reason -- a tree
+# that applied the reload counted it `file-newer`, and `save-parked` is
+# then absent from the object, which is the red D3 and W were seen under.
+reason_some() { local n; n=$(pf "['stateReloadsByReason']['$1']"); case $n in 0) echo no ;; [1-9]*) echo yes ;; *) echo "$n" ;; esac; }
+# The whole per-reason object, for the reader (numbers keyed by reason).
+reasons() { qa_json_field "json.dumps(d['stateReloadsByReason'], sort_keys=True)" "$(ipc pointerState)"; }
 # A field of state.json on disk, through the same sentinels as the IPC reads.
 sj() {
   python3 -c '
@@ -614,8 +735,9 @@ shell_arm() {
   sleep 1.0   # the parked save and the entry flush land in stateInitProc's exit; give the file its moment
   ck "D2 the adopted key survives the dirs becoming ready: in memory and in the file" \
      "dirs:$(pf "['dirsReady']") memory:$(pf "['memoryActiveKey']") file:$(sj "d.get('activeKey', 'absent')")" "dirs:true memory:$KA file:$KA"
-  ck "D3 the helper tightened the 0644 file to 0600, and the reload that chmod fired was IGNORED, not applied (R9 at the counter)" \
-     "mode:$(stat -c %a "$STATE" 2>/dev/null) ignored:$(ignored_some)" "mode:600 ignored:yes"
+  echo "   reloads by reason across the D start: $(reasons) (ignored total $(pf "['stateReloadsIgnored']"); null on a pre-R9 tree)"
+  ck "D3 the helper tightened the 0644 file to 0600, and the reload that chmod fired was IGNORED as save-parked, not applied (R9 at the per-reason counter)" \
+     "mode:$(stat -c %a "$STATE" 2>/dev/null) save-parked:$(reason_some save-parked)" "mode:600 save-parked:yes"
 
   echo "== N: a FRESH install -- no state directory, no state.json, no cache -- the helper CREATES the file under the adoption ($(elapsed) s)"
   # The created-file shape of D-SRC-15 (round-2 live lens): the helper's
@@ -638,7 +760,7 @@ shell_arm() {
      "memory:$(pf "['memoryActiveKey']") file:$(sj "d.get('activeKey', 'absent')") records:$(sj "len(d['sources'])") mode:$(stat -c %a "$STATE" 2>/dev/null)" "memory:$KA file:$KA records:1 mode:600"
   ck "N3 the stored entry carries sourceKey = that key and no playlistUrl" "$(hf "['stored']") sourceKey:$(stored_has sourceKey) playlistUrl:$(stored_has playlistUrl)" "$KA sourceKey:yes playlistUrl:no"
   ck "N4 configured on it, its first fetch wrote its cache and loaded, activeCache is its directory" "$(svc "['configured']") $(svc "['channels']") $(ipc activeCache) cache:$([[ -f $CACHE/sources/$KA/channels.json ]] && echo written || echo missing)" "true 20 $CACHE/sources/$KA cache:written"
-  echo "   reloads the service ignored across the fresh start: $(pf "['stateReloadsIgnored']") (a number; null on a pre-R9 tree)"
+  echo "   reloads the service ignored across the fresh start: $(pf "['stateReloadsIgnored']") by reason $(reasons) (numbers; null on a pre-R9 tree)"
 
   echo "== M: the two-source migration (entry URL, no activeKey) ($(elapsed) s)"
   seed ""
@@ -766,6 +888,112 @@ shell_arm() {
      "record:1 activeKey:$KD true 11"
   ck "O6 and the migration then completes: key on the entry, URL off it" "$(hf "['stored']") playlistUrl:$(stored_has playlistUrl)" "$KD playlistUrl:no"
 
+  echo "== W: the D-SRC-15 sibling -- an IPC switch, then a remove, INSIDE the start-up window, the chmod reload landing after the call (SRC-MIG-16) ($(elapsed) s)"
+  # The O staging again (the slow tree holds `state init` for SLOW_MS), over
+  # a file seeded at 0644 so the helper's chmod -- and the reload it raises
+  # -- lands AFTER the IPC call, carrying the pre-call text. Lifted from the
+  # round-3 live lens's scratch driver (rev-key3-dataloss/dqsib-child.sh),
+  # which observed both calls holding on lane-key-s2 and nowhere in a
+  # segment. The start names the key the file already holds (`--playlist
+  # none --source-key KA`), the migrated shape, so nothing is adopted: the
+  # only change in memory is the call's own.
+  export OMARCHY_IPTV_PLUGIN_ROOT=$SLOW_TREE OMARCHY_IPTV_SLOW_MS=$SLOW_MS OMARCHY_IPTV_SLOW_VERBS="state init"
+  seed "$KA"
+  chmod 0644 "$STATE"
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  observe_window "$KA" 6 || true
+  res=$(ipc switchSource "$KC")
+  ck "W1 inside the window a switch to C is accepted, in memory and held, the file still naming A at 0644 (control)" \
+     "$WINDOW dirs:$(pf "['dirsReady']") ok:$(qa_json_field "d['ok']" "$res") memory:$(pf "['memoryActiveKey']") held:$(pf "['pendingEntryKey']") file:$(sj "d.get('activeKey', 'absent')") mode:$(stat -c %a "$STATE" 2>/dev/null)" \
+     "observed dirs:false ok:true memory:$KC held:$KC file:$KA mode:644"
+  wait_for true 15 pf "['dirsReady']" >/dev/null || true
+  wait_for no 10 stored_has playlistUrl >/dev/null || true
+  wait_for "$KC" 10 hf "['stored']" >/dev/null || true
+  sleep 1.0   # the parked save, the chmod reload and the mirror all land around stateInitProc's exit
+  echo "   reloads by reason across the W switch: $(reasons)"
+  ck "W2 after the dirs are ready the switch SURVIVED the chmod reload: C in memory and in the file, mode 600" \
+     "memory:$(pf "['memoryActiveKey']") file:$(sj "d.get('activeKey', 'absent')") mode:$(stat -c %a "$STATE" 2>/dev/null)" "memory:$KC file:$KC mode:600"
+  ck "W3 the reload was counted save-parked and the mirror followed the LANDED save: stored C, no playlistUrl, nothing held" \
+     "save-parked:$(reason_some save-parked) $(hf "['stored']") playlistUrl:$(stored_has playlistUrl) held:$(pf "['pendingEntryKey']")" "save-parked:yes $KC playlistUrl:no held:NOFIELD"
+  ck "W4 both caches survive and the service is configured on C (control)" \
+     "A:$([[ -f $CACHE/sources/$KA/channels.json ]] && echo present || echo gone) C:$([[ -f $CACHE/sources/$KC/channels.json ]] && echo present || echo gone) $(svc "['configured']") $(svc "['activeSourceKey']") $(svc "['channels']")" \
+     "A:present C:present true $KC 7"
+  # The same window, a remove of the active source.
+  seed "$KA"
+  chmod 0644 "$STATE"
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  observe_window "$KA" 6 || true
+  res=$(ipc removeSource "$KA")
+  ck "W5 inside the window the active source is removed: accepted, the pointer cleared in memory and held empty, the file still naming A (control)" \
+     "$WINDOW dirs:$(pf "['dirsReady']") ok:$(qa_json_field "d['ok']" "$res") memory:[$(pf "['memoryActiveKey']")] held:[$(pf "['pendingEntryKey']")] file:$(sj "d.get('activeKey', 'absent')")" \
+     "observed dirs:false ok:true memory:[] held:[] file:$KA"
+  wait_for true 15 pf "['dirsReady']" >/dev/null || true
+  wait_for false 10 svc "['configured']" >/dev/null || true
+  wait_gone "$CACHE/sources/$KA" 10 || true
+  sleep 1.0
+  echo "   reloads by reason across the W remove: $(reasons)"
+  ck "W6 after the dirs are ready the removal survived the reload: pointer empty in the file with one record, mirror empty, A's cache gone, C's kept, unconfigured, counted save-parked" \
+     "file:$(sj "json.dumps(d.get('activeKey', 'absent'))") records:$(sj "len(d['sources'])") stored:$(qa_json_field "json.dumps(d['stored'])" "$(ipc hostEntry)") A:$([[ -e $CACHE/sources/$KA ]] && echo present || echo gone) C:$([[ -f $CACHE/sources/$KC/channels.json ]] && echo present || echo gone) $(svc "['configured']") save-parked:$(reason_some save-parked)" \
+     'file:"" records:1 stored:"" A:gone C:present false save-parked:yes'
+  export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS
+
+  echo "== F: the state write FAILS with the dirs ready -- an unwritable state directory under a running shell, a CLI set, a switch, a restart (R13, round-3 P1) ($(elapsed) s)"
+  seed "$KA"
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  # A start over a matching key still parks one save (the round-3 review's
+  # remark); let it land before the disk is taken away, so F2's failure is
+  # the CLI set's and nothing else's.
+  wait_for 0 10 pf "['stateSavesInFlight']" >/dev/null || true
+  sleep 0.5
+  ck "F1 configured on A with nothing in flight and no failure recorded (control)" \
+     "$(svc "['configured']") $(svc "['activeSourceKey']") inflight:$(pf "['stateSavesInFlight']") failed:$(pf "['stateSaveFailed']") signalled:$(log_since 'sourcesPersistFailed')" "true $KA inflight:0 failed:false signalled:0"
+  sha0=$(sha "$STATE")
+  # The disk goes away: the directory loses `w`, so the FileView's atomic
+  # temp file cannot be created (a full disk and a read-only ~/.local/state
+  # fail the same call). This scenario's own scratch directory, 0700 again
+  # below before the shell is stopped.
+  chmod 0500 "$(dirname "$STATE")"
+  ipc set playlistUrl "$B" >/dev/null
+  wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
+  wait_for "$KB" 10 svc "['activeSourceKey']" >/dev/null || true
+  sleep 1.0
+  ck "F2 the CLI value is adopted in memory and its state write FAILED: failure recorded, nothing in flight, nothing held (control: the rig made the write fail)" \
+     "memory:$(pf "['memoryActiveKey']") failed:$(pf "['stateSaveFailed']") inflight:$(pf "['stateSavesInFlight']") held:$(pf "['pendingEntryKey']")" "memory:$KB failed:true inflight:0 held:NOFIELD"
+  ck "F3 the stored entry was NOT rewritten: the URL is still on it, the only copy of the input, beside the OLD mirror" \
+     "$(hf "['stored']") playlistUrl:$(stored_has playlistUrl)" "$KA playlistUrl:yes"
+  ck "F4 state.json on disk is untouched, the failure is logged without a URL, and sourcesPersistFailed(state_write_failed) was signalled exactly once" \
+     "file:$([[ $(sha "$STATE") == "$sha0" ]] && echo untouched || echo written) logged:$([[ $(log_since 'state.json could not be written') -gt 0 ]] && echo yes || echo no) signalled:$(log_since 'sourcesPersistFailed .*state_write_failed') urls:$(tail -n +"$((LOG_MARK + 1))" "$LOG" 2>/dev/null | grep -a 'could not be written' | grep -ac '://')" \
+     "file:untouched logged:yes signalled:1 urls:0"
+  res=$(ipc switchSource "$KC")
+  sleep 1.0
+  ck "F5 a switch on the failed disk is accepted (the write is issued), lands in memory only, holds no mirror, the entry is left as it is, no second signal for the episode" \
+     "ok:$(qa_json_field "d['ok']" "$res") code:$(qa_json_field "d['code']" "$res") memory:$(pf "['memoryActiveKey']") held:$(pf "['pendingEntryKey']") $(hf "['stored']") playlistUrl:$(stored_has playlistUrl) left:$([[ $(log_since 'left as it is \(save-failed\)') -gt 0 ]] && echo yes || echo no) signalled:$(log_since 'sourcesPersistFailed .*state_write_failed') file:$([[ $(sha "$STATE") == "$sha0" ]] && echo untouched || echo written)" \
+     "ok:true code:ok memory:$KC held:NOFIELD $KA playlistUrl:yes left:yes signalled:1 file:untouched"
+  # The next start, over the entry EXACTLY as the host stored it: the URL
+  # the failed write left there, beside the old mirror. Re-seeded by key
+  # NAME as O does it, and observed BEFORE the stop: a stopped shell cannot
+  # be asked, and the fake host lives in its memory (the first run of this
+  # segment read the entry after stop_shell, got "no" from a dead IPC, and
+  # restarted with no playlist at all: F6/F7 red for the rig's own reason).
+  seed_playlist=none; [[ $(stored_has playlistUrl) == yes ]] && seed_playlist=$B
+  chmod 0700 "$(dirname "$STATE")"
+  stop_shell
+  echo "   restarting over the entry as stored: playlist $([[ $seed_playlist == none ]] && echo none || echo '(set)'), sourceKey $KA"
+  start_shell --playlist "$seed_playlist" --source-key "$KA" || true
+  wait_for "$KB" 10 svc "['activeSourceKey']" >/dev/null || true
+  wait_for 3 20 svc "['channels']" >/dev/null || true
+  wait_for no 10 stored_has playlistUrl >/dev/null || true
+  ck "F6 the next start RE-ADOPTS the URL the failed write left on the entry: its record in the file, active, fetched, and the URL off the entry" \
+     "record:$(sj "len([s for s in d['sources'] if s['key'] == '$KB'])") activeKey:$(sj "d.get('activeKey', 'absent')") $(svc "['configured']") $(svc "['channels']") $(hf "['stored']") playlistUrl:$(stored_has playlistUrl)" \
+     "record:1 activeKey:$KB true 3 $KB playlistUrl:no"
+  ck "F7 the history holds the three records and nothing carries B's path (the switch that landed in memory only went with the shell)" \
+     "records:$(sj "len(d['sources'])") leaks:$(qa_count "$B" "$LOG") $(printf '%s\n%s\n%s\n' "$(ipc state)" "$(ipc hostEntry)" "$(ipc sources)" | grep -ac "$B")" "records:3 leaks:0 0"
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -796,7 +1024,8 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 48, both arms          -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 61, both arms          -> live
+# (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -806,7 +1035,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=48
+  EXPECTED_CHECKS=61
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
@@ -816,7 +1045,7 @@ else
 fi
 
 if [[ -n $BASELINE ]]; then
-  echo "baseline $BASELINE: on lane-key-r2 (the tree D-SRC-15 was found on) the reds are D2, D3, M1, M3, M5, C1..C5, E1, O5, O6 -- 36 passed, 13 failed: the start-up chmod reload replaces the adoption (D2 at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it. On f275bde (the first build) the one discriminating red is O2 (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1..O4, P1, P2, T1 and every I and S check are controls."
+  echo "baseline $BASELINE: on lane-key-s2 (round 3's code) the reds are this round's -- D3, W3, W6 (no per-reason counter there), F3, F4, F5, F6, F7 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 8 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 24 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 23 failed. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
 fi
 echo "key-scenario: $PASS passed, $FAIL failed (mode $MODE, tree $PLUGIN_ROOT${BASELINE:+, baseline $BASELINE}, $(elapsed) s)"
 (( FAIL == 0 ))

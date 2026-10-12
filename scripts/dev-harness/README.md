@@ -906,8 +906,9 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (36 / 13)
-scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (O2 its one discriminator)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red run: round 3's code (54 / 8: D3, W3, W6, F3..F7)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (38 / 24)
+scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 23; O2 its one discriminator)
 ```
 
 D-SINK-19 takes the provider URL off the host's bar entry: the entry
@@ -940,14 +941,20 @@ this directory had to move with it.
   `pendingEntryKey`, the in-memory `activeKey`) and, since D-SRC-15, the
   service's own accounting of the file against memory
   (`stateSavesInFlight`, `stateSaveFailed`, `stateInitOk`,
-  `stateReloadsIgnored`: numbers and booleans, never a URL), every field
-  optional so a pre-change tree answers null rather than throwing.
+  `stateReloadsIgnored`, and since round 4 `stateReloadsByReason`, one
+  number per `Model.reloadDisposition` reason: numbers and booleans, never
+  a URL -- the service's `lastSaveText` beside them is the state.json text
+  and is deliberately not reported), every field optional so a
+  pre-change tree answers null rather than throwing.
 * **The scenarios (R7).** The live arm runs the real `Service.qml` under a
   nested cage, IPC only, over ten seeded starts, each from its own
   `state.json`, caches and entry so a red is attributable to one ruling:
   the start-up adoption watched across `dirsReady` from inside with the
   file seeded at 0644 so the helper's chmod fires the reload R9 has to
-  absorb, read off the counter (D), a fresh install with no state
+  absorb, read off the per-reason counter (D; `save-parked`, because the
+  plain ignored total is satisfied by the own-write echo after every start
+  and could not go red for the chmod reload -- the round-3 review's P2),
+  a fresh install with no state
   directory, file or cache (N), the two-source migration asserting the
   count it went in with (M), the idempotent second start (J), a
   `playlistUrl` and an `epgUrl` set while the shell was down (C, E; the
@@ -957,9 +964,21 @@ this directory had to move with it.
   SIGKILLed between the parked state save and the entry mirror, then
   restarted over the entry as the host held it, `--source-key` passed only
   when the entry observed stored carries that NAME (O; R5, the review's
-  P2). `cleanup()` records the live shell's children by parent pid before
-  it reaps, so a TERM inside the O window takes the sleeping slow helper
-  with it (proven inside O, D and N; `qa-lib-test.sh` pins the seam).
+  P2); since round 4 (2026-10-12) the D-SRC-15 SIBLING, an IPC switch and
+  then a remove made inside that same slow window over a 0644 file so the
+  chmod reload lands after the call (W; lifted from the round-3 lens's
+  scratch driver, the fixture's named case now observed live), and the
+  round-3 P1 at the sink: the state directory made 0500 under a running
+  shell with the dirs ready, then a CLI `playlistUrl` and a switch, which
+  must leave the URL on the entry, the file untouched and one
+  `sourcesPersistFailed("state_write_failed")`, and the next start must
+  re-adopt what the failed write left there (F; R13). `cleanup()` records
+  the live shell's children by parent pid before it reaps, so a TERM
+  inside the O window takes the sleeping slow helper with it (proven
+  inside O, D and N; `qa-lib-test.sh` pins the seam). The one window
+  outside that seam, a TERM between `--detach` returning and `qs.pid`
+  being read, is ended by the nested compositor going away rather than by
+  `reap` (which is gated off there); the round-3 review measured it.
 
 **What the first run found (2026-10-11, lane-key-r1 at f84ee50), now
 D-SRC-15.** The key adopted at the first start was dropped when the
@@ -973,10 +992,28 @@ URL with `sourceKey ""`. Measured by polling `pointerState` at 50 ms
 it with a helper whose `state init` does nothing (the key survives).
 lane-key-s1 (R9-R12) closes it: a reload never replaces memory that is
 newer than the file, the helper leaves a 0600 file alone, the entry waits
-for the save to land. Counts from the transcripts, 2026-10-11: the forward
-run on lane-key-s2 (lane-key-s1's code) **49 passed, 0 failed**;
-`--baseline lane-key-r2` **36 passed, 13 failed** (D2, D3, M1, M3, M5,
-C1-C5, E1, O5, O6). Two things the measurement corrected: E1 had been red
+for the save to land. Counts from the transcripts, 2026-10-11, on the
+round-3 harness (48 lettered checks): the forward run on lane-key-s2
+(lane-key-s1's code) **49 passed, 0 failed**; `--baseline lane-key-r2`
+**36 passed, 13 failed** (D2, D3, M1, M3, M5, C1-C5, E1, O5, O6). On the
+round-4 harness (61 lettered checks: W1-W6 and F1-F7 added, D3 by
+reason), 2026-10-12: the forward run on lane-key-t2 (lane-key-t1's code,
+R13-R15) **62 passed, 0 failed**; `--baseline lane-key-s2` **54 passed, 8
+failed** (D3, W3, W6 for the per-reason counter s2 lacks; F3, F4, F5, F6,
+F7 -- the dirsReady-route state write failing strips the URL from the
+stored entry, moves the mirror and loses the input, no record for it after
+the restart); `--baseline lane-key-r2` **38 passed, 24 failed** (the 13
+above plus W2, W3, W4, W6 -- the in-window switch and remove dropped by
+the same reload -- and F1-F7); `--baseline f275bde` **39 passed, 23
+failed**, O2 still its one discriminator against every later tree, the
+rest instrument absences and the start-up-adoption reds. Two mutations of
+this tree's code through the same harness: `Model.reloadDisposition`'s
+save-parked clause deleted reads 56 / 6 (D2, D3, W2, W3, W4, W6; the
+counter reads `file-newer` and `save-parked` is absent) and
+`applyUserState`'s R14 `return` deleted reads 57 / 5 (D2, W2, W3, W4, W6
+-- and D3 green, because a counter observes the decision and not the
+sink; the `return` is pinned structurally in `tests/Model.test.js`). Two
+things the first measurement corrected: E1 had been red
 on every tree because its own `want` was wrong (`kind=x` where
 `Model.maskUrl` masks every query value, by calling it on dev, lane-key-r2
 and lane-key-s1 alike), and the created-file shape (no `state.json` at
@@ -985,25 +1022,32 @@ does NOT drop: N2-N4 are green on `--baseline lane-key-r2` and
 `stateReloadsIgnored` reads 0 across the whole fresh start, because a
 `FileView` loaded over a missing path never sees the helper's create. N
 stays as the control for the one start every new user makes.
-`sources-scenario.sh` under cage reads 63 passed, 3 failed on this tree
-(46 / 22 on lane-key-r2; 66 / 0 on dev): the three pin behaviour round 2
-changed on purpose and are a ruling for the lead (below), not this round's.
+`sources-scenario.sh` under cage read 63 passed, 3 failed on lane-key-s2
+(46 / 22 on lane-key-r2; 66 / 0 on dev): the three pinned behaviour round
+2 changed on purpose. The lead ruled on 2026-10-12 and the three checks
+moved to the ruled contract in round 4, **66 passed, 0 failed** under cage
+on lane-key-t2: an invalid CLI value is reported (`settingsInvalid`),
+logged as ignored, and keeps the active source and its channels (D16 as
+narrowed by D-SINK-19 -- the old check wanted the guide blanked); a host
+that cannot write our entry refuses only the MIRROR, which is logged (`no
+writable bar entry for the settings change`), left for the next start to
+repair, and never raised as `persist_failed` for a switch that has already
+happened (SR25 as amended: `persist_failed` is now the state write
+failing, reported from the FileView as `state_write_failed`, which
+`key-scenario.sh` F observes).
 
-**A weak check in `sources-scenario.sh`, recorded rather than fixed.**
-'a switch the host already stores is not reported as a persist failure'
-means to make the fake's `updateEntryInline` take its `!dirty` branch
-(the host's "already stored", `false` as success) by pre-setting
-`playlistUrl` on the stored entry. That branch logs `updateEntryInline:
-nothing changed (already stored)` (shell.qml, the only place the string
-exists) and the line never appears on any tree -- not on dev, where the
-plugin still writes `playlistUrl` beside what was set, and not since
-D-SINK-19, where the plugin writes `sourceKey` and a `playlistUrl` seed
-cannot make the host hold its write at all. The check passes as "switch
-returned ok": rule 14's shape, a check that cannot go red for the thing it
-names. Found by the round-2 live lens; fixing it means seeding `sourceKey`
-on the stored side (`ipc setStored sourceKey <key>`) and asserting the
-logged line, which changes what the check observes and belongs with the
-SR25 ruling the three reds above wait on.
+**The weak already-stored check, fixed in round 4.** 'a switch the host
+already stores is not reported as a persist failure' means to make the
+fake's `updateEntryInline` take its `!dirty` branch (the host's "already
+stored", `false` as success). The first version pre-set `playlistUrl` on
+the stored entry, which no D-SINK-19 write can match, so the branch's log
+line `updateEntryInline: nothing changed (already stored)` (shell.qml, the
+only place the string exists) never appeared on any tree and the check
+passed on `ok` alone -- rule 14's shape, found by the round-2 live lens.
+It now seeds `sourceKey` on the stored side (`ipc setStored sourceKey
+<key>`) and waits for one MORE of that line than the log held before, so
+an earlier line cannot satisfy it; `qa-lib-test.sh` pins the seed and the
+wait.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

@@ -237,11 +237,21 @@ check "switching to the source that is already active is ok, not busy" \
 # stores the value (updateEntryInline takes its `!dirty` branch and returns
 # false) while the plugin has not been handed it yet. False from a writable
 # entry means "already saved", which is success.
-ipc setStored playlistUrl "$FIX/harness.m3u" >/dev/null
+# D-SINK-19: what the plugin writes is `sourceKey`, so the stored side is
+# seeded with the KEY the next switch will mirror. The first version seeded
+# `playlistUrl`, which no plugin write has matched on any tree -- the
+# round-2 live lens found the branch's log line never appearing -- so the
+# check passed as "switch returned ok" alone (rule 14's shape). The branch
+# logs `updateEntryInline: nothing changed (already stored)` (shell.qml,
+# the only place the string exists), and that line, counted from here so an
+# earlier one cannot satisfy it, is the observation.
+already_stored() { grep -ac 'nothing changed (already stored)' "$LOG"; }
+n_already=$(already_stored)
+ipc setStored sourceKey "$K2" >/dev/null
 sleep 0.3
 res=$(ipc switchSource "$K2")
-check "a switch the host already stores is not reported as a persist failure" \
-  '[[ "$(py "d['\''ok'\'']" "$res")" == true && "$(py "d['\''code'\'']" "$res")" == ok ]]'
+check "a switch the host already stores is not reported as a persist failure, and the host's already-stored branch was reached" \
+  '[[ "$(py "d['\''ok'\'']" "$res")" == true && "$(py "d['\''code'\'']" "$res")" == ok ]] && wait_for "$((n_already + 1))" 5 already_stored'
 res=$(ipc switchSource "$K1")
 check "switching back after that is still ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true ]]'
 check "no sourcesPersistFailed anywhere in the switch sequence" 'log_lacks "sourcesPersistFailed"'
@@ -285,8 +295,16 @@ check "new record origin cli, label basic.m3u, active" \
 wait_for 3 20 svc "['channels']" || bad "first fetch of the CLI source did not load"
 check "first fetch ran (no cache yet) and loaded 3 channels" '[[ "$(svc "['\''channels'\'']")" == 3 && -f "$CACHE/sources/$K3/channels.json" ]]'
 check "H11 duplicate of the active URL -> duplicate with its id" '[[ "$(py "(d['\''code'\''], d['\''id'\''])" "$(ipc addSource "$FIX/basic.m3u" "" "")")" == "('\''duplicate'\'', '\''$K3'\'')" ]]'
-check "invalid CLI value synthesizes an error and runs no helper" \
-  'ipc set playlistUrl "ftp://h.test/x" >/dev/null; sleep 0.3; [[ "$(svc "['\''settingsInvalid'\'']['\''code'\'']")" == scheme && "$(svc "['\''configured'\'']")" == true && "$(svc "['\''channels'\'']")" == 0 ]] && ! grep -q "h.test" "$LOG"'
+# D16 as narrowed by D-SINK-19 (lead ruling, 2026-10-12): an invalid CLI
+# value is consumed and reported (`settingsInvalid`) but it does NOT replace
+# a working source -- the active source stays, the guide keeps its channels,
+# the service logs that it ignored the value, and the synthesized error
+# becomes the guide's body only when there is nothing else to show. The
+# first version of this check wanted `channels 0`, the pre-round-2 contract
+# in which a typo blanked the guide; it was red on every tree since round 2
+# and nobody had amended it (round-3 review P2).
+check "invalid CLI value is reported, ignored for the guide (active source and channels kept), and runs no helper (D16 as narrowed)" \
+  'ipc set playlistUrl "ftp://h.test/x" >/dev/null; sleep 0.5; [[ "$(svc "['\''settingsInvalid'\'']['\''code'\'']")" == scheme && "$(svc "['\''configured'\'']")" == true && "$(svc "['\''activeSourceKey'\'']")" == "$K3" && "$(svc "['\''channels'\'']")" == 3 ]] && wait_log "ignoring an invalid playlistUrl setting; the active source is unchanged" 3 && ! grep -q "h.test" "$LOG"'
 ipc set playlistUrl "$FIX/basic.m3u" >/dev/null; wait_for 3 10 svc "['channels']" || true
 
 echo "== H12 edit: label and EPG commit at once, editMasked masks (SR4, SR22)"
@@ -320,17 +338,33 @@ check "history keeps the two other sources" '[[ "$(py "len(d)" "$(ipc sources)")
 res=$(ipc switchSource "$K1"); wait_log "sourceSwitched .*\"id\":\"$K1\"" 10 || bad "switch back after removal failed"
 check "switch after removal restores the guide (20 channels)" '[[ "$(svc "['\''channels'\'']")" == 20 ]]'
 
-echo "== SR25 persist failure (failPersist): signal only, no argv fallback"
+echo "== SR25 as amended 2026-10-12: a refused entry mirror is logged, never a failed switch (the state write IS the switch)"
+# D-SINK-19 (R13): the active key lives in the plugin's own state.json and
+# the bar entry carries a MIRROR of it. The state write is the switch and it
+# is reported on being issued; its failure, if any, arrives as
+# sourcesPersistFailed("state_write_failed") from the FileView
+# (key-scenario.sh F). A host that cannot write our entry -- what
+# `failPersist true` models by taking updateEntryInline off the api --
+# refuses only the mirror: that is LOGGED, repaired on the next start
+# (Model.adoptActiveSource step 2 rewrites a mirror that disagrees with the
+# state), and never raised as a failed switch, because the first version
+# sent the user to `omarchy bar set` for a switch that had already happened.
+# The two checks that pinned the pre-amendment contract (persist_failed with
+# the SR25 copy; active unchanged) were red on every tree since round 2.
+n_persist_failed=$(grep -ac sourcesPersistFailed "$LOG")
+stored_key() { py "d['stored']" "$(ipc hostEntry)"; }
 ipc failPersist true >/dev/null
 res=$(ipc switchSource "$K2")
-check "switchSource with a refusing host -> persist_failed with the SR25 copy" \
-  '[[ "$(py "d['\''code'\'']" "$res")" == persist_failed && "$(py "d['\''message'\'']" "$res")" == "Could not save settings"*"try omarchy bar set" ]]'
-check "sourcesPersistFailed signalled, active unchanged, switching released" \
-  'wait_log "sourcesPersistFailed" 3 && [[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''switching'\'']")" == false ]]'
+check "switchSource with a host that cannot write our entry still COMPLETES: ok, active K2, switching released" \
+  '[[ "$(py "d['\''ok'\'']" "$res")" == true && "$(py "d['\''code'\'']" "$res")" == ok ]] && wait_for "$K2" 10 svc "['\''activeSourceKey'\'']" && wait_for false 10 svc "['\''switching'\'']"'
+check "the refused mirror is logged (no writable bar entry), the stored entry still names the previous key, and no sourcesPersistFailed was raised for it" \
+  'wait_log "no writable bar entry for the settings change" 5 && [[ "$(stored_key)" == "$K1" && "$(grep -ac sourcesPersistFailed "$LOG")" == "$n_persist_failed" ]]'
 check "no omarchy bar argv fallback in the log" 'log_lacks "omarchy bar"'
 ipc failPersist false >/dev/null
-res=$(ipc switchSource "$K2"); wait_log "sourceSwitched .*\"id\":\"$K2\"" 10 || bad "switch after failPersist false did not complete"
-check "switch works again once the host accepts" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" ]]'
+ipc switchSource "$K1" >/dev/null; wait_for "$K1" 10 svc "['activeSourceKey']" || bad "switch to K1 after failPersist false did not complete"
+res=$(ipc switchSource "$K2")
+check "once the host accepts again the next switch's mirror lands: active K2 and the stored entry names K2" \
+  '[[ "$(py "d['\''ok'\'']" "$res")" == true ]] && wait_for "$K2" 10 svc "['\''activeSourceKey'\'']" && wait_for "$K2" 5 stored_key'
 
 echo "== privacy"
 # C7's other half: assert the harness is still alive BEFORE the sweeps, so a

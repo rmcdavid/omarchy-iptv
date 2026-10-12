@@ -1213,7 +1213,17 @@ ShellRoot {
                               stateSavesInFlight: s.stateSavesInFlight === undefined ? null : s.stateSavesInFlight,
                               stateSaveFailed: s.stateSaveFailed === undefined ? null : s.stateSaveFailed,
                               stateInitOk: s.stateInitOk === undefined ? null : s.stateInitOk,
-                              stateReloadsIgnored: s.stateReloadsIgnored === undefined ? null : s.stateReloadsIgnored })
+                              stateReloadsIgnored: s.stateReloadsIgnored === undefined ? null : s.stateReloadsIgnored,
+                              // R15 (round-3 review): the ignored total above is satisfied
+                              // by the own-write echo that follows every start, so a check
+                              // reading it could not go red for the chmod reload it named.
+                              // The service counts BY REASON (Model.countReload, one
+                              // number per Model.reloadDisposition reason: first-load,
+                              // file-newer, own-write, save-parked, save-in-flight,
+                              // save-failed) and key-scenario D3 asserts the one it means.
+                              // `lastSaveText` lives beside these on the service and is
+                              // NOT reported: it is the state.json text, URLs included.
+                              stateReloadsByReason: s.stateReloadsByReason === undefined ? null : s.stateReloadsByReason })
     }
     function widget(): string {
       var w = barLoader.item
