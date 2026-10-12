@@ -559,9 +559,6 @@ Item {
   readonly property int sourceCursor: guide.sourceCursor
   readonly property int sourceRowCount: Model.sourcesRowCount(sourceCount)
   readonly property string sourceCursorKind: Model.sourcesRowKind(sourceCursor, sourceCount)
-  // Set by the form key handler right before the TextField pastes, so the
-  // next text change is trimmed and re-masked as a paste (UX-SOURCES 2.3).
-  property bool pasteArmed: false
   property string pendingProbeId: ""
   property string pendingCursorId: ""
   property string switchPendingId: ""
@@ -585,11 +582,15 @@ Item {
     if (!root.serviceReady || root.service.settingsInvalid === undefined || !root.service.settingsInvalid) return ""
     return Model.sourceErrorMessage(String(root.service.settingsInvalid.code || "invalid"))
   }
-  // D9: Qt's clipboard through the TextField is the paste path. Flip to
-  // true only if harness scenario H4 finds the layer-shell surface pastes
-  // empty; the service's wl-paste verb (requestClipboard / clipboardText)
-  // is then used and guarded here.
-  readonly property bool pasteViaProcess: false
+  // The D9 lever, thrown for good by D-CLIP-1: paste is the out-of-process
+  // path ONLY. The service runs the helper's bounded `clipboard` verb as
+  // argv (R8: it reads at most 32 KiB from wl-paste under a deadline) and
+  // answers through `clipboardText(text)`; nothing in this process reads Qt's
+  // clipboard, and every form field is read-only, so Qt's own paste (Ctrl+V,
+  // Shift+Insert, the middle-click selection) cannot fire inside one. The
+  // in-process branches this flag used to select are gone; it stays as the
+  // record of which way the lever points.
+  readonly property bool pasteViaProcess: true
   // M3-02: the picker is a panel OVER the list, so the surface under it does
   // not change. This flag restores the QUERY LINE and suppresses the title;
   // the SCOPE LABEL is restored by `headerRight` below. The first version of
@@ -959,7 +960,6 @@ Item {
     root.guide = next
     root.transientText = ""
     root.enterPending = false
-    root.pasteArmed = false
     root.pendingProbeId = ""
     root.pendingCursorId = ""
     root.switchPendingId = ""
@@ -2586,25 +2586,10 @@ Item {
     if (root.formActive && root.formFocus !== id) root.guide = Model.withFormFocus(root.guide, id)
   }
 
-  // Text changed inside a TextField (typing, native paste, primary
-  // selection): sanitize at the boundary and store it in the form state. A
-  // masked field is readOnly, so a change there can only be our binding.
-  function fieldEdited(id, text) {
-    if (!root.formActive || root.fieldMasked(id)) return
-    var value = String(text)
-    if (value === root.formValue(id)) return
-    var limit = Model.formCapacity(id)
-    var typed = true
-    var clean
-    if (root.pasteArmed) {
-      root.pasteArmed = false
-      clean = Model.isUrlField(id) ? Model.sanitizeInput(value, limit) : Model.sanitizeTyping(value, limit)
-      typed = false
-    } else {
-      clean = Model.sanitizeTyping(value, limit)
-    }
-    root.guide = Model.withFormValue(root.guide, id, clean, { typed: typed })
-  }
+  // D-CLIP-1: there is no `fieldEdited` any more. Every field is read-only,
+  // so the control never changes its own text and an onTextChanged there
+  // could only ever echo our binding. The write paths are applyEdit (keys)
+  // and pasteFromProcess (the wl-paste answer), both below.
 
   function setFieldValue(id, value, typed) {
     root.guide = Model.withFormValue(root.guide, id, Model.sanitizeTyping(value, Model.formCapacity(id)), { typed: typed })
@@ -2617,50 +2602,73 @@ Item {
     root.placeCaretAtEnd()
   }
 
+  // The field is read-only by design now (D-CLIP-1), so this no longer
+  // tests readOnly: navigation and the caret stay native on a read-only
+  // TextInput (the QML spec (Model.spec.qml, dev branch) test_readOnlyFieldPremises).
   function placeCaretAtEnd() {
     Qt.callLater(function() {
       var item = root.fieldItem(root.formFocus)
-      if (item && !item.readOnly) {
+      if (item) {
         item.forceActiveFocus()
         item.cursorPosition = item.length
       }
     })
   }
 
-  function clipboardText() {
-    var text = Quickshell.clipboardText
-    return text === undefined || text === null ? "" : String(text)
-  }
-
-  // Paste into a masked field replaces the whole value and masks it again
-  // before the next frame (UX-SOURCES 2.3, 6.6).
-  function pasteReplace(id) {
-    if (root.pasteViaProcess) { root.pasteInto(id); return }
-    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeInput(root.clipboardText(), Model.formCapacity(id)))
-  }
-
-  // wl-paste fallback path (D9): asks the service, which answers through a
-  // `clipboardText(text)` signal; guarded because the verb may not exist.
+  // Paste (D9, the only path since D-CLIP-1): asks the service, which runs
+  // the helper's bounded `clipboard` verb as argv (R8: at most 32 KiB read
+  // from wl-paste, under a deadline; the shell never holds more than the
+  // reply) and answers through the `clipboardText(text)` signal --
+  // pasteFromProcess below. Nothing in this process reads Qt's clipboard:
+  // Quickshell.clipboardText is QClipboard::text() in this process, the
+  // very read the defect is, and the function that wrapped it is gone.
+  // Guarded because the verb may not exist on an older service.
   function pasteInto(id) {
     if (root.serviceReady && typeof root.service.requestClipboard === "function") root.service.requestClipboard()
   }
 
+  // The wl-paste answer: sanitized at the boundary (controls out, edges
+  // trimmed, a leading BOM dropped, capped at the field's capacity), then
+  // inserted over the selection of the focused field -- or over the whole
+  // value of a masked one, which is fully selected by rule (UX-SOURCES 2.3,
+  // 6.6). A paste re-masks a URL field (`typed: false`, as before). A
+  // failed wl-paste answers nothing (Service.qml), so a paste never clears
+  // a field by accident; a clipboard that sanitizes to nothing changes
+  // nothing either.
   function pasteFromProcess(text) {
     if (!root.formActive || !Model.isFormField(root.form, root.formFocus)) return
-    root.guide = Model.withFormValue(root.guide, root.formFocus, Model.sanitizeInput(text, Model.formCapacity(root.formFocus)))
+    var id = root.formFocus
+    var item = root.fieldItem(id)
+    var value = root.formValue(id)
+    // The range is the model's decision (Model.editRangeFor): a masked field
+    // is fully selected by rule; a field whose control is not realised is
+    // treated as masked, which replaces the value rather than guessing a caret.
+    var range = item
+      ? Model.editRangeFor(root.fieldMasked(id), value, item.cursorPosition, item.selectionStart, item.selectionEnd)
+      : Model.editRangeFor(true, value, 0, 0, 0)
+    var cap = Model.formCapacity(id)
+    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeInput(text, cap), cap)
+    if (!edit.changed) return
+    root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: false })
+    if (item) item.cursorPosition = edit.caret
   }
 
   // Form keys seen before the focused TextField / Button (Keys.forwardTo):
-  // Tab / Shift+Tab / Up / Down, Enter, Esc, Ctrl+U, Ctrl+R, paste and the
-  // masked-field replacement rules. Everything else falls through to Qt's
-  // native editing (caret, selection, Ctrl+Backspace, Ctrl+A).
+  // Tab / Shift+Tab / Up / Down, Enter, Esc, Ctrl+U, Ctrl+R, paste, cut and
+  // -- since D-CLIP-1 made every field read-only -- all editing: printable
+  // insertion, Backspace, Delete and their Ctrl (word) variants, over the
+  // MODEL value, with the caret and selection the read-only TextInput still
+  // keeps natively. Navigation, selection, Home / End, Ctrl+A, Ctrl+C and
+  // mouse selection fall through and stay native. Stated loss (R5): input
+  // method composition (dead keys, CJK) does not reach a read-only
+  // TextInput, so accented characters cannot be TYPED into the label field;
+  // ASCII typing is unaffected and a paste carries any Unicode. Native undo
+  // (Ctrl+Z) is gated by readOnly too and is gone with it.
   function handleFormKey(event) {
     var f = root.form
     if (!f) return false
     var key = event.key
     var focus = root.formFocus
-    var isPaste = event.matches(StandardKey.Paste)
-    if (!isPaste) root.pasteArmed = false
     if (key === Qt.Key_Escape) { root.handleEscape(); return true }
     if (f.probing) return true
     // Shift+Tab arrives as Key_Backtab or as Key_Tab with the modifier
@@ -2676,23 +2684,60 @@ Item {
       if (root.fieldMaskable(focus)) root.toggleRevealField(focus)
       return true
     }
-    if (isPaste) {
-      if (masked) { root.pasteReplace(focus); return true }
-      if (root.pasteViaProcess) { root.pasteInto(focus); return true }
-      root.pasteArmed = true
-      return false
-    }
-    if (!masked) return false
-    // Masked = fully selected (UX-SOURCES 2.3): typing, Backspace and
-    // Ctrl+Backspace replace or clear the whole value; navigation is a no-op.
-    if (key === Qt.Key_Backspace || key === Qt.Key_Delete) { root.setFieldValue(focus, "", true); return true }
-    if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return true
-    if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
-      root.setFieldValue(focus, event.text, true)
-      root.placeCaretAtEnd()
+    // Ctrl+V and Shift+Insert both match StandardKey.Paste, and both reach
+    // this handler through Keys.forwardTo before the field (measured in the
+    // spec): the process path, never Qt's clipboard (D-CLIP-1, R2).
+    if (event.matches(StandardKey.Paste)) { root.pasteInto(focus); return true }
+    var item = root.fieldItem(focus)
+    if (!item) return masked
+    var value = root.formValue(focus)
+    // Masked = fully selected (UX-SOURCES 2.3): typing replaces the whole
+    // value, Backspace / Delete / Ctrl+Backspace clear it, navigation is a
+    // no-op. Unmasked: the control's own caret and selection. The decision
+    // is Model.editRangeFor's, where a test reaches it; it was made here.
+    var range = Model.editRangeFor(masked, value, item.cursorPosition, item.selectionStart, item.selectionEnd)
+    var opaque = item.echoMode !== TextInput.Normal
+    if (!masked && event.matches(StandardKey.Cut)) {
+      // Native cut is gated by readOnly AND by echoMode (Qt's cut() is a
+      // no-op on a Password field, measured in the spec); native copy is
+      // Qt's own. Model.cutApplies keeps the echo gate: a Password field's
+      // Ctrl+X does nothing, as it did natively, rather than deleting a
+      // selection with nothing on the clipboard to paste back.
+      if (Model.cutApplies(opaque, range)) {
+        item.copy()
+        root.applyEdit(focus, item, Model.editDelete(value, range.start, range.end, 1, false, opaque))
+      }
       return true
     }
-    return true
+    if (key === Qt.Key_Backspace || key === Qt.Key_Delete) {
+      if (!masked && (event.modifiers & (Qt.AltModifier | Qt.MetaModifier))) return false
+      var word = (event.modifiers & Qt.ControlModifier) !== 0
+      root.applyEdit(focus, item, Model.editDelete(value, range.start, range.end, key === Qt.Key_Backspace ? -1 : 1, word, opaque))
+      return true
+    }
+    if (masked && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) return true
+    // Qt's own acceptance rule for typed text (Model.typedText): a chord of
+    // exactly Control or Control+Shift never types; AltGr text does.
+    var ctrlOnly = event.modifiers === Qt.ControlModifier || event.modifiers === (Qt.ControlModifier | Qt.ShiftModifier)
+    var text = Model.typedText(event.text, ctrlOnly)
+    if (text !== "") {
+      root.applyEdit(focus, item, Model.editInsert(value, range.start, range.end, text, Model.formCapacity(focus)))
+      return true
+    }
+    return masked
+  }
+
+  // The one write path for a keyboard edit: the value through the model,
+  // then the caret back where the edit left it. The binding re-renders the
+  // field synchronously and Qt parks its caret at the end on every bound
+  // write (measured, the QML spec on the dev branch, test_readOnlyFieldPremises), which is why the
+  // caret is restored here rather than left to Qt. Every keyboard edit is
+  // `typed`, Backspace included, so a revealed URL stays revealed while it
+  // is being edited; a paste is the one edit that re-masks (pasteFromProcess).
+  function applyEdit(id, item, edit) {
+    if (!edit.changed) return
+    root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: true })
+    item.cursorPosition = edit.caret
   }
 
   ListModel { id: groupModel }
@@ -4717,7 +4762,21 @@ Item {
                   y: root.narrow ? fieldLabel.implicitHeight + Style.spacing.labelGap : 0
                   width: formColumn.fieldWidth
                   text: root.fieldDisplay(fieldRow.fieldId)
-                  readOnly: fieldRow.masked
+                  // D-CLIP-1: ALWAYS read-only, focused or not, masked or not.
+                  // An editable QtQuick TextInput subscribes to
+                  // QClipboard::dataChanged, and on the released Qt 6.11.2
+                  // that slot calls QMimeData::text(), which on Wayland reads
+                  // the whole foreign offer through a pipe on the shell's main
+                  // thread -- 1 s timeout per read, no total limit, no
+                  // deadline -- at every clipboard change by any application
+                  // (measured +238 MB inside 600 ms of a 100 MB offer; +0 with
+                  // readOnly true; QA-RESULTS on the dev branch, "Sixth maintainer
+                  // finding"). readOnly is the one switch on that slot. The
+                  // plugin edits the value itself (handleFormKey -> Model.
+                  // editInsert / editDelete -> applyEdit) and the control only
+                  // renders it; its caret, selection and navigation stay
+                  // native. This line is the fix; do not bind it to anything.
+                  readOnly: true
                   // A masked field is shown from its start so scheme and host
                   // are always readable (UX-SOURCES 4.4); no caret scrolling.
                   autoScroll: !fieldRow.masked
@@ -4758,8 +4817,40 @@ Item {
                   Accessible.description: fieldRow.fieldId === "password"
                     ? root.fieldLabelText(fieldRow.fieldId)
                     : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
-                  onTextChanged: root.fieldEdited(fieldRow.fieldId, text)
                   onActiveFocusChanged: if (activeFocus) root.fieldFocused(fieldRow.fieldId)
+                  onCursorPositionChanged: {
+                    fieldCaret.lit = true
+                    if (caretBlink.running) caretBlink.restart()
+                  }
+
+                  // Qt draws no caret on a read-only input (measured:
+                  // cursorVisible stays false and a cursorDelegate is never
+                  // instantiated; spec test_readOnlyFieldPremises), so the
+                  // field draws its own on the native cursorRectangle, which
+                  // keeps following the caret. Hidden while masked, where
+                  // navigation is a no-op anyway.
+                  Rectangle {
+                    id: fieldCaret
+                    property bool lit: true
+                    x: field.cursorRectangle.x
+                    y: field.cursorRectangle.y
+                    width: Style.spacing.hairline
+                    height: field.cursorRectangle.height
+                    color: field.color
+                    visible: field.activeFocus && !fieldRow.masked && fieldCaret.lit
+                  }
+                  Timer {
+                    id: caretBlink
+                    // The platform's own blink period, the hint Qt's caret
+                    // uses; a hint of 0 means a steady caret.
+                    // CONVENTION-EXCEPTION: Qt toggles every HALF period, and
+                    // the floor of 1 only keeps a Timer from an interval of 0.
+                    interval: Math.max(1, Math.round(Application.styleHints.cursorFlashTime / 2))
+                    running: field.activeFocus && !fieldRow.masked && Application.styleHints.cursorFlashTime > 0
+                    repeat: true
+                    onTriggered: fieldCaret.lit = !fieldCaret.lit
+                    onRunningChanged: fieldCaret.lit = true
+                  }
                 }
 
                 // Eye button in the reserved slot, only when there is something to mask.

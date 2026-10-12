@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.13.4. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.13.5. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -29,6 +29,8 @@ The plugin ships no content. Bring a playlist you are entitled to use.
 - Omarchy 4.x (the Quickshell shell with the plugin system) on Hyprland
 - `mpv` 0.41 or newer on PATH (installed by default)
 - `python3` (already a hard dependency of Omarchy through `uwsm`)
+- `wl-paste` (package `wl-clipboard`, installed by default): pasting into the
+  in-app form runs it, see Sources below
 - An M3U/M3U8 playlist URL or local file, and optionally an XMLTV EPG URL
   (plain or `.gz`). Xtream-style providers: paste their
   `get.php?...&type=m3u_plus` and `xmltv.php?...` URLs.
@@ -401,6 +403,35 @@ masked (`password=****`); press `Ctrl+R` or the eye button to reveal one
 while editing. Only `http://`, `https://`, and absolute paths are accepted,
 and no prefix is guessed.
 
+**How these fields take input, and why.** They look like the shell's own
+text boxes, but Qt does not edit them: the plugin handles every keystroke
+itself -- typing, `Backspace`, `Delete`, their `Ctrl` word variants, cut --
+and the control only draws the result, your caret and your selection. Paste
+is `Ctrl+V` or `Shift+Insert` only. It asks the plugin's helper to run
+`wl-paste` as a separate process; the helper reads at most 32 KiB of what
+comes back, stops the read there, gives up after 5 seconds, and hands the
+shell at most 8,192 characters. The shell itself never holds more than that
+reply: measured with a 100 MB clipboard, one paste left the shell's memory
+unchanged, where the first version of this fix had the shell take the whole
+clipboard in and keep about 300 MB of it. A paste changes nothing if the
+helper or `wl-paste` fails, and nothing is written anywhere else.
+Middle-click paste of the primary selection no longer works in these
+fields. The reason is the Qt the shell runs on, 6.11.2: an editable Qt text
+field reads the ENTIRE clipboard, inside the shell process and on its main
+thread, every time any program on your desktop changes the clipboard, with
+no size limit and no deadline, whether or not you are typing in it. Qt
+added that read on its 6.11 branch in February
+2026 (commit `c82ef988`) and removed it in September 2026 (`7d0a433a`), after
+6.11.2 was cut; as of 2026-10-11 no released Qt carries the removal, and
+6.12.0 reads too. A read-only field does not subscribe to that read, so every
+field in these forms is read-only to Qt and editable only through the plugin.
+A marketplace reviewer raised it against 0.13.4. One loss, stated plainly:
+input-method composition (dead keys, Compose, CJK input) does not reach a
+read-only field, so accented or non-Latin characters cannot be TYPED into the
+label field: a dead key followed by a letter inserts the plain letter (an
+acute dead key then `e` types `e`), measured. Plain ASCII typing is
+unaffected, and pasting carries any character.
+
 `omarchy bar set ... playlistUrl` still works and shows up in the Sources
 list as well; the two stay in sync. Up to 50 sources are kept.
 
@@ -557,6 +588,14 @@ Nothing inside the plugin directory is written at runtime.
   never reaches your shell history, which `omarchy bar set` cannot avoid;
   use the command line only for a free public list you do not mind storing
   in plain text.
+- Paste does nothing in a form: the plugin pastes by having its helper run
+  `wl-paste`, so that must be installed (`wl-clipboard`, an Omarchy
+  default). The helper reads at most 32 KiB of the clipboard and gives up
+  after 5 seconds; the field keeps at most 8,192 characters of that, and
+  then its own limit applies. Accented characters typed through dead keys
+  arrive as the plain letter (the accent is dropped) and an input method
+  does not reach the fields at all; paste them instead (see Sources above
+  for why).
 - "Settings file is readable by other users": the guide would not save your
   source, because it could not make `~/.config/omarchy/shell.json` private and
   your provider URL would have gone into a file other accounts can read.

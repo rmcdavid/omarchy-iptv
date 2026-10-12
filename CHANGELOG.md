@@ -3,6 +3,43 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.13.5 (2026-10-11)
+
+**Security.** While the add-source or first-run form was open, every editable
+field in it made the desktop shell read the ENTIRE clipboard, synchronously,
+whenever any application changed it -- no keypress needed. That is how the
+version of Qt your system ships behaves (it was changed upstream after the
+release you have), and a program offering a huge or never-ending clipboard
+could stall the shell or run it out of memory. Measured: one editable field,
+one 100 MB clipboard, +238 MB inside the shell within a second. Raised by the
+marketplace maintainer against 0.13.4, the sixth finding in five days.
+
+### Fixed
+
+- **The form's fields no longer let Qt edit them.** The plugin handles your
+  typing, deleting and selection itself, so no field in the form subscribes
+  to clipboard changes. Measured on the real form: a 100 MB foreign clipboard
+  now costs the shell nothing, where it cost up to 297 MB and a stall before.
+- **Paste (Ctrl+V or Shift+Insert) goes through a small helper that reads at
+  most 32 KB of the clipboard and then stops**, so even pasting while a
+  hostile program holds the clipboard cannot exhaust the shell. The field
+  itself still keeps at most what it always did.
+
+### Worth knowing
+
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration).
+- Typing accented characters with dead keys or an input method into the
+  Name field no longer works (the base letter arrives instead); pasting them
+  does. Every other field takes URLs, hostnames and passwords, which are
+  ASCII in practice.
+- Ctrl+X in the password field no longer removes the selection (Qt never
+  put it on the clipboard either, so it only ever lost text). Ctrl+Z undo
+  inside a field is gone with the native editing.
+- The Omarchy shell's own text fields (Wi-Fi passphrase and the like) have
+  the same exposure; that is reported upstream, not something this plugin
+  can change.
+
 ## 0.13.4 (2026-10-11)
 
 **Security.** A channel logo is a picture your provider serves, and the plugin

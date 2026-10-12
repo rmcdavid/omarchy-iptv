@@ -76,7 +76,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.13.4"
+var PLUGIN_VERSION = "0.13.5"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -10270,6 +10270,252 @@ function withFormReveal(st, field, revealed) {
   return cur
 }
 
+// ---- form editing (D-CLIP-1) ----
+//
+// Every form field is a read-only TextInput for as long as the form is open.
+// An EDITABLE QtQuick TextInput subscribes to QClipboard::dataChanged, and on
+// the released Qt 6.11.2 that slot calls QMimeData::text(): on Wayland that
+// reads the whole foreign offer through a pipe, synchronously, on the shell's
+// main thread, with a 1 s timeout per read and no total limit or deadline
+// (QA-RESULTS on the dev branch, "Sixth maintainer finding"; measured
+// +238 MB inside 600 ms of a 100 MB offer, +0 with readOnly true). readOnly
+// is the one switch on that slot in every version of it, so the plugin edits
+// the model value itself from the form key handler and the control only
+// renders it. Navigation, selection and the caret stay native -- readOnly
+// removes none of them -- so the handler reads caret and selection from the
+// control, computes the new value and caret here, writes the value through
+// withFormValue and puts the caret back. Paste is the out-of-process path
+// only (wl-paste as argv, Service.requestClipboard): nothing in the shell
+// process reads Qt's clipboard.
+//
+// The word boundary is Qt's own, MEASURED rather than read: the QML spec
+// drives Ctrl+Left / Ctrl+Right on a read-only TextInput and Ctrl+Backspace /
+// Ctrl+Delete on an editable one, position by position, against
+// the form-edit fixture (fixtures/form-edit.js, both on the dev branch), and
+// node runs the same table through these
+// functions. The rule that came out: backward, skip spaces, then one run of
+// either separators or word characters; forward, one such run, then skip
+// spaces. `_` is a word character. The space set is QChar::isSpace -- U+3000,
+// U+2028, U+0085 and NBSP are spaces; U+FEFF, U+200B and U+00AD are not. A
+// Password field has no words: its word is the whole line (`opaque`).
+var WORD_SEPARATOR_RE = /[.,?!@#$:;\-<>\[\]{}()=\/+%&^*'"`~|\\]/
+var WORD_SPACE_RE = /[\t\n\u000b\u000c\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/
+
+// The paste path (D-CLIP-1, R8). The shell never holds more than the
+// bounded reply: the helper's `clipboard` verb runs wl-paste with a pipe,
+// reads at most CLIPBOARD_MAX_BYTES, terminates the child at the cap, EOF
+// or its deadline, and prints one JSON object. The first fix collected
+// wl-paste's whole output in the shell and cut it afterwards -- measured, a
+// user Ctrl+V over a 100 MB foreign offer cost the shell +298 MB and kept
+// most of it; the bound was time, not bytes.
+//
+// The arithmetic, mirrored by MAX_CLIPBOARD_* in bin/omarchy-iptv and
+// pinned on both sides by the shared clipboard fixture: the shell keeps
+// LIMITS.url * 4 = 8192 UTF-16 units; a UTF-8 character is at most 4
+// bytes, so 32768 bytes (32 KiB) is the most a reply can need. The helper's
+// deadline is CLIPBOARD_TIMEOUT_MS; the shell's watchdog (Service.qml
+// clipboardWatchdog) is the OUTER bound and sits beyond the helper's
+// deadline plus TWO kill graces (a SIGTERM wait and then a SIGKILL wait, the
+// helper's reap_child) plus a second of interpreter start-up, so a helper
+// that answers "timeout" on time is read rather than killed mid-reply, and a helper that cannot answer at
+// all is still killed. A producer that drips bytes at the protocol's 1 s
+// per-read timeout runs into the helper's deadline; the bound kills a
+// CHILD, never the shell.
+var CLIPBOARD_TIMEOUT_MS = 5 * 1000
+var CLIPBOARD_KILL_GRACE_MS = 1000
+var CLIPBOARD_WATCHDOG_MS = CLIPBOARD_TIMEOUT_MS + 2 * CLIPBOARD_KILL_GRACE_MS + 2000
+var CLIPBOARD_MAX_CHARS = MAX_SOURCE_URL * 4
+var CLIPBOARD_MAX_BYTES = CLIPBOARD_MAX_CHARS * 4
+
+function clipboardArgv(helperPath) {
+  return helperArgv(helperPath, ["clipboard"])
+}
+
+// `text` cut to at most CLIPBOARD_MAX_CHARS UTF-16 units, never inside a
+// surrogate pair (the helper's utf16_cut counts the same units).
+function clipboardCut(text) {
+  var t = str(text)
+  if (t.length <= CLIPBOARD_MAX_CHARS) return t
+  var end = CLIPBOARD_MAX_CHARS
+  if (isHighSurrogate(t.charCodeAt(end - 1)) && isLowSurrogate(t.charCodeAt(end))) end--
+  return t.substring(0, end)
+}
+
+// The helper's reply, or null for anything that is not an `ok` reply with
+// a string text: a failure code, a killed helper's partial line, a blank
+// stdout, a non-object. The caller emits nothing for null, so a failed
+// paste can never clear a field (R2). The cut is re-applied here so the
+// bound holds even against a helper that did not apply it.
+function parseClipboardReply(stdout) {
+  var line = str(stdout).trim()
+  if (line === "") return null
+  var reply
+  try { reply = JSON.parse(line) } catch (e) { return null }
+  if (!reply || typeof reply !== "object" || Array.isArray(reply)) return null
+  if (reply.ok !== true || typeof reply.text !== "string") return null
+  var text = clipboardCut(reply.text)
+  return { text: text, truncated: reply.truncated === true || text.length !== reply.text.length, bytes: Math.max(0, Math.floor(Number(reply.bytes)) || 0) }
+}
+
+function isWordSpace(ch) { return WORD_SPACE_RE.test(ch) }
+function isWordSeparator(ch) { return WORD_SEPARATOR_RE.test(ch) }
+
+function clampIndex(n, len) {
+  var i = Math.floor(Number(n))
+  if (!isFinite(i) || i < 0) return 0
+  return i > len ? len : i
+}
+
+function editCapacity(cap) {
+  var n = Number(cap)
+  return n > 0 ? Math.floor(n) : MAX_SOURCE_URL
+}
+
+// The range an edit acts on, from what the control reports: the selection
+// when there is one, else the caret twice. Ordered; clamping is the edit's.
+function editRange(cursor, selStart, selEnd, hasSelection) {
+  if (hasSelection !== true) {
+    var c = Math.max(0, Math.floor(Number(cursor)) || 0)
+    return { start: c, end: c }
+  }
+  var a = Math.max(0, Math.floor(Number(selStart)) || 0)
+  var b = Math.max(0, Math.floor(Number(selEnd)) || 0)
+  return a <= b ? { start: a, end: b } : { start: b, end: a }
+}
+
+// A masked field is fully selected (UX-SOURCES 2.3): typing replaces the
+// whole value and Backspace clears it.
+function fullRange(value) {
+  return { start: 0, end: str(value).length }
+}
+
+// The range an edit acts on, for the field as it is: a MASKED field is
+// fully selected by rule (fullRange), so typing replaces the whole value
+// and Backspace clears it; an unmasked field edits the control's own
+// selection or caret (editRange). The decision used to sit in Guide.qml at
+// both call sites, where no check could reach it: on a masked field the
+// control's caret is an offset into the masked DISPLAY string, not into the
+// raw value, so an edit through editRange there splices typed characters
+// into the credential at a meaningless offset while the user sees `****`.
+function editRangeFor(masked, value, cursor, selStart, selEnd) {
+  if (masked === true) return fullRange(value)
+  var a = Math.floor(Number(selStart)) || 0
+  var b = Math.floor(Number(selEnd)) || 0
+  return editRange(cursor, a, b, a !== b)
+}
+
+// Whether Ctrl+X edits: only with a selection and only on a field whose
+// echo is Normal, which is Qt's own gate on cut() (measured in the QML
+// spec on the dev branch: a Password field's Ctrl+X is a no-op natively).
+// The first D-CLIP-1 cut deleted the selection on the password field with
+// nothing on the clipboard to paste back, where native did nothing.
+function cutApplies(opaque, range) {
+  if (opaque === true) return false
+  return !!range && range.start !== range.end
+}
+
+function orderedRange(text, selStart, selEnd) {
+  var a = clampIndex(selStart, text.length)
+  var b = clampIndex(selEnd, text.length)
+  return a <= b ? { start: a, end: b } : { start: b, end: a }
+}
+
+// Qt's own word boundary (see the header). `direction` -1 looks backward
+// from `pos`, +1 forward. `opaque` is a Password field.
+function wordBoundary(text, pos, direction, opaque) {
+  var t = str(text)
+  var len = t.length
+  var p = clampIndex(pos, len)
+  var back = Number(direction) < 0
+  if (opaque === true) return back ? 0 : len
+  if (back) {
+    while (p > 0 && isWordSpace(t.charAt(p - 1))) p--
+    if (p > 0 && isWordSeparator(t.charAt(p - 1))) {
+      p--
+      while (p > 0 && isWordSeparator(t.charAt(p - 1))) p--
+    } else {
+      while (p > 0 && !isWordSpace(t.charAt(p - 1)) && !isWordSeparator(t.charAt(p - 1))) p--
+    }
+    return p
+  }
+  if (p < len && isWordSeparator(t.charAt(p))) {
+    p++
+    while (p < len && isWordSeparator(t.charAt(p))) p++
+  } else {
+    while (p < len && !isWordSpace(t.charAt(p)) && !isWordSeparator(t.charAt(p))) p++
+  }
+  while (p < len && isWordSpace(t.charAt(p))) p++
+  return p
+}
+
+function isHighSurrogate(code) { return code >= 0xd800 && code <= 0xdbff }
+function isLowSurrogate(code) { return code >= 0xdc00 && code <= 0xdfff }
+
+// One code point either side of `pos`: a surrogate pair goes as one, the
+// way Qt's backspace() and del() take it. A combining mark is its own unit
+// here (Qt's backspace agrees; its del() eats the grapheme -- recorded in
+// the fixture rather than imitated).
+function codePointStart(text, pos) {
+  if (pos >= 2 && isLowSurrogate(text.charCodeAt(pos - 1)) && isHighSurrogate(text.charCodeAt(pos - 2))) return pos - 2
+  return pos - 1
+}
+
+function codePointEnd(text, pos) {
+  if (pos + 1 < text.length && isHighSurrogate(text.charCodeAt(pos)) && isLowSurrogate(text.charCodeAt(pos + 1))) return pos + 2
+  return pos + 1
+}
+
+// What a key press may insert, by Qt's own acceptance rule for a TextInput
+// (QInputControl::isAcceptableInput, QTBUG-35734): nothing when the
+// modifiers are exactly Control or exactly Control+Shift, so chords never
+// type; otherwise the text with control characters removed. AltGr text
+// (Control+Alt) types, as it did natively.
+function typedText(text, ctrlOnly) {
+  if (ctrlOnly === true) return ""
+  return str(text).replace(CONTROL_RE, "")
+}
+
+// Insert `text` over [selStart, selEnd) of `value`, capped at `cap` UTF-16
+// units the way Qt's maximumLength caps an insert: the inserted text is cut
+// to what fits (`s.left(remaining)`, measured), so one key at the cap is
+// refused and a long paste keeps what fits. The cap is the field's CAPACITY
+// (limit plus slack, formCapacity), so an over-limit value survives long
+// enough to be refused with its error on submit (SR18, SR22). `caret` is
+// meaningful only when `changed`.
+function editInsert(value, selStart, selEnd, text, cap) {
+  var v = str(value)
+  var r = orderedRange(v, selStart, selEnd)
+  var ins = str(text).replace(CONTROL_RE, "")
+  var room = editCapacity(cap) - (v.length - (r.end - r.start))
+  if (ins.length > room) ins = ins.substring(0, Math.max(0, room))
+  if (ins === "") return { value: v, caret: r.start, changed: false }
+  return { value: v.substring(0, r.start) + ins + v.substring(r.end), caret: r.start + ins.length, changed: true }
+}
+
+// Delete from `value`: the selection when [selStart, selEnd) is non-empty
+// (any variant), else one code point (`word` false) or to Qt's word boundary
+// (`word` true, the Ctrl variants) in `direction` (-1 Backspace, +1 Delete).
+// With a selection the Ctrl variants delete the selection ALONE: measured
+// Qt extends Ctrl+Delete to the next boundary as well, and that is not
+// imitated (the QML spec on the dev branch pins both sides).
+function editDelete(value, selStart, selEnd, direction, word, opaque) {
+  var v = str(value)
+  var r = orderedRange(v, selStart, selEnd)
+  var a = r.start
+  var b = r.end
+  if (a === b) {
+    if (Number(direction) < 0) {
+      if (a === 0) return { value: v, caret: a, changed: false }
+      a = word === true ? wordBoundary(v, b, -1, opaque) : codePointStart(v, b)
+    } else {
+      if (b >= v.length) return { value: v, caret: a, changed: false }
+      b = word === true ? wordBoundary(v, a, 1, opaque) : codePointEnd(v, a)
+    }
+  }
+  if (a === b) return { value: v, caret: a, changed: false }
+  return { value: v.substring(0, a) + v.substring(b), caret: a, changed: true }
+}
+
 // Error line + focus on the offending field (UX 5.4: one error at a time).
 function withFormError(st, error) {
   var cur = copyGuide(st)
@@ -10906,6 +11152,16 @@ if (typeof module !== "undefined") {
     MASK: MASK,
     MASK_CLEAR_PARAMS: MASK_CLEAR_PARAMS,
     LIMITS: LIMITS,
+    CLIPBOARD_TIMEOUT_MS: CLIPBOARD_TIMEOUT_MS,
+    CLIPBOARD_KILL_GRACE_MS: CLIPBOARD_KILL_GRACE_MS,
+    CLIPBOARD_WATCHDOG_MS: CLIPBOARD_WATCHDOG_MS,
+    CLIPBOARD_MAX_CHARS: CLIPBOARD_MAX_CHARS,
+    CLIPBOARD_MAX_BYTES: CLIPBOARD_MAX_BYTES,
+    clipboardArgv: clipboardArgv,
+    clipboardCut: clipboardCut,
+    parseClipboardReply: parseClipboardReply,
+    editRangeFor: editRangeFor,
+    cutApplies: cutApplies,
     SOURCE_KEYS: SOURCE_KEYS,
     PAUSE_KEY: PAUSE_KEY,
     TRACKS_KEY: TRACKS_KEY,
@@ -11017,6 +11273,12 @@ if (typeof module !== "undefined") {
     fieldRevealed: fieldRevealed,
     fieldMasked: fieldMasked,
     toggleReveal: toggleReveal,
+    wordBoundary: wordBoundary,
+    editRange: editRange,
+    fullRange: fullRange,
+    editInsert: editInsert,
+    editDelete: editDelete,
+    typedText: typedText,
     withFormReveal: withFormReveal,
     withFormError: withFormError,
     withFormProbing: withFormProbing,

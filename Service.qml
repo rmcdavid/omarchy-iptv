@@ -768,8 +768,11 @@ Item {
   signal sourceSwitched(string id)
   signal sourceRemoved(string id)
   signal sourcesPersistFailed(string reason)
-  // Answer to requestClipboard() (the wl-paste fallback of D9): the raw
-  // clipboard text for the guide to sanitize; never logged.
+  // Answer to requestClipboard() (D9; the ONLY paste path since D-CLIP-1):
+  // the raw clipboard text for the guide to sanitize; never logged. Emitted
+  // only when the helper's `clipboard` verb answered ok -- a failure code,
+  // a malformed line or a watchdog kill answers nothing, so a paste can
+  // never clear a field by accident.
   signal clipboardText(string text)
 
   // ------------------------------------------------------------ public API (R9)
@@ -1842,11 +1845,19 @@ Item {
     return root.sourceResult(true, "ok", "", key)
   }
 
-  // wl-paste fallback of D9 (Guide.qml pasteInto): argv only, the text
-  // comes back through clipboardText(text) and is never logged.
+  // The paste path (D9; the only one since D-CLIP-1; Guide.qml pasteInto):
+  // the helper's `clipboard` verb as argv (R8), which runs wl-paste with a
+  // pipe, reads at most Model.CLIPBOARD_MAX_BYTES and terminates it at the
+  // cap, EOF or its own deadline; the reply is one JSON line, parsed by
+  // Model.parseClipboardReply, the text back through clipboardText(text),
+  // never logged. The helper is the process allowed to hold the bytes
+  // briefly and die; this one holds only the bounded reply. The shell
+  // process itself never asks Qt. clipboardWatchdog is the outer bound.
   function requestClipboard() {
     if (clipboardProc.running) return false
+    clipboardProc.command = Model.clipboardArgv(root.helperPath)
     clipboardProc.running = true
+    clipboardWatchdog.restart()
     return true
   }
 
@@ -5163,17 +5174,44 @@ Item {
   }
 
   Process {
-    // Clipboard fallback (D9): the text is data for the guide's field only;
-    // capped here so a huge selection never becomes a binding value.
+    // The paste path (D9; the only one since D-CLIP-1; R8): the helper's
+    // `clipboard` verb, whose stdout is ONE JSON line of at most
+    // Model.CLIPBOARD_MAX_CHARS characters of text, so this collector can
+    // never hold more than the bounded reply -- the first fix ran wl-paste
+    // here and collected its whole output before cutting it. Runs only on a
+    // user paste, never on a clipboard change (the change-driven read was
+    // the defect). The command is set per run (requestClipboard). Its
+    // stderr is discarded on purpose: the verb prints nothing there by
+    // contract and the text may go nowhere but the reply (rule 5). This
+    // Process never carries fetchEnvironment: nothing here inherits a URL.
     id: clipboardProc
-    command: ["wl-paste", "--no-newline", "--type", "text"]
     stdout: StdioCollector { id: clipboardStdout; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
   }
   Connections {
     target: clipboardProc
     function onExited(exitCode, exitStatus) {
-      root.clipboardText(exitCode === 0 ? String(clipboardStdout.text).substring(0, Model.LIMITS.url * 4) : "")
+      clipboardWatchdog.stop()
+      var reply = Model.parseClipboardReply(clipboardStdout.text)
+      if (!reply) return
+      root.clipboardText(reply.text)
+    }
+  }
+  Timer {
+    // D-CLIP-1 (R2, R8): the OUTER bound. The helper has its own deadline
+    // (Model.CLIPBOARD_TIMEOUT_MS) after which it terminates wl-paste and
+    // answers "timeout"; this timer sits beyond that deadline plus the kill
+    // grace, so a helper that answers on time is read, and a helper that
+    // cannot answer at all (a wl-paste stuck in the kernel, an interpreter
+    // that never started) is killed. The bound kills a CHILD; the shell
+    // never waits on it. Both numbers live in Model so they are testable.
+    id: clipboardWatchdog
+    interval: Model.CLIPBOARD_WATCHDOG_MS
+    repeat: false
+    onTriggered: {
+      if (!clipboardProc.running) return
+      console.warn("omarchy-iptv: clipboard helper exceeded " + Math.floor(Model.CLIPBOARD_WATCHDOG_MS / 1000) + " s, terminating it")
+      clipboardProc.signal(15)
     }
   }
 
