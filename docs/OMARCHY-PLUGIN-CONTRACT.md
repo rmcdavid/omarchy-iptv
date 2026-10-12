@@ -225,6 +225,27 @@ switch never observed a cache load within 40 seconds. The behavior is pinned
 by `tests/Model.spec.qml::test_hostEchoLagsByOneWrite`, which reproduces it in
 both binding declaration orders.
 
+**Upstream status, 2026-10-12.** Reported as omacom/omarchy#11852 on
+2026-09-14; confirmed by the maintainers' bot on 2026-10-11 ("reproduced on a
+worker built from the Omarchy ISO, running the shell from current quattro")
+and FIXED in omacom/omarchy#15082 (open, awaiting maintainer review as of
+2026-10-12 00:58 UTC): `publicBarConfig()` reads `shellConfig` directly
+through `currentBarConfig()`, so every path that hands a plugin its bar
+config publishes the CURRENT one, and the host's new
+`test/shell.d/plugin-own-settings-test.sh` reads the value back straight
+after the write. `updateEntryInline()` returning `false` for "nothing
+changed" is unchanged and documented as such. What this means here, read
+against the code rather than assumed: the plugin is correct under BOTH
+hosts, because `Model.ownWriteInForce` holds the local override only while
+the host still reports the PRE-write value and drops it on any other value
+-- the echo of our own write included -- after which `settings` is the host's
+copy carrying the same values; the echo path was built idempotent for
+exactly this. What is NOT yet true: `scripts/dev-harness/shell.qml` models
+the one-write-behind host only (its line ~759), so the own-write scenarios
+have never run against an echoing host; that is D-HOST-4 on the board, due
+when a release carrying #15082 is on this machine. The section above stays
+as the verified behaviour of every Omarchy up to and including 4.0.4.
+
 ## Verified host renderers for the strings the plugin hands over (2026-10-02)
 
 The plugin hands the host five kinds of string, most of them carrying

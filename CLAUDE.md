@@ -523,6 +523,11 @@ requests and raise the batch.
    override as soon as the host reports any other value so external changes
    win, and keep the echo path idempotent. See the last section of
    `docs/OMARCHY-PLUGIN-CONTRACT.md`.
+   Upstream confirmed and fixed this on 2026-10-11 (omacom/omarchy#11852 ->
+   #15082, awaiting review): a host carrying it ECHOES the write at once.
+   The rule does not change -- the override is dropped on any value but the
+   pre-write one, our own echo included, so both hosts read the same -- but
+   the harness fake models only the old host until D-HOST-4 is done.
 10. A test double must never be more forgiving than the real thing. When you
    change a fake to match reality, prove it with counts: the suite must fail
    against the code that shipped the bug and pass against the fix.
