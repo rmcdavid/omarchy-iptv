@@ -2542,7 +2542,7 @@ function savedSearchRecord(entry) {
 }
 
 function emptyState() {
-  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" }
 }
 
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
@@ -2577,7 +2577,13 @@ function cloneState(state, patch) {
     // M3-01. The fourth key this whitelist had to be taught, and the test
     // that proves it is the same shape as the savedSearches one: a state
     // that carries it goes through every reducer and comes out with it.
-    hiddenGroups: asList(st.hiddenGroups).slice()
+    hiddenGroups: asList(st.hiddenGroups).slice(),
+    // D-SINK-19. The FIFTH, and the one whose loss is worst: it is the only
+    // record of which source is active, so a reducer that dropped it would
+    // un-configure the plugin on the next favourite toggle. Additive at
+    // STATE_VERSION 2 exactly like hiddenGroups -- a file without it reads
+    // as "", an older build drops it, the version does not move.
+    activeKey: str(st.activeKey)
   }
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
@@ -2641,6 +2647,12 @@ function parseState(text) {
   // M3-01. Additive and optional like savedSearches below: a file without
   // it reads as [], an older build drops it, STATE_VERSION stays 2.
   state.hiddenGroups = hiddenGroupList(parsed.hiddenGroups)
+  // D-SINK-19. Which source is active, by KEY. Additive at version 2 on the
+  // same precedent as hiddenGroups and savedSearches. A value that is not a
+  // key reads as "" rather than failing; a key naming no record is kept here
+  // and resolved to "" by activeKeyOf, because dropping it at parse time
+  // would hide the case the migration has to decide about.
+  state.activeKey = activeKeyText(parsed.activeKey)
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -3489,8 +3501,19 @@ function settingsFrom(entry) {
   // so a clamp can never be written twice and drift (R2, engineering rule 12 (dev branch)).
   var pip = pipOptions(entry)
   return {
+    // D-SINK-19. These two are INPUT ONLY now: `omarchy bar set ... playlistUrl
+    // <url>` still adopts (SR8), and the plugin takes the URL into its own
+    // 0600 state and then writes the entry back WITHOUT it. Nothing derives
+    // the active source from them any more; `sourceKey` below is the mirror
+    // of what does.
     playlistUrl: str(settingOf(entry, "playlistUrl", "")).replace(/^\s+|\s+$/g, ""),
     epgUrl: str(settingOf(entry, "epgUrl", "")).replace(/^\s+|\s+$/g, ""),
+    // The active source's key, mirrored into the host entry so an install
+    // that loses state.json's active key can still find its way back to a
+    // source it still has (adoptActiveSource step 2). Read through
+    // activeKeyText so a hand-edited value cannot become a path component.
+    // NOT the authority: state.json is (activeKeyOf).
+    sourceKey: activeKeyText(settingOf(entry, "sourceKey", "")),
     refreshMinutes: clampSetting("refreshMinutes", settingOf(entry, "refreshMinutes", SETTING_RANGES.refreshMinutes.def)),
     mpvArgs: str(settingOf(entry, "mpvArgs", "")),
     showChannelName: boolSetting(settingOf(entry, "showChannelName", true)),
@@ -4220,9 +4243,26 @@ function ownWriteOf(hostSettings, values) {
 // back on by itself, and the fetch resumed. The same hole existed in the
 // other direction.
 //
-// Stating all three on every write makes both writers idempotent and makes
-// neither able to revert the other. It is cheap because there are three.
-var OWNED_SETTINGS = ["playlistUrl", "epgUrl", "showLogos"]
+// Stating all of them on every write makes both writers idempotent and makes
+// neither able to revert the other. It is cheap because there are two.
+//
+// D-SINK-19 took the URLs OFF this list and put `sourceKey` on it. The list
+// is the only thing that decides what a write carries, so that one edit moves
+// both writers at once -- which is the D-LOGO-2 lesson spent rather than
+// relearned.
+var OWNED_SETTINGS = ["sourceKey", "showLogos"]
+
+// Keys this plugin USED to own and now removes from the entry on every write
+// it makes (D-SINK-19). They are still READ (settingsFrom above, SR8's input
+// path), so a user who sets one gets it adopted; what must not happen is the
+// plugin writing one back, or leaving one behind that it has already adopted.
+//
+// Removal lives in `entryWith`, which is the single funnel both
+// `updateEntryInline` call sites go through, rather than in either caller: a
+// rule written at one of two sites is the shape D-LOGO-2 and rule 15 are
+// both about. The consequence is deliberate and is what makes the migration
+// cheap -- ANY owned write heals an old entry, including the logo toggle.
+var RETIRED_SETTINGS = ["playlistUrl", "epgUrl"]
 
 // The patch for a settings write: every owned key, at the value it should
 // hold AFTER this write. `effective` is what the plugin currently acts on
@@ -4239,9 +4279,10 @@ function ownedEntryPatch(effective, overrides) {
   return out
 }
 
-// The URL pair, which is what every caller before M2-04 writes.
-function ownWriteFor(hostSettings, playlistUrl, epgUrl) {
-  return ownWriteOf(hostSettings, { playlistUrl: str(playlistUrl), epgUrl: str(epgUrl) })
+// The active key, which is what the source writers carry since D-SINK-19
+// (it was the URL pair from M2-01 to 0.13.3).
+function ownWriteForKey(hostSettings, key) {
+  return ownWriteOf(hostSettings, { sourceKey: activeKeyText(key) })
 }
 
 // Can `updateEntryInline` carry our settings at all? It rewrites a layout
@@ -4775,6 +4816,34 @@ function configShieldDecision(state, playlistUrl, epgUrl) {
   if (s === CONFIG_SHIELD_ABSENT) return CONFIG_PERSIST
   if (s === CONFIG_SHIELD_EXPOSED) return CONFIG_REFUSE
   return CONFIG_DEFER
+}
+
+// D-SINK-19. The gate's question, asked of the ENTRY about to be written
+// instead of of two argument names.
+//
+// Why this exists rather than a call that passes two empty strings. The
+// plugin no longer writes a URL into the host's file at all -- `ownedEntryPatch`
+// names `sourceKey` and `showLogos`, and `entryWith` strips the retired keys --
+// so the gate above would never fire again on any shipping path, and a gate
+// that cannot fire is a gate nobody notices breaking (rule 14). Asking the
+// patch means the answer comes back REFUSE the moment a URL-bearing key is
+// written again, whoever writes it and whatever they call it.
+//
+// IS A SOURCE KEY A SECRET? No, and this is the risk that decision accepts.
+// A key is `fnv1a32` of the normalized playlist URL: eight hex characters,
+// 32 bits, which cannot carry a URL back. What it can do is CONFIRM a guess
+// -- anyone who can read `shell.json` may hash a candidate URL and see
+// whether it matches -- so a reader who already holds a provider URL learns
+// that this user has that account. That is a real loss, it is not zero, and
+// it is smaller by a category than the credential itself, which is what used
+// to be in the file. ACCEPTED, because the alternative is worse: gating the
+// key write would let an exposed file refuse the very write that TAKES THE
+// URL OUT, which is the trap `persistCarriesSecret` already documents one
+// function above. The exposure is not "closed"; it is reduced from the
+// credential to a 32-bit check on a guess.
+function entryShieldDecision(state, patch) {
+  var p = patch || {}
+  return configShieldDecision(state, p.playlistUrl, p.epgUrl)
 }
 
 function seqArg(seq) {
@@ -9900,14 +9969,196 @@ function withSourceStats(state, key, status, nowSec) {
   })
 }
 
-// The settings value is a CLI-origin value (SR11): a `~` path set through
-// `omarchy bar set` must resolve to its record like any other.
-function activeSourceKey(state, playlistUrl) {
-  var url = normalizeSourceUrl(playlistUrl, { origin: "cli" })
-  if (url === "") return ""
-  var rec = findSourceByUrl(state ? state.sources : [], url)
-  return rec ? str(rec.key) : ""
+// ---- the active source, by KEY (D-SINK-19)
+//
+// D4 gave source identity to the normalized playlist URL and named the active
+// source by it, which meant the host's `shell.json` had to hold a provider
+// credential for the plugin to know which source was active. D-SINK-18
+// contained that by making the file private first; this removes the reason.
+// The IDENTITY half of D4 is untouched -- duplicates are still detected on
+// the normalized URL, the key is still `fnv1a32` of it -- and only the
+// PERSISTENCE half is overturned: the active source is named by its key, in
+// the plugin's own 0600 state file.
+//
+// A key read back from the file is NOT trusted to name a record: a `state
+// source remove` through the CLI, a hand-edited file, or an eviction can all
+// leave one dangling. The resolution is here, in one place, so no caller has
+// to remember to check.
+// A STRING or nothing, and the type test is not defensive clutter: it is the
+// shared fixture's finding. `str()` coerces, and the coercions land inside the
+// key grammar -- the number 12345678 becomes "12345678", eight hex-valid
+// characters, and the one-element array ["d990c2e4"] becomes "d990c2e4". The
+// helper's mirror requires `isinstance(raw, str)`, so a hand-edited or
+// foreign-written state.json would have read as configured on one side and
+// unconfigured on the other. Caught by the shared active-key fixture (dev
+// branch) running both readers on the same bytes (rule 12); it was not caught
+// by review.
+function activeKeyText(value) {
+  if (typeof value !== "string") return ""
+  var key = value.replace(/^\s+|\s+$/g, "")
+  return isSourceKey(key) ? key : ""
 }
+
+// The active source's key: what the state says, when it still names a record
+// this state carries. "" means "no active source", which is what `configured`
+// now asks about.
+function activeKeyOf(state) {
+  var key = activeKeyText(state ? state.activeKey : "")
+  if (key === "") return ""
+  return findSource(state ? state.sources : [], key) ? key : ""
+}
+
+// The active source's record, or null.
+function activeSourceRecord(state) {
+  return findSource(state ? state.sources : [], activeKeyOf(state))
+}
+
+// Set (or clear) the active key. Goes through cloneState like every other
+// reducer, so the key survives a favourites or recents write.
+function withActiveKey(state, key) {
+  var want = activeKeyText(key)
+  var st = state || emptyState()
+  if (str(st.activeKey) === want) return st
+  return cloneState(st, { activeKey: want })
+}
+
+// D16 / SR8 after D-SINK-19: when does a REFUSED input become the guide's
+// error state and stop the helper?
+//
+// Only when there is no active source to show instead. D16 was written when
+// the setting WAS the active source, so a typo in `omarchy bar set ...
+// playlistUrl` legitimately emptied the guide: nothing was configured any
+// more. The setting is an input now and the active source is in state.json,
+// so the same typo must leave a working source alone -- and the error must
+// still be the body when the bad value is the only configuration there is.
+//
+// In Model.js rather than as an inline expression in Service.qml for the
+// reason rule 12 gives: a decision a test cannot call is a decision nothing
+// checks.
+function invalidInputBlocks(invalid, activeKey) {
+  if (!invalid) return false
+  return activeKeyText(activeKey) === ""
+}
+
+// D-SINK-19. WHAT A SETTINGS CHANGE MEANS FOR THE ACTIVE SOURCE.
+//
+// Lifted out of Service.qml's reconcile() deliberately (rule 12): it is pure
+// logic, it is the single most dangerous decision in this change, and inside
+// a QML component no test can call it. The danger is specific. The plugin now
+// strips the URL keys from the bar entry on every write, so the host comes to
+// report `playlistUrl` as absent -- and under the old rule, where an empty
+// playlistUrl meant "no active source", the host merely catching up would
+// un-configure the plugin. So the rule is about a CHANGE of the input, never
+// about its value:
+//
+//   migrate  a state load, or the first reconcile of this service: resolve
+//            the active source from the state, then the entry's key, then the
+//            entry's URL (adoptActiveSource). This is where an old install
+//            becomes a new one.
+//   adopt    the input changed to a non-empty value: SR8, unchanged. The URL
+//            goes into the history and that source becomes active.
+//   ignore   everything else, which includes the input going empty. That is
+//            the ordinary steady state after this change, not a command.
+//
+// `adoptEpg` is D-SRC-10, untouched: an epgUrl that did NOT change in the
+// write that changed the playlist was written for the previous source.
+function reconcileAction(input) {
+  var it = input || {}
+  var playlist = str(it.playlist)
+  var epg = str(it.epg)
+  var first = it.first === true
+  var playlistChanged = first || playlist !== str(it.lastPlaylist)
+  var epgChanged = first || epg !== str(it.lastEpg)
+  var out = { act: "ignore", adoptEpg: first || it.force === true || epgChanged,
+              playlistChanged: playlistChanged, epgChanged: epgChanged }
+  if (it.force === true || first) { out.act = "migrate"; return out }
+  if (!playlistChanged && !epgChanged) return out
+  if (playlist === "") return out
+  out.act = "adopt"
+  return out
+}
+
+// D-SINK-19. Resolve the active source ONCE per state load, and migrate an
+// install written by a build that named it by URL.
+//
+// `entry` is the host's bar entry as `settingsFrom` read it. The order is the
+// whole of the decision and each step is why the next is safe:
+//
+//   1. the state's own `activeKey`, when it names a record this state carries.
+//      Nothing else is consulted, which is what makes a second run a no-op.
+//   2. the entry's `sourceKey`, when it names a record. This is the mirror the
+//      plugin writes; it is a POINTER and not a credential, so an install that
+//      lost `state.json`'s active key but still has its sources recovers.
+//      A stale `playlistUrl` sitting beside it is IGNORED -- the key wins,
+//      which is what stops a removed source being resurrected by a URL the
+//      host had not caught up on yet.
+//   3. the entry's `playlistUrl`: the OLD shape, and the only step that reads
+//      a URL. It is adopted exactly as `reconcileSources` adopts a CLI value
+//      (SR8): a known URL becomes active, an unknown one is added with a
+//      derived label and `origin` "migrated" or "cli".
+//   4. nothing: no active source.
+//
+// Returns { state, key, changed, adoptedUrl }. `changed` is whether the state
+// must be written; `adoptedUrl` is true when step 3 fired, which is what tells
+// the caller the entry still holds a URL that has to come out of it.
+// `invalid` carries a validation failure of step 3 (D16/SR8) so a garbage CLI
+// value still synthesizes an error status instead of running the helper.
+function adoptActiveSource(state, entry, nowSec, origin) {
+  var st = state || emptyState()
+  var out = { state: st, key: "", changed: false, adoptedUrl: false, invalid: null, added: "", evicted: [] }
+  var stateKey = activeKeyOf(st)
+  if (stateKey !== "") {
+    out.key = stateKey
+    // The stored text may differ from the resolved key only by whitespace;
+    // withActiveKey is a no-op when it does not.
+    out.state = withActiveKey(st, stateKey)
+    out.changed = out.state !== st
+    return out
+  }
+  var e = entry || {}
+  var entryKey = activeKeyText(e.sourceKey)
+  if (entryKey !== "" && findSource(st.sources, entryKey)) {
+    out.key = entryKey
+    out.state = withActiveKey(st, entryKey)
+    out.changed = out.state !== st
+    return out
+  }
+  var url = str(e.playlistUrl)
+  if (sanitizeInput(url, MAX_SOURCE_URL + 1) === "") {
+    // No pointer anywhere. Clear a dangling key rather than leaving one in
+    // the file for the next reader to resolve again.
+    out.state = withActiveKey(st, "")
+    out.changed = out.state !== st
+    return out
+  }
+  var rec = reconcileSources(st, url, str(e.epgUrl), "", nowSec, origin)
+  if (rec.invalid) {
+    out.invalid = rec.invalid
+    out.state = withActiveKey(st, "")
+    out.changed = out.state !== st
+    return out
+  }
+  out.state = withActiveKey(rec.state, rec.activeKey)
+  out.key = activeKeyOf(out.state)
+  out.changed = true
+  out.adoptedUrl = out.key !== ""
+  out.added = rec.added
+  out.evicted = rec.evicted
+  return out
+}
+
+// `activeSourceKey(state, playlistUrl)` USED TO BE HERE and is deliberately
+// gone (D-SINK-19, rule 15). It was the one function whose job was "name the
+// active source from a URL", and leaving it behind with no caller would leave
+// the defect one call away: the next reader needing the active key would find
+// a function that takes the setting and returns it. Identity by URL survives
+// where it belongs -- `findSourceByUrl` for duplicate detection and for
+// `reconcileSources` adopting a CLI value (D4's identity half, untouched) --
+// and the active source is `activeKeyOf(state)`.
+//
+// SR11 is unaffected: a `~` path set through `omarchy bar set` still resolves
+// to its record, because `reconcileSources` is what resolves it and it still
+// validates with `origin: "cli"`.
 
 // D3 / SR8: the settings are the source of truth for the active source; the
 // history follows. A known URL bumps `lastUsed` only when the active key
@@ -9994,12 +10245,20 @@ function sourcesSummary(state, activeKey) {
 }
 
 // Full bar entry for `shell.updateEntryInline`: every own key of `entry`
-// copied (keys we do not own must survive the wholesale replace), `patch`
-// applied, `id` forced.
+// copied (keys we do not own must survive the wholesale replace) EXCEPT the
+// retired URL keys, `patch` applied, `id` forced.
+//
+// D-SINK-19. The host builds the stored entry as `{id} + everything in what
+// we hand it` (shell.qml:1092-1093), so a key we leave out is a key that is
+// GONE from the file -- which is how the credential actually leaves, rather
+// than being overwritten with an empty string that still says what shape the
+// old entry had. A `patch` may name a retired key explicitly and that value
+// wins; nothing in this repository does, and the test that proves it calls
+// `ownedEntryPatch` rather than grepping for the names.
 function entryWith(entry, patch) {
   var out = {}
   var src = entry && typeof entry === "object" ? entry : {}
-  for (var k in src) out[k] = src[k]
+  for (var k in src) if (RETIRED_SETTINGS.indexOf(k) === -1) out[k] = src[k]
   var p = patch || {}
   for (var q in p) out[q] = p[q]
   if (str(out.id) === "" && str(src.id) !== "") out.id = str(src.id)
@@ -10869,6 +11128,7 @@ if (typeof module !== "undefined") {
     configShieldArgv: configShieldArgv,
     configShieldState: configShieldState,
     configShieldDecision: configShieldDecision,
+    entryShieldDecision: entryShieldDecision,
     persistCarriesSecret: persistCarriesSecret,
     CONFIG_SHIELD_UNKNOWN: CONFIG_SHIELD_UNKNOWN,
     CONFIG_SHIELD_PRIVATE: CONFIG_SHIELD_PRIVATE,
@@ -10901,7 +11161,8 @@ if (typeof module !== "undefined") {
     splitLogoUrl: splitLogoUrl,
     ownWriteInForce: ownWriteInForce,
     settingsWithOwnWrite: settingsWithOwnWrite,
-    ownWriteFor: ownWriteFor,
+    ownWriteForKey: ownWriteForKey,
+    RETIRED_SETTINGS: RETIRED_SETTINGS,
     barEntryWritable: barEntryWritable,
     splitMpvArgs: splitMpvArgs,
     mpvOptionBase: mpvOptionBase,
@@ -11247,7 +11508,13 @@ if (typeof module !== "undefined") {
     withSourceStats: withSourceStats,
     sourceStatsDiffer: sourceStatsDiffer,
     statusFetchedAt: statusFetchedAt,
-    activeSourceKey: activeSourceKey,
+    activeKeyText: activeKeyText,
+    activeKeyOf: activeKeyOf,
+    activeSourceRecord: activeSourceRecord,
+    withActiveKey: withActiveKey,
+    adoptActiveSource: adoptActiveSource,
+    reconcileAction: reconcileAction,
+    invalidInputBlocks: invalidInputBlocks,
     reconcileSources: reconcileSources,
     sourceForEdit: sourceForEdit,
     sourcesSummary: sourcesSummary,

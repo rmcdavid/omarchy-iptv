@@ -7345,7 +7345,24 @@ def cmd_cache(args: argparse.Namespace) -> int:
 
 def default_state() -> dict[str, Any]:
     return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None,
-            "session": None, "sources": [], "savedSearches": [], "hiddenGroups": []}
+            "session": None, "sources": [], "savedSearches": [], "hiddenGroups": [], "activeKey": ""}
+
+
+def normalize_active_key(raw: Any) -> str:
+    """Mirror of Model.activeKeyText: the active source's key (D-SINK-19), or
+    "" when the value is not a key. A key naming no record is KEPT -- the shell
+    resolves that case (Model.activeKeyOf) and dropping it here would hide it.
+
+    This is the fifth key this reader had to be taught and the one whose loss
+    would be worst: default_state() is rebuilt field by field and copied into,
+    so a key this function does not exist for is ERASED by the next
+    `state favorite add` -- which for this key means the plugin reads as not
+    configured at all. savedSearches and hiddenGroups both carry that warning
+    above them; this one would have been visible."""
+    if not isinstance(raw, str):
+        return ""
+    key = raw.strip()
+    return key if SOURCE_KEY_RE.match(key) else ""
 
 
 # Must match Model.js MAX_SAVED_SEARCHES / MAX_SAVED_TERMS / MAX_SAVED_QUERY and
@@ -7539,6 +7556,8 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     # writer rebuilds from default_state(), so a key it is not taught is
     # erased by the next `state favorite add`.
     state["hiddenGroups"] = normalize_hidden_groups(raw.get("hiddenGroups"))
+    # Which source is active, by key (D-SINK-19). Same whitelist trap again.
+    state["activeKey"] = normalize_active_key(raw.get("activeKey"))
     state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
     # What the player was last asked to play (4.6, section 8). Same record as
     # lastPlayed, different lifetime: the service clears it when the player
@@ -7593,6 +7612,10 @@ def public_source(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Every `state` action prints this; stdout is a sink (rule 5) and must
+    never carry a URL. `activeKey` needs no treatment and is printed as it is:
+    it is fnv1a32 of the URL, which the cache directory names on disk already,
+    and it is the identifier every other field here is keyed by."""
     out = dict(state)
     out["sources"] = [public_source(record) for record in state.get("sources", [])]
     return out
@@ -7677,10 +7700,19 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
 #    persistActive(rec.url, rec.epgUrl) -- the record's value goes INTO the
 #    setting. The command is right for every source but one. It is also how a
 #    machine with no shell running, and the test suite, set a source up at all.
-#  - And the helper cannot tell WHICH source is the active one: the active key
-#    is derived from the setting's playlistUrl, and state.json does not record
-#    it. Nothing here can make that distinction without reading the shell's
-#    config, which is the first option again.
+#  - And the helper could not tell WHICH source is the active one: the active
+#    key was derived from the setting's playlistUrl, and state.json did not
+#    record it. Nothing here could make that distinction without reading the
+#    shell's config, which is the first option again.
+#    D-SINK-19 CHANGED THAT HALF: state.json now carries `activeKey`, so this
+#    file CAN tell, and the warning below is therefore wider than it needs to
+#    be -- it fires for an inactive source too. Narrowing it is a behaviour
+#    change on a documented warning and is NOT taken here; it is raised for
+#    the board in this round's write-up rather than decided in a code comment.
+#    The other two reasons stand unchanged, and the warning is
+#    still true of the active source: `--epg-url` on it is overwritten by the
+#    shell, because `reconcileSources` adopts the setting's epgUrl (SR8 input,
+#    D-SRC-02) and the record follows it.
 # So the command says what it wrote, who owns it, and what to change instead.
 # Exit code stays 0 because the write did happen.
 #
@@ -7738,6 +7770,13 @@ def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any
             record["url"] = playlist["url"]
             record["kind"] = playlist["kind"]
             record["key"] = allocate_source_key([item for item in sources if item is not record], playlist["url"])
+            # D-SINK-19. The active source is named by key now, so a re-key has
+            # to carry the pointer with it or state.json is left naming a
+            # record that no longer exists. Introduced by that change rather
+            # than fixed by it: before it, nothing in this file could tell
+            # which source was active.
+            if state.get("activeKey") == replaced:
+                state["activeKey"] = record["key"]
             record["fetchedAt"] = 0
             record["channelCount"] = 0
             record["groupCount"] = 0
@@ -7769,6 +7808,12 @@ def remove_source_record(state: dict[str, Any], key: str) -> dict[str, Any]:
     if record is None:
         raise HelperError("unknown_source", "no source with that key")
     state["sources"] = [item for item in state["sources"] if item is not record]
+    # D-SINK-19, the same obligation as the re-key above: removing the ACTIVE
+    # source clears the pointer. Model.activeKeyOf resolves a dangling key to
+    # "" so a shell reading this file is safe either way, but leaving one
+    # behind means the next reader has to decide the same question again.
+    if state.get("activeKey") == record["key"]:
+        state["activeKey"] = ""
     return record
 
 

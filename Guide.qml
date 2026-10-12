@@ -578,8 +578,17 @@ Item {
   }
   // D-SRC-06: a configured URL the validator refused (CLI, SR8) renders the
   // UX 5.4 sentence alone, no host and no `r` hint (nothing to retry).
+  //
+  // D-SINK-19 narrowed it to the case it was written for. `playlistUrl` is an
+  // INPUT now and the active source lives in state.json, so a refused CLI
+  // value no longer takes a working source away -- and this sentence must not
+  // be painted over one. The service answers the question (its
+  // `invalidInputBlocks`, which is Model.invalidInputBlocks) rather than this
+  // file deciding it a second way: one decision, two readers, joined by a
+  // call (rule 13).
   readonly property string invalidSettingsText: {
     if (!root.serviceReady || root.service.settingsInvalid === undefined || !root.service.settingsInvalid) return ""
+    if (root.service.invalidInputBlocks !== true) return ""
     return Model.sourceErrorMessage(String(root.service.settingsInvalid.code || "invalid"))
   }
   // The D9 lever, thrown for good by D-CLIP-1: paste is the out-of-process

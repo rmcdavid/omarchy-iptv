@@ -21,7 +21,27 @@ FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
 # cache layout marker and the source history, plus the optional nullable
 # `session` of the detached player (ARCHITECTURE-PLAYER.md section 8), which
 # is additive and does NOT bump the version.
-EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [], "savedSearches": [], "hiddenGroups": []}
+# D-SINK-19 adds the fifth additive key, `activeKey`: which source is active,
+# by key, in the plugin's own 0600 file instead of as a URL in the host's.
+# Additive at version 2 like the four before it.
+EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [], "savedSearches": [], "hiddenGroups": [], "activeKey": ""}
+
+
+# D-SINK-19's fixtures. Credentialed on purpose: the assertions about stdout
+# and about what is left in the file are only worth anything over a URL that
+# carries something.
+SRC_PROVIDER = {
+    "key": "d990c2e4",
+    "url": "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts",
+    "epgUrl": "http://provider.example.test/xmltv.php?username=u&password=p",
+    "kind": "http", "label": "provider.example.test", "labelCustom": False, "origin": "cli",
+    "addedAt": 10, "lastUsed": 20, "fetchedAt": 30, "channelCount": 9, "groupCount": 2,
+}
+SRC_SECOND = {
+    "key": "42839dd5", "url": "http://second.example.test/list.m3u", "epgUrl": "",
+    "kind": "http", "label": "second.example.test", "labelCustom": False, "origin": "guide",
+    "addedAt": 11, "lastUsed": 21, "fetchedAt": 31, "channelCount": 5, "groupCount": 1,
+}
 
 
 def v2(**patch):
@@ -297,6 +317,120 @@ class SessionKeyTest(unittest.TestCase):
         self.assertEqual(len(helper.normalize_hidden_groups(many)), fixture["cap"])
         self.assertEqual(helper.normalize_hidden_groups(many)[-1], "G%d" % (fixture["cap"] - 1))
 
+    # ---- D-SINK-19: activeKey, the fifth additive key ----------------------
+    #
+    # The plugin used to identify the active source by the provider URL on the
+    # host's bar entry, so the credential HAD to be in a file the plugin does
+    # not own. The key goes in state.json instead -- 0600 inside a 0700
+    # directory -- and the host's file gets a pointer. The exposure is reduced,
+    # not closed: a key is fnv1a32 of the URL, so it cannot carry one back and
+    # it CAN confirm a guessed one (Model.entryShieldDecision states the trade).
+    #
+    # This reader is the dangerous half. It rebuilds the document from
+    # default_state() and copies the keys it knows, so a key it has not been
+    # taught is erased by the next write -- and for THIS key that means the
+    # shell reads as not configured, with the sources still listed and no
+    # active one. savedSearches suffered exactly that erase live.
+
+    def test_active_key_survives_a_write_by_this_writer(self):
+        """The fifth key taught to this whitelist, on the day it was added."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        self.assertEqual(helper.normalize_state(doc)["activeKey"], "d990c2e4")
+
+    def test_active_key_survives_the_real_cli_writer(self):
+        """Through main(), not normalize_state. This is the assertion that would
+        have gone red for the erase savedSearches shipped with: exit 0,
+        "ok": true, and the key gone from the file."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER]
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        for args in (("favorite", "add", "t:x"), ("favorite", "remove", "t:x"), ("clear-recents",)):
+            code, payload, _ = self.state(*args)
+            self.assertEqual(code, 0, args)
+            written = json.loads(self.path.read_text(encoding="utf-8"))
+            self.assertEqual(written["activeKey"], "d990c2e4", args)
+            self.assertEqual(payload["state"]["activeKey"], "d990c2e4", args)
+
+    def test_active_key_runs_the_shared_fixture(self):
+        """tests/fixtures/active-key.json, the same file Model.test.js runs,
+        through normalize_active_key AND through normalize_state.
+
+        The fixture earned its keep on the first run: Model.activeKeyText used
+        str() and coerced the number 12345678 and the list ["d990c2e4"] INTO
+        the key grammar, where this reader rejects both for not being strings.
+        A hand-edited or foreign-written file would have read as configured on
+        one side and unconfigured on the other."""
+        with open(ROOT / "tests" / "fixtures" / "active-key.json", encoding="utf-8") as fh:
+            fixture = json.load(fh)
+        for case in fixture["parse"]:
+            self.assertEqual(helper.normalize_active_key(case["raw"]), case["key"], case["name"])
+            self.assertEqual(helper.normalize_state({"activeKey": case["raw"]})["activeKey"],
+                             case["key"], case["name"])
+        # The fixture holds both answers and the shapes that are not strings.
+        self.assertTrue(any(c["key"] for c in fixture["parse"]))
+        self.assertTrue(any(not c["key"] for c in fixture["parse"]))
+        self.assertTrue(any(not isinstance(c["raw"], str) for c in fixture["parse"]))
+
+    def test_active_key_is_printed_rather_than_redacted(self):
+        """public_state replaces every URL by its host, because stdout is a sink
+        (rule 5). The key needs no treatment: it is fnv1a32 of the URL, it is
+        already the cache directory name on disk, and it is the identifier every
+        other field is keyed by. The assertion that matters beside it is that
+        the URL is still gone."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        code, payload, _ = self.state("show")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["state"]["activeKey"], "d990c2e4")
+        self.assertNotIn("://", json.dumps(payload))
+        self.assertNotIn("password", json.dumps(payload))
+
+    def test_removing_the_active_source_clears_the_pointer(self):
+        """D-SINK-19 introduced this obligation rather than fixing it: before
+        the change nothing in this file could tell which source was active, so
+        a CLI remove could not have left a dangling pointer. Now it could."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER, SRC_SECOND]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        # Removing an INACTIVE source leaves the pointer alone.
+        code, payload, _ = self.state("source", "remove", "42839dd5")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["activeKey"], "d990c2e4")
+        # Removing the ACTIVE one clears it.
+        code, payload, _ = self.state("source", "remove", "d990c2e4")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["activeKey"], "")
+
+    def test_rekeying_the_active_source_carries_the_pointer_with_it(self):
+        """`state source update --url` re-keys the record. The pointer has to
+        follow, or state.json names a record that no longer exists."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER, SRC_SECOND]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        code, payload, _ = self.state("source", "update", "d990c2e4",
+                                      "--url", "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts")
+        self.assertEqual(code, 0)
+        written = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["replacedKey"], "d990c2e4")
+        self.assertEqual(written["activeKey"], payload["key"])
+        self.assertNotEqual(written["activeKey"], "d990c2e4")
+        self.assertTrue(any(r["key"] == written["activeKey"] for r in written["sources"]))
+        # Re-keying an INACTIVE source does not move the pointer.
+        code, payload, _ = self.state("source", "update", "42839dd5",
+                                      "--url", "http://second.example.test/other.m3u")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["activeKey"], written["activeKey"])
+
     def test_saved_searches_run_the_shared_fixture(self):
         """The same file tests/Model.test.js runs, so neither implementation
         can change the folding or the bounds while believing it agrees."""
@@ -364,7 +498,8 @@ class SessionKeyTest(unittest.TestCase):
         # writers are in different languages and a key appended in one place and
         # inserted in the other makes every diff noisy.
         self.assertEqual(list(helper.default_state()),
-                         ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session", "sources", "savedSearches", "hiddenGroups"])
+                         ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session",
+                          "sources", "savedSearches", "hiddenGroups", "activeKey"])
 
 
 if __name__ == "__main__":
