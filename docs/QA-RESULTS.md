@@ -13017,6 +13017,40 @@ questions, so they do not wait on the round's integration:
   only made it legible. A one-assignment flicker on an edit the user just
   confirmed; P3.
 
+### D-SRC-15: the start-up `state init` chmod reloads the state file over the adoption, and D-SINK-19 removes the backup that hid it
+
+Found live by the D-SINK-19 repair round's harness lane on 2026-10-11 and
+reproduced at the Model layer and on the real form by two lenses the same
+night. The helper's start-up `state init` runs `os.chmod(path, 0o600)` on an
+EXISTING `state.json` -- an inotify `IN_ATTRIB` even when the mode does not
+change -- and `Service.qml`'s `stateFile` FileView has `watchChanges: true`
+and `onFileChanged: reload()`. `applyUserState` is then handed the
+pre-adoption text (not in `recentSaves`, because the first save is parked
+behind `dirsReady`), `Model.stateOnLoad` keeps only the in-memory session
+record, and whatever `adoptActiveSource` adopted on the first reconcile --
+the active key, and any NEW record -- is replaced by the file. The parked
+save then writes the key-less state and the entry flush strips the URL
+with `sourceKey ""`. Measured with a 50 ms poll of the service's pointer
+state: `+1489 ms: KA dirs=False parked=True held=KA` then `+1909 ms: (empty)
+dirs=True parked=False held=None`; the same run with a helper whose `state
+init` prints ok and does nothing keeps `KA` throughout. Two loss shapes on
+the repaired tree: a 0.13.5 install with one source comes up with the
+record kept, the pointer "" and the URL stripped (unconfigured); a URL set
+with `omarchy bar set` while the shell was down is never written as a
+record and is stripped -- the user's input gone with no copy anywhere.
+The shape is OLDER than D-SINK-19: any in-memory change before `dirsReady`
+is lost on that reload, and the first build's immediate entry write plus
+the URL left on the entry recovered a KNOWN record by accident (the "URL as
+accidental backup" the first review named). D-SINK-19 removes the backup,
+so the repair round's forward live arm reads 32 / 12 and the pre-existing
+sources scenario 46 / 22 on that tree, 66 / 0 on dev. A sibling found by the
+same lens: `startCacheLayout` sets `cacheReady` before `dirsReady`, so a
+switch or remove over IPC in that window is undone by the same reload while
+its `cache remove` still deletes the directory. The fix is the service's
+(a reload while a save is parked must not replace newer in-memory state),
+with the helper not touching a file already 0600 as belt and braces and
+the entry flush gated on the save having landed (the round's DQ-B2).
+
 ### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
 
 Three reviewers over one fix. They found three P1s.
