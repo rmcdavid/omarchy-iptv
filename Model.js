@@ -10139,7 +10139,7 @@ function withActiveKey(state, key) {
 // so the same typo must leave a working source alone -- and the error must
 // still be the body when the bad value is the only configuration there is.
 //
-// In Model.js rather than as an inline expression in Service.qml for the
+// In the model rather than as an inline expression in Service.qml for the
 // reason rule 12 gives: a decision a test cannot call is a decision nothing
 // checks.
 function invalidInputBlocks(invalid, activeKey) {
@@ -10431,7 +10431,7 @@ function adoptPendingEpg(state, key, epgInput, lastEpg, nowSec, opts) {
 //                           parked state and the same disposition settles it
 //                           once that save lands (R11)
 // `entryWaits` is true whenever the entry is held rather than written.
-// In Model.js rather than inline so node can call it (rule 12); the shared
+// In the model rather than inline so node can call it (rule 12); the shared
 // fixture's `order` cases pin every combination.
 function pointerWritePlan(input) {
   var it = input || {}
@@ -10617,7 +10617,7 @@ function entryFlushDisposition(ctx) {
 // input gets the write that cannot lose a record, never the one that can.
 //
 // Takes the four inputs and nothing else; the reason names which one
-// decided, `state-not-loaded` first. In Model.js so node can call it
+// decided, `state-not-loaded` first. In the model so node can call it
 // (rule 12) and the fixture's `ownedWrite` section pins every combination.
 function ownedWriteMode(flags) {
   var f = flags || {}
