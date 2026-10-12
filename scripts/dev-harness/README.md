@@ -910,7 +910,8 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline lane-key-w2  # the round-8 red run: round 7's code (73 / 6: K1, K3, Z1, Z2, Z3, A2)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-y0  # the round-9 red run: round 8's code (74 / 12: U1, U2, U5, K1-K3, Y1-Y3, Q1, V1, H1)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-w2  # the round-8 red run: round 7's code (73 / 6 before Y, Q, V, H existed: K1, K3, Z1, Z2, Z3, A2)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-v2  # the round-7 red run: round 6's code (66 / 5 before K, Z, A existed: U2, U3, U4, U6, U7)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-t2  # the round-5 red run: round 4's code (60 / 4 before U existed: L1, L2, F6, F7)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red run: round 3's code (54 / 10: D3, W3, W6, F3..F7, L1, L2)
@@ -1162,6 +1163,29 @@ the write-settling half alone stops the loop); the funnel's two settling
 decisions removed, 78 / 1 (K1, 14,256 / 601); the probe commit no longer
 handing the form's guide URL over, 78 / 1 (A2). `sources-scenario.sh`
 **66 / 0** (the 10k switch median 33 ms) and `logo-scenario.sh live`
+**33 / 0** under a nested headless cage on the same tree.
+
+**Round 9 (R19: Y, Q, V, H; U, K and A re-read).** Both round-8 lenses
+found the write skip R18b added coming back after a publish A -> B -> A on
+the lagging host, live, and the data-loss lens found the add form's guide
+URL superseding a CLI epgUrl set AFTER the form was submitted (and the
+same on the edit form). Y lifts the lens's `aba-child.sh` (T=logo, bad,
+epg) and starts, as that driver does, over an entry carrying A's URL: over
+the harness seed's in-place empty `playlistUrl` / `epgUrl` the first
+restore differs by those two keys and Y1/Y3 were green on the tree that
+has the defect (measured). Q lifts `race-child.sh`: the probe is held open
+by a local listener that answers after 4 s, its pid read from the listener
+(`ss -ltnp`) and killed by that pid, in both orders. V lifts `T=edit`. H is
+D-SRC-18 at the sink, with F's lever (the state directory 0500 under the
+running shell). U, K and A now read `held:` from state.json: R19b holds a
+guide URL with no source to land on there and takes it off the entry.
+Counts from the transcripts on lane-key-y1 (42850dc), under the scenario's
+own nested cage: the forward run **86 passed, 0 failed** (205.2 s; every K
+window 0 writes and 0 ticks); `--baseline lane-key-y0` **74 passed, 12
+failed** -- U1, U2, U5, K1, K2, K3, Y1, Y2, Y3, Q1, V1, H1, with A1, A2 and
+Q2 green as its controls; the two key-mutation patches through `--tree`
+**80 / 6** and **81 / 5**, the same letters as before. `sources-scenario.sh`
+**66 / 0** (the 10k switch median 35 ms) and `logo-scenario.sh live`
 **33 / 0** under a nested headless cage on the same tree.
 
 **The weak already-stored check, fixed in round 4.** 'a switch the host
