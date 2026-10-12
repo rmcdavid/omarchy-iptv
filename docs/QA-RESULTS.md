@@ -13072,6 +13072,44 @@ round 4: with the directories already ready, the entry is written straight
 after `setText` and before `saved`, so a state write that fails then still
 strips the URL (lane A's DQ-A2, measured live by the round-3 data-loss lens).
 
+### D-SRC-16: a burst of switches leaves the in-flight save count stuck, and every later reload is ignored
+
+**Filed 2026-10-12 from the round-4 code lane's report (D-SINK-19 repair,
+`lane-key-t1`); P2; fixed on that branch; never shipped.** Round 3's R9 made
+the service ignore a `state.json` reload while a save is parked, in flight
+or failed, and counted "in flight" as one up per `setText` and one down per
+`saved`. Quickshell's `FileView` does not honour that arithmetic: a probe
+under a nested cage (Quickshell 0.3.1, `scratchpad/lane-a-t1/fv/burst.log`
+in the lane's scratch) sent 26 `setText` and saw 25 `saved` plus 1
+`saveFailed`, with `textChanged` preceding every `saved` and `text()`
+reading the PREVIOUS content while the last write was still pending; the
+service under the same burst sent 20 and saw 15. A queued write that a
+later one replaces raises nothing. So after ten warm switches on
+`lane-key-s2` the counter read 5 and stayed there, and from then on every
+foreign reload -- an external edit of the state file, the thing R9's
+file-newer branch exists to apply -- was ignored for the rest of the
+session (the lane's `dlive20-s2.out`: 20 `setText`, 15 `saved`,
+`stateSavesInFlight` 5). No record is lost by it: memory is newer than the
+file throughout and the next start reads the file. It is the sibling of
+D-SRC-15 in the other direction: that defect applied a reload it should
+have ignored, this one ignores reloads it should apply, and both come from
+a decision reading a number that is not what it is named.
+
+The fix on `lane-key-t1` reads "landed" from CONTENT rather than from a
+count: `saveState` keeps the text it asked for, and `onSaved` /
+`onSaveFailed` clear the in-flight flag only when the FileView's `text()`
+equals it (stateSaveLanded in Model.js on that branch, cited bare until it
+lands on `dev`), so the flag is 0/1, a replaced write clears nothing and the
+write that carried the last content clears it. Node-pinned by a burst
+driver over the shipping functions in the service order (both host shapes)
+that reads `after:[18,null,...], foreignApplied:""` on an export of
+`lane-key-s2` and 0 / applied on `lane-key-t1`; live, the same ten-switch
+driver on the repaired tree ends with `stateSavesInFlight` 0 and the
+stored mirror equal to the published one half a second after one more
+switch. The sentence "one `saved` per `setText`" that the round-3 documents
+carried is false for a burst and was replaced on the round-4 docs branch
+with these numbers (`docs/OMARCHY-PLUGIN-CONTRACT.md`, SR38's amendment).
+
 ### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
 
 Three reviewers over one fix. They found three P1s.
