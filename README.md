@@ -148,15 +148,25 @@ obvious when it happens to you:
   or after you remove the one in use -- is kept on the entry until a source
   becomes active, and is attached to that one then, replacing any guide URL
   that source already had: whether you pick a saved source in Sources, add one
-  in the app, or set `playlistUrl`. Nothing the plugin writes in the meantime
-  takes it off the entry, turning channel logos on or off included. Every
+  in the app, or set `playlistUrl`. The one exception is a source you add in
+  the app with a guide URL of its own in the form -- typed, or the one an
+  Xtream login fills in: the guide URL in the form is the later of the two,
+  so it wins, and the waiting one is taken off the entry by that same add
+  (the shell's journal names the key, never the URL). Nothing the plugin
+  writes in the meantime takes it off the entry, turning channel logos on or
+  off included. Every
   earlier build of this change, none of them shipped, lost it -- through the
   logo toggle on today's Omarchy, and through picking a saved source or
   adding one in the app on an Omarchy carrying the settings fix that is
   awaiting review upstream. All three routes are exercised on every commit's
-  test tree under both kinds of host, and the logo toggle and the pick also
-  live, in the same harness scenario under a headless compositor, on
-  2026-10-12.
+  test tree under both kinds of host, and the logo toggle, the pick and the
+  add in the app also live, in the same harness scenario under a headless
+  compositor, on 2026-10-12. Spaces or a newline around a pasted value
+  (`omarchy bar set` stores it as typed) make no difference to any of this,
+  and a mistyped `playlistUrl` beside a waiting guide URL is reported once
+  and removed -- builds of this change that never shipped kept such a value
+  on the entry, or handed the same entry to the shell thousands of times a
+  second.
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -246,8 +256,8 @@ One place they can escape that, worth knowing, and one that used to:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist. **An input, not a stored setting**: the plugin reads it, adds the playlist to your sources, makes it the active one and removes the value from the entry on its next write, so it is not there when you look again. A value it refuses (a typo, a scheme it does not accept) is removed too; with no source yet the guide shows the reason, and with a working source that source is left alone and the refusal goes to the shell's log. Setting it to an empty string does nothing; to go back to no playlist, remove the source on the Sources screen (`x`) |
-| `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional. An input on the same terms: attached to the active source and then removed from the entry. Set while no source is active (before your first playlist, or after removing the one in use), it stays on the entry until a source becomes active -- picked in Sources, added in the app, or set with `playlistUrl` -- and is attached to that one then, replacing any guide URL it had; it is never removed unused, whatever else the plugin writes meanwhile, the logo toggle included. Setting it empty does nothing — clear a guide URL on the Sources screen (`e`). If your playlist names its own guide and the source has none, that one is used and the Sources screen says so. Channels are matched by id and, when the ids do not agree, by name -- which is usually what happens, because playlists and guides rarely come from the same place |
+| `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist. **An input, not a stored setting**: the plugin reads it, adds the playlist to your sources, makes it the active one and removes the value from the entry on its next write, so it is not there when you look again. A value it refuses (a typo, a scheme it does not accept) is removed too, spaces around it or not; with no source yet the guide shows the reason, and with a working source that source is left alone and the refusal goes to the shell's log. Setting it to an empty string does nothing; to go back to no playlist, remove the source on the Sources screen (`x`) |
+| `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional. An input on the same terms: attached to the active source and then removed from the entry. Set while no source is active (before your first playlist, or after removing the one in use), it stays on the entry until a source becomes active -- picked in Sources, added in the app, or set with `playlistUrl` -- and is attached to that one then, replacing any guide URL it had -- unless that source is one you add in the app with a guide URL of its own in the form, which wins and takes the waiting one off the entry; it is never removed unused, whatever else the plugin writes meanwhile, the logo toggle included. Setting it empty does nothing — clear a guide URL on the Sources screen (`e`). If your playlist names its own guide and the source has none, that one is used and the Sources screen says so. Channels are matched by id and, when the ids do not agree, by name -- which is usually what happens, because playlists and guides rarely come from the same place |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
 | `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate; a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below |
@@ -540,7 +550,9 @@ second time, and setting it again after removing that source is read as new
 start; walked through the shipping code, it does not). `epgUrl` is treated the
 same way and is attached to whichever source is active; set while no source
 is active, it waits on the entry for the next one that becomes active,
-however it becomes active; setting it empty does nothing,
+however it becomes active, unless that one is a source you add in the app
+with its own guide URL in the form, which wins; spaces around a value you
+set are ignored, and a value of spaces alone is no value; setting it empty does nothing,
 and the Sources screen is where a guide URL is cleared. Up to 50
 sources are kept, and this list is the only copy of them.
 

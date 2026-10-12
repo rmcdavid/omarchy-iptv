@@ -1207,7 +1207,8 @@ that hid the round-6 data-loss lens's P1 on today's host. `ipc hostEntry`
 reports `host: "lag" | "echo"`, so a scenario can assert the lever took;
 `run.sh` refuses any other value at the parse and records the variable in
 `last-start.env`, and `qa-lib-test.sh` pins both. Only `key-scenario.sh`'s
-U5..U7 run on it so far; the other own-write scenarios (E6, the key
+U5..U7 run on it so far [round 8: and K2, K3, the loop window on the
+echoing host]; the other own-write scenarios (E6, the key
 mirror, the logo toggle) running both ways is the rest of D-HOST-4. `ipc hostEntry` shows the two sides, and the scenario's
 `== D-LIVE-20` block asserts that a switch takes effect **while** the
 published bar still names the previous source. Against a service that waits

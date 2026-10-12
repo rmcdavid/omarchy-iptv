@@ -528,7 +528,35 @@ live half is key-scenario segment U, U1-U4 on the lagging fake host and
 U5-U7 on the echoing one: 71 / 0 forward on 70 lettered checks, 66 / 5 over
 `--baseline lane-key-v2` (U2, U3, U4, U6, U7), lane A's transcripts under
 the scenario's own nested cage. The in-app add with an EPG pending is
-observed in node only.
+observed in node only [round 8: live too, key-scenario A1 and A2]. Round 8
+(lane-key-x1 1f8bd1b, 2026-10-12; lead ruling R18 after the seventh review
+found a whitespace-wrapped input never counted as consumed, and a refused
+`playlistUrl` beside a pending EPG looping the lagging host at about 3,000
+entry writes a second -- neither visible to any check, because no driver
+case carried a refused or a whitespace-wrapped value) adds unit pins for
+the one normaliser (`Model.entryInputForm`, a 34-case agreement property
+between reconcile's "fresh" and the sink's "consumed", and the
+control-character sibling its search found), for the settling funnel
+(`Model.entryWriteNeeded`, `Model.sameOwnWrite`) and for the add form's
+guide URL winning (`Model.adoptPendingEpg` with `formEpg`); the `retiredKeep`
+fixture grows 20 -> 28 (whitespace beside a non-empty snapshot); the
+service-order driver gains refused and whitespace-wrapped cases under
+three wrappings and both host shapes, runs every sequence to quiescence
+under a bound, fails one that does not settle (`R18c: every service-order
+sequence in this file reached quiescence under the bound -- no LOOP`), and
+re-runs reconcile on every own-write reassignment as QML does (rule 10: it
+had done so only on a content change, which is why the loop never reached
+node); and the input audit now reaches refused and superseded values and
+counts them apart -- 45 `ok   R18` lines, SRC-MIG-26, SRC-MIG-27 and
+SRC-MIG-28. Seen red by lane A: the same test files over lane-key-w2's code
+read `2236 checks, 41 failure(s)`; one-decision mutations 19 (the raw
+snapshot compare), 11 (the settling funnel removed), 7, 4, 6, 6, 1, 1 and
+1. Counts on lane-key-x1: node 2236 / 0 (+45; read again by lane C on
+lane-key-x2), python 1057, qml 78, `qa-lib-test.sh` 443 / 0. The live half
+is key-scenario segments K (the loop window on both hosts), Z (whitespace)
+and A (the in-app add through `ipc addSource`): 79 / 0 forward on 78
+lettered checks, 73 / 6 over `--baseline lane-key-w2` (K1, K3, Z1, Z2, Z3,
+A2), lane A's transcripts under the scenario's own nested cage.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 

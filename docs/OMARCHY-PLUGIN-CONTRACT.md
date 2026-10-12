@@ -253,7 +253,8 @@ value and is inert rather than lapsed -- `inForce true` there is not a
 stale override (lane A's DQ-U4). The node driver asserts both shapes for
 both hosts (`R16 (lag host)` / `(echo host)`: `the patch-only write is
 recognised as our own`, lane-key-u1); the echoing host is still modelled,
-not run (D-HOST-4 below). Round 6 pins the other half of rule 9 in that
+not run (D-HOST-4 below) [rounds 7 and 8: modelled in the harness too, by
+an echo lever on the fake host; no real host carrying #15082 has run it]. Round 6 pins the other half of rule 9 in that
 writer: the funnel composes the owned patch from `settings` -- the host's
 publish with our own last write laid over it -- and never from
 `hostSettings`, the bare publish. On this host the difference is one write,
@@ -276,7 +277,25 @@ was left to adopt -- the plugin had been depending on the host's lag for its
 own state. The fix does not consult the host: the switch and the probe
 commit land a pending input on the record becoming active in the same turn
 (`Model.adoptPendingEpg`), and every owned write leaves an input nothing has
-consumed on the entry (`Model.retiredInputsToKeep`). What is NOT yet true
+consumed on the entry (`Model.retiredInputsToKeep`). Round 8 (R18,
+2026-10-12) found the other side of the same coin on THIS host: a write the
+host answers `false` to must not re-trigger anything. A refused
+`playlistUrl` beside a pending `epgUrl`: the plugin's heal stripped the
+refused value from the STORED entry, this host kept publishing the
+pre-write entry, every reconcile asked for the strip again, the host
+answered `false` (nothing changed) -- and the plugin still re-recorded its
+own write, which re-evaluated `settings` and ran reconcile again, about
+3,000 times a second (the seventh review, live on the lagging fake host;
+`false` is "already stored", as the section above says). The fix is still
+not a wait for the echo. The funnel estimates what the host STORES from
+its own record of its last write while the publish has not moved, and from
+the publish once it has (`Model.entryWriteNeeded`, the host's own
+`JSON.stringify` comparison at `shell.qml:1094` for a layout entry and
+`:1107` for a plugins entry, read on this machine), makes no write the host
+would answer `false` to, and re-records its own write only when the record
+differs (`Model.sameOwnWrite`). On the echoing host the estimate is the
+echo itself, so the same code settles there after one reconcile; the echo
+path stays idempotent. What is NOT yet true
 [amended 2026-10-12, round 7]: `scripts/dev-harness/shell.qml` modelled the
 one-write-behind host only until round 7; it now has an echo lever --
 `run.sh --host echo` makes `syncPluginApis` publish `shellConfig.bar` at
@@ -284,7 +303,9 @@ once, with no intermediate stale publish (a fake that published the old bar
 first would hand the plugin this host's accidental rescue on the echoing
 host too, more forgiving than either real host), and `ipc hostEntry`
 reports `host` -- and key-scenario U5-U7 run on it (lane A, lane-key-w1:
-U6 red on `--baseline lane-key-v2`). The other own-write scenarios (E6, the
+U6 red on `--baseline lane-key-v2`) [round 8: and K2, K3, the loop window
+on the echoing host -- K3 red on `--baseline lane-key-w2` with 19,943
+entry writes in 5 s; lane A, lane-key-x1]. The other own-write scenarios (E6, the
 key-mirror segments, the L toggle) have not run both ways; that, and
 re-verifying this section on the first release carrying #15082, is what
 remains of D-HOST-4 on the board. The section above stays

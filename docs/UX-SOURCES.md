@@ -186,6 +186,30 @@ goes to `sources` with the cursor on the new row and the transient `Added
 tv.example.net - 1,475 channels in 28 groups`. The new source becomes
 active: the user pasted it to use it, and switching back is two keystrokes.
 
+**A guide URL waiting on the bar entry meets the `EPG` field (round 8,
+2026-10-12; D-SINK-19 R18d, the lead's ruling on OQ-W3).** When the user
+set `epgUrl` from a terminal while no source was active, that value waits
+on the entry for the next source to become active (5.5). If the source
+becoming active is this add and its `EPG` field is NOT empty, the field
+wins: it is the user's later, explicit input for the same slot. The new
+record keeps the field's guide URL, and the waiting value is superseded
+-- the same commit takes it off the entry, and the shell's journal reads
+`the guide URL in the add form supersedes a pending input (epgUrl); the
+bar entry drops it`, the key name and never a URL. If the field is empty,
+the waiting value is attached to the new record, as on every other route.
+Nothing on screen changes in either case: the form never shows the
+waiting value (`Guide.qml` reads no entry input) and the transient is the
+usual `Added ...`. Round 7 did the opposite (the waiting
+value replaced the field's), so a guide URL set long ago from a terminal
+silently beat the one just typed. One case is open (lane A's OQ-X3, for
+the lead and UX): if the same playlist was added from the terminal while
+this add was being probed (S5's duplicate branch), the commit keeps that
+record, the field's guide URL is not on it, and the waiting value is
+attached as before. Observed through the harness by key-scenario A1 (empty
+field) and A2 (a field with its own guide URL; red on `--baseline
+lane-key-w2`), lane A on lane-key-x1, with two saved sources and none
+active; the add into an empty list is node only.
+
 ### 1.6 Editing (S4, S6)
 
 `e` / `E` in `sources`, or the pencil action button on the cursor row ->
@@ -242,6 +266,13 @@ saved record is an ordinary source with `kind: "xtream"` (used only for the
 default label and the `Xtream` segment in the row detail). The password
 value is dropped from memory as soon as the URLs are built; the form is
 never shown pre-filled.
+
+The built `xmltv.php` URL counts as the form's own guide URL (round 8,
+R18d): a guide URL waiting on the bar entry is superseded by it exactly as
+by a typed `EPG` field (1.5), because the user's login is the later
+explicit input. Pinned in node (`R18d (lag host) OQ-W3, the Xtream add`
+and its echo-host twin); no live segment drives the Xtream form with a
+value waiting.
 
 ### 1.9 Modes and transitions
 
@@ -1293,11 +1324,24 @@ through the key mirror's write. Now every write the plugin makes leaves an
 input no source has consumed where it is, and the pick or the add that
 makes a source active attaches the waiting guide URL to it in the same turn
 -- replacing that source's own guide URL, or the EPG typed into the add
-form, when they differ (the second is open as lane A's OQ-W3). The only
+form, when they differ (the second is open as lane A's OQ-W3) [round 8,
+R18d: ruled the other way -- a guide URL the add form carries wins and the
+waiting value is superseded, 1.5 and 1.8; with the field empty the waiting
+value is attached as described here]. The only
 trace is the shell's journal: `the bar entry keeps an input no source has
 adopted yet (epgUrl)`, the key name and never the value. Observed through
 the harness by key-scenario U1-U7 (lane A, lane-key-w1, 2026-10-12; red on
-`--baseline lane-key-v2`); the form route is node only.
+`--baseline lane-key-v2`); the form route is node only [round 8: observed
+through the harness too, key-scenario A1 and A2 on lane-key-x1, the add
+into an empty list still node only]. Round 8 also makes the waiting value
+indifferent to spacing: a value pasted with a trailing space or newline
+(`omarchy bar set` stores it as typed) is the same value as without, and a
+value of spaces alone is no value (R18a). A mistyped `playlistUrl` set
+beside a waiting guide URL is reported and removed once, and nothing
+repeats -- on the round-7 build the plugin handed the lagging host the same
+entry about 3,000 times a second in that state, with nothing on screen to
+say so
+(R18b; key-scenario K).
 
 ### 5.6 Default label and duplicates (S4, S5)
 
