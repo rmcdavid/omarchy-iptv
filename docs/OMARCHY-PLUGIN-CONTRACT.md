@@ -266,10 +266,28 @@ mirror's heal write once the disk recovers -- showLogos stays as toggled`
 under the lagging host (lane A, 2026-10-12). On the echoing host the two
 are equal, so the mutation reddens no echo-host case (all seven are the
 structural pin or lag-host cases); the code is right under both hosts
-without knowing which one it meets. What is NOT yet true: `scripts/dev-harness/shell.qml` models
-the one-write-behind host only (its line ~759), so the own-write scenarios
-have never run against an echoing host; that is D-HOST-4 on the board, due
-when a release carrying #15082 is on this machine. The section above stays
+without knowing which one it meets. Round 7 (R17, 2026-10-12) found the one
+place where that was NOT true, and it is rule 9's exact hazard: an `epgUrl`
+left on the entry while no source is active (R12) survived a switch only
+because THIS host republished the pre-strip entry one write late and the
+next reconcile consumed it. On the echoing host the key mirror's write
+stripped it and the host published the stripped entry at once, so nothing
+was left to adopt -- the plugin had been depending on the host's lag for its
+own state. The fix does not consult the host: the switch and the probe
+commit land a pending input on the record becoming active in the same turn
+(`Model.adoptPendingEpg`), and every owned write leaves an input nothing has
+consumed on the entry (`Model.retiredInputsToKeep`). What is NOT yet true
+[amended 2026-10-12, round 7]: `scripts/dev-harness/shell.qml` modelled the
+one-write-behind host only until round 7; it now has an echo lever --
+`run.sh --host echo` makes `syncPluginApis` publish `shellConfig.bar` at
+once, with no intermediate stale publish (a fake that published the old bar
+first would hand the plugin this host's accidental rescue on the echoing
+host too, more forgiving than either real host), and `ipc hostEntry`
+reports `host` -- and key-scenario U5-U7 run on it (lane A, lane-key-w1:
+U6 red on `--baseline lane-key-v2`). The other own-write scenarios (E6, the
+key-mirror segments, the L toggle) have not run both ways; that, and
+re-verifying this section on the first release carrying #15082, is what
+remains of D-HOST-4 on the board. The section above stays
 as the verified behaviour of every Omarchy up to and including 4.0.4.
 
 ## Verified host renderers for the strings the plugin hands over (2026-10-02)
@@ -659,7 +677,10 @@ are built on:
   no `loaded` followed it, while the service's `recentSaves` comment assumes
   one can; which it is was not settled (lane A's DQ-A7) and nothing depends
   on it, because `Model.reloadDisposition` ignores an own write by its text and a
-  parked or in-flight save by its count.
+  parked or in-flight save by its flag [corrected 2026-10-12, round 7: this
+  said "count"; since R13 the in-flight input is 0 or 1, set when a write is
+  asked for and cleared by content (`Model.stateSaveLanded`), so it is a flag
+  that keeps a counter's name (OQ-C5)].
 - **A FileView loaded over a MISSING path does not see the file being
   created by another process.** Over a fresh install (no state directory, no
   file) the helper's `state init` creates `state.json` under the parked

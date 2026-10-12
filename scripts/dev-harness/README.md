@@ -1092,7 +1092,12 @@ passed, 0 failed**, the three `held:` reads NULL as before; `--baseline
 f275bde` **39 passed, 25 failed**, the same letters as round 5, and the
 held half is now red on its own: W1, W3, W5, F2 and F5 read
 `held:NOFIELD` (`held:[NOFIELD]` in W5) where the round-5 transcript read
-`held:NULL`. `sources-scenario.sh` **66 / 0** and `logo-scenario.sh live`
+`held:NULL`. [Round 7, the round-6 live lens's P3: "red on its own" says
+more than this run shows. Every one of those checks also differs from its
+want in another half on f275bde, so the live run shows the held half is no
+longer satisfied, not that it alone would redden a check; that it alone
+does is proven at the instrument, `qa-lib-test.sh` reading 439 / 2 with the
+round-5 fold put back.] `sources-scenario.sh` **66 / 0** and `logo-scenario.sh live`
 **33 / 0** under a nested headless cage on the same tree. Two gate-side
 repairs the same round: `check.sh` runs `qa-lib-test.sh` with
 `OMARCHY_IPTV_HARNESS_DIR` unset, because one pin asserts the DEFAULT

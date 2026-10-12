@@ -515,6 +515,17 @@ io.github.rmcdavid.iptv)` -- `Guide.qml` `unconfiguredEpg` and
 caption so one phrase means one thing; UX.md 4.4 and 6.3 carry them. In round
 2 they were an open UX item for the lead, recorded
 here and in the lane report rather than given an id this lane cannot board.
+**A conflict this document raises rather than resolves (round 7, 2026-10-12,
+lane C).** The `Optional EPG` line ends `(converted; not kept in
+shell.json)`, and it belongs to the unconfigured empty state -- no active
+source (whether that state is still on screen behind the first-run form was
+not read for this note) -- which is exactly the state in which R12 -- enforced at the sink since round 7 (R17a) -- KEEPS
+a guide URL set from a terminal on the bar entry in `shell.json` until a
+source becomes active. "Converted" is true eventually; "not kept" is false
+until then, and the README now says it waits on the entry. Whether the
+caption should say so (for example "kept on the entry until a source is
+active") is a copy decision for the lead and the Guide's owner
+(`Guide.qml` `unconfiguredEpg`); nothing here changes it.
 
 #### 3.1.2 After paste (both URLs masked)
 
@@ -1222,7 +1233,16 @@ composed by `Model.persistFailureMessage` on both surfaces, never
 only `persist_failed`'s naming `omarchy bar set`, the fallback for an unknown
 reason. The rendered line on a display is UNVERIFIED: no scenario reads the
 result line or the footer for it (key-scenario's L reads the bar entry and
-the guide's `showLogos`), and the docs lane holds no display.
+the guide's `showLogos`), and the docs lane holds no display. **[Round 7,
+2026-10-12 (OQ-C3): narrowed to the pixels. The TEXT the guide binds to both
+surfaces is OBSERVED through the harness: the round-5 live lens drove the
+signal with `state_write_failed` on lane-key-u3 (its `guide-copy.sh`, no
+screenshot) and read the footer's transient with the guide in Sources, and
+the add form's result line with the form open, each equal to
+`Model.persistFailureMessage` of that reason, with no URL, no `omarchy bar
+set` and no fixture path. What it looks like on a display -- wrapping,
+elision, contrast -- is still UNVERIFIED, and no committed scenario carries
+the text read yet.]**
 
 **Once per episode, a decision with its consequence (round 4, kept in round
 5).** The failure is signalled on the FIRST `saveFailed` of an episode and
@@ -1259,6 +1279,25 @@ honestly: a LOGO write the host refuses outright (no writable bar entry;
 bar set` through the return value, and that advice is sound there because
 the write it describes carries no credential (DQ-U5); nothing observes that
 line on a display either.
+
+**A guide URL waiting for a source (round 7, R17).** Nothing on this screen
+changes, and that is the point: an `epgUrl` the user set from a terminal
+while no source was active -- the unconfigured state, or right after
+removing the active source -- stays on the bar entry until a source becomes
+active, and pressing `g` meanwhile no longer takes it away. Until round 7
+the toggle's write, with nothing outstanding, healed the entry and dropped
+the value with no copy anywhere (observed live on the lagging host by the
+sixth review); and on the echoing host simply picking a saved source here
+(`Enter` / `Space`), or adding the first source with the form, did the same
+through the key mirror's write. Now every write the plugin makes leaves an
+input no source has consumed where it is, and the pick or the add that
+makes a source active attaches the waiting guide URL to it in the same turn
+-- replacing that source's own guide URL, or the EPG typed into the add
+form, when they differ (the second is open as lane A's OQ-W3). The only
+trace is the shell's journal: `the bar entry keeps an input no source has
+adopted yet (epgUrl)`, the key name and never the value. Observed through
+the harness by key-scenario U1-U7 (lane A, lane-key-w1, 2026-10-12; red on
+`--baseline lane-key-v2`); the form route is node only.
 
 ### 5.6 Default label and duplicates (S4, S5)
 

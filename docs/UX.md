@@ -677,6 +677,14 @@ at full opacity. The glyph is `Style.font.displayLarge` in
 treatment). Clicking the command box copies it with `wl-copy` (mouse
 convenience; not required for keyboard users).
 
+Round 7 note (2026-10-12, D-SINK-19 R17; a conflict raised, not resolved).
+This is the state with no active source, and in it a guide URL set with the
+`Optional EPG` command is KEPT in `shell.json` -- on the bar entry, until a
+source becomes active, which R12 rules and R17a now enforces on every write
+the plugin makes. The caption's `(converted; not kept in shell.json)` is
+therefore true only once a source is active. The copy is the lead's and the
+Guide owner's to decide; `UX-SOURCES.md` 3.1.1 carries the request.
+
 ### 4.5 Loading (first fetch, no cache yet)
 
 ```

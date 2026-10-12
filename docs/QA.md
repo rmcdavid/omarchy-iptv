@@ -501,7 +501,34 @@ reporting a failed `rm`; run by the gate with `OMARCHY_IPTV_HARNESS_DIR`
 unset). The live half is SRC-MIG-22 and SRC-MIG-23's round-6 brackets: 64 /
 0 forward, 39 / 25 over `--baseline f275bde` with the `held` half of W1, W3,
 W5, F2 and F5 now `NOFIELD` (lane A's transcripts). No lettered check
-observes the pre-load toggle: no harness reaches that window.
+observes the pre-load toggle: no harness reaches that window. Round 7
+(lane-key-w1 2ccbb74, 2026-10-12; lead ruling R17 after the sixth review
+found an `epgUrl` R12 leaves on the entry with no source active stripped by
+any heal write, invisible to every earlier matrix because their oracle
+checked playlist inputs only) adds the fixture section `retiredKeep` (20
+cases, the lead's whole cube of playlist and EPG x held and unheld x an
+active record or none, run through `Model.retiredInputsToKeep`), unit pins
+for `Model.entryWith` with `keep` and for `Model.adoptPendingEpg`, six
+service-order driver cases under each host shape (`R17 (lag host)` / `R17
+(echo host)`: E1 no active source, the toggle, then a switch; E2 remove the
+active source, a CLI `epgUrl`, the toggle; E3 a switch alone; E4 the in-app
+first add; X1 and X2 the snapshot clause), two structural pins (the funnel
+hands the keep decision to `Model.entryWith` on every owned write; the
+switch and the probe commit adopt before their save and the mirror, the
+remove does not) and the rule-15 pin `R17 / rule 15: the input audit` over
+every owned write the driver makes -- 19 `ok   R17` lines, SRC-MIG-24 and
+SRC-MIG-25. Seen red by lane A: the same test files over c2218f0 (lane-key-v2's
+code plus `dev`) read `2191 checks, 16 failure(s)`, the driver failing on
+the loss itself and the audit naming 8 lost EPG writes; eleven one-decision
+mutations each red (1 to 10 checks). Counts on lane-key-w1: node 2191 / 0
+(+19; read again by lane C on lane-key-w2), python 1057, qml 78;
+`qa-lib-test.sh` 443 / 0 (+2, the `run.sh --host` lever; the
+default-directory pin now unsets `OMARCHY_IPTV_HARNESS_DIR` itself). The
+live half is key-scenario segment U, U1-U4 on the lagging fake host and
+U5-U7 on the echoing one: 71 / 0 forward on 70 lettered checks, 66 / 5 over
+`--baseline lane-key-v2` (U2, U3, U4, U6, U7), lane A's transcripts under
+the scenario's own nested cage. The in-app add with an EPG pending is
+observed in node only.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 
