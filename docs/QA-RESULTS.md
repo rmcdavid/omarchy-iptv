@@ -12996,6 +12996,61 @@ and `playlistUrl` on the bar entry is a documented way for a user to configure
 the plugin directly. It is filed rather than rushed into a security release,
 which is what an id is for.
 
+### D-SINK-19 repair round, two things the lanes surfaced that are the lead's (F-M3-20, D-SRC-14)
+
+Filed the day they were reported, from the code and docs lanes' open
+questions, so they do not wait on the round's integration:
+
+- **F-M3-20.** The `SR` ruling register (`docs/ARCHITECTURE-SOURCES.md`,
+  SR1-SR38 and counting) is cited by id from 29 tracked files -- 40 distinct
+  ids -- and nothing validates the join: a ruling can be renumbered, retired
+  or overturned and every citation reads as current. Rule 13's shape, one
+  register along from the defect ids that `check-defect-ledger.py` already
+  pins. Found by the docs lane re-applying D-SINK-19's documents by hand.
+- **D-SRC-14.** The probe-commit edit of the ACTIVE source (`Service.qml`
+  ~3964-3999) removes the old record, adds the new one, assigns
+  `root.userState`, and only then calls `persistActive(newKey)`: for that
+  one assignment the state carries no valid active key, `configured` reads
+  false and `onConfiguredChanged -> clearSourceData` runs before the new key
+  lands. Pre-existing at f275bde (there the dangling old key resolved to ""
+  in the same intermediate), so the repair round's R3 did not introduce it,
+  only made it legible. A one-assignment flicker on an edit the user just
+  confirmed; P3.
+
+### D-SRC-15: the start-up `state init` chmod reloads the state file over the adoption, and D-SINK-19 removes the backup that hid it
+
+Found live by the D-SINK-19 repair round's harness lane on 2026-10-11 and
+reproduced at the Model layer and on the real form by two lenses the same
+night. The helper's start-up `state init` runs `os.chmod(path, 0o600)` on an
+EXISTING `state.json` -- an inotify `IN_ATTRIB` even when the mode does not
+change -- and `Service.qml`'s `stateFile` FileView has `watchChanges: true`
+and `onFileChanged: reload()`. `applyUserState` is then handed the
+pre-adoption text (not in `recentSaves`, because the first save is parked
+behind `dirsReady`), `Model.stateOnLoad` keeps only the in-memory session
+record, and whatever `adoptActiveSource` adopted on the first reconcile --
+the active key, and any NEW record -- is replaced by the file. The parked
+save then writes the key-less state and the entry flush strips the URL
+with `sourceKey ""`. Measured with a 50 ms poll of the service's pointer
+state: `+1489 ms: KA dirs=False parked=True held=KA` then `+1909 ms: (empty)
+dirs=True parked=False held=None`; the same run with a helper whose `state
+init` prints ok and does nothing keeps `KA` throughout. Two loss shapes on
+the repaired tree: a 0.13.5 install with one source comes up with the
+record kept, the pointer "" and the URL stripped (unconfigured); a URL set
+with `omarchy bar set` while the shell was down is never written as a
+record and is stripped -- the user's input gone with no copy anywhere.
+The shape is OLDER than D-SINK-19: any in-memory change before `dirsReady`
+is lost on that reload, and the first build's immediate entry write plus
+the URL left on the entry recovered a KNOWN record by accident (the "URL as
+accidental backup" the first review named). D-SINK-19 removes the backup,
+so the repair round's forward live arm reads 32 / 12 and the pre-existing
+sources scenario 46 / 22 on that tree, 66 / 0 on dev. A sibling found by the
+same lens: `startCacheLayout` sets `cacheReady` before `dirsReady`, so a
+switch or remove over IPC in that window is undone by the same reload while
+its `cache remove` still deletes the directory. The fix is the service's
+(a reload while a save is parked must not replace newer in-memory state),
+with the helper not touching a file already 0600 as belt and braces and
+the entry flush gated on the save having landed (the round's DQ-B2).
+
 ### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
 
 Three reviewers over one fix. They found three P1s.
@@ -13572,6 +13627,9 @@ failed or cut paste stays silent this release, by decision); the
 primary-selection WRITE on a left-button selection in a revealed URL field
 is user-initiated, pre-existing and recorded in rule 5; the masked-field
 navigation no-ops stay `Guide.qml`-only decisions (cosmetic: the caret is
-hidden while masked). Upstream reports to Omarchy (the host kit's own
-`TextField`) and Qt (the released 6.11.x and 6.12.0 read text on every
-change) are drafted in `docs/ARCHITECTURE.md` section 6 for the lead to file.
+hidden while masked). Upstream: the Omarchy report (the host kit's own `TextField`) is filed as
+omacom/omarchy#15083 on 2026-10-11; the Qt side is QTBUG-149610, confirmed
+to be this bug and already Closed / Fixed for 6.8.10, 6.12.1 and 6.13 with
+no 6.11.x fix version -- a comment asking for one and recording the
+memory-exhaustion half is drafted in `docs/ARCHITECTURE.md` section 6 and
+waits on a tracker login.
