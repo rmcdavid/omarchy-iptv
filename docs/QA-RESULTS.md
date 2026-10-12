@@ -12980,11 +12980,13 @@ to it. That is the right thing to ship today and the wrong thing to still be
 doing in a year, because the credential should not be in a file this plugin
 does not own whatever its mode is.
 
-The reason it is there is structural and the code says so plainly.
-`Service.qml:200`: "the active source is still `playlistUrl` / `epgUrl` on the
-bar entry". `Service.qml:247` derives `activeSourceKey` by matching that URL
-against the records in `state.json`, and `state.json` carries no `activeKey` of
-its own, which was confirmed by reading the live file: its top-level keys are
+The reason it is there is structural and the code said so plainly, at
+1a8dccd (0.13.5; the lines and the function below are that tree's, not
+today's -- the repair deletes the function and the resolver is
+activeKeyOf in Model.js on the repair branch, cited bare until it lands). `Service.qml:200` then: "the active source is still
+`playlistUrl` / `epgUrl` on the bar entry". `Service.qml:247` then derived
+`activeSourceKey` by matching that URL against the records in `state.json`,
+and `state.json` carried no `activeKey` of its own, which was confirmed by reading the live file: its top-level keys are
 version, cacheLayout, favorites, recents, lastPlayed, session, sources,
 savedSearches and hiddenGroups. So the URL has to be on the bar entry for the
 plugin to know which source is active, and the bar entry is what the host
