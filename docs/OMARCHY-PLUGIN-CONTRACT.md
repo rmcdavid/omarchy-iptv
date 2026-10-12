@@ -241,10 +241,11 @@ the host still reports the PRE-write value and drops it on any other value
 -- the echo of our own write included -- after which `settings` is the host's
 copy carrying the same values; the echo path was built idempotent for
 exactly this. Round 5 of D-SINK-19 (R16, 2026-10-12) adds a second SHAPE of
-own write and it behaves the same way: while a state write is parked, in
-flight or failed the logo toggle writes `{ showLogos }` alone with the
-entry's source keys as the host holds them (patch-only; `ARCHITECTURE-
-SOURCES.md` 4.3), and its record is made against the host value exactly as
+own write and it behaves the same way: before the first state load (round
+6) and while a state write is parked, in flight or failed the logo toggle
+writes `{ showLogos }` alone with the entry's source keys as the host
+PUBLISHES them (patch-only; `ARCHITECTURE-SOURCES.md` 4.3; on this
+one-write-behind host that copy can be one write old, which is D-SINK-20), and its record is made against the host value exactly as
 the full write's is, so under the lagging host the override holds
 `showLogos` until the host catches up and lapses on the echo to the same
 value, and under the echoing host it is recorded against the already-echoed
@@ -252,7 +253,20 @@ value and is inert rather than lapsed -- `inForce true` there is not a
 stale override (lane A's DQ-U4). The node driver asserts both shapes for
 both hosts (`R16 (lag host)` / `(echo host)`: `the patch-only write is
 recognised as our own`, lane-key-u1); the echoing host is still modelled,
-not run (D-HOST-4 below). What is NOT yet true: `scripts/dev-harness/shell.qml` models
+not run (D-HOST-4 below). Round 6 pins the other half of rule 9 in that
+writer: the funnel composes the owned patch from `settings` -- the host's
+publish with our own last write laid over it -- and never from
+`hostSettings`, the bare publish. On this host the difference is one write,
+and composed from the publish the key mirror's heal after a toggle carried
+the PRE-toggle `showLogos` back to disk (D-LOGO-2's shape); that one-token
+mutation read node 2,162 / 0 and live 64 / 0 on lane-key-u3, and on
+lane-key-v1 it reddens 7 node checks, among them a structural pin over the
+call and the driver case `a patch-only toggle on a failed disk, then the key
+mirror's heal write once the disk recovers -- showLogos stays as toggled`
+under the lagging host (lane A, 2026-10-12). On the echoing host the two
+are equal, so the mutation reddens no echo-host case (all seven are the
+structural pin or lag-host cases); the code is right under both hosts
+without knowing which one it meets. What is NOT yet true: `scripts/dev-harness/shell.qml` models
 the one-write-behind host only (its line ~759), so the own-write scenarios
 have never run against an echoing host; that is D-HOST-4 on the board, due
 when a release carrying #15082 is on this machine. The section above stays
@@ -627,7 +641,7 @@ are built on:
   (15 on lane-key-s2), so a signal counter stuck at 5-6 for the rest of the
   session (and on lane-key-s2 read every later foreign reload as "save in
   flight"). "A write is in flight" is therefore decided by CONTENT
-  (`stateSaveLanded`: the view's text IS the last text asked for;
+  (`Model.stateSaveLanded`: the view's text IS the last text asked for;
   `stateSavesInFlight` is 0 or 1 and keeps its name for the harness), and an
   earlier write's `saved` changes nothing. Whether a replaced queued write can
   ever be the LAST content is unmeasured (the probe and both live runs say
@@ -644,7 +658,7 @@ are built on:
 - **The view's own atomic write fires `fileChanged` too.** In the probe run
   no `loaded` followed it, while the service's `recentSaves` comment assumes
   one can; which it is was not settled (lane A's DQ-A7) and nothing depends
-  on it, because `reloadDisposition` ignores an own write by its text and a
+  on it, because `Model.reloadDisposition` ignores an own write by its text and a
   parked or in-flight save by its count.
 - **A FileView loaded over a MISSING path does not see the file being
   created by another process.** Over a fresh install (no state directory, no

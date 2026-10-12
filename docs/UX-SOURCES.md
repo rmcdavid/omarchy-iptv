@@ -1206,8 +1206,8 @@ this screen: logged, repaired at the next start (SR25 as amended in
 `ARCHITECTURE-SOURCES.md`); `config_unsafe` keeps its own sentence
 (D-SINK-18). The guide renders the sentence for THE reason the signal
 carried: `Guide.showPersistFailed(reason)` hands it to
-`persistFailureMessage` (in `Model.js`, cited bare until the merge; the three
-reasons are `PERSIST_FAILURE_REASONS`, and an unknown one falls back to
+`Model.persistFailureMessage` (the three reasons are
+`Model.PERSIST_FAILURE_REASONS`, and an unknown one falls back to
 `persist_failed`'s sentence), on the form's result line while a form is open
 and in the footer otherwise. Until round 5 the guide rendered
 `persist_failed`'s sentence for every code, so a write that failed in
@@ -1216,7 +1216,7 @@ advice, and the durable sink rule 5 forbids advising (lane A's DQ-T1, the
 round-4 review's P2; closed on lane-key-u1 b42b5ab). OBSERVED at the code by
 two node checks on lane-key-u1, both red over an export of lane-key-t2:
 the routing read off `Guide.qml` (the reason handed through, the message
-composed by `persistFailureMessage` on both surfaces, never
+composed by `Model.persistFailureMessage` on both surfaces, never
 `persist_failed`'s sentence by name), and the copy for every reason
 `Service.qml` emits -- derived from the service source, none naming a URL,
 only `persist_failed`'s naming `omarchy bar set`, the fallback for an unknown
@@ -1242,8 +1242,12 @@ silent on screen is the stated cost.
 confirm behave as they always do -- `Logos on` / `Logos off` in the footer,
 no sentence about the save -- because that write carries no source and
 raises nothing on this channel. What changed is beneath the screen: while a
-state write is parked, in flight or failed, the toggle writes the logo
-setting ALONE and leaves the entry's source keys as the host holds them,
+state write is parked, in flight or failed -- and, since round 6, in the
+first moments of a shell start before the plugin has read its own state --
+the toggle writes the logo setting ALONE and leaves the entry's source keys
+as the host publishes them (round 5 wrote "holds"; on the host that
+publishes one write behind, the copy it carries can be one write old, which
+is D-SINK-20 and changes nothing on this screen),
 where before round 5 it mirrored the in-memory key and stripped the URL the
 failed write had left on the entry as its only copy (the round-4 review's P1,
 measured live; `ARCHITECTURE-SOURCES.md` 4.3 and SRC-MIG-22). Observed at the

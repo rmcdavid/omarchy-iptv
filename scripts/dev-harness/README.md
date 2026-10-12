@@ -1040,7 +1040,8 @@ counter reads `file-newer` and `save-parked` is absent) and
 -- and D3 green, because a counter observes the decision and not the
 sink; the `return` is pinned structurally in `tests/Model.test.js`). The
 two mutations are PATCH FILES under `spikes/key-mutations/` (round 5; the
-round-4 throwaway branches are deleted), applied to an export and run
+round-4 throwaway branches are retired, cited nowhere, and the lead's to
+delete), applied to an export and run
 through `--tree`; `qa-lib-test.sh` proves each still applies.
 
 **Round 5 (2026-10-12, R16; 63 lettered checks: L1, L2 added).** The
@@ -1090,7 +1091,19 @@ f275bde` **39 passed, 25 failed**, the same letters as round 5, and the
 held half is now red on its own: W1, W3, W5, F2 and F5 read
 `held:NOFIELD` (`held:[NOFIELD]` in W5) where the round-5 transcript read
 `held:NULL`. `sources-scenario.sh` **66 / 0** and `logo-scenario.sh live`
-**33 / 0** under a nested headless cage on the same tree.
+**33 / 0** under a nested headless cage on the same tree. Two gate-side
+repairs the same round: `check.sh` runs `qa-lib-test.sh` with
+`OMARCHY_IPTV_HARNESS_DIR` unset, because one pin asserts the DEFAULT
+transcript directory and an exported variable reddened it over a green tree
+(the old invocation 440 / 1, the new 441 / 0 with it exported); and the two
+load-sensitive timing tests the gate runs (the 10,000-entry parse budget in
+`tests/test_playlist.py`, the stub's real-socket seek in `qa-stub-mpv.py
+--self-test`) say on failure that the number is load-dependent and how to
+re-run that one test alone, with the assertion and the budget unchanged.
+No lettered check observes the round-6 code change (a logo toggle before
+the first state load, which no harness reaches), so `--baseline
+lane-key-u3` was not run (it is expected to read 64 / 0, which nobody has
+measured).
 
 **The weak already-stored check, fixed in round 4.** 'a switch the host
 already stores is not reported as a persist failure' means to make the

@@ -138,9 +138,10 @@ obvious when it happens to you:
   which was measured on a build that never shipped). If that write fails —
   `~/.local/state` not writable, a full disk — your URL is left where you put
   it rather than taken away (turning channel logos on or off in the meantime
-  does not take it away either: while a save is outstanding that write
-  changes the logo setting alone, which a build that never shipped got
-  wrong), the source you set or switched to stays in
+  does not take it away either: while a save is outstanding, and in the
+  first moments after the shell starts, before the plugin has read its own
+  file, that write changes the logo setting alone, which two builds that
+  never shipped got wrong), the source you set or switched to stays in
   effect for this session only, the shell's journal says `state.json could
   not be written`, and the next shell start reads the entry again. A guide
   URL (`epgUrl`) set before you have any playlist is kept on the entry until

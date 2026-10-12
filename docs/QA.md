@@ -423,7 +423,7 @@ URL on the entry and re-adopt it on the next start; a writable disk holds the
 entry until `saved` and writes it exactly once; a switch on an unwritable
 disk returns `ok` and `state_write_failed` follows; a refused mirror is
 logged and not signalled; a burst of coalesced writes still lands; a landed
-write clears the sticky flag), `countReload` checks (`R15`), and three
+write clears the sticky flag), `Model.countReload` checks (`R15`), and three
 structural pins (`R13 (structural)`: the plan is handed the in-flight count
 and the sticky failure; `R13 (structural, SR25 as amended)`: the failure is
 signalled from `onSaveFailed` and never returned; `R14 (structural)`: the
@@ -434,7 +434,7 @@ Seen red by lane A: the same test files over an export of lane-key-s2 read
 entryWrites:1 ... fileSources:2` (the loss, not a missing symbol), and each
 pin red under its own one-line mutation (fifteen, listed in the lane report:
 the `return` deleted, the park deleted, the in-flight branch of the plan
-deleted, the failure checked before in-flight, `stateSaveLanded` returning
+deleted, the failure checked before in-flight, `Model.stateSaveLanded` returning
 true, the count moved after the decision, among them). Counts on lane-key-t1:
 node 2146 / 0, python 1056, qml 78 (neither extended). The live half on
 lane-key-t2 is SRC-MIG-16..21: 62 / 0 forward, 54 / 8 over `--baseline
@@ -453,8 +453,8 @@ parked save that fails then the toggle; a failed switch then the toggle,
 and the heal with nothing outstanding; heal, failed switch, toggle), a
 structural pin (`R16 (structural)`: `setShowLogos` asks the decision with
 the three flags, writes `showLogos` alone with `keepRetired` on `patch`,
-the funnel hands it to `entryWith`, the mirror never passes it) and the
-two round-4-P2 pins (`persistFailureMessage` renders THE reason's sentence
+the funnel hands it to `Model.entryWith`, the mirror never passes it) and the
+two round-4-P2 pins (`Model.persistFailureMessage` renders THE reason's sentence
 over every reason `Service.qml` emits, none naming a URL, only
 `persist_failed`'s naming `omarchy bar set`; the guide hands the reason
 through on both surfaces). Seen red by lane A: the same test files over an
@@ -471,7 +471,37 @@ is SRC-MIG-22 (L1/L2 inside F) and SRC-MIG-23 (the harness's own repairs):
 (L1, L2, F6, F7), 54 / 10 over `--baseline lane-key-s2`, 38 / 26 over
 `--baseline lane-key-r2`, 39 / 25 over `--baseline f275bde`, 58 / 6 and 59
 / 5 for the two mutation patches through `--tree`; `qa-lib-test.sh` 435 /
-0 (+15); `check-tree` 11 / 0 (lane B's transcripts, 2026-10-12).
+0 (+15); `check-tree` 11 / 0 (lane B's transcripts, 2026-10-12). Round 6
+(lane-key-v1 78ff442, 2026-10-12; R16 amended after the fifth review found
+the one state the three flags could not name, before the first state load)
+re-levels the `ownedWrite` section to 16 cases, the cube of
+`Model.ownedWriteMode`'s four inputs (`stateLoaded` first, then the three
+save flags; the cube check's title now ends `the decision takes the four
+inputs and nothing else`), adds four service-order driver cases under each
+host shape (`R16 (lag host), round 6:` / `(echo host), round 6:` -- the
+toggle BEFORE the first state load on a writable and an unwritable disk; a
+patch-only toggle and then the key mirror's heal, `showLogos` staying as
+toggled; a switch while the directories are not ready, then a toggle; a
+switch, then a toggle before `saved`), re-levels the structural pin to the
+four inputs, and adds `R16 / D-LOGO-2 (structural, round 6): writeOwnedEntry
+composes the owned patch from root.settings, the own-write overlay, and
+never from root.hostSettings`, the driver composing from whichever token
+`Service.qml` names there. Seen red by lane A: the same test files over
+lane-key-u3's code read `2171 checks, 5 failure(s)` (the fixture, the cube,
+the pre-load case under both hosts, the structural pin; the driver's got is
+the loss, `urlKept:false mirror:"" patched:0`), and one-decision mutations
+on an export of 78ff442 read 4 red with `stateLoaded` ignored, 4 with
+`savePending` ignored, 4 with `savesInFlight` ignored (the two routes the
+cube alone had pinned), 7 with the funnel composing from `hostSettings`
+(round 5: 0), and 1 each with the service handing `stateLoaded: true` or
+omitting it. Counts on lane-key-v1: node 2171 / 0 (+9; 25 `ok   R16`
+lines), python 1057 (one test from `dev`), qml 78; `qa-lib-test.sh` 441 / 0
+(+6, `pointerState` now omitting a field the tree lacks, and `run.sh clean`
+reporting a failed `rm`; run by the gate with `OMARCHY_IPTV_HARNESS_DIR`
+unset). The live half is SRC-MIG-22 and SRC-MIG-23's round-6 brackets: 64 /
+0 forward, 39 / 25 over `--baseline f275bde` with the `held` half of W1, W3,
+W5, F2 and F5 now `NOFIELD` (lane A's transcripts). No lettered check
+observes the pre-load toggle: no harness reaches that window.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 
