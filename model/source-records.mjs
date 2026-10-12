@@ -508,11 +508,17 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   if (adoptEpg && epg.text !== "" && out.key !== "") {
     out.epgConsumed = true
     var active = findSource(out.state.sources, out.key)
-    if (epg.ok && active && (epg.url !== str(active.epgUrl) || (seenAt > 0 && seenAt !== epgSetAtOf(active)))) {
+    // The guide URL the record ALREADY holds is not re-stamped: no held
+    // value can be waiting for a record while one is active (R19b holds only
+    // with none active, and every move clears it), so a later time on an
+    // equal value is never compared with anything -- and the state write it
+    // would cost defers the strip behind R13 for nothing (the round-9 matrix
+    // measured a re-set of the same value made invisible that way).
+    if (epg.ok && active && epg.url !== str(active.epgUrl)) {
       var patch = { epgUrl: epg.url }
       if (seenAt > 0) patch.epgSetAt = seenAt
       out.state = replaceSource(out.state, out.key, patch)
-      out.adoptedEpg = epg.url !== str(active.epgUrl)
+      out.adoptedEpg = true
     }
   } else if (adoptEpg && epg.text !== "") {
     // R19b: NO record can take it. A valid one is held in the state as
