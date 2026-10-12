@@ -131,6 +131,15 @@ chmod 600 "$STATE"
 
 # A silent listener: accepts the TCP handshake and never answers, so a probe
 # against it hangs until the helper's timeout (20 s) -- long enough to cancel.
+# A RE-RUN in the same harness directory found the previous run's port file:
+# `run.sh clean` leaves it, the background listener's `>` truncates it only
+# once that child has forked, and qa_wait_nonempty below ran first, saw the
+# stale non-empty file, and `cat` then read the just-truncated empty one --
+# "the silent listener reported a usable port" red on the second run of
+# 2026-10-12 and green on the first (C6's shape one step earlier). Removed
+# here, before the listener starts; key-scenario.sh clears its cage's
+# `display` / `child.pid` files the same way before each start.
+rm -f "$SCRATCH/silent.port" "$SCRATCH/silent.err"
 python3 - >"$SCRATCH/silent.port" 2>>"$SCRATCH/silent.err" <<'PY' &
 import socket, sys, time
 s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(4)
