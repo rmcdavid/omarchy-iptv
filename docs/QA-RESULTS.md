@@ -13110,6 +13110,40 @@ switch. The sentence "one `saved` per `setText`" that the round-3 documents
 carried is false for a burst and was replaced on the round-4 docs branch
 with these numbers (`docs/OMARCHY-PLUGIN-CONTRACT.md`, SR38's amendment).
 
+### D-SINK-20: the patch-only logo write re-carries a stale URL on the lagging host
+
+**Filed 2026-10-12 from the D-SINK-19 round-5 lenses; P3; open; never
+shipped.** Round 4 found the logo toggle was the second writer of the bar
+entry and stripped the only copy of a URL after a failed state write. The
+round-5 ruling R16 makes that toggle, while a state write is parked, in
+flight or failed, write `showLogos` alone and carry every other key of the
+entry over as it is. "As it is" means as the host PUBLISHES it, because the
+write composes from `barConfig`; on a host through 4.0.4 that copy is one
+write behind (CLAUDE.md rule 9). So in one sequence -- a URL set with
+`omarchy bar set`, adopted and stripped by a heal write, then a failed
+state write, then a logo toggle -- the toggle puts the stripped URL back on
+the stored entry, and the next owned write strips it again. The live lens
+drove exactly that under a nested cage with the fake host modelling the
+lag (`scratchpad/rev-key5-live/logo-lag.sh` in the session scratch):
+stored entry `['B', False, True]` after the heal, `playlistUrl back on the
+STORED entry? true` after the toggle, gone after a second toggle,
+`state.json` unchanged throughout, leak scan 0. The data-loss lens bounded
+it over 48,312 driven sequences: 63 re-carries, all under the lagging host,
+every one a URL that was the user's own input one write earlier and already
+a record in the 0600 state file (an audit for a re-carried URL with no file
+record read 0); the echoing host never re-carries.
+
+Recorded rather than fixed, and the reason is that the obvious fix is
+wrong. Keeping the retired keys only while no own-write override is in
+force would, in the round-4 sequence -- a URL whose state write failed,
+then the toggle on, then the toggle off -- compose the second write from
+the published entry with the override in force and strip the only copy of
+the input, which is the round-4 P1 through the same writer. The correct
+narrowing has to know whether the last state text that LANDED holds a
+record for the published URL, which is a change to what the service keeps,
+not to the toggle. Meanwhile the shield keeps the file 0600 (D-SINK-18),
+and the exposure ends with the next owned write.
+
 ### D-REL-5: the shipped Model.js is over the marketplace scanner's file limit, and nothing here could have gone red for it
 
 **Found 2026-10-12 reading the verification request for 0.13.5
