@@ -1612,8 +1612,17 @@ contents in an error; the shell runs it through the same `Process`, parses
 with `Model.parseClipboardReply`, keeps its watchdog as the outer bound and
 emits `clipboardText` only on ok. The helper is the process allowed to hold
 the bytes briefly and die; the shell is not.
-**Upstream, drafted here for the lead to file.** Two reports, because the
-two parties can each act and neither can act for the other.
+**Upstream, drafted here and filed.** Two reports, because the two parties
+can each act and neither can act for the other. The Omarchy report went in
+as omacom/omarchy#15083 on 2026-10-11, in the form of #12009. The Qt side:
+QTBUG-149610 IS this bug (summary "TextInput canPaste is recomputed eagerly
+on QClipboard::dataChanged() (2 s stall per focus-in on Wayland)", created
+2026-08-29, Closed / Fixed, affected 6.8.8, 6.10.3, 6.11.0-6.11.2 and 6.12.0
+Beta3, fix versions 6.8.10, 6.12.1 and 6.13 -- and NO 6.11.x fix version,
+although the 6.11 branch carries the commit), read through the tracker's
+public REST endpoint the same day. The comment below asks for a 6.11.x fix
+version and records the memory-exhaustion half; it waits on a tracker
+login, which the lead's tooling does not hold.
 
 > **To Omarchy (omacom/omarchy), against `Ui/TextField.qml` on 4.0.4.**
 > `Ui/TextField.qml` inherits Qt Quick Controls `TextField` and leaves
@@ -1652,8 +1661,7 @@ two parties can each act and neither can act for the other.
 > ten-line QML files (editable, read-only, no field) and one `wl-copy`,
 > available on request.
 
-> **To Qt, as a comment on QTBUG-149610 (or a new report if that bug turns
-> out not to be this one): released 6.11.2 and 6.12.0 read the whole
+> **To Qt, as a comment on QTBUG-149610 (confirmed to be this bug): released 6.11.2 and 6.12.0 read the whole
 > clipboard synchronously on every `dataChanged`; please ship `7d0a433a`.**
 > `QQuickTextInput::q_canPasteChanged()` in v6.11.2
 > (`qquicktextinput.cpp:3010`) and v6.12.0 (`:3009`) evaluates
