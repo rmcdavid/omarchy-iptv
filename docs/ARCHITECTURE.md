@@ -1404,8 +1404,7 @@ login, which the lead's tooling does not hold.
 > ten-line QML files (editable, read-only, no field) and one `wl-copy`,
 > available on request.
 
-> **To Qt, as a comment on QTBUG-149610 (or a new report if that bug turns
-> out not to be this one): released 6.11.2 and 6.12.0 read the whole
+> **To Qt, as a comment on QTBUG-149610 (confirmed to be this bug): released 6.11.2 and 6.12.0 read the whole
 > clipboard synchronously on every `dataChanged`; please ship `7d0a433a`.**
 > `QQuickTextInput::q_canPasteChanged()` in v6.11.2
 > (`qquicktextinput.cpp:3010`) and v6.12.0 (`:3009`) evaluates
