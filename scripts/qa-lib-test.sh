@@ -1224,8 +1224,9 @@ is "F and L each set their own log mark before the call they count, and U before
 # that follow a failed or interrupted write (O and F) reseed the key the
 # entry was OBSERVED to carry, never a constant. Round 7: U drives the same
 # key path (3 more) and restarts twice over the observed entry (2 more).
-is "L and U reach setShowLogos through the guide's Sources key path, and F and U restart over the observed key as O does" \
-   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "6 4"
+# Round 8: Z restarts once over the observed entry after its remove (1 more).
+is "L and U reach setShowLogos through the guide's Sources key path, and F, U and Z restart over the observed key as O does" \
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "6 5"
 # The two one-decision mutations the round-4 checks were seen red against
 # are PATCH FILES under spikes/key-mutations/ (the lead's ruling: never a
 # branch that can be merged by accident). Each must still APPLY to this

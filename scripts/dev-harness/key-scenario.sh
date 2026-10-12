@@ -185,6 +185,24 @@
 #       it, and the echoing host publishes the stripped entry at once
 #                                       <- R17b, the echo half of the P1
 #   U7  a restart over that (echoing host) stands on A with the EPG on A
+#   K1  the lagging host, a REFUSED playlistUrl beside a pending EPG (no
+#       source active): the shell SETTLES -- at most 2 entry writes and 50
+#       CPU ticks in a 5 s window -- the refused value off the stored entry,
+#       the EPG on it                     <- R18b, the round-7 data-loss P1-B
+#   K2  the same entry on the ECHOING host settles (control)
+#   K3  the echoing host with the refused value WRAPPED IN WHITESPACE
+#       settles and drops it                          <- R18a, P1-A's loop
+#   Z1  a whitespace-wrapped CLI playlist adopted, then removed: the stored
+#       entry carries no playlistUrl                  <- R18a, P1-A
+#   Z2  the restart over that does not resurrect the removed source
+#   Z3  a whitespace-wrapped REFUSED credential beside a working source
+#       leaves the stored entry; the source stays active   <- R18a, P1-A
+#   A1  an in-app add (harness addSource) with no form EPG while a CLI
+#       epgUrl is pending: the new record holds it, the entry drops it
+#                                          <- R17b's probe commit, live
+#   A2  the same add with the form's OWN guide URL: the form's value wins,
+#       the pending one is superseded, stripped and logged by name
+#                                                   <- R18d (OQ-W3 ruled)
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -285,6 +303,19 @@
 # restarts over the entry as the host stored it AFTER the toggle (the key
 # observed stored, as O does it), so on a tree without R16 F6 and F7 go
 # red with L1 and L2.
+#
+# K, Z AND A, ROUND 8 (R18). The round-7 data-loss lens found two P1s
+# live, each in its own driver, and this file had no refused value and no
+# whitespace-wrapped value anywhere: K lifts loop-child.sh (a refused
+# playlistUrl beside an EPG R12 holds: the lagging host looped at about
+# 3,000 entry writes a second, measured as writes and CPU ticks of the
+# shell's own pid over a 5 s window), Z lifts resurrect-child.sh and
+# MODE=badws (a whitespace-wrapped input never counted as consumed: a
+# removed source came back, a refused credential stayed in shell.json), and
+# A drives the in-app add's probe commit through the harness addSource
+# verb, which the round-7 live lens found no segment reaching. The input
+# values are never printed: key names from hostEntry, the record's EPG
+# compared inside python, the window's numbers on one stderr line.
 #
 # U, ROUND 7 (R17). The round-6 data-loss lens found an input no oracle
 # had covered for five rounds, because every matrix checked the PLAYLIST
@@ -1228,6 +1259,118 @@ shell_arm() {
   ck "U7 a restart over that (echoing host) stands on A with the EPG on A's record" \
      "$(svc "['activeSourceKey']") $(svc "['channels']") on:$(epg_on) records:$(sj "len(d['sources'])")" "$KA 20 on:$KA records:2"
 
+  echo "== K: a REFUSED playlistUrl beside a pending EPG SETTLES, on both hosts (R18b, R18a; the round-7 data-loss lens's two loops) ($(elapsed) s)"
+  # Lifted from the round-7 data-loss lens's live driver (rev-key7-dataloss/
+  # loop-child.sh). Two saved sources, NONE active, an epgUrl R12 leaves on
+  # the entry, and a playlistUrl the plugin REFUSES (an ftp:// URL carrying a
+  # credential). On lane-key-w2 the lagging host looped: the heal stripped
+  # the refused value from the STORED entry, the host kept publishing the
+  # pre-write entry, every reconcile asked for the strip again, the no-op
+  # write reassigned the own-write record, `settings` re-evaluated and
+  # reconcile ran again -- about 3,000 entry writes a second and the shell's
+  # CPU saturated (the lens: 15,003 writes and 549 ticks in 5 s). The
+  # echoing host settles on the bare value (K2, a control there) and looped
+  # on a WHITESPACE-wrapped one (K3), which round 7's keep decision never
+  # counted as consumed (P1-A). The window opens 2 s after the shell
+  # settles and runs 5 s; writes are the harness log's updateEntryInline
+  # lines (a no-op hand-over logs one too), ticks are utime + stime of the
+  # shell's own pid. Bounds: at most 2 writes and 50 ticks (0.5 s of CPU)
+  # in the window; an idle shell reads 0 and 0, the loop thousands.
+  loop_window() {
+    local w0 t0 w1 t1
+    sleep 2
+    w0=$(log_since 'updateEntryInline'); t0=$(awk '{print $14 + $15}' "/proc/$SHELL_PID/stat" 2>/dev/null)
+    sleep 5
+    w1=$(log_since 'updateEntryInline'); t1=$(awk '{print $14 + $15}' "/proc/$SHELL_PID/stat" 2>/dev/null)
+    echo "   measured on shell pid $SHELL_PID: $((w1 - w0)) entry writes and $((t1 - t0)) CPU ticks in 5 s (CLK_TCK $(getconf CLK_TCK))" >&2
+    if [[ ! $w0$w1 =~ ^[0-9]+$ || ! $t0$t1 =~ ^[0-9]+$ ]]; then echo unmeasured
+    elif (( w1 - w0 <= 2 && t1 - t0 <= 50 )); then echo settled
+    else echo LOOP; fi
+  }
+  seed ""
+  start_shell --playlist "$BAD" --epg "$EPG" --source-key "" || true
+  verdict=$(loop_window)
+  ck "K1 the lagging host with a refused playlistUrl beside a pending EPG SETTLES (at most 2 entry writes and 50 CPU ticks in 5 s), the refused value is off the stored entry and the EPG stays on it (R12)" \
+     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) on:$(epg_on)" \
+     "settled host:lag playlistUrl:no epgUrl:yes on:none"
+  seed ""
+  start_shell --host echo --playlist "$BAD" --epg "$EPG" --source-key "" || true
+  verdict=$(loop_window)
+  ck "K2 the echoing host with the same entry settles too (control: the echo host settled on a bare value on every tree), the refused value off the stored entry, the EPG on it" \
+     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl)" \
+     "settled host:echo playlistUrl:no epgUrl:yes"
+  seed ""
+  start_shell --host echo --playlist "  $BAD " --epg "$EPG" --source-key "" || true
+  verdict=$(loop_window)
+  ck "K3 the echoing host with the refused value WRAPPED IN WHITESPACE (as \`omarchy bar set\` stores it) settles, and the refused credential leaves the stored entry once reported" \
+     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl)" \
+     "settled host:echo playlistUrl:no epgUrl:yes"
+
+  echo "== Z: whitespace-wrapped inputs are compared the way adoption compares (R18a, the round-7 data-loss lens's P1-A) ($(elapsed) s)"
+  # Lifted from the lens's resurrect-child.sh and loop-child.sh MODE=badws.
+  # `omarchy bar set` hands the value to `jq --arg` as typed, so a pasted
+  # URL can carry surrounding whitespace onto the entry; settingsFrom trims
+  # it and round 7's keep decision did not, so the value never matched its
+  # own snapshot. Z1/Z2: a whitespace-wrapped CLI playlist adopted and then
+  # REMOVED -- on lane-key-w2 the remove's own mirror write carried it back
+  # onto the stored entry and the next start re-adopted the removed source
+  # and made it active. Z3: a whitespace-wrapped REFUSED credential beside a
+  # working source stayed on the stored entry for good.
+  seed "$KA"
+  start_shell --playlist "  $B  " --source-key "$KA" || true
+  wait_for "$KB" 10 svc "['activeSourceKey']" >/dev/null || true
+  res=$(ipc removeSource "$KB")
+  wait_for "" 10 hf "['stored']" >/dev/null || true
+  sleep 1.0
+  ck "Z1 a whitespace-wrapped CLI playlist adopted (B), then that source removed: the removal stands in memory and in the file, and the stored entry carries NO playlistUrl" \
+     "ok:$(qa_json_field "d['ok']" "$res") active:[$(svc "['activeSourceKey']")] records:$(sj "len([s for s in d['sources'] if s['key'] == '$KB'])") playlistUrl:$(stored_has playlistUrl)" \
+     "ok:true active:[] records:0 playlistUrl:no"
+  seed_args=(--playlist none); seed_key="(none)"
+  [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
+  [[ $(stored_has playlistUrl) == yes ]] && seed_args=(--playlist "  $B  " "${seed_args[@]:2}")
+  stop_shell
+  echo "   restarting over the entry as stored: playlist $([[ ${seed_args[1]} == none ]] && echo none || echo '(the removed source, as stored)'), sourceKey $seed_key"
+  start_shell "${seed_args[@]}" || true
+  sleep 1.0
+  ck "Z2 the next start over that entry does NOT resurrect the removed source: no record for B, not active" \
+     "records:$(sj "len([s for s in d['sources'] if s['key'] == '$KB'])") active:[$(svc "['activeSourceKey']")]" "records:0 active:[]"
+  seed "$KA"
+  start_shell --playlist "  $BAD"$'\t' --source-key "$KA" || true
+  wait_for no 10 stored_has playlistUrl >/dev/null || true
+  sleep 0.5
+  ck "Z3 a whitespace-wrapped REFUSED credential beside a working source leaves the stored entry once reported, and the working source stays active" \
+     "playlistUrl:$(stored_has playlistUrl) active:$(svc "['activeSourceKey']") $(svc "['configured']")" "playlistUrl:no active:$KA true"
+
+  echo "== A: the in-app add with an EPG pending, through the harness addSource verb (R17b, R18d / OQ-W3 ruled) ($(elapsed) s)"
+  # The probe commit of an in-app add (Service's sourceProbeProc exit), which
+  # U never reached live (the round-7 live lens's P3: the commit's R17b call
+  # could be removed with this scenario green). A1: the form carries no
+  # guide URL, and the pending CLI epgUrl lands on the new record (R17b).
+  # A2: the form carries its OWN guide URL, and the lead's OQ-W3 ruling
+  # (R18d) makes it win -- the user's later explicit input for the same slot
+  # supersedes the pending value, which the commit's mirror strips and the
+  # service logs by key name only. On lane-key-w2 the stale CLI value
+  # replaced the form's on the record and the form's value existed nowhere.
+  form_on() { sj "','.join(sorted(s['key'] for s in d['sources'] if s.get('epgUrl') == '$FORM_EPG')) or 'none'"; }
+  seed ""
+  start_shell --playlist none --epg "$EPG" --source-key "" || true
+  res=$(ipc addSource "$D" "" "")
+  wait_for "$KD" 20 svc "['activeSourceKey']" >/dev/null || true
+  wait_for no 10 stored_has epgUrl >/dev/null || true
+  sleep 0.5
+  ck "A1 an in-app add with NO guide URL in the form while a CLI epgUrl is pending: the new record is active and holds the pending EPG, and the stored entry no longer carries it" \
+     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") on:$(epg_on) epgUrl:$(stored_has epgUrl) stored:$(hf "['stored']")" \
+     "ok:true active:$KD on:$KD epgUrl:no stored:$KD"
+  seed ""
+  start_shell --playlist none --epg "$EPG" --source-key "" || true
+  res=$(ipc addSource "$D" "$FORM_EPG" "")
+  wait_for "$KD" 20 svc "['activeSourceKey']" >/dev/null || true
+  wait_for no 10 stored_has epgUrl >/dev/null || true
+  sleep 0.5
+  ck "A2 an in-app add whose FORM carries its own guide URL while a CLI epgUrl is pending: the form's value is on the new record, the pending value on no record and off the stored entry, superseded and logged by key name once" \
+     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") form:$(form_on) pending:$(epg_on) epgUrl:$(stored_has epgUrl) logged:$(log_since 'supersedes a pending input \(epgUrl\)')" \
+     "ok:true active:$KD form:$KD pending:none epgUrl:no logged:1"
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -1251,6 +1394,10 @@ python3 "$ROOT/scripts/gen-playlist.py" --channels 7 --groups 2 --seed 2 --out "
 python3 "$ROOT/scripts/gen-playlist.py" --channels 11 --groups 3 --seed 3 --out "$WORK/fixtures/d.m3u" >/dev/null 2>&1
 A="$WORK/fixtures/a.m3u"; B="$WORK/fixtures/b.m3u"; C="$WORK/fixtures/c.m3u"; D="$WORK/fixtures/d.m3u"
 EPG="http://u:p@127.0.0.1:9/epg.xml?token=abc&kind=x"
+# Round 8: a value the plugin REFUSES (ftp://, with a credential P2 scans
+# for) and a second guide URL, the one an add form carries (A2).
+BAD="ftp://u:p@127.0.0.1:9/refused.m3u"
+FORM_EPG="http://127.0.0.1:9/form-epg.xml?token=abc&kind=form"
 
 instrument
 [[ $MODE == live ]] && shell_arm
@@ -1258,9 +1405,10 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 70, both arms          -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 78, both arms          -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
-# day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7.)
+# day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
+# the same day, round 8: K1..K3, Z1..Z3, A1, A2.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -1270,7 +1418,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=70
+  EXPECTED_CHECKS=78
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
