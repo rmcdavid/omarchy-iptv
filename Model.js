@@ -787,8 +787,8 @@ function prepareChannels(channels) {
 
 // The single "this channel has no number" answer, so every failure path
 // returns the same shape and no caller has to test for a partial one.
-var CHNO_NONE = { ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 }
-var CHNO_NO_MATCH = { kind: "none", channelIndex: -1, key: "", label: "", matches: 0, ordinal: 0 }
+var CHNO_NONE = Object.freeze({ ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 })
+var CHNO_NO_MATCH = Object.freeze({ kind: "none", channelIndex: -1, key: "", label: "", matches: 0, ordinal: 0 })
 var CHNO_NO_NUMBERS_TEXT = "No channel numbers in this playlist"
 
 function chnoFail() {
@@ -4716,7 +4716,7 @@ function configShieldArgv(helperPath) {
 // and the verdict string. Everything else is `exposed`: a crashed helper, no
 // output at all, an unparseable line, one of the verb's other verdicts
 // (absent, symlink, foreign, not_regular, replaced, error) and -- the case
-// this is really written for -- a verdict string this version of Model.js has
+// this is really written for -- a verdict string this version of the model has
 // never heard of. A helper that learns a new verdict later cannot have it
 // read as "private" by an older guide.
 //
@@ -5013,7 +5013,7 @@ function moveTrackCursor(rows, index, delta) {
 }
 
 // Whether an open picker should ask the player about the channel that is
-// playing now. Pure, and in Model.js rather than inline in the service,
+// playing now. Pure, and in the model rather than inline in the service,
 // because the inline version was a self-sustaining loop and no test in the
 // suite could reach it (rule 12).
 //
@@ -9707,7 +9707,7 @@ function hasControlChars(text) {
 }
 
 // Console line for a record the reader drops (D-SRC-09): the key only,
-// never the URL. Model.js is otherwise silent; node has a console too.
+// never the URL. The model is otherwise silent; node has a console too.
 function warnState(message) {
   if (typeof console !== "undefined" && console && typeof console.warn === "function") console.warn("omarchy-iptv: state: " + message)
 }
