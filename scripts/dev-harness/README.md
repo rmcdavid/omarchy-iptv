@@ -946,8 +946,12 @@ this directory had to move with it.
   `stateReloadsIgnored`, and since round 4 `stateReloadsByReason`, one
   number per `Model.reloadDisposition` reason: numbers and booleans, never
   a URL -- the service's `lastSaveText` beside them is the state.json text
-  and is deliberately not reported), every field optional so a
-  pre-change tree answers null rather than throwing.
+  and is deliberately not reported), every field optional. Since round 6
+  a field the tree under test does not have is OMITTED rather than
+  reported as null (`HarnessLib.pointerStateOf` in `harness-lib.js`, which
+  `qa-lib-test.sh` drives), so the reader answers NOFIELD for it; before,
+  a pre-change tree published a present null and was indistinguishable
+  from a service holding nothing.
 * **The scenarios (R7).** The live arm runs the real `Service.qml` under a
   nested cage, IPC only, over ten seeded starts, each from its own
   `state.json`, caches and entry so a red is attributable to one ruling:
@@ -989,14 +993,18 @@ this directory had to move with it.
   directory its mode back on every exit, because a TERM inside F used to
   leave it 0500 and `rm -rf` of the harness directory then stopped on
   `state.json` (`run.sh clean` now tolerates that directory too; both
-  measured in round 5). The one window
+  measured in round 5; since round 6 a `clean` whose `rm` still fails
+  says so and exits 1 instead of printing `cleaned`). The one window
   outside that seam, a TERM between `--detach` returning and `qs.pid`
   being read, is ended by the nested compositor going away rather than by
   `reap` (which is gated off there); the round-3 review measured it.
   `qa_json_field` answers `NULL` for a key that is present and null and
   `NOFIELD` only for one that is absent, so a `held:NULL` want cannot be
   met by a tree with no `pendingEntryKey` at all (round 4's P3; the three
-  `held:` wants say NULL).
+  `held:` wants say NULL) -- true only since round 6, when `pointerState`
+  stopped folding an absent property to null: the round-5 split was at the
+  reader alone, and `held:NULL` was green on f275bde (the round-5 live
+  lens's P2).
 
 **What the first run found (2026-10-11, lane-key-r1 at f84ee50), now
 D-SRC-15.** The key adopted at the first start was dropped when the

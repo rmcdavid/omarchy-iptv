@@ -624,8 +624,15 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     # is confined to those five paths, never the directory itself.
     chmod -R u+rwX "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/config" \
       "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots" 2>/dev/null
-    rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/config" \
-      "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"
+    # DQ-B17: the rm's own status is the verb's answer. This printed
+    # `cleaned` with rc 0 whatever rm did, so a directory it could not
+    # remove (a parent left without `w`, which the chmod above deliberately
+    # does not touch) read as clean and the next run inherited it.
+    if ! rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/config" \
+         "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"; then
+      echo "[run.sh] clean FAILED: could not remove everything under $SCRATCH (rm reported the paths above)" >&2
+      exit 1
+    fi
     echo "[run.sh] cleaned $SCRATCH"
     ;;
   scenario)

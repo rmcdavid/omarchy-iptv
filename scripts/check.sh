@@ -513,7 +513,12 @@ fi
 step "scripts/qa-lib-test.sh (the harness predicates)"
 # The tooling this project tests itself with is tested here. Every predicate
 # is driven against the condition that used to make its check pass silently.
-if bash "$ROOT/scripts/qa-lib-test.sh" >"$CHECK_TMP/qalib.log" 2>&1; then
+# Run with OMARCHY_IPTV_HARNESS_DIR UNSET (D-SINK-19 round 6, the round-5
+# live lens's P3): the suite pins the DEFAULT transcript directory, and a
+# gate started from a shell that exported the variable for a scenario run
+# went red on that pin over a green tree. The suite sets the variable
+# itself, per call, wherever it means to.
+if env -u OMARCHY_IPTV_HARNESS_DIR bash "$ROOT/scripts/qa-lib-test.sh" >"$CHECK_TMP/qalib.log" 2>&1; then
   ok "harness predicates ($(grep -c '^PASS' "$CHECK_TMP/qalib.log") checks)"
   if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$CHECK_TMP/qalib.log"; fi
 else

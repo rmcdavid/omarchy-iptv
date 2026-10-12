@@ -1148,8 +1148,33 @@ is "key-scenario.sh's cleanup records the live shell's children by parent pid (n
 # total are the two informational `echo` lines beside D and N.
 is "key-scenario D3 and W read the per-reason counter (save-parked), and only informational lines read the ignored total" \
    "$(qa_count 'save-parked:\$\(reason_some save-parked\)' "$KS") $(qa_count '\$\(pf "\[.stateReloadsIgnored.\]"\)' "$KS") $(qa_count '^ *echo .*\$\(pf "\[.stateReloadsIgnored.\]"\)' "$KS")" "3 2 2"
-is "shell.qml's pointerState reports stateReloadsByReason and never the service's lastSaveText" \
-   "$(qa_count 'stateReloadsByReason: s\.stateReloadsByReason === undefined \? null : s\.stateReloadsByReason' "$ROOT/scripts/dev-harness/shell.qml") $(qa_count 's\.lastSaveText' "$ROOT/scripts/dev-harness/shell.qml")" "1 0"
+# Round 6 (the round-5 live lens's P2): pointerState is now
+# HarnessLib.pointerStateOf, DRIVEN here with fake services and read back
+# through qa_json_field, the reader key-scenario uses. It used to fold
+# `undefined` to null on every field, so a tree LACKING pendingEntryKey
+# published a present null and `held:NULL` was green on f275bde: the
+# reader's NULL/NOFIELD split never saw an absence. Seen red with the fold
+# put back into pointerStateOf (the first pin reads NULL).
+ps_probe() { node -e '
+const H = require(process.argv[1])
+const which = process.argv[2]
+const svc = { userState: { activeKey: "abcd1234", sources: [{}, {}] }, stateLoaded: true, dirsReady: true, stateSavePending: false,
+              stateReloadsByReason: { "own-write": 1 }, lastSaveText: "{\"sources\":[{\"url\":\"http://u:p4ss@h.test/x\"}]}" }
+if (which === "held-null") svc.pendingEntryKey = null
+if (which === "held-key") svc.pendingEntryKey = "d990c2e4"
+const out = which === "bare" ? H.pointerStateOf({}) : which === "none" ? H.pointerStateOf(null) : H.pointerStateOf(svc)
+process.stdout.write(JSON.stringify(out))' "$ROOT/scripts/dev-harness/harness-lib.js" "$1" 2>/dev/null; }
+is "pointerState OMITS a property the service lacks, so a tree without pendingEntryKey reads NOFIELD (driven)" \
+   "$(qa_json_field "d['pendingEntryKey']" "$(ps_probe lacking)")" "NOFIELD"
+is "and a service holding nothing reads NULL, one holding a key reads the key" \
+   "$(qa_json_field "d['pendingEntryKey']" "$(ps_probe held-null)") $(qa_json_field "d['pendingEntryKey']" "$(ps_probe held-key)")" "NULL d990c2e4"
+is "a bare service answers ok and nothing else: none of the twelve fields, no memory key, no count, is reported as null" \
+   "$(ps_probe bare)" '{"ok":true}'
+is "no service at all is no_service, as before" "$(qa_json_field "d['error']['code']" "$(ps_probe none)")" "no_service"
+is "pointerState reports stateReloadsByReason and never the service's lastSaveText or a URL in it" \
+   "$(qa_json_field "d['stateReloadsByReason']['own-write']" "$(ps_probe held-null)") $(ps_probe held-null | grep -c 'lastSaveText\|p4ss\|://')" "1 0"
+is "shell.qml answers pointerState with the lifted function and reads no service field itself" \
+   "$(qa_count '^      return JSON\.stringify\(HarnessLib\.pointerStateOf\(serviceLoader\.item\)\)$' "$ROOT/scripts/dev-harness/shell.qml") $(qa_count 's\.lastSaveText|s\.pendingEntryKey' "$ROOT/scripts/dev-harness/shell.qml")" "1 0"
 # sources-scenario.sh's already-stored check (round-2 live lens, fixed in
 # round 4): the stored side is seeded with the KEY the switch will mirror,
 # and the host's `!dirty` line is what the check waits for -- a
@@ -1199,6 +1224,15 @@ chmod 0500 "$km_clean/state/omarchy-iptv"
 OMARCHY_IPTV_HARNESS_DIR=$km_clean "$ROOT/scripts/dev-harness/run.sh" clean >/dev/null 2>&1; km_rc=$?
 is "run.sh clean removes a state directory a signalled F left 0500" \
    "$km_rc $([[ -e $km_clean/state ]] && echo left || echo gone)" "0 gone"
+chmod -R u+rwX "$km_clean" 2>/dev/null; rm -rf "$km_clean"
+# DQ-B17 (round 6): an rm that fails for a reason the chmod does not reach
+# -- here the harness directory itself 0500, which clean deliberately
+# never chmods -- is REPORTED, with a non-zero exit, and `cleaned` is not
+# printed. The old verb printed `[run.sh] cleaned` with rc 0 and left it.
+km_clean=$TMP/clean-parent; mkdir -p "$km_clean/state/omarchy-iptv"; chmod 0500 "$km_clean"
+km_out=$(OMARCHY_IPTV_HARNESS_DIR=$km_clean "$ROOT/scripts/dev-harness/run.sh" clean 2>&1); km_rc=$?
+is "run.sh clean reports an rm it could not complete and exits non-zero (never 'cleaned')" \
+   "$km_rc $(grep -c 'cleaned' <<<"$km_out") $(grep -c 'could not remove' <<<"$km_out") $([[ -e $km_clean/state ]] && echo left || echo gone)" "1 0 1 left"
 chmod -R u+rwX "$km_clean" 2>/dev/null; rm -rf "$km_clean"
 # DQ-B14 (round 4): a background writer's `>` racing a reader that trusts a
 # non-empty file. sources-scenario clears silent.port before its listener
@@ -2033,7 +2067,7 @@ RS="$ROOT/scripts/dev-harness/run.sh"
 is "run.sh points XDG_CONFIG_HOME inside the scratch tree" \
    "$(qa_count '^  export XDG_CONFIG_HOME="\$SCRATCH/config"$' "$RS")" "1"
 is "and a clean removes it, so one run cannot inherit the last run's fix" \
-   "$(qa_count '^ *rm -rf "\$SCRATCH/cache" "\$SCRATCH/state" "\$SCRATCH/config"' "$RS")" "1"
+   "$(qa_count '^ *(if ! )?rm -rf "\$SCRATCH/cache" "\$SCRATCH/state" "\$SCRATCH/config"' "$RS")" "1"
 # D-SINK-18 repair: the verb derives its path from $HOME, because the HOST
 # does, so HOME is what isolates a run. This pinned XDG_CONFIG_HOME, which the
 # verb now ignores -- a scenario isolated by a variable nothing reads is a
@@ -2152,7 +2186,12 @@ is "a umask-created file here would have been private, which is why the mode is 
 # lever refuses above the transcript (2). Two existing wants moved with
 # the sentinel: the no-verb tree's `active` is a present null and reads
 # NULL now (the two pins under "a tree without the verb").
-EXPECTED=435
+# Round 6: the one grepped pointerState pin is replaced by six DRIVEN ones
+# over HarnessLib.pointerStateOf (NOFIELD for a lacking field, NULL and the
+# key, a bare service reports nothing, no_service, the per-reason object
+# and no lastSaveText, and shell.qml's one-line delegation): +5; run.sh
+# clean reports an rm it could not complete (1).
+EXPECTED=441
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

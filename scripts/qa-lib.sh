@@ -280,16 +280,40 @@ print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))
 # not "false", so it fails instead.
 #
 # A PRESENT null and an ABSENT key are two different answers (D-SINK-19
-# round 4, the live review's P3): the harness reports a service property the
-# tree lacks as null (`s.pendingEntryKey === undefined ? null : ...`), and a
-# service that holds nothing reports null too, so one sentinel for both let
-# `held:NOFIELD` read "nothing held" on a tree with no instrument at all.
-# So: the expression raising (KeyError, TypeError, IndexError -- the key is
-# not there) is NOFIELD; the expression answering None (the key is there and
+# round 4, the live review's P3): one sentinel for both let `held:NOFIELD`
+# read "nothing held" on a tree with no instrument at all. So: the
+# expression raising (KeyError, TypeError, IndexError -- the key is not
+# there) is NOFIELD; the expression answering None (the key is there and
 # holds null) is NULL. A want that means "present and empty" says NULL and
-# cannot be satisfied by a missing field. qa_field and qa_guide_field keep
-# the one-sentinel fold on purpose: their NOFIELD wants (chno-entry N8 on
-# `nowPlaying`) were written under it and are not re-graded here.
+# cannot be satisfied by a missing field -- PROVIDED the instrument lets
+# the field be missing. Round 5 split this reader and left the instrument
+# folding: `ipc pointerState` reported a property the tree lacked as null
+# (`s.pendingEntryKey === undefined ? null : ...`), so the absence never
+# reached this layer and `held:NULL` was green on f275bde (round-5 live
+# lens, P2). Since round 6 pointerState is HarnessLib.pointerStateOf, which
+# OMITS a property the service does not have, and qa-lib-test.sh drives it
+# through this function: a service without pendingEntryKey reads NOFIELD,
+# one holding nothing reads NULL.
+#
+# qa_field and qa_guide_field keep the one-sentinel fold on purpose
+# (DQ-B15, rule 15 applied in round 6 and recorded rather than changed):
+#   qa_field        the split would MOVE wants, and not all of them can be
+#                   re-graded on this headless seat: chno-entry N8
+#                   (`sf "['nowPlaying']" == NOFIELD`, a present null),
+#                   player-scenario P14 (`d['failedAt'].get('t:live1')` ==
+#                   NOFIELD, where `.get` turns the ABSENT mark into None, so
+#                   the split would read the absence as NULL and invert the
+#                   want), and qa-lib-test's `an absent field is NOFIELD`
+#                   pair, written with the same `.get`. P14 needs the player
+#                   arm, which this lane did not run.
+#   qa_guide_field  no want moves, and that is the reason NOT to split it:
+#                   the instrument behind it, shell.qml's state() guide half,
+#                   folds `=== undefined ? null` too, so the reader could not
+#                   tell an absence from a null either way -- a split that
+#                   cannot go red for the thing it would be named for.
+#                   Fixing it means doing to state() what round 6 did to
+#                   pointerState, under readers (rewind R13 types into the
+#                   guide with wtype) this seat cannot drive.
 qa_json_field() {
   python3 -c '
 import json, sys

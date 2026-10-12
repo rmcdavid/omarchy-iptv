@@ -1182,48 +1182,12 @@ ShellRoot {
                               publishedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeShell.barConfig, harness.pluginId)) })
     }
     // D-SINK-19, R5: where the two writes of a pointer change stand. The
-    // service's start-up gate (`dirsReady`), the state save parked behind it
-    // (`stateSavePending`), the entry mirror waiting for that save
-    // (`pendingEntryKey`, R5's own property) and the `activeKey` the
-    // in-memory state carries -- so a scenario can see the interruptible
-    // window from inside rather than infer it from timing, and stop the
-    // shell IN it. Every field optional: a pre-R5 service has no
-    // pendingEntryKey, and the scenario has to run against one to show its
-    // checks red there first (rule 10). "undefined" is reported as null,
-    // and the key string is a key or "", never a URL.
+    // body is HarnessLib.pointerStateOf, so qa-lib-test.sh drives the very
+    // function this verb answers with (rule 12). Round 6: a property the
+    // service does not have is OMITTED, not reported as null, so the
+    // reader's NOFIELD sees an absence (see harness-lib.js).
     function pointerState(): string {
-      var s = serviceLoader.item
-      if (!s) return JSON.stringify({ ok: false, error: { code: "no_service" } })
-      var st = s.userState
-      return JSON.stringify({ ok: true,
-                              stateLoaded: s.stateLoaded === undefined ? null : s.stateLoaded,
-                              reconciled: s.reconciled === undefined ? null : s.reconciled,
-                              dirsReady: s.dirsReady === undefined ? null : s.dirsReady,
-                              stateSavePending: s.stateSavePending === undefined ? null : s.stateSavePending,
-                              pendingEntryKey: s.pendingEntryKey === undefined ? null : s.pendingEntryKey,
-                              configured: s.configured === undefined ? null : s.configured,
-                              activeSourceKey: s.activeSourceKey === undefined ? null : s.activeSourceKey,
-                              memoryActiveKey: st && st.activeKey !== undefined ? String(st.activeKey) : null,
-                              sourceCount: st && st.sources ? st.sources.length : null,
-                              // D-SRC-15 (R9 / R11): the save count in flight, the sticky
-                              // failure, the helper's start-up exit as read, and the
-                              // reloads the service IGNORED -- numbers and booleans, so a
-                              // scenario can see a reload absorbed rather than infer it
-                              // from the key surviving. null on a tree without them.
-                              stateSavesInFlight: s.stateSavesInFlight === undefined ? null : s.stateSavesInFlight,
-                              stateSaveFailed: s.stateSaveFailed === undefined ? null : s.stateSaveFailed,
-                              stateInitOk: s.stateInitOk === undefined ? null : s.stateInitOk,
-                              stateReloadsIgnored: s.stateReloadsIgnored === undefined ? null : s.stateReloadsIgnored,
-                              // R15 (round-3 review): the ignored total above is satisfied
-                              // by the own-write echo that follows every start, so a check
-                              // reading it could not go red for the chmod reload it named.
-                              // The service counts BY REASON (Model.countReload, one
-                              // number per Model.reloadDisposition reason: first-load,
-                              // file-newer, own-write, save-parked, save-in-flight,
-                              // save-failed) and key-scenario D3 asserts the one it means.
-                              // `lastSaveText` lives beside these on the service and is
-                              // NOT reported: it is the state.json text, URLs included.
-                              stateReloadsByReason: s.stateReloadsByReason === undefined ? null : s.stateReloadsByReason })
+      return JSON.stringify(HarnessLib.pointerStateOf(serviceLoader.item))
     }
     function widget(): string {
       var w = barLoader.item

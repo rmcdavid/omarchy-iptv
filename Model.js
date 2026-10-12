@@ -4274,9 +4274,11 @@ var OWNED_SETTINGS = ["sourceKey", "showLogos"]
 // R16 (D-SINK-19 round 5) narrows WHICH owned write: healing is the KEY
 // MIRROR's job and happens only once the file agrees with memory (writeActive
 // under R13). The logo toggle heals too while nothing of ours is outstanding,
-// and while a state write is parked, in flight or failed it writes
-// `showLogos` ALONE and leaves these two keys and `sourceKey` as the host
-// holds them (`ownedWriteMode`; `entryWith` with `keepRetired`). The round-4
+// and before the first state load or while a state write is parked, in
+// flight or failed it writes `showLogos` ALONE and leaves these two keys and
+// `sourceKey` as the host publishes them (`ownedWriteMode`, four inputs since
+// round 6; `entryWith` with `keepRetired`; the lagging host's one-write
+// residual is D-SINK-20). The round-4
 // review measured the old rule losing the record: after a failed state write
 // the URL on the entry is the only copy, and "any owned write heals" meant one
 // `g` in Sources stripped it and mirrored a key the file did not have.
@@ -10471,19 +10473,32 @@ function entryFlushDisposition(ctx) {
 //   heal   nothing of ours is outstanding: the file agrees with memory, so
 //          the write may name every owned key at its effective value and
 //          drop the retired ones, as the mirror does
-//   patch  a state write is parked, in flight or failed: the write carries
-//          `showLogos` alone, with `sourceKey`, `playlistUrl` and `epgUrl`
-//          exactly as the host holds them (`entryWith` with `keepRetired`;
-//          the patch's sourceKey is the host's own value through
-//          `ownedEntryPatch` over `settings`, never memory's). Healing is
-//          the key mirror's job, through writeActive under R13, once the
-//          file agrees with memory again
+//   patch  the state has not been loaded yet, or a state write is parked,
+//          in flight or failed: the write carries `showLogos` alone, with
+//          `sourceKey`, `playlistUrl` and `epgUrl` as the host PUBLISHES
+//          them (`entryWith` with `keepRetired`; the patch's sourceKey is
+//          the host's own value through `ownedEntryPatch` over `settings`,
+//          never memory's). On the lagging host the published entry is one
+//          write behind, so this can carry back for one write a URL our own
+//          heal had just stripped (D-SINK-20). Healing is the key mirror's
+//          job, through writeActive under R13, once the file agrees with
+//          memory again
 //
-// Takes the three flags and nothing else; the reason names which one. In
-// Model.js so node can call it (rule 12) and the fixture's `ownedWrite`
-// section pins every combination.
+// R16 as amended (D-SINK-19 round 6, the round-5 data-loss lens's P2): a
+// FOURTH input, `stateLoaded`. Before the first state load memory is
+// Model.emptyState() and none of the three save flags is raised, so the
+// three alone answered `heal` there: the toggle mirrored sourceKey "" and
+// stripped the only copy of a URL set while the shell was down (3 of 4
+// host/disk combinations lost it, measured at the model layer). Anything
+// but `stateLoaded === true` is "not loaded": a caller that forgets the
+// input gets the write that cannot lose a record, never the one that can.
+//
+// Takes the four inputs and nothing else; the reason names which one
+// decided, `state-not-loaded` first. In Model.js so node can call it
+// (rule 12) and the fixture's `ownedWrite` section pins every combination.
 function ownedWriteMode(flags) {
   var f = flags || {}
+  if (f.stateLoaded !== true) return { mode: "patch", reason: "state-not-loaded" }
   if (f.savePending === true) return { mode: "patch", reason: "save-parked" }
   if ((Number(f.savesInFlight) || 0) > 0) return { mode: "patch", reason: "save-in-flight" }
   if (f.saveFailed === true) return { mode: "patch", reason: "save-failed" }
@@ -10607,8 +10622,11 @@ function sourcesSummary(state, activeKey) {
 // `ownedEntryPatch` rather than grepping for the names.
 //
 // R16: `opts.keepRetired === true` carries the retired keys over UNCHANGED.
-// That is the patch-only write (Service.setShowLogos while a state write is
-// outstanding, `ownedWriteMode`): the URL on the entry may be the only copy
+// That is the patch-only write (Service.setShowLogos before the first state
+// load or while a state write is outstanding, `ownedWriteMode`): "unchanged"
+// means as `entry` carries them, and the service hands this the PUBLISHED
+// entry, which the lagging host leaves one write behind (D-SINK-20). The
+// URL on the entry may be the only copy
 // of a source whose state write has not landed, and a write that takes it
 // off is the key mirror's to make, after the save lands. The default is
 // still removal, because the default is what the mirror and the settled

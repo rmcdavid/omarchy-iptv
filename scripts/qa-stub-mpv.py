@@ -663,7 +663,7 @@ def self_test():
                 # gets the event alone -- an event it did not cause.
                 self.assertEqual([m.get("error") for m in got_a if "request_id" in m], ["success"])
                 self.assertIn("seek", [m.get("event") for m in got_a])
-                self.assertEqual([m.get("event") for m in got_b], ["seek"])
+                self.assertEqual([m.get("event") for m in got_b], ["seek"], "B's event arrives within a 2 s read over a real socket, so this is load-dependent: re-run `python3 scripts/qa-stub-mpv.py --self-test` alone before reading it as a tree defect")
                 self.assertNotIn("request_id", got_b[0])
                 with stub.lock:
                     self.assertEqual(len(stub.conns), 2)

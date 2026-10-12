@@ -7133,6 +7133,21 @@ checkCall("R7: the migration keeps the source count it went in with (two records
 // Service.qml to; the sink itself is observed by key-scenario.sh.
 const r13 = (() => {
   const PID = "io.github.rmcdavid.iptv"
+  // The ONE token of Service.writeOwnedEntry this driver takes from the
+  // shipping file rather than from its own copy of the order (round 6, the
+  // round-5 data-loss lens's P2): which of `settings` (the own-write overlay)
+  // and `hostSettings` (the host's publish, one write behind under lag) the
+  // funnel composes the owned patch from. A double that hard-codes the
+  // answer cannot see a Service.qml edit -- the lens's one-token mutation to
+  // `hostSettings` reverted a logo toggle at the next owned write under the
+  // lagging host (D-LOGO-2's shape) with this suite green -- so the driver
+  // composes from whatever the line names, and anything else fails every
+  // driver case rather than guessing.
+  const FUNNEL_COMPOSES_FROM = (() => {
+    const m = /function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n    var patch = Model\.ownedEntryPatch\(root\.([A-Za-z]+), overrides\)\n/.exec(serviceSource)
+    if (!m || (m[1] !== "settings" && m[1] !== "hostSettings")) throw new Error("the service-order driver cannot read what Service.writeOwnedEntry composes its patch from")
+    return m[1]
+  })()
   const clone = x => JSON.parse(JSON.stringify(x))
   class Host {
     constructor(entry, mode) {
@@ -7307,7 +7322,7 @@ const r13 = (() => {
     // argument; a tree without it strips, and fails on the loss).
     writeOwnedEntry(overrides, keepRetired) {
       if (!Model.barEntryWritable(this.host.barConfig, PID)) { this.warnings.push("no writable bar entry"); return false }
-      const patch = Model.ownedEntryPatch(this.settings, overrides)
+      const patch = Model.ownedEntryPatch(this[FUNNEL_COMPOSES_FROM], overrides)
       patch.id = PID
       const entry = Model.entryWith(Model.findBarEntry(this.host.barConfig, PID), patch, { keepRetired: keepRetired === true })
       this.entryWrites.push(clone(entry))
@@ -7332,7 +7347,7 @@ const r13 = (() => {
       const want = on === true
       if ((this.settings.showLogos === true) === want) return true
       const mode = typeof Model.ownedWriteMode === "function"
-        ? Model.ownedWriteMode({ savePending: this.stateSavePending, savesInFlight: this.stateSavesInFlight, saveFailed: this.stateSaveFailed })
+        ? Model.ownedWriteMode({ stateLoaded: this.stateLoaded, savePending: this.stateSavePending, savesInFlight: this.stateSavesInFlight, saveFailed: this.stateSaveFailed })
         : { mode: "heal", reason: "no R16 on this tree" }
       if (mode.mode === "patch") { this.warnings.push("logo setting written alone (" + mode.reason + ")"); return this.writeOwnedEntry({ showLogos: want }, true) }
       return this.writeOwnedEntry({ sourceKey: this.activeSourceKey, showLogos: want }, false)
@@ -7352,12 +7367,19 @@ const r13 = (() => {
       if (!this.persistActive(key)) this.warnings.push("switched but could not mirror")
       return { ok: true, code: "ok" }
     }
+    // `beforeLoad(svc)` runs in the start-up window the round-5 data-loss
+    // lens named: Service.Component.onCompleted has run (the first
+    // reconcile, a no-op until the state loads) and stateFile has not
+    // delivered its first load yet -- what a guide opened at start-up meets.
+    // `dirsLater` leaves the helper's `state init` exit to the caller, so a
+    // save stays PARKED behind it.
     start(o) {
       const opts = o || {}
       this.reconcile(false)
       if (opts.dirsFirst) this.stateInitExit()
+      if (opts.beforeLoad) { opts.beforeLoad(this); this.runLater() }
       this.applyUserState(this.disk.text); this.runLater()
-      if (!opts.dirsFirst) this.stateInitExit()
+      if (!opts.dirsFirst && !opts.dirsLater) this.stateInitExit()
       if (!opts.holdEvents) this.drain()
       return this
     }
@@ -7584,17 +7606,27 @@ checkCall("R15 (structural): applyUserState counts every reload by reason throug
 // did not have and took the URL off; the next start found the record
 // nowhere. Every check below was seen red on lane-key-t2 (the driver cases on
 // the loss itself, the structural pins on the missing shape).
-checkCall("R16: ownedWriteMode over every `ownedWrite` case of the shared fixture -- patch whenever a save is parked, in flight or failed; heal only when nothing is outstanding", () => {
-  return activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify(Model.ownedWriteMode({ savePending: c.savePending, savesInFlight: c.savesInFlight, saveFailed: c.saveFailed })))
+checkCall("R16: ownedWriteMode over every `ownedWrite` case of the shared fixture -- patch before the first state load and whenever a save is parked, in flight or failed; heal only when the state is loaded and nothing is outstanding", () => {
+  return activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify(Model.ownedWriteMode({ stateLoaded: c.stateLoaded, savePending: c.savePending, savesInFlight: c.savesInFlight, saveFailed: c.saveFailed })))
 }, activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify({ mode: c.mode, reason: c.reason })))
-checkCall("R16: the fixture covers the whole cube, the mode is `patch` exactly when any flag is raised, and the decision takes the three flags and nothing else", () => {
-  const combos = new Set(activeKeyFixture.ownedWrite.map(c => [c.savePending, c.savesInFlight > 0, c.saveFailed].join("/")))
-  const cube = activeKeyFixture.ownedWrite.every(c => Model.ownedWriteMode(c).mode === ((c.savePending || c.savesInFlight > 0 || c.saveFailed) ? "patch" : "heal"))
+// R16 as amended (round 6): FOUR inputs. The round-5 data-loss lens found the
+// state the three save flags cannot name -- before the first load memory is
+// emptyState, nothing is outstanding, and the toggle healed with sourceKey
+// "" -- and this pin then said "the three flags and nothing else", so the
+// one-input fix reddened it as written. Re-levelled to the four inputs, with
+// the fail-safe direction pinned: anything but `stateLoaded === true` is
+// "not loaded", so a caller that forgets the input gets `patch`.
+checkCall("R16: the fixture covers the whole four-input cube, the mode is `patch` exactly when the state is not loaded or any save flag is raised, and the decision takes the four inputs and nothing else", () => {
+  const combos = new Set(activeKeyFixture.ownedWrite.map(c => [c.stateLoaded, c.savePending, c.savesInFlight > 0, c.saveFailed].join("/")))
+  const cube = activeKeyFixture.ownedWrite.every(c => Model.ownedWriteMode(c).mode === ((c.stateLoaded !== true || c.savePending || c.savesInFlight > 0 || c.saveFailed) ? "patch" : "heal"))
   const body = (modelSource.match(/function ownedWriteMode\(flags\) \{[\s\S]*?\n\}/) || [""])[0]
   const reads = Array.from(new Set((body.match(/f\.([A-Za-z]+)/g) || []).map(x => x.slice(2)))).sort()
-  return [combos.size, cube, reads, Model.ownedWriteMode(null).mode, Model.ownedWriteMode({ savesInFlight: "2" }).reason, Model.ownedWriteMode({ saveFailed: "true" }).mode,
-          Model.ownedWriteMode({ savePending: true, savesInFlight: 1, saveFailed: true }).reason]
-}, [8, true, ["saveFailed", "savePending", "savesInFlight"], "heal", "save-in-flight", "heal", "save-parked"])
+  return [combos.size, cube, reads, Model.ownedWriteMode(null).reason, Model.ownedWriteMode({}).reason, Model.ownedWriteMode({ stateLoaded: "true" }).reason,
+          Model.ownedWriteMode({ stateLoaded: true }).mode, Model.ownedWriteMode({ stateLoaded: true, savesInFlight: "2" }).reason,
+          Model.ownedWriteMode({ stateLoaded: true, saveFailed: "true" }).mode, Model.ownedWriteMode({ stateLoaded: true, savePending: true, savesInFlight: 1, saveFailed: true }).reason,
+          Model.ownedWriteMode({ stateLoaded: false, savePending: true, savesInFlight: 1, saveFailed: true }).reason]
+}, [16, true, ["saveFailed", "savePending", "savesInFlight", "stateLoaded"], "state-not-loaded", "state-not-loaded", "state-not-loaded",
+    "heal", "save-in-flight", "heal", "save-parked", "state-not-loaded"])
 checkCall("R16: entryWith with keepRetired carries the retired URL keys over unchanged, the patch still wins over them, the id is still forced, and the default still removes them", () => {
   const host = { id: "x", playlistUrl: "http://p.test/a.m3u?password=s3cret", epgUrl: "http://p.test/a.xml", sourceKey: "d990c2e4", showLogos: false, barLabelMaxWidth: 240 }
   const kept = Model.entryWith(host, { showLogos: true, id: "x" }, { keepRetired: true })
@@ -7719,12 +7751,99 @@ for (const mode of ["lag", "echo"]) {
   }, { afterHeal: [r13.KNEW, false, mode === "lag" ? r13.KA : r13.KNEW, mode === "lag", r13.KNEW],
        stored: [r13.KNEW, true, mode === "lag", mode === "lag" ? "the file's active record" : "none"],
        fileKey: r13.KNEW, fileHasStoredKey: true, audits: true, restart: [r13.KNEW, r13.KNEW, 3, false, r13.KNEW] })
+  // ---- round 6 (the round-5 lenses' P2 and P3 on R16) ----
+  //
+  // C1, the state the three save flags cannot name: BEFORE the first state
+  // load. A URL set with `omarchy bar set` while the shell was down is on
+  // the entry and nowhere else; memory is emptyState and nothing is
+  // outstanding, so a three-flag decision healed -- mirrored sourceKey ""
+  // and stripped the URL -- and 3 of the 4 host/disk combinations then lost
+  // the record (the lens's proof-preload.js). Seen red on lane-key-u3's
+  // Model.js, whose ownedWriteMode ignores the fourth input.
+  checkCall("R16 (" + mode + " host), round 6: a URL set while the shell was down, then setShowLogos BEFORE the first state load -- showLogos is written alone (state-not-loaded), the entry keeps the URL and the host's pointer, and on a writable and an unwritable disk alike the record survives into the next start", () => {
+    const out = {}
+    for (const disk of ["writable", "unwritable"]) {
+      const d = new r13.Disk(r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA)); d.writeFails = disk === "unwritable"
+      let at = null
+      const svc = new r13.Svc(new r13.Host({ playlistUrl: r13.NEW, sourceKey: r13.KA, showLogos: false }, mode), d).start({ beforeLoad: s => {
+        const toggled = s.setShowLogos(true)
+        const e = s.host.storedEntry()
+        at = { loaded: s.stateLoaded, toggled, local: s.settings.showLogos, urlKept: r13.has(e, "playlistUrl"), mirror: e.sourceKey, showLogos: e.showLogos }
+      } })
+      svc.drain()
+      const stored = svc.host.storedEntry(), file = r13.fileOf(svc)
+      const durable = r13.has(stored, "playlistUrl") || file.sources.some(r => r.key === r13.KNEW)
+      d.writeFails = false
+      const next = r13.restart(svc, mode)
+      const nextFile = r13.fileOf(next)
+      out[disk] = { at, patched: svc.warnings.filter(w => w.indexOf("logo setting written alone (state-not-loaded)") === 0).length,
+                    durableWhileRunning: durable, memKey: svc.activeSourceKey, showLogos: stored.showLogos,
+                    audits: svc.entryAudits.every(a => a.entryKey === a.fileKey && a.fileHas),
+                    afterRestart: { memKey: next.activeSourceKey, fileKey: Model.activeKeyOf(nextFile), hasNew: nextFile.sources.some(r => r.key === r13.KNEW), fileSources: nextFile.sources.length, showLogos: next.settings.showLogos } }
+    }
+    return out
+  }, (() => {
+    const one = { at: { loaded: false, toggled: true, local: true, urlKept: true, mirror: r13.KA, showLogos: true }, patched: 1,
+                  durableWhileRunning: true, memKey: r13.KNEW, showLogos: true, audits: true,
+                  afterRestart: { memKey: r13.KNEW, fileKey: r13.KNEW, hasNew: true, fileSources: 3, showLogos: true } }
+    return { writable: one, unwritable: one }
+  })())
+  // C2, the funnel's composition source. writeOwnedEntry composes the owned
+  // patch from `settings` (our own last write laid over the host's publish),
+  // and that is what keeps a toggle when the NEXT owned write is the key
+  // mirror's: under the lagging host the publish still says the pre-toggle
+  // value. The driver composes from whatever Service.qml's line names
+  // (FUNNEL_COMPOSES_FROM above), so the lens's one-token mutation to
+  // `hostSettings` reddens this under lag; under echo the publish is current
+  // and the case is the control.
+  checkCall("R16 (" + mode + " host), round 6: a patch-only toggle on a failed disk, then the key mirror's heal write once the disk recovers -- showLogos stays as toggled on the stored entry, in settings and after a restart", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.writeFails = true; svc.switchSource(r13.KB); svc.drain()
+    svc.setShowLogos(true); svc.drain()
+    const published = Model.findBarEntry(svc.host.barConfig, "io.github.rmcdavid.iptv")
+    const afterPatch = [svc.host.storedEntry().showLogos, svc.settings.showLogos, published.showLogos, svc.warnings.filter(w => w.indexOf("logo setting written alone (save-failed)") === 0).length]
+    svc.disk.writeFails = false; svc.switchSource(r13.KA); svc.drain()
+    const s2 = svc.host.storedEntry()
+    const afterHeal = [svc.stateSaveFailed, s2.sourceKey, s2.showLogos, svc.settings.showLogos]
+    const next = r13.restart(svc, mode)
+    return { afterPatch, afterHeal, afterRestart: [next.settings.showLogos, next.host.storedEntry().showLogos, next.activeSourceKey] }
+  }, { afterPatch: [true, true, mode === "lag" ? false : true, 1], afterHeal: [false, r13.KA, true, true], afterRestart: [true, true, r13.KA] })
+  // C3, the parked-only and in-flight-only routes, which the cube alone
+  // pinned: dropping either save flag from ownedWriteMode reddened two
+  // fixture checks and no driver case. Each of these makes the consequence
+  // observable at the entry: a heal in either window mirrors the MEMORY key
+  // while the file still names the old one (the lens's L12), which is the
+  // pointer getting ahead of a save that has not landed.
+  checkCall("R16 (" + mode + " host), round 6: switch while the dirs are not ready, then toggle -- the toggle writes showLogos alone (save-parked) and keeps the file's pointer; the parked save lands and only then does the mirror move", () => {
+    const svc = new r13.Svc(new r13.Host({ sourceKey: r13.KA, showLogos: false }, mode), new r13.Disk(r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA))).start({ dirsLater: true })
+    svc.switchSource(r13.KB)
+    const window = [svc.dirsReady, svc.stateSavePending, svc.stateSavesInFlight, svc.stateSaveFailed]
+    svc.setShowLogos(true)
+    const atToggle = [svc.host.storedEntry().sourceKey, svc.host.storedEntry().showLogos, Model.activeKeyOf(r13.fileOf(svc)),
+                      svc.warnings.filter(w => w.indexOf("logo setting written alone (save-parked)") === 0).length]
+    svc.stateInitExit(); svc.drain()
+    const s = svc.host.storedEntry()
+    return { window, atToggle, landed: [s.sourceKey, s.showLogos, Model.activeKeyOf(r13.fileOf(svc)), svc.stateSavePending, svc.stateSavesInFlight],
+             audits: svc.entryAudits.map(a => [a.entryKey === a.fileKey, a.fileHas]) }
+  }, { window: [false, true, 0, false], atToggle: [r13.KA, true, r13.KA, 1], landed: [r13.KB, true, r13.KB, false, 0], audits: [[true, true], [true, true]] })
+  checkCall("R16 (" + mode + " host), round 6: switch, then toggle before the FileView's `saved` -- the toggle writes showLogos alone (save-in-flight) and keeps the file's pointer; `saved` arrives and only then does the mirror move", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.switchSource(r13.KB)
+    const window = [svc.dirsReady, svc.stateSavePending, svc.stateSavesInFlight, svc.stateSaveFailed]
+    svc.setShowLogos(true)
+    const atToggle = [svc.host.storedEntry().sourceKey, svc.host.storedEntry().showLogos, Model.activeKeyOf(r13.fileOf(svc)),
+                      svc.warnings.filter(w => w.indexOf("logo setting written alone (save-in-flight)") === 0).length]
+    svc.drain()
+    const s = svc.host.storedEntry()
+    return { window, atToggle, landed: [s.sourceKey, s.showLogos, Model.activeKeyOf(r13.fileOf(svc)), svc.stateSavesInFlight],
+             audits: svc.entryAudits.map(a => [a.entryKey === a.fileKey, a.fileHas]) }
+  }, { window: [true, false, 1, false], atToggle: [r13.KA, true, r13.KA, 1], landed: [r13.KB, true, r13.KB, 0], audits: [[true, true], [true, true]] })
 }
 // R16, THE WIRING. Structural pins (Service.qml and Guide.qml cannot be
 // instantiated here); the driver above CALLS the decisions in this order, the
 // live arm (key-scenario.sh) observes the sink. Each seen red by deleting
 // the line it names.
-checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the three flags, writes showLogos ALONE with keepRetired on `patch`, heals on the other branch, and the funnel hands keepRetired to entryWith; the key mirror never passes it", () => {
+checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the four inputs (round 6: stateLoaded and the three save flags), writes showLogos ALONE with keepRetired on `patch`, heals on the other branch, and the funnel hands keepRetired to entryWith; the key mirror never passes it", () => {
   const fn = (serviceSource.match(/function setShowLogos\(on\) \{[\s\S]*?\n  \}/) || [""])[0]
   const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
   const decide = fn.indexOf("Model.ownedWriteMode(")
@@ -7733,7 +7852,7 @@ checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the thr
   return {
     found: fn !== "" && funnel !== "",
     decides: decide !== -1,
-    handsTheThreeFlags: /Model\.ownedWriteMode\(\{ savePending: root\.stateSavePending,\s*savesInFlight: root\.stateSavesInFlight,\s*saveFailed: root\.stateSaveFailed \}\)/.test(fn),
+    handsTheFourInputs: /Model\.ownedWriteMode\(\{ stateLoaded: root\.stateLoaded,\s*savePending: root\.stateSavePending,\s*savesInFlight: root\.stateSavesInFlight,\s*saveFailed: root\.stateSaveFailed \}\)/.test(fn),
     decidesBeforeWriting: decide !== -1 && decide < fn.indexOf("root.writeOwnedEntry("),
     patchWritesShowLogosAlone: /return root\.writeOwnedEntry\(\{ showLogos: want \}, "logo setting", false, true\)/.test(patchBranch),
     patchNamesNoKey: patchBranch !== "" && patchBranch.indexOf("sourceKey") === -1 && patchBranch.indexOf("activeSourceKey") === -1,
@@ -7747,8 +7866,25 @@ checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the thr
     callers: callers.length,
     onlyThePatchPassesIt: callers.filter(c => /, true\)$/.test(c)).length === 1 && callers.filter(c => c.indexOf("{ showLogos: want }") !== -1 && /, true\)$/.test(c)).length === 1
   }
-}, { found: true, decides: true, handsTheThreeFlags: true, decidesBeforeWriting: true, patchWritesShowLogosAlone: true, patchNamesNoKey: true, patchLogsTheReason: true,
+}, { found: true, decides: true, handsTheFourInputs: true, decidesBeforeWriting: true, patchWritesShowLogosAlone: true, patchNamesNoKey: true, patchLogsTheReason: true,
      healIsTheOldWrite: true, funnelKeeps: true, overrideRecordedForEveryWrite: true, callers: 3, onlyThePatchPassesIt: true })
+// C2 (round 6, the round-5 data-loss lens's P2): what the funnel composes
+// the owned patch FROM. `root.settings` is the own-write overlay; composed
+// from `root.hostSettings` (the publish, one write behind under lag), the
+// key mirror's next write carries a logo toggle's pre-toggle value back to
+// disk -- D-LOGO-2's regression -- and before this pin the one-token mutation
+// left node 2162/0 and the live arm 64/0. The service-order driver above
+// composes from the same token, so the mutation reddens a driver case too.
+// Seen red by that mutation.
+checkCall("R16 / D-LOGO-2 (structural, round 6): writeOwnedEntry composes the owned patch from root.settings, the own-write overlay, and never from root.hostSettings", () => {
+  const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const composed = funnel.match(/Model\.ownedEntryPatch\(root\.[A-Za-z]+, overrides\)/g) || []
+  return { found: funnel !== "",
+           patchFromSettings: /\n    var patch = Model\.ownedEntryPatch\(root\.settings, overrides\)\n/.test(funnel),
+           neverFromHost: funnel.indexOf("ownedEntryPatch(root.hostSettings") === -1,
+           everyCompositionFromSettings: composed.length > 0 && composed.every(c => c === "Model.ownedEntryPatch(root.settings, overrides)"),
+           compositions: composed.length }
+}, { found: true, patchFromSettings: true, neverFromHost: true, everyCompositionFromSettings: true, compositions: 2 })
 checkCall("R16 / round-4 P2: persistFailureMessage renders THE reason's sentence; every reason Service.qml emits is in PERSIST_FAILURE_REASONS; no sentence names a URL and only persist_failed's says `omarchy bar set`; an unknown reason falls back to it", () => {
   const emitted = Array.from(new Set((serviceSource.match(/root\.sourcesPersistFailed\("[a-z_]+"\)/g) || []).map(m => m.replace(/^root\.sourcesPersistFailed\("|"\)$/g, "")))).sort()
   const table = {}

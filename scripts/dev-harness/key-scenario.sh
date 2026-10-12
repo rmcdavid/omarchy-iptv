@@ -211,12 +211,15 @@
 # scratch copy; this file makes the ordinary run do it). D3 then reads the
 # decision off `stateReloadsByReason['save-parked']`, which `pointerState`
 # reports beside the plain ignored total, the in-flight count, the sticky
-# save failure and the helper's exit (numbers and booleans; null on a tree
-# without them). BY REASON, because the round-3 review showed the total
-# cannot go red for the mechanism D3 names: the service's own atomic write
-# of the parked save raises a reload that is ignored as `own-write` after
-# EVERY D start, so `stateReloadsIgnored >= 1` held whether or not the
-# chmod reload was applied (a Service.qml mutated to apply every reload but
+# save failure and the helper's exit (numbers and booleans; OMITTED on a
+# tree without them since round 6, so they read NOFIELD there -- they used
+# to be reported as null, which is how a `held` want of NULL came to be
+# green on a tree with no pendingEntryKey; HarnessLib.pointerStateOf). BY
+# REASON, because the round-3 review showed the total cannot go red for
+# the mechanism D3 names: the service's own atomic write of the parked
+# save raises a reload that is ignored as `own-write` after EVERY D
+# start, so `stateReloadsIgnored >= 1` held whether or not the chmod
+# reload was applied (a Service.qml mutated to apply every reload but
 # its own write read `PASS D3` beside `FAIL D2`). The per-reason number is
 # the decision itself: a tree that applies the chmod reload counts it as
 # `file-newer` and never as `save-parked`, which is the mutation D3 was
@@ -259,7 +262,9 @@
 # nowhere. Measured live on lane-key-t2 by the lens (its driver is what L
 # lifts). R16: while a state write is parked, in flight or failed the
 # toggle patches `showLogos` ALONE and leaves `sourceKey`, `playlistUrl`
-# and `epgUrl` as the host holds them (Model.ownedWriteMode decides); the
+# and `epgUrl` as the host publishes them (Model.ownedWriteMode decides,
+# and since round 6 it patches before the first state load too; on the
+# lagging host the publish is one write behind, D-SINK-20); the
 # heal is writeActive's, under R13, once the file agrees with memory. L
 # runs inside F, after the switch and before the restart, and F6 then
 # restarts over the entry as the host stored it AFTER the toggle (the key
@@ -804,7 +809,7 @@ shell_arm() {
   sleep 1.0   # the parked save and the entry flush land in stateInitProc's exit; give the file its moment
   ck "D2 the adopted key survives the dirs becoming ready: in memory and in the file" \
      "dirs:$(pf "['dirsReady']") memory:$(pf "['memoryActiveKey']") file:$(sj "d.get('activeKey', 'absent')")" "dirs:true memory:$KA file:$KA"
-  echo "   reloads by reason across the D start: $(reasons) (ignored total $(pf "['stateReloadsIgnored']"); null on a pre-R9 tree)"
+  echo "   reloads by reason across the D start: $(reasons) (ignored total $(pf "['stateReloadsIgnored']"); NOFIELD on a pre-R9 tree)"
   ck "D3 the helper tightened the 0644 file to 0600, and the reload that chmod fired was IGNORED as save-parked, not applied (R9 at the per-reason counter)" \
      "mode:$(stat -c %a "$STATE" 2>/dev/null) save-parked:$(reason_some save-parked)" "mode:600 save-parked:yes"
 
@@ -829,7 +834,7 @@ shell_arm() {
      "memory:$(pf "['memoryActiveKey']") file:$(sj "d.get('activeKey', 'absent')") records:$(sj "len(d['sources'])") mode:$(stat -c %a "$STATE" 2>/dev/null)" "memory:$KA file:$KA records:1 mode:600"
   ck "N3 the stored entry carries sourceKey = that key and no playlistUrl" "$(hf "['stored']") sourceKey:$(stored_has sourceKey) playlistUrl:$(stored_has playlistUrl)" "$KA sourceKey:yes playlistUrl:no"
   ck "N4 configured on it, its first fetch wrote its cache and loaded, activeCache is its directory" "$(svc "['configured']") $(svc "['channels']") $(ipc activeCache) cache:$([[ -f $CACHE/sources/$KA/channels.json ]] && echo written || echo missing)" "true 20 $CACHE/sources/$KA cache:written"
-  echo "   reloads the service ignored across the fresh start: $(pf "['stateReloadsIgnored']") by reason $(reasons) (numbers; null on a pre-R9 tree)"
+  echo "   reloads the service ignored across the fresh start: $(pf "['stateReloadsIgnored']") by reason $(reasons) (numbers; NOFIELD on a pre-R9 tree)"
 
   echo "== M: the two-source migration (entry URL, no activeKey) ($(elapsed) s)"
   seed ""

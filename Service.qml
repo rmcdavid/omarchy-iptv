@@ -3541,11 +3541,22 @@ Item {
   //
   // R16: `keepRetired` true is the PATCH-ONLY write, and it is the one
   // difference between the two writers about what reaches the file. The
-  // caller (setShowLogos, under Model.ownedWriteMode) passes it while a state
-  // write is parked, in flight or failed: the entry then keeps the retired
-  // URL keys it carries -- the only copy of a source whose state write has
-  // not landed -- and the patch's `sourceKey` is the host's own value
-  // (ownedEntryPatch over `settings`), never memory's. Healing the entry is
+  // caller (setShowLogos, under Model.ownedWriteMode) passes it before the
+  // first state load and while a state write is parked, in flight or
+  // failed: the entry then keeps the retired URL keys the PUBLISHED entry
+  // carries -- the only copy of a source whose state write has not landed,
+  // and on the lagging host possibly one our last heal stripped (D-SINK-20)
+  // -- and the patch's `sourceKey` is the host's own value (ownedEntryPatch
+  // over `settings`), never memory's.
+  //
+  // `settings`, not `hostSettings`, is load-bearing (D-LOGO-2): `settings`
+  // carries our own last write laid over the host's one-write-behind
+  // publish, so a key this write does not override goes out at the value we
+  // last wrote. Composed from `hostSettings`, the key mirror's write after a
+  // logo toggle would carry the PRE-toggle showLogos back to disk on the
+  // lagging host. Pinned by the node suite on the dev branch (the R16
+  // funnel pin, and the service-order driver, which composes from whichever
+  // this line names). Healing the entry is
   // the key mirror's job once the file agrees with memory again (writeActive
   // under R13), and the mirror never passes this.
   function writeOwnedEntry(overrides, what, announce, keepRetired) {
@@ -3674,12 +3685,24 @@ Item {
     // D-SINK-18: still not gated, and the reason is sharper than it was. The
     // settled write carries `sourceKey` and `showLogos` and strips the URL
     // keys, so it can only ever take a credential OUT of that file, and the
-    // one write that must never be refused is the one that does that; the
-    // patch-only write below carries the entry's URL keys over UNCHANGED, so
-    // it puts into the file nothing the file does not already hold. What
-    // both get is the shield re-arm, which tightens the file and shortens
-    // the drift window by one more event. writeOwnedEntry re-arms the shield
-    // itself, so there is no second call here: one write, one re-arm.
+    // one write that must never be refused is the one that does that. The
+    // patch-only write below carries the entry's URL keys over as the host
+    // PUBLISHES them, and that is not "nothing the file does not already
+    // hold": on the host that publishes one write behind (through 4.0.4),
+    // after a heal write has stripped a URL the user set with `omarchy bar
+    // set`, the published copy still carries it, and this write puts it
+    // back on the stored entry until the next owned write strips it again
+    // -- D-SINK-20, observed live under the harness's lagging fake host.
+    // Bounded, not zero: what comes back was the user's own input one write
+    // earlier and is already a record in the 0600 state file, the echoing
+    // host never re-carries, and the shield keeps the file 0600 meanwhile.
+    // Do NOT narrow it to "keep the retired keys only while no own-write
+    // override is in force": that strips the only copy of an input whose
+    // state write failed (the round-4 P1 back through this writer).
+    // What both get is the shield re-arm, which tightens the file and
+    // shortens the drift window by one more event. writeOwnedEntry re-arms
+    // the shield itself, so there is no second call here: one write, one
+    // re-arm.
     //
     // R16 (round-4 review P1, rule 15: this is writeOwnedEntry's SECOND
     // caller, and R13 gated only the first). While a state write is parked,
@@ -3687,12 +3710,21 @@ Item {
     // entry may be the only copy of a source whose write did not land; this
     // write used to mirror the in-memory key and strip that URL, and the
     // next start found the record nowhere. Model.ownedWriteMode decides from
-    // the three flags: "patch" writes `showLogos` alone and leaves
-    // `sourceKey`, `playlistUrl` and `epgUrl` exactly as the host holds them
-    // (ownedEntryPatch takes the key from `settings`, entryWith keeps the
-    // retired keys); "heal" is today's write. The mirror itself is written
-    // by writeActive once the file agrees with memory, under R13.
-    var mode = Model.ownedWriteMode({ savePending: root.stateSavePending,
+    // four inputs: "patch" writes `showLogos` alone and leaves `sourceKey`,
+    // `playlistUrl` and `epgUrl` as the host publishes them (ownedEntryPatch
+    // takes the key from `settings`, entryWith keeps the retired keys);
+    // "heal" is today's write. The mirror itself is written by writeActive
+    // once the file agrees with memory, under R13.
+    //
+    // R16 as amended (round 6): `stateLoaded` is the fourth input. Before
+    // stateFile's first load userState is Model.emptyState() and no save
+    // flag is raised, so the three flags answered "heal" and the toggle
+    // mirrored sourceKey "" and stripped a URL set while the shell was down
+    // -- the only copy of it. Nothing on the guide's path waits for the
+    // load (openSources needs serviceReady, toggleLogos inSources), so the
+    // gate is here, where the write is decided.
+    var mode = Model.ownedWriteMode({ stateLoaded: root.stateLoaded,
+                                      savePending: root.stateSavePending,
                                       savesInFlight: root.stateSavesInFlight,
                                       saveFailed: root.stateSaveFailed })
     if (mode.mode === "patch") {

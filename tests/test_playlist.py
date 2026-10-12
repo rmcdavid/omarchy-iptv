@@ -654,7 +654,7 @@ class PerformanceTest(unittest.TestCase):
                 document = json.loads(handle.read())
             self.assertEqual(document["count"], 10000)
             self.assertEqual(document["channels"][7]["headers"], {"User-Agent": "Agent/7"})
-            self.assertLess(elapsed, 1.0, "playlist parse+write took %.0f ms for 10k entries" % (elapsed * 1000))
+            self.assertLess(elapsed, 1.0, "playlist parse+write took %.0f ms for 10k entries -- this number is load-dependent: re-run this test alone (python3 -m unittest discover -s tests -p test_playlist.py -k PerformanceTest) before reading it as a tree defect" % (elapsed * 1000))
 
 
 class QaFixtureTest(unittest.TestCase):

@@ -75,6 +75,48 @@ function entryKeyNames(entry) {
   return out
 }
 
+// D-SINK-19, R5 and round 6. `ipc pointerState`: where the two writes of a
+// pointer change stand -- the service's start-up gate (`dirsReady`), the
+// state save parked behind it (`stateSavePending`), the entry mirror
+// waiting for that save (`pendingEntryKey`, R5's own property), the save
+// count in flight, the sticky failure, the helper's start-up exit, the
+// reloads the service ignored in total and BY REASON (R15), and the
+// `activeKey` the in-memory state carries -- so a scenario can see the
+// interruptible window from inside rather than infer it from timing.
+//
+// A property the service does NOT HAVE is OMITTED, never reported as null
+// (round 6, the round-5 live lens's P2). This used to be
+// `s.pendingEntryKey === undefined ? null : s.pendingEntryKey` on every
+// field, so a tree lacking the property was published as a present null,
+// exactly as a service holding nothing is, and qa_json_field's NULL /
+// NOFIELD split (round 5) never saw an absence: `held:NULL` in W3, F2 and
+// F5 was satisfied on f275bde, a tree with no pendingEntryKey at all.
+// Omitted, the absence reaches the reader and reads NOFIELD. Every one of
+// these is declared WITH an initializer on the trees that have it
+// (`property var pendingEntryKey: null`, `property int ...: 0`), so
+// `undefined` here means "not declared"; a `property var` declared with
+// no initializer would also read as absent, which is why the scenario's
+// wants for a held key say NULL only for the field that is null by design.
+//
+// `lastSaveText` lives beside these on the service and is NOT reported: it
+// is the state.json text, URLs included (rule 5). Numbers, booleans, keys
+// and the per-reason object only. Nothing here reads a URL.
+var POINTER_FIELDS = ["stateLoaded", "reconciled", "dirsReady", "stateSavePending", "pendingEntryKey", "configured",
+                      "activeSourceKey", "stateSavesInFlight", "stateSaveFailed", "stateInitOk", "stateReloadsIgnored",
+                      "stateReloadsByReason"]
+function pointerStateOf(s) {
+  if (!s) return { ok: false, error: { code: "no_service" } }
+  var out = { ok: true }
+  for (var i = 0; i < POINTER_FIELDS.length; i++) {
+    var v = s[POINTER_FIELDS[i]]
+    if (v !== undefined) out[POINTER_FIELDS[i]] = v
+  }
+  var st = s.userState
+  if (st && st.activeKey !== undefined) out.memoryActiveKey = String(st.activeKey)
+  if (st && st.sources) out.sourceCount = st.sources.length
+  return out
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames }
+  module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS }
 }
