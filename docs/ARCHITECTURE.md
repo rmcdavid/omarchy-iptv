@@ -1618,6 +1618,12 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   across a cycle gets `undefined`, silently -- measured on 2026-10-12 under
   node, qmltestrunner and Quickshell in a nested cage. References across
   parts live in function bodies, which run after every part has evaluated.
+- **Declared first.** A `var` sits above every function of its own part that
+  names it. A classic script never cared, and a module does: Quickshell logs
+  `qt.qml.usedbeforedeclared`, with the module's file:// URL, on every load
+  for each such use (measured 2026-10-12, two of them at the cut). The script
+  refuses the shape and never reorders code; the remedy is the manifest,
+  putting the `var` in another part so it is an import.
 - **No shared mutable state.** No code assigns to or mutates a top-level
   binding after evaluation. One module instance is shared by every component
   that imports it, where a classic script was copied per component, so a
