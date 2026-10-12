@@ -1445,7 +1445,7 @@ shell_arm() {
   wait_for no 10 stored_has epgUrl >/dev/null || true
   sleep 0.5
   ck "A2 an in-app add whose FORM carries its own guide URL, submitted AFTER a CLI epgUrl was held: the form (later) is on the new record, the held value on no record, cleared and off the stored entry, superseded and logged by setting and key once (R19c)" \
-     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") form:$(form_on) pending:$(epg_on) held:$(held) epgUrl:$(stored_has epgUrl) logged:$(log_since 'a pending guide URL \(epgUrl\) is superseded')" \
+     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") form:$(form_on) pending:$(epg_on) held:$(held) epgUrl:$(stored_has epgUrl) logged:$(log_since 'supersede.*\(epgUrl\)|\(epgUrl\).*supersede')" \
      "ok:true active:$KD form:$KD pending:none held:no epgUrl:no logged:1"
 
   echo "== Y: a publish that goes A -> B -> A on the lagging host, then the user's own act (R19a; the round-8 lenses' P1-A) ($(elapsed) s)"
@@ -1461,9 +1461,16 @@ shell_arm() {
   # an in-app guide URL edit. R19a hands every owned write to the host.
   # Values are never printed: names from hostEntry, the guide's own
   # showLogos, and the record's EPG compared inside python.
+  # Y1 and Y3 start over an entry carrying A's playlistUrl, as the lens's
+  # driver does: the start adopts it and the mirror's write strips it, so
+  # every later entry carries no retired key and a re-set reproduces the
+  # earlier entry EXACTLY. The harness seed's in-place empty `playlistUrl`
+  # / `epgUrl` would otherwise make the first restore differ by those two
+  # keys and hide the defect (measured: both green on lane-key-y0 that way).
   seed "$KA"
-  start_shell --playlist none --source-key "$KA" || true
+  start_shell --playlist "$A" --source-key "$KA" || true
   wait_for 20 10 svc "['channels']" >/dev/null || true
+  wait_for no 10 stored_has playlistUrl >/dev/null || true
   logos() { qa_json_field "d['guide']['showLogos']" "$(ipc state)"; }
   ipc set showLogos true >/dev/null; wait_for true 10 logos >/dev/null || true
   ipc open '{}' >/dev/null; sleep 0.5
@@ -1494,8 +1501,9 @@ shell_arm() {
   ck "Y2 the same refused (credentialed) playlistUrl set three times beside the active source: off the stored entry after EVERY set, the source still active" \
      "after:${after% } active:$(svc "['activeSourceKey']")" "after:no no no active:$KA"
   seed "$KA"
-  start_shell --playlist none --source-key "$KA" || true
+  start_shell --playlist "$A" --source-key "$KA" || true
   wait_for 20 10 svc "['channels']" >/dev/null || true
+  wait_for no 10 stored_has playlistUrl >/dev/null || true
   rec_epg() { sj "','.join({'$EPG': 'E', '$FORM_EPG': 'F', '': 'none'}.get(s.get('epgUrl', ''), 'other') for s in d['sources'] if s['key'] == '$1') or 'norecord'"; }
   ipc set epgUrl "$EPG" >/dev/null; wait_for E 10 rec_epg "$KA" >/dev/null || true; sleep 1.0
   ipc set epgUrl "$EPG" >/dev/null; sleep 1.5
@@ -1557,7 +1565,7 @@ SLOW
   wait_for "$KS_SLOW" 20 svc "['activeSourceKey']" >/dev/null || true
   sleep 1.0
   ck "Q2 CLI first (control): the held CLI value is EARLIER than the form submitted after it, so the form's guide URL stands, the held value is cleared and logged as superseded" \
-     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") on:$(rec_epg "$KS_SLOW") held:$(held) epgUrl:$(stored_has epgUrl) logged:$(log_since 'a pending guide URL \(epgUrl\) is superseded')" \
+     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") on:$(rec_epg "$KS_SLOW") held:$(held) epgUrl:$(stored_has epgUrl) logged:$(log_since 'supersede.*\(epgUrl\)|\(epgUrl\).*supersede')" \
      "ok:true active:$KS_SLOW on:F held:no epgUrl:no logged:1"
   kill_pid "$SLOW_PID"; SLOW_PID=""
 
