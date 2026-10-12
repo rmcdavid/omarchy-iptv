@@ -68,7 +68,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-INST-02 | git clone install (no symlink), validate on the clone | M 5.2 | `omarchy plugin validate ~/.config/omarchy/plugins/io.github.rmcdavid.iptv` exit 0 |
 | TC-INST-03 | rescan + enable | M 5.2 | `omarchy plugin list --json` shows `enabled: true`, kinds `bar-widget,overlay,service`; `shell.json` gains exactly `{"id":"io.github.rmcdavid.iptv"}` at the end of `bar.layout.right`; `plugins[]` unchanged |
 | TC-INST-04 | console clean on load | M 5.2, 5.9 | no `WARN`/`ERROR` lines mentioning `io.github.rmcdavid.iptv`, `Guide.qml`, `Service.qml`, `BarWidget.qml` or `omarchy-iptv` in the journal after enable |
-| TC-INST-05 | disable removes the widget and its settings; re-enable starts clean | M 5.10 (before remove) | after `omarchy plugin disable`, the bar entry (and inline `playlistUrl`) is gone from shell.json, widget gone, `omarchy-shell shell toggle io.github.rmcdavid.iptv` is a no-op, mpv (attached Process) exits; after `enable` the guide shows the not-configured state. Expected host behaviour; README must say settings are lost on disable |
+| TC-INST-05 | disable removes the widget and its settings; re-enable starts clean | M 5.10 (before remove) | after `omarchy plugin disable`, the bar entry (and inline `playlistUrl`) is gone from shell.json, widget gone, `omarchy-shell shell toggle io.github.rmcdavid.iptv` is a no-op, mpv (attached Process) exits; after `enable` the guide shows the not-configured state. Expected host behaviour; README must say settings are lost on disable **[Amended 2026-10-11, D-SINK-19: the entry (and its `sourceKey` mirror) is gone from shell.json after disable, but `state.json` still names the active source, so after `enable` the plugin reads as CONFIGURED on the same playlist and rewrites the entry with `sourceKey`; only the other settings on the entry are lost. Derived from `Model.adoptActiveSource` step 2 over a first reconcile with no URL; UNVERIFIED live. The README says so.]** |
 | TC-INST-06 | `omarchy plugin remove --yes` leaves only cache, state, runtime dirs | M 5.10 | `find ~ -path '*omarchy-iptv*'` lists only `~/.cache/omarchy-iptv`, `~/.local/state/omarchy-iptv`, `/run/user/1000/omarchy-iptv`; shell.json identical to the pre-install snapshot |
 | TC-INST-07 | nothing written inside the plugin directory at runtime | M 5.7 | `find <plugindir> -newer <plugindir>/manifest.json -not -path '*/.git/*'` prints nothing after a full session |
 | TC-INST-08 | `omarchy restart shell` round trip | M 5.4 US5 step 6 | widget back, settings intact, favorites and recents intact, **mpv keeps playing: same pid, same window** (R10 withdrawn by M2-02; observed PLY-RST-01; corrected 2026-09-25, D-QA-19) |
@@ -79,7 +79,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-CFG-01 | `omarchy bar set ... playlistUrl <url>` fetches without restart | M 5.3, 5.4 US1 | helper runs within ~1 s (journal shows one run, 300 ms debounce); bar tooltip `IPTV - click to open the guide`; guide footer `1,475 channels - updated HH:MM` (count from the live list, thousands separator) |
+| TC-CFG-01 | `omarchy bar set ... playlistUrl <url>` fetches without restart | M 5.3, 5.4 US1 | helper runs within ~1 s (journal shows one run, 300 ms debounce); bar tooltip `IPTV - click to open the guide`; guide footer `1,475 channels - updated HH:MM` (count from the live list, thousands separator) **[Amended 2026-10-11, D-SINK-19: and afterwards `jq` of the entry in shell.json shows `sourceKey` = the record's key and NO `playlistUrl`; `state.json` `activeKey` = that key; the file is 0600. The same holds when the value was set while the shell was down (SRC-MIG-11 in QA-SOURCES.md); at the first build it was discarded and erased instead.]** |
 | TC-CFG-02 | HTTP 404 with no cache | M 5.4 US1 step 4 | empty state `Playlist failed to load` / `HTTP 404 Not Found from iptv-org.github.io - check playlistUrl`; hint `r reload - Esc close`; bar glyph U+F0503, tooltip `IPTV - playlist error, open the guide`; notification `Playlist error` / `Could not fetch the playlist (HTTP 404 Not Found). Open the guide for details.` |
 | TC-CFG-03 | unresolvable host | M 5.4 US1 step 5 | reason `Could not resolve host` |
 | TC-CFG-04 | unsupported source scheme | A `python3 -m unittest discover -s tests` (`tests/test_helper.py::test_refuses_unsupported_scheme`); M optional | code `unsupported_scheme`, guide renders the message |
@@ -211,7 +211,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-UI-01 | not configured (UX 4.4, 6.3) | M 5.4 US1 step 1 | `No playlist configured`; `Set your M3U URL or path, then press r to load it:`; command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>`; `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>`; `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`; column hidden; hint `r reload - Esc close`; glyph U+F0502; click on the box copies (`wl-paste`) and footer `Copied` |
+| TC-UI-01 | not configured (UX 4.4, 6.3) | M 5.4 US1 step 1 | `No playlist configured`; `Set your M3U URL or path, then press r to load it:`; command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>`; `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>`; `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`; column hidden; hint `r reload - Esc close`; glyph U+F0502; click on the box copies (`wl-paste`) and footer `Copied` **[Noted 2026-10-11, D-SINK-19: these three strings are unchanged on the tree and still present `playlistUrl` / `epgUrl` as stored settings; they are inputs now (the value is converted and removed from the entry). The first-run form's caption says so (`(converted; not kept in shell.json)`, UX-SOURCES 5.1); these three are an open UX item for the lead, not a defect this lane can board.]** |
 | TC-UI-02 | loading, no cache (UX 4.5) | M 5.4 US1 step 2 | glyph U+F01D8, `Loading playlist...`, `Fetching from iptv-org.github.io` (host only), hint `Esc close`; never shown when a cache exists |
 | TC-UI-03 | error with cache (banner, UX 4.6) and without cache | M 5.4 US7 step 3, US1 step 4 | banner spec (height `Style.space(28)`, urgent tint, glyph U+F0026, 140 ms fade); empty error state with glyph U+F0503 |
 | TC-UI-04 | now-playing cues (UX 4.7) | M 5.4 US3 step 4 | bold name + U+F040A + footer, column unchanged |
@@ -378,6 +378,19 @@ node tests/Model.test.js | grep -c '^ok'
 grep -o 'qa-[a-z-]*\.\(m3u\|xml\|gz\|html\)' tests/test_*.py tests/*.js tests/*.qml | sort | uniq -c   # every fixture referenced
 ```
 
+D-SINK-19 (2026-10-11), automated half, all in the gate: `node tests/Model.test.js`
+runs the shared fixture `tests/fixtures/active-key.json` -- `parse` (18 cases,
+also run by `tests/test_state.py::test_active_key_runs_the_shared_fixture`),
+`remove` (5, also `test_remove_runs_the_shared_fixture`), `resolve` (6), `adopt`
+(23, the R1 order, both refusals, the consumed echo, the R4 EPG rules) and
+`order` (8, the R5 write plan) -- plus the `D-SINK-19 migration 1..6`,
+`R1 (review P1)`, `R7` and `P3 sibling` checks; `tests/Model.spec.qml`
+`test_guideSurfaceClearedPlaylist` carries the R2 compare inside the Qt
+engine. Lane A measured 16 node checks and 1 qml compare red against the
+first build (f275bde) and the rest red by mutation. The LIVE half is
+`QA-SOURCES.md` SRC-MIG-08..12 and SRC-RM-10, which wait on the harness
+repair (R6) and are UNVERIFIED until it lands.
+
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 
 Run from the repo root (static) and on the live shell (dynamic). Expected
@@ -405,7 +418,7 @@ output is empty unless stated.
 | SEC-18 | 8.6 no network from QML | A `grep -rnE 'XMLHttpRequest|fetch\(|Qt\.openUrlExternally|WebSocket' *.qml Model.js` | nothing |
 | SEC-19 | XMLTV entity expansion / external entities | A* small XML with a 10x10 nested entity (`<!ENTITY a "aaaa..."><!ENTITY b "&a;&a;...">`) and an external entity `<!ENTITY x SYSTEM "file:///etc/passwd">` as EPG source | parse error or bounded memory; external entity never read (`xml.etree` does not resolve them); `bad_xml`/`network` style error surfaced |
 | SEC-20 | 8.4 redirects | A* mock `http://` source that redirects to `file:///etc/passwd` and to `ftp://` | `urllib` refuses non-http redirects -> `network` error; https -> http downgrade is allowed by urllib (document) |
-| SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials |
+| SEC-21 | credentials in `channels.json` (section 6 caveat) | M 5.7 | file 0600 in a 0700 dir; README settings section warns that `shell.json` and the cache contain the provider credentials **[Amended 2026-10-11, D-SINK-19: the README now counts two files the plugin owns (`state.json`, the cache) and one it does not own that a URL only passes through (`shell.json`, from the user's own `omarchy bar set` or an install upgrading into this version, until the plugin's next write); `grep -c playlistUrl ~/.config/omarchy/shell.json` is 0 after any owned write, and the sentence "Nothing else ... writes either URL anywhere but the two files of its own" is checked against the count in the same section]** |
 | SEC-22 | 8.12 a logo's declared dimensions are bounded (D-LOGO-11) | A `tests/test_logo_dimensions.py` calls the shipping `logo_dimensions` / `logo_within_bounds` / `logo_file_within_bounds` / `write_logo` / `cmd_logos` over `tests/fixtures/logo-dimensions.json` (56 header cases at integration (55 at lane commit ddc0a7b, up from 44 at 995c6be): all four types, the boundary shapes 4096x1024, 4097x1024, 2048x2049 and their transposes, an EXIF thumbnail before the real frame header, a 64x65535 column, a two-frame GIF); M section 3.2 observes both sinks through `scripts/dev-harness/logo-scenario.sh` | every over-bound or unreadable header refused with `logo_dimensions` and nothing created on disk; a cached file that is over the bound, unreadable, not one of the four types, or over the byte cap with its header past the first read, swept and never announced, past the per-run fetch cap included; the within-bound control reaches `Image.Ready` at control memory |
 | SEC-23 | 8.13 the shell never subscribes to the clipboard (D-CLIP-1) | A `node tests/Model.test.js` (the D-CLIP-1 block: `editInsert` / `editDelete` / `wordBoundary` over `tests/fixtures/form-edit.js`, 115 checks at lane commit 44b250b, +48 at 51866a3 for R8: `clipboardArgv`, 17 `parseClipboardReply` vectors from `tests/fixtures/clipboard.json`, `clipboardCut`, `editRangeFor`, `cutApplies`), `tests/test_clipboard.py` (20 tests at 51866a3: the helper's `clipboard` verb run as a subprocess against a stub `wl-paste` on PATH that streams 4 MiB, hangs, ignores SIGTERM, fails or is absent -- the byte cap, the deadline, the kill grace, the character-boundary cut, an empty stderr and a reaped child are each observed, never grepped) and `qmltestrunner tests/Model.spec.qml` (`test_formEditBoundaries`, `test_formEditDeletes`, `test_formEditCap`, `test_readOnlyFieldPremises`, `test_passwordCutIsNativelyANoOp`, which re-measure Qt's word boundary and pin that a read-only input never edits itself); M section 3.3 observes the sink | the model edits agree with a real `TextInput` position by position; the form field reads `readOnly: true` and Qt draws no caret on it; under a foreign 100 MB offer inside a nested compositor the shell's RSS and an IPC round-trip are unchanged on the fixed tree and the read shows on `--baseline d55149b` |
 
@@ -914,6 +927,8 @@ codepoints for `...`, quotes and the middle dot).
    `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`,
    no group column, hint `r reload - Esc close`, glyph U+F0502; click the box,
    `wl-paste` prints the command, footer `Copied` [TC-UI-01, TC-BAR-02].
+   (Since D-SINK-19 the command is an input: after step 2 the entry carries
+   `sourceKey` and no `playlistUrl`; see TC-CFG-01 as amended.)
 2. Set `playlistUrl` (5.3) with the guide open: within a second the state
    becomes `Loading playlist...` / `Fetching from iptv-org.github.io` (host
    only) with hint `Esc close` [TC-UI-02], then the list renders; footer

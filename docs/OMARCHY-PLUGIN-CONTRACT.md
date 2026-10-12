@@ -515,3 +515,54 @@ not provide a clipboard verb of its own; `Quickshell.clipboardText`
 (quickshell-core.qmltypes) is the same `QClipboard::text()` read in the same
 process and is not used, and the plugin's own unreachable `clipboardText()`
 in `Guide.qml` was deleted at 51866a3.
+
+## Verified host behavior: `updateEntryInline` stores every key it is handed, declared or not (verified 2026-10-11)
+
+Why it matters. D-SINK-19 mirrors the active source's key into the bar entry
+as `sourceKey`, a key `manifest.json` deliberately does not declare (declaring
+it would offer the plugin's own mirror as a user setting with help text). The
+recovery path `Model.adoptActiveSource` step 3 -- an install that lost
+`state.json`'s pointer but still has its sources finds its way back through
+the entry -- rests on the host KEEPING a key it was never told about, and that
+premise had been read off the host's source and never measured.
+
+Measured by running the host's OWN function, not a reimplementation of it:
+`shell.qml:1078-1117` (`/usr/share/omarchy/shell/shell.qml`, Omarchy 4.0.4-1,
+sha256 prefix `4a4b7694e5b9e0bd`) copied by line range into node with stubs
+for `Util.canonicalWidgetId`, `Util.isPlainObject` and `persistShellConfig`,
+over three stored configurations (the script, `host-undeclared-key.js`, and
+its output sit in the docs lane's scratch; re-run it with
+`sed -n 1078,1117p /usr/share/omarchy/shell/shell.qml > host-updateEntryInline.js && node host-undeclared-key.js`
+after checking the function still ends at line 1117):
+
+- **A. The entry is in `bar.layout` only** (the shape `omarchy plugin enable`
+  writes). Handed `{id, sourceKey, showLogos, refreshMinutes}` over a stored
+  entry that carried `playlistUrl`, the stored entry became exactly
+  `{id, sourceKey, showLogos, refreshMinutes}`: the undeclared key is kept, and
+  the key NOT handed over (`playlistUrl`) is GONE rather than emptied. The
+  code is `var next = { id: stripped }; for (var k in settings) if (k !== "id")
+  next[k] = settings[k]` (`shell.qml:1092-1093`); no schema is consulted. This
+  is what lets `Model.entryWith` remove the retired URL keys by omission.
+- **B. The same id is ALSO in the top-level `plugins[]` list.** Only the
+  `bar.layout` copy is rewritten -- the `plugins[]` loop runs only `if
+  (!foundInLayout)` (`shell.qml:1102`) -- and a `plugins[]` copy keeps whatever
+  it had, `playlistUrl` included. The plugin never READS that copy (`barConfig`
+  is built from `bar`), but no write of ours would remove a credential from
+  it. On this machine `plugins` is `[]`, and `omarchy plugin enable` writes
+  `{id}` objects into `bar.layout` (`services/PluginRegistry.qml:526`). Whether
+  any supported command fills `plugins[]` is UNVERIFIED.
+- **C. Handing back exactly what is stored** returns `false` and persists
+  nothing (the one-write-behind section above; `shell.qml:1114`).
+
+Two neighbouring facts, read rather than run:
+
+- `omarchy bar set <id> <key> <value>` writes ANY key. `setBarWidget`
+  (`services/PluginRegistry.qml:342-380`) finds the entry and does
+  `entry[String(key)] = value`; nothing checks the key against the manifest
+  schema, so a user can set `sourceKey` by hand (the plugin ignores a value
+  naming none of their records, and consults it at all only when `state.json`
+  names no source), and `omarchy bar set ... playlistUrl ""` stores an empty
+  string, which the plugin treats as a no-op since D-SINK-19.
+- `omarchy plugin disable` removes the entry and everything on it, the mirror
+  included (`QA.md` TC-INST-05); the plugin's own `state.json` still names the
+  active source, so re-enabling does not need the URL again.

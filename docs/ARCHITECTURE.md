@@ -229,6 +229,18 @@ helper). `epg-status.json` mirrors the playlist status shape with
 `recents` is newest first, capped at `maxRecents`. Favorites keep their
 insertion order (that is the order of the Favorites group).
 
+The block above is the version-1 shape and is kept for the fields it shows;
+version 2, with the Sources history, is specified in `ARCHITECTURE-SOURCES.md`
+2.1. Amended 2026-10-11 (D-SINK-19): version 2 also carries `activeKey`, the
+key of the active source, additive with no version bump on the `hiddenGroups`
+precedent -- and it is the field whose absence un-configures the plugin, since
+`state.json` is now the ONLY place the active source is named. It is read
+through `Model.activeKeyOf`, which answers `""` for a key naming no record in
+`sources[]`, and it is taught to all three whitelists (`Model.parseState`,
+`Model.cloneState`, the helper's `normalize_state`), each through a type test
+rather than a string coercion, because the shared fixture found `str()` turning
+the number `12345678` into a valid-looking key on one side and not the other.
+
 ### mpv status (helper `status` stdout, M1 target)
 
 ```json
@@ -252,8 +264,9 @@ bar entry, read by the service through `shell.barConfig`.
 
 | Key | Type | Default | Validation (service side, `Model.js`) |
 |---|---|---|---|
-| `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else |
-| `epgUrl` | string | `""` | same rules; empty disables EPG |
+| `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else. **Amended 2026-10-11 (D-SINK-19): an INPUT, not a stored setting.** A value here that this service has not consumed -- the first reconcile of a service, or a value different from the one it last saw -- is validated and adopted through `Model.reconcileSources` exactly as a CLI value always was (SR8; SR37 in `ARCHITECTURE-SOURCES.md` as amended), the adopted record becomes the active one, and the plugin then rewrites the entry WITHOUT this key (`Model.RETIRED_SETTINGS`, dropped by `Model.entryWith`), so reading the entry back does not show it. A refused value is reported (D16, narrowed by `Model.invalidInputBlocks` to the case with no active source to show instead) and stripped too. An empty value is a no-op: it is the steady state after the plugin's own strip, not a command. The plugin itself never writes a URL here any more |
+| `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key |
+| `sourceKey` | string | `""` | D-SINK-19. Written by the plugin, never derived from user input: `Model.activeKeyText` of the active source's key, 8 lowercase hex with D4's suffix rule, mirrored into the entry by every owned write (`Model.OWNED_SETTINGS` is `["sourceKey", "showLogos"]`). NOT the authority -- `state.json`'s `activeKey` is -- and consulted only when the state names no record (`Model.adoptActiveSource` step 3); a value naming none of the user's records reads as absent. Deliberately NOT declared in `manifest.json` (`barWidget.defaults` and `schema` do not name it): declaring it would offer the mirror as a user setting with help text. The host keeps an undeclared key through its own rewrite and `omarchy bar set` writes any key without a schema check -- both MEASURED on 2026-10-11 and recorded in `OMARCHY-PLUGIN-CONTRACT.md`, because the recovery path rests on them. Not a credential: SR36 states what it is (a 32-bit confirmation of a guessed URL) |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
 | `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in `Model.js` and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
 | `showChannelName` | boolean | true | widget-only, `!== false` |
@@ -274,6 +287,32 @@ D-SINK-8 below. The helper never logs or prints a URL (errors carry the host
 only), `channels.json` stores `sourceHost` rather than the URL, but stream
 URLs inside `channels.json` do contain the credentials (cache dir is 0700,
 files 0600). Documented in the README's settings section.
+
+Amended 2026-10-11 (D-SINK-19). **`shell.json` comes off that list as a place
+the plugin PUTS a credential, and stays on it as a place one passes through.**
+The plugin no longer writes a URL into the bar entry at all: the entry carries
+the active source's key (`sourceKey`, the settings table above), and
+`Model.entryWith` drops `playlistUrl` and `epgUrl` from every write it makes.
+So the paragraph above reduces, for the plugin's own writes, to `state.json`
+(which now also names the active source), the fetch environment for the life of
+a fetch, and the stream URLs inside each `channels.json` -- every one a file or
+a process the plugin creates itself, 0600 inside 0700, or an environment the
+fetch verbs make non-dumpable. Two things keep the sentence from being
+absolute, and both are bounded rather than denied: a URL the USER sets with
+`omarchy bar set` is written there by the host before the plugin can do
+anything about it, and is removed on adoption rather than never arriving (the
+window is from the host's write to the plugin's next owned write: one
+reconcile and one `Qt.callLater` while the shell runs, the whole downtime plus
+the first start's reconcile when it was not); and an install upgrading into
+this release has one in the file until the migration's first owned write
+lands. The mode shield (D-SINK-18) is what covers both windows and it stays for
+that reason -- SR40 in `ARCHITECTURE-SOURCES.md` records the reasoning,
+including why the gate in front of a persist now asks about the entry being
+written (`Model.entryShieldDecision`) and answers `persist` on every shipping
+path. "The URL is no longer stored" would be the wrong sentence and is not the
+one above: the credential IS stored, in the plugin's own 0600 file, which is
+the whole point of the change. The README counts the files the same way: two
+the plugin owns, one it does not own that a URL only passes through.
 
 Amended 2026-09-22 (D-SINK-3). The argv exposure above is transient and was
 reasoned about; a second one was not. The README's own install instructions
@@ -717,6 +756,224 @@ identified by its URL on the bar entry, so a credential has to live in the
 host's config for the plugin to know which source is active.
 `ARCHITECTURE-SOURCES.md` D1 records that, and the migration to a key is filed
 separately by the lead; the shield is the containment, not the answer.
+
+Raised 2026-10-09 (D-SINK-19), built 2026-10-11 in two rounds, and written
+here in the round that built it -- the state of the change is the board row in
+`docs/STATUS.md`, not this paragraph. **The first finding in this run that came
+from inside the project, and it came from the one place rule 15 says to
+look.** It is the sibling sweep at the end of the entry above, whose closing
+sentence is "the root cause is not the mode at all", given an id, a round and
+a release of its own instead of being left as a remark at the bottom of
+somebody else's fix.
+
+**What the exposure was.** Not a new leak: the same credential in the same
+file, named by its cause rather than by its symptom. The active source was
+identified by its URL, so the URL had to be on the bar entry for the plugin to
+know which source was playing: at 65ec1b8, the last tree before the change,
+`Service.qml:199-201` said so in terms, `Service.qml:247` derived the active
+key by matching that URL against the records in `state.json`, and `state.json`
+had no `activeKey` of its own. The host persists that entry into
+`~/.config/omarchy/shell.json`, whose packaged default is 0644 and whose
+writer preserves whatever mode it finds. Every source reached it, not only
+Xtream: a `https://user:pass@host/list.m3u`, a provider URL carrying the
+credential as a path token, and a `get.php?username=U&password=P` alike.
+
+**What D-SINK-18 contained.** The mode shield in the entry above: a real
+narrowing that shipped in 0.13.3, and a narrowing of WHO CAN READ the file
+rather than of what is in it.
+
+**Why containment was not the end of it.** Three reasons, none of them a
+criticism of the shield. A mode is a property of the file rather than of the
+plugin: anything may reset it and nothing tells a plugin that happened, which
+is residual 2 of the entry above. The shield defends a container the plugin
+does not own, so its correctness depends on facts about somebody else's
+software that were measured once, on one machine, on one day. And the question
+the shield answers -- "is this box private?" -- is downstream of the question
+that should never have had this answer: "why is the secret in that box at
+all?" A containment whose premise is that the credential belongs there is
+re-raised every time the premise is re-examined, and it was, four times in
+four days.
+
+**What changed, as the code on this tree does it.** The active source is
+named by its KEY. `state.json` gains `activeKey`, additive at
+`Model.STATE_VERSION` 2 on the `hiddenGroups` precedent with no version bump,
+taught to all three whitelists and read through `Model.activeKeyOf`, which
+refuses a key naming no record (section 5 above). `configured` is "there is an
+active source" rather than "the entry holds a URL" (`Service.qml:170`). The
+bar entry carries `sourceKey`, a mirror of that key, and NO URL:
+`Model.OWNED_SETTINGS` is `["sourceKey", "showLogos"]`,
+`Model.RETIRED_SETTINGS` is `["playlistUrl", "epgUrl"]`, and `Model.entryWith`
+DROPS the retired keys from every write, so the key is removed from the stored
+entry rather than emptied -- the host builds the stored entry as `{id}` plus
+exactly what it is handed, measured on 2026-10-11 and recorded in
+`OMARCHY-PLUGIN-CONTRACT.md`. There is now exactly ONE call of
+`updateEntryInline` in `Service.qml` (`writeOwnedEntry`; the node suite counts
+the call sites). Identity is NOT changed: still the normalized URL, the key
+still `Model.sourceKey` of it and still the cache directory name, so no cache
+is rebuilt. The function whose job was "name the active source from a URL" is
+deleted rather than left behind with no caller; the comment above
+`Model.reconcileSources` says why.
+
+**The input path, which the first build got wrong and the adversarial review
+caught (lead rulings R1-R5, 2026-10-11).** `playlistUrl` and `epgUrl` on the
+entry are INPUTS, and the first build read them in the wrong order: its
+resolver trusted the state's key before it looked at the entry, every first or
+forced reconcile went that way, and the owned write that followed stripped the
+URL out of `shell.json` -- so a `omarchy bar set ... playlistUrl` made while
+the shell was down was discarded and then erased, and a configured install
+never moved its active source on the CLI path at all. Reproduced by calling
+the shipping functions in the service's order, not argued. What the tree does
+now, with each decision lifted into `Model.js` so node can call it (rule 12):
+- `Model.reconcileAction` decides what a settings change MEANS. `adopt` when
+  the entry carries a playlist URL this service has not consumed -- the first
+  reconcile of a service, or a value different from the snapshot of the last
+  one -- whether or not the reconcile was forced; `migrate` on a state load or
+  a first reconcile with no fresh URL; `ignore` otherwise, including the input
+  going empty, which is the steady state after the plugin's own strip.
+  `adoptEpg` is decided the same way and independently.
+- `Model.adoptActiveSource` resolves in this order, and the order is the
+  whole decision: (1) a fresh entry `playlistUrl`, validated -- valid goes
+  through `Model.reconcileSources` exactly as a CLI value always has (a known
+  URL becomes active; an unknown one is added with origin `cli`, or `migrated`
+  on the very first v2 run; at the 50 cap the least-recently-used non-active
+  record is evicted and its cache directory removed), invalid is reported and
+  the key is left exactly as it was; (2) the state's `activeKey` when it
+  names a record; (3) the entry's `sourceKey` when it names a record; (4)
+  nothing, and a dangling key is cleared rather than left for the next reader.
+  Then a fresh EPG input is attached to whichever record is now active, on
+  every path, an `ignore` plan included, so D-SRC-02 stays closed.
+  `Model.reconcileSources` writes the adopted key INTO the state it returns
+  (R2); `Model.removeSource` of the active record clears the pointer in the
+  state it returns (R3), as the helper's `remove_source_record` already did.
+- Why "not consumed" and not "every reconcile" (lane A's DR-1, accepted as
+  built): the strip is the plugin's own write, which the host never echoes
+  (rule 9), so the host keeps publishing the adopted URL until somebody else
+  writes. A state reload is a forced reconcile, and reading that stale URL
+  again would re-add and re-activate a source the user had just removed
+  through `state source remove`. The cost: re-setting the SAME URL in one
+  session after removing it is `ignore` until the next shell start, which is
+  what 0.13.5 did too.
+- The empty input is a no-op, and that is a lever withdrawn rather than lost
+  quietly: `omarchy bar set ... playlistUrl ""` and `... epgUrl ""` no longer
+  clear anything, because an entry the plugin itself empties on every write
+  cannot also be a command to empty the configuration. The Sources screen and
+  the helper's `state source` verbs are where a source or a guide URL is
+  cleared (R4). The stale `Service.qml` comment that said the CLI clear still
+  arrived on `onActiveEpgUrlChanged` is rewritten.
+- Write order (R5). A move of the active source is two writes, the key into
+  `state.json` and the mirror into the entry, and the mirror write is the one
+  that takes the URL OUT of the entry. `Model.pointerWritePlan` fixes the
+  order: state first, and the entry WAITS when the state save is parked
+  behind the start-up directories (`stateInitProc`'s exit writes the parked
+  state and only then the entry). An interrupted migration therefore leaves,
+  at worst, the URL still on the entry -- the idempotent old shape,
+  re-adopted on the next run -- and never a record nobody points at. The
+  first build wrote the entry ungated through `Qt.callLater` while the state
+  save could still be deferred.
+
+**What REMAINS, with its size rather than a claim of zero.** The exposure is
+NOT closed. Three things remain, and the first is the one to quote:
+1. *The key is a confirmation oracle.* It is `fnv1a32` of the normalized URL,
+   32 bits, one-way, and it still sits in a file that can be 0644. It cannot
+   be turned into a URL. It CAN be used to check a guess: another local
+   account that reads the entry and guesses a candidate URL -- a provider's
+   published `get.php` shape, a username it already knows, a password from a
+   list -- hashes the candidate and compares. That is much less than handing
+   over the credential and it is not nothing, and it is the reason the shield
+   is kept rather than retired (SR40; `Model.entryShieldDecision` states the
+   trade in code).
+2. *The input path.* `omarchy bar set ... playlistUrl` is still supported and
+   is still a write of a credential into that file, made by the host on the
+   user's instruction, at a moment the plugin cannot gate. The plugin removes
+   it on adoption; it does not prevent its arrival. The window runs from the
+   host's write to the plugin's next owned write -- one reconcile and one
+   `Qt.callLater` while the shell runs, the whole downtime plus the first
+   start's reconcile when it was not. Bounded in events; its wall-clock size
+   is a property of the user's session and is UNVERIFIED. The README says the
+   value is converted and will not be there afterwards, which is the only
+   honest version of "it still works".
+3. *Installs upgrading into this release.* Their `shell.json` holds a URL
+   until the first owned write on the new version, which the migration itself
+   issues on the first reconcile (a URL on the entry makes `writeEntry` true).
+   The shield runs on the startup path unconditionally, so the container is
+   tightened at that start whether or not the write lands -- F-M3-16's
+   lesson, that the artifact needs the fix as much as the derivation does.
+A fourth, smaller, and measured on 2026-10-11 (`OMARCHY-PLUGIN-CONTRACT.md`):
+when the plugin's id ALSO appears in the host's top-level `plugins[]` list,
+`updateEntryInline` rewrites only the `bar.layout` copy, so a URL in a
+`plugins[]` copy would stay there untouched by any write of ours. On this
+machine that list is empty and `omarchy plugin enable` writes to `bar.layout`;
+whether any supported command fills `plugins[]` is UNVERIFIED.
+
+**The costs, accepted by the product owner on 2026-10-09 before the work was
+briefed, restated after the review as what the code does.** (1) `omarchy bar
+set ... playlistUrl` is input-only, on the "not consumed" terms above. (2) A
+DOWNGRADE reports the plugin as not configured, because an older build looks
+for a URL that is no longer there, and it looks like data loss precisely
+because the migration was silent; the older build's own `Saved sources (n)`
+link is the recovery. The round trip back up is a MIXED shape, not the old
+one: the older build's `entryWith` copies every own key of the entry, so
+`sourceKey` survives on it; its `ownedEntryPatch` writes the newly picked
+`playlistUrl` beside that stale key; and the older `parseState` drops
+`activeKey` on its next save. Step 1 above resolves that to the URL -- the
+source picked while downgraded is the one that comes back -- and the owned
+write that follows strips the URL again. Derived from both builds' code
+(1a8dccd for the older one) and pinned by the node suite's adopt cases; the
+live round trip is UNVERIFIED. (3) `state.json` becomes the only copy of the
+source list, where the URL in `shell.json` used to be an accidental backup
+that `Model.reconcileSources` could rebuild a record from. All three are in
+the README in plain language, none of them softened.
+
+**The siblings, asked before closing (rule 15), in two sweeps.** The first
+sweep's shape is not "what writes to a file we do not own" -- that was
+D-SINK-18's -- but "what FACT does this plugin identify by a value that is
+itself a secret", since an identifier has to live wherever the fact is named.
+Swept over the tree at 65ec1b8:
+- **`epgUrl` on the bar entry.** Not a new discovery, but named because the
+  fix can get it wrong: a migration that moves `playlistUrl` and forgets
+  `epgUrl` leaves the same credential behind in the same place, and on an
+  Xtream provider the `xmltv.php` URL is built from the same username and
+  password. Both are retired keys; both move.
+- **The cache directory name.** Already a key and not a URL (D4/D5). The
+  precedent the fix follows. Cleared.
+- **Logo cache filenames.** Already `fnv1a32(url)` -- `logo_filename` in the
+  helper, whose docstring is explicit that the provider's path never reaches
+  the filesystem. Cleared.
+- **Favorites, recents, `lastPlayed`, `failed.json`.** Keyed by channel id,
+  never by a URL (a `failed.json` row is `{id, at}`). Cleared.
+- **The player session record, the player lock file, the mpv socket and the
+  runtime directory.** A channel id and a name; `{schema, seq, verb, at}`;
+  constant names under a directory the plugin owns. Cleared.
+The second sweep, 2026-10-11, over the repair itself, by the shapes the review
+found: "where else is the active key derived", "where else does a record leave
+the list", "who else reads the input pair". `Model.parseState` dropping
+invalid records and `Model.reconcileSources` evicting at the cap can both
+leave the file's `activeKey` dangling -> `Model.activeKeyOf` validates on
+every read (fixture section `resolve`). The helper's `remove_source_record`
+and its id-remap already clear or carry the pointer; unchanged, now run by the
+shared fixture. The probe-commit edit of the ACTIVE source (`Service.qml:4005`)
+removes the old record and adds the new one before `persistActive(newKey)`,
+and already resolved the intermediate state to `""` at the merge base, so R3
+changes nothing there (lane A's DR-5; left for whoever holds the display). The
+readers of the input pair are `inputPlaylistUrl`, `inputEpgUrl`,
+`activeEpgUrl`'s fallback to the input for the one case that has no record
+(kept, and the fixture records it), and `Service.reconcile`, the plan's only
+consumer. The `cloneState` whitelist coerced a non-string key where
+`activeKeyText` had been fixed -- the same site one function away -- and is
+fixed with it. Nothing the two sweeps reached identifies a fact by a
+credential, and the scope of that claim is stated rather than implied: a read
+over the one `updateEntryInline` call site, the state and cache writers, the
+helper's file-name derivations and the runtime directory's contents. It is not
+a proof of absence.
+
+**What this lane did not verify.** This is the docs lane; it holds no display.
+It has not run the shell, the migration, a downgrade or an upgrade; it cites
+the lead's 2026-10-09 mode measurements and lane A's 2026-10-11 node evidence
+rather than restating them as its own, and the one measurement it took itself
+is the host's `updateEntryInline` run in node over the host's own source
+(`OMARCHY-PLUGIN-CONTRACT.md`). The harness instrument that would observe the
+migration live derives the key from the entry's URL and is being repaired
+under R6; until that lands, every live half of this entry is UNVERIFIED.
 
 Raised 2026-10-09 (D-LOGO-11), and written here in the round that fixes it --
 the state of that fix is the board row in `docs/STATUS.md`, not this
@@ -1465,7 +1722,9 @@ Performance budget (10k channels):
 6. No symlinks in the repo (validator rejects them); no sudo, no pkexec, no
    network from QML.
 7. Credentials: never printed; `sourceHost` instead of URL in caches and
-   errors. README warns that `shell.json` and the cache contain them, and
+   errors. README warns that `state.json` and the cache contain them (since
+   D-SINK-19 the two files the plugin owns, counted in the README), that
+   `shell.json` only has one passing through it, and
    says plainly what the plugin changes about `shell.json` so that a user
    meets that fact in the README rather than in `ls -l`.
 8. IPC surface is minimal (`play/stop/next/prev/refresh/status`) and only acts
@@ -1501,7 +1760,14 @@ Performance budget (10k channels):
     includes a container it does not own. Standard 5 covers the plugin's own
     files; D-SINK-18 is what happens when the same credential goes into the
     host's `shell.json`, whose packaged default is 0644 and whose writer keeps
-    whatever mode it finds. So the mode of that one file is checked and
+    whatever mode it finds. Since D-SINK-19 the plugin writes NO secret into
+    that container -- the entry carries the active source's key -- and this
+    standard is kept in full for the two routes a URL still takes into it
+    (the user's own `omarchy bar set`, and an install upgrading into this
+    release), with the gate asked of the entry about to be written
+    (`Model.entryShieldDecision`) so that it fires again the moment a
+    URL-bearing key is written by anyone. So the mode of that one file is
+    checked and
     tightened BEFORE a URL is written into it -- the helper's `config shield`,
     a verb with no path argument that operates on a file descriptor rather
     than a name -- and a persist that carries a URL is REFUSED when it cannot

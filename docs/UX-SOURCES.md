@@ -68,6 +68,15 @@ active playlist URL was cleared at runtime, for example by
 `omarchy bar set io.github.rmcdavid.iptv playlistUrl ""`. In the cleared
 case the source record and its cache survive, so this surface shows the
 `Saved sources (n)` link and setting a URL again reloads from cache.
+**[Amended 2026-10-11, D-SINK-19: `configured` is "the plugin's own
+`state.json` names a source it holds", and `omarchy bar set ... playlistUrl
+""` no longer clears anything -- an empty input is a no-op (R1/R4), because
+the plugin itself empties that key on every write. The surface is reached
+by removing the active source (here, or `state source remove`), by a state
+file whose pointer names no record, and -- the case worth knowing about --
+by an OLDER build run over a migrated install, which looks for a URL on the
+entry and finds none; the `Saved sources (n)` link is the recovery in all
+three.]**
 
 1. The guide opens straight into `sourceEdit` with `origin: "firstRun"`.
    The empty-state column keeps its glyph and title (`No playlist
@@ -139,7 +148,9 @@ scope, query survive) unless the active source changed (1.4).
 1. Already active: return to the guide, no reload (parity with `Enter` on the
    playing row).
 2. Otherwise `service.switchSource(id)`: shell.json gets that source's
-   `playlistUrl` / `epgUrl`, the service points at its cache directory, the
+   `playlistUrl` / `epgUrl` **[since D-SINK-19, 2026-10-11: `state.json`
+   gets the source's key as `activeKey`, and shell.json gets that key as
+   `sourceKey` and no URL]**, the service points at its cache directory, the
    in-memory channels are replaced from its `channels.json`, `lastUsedAt` is
    stamped.
 3. The guide returns to `search` mode with an empty query, scope by the
@@ -482,6 +493,21 @@ The terminal line is `Style.font.caption` at opacity 0.7 and keeps the
 shipped click-to-copy. Placeholder text in the field uses the kit's
 `placeholderTextColor`. The eye slot after each URL field is reserved but
 empty (nothing to mask).
+
+Amended 2026-10-11 (D-SINK-19). The terminal caption in this wireframe and
+the next is the pre-D-SINK-19 text. The shipped string now ends
+` (converted; not kept in shell.json)` -- the exact string is in the table in
+section 5.1 -- because the command is an INPUT: the URL is moved into the
+plugin's private state and taken back out of shell.json by the plugin's next
+write, and a user who looks for it there afterwards should have been told.
+The caption is `elide: Text.ElideMiddle` over the card width; whether the
+longer string elides at the shipped width, and what it looks like when it
+does, is UNVERIFIED (the docs lane holds no display). Two strings on the
+OLDER empty state (the one with the command box, UX.md 4.4) still present the
+URL settings as stored -- `Settings live in ~/.config/omarchy/shell.json
+(entry ...)` and `Optional EPG:  omarchy bar set ... epgUrl <url>` -- and are
+unchanged in this round; they are an open UX item for the lead, recorded
+here and in the lane report rather than given an id this lane cannot board.
 
 #### 3.1.2 After paste (both URLs masked)
 
@@ -1077,7 +1103,7 @@ no "please".
 | Header, forms | `Add source`, `Edit source`, `Add Xtream login` |
 | First-run title (shipped) | `No playlist configured` |
 | First-run prose | `Paste or type your M3U URL or path, then press Enter` |
-| First-run terminal caption | `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` |
+| First-run terminal caption | `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>  (converted; not kept in shell.json)` (D-SINK-19, 2026-10-11; two spaces before the parenthesis, as shipped; it was `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` before) |
 | Field labels, URL form | `Label`, `Playlist`, `EPG` |
 | Field labels, Xtream form | `Label`, `Server`, `Username`, `Password` |
 | Placeholder, Label | the derived label (5.6) once a URL / server parses, otherwise `optional` |
