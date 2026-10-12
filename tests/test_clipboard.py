@@ -124,14 +124,69 @@ class ClipboardVerbTestCase(unittest.TestCase):
         for key, value in extra.items():
             env[key] = str(value)
         started = time.monotonic()
-        completed = subprocess.run([sys.executable, str(HELPER), "clipboard"], env=env,
-                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, timeout=30)
-        elapsed = time.monotonic() - started
-        for event in self.events():
-            if event["event"] == "start":
-                self.pids.append(event["pid"])
+        try:
+            completed = subprocess.run([sys.executable, str(HELPER), "clipboard"], env=env,
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, timeout=30)
+        finally:
+            # Harvested whether or not the verb returned: a review dropped the
+            # helper's deadline, the run raised TimeoutExpired on the line
+            # above, and the stubs it had started lived out their 120 s with
+            # nothing to reap them -- the reaper only knew pids it had been
+            # handed AFTER a successful return.
+            elapsed = time.monotonic() - started
+            for event in self.events():
+                if event["event"] == "start" and event["pid"] not in self.pids:
+                    self.pids.append(event["pid"])
         return completed, elapsed
+
+    def test_a_sigterm_to_the_helper_reaps_the_child_first(self):
+        """The shell's watchdog ends the HELPER with SIGTERM when its outer
+        bound fires. Python's default disposition skips every `finally`, so
+        the wl-paste child was reparented with its read of a hostile offer
+        still open (a review orphaned one with a never-writing stub). The
+        helper now installs a handler that reaps the child before it exits."""
+        self.payload.write_bytes(b"")
+        env = dict(os.environ)
+        env["PATH"] = str(self.bin)
+        env["STUB_WL_PASTE_MODE"] = "hang"
+        env["STUB_WL_PASTE_FILE"] = str(self.payload)
+        env["STUB_WL_PASTE_RECORD"] = str(self.record)
+        env[helper.CLIPBOARD_TIMEOUT_ENV] = "30"
+        proc = subprocess.Popen([sys.executable, str(HELPER), "clipboard"], env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 10
+            stub = None
+            while time.monotonic() < deadline and stub is None:
+                for event in self.events():
+                    if event["event"] == "start":
+                        stub = event["pid"]
+                time.sleep(0.05)
+            self.assertIsNotNone(stub, "the stub never started")
+            self.pids.append(stub)
+            proc.terminate()
+            out, err = proc.communicate(timeout=10)
+            self.assertEqual(err, b"")
+            # the child is gone, by the helper's hand and within its grace
+            gone_by = time.monotonic() + helper.CLIPBOARD_KILL_GRACE + 1.0
+            while time.monotonic() < gone_by and self.alive(stub):
+                time.sleep(0.05)
+            self.assertFalse(self.alive(stub), "wl-paste outlived the helper that spawned it")
+            self.assertEqual(proc.returncode, 128 + 15)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def alive(self, pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     def events(self):
         if not self.record.exists():

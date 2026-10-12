@@ -10316,7 +10316,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     return [Model.CLIPBOARD_MAX_BYTES, Model.CLIPBOARD_MAX_CHARS * 4]
   }, [clip.maxBytes, clip.maxBytes])
   checkCall("D-CLIP-1 R8: the shell's watchdog is the OUTER bound, beyond the helper's deadline plus its kill grace", function () {
-    return Model.CLIPBOARD_WATCHDOG_MS > Model.CLIPBOARD_TIMEOUT_MS + Model.CLIPBOARD_KILL_GRACE_MS
+    // The helper's worst case is the deadline plus TWO graces (SIGTERM wait,
+    // then SIGKILL wait) plus its own start-up; a watchdog one grace short
+    // SIGTERMs a helper that was about to answer, and a review built that
+    // mutation (6001 ms) against a check that only pinned one grace.
+    return Model.CLIPBOARD_WATCHDOG_MS >= Model.CLIPBOARD_TIMEOUT_MS + 2 * Model.CLIPBOARD_KILL_GRACE_MS + 1000
   }, true)
   checkCall("D-CLIP-1 R8: the watchdog is still short", function () {
     return Model.CLIPBOARD_WATCHDOG_MS <= 30 * 1000

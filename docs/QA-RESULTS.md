@@ -13507,5 +13507,6 @@ right: it is the released Qt that reads, every editable `TextInput` does it
 on every clipboard change by any application, and the Wayland read beneath
 it has a 1 s per-read timeout, no total limit and no deadline. `readOnly`
 is the one switch on it, in every version of the slot (the January commit
-`a026cb69`, "check read-only first", only moved that check ahead of the
+`a026cb69`, "check for read-only first in q_canPasteChanged()", only
+moved that check ahead of the
 read), which is what the fix rests on.

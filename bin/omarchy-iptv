@@ -8130,6 +8130,18 @@ def read_clipboard(argv: list[str], max_bytes: int, timeout: float, grace: float
     eof = False
     timed_out = False
     status: int | None = None
+    # The shell's watchdog ends THIS process with SIGTERM when its outer bound
+    # fires. Python's default disposition for that signal skips every
+    # `finally`, so the wl-paste child would be reparented with its read of
+    # the hostile offer still open (a review orphaned one that way with a
+    # never-writing stub). The handler reaps the child first, then exits with
+    # the conventional status; the disposition is restored once the read is
+    # over so nothing outside this function inherits it.
+    import signal as _signal
+    def _terminated(signum, frame):
+        reap_child(child, grace)
+        raise SystemExit(128 + signum)
+    previous_term = _signal.signal(_signal.SIGTERM, _terminated)
     try:
         while True:
             if total >= max_bytes:
@@ -8163,6 +8175,7 @@ def read_clipboard(argv: list[str], max_bytes: int, timeout: float, grace: float
             except subprocess.TimeoutExpired:
                 timed_out = True
     finally:
+        _signal.signal(_signal.SIGTERM, previous_term)
         reaped = reap_child(child, grace)
         if status is None:
             status = reaped

@@ -469,13 +469,14 @@ requests and raise the batch.
      with a throwaway client under the user's own compositor: one editable
      `TextField` grew by 238 MB within 600 ms of a foreign 100 MB
      `text/plain` offer; the same field `readOnly: true` grew by nothing; a
-     window with no field made zero pipe reads. Attributed by a gdb
+     window with no field created no pipe after the offer. Attributed by a gdb
      catchpoint on `pipe2`: `q_canPasteChanged -> QMimeData::text() ->
      QInternalMimeData::retrieveData`. Upstream added that read on
      2026-02-18 (`c82ef988`, in 6.11.2) and removed it on 2026-09-15
      (`7d0a433a`, after the cut), so the marketplace maintainer's "6.12
      path" had the versions inverted and the mechanism right. Raised on
-     the verification request for 0.13.4, the sixth finding in six days.
+     the verification request for 0.13.4, the sixth finding in five
+     calendar days.
      `readOnly` is the one switch on the slot in every version, so the
      rule is: **while the plugin's form is open, no editable `TextInput`
      exists in the shell.** The form's fields are `readOnly: true`
@@ -484,9 +485,19 @@ requests and raise the batch.
      Model.js, node-tested; cited without the prefix until the lane that
      adds them lands, because the ledger resolves a prefixed citation
      against the tree), and paste is the out-of-process path
-     only -- `wl-paste` as argv, capped at `Model.LIMITS.url * 4`, in a
-     child that can be killed -- which also closes the middle-click
-     Selection paste, a second unbounded read on the same object. The
+     only: the helper's `clipboard` verb runs `wl-paste` as argv, reads at
+     most 32 KiB (`MAX_CLIPBOARD_BYTES`, 8,192 characters at four bytes
+     each) under a 5 s deadline, reaps the child even when the shell's
+     watchdog SIGTERMs it, and prints one bounded reply, so the shell never
+     holds more than that (the first version collected `wl-paste` whole in
+     the shell and a user Ctrl+V over a 100 MB offer cost +298 MB, kept;
+     measured, then closed). `readOnly` also closes the middle-click
+     Selection paste, a second unbounded read on the same object. What it
+     does NOT close, recorded rather than fixed: a left-button selection in
+     a REVEALED URL field writes the raw URL to the PRIMARY selection
+     (`mouseReleaseEvent` copies on every left release, no `readOnly`
+     gate) -- user-initiated, pre-existing, and the password field is
+     exempt because `copy()` is a no-op for `echoMode` Password. The
      stated loss: input-method composition (dead keys, CJK) does not reach
      a read-only field, so accents cannot be TYPED into the name field;
      ASCII typing and any paste are unaffected.

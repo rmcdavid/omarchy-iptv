@@ -10315,14 +10315,15 @@ var WORD_SPACE_RE = /[\t\n\u000b\u000c\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u
 // bytes, so 32768 bytes (32 KiB) is the most a reply can need. The helper's
 // deadline is CLIPBOARD_TIMEOUT_MS; the shell's watchdog (Service.qml
 // clipboardWatchdog) is the OUTER bound and sits beyond the helper's
-// deadline plus its kill grace, so a helper that answers "timeout" on time
-// is read rather than killed mid-reply, and a helper that cannot answer at
+// deadline plus TWO kill graces (a SIGTERM wait and then a SIGKILL wait, the
+// helper's reap_child) plus a second of interpreter start-up, so a helper
+// that answers "timeout" on time is read rather than killed mid-reply, and a helper that cannot answer at
 // all is still killed. A producer that drips bytes at the protocol's 1 s
 // per-read timeout runs into the helper's deadline; the bound kills a
 // CHILD, never the shell.
 var CLIPBOARD_TIMEOUT_MS = 5 * 1000
 var CLIPBOARD_KILL_GRACE_MS = 1000
-var CLIPBOARD_WATCHDOG_MS = CLIPBOARD_TIMEOUT_MS + CLIPBOARD_KILL_GRACE_MS + 2000
+var CLIPBOARD_WATCHDOG_MS = CLIPBOARD_TIMEOUT_MS + 2 * CLIPBOARD_KILL_GRACE_MS + 2000
 var CLIPBOARD_MAX_CHARS = MAX_SOURCE_URL * 4
 var CLIPBOARD_MAX_BYTES = CLIPBOARD_MAX_CHARS * 4
 

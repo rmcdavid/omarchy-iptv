@@ -1119,7 +1119,7 @@ adversarial review; since 51866a3 `Ctrl+C` is measured by pasting the
 copied selection into the editable control and a click and a drag are
 measured on a dedicated non-overlapping read-only control, with
 `selectByMouse` at the default the host's `TextField` inherits), so the
-plugin does the rest itself: `handleFormKey` (`Guide.qml:2669`), which already saw every
+plugin does the rest itself: `handleFormKey` (`Guide.qml:2667`), which already saw every
 key first through `Keys.forwardTo`, applies printable insertion, Backspace,
 Delete, their Ctrl word variants and cut to the MODEL value through
 `Model.editInsert` / `Model.editDelete` (`Model.js:10484`, `:10500` at

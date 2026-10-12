@@ -194,6 +194,7 @@ OFFER_MB=${CLIP_OFFER_MB:-}
 # with the helper's own peak at 32 MB.
 PROBE_BAND_MB=8
 SHELL_BAND_MB=16
+HELPER_BAND_MB=${HELPER_BAND_MB:-64}
 IPC_BOUND_MS=400
 MODE=${1:-}
 case $MODE in
@@ -654,8 +655,15 @@ shell_arm() {
   len=$(field_len); head=$(field_head)
   echo "   shell rss MB over the paste: before $before, peak $peak, growth +$r, last growth at +$4 ms (chord at +0 ms, sampled from -0.5 s to +$5 ms); at the window's end $(( $(rss_kb "$shell_pid") / 1024 )) MB"
   echo "   clipboard helper seen under the shell: $helper_seen, peak rss $((helper_peak / 1024)) MB; the tree's helper byte bound: $helper_bound"
-  ck "L10 Ctrl+V over the ${OFFER_MB} MB offer lands at formCapacity and grows the shell by less than ${SHELL_BAND_MB} MB (key exit $KEY_RC)" \
-     "$len $head $([[ $r =~ ^-?[0-9]+$ ]] && (( r < SHELL_BAND_MB )) && echo unchanged || echo "grew +$r MB")" "$cap DDD unchanged"
+  # R8 is observed on BOTH halves, or the label claims more than the check
+  # can redden for: the shell's growth (the exhaust half) AND the helper's own
+  # peak while it held the bytes -- a dropped byte cap left this check green
+  # in a review until the helper's peak joined the verdict. HELPER_BAND_MB is
+  # twice the 32 MB an interpreter peaks at on a 2-byte reply (measured six
+  # runs on this machine), so it is the cap that is asserted, not the floor.
+  hb=$(( helper_peak / 1024 ))
+  ck "L10 Ctrl+V over the ${OFFER_MB} MB offer lands at formCapacity, grows the shell by less than ${SHELL_BAND_MB} MB, and the helper that held the bytes peaked under ${HELPER_BAND_MB} MB (key exit $KEY_RC)" \
+     "$len $head $([[ $r =~ ^-?[0-9]+$ ]] && (( r < SHELL_BAND_MB )) && echo unchanged || echo "grew +$r MB") $([[ $helper_seen == 1 ]] && (( hb < HELPER_BAND_MB )) && echo helper-bounded || echo "helper seen=$helper_seen peak=${hb}MB")" "$cap DDD unchanged helper-bounded"
   wait_for 0 3 clip_children "$shell_pid"
   ck "L11 no clipboard helper and no wl-paste left under the shell after the cut-short paste" "$(clip_children "$shell_pid")" "0"
   producer_stop
