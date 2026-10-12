@@ -1325,7 +1325,7 @@ Regression re-test after the M2-01 fix round (`f19fe8f` Model.js, `f05420d` help
 | D-SRC-07 `cache prune` removes the `--active` key | P3 | `h15`: dirs `11111111 22222222 33333333`, `cache prune --keep 22222222 33333333 --active 11111111`; `--active` alone; bad `--active` | **verified fixed**: `removed` holds only the other valid-key dirs, `11111111` stays; `--active` alone keeps only the active key; `--active ../x` / `DEADBEEF` -> `bad_key` exit 1; the aged EPG of the active key is kept while a kept non-active key is aged (`agedEpg`); `keep_set.add(check_source_key(active))` at `bin/omarchy-iptv:1951`; `test_cache` +3 | `logs/h15.txt` |
 | D-SRC-08 Xtream server with `#fragment` accepted | P3 | `ipc xtream 'http://h.test/#frag' u p` and node E05 (`h09c` (d), `model.sh`) | **verified fixed**: `{"ok":false,"code":"server_path","message":"Server is just http://host:port - no path","field":"server"}` for `http://h.test/#frag`, `http://h.test#frag`, `http://127.0.0.1:8765/#x` and `?q=1`; `http://127.0.0.1:8765/` still ok; fixture E05 now passes (`code: server_path`, `archCode: bad_server`), `xtream-expect.json` 28 cases: the five UX-rule path vectors remain the only non-fixture verdicts (`[v0.2]`) | `logs/h09c.txt` (d), `logs/model.txt` |
 | D-SRC-09 record with a NUL in its URL kept | P3 | tampered v2 `state.json` on the harness (`h16t`, explicit `\x00`), node `nul-probe.js` (NUL, SOH, BEL, ESC, DEL, U+0085, CR, LF, TAB via `String.fromCharCode`), helper `state show` on the same file (`model2.sh`) | **verified fixed**: `deadbeef` (NUL in `url`) dropped by the service on load with the console line `omarchy-iptv: state: dropped source deadbeef (invalid url)` (key only), likewise CR LF (`deadbef4`) and ESC (`deadbef5`), the 3,000-character `deadbef0`; `deadbef3` (NUL in `epgUrl`) kept with `epgUrl ""`; `ipc sources` lists the four survivors, the rewritten `state.json` holds no control character, `switchSource deadbeef` -> `unknown_source`; `Model.normalizeSourceRecord` drops every control character listed above and `parseState` logs by key; the helper drops / clears the same records (`stderr`: `dropped source deadbeef (control characters in url)`, `cleared the epgUrl of source deadbef3`), its `state show` output carries no `url`; the `state init` run at start logs the same lines. Note: the qa4 `h14.sh` tampered vector lost its NUL byte when the script was copied (its `deadbeef` record has a plain URL and is legitimately kept in `logs/h14.txt`); `h16t.sh` writes the byte explicitly (`NUL bytes in file: 2`) and is the evidence | `logs/h16t.txt`, `logs/h16n.log`, `logs/nul-probe.txt`, `logs/model2.txt` |
-| D-SRC-10 CLI playlist change carries the previous source's `epgUrl` | P3 | `h09c` (e) and the privacy sweep `h13`: Xtream source active (settings `epgUrl` = `xmltv.php?username=...&password=...`), `ipc set playlistUrl C`, `editMasked C`, `ipc sources`, switch back | **verified fixed**: the new record C has `epgUrl ""`, `editMasked` `epgMasked ""`, `hasEpg false`, no `EPG` segment on its row, `service.epg.configured false`; exactly one `updateEntryInline ... playlist (set) epg (none)` write-back follows the CLI change (the settings follow the record, `syncSettingsEpg`); switching back to the Xtream source restores its EPG (`epg (set)`, `epgMasked` `.../xmltv.php?username=****&password=****`); a CLI `set epgUrl E` in a separate write is still adopted (D-SRC-02); the record of the previous source keeps its own EPG throughout. SRC-CLI-01's "never writes back" holds when no EPG was carried (`h09`: 0 write-backs) - expectation updated `[v0.3]` | `logs/h09c.txt` (e), `logs/sweep/editMasked-C.json`, `logs/h13.log`, `shots/sources-sweep-list.png`, `shots/sources-sweep-edit-playlist.png` |
+| D-SRC-10 CLI playlist change carries the previous source's `epgUrl` | P3 | `h09c` (e) and the privacy sweep `h13`: Xtream source active (settings `epgUrl` = `xmltv.php?username=...&password=...`), `ipc set playlistUrl C`, `editMasked C`, `ipc sources`, switch back | **verified fixed**: the new record C has `epgUrl ""`, `editMasked` `epgMasked ""`, `hasEpg false`, no `EPG` segment on its row, `service.epg.configured false`; exactly one `updateEntryInline ... playlist (set) epg (none)` write-back follows the CLI change (the settings follow the record, `syncSettingsEpg` (deleted by D-SINK-19; a 0.13.x name)); switching back to the Xtream source restores its EPG (`epg (set)`, `epgMasked` `.../xmltv.php?username=****&password=****`); a CLI `set epgUrl E` in a separate write is still adopted (D-SRC-02); the record of the previous source keeps its own EPG throughout. SRC-CLI-01's "never writes back" holds when no EPG was carried (`h09`: 0 write-backs) - expectation updated `[v0.3]` | `logs/h09c.txt` (e), `logs/sweep/editMasked-C.json`, `logs/h13.log`, `shots/sources-sweep-list.png`, `shots/sources-sweep-edit-playlist.png` |
 
 10/10 verified fixed, none reopened, no new defect filed (R9 lists the observations).
 
@@ -1694,7 +1694,7 @@ transcripts, `logs/sweep/` the privacy sinks, `live/` the fixtures and
 | Item | Value |
 |---|---|
 | Code under test | `845d445` (merge: fix D-LIVE-20/21). `origin/main` on GitHub had already moved to `210cfa3` when the installed clone fetched; `git diff --stat 845d445 origin/main` is `CHANGELOG.md`, `CLAUDE.md`, `docs/ARCHITECTURE-SOURCES.md`, `docs/OMARCHY-PLUGIN-CONTRACT.md` only, so the code under test is the same either way |
-| Scope beyond the P1 fix | `main` gained a **cosmetics lane** since the last QA pass (`3550693`: `c75dce2` D-LIVE-19, `cf22c3f` EPG helper warnings in the footer) and `48dd054` (UX.md `r reload` -> `r retry`, observation O11). Those are re-tested here as well; the P1 fix itself is confined to `Service.qml` (`hostSettings` / `ownWrite` / `settings`, `persistActive`, `applyOwnWrite`, `onHostSettingsChanged`) and four new `Model.js` functions |
+| Scope beyond the P1 fix | `main` gained a **cosmetics lane** since the last QA pass (`3550693`: `c75dce2` D-LIVE-19, `cf22c3f` EPG helper warnings in the footer) and `48dd054` (UX.md `r reload` -> `r retry`, observation O11). Those are re-tested here as well; the P1 fix itself is confined to `Service.qml` (`hostSettings` / `ownWrite` / `settings`, `persistActive`, `applyOwnWrite` (deleted by D-SINK-19; a 0.13.x name), `onHostSettingsChanged`) and four new `Model.js` functions |
 | Live machine | Hyprland, eDP-1 1366x768 @ scale 1, quickshell `/usr/share/omarchy/shell`, plugin `~/.config/omarchy/plugins/io.github.rmcdavid.iptv`, theme Retropc. Baseline: one source `iptv-org.github.io` (`d5977d8a`), active, 1,474 channels in 28 groups, 5 recents, 0 favorites, state schema v2 / cacheLayout 2 |
 | Keystroke safety | every `wtype` call went through `E/k.sh`, which refuses unless `pgrep -x hyprlock` is empty **and** `hyprctl layers` shows an `omarchy-iptv` layer; the guide was opened with `omarchy-shell shell toggle io.github.rmcdavid.iptv` (the string the keybinding runs) |
 | Switch timings | measurable live for the first time: the shell was relaunched once through `hyprctl dispatch exec_cmd("env OMARCHY_IPTV_DEBUG=1 omarchy-launch-shell")`, which only gates a `console.info` with millisecond counts and channel counts (`Service.qml:99`, `:1059`) and changes no behaviour and no file. The closing `omarchy restart shell` put the canonical launch back |
@@ -12980,11 +12980,13 @@ to it. That is the right thing to ship today and the wrong thing to still be
 doing in a year, because the credential should not be in a file this plugin
 does not own whatever its mode is.
 
-The reason it is there is structural and the code says so plainly.
-`Service.qml:200`: "the active source is still `playlistUrl` / `epgUrl` on the
-bar entry". `Service.qml:247` derives `activeSourceKey` by matching that URL
-against the records in `state.json`, and `state.json` carries no `activeKey` of
-its own, which was confirmed by reading the live file: its top-level keys are
+The reason it is there is structural and the code said so plainly, at
+1a8dccd (0.13.5; the lines and the function below are that tree's, not
+today's -- the repair deletes the function and the resolver is
+activeKeyOf in Model.js on the repair branch, cited bare until it lands). `Service.qml:200` then: "the active source is still
+`playlistUrl` / `epgUrl` on the bar entry". `Service.qml:247` then derived
+`activeSourceKey` by matching that URL against the records in `state.json`,
+and `state.json` carried no `activeKey` of its own, which was confirmed by reading the live file: its top-level keys are
 version, cacheLayout, favorites, recents, lastPlayed, session, sources,
 savedSearches and hiddenGroups. So the URL has to be on the bar entry for the
 plugin to know which source is active, and the bar entry is what the host
@@ -13050,6 +13052,25 @@ its `cache remove` still deletes the directory. The fix is the service's
 (a reload while a save is parked must not replace newer in-memory state),
 with the helper not touching a file already 0600 as belt and braces and
 the entry flush gated on the save having landed (the round's DQ-B2).
+
+**Round 3 (2026-10-12), measured.** The fix is on `lane-key-s1`: a reload
+never replaces newer in-memory state (reloadDisposition in Model.js on that branch, ignored
+while a save is parked, in flight, or failed; decided before anything else
+in `applyUserState`), the helper leaves a file already 0600 alone, and the
+entry flush waits for the state write to LAND (entryFlushDisposition
+on `saved` / `saveFailed`; a failed write keeps the URL on the entry as the
+backup it accidentally is). A FileView probe under a nested cage settled the
+trigger: a chmod 0600->0600 fires `fileChanged` and a reload exactly as a
+0644->0600 one does, which is why the helper change is belt and braces and
+not the fix. The key scenario reads **49 / 0 forward and 36 / 13 against
+`lane-key-r2`** (D2, D3, M1, M3, M5, C1-C5, E1, O5, O6 red there), and 43 / 1
+with R10 reverted so the helper chmods on every start -- R9 alone holds. The
+created-file shape the round-2 lens asserted is **refuted by measurement**:
+N1-N4 are green even on the dropping tree, so a fresh install was never
+exposed; every UPGRADE was. One route stays open and is ruled closed in
+round 4: with the directories already ready, the entry is written straight
+after `setText` and before `saved`, so a state write that fails then still
+strips the URL (lane A's DQ-A2, measured live by the round-3 data-loss lens).
 
 ### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
 
