@@ -112,6 +112,12 @@ Item {
   // shipped ones, clamped through the same SETTING_RANGES ladder.
   readonly property var hostSettings: Model.settingsFrom(Model.findBarEntry(shell ? shell.barConfig : null, pluginId))
   property var ownWrite: null                          // { base, value }: our write, applied locally
+  // R18b (round 8): this service's record of its own last entry write --
+  // the publish that stood when it was made and the entry the host then
+  // stores (Model.entryWriteRecord). The funnel asks Model.entryWriteNeeded
+  // with it, so a write the host would answer `false` to is not made, and
+  // nothing it would have re-triggered runs.
+  property var lastEntryWrite: null
   readonly property var settings: Model.settingsWithOwnWrite(hostSettings, ownWrite)
   // D-SINK-19. INPUT ONLY. `omarchy bar set io.github.rmcdavid.iptv playlistUrl
   // <url>` adopts the URL into the history and makes that source active on
@@ -185,7 +191,11 @@ Item {
   readonly property string activeEpgUrl: {
     var rec = root.activeSourceRecord
     if (!rec) return root.inputEpgUrl
-    if (root.inputEpgUrl !== "" && Model.normalizeSourceUrl(root.inputEpgUrl, { kind: "epg", origin: "cli" }) === "") return root.inputEpgUrl
+    // R18a: "an input that does not validate" through the one normaliser, so
+    // a value of whitespace or control characters alone is no input here
+    // either, as it is to reconcile.
+    var input = Model.entryInputForm("epgUrl", root.inputEpgUrl)
+    if (input.text !== "" && !input.ok) return root.inputEpgUrl
     return String(rec.epgUrl || "")
   }
   // M4-01 repair 3 (D-EPG-2). The guide URL actually in force, and where it
@@ -1894,12 +1904,21 @@ Item {
   // host publishes the stripped entry and nothing is left to adopt). The EPG
   // snapshot moves exactly as reconcile moves it. removeSource does not call
   // this: with no active record the input stays pending (R12).
-  function adoptPendingEpgOnto(key) {
+  //
+  // R18d (round 8, OQ-W3 ruled): `formEpg` is the guide URL an in-app ADD's
+  // form carried (typed, or derived by an Xtream add). It wins: the pending
+  // input is superseded by the user's later explicit input for the same
+  // slot, consumed so the commit's own mirror write strips it, and logged by
+  // key NAME only. With no guide URL in the form the pending value is
+  // adopted as before.
+  function adoptPendingEpgOnto(key, formEpg) {
     var epg = String(root.settings.epgUrl || "")
-    var out = Model.adoptPendingEpg(root.userState, key, epg, root.reconciledEpgUrl, Math.floor(Date.now() / 1000))
+    var out = Model.adoptPendingEpg(root.userState, key, epg, root.reconciledEpgUrl, Math.floor(Date.now() / 1000),
+                                    { formEpg: String(formEpg || "") })
     if (!out.pending) return false
     if (out.state !== root.userState) root.userState = out.state
     root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, out.consumed)
+    if (out.superseded) console.warn("omarchy-iptv: the guide URL in the add form supersedes a pending input (epgUrl); the bar entry drops it")
     return out.consumed
   }
 
@@ -3607,10 +3626,22 @@ Item {
     var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)
     var keep = Model.retiredInputsToKeep(published, root.userState,
                                          { playlistUrl: root.reconciledPlaylistUrl, epgUrl: root.reconciledEpgUrl })
-    if (keep.length > 0 && keepRetired !== true) console.warn("omarchy-iptv: the bar entry keeps an input no source has adopted yet (" + keep.join(", ") + ")")
     var entry = Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })
+    // R18b (round 8): THE CYCLE SETTLES. A write the host would answer
+    // `false` to is not made (Model.entryWriteNeeded, against this service's
+    // own record of its last write while the publish has not moved), and
+    // the own-write record is reassigned only when it differs from the one
+    // in force (Model.sameOwnWrite). Reassigning an equal record re-evaluates
+    // `settings` and fires onSettingsChanged -> reconcile -> this funnel
+    // again: round 7's lagging-host loop, a refused playlistUrl beside a
+    // pending EPG, at about 3,000 no-op writes a second. Success either way:
+    // the host already stores this entry (rule 9's `false`).
+    if (!Model.entryWriteNeeded(root.pluginId, entry, published, root.lastEntryWrite)) return true
+    if (keep.length > 0 && keepRetired !== true) console.warn("omarchy-iptv: the bar entry keeps an input no source has adopted yet (" + keep.join(", ") + ")")
     root.shell.updateEntryInline(root.pluginId, entry)
-    root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, overrides))
+    root.lastEntryWrite = Model.entryWriteRecord(root.pluginId, entry, Model.findBarEntry(root.shell.barConfig, root.pluginId))
+    var record = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, overrides))
+    if (!Model.sameOwnWrite(root.ownWrite, record)) root.ownWrite = record
     // D-SINK-18. Re-arm for the NEXT write. The file can be recreated 0644
     // while the shell runs -- omarchy-refresh-config copies the 0644 package
     // default with `cp -f`, which keeps an existing file's mode but gives a
@@ -4164,6 +4195,9 @@ Item {
     }
     if (status.ok === true) {
       var newKey = key
+      // R18d: the add form's own guide URL, when the record this commit keeps
+      // IS the form's (not the record the CLI added meanwhile, S5).
+      var formEpg = ""
       if (pending) {
         // Record the pending add now (SR23), or move the edited record to
         // its new key (SR7): the old record and its directory go.
@@ -4186,6 +4220,7 @@ Item {
             record.key = newKey
           }
           st = Model.cloneState(st, { sources: st.sources.concat([record]) })
+          if (mode === "add") formEpg = String(record.epgUrl || "")
         }
         // A key that moved (a colliding record appeared meanwhile) leaves
         // the probe's directory behind: it is dropped and the freshness
@@ -4199,7 +4234,7 @@ Item {
       // EPG input now, before the save and before persistActive's mirror. A
       // commit that activates nothing (an inactive edit, a retry of the
       // active source) leaves a pending input where it is.
-      if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey)
+      if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey, formEpg)
       root.saveState()
       if (commit) {
         if (newKey === root.activeSourceKey) {

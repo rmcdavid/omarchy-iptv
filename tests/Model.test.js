@@ -7163,9 +7163,36 @@ const r13 = (() => {
       funnelKeeps: /var keep = Model\.retiredInputsToKeep\(published, root\.userState,\s*\{ playlistUrl: root\.reconciledPlaylistUrl, epgUrl: root\.reconciledEpgUrl \}\)/.test(funnel)
         && funnel.indexOf("Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })") !== -1,
       switchAdopts: /root\.adoptPendingEpgOnto\(key\)\n\s*root\.saveState\(\)/.test(sw),
-      probeAdopts: /if \(commit && newKey !== root\.activeSourceKey\) root\.adoptPendingEpgOnto\(newKey\)\n\s*root\.saveState\(\)/.test(probe)
+      probeAdopts: /if \(commit && newKey !== root\.activeSourceKey\) root\.adoptPendingEpgOnto\(newKey(, formEpg)?\)\n\s*root\.saveState\(\)/.test(probe)
     }
   })()
+  // R18 (round 8): the same binding for round 8's halves. FUNNEL_SKIPS: the
+  // funnel asks Model.entryWriteNeeded against its own record of its last
+  // write and makes no write the host would answer `false` to.
+  // OWN_WRITE_SETTLES: it reassigns the own-write record only when
+  // Model.sameOwnWrite says it differs. FORM_WINS: the probe commit hands an
+  // add's own form EPG to adoptPendingEpgOnto (R18d). A tree without them
+  // (lane-key-w2) is modelled as that tree is: every owned write is made and
+  // reassigns the record, which re-evaluates `settings` -- and the driver
+  // then FAILS the sequence that does not settle, which is P1-B itself.
+  const R18 = (() => {
+    const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
+    const probe = (serviceSource.match(/      var newKey = key\n[\s\S]*?root\.saveState\(\)\n/) || [""])[0]
+    const ask = funnel.indexOf("if (!Model.entryWriteNeeded(root.pluginId, entry, published, root.lastEntryWrite)) return true")
+    const write = funnel.indexOf("root.shell.updateEntryInline(root.pluginId, entry)")
+    const record = funnel.indexOf("root.lastEntryWrite = Model.entryWriteRecord(root.pluginId, entry, Model.findBarEntry(root.shell.barConfig, root.pluginId))")
+    return {
+      funnelSkips: ask !== -1 && ask < write && write < record,
+      ownWriteSettles: /var record = Model\.ownWriteOf\(root\.hostSettings, Model\.ownedEntryPatch\(root\.settings, overrides\)\)\n\s*if \(!Model\.sameOwnWrite\(root\.ownWrite, record\)\) root\.ownWrite = record\n/.test(funnel)
+        && (funnel.match(/root\.ownWrite =/g) || []).length === 1,
+      formWins: /if \(mode === "add"\) formEpg = String\(record\.epgUrl \|\| ""\)/.test(probe)
+        && /root\.adoptPendingEpgOnto\(newKey, formEpg\)/.test(probe)
+    }
+  })()
+  // R18c: a sequence that does not reach quiescence within this many deferred
+  // calls, or this many owned entry writes, is a LOOP and fails its case.
+  const SETTLE_BOUND = 400
+  const loops = []
   const clone = x => JSON.parse(JSON.stringify(x))
   // THE INPUT AUDIT (R17, the round-6 lesson). At EVERY owned entry write the
   // driver makes, in every case: no input value the STORED entry carried
@@ -7178,12 +7205,23 @@ const r13 = (() => {
   // apart, never silently. Accumulated over the whole suite and asserted
   // once at the end ("the input audit"), and per case where a case is about
   // an input.
-  const audit = { writes: 0, lost: [], refused: 0 }
-  const inputHeld = (records, name, value) => {
+  const audit = { writes: 0, lost: [], refused: 0, superseded: 0, skipped: 0 }
+  // The oracle's OWN spelling of what adoption does to an entry value (round
+  // 8: settingsFrom's \s trim, then sanitize, then validation) -- not a call
+  // to Model.entryInputForm, because an oracle that asks the function under
+  // test cannot see that function being wrong. Round 7's oracle validated
+  // the raw value, so a whitespace-wrapped VALID input read as "refused" and
+  // was never counted as lost or held.
+  const oracleForm = (name, value) => {
     const kind = name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" }
-    const v = Model.validateSourceUrl(name === "epgUrl" ? value : Model.sanitizeInput(value, 2049), kind)
+    const text = Model.sanitizeInput(String(value || "").replace(/^\s+|\s+$/g, ""), 2049)
+    const v = text === "" ? { ok: false } : Model.validateSourceUrl(text, kind)
+    return { text, ok: v.ok === true && String(v.url || "") !== "", url: v.ok ? String(v.url || "") : "" }
+  }
+  const inputHeld = (records, name, value) => {
+    const f = oracleForm(name, value)
     const field = name === "epgUrl" ? "epgUrl" : "url"
-    return records.some(r => String(r[field] || "") === value || (v.ok && String(r[field] || "") === v.url))
+    return records.some(r => String(r[field] || "") === value || (f.ok && String(r[field] || "") === f.url))
   }
   const auditWrite = (svc, before, label) => {
     audit.writes++
@@ -7203,8 +7241,15 @@ const r13 = (() => {
       const value = String((before || {})[name] || "")
       if (value === "") continue
       if (String(after[name] || "") === value || inputHeld(records, name, value)) continue
-      const kind = name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" }
-      if (!Model.validateSourceUrl(value, kind).ok) { audit.refused++; continue }
+      const f = oracleForm(name, value)
+      // no input at all (whitespace / control characters alone): nothing to lose
+      if (f.text === "") continue
+      // REFUSED (D16) and stripped once reported, on purpose (rule 5, OQ-W2
+      // confirmed in round 8): counted apart, never as lost
+      if (!f.ok) { audit.refused++; svc.refusedStripped.push(name); continue }
+      // R18d: superseded by the user's LATER explicit input for the same
+      // slot (an add form's own guide URL over a pending CLI epgUrl): not lost
+      if (svc.supersededInputs.indexOf(name + " " + f.url) !== -1) { audit.superseded++; continue }
       const lost = { name, label, host: svc.host.mode }
       audit.lost.push(lost); svc.inputLost.push(lost)
     }
@@ -7275,6 +7320,7 @@ const r13 = (() => {
       this.stateSaveFailed = false; this.stateInitOk = false; this.stateReloadsByReason = {}
       this.pendingEntryKey = null; this.ownWrite = null; this.recentSaves = []; this.lastSaveText = ""
       this.later = []; this.warnings = []; this.signals = []; this.entryWrites = []; this.entryAudits = []; this.inputLost = []; this.now = 1000
+      this.lastEntryWrite = null; this.refusedStripped = []; this.supersededInputs = []; this.turns = 0; this.ownWriteAssignments = 0; this.reconciles = 0
       host.listeners.push(() => this.onHostChanged())
     }
     get hostSettings() { return Model.settingsFrom(Model.findBarEntry(this.host.barConfig, PID)) }
@@ -7284,7 +7330,21 @@ const r13 = (() => {
       if (this.ownWrite && !Model.ownWriteInForce(this.hostSettings, this.ownWrite)) this.ownWrite = null
       this.reconcile(false)
     }
-    runLater() { while (this.later.length) this.later.shift()() }
+    // R18c: bounded. A deferred call that keeps queueing the next one (the
+    // round-7 loop: reconcile -> persistActive -> a no-op write that still
+    // re-evaluates `settings` -> reconcile) is a LOOP, not patience: it
+    // throws, which fails the case that drove it, and is recorded for the
+    // suite-wide quiescence check.
+    runLater() {
+      while (this.later.length) {
+        if (++this.turns > SETTLE_BOUND) {
+          const why = "LOOP: " + this.turns + " deferred calls, " + this.entryWrites.length + " entry writes (" + this.host.mode + " host)"
+          loops.push(why); this.later = []
+          throw new Error(why)
+        }
+        this.later.shift()()
+      }
+    }
     deliverOne() {
       const ev = this.disk.pop()
       if (!ev) return false
@@ -7347,6 +7407,7 @@ const r13 = (() => {
     }
     reconcile(force) {
       if (!this.stateLoaded) return
+      this.reconciles++
       const st = this.settings
       const playlist = String(st.playlistUrl || ""), epg = String(st.epgUrl || "")
       const plan = Model.reconcileAction({ first: !this.reconciled, force: force === true, playlist, epg, lastPlaylist: this.reconciledPlaylistUrl, lastEpg: this.reconciledEpgUrl })
@@ -7389,6 +7450,12 @@ const r13 = (() => {
       const keep = R17.funnelKeeps ? Model.retiredInputsToKeep(published, this.userState, { playlistUrl: this.reconciledPlaylistUrl, epgUrl: this.reconciledEpgUrl }) : []
       if (keep.length > 0 && keepRetired !== true) this.warnings.push("entry keeps an unadopted input (" + keep.join(", ") + ")")
       const entry = Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })
+      // R18b: no write the host would answer `false` to (R18.funnelSkips)
+      if (R18.funnelSkips && !Model.entryWriteNeeded(PID, entry, published, this.lastEntryWrite)) { audit.skipped++; return true }
+      if (this.entryWrites.length > SETTLE_BOUND) {
+        const why = "LOOP: " + this.entryWrites.length + " entry writes (" + this.host.mode + " host)"
+        loops.push(why); throw new Error(why)
+      }
       this.entryWrites.push(clone(entry))
       const storedBefore = clone(this.host.storedEntry() || {})
       // The round-4 lens's L12 audit, at the sink: at the moment the entry is
@@ -7398,11 +7465,17 @@ const r13 = (() => {
       const key = String(entry.sourceKey || "")
       this.entryAudits.push({ entryKey: key, fileKey: Model.activeKeyOf(file), memKey: this.activeSourceKey,
                               fileHas: key === "" || file.sources.some(r => r.key === key), urlKept: Object.prototype.hasOwnProperty.call(entry, "playlistUrl") })
-      const before = JSON.stringify(this.settings)
       this.host.updateEntryInline(PID, entry)
+      if (R18.funnelSkips) this.lastEntryWrite = Model.entryWriteRecord(PID, entry, Model.findBarEntry(this.host.barConfig, PID))
       auditWrite(this, storedBefore, keepRetired === true ? "patch" : "heal")
-      this.ownWrite = Model.ownWriteOf(this.hostSettings, Model.ownedEntryPatch(this.settings, overrides))
-      if (JSON.stringify(this.settings) !== before) this.reconcile(false)
+      // The own-write record. A reassignment re-evaluates Service's `settings`
+      // binding and fires onSettingsChanged -> reconcile, whatever the CONTENT
+      // (a new object is a new value to a QML var property); round 7's driver
+      // reconciled only when the content changed, which is more forgiving than
+      // the real thing (rule 10) and is why P1-B never reached node. Modelled
+      // as QML does it: every reassignment reconciles.
+      const record = Model.ownWriteOf(this.hostSettings, Model.ownedEntryPatch(this.settings, overrides))
+      if (!R18.ownWriteSettles || !Model.sameOwnWrite(this.ownWrite, record)) { this.ownWrite = record; this.ownWriteAssignments++; this.reconcile(false) }
       return true
     }
     // Service.setShowLogos (R16): the SECOND owned-entry writer. A tree
@@ -7436,12 +7509,16 @@ const r13 = (() => {
       return { ok: true, code: "ok" }
     }
     // Service.adoptPendingEpgOnto (R17b)
-    adoptPendingEpgOnto(key) {
+    adoptPendingEpgOnto(key, formEpg) {
       const epg = String(this.settings.epgUrl || "")
-      const out = Model.adoptPendingEpg(this.userState, key, epg, this.reconciledEpgUrl, this.now++)
+      const out = Model.adoptPendingEpg(this.userState, key, epg, this.reconciledEpgUrl, this.now++, { formEpg: String(formEpg || "") })
       if (!out.pending) return false
       if (out.state !== this.userState) this.userState = out.state
       this.reconciledEpgUrl = Model.epgSnapshotAfter(epg, this.reconciledEpgUrl, out.consumed)
+      if (out.superseded) {
+        this.warnings.push("the add form's guide URL supersedes a pending input (epgUrl)")
+        this.supersededInputs.push("epgUrl " + oracleForm("epgUrl", epg).url)
+      }
       return out.consumed
     }
     // The probe commit of an in-app ADD (Service's sourceProbeProc exit, status
@@ -7456,12 +7533,16 @@ const r13 = (() => {
       let st = this.userState
       const known = Model.findSourceByUrl(st.sources, pending.url)
       let newKey
+      let formEpg = ""
       if (known) newKey = String(known.key)
-      else { newKey = Model.allocateSourceKey(st.sources, pending.url); st = Model.cloneState(st, { sources: st.sources.concat([Object.assign({}, pending, { key: newKey })]) }) }
+      else {
+        newKey = Model.allocateSourceKey(st.sources, pending.url); st = Model.cloneState(st, { sources: st.sources.concat([Object.assign({}, pending, { key: newKey })]) })
+        if (R18.formWins) formEpg = String(pending.epgUrl || "")
+      }
       st = Model.withSourceStats(st, newKey, { ok: true, channelCount: 5, groupCount: 1, fetchedAt: this.now }, this.now)
       st = Model.touchSource(st, newKey, this.now++)
       this.userState = st
-      if (R17.probeAdopts && newKey !== this.activeSourceKey) this.adoptPendingEpgOnto(newKey)
+      if (R17.probeAdopts && newKey !== this.activeSourceKey) this.adoptPendingEpgOnto(newKey, formEpg)
       this.saveState()
       if (newKey !== this.activeSourceKey && !this.persistActive(newKey)) this.warnings.push("adopted but could not mirror")
       return { ok: true, code: "ok", key: newKey }
@@ -7492,7 +7573,7 @@ const r13 = (() => {
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k)
   const restart = (svc, mode, o) => new Svc(new Host(clone(svc.host.storedEntry()), mode), new Disk(svc.disk.text)).start(o)
   const boot = (entry, text, mode, o) => new Svc(new Host(entry, mode), new Disk(text)).start(o)
-  return { Host, Disk, Svc, A, B, NEW, KA, KB, KNEW, rec, stateText, fileOf, has, restart, boot, R17, audit }
+  return { Host, Disk, Svc, A, B, NEW, KA, KB, KNEW, rec, stateText, fileOf, has, restart, boot, R17, R18, audit, loops, SETTLE_BOUND, oracleForm }
 })()
 for (const mode of ["lag", "echo"]) {
   // The P1 itself, on the mid-session route: a CLI playlistUrl set while the
@@ -7597,7 +7678,11 @@ for (const mode of ["lag", "echo"]) {
     const failed = [svc.stateSaveFailed, svc.host.storedEntry().sourceKey, svc.entryWrites.length]
     svc.disk.writeFails = false; svc.switchSource(r13.KA); svc.drain()
     return [failed, svc.stateSaveFailed, svc.host.storedEntry().sourceKey, Model.activeKeyOf(r13.fileOf(svc)), svc.entryWrites.length, svc.signals]
-  }, [[true, r13.KA, 0], false, r13.KA, r13.KA, 1, ["state_write_failed"]])
+    // R18b (round 8): the mirror the landed write asks for names A, which the
+    // host already stores (the failed episode never wrote the entry), so it
+    // is a write the host would answer `false` to and is not made: 0, where
+    // round 7 counted the no-op hand-over as 1.
+  }, [[true, r13.KA, 0], false, r13.KA, r13.KA, r13.R18.funnelSkips ? 0 : 1, ["state_write_failed"]])
 }
 
 // R13 / R14 / R15, THE WIRING IN Service.qml. Structural pins (Service.qml
@@ -7961,8 +8046,9 @@ checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the fou
     funnelKeeps: funnel.indexOf("var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)") !== -1
       && funnel.indexOf("Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })") !== -1,
     // rule 9: the own-write record is made for EVERY write through the funnel, the patch-only one included,
-    // directly after the write and over the same patch -- not behind a condition on the mode
-    overrideRecordedForEveryWrite: /root\.shell\.updateEntryInline\(root\.pluginId, entry\)\n\s*root\.ownWrite = Model\.ownWriteOf\(root\.hostSettings, Model\.ownedEntryPatch\(root\.settings, overrides\)\)/.test(funnel),
+    // directly after the write and over the same patch -- not behind a condition on the mode. R18b (round 8):
+    // the write's own record comes first, and the own-write record is assigned unless it EQUALS the one in force
+    overrideRecordedForEveryWrite: /root\.shell\.updateEntryInline\(root\.pluginId, entry\)\n\s*root\.lastEntryWrite = Model\.entryWriteRecord\(root\.pluginId, entry, Model\.findBarEntry\(root\.shell\.barConfig, root\.pluginId\)\)\n\s*var record = Model\.ownWriteOf\(root\.hostSettings, Model\.ownedEntryPatch\(root\.settings, overrides\)\)\n\s*if \(!Model\.sameOwnWrite\(root\.ownWrite, record\)\) root\.ownWrite = record\n/.test(funnel),
     // three call sites: writeActive (no fourth argument), the patch branch (true), the heal branch (none)
     callers: callers.length,
     onlyThePatchPassesIt: callers.filter(c => /, true\)$/.test(c)).length === 1 && callers.filter(c => c.indexOf("{ showLogos: want }") !== -1 && /, true\)$/.test(c)).length === 1
@@ -8175,8 +8261,8 @@ checkCall("R17a (structural): the funnel asks Model.retiredInputsToKeep over the
 checkCall("R17b (structural): switchSource and the probe commit adopt a pending EPG before their saveState and before persistActive; removeSource does not; the helper asks Model.adoptPendingEpg with the settings' EPG and the snapshot, and moves the snapshot only through epgSnapshotAfter", () => {
   const sw = (serviceSource.match(/function switchSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
   const remove = (serviceSource.match(/function removeSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
-  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key\) \{[\s\S]*?\n  \}/) || [""])[0]
-  const commit = serviceSource.indexOf("if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey)")
+  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key, formEpg\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const commit = serviceSource.indexOf("if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey, formEpg)")
   const commitSave = serviceSource.indexOf("root.saveState()", commit)
   const commitPersist = serviceSource.indexOf("root.persistActive(newKey)", commit)
   return { driverBound: [r13.R17.switchAdopts, r13.R17.probeAdopts],
@@ -8184,9 +8270,246 @@ checkCall("R17b (structural): switchSource and the probe commit adopt a pending 
            commitBeforeSaveAndPersist: commit !== -1 && commit < commitSave && commitSave < commitPersist,
            removeDoesNot: remove !== "" && remove.indexOf("adoptPendingEpg") === -1,
            callers: (serviceSource.match(/root\.adoptPendingEpgOnto\(/g) || []).length,
-           asks: /Model\.adoptPendingEpg\(root\.userState, key, epg, root\.reconciledEpgUrl,/.test(helper) && /var epg = String\(root\.settings\.epgUrl \|\| ""\)/.test(helper),
+           asks: /Model\.adoptPendingEpg\(root\.userState, key, epg, root\.reconciledEpgUrl,[^\n]*\n\s*\{ formEpg: String\(formEpg \|\| ""\) \}\)/.test(helper) && /var epg = String\(root\.settings\.epgUrl \|\| ""\)/.test(helper),
            snapshot: /root\.reconciledEpgUrl = Model\.epgSnapshotAfter\(epg, root\.reconciledEpgUrl, out\.consumed\)/.test(helper) && (helper.match(/root\.reconciledEpgUrl =/g) || []).length === 1 }
 }, { driverBound: [true, true], switchBeforeSaveAndPersist: true, commitBeforeSaveAndPersist: true, removeDoesNot: true, callers: 2, asks: true, snapshot: true })
+// ---- R18 (D-SINK-19 round 8): one normaliser, a cycle that settles, and
+// quiescence as a check ----
+//
+// The round-7 data-loss lens's two P1s, both reproduced live. P1-A (R17a's
+// snapshot clause compared the UNTRIMMED published value against the TRIMMED
+// snapshot settingsFrom takes; `omarchy bar set` stores the value as typed):
+// a whitespace-wrapped input was never consumed -- a refused credential
+// stayed in shell.json, a removed source was re-adopted at the next start,
+// and on the echoing host a pending EPG beside it looped. With the one-line
+// trim the suite read 2191 / 0 either way: nothing here could see it. P1-B
+// (on the chain since before round 7): on the lagging host a pending R12 EPG
+// beside a REFUSED playlistUrl looped at about 3,000 no-op entry writes a
+// second, because the funnel reassigned an EQUAL own-write record and the
+// driver above reconciled only on a CONTENT change, which QML does not do.
+// Every check below was seen red against lane-key-w2's code, or against the
+// one R18 decision it names removed (the report carries the counts).
+checkCall("R18a: entryInputForm is settingsFrom's trim, then sanitize, then validation -- a whitespace- or control-wrapped value has the form its bare self has, a refused value keeps its sanitized text as its form, and whitespace or control characters alone are NO input", () => {
+  const P = "http://second.example.test/list.m3u", E = "http://epg.example.test/xmltv.php?username=n&password=q"
+  const row = (name, v) => { const f = Model.entryInputForm(name, v); return [f.text === "" ? "(none)" : "text", f.ok, f.form === "" ? "(none)" : f.form] }
+  const wraps = [" ", "\t", "\n", "\u00a0", "\u2003", "\r\n"]
+  return {
+    playlist: wraps.every(w => JSON.stringify(row("playlistUrl", w + P + w)) === JSON.stringify(row("playlistUrl", P))),
+    epg: wraps.every(w => JSON.stringify(row("epgUrl", w + E + w)) === JSON.stringify(row("epgUrl", E))),
+    bare: [row("playlistUrl", P), row("epgUrl", E)],
+    refused: [row("playlistUrl", "  ftp://u:p@h.test/x.m3u\t"), row("epgUrl", "\u2003ftp://h.test/x.xml ")],
+    none: [row("playlistUrl", " \t "), row("epgUrl", "\u0007\u0007"), row("epgUrl", ""), row("playlistUrl", undefined), row("epgUrl", null)],
+    same: [Model.sameEntryInput("playlistUrl", "  " + P, P + "\n"), Model.sameEntryInput("epgUrl", " ftp://h.test/x.xml", "ftp://h.test/x.xml\u00a0"),
+           Model.sameEntryInput("playlistUrl", P, "http://other.example.test/a.m3u"), Model.sameEntryInput("epgUrl", "\u0007", "")],
+    settingsTrim: Model.settingsFrom({ playlistUrl: " \u2003" + P + "\t", epgUrl: "\n" + E + " " }).playlistUrl === P
+      && Model.settingsFrom({ epgUrl: "\n" + E + " " }).epgUrl === Model.entryInputText("\n" + E + " ")
+  }
+}, { playlist: true, epg: true, bare: [["text", true, "http://second.example.test/list.m3u"], ["text", true, "http://epg.example.test/xmltv.php?username=n&password=q"]],
+     refused: [["text", false, "ftp://u:p@h.test/x.m3u"], ["text", false, "ftp://h.test/x.xml"]],
+     none: [["(none)", false, "(none)"], ["(none)", false, "(none)"], ["(none)", false, "(none)"], ["(none)", false, "(none)"], ["(none)", false, "(none)"]],
+     same: [true, true, false, true], settingsTrim: true })
+// THE AGREEMENT, which is P1-A's shape stated as a property: for every input
+// kind and every wrapping, a value reconcileAction calls NOT fresh against
+// the snapshot the service took of it is a value retiredInputsToKeep calls
+// consumed (nothing holds it here, so only the snapshot clause can strip
+// it). Round 7 broke exactly this: reconcile compared trimmed to trimmed,
+// the keep decision raw to trimmed.
+checkCall("R18a: reconcileAction's 'not fresh' and retiredInputsToKeep's 'consumed' agree for every input kind (valid, refused, removed) under every wrapping, the snapshot being what settingsFrom made of the same entry", () => {
+  const values = { playlistUrl: ["http://gone.example.test/list.m3u?username=u&password=p", "ftp://u:p@h.test/x.m3u", "~/lists/a.m3u"],
+                   epgUrl: ["http://epg.example.test/xmltv.php?username=n&password=q", "ftp://h.test/x.xml"] }
+  const wraps = [["", ""], ["  ", "  "], ["\t", "\n"], ["\u00a0", ""], ["", "\u2003"], [" \r\n", "\u3000"]]
+  const disagree = []
+  let n = 0
+  for (const name of Object.keys(values)) for (const v of values[name]) for (const [a, b] of wraps) {
+    const entry = {}; entry[name] = a + v + b
+    const snap = Model.settingsFrom(entry)[name]
+    const plan = Model.reconcileAction({ playlist: name === "playlistUrl" ? entry[name] : "", epg: name === "epgUrl" ? entry[name] : "",
+                                         lastPlaylist: name === "playlistUrl" ? snap : "", lastEpg: name === "epgUrl" ? snap : "" })
+    const fresh = name === "playlistUrl" ? plan.adoptUrl : plan.adoptEpg
+    const kept = Model.retiredInputsToKeep(entry, Model.emptyState(), { playlistUrl: name === "playlistUrl" ? snap : "", epgUrl: name === "epgUrl" ? snap : "" }).indexOf(name) !== -1
+    n++
+    if (fresh || kept) disagree.push(name + " " + JSON.stringify(a) + "+" + JSON.stringify(b) + " fresh:" + fresh + " kept:" + kept)
+  }
+  // ... and beyond spacing: an entry value and a snapshot that differ in
+  // what sanitize removes or validation normalises (scheme and host case,
+  // the default port, an embedded control character, a byte-order mark) are
+  // ONE input to both decisions -- the snapshot a user's earlier spelling of
+  // the value the entry now carries.
+  const pairs = [["playlistUrl", "HTTP://Gone.Example.TEST/list.m3u", "http://gone.example.test/list.m3u"],
+                 ["playlistUrl", "http://gone.example.test:80/list.m3u", "http://gone.example.test/list.m3u"],
+                 ["playlistUrl", "ftp://u:p@h.test/x.m3u\u0007", "ftp://u:p@h.test/x.m3u"],
+                 ["epgUrl", "\ufeffhttp://epg.example.test/x.xml", "http://EPG.example.test/x.xml"]]
+  for (const [name, value, snap] of pairs) {
+    const entry = {}; entry[name] = value
+    const plan = Model.reconcileAction({ playlist: name === "playlistUrl" ? value : "", epg: name === "epgUrl" ? value : "",
+                                         lastPlaylist: name === "playlistUrl" ? snap : "", lastEpg: name === "epgUrl" ? snap : "" })
+    const fresh = name === "playlistUrl" ? plan.adoptUrl : plan.adoptEpg
+    const kept = Model.retiredInputsToKeep(entry, Model.emptyState(), { playlistUrl: name === "playlistUrl" ? snap : "", epgUrl: name === "epgUrl" ? snap : "" }).indexOf(name) !== -1
+    n++
+    if (fresh || kept) disagree.push(name + " " + JSON.stringify(value) + " vs " + JSON.stringify(snap) + " fresh:" + fresh + " kept:" + kept)
+  }
+  return { cases: n, disagree }
+}, { cases: 34, disagree: [] })
+checkCall("R18a, the sibling its search found: an EPG input of control characters alone is NO input -- reconcile does not adopt it and adoptActiveSource never replaces the active record's guide URL with the empty one it used to validate as", () => {
+  const st = fixtureState(["d990c2e4", "42839dd5"], "d990c2e4")
+  const own = activeKeyFixture.records.d990c2e4.epgUrl
+  return ["\u0007", "\u0001\u001f", "\u0085"].map(junk => {
+    const plan = Model.reconcileAction({ playlist: "", epg: junk, lastPlaylist: "", lastEpg: "" })
+    const forced = Model.adoptActiveSource(st, { playlistUrl: "", epgUrl: junk, sourceKey: "d990c2e4" }, 5, "", { adoptUrl: false, adoptEpg: true })
+    return [plan.adoptEpg, forced.epgConsumed, forced.adoptedEpg, Model.findSource(forced.state.sources, "d990c2e4").epgUrl === own]
+  })
+}, [[false, false, false, true], [false, false, false, true], [false, false, false, true]])
+checkCall("R18b: entryWriteNeeded answers the host's own dirty check against the STORED entry as this service can know it -- its own last write while the publish has not moved, the publish once it has -- key order included; no record means the publish", () => {
+  const ID = "io.github.rmcdavid.iptv"
+  const pub0 = { id: ID, playlistUrl: "ftp://u:p@h.test/x.m3u", epgUrl: "http://e.test/x.xml", sourceKey: "", showLogos: false }
+  const written = Model.entryWith(pub0, { id: ID, sourceKey: "", showLogos: false }, { keep: ["epgUrl"] })
+  const rec = Model.entryWriteRecord(ID, written, pub0)                      // the lagging host: the publish did not move
+  const same = Model.entryWith(pub0, { id: ID, sourceKey: "", showLogos: false }, { keep: ["epgUrl"] })
+  const moved = JSON.parse(JSON.stringify(written))                           // the host published our write (echo, or the next write)
+  const external = Object.assign({}, written, { playlistUrl: "ftp://u:p@h.test/x.m3u" })   // somebody wrote it back
+  const reordered = { showLogos: false, id: ID, epgUrl: "http://e.test/x.xml", sourceKey: "" }
+  return [Model.entryWriteNeeded(ID, same, pub0, rec), Model.entryWriteNeeded(ID, same, pub0, null), Model.entryWriteNeeded(ID, same, moved, rec),
+          Model.entryWriteNeeded(ID, same, external, rec), Model.entryWriteNeeded(ID, reordered, moved, null),
+          Model.entryWriteNeeded(ID, Object.assign({}, same, { showLogos: true }), pub0, rec), Model.hostEntryForm(ID, { b: 1, id: "other", a: 2 })]
+}, [false, true, false, true, true, true, { id: "io.github.rmcdavid.iptv", b: 1, a: 2 }])
+checkCall("R18b: sameOwnWrite is equality over exactly what ownWriteInForce and settingsWithOwnWrite read -- the same keys with strictly equal values in base and value; undefined is not \"\", and two absences are equal", () => {
+  const host = { sourceKey: "d990c2e4", showLogos: false }
+  const a = Model.ownWriteOf(host, { sourceKey: "d990c2e4", showLogos: true })
+  const b = Model.ownWriteOf(Object.assign({}, host), { showLogos: true, sourceKey: "d990c2e4" })
+  return [Model.sameOwnWrite(a, b), Model.sameOwnWrite(a, Model.ownWriteOf(host, { sourceKey: "d990c2e4", showLogos: false })),
+          Model.sameOwnWrite(a, Model.ownWriteOf({ showLogos: false }, { sourceKey: "d990c2e4", showLogos: true })),
+          Model.sameOwnWrite({ base: { sourceKey: undefined }, value: {} }, { base: { sourceKey: "" }, value: {} }),
+          Model.sameOwnWrite(null, null), Model.sameOwnWrite(null, a), Model.sameOwnWrite(a, undefined), Model.sameOwnWrite(a, a)]
+}, [true, false, false, false, true, false, false, true])
+checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pending input is SUPERSEDED (consumed, so the commit's mirror strips it; nothing adopted, the record keeps the form's value); a blank form EPG supersedes nothing and R17b adopts as before; no record still leaves it pending", () => {
+  const EPG = "http://epg.example.test/xmltv.php?username=e&password=f"
+  const FORM = "http://form.example.test/xmltv.php?username=x&password=y"
+  const st = fixtureState(["d990c2e4", "42839dd5"], "")
+  const facts = o => [o.pending, o.consumed, o.adopted, o.superseded, o.state === st]
+  return { form: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5, { formEpg: FORM })),
+           formWrapped: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5, { formEpg: "  " + FORM + "\t" })),
+           blank: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5, { formEpg: "  " })),
+           none: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5)),
+           noRecord: facts(Model.adoptPendingEpg(st, "deadbeef", EPG, "", 5, { formEpg: FORM })),
+           consumedAlready: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, EPG, 5, { formEpg: FORM })) }
+}, { form: [true, true, false, true, true], formWrapped: [true, true, false, true, true], blank: [true, true, true, false, false], none: [true, true, true, false, false],
+     noRecord: [true, false, false, false, true], consumedAlready: [false, false, false, false, true] })
+{
+  // THE SERVICE ORDER, R18c. Every case runs to quiescence under the
+  // driver's bound (SETTLE_BOUND deferred calls / entry writes) and then
+  // proves the fixed point: one more reconcile with nothing changed makes no
+  // entry write and queues nothing. A case that loops THROWS out of the
+  // bounded runLater and fails here, and is recorded for the suite-wide
+  // check at the end.
+  const EPG = "http://epg.example.test/xmltv.php?username=e&password=f"
+  const BAD = "ftp://u:lenspass@127.0.0.1:9/x.m3u"
+  const FORM = "http://form.example.test/xmltv.php?username=x&password=y"
+  const NEW2 = "http://added.example.test/list.m3u"
+  const KNEW2 = Model.sourceKey(Model.normalizeSourceUrl(NEW2, { origin: "cli" }))
+  const epgOn = (svc, v) => r13.fileOf(svc).sources.filter(r => r.epgUrl === (v || EPG)).map(r => r.key).sort()
+  const stored = svc => svc.host.storedEntry()
+  const fixedPoint = svc => {
+    svc.drain()
+    const writes = svc.entryWrites.length
+    svc.reconcile(false); svc.runLater(); svc.drain()
+    return svc.entryWrites.length === writes && svc.later.length === 0 && svc.disk.events.length === 0
+  }
+  const WRAPS = [["  ", "  "], ["\t", "\n"], ["\u00a0", "\u2003"]]
+  for (const mode of ["lag", "echo"]) {
+    checkCall("R18c (" + mode + " host) P1-B: no state file, a REFUSED playlistUrl beside a pending EPG -- the start settles (a bounded number of entry writes, a fixed point after), the refused value leaves the stored entry, the EPG stays on it (R12)", () => {
+      const svc = r13.boot({ playlistUrl: BAD, epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      return [fixedPoint(svc), svc.entryWrites.length <= 2, r13.has(stored(svc), "playlistUrl"), stored(svc).epgUrl === EPG, svc.inputLost]
+    }, [true, true, false, true, []])
+    checkCall("R18c (" + mode + " host) P1-B with saved sources and none active: the start settles, and the first switch then lands the pending EPG on the switched-to record", () => {
+      const svc = r13.boot({ playlistUrl: BAD, epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
+      const settled = fixedPoint(svc)
+      svc.switchSource(r13.KA)
+      return [settled, fixedPoint(svc), epgOn(svc), r13.has(stored(svc), "playlistUrl"), r13.has(stored(svc), "epgUrl"), svc.inputLost]
+    }, [true, true, [r13.KA], false, false, []])
+    for (const [a, b] of WRAPS) {
+      const w = JSON.stringify(a) + "+" + JSON.stringify(b)
+      checkCall("R18c (" + mode + " host) P1-A " + w + ": a whitespace-wrapped REFUSED playlistUrl beside a pending EPG settles, and the refused credential leaves the stored entry once reported", () => {
+        const svc = r13.boot({ playlistUrl: a + BAD + b, epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+        return [fixedPoint(svc), svc.entryWrites.length <= 2, r13.has(stored(svc), "playlistUrl"), stored(svc).epgUrl === EPG, svc.inputLost]
+      }, [true, true, false, true, []])
+      checkCall("R18c (" + mode + " host) P1-A " + w + ": a whitespace-wrapped REFUSED playlistUrl set mid-session beside an active source -- reported, stripped, the active source unchanged, settled", () => {
+        const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+        svc.host.externalSet("playlistUrl", a + BAD + b); svc.runLater(); svc.drain()
+        return [fixedPoint(svc), svc.activeSourceKey, r13.has(stored(svc), "playlistUrl"), r13.fileOf(svc).sources.length, svc.inputLost]
+      }, [true, r13.KA, false, 2, []])
+      checkCall("R18c (" + mode + " host) P1-A " + w + ", X1's shape: a whitespace-wrapped CLI playlist adopted, then its source REMOVED -- nothing carries it back, and the restart does not resurrect it", () => {
+        const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+        svc.host.externalSet("playlistUrl", a + r13.NEW + b); svc.runLater(); svc.drain()
+        const adopted = svc.activeSourceKey
+        svc.removeSource(r13.KNEW)
+        const settled = fixedPoint(svc)
+        const next = r13.restart(svc, mode)
+        return [adopted, settled, r13.has(stored(svc), "playlistUrl"), next.activeSourceKey, r13.fileOf(next).sources.map(r => r.key).sort(), fixedPoint(next), svc.inputLost.concat(next.inputLost)]
+      }, [r13.KNEW, true, false, "", [r13.KA, r13.KB].sort(), true, []])
+      checkCall("R18c (" + mode + " host) " + w + ": a whitespace-wrapped EPG beside the active source is adopted onto it and stripped; a whitespace-wrapped EPG pending with none active stays through a toggle and lands on the first switch", () => {
+        const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+        svc.host.externalSet("epgUrl", a + EPG + b); svc.runLater()
+        const active = [fixedPoint(svc), epgOn(svc), r13.has(stored(svc), "epgUrl")]
+        const p = r13.boot({ epgUrl: a + EPG + b, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
+        p.setShowLogos(true)
+        const toggled = [fixedPoint(p), r13.has(stored(p), "epgUrl"), epgOn(p)]
+        p.switchSource(r13.KB)
+        return { active, toggled, switched: [fixedPoint(p), epgOn(p), r13.has(stored(p), "epgUrl")], lost: svc.inputLost.concat(p.inputLost) }
+      }, { active: [true, [r13.KA], false], toggled: [true, true, []], switched: [true, [r13.KB], false], lost: [] })
+    }
+    checkCall("R18c (" + mode + " host): a REFUSED EPG beside the active source and a refused EPG with none active -- the first is reported and stripped, the second stays pending; both settle, neither is counted lost", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+      svc.host.externalSet("epgUrl", " ftp://u:p@h.test/x.xml "); svc.runLater()
+      const p = r13.boot({ epgUrl: "ftp://u:p@h.test/x.xml", sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A)]), mode)
+      return [fixedPoint(svc), r13.has(stored(svc), "epgUrl"), epgOn(svc, "ftp://u:p@h.test/x.xml"), fixedPoint(p), r13.has(stored(p), "epgUrl"), svc.inputLost.concat(p.inputLost)]
+    }, [true, false, [], true, true, []])
+    checkCall("R18b (" + mode + " host): writes that change only the RETIRED keys (two refused CLI values, each reported and stripped beside the same active source) reassign no own-write record after the first, so they re-evaluate nothing and re-run no reconcile", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+      svc.host.externalSet("playlistUrl", "ftp://u:p@h.test/one.m3u"); svc.runLater(); svc.drain()
+      const first = [svc.entryWrites.length, svc.ownWriteAssignments, r13.has(stored(svc), "playlistUrl")]
+      const before = [svc.entryWrites.length, svc.ownWriteAssignments]
+      svc.host.externalSet("playlistUrl", "ftp://u:p@h.test/two.m3u"); svc.runLater(); svc.drain()
+      return { first, second: [svc.entryWrites.length - before[0], svc.ownWriteAssignments - before[1], r13.has(stored(svc), "playlistUrl")], settled: fixedPoint(svc) }
+    }, { first: [1, 1, false], second: [1, 0, false], settled: true })
+    checkCall("R18d (" + mode + " host) OQ-W3: the in-app first add whose FORM carries a guide URL while a CLI epgUrl is pending -- the form's value wins on the new record, the pending value is stripped by the same commit and logged by key name, it counts as superseded and not lost, and the restart stands on the form's value", () => {
+      const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      const res = svc.commitAdd({ playlistUrl: NEW2, epgUrl: FORM, label: "", origin: "guide" })
+      const settled = fixedPoint(svc)
+      const next = r13.restart(svc, mode)
+      const warn = svc.warnings.filter(x => x.indexOf("supersedes a pending input (epgUrl)") !== -1)
+      return [res.ok, settled, svc.activeSourceKey, epgOn(svc, FORM), epgOn(svc), r13.has(stored(svc), "epgUrl"), warn.length, warn.join("").indexOf("://") === -1,
+              next.activeSourceKey, epgOn(next, FORM), epgOn(next), svc.inputLost.concat(next.inputLost)]
+    }, [true, true, KNEW2, [KNEW2], [], false, 1, true, KNEW2, [KNEW2], [], []])
+    checkCall("R18d (" + mode + " host) OQ-W3, the Xtream add: the xmltv.php URL the form derived wins over the pending CLI value in the same way", () => {
+      const built = Model.xtreamUrls("http://xt.example.test:8080", "xu", "xp")
+      const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      const res = svc.commitAdd({ playlistUrl: built.playlistUrl, epgUrl: built.epgUrl, label: "", origin: "xtream" })
+      return [built.ok, res.ok, fixedPoint(svc), epgOn(svc, built.epgUrl).length, epgOn(svc), r13.has(stored(svc), "epgUrl"), svc.inputLost]
+    }, [true, true, true, 1, [], false, []])
+  }
+}
+// R18, THE WIRING. Structural pins; the driver above is bound to the same
+// lines (R18.*), so a Service.qml that drops one is red there too -- where
+// it matters most, as a LOOP.
+checkCall("R18b (structural): the funnel asks Model.entryWriteNeeded against its own last-write record BEFORE handing the entry to the host, records the write after it, and reassigns the own-write record only when Model.sameOwnWrite says it differs; the keep warning is logged only for a write that is made", () => {
+  const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const ask = funnel.indexOf("if (!Model.entryWriteNeeded(root.pluginId, entry, published, root.lastEntryWrite)) return true")
+  const warn = funnel.indexOf('console.warn("omarchy-iptv: the bar entry keeps')
+  const write = funnel.indexOf("root.shell.updateEntryInline(root.pluginId, entry)")
+  return { driverBound: [r13.R18.funnelSkips, r13.R18.ownWriteSettles], askBeforeWarnAndWrite: ask !== -1 && ask < warn && warn < write,
+           oneWrite: (funnel.match(/updateEntryInline\(/g) || []).length, lastWriteDeclared: /\n  property var lastEntryWrite: null\n/.test(serviceSource),
+           lastWriteAssignedOnlyHere: (serviceSource.match(/root\.lastEntryWrite =/g) || []).length }
+}, { driverBound: [true, true], askBeforeWarnAndWrite: true, oneWrite: 1, lastWriteDeclared: true, lastWriteAssignedOnlyHere: 1 })
+checkCall("R18d (structural): the probe commit hands adoptPendingEpgOnto the form's guide URL only for an ADD whose own record is kept (not the record the CLI added meanwhile), and the helper logs the supersede by key name only", () => {
+  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key, formEpg\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const line = (helper.match(/if \(out\.superseded\) console\.warn\([^\n]*/) || [""])[0]
+  return { driverBound: r13.R18.formWins, logs: line !== "" && line.indexOf("(epgUrl)") !== -1 && !/\+ *(epg|formEpg|out)/.test(line),
+           switchPassesNone: /root\.adoptPendingEpgOnto\(key\)\n/.test(serviceSource) }
+}, { driverBound: true, logs: true, switchPassesNone: true })
+// QUIESCENCE, suite-wide: no service-order sequence anywhere in this file
+// looped. Seen red with R18b's two decisions removed from Service.qml (the
+// driver then models every write as made and every record as reassigned).
+checkCall("R18c: every service-order sequence in this file reached quiescence under the bound -- no LOOP", () => r13.loops, [])
 // THE INPUT AUDIT, over every owned entry write every service-order case in
 // this file made (R13, R16 and R17 alike). This is the pin that would have
 // caught the round-6 P1 in round 2: the oracle covers EVERY input the entry
@@ -8194,9 +8517,15 @@ checkCall("R17b (structural): switchSource and the probe commit adopt a pending 
 // file's records, and every other user setting (E1 and E2 seed mpvArgs and
 // refreshMinutes) against the stored entry, which entryWith must carry. Seen red on lane-key-v2's code (the E cases' writes lose the
 // EPG) and on the bare-rule mutation (X1 and X2 under the lagging host).
-checkCall("R17 / rule 15: the input audit -- at every owned entry write the driver made, no input value the stored entry carried before the write is absent afterwards from both the entry and every record in the file, and no other user setting changes; refused values counted apart", () => {
-  return { writes: r13.audit.writes >= 60, lost: r13.audit.lost, refused: r13.audit.refused }
-}, { writes: true, lost: [], refused: 0 })
+// Round 8 (R18c): the audit now SEES refused values and whitespace-wrapped
+// variants of every input kind -- round 7's expected `refused: 0`, because no
+// driver case carried one, and that is how both P1s stayed out of node.
+// Refused values are stripped once reported (OQ-W2, confirmed) and counted
+// apart; a value superseded by the user's later explicit input for the same
+// slot (R18d) is counted apart too; neither is ever counted lost.
+checkCall("R17 / R18c / rule 15: the input audit -- at every owned entry write the driver made, no input value the stored entry carried before the write is absent afterwards from both the entry and every record in the file, and no other user setting changes; refused and superseded values counted apart, and both kinds reached", () => {
+  return { writes: r13.audit.writes >= 60, lost: r13.audit.lost, refusedSeen: r13.audit.refused > 0, supersededSeen: r13.audit.superseded > 0, skippedSeen: r13.audit.skipped > 0 }
+}, { writes: true, lost: [], refusedSeen: true, supersededSeen: true, skippedSeen: true })
 
 // ---- SR8: `omarchy bar set ... playlistUrl <url>` still adopts ----
 //

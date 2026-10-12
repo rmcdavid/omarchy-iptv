@@ -3514,8 +3514,8 @@ function settingsFrom(entry) {
     // 0600 state and then writes the entry back WITHOUT it. Nothing derives
     // the active source from them any more; `sourceKey` below is the mirror
     // of what does.
-    playlistUrl: str(settingOf(entry, "playlistUrl", "")).replace(/^\s+|\s+$/g, ""),
-    epgUrl: str(settingOf(entry, "epgUrl", "")).replace(/^\s+|\s+$/g, ""),
+    playlistUrl: entryInputText(settingOf(entry, "playlistUrl", "")),
+    epgUrl: entryInputText(settingOf(entry, "epgUrl", "")),
     // The active source's key, mirrored into the host entry so an install
     // that loses state.json's active key can still find its way back to a
     // source it still has (adoptActiveSource step 2). Read through
@@ -3538,6 +3538,55 @@ function settingsFrom(entry) {
     pipSizePercent: pip.sizePercent,
     pipMargin: pip.margin
   }
+}
+
+// D-SINK-19 round 8, R18a. THE ONE NORMALISER for a value read from the bar
+// entry's two input keys (`playlistUrl`, `epgUrl`).
+//
+// Round 7's P1: Model.retiredInputsToKeep compared the PUBLISHED entry's
+// value raw against the service's snapshot, and the snapshot comes from
+// settingsFrom, which trims. `omarchy bar set` does not trim (the host's
+// omarchy-bar hands the value to `jq --arg` as typed), so a value with
+// surrounding whitespace was never "consumed": a refused credential stayed in
+// shell.json, a removed source came back at the next start, and on the
+// echoing host a pending EPG beside it looped. With the one-line trim the
+// node suite read the same count as without it -- nothing could see it.
+//
+// So there is ONE form, and every comparison of an entry value -- against a
+// snapshot, a record, or another entry value -- goes through it:
+//   entryInputText  settingsFrom's own trim (every \s at either edge). The
+//                   service's snapshots are taken from `settings`, which is
+//                   this; a raw published value becomes this before anything
+//                   compares it.
+//   entryInputForm  then what adoption does with it: sanitizeInput (control
+//                   characters out, the space / NBSP edges, the cap), then
+//                   validateSourceUrl as a CLI value of that kind. `form` is
+//                   the validated URL when it passes (what a record stores
+//                   and what findSourceByUrl compares) and the sanitized text
+//                   when it does not (a refused value is still one value,
+//                   whatever spacing it came with). `text` "" means NO input:
+//                   a value of whitespace or control characters alone is the
+//                   same as an absent key on every path, which it was not --
+//                   an EPG of "\u0007" validated as the EMPTY guide URL and
+//                   adoptActiveSource replaced the active record's guide URL
+//                   with "" (found by this ruling's search, R4 says an empty
+//                   EPG input is a no-op).
+// Two forms are the same input exactly when their `form`s are equal
+// (sameEntryInput). Nothing here is a URL the caller did not already hold.
+function entryInputText(value) {
+  return str(value).replace(/^\s+|\s+$/g, "")
+}
+
+function entryInputForm(name, value) {
+  var text = sanitizeInput(entryInputText(value), MAX_SOURCE_URL + 1)
+  if (text === "") return { text: "", ok: false, url: "", form: "" }
+  var v = validateSourceUrl(text, name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" })
+  var ok = v.ok === true && str(v.url) !== ""
+  return { text: text, ok: ok, url: ok ? str(v.url) : "", form: ok ? str(v.url) : text }
+}
+
+function sameEntryInput(name, a, b) {
+  return entryInputForm(name, a).form === entryInputForm(name, b).form
 }
 
 // ------------------------------------------------------------ logos (M2-04)
@@ -10141,8 +10190,11 @@ function invalidInputBlocks(invalid, activeKey) {
 // guide URL.
 function reconcileAction(input) {
   var it = input || {}
-  var playlist = str(it.playlist)
-  var epg = str(it.epg)
+  // R18a (round 8): both sides through the one normaliser, so "fresh" here
+  // and "consumed" in retiredInputsToKeep can never disagree about a value
+  // that differs only in its spacing.
+  var playlist = entryInputForm("playlistUrl", it.playlist)
+  var epg = entryInputForm("epgUrl", it.epg)
   var first = it.first === true
   var force = it.force === true
   // `first` carries no weight in "changed": the service's snapshot starts
@@ -10150,11 +10202,11 @@ function reconcileAction(input) {
   // comparison alone. The term `first ||` used to sit here and a mutation
   // that dropped it reddened nothing (round 2 review, P3); `first` decides
   // `act` below and nothing else.
-  var playlistChanged = playlist !== str(it.lastPlaylist)
-  var epgChanged = epg !== str(it.lastEpg)
+  var playlistChanged = playlist.form !== entryInputForm("playlistUrl", it.lastPlaylist).form
+  var epgChanged = epg.form !== entryInputForm("epgUrl", it.lastEpg).form
   var out = { act: "ignore",
-              adoptUrl: playlist !== "" && playlistChanged,
-              adoptEpg: epg !== "" && epgChanged,
+              adoptUrl: playlist.text !== "" && playlistChanged,
+              adoptEpg: epg.text !== "" && epgChanged,
               playlistChanged: playlistChanged, epgChanged: epgChanged }
   if (out.adoptUrl) out.act = "adopt"
   else if (first || force) out.act = "migrate"
@@ -10216,8 +10268,12 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var before = activeKeyOf(st)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
               epgConsumed: false, invalid: null, added: "", evicted: [], writeEntry: false }
-  var url = adoptUrl ? sanitizeInput(str(e.playlistUrl), MAX_SOURCE_URL + 1) : ""
-  var epg = adoptEpg ? str(e.epgUrl) : ""
+  // R18a: the one normaliser (entryInputForm). `url` is the sanitized text
+  // reconcileSources validates; `epg` is the whole form, so an EPG of
+  // whitespace or control characters alone is NO input (R4's no-op) and not
+  // the empty guide URL it used to validate as.
+  var url = adoptUrl ? entryInputForm("playlistUrl", e.playlistUrl).text : ""
+  var epg = adoptEpg ? entryInputForm("epgUrl", e.epgUrl) : entryInputForm("epgUrl", "")
   var resolved = false
   if (url !== "") {
     // Step 1. The EPG input is NOT handed to reconcileSources here: the R4
@@ -10248,12 +10304,11 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   // R4: a fresh EPG input reaches the ACTIVE record on any path -- the record
   // a fresh URL just named, a state load with an EPG on the entry, an
   // "ignore" plan that carries only an EPG change (D-SRC-02).
-  if (adoptEpg && epg !== "" && out.key !== "") {
+  if (adoptEpg && epg.text !== "" && out.key !== "") {
     out.epgConsumed = true
-    var ev = validateSourceUrl(epg, { kind: "epg", origin: "cli" })
     var active = findSource(out.state.sources, out.key)
-    if (ev.ok && active && ev.url !== str(active.epgUrl)) {
-      out.state = replaceSource(out.state, out.key, { epgUrl: ev.url })
+    if (epg.ok && active && epg.url !== str(active.epgUrl)) {
+      out.state = replaceSource(out.state, out.key, { epgUrl: epg.url })
       out.adoptedEpg = true
     }
   }
@@ -10294,19 +10349,33 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
 // is moved by the caller's own pointer write (persistActive), whose plan is
 // unchanged by this.
 //
-// -> { state, pending, consumed, adopted }. `pending`: there was a fresh EPG
-// input at all. `consumed`: it reached the record (adopted, already held, or
-// refused by validation -- R4's meaning, and what Model.epgSnapshotAfter
-// moves the snapshot on). `adopted`: the record's epgUrl changed. A key that
-// names no record consumes nothing, so the input stays pending (R12).
-function adoptPendingEpg(state, key, epgInput, lastEpg, nowSec) {
+// -> { state, pending, consumed, adopted, superseded }. `pending`: there was
+// a fresh EPG input at all. `consumed`: it reached the record (adopted,
+// already held, refused by validation, or superseded -- R4's meaning, and
+// what Model.epgSnapshotAfter moves the snapshot on). `adopted`: the record's
+// epgUrl changed. A key that names no record consumes nothing, so the input
+// stays pending (R12).
+//
+// R18d (round 8, OQ-W3 ruled): `opts.formEpg` is the guide URL the ADD FORM
+// carried -- typed, or derived by an Xtream add -- and it WINS over a pending
+// CLI epgUrl: the user's later explicit input for the same slot supersedes
+// the earlier one. The record keeps the form's value, the pending input is
+// `superseded` (consumed, so the snapshot moves onto it and the commit's own
+// mirror write strips it from the entry) and nothing is adopted. An empty
+// form EPG (the form left blank) supersedes nothing: R17b adopts as before.
+function adoptPendingEpg(state, key, epgInput, lastEpg, nowSec, opts) {
   var st = state || emptyState()
-  var out = { state: st, pending: false, consumed: false, adopted: false }
+  var out = { state: st, pending: false, consumed: false, adopted: false, superseded: false }
   var plan = reconcileAction({ playlist: "", epg: epgInput, lastPlaylist: "", lastEpg: lastEpg })
   out.pending = plan.adoptEpg === true
   if (!out.pending) return out
   var k = activeKeyText(key)
   if (k === "" || !findSource(st.sources, k)) return out
+  if (opts && entryInputForm("epgUrl", opts.formEpg).text !== "") {
+    out.consumed = true
+    out.superseded = true
+    return out
+  }
   var res = adoptActiveSource(withActiveKey(st, k), { playlistUrl: "", epgUrl: str(epgInput), sourceKey: "" }, nowSec, "",
                               { adoptUrl: false, adoptEpg: true })
   out.consumed = res.epgConsumed === true
@@ -10716,16 +10785,22 @@ function retiredInputsToKeep(entry, state, consumed) {
   var keep = []
   for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
     var name = RETIRED_SETTINGS[i]
-    var raw = str(e[name])
-    if (raw === "" || raw === str(c[name])) continue
+    // R18a (round 8): the ENTRY value through the one normaliser before any
+    // comparison. Round 7 compared it raw against a snapshot settingsFrom had
+    // trimmed, so a value with surrounding whitespace -- which `omarchy bar
+    // set` stores as typed -- never matched its own snapshot: a refused
+    // credential stayed in shell.json, a removed source was re-adopted at
+    // the next start, and on the echoing host a pending EPG beside it looped.
+    // A key this function does not know is compared the same way (as a
+    // playlist-kind value): it is kept unless its form is empty or consumed.
+    var f = entryInputForm(name, e[name])
+    if (f.text === "" || f.form === entryInputForm(name, c[name]).form) continue
     var held = false
     if (name === "playlistUrl") {
-      var pv = validateSourceUrl(sanitizeInput(raw, MAX_SOURCE_URL + 1), { origin: "cli" })
-      held = pv.ok === true && findSourceByUrl(st.sources, pv.url) !== null
+      held = f.ok && findSourceByUrl(st.sources, f.url) !== null
     } else if (name === "epgUrl") {
-      var ev = validateSourceUrl(raw, { kind: "epg", origin: "cli" })
       var active = activeSourceRecord(st)
-      held = ev.ok === true && active !== null && ev.url === str(active.epgUrl)
+      held = f.ok && active !== null && f.url === str(active.epgUrl)
     }
     if (!held) keep.push(name)
   }
@@ -10772,6 +10847,77 @@ function entryWith(entry, patch, opts) {
   for (var q in p) out[q] = p[q]
   if (str(out.id) === "" && str(src.id) !== "") out.id = str(src.id)
   return out
+}
+
+// D-SINK-19 round 8, R18b. THE CYCLE SETTLES: a write that changes nothing
+// changes nothing.
+//
+// Round 7's second P1, on the chain since before round 7: on the lagging host
+// a pending R12 EPG beside a REFUSED playlistUrl looped at about 3,000 entry
+// writes a second. The heal stripped the refused value from the STORED entry
+// but the host kept publishing the pre-write entry, so every reconcile asked
+// for the strip again (Model.adoptActiveSource's `writeEntry` reads the stale
+// published copy, and must: after a patch-only write re-carried a value, that
+// same answer is what heals it, D-SINK-20); the write was a no-op the host
+// answered `false` to -- and the funnel still REASSIGNED the own-write
+// record, which re-evaluated `settings`, fired onSettingsChanged and ran
+// reconcile again, every event-loop turn.
+//
+// Two decisions, both here so the node driver calls what Service.qml calls:
+//
+// hostEntryForm / entryWriteNeeded / entryWriteRecord. Would handing `entry`
+// to updateEntryInline change what the host STORES? The host's own answer is
+// its dirty check -- JSON.stringify of `{ id } + the entry's other keys`
+// against the stored entry, key order included (shell.qml updateEntryInline)
+// -- but the plugin sees only what the host PUBLISHES, which the lagging
+// host leaves one write behind (rule 9). So the stored entry is estimated:
+// while the publish is still exactly the one that stood when this service
+// last wrote (`lastWrite.published`), the host stores what that write handed
+// it (`lastWrite.stored`); the moment the publish moves -- our own echo, or
+// anybody's write -- the publish is the estimate. A write is needed exactly
+// when the entry differs from the estimate under the host's own comparison,
+// so a write this skips is one the host would have answered `false` to. The
+// estimate never waits for an echo (rule 9): it is the plugin's own record
+// of its own write, dropped as soon as the host says anything else.
+function hostEntryForm(id, entry) {
+  var next = { id: str(id) }
+  var e = entry && typeof entry === "object" ? entry : {}
+  for (var k in e) if (k !== "id") next[k] = e[k]
+  return next
+}
+
+function entryWriteRecord(id, entry, published) {
+  return { published: JSON.stringify(published && typeof published === "object" ? published : {}),
+           stored: JSON.stringify(hostEntryForm(id, entry)) }
+}
+
+function entryWriteNeeded(id, entry, published, lastWrite) {
+  var pub = JSON.stringify(published && typeof published === "object" ? published : {})
+  var stored = lastWrite && typeof lastWrite === "object" && typeof lastWrite.stored === "string"
+               && lastWrite.published === pub ? lastWrite.stored : pub
+  return JSON.stringify(hostEntryForm(id, entry)) !== stored
+}
+
+// sameOwnWrite. The own-write record the funnel would assign, against the one
+// in force: equal when both are absent, or when `base` and `value` carry the
+// same keys with strictly equal values -- exactly the inputs ownWriteInForce
+// and settingsWithOwnWrite read, so an equal record is one no binding can
+// tell apart and reassigning it is the re-trigger and nothing else.
+function sameOwnWrite(a, b) {
+  function same(x, y) {
+    var xo = x && typeof x === "object" ? x : null
+    var yo = y && typeof y === "object" ? y : null
+    if (xo === null || yo === null) return xo === yo
+    var xk = Object.keys(xo).sort()
+    var yk = Object.keys(yo).sort()
+    if (xk.join("\n") !== yk.join("\n")) return false
+    for (var i = 0; i < xk.length; i++) if (xo[xk[i]] !== yo[xk[i]]) return false
+    return true
+  }
+  var ao = a && typeof a === "object" ? a : null
+  var bo = b && typeof b === "object" ? b : null
+  if (ao === null || bo === null) return ao === bo
+  return same(ao.base, bo.base) && same(ao.value, bo.value)
 }
 
 // A cache is stale when its status is not ok, has no fetchedAt, or is older
@@ -12038,6 +12184,13 @@ if (typeof module !== "undefined") {
     sourcesSummary: sourcesSummary,
     entryWith: entryWith,
     retiredInputsToKeep: retiredInputsToKeep,
+    entryInputText: entryInputText,
+    entryInputForm: entryInputForm,
+    sameEntryInput: sameEntryInput,
+    hostEntryForm: hostEntryForm,
+    entryWriteRecord: entryWriteRecord,
+    entryWriteNeeded: entryWriteNeeded,
+    sameOwnWrite: sameOwnWrite,
     cacheStale: cacheStale,
     formFields: formFields,
     isFormField: isFormField,
