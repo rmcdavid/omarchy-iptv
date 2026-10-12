@@ -151,3 +151,27 @@ class TheRealLinter(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GateWiring(unittest.TestCase):
+    """STRUCTURAL pin, and labelled as one: it reads check.sh, it does not run
+    the qmllint step. The judge above is driven for real; what this pins is the
+    two lines that make its verdict COUNT. The D-REL-5 round-2 lens dropped
+    them one at a time (`(( members_status != 0 && 0 ))`, `members_status=0`)
+    and the gate stayed green with a bogus member in Service.qml, because no
+    test read them. A refactor that moves the step must move this pin with it.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, 'scripts', 'check.sh'), encoding='utf-8') as f:
+            self.lines = [l.strip() for l in f.read().splitlines()]
+
+    def test_the_judge_status_is_taken_straight_from_the_judge(self):
+        i = next(n for n, l in enumerate(self.lines) if 'check-model-members.py' in l and l.startswith('members_out='))
+        self.assertEqual('members_status=$?', self.lines[i + 1])
+        self.assertEqual(1, sum(1 for l in self.lines if l.startswith('members_status=')))
+
+    def test_a_non_zero_verdict_turns_the_gate_red(self):
+        i = self.lines.index('if (( members_status != 0 )); then')
+        self.assertTrue(self.lines[i + 1].startswith('bad '), self.lines[i + 1])
+

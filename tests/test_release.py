@@ -467,6 +467,14 @@ class ReleaseCase(unittest.TestCase):
             problems = [p for p in self.model_js_problems(rel, text) if p.startswith(rel + ':')]
             self.assertEqual(1, len(problems), (rel, problems))
 
+    def test_a_name_followed_by_punctuation_is_still_red(self):
+        # bin/omarchy-iptv:7415 at 1ebbc5b read "Mirror Model.js's ...", so the
+        # possessive is a form that shipped; the D-REL-5 round-2 lens showed a
+        # lookahead that also excludes the apostrophe passed every other test.
+        for line in ("// Mirror Model.js's Math.trunc\n", '// (see Model.js)\n', '// in Model.js, then\n',
+                     '// lives in Model.js.\n', '// "Model.js"\n'):
+            self.assertEqual(1, len(self.model_js_problems('Guide.qml', line)), line)
+
     def test_an_import_of_model_js_by_path_is_red(self):
         self.assertEqual(1, len(self.model_js_problems('Guide.qml', 'import "./Model.js" as Model\n')))
 
