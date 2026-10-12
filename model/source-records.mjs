@@ -27,7 +27,7 @@ function hasControlChars(text) {
 }
 
 // Console line for a record the reader drops (D-SRC-09): the key only,
-// never the URL. Model.js is otherwise silent; node has a console too.
+// never the URL. The model is otherwise silent; node has a console too.
 function warnState(message) {
   if (typeof console !== "undefined" && console && typeof console.warn === "function") console.warn("omarchy-iptv: state: " + message)
 }

@@ -80,7 +80,7 @@ function configShieldArgv(helperPath) {
 // and the verdict string. Everything else is `exposed`: a crashed helper, no
 // output at all, an unparseable line, one of the verb's other verdicts
 // (absent, symlink, foreign, not_regular, replaced, error) and -- the case
-// this is really written for -- a verdict string this version of Model.js has
+// this is really written for -- a verdict string this version of the model has
 // never heard of. A helper that learns a new verdict later cannot have it
 // read as "private" by an older guide.
 //

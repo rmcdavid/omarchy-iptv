@@ -6566,6 +6566,17 @@ for (const c of chnoCases) {
 check("CN1.2: parseChno never throws on a non-string", [Model.parseChno(null).ok, Model.parseChno(undefined).ok, Model.parseChno(12).key, Model.parseChno({}).ok, Model.parseChno([]).ok, Model.parseChno(true).ok], [false, false, "12", false, false, false])
 check("CN1.2: every failure returns the same shape", Model.parseChno("HD"), { ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 })
 check("CN1.2: major and minor are reported separately", [Model.parseChno("7.1").major, Model.parseChno("7.1").minor, Model.parseChno("7").minor], [7, 1, -1])
+// D-REL-5. The model is ONE ES module instance shared by every component that
+// imports it, where the classic script was a private copy per component, so a
+// constant handed out by reference is now one object for the guide, the
+// service and the bar. chnoOf hands out CHNO_NONE itself for every channel
+// without a number; it is frozen so a caller that writes to its result throws
+// in strict mode instead of corrupting the value for the other two. Found by
+// the D-REL-5 equivalence lens, which poisoned every non-frozen object 474
+// functions returned over 8,688 calls and saw this one shared value change.
+checkCall("D-REL-5: the no-number channel record chnoOf hands out is frozen, not shared mutable",
+  () => [Object.isFrozen(Model.chnoOf(null)), Object.isFrozen(Model.chnoOf({ chnoKey: "" })), Model.chnoOf(null) === Model.chnoOf({ chnoKey: "" })],
+  [true, true, true])
 
 // CN11: the product owner's amendment. A playlist whose numbers live under an
 // alias must not silently look unnumbered.

@@ -13110,6 +13110,65 @@ switch. The sentence "one `saved` per `setText`" that the round-3 documents
 carried is false for a burst and was replaced on the round-4 docs branch
 with these numbers (`docs/OMARCHY-PLUGIN-CONTRACT.md`, SR38's amendment).
 
+### F-HARNESS-19: the TLS scenario's stage shell calls a model function the staged tree does not have
+
+**Filed 2026-10-12 from the D-REL-5 lane's report; P2; open.** The lane
+ran every dev-harness scenario on `dev` (422c8e1) and on its split tree
+under the same nested cage, to show the split changes no count, and
+`tls-scenario.sh` read 48 / 1 on both with S6 red: "the stage shell never
+parsed the playlist". S6 is the live proof for D-SINK-16: it stages the
+pre-TLS code (`PRE_TLS_REF="b731882^"`, 0.12.1-era), lets that shell start
+a player, then starts the current code and asserts the adopted player is
+migrated before it is fed. The stage shell is the CURRENT
+`scripts/dev-harness/shell.qml` over the OLD model, and since 51d686b
+(2026-10-11, the D-LOGO-11 review) that shell computes
+`logoCount: ... Model.logoHaveCount(s2.logoHave)`, which the old model does
+not export: the lane counted 109 TypeErrors at `shell.qml:1345` in one stage
+log. So the segment has been red for a rig reason since the day that line
+landed, and a regression in the adoption path would read the same. One of
+three runs on the split also failed S6's adoption check itself while `dev`
+passed it twice; that is unattributed and is re-measured once the rig is
+fixed, not assumed to be a flake.
+
+The fix is the harness's: a call to a model function that postdates the
+oldest tree any scenario stages asks whether it exists first, and the
+search is over every `Model.` call in `shell.qml` against `b731882^`'s
+exports (rule 15), not this one line.
+
+### D-SINK-20: the patch-only logo write re-carries a stale URL on the lagging host
+
+**Filed 2026-10-12 from the D-SINK-19 round-5 lenses; P3; open; never
+shipped.** Round 4 found the logo toggle was the second writer of the bar
+entry and stripped the only copy of a URL after a failed state write. The
+round-5 ruling R16 makes that toggle, while a state write is parked, in
+flight or failed, write `showLogos` alone and carry every other key of the
+entry over as it is. "As it is" means as the host PUBLISHES it, because the
+write composes from `barConfig`; on a host through 4.0.4 that copy is one
+write behind (CLAUDE.md rule 9). So in one sequence -- a URL set with
+`omarchy bar set`, adopted and stripped by a heal write, then a failed
+state write, then a logo toggle -- the toggle puts the stripped URL back on
+the stored entry, and the next owned write strips it again. The live lens
+drove exactly that under a nested cage with the fake host modelling the
+lag (`scratchpad/rev-key5-live/logo-lag.sh` in the session scratch):
+stored entry `['B', False, True]` after the heal, `playlistUrl back on the
+STORED entry? true` after the toggle, gone after a second toggle,
+`state.json` unchanged throughout, leak scan 0. The data-loss lens bounded
+it over 48,312 driven sequences: 63 re-carries, all under the lagging host,
+every one a URL that was the user's own input one write earlier and already
+a record in the 0600 state file (an audit for a re-carried URL with no file
+record read 0); the echoing host never re-carries.
+
+Recorded rather than fixed, and the reason is that the obvious fix is
+wrong. Keeping the retired keys only while no own-write override is in
+force would, in the round-4 sequence -- a URL whose state write failed,
+then the toggle on, then the toggle off -- compose the second write from
+the published entry with the override in force and strip the only copy of
+the input, which is the round-4 P1 through the same writer. The correct
+narrowing has to know whether the last state text that LANDED holds a
+record for the published URL, which is a change to what the service keeps,
+not to the toggle. Meanwhile the shield keeps the file 0600 (D-SINK-18),
+and the exposure ends with the next owned write.
+
 ### D-REL-5: the shipped Model.js is over the marketplace scanner's file limit, and nothing here could have gone red for it
 
 **Found 2026-10-12 reading the verification request for 0.13.5
@@ -13190,6 +13249,24 @@ check` gains a ceiling below the scanner's so the gate goes red before the
 marketplace does. Step one merges with the chain through git's rename
 detection (a file renamed on one side and edited on the other), which the
 review lens rehearses against `lane-key-t2` before anything is merged.
+
+**Amended the same day, before any code: the split is a SCRIPT, built now
+and re-run at integration.** The plan above did the rename first, alone,
+and the probe already says what that buys: the `.mjs` copy is 544,969
+bytes, still over the limit, so a rename-only step fixes nothing a release
+could ship. The reason for waiting was that a hand split of a file the
+D-SINK-19 chain is editing cannot be merged; a split produced by a
+deterministic script from the monolith CAN be, by running the script again
+over the chain's `Model.js` once it lands. So `lane-esm-1` (off `dev`
+422c8e1, workflow run wf_f864244f-a4a) builds `scripts/split-model.mjs` with
+a name-to-part manifest, an equivalence check (every chunk of the input
+byte-identical in exactly one part; the aggregator's 603 names equal to
+today's exports; no top-level initializer reading another part), the
+448 KiB ceiling in `release.py check`, and every consumer repointed, and
+proves it under the nested cage on `dev`'s file. A declaration the manifest
+does not name goes to the part of its nearest named predecessor and is
+reported, which is how the chain's new functions get a home. Model.js on
+`dev` is frozen to everything but the chain until the split lands.
 
 **The lesson, rule 14's shape at the artifact level.** The gate checks
 that the allowlist is whole, that every import resolves, that no

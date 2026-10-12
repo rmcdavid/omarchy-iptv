@@ -99,8 +99,8 @@ function prepareChannels(channels) {
 
 // The single "this channel has no number" answer, so every failure path
 // returns the same shape and no caller has to test for a partial one.
-var CHNO_NONE = { ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 }
-var CHNO_NO_MATCH = { kind: "none", channelIndex: -1, key: "", label: "", matches: 0, ordinal: 0 }
+var CHNO_NONE = Object.freeze({ ok: false, key: "", label: "", sort: -1, major: -1, minor: -1 })
+var CHNO_NO_MATCH = Object.freeze({ kind: "none", channelIndex: -1, key: "", label: "", matches: 0, ordinal: 0 })
 var CHNO_NO_NUMBERS_TEXT = "No channel numbers in this playlist"
 
 function chnoFail() {

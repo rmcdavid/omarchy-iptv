@@ -577,7 +577,7 @@ function moveTrackCursor(rows, index, delta) {
 }
 
 // Whether an open picker should ask the player about the channel that is
-// playing now. Pure, and in Model.js rather than inline in the service,
+// playing now. Pure, and in the model rather than inline in the service,
 // because the inline version was a self-sustaining loop and no test in the
 // suite could reach it (rule 12).
 //
