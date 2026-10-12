@@ -13191,6 +13191,24 @@ marketplace does. Step one merges with the chain through git's rename
 detection (a file renamed on one side and edited on the other), which the
 review lens rehearses against `lane-key-t2` before anything is merged.
 
+**Amended the same day, before any code: the split is a SCRIPT, built now
+and re-run at integration.** The plan above did the rename first, alone,
+and the probe already says what that buys: the `.mjs` copy is 544,969
+bytes, still over the limit, so a rename-only step fixes nothing a release
+could ship. The reason for waiting was that a hand split of a file the
+D-SINK-19 chain is editing cannot be merged; a split produced by a
+deterministic script from the monolith CAN be, by running the script again
+over the chain's `Model.js` once it lands. So `lane-esm-1` (off `dev`
+422c8e1, workflow run wf_f864244f-a4a) builds `scripts/split-model.mjs` with
+a name-to-part manifest, an equivalence check (every chunk of the input
+byte-identical in exactly one part; the aggregator's 603 names equal to
+today's exports; no top-level initializer reading another part), the
+448 KiB ceiling in `release.py check`, and every consumer repointed, and
+proves it under the nested cage on `dev`'s file. A declaration the manifest
+does not name goes to the part of its nearest named predecessor and is
+reported, which is how the chain's new functions get a home. Model.js on
+`dev` is frozen to everything but the chain until the split lands.
+
 **The lesson, rule 14's shape at the artifact level.** The gate checks
 that the allowlist is whole, that every import resolves, that no
 agent-instruction file ships, and never that the artifact is one the
