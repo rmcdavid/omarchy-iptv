@@ -2,7 +2,9 @@
 # scripts/check.sh -- the whole quality gate for omarchy-iptv, in one command.
 #   1. omarchy plugin validate   (manifest schema, entry points, no symlinks)
 #   2. qmllint on every .qml     (qs.Commons / qs.Ui mapped through $QMLROOT),
-#                                INCLUDING the dev-harness fake (CLAUDE.md 10)
+#                                INCLUDING the dev-harness fake (CLAUDE.md 10);
+#                                every `Model.X` it reports must be a name
+#                                Model.mjs exports (check-model-members.py)
 #   3. node tests                (tests/Model.test.js)
 #   4. python tests              (python3 -m unittest discover -s tests)
 #   4b. model split              (scripts/split-model.mjs --check: Model.mjs and
@@ -422,18 +424,31 @@ else
     errors=$(grep -c -E '^Error:|: error:|Error at' <<<"$output")
     (( lint_status == 0 )) || errors=$(( errors + 1 ))
     warnings=$(grep -c -E 'Warning:|: warning:' <<<"$output")
-    # D-REL-5: qmllint 6.11 reads no ES module's exports, so every call of a
-    # Model function is a `missing-property` on type "Model" since the model
-    # became Model.mjs (measured: the classic Model.js was not resolved
-    # either -- an unknown member drew no warning -- so no check was lost).
-    # They are counted apart so the rest stays comparable with the baseline.
+    # D-REL-5: qmllint 6.11 reads no ES module's exports, so since the model
+    # became Model.mjs every Model member it reaches is a `missing-property`
+    # on type "Model". The first version of this comment said the classic
+    # Model.js was not resolved either, so no check was lost. Measured, that
+    # was false: Model.js WAS resolved, a real member drew nothing and a
+    # mistyped one drew a warning naming it (BarWidget.qml 0 -> 1). Here that
+    # warning would be one line in a bucket of hundreds. So the member lines
+    # are counted apart, to keep the rest comparable with the baseline, and
+    # every name in them is judged against the aggregator's export names by
+    # check-model-members.py: an unknown one is red. Not covered, measured on
+    # the three entry points: a member qmllint never reaches (82 code
+    # positions; the classic Model.js reached 1 of them).
     model_members=$(grep -c -E 'not found on type "Model" \[missing-property\]' <<<"$output")
+    members_out=$(python3 "$ROOT/scripts/check-model-members.py" --root "$ROOT" --file "$file" <<<"$output")
+    members_status=$?
     if (( errors > 0 )); then
       bad "$(basename "$file"): $errors error(s), $warnings warning(s)"
       printf '%s\n' "$output"
     else
       ok "$(basename "$file"): 0 errors, $(( warnings - model_members )) warning(s) + $model_members on Model members"
       if [[ ${CHECK_VERBOSE:-0} == 1 && -n $output ]]; then printf '%s\n' "$output"; fi
+    fi
+    if (( members_status != 0 )); then
+      bad "$(basename "$file"): a Model member that Model.mjs does not export"
+      printf '%s\n' "$members_out"
     fi
   done
   # `[[ -f $file ]] || continue` means an unmatched glob lints NOTHING while

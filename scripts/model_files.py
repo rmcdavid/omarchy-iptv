@@ -43,6 +43,30 @@ def part_paths(root):
     return parts
 
 
+# A generated re-export block of the aggregator: `export {`, the names, then
+# `} from "./model/x.mjs"` (or the one-line empty form, which names nothing).
+EXPORT_BLOCK = re.compile(r'^export \{\n((?:  [^\n]*\n)*)\} from "\./model/[a-z][a-z0-9-]*\.mjs"$', re.M)
+
+
+def public_names(root):
+    """The names Model.mjs re-exports, in its order: what QML sees as
+    `Model.<name>`. Read from the generated export blocks, the same text the
+    engine loads; split-model.mjs --check proves the loaded namespace is
+    exactly this list."""
+    agg = os.path.join(root, AGGREGATOR)
+    try:
+        with open(agg, encoding='utf-8') as fh:
+            text = fh.read()
+    except OSError as error:
+        raise ModelLayoutError('%s is unreadable: %s' % (agg, error))
+    names = []
+    for block in EXPORT_BLOCK.findall(text):
+        names.extend(n.strip() for n in block.replace('\n', ',').split(',') if n.strip())
+    if not names:
+        raise ModelLayoutError('%s re-exports no name' % agg)
+    return names
+
+
 def model_paths(root):
     """Every file of the model, repo-relative: the aggregator, then the parts."""
     return [AGGREGATOR] + part_paths(root)
