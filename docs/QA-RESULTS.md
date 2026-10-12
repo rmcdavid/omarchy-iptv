@@ -13157,6 +13157,32 @@ minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
 `qml` image probe, never the harness shell -- so it cannot carry this
 error. Every other count against those trees predates 51d686b.
 
+### D-SRC-17 and D-SRC-18: two guide-URL findings from the D-SINK-19 round-8 reviews
+
+**Filed 2026-10-12; both on the D-SINK-19 repair branch only, never
+shipped.** Round 8's ruling R18a put every comparison of a bar-entry input
+through one normaliser, after round 7's whitespace P1. The code lane's
+search for siblings of that comparison (rule 15) found **D-SRC-17**: an
+`omarchy bar set ... epgUrl` of control characters alone sanitized to the
+empty string, validated as the EMPTY guide URL, and was adopted onto the
+active source by R4 -- clearing a guide URL the user had, where R4 says an
+empty EPG input is a no-op. Fixed on `lane-key-x1` (1f8bd1b): the read goes
+through entryInputForm (Model.js on that branch, cited bare until it lands)
+and a node check named for the sibling pins it. The round-8 data-loss lens
+reported one way of mutating that read which no check catches yet; round 9
+adds the check.
+
+**D-SRC-18** is the data-loss lens's LF case, present identically on the
+round-7 and round-8 trees: R11 and R13 leave an input on the entry when the
+state write that would adopt it fails -- deliberately, as the only copy --
+and if the user then edits the same source's guide URL in the app and that
+write lands, nothing removes the older input, so the next start adopts it
+over the edit. Sixteen such runs per host shape in the lens's length-2
+matrix on `lane-key-x2`. It needs a failed state write that the user was
+told about. Round 9's ruling, that the latest explicit input wins by time,
+is the place it is either settled or shown to be unknowable: the write that
+would have recorded when the older input arrived is the write that failed.
+
 ### D-SINK-20: the patch-only logo write re-carries a stale URL on the lagging host
 
 **Filed 2026-10-12 from the D-SINK-19 round-5 lenses; P3; open; never
