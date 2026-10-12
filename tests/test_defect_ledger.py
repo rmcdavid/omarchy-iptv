@@ -258,6 +258,22 @@ class LedgerCase(unittest.TestCase):
                    'The pass filed D-AAA-1 and D-AAA-2. See `Model.ghostThing`.\n')
         self.assertRed(r'Model\.ghostThing is cited in docs/QA-RESULTS\.md')
 
+    def test_the_module_file_name_is_not_a_symbol_citation(self):
+        """`Model.mjs` is a FILE, as `Model.js` is; neither cites a symbol.
+
+        D-REL-5: the shipped script is over the marketplace scanner's 512 KiB
+        file limit and becomes the ES module `Model.mjs`. The day it was filed,
+        the filing itself turned the ledger red with "Model.mjs is cited ...
+        and resolves in no source file", because the exemption named one
+        suffix. Both suffixes are file names and the exemption says so.
+        """
+        self.good_ledger()
+        self.write('Model.js', 'function realThing() { return 1 }\n')
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2; the fix renames '
+                   '`Model.js` to `Model.mjs` and keeps `Model.realThing`.\n')
+        self.assertGreen()
+
     def test_citations_with_no_model_file_are_red_but_silence_is_not(self):
         """A repo with neither citations nor a Model.js is consistent."""
         self.good_ledger()

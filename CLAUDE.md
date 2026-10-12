@@ -57,7 +57,12 @@ Consequences you must respect:
 - A release is: bump `manifest.json` (and `Model.PLUGIN_VERSION` with it,
   D-HOST-1), date the top `CHANGELOG.md` heading for the day of the cut,
   re-level the test floors in `scripts/check.sh` to the counts on the tree,
-  green gate, `scripts/release.py build --gate-already-green`, then push
+  green gate, run `scripts/dev-harness/key-scenario.sh live` under the
+  nested headless cage and record its count in `docs/QA-RESULTS.md` (the
+  live arm is the only observer of the start-up window that D-SRC-15 lives
+  in; `check.sh` runs just its 11-check preflight, and a README that
+  promises the live run is only true while this step is run), then
+  `scripts/release.py build --gate-already-green`, then push
   `dev`, `main` and the tag. `build` refuses a heading that names another
   version or carries another day's date, which is how 0.8.0 came to ship
   release notes dated the day before it existed (D-REL-4).
@@ -481,10 +486,8 @@ requests and raise the batch.
      rule is: **while the plugin's form is open, no editable `TextInput`
      exists in the shell.** The form's fields are `readOnly: true`
      unconditionally; the plugin does the editing itself in
-     `handleFormKey` over the model value (editInsert and editDelete in
-     Model.js, node-tested; cited without the prefix until the lane that
-     adds them lands, because the ledger resolves a prefixed citation
-     against the tree), and paste is the out-of-process path
+     `handleFormKey` over the model value (`Model.editInsert` and
+     `Model.editDelete`, node-tested), and paste is the out-of-process path
      only: the helper's `clipboard` verb runs `wl-paste` as argv, reads at
      most 32 KiB (`MAX_CLIPBOARD_BYTES`, 8,192 characters at four bytes
      each) under a 5 s deadline, reaps the child even when the shell's

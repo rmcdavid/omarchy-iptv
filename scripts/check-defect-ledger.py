@@ -557,11 +557,12 @@ def main(argv=None):
             text = read(root, rel)
             for m in re.finditer(r'`Model\.([A-Za-z_][A-Za-z0-9_]*)`', text):
                 cited.setdefault(m.group(1), set()).add(rel)
-        # `Model.js` is the FILE, named in 22 documents, and `Model.X` is the
-        # placeholder this very check is described with. Neither is a citation.
+        # `Model.js` is the FILE, named in 22 documents, `Model.mjs` is the
+        # same file once it is an ES module (D-REL-5), and `Model.X` is the
+        # placeholder this very check is described with. None is a citation.
         # Kept as a named, short list rather than a clever pattern: an
         # exception you can read is an exception somebody will notice.
-        not_symbols = {'js', 'X'}
+        not_symbols = {'js', 'mjs', 'X'}
         for symbol in sorted(cited):
             if symbol in not_symbols:
                 continue

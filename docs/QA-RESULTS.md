@@ -13072,6 +13072,186 @@ round 4: with the directories already ready, the entry is written straight
 after `setText` and before `saved`, so a state write that fails then still
 strips the URL (lane A's DQ-A2, measured live by the round-3 data-loss lens).
 
+### D-SRC-16: a burst of switches leaves the in-flight save count stuck, and every later reload is ignored
+
+**Filed 2026-10-12 from the round-4 code lane's report (D-SINK-19 repair,
+`lane-key-t1`); P2; fixed on that branch; never shipped.** Round 3's R9 made
+the service ignore a `state.json` reload while a save is parked, in flight
+or failed, and counted "in flight" as one up per `setText` and one down per
+`saved`. Quickshell's `FileView` does not honour that arithmetic: a probe
+under a nested cage (Quickshell 0.3.1, `scratchpad/lane-a-t1/fv/burst.log`
+in the lane's scratch) sent 26 `setText` and saw 25 `saved` plus 1
+`saveFailed`, with `textChanged` preceding every `saved` and `text()`
+reading the PREVIOUS content while the last write was still pending; the
+service under the same burst sent 20 and saw 15. A queued write that a
+later one replaces raises nothing. So after ten warm switches on
+`lane-key-s2` the counter read 5 and stayed there, and from then on every
+foreign reload -- an external edit of the state file, the thing R9's
+file-newer branch exists to apply -- was ignored for the rest of the
+session (the lane's `dlive20-s2.out`: 20 `setText`, 15 `saved`,
+`stateSavesInFlight` 5). No record is lost by it: memory is newer than the
+file throughout and the next start reads the file. It is the sibling of
+D-SRC-15 in the other direction: that defect applied a reload it should
+have ignored, this one ignores reloads it should apply, and both come from
+a decision reading a number that is not what it is named.
+
+The fix on `lane-key-t1` reads "landed" from CONTENT rather than from a
+count: `saveState` keeps the text it asked for, and `onSaved` /
+`onSaveFailed` clear the in-flight flag only when the FileView's `text()`
+equals it (stateSaveLanded in Model.js on that branch, cited bare until it
+lands on `dev`), so the flag is 0/1, a replaced write clears nothing and the
+write that carried the last content clears it. Node-pinned by a burst
+driver over the shipping functions in the service order (both host shapes)
+that reads `after:[18,null,...], foreignApplied:""` on an export of
+`lane-key-s2` and 0 / applied on `lane-key-t1`; live, the same ten-switch
+driver on the repaired tree ends with `stateSavesInFlight` 0 and the
+stored mirror equal to the published one half a second after one more
+switch. The sentence "one `saved` per `setText`" that the round-3 documents
+carried is false for a burst and was replaced on the round-4 docs branch
+with these numbers (`docs/OMARCHY-PLUGIN-CONTRACT.md`, SR38's amendment).
+
+### D-SINK-20: the patch-only logo write re-carries a stale URL on the lagging host
+
+**Filed 2026-10-12 from the D-SINK-19 round-5 lenses; P3; open; never
+shipped.** Round 4 found the logo toggle was the second writer of the bar
+entry and stripped the only copy of a URL after a failed state write. The
+round-5 ruling R16 makes that toggle, while a state write is parked, in
+flight or failed, write `showLogos` alone and carry every other key of the
+entry over as it is. "As it is" means as the host PUBLISHES it, because the
+write composes from `barConfig`; on a host through 4.0.4 that copy is one
+write behind (CLAUDE.md rule 9). So in one sequence -- a URL set with
+`omarchy bar set`, adopted and stripped by a heal write, then a failed
+state write, then a logo toggle -- the toggle puts the stripped URL back on
+the stored entry, and the next owned write strips it again. The live lens
+drove exactly that under a nested cage with the fake host modelling the
+lag (`scratchpad/rev-key5-live/logo-lag.sh` in the session scratch):
+stored entry `['B', False, True]` after the heal, `playlistUrl back on the
+STORED entry? true` after the toggle, gone after a second toggle,
+`state.json` unchanged throughout, leak scan 0. The data-loss lens bounded
+it over 48,312 driven sequences: 63 re-carries, all under the lagging host,
+every one a URL that was the user's own input one write earlier and already
+a record in the 0600 state file (an audit for a re-carried URL with no file
+record read 0); the echoing host never re-carries.
+
+Recorded rather than fixed, and the reason is that the obvious fix is
+wrong. Keeping the retired keys only while no own-write override is in
+force would, in the round-4 sequence -- a URL whose state write failed,
+then the toggle on, then the toggle off -- compose the second write from
+the published entry with the override in force and strip the only copy of
+the input, which is the round-4 P1 through the same writer. The correct
+narrowing has to know whether the last state text that LANDED holds a
+record for the published URL, which is a change to what the service keeps,
+not to the toggle. Meanwhile the shield keeps the file 0600 (D-SINK-18),
+and the exposure ends with the next owned write.
+
+### D-REL-5: the shipped Model.js is over the marketplace scanner's file limit, and nothing here could have gone red for it
+
+**Found 2026-10-12 reading the verification request for 0.13.5
+(omacom/omarchy-plugin-marketplace#11114); P1; open.** The request carries
+`needs-fixes`, and the automated security baseline that must pass before a
+maintainer can apply `approved-and-verified` reports: "The static scan could
+not safely process `Model.js` within its configured limits." The limit is
+not a guess: `scripts/security-baseline-limits.mjs` in the marketplace
+repository sets `securityFileByteLimit = 512 * 1024`, and
+`security-baseline-report.mjs` prints that sentence only for the
+`security-baseline-scan-limit` code with a path attached. The arithmetic
+agrees with the history:
+
+| Commit | Release | `Model.js` bytes | Baseline |
+|---|---|---|---|
+| d55149b | 0.13.4 | 522,183 | passed (#11077, 2026-10-11T18:27Z) |
+| 0bd4515 | 0.13.5 | 534,599 | could not complete (#11114, 2026-10-12T00:10Z) |
+| ce1d71a | dev today | 534,599 | -- |
+| f54f408 | lane-key-t2 (D-SINK-19) | 567,228 | -- |
+
+So 0.13.4 passed with 2 KB to spare, D-CLIP-1's 263 lines took the file
+over, and the D-SINK-19 repair adds 33 KB more. The verified snapshot is
+0.12.0; every release since 0.12.1 drew a finding on its own request, and
+this one would have been refused by a script before anyone read it.
+
+**What the file is made of** (measured on lane-key-t2's copy with a
+line-comment pass: `//` blocks counted by bytes): 735 comment blocks,
+312,721 bytes, 55 percent of the file; the code alone is about 252 KB. The
+weight is not in a few essays: the 34 blocks of 1,500 bytes or more total
+69 KB, the 81 of 1,000 or more 126 KB, and reaching a file that stays under
+the limit through the next few releases would mean relocating the 150
+blocks of 600 bytes or more, 179 KB, which is most of the reasoning the
+code carries. A comment move is the fallback, not the fix.
+
+**The fix is a module split, and its three preconditions were measured on
+this machine before the decision** (node v26.8.1, Qt 6.11.2 offscreen,
+`scratchpad/esm-probe/` on a `git archive dev` of ce1d71a):
+
+- Strict mode. An ES module is strict. With `"use strict";` prepended to
+  the shipping `Model.js`, `node tests/Model.test.js` exits 0, "All
+  Model.js tests passed" (2,074-floor suite, every check).
+- Node. All 603 `module.exports` keys are top-level declarations exported
+  under their own name (a regex over the source, 0 exceptions). A copy
+  named `Model.mjs` with the guarded CommonJS block replaced by
+  `export { ...the same 603 names... }` loads by `require("./Model.mjs")`
+  (node 26 resolves a synchronous ES module from CommonJS) and by
+  `import * as M`, both reporting 603 keys and `PLUGIN_VERSION` 0.13.5; the
+  node suite with its one `require` line pointed at the `.mjs` exits 0.
+- The QML engine. `qmltestrunner` over a `TestCase` that does
+  `import "Model.mjs" as Model` reaches the module (the one failing compare
+  was this author's wrong expectation of `redactUrls`' output, which strips
+  the scheme as well as the path); an aggregator `Agg.mjs` doing
+  `export * from "./Part.mjs"` plus its own function exposes the part's
+  function and constant to QML (`A.partFn`, `A.PART_CONST`: pass); and the
+  project's own `tests/Model.spec.qml` with its import pointed at the
+  `.mjs` reads **78 passed, 0 failed**. `omarchy plugin validate` on a copy
+  of the tree with `Model.js` removed, `Model.mjs` present and the three
+  QML imports renamed exits 0, and `qmllint` on `Service.qml` reports the
+  same count before and after.
+- The scanner. `security-baseline-scope.mjs` lists `.mjs` in
+  `scannedExtensions`, so a module is scanned exactly as the script was.
+  This is a split, not an evasion.
+
+**The plan, ruled 2026-10-12.** Step one, on `lane-esm-1` off `dev`: the
+rename to `Model.mjs` with the export block swapped and NOTHING else in the
+file changed (the lane proves the two files differ by that block alone),
+every importer repointed (three QML files, the QML spec, the harness
+shell, every node `require`, every python test that reads the file or
+spawns node over it, the release allowlist, the ledger's symbol resolver,
+the gate's `*.js` globs), gate green, and the dev harness run under the
+nested cage so the real Quickshell is seen loading the module and not only
+the Qt engine. Step two, after the D-SINK-19 chain (`lane-key-u3`) has
+landed, because a split of a file the chain is editing cannot be merged
+through rename detection: the module is cut by domain into parts each well
+under half the limit, `Model.mjs` re-exporting them so every `Model.X`
+call site and every `Model.X` citation stays as it is, and `release.py
+check` gains a ceiling below the scanner's so the gate goes red before the
+marketplace does. Step one merges with the chain through git's rename
+detection (a file renamed on one side and edited on the other), which the
+review lens rehearses against `lane-key-t2` before anything is merged.
+
+**Amended the same day, before any code: the split is a SCRIPT, built now
+and re-run at integration.** The plan above did the rename first, alone,
+and the probe already says what that buys: the `.mjs` copy is 544,969
+bytes, still over the limit, so a rename-only step fixes nothing a release
+could ship. The reason for waiting was that a hand split of a file the
+D-SINK-19 chain is editing cannot be merged; a split produced by a
+deterministic script from the monolith CAN be, by running the script again
+over the chain's `Model.js` once it lands. So `lane-esm-1` (off `dev`
+422c8e1, workflow run wf_f864244f-a4a) builds `scripts/split-model.mjs` with
+a name-to-part manifest, an equivalence check (every chunk of the input
+byte-identical in exactly one part; the aggregator's 603 names equal to
+today's exports; no top-level initializer reading another part), the
+448 KiB ceiling in `release.py check`, and every consumer repointed, and
+proves it under the nested cage on `dev`'s file. A declaration the manifest
+does not name goes to the part of its nearest named predecessor and is
+reported, which is how the chain's new functions get a home. Model.js on
+`dev` is frozen to everything but the chain until the split lands.
+
+**The lesson, rule 14's shape at the artifact level.** The gate checks
+that the allowlist is whole, that every import resolves, that no
+agent-instruction file ships, and never that the artifact is one the
+marketplace can read. The limit was public in the marketplace's own
+scripts the whole time, and 0.13.4 passed under it by 2,105 bytes while
+every lane was told to keep the lessons beside the code. A ceiling the
+gate enforces is the only check that can go red for this; a reviewer
+noticing the file is large is not one.
+
 ### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
 
 Three reviewers over one fix. They found three P1s.
