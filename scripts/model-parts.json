@@ -44,7 +44,9 @@
         "MPV_TLS_VERIFY",
         "MPV_TLS_VERIFY_PROP",
         "MPV_STREAM_OPTS_PROP",
-        "NOTIFY_IDS"
+        "NOTIFY_IDS",
+        "PLACE_TTL_SEC",
+        "ZAP_MAX_SKIP"
       ]
     },
     {
@@ -186,11 +188,9 @@
         "nextInGroup",
         "rowIndexOfId",
         "placeToRestore",
-        "PLACE_TTL_SEC",
         "placeMark",
         "zapSkipNotice",
-        "zapStep",
-        "ZAP_MAX_SKIP"
+        "zapStep"
       ]
     },
     {

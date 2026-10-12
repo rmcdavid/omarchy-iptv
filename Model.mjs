@@ -29,7 +29,8 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_TLS_VERIFY, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP, NOTIFY_IDS
+  MPV_TLS_VERIFY, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP, NOTIFY_IDS,
+  PLACE_TTL_SEC, ZAP_MAX_SKIP
 } from "./model/build.mjs"
 export {
   FOLD_GROUPS, asList, normalizeText, normalizeIdText, searchKey, tokenize,
@@ -55,8 +56,7 @@ export {
   scopeLabel, GUIDE_MODES, guideMode, guideState, copyGuide, openTracks,
   closeTracks, withTrackCursor, withQuery, withScope, withMode, withCursor,
   toggleMode, onEscape, moveCursor, launchScope, zapRing, nextInGroup,
-  rowIndexOfId, placeToRestore, PLACE_TTL_SEC, placeMark, zapSkipNotice,
-  zapStep, ZAP_MAX_SKIP
+  rowIndexOfId, placeToRestore, placeMark, zapSkipNotice, zapStep
 } from "./model/browse.mjs"
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
