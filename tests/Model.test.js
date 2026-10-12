@@ -7189,6 +7189,16 @@ const r13 = (() => {
     audit.writes++
     const after = svc.host.storedEntry() || {}
     const records = Model.parseState(svc.disk.text).sources
+    // Every OTHER setting the user put on the entry (mpvArgs, refreshMinutes,
+    // ...) is carried by entryWith unchanged; the keys the plugin owns
+    // (sourceKey, showLogos) are its own to write, and the two retired ones
+    // are checked against the records below.
+    for (const k of Object.keys(before || {})) {
+      if (k === "id" || k === "playlistUrl" || k === "epgUrl" || k === "sourceKey" || k === "showLogos") continue
+      if (JSON.stringify(after[k]) === JSON.stringify(before[k])) continue
+      const lost = { name: k, label, host: svc.host.mode }
+      audit.lost.push(lost); svc.inputLost.push(lost)
+    }
     for (const name of ["playlistUrl", "epgUrl"]) {
       const value = String((before || {})[name] || "")
       if (value === "") continue
@@ -8092,7 +8102,7 @@ checkCall("R17b: adoptPendingEpg lands a FRESH EPG input on the named record onl
   const alone = svc => svc.warnings.filter(w => w.indexOf("logo setting written alone") === 0).length
   for (const mode of ["lag", "echo"]) {
     checkCall("R17 (" + mode + " host) E1: no active source, an EPG set while the shell was down, the logo toggle, then a switch -- the toggle HEALS and keeps the EPG on the entry, the switch lands it on the switched-to record in the same turn, the entry is stripped only after, and it survives the restart; no write loses an input", () => {
-      const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
+      const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false, mpvArgs: "--volume=50", refreshMinutes: 120 }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
       const toggled = svc.setShowLogos(true); svc.drain()
       const atToggle = { toggled, alone: alone(svc), kept: kept(svc), storedEpg: storedEpg(svc), showLogos: svc.host.storedEntry().showLogos, epgOn: epgOn(svc) }
       const sw = svc.switchSource(r13.KB)
@@ -8105,7 +8115,7 @@ checkCall("R17b: adoptPendingEpg lands a FRESH EPG input on the named record onl
          afterSwitch: { ok: true, sameTurn: true, memKey: r13.KB, mirror: r13.KB, storedEpg: false, epgOn: [r13.KB] },
          afterRestart: { memKey: r13.KB, storedEpg: false, epgOn: [r13.KB] }, lost: [] })
     checkCall("R17 (" + mode + " host) E2: remove the active source, a CLI epgUrl with nothing active, the logo toggle -- the EPG stays on the entry through the toggle and the restart (R12: nothing can consume it), and the first switch after the restart lands it", () => {
-      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false, mpvArgs: "--volume=50", refreshMinutes: 120 }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
       svc.removeSource(r13.KA); svc.drain()
       svc.host.externalSet("epgUrl", EPG); svc.runLater(); svc.drain()
       svc.setShowLogos(true); svc.drain()
@@ -8180,9 +8190,11 @@ checkCall("R17b (structural): switchSource and the probe commit adopt a pending 
 // THE INPUT AUDIT, over every owned entry write every service-order case in
 // this file made (R13, R16 and R17 alike). This is the pin that would have
 // caught the round-6 P1 in round 2: the oracle covers EVERY input the entry
-// can carry. Seen red on lane-key-v2's code (the E cases' writes lose the
+// can carry -- the two retired URL keys against the stored entry and the
+// file's records, and every other user setting (E1 and E2 seed mpvArgs and
+// refreshMinutes) against the stored entry, which entryWith must carry. Seen red on lane-key-v2's code (the E cases' writes lose the
 // EPG) and on the bare-rule mutation (X1 and X2 under the lagging host).
-checkCall("R17 / rule 15: the input audit -- at every owned entry write the driver made, no input value the stored entry carried before the write is absent afterwards from both the entry and every record in the file; refused values counted apart", () => {
+checkCall("R17 / rule 15: the input audit -- at every owned entry write the driver made, no input value the stored entry carried before the write is absent afterwards from both the entry and every record in the file, and no other user setting changes; refused values counted apart", () => {
   return { writes: r13.audit.writes >= 60, lost: r13.audit.lost, refused: r13.audit.refused }
 }, { writes: true, lost: [], refused: 0 })
 
