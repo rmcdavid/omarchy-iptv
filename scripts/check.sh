@@ -161,12 +161,12 @@ fail=0
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2074}
-# 1047 -> 1082 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
+# 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
 # guard over every model file. The python floor sat one under the 1048 on the
 # tree before them; it is level again.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1082}
+PY_TESTS_MIN=${PY_TESTS_MIN:-1084}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
