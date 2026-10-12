@@ -154,6 +154,25 @@ class SplitModel(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertNotIn('init locality', out)
 
+    # ------------------------------------------------------------ declaration order
+
+    def test_a_var_named_above_its_declaration_in_its_part_is_refused(self):
+        # Quickshell logged qt.qml.usedbeforedeclared, with the module's
+        # file:// URL, for exactly this shape in a module (and never for the
+        # classic script it came from). Measured on the real cut: two of them.
+        mono = MONOLITH.replace('  return x + B + g()\n}\n', '  return x + B + g() + LATER\n}\nvar LATER = 3\n')
+        parts = [dict(PARTS[0], names=['A', 'B', 'f', 'LATER']), PARTS[1]]
+        code, out = self.run_script('write', monolith=mono, parts=parts)
+        self.assertEqual(code, 2, out)
+        self.assertIn('`f` names `LATER`, which is declared below it in part one', out)
+
+    def test_the_same_var_in_another_part_is_an_import_and_is_fine(self):
+        mono = MONOLITH.replace('  return x + B + g()\n}\n', '  return x + B + g() + LATER\n}\nvar LATER = 3\n')
+        parts = [PARTS[0], dict(PARTS[1], names=['LATER', 'g', 'C'])]
+        code, out = self.run_script('write', monolith=mono, parts=parts)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.node_eval('M.f(1)'), 1 + 2 + 2 + 3)
+
     # ------------------------------------------------------------ writes
 
     def test_an_assignment_to_a_top_level_binding_is_refused(self):

@@ -48,6 +48,17 @@
 //                  top-level name are skipped, so this is an over-approximate
 //                  guard and the runtime is the backstop: a write to an
 //                  import throws in strict mode.
+//   declared first A `var` is declared above every chunk of its own part whose
+//                  code names it. The monolith never had to care: a classic
+//                  script's `var` is hoisted and V4 says nothing. An ES module
+//                  is compiled differently, and Quickshell logged
+//                  `qt.qml.usedbeforedeclared` with the module's file:// URL on
+//                  every load for each function that used a later `var` of
+//                  its own part (measured 2026-10-12, PLACE_TTL_SEC and
+//                  ZAP_MAX_SKIP; the rewind scenario's log sweep went red on
+//                  the URL). Code is never reordered here, so the remedy is in
+//                  the manifest: put the `var` in another part, whose binding
+//                  is then an import, declared at the top.
 //   imports        A part imports every top-level name of another part that
 //                  appears in its text as a whole word (an over-
 //                  approximation: an unused import is harmless, a missing one
@@ -376,6 +387,20 @@ function staticRules(chunks, byName) {
       if (write.test(c.code)) problems.push(c.where + ":" + c.line + ": `" + c.name + "` assigns to the top-level binding `" + w + "`")
       else if (mutate.test(c.code)) problems.push(c.where + ":" + c.line + ": `" + c.name + "` mutates the top-level binding `" + w + "` in place")
     }
+  }
+  // declared first: no chunk names a later `var` of its own part
+  const seenInPart = new Map()
+  for (const c of chunks) {
+    if (!seenInPart.has(c.part)) seenInPart.set(c.part, new Set())
+    const seen = seenInPart.get(c.part)
+    const locals = localNames(c.stripped)
+    for (const r of c.refs) {
+      const d = byName.get(r)
+      if (d.kind !== "var" || d.part !== c.part || seen.has(r) || locals.has(r)) continue
+      problems.push(c.where + ":" + c.line + ": `" + c.name + "` names `" + r + "`, which is declared below it in part " + c.part +
+        " (V4 logs qt.qml.usedbeforedeclared for that in a module); assign `" + r + "` to another part in the manifest")
+    }
+    seen.add(c.name)
   }
   // init locality, transitively through same-part functions an initializer names
   for (const c of chunks) {
