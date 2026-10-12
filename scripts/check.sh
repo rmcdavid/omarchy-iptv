@@ -276,7 +276,7 @@ gate_new_suffix() {   # $1: repo-relative path. A note if it is not in the index
 
 gate_ascii_scan() {
   local rel file suffix bad_any=0 scanned=0 newly=0
-  local -a specs=( '*.js' '*.py' '*.json' 'bin/*' 'scripts/*.sh' \
+  local -a specs=( '*.js' '*.mjs' '*.py' '*.json' 'bin/*' 'scripts/*.sh' \
                    'scripts/dev-harness/*' 'tests/fixtures/*' 'docs/ARCHITECTURE.md' )
   local -a exempt_files=( 'tests/fixtures/qa-player/qa-player.m3u' \
                           'scripts/dev-harness/fixtures/harness.m3u.in' )
@@ -326,7 +326,7 @@ gate_ascii_scan() {
 
 gate_control_scan() {
   local rel file suffix bad_any=0 scanned=0 newly=0
-  local -a specs=( '*.js' '*.py' '*.qml' '*.json' '*.sh' 'bin/*' 'scripts/dev-harness/*' )
+  local -a specs=( '*.js' '*.mjs' '*.py' '*.qml' '*.json' '*.sh' 'bin/*' 'scripts/dev-harness/*' )
   gate_load_corpus "${specs[@]}"
   for rel in "${gate_corpus[@]}"; do
     case $rel in
