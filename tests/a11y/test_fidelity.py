@@ -29,7 +29,7 @@ import fidelity
 import qmlscan
 
 GUIDE = os.path.join(fidelity.REPO, "Guide.qml")
-MODEL = os.path.join(fidelity.REPO, "Model.js")
+MODEL = os.path.join(fidelity.REPO, "Model.mjs")
 
 # Floors, in the spirit of scripts/check.sh: a scanner that silently stopped
 # finding declarations would make every assertion below vacuous.
@@ -322,15 +322,12 @@ class VerbatimCopies(unittest.TestCase):
 class TreeGate(unittest.TestCase):
     """The one-call entry point the harness is meant to gate itself on."""
 
-    def _tree(self, guide_text, model_text=None):
+    def _tree(self, guide_text):
         import tempfile
         work = tempfile.mkdtemp(prefix="a11y-tree-")
         with open(os.path.join(work, "GuideProbe.qml"), "w") as out:
             out.write(guide_text)
-        with open(MODEL) as handle:
-            model = handle.read()
-        with open(os.path.join(work, "Model.js"), "w") as out:
-            out.write(model if model_text is None else model_text)
+        fidelity.model_files.copy_model(fidelity.REPO, work)
         return work
 
     def test_a_faithful_tree_passes(self):
@@ -396,6 +393,25 @@ class TreeGate(unittest.TestCase):
         work = self._tree(copy)
         try:
             self.assertIn("L3", layers(fidelity.guard_tree(work)))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def test_a_drifted_or_missing_model_part_is_reported(self):
+        """D-REL-5: the copy is every file of the model, not one. A tree
+        whose LAST part drifted, or lacks it, composes names the shipping
+        model does not, and the gate must say which file."""
+        import shutil
+        work = self._tree(fidelity.apply_transform(source()))
+        try:
+            last = fidelity.model_files.part_paths(fidelity.REPO)[-1]
+            self.assertEqual(fidelity.guard_tree(work, kit=False), [])
+            with open(os.path.join(work, last), "a") as out:
+                out.write("\n// drift\n")
+            found = fidelity.guard_tree(work, kit=False)
+            self.assertEqual(layers(found), ["L6"])
+            self.assertIn(os.path.basename(last), "\n".join(str(f) for f in found))
+            os.unlink(os.path.join(work, last))
+            self.assertEqual(layers(fidelity.guard_tree(work, kit=False)), ["L6"])
         finally:
             shutil.rmtree(work, ignore_errors=True)
 

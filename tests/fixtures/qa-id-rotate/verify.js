@@ -17,7 +17,7 @@
 // ASCII only (CLAUDE.md rule 8).
 "use strict"
 const fs = require("fs")
-const Model = require("../../../Model.js")
+const Model = require("../../../Model.mjs")
 
 function readJson(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"))

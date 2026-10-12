@@ -25,6 +25,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import sys
 import unittest
 
 from helper_loader import load_helper
@@ -34,6 +35,8 @@ helper = load_helper()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
+sys.path.insert(0, str(ROOT / "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 
 # A credentialed URL, a token in the path and a password: the privacy sweep
 # greps every recorded argv, every emitted line and the whole runtime dir for
@@ -2083,7 +2086,7 @@ class ParityTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
-        cls.model = (ROOT / "Model.js").read_text(encoding="utf-8")
+        cls.model = model_files.model_source(str(ROOT))
 
     def test_mpv_reserved_matches_model_js(self):
         block = re.search(r"var MPV_RESERVED = \{(.*?)\n\}", self.model, re.S)

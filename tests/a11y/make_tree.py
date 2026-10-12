@@ -136,7 +136,11 @@ def guide():
         log("guide", "%-22s applied  (%s)" % (rule["id"], rule.get("why", "")[:60].replace("\n", " ")))
     os.makedirs(TREE, exist_ok=True)
     open(os.path.join(TREE, "GuideProbe.qml"), "w").write(text)
-    shutil.copy(os.path.join(REPO, "Model.js"), TREE)
+    # The model is Model.mjs and the parts under model/ it names (D-REL-5),
+    # copied at their own relative paths so the copy's imports resolve.
+    sys.path.insert(0, os.path.join(REPO, "scripts"))
+    import model_files
+    model_files.copy_model(REPO, TREE)
     shutil.copy(os.path.join(HERE, "host_src.qml"), os.path.join(TREE, "host.qml"))
     log("guide", "wrote GuideProbe.qml (%d lines from %d)"
         % (len(text.split("\n")), len(orig.split("\n"))))

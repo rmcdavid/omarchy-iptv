@@ -236,6 +236,29 @@ seam() {
   if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in ${file#"$PLUGIN_ROOT/"})"; fi
 }
 
+# `model_seam <label> <ere> <want>`: `seam` over every file of the model
+# (D-REL-5: Model.mjs and its parts under model/, or a pre-split tree's
+# Model.js), through qa_model_files, so a seam names what the model must hold
+# and not which part holds it. A tree with no readable model is a failure,
+# never a count of 0.
+model_seam() {
+  local label=$1 ere=$2 want=$3
+  checks=$((checks + 1))
+  local got
+  if ! got=$(qa_model_count "$ere" "$PLUGIN_ROOT"); then bad "$label (no model in $PLUGIN_ROOT)"; return; fi
+  if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in the model)"; fi
+}
+
+# `model_absent <label> <ere>`: `absent` over every file of the model, with
+# the same refusal of a model that is not there.
+model_absent() {
+  local label=$1 ere=$2
+  checks=$((checks + 1))
+  local got
+  if ! got=$(qa_model_count "$ere" "$PLUGIN_ROOT"); then bad "$label (no model in $PLUGIN_ROOT - an absence test over nothing proves nothing)"; return; fi
+  if (( got == 0 )); then ok "$label"; else bad "$label (matched $got in the model, wanted none)"; fi
+}
+
 # `absent <label> <file> <ere>`: the marker is NOT in the file, and the file
 # is really there. Never `seam ... 0`, which passes against anything at all,
 # including a file that does not exist. The positive probe first is what
@@ -262,23 +285,23 @@ preflight() {
   # are behind that read.
   seam "the service reads the compositor"                 "$PLUGIN_ROOT/Service.qml" 'command: \["hyprctl", "-j", "clients"\]' 1
   seam "and reads the monitor it will place the box on"   "$PLUGIN_ROOT/Service.qml" 'command: \["hyprctl", "-j", "monitors"\]' 1
-  seam "the float step is behind a live read"             "$PLUGIN_ROOT/Model.js" 'if \(l\.floating !== true\) steps\.push' 1
-  seam "the pin step is behind a live read"               "$PLUGIN_ROOT/Model.js" 'if \(l\.pinned !== true\) steps\.push' 1
+  model_seam "the float step is behind a live read"             'if \(l\.floating !== true\) steps\.push' 1
+  model_seam "the pin step is behind a live read"               'if \(l\.pinned !== true\) steps\.push' 1
   # Verification is the definition of success (PIP11).
   seam "success is a readback, in one place"              "$PLUGIN_ROOT/Service.qml" '^ *function pipCheck\(live\)' 1
-  seam "and the comparison it makes"                      "$PLUGIN_ROOT/Model.js" '^function pipVerify\(live, intent, expected\)' 1
+  model_seam "and the comparison it makes"                      '^function pipVerify\(live, intent, expected\)' 1
   seam "a dispatch step reports nothing but its text"     "$PLUGIN_ROOT/Service.qml" '^ *function pipNoteStep\(text, exitCode\)' 1
   # The pure layer the service calls instead of carrying (M2-05-02), and the
   # guide key that reaches it. These four are the seams this file's header
   # asked for once lane V1 had merged.
-  seam "Model.js owns the plan"                           "$PLUGIN_ROOT/Model.js" '^function pipPlan\(' 1
-  seam "Model.js owns the geometry"                       "$PLUGIN_ROOT/Model.js" '^function pipGeometry\(' 1
+  model_seam "the model owns the plan"                           '^function pipPlan\(' 1
+  model_seam "the model owns the geometry"                       '^function pipGeometry\(' 1
   seam "Guide.qml routes the p key"                       "$PLUGIN_ROOT/Guide.qml" 'togglePip\(\)' 1
   absent "no stand-in survives integration"               "$PLUGIN_ROOT/Service.qml" 'STAND-?IN'
   # PIP15: one spelling, chosen from the compositor's own answer, no second
   # arm to fall back to.
   seam "the dispatch spelling is chosen once"             "$PLUGIN_ROOT/Service.qml" 'root\.pipProvider = /configProvider' 1
-  absent "and no fallback spelling ships"                 "$PLUGIN_ROOT/Model.js" '"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
+  model_absent "and no fallback spelling ships"                 '"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
   absent "nor a second builder inside the service"        "$PLUGIN_ROOT/Service.qml" 'pipLegacyDispatch|"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
   # Addressing, the snapshot, and the mpv half.
   seam "the window is narrowed by the player pid"         "$PLUGIN_ROOT/Service.qml" 'pipFindWindow\(text, root\.playerPid, root\.pipClass\)' 1
@@ -286,9 +309,9 @@ preflight() {
   # applied to. With a user's own mpv of the same app id open it focused the
   # stranger 3 times out of 3. The class selector is removed rather than
   # left unused, so nothing can route back to it.
-  seam "focus names the window the pid resolved"          "$PLUGIN_ROOT/Model.js" '^function focusPlayerArgv\(address\)' 1
-  absent "and no class selector survives in the builder"  "$PLUGIN_ROOT/Model.js" 'PIP_CLASS_SELECTOR'
-  seam "the snapshot lives in the player"                 "$PLUGIN_ROOT/Model.js" 'PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"' 1
+  model_seam "focus names the window the pid resolved"          '^function focusPlayerArgv\(address\)' 1
+  model_absent "and no class selector survives in the builder"  'PIP_CLASS_SELECTOR'
+  model_seam "the snapshot lives in the player"                 'PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"' 1
   seam "and the service asks for it by that one name"     "$PLUGIN_ROOT/Service.qml" 'Model\.PIP_SNAPSHOT_KEY' 1
   seam "and is read back after a shell restart"           "$PLUGIN_ROOT/Service.qml" '^ *function pipRequestSnapshot\(sock\)' 1
   # D-PIP-4 / 4.7 step 3. The snapshot above says what the window WAS; this
@@ -297,8 +320,8 @@ preflight() {
   # a read, the two places a player becomes ours, and a pure decision.
   seam "and what it IS is re-derived, not remembered"     "$PLUGIN_ROOT/Service.qml" '^ *function pipApplyPeek\(text\)' 1
   seam "that read runs when a player becomes ours"        "$PLUGIN_ROOT/Service.qml" 'root\.pipPeek\(\)' 2
-  seam "and the derivation is pure, so a test can call it" "$PLUGIN_ROOT/Model.js" '^function pipDeriveState\(' 1
-  seam "a channel change cannot resize the box"           "$PLUGIN_ROOT/Model.js" 'PIP_MPV_RESIZE_PROP' 4
+  model_seam "and the derivation is pure, so a test can call it" '^function pipDeriveState\(' 1
+  model_seam "a channel change cannot resize the box"           'PIP_MPV_RESIZE_PROP' 4
   seam "status carries the verified state"                "$PLUGIN_ROOT/Service.qml" 'available: root\.pipAvailable' 1
   # Bounds (CLAUDE.md rule 3).
   seam "one bound per compositor round trip"              "$PLUGIN_ROOT/Service.qml" 'id: pipStepWatchdog' 1

@@ -3,7 +3,7 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // Guide.qml -- fullscreen channel guide overlay for io.github.rmcdavid.iptv
 // (manifest kind "overlay", keepLoaded so the layer-shell window stays

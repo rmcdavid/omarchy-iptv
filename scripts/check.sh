@@ -5,6 +5,9 @@
 #                                INCLUDING the dev-harness fake (CLAUDE.md 10)
 #   3. node tests                (tests/Model.test.js)
 #   4. python tests              (python3 -m unittest discover -s tests)
+#   4b. model split              (scripts/split-model.mjs --check: Model.mjs and
+#                                the parts under model/ are what the script
+#                                writes, and no initializer reads another part)
 #   5. QML spec                  (qmltestrunner on tests/Model.spec.qml)
 #   6. harness predicates        (scripts/qa-lib-test.sh)
 #   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
@@ -160,7 +163,7 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2074}
 PY_TESTS_MIN=${PY_TESTS_MIN:-1047}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
-A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
+A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
 # The M2-05 picture-in-picture preflight: 34 seams (integration added the
@@ -394,16 +397,18 @@ else
   # than the real host - was never linted. A QML error there leaves this gate
   # green while every harness scenario fails to start.
   #
-  # The harness fake imports "Model.js", which run.sh stages beside it in the
-  # scratch root. Lint it the way it actually runs, or the import warning is
-  # noise and the Model.* calls are never resolved at all.
+  # The harness fake imports "Model.mjs", which run.sh stages beside it in the
+  # scratch root with the parts under model/ it re-exports (D-REL-5). Lint it
+  # the way it actually runs, or the import warning is noise and the Model.*
+  # calls are never resolved at all.
   stage="$CHECK_TMP/dev-harness"
   mkdir -p "$stage"
   for f in "$ROOT"/scripts/dev-harness/*.qml; do
     [[ -f $f ]] || continue
     cp "$f" "$stage/" || bad "could not stage $(basename "$f") for linting"
   done
-  ln -sfn "$ROOT/Model.js" "$stage/Model.js"
+  ln -sfn "$ROOT/Model.mjs" "$stage/Model.mjs"
+  ln -sfn "$ROOT/model" "$stage/model"
   for file in "$ROOT"/*.qml "$ROOT"/tests/*.qml "$stage"/*.qml; do
     [[ -f $file ]] || continue
     linted=$(( linted + 1 ))
@@ -467,6 +472,24 @@ if (cd "$ROOT" && python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
   fi
 else
   cat "$py_log"; bad "python tests"
+fi
+
+step "model split (scripts/split-model.mjs --check)"
+# D-REL-5. The model is Model.mjs and the parts under model/ it re-exports.
+# This proves the tree as it stands: every part's generated import and export
+# lines are what the script would write, no top-level initializer reads
+# another part (a cyclic import hands it undefined, silently -- measured), no
+# code writes to a top-level binding, every part loads, and Model.mjs exports
+# exactly the names its own lines list. `--relink` repairs the generated lines
+# after an edit adds a call across parts.
+if command -v node >/dev/null 2>&1; then
+  if node "$ROOT/scripts/split-model.mjs" --check --root "$ROOT" >"$CHECK_TMP/split.log" 2>&1; then
+    ok "model split ($(grep -oE '^declarations: [0-9]+ in [0-9]+ parts' "$CHECK_TMP/split.log" | head -1))"
+  else
+    bad "model split"; cat "$CHECK_TMP/split.log"
+  fi
+else
+  bad "node not found; the model split cannot be checked"
 fi
 
 step "qmltestrunner tests/Model.spec.qml"

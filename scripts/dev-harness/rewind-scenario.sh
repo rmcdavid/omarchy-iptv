@@ -382,8 +382,8 @@ qa_safe_path "$SCRATCH" || { echo "unsafe scratch path" >&2; exit 2; }
 TREE_LINE=""
 if [[ -n $TREE ]]; then
   PLUGIN_ROOT=$(cd "$TREE" 2>/dev/null && pwd) || { echo "--tree $TREE is not a directory I can enter" >&2; exit 2; }
-  [[ -f $PLUGIN_ROOT/Model.js && -f $PLUGIN_ROOT/Service.qml ]] \
-    || { echo "--tree $PLUGIN_ROOT is not a plugin tree (no Model.js / Service.qml)" >&2; exit 2; }
+  qa_model_files "$PLUGIN_ROOT" >/dev/null && [[ -f $PLUGIN_ROOT/Service.qml ]] \
+    || { echo "--tree $PLUGIN_ROOT is not a plugin tree (no readable model / Service.qml)" >&2; exit 2; }
   TREE_LINE="== prepared tree $PLUGIN_ROOT"
 fi
 if [[ -n $BASELINE ]]; then
@@ -763,8 +763,16 @@ echo "== R16 ruling D10: a seek run is not busy for the health tick (F-RWD-18)"
 SLOW_TREE="$WORK/slow-tree"
 mkdir -p "$SLOW_TREE/bin"
 staged=1
-for f in manifest.json Model.js Service.qml Guide.qml BarWidget.qml; do
+for f in manifest.json Service.qml Guide.qml BarWidget.qml; do
   cp "$PLUGIN_ROOT/$f" "$SLOW_TREE/$f" 2>/dev/null || staged=0
+done
+# The model is every file qa_model_files names (Model.mjs and its parts since
+# D-REL-5, or a pre-split tree's Model.js), each at its own relative path.
+mapfile -t model_files < <(qa_model_files "$PLUGIN_ROOT")
+(( ${#model_files[@]} > 0 )) || staged=0
+for f in "${model_files[@]}"; do
+  rel=${f#"$PLUGIN_ROOT/"}
+  mkdir -p "$SLOW_TREE/$(dirname "$rel")" && cp "$f" "$SLOW_TREE/$rel" 2>/dev/null || staged=0
 done
 cp -R "$PLUGIN_ROOT/contrib" "$SLOW_TREE/contrib" 2>/dev/null || true
 cp "$PLUGIN_ROOT/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || staged=0

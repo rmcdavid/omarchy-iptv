@@ -1,7 +1,7 @@
 // tests/fixtures/qa-gs2/verify.js -- the D-GS-2 verdict, taken from Model.js
 // itself and printed as one JSON object for tests/test_fixture_gs2.py.
 //
-//   node verify.js <Model.js> <channels.json> <epg-now.json> <nowSec>
+//   node verify.js <Model.mjs> <channels.json> <epg-now.json> <nowSec>
 //
 // CLAUDE.md rule 12: the row-height decision lives in Model.js and a python
 // test cannot reach it, so this is the bridge. It CALLS the shipping functions
@@ -35,7 +35,7 @@ var path = require("path")
 
 function usage(message) {
   process.stderr.write("verify.js: " + message + "\n")
-  process.stderr.write("usage: node verify.js <Model.js> <channels.json> <epg-now.json> <nowSec>\n")
+  process.stderr.write("usage: node verify.js <Model.mjs> <channels.json> <epg-now.json> <nowSec>\n")
   process.exit(2)
 }
 

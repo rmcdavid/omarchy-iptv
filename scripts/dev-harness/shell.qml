@@ -3,7 +3,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // Dev harness for io.github.rmcdavid.iptv -- a standalone Quickshell config
 // that loads the three plugin entry points straight from the repo with fake

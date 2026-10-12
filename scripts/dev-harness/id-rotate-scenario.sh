@@ -244,6 +244,19 @@ seam() {
   if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in ${file#"$PLUGIN_ROOT/"})"; fi
 }
 
+# `model_seam <label> <ere> <want>`: `seam` over every file of the model
+# (D-REL-5: Model.mjs and its parts under model/, or a pre-split tree's
+# Model.js), through qa_model_files, so a seam names what the model must hold
+# and not which part holds it. A tree with no readable model is a failure,
+# never a count of 0.
+model_seam() {
+  local label=$1 ere=$2 want=$3
+  checks=$((checks + 1))
+  local got
+  if ! got=$(qa_model_count "$ere" "$PLUGIN_ROOT"); then bad "$label (no model in $PLUGIN_ROOT)"; return; fi
+  if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in the model)"; fi
+}
+
 preflight() {
   echo "== preflight: can this tree keep the migration? (plugin: $PLUGIN_ROOT)"
   # The fix (D-ID-3): the map per parsed list, the move at apply, gated on moved.
@@ -251,8 +264,8 @@ preflight() {
   seam "Service.qml moves the loaded state onto it at apply"    "$PLUGIN_ROOT/Service.qml" 'Model\.remapStateIds\(root\.userState, remap\)' 1
   seam "Service.qml writes only when something moved"           "$PLUGIN_ROOT/Service.qml" '^ *if \(!\(moved\.moved > 0\)\) return' 1
   # What that calls, and what the helper half still needs (D-ID-1).
-  seam "Model.js owns the scheme-1 -> scheme-2 map"             "$PLUGIN_ROOT/Model.js" '^function channelIdRemap\(channels\)' 1
-  seam "Model.js owns the state move"                           "$PLUGIN_ROOT/Model.js" '^function remapStateIds\(state, remap\)' 1
+  model_seam "the model owns the scheme-1 -> scheme-2 map"             '^function channelIdRemap\(channels\)' 1
+  model_seam "the model owns the state move"                           '^function remapStateIds\(state, remap\)' 1
   seam "the active fetch still carries --state-dir"             "$PLUGIN_ROOT/Service.qml" 'Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, root\.stateDir\)' 1
   # The verbs the live half drives.
   seam "the harness answers state()"                            "$HERE/shell.qml" 'function state\(\): string' 1

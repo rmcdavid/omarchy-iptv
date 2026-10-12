@@ -377,9 +377,12 @@ $H ipc state                   # + activeSourceKey, cacheReady, probing, switchi
                                #   values as { value: masked, length, masked, revealed } per field; credentials are ****)
 ```
 
-`state().guide.form` masks with the plugin's own `Model.js`, which `run.sh`
-copies into the scratch root next to `shell.qml`; a raw form value never
-reaches the terminal.
+`state().guide.form` masks with the plugin's own model, which `run.sh`
+copies into the scratch root next to `shell.qml` -- `Model.mjs` and every
+part under `model/` it names (D-REL-5), each compared with the tree under
+test, or the one-file `Model.js` of a tree from before the split, with the
+staged shell's import pointed at it; a raw form value never reaches the
+terminal.
 
 `run.sh --source2 SRC` seeds the history with a second, never-fetched
 record before start (helper `state source add`), so `switchSource` takes

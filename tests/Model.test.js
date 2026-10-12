@@ -1,8 +1,8 @@
-// Unit tests for Model.js. Run: node tests/Model.test.js
+// Unit tests for the model (Model.mjs and its parts under model/, D-REL-5). Run: node tests/Model.test.js
 // Console PASS/FAIL runner, nonzero exit on any failure (same style as the
 // installed dell-power plugin, so QA can read either without a framework).
 // ASCII only: non-ASCII expectations are written as \uXXXX escapes.
-const Model = require("../Model.js")
+const Model = require("../Model.mjs")
 // The shared vectors both languages run (CLAUDE.md: a rule written twice gets
 // one fixture). tests/test_player.py reads the same file.
 const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
@@ -10410,4 +10410,4 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
-console.log("All Model.js tests passed.")
+console.log("All model tests passed.")

@@ -52,7 +52,7 @@ failure mode a guard may not have. So any `import QtQuick...  as <Alias>` in
 a scanned file is reported as a problem with the import's line: the scan
 reads unqualified `Text` and `Label` only, and the file must import them
 unqualified. No shipped file uses a qualified QtQuick import today.
-`import "Model.js" as Model` is a JavaScript import, not a QtQuick one, and
+`import "Model.mjs" as Model` is a JavaScript import, not a QtQuick one, and
 is not refused.
 
 WHAT IT SCANS. With no arguments, the `.qml` entries of ALLOWLIST in

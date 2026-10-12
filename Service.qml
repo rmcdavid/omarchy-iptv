@@ -7,7 +7,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // Service.qml -- headless state owner for io.github.rmcdavid.iptv
 // (manifest kind "service", keepLoaded). Exactly one instance per shell,

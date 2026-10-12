@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // BarWidget.qml -- bar entry point for io.github.rmcdavid.iptv.
 // One instance per bar surface (per monitor); it owns no state. Everything

@@ -6,9 +6,12 @@ import os
 import pathlib
 import tempfile
 import time
+import sys
 import unittest
 
 from helper_loader import load_helper
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 
 helper = load_helper()
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
@@ -48,7 +51,8 @@ class NormalizationTest(unittest.TestCase):
         self.assertEqual(helper.fnv1a32("foobar"), "bf9cf968")
 
     def test_fold_table_matches_model_js(self):
-        model = (pathlib.Path(__file__).resolve().parent.parent / "Model.js").read_text(encoding="ascii")
+        model = model_files.model_source(str(pathlib.Path(__file__).resolve().parent.parent))
+        model.encode("ascii")
         for chars, replacement in helper.FOLD_GROUPS:
             escaped = "".join("\\u%04x" % ord(ch) for ch in chars)
             self.assertIn('["%s", "%s"]' % (escaped, replacement), model)

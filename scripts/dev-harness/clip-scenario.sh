@@ -256,7 +256,7 @@ if [[ -n $BASELINE ]]; then
   if ! git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR"; then
     echo "could not export $BASELINE" >&2; rm -rf "$EXPORT_DIR"; exit 2
   fi
-  [[ -f $EXPORT_DIR/Guide.qml && -f $EXPORT_DIR/Model.js ]] || { echo "$BASELINE holds no Guide.qml / Model.js" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
+  [[ -f $EXPORT_DIR/Guide.qml ]] && qa_model_files "$EXPORT_DIR" >/dev/null || { echo "$BASELINE holds no Guide.qml / model" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
   PLUGIN_ROOT=$EXPORT_DIR
   export OMARCHY_IPTV_PLUGIN_ROOT=$EXPORT_DIR
   TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported to $EXPORT_DIR"
@@ -611,7 +611,7 @@ shell_arm() {
   wait_for 13 5 field_len
   ck "L7 Shift+Insert pastes a 10-byte offer through the process path (key exit $KEY_RC)" "$(field_len) $(field_head)" "13 abc"
   producer_stop
-  cap=$(node -e 'console.log(require(process.argv[1] + "/Model.js").formCapacity("playlist"))' "$PLUGIN_ROOT" 2>/dev/null)
+  cap=$(node -e 'console.log(require(process.argv[1]).formCapacity("playlist"))' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)" 2>/dev/null)
   python3 -c 'import sys; sys.stdout.write("B" * 5000)' | WAYLAND_DISPLAY=$NESTED wl-copy --foreground --type text/plain >/dev/null 2>&1 &
   PRODUCER_PID=$!
   regain_focus
@@ -637,7 +637,7 @@ shell_arm() {
   regain_focus
   chord -M ctrl a -m ctrl
   settle "$shell_pid"
-  helper_bound=$(node -e 'var m = require(process.argv[1] + "/Model.js"); console.log(m.CLIPBOARD_MAX_BYTES === undefined ? "none (this tree has no helper bound)" : m.CLIPBOARD_MAX_BYTES + " bytes")' "$PLUGIN_ROOT" 2>/dev/null)
+  helper_bound=$(node -e 'var m = require(process.argv[1]); console.log(m.CLIPBOARD_MAX_BYTES === undefined ? "none (this tree has no helper bound)" : m.CLIPBOARD_MAX_BYTES + " bytes")' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)" 2>/dev/null)
   sampler_start "$shell_pid" 60 "$WORK/paste.rss"
   sleep 0.5
   T_OFFER=$(date +%s.%N)

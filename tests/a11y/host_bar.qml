@@ -3,7 +3,7 @@ import QtQuick.Window
 
 // Lane 2 BarWidget host.
 //
-// BarWidget.qml imports qs.Commons, qs.Ui and Model.js, and NO Quickshell
+// BarWidget.qml imports qs.Commons, qs.Ui and Model.mjs, and NO Quickshell
 // type of its own, so the file instantiated here is a byte-for-byte copy of
 // the repo's -- make_hosts.py copies it without a single edit and
 // asserts the bytes match. The only substitutions are the three objects the

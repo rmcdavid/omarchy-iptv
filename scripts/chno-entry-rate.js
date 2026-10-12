@@ -36,7 +36,7 @@
 
 const fs = require("fs")
 const path = require("path")
-const Model = require(path.join(__dirname, "..", "Model.js"))
+const Model = require(path.join(__dirname, "..", "Model.mjs"))
 
 // typer(rows, index) -> type(text, cursorRow)
 //

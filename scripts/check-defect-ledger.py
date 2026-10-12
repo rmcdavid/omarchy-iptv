@@ -115,6 +115,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+
 # Both prefixes. `D-` is a defect, `F-` a finding that a lane filed instead
 # of a defect -- the distinction is about tone, not about whether somebody
 # has to act, and both went untracked for the same reason.
@@ -532,14 +535,18 @@ def main(argv=None):
     # unresolvable. An id citation survives being quoted; a symbol citation
     # inside a story about a symbol that was deleted does not. So the symbol
     # half stays where its corpus is prose that ASSERTS.
+    # D-REL-5: the model is Model.mjs and the parts under model/ it names, and
+    # a symbol resolves if ANY of them declares it. The list comes from the
+    # aggregator through scripts/model_files.py, so a part is read because the
+    # model loads it, never because somebody listed it here too.
     sources = {}
-    for name in ('Model.js',):
-        try:
+    try:
+        for name in model_files.model_paths(root):
             sources[name] = read(root, name)
-        except IOError:
-            pass
+    except (IOError, model_files.ModelLayoutError):
+        sources = {}
     if not sources:
-        # A repository with no Model.js and no citations of one is consistent,
+        # A repository with no model and no citations of one is consistent,
         # not broken -- the synthetic fixtures in tests/test_defect_ledger.py
         # are exactly that. Only a repo that CITES symbols it cannot resolve
         # has a problem, so the complaint moves inside the citation scan.
@@ -548,7 +555,8 @@ def main(argv=None):
             for rel in tracked_markdown(root))
         if cited_anywhere:
             problems.append(
-                'documents cite Model.* symbols but Model.js is unreadable, '
+                'documents cite Model.* symbols but the model (Model.mjs and '
+                'its parts) is unreadable, '
                 'so no citation could be checked')
     else:
         blob = '\n'.join(sources.values())

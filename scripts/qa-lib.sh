@@ -46,6 +46,44 @@ qa_count_multi() {
   printf '%s\n' "$total"
 }
 
+# --------------------------------------------------------------- the model
+
+# qa_model_files <plugin-root>
+# The model's files, one absolute path per line, aggregator first: Model.mjs
+# and the parts its own `from "./model/<part>.mjs"` lines name (D-REL-5). The
+# part list is read from the aggregator, never kept here, which is the one
+# reader of it in shell (scripts/model_files.py is the one in python).
+# A tree from before the split -- a --baseline or --pre-tls ref -- has the
+# one-file Model.js and no Model.mjs, and is answered with that file, so the
+# rule-11 recipes that run a scenario against an old commit keep working.
+# Exit 1 (and nothing printed) when the root holds neither, or an aggregator
+# that names no part: a seam grep over no file must not read as a count of 0.
+qa_model_files() {
+  local root=$1 rel
+  local -a parts=()
+  if [[ -f $root/Model.mjs ]]; then
+    mapfile -t parts < <(sed -nE 's#^(\}|export \{\}) from "\./(model/[a-z][a-z0-9-]*\.mjs)"$#\2#p' "$root/Model.mjs")
+    (( ${#parts[@]} > 0 )) || return 1
+    for rel in "${parts[@]}"; do [[ -f $root/$rel ]] || return 1; done
+    printf '%s\n' "$root/Model.mjs"
+    for rel in "${parts[@]}"; do printf '%s\n' "$root/$rel"; done
+    return 0
+  fi
+  [[ -f $root/Model.js ]] || return 1
+  printf '%s\n' "$root/Model.js"
+}
+
+# qa_model_count <ere> <plugin-root>
+# qa_count over every file of the model. Prints one integer; prints nothing
+# and exits 1 when qa_model_files does, so a caller sees "no model" and not 0.
+qa_model_count() {
+  local ere=$1 root=$2
+  local -a files=()
+  mapfile -t files < <(qa_model_files "$root")
+  (( ${#files[@]} > 0 )) || return 1
+  qa_count_multi "$ere" "${files[@]}"
+}
+
 # ------------------------------------------------------------- sentinels
 
 # The tooling must never answer a question with the same value a healthy run

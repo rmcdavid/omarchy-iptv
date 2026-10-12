@@ -101,7 +101,10 @@ die() { echo "[run.sh] $*" >&2; exit 2; }
 # silently became a path at /. Nothing checked it.
 PLUGIN_ROOT=$(cd "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}" 2>/dev/null && pwd)
 [[ -n $PLUGIN_ROOT ]] || die "OMARCHY_IPTV_PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT} is not a directory I can enter"
-[[ -f $PLUGIN_ROOT/Model.js ]] || die "$PLUGIN_ROOT holds no Model.js; that is not a plugin tree"
+# D-REL-5: Model.mjs and model/ since the split; a --baseline tree from before
+# it carries the one-file Model.js, and either is a plugin tree.
+qa_model_files "$PLUGIN_ROOT" >/dev/null \
+  || die "$PLUGIN_ROOT holds no readable model (Model.mjs and its parts, or a pre-split Model.js); that is not a plugin tree"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
 SHELL_DIR=${OMARCHY_PATH:-/usr/share/omarchy}/shell
@@ -224,13 +227,37 @@ prepare_root() {
   ln -sfn "$SHELL_DIR/Commons" "$root/Commons" || die "could not link $SHELL_DIR/Commons"
   ln -sfn "$SHELL_DIR/Ui" "$root/Ui"           || die "could not link $SHELL_DIR/Ui"
   [[ -e $root/Commons && -e $root/Ui ]]        || die "the qs.Commons / qs.Ui links do not resolve"
-  cp "$HERE/shell.qml" "$root/shell.qml"       || die "could not copy shell.qml into $root"
-  # The harness masks form values with the plugin's own Model.js (state()).
-  cp "$PLUGIN_ROOT/Model.js" "$root/Model.js"  || die "could not copy Model.js from $PLUGIN_ROOT"
-  qa_same_file "$HERE/shell.qml" "$root/shell.qml" \
-    || die "$root/shell.qml does not match the harness shell.qml"
-  qa_same_file "$PLUGIN_ROOT/Model.js" "$root/Model.js" \
-    || die "$root/Model.js does not match $PLUGIN_ROOT/Model.js: the tree under test is MIXED"
+  # The harness masks form values with the plugin's own model (state()), so
+  # the model is staged beside shell.qml: every file qa_model_files names --
+  # Model.mjs and the parts under model/ since D-REL-5 -- each copied and each
+  # compared, after the previous run's copies are removed so a part the tree
+  # under test does not have cannot linger. A tree from before the split has
+  # the one-file Model.js; the staged shell.qml then imports that name, its
+  # one changed line asserted, because the harness shell itself names
+  # Model.mjs.
+  [[ -n $root && $root != / ]] || die "the scratch config root is empty"
+  rm -rf "$root/model" "$root/Model.mjs" "$root/Model.js" || die "could not clear the previous model from $root"
+  local -a model_files=()
+  local f rel
+  mapfile -t model_files < <(qa_model_files "$PLUGIN_ROOT")
+  (( ${#model_files[@]} > 0 )) || die "$PLUGIN_ROOT holds no readable model"
+  for f in "${model_files[@]}"; do
+    rel=${f#"$PLUGIN_ROOT/"}
+    mkdir -p "$root/$(dirname "$rel")" || die "could not create $root/$(dirname "$rel")"
+    cp "$f" "$root/$rel" || die "could not copy $rel from $PLUGIN_ROOT"
+    qa_same_file "$f" "$root/$rel" \
+      || die "$root/$rel does not match $PLUGIN_ROOT/$rel: the tree under test is MIXED"
+  done
+  if [[ ${model_files[0]} == "$PLUGIN_ROOT/Model.mjs" ]]; then
+    cp "$HERE/shell.qml" "$root/shell.qml"     || die "could not copy shell.qml into $root"
+    qa_same_file "$HERE/shell.qml" "$root/shell.qml" \
+      || die "$root/shell.qml does not match the harness shell.qml"
+  else
+    sed 's#^import "Model.mjs" as Model$#import "Model.js" as Model#' "$HERE/shell.qml" >"$root/shell.qml" \
+      || die "could not stage shell.qml for a pre-split tree"
+    [[ $(diff "$HERE/shell.qml" "$root/shell.qml" | grep -c '^[<>]') == 2 ]] \
+      || die "$root/shell.qml differs from the harness shell.qml by more than its model import"
+  fi
   # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
   [[ -d $REAL_RUNTIME/hypr ]] && ln -sfn "$REAL_RUNTIME/hypr" "$SCRATCH/runtime/hypr"
   return 0
@@ -642,7 +669,7 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         || die "the recorded plugin tree $OMARCHY_IPTV_PLUGIN_ROOT is gone"
     fi
     [[ "$PLUGIN_ROOT" == "${OMARCHY_IPTV_ROOT:-$PLUGIN_ROOT}" ]] \
-      || die "restart-shell would mix trees: Model.js from $PLUGIN_ROOT, QML from $OMARCHY_IPTV_ROOT"
+      || die "restart-shell would mix trees: the model from $PLUGIN_ROOT, QML from $OMARCHY_IPTV_ROOT"
     prepare_root
     start_detached_shell
     ;;
