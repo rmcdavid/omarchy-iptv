@@ -615,6 +615,15 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     # $SCRATCH/config goes too (D-SINK-18): a clean that left it behind would
     # leave the mode the last run's fix tightened, and the next run's green
     # would be inherited rather than earned. prepare_root re-seeds it at 0644.
+    # key-scenario.sh's F segment takes `w` off the state directory under
+    # the running shell; a run signalled inside it left the directory 0500,
+    # and `rm -rf` then stopped on state.json ("Permission denied", the
+    # directory left behind -- round-4 live review). Everything under these
+    # five paths is the XDG tree harness_env points into $SCRATCH -- this
+    # harness's own scratch -- so give it back its modes first. The chmod
+    # is confined to those five paths, never the directory itself.
+    chmod -R u+rwX "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/config" \
+      "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots" 2>/dev/null
     rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/config" \
       "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"
     echo "[run.sh] cleaned $SCRATCH"

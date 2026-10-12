@@ -149,7 +149,10 @@ STATE_NOGUIDE='{"guide":null,"service":{"playing":false}}'
 is "qa_json_field reads a value"          "$(qa_json_field "d['buffer']" "$NUM_OK")" "10"
 is "qa_json_field renders a bool as JSON" "$(qa_json_field "d['active']" "$NUM_OK")" "true"
 is "a number the entry really reports"    "$(qa_json_field "d['cursorIndex']" "$NUM_OK")" "3"
-is "a tree without the verb answers NOFIELD, not false" "$(qa_json_field "d['active']" "$NUM_NOVERB")" "NOFIELD"
+# The no-verb answer carries `active` as a PRESENT null (the harness reports
+# every field, null where the tree has nothing): NULL since round 5, and
+# still not "false", which is the whole point.
+is "a tree without the verb answers NULL (a present null), not false" "$(qa_json_field "d['active']" "$NUM_NOVERB")" "NULL"
 is "and the error it carries is readable" "$(qa_json_field "d['error']" "$NUM_NOVERB")" "no_verb"
 is "a dead IPC is NOSTATE, not ''"        "$(qa_json_field "d['active']" "")" "NOSTATE"
 is "an unparseable answer is NOSTATE"     "$(qa_json_field "d['active']" "{oops")" "NOSTATE"
@@ -164,9 +167,27 @@ print(json.dumps(v) if isinstance(v, bool) else ("" if v is None else v))' "$1" 
 ck "a bare reader answers the no-verb tree with '', which an 'is it off?' check accepts" \
    '[[ "$(old_number_field "d['\''active'\'']" "$NUM_NOVERB")" != "true" ]]'
 ck "qa_json_field refuses to let that count as an answer" \
-   '[[ "$(qa_json_field "d['\''active'\'']" "$NUM_NOVERB")" == "NOFIELD" ]]'
+   '[[ "$(qa_json_field "d['\''active'\'']" "$NUM_NOVERB")" == "NULL" ]]'
 ck "and still reports a real 'not active' as false" \
    '[[ "$(qa_json_field "d['\''active'\'']" "{\"active\":false}")" == "false" ]]'
+# D-SINK-19 round 4 (the live review's P3): a key that is THERE and holds
+# null, and a key that is NOT there, are two answers. The harness reports a
+# service property the tree lacks as null, so one sentinel for both let
+# `held:NOFIELD` read "nothing held" on a tree with no instrument at all.
+is "a PRESENT null is NULL, not NOFIELD"            "$(qa_json_field "d['active']" '{"active":null}')" "NULL"
+is "an ABSENT key is NOFIELD, not NULL"             "$(qa_json_field "d['active']" '{"other":1}')" "NOFIELD"
+is "a key under a null parent raises, so NOFIELD"  "$(qa_json_field "d['a']['k']" '{"a":null}')" "NOFIELD"
+ck "qa_value rejects NULL"                          '! qa_value "$QA_NULL"'
+# The one-sentinel fold this replaces, written out: both answers read the same.
+old_json_fold() { python3 -c '
+import json, sys
+try: d = json.loads(sys.argv[2])
+except Exception: print("NOSTATE"); raise SystemExit(0)
+try: v = eval(sys.argv[1])
+except Exception: v = None
+print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))' "$1" "$2" 2>/dev/null; }
+is "the one-sentinel fold could not tell a present null from an absent key (the shape replaced)" \
+   "$(old_json_fold "d['active']" '{"active":null}') $(old_json_fold "d['active']" '{"other":1}')" "NOFIELD NOFIELD"
 
 is "qa_guide_field digs into the guide half"   "$(qa_guide_field "d['cursorIndex']" "$STATE_GUIDE")" "3"
 is "it reaches the nested entry"               "$(qa_guide_field "d['numberEntry']['resume']" "$STATE_GUIDE")" "true"
@@ -1136,6 +1157,56 @@ is "shell.qml's pointerState reports stateReloadsByReason and never the service'
 # the check then passed on `ok` alone.
 is "sources-scenario seeds sourceKey on the stored side and waits for the host's already-stored line" \
    "$(qa_count '^ipc setStored sourceKey "\$K2" >/dev/null$' "$SS") $(qa_count '^ipc setStored playlistUrl' "$SS") $(qa_count 'wait_for "\$\(\(n_already \+ 1\)\)" 5 already_stored' "$SS")" "1 0 1"
+# Round 5 (R16 and the round-4 live review's four rig remarks). The joins
+# are by shape (rule 13); the criteria are the live transcripts the
+# scenario's header counts, never these greps (rule 14).
+# A held key that is null is a PRESENT null: every `held:` want says NULL
+# (W3, F2, F5), and none says NOFIELD, which a tree with no pendingEntryKey
+# at all would also have satisfied.
+is "key-scenario's held wants mean a present null: NULL, never NOFIELD" \
+   "$(qa_count 'held:NULL' "$KS") $(qa_count 'held:NOFIELD' "$KS")" "3 0"
+# cleanup() gives the state directory its mode back on every exit: a TERM
+# inside F left it 0500 and `rm -rf` of the harness directory then failed
+# on state.json (round-4 live review P3). Inside cleanup's body, not merely
+# somewhere in the file.
+is "key-scenario's cleanup restores the state directory's mode on every exit" \
+   "$(awk '/^cleanup\(\) \{/,/^\}/' "$KS" | grep -cE 'chmod 0700 "\$\(dirname "\$STATE"\)" 2>/dev/null$')" "1"
+# F counts the switch's lines from the switch's OWN mark and L the toggle's
+# from its own (F5's `left:yes` used to be pre-satisfied by F2's drop line):
+# two bare `log_mark` lines between the F banner and the P banner.
+is "F and L each set their own log mark before the call they count" \
+   "$(awk '/^  echo "== F:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2"
+# L drives the toggle through the guide's own key path (shell.qml's
+# sourcesKey calls the guide's handlers; no keystroke), and both restarts
+# that follow a failed or interrupted write (O and F) reseed the key the
+# entry was OBSERVED to carry, never a constant.
+is "L reaches setShowLogos through the guide's Sources key path, and F restarts over the observed key as O does" \
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "3 2"
+# The two one-decision mutations the round-4 checks were seen red against
+# are PATCH FILES under spikes/key-mutations/ (the lead's ruling: never a
+# branch that can be merged by accident). Each must still APPLY to this
+# tree -- `git apply --check` is the call -- and the header cites them by
+# file, not by the deleted branch names.
+KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
+is "both key-mutation patches still apply to this tree (git apply --check)" \
+   "$(git -C "$ROOT" apply --check "$KM/d3-save-parked.patch" >/dev/null 2>&1; echo $?) $(git -C "$ROOT" apply --check "$KM/r14-no-return.patch" >/dev/null 2>&1; echo $?)" "0 0"
+is "key-scenario and the README cite the patch files and no mutation branch" \
+   "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "2 0 0"
+# run.sh clean on the directory a signalled F leaves: DRIVEN. The old
+# `rm -rf` stopped on the 0500 directory's state.json and left it.
+km_clean=$TMP/clean0500; mkdir -p "$km_clean/state/omarchy-iptv"; echo '{}' >"$km_clean/state/omarchy-iptv/state.json"
+chmod 0500 "$km_clean/state/omarchy-iptv"
+OMARCHY_IPTV_HARNESS_DIR=$km_clean "$ROOT/scripts/dev-harness/run.sh" clean >/dev/null 2>&1; km_rc=$?
+is "run.sh clean removes a state directory a signalled F left 0500" \
+   "$km_rc $([[ -e $km_clean/state ]] && echo left || echo gone)" "0 gone"
+chmod -R u+rwX "$km_clean" 2>/dev/null; rm -rf "$km_clean"
+# DQ-B14 (round 4): a background writer's `>` racing a reader that trusts a
+# non-empty file. sources-scenario clears silent.port before its listener
+# starts (f54f408); rewind-scenario's fixture directory under the SHARED
+# harness directory is cleared before anything writes into it, at column
+# zero (the indented one is cleanup's).
+is "rewind-scenario clears its fixture directory before its listener and ffmpeg write into it" \
+   "$(qa_count '^rm -rf "\$FIX"$' "$ROOT/scripts/dev-harness/rewind-scenario.sh") $(qa_count '^rm -f "\$SCRATCH/silent\.port" "\$SCRATCH/silent\.err"$' "$SS")" "1 1"
 # Its 77 path, DRIVEN rather than grepped: with the cage binary pointed at
 # nothing it must refuse with 77 from both modes, name the tool as its first
 # line out, start nothing, and leave no transcript -- the refusal sits above
@@ -1487,6 +1558,13 @@ is "rewind-scenario.sh --tree <not a plugin tree> likewise" \
    "$(tr_refuse rewind-scenario.sh --tree /etc)" "2 0"
 is "player-scenario.sh --baseline <no such ref> likewise" \
    "$(tr_refuse player-scenario.sh --baseline no-such-ref-for-a-test)" "2 0"
+# key-scenario.sh's --tree lever (round 5: a prepared export with a
+# key-mutations patch applied) carries rewind's two refusals, above the
+# transcript.
+is "key-scenario.sh --baseline X --tree Y refuses and writes no transcript" \
+   "$(tr_refuse key-scenario.sh --baseline HEAD --tree /tmp)" "2 0"
+is "key-scenario.sh --tree <not a plugin tree> likewise" \
+   "$(tr_refuse key-scenario.sh --tree /etc)" "2 0"
 # D-SINK-13's scenario, whose refusals are the only part of it a machine with no
 # display can reach. The third one is not hypothetical: `--baseline` with its
 # value dropped read as `BASELINE=""` and ran the whole LIVE half -- five
@@ -1955,7 +2033,7 @@ RS="$ROOT/scripts/dev-harness/run.sh"
 is "run.sh points XDG_CONFIG_HOME inside the scratch tree" \
    "$(qa_count '^  export XDG_CONFIG_HOME="\$SCRATCH/config"$' "$RS")" "1"
 is "and a clean removes it, so one run cannot inherit the last run's fix" \
-   "$(qa_count '"\$SCRATCH/config"' "$RS")" "2"
+   "$(qa_count '^ *rm -rf "\$SCRATCH/cache" "\$SCRATCH/state" "\$SCRATCH/config"' "$RS")" "1"
 # D-SINK-18 repair: the verb derives its path from $HOME, because the HOST
 # does, so HOME is what isolates a run. This pinned XDG_CONFIG_HOME, which the
 # verb now ignores -- a scenario isolated by a variable nothing reads is a
@@ -2062,7 +2140,19 @@ is "a umask-created file here would have been private, which is why the mode is 
 # shell.qml reports that object and never lastSaveText (1), and
 # sources-scenario's already-stored check seeds the key and waits for the
 # host's line (1).
-EXPECTED=420
+# 420 -> 435 the same day, D-SINK-19 round five: qa_json_field tells a
+# present null (NULL) from an absent key (NOFIELD), qa_value rejects NULL,
+# and the one-sentinel fold is shown reading both the same (5);
+# key-scenario's held wants say NULL (1), cleanup restores the state
+# directory's mode (1), F and L mark before the call they count (1), L
+# drives the guide's key path and F restarts over the observed key (1),
+# the two mutation patches apply (1) and are cited by file (1), run.sh
+# clean removes a 0500 state directory, driven (1), rewind clears its
+# fixture directory before its listener (1), and key-scenario's --tree
+# lever refuses above the transcript (2). Two existing wants moved with
+# the sentinel: the no-verb tree's `active` is a present null and reads
+# NULL now (the two pins under "a tree without the verb").
+EXPECTED=435
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

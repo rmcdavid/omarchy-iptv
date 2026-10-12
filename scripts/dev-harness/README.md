@@ -906,9 +906,11 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red run: round 3's code (54 / 8: D3, W3, W6, F3..F7)
-scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (38 / 24)
-scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 23; O2 its one discriminator)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-t2  # the round-5 red run: round 4's code (60 / 4: L1, L2, F6, F7)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red run: round 3's code (54 / 10: D3, W3, W6, F3..F7, L1, L2)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (38 / 26)
+scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 25; O2 its one discriminator)
+scripts/dev-harness/key-scenario.sh --tree "$cp"            # a PREPARED export: spikes/key-mutations/README.md has the recipe
 ```
 
 D-SINK-19 takes the provider URL off the host's bar entry: the entry
@@ -972,13 +974,29 @@ this directory had to move with it.
   shell with the dirs ready, then a CLI `playlistUrl` and a switch, which
   must leave the URL on the entry, the file untouched and one
   `sourcesPersistFailed("state_write_failed")`, and the next start must
-  re-adopt what the failed write left there (F; R13). `cleanup()` records
+  re-adopt what the failed write left there (F; R13); and since round 5
+  the LOGO TOGGLE on that same failed disk (L; R16): the guide opened over
+  IPC and driven through `ipc sourcesKey` (`enter`, `g`, `confirm` -- the
+  harness verb that calls the guide's own handlers, no keystroke), which
+  must patch `showLogos` alone and leave the URL and the FILE's mirror on
+  the stored entry, and F6 then restarts over the entry as the host stored
+  it after the toggle. F5's counts are taken from the switch's own log
+  mark and L's from the toggle's (F2's drop line used to pre-satisfy
+  F5's `left:yes`). `cleanup()` records
   the live shell's children by parent pid before it reaps, so a TERM
   inside the O window takes the sleeping slow helper with it (proven
-  inside O, D and N; `qa-lib-test.sh` pins the seam). The one window
+  inside O, D and N; `qa-lib-test.sh` pins the seam), and gives the state
+  directory its mode back on every exit, because a TERM inside F used to
+  leave it 0500 and `rm -rf` of the harness directory then stopped on
+  `state.json` (`run.sh clean` now tolerates that directory too; both
+  measured in round 5). The one window
   outside that seam, a TERM between `--detach` returning and `qs.pid`
   being read, is ended by the nested compositor going away rather than by
   `reap` (which is gated off there); the round-3 review measured it.
+  `qa_json_field` answers `NULL` for a key that is present and null and
+  `NOFIELD` only for one that is absent, so a `held:NULL` want cannot be
+  met by a tree with no `pendingEntryKey` at all (round 4's P3; the three
+  `held:` wants say NULL).
 
 **What the first run found (2026-10-11, lane-key-r1 at f84ee50), now
 D-SRC-15.** The key adopted at the first start was dropped when the
@@ -1012,8 +1030,24 @@ save-parked clause deleted reads 56 / 6 (D2, D3, W2, W3, W4, W6; the
 counter reads `file-newer` and `save-parked` is absent) and
 `applyUserState`'s R14 `return` deleted reads 57 / 5 (D2, W2, W3, W4, W6
 -- and D3 green, because a counter observes the decision and not the
-sink; the `return` is pinned structurally in `tests/Model.test.js`). Two
-things the first measurement corrected: E1 had been red
+sink; the `return` is pinned structurally in `tests/Model.test.js`). The
+two mutations are PATCH FILES under `spikes/key-mutations/` (round 5; the
+round-4 throwaway branches are deleted), applied to an export and run
+through `--tree`; `qa-lib-test.sh` proves each still applies.
+
+**Round 5 (2026-10-12, R16; 63 lettered checks: L1, L2 added).** The
+round-4 data-loss lens found rule 15's shape in R13 itself: the logo
+toggle is `writeOwnedEntry`'s SECOND caller, mirrored the in-memory key
+with no gate and stripped the URL, so in exactly the state F leaves one
+`g` + confirm in Sources lost the record. L drives that toggle inside F.
+Counts from the transcripts on the round-5 harness: the forward run on
+lane-key-u2 (lane-key-u1's code, R16) **64 passed, 0 failed**;
+`--baseline lane-key-t2` **60 passed, 4 failed** (L1 `stored:<C>
+playlistUrl:no`, L2 `keys:0 alone:0`, and F6/F7 restarting over that
+entry find no record for B); `--baseline lane-key-s2` **54 passed, 10
+failed** (round 4's eight plus L1, L2); the two patches through `--tree`
+read **58 / 6** and **59 / 5**, the same letters as above.
+Two things the first measurement corrected: E1 had been red
 on every tree because its own `want` was wrong (`kind=x` where
 `Model.maskUrl` masks every query value, by calling it on dev, lane-key-r2
 and lane-key-s1 alike), and the created-file shape (no `state.json` at

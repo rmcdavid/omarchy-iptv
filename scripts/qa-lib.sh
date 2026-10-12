@@ -53,7 +53,8 @@ qa_count_multi() {
 # "the service says this is unset", and three P14 assertions demanded exactly
 # "". These sentinels are non-empty and are not a legal service value.
 QA_NO_STATE=NOSTATE      # the IPC did not answer, or answered unparseable JSON
-QA_NO_FIELD=NOFIELD      # it answered, and the field is absent or null
+QA_NO_FIELD=NOFIELD      # it answered, and the field is absent (qa_json_field) or absent-or-null (qa_field)
+QA_NULL=NULL             # it answered, the key is PRESENT, and its value is JSON null (qa_json_field only)
 QA_NO_FILE=NOFILE        # the file is missing or unparseable
 QA_NO_SESSION=NOSESSION  # the file parsed, and it holds no session record
 QA_NO_DELTA=NODELTA      # one side of a before/after pair was not a number
@@ -62,7 +63,7 @@ QA_NO_DELTA=NODELTA      # one side of a before/after pair was not a number
 # Use this wherever a check used to say [[ -n "$x" ]].
 qa_value() {
   case ${1-} in
-    "" | "$QA_NO_STATE" | "$QA_NO_FIELD" | "$QA_NO_FILE" | "$QA_NO_SESSION" | "$QA_NO_DELTA") return 1 ;;
+    "" | "$QA_NO_STATE" | "$QA_NO_FIELD" | "$QA_NULL" | "$QA_NO_FILE" | "$QA_NO_SESSION" | "$QA_NO_DELTA") return 1 ;;
   esac
   return 0
 }
@@ -277,6 +278,18 @@ print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))
 # written as [[ "$(field active)" == "false" ]] would then read "the entry is
 # not active" and PASS against a tree that cannot answer at all. NOFIELD is
 # not "false", so it fails instead.
+#
+# A PRESENT null and an ABSENT key are two different answers (D-SINK-19
+# round 4, the live review's P3): the harness reports a service property the
+# tree lacks as null (`s.pendingEntryKey === undefined ? null : ...`), and a
+# service that holds nothing reports null too, so one sentinel for both let
+# `held:NOFIELD` read "nothing held" on a tree with no instrument at all.
+# So: the expression raising (KeyError, TypeError, IndexError -- the key is
+# not there) is NOFIELD; the expression answering None (the key is there and
+# holds null) is NULL. A want that means "present and empty" says NULL and
+# cannot be satisfied by a missing field. qa_field and qa_guide_field keep
+# the one-sentinel fold on purpose: their NOFIELD wants (chno-entry N8 on
+# `nowPlaying`) were written under it and are not re-graded here.
 qa_json_field() {
   python3 -c '
 import json, sys
@@ -288,8 +301,8 @@ except Exception:
 try:
     v = eval(sys.argv[1])
 except Exception:
-    v = None
-print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))' "$1" "$2" 2>/dev/null \
+    print("NOFIELD"); raise SystemExit(0)
+print(json.dumps(v) if isinstance(v, bool) else ("NULL" if v is None else v))' "$1" "$2" 2>/dev/null \
     || printf '%s\n' "$QA_NO_STATE"
 }
 

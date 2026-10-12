@@ -1,0 +1,15 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2065,9 +2065,7 @@ Item {
+     root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)
+     if (disposition.act !== "apply") {
+       root.stateReloadsIgnored = root.stateReloadsIgnored + 1
+-      // R14: this `return` IS the decision. Without it the reload is counted
+-      // as ignored and then applied anyway, and only the live arm can tell.
+-      return
++      // MUTATION (lane B, round 4): the R14 `return` deleted -- counted, then applied anyway
+     }
+     // Section 15's race: what arrives is a snapshot of the file from before
+     // this shell wrote anything, so it is a base to merge onto, not a
