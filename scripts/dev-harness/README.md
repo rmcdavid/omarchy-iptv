@@ -1078,6 +1078,20 @@ happened (SR25 as amended: `persist_failed` is now the state write
 failing, reported from the FileView as `state_write_failed`, which
 `key-scenario.sh` F observes).
 
+**Round 6 (2026-10-12; no lettered check added, 63 as before).** The
+round-5 live lens found the NULL/NOFIELD split blind to an absent
+`pointerState` field: the verb folded `undefined` to null, so on f275bde
+(no `pendingEntryKey`) W3, F2 and F5 read `held:NULL` and that half of
+each was green. `pointerState` now omits what the tree lacks
+(`harness-lib.js`, `pointerStateOf`, driven by `qa-lib-test.sh`). Counts
+from the transcripts on lane-key-v1 (78ff442): the forward run **64
+passed, 0 failed**, the three `held:` reads NULL as before; `--baseline
+f275bde` **39 passed, 25 failed**, the same letters as round 5, and the
+held half is now red on its own: W1, W3, W5, F2 and F5 read
+`held:NOFIELD` (`held:[NOFIELD]` in W5) where the round-5 transcript read
+`held:NULL`. `sources-scenario.sh` **66 / 0** and `logo-scenario.sh live`
+**33 / 0** under a nested headless cage on the same tree.
+
 **The weak already-stored check, fixed in round 4.** 'a switch the host
 already stores is not reported as a persist failure' means to make the
 fake's `updateEntryInline` take its `!dirty` branch (the host's "already
