@@ -13110,6 +13110,31 @@ switch. The sentence "one `saved` per `setText`" that the round-3 documents
 carried is false for a burst and was replaced on the round-4 docs branch
 with these numbers (`docs/OMARCHY-PLUGIN-CONTRACT.md`, SR38's amendment).
 
+### F-HARNESS-19: the TLS scenario's stage shell calls a model function the staged tree does not have
+
+**Filed 2026-10-12 from the D-REL-5 lane's report; P2; open.** The lane
+ran every dev-harness scenario on `dev` (422c8e1) and on its split tree
+under the same nested cage, to show the split changes no count, and
+`tls-scenario.sh` read 48 / 1 on both with S6 red: "the stage shell never
+parsed the playlist". S6 is the live proof for D-SINK-16: it stages the
+pre-TLS code (`PRE_TLS_REF="b731882^"`, 0.12.1-era), lets that shell start
+a player, then starts the current code and asserts the adopted player is
+migrated before it is fed. The stage shell is the CURRENT
+`scripts/dev-harness/shell.qml` over the OLD model, and since 51d686b
+(2026-10-11, the D-LOGO-11 review) that shell computes
+`logoCount: ... Model.logoHaveCount(s2.logoHave)`, which the old model does
+not export: the lane counted 109 TypeErrors at `shell.qml:1345` in one stage
+log. So the segment has been red for a rig reason since the day that line
+landed, and a regression in the adoption path would read the same. One of
+three runs on the split also failed S6's adoption check itself while `dev`
+passed it twice; that is unattributed and is re-measured once the rig is
+fixed, not assumed to be a flake.
+
+The fix is the harness's: a call to a model function that postdates the
+oldest tree any scenario stages asks whether it exists first, and the
+search is over every `Model.` call in `shell.qml` against `b731882^`'s
+exports (rule 15), not this one line.
+
 ### D-SINK-20: the patch-only logo write re-carries a stale URL on the lagging host
 
 **Filed 2026-10-12 from the D-SINK-19 round-5 lenses; P3; open; never
