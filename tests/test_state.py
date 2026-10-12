@@ -409,6 +409,30 @@ class SessionKeyTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["activeKey"], "")
 
+    def test_remove_runs_the_shared_fixture(self):
+        """The `remove` section of tests/fixtures/active-key.json, the same
+        cases Model.test.js runs through Model.removeSource (R3). The two
+        implementations must leave the same pointer: the review found the JS
+        side keeping a key that named the record it had just removed while
+        this side cleared it, and 1,053 python tests were green because the
+        join between them was a comment, not a call."""
+        with open(ROOT / "tests" / "fixtures" / "active-key.json", encoding="utf-8") as fh:
+            fixture = json.load(fh)
+        self.assertGreaterEqual(len(fixture["remove"]), 4)
+        for case in fixture["remove"]:
+            state = dict(helper.default_state())
+            state["sources"] = [dict(SRC_PROVIDER if k == "d990c2e4" else SRC_SECOND) for k in case["keys"]]
+            state["activeKey"] = case["activeKey"]
+            if case["ok"]:
+                helper.remove_source_record(state, case["remove"])
+            else:
+                with self.assertRaises(helper.HelperError, msg=case["name"]):
+                    helper.remove_source_record(state, case["remove"])
+            self.assertEqual(state["activeKey"], case["want"]["activeKey"], case["name"])
+            self.assertEqual(len(state["sources"]), case["want"]["count"], case["name"])
+            # ... and the document the real writer leaves behind agrees.
+            self.assertEqual(helper.normalize_state(state)["activeKey"], case["want"]["activeKey"], case["name"])
+
     def test_rekeying_the_active_source_carries_the_pointer_with_it(self):
         """`state source update --url` re-keys the record. The pointer has to
         follow, or state.json names a record that no longer exists."""

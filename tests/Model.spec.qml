@@ -1297,11 +1297,17 @@ TestCase {
     compare(cleared.savedSources, 3)
     compare(Model.footerStatus({ configured: false, count: cleared.channelCount, lastUpdated: "15:13" }), "")
     var first = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/a.m3u", "", "", 1)
+    // R2: the adopted key is IN the state reconcileSources returns.
+    compare(Model.activeKeyOf(first.state), first.added)
     var after = Model.reconcileSources(first.state, "", "", first.added, 2)
     compare(after.state.sources.length, 1)
     compare(after.activeKey, "")
     compare(after.invalid, null)
-    compare(Model.activeKeyOf(after.state), "")
+    // An emptied input is not a command (D-SINK-19 / R1): the active source
+    // is untouched. Clearing it is removeSource, which clears the pointer in
+    // the state it returns (R3).
+    compare(Model.activeKeyOf(after.state), first.added)
+    compare(Model.activeKeyOf(Model.removeSource(after.state, first.added).state), "")
     // The rest of the state machine is as shipped.
     compare(Model.guideSurface({ serviceReady: false }).empty, "service")
     compare(Model.guideSurface({ serviceReady: true, configured: true, channelCount: 0, status: "loading" }).empty, "loading")
@@ -1355,7 +1361,9 @@ TestCase {
     // D-SINK-19: a source write carries the active KEY, not the URL pair.
     var hostA = Model.settingsFrom({ id: "p", sourceKey: "d990c2e4", refreshMinutes: 45 })
     var hostB = Model.settingsFrom({ id: "p", sourceKey: "b0eed9fb", refreshMinutes: 45 })
-    var write = Model.ownWriteForKey(hostA, "b0eed9fb")
+    // Composed as Service.writeOwnedEntry composes it (ownWriteOf over
+    // ownedEntryPatch); the helper this used to call was dead code and is gone.
+    var write = Model.ownWriteOf(hostA, Model.ownedEntryPatch(hostA, { sourceKey: "b0eed9fb" }))
     // Applied at once, against the host value we wrote on.
     compare(Model.ownWriteInForce(hostA, write), true)
     compare(Model.settingsWithOwnWrite(hostA, write).sourceKey, "b0eed9fb")
@@ -1367,7 +1375,7 @@ TestCase {
     var hostC = Model.settingsFrom({ id: "p", sourceKey: "11111111" })
     compare(Model.settingsWithOwnWrite(hostC, write).sourceKey, "11111111")
     // Clearing the active source is the same mechanism (D-LIVE-21).
-    compare(Model.settingsWithOwnWrite(hostB, Model.ownWriteForKey(hostB, "")).sourceKey, "")
+    compare(Model.settingsWithOwnWrite(hostB, Model.ownWriteOf(hostB, Model.ownedEntryPatch(hostB, { sourceKey: "" }))).sourceKey, "")
     // The patch a write actually carries, in this engine: owned keys only,
     // and no URL even when the host entry still holds one.
     var patch = Model.ownedEntryPatch(Model.settingsFrom({ id: "p", playlistUrl: "http://h.test/a.m3u", epgUrl: "http://h.test/a.xml", sourceKey: "d990c2e4", showLogos: true }),

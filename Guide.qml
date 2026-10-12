@@ -225,6 +225,10 @@ Item {
     serviceProse: "Run omarchy restart shell",
     unconfiguredTitle: "No playlist configured",
     unconfiguredProse: "Set your M3U URL or path, then press r to load it:",
+    // D-SINK-19: this is what a click COPIES, so it stays a bare command. It
+    // is an input: the URL is adopted into the plugin's private state and
+    // removed from shell.json by the plugin's next write (see the caption on
+    // the first-run form, `firstRunTerminal`).
     unconfiguredCommand: "omarchy bar set " + root.pluginId + " playlistUrl <url>",
     unconfiguredEpg: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>",
     unconfiguredWhere: "Settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
@@ -268,7 +272,10 @@ Item {
     editSourceTitle: "Edit source",
     xtreamTitle: "Add Xtream login",
     firstRunProse: "Paste or type your M3U URL or path, then press Enter",
-    firstRunTerminal: "Or from a terminal:  omarchy bar set " + root.pluginId + " playlistUrl <url>",
+    // D-SINK-19: the command is an INPUT. The URL is moved into the plugin's
+    // own private state and taken back out of shell.json; the caption says so
+    // rather than letting the user look for it there afterwards.
+    firstRunTerminal: "Or from a terminal:  omarchy bar set " + root.pluginId + " playlistUrl <url>  (converted; not kept in shell.json)",
     fieldLabel: "Label",
     fieldPlaylist: "Playlist",
     fieldEpg: "EPG",

@@ -2583,7 +2583,15 @@ function cloneState(state, patch) {
     // un-configure the plugin on the next favourite toggle. Additive at
     // STATE_VERSION 2 exactly like hiddenGroups -- a file without it reads
     // as "", an older build drops it, the version does not move.
-    activeKey: str(st.activeKey)
+    //
+    // Through activeKeyText and NOT str(): this is the sibling of the
+    // activeKeyText fix that the first round missed (rule 15). str() coerces
+    // the number 12345678 and the list ["d990c2e4"] into values that sit
+    // inside the key grammar, and every reducer passes through here, so a raw
+    // state object handed to one would have come out "configured" on this
+    // side and unconfigured on the helper's (normalize_active_key requires a
+    // string). One reader, one rule, the same answer as parseState.
+    activeKey: activeKeyText(st.activeKey)
   }
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
@@ -4279,11 +4287,12 @@ function ownedEntryPatch(effective, overrides) {
   return out
 }
 
-// The active key, which is what the source writers carry since D-SINK-19
-// (it was the URL pair from M2-01 to 0.13.3).
-function ownWriteForKey(hostSettings, key) {
-  return ownWriteOf(hostSettings, { sourceKey: activeKeyText(key) })
-}
+// `ownWriteForKey(hostSettings, key)` USED TO BE HERE. Its only caller was
+// Service.applyOwnWrite, which nothing called (dead since b2a4986, found by
+// the D-SINK-19 review); the live write is `writeOwnedEntry`, which records
+// `ownWriteOf(hostSettings, ownedEntryPatch(settings, overrides))`, and the
+// tests now call that composition rather than a helper the shipping path
+// never reached (rule 14).
 
 // Can `updateEntryInline` carry our settings at all? It rewrites a layout
 // entry in place, so it needs an object entry with our id: a bare-string
@@ -9918,13 +9927,22 @@ function updateSource(state, key, fields, nowSec) {
   return { ok: true, code: "ok", message: "", state: replaceSource(st, rec.key, patch), key: rec.key, urlChanged: urlChanged, replacedKey: "" }
 }
 
+// Removing the ACTIVE record clears the pointer in the state this returns
+// (D-SINK-19 repair, R3). The helper's `remove_source_record` has done the
+// same since the key existed; this side rebuilt through cloneState, which
+// carries `activeKey` faithfully, so the state named a record it no longer
+// held. activeKeyOf resolves that to "no active source" on every read, which
+// is why nothing crashed -- but a pointer that only reads as cleared is the
+// shape the review called a dangling key, and the file said otherwise. The
+// shared fixture's `remove` cases run through both implementations.
 function removeSource(state, key) {
   var st = cloneState(state)
   var removed = findSource(st.sources, key)
   if (!removed) return { state: st, removed: null }
   var out = []
   for (var i = 0; i < st.sources.length; i++) if (st.sources[i] !== removed) out.push(st.sources[i])
-  return { state: cloneState(st, { sources: out }), removed: removed }
+  var next = cloneState(st, { sources: out })
+  return { state: withActiveKey(next, activeKeyOf(next)), removed: removed }
 }
 
 function touchSource(state, key, nowSec) {
@@ -10044,107 +10062,194 @@ function invalidInputBlocks(invalid, activeKey) {
 //
 // Lifted out of Service.qml's reconcile() deliberately (rule 12): it is pure
 // logic, it is the single most dangerous decision in this change, and inside
-// a QML component no test can call it. The danger is specific. The plugin now
-// strips the URL keys from the bar entry on every write, so the host comes to
-// report `playlistUrl` as absent -- and under the old rule, where an empty
-// playlistUrl meant "no active source", the host merely catching up would
-// un-configure the plugin. So the rule is about a CHANGE of the input, never
-// about its value:
+// a QML component no test can call it.
 //
-//   migrate  a state load, or the first reconcile of this service: resolve
-//            the active source from the state, then the entry's key, then the
-//            entry's URL (adoptActiveSource). This is where an old install
-//            becomes a new one.
-//   adopt    the input changed to a non-empty value: SR8, unchanged. The URL
-//            goes into the history and that source becomes active.
-//   ignore   everything else, which includes the input going empty. That is
-//            the ordinary steady state after this change, not a command.
+// REPAIRED after the adversarial review (lead ruling R1). The first version
+// answered "migrate" for every first or forced reconcile and "migrate" never
+// read the entry's URL when the state already held a key -- so a URL set with
+// `omarchy bar set ... playlistUrl` while the shell was down was discarded on
+// the next start and then stripped out of shell.json by the plugin's own
+// write. The user's input was deleted and nothing said so.
 //
-// `adoptEpg` is D-SRC-10, untouched: an epgUrl that did NOT change in the
-// write that changed the playlist was written for the previous source.
+// The rule now: a URL on the bar entry that this service has NOT ALREADY
+// CONSUMED is fresh user input and is adopted before any key is trusted. The
+// plugin strips URLs on every own write, so a URL can only be on the entry
+// because a user put it there -- with one qualification the host imposes:
+// barConfig is published ONE WRITE BEHIND and the plugin's own write never
+// echoes (rule 9), so after the strip the host keeps publishing the SAME URL
+// until somebody else writes. That stale echo is what `lastPlaylist` is for.
+// A value equal to the one this service already adopted is consumed, not a
+// command; a value that differs, or any value on the first reconcile of a
+// service (the shell start, where the published entry IS the file), is fresh.
+//
+//   adopt    the entry carries a playlist URL this service has not consumed
+//            (first reconcile, or the value differs from the snapshot):
+//            SR8. Whether or not the reconcile was forced.
+//   migrate  a state load or the first reconcile, with no fresh URL: resolve
+//            the active source from the state's key, then the entry's key.
+//   ignore   everything else, including the input going empty, which is the
+//            ordinary steady state after the plugin's own strip.
+//
+// `adoptEpg` (R4) is decided the same way and independently of the playlist:
+// a non-empty EPG input this service has not consumed is adopted into the
+// ACTIVE record on any reconcile that sees it, "ignore" included, and taken
+// out of the entry by the same owned write. D-SRC-10 ("an epgUrl that did not
+// change in the write that changed the playlist was written for the previous
+// source") is the same rule seen from the other side: an unchanged value is a
+// consumed one. An EMPTY epg input is a no-op -- the CLI clear lever
+// (`omarchy bar set ... epgUrl ""`) is withdrawn, the Sources screen clears a
+// guide URL.
 function reconcileAction(input) {
   var it = input || {}
   var playlist = str(it.playlist)
   var epg = str(it.epg)
   var first = it.first === true
+  var force = it.force === true
   var playlistChanged = first || playlist !== str(it.lastPlaylist)
   var epgChanged = first || epg !== str(it.lastEpg)
-  var out = { act: "ignore", adoptEpg: first || it.force === true || epgChanged,
+  var out = { act: "ignore",
+              adoptUrl: playlist !== "" && playlistChanged,
+              adoptEpg: epg !== "" && epgChanged,
               playlistChanged: playlistChanged, epgChanged: epgChanged }
-  if (it.force === true || first) { out.act = "migrate"; return out }
-  if (!playlistChanged && !epgChanged) return out
-  if (playlist === "") return out
-  out.act = "adopt"
+  if (out.adoptUrl) out.act = "adopt"
+  else if (first || force) out.act = "migrate"
   return out
 }
 
-// D-SINK-19. Resolve the active source ONCE per state load, and migrate an
-// install written by a build that named it by URL.
+// D-SINK-19. Resolve the active source, and migrate an install written by a
+// build that named it by URL. ONE resolver for every reconcile: the shell
+// start, a state load, a settings change (R1).
 //
-// `entry` is the host's bar entry as `settingsFrom` read it. The order is the
-// whole of the decision and each step is why the next is safe:
+// `entry` is the host's bar entry as `settingsFrom` read it; `opts` is the
+// plan reconcileAction made (`adoptUrl`, `adoptEpg`; both default to true so
+// a caller with no plan gets the start-of-service behaviour). The order is
+// the whole of the decision and each step is why the next is safe:
 //
-//   1. the state's own `activeKey`, when it names a record this state carries.
-//      Nothing else is consulted, which is what makes a second run a no-op.
-//   2. the entry's `sourceKey`, when it names a record. This is the mirror the
-//      plugin writes; it is a POINTER and not a credential, so an install that
-//      lost `state.json`'s active key but still has its sources recovers.
-//      A stale `playlistUrl` sitting beside it is IGNORED -- the key wins,
-//      which is what stops a removed source being resurrected by a URL the
-//      host had not caught up on yet.
-//   3. the entry's `playlistUrl`: the OLD shape, and the only step that reads
-//      a URL. It is adopted exactly as `reconcileSources` adopts a CLI value
-//      (SR8): a known URL becomes active, an unknown one is added with a
-//      derived label and `origin` "migrated" or "cli".
-//   4. nothing: no active source.
+//   1. the entry's `playlistUrl`, when the plan says it is fresh. The ONLY
+//      step that reads a URL. Validated; valid -> reconcileSources adopts it
+//      exactly as it adopts a CLI value (SR8): a known URL becomes active, an
+//      unknown one is added with origin "cli", or "migrated" on the very
+//      first v2 run. Invalid -> `invalid` carries the result (D16) and the
+//      resolution continues at step 2, so a typo leaves the active source
+//      exactly as it was. The first version put this step LAST and returned
+//      at step 2 before reaching it; see reconcileAction.
+//   2. the state's own `activeKey`, when it names a record this state carries.
+//   3. the entry's `sourceKey`, when it names a record. This is the mirror the
+//      plugin writes; a POINTER and not a credential, so an install that lost
+//      state.json's active key but still has its sources recovers.
+//   4. nothing: no active source, and a dangling key is cleared rather than
+//      left in the file for the next reader to resolve again.
 //
-// Returns { state, key, changed, adoptedUrl }. `changed` is whether the state
-// must be written; `adoptedUrl` is true when step 3 fired, which is what tells
-// the caller the entry still holds a URL that has to come out of it.
-// `invalid` carries a validation failure of step 3 (D16/SR8) so a garbage CLI
-// value still synthesizes an error status instead of running the helper.
-function adoptActiveSource(state, entry, nowSec, origin) {
+// Then, whichever step answered, a fresh EPG input (R4) is adopted into the
+// record that is now active, when it validates and differs from what the
+// record holds.
+//
+// Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, invalid,
+// added, evicted, writeEntry }. `changed` is whether the state must be
+// written; `moved` is whether the active source is a DIFFERENT one than
+// before, which is the only thing that resets the status line (the first
+// version reset it on any input change, so a refused typo blanked a working
+// source's status); `writeEntry` is whether the bar entry must be rewritten
+// -- it still holds a URL (fresh, stale or refused: a refused value can still
+// carry credentials), or its mirrored key disagrees with the state.
+function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var st = state || emptyState()
-  var out = { state: st, key: "", changed: false, adoptedUrl: false, invalid: null, added: "", evicted: [] }
-  var stateKey = activeKeyOf(st)
-  if (stateKey !== "") {
-    out.key = stateKey
-    // The stored text may differ from the resolved key only by whitespace;
-    // withActiveKey is a no-op when it does not.
-    out.state = withActiveKey(st, stateKey)
-    out.changed = out.state !== st
-    return out
-  }
   var e = entry || {}
-  var entryKey = activeKeyText(e.sourceKey)
-  if (entryKey !== "" && findSource(st.sources, entryKey)) {
-    out.key = entryKey
-    out.state = withActiveKey(st, entryKey)
-    out.changed = out.state !== st
-    return out
+  var o = opts || {}
+  var adoptUrl = o.adoptUrl !== false
+  var adoptEpg = o.adoptEpg !== false
+  var before = activeKeyOf(st)
+  var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
+              invalid: null, added: "", evicted: [], writeEntry: false }
+  var url = adoptUrl ? sanitizeInput(str(e.playlistUrl), MAX_SOURCE_URL + 1) : ""
+  var epg = adoptEpg ? str(e.epgUrl) : ""
+  var resolved = false
+  if (url !== "") {
+    // Step 1. The EPG input is NOT handed to reconcileSources here: the R4
+    // block below is the one place an EPG input reaches a record, whichever
+    // step resolved the key, so there is one rule and not two.
+    var rec = reconcileSources(st, url, "", before, nowSec, origin, { adoptEpg: false })
+    if (rec.invalid) {
+      out.invalid = rec.invalid
+    } else {
+      // The original object when nothing moved, so `changed` below stays an
+      // honest "must this be written" and a consumed re-run saves nothing.
+      out.state = rec.changed ? rec.state : st
+      out.adoptedUrl = true
+      out.added = rec.added
+      out.evicted = rec.evicted
+      resolved = true
+    }
   }
-  var url = str(e.playlistUrl)
-  if (sanitizeInput(url, MAX_SOURCE_URL + 1) === "") {
-    // No pointer anywhere. Clear a dangling key rather than leaving one in
-    // the file for the next reader to resolve again.
-    out.state = withActiveKey(st, "")
-    out.changed = out.state !== st
-    return out
+  if (!resolved) {
+    // Steps 2 to 4. activeKeyOf already refuses a key that names no record,
+    // so "names a record" is the resolver's answer and not a second check.
+    var stateKey = activeKeyOf(st)
+    var entryKey = activeKeyText(e.sourceKey)
+    var want = stateKey !== "" ? stateKey : (findSource(st.sources, entryKey) ? entryKey : "")
+    out.state = withActiveKey(st, want)
   }
-  var rec = reconcileSources(st, url, str(e.epgUrl), "", nowSec, origin)
-  if (rec.invalid) {
-    out.invalid = rec.invalid
-    out.state = withActiveKey(st, "")
-    out.changed = out.state !== st
-    return out
-  }
-  out.state = withActiveKey(rec.state, rec.activeKey)
   out.key = activeKeyOf(out.state)
-  out.changed = true
-  out.adoptedUrl = out.key !== ""
-  out.added = rec.added
-  out.evicted = rec.evicted
+  // R4: a fresh EPG input reaches the ACTIVE record on any path -- the record
+  // a fresh URL just named, a state load with an EPG on the entry, an
+  // "ignore" plan that carries only an EPG change (D-SRC-02).
+  if (adoptEpg && epg !== "" && out.key !== "") {
+    var ev = validateSourceUrl(epg, { kind: "epg", origin: "cli" })
+    var active = findSource(out.state.sources, out.key)
+    if (ev.ok && active && ev.url !== str(active.epgUrl)) {
+      out.state = replaceSource(out.state, out.key, { epgUrl: ev.url })
+      out.adoptedEpg = true
+    }
+  }
+  out.changed = out.state !== st
+  out.moved = out.key !== before
+  out.writeEntry = str(e.playlistUrl) !== "" || str(e.epgUrl) !== "" || activeKeyText(e.sourceKey) !== out.key
   return out
+}
+
+// D-SINK-19 repair, R5. THE ORDER OF THE TWO WRITES A POINTER CHANGE MAKES.
+//
+// A move of the active source is two writes: the key into state.json (the
+// authority) and the mirror into the bar entry, which is also the write that
+// takes a URL OUT of that entry. The first version wrote the entry through
+// Qt.callLater ungated while the state save could still be DEFERRED (dirs
+// not ready at start-up: saveState() parks the write behind stateInitProc),
+// so a shell that died between the two left the URL gone from the entry and
+// no key in the state -- a source nobody points at, with nothing left to
+// re-adopt from.
+//
+// The state is saved FIRST and the entry write WAITS for a deferred save. An
+// interrupted migration then leaves, at worst, the URL still on the entry
+// (the idempotent old shape, re-adopted on the next run) and never a
+// pointer-less source.
+//
+// `steps` is executed in order by Service.persistActive:
+//   save-state   assign the state and call saveState() (which writes now)
+//   defer-state  the same call, which parks the write until the dirs are
+//                ready; named separately so a test can see the difference
+//   write-entry  mirror the key into the entry now
+//   wait-entry   hold the key; stateInitProc's exit writes the parked state
+//                and THEN the entry
+// In Model.js rather than inline so node can call it (rule 12); the shared
+// fixture's `order` cases pin every combination.
+function pointerWritePlan(input) {
+  var it = input || {}
+  var keyMoved = it.keyMoved === true
+  var dirsReady = it.dirsReady === true
+  var savePending = it.savePending === true
+  if (keyMoved) {
+    return dirsReady ? { steps: ["save-state", "write-entry"], entryWaits: false }
+                     : { steps: ["defer-state", "wait-entry"], entryWaits: true }
+  }
+  // Nothing of ours to save, unless an EARLIER save is still parked: then the
+  // entry must not get ahead of it. With the dirs ready that park is flushed
+  // right here rather than waited on, because nothing else would wake the
+  // wait (stateInitProc's exit has already run).
+  if (savePending) {
+    return dirsReady ? { steps: ["save-state", "write-entry"], entryWaits: false }
+                     : { steps: ["wait-entry"], entryWaits: true }
+  }
+  return { steps: ["write-entry"], entryWaits: false }
 }
 
 // `activeSourceKey(state, playlistUrl)` USED TO BE HERE and is deliberately
@@ -10160,12 +10265,15 @@ function adoptActiveSource(state, entry, nowSec, origin) {
 // to its record, because `reconcileSources` is what resolves it and it still
 // validates with `origin: "cli"`.
 
-// D3 / SR8: the settings are the source of truth for the active source; the
-// history follows. A known URL bumps `lastUsed` only when the active key
-// actually changed and adopts a changed (valid) EPG URL; an unknown URL is
-// added with a derived label and `origin` "migrated" on the very first v2
-// run (no history, legacy cache layout) or "cli" afterwards. Beyond
-// MAX_SOURCES the least recently used non-active records are evicted.
+// D3 / SR8, narrowed by D-SINK-19: a playlist URL INPUT names the active
+// source; the history follows and the key is written INTO the returned state
+// (R2 -- the first version returned it as an out-param only and
+// Service.reconcile never wrote it, so on a configured install the active
+// source never moved on this path). A known URL bumps `lastUsed` only when
+// the active key actually changed and adopts a changed (valid) EPG URL; an
+// unknown URL is added with a derived label and `origin` "migrated" on the
+// very first v2 run (no history, legacy cache layout) or "cli" afterwards.
+// Beyond MAX_SOURCES the least recently used non-active records are evicted.
 // `invalid` carries the validation result for a set but invalid URL (D16).
 // `opts.adoptEpg === false` (D-SRC-10): the settings' epgUrl was written
 // for the previous source (it did not change in the settings write that
@@ -10194,6 +10302,10 @@ function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec,
     for (var k in patch) keys++
     if (keys > 0) { out.state = replaceSource(st, rec.key, patch); out.changed = true }
     out.activeKey = str(rec.key)
+    // R2: the key lives where the state lives. withActiveKey returns the same
+    // object when the key is already this one, so `changed` stays honest.
+    out.state = withActiveKey(out.state, out.activeKey)
+    out.changed = out.changed || out.state !== st
     return out
   }
   var kind = str(origin) !== "" && SOURCE_ORIGINS.indexOf(str(origin)) !== -1 ? str(origin) : (st.sources.length === 0 && st.cacheLayout !== CACHE_LAYOUT ? "migrated" : "cli")
@@ -10214,7 +10326,7 @@ function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec,
     out.evicted.push(str(sources[victim].key))
     sources.splice(victim, 1)
   }
-  out.state = cloneState(st, { sources: sources })
+  out.state = withActiveKey(cloneState(st, { sources: sources }), key)
   out.changed = true
   out.activeKey = key
   out.added = key
@@ -11161,7 +11273,6 @@ if (typeof module !== "undefined") {
     splitLogoUrl: splitLogoUrl,
     ownWriteInForce: ownWriteInForce,
     settingsWithOwnWrite: settingsWithOwnWrite,
-    ownWriteForKey: ownWriteForKey,
     RETIRED_SETTINGS: RETIRED_SETTINGS,
     barEntryWritable: barEntryWritable,
     splitMpvArgs: splitMpvArgs,
@@ -11514,6 +11625,7 @@ if (typeof module !== "undefined") {
     withActiveKey: withActiveKey,
     adoptActiveSource: adoptActiveSource,
     reconcileAction: reconcileAction,
+    pointerWritePlan: pointerWritePlan,
     invalidInputBlocks: invalidInputBlocks,
     reconcileSources: reconcileSources,
     sourceForEdit: sourceForEdit,

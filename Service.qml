@@ -114,13 +114,18 @@ Item {
   property var ownWrite: null                          // { base, value }: our write, applied locally
   readonly property var settings: Model.settingsWithOwnWrite(hostSettings, ownWrite)
   // D-SINK-19. INPUT ONLY. `omarchy bar set io.github.rmcdavid.iptv playlistUrl
-  // <url>` still adopts the URL into the history and makes that source active
-  // (SR8, unchanged), and `epgUrl` still reaches the active record
-  // (D-SRC-02). What has stopped is the plugin IDENTIFYING the active source
-  // by this value or writing it back: the credential lives only in the
-  // plugin's own 0600 state.json now, and the entry carries the key. A user
-  // who sets one of these and reads shell.json back will not find it there,
-  // which is cost 1 of the change and is in the release notes.
+  // <url>` adopts the URL into the history and makes that source active on
+  // EVERY reconcile that sees a value this service has not consumed -- the
+  // shell start, a state load, a settings change (SR8, lead ruling R1 after
+  // the review found the first version discarding a URL set while the shell
+  // was down). A non-empty `epgUrl` reaches the active record the same way
+  // (D-SRC-02, R4); an empty one is a no-op, and the CLI clear lever is
+  // withdrawn -- the Sources screen clears a guide URL. What has stopped is
+  // the plugin IDENTIFYING the active source by this value or writing it
+  // back: the credential lives only in the plugin's own 0600 state.json now,
+  // and the entry carries the key. A user who sets one of these and reads
+  // shell.json back will not find it there, which is cost 1 of the change and
+  // is in the release notes.
   readonly property string inputPlaylistUrl: settings.playlistUrl
   readonly property string inputEpgUrl: settings.epgUrl
   // The active source's record and its playlist URL: what every fetch, label
@@ -262,14 +267,14 @@ Item {
   // Does the rejected input become the guide's error state and stop the
   // helper? Only when there is no active source to show instead.
   readonly property bool invalidInputBlocks: Model.invalidInputBlocks(root.settingsInvalid, root.activeSourceKey)
-  // Snapshot of the settings the last reconcile() saw (D-SRC-02 / D-SRC-10):
-  // which of playlistUrl / epgUrl changed in one settings write decides
-  // whether the epgUrl is adopted; the active key it resolved is the
-  // `previousActiveKey` of the next run (never a binding read mid-update).
+  // Snapshot of the settings the last reconcile() saw (D-SRC-02 / D-SRC-10,
+  // and since the D-SINK-19 repair the thing that tells a FRESH input from
+  // the host's stale echo of one already adopted -- see Model.reconcileAction).
+  // It moves on every path, including "ignore". The previous active key is
+  // read off the state by Model.adoptActiveSource, not snapshotted here.
   property bool reconciled: false
   property string reconciledPlaylistUrl: ""
   property string reconciledEpgUrl: ""
-  property string reconciledActiveKey: ""
   property var cacheQueue: []                          // FIFO of { args, onDone } for cacheProc (section 4.7)
   property var cacheJob: null
   property var recentSaves: []                         // texts this service wrote to state.json (own-write reloads are skipped)
@@ -577,6 +582,10 @@ Item {
   property bool epgTimedOut: false
   property bool dirsReady: false
   property bool stateSavePending: false
+  // R5: the key whose entry mirror is WAITING for a parked state save
+  // (Model.pointerWritePlan "wait-entry"); null when nothing waits. Written
+  // by stateInitProc's exit, after the parked save, never before it.
+  property var pendingEntryKey: null
   // D-SINK-18. What the last `config shield` run said about the file the host
   // persists our source URLs into: Model.CONFIG_SHIELD_UNKNOWN ("") until the
   // first run exits, then "private" or "exposed" for ever after -- a RE-check
@@ -1825,9 +1834,10 @@ Item {
     // D-SINK-19: clearing the pointer. The state write cannot be refused, so
     // the removal always takes effect; only the entry mirror can fail, and a
     // stale mirror naming a record that is gone resolves to "no active
-    // source" (Model.adoptActiveSource step 2 requires the key to name a
-    // record). The failure is still reported, because the user should know
-    // the host's file could not be updated.
+    // source" (Model.adoptActiveSource step 3 requires the key to name a
+    // record, and Model.removeSource itself clears the pointer in the state
+    // it returns, R3). The failure is still reported, because the user
+    // should know the host's file could not be updated.
     if (wasActive && !root.persistActive("")) {
       root.sourceRemoved(key)
       return root.persistFailureResult(key)
@@ -3282,14 +3292,43 @@ Item {
   // already happened.
   //
   // `key` is "" to clear the active source (removeSource).
+  //
+  // R5. The ORDER is Model.pointerWritePlan's and not this function's: state
+  // first, and the entry WAITS when the state save is parked behind the
+  // start-up dirs (saveState sets stateSavePending; stateInitProc's exit
+  // writes the parked state and then calls flushPendingEntry). A shell that
+  // dies in between leaves the URL still on the entry, which the next start
+  // re-adopts -- never a source nobody points at.
   function persistActive(key) {
     var want = Model.activeKeyText(key)
     var next = Model.withActiveKey(root.userState, want)
-    if (next !== root.userState) {
-      root.userState = next
-      root.saveState()
+    var plan = Model.pointerWritePlan({ keyMoved: next !== root.userState, dirsReady: root.dirsReady,
+                                        savePending: root.stateSavePending })
+    for (var i = 0; i < plan.steps.length; i++) {
+      var step = plan.steps[i]
+      if (step === "save-state" || step === "defer-state") {
+        root.userState = next
+        root.saveState()
+      } else if (step === "wait-entry") {
+        root.pendingEntryKey = want
+      } else if (step === "write-entry") {
+        return root.persistEntryKey(want)
+      }
     }
-    return root.persistEntryKey(want)
+    // "wait-entry": accepted, not refused; nothing has been written to the
+    // host's file yet and the state write it waits for cannot be refused.
+    return true
+  }
+
+  // The second half of a "wait-entry" plan, run by stateInitProc's exit
+  // AFTER the parked state save. The last key asked for wins: every owned
+  // write states every owned key, so one write for the latest value is the
+  // same file as one write per value.
+  function flushPendingEntry() {
+    if (root.pendingEntryKey === null) return
+    var key = root.pendingEntryKey
+    root.pendingEntryKey = null
+    root.persistEntryKey(key)
   }
 
   // D-SINK-18's gate, kept and now asked about the ENTRY rather than about a
@@ -3451,14 +3490,9 @@ Item {
     return true
   }
 
-  // Apply our own write to `settings` at once. Assigning `ownWrite` makes
-  // the `settings` binding re-evaluate, which runs the ordinary
-  // onSettingsChanged -> reconcile() path: exactly what the echo would have
-  // done, in the same event loop turn. The override lapses by itself as soon
-  // as the host reports anything other than the value it had when we wrote.
-  function applyOwnWrite(key) {
-    root.ownWrite = Model.ownWriteForKey(root.hostSettings, key)
-  }
+  // `applyOwnWrite(key)` USED TO BE HERE. Nothing called it (dead since
+  // b2a4986; the D-SINK-19 review found it carrying six live assertions). The
+  // own-write record is made where the write is made, in writeOwnedEntry.
 
   // D-SINK-18. Start the shield, or remember to start it again. Setting
   // `running = true` on a Process that is already running is not a queue, so
@@ -3989,120 +4023,69 @@ Item {
     root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, host: host, cancelled: false, replacedId: "" })
   }
 
-  // SR8 PRESERVED, D3 NARROWED (D-SINK-19). `omarchy bar set ... playlistUrl
-  // <url>` still adopts: the URL goes into the history and that source
-  // becomes active. What has changed is that the settings are no longer the
-  // SOURCE OF TRUTH for which source is active -- state.json's `activeKey`
-  // is -- so this runs on a CHANGE of the input and never on its value.
+  // SR8 PRESERVED, D3 NARROWED (D-SINK-19), REPAIRED after the review (lead
+  // ruling R1). `omarchy bar set ... playlistUrl <url>` adopts: the URL goes
+  // into the history and that source becomes active -- on the shell start, on
+  // a state load and on a settings change alike, whenever the value is one
+  // this service has not already consumed. What has changed since 0.13.3 is
+  // that the settings are no longer the SOURCE OF TRUTH for which source is
+  // active -- state.json's `activeKey` is -- so an EMPTY input is never a
+  // command: the plugin strips the URL keys from the entry on every write, so
+  // the host comes to report them absent, and if that still meant "no active
+  // source" the host catching up would un-configure the plugin. Clearing the
+  // active source is `removeSource` (or the Sources screen).
   //
-  // That distinction is the whole safety property. The plugin strips the URL
-  // keys from the entry on every write, so the host eventually reports them
-  // as absent; if an empty `playlistUrl` still meant "no active source", the
-  // host catching up would un-configure the plugin. So: a changed, non-empty,
-  // valid playlist URL moves the active key; everything else leaves it alone,
-  // and clearing the active source is `removeSource` (or the Sources screen),
-  // not a settings value.
-  //
-  // `force` (a state load, or `shell` arriving) goes through
-  // adoptActiveSource instead, which is where the migration lives.
-  // Idempotent: an unrelated settings write is a no-op.
+  // The decision is Model.reconcileAction (what this write means) and
+  // Model.adoptActiveSource (what the active source is now), so a test can
+  // call both (rule 12). This function only moves the snapshot and hands the
+  // plan on. The first version had TWO resolvers -- a direct reconcileSources
+  // call for a changed input and adoptActiveSource for a forced one -- and
+  // the forced one never read the URL, which is how a value set while the
+  // shell was down was discarded and then stripped from shell.json.
   function reconcile(force) {
     if (!root.stateLoaded) return
     var s = root.settings
     var playlist = String(s.playlistUrl || "")
     var epg = String(s.epgUrl || "")
-    // The decision itself is Model.reconcileAction, so a test can call it
-    // (rule 12). Three answers: migrate, adopt, ignore.
     var plan = Model.reconcileAction({ first: !root.reconciled, force: force === true,
                                        playlist: playlist, epg: epg,
                                        lastPlaylist: root.reconciledPlaylistUrl,
                                        lastEpg: root.reconciledEpgUrl })
-    if (plan.act === "migrate") return root.adoptActive(playlist, epg, plan.playlistChanged)
-    if (plan.act === "ignore") {
-      // Nothing to do, but the snapshot still moves: an input that went away
-      // is not a command, and the plugin itself empties these keys, so this is
-      // the ORDINARY steady state (see reconcileAction).
-      root.reconciledPlaylistUrl = playlist
-      root.reconciledEpgUrl = epg
-      return
-    }
-    var out = Model.reconcileSources(root.userState, playlist, epg, root.reconciledActiveKey,
-                                     Math.floor(Date.now() / 1000), "", { adoptEpg: plan.adoptEpg })
+    // The snapshot moves on EVERY path (R1): an input that went away is not a
+    // command, and a value adopted below is consumed from here on, so the
+    // host's stale echo of it (rule 9) is not adopted twice.
     root.reconciled = true
     root.reconciledPlaylistUrl = playlist
     root.reconciledEpgUrl = epg
-    root.reconciledActiveKey = out.invalid ? "" : String(out.activeKey || "")
-    if (plan.playlistChanged) {
-      // A new source starts clean: the previous source's reason and host
-      // must not stay on screen while its first fetch runs (UX 4.5,
-      // D-LIVE-10). The fetch itself is driven by the new cache's freshness
-      // once its directory is bound (section 4.4 step 6), never from here.
-      root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
-      root.playlistLoadWarnings = []
-      root.lastError = ""
-    }
-    root.settingsInvalid = out.invalid
-    if (out.invalid) {
-      // D16: never run the helper for garbage. The active source is left
-      // exactly as it was (D-SINK-19: a typo in an INPUT must not take a
-      // working source away), so the guide's error empty state is reached
-      // only when there is nothing else to show -- which is what
-      // applyInvalidStatus now asks (re-applied by clearSourceData when the
-      // cache directory unbinds, D-SRC-03).
-      root.applyInvalidStatus()
-      if (!root.invalidInputBlocks) console.warn("omarchy-iptv: ignoring an invalid playlistUrl setting; the active source is unchanged")
-      // Take the refused value out of the host's file anyway: a value that
-      // failed validation can still carry credentials (see adoptActive).
-      var keep = root.activeSourceKey
-      Qt.callLater(function() { root.persistActive(keep) })
-      return
-    }
-    // SR8. The adopted URL becomes the active source, and THIS is the write
-    // that makes the pointer ours: the key into state.json, the key mirrored
-    // into the entry, and the URL that arrived in the entry stripped out of
-    // it by the same write (Model.entryWith / RETIRED_SETTINGS).
-    if (out.changed) {
-      root.userState = out.state
-      root.saveState()
-    }
-    // ONE owned write does both jobs. It moves the pointer when the input
-    // named a different source, and it takes the URL the user just set OUT of
-    // the entry -- which is needed even when that source was already active,
-    // because re-setting the same URL must not leave a credential in the
-    // host's file. persistActive writes the state again only if the key
-    // actually moves, so the save above is not duplicated.
-    //
-    // Deferred: never write the host's settings from inside their own change
-    // notification (the reason the old epgUrl follow-up was deferred too).
-    var adopted = String(out.activeKey || "")
-    if (adopted !== "") Qt.callLater(function() { root.persistActive(adopted) })
-    for (var i = 0; i < out.evicted.length; i++) {
-      console.warn("omarchy-iptv: source history full, evicting", out.evicted[i])
-      root.queueCacheJob(["remove", "--key", out.evicted[i]], null)
-    }
+    // "ignore" with no fresh EPG input is the ordinary steady state.
+    if (plan.act === "ignore" && !plan.adoptEpg) return
+    root.adoptActive(playlist, epg, plan)
   }
 
-  // D-SINK-19. The state load, the `shell` arrival, and the MIGRATION of an
-  // install whose active source was named by a URL on the bar entry.
+  // D-SINK-19. ONE resolver for the state load, the `shell` arrival, the
+  // migration of an install whose active source was named by a URL on the
+  // bar entry, and a settings change (R1).
   //
   // Model.adoptActiveSource holds the decision (and the reasoning for the
   // order it takes it in). What belongs here is only the consequences: write
   // the state if it moved, mirror the key into the entry -- which is also
-  // what takes the old URL out of that entry, so the migration finishes
-  // itself -- and surface an invalid CLI value through D16's synthesized
-  // status.
+  // what takes the URL out of that entry, so the migration finishes itself --
+  // and surface an invalid CLI value through D16's synthesized status.
   //
-  // Idempotent by construction: on the second run the state's own `activeKey`
-  // answers at step 1 and nothing else is read.
-  function adoptActive(playlist, epg, playlistChanged) {
+  // Idempotent by construction: a second run over the same inputs finds the
+  // URL consumed (reconcileAction) and the state's own `activeKey` answering.
+  function adoptActive(playlist, epg, plan) {
     var entry = { playlistUrl: playlist, epgUrl: epg, sourceKey: String(root.settings.sourceKey || "") }
-    var out = Model.adoptActiveSource(root.userState, entry, Math.floor(Date.now() / 1000), "")
-    root.reconciled = true
-    root.reconciledPlaylistUrl = playlist
-    root.reconciledEpgUrl = epg
-    root.reconciledActiveKey = out.key
+    var out = Model.adoptActiveSource(root.userState, entry, Math.floor(Date.now() / 1000), "",
+                                      { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true })
     root.settingsInvalid = out.invalid
-    if (playlistChanged) {
+    if (out.moved) {
+      // A new source starts clean: the previous source's reason and host
+      // must not stay on screen while its first fetch runs (UX 4.5,
+      // D-LIVE-10). The fetch itself is driven by the new cache's freshness
+      // once its directory is bound (section 4.4 step 6), never from here.
+      // `moved`, not "the input changed": a refused typo over a working
+      // source used to blank that source's status line (review P3).
       root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
       root.playlistLoadWarnings = []
       root.lastError = ""
@@ -4117,13 +4100,18 @@ Item {
     }
     if (out.invalid) {
       // D16, narrowed by D-SINK-19: the error becomes the guide's body only
-      // when there is no active source to show instead.
+      // when there is no active source to show instead (re-applied by
+      // clearSourceData when the cache directory unbinds, D-SRC-03).
       root.applyInvalidStatus()
       if (!root.invalidInputBlocks) console.warn("omarchy-iptv: ignoring an invalid playlistUrl setting; the active source is unchanged")
     }
-    // The entry still holds a URL (the old shape, or a CLI value just
-    // adopted), or its mirrored key disagrees with the state. Either way one
-    // owned write fixes both. Deferred for the same reason as above.
+    // The entry still holds a URL (the old shape, a CLI value just adopted,
+    // or a refused one), or its mirrored key disagrees with the state. One
+    // owned write fixes both; Model.adoptActiveSource decides (`writeEntry`).
+    // Deferred: never write the host's settings from inside their own change
+    // notification. persistActive saves the state again only if the key
+    // actually moves, so the save above is not duplicated, and its ORDER
+    // against the entry write is Model.pointerWritePlan's (R5).
     //
     // An INVALID input is written out too, and that is deliberate: a value
     // that failed validation can still carry credentials (`ftp://u:p@h/x`,
@@ -4132,9 +4120,9 @@ Item {
     // The cost is that the user cannot read their typo back out of
     // shell.json; it was never a working configuration, and the guide names
     // the reason it was refused.
-    if (out.adoptedUrl || out.invalid || playlist !== "" || epg !== ""
-        || String(root.settings.sourceKey || "") !== out.key) {
-      Qt.callLater(function() { root.persistActive(out.key) })
+    if (out.writeEntry) {
+      var key = out.key
+      Qt.callLater(function() { root.persistActive(key) })
     }
   }
 
@@ -4365,8 +4353,10 @@ Item {
       // carry is back in the footer for a guide source the user has removed.
       // Removing a source already deletes its whole directory; a setting the
       // user cleared gets the same treatment for the part of it that setting
-      // owns. The playlist half of the cache is untouched. This is also the
-      // path a CLI `omarchy bar set ... epgUrl ""` arrives on.
+      // owns. The playlist half of the cache is untouched. Since D-SINK-19 a
+      // guide URL is cleared in the Sources screen (or by `state source
+      // update` through the CLI): `omarchy bar set ... epgUrl ""` is an empty
+      // INPUT, which is a no-op (R4), and never arrives here.
       if (root.activeSourceKey !== "") root.queueCacheJob(["epg-clear", "--key", root.activeSourceKey], null)
       return
     }
@@ -4990,7 +4980,10 @@ Item {
     target: stateInitProc
     function onExited(exitCode, exitStatus) {
       root.dirsReady = true
+      // R5: the parked state save FIRST, then the entry mirror that waited
+      // for it. The other order is the pointer-less source the review found.
       if (root.stateSavePending) root.saveState()
+      root.flushPendingEntry()
       root.runNextCacheJob()
     }
   }

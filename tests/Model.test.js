@@ -6366,9 +6366,23 @@ check("D-SINK-19: identity by URL survives as findSourceByUrl + normalizeSourceU
 // reconcile (D3 / SR8)
 check("reconcileSources: empty playlistUrl is a no-op", Model.reconcileSources(twoState, "", "", "", 1), { state: twoState, changed: false, activeKey: "", added: "", evicted: [], invalid: null })
 check("reconcileSources: invalid value synthesizes the validation result, never adds", (() => { const r = Model.reconcileSources(twoState, "ftp://x", "", "", 1); return [r.changed, r.activeKey, r.invalid.code, r.state.sources.length] })(), [false, "", "scheme", 2])
-check("reconcileSources: known url, same active key -> unchanged", (() => { const r = Model.reconcileSources(twoState, "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", twoState.sources[0].epgUrl, "d990c2e4", 5000); return [r.changed, r.activeKey, r.state.sources[0].lastUsed] })(), [false, "d990c2e4", 1000])
+// R2 (D-SINK-19 repair): the adopted key is written INTO the returned state,
+// so "same active key" means the state already names it. Before R2 the key
+// was an out-param only and this check built on a state with no key at all.
+const twoActive = Model.withActiveKey(twoState, "d990c2e4")
+check("reconcileSources: known url, same active key -> unchanged", (() => { const r = Model.reconcileSources(twoActive, "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", twoState.sources[0].epgUrl, "d990c2e4", 5000); return [r.changed, r.activeKey, r.state.sources[0].lastUsed, r.state.activeKey] })(), [false, "d990c2e4", 1000, "d990c2e4"])
+checkCall("R2: reconcileSources writes the adopted key into out.state, on the known-URL path and on the added path (the review's P1: Service.reconcile wrote out.state and never the key)", () => {
+  const known = Model.reconcileSources(twoActive, "/srv/tv/local.m3u", "", "d990c2e4", 5000)
+  const added = Model.reconcileSources(twoActive, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000)
+  const same = Model.reconcileSources(twoState, "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", twoState.sources[0].epgUrl, "", 5000)
+  return [known.activeKey, Model.activeKeyOf(known.state), known.changed,
+          added.activeKey, Model.activeKeyOf(added.state),
+          // a state with NO key that adopts a known URL: nothing in the history
+          // moves, but the key now does, so it is a change to write
+          same.changed, Model.activeKeyOf(same.state), Model.activeKeyOf(twoState)]
+}, ["b0eed9fb", "b0eed9fb", true, "d5977d8a", "d5977d8a", true, "d990c2e4", ""])
 check("reconcileSources: known url, key changed -> lastUsed bumped only", (() => { const r = Model.reconcileSources(twoState, "/srv/tv/local.m3u", "", "d990c2e4", 5000); return [r.changed, r.activeKey, r.added, r.state.sources[1].lastUsed, r.state.sources[0].lastUsed] })(), [true, "b0eed9fb", "", 5000, 1000])
-check("reconcileSources: adopts a changed valid epgUrl, ignores an invalid one", [Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000).state.sources[1].epgUrl, Model.reconcileSources(twoState, "/srv/tv/local.m3u", "ftp://e", "b0eed9fb", 5000).changed], ["http://e.test/x.xml", false])
+check("reconcileSources: adopts a changed valid epgUrl, ignores an invalid one", [Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000).state.sources[1].epgUrl, Model.reconcileSources(Model.withActiveKey(twoState, "b0eed9fb"), "/srv/tv/local.m3u", "ftp://e", "b0eed9fb", 5000).changed], ["http://e.test/x.xml", false])
 check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, "d5977d8a", "d5977d8a", "cli", "iptv-org.github.io", 6000, 0, false])
 check("reconcileSources: first v2 run (no history, legacy layout) tags the record migrated", [Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.emptyState(), "http://x.test/", "", "", 1, "cli").state.sources[0].origin], ["migrated", "cli", "cli"])
 check("reconcileSources: derived label is made unique", Model.reconcileSources(twoState, "http://provider.example.test/second.m3u", "", "", 1).state.sources[2].label, "provider.example.test 2")
@@ -6514,11 +6528,14 @@ checkCall("M2-04: the own-write override covers the keys the write carried, not 
     // the host changing something else does NOT drop it: it is not ours
     Model.ownWriteInForce({ sourceKey: "d990c2e4", showLogos: false, maxRecents: 20 }, w),
     // and the source write keeps working exactly as it did, on the key it
-    // carries since D-SINK-19
-    Model.settingsWithOwnWrite(host, Model.ownWriteForKey(host, "b0eed9fb")).sourceKey,
-    Model.ownWriteInForce({ sourceKey: "11111111", showLogos: false }, Model.ownWriteForKey(host, "b0eed9fb"))
+    // carries since D-SINK-19 -- composed the way writeOwnedEntry composes it
+    // (ownWriteOf over ownedEntryPatch), not through a helper nothing ships
+    // calls: ownWriteForKey was dead code and is gone
+    Model.settingsWithOwnWrite(host, Model.ownWriteOf(host, Model.ownedEntryPatch(host, { sourceKey: "b0eed9fb" }))).sourceKey,
+    Model.ownWriteInForce({ sourceKey: "11111111", showLogos: false }, Model.ownWriteOf(host, Model.ownedEntryPatch(host, { sourceKey: "b0eed9fb" })))
   ]
 }, [true, "d990c2e4", false, true, "b0eed9fb", false])
+check("D-SINK-19 review P3: the dead own-write helper is not exported (its only caller, Service.applyOwnWrite, was never called)", typeof Model.ownWriteForKey, "undefined")
 
 check("footerHints confirmRemove", Model.footerHints({ mode: "confirmRemove" }), [["Left/Right", "choose"], ["Enter", "confirm"], ["Esc", "cancel"]])
 check("footerHints error empty state adds o sources when sources exist", [Model.footerHints({ empty: "error", sourcesExist: true }), Model.footerHints({ empty: "error", sourcesExist: false }), Model.footerHints({ empty: "loading", sourcesExist: true })], [[["r", "retry"], ["o", "sources"], ["Esc", "close"]], [["r", "retry"], ["Esc", "close"]], [["Esc", "close"]]])
@@ -6670,11 +6687,16 @@ checkCall("D-SINK-19 migration 2: idempotent -- the second run reads the state's
   // The entry has been rewritten by now: key in, URL out.
   const second = Model.adoptActiveSource(first.state, { playlistUrl: "", epgUrl: "", sourceKey: OLD_KEY }, 2000, "")
   // ... and a third run where the host has not caught up and STILL reports the
-  // old URL. The key wins; the URL is not re-read.
+  // old URL. R1: whether that URL is read is the PLAN's call (reconcileAction
+  // marks a value equal to the snapshot as consumed, and the service passes
+  // adoptUrl false); the resolver itself, asked with no plan, treats it as
+  // fresh -- and because it is the same URL, re-adopting it moves nothing.
+  const stale = Model.adoptActiveSource(second.state, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: OLD_KEY }, 3000, "", { adoptUrl: false })
   const third = Model.adoptActiveSource(second.state, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: OLD_KEY }, 3000, "")
   return [second.key, second.changed, second.adoptedUrl, JSON.stringify(second.state) === JSON.stringify(first.state),
-          third.key, third.changed, third.adoptedUrl, JSON.stringify(third.state) === JSON.stringify(first.state)]
-}, [OLD_KEY, false, false, true, OLD_KEY, false, false, true])
+          stale.key, stale.changed, stale.adoptedUrl, JSON.stringify(stale.state) === JSON.stringify(first.state),
+          third.key, third.changed, third.adoptedUrl, third.moved, JSON.stringify(third.state) === JSON.stringify(first.state)]
+}, [OLD_KEY, false, false, true, OLD_KEY, false, false, true, OLD_KEY, false, true, false, true])
 
 checkCall("D-SINK-19 migration 3: two sources, and the one the entry names is the one that becomes active", () => {
   const a = Model.adoptActiveSource(oldShape([srcProvider, srcSecond]), { playlistUrl: srcSecond.url, epgUrl: "", sourceKey: "" }, 1000, "")
@@ -6697,18 +6719,24 @@ checkCall("D-SINK-19 migration 4: a URL the history has never seen is ADDED, not
           out.state.sources.map(r => r.key).indexOf("42839dd5") >= 0]
 }, ["d5977d8a", "d5977d8a", true, 2, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://e.test/x.xml", "cli", "d5977d8a", "migrated", true])
 
-checkCall("D-SINK-19 migration 5: an entry with a KEY and a stale URL -- the key wins and the URL is never read", () => {
-  // This is the host one write behind: we have already written the key and
-  // the URL is still in the published copy. Reading the URL here would
-  // resurrect a source the user may have just removed.
+checkCall("D-SINK-19 migration 5 (R1): an entry with a KEY and a CONSUMED URL -- the key wins and the URL is not read; a FRESH URL beside the same key is adopted", () => {
+  // The consumed case is the host one write behind: we have already written
+  // the key and adopted this URL, and it is still in the published copy.
+  // Reading it again would resurrect a source the user may have just removed.
+  // The plan (reconcileAction) is what knows the difference; the resolver is
+  // told through opts.adoptUrl.
   const st = Model.cloneState(oldShape([srcSecond]), { activeKey: "" })
-  const out = Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "42839dd5" }, 1000, "")
-  // ... and the same with a key that is a non-key: that falls THROUGH to the
-  // URL, because a value that is not a key is not a pointer.
-  const junk = Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "not-a-key" }, 1000, "")
-  return [out.key, out.adoptedUrl, out.state.sources.length, out.added,
-          junk.key, junk.adoptedUrl, junk.state.sources.length, junk.added]
-}, ["42839dd5", false, 1, "", OLD_KEY, true, 2, OLD_KEY])
+  const consumed = Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "42839dd5" }, 1000, "", { adoptUrl: false })
+  // The FRESH case is the review's P1: a URL set while the shell was down,
+  // beside the mirror of the previous source. The first version let the key
+  // win here too, which discarded the user's input and then stripped it.
+  const fresh = Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "42839dd5" }, 1000, "")
+  // ... and a non-key beside a consumed URL: nothing to go on.
+  const junk = Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "not-a-key" }, 1000, "", { adoptUrl: false })
+  return [consumed.key, consumed.adoptedUrl, consumed.state.sources.length, consumed.added,
+          fresh.key, fresh.adoptedUrl, fresh.state.sources.length, fresh.added, fresh.moved,
+          junk.key, junk.adoptedUrl, junk.state.sources.length]
+}, ["42839dd5", false, 1, "", OLD_KEY, true, 2, OLD_KEY, true, "", false, 1])
 
 checkCall("D-SINK-19 migration 6: an activeKey naming a source that no longer exists falls through, and the dangling value is cleared", () => {
   const dangling = oldShape([srcSecond], "d990c2e4")
@@ -6766,18 +6794,179 @@ check("D16/D-SINK-19: a refused INPUT is the guide's error state only when there
    Model.invalidInputBlocks({ code: "scheme" }, "not-a-key")],
   [true, false, false, false, false, false, true])
 
+// ---- D-SINK-19 REPAIR ROUND (lead rulings R1-R5 after the adversarial review) ----
+//
+// Every check below was run against f275bde first, where the defect it
+// guards exists, and went red there: the new fields (`moved`, `writeEntry`,
+// `adoptedEpg`), the new function (pointerWritePlan), the new fixture
+// sections and the order change all fail on that tree for the reason the
+// review gave.
+
+// The review's P1, reproduced by calling the shipping functions in the order
+// the service calls them: state {activeKey K_OLD}, entry {playlistUrl NEW,
+// sourceKey K_OLD}, the first reconcile of a service (a shell start after
+// `omarchy bar set ... playlistUrl NEW` while it was down). At f275bde the
+// plan was "migrate", the resolver returned K_OLD at step 1, NEW never
+// entered the history, and the owned write then STRIPPED it from shell.json.
+checkCall("R1 (review P1): a URL set while the shell was down is adopted on the first reconcile, becomes active, and the entry patch carries the NEW key and no URL", () => {
+  const NEW = "http://new.example.test/list.m3u"
+  const st = Model.cloneState(oldShape([srcProvider]), { activeKey: OLD_KEY })
+  const hostEntry = { id: "io.github.rmcdavid.iptv", playlistUrl: NEW, sourceKey: OLD_KEY, showLogos: false }
+  const settings = Model.settingsFrom(hostEntry)
+  const plan = Model.reconcileAction({ first: true, force: false, playlist: settings.playlistUrl, epg: settings.epgUrl, lastPlaylist: "", lastEpg: "" })
+  const out = Model.adoptActiveSource(st, { playlistUrl: settings.playlistUrl, epgUrl: settings.epgUrl, sourceKey: settings.sourceKey }, 1000, "",
+                                      { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg })
+  const patch = Model.ownedEntryPatch(settings, { sourceKey: out.key })
+  patch.id = hostEntry.id
+  const entry = Model.entryWith(hostEntry, patch)
+  const newRec = Model.findSourceByUrl(out.state.sources, Model.normalizeSourceUrl(NEW, { origin: "cli" }))
+  return [plan.act, out.key !== OLD_KEY, out.key !== "", newRec ? newRec.key === out.key : "not adopted",
+          Model.activeKeyOf(out.state) === out.key, out.moved, out.writeEntry,
+          entry.sourceKey === out.key, Object.prototype.hasOwnProperty.call(entry, "playlistUrl"),
+          // the old source survives in the history
+          out.state.sources.map(r => r.key).indexOf(OLD_KEY) >= 0, out.state.sources.length]
+}, ["adopt", true, true, true, true, true, true, true, false, true, 2])
+
+// The same shape mid-session: a forced reconcile (state reload) that sees a
+// URL the service has NOT consumed adopts it too (the review's route (b)).
+checkCall("R1: a forced reconcile over a fresh URL adopts; over the consumed echo of it, resolves from the key", () => {
+  const NEW = "http://new.example.test/list.m3u"
+  const st = Model.cloneState(oldShape([srcProvider]), { activeKey: OLD_KEY })
+  const fresh = Model.reconcileAction({ first: false, force: true, playlist: NEW, epg: "", lastPlaylist: OLD_URL, lastEpg: "" })
+  const echo = Model.reconcileAction({ first: false, force: true, playlist: NEW, epg: "", lastPlaylist: NEW, lastEpg: "" })
+  const a = Model.adoptActiveSource(st, { playlistUrl: NEW, epgUrl: "", sourceKey: OLD_KEY }, 1000, "", { adoptUrl: fresh.adoptUrl, adoptEpg: fresh.adoptEpg })
+  const b = Model.adoptActiveSource(st, { playlistUrl: NEW, epgUrl: "", sourceKey: OLD_KEY }, 1000, "", { adoptUrl: echo.adoptUrl, adoptEpg: echo.adoptEpg })
+  return [fresh.act, a.adoptedUrl, a.key !== OLD_KEY, echo.act, b.adoptedUrl, b.key]
+}, ["adopt", true, true, "migrate", false, OLD_KEY])
+
+// R1's order, every step and every refusal, from the shared fixture.
+function fixtureState(keys, activeKey) {
+  const recs = keys.map(k => Object.assign({ key: k, kind: "http", label: k, labelCustom: false, origin: "cli", addedAt: 1, lastUsed: 1, fetchedAt: 1, channelCount: 1, groupCount: 1 }, activeKeyFixture.records[k]))
+  const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, sources: recs }))
+  return Model.cloneState(st, { activeKey: activeKey })
+}
+function fixtureUrl(value) {
+  if (value === "@new") return activeKeyFixture.new
+  if (String(value).indexOf("@") === 0) return activeKeyFixture.records[String(value).slice(1)].url
+  return value
+}
+checkCall("R1/R4: adoptActiveSource over every `adopt` case of the shared fixture (URL first, then the state's key, then the entry's mirror, then nothing)", () => {
+  return activeKeyFixture.adopt.map(c => {
+    const st = fixtureState(c.keys, c.activeKey)
+    const entry = { playlistUrl: fixtureUrl(c.entry.playlistUrl), epgUrl: c.entry.epgUrl, sourceKey: c.entry.sourceKey }
+    const out = Model.adoptActiveSource(st, entry, 1000, "", c.opts)
+    const active = Model.findSource(out.state.sources, out.key)
+    const facts = { key: out.key, adoptedUrl: out.adoptedUrl, adoptedEpg: out.adoptedEpg, added: out.added,
+                    invalid: out.invalid ? out.invalid.code : null, moved: out.moved, changed: out.changed,
+                    writeEntry: out.writeEntry, sources: out.state.sources.length,
+                    epgOnActive: active ? String(active.epgUrl) : "" }
+    // In the fixture's own key order, so the comparison is about values.
+    const got = {}
+    Object.keys(c.want).forEach(k => { got[k] = facts[k] })
+    // the key the state carries is the key the resolver answered, always
+    const consistent = Model.activeKeyOf(out.state) === out.key && (out.changed || out.state === st)
+    return c.name + ": " + JSON.stringify(got) + (consistent ? "" : " INCONSISTENT")
+  })
+}, activeKeyFixture.adopt.map(c => c.name + ": " + JSON.stringify(c.want)))
+check("R1: the fixture's adopt section covers every step, both refusals, the consumed echo and the EPG rules",
+  [activeKeyFixture.adopt.filter(c => c.want.adoptedUrl).length >= 4,
+   activeKeyFixture.adopt.filter(c => c.want.invalid !== null).length >= 2,
+   activeKeyFixture.adopt.filter(c => c.opts && c.opts.adoptUrl === false).length >= 2,
+   activeKeyFixture.adopt.filter(c => c.want.adoptedEpg === true).length >= 2,
+   activeKeyFixture.adopt.filter(c => c.entry.sourceKey !== "" && c.entry.playlistUrl === "" && c.activeKey === "" && c.want.key !== "").length >= 1,
+   activeKeyFixture.adopt.filter(c => c.want.key === "" && c.activeKey !== "" && c.want.changed).length >= 1],
+  [true, true, true, true, true, true])
+
+// R3: removing the active record clears the pointer in the state returned,
+// from the shared fixture (the helper's remove_source_record runs the same
+// cases in tests/test_state.py).
+checkCall("R3: removeSource over every `remove` case of the shared fixture", () => {
+  return activeKeyFixture.remove.map(c => {
+    const st = fixtureState(c.keys, c.activeKey)
+    const out = Model.removeSource(st, c.remove)
+    return c.name + ": " + JSON.stringify({ ok: out.removed !== null, activeKey: out.state.activeKey, resolved: Model.activeKeyOf(out.state), count: out.state.sources.length })
+  })
+}, activeKeyFixture.remove.map(c => c.name + ": " + JSON.stringify({ ok: c.ok, activeKey: c.want.activeKey, resolved: c.want.activeKey, count: c.want.count })))
+check("R3: the stored key and the resolved key agree after a remove -- no dangling pointer, in the FILE and not only on read",
+  (() => { const st = fixtureState(["d990c2e4", "42839dd5"], "d990c2e4"); const out = Model.removeSource(st, "d990c2e4"); return [out.state.activeKey, Model.activeKeyOf(out.state), st.activeKey] })(),
+  ["", "", "d990c2e4"])
+
+// R5: the write order, from the shared fixture.
+checkCall("R5: pointerWritePlan over every `order` case of the shared fixture -- the entry never gets ahead of a parked state save", () => {
+  return activeKeyFixture.order.map(c => {
+    const input = Object.prototype.hasOwnProperty.call(c, "input") ? c.input : { keyMoved: c.keyMoved, dirsReady: c.dirsReady, savePending: c.savePending }
+    const plan = Model.pointerWritePlan(input)
+    return c.name + ": " + JSON.stringify(plan)
+  })
+}, activeKeyFixture.order.map(c => c.name + ": " + JSON.stringify({ steps: c.steps, entryWaits: c.entryWaits })))
+checkCall("R5: in every plan the state step, when there is one, comes BEFORE the entry step, and a wait is never paired with a write",
+  () => activeKeyFixture.order.map(c => {
+    const plan = Model.pointerWritePlan(Object.prototype.hasOwnProperty.call(c, "input") ? c.input : c)
+    const stateAt = plan.steps.findIndex(x => x === "save-state" || x === "defer-state")
+    const entryAt = plan.steps.findIndex(x => x === "write-entry" || x === "wait-entry")
+    return (stateAt === -1 || stateAt < entryAt) && entryAt === plan.steps.length - 1
+      && (plan.steps.indexOf("wait-entry") === -1) !== plan.entryWaits
+  }), activeKeyFixture.order.map(() => true))
+
+// P3 sibling (rule 15): cloneState coerced a non-string activeKey into the key
+// grammar exactly as activeKeyText used to, one fix having landed at one of
+// two identical sites. Every reducer goes through cloneState.
+checkCall("P3 sibling: cloneState carries activeKey through activeKeyText, so a reducer over a raw state agrees with the helper's isinstance check", () => {
+  return activeKeyFixture.parse.map(c => JSON.stringify(Model.cloneState({ activeKey: c.raw }).activeKey)
+    + "/" + JSON.stringify(Model.withFavorites({ activeKey: c.raw, favorites: [] }, ["x"]).activeKey))
+}, activeKeyFixture.parse.map(c => JSON.stringify(c.key) + "/" + JSON.stringify(c.key)))
+
+// P3 sibling: the status-line reset is keyed to a MOVE of the active source,
+// not to the input changing, so a refused typo over a working source leaves
+// that source's status alone.
+checkCall("P3 sibling: `moved` is false for a refused input and for a re-set of the active URL, true only when the active source is a different one", () => {
+  const st = Model.cloneState(oldShape([srcProvider, srcSecond]), { activeKey: OLD_KEY })
+  return [Model.adoptActiveSource(st, { playlistUrl: "ftp://h.test/x", epgUrl: "", sourceKey: OLD_KEY }, 1, "").moved,
+          Model.adoptActiveSource(st, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: OLD_KEY }, 1, "").moved,
+          Model.adoptActiveSource(st, { playlistUrl: srcSecond.url, epgUrl: "", sourceKey: OLD_KEY }, 1, "").moved,
+          Model.adoptActiveSource(st, { playlistUrl: "", epgUrl: "http://e.test/x.xml", sourceKey: OLD_KEY }, 1, "").moved,
+          Model.adoptActiveSource(Model.cloneState(st, { activeKey: "" }), { playlistUrl: "", epgUrl: "", sourceKey: OLD_KEY }, 1, "").moved]
+}, [false, false, true, false, true])
+
+// P3 sibling (rule 13): the fixture's own prose names its sections; every
+// name it backticks in the sections list must be a key of the file.
+check("P3 sibling: every section the fixture's comment names exists in the fixture",
+  (() => {
+    const named = []
+    activeKeyFixture.comment.forEach(line => { const m = /^\s*`([a-z]+)`\s+(BOTH|JavaScript only)/.exec(line); if (m) named.push(m[1]) })
+    return [named.length, named.filter(n => Array.isArray(activeKeyFixture[n])).length, named.sort().join(",")]
+  })(), [5, 5, "adopt,order,parse,remove,resolve"])
+
+// R7, the half node can grade: the migration over a TWO-source state keeps
+// the count it went in with, whichever record the entry names, and the
+// non-active record is the one that must survive.
+checkCall("R7: the migration keeps the source count it went in with (two records, one active, one not), on both routes", () => {
+  const twoOld = oldShape([srcProvider, srcSecond])
+  const viaProvider = Model.adoptActiveSource(twoOld, { playlistUrl: OLD_URL, epgUrl: "", sourceKey: "" }, 1000, "")
+  const viaSecond = Model.adoptActiveSource(twoOld, { playlistUrl: srcSecond.url, epgUrl: "", sourceKey: "" }, 1000, "")
+  const viaMirror = Model.adoptActiveSource(twoOld, { playlistUrl: "", epgUrl: "", sourceKey: "42839dd5" }, 1000, "")
+  const survives = (out) => out.state.sources.length === twoOld.sources.length
+    && out.state.sources.map(r => r.key).sort().join(",") === twoOld.sources.map(r => r.key).sort().join(",")
+  return [twoOld.sources.length, survives(viaProvider), survives(viaSecond), survives(viaMirror),
+          viaProvider.key, viaSecond.key, viaMirror.key]
+}, [2, true, true, true, OLD_KEY, "42839dd5", "42839dd5"])
+
 // ---- SR8: `omarchy bar set ... playlistUrl <url>` still adopts ----
 //
 // It becomes INPUT ONLY (cost 1 of the change) and the adoption path is the
 // same reconcile that runs today. The decision about WHAT a settings change
 // means is Model.reconcileAction, lifted out of Service.qml so this can call
 // it instead of grepping the component for a branch (rules 12 and 14).
-checkCall("SR8/D-SINK-19: a changed, non-empty playlistUrl adopts; an input that went away is NOT a command", () => {
+checkCall("SR8/D-SINK-19 (R1): a playlistUrl this service has not consumed adopts -- first, forced or changed; an input that went away is NOT a command", () => {
   const A = "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"
   const B = "http://second.example.test/list.m3u"
   return [
-    // a state load, and the first reconcile of a service: migrate
+    // the first reconcile of a service with a URL on the entry: ADOPT (the
+    // review's P1 -- the first version said "migrate" here and the migration
+    // never read the URL)
     Model.reconcileAction({ first: true, playlist: A, epg: "" }).act,
+    // a forced reconcile (state load) over a URL already consumed: the host's
+    // stale echo, rule 9 -- resolve from the key
     Model.reconcileAction({ force: true, playlist: A, epg: "", lastPlaylist: A }).act,
     // SR8: the user sets a URL, or changes it
     Model.reconcileAction({ playlist: A, epg: "", lastPlaylist: "" }).act,
@@ -6793,12 +6982,28 @@ checkCall("SR8/D-SINK-19: a changed, non-empty playlistUrl adopts; an input that
     // an epgUrl change alone, with a playlist that is already empty: still
     // not a command about the active source
     Model.reconcileAction({ playlist: "", epg: "http://e.test/x.xml", lastPlaylist: "" }).act,
-    // an epgUrl change beside an unchanged playlist adopts (D-SRC-02)
+    // an epgUrl change beside an unchanged playlist: not a command about the
+    // ACTIVE source ("ignore"), and the EPG is adopted anyway (R4, below)
     Model.reconcileAction({ playlist: A, epg: "http://e.test/x.xml", lastPlaylist: A }).act,
     // nothing at all
-    Model.reconcileAction(null).act, Model.reconcileAction({}).act
+    Model.reconcileAction(null).act, Model.reconcileAction({}).act,
+    // a forced reconcile over a URL that DIFFERS from the snapshot: fresh
+    Model.reconcileAction({ force: true, playlist: B, epg: "", lastPlaylist: A }).act,
+    // a forced reconcile with no URL: the migration path
+    Model.reconcileAction({ force: true, playlist: "", epg: "", lastPlaylist: "" }).act
   ]
-}, ["migrate", "migrate", "adopt", "adopt", "ignore", "ignore", "ignore", "ignore", "adopt", "ignore", "ignore"])
+}, ["adopt", "migrate", "adopt", "adopt", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", "adopt", "migrate"])
+checkCall("R1: the plan's adoptUrl is the one bit the resolver reads, and it is consumed-vs-fresh, never first-vs-forced", () => {
+  const A = "http://h.test/a.m3u"
+  return [
+    Model.reconcileAction({ first: true, playlist: A, epg: "" }).adoptUrl,
+    Model.reconcileAction({ force: true, playlist: A, epg: "", lastPlaylist: A }).adoptUrl,
+    Model.reconcileAction({ force: true, playlist: A, epg: "", lastPlaylist: "" }).adoptUrl,
+    Model.reconcileAction({ playlist: A, epg: "", lastPlaylist: A }).adoptUrl,
+    Model.reconcileAction({ playlist: "", epg: "", lastPlaylist: A }).adoptUrl,
+    Model.reconcileAction({ first: true, playlist: "", epg: "" }).adoptUrl
+  ]
+}, [true, false, true, false, false, false])
 checkCall("SR8/D-SINK-19: adoptEpg is D-SRC-10 unchanged -- an epgUrl that did not move in the write that moved the playlist is the PREVIOUS source's", () => {
   const A = "http://h.test/a.m3u", B = "http://h.test/b.m3u", E = "http://h.test/a.xml"
   return [
@@ -6808,11 +7013,21 @@ checkCall("SR8/D-SINK-19: adoptEpg is D-SRC-10 unchanged -- an epgUrl that did n
     Model.reconcileAction({ playlist: B, epg: "http://h.test/b.xml", lastPlaylist: A, lastEpg: E }).adoptEpg,
     // the epgUrl alone changed: adopted
     Model.reconcileAction({ playlist: A, epg: "http://h.test/c.xml", lastPlaylist: A, lastEpg: E }).adoptEpg,
-    // a state load takes the settings as they are
+    // the first reconcile of a service takes the settings as they are
     Model.reconcileAction({ first: true, playlist: A, epg: E }).adoptEpg,
-    Model.reconcileAction({ force: true, playlist: A, epg: E, lastPlaylist: A, lastEpg: E }).adoptEpg
+    // a FORCED reconcile over an epgUrl already consumed does not re-adopt it
+    // (R4 / R1: the host's stale echo is not a command -- the first version
+    // said true here, which would have put back a guide URL the user had
+    // since cleared in the Sources screen)
+    Model.reconcileAction({ force: true, playlist: A, epg: E, lastPlaylist: A, lastEpg: E }).adoptEpg,
+    // R4: an EPG input alone, on an "ignore" plan, is adopted ...
+    Model.reconcileAction({ playlist: "", epg: E, lastPlaylist: "", lastEpg: "" }).adoptEpg,
+    Model.reconcileAction({ playlist: "", epg: E, lastPlaylist: "", lastEpg: "" }).act,
+    // ... and an EMPTY one is a no-op: the CLI clear lever is withdrawn
+    Model.reconcileAction({ playlist: "", epg: "", lastPlaylist: "", lastEpg: E }).adoptEpg,
+    Model.reconcileAction({ first: true, playlist: "", epg: "" }).adoptEpg
   ]
-}, [false, true, true, true, true])
+}, [false, true, true, true, false, true, "ignore", false, false])
 checkCall("SR8/D-SINK-19: the adopt path really is the same reconcile, and it is what sets the active key", () => {
   const A = "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"
   const base = Model.withCacheLayout(Model.emptyState(), 2)
@@ -6890,16 +7105,23 @@ check("EPG warnings: a playlist warning still outranks an EPG one in the same fo
 // D-SINK-19: what a source write CARRIES is the active key now, not the URL
 // pair. The override machinery is unchanged and so is every property it has;
 // the values it is exercised over are keys.
+//
+// Composed HERE the way Service.writeOwnedEntry composes it -- ownWriteOf over
+// ownedEntryPatch, every owned key stated -- and not through a helper. The
+// review found `Model.ownWriteForKey` reachable only from
+// `Service.applyOwnWrite`, which nothing called, with six assertions over it
+// (rule 14 at one remove); both are gone and these assert the live path.
 const hostA = Model.settingsFrom({ id: "x", sourceKey: "d990c2e4" })
 const hostB = Model.settingsFrom({ id: "x", sourceKey: "b0eed9fb" })
-const writeB = Model.ownWriteForKey(hostA, "b0eed9fb")
-check("own write: recorded against the host value it was made on", writeB, { base: { sourceKey: "d990c2e4" }, value: { sourceKey: "b0eed9fb" } })
+const sourceWrite = (host, key) => Model.ownWriteOf(host, Model.ownedEntryPatch(host, { sourceKey: Model.activeKeyText(key) }))
+const writeB = sourceWrite(hostA, "b0eed9fb")
+check("own write: recorded against the host value it was made on, every owned key stated (D-LOGO-2)", writeB, { base: { sourceKey: "d990c2e4", showLogos: false }, value: { sourceKey: "b0eed9fb", showLogos: false } })
 check("own write: in force while the host still reports the base", [Model.ownWriteInForce(hostA, writeB), Model.settingsWithOwnWrite(hostA, writeB).sourceKey], [true, "b0eed9fb"])
 check("own write: every other setting still comes from the host", [Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", sourceKey: "d990c2e4", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).refreshMinutes, Model.settingsWithOwnWrite(Model.settingsFrom({ id: "x", sourceKey: "d990c2e4", refreshMinutes: 45, mpvArgs: "--mute" }), writeB).mpvArgs], [45, "--mute"])
 check("own write: the host echoing our own value back lapses it, and the result is unchanged (idempotent)", [Model.ownWriteInForce(hostB, writeB), Model.settingsWithOwnWrite(hostB, writeB).sourceKey], [false, "b0eed9fb"])
 check("own write: a foreign change (omarchy bar set) lapses it and wins", (() => { const hostC = Model.settingsFrom({ id: "x", sourceKey: "11111111" }); return [Model.ownWriteInForce(hostC, writeB), Model.settingsWithOwnWrite(hostC, writeB).sourceKey] })(), [false, "11111111"])
-check("own write: clearing the active source is an ordinary write (D-LIVE-21)", (() => { const cleared = Model.ownWriteForKey(hostB, ""); return [Model.settingsWithOwnWrite(hostB, cleared).sourceKey, Model.ownWriteInForce(hostB, cleared)] })(), ["", true])
-check("own write: a junk key written through ownWriteForKey is normalized, never stored raw", (() => { const w = Model.ownWriteForKey(hostA, "../../etc/passwd"); return [w.value.sourceKey, Model.settingsWithOwnWrite(hostA, w).sourceKey] })(), ["", ""])
+check("own write: clearing the active source is an ordinary write (D-LIVE-21)", (() => { const cleared = sourceWrite(hostB, ""); return [Model.settingsWithOwnWrite(hostB, cleared).sourceKey, Model.ownWriteInForce(hostB, cleared)] })(), ["", true])
+check("own write: a junk key is normalized by the caller (writeActive passes activeKeyText) and never stored raw", (() => { const w = sourceWrite(hostA, "../../etc/passwd"); return [w.value.sourceKey, Model.settingsWithOwnWrite(hostA, w).sourceKey] })(), ["", ""])
 check("own write: no record, or a malformed one, leaves the host untouched", [Model.settingsWithOwnWrite(hostA, null).sourceKey, Model.settingsWithOwnWrite(hostA, {}).sourceKey, Model.settingsWithOwnWrite(hostA, { base: null, value: { sourceKey: "x" } }).sourceKey, Model.ownWriteInForce(hostA, undefined)], ["d990c2e4", "d990c2e4", "d990c2e4", false])
 check("own write: reconcile treats the echo of our own value as no change at all", (() => { const st = Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "http://h.test/b.m3u", "", "", 10); const again = Model.reconcileSources(st.state, "http://h.test/b.m3u", "", st.activeKey, 20); return [again.changed, again.activeKey === st.activeKey, again.added] })(), [false, true, ""])
 
