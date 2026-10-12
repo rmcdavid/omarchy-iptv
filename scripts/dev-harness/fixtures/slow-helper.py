@@ -68,11 +68,27 @@ REAL = os.path.join(HERE, "omarchy-iptv.real")
 
 
 def verb_of(argv):
-    """The verb this invocation names, or "" when it names none."""
+    """The verb this invocation names, or "" when it names none.
+
+    `state --state-dir <dir> init` is "state init" (D-SINK-19 R5:
+    key-scenario.sh stretches the service's start-up `state init` so the
+    window between the parked state save and the entry mirror is seconds
+    wide and a shell can be stopped inside it): the sub-verb after the
+    `--flag value` pairs, joined to "state" with a space so the plain
+    "state" of an older OMARCHY_IPTV_SLOW_VERBS list still names nothing
+    that this one does not."""
     if not argv:
         return ""
     if argv[0] == "player" and len(argv) > 1:
         return argv[1]
+    if argv[0] == "state":
+        i = 1
+        while i < len(argv):
+            if argv[i].startswith("--"):
+                i += 2
+                continue
+            return "state " + argv[i]
+        return "state"
     return argv[0]
 
 

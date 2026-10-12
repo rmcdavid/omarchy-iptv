@@ -47,6 +47,10 @@
 #   --window MODE       layer (default): the production PanelWindow + layer-shell. floating: host
 #                       the guide in a FloatingWindow (xdg toplevel) so it maps under a compositor
 #                       with no layer-shell, e.g. headless cage (docs/SPIKE-CAGE-HEADLESS.md). Harness-only.
+#   --source-key KEY    seed `sourceKey` on the bar entry at KEY ("" allowed), the mirror the
+#                       plugin writes since D-SINK-19; absent, the entry carries no such key, which
+#                       is the 0.13.5 shape. With --playlist it presents the entry a host holds
+#                       after `omarchy bar set ... playlistUrl` while the shell was down
 #
 # Why `key` and `type` refuse (F-M3-1 half (a)). wtype types into whatever
 # surface holds the keyboard, which on a bad day is the terminal the scenario is
@@ -225,10 +229,15 @@ prepare_root() {
   ln -sfn "$SHELL_DIR/Ui" "$root/Ui"           || die "could not link $SHELL_DIR/Ui"
   [[ -e $root/Commons && -e $root/Ui ]]        || die "the qs.Commons / qs.Ui links do not resolve"
   cp "$HERE/shell.qml" "$root/shell.qml"       || die "could not copy shell.qml into $root"
+  # The harness's own pure logic (entryKey, D-SINK-19 R6), which shell.qml
+  # imports beside Model.js and key-scenario.sh drives from node.
+  cp "$HERE/harness-lib.js" "$root/harness-lib.js" || die "could not copy harness-lib.js into $root"
   # The harness masks form values with the plugin's own Model.js (state()).
   cp "$PLUGIN_ROOT/Model.js" "$root/Model.js"  || die "could not copy Model.js from $PLUGIN_ROOT"
   qa_same_file "$HERE/shell.qml" "$root/shell.qml" \
     || die "$root/shell.qml does not match the harness shell.qml"
+  qa_same_file "$HERE/harness-lib.js" "$root/harness-lib.js" \
+    || die "$root/harness-lib.js does not match the harness harness-lib.js"
   qa_same_file "$PLUGIN_ROOT/Model.js" "$root/Model.js" \
     || die "$root/Model.js does not match $PLUGIN_ROOT/Model.js: the tree under test is MIXED"
   # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
@@ -656,7 +665,7 @@ except Exception: print("<unreadable>")' | tr -d '\n')
   start|--*)
     [[ $cmd == start ]] && shift
     OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0
-    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer
+    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer SOURCE_KEY="" SOURCE_KEY_SET=0
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
@@ -686,6 +695,12 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         # same reason as --order: shell.qml compares the string, so a typo
         # would silently run the production window under a compositor that
         # cannot map it and every pixel check after it would be vacuous.
+        # D-SINK-19. Validated here for the same reason as --order: the fake
+        # seeds the string as given, and a key that is not one would present
+        # an entry no host write can produce (Model.activeKeyText refuses it
+        # on the way in, so the plugin would read "" and a scenario a pass).
+        --source-key) SOURCE_KEY=$2; SOURCE_KEY_SET=1; shift
+                 [[ $SOURCE_KEY == "" || $SOURCE_KEY =~ ^[0-9a-f]{8}(-[0-9]+)?$ ]] || die "--source-key takes an 8-hex source key or \"\", not '$SOURCE_KEY'" ;;
         --window) WINDOW=$2; shift
                  [[ $WINDOW == layer || $WINDOW == floating ]] || die "--window takes layer or floating, not '$WINDOW'" ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -726,6 +741,8 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     export OMARCHY_IPTV_ENTRY_MS="$ENTRY_MS"
     export OMARCHY_IPTV_BAR_NUMBER="$BAR_NUMBER"
     export OMARCHY_IPTV_HARNESS_WINDOW="$WINDOW"
+    export OMARCHY_IPTV_SOURCE_KEY="$SOURCE_KEY"
+    export OMARCHY_IPTV_SOURCE_KEY_SET="$SOURCE_KEY_SET"
     # scheme://host only: the URL may carry provider credentials (S-08).
     echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s window=$WINDOW playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
     if (( DETACH )); then
@@ -754,6 +771,8 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         qa_env_line OMARCHY_IPTV_ENTRY_MS    "$OMARCHY_IPTV_ENTRY_MS"
         qa_env_line OMARCHY_IPTV_BAR_NUMBER  "$OMARCHY_IPTV_BAR_NUMBER"
         qa_env_line OMARCHY_IPTV_HARNESS_WINDOW "$OMARCHY_IPTV_HARNESS_WINDOW"
+        qa_env_line OMARCHY_IPTV_SOURCE_KEY     "$OMARCHY_IPTV_SOURCE_KEY"
+        qa_env_line OMARCHY_IPTV_SOURCE_KEY_SET "$OMARCHY_IPTV_SOURCE_KEY_SET"
         qa_env_line OMARCHY_IPTV_MPV_ARGS    "${OMARCHY_IPTV_MPV_ARGS:-}"
       } >"$SCRATCH/last-start.env"
       start_detached_shell

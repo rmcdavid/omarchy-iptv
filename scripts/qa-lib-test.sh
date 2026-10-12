@@ -976,7 +976,7 @@ is "and in a check-tree scenario the call sits on the live arm only" \
 # transcript would land on every commit. The list is literal and so it
 # drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
 # not learn it until a review read the two lists side by side.
-for g in chno-entry pip id-rotate logo clip; do
+for g in chno-entry pip id-rotate logo clip key; do
   lbl=$(grep -nE '^ *live\|"" *\)' "$ROOT/scripts/dev-harness/$g-scenario.sh" | head -1 | cut -d: -f1)
   ck "$g-scenario.sh (run by check.sh in check-tree mode) has a live arm to gate on" '[[ -n $lbl ]]'
 done
@@ -1040,6 +1040,45 @@ cl_swept=$(grep -oE "qa_count '([A-Z]\{64\}\|?)+' \"\\\$SCRATCH/harness.log\"" "
 is "the clip console-sink sweep names every payload letter the scenario offers" \
    "$cl_swept" "$cl_letters"
 is "and that derivation found the offers (non-vacuity)" "${#cl_letters}" "3"
+# D-SINK-19's scenario (key-scenario.sh, joined the gate 2026-10-11): the
+# same joins -- two floors, each to its recipe (every assertion is one
+# `ck "<letter><n>` line, none in a loop; the instrument arm is the I and S
+# lines) and check.sh's floor to the check-tree one plus one. And the
+# instrument itself, DRIVEN rather than grepped: harness-lib.js is loaded
+# from node with the repository's Model.js, so a copy of the function pasted
+# back into shell.qml beside the import would still pass S1 (a seam) but the
+# lifted body is what these three cases call. The three cases are the
+# ruling's three clauses, each seen red against the body it rules out:
+# `sourceKey` first (f275bde's body hashed the URL alone and reads the
+# URL's key where the mirror names another source), the URL hash second
+# (an entry with no mirror), named candidates only (the first repair, never
+# merged, iterated every own value and reads "deadbeef" off mpvArgs).
+KS="$ROOT/scripts/dev-harness/key-scenario.sh"
+is "the key scenario declares exactly two floors" \
+   "$(qa_count '^ *EXPECTED_CHECKS=[0-9]+$' "$KS")" "2"
+k_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$KS" | sed -n 1p | cut -d= -f2)
+k_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$KS" | sed -n 2p | cut -d= -f2)
+is "the key check-tree floor matches its recipe (the I and S lines)" \
+   "$k_tree" "$(qa_count '^ *ck "[IS][0-9]' "$KS")"
+is "the key live floor matches its recipe (every lettered line)" \
+   "$k_live" "$(qa_count '^ *ck "[A-Z][0-9]' "$KS")"
+is "check.sh's key preflight floor matches the scenario's own" \
+   "$(grep -oE 'KEY_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( k_tree + 1 ))"
+k_probe=$(node -e '
+const M = require(process.argv[1]); const H = require(process.argv[2])
+const url = "/tmp/qa-lib-test/a.m3u", other = "/tmp/qa-lib-test/b.m3u"
+const key = M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+const otherKey = M.sourceKey(M.normalizeSourceUrl(other, { origin: "cli" }))
+const r = [
+  H.entryKey(M, { id: "x", sourceKey: otherKey, playlistUrl: url }) === otherKey ? "key-first" : "url-first",
+  H.entryKey(M, { id: "x", playlistUrl: url }) === key ? "url-second" : "no-url",
+  H.entryKey(M, { id: "x", mpvArgs: "deadbeef", label: "0123abcd", activeKey: "cafebabe", key: "12345678" }) === "" ? "named-only" : "any-value"
+]
+process.stdout.write(r.join(" "))' "$ROOT/Model.js" "$ROOT/scripts/dev-harness/harness-lib.js" 2>/dev/null)
+is "the instrument reads sourceKey first, the URL hash second, named candidates only (driven)" \
+   "$k_probe" "key-first url-second named-only"
+is "and shell.qml stages nothing of its own: entryKey is the lifted function" \
+   "$(qa_count '^ *return HarnessLib\.entryKey\(Model, Model\.findBarEntry\(barConfig, harness\.pluginId\)\)$' "$ROOT/scripts/dev-harness/shell.qml")" "1"
 # INT and TERM trapped into an exit, beside the EXIT trap, in every scenario
 # that detaches a shell and has been PROVEN to clean up on a signal (clip:
 # `timeout -s TERM` after L3 and in the probe arm, and `-s INT`, measured
@@ -1051,7 +1090,10 @@ is "and that derivation found the offers (non-vacuity)" "${#cl_letters}" "3"
 # pip-, sources- and text-scenario.sh also detach and carry the EXIT trap
 # alone; they are not in this list because none has been signalled mid-run
 # and proven, and a list of the proven is what this asserts.
-for sc in clip player rewind tls; do
+# key: `timeout -s TERM 30` landing in its M segment, measured 2026-10-11
+# leaving no cage, shell, nested socket or work directory, with the
+# slow-helper orphans of its O segment reaped by recorded pid).
+for sc in clip player rewind tls key; do
   is "$sc-scenario.sh traps INT and TERM into an exit beside its EXIT trap" \
      "$(qa_count "^trap cleanup EXIT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 130' INT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 143' TERM$" "$ROOT/scripts/dev-harness/$sc-scenario.sh")" "1 1 1"
 done
@@ -1969,7 +2011,11 @@ is "a umask-created file here would have been private, which is why the mode is 
 # by one with L5 reported there, the offer size is pinned by mode (DR-B1),
 # the console-sink sweep is derived from the payload letters, and the four
 # scenarios proven to clean up on INT/TERM carry the two traps.
-EXPECTED=408
+# 408 -> 416 on 2026-10-11, D-SINK-19 round two: key-scenario.sh joins the
+# gate's named list (1), its two floors are joined to its recipe and to
+# check.sh (4), the instrument is driven from node over the ruling's three
+# clauses with the seam beside it (2), and it joins the proven-traps list (1).
+EXPECTED=416
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

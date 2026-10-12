@@ -206,6 +206,21 @@ LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-33}
 # scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
 # EXPECTED_CHECKS plus one.
 CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
+# The D-SINK-19 key preflight (scripts/dev-harness/key-scenario.sh
+# check-tree): 10 checks over the harness's own instrument -- entryKey in
+# harness-lib.js, driven from node with the tree's Model.js (lead ruling R6:
+# `sourceKey` first, the URL hash second, named candidates only; the first
+# repair would have reported a user's `mpvArgs` of "deadbeef" as the active
+# source) and three seams that keep shell.qml, hostEntry and run.sh reading
+# through it -- plus its own "ran every check" line. The shell arm (the real
+# Service.qml under cage over six seeded starts: the two-source migration,
+# the idempotent second start, a URL and an EPG set while the shell was
+# down, the remove of the active source, and a SIGKILL between the two
+# writes of a pointer change) is the live mode's, for a human; its STATUS
+# paragraph records the start-up reload drop it found on lane-key-r1.
+# scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
+# EXPECTED_CHECKS plus one.
+KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -399,7 +414,7 @@ else
   # noise and the Model.* calls are never resolved at all.
   stage="$CHECK_TMP/dev-harness"
   mkdir -p "$stage"
-  for f in "$ROOT"/scripts/dev-harness/*.qml; do
+  for f in "$ROOT"/scripts/dev-harness/*.qml "$ROOT"/scripts/dev-harness/*.js; do
     [[ -f $f ]] || continue
     cp "$f" "$stage/" || bad "could not stage $(basename "$f") for linting"
   done
@@ -657,6 +672,34 @@ elif (( clip_rc == 77 )); then
   fi
 else
   cat "$clip_log"; bad "clip preflight (exit $clip_rc)"
+fi
+
+step "scripts/dev-harness/key-scenario.sh check-tree (D-SINK-19 R6)"
+# The harness's instrument for the active source -- `hostEntry`, which
+# every sources-scenario.sh check about the one-write-behind host grades
+# through -- hashed the entry's playlistUrl, which D-SINK-19 takes OFF the
+# entry, so it read "" on both sides of the very tree it had to grade and
+# the gate could not see that (the D-SINK-19 review's harness P2). The
+# function now lives in scripts/dev-harness/harness-lib.js, which shell.qml
+# imports and this step drives from node with the tree's own Model.js:
+# `sourceKey` first, the URL hash second, named candidates only. No
+# display, no quickshell, under a second. A machine without node or
+# python3 answers 77, RED here unless KEY_PREFLIGHT_SKIP_OK=1 is set, for
+# the same reason as the two steps above.
+key_log=$CHECK_TMP/key-scenario.log
+"$ROOT/scripts/dev-harness/key-scenario.sh" check-tree >"$key_log" 2>&1; key_rc=$?
+if (( key_rc == 0 )); then
+  key_n=$(grep -c '^PASS' "$key_log" || true)
+  if (( key_n < KEY_PREFLIGHT_MIN )); then cat "$key_log"; bad "key preflight ran $key_n checks, expected at least $KEY_PREFLIGHT_MIN"; else ok "key preflight ($key_n checks)"; fi
+elif (( key_rc == 77 )); then
+  key_why=$(grep -a '^SKIP' "$key_log" | head -1 | sed 's/^SKIP key-scenario: //')
+  if [[ ${KEY_PREFLIGHT_SKIP_OK:-0} == 1 ]]; then
+    printf 'SKIP key preflight (KEY_PREFLIGHT_SKIP_OK=1): %s\n' "$key_why"
+  else
+    bad "key preflight SKIPPED, which is not green: $key_why (set KEY_PREFLIGHT_SKIP_OK=1 to accept a gate that drove no instrument)"
+  fi
+else
+  cat "$key_log"; bad "key preflight (exit $key_rc)"
 fi
 
 step "ascii check (code files)"

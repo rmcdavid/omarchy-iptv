@@ -4,6 +4,9 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import "Model.js" as Model
+// The harness's own pure logic (entryKey), staged beside this file by run.sh
+// so node can call the same function a scenario's live arm observes here.
+import "harness-lib.js" as HarnessLib
 
 // Dev harness for io.github.rmcdavid.iptv -- a standalone Quickshell config
 // that loads the three plugin entry points straight from the repo with fake
@@ -26,6 +29,8 @@ import "Model.js" as Model
 //   OMARCHY_IPTV_ENTRY_MS   numberEntryMs setting
 //   OMARCHY_IPTV_BAR_NUMBER "false" hides the channel number in the bar
 //   OMARCHY_IPTV_HARNESS_WINDOW "floating" hosts the guide in a FloatingWindow (harness-only; see floatingGuide)
+//   OMARCHY_IPTV_SOURCE_KEY_SET "1" seeds `sourceKey` on the entry (D-SINK-19), at
+//   OMARCHY_IPTV_SOURCE_KEY     this value, "" included (`run.sh --source-key`)
 //
 // Drive it with `run.sh ipc <fn> [args]` (IpcHandler target "harness").
 ShellRoot {
@@ -55,7 +60,16 @@ ShellRoot {
   property var lastPipOutcome: null
   // The entry shell.json starts with. The live value lives in
   // fakeHost.shellConfig from here on; `barEntry` below reads it back.
-  readonly property var seedBarEntry: ({
+  //
+  // D-SINK-19. `sourceKey` is seeded ONLY when run.sh was given --source-key
+  // (the SET variable), and then at exactly that value, "" included. The
+  // real entry carries the key only once the plugin has written it, so a
+  // seed that always carried one -- even empty -- would present a shape no
+  // 0.13.5 install has and let a scenario's "the entry gained the key" pass
+  // on the seed (rule 10). With it a scenario can present the entry a host
+  // would hold after an earlier shell wrote it: the key beside a fresh
+  // `playlistUrl` set while the shell was down, or the key alone.
+  readonly property var seedBarEntry: harness.withSeedKey({
     id: harness.pluginId,
     playlistUrl: Quickshell.env("OMARCHY_IPTV_PLAYLIST") || "",
     epgUrl: Quickshell.env("OMARCHY_IPTV_EPG") || "",
@@ -79,6 +93,10 @@ ShellRoot {
     pipSizePercent: parseInt(Quickshell.env("OMARCHY_IPTV_PIP_PERCENT") || "30", 10),
     pipMargin: parseInt(Quickshell.env("OMARCHY_IPTV_PIP_MARGIN") || "16", 10)
   })
+  function withSeedKey(entry) {
+    if (Quickshell.env("OMARCHY_IPTV_SOURCE_KEY_SET") === "1") entry.sourceKey = Quickshell.env("OMARCHY_IPTV_SOURCE_KEY") || ""
+    return entry
+  }
   // What the host has actually stored (the shell.json truth), as opposed to
   // what it has published to the plugin, which can lag it by one write.
   readonly property var barEntry: Model.findBarEntry(fakeHost.barConfig, harness.pluginId)
@@ -665,10 +683,15 @@ ShellRoot {
 
   // The active source of a bar config as its 8-hex key (or "" when unset):
   // comparable across the stored / published sides without printing a URL.
+  //
+  // D-SINK-19, lead ruling R6: `sourceKey` first, the `playlistUrl` hash
+  // second, named candidates ONLY. The decision and its reasons live in
+  // harness-lib.js so key-scenario.sh can drive the same function from node
+  // (rule 12); this used to hash the URL alone, which the plugin now strips,
+  // so `hostEntry` read "" on both sides and every scenario check grading
+  // through it was blind (the D-SINK-19 review's harness P2).
   function entryKey(barConfig) {
-    var url = Model.settingsFrom(Model.findBarEntry(barConfig, harness.pluginId)).playlistUrl
-    var normalized = Model.normalizeSourceUrl(url, { origin: "cli" })
-    return normalized === "" ? "" : Model.sourceKey(normalized)
+    return HarnessLib.entryKey(Model, Model.findBarEntry(barConfig, harness.pluginId))
   }
 
   // shell.qml applyShellConfig (76-89) driven by the user config FileView:
@@ -1147,8 +1170,41 @@ ShellRoot {
     // after a plugin's own updateEntryInline: the regression D-LIVE-20 is
     // exactly a plugin that waits for `published` to catch up with `stored`.
     // Both sides are reported as source keys, never URLs (S-08).
+    //
+    // D-SINK-19 adds the key NAMES each side's entry carries (`storedKeys`,
+    // `publishedKeys`; names only, `id` excluded, sorted): whether the
+    // retired `playlistUrl` / `epgUrl` are still on the stored entry after
+    // the plugin's write is a question about names, and the values can be
+    // credentialed URLs this reply must never carry.
     function hostEntry(): string {
-      return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig) })
+      return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig),
+                              storedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeHost.barConfig, harness.pluginId)),
+                              publishedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeShell.barConfig, harness.pluginId)) })
+    }
+    // D-SINK-19, R5: where the two writes of a pointer change stand. The
+    // service's start-up gate (`dirsReady`), the state save parked behind it
+    // (`stateSavePending`), the entry mirror waiting for that save
+    // (`pendingEntryKey`, R5's own property) and the `activeKey` the
+    // in-memory state carries -- so a scenario can see the interruptible
+    // window from inside rather than infer it from timing, and stop the
+    // shell IN it. Every field optional: a pre-R5 service has no
+    // pendingEntryKey, and the scenario has to run against one to show its
+    // checks red there first (rule 10). "undefined" is reported as null,
+    // and the key string is a key or "", never a URL.
+    function pointerState(): string {
+      var s = serviceLoader.item
+      if (!s) return JSON.stringify({ ok: false, error: { code: "no_service" } })
+      var st = s.userState
+      return JSON.stringify({ ok: true,
+                              stateLoaded: s.stateLoaded === undefined ? null : s.stateLoaded,
+                              reconciled: s.reconciled === undefined ? null : s.reconciled,
+                              dirsReady: s.dirsReady === undefined ? null : s.dirsReady,
+                              stateSavePending: s.stateSavePending === undefined ? null : s.stateSavePending,
+                              pendingEntryKey: s.pendingEntryKey === undefined ? null : s.pendingEntryKey,
+                              configured: s.configured === undefined ? null : s.configured,
+                              activeSourceKey: s.activeSourceKey === undefined ? null : s.activeSourceKey,
+                              memoryActiveKey: st && st.activeKey !== undefined ? String(st.activeKey) : null,
+                              sourceCount: st && st.sources ? st.sources.length : null })
     }
     function widget(): string {
       var w = barLoader.item

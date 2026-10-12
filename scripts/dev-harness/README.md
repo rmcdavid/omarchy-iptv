@@ -85,7 +85,7 @@ qa_transcript_start <name> || exit 2     # after the preflight, before the first
 * In a scenario with a **`check-tree` mode** the call goes on the `live|""`
   arm of the dispatch, never above it. `scripts/check.sh` runs
   `chno-entry-scenario.sh`, `pip-scenario.sh`, `id-rotate-scenario.sh`,
-  `logo-scenario.sh` and `clip-scenario.sh` in
+  `logo-scenario.sh`, `clip-scenario.sh` and `key-scenario.sh` in
   `check-tree` mode on every commit, and a gate step may neither print a path
   nobody asked for nor leave a file behind. It goes on that arm *above*
   `preflight`, so a live run's transcript covers both halves -- the summary at
@@ -206,6 +206,8 @@ scripts/dev-harness/run.sh --open --vertical         # glyph-only bar widget
 scripts/dev-harness/run.sh --open --order number      # channelOrder=number (M2-03)
 scripts/dev-harness/run.sh --open --entry-ms 3000 --no-bar-number
 scripts/dev-harness/run.sh --open --window floating   # harness-only window mode (headless cage)
+scripts/dev-harness/run.sh --playlist /x.m3u --source-key d990c2e4 --keep   # the entry a host holds after
+                                                     # `omarchy bar set playlistUrl` beside the mirror (D-SINK-19)
 scripts/dev-harness/run.sh ipc state                 # the harness's own target
 scripts/dev-harness/run.sh plugin-ipc status         # the plugin's target: the verbs a user binds
 scripts/dev-harness/run.sh plugin-ipc back 10        # argv is passed through untouched
@@ -898,6 +900,72 @@ either way. `CLIP_CAGE_BIN` and `CLIP_QML_BIN` override the two binaries;
 that no transcript lands. The scenario uses its own harness directory
 (`$XDG_RUNTIME_DIR/omarchy-iptv-clip`), not the shared one, so a display
 lane's running harness is never reaped by a clip run.
+
+### The bar entry names a key, not a URL (D-SINK-19)
+
+```
+scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
+scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
+scripts/dev-harness/key-scenario.sh --baseline f275bde    # the red run: the first build of the change
+```
+
+D-SINK-19 takes the provider URL off the host's bar entry: the entry
+carries `sourceKey`, an 8-hex pointer, and `state.json` carries
+`activeKey`; `omarchy bar set ... playlistUrl` is an INPUT that is adopted
+and then removed from the entry by the plugin's own write. Two things in
+this directory had to move with it.
+
+* **The instrument (lead ruling R6).** `hostEntry` -- the verb every
+  `sources-scenario.sh` check about the one-write-behind host grades
+  through -- derived both sides' keys by hashing the entry's `playlistUrl`,
+  which is the one thing the change takes off the entry, so on the very
+  tree it had to grade it read `""` on both sides. `entryKey` now lives in
+  `harness-lib.js`, which `shell.qml` imports beside `Model.js` and
+  `run.sh` stages the same way, and node can `require` it: `sourceKey`
+  first, the URL hash second, **named candidates only**. A first repair
+  (never merged) iterated every own value of the entry and would have
+  reported a user's `mpvArgs` of `deadbeef` as the active source. The
+  check-tree arm drives the function from node with the tree's own
+  `Model.js` (I1-I7) and pins the three seams that keep `shell.qml`,
+  `hostEntry` and `run.sh` reading through it (S1-S3); `hostEntry` also
+  reports each side's key NAMES (`storedKeys`, `publishedKeys`), never
+  values, so a scenario can see the retired URL keys leave the stored entry.
+  `run.sh --source-key KEY` seeds the mirror on the entry (`""` allowed),
+  which is how a scenario presents the entry a host would hold after an
+  earlier shell wrote it; absent, the entry carries no such key, which is
+  the 0.13.5 shape (rule 10: the seed never carries a key the plugin has
+  not written). `ipc pointerState` reports where the two writes of a
+  pointer change stand (`dirsReady`, `stateSavePending`, the held
+  `pendingEntryKey`, the in-memory `activeKey`), every field optional so
+  a pre-change tree answers null rather than throwing.
+* **The scenarios (R7).** The live arm runs the real `Service.qml` under a
+  nested cage, IPC only, over six seeded starts, each from its own
+  `state.json`, caches and entry so a red is attributable to one ruling:
+  the two-source migration asserting the count it went in with (M), the
+  idempotent second start (J), a `playlistUrl` and an `epgUrl` set while
+  the shell was down (C, E; the review's P1 and R4), removing the active
+  source (R; R3), and the interrupted order -- a NEW URL on the entry with
+  the service's `state init` held for seconds by `fixtures/slow-helper.py`
+  so the shell can be SIGKILLed between the parked state save and the
+  entry mirror, then restarted over the entry as the host held it (O; R5,
+  the review's P2). Plus a D segment that watches the start-up adoption
+  across `dirsReady` from inside, because of what the first run found.
+
+**What the first run found (2026-10-11, lane-key-r1 at f84ee50).** The
+key adopted at the first start is dropped when the helper's start-up
+`state init` chmods the EXISTING `state.json`: the chmod is an inotify
+`IN_ATTRIB` on the file the service's `FileView` watches, the reload hands
+`applyUserState` the pre-adoption text, `Model.stateOnLoad` keeps only the
+session record, the parked save then writes the key-less state and the
+entry flush strips the URL with `sourceKey ""`. Measured by polling
+`pointerState` at 50 ms (+1489 ms adopted and parked, +1909 ms dropped) and
+attributed by repeating it with a helper whose `state init` does nothing
+(the key survives). D2, M1, M3, M5, C1-C5, E1, O5 and O6 are red on that
+tree for this reason -- and so is `sources-scenario.sh`'s H1 (46 passed,
+22 failed under cage, identical with and without this directory's changes;
+66 passed, 0 failed over the dev tree with them), because the v1 migration
+adopts at start-up too. The scenario's header carries the full account;
+the fix is Service.qml's and the helper's, not this directory's.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
