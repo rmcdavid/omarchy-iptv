@@ -7676,53 +7676,45 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
     return key
 
 
-# D-SRC-11. The record fields the RUNNING shell owns, with the flag that writes
-# each and the plugin setting that is its authority.
+# D-SRC-11, OVERTURNED IN PART BY D-SINK-19. The record fields `state source
+# update` warns about, with the flag that writes each and the plugin setting
+# the bar entry used to carry for it.
 #
-# The settings are the source of truth for the ACTIVE source and the history
-# follows them (ruling D3 / SR8, and D-SRC-10 for the EPG half). So
-# `state source update --epg-url` writes the FOLLOWER: the shell's reconcile
-# rewrites the active record's `epgUrl` from the plugin's `epgUrl` setting every
-# time it re-reads state.json -- and it re-reads it because this command just
-# wrote it. Measured on the live install 2026-10-03: exit 0, "ok": true, and the
-# record read "" immediately afterwards. Against an isolated state directory the
-# same command writes the value and it persists, so the helper was never wrong;
-# it was silent about who would win.
+# What D-SRC-11 found (2026-10-03, measured on the live install): the settings
+# were the source of truth for the ACTIVE source and the history followed
+# them, so `--epg-url` on the active record was rewritten from the plugin's
+# `epgUrl` setting the moment the shell re-read state.json -- which this
+# command's own write caused -- and the helper said "ok": true about a value
+# that was already gone. The warning below was written for that.
 #
-# WHY THIS WARNS RATHER THAN REFUSES. Three options, and two of them are worse.
-#  - Writing the SETTING as well is out of scope. That is shell.json, whose
-#    schema belongs to the host; this helper is stdlib-only and knows nothing
-#    about the shell on purpose -- shell.json is not named anywhere else in this
-#    file, and teaching it that schema is a coupling the architecture refuses.
-#  - Refusing would break the half that WORKS. Reconcile only touches the
-#    record whose url matches the setting's playlistUrl, so an INACTIVE source
-#    keeps what this command wrote, and switching to it calls
-#    persistActive(rec.url, rec.epgUrl) -- the record's value goes INTO the
-#    setting. The command is right for every source but one. It is also how a
-#    machine with no shell running, and the test suite, set a source up at all.
-#  - And the helper could not tell WHICH source is the active one: the active
-#    key was derived from the setting's playlistUrl, and state.json did not
-#    record it. Nothing here could make that distinction without reading the
-#    shell's config, which is the first option again.
-#    D-SINK-19 CHANGED THAT HALF: state.json now carries `activeKey`, so this
-#    file CAN tell, and the warning below is therefore wider than it needs to
-#    be -- it fires for an inactive source too. Narrowing it is a behaviour
-#    change on a documented warning and is NOT taken here; it is raised for
-#    the board in this round's write-up rather than decided in a code comment.
-#    The other two reasons stand unchanged, and the warning is
-#    still true of the active source: `--epg-url` on it is overwritten by the
-#    shell, because `reconcileSources` adopts the setting's epgUrl (SR8 input,
-#    D-SRC-02) and the record follows it.
-# So the command says what it wrote, who owns it, and what to change instead.
+# D-SINK-19 inverted the ownership. The bar entry's `playlistUrl` and `epgUrl`
+# are INPUTS now: the shell converts a value it finds there into the record
+# and takes it off the entry; `activeKey` in state.json names the active
+# source; the record is the only store for both URLs and the shell reads it.
+# So this command's write is no longer undone by a reconcile, and a re-key
+# through `--url` moves `activeKey` with the record (update_source_record).
+# What the warning says now is the two things still worth a line:
+#  - the running shell picks the new value up when it re-reads state.json,
+#    which this write causes -- UNLESS it has a write of its own parked or in
+#    flight at that moment, in which case its write wins (D-SRC-15's R9: a
+#    reload never replaces in-memory state newer than the file) and the value
+#    in the file afterwards is the shell's. The Sources screen edits the same
+#    record inside the running shell, with no such race;
+#  - `--url` RE-KEYS the record: the cache directory of the old key is the
+#    caller's to move or remove (the shell does it for its own edits; this
+#    command does not), and the channels are fetched again.
+# The warning still fires for an inactive source too, which is wider than it
+# needs to be; narrowing it is a behaviour change on a documented warning and
+# is not taken here.
+#
+# WHY THIS WARNS RATHER THAN REFUSES (unchanged): writing the host's
+# shell.json is out of scope for a stdlib-only helper that names that file
+# nowhere, and refusing would break the half that is right for every source.
 # Exit code stays 0 because the write did happen.
 #
 # Scope, stated rather than implied: this fires for `update`, which is what
-# D-SRC-11 is filed against. `add --epg-url` has the same exposure in one narrow
-# case -- the url being added IS the setting's playlistUrl and no record existed
-# for it yet, which only happens on a state file the shell has not reconciled --
-# and it is not warned about, because warning on every add would make the
-# ordinary, correct operation noisy and the ordinary add is a source that is not
-# active yet, where the record is the authority until a switch copies it over.
+# D-SRC-11 is filed against; `add` is a source that is not active yet, where
+# nothing competes with the record.
 SETTING_OWNED_SOURCE_FIELDS = (
     ("epgUrl", "--epg-url", "epgUrl", "guide (EPG) URL"),
     ("url", "--url", "playlistUrl", "playlist URL"),
@@ -7730,21 +7722,29 @@ SETTING_OWNED_SOURCE_FIELDS = (
 
 
 def setting_owned_warnings(fields: Any) -> list[str]:
-    """Lines for a `state source update` that writes a field the running shell
-    owns for the active source (D-SRC-11), in a fixed order. Empty when nothing
-    asked for is one, so `--label` on its own says nothing."""
+    """Lines for a `state source update` that writes a URL field of a record
+    (D-SRC-11, as overturned in part by D-SINK-19), in a fixed order. Empty
+    when nothing asked for is one, so `--label` on its own says nothing."""
     asked = [row for row in SETTING_OWNED_SOURCE_FIELDS if row[0] in set(fields or ())]
     if not asked:
         return []
     out = []
     for field, flag, setting, _human in asked:
-        out.append("%s wrote the record's %s, which the running shell OWNS for the active "
-                   "source: the plugin setting '%s' is the authority and omarchy-shell "
-                   "rewrites the record from it whenever it re-reads state.json (D-SRC-11)."
-                   % (flag, field, setting))
-    out.append("So if this is the source the bar is showing, that value is already gone: set "
-               "the %s from the guide's Sources screen instead. For any other source the "
-               "record keeps it, and switching to that source copies it into the setting."
+        rekey = ""
+        if field == "url":
+            rekey = (" It also RE-KEYED the record: a new key, 'activeKey' moved with it when it was "
+                     "the active source, the old key's cache directory is yours to remove, and the "
+                     "channels are fetched again.")
+        out.append("%s wrote the record's %s. The record is the only store for it: the plugin "
+                   "setting '%s' on the bar entry is an INPUT the running shell converts into "
+                   "the record and takes off the entry, not where the value is kept "
+                   "(D-SINK-19; the D-SRC-11 warning that stood here said the shell would undo "
+                   "this write, and that design is gone).%s"
+                   % (flag, field, setting, rekey))
+    out.append("A running omarchy-shell reads the new %s when it re-reads state.json, which this "
+               "write causes -- unless it has a write of its own parked or in flight at that "
+               "moment, when its write wins and this value is lost (D-SRC-15, R9). The guide's "
+               "Sources screen edits the same record inside the shell with no such race."
                % " and ".join(row[3] for row in asked))
     return out
 
@@ -7823,13 +7823,20 @@ def init_state_file(path: str, state: dict[str, Any]) -> bool:
     and keeps the mode of an existing one, so the service runs `state init`
     once at startup before its first write. O_EXCL makes the check-and-create
     atomic: a file that appears in between is left alone. An existing file
-    is not rewritten; only its mode is tightened. Returns True when created."""
+    is not rewritten; its mode is tightened only when it is not 0600 already
+    (D-SRC-15, R10): a chmod is an inotify IN_ATTRIB on the file the shell's
+    FileView watches, mode changed or not, and the reload it causes arrives
+    while the shell's first save is still parked. The shell survives that
+    reload on its own (it ignores a reload while a save is parked or in
+    flight); this leaves the already-private file untouched so the ordinary
+    start never raises it at all. Returns True when created."""
     ensure_private_dir(os.path.dirname(path))
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         try:
-            os.chmod(path, 0o600)
+            if stat.S_IMODE(os.stat(path).st_mode) != 0o600:
+                os.chmod(path, 0o600)
         except OSError:
             pass
         return False

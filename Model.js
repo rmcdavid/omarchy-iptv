@@ -10105,8 +10105,13 @@ function reconcileAction(input) {
   var epg = str(it.epg)
   var first = it.first === true
   var force = it.force === true
-  var playlistChanged = first || playlist !== str(it.lastPlaylist)
-  var epgChanged = first || epg !== str(it.lastEpg)
+  // `first` carries no weight in "changed": the service's snapshot starts
+  // "" and a value that equals "" is empty, so a first value is fresh by the
+  // comparison alone. The term `first ||` used to sit here and a mutation
+  // that dropped it reddened nothing (round 2 review, P3); `first` decides
+  // `act` below and nothing else.
+  var playlistChanged = playlist !== str(it.lastPlaylist)
+  var epgChanged = epg !== str(it.lastEpg)
   var out = { act: "ignore",
               adoptUrl: playlist !== "" && playlistChanged,
               adoptEpg: epg !== "" && epgChanged,
@@ -10144,14 +10149,24 @@ function reconcileAction(input) {
 // record that is now active, when it validates and differs from what the
 // record holds.
 //
-// Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, invalid,
-// added, evicted, writeEntry }. `changed` is whether the state must be
-// written; `moved` is whether the active source is a DIFFERENT one than
+// Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, epgConsumed,
+// invalid, added, evicted, writeEntry }. `changed` is whether the state must
+// be written; `moved` is whether the active source is a DIFFERENT one than
 // before, which is the only thing that resets the status line (the first
 // version reset it on any input change, so a refused typo blanked a working
 // source's status); `writeEntry` is whether the bar entry must be rewritten
-// -- it still holds a URL (fresh, stale or refused: a refused value can still
-// carry credentials), or its mirrored key disagrees with the state.
+// -- it still holds a playlist URL (fresh, stale or refused: a refused value
+// can still carry credentials), an EPG input that REACHED a record
+// (`epgConsumed`: adopted, already held, or refused -- there was an active
+// record for it to land on), or its mirrored key disagrees with the state.
+//
+// R12 (round 3): an input is never stripped unadopted. An EPG input with NO
+// active source to land on is left on the entry -- the guide reads it as its
+// fallback meanwhile -- until a source exists and a later reconcile adopts
+// it; the service keeps its EPG snapshot where it was for exactly that case
+// (epgSnapshotAfter), so the value stays fresh to reconcileAction. The first
+// build stripped it in the same write and the value was gone with no copy
+// anywhere (round 2 review, P2).
 function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var st = state || emptyState()
   var e = entry || {}
@@ -10160,7 +10175,7 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var adoptEpg = o.adoptEpg !== false
   var before = activeKeyOf(st)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
-              invalid: null, added: "", evicted: [], writeEntry: false }
+              epgConsumed: false, invalid: null, added: "", evicted: [], writeEntry: false }
   var url = adoptUrl ? sanitizeInput(str(e.playlistUrl), MAX_SOURCE_URL + 1) : ""
   var epg = adoptEpg ? str(e.epgUrl) : ""
   var resolved = false
@@ -10194,6 +10209,7 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   // a fresh URL just named, a state load with an EPG on the entry, an
   // "ignore" plan that carries only an EPG change (D-SRC-02).
   if (adoptEpg && epg !== "" && out.key !== "") {
+    out.epgConsumed = true
     var ev = validateSourceUrl(epg, { kind: "epg", origin: "cli" })
     var active = findSource(out.state.sources, out.key)
     if (ev.ok && active && ev.url !== str(active.epgUrl)) {
@@ -10203,7 +10219,14 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   }
   out.changed = out.state !== st
   out.moved = out.key !== before
-  out.writeEntry = str(e.playlistUrl) !== "" || str(e.epgUrl) !== "" || activeKeyText(e.sourceKey) !== out.key
+  // R12: `epgConsumed`, not "the entry carries an EPG". A consumed EPG input
+  // (adopted, held already, or refused -- all three had a record to reach)
+  // is taken out, and so is the host's stale echo of one consumed EARLIER
+  // (the plan says `adoptEpg` false: it is not fresh, so it was adopted, rule
+  // 9's one-write-behind host still publishing it). The one EPG that stays
+  // is a FRESH one with no record to land on.
+  var epgEcho = str(e.epgUrl) !== "" && !adoptEpg
+  out.writeEntry = str(e.playlistUrl) !== "" || out.epgConsumed || epgEcho || activeKeyText(e.sourceKey) !== out.key
   return out
 }
 
@@ -10250,6 +10273,82 @@ function pointerWritePlan(input) {
                      : { steps: ["wait-entry"], entryWaits: true }
   }
   return { steps: ["write-entry"], entryWaits: false }
+}
+
+// R12's other half. The service keeps a snapshot of the last EPG input it saw
+// (reconcileAction compares against it, so a value is adopted once and the
+// host's stale echo of it, rule 9, is not adopted twice). The snapshot moves
+// to the input only when the input was CONSUMED -- there was an active record
+// for it to reach (adoptActiveSource's `epgConsumed`) -- or when the input
+// went away. An EPG set with no source yet is left fresh, so the reconcile
+// that follows the first source adopts it; without this the snapshot would
+// mark it consumed on the reconcile that could not use it, and the next
+// playlist write would strip it unadopted.
+function epgSnapshotAfter(epg, lastEpg, consumed) {
+  var now = str(epg)
+  if (now === "" || consumed === true) return now
+  return str(lastEpg)
+}
+
+// D-SRC-15 (R9). A reload of state.json NEVER replaces in-memory state that
+// is newer than the file. The file is the service's own write target, so the
+// in-memory state is newer whenever a save is parked behind the start-up dirs
+// (`savePending`), a write is still in flight (`savesInFlight`: setText has
+// returned, `saved` has not fired), or the last write FAILED (`saveFailed`:
+// the file never caught up, and applying it would replay the loss). In every
+// one of those the file is older than memory by construction: the parked or
+// in-flight save overwrites it anyway, so an ignored reload loses nothing
+// that was going to survive. The one reload that must always apply is the
+// FIRST (`loadedBefore` false): before it, memory is the empty default plus
+// whatever stateOnLoad replays on top.
+//
+// The reload this exists for is not the service's own write echoed back
+// (`ownWrite`, texts in recentSaves: skipped since R10 of the player design)
+// but a touch by something else: the helper's start-up `state init` chmods
+// the existing file, which is an inotify IN_ATTRIB and a `loaded` with the
+// PRE-adoption text (measured 2026-10-11 on a FileView probe: a chmod from
+// 0600 to 0600 reloads too). Applied, that text replaced the key and the
+// record adoptActiveSource had just adopted, the parked save then wrote the
+// key-less state and the entry flush stripped the URL: the user's active
+// source lost on the first start after the upgrade (D-SRC-15). The sibling
+// is the same flag: an IPC switch or remove before dirsReady (cacheReady
+// comes first) parks a save, so the reload that follows is ignored too.
+//
+// -> { act: "apply" | "ignore", reason }. Called by Service.applyUserState
+// before anything else; an ignored reload runs neither reconcile nor the
+// cache layout.
+function reloadDisposition(ctx) {
+  var c = ctx || {}
+  if (c.loadedBefore !== true) return { act: "apply", reason: "first-load" }
+  if (c.ownWrite === true) return { act: "ignore", reason: "own-write" }
+  if (c.savePending === true) return { act: "ignore", reason: "save-parked" }
+  if ((Number(c.savesInFlight) || 0) > 0) return { act: "ignore", reason: "save-in-flight" }
+  if (c.saveFailed === true) return { act: "ignore", reason: "save-failed" }
+  return { act: "apply", reason: "file-newer" }
+}
+
+// D-SRC-15 (R11). The second half of a "wait-entry" plan (pointerWritePlan):
+// the entry mirror that waited for the parked state save is written only
+// when that save has LANDED -- the FileView's `saved` signal, not setText
+// returning -- and the helper's start-up `state init` exited 0. Loading the
+// entry with the key is also the write that takes the URL off it, and the
+// URL on the entry is the only copy of a source whose state write failed, so
+// on either failure the entry is left exactly as it is ("drop": the next
+// start re-adopts it, the idempotent old shape) and the service logs a line
+// with no URL in it. "wait" while the save is parked or in flight, "flush"
+// once it has landed, "none" with nothing held.
+//
+// -> { act: "none" | "wait" | "flush" | "drop", reason }. Called from
+// stateInitProc's exit (after the parked save is issued), from stateFile's
+// `saved` and from its `saveFailed`.
+function entryFlushDisposition(ctx) {
+  var c = ctx || {}
+  if (c.pendingKey === null || c.pendingKey === undefined) return { act: "none", reason: "nothing-held" }
+  if (c.dirsReady !== true) return { act: "wait", reason: "dirs" }
+  if (c.initOk !== true) return { act: "drop", reason: "init-failed" }
+  if (c.saveFailed === true) return { act: "drop", reason: "save-failed" }
+  if (c.savePending === true || (Number(c.savesInFlight) || 0) > 0) return { act: "wait", reason: "save-in-flight" }
+  return { act: "flush", reason: "saved" }
 }
 
 // `activeSourceKey(state, playlistUrl)` USED TO BE HERE and is deliberately
@@ -11626,6 +11725,9 @@ if (typeof module !== "undefined") {
     adoptActiveSource: adoptActiveSource,
     reconcileAction: reconcileAction,
     pointerWritePlan: pointerWritePlan,
+    epgSnapshotAfter: epgSnapshotAfter,
+    reloadDisposition: reloadDisposition,
+    entryFlushDisposition: entryFlushDisposition,
     invalidInputBlocks: invalidInputBlocks,
     reconcileSources: reconcileSources,
     sourceForEdit: sourceForEdit,

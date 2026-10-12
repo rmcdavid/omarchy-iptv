@@ -582,9 +582,19 @@ Item {
   property bool epgTimedOut: false
   property bool dirsReady: false
   property bool stateSavePending: false
+  // D-SRC-15 (R9, R11). The three facts that say whether state.json on disk
+  // is OLDER than memory, read by Model.reloadDisposition before any reload
+  // is applied and by Model.entryFlushDisposition before the held entry
+  // mirror is written: saves issued and not yet confirmed by the FileView's
+  // `saved` (one per setText, measured 2026-10-11), whether the last write
+  // failed, and whether the helper's start-up `state init` exited 0.
+  property int stateSavesInFlight: 0
+  property bool stateSaveFailed: false
+  property bool stateInitOk: false
+  property int stateReloadsIgnored: 0                   // observable by the harness; never a URL
   // R5: the key whose entry mirror is WAITING for a parked state save
   // (Model.pointerWritePlan "wait-entry"); null when nothing waits. Written
-  // by stateInitProc's exit, after the parked save, never before it.
+  // by settleEntryFlush once that save has LANDED (R11), never before it.
   property var pendingEntryKey: null
   // D-SINK-18. What the last `config shield` run said about the file the host
   // persists our source URLs into: Model.CONFIG_SHIELD_UNKNOWN ("") until the
@@ -2021,7 +2031,24 @@ Item {
   // of this service's own writes is skipped: the in-memory state is newer
   // than what an earlier atomic write may still be delivering (R10).
   function applyUserState(text) {
-    if (root.stateLoaded && root.recentSaves.indexOf(text) !== -1) return
+    // D-SRC-15 (R9): a reload never replaces in-memory state that is newer
+    // than the file. Model.reloadDisposition holds the reasons (our own write
+    // echoed back; a save parked behind the start-up dirs; a write in flight;
+    // a write that failed). The reload this guards is the helper's start-up
+    // `state init` chmod of the existing file, which arrives with the
+    // PRE-adoption text while the adoption's save is still parked; applied,
+    // it dropped the adopted key and record, and the parked save then wrote
+    // the loss to disk. An ignored reload runs nothing below: neither
+    // reconcile nor the cache layout.
+    var disposition = Model.reloadDisposition({ loadedBefore: root.stateLoaded,
+                                                ownWrite: root.recentSaves.indexOf(text) !== -1,
+                                                savePending: root.stateSavePending,
+                                                savesInFlight: root.stateSavesInFlight,
+                                                saveFailed: root.stateSaveFailed })
+    if (disposition.act !== "apply") {
+      root.stateReloadsIgnored = root.stateReloadsIgnored + 1
+      return
+    }
     // Section 15's race: what arrives is a snapshot of the file from before
     // this shell wrote anything, so it is a base to merge onto, not a
     // replacement. Model.stateOnLoad() replays the play this shell recorded
@@ -2061,7 +2088,29 @@ Item {
     saves.push(text)
     while (saves.length > 8) saves.shift()
     root.recentSaves = saves
+    // Counted BEFORE setText: the file is older than memory from here until
+    // stateFile's `saved` (or `saveFailed`) says otherwise (R9).
+    root.stateSavesInFlight = root.stateSavesInFlight + 1
     stateFile.setText(text)
+  }
+
+  // D-SRC-15 (R11). Run when anything the held entry mirror waits on moves:
+  // the helper's start-up exit, a state save landing, a state save failing.
+  // Model.entryFlushDisposition decides; this only does what it says. A
+  // "drop" leaves the entry EXACTLY as it is -- the URL still on it is the
+  // only copy of a source whose state write did not land, and the next start
+  // re-adopts it -- and logs a line that carries the reason and no URL.
+  function settleEntryFlush() {
+    var d = Model.entryFlushDisposition({ pendingKey: root.pendingEntryKey, dirsReady: root.dirsReady,
+                                          initOk: root.stateInitOk, saveFailed: root.stateSaveFailed,
+                                          savePending: root.stateSavePending,
+                                          savesInFlight: root.stateSavesInFlight })
+    if (d.act === "flush") {
+      root.flushPendingEntry()
+    } else if (d.act === "drop") {
+      root.pendingEntryKey = null
+      console.warn("omarchy-iptv: the bar entry is left as it is (" + d.reason + "); the source stays where it was")
+    }
   }
 
   function applyPlaylistStatus(text) {
@@ -3316,14 +3365,17 @@ Item {
       }
     }
     // "wait-entry": accepted, not refused; nothing has been written to the
-    // host's file yet and the state write it waits for cannot be refused.
+    // host's file yet. The state write it waits for CAN fail (an unwritable
+    // directory, a full disk -- the FileView reports it through saveFailed),
+    // and then the entry is not written at all (R11, settleEntryFlush).
     return true
   }
 
-  // The second half of a "wait-entry" plan, run by stateInitProc's exit
-  // AFTER the parked state save. The last key asked for wins: every owned
-  // write states every owned key, so one write for the latest value is the
-  // same file as one write per value.
+  // The second half of a "wait-entry" plan, run by settleEntryFlush once the
+  // parked state save has LANDED (stateFile's `saved`, R11) -- never from
+  // stateInitProc's exit directly, which only issues that save. The last key
+  // asked for wins: every owned write states every owned key, so one write
+  // for the latest value is the same file as one write per value.
   function flushPendingEntry() {
     if (root.pendingEntryKey === null) return
     var key = root.pendingEntryKey
@@ -4051,15 +4103,19 @@ Item {
                                        playlist: playlist, epg: epg,
                                        lastPlaylist: root.reconciledPlaylistUrl,
                                        lastEpg: root.reconciledEpgUrl })
-    // The snapshot moves on EVERY path (R1): an input that went away is not a
-    // command, and a value adopted below is consumed from here on, so the
-    // host's stale echo of it (rule 9) is not adopted twice.
+    // The playlist snapshot moves on EVERY path (R1): an input that went away
+    // is not a command, and a value adopted below is consumed from here on,
+    // so the host's stale echo of it (rule 9) is not adopted twice. The EPG
+    // snapshot moves only when the input was CONSUMED -- there was an active
+    // record for it to reach -- or went away (R12, Model.epgSnapshotAfter):
+    // an EPG set before any source exists stays fresh, and on the entry,
+    // until a source exists and adopts it.
     root.reconciled = true
     root.reconciledPlaylistUrl = playlist
-    root.reconciledEpgUrl = epg
+    var epgConsumed = false
     // "ignore" with no fresh EPG input is the ordinary steady state.
-    if (plan.act === "ignore" && !plan.adoptEpg) return
-    root.adoptActive(playlist, epg, plan)
+    if (!(plan.act === "ignore" && !plan.adoptEpg)) epgConsumed = root.adoptActive(playlist, epg, plan)
+    root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, epgConsumed)
   }
 
   // D-SINK-19. ONE resolver for the state load, the `shell` arrival, the
@@ -4074,6 +4130,7 @@ Item {
   //
   // Idempotent by construction: a second run over the same inputs finds the
   // URL consumed (reconcileAction) and the state's own `activeKey` answering.
+  // Returns whether an EPG input was consumed (R12: reconcile's snapshot).
   function adoptActive(playlist, epg, plan) {
     var entry = { playlistUrl: playlist, epgUrl: epg, sourceKey: String(root.settings.sourceKey || "") }
     var out = Model.adoptActiveSource(root.userState, entry, Math.floor(Date.now() / 1000), "",
@@ -4119,11 +4176,13 @@ Item {
     // the plugin has already consumed and reported it (`settingsInvalid`).
     // The cost is that the user cannot read their typo back out of
     // shell.json; it was never a working configuration, and the guide names
-    // the reason it was refused.
+    // the reason it was refused. An EPG input with NO source to land on is
+    // the one input NOT written out (R12): nothing consumed it, so it stays.
     if (out.writeEntry) {
       var key = out.key
       Qt.callLater(function() { root.persistActive(key) })
     }
+    return out.epgConsumed === true
   }
 
   // The synthesized status for an invalid configured URL (D16, SR8): the
@@ -4556,7 +4615,25 @@ Item {
     printErrors: false
     onLoaded: root.applyUserState(text())
     onLoadFailed: root.applyUserState("")
+    // Fires for our own atomic write AND for a bare chmod of the file, mode
+    // changed or not (measured 2026-10-11, D-SRC-15); applyUserState decides
+    // whether what the reload delivers is newer than memory (R9).
     onFileChanged: reload()
+    // R9 / R11: one `saved` per setText (measured). The in-flight count is
+    // what tells a reload the file is older than memory, and the held entry
+    // mirror is written only once the count is back to zero.
+    onSaved: {
+      root.stateSavesInFlight = Math.max(0, root.stateSavesInFlight - 1)
+      root.stateSaveFailed = false
+      root.settleEntryFlush()
+    }
+    onSaveFailed: (error) => {
+      root.stateSavesInFlight = Math.max(0, root.stateSavesInFlight - 1)
+      root.stateSaveFailed = true
+      // The error is an enum, never a path or a URL.
+      console.warn("omarchy-iptv: state.json could not be written (error " + error + "); the in-memory state stands")
+      root.settleEntryFlush()
+    }
   }
 
   // ------------------------------------------------------------ timers
@@ -4980,10 +5057,18 @@ Item {
     target: stateInitProc
     function onExited(exitCode, exitStatus) {
       root.dirsReady = true
+      // R11: the helper's exit code is read, not assumed. A failed init (the
+      // state directory could not be made, say) means the save below may
+      // fail too, and the entry mirror must not strip the URL on top of it.
+      root.stateInitOk = exitCode === 0
+      if (!root.stateInitOk) console.warn("omarchy-iptv: state init exited " + exitCode + "; state.json may be unwritable")
       // R5: the parked state save FIRST, then the entry mirror that waited
       // for it. The other order is the pointer-less source the review found.
+      // R11: "then" means once the save has LANDED -- settleEntryFlush reads
+      // the in-flight count and waits for stateFile's `saved`; the call here
+      // answers the one case with nothing in flight.
       if (root.stateSavePending) root.saveState()
-      root.flushPendingEntry()
+      root.settleEntryFlush()
       root.runNextCacheJob()
     }
   }

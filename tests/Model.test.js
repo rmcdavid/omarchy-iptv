@@ -6859,7 +6859,7 @@ checkCall("R1/R4: adoptActiveSource over every `adopt` case of the shared fixtur
     const facts = { key: out.key, adoptedUrl: out.adoptedUrl, adoptedEpg: out.adoptedEpg, added: out.added,
                     invalid: out.invalid ? out.invalid.code : null, moved: out.moved, changed: out.changed,
                     writeEntry: out.writeEntry, sources: out.state.sources.length,
-                    epgOnActive: active ? String(active.epgUrl) : "" }
+                    epgOnActive: active ? String(active.epgUrl) : "", epgConsumed: out.epgConsumed }
     // In the fixture's own key order, so the comparison is about values.
     const got = {}
     Object.keys(c.want).forEach(k => { got[k] = facts[k] })
@@ -6874,8 +6874,12 @@ check("R1: the fixture's adopt section covers every step, both refusals, the con
    activeKeyFixture.adopt.filter(c => c.opts && c.opts.adoptUrl === false).length >= 2,
    activeKeyFixture.adopt.filter(c => c.want.adoptedEpg === true).length >= 2,
    activeKeyFixture.adopt.filter(c => c.entry.sourceKey !== "" && c.entry.playlistUrl === "" && c.activeKey === "" && c.want.key !== "").length >= 1,
-   activeKeyFixture.adopt.filter(c => c.want.key === "" && c.activeKey !== "" && c.want.changed).length >= 1],
-  [true, true, true, true, true, true])
+   activeKeyFixture.adopt.filter(c => c.want.key === "" && c.activeKey !== "" && c.want.changed).length >= 1,
+   // R12: an EPG input with no record to land on is NOT stripped (writeEntry false, epgConsumed false)
+   activeKeyFixture.adopt.filter(c => c.entry.epgUrl !== "" && c.want.key === "" && c.want.writeEntry === false && c.want.epgConsumed === false).length >= 1,
+   // ... and is adopted, then stripped, by the reconcile that brings the first source
+   activeKeyFixture.adopt.filter(c => c.keys.length === 0 && c.entry.epgUrl !== "" && c.want.adoptedEpg === true && c.want.writeEntry === true).length >= 1],
+  [true, true, true, true, true, true, true, true])
 
 // R3: removing the active record clears the pointer in the state returned,
 // from the shared fixture (the helper's remove_source_record runs the same
@@ -6935,7 +6939,142 @@ check("P3 sibling: every section the fixture's comment names exists in the fixtu
     const named = []
     activeKeyFixture.comment.forEach(line => { const m = /^\s*`([a-z]+)`\s+(BOTH|JavaScript only)/.exec(line); if (m) named.push(m[1]) })
     return [named.length, named.filter(n => Array.isArray(activeKeyFixture[n])).length, named.sort().join(",")]
-  })(), [5, 5, "adopt,order,parse,remove,resolve"])
+  })(), [8, 8, "adopt,flush,order,parse,reload,remove,resolve,snapshot"])
+
+// ---- D-SRC-15, round 3 (R9, R11, R12) ----
+//
+// R12: an input is never stripped unadopted. The strip of a no-source EPG was
+// pinned as intended in round 2 ("R4: an EPG input with no active source to
+// land on") and graded as input loss by the review; the fixture case flips
+// to writeEntry false, and `epgConsumed` is what the entry write now asks.
+checkCall("R12: an EPG input with NO active source is neither adopted nor stripped, and the same input beside the first source is adopted and then stripped", () => {
+  const empty = fixtureState([], "")
+  const alone = Model.adoptActiveSource(empty, { playlistUrl: "", epgUrl: "http://e.test/x.xml", sourceKey: "" }, 1000, "", { adoptUrl: false, adoptEpg: true })
+  const withUrl = Model.adoptActiveSource(empty, { playlistUrl: activeKeyFixture.new, epgUrl: "http://e.test/x.xml", sourceKey: "" }, 1000, "", {})
+  const rec = Model.findSource(withUrl.state.sources, withUrl.key)
+  return [alone.writeEntry, alone.epgConsumed, alone.adoptedEpg, alone.changed,
+          withUrl.writeEntry, withUrl.epgConsumed, withUrl.adoptedEpg, rec ? rec.epgUrl : null]
+}, [false, false, false, false, true, true, true, "http://e.test/x.xml"])
+checkCall("R12: epgSnapshotAfter over every `snapshot` case of the shared fixture -- the snapshot moves only for a consumed input or one that went away", () => {
+  return activeKeyFixture.snapshot.map(c => c.name + ": " + JSON.stringify(Model.epgSnapshotAfter(c.epg, c.lastEpg, c.consumed)))
+}, activeKeyFixture.snapshot.map(c => c.name + ": " + JSON.stringify(c.want)))
+// The two together, in the service's order: the reconcile that sees an EPG
+// with no source must leave the next reconcile seeing it as FRESH, else the
+// playlist write that follows strips it unadopted (the loss R12 names).
+checkCall("R12: the EPG set before any source is still fresh to the reconcile that brings the first source, and lands on it", () => {
+  const E = "http://e.test/x.xml"
+  let lastEpg = "", lastPlaylist = ""
+  let st = fixtureState([], "")
+  // reconcile 1: epg only, no source
+  let plan = Model.reconcileAction({ first: true, force: false, playlist: "", epg: E, lastPlaylist: lastPlaylist, lastEpg: lastEpg })
+  let out = Model.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: "" }, 1, "", { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg })
+  lastPlaylist = ""; lastEpg = Model.epgSnapshotAfter(E, lastEpg, out.epgConsumed)
+  const r1 = [plan.adoptEpg, out.writeEntry, lastEpg]
+  // reconcile 2: the host still publishes the EPG (nothing stripped it) and now a playlist
+  plan = Model.reconcileAction({ first: false, force: false, playlist: activeKeyFixture.new, epg: E, lastPlaylist: lastPlaylist, lastEpg: lastEpg })
+  out = Model.adoptActiveSource(out.state, { playlistUrl: activeKeyFixture.new, epgUrl: E, sourceKey: "" }, 2, "", { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg })
+  lastEpg = Model.epgSnapshotAfter(E, lastEpg, out.epgConsumed)
+  const rec = Model.findSource(out.state.sources, out.key)
+  return r1.concat([plan.adoptEpg, out.adoptedEpg, rec ? rec.epgUrl : null, out.writeEntry, lastEpg])
+}, [true, false, "", true, true, "http://e.test/x.xml", true, "http://e.test/x.xml"])
+// The `first ||` term that used to sit in reconcileAction's "changed" carried
+// no weight (round 2 review P3: dropping it reddened nothing). It is gone, and
+// this is the check that would have reddened: first + a value equal to the
+// snapshot is a consumed value, not a fresh one.
+check("reconcileAction: `first` decides the act, never freshness -- a first value equal to the snapshot is consumed",
+  (() => { const p = Model.reconcileAction({ first: true, force: false, playlist: "http://a.test/x.m3u", epg: "http://e.test/x.xml", lastPlaylist: "http://a.test/x.m3u", lastEpg: "http://e.test/x.xml" }); return [p.act, p.adoptUrl, p.adoptEpg, p.playlistChanged] })(),
+  ["migrate", false, false, false])
+
+// R9: the reload disposition, every case from the shared fixture.
+checkCall("R9: reloadDisposition over every `reload` case of the shared fixture -- a reload never replaces in-memory state newer than the file", () => {
+  return activeKeyFixture.reload.map(c => c.name + ": " + JSON.stringify(Model.reloadDisposition(c.ctx)))
+}, activeKeyFixture.reload.map(c => c.name + ": " + JSON.stringify({ act: c.act, reason: c.reason })))
+check("R9: the fixture's reload section has both answers, the parked case D-SRC-15 is, the in-flight case and the failed-write case",
+  [activeKeyFixture.reload.some(c => c.act === "apply" && c.reason === "first-load"),
+   activeKeyFixture.reload.some(c => c.act === "apply" && c.reason === "file-newer"),
+   activeKeyFixture.reload.some(c => c.act === "ignore" && c.reason === "save-parked"),
+   activeKeyFixture.reload.some(c => c.act === "ignore" && c.reason === "save-in-flight"),
+   activeKeyFixture.reload.some(c => c.act === "ignore" && c.reason === "save-failed"),
+   activeKeyFixture.reload.some(c => c.act === "ignore" && c.reason === "own-write")],
+  [true, true, true, true, true, true])
+
+// R11: the entry flush disposition, every case from the shared fixture.
+checkCall("R11: entryFlushDisposition over every `flush` case of the shared fixture -- the held mirror is written only once the save LANDED and init exited 0", () => {
+  return activeKeyFixture.flush.map(c => { const d = Model.entryFlushDisposition(c.ctx); return c.name + ": " + d.act + (c.reason ? "/" + d.reason : "") })
+}, activeKeyFixture.flush.map(c => c.name + ": " + c.act + (c.reason ? "/" + c.reason : "")))
+check("R11: the fixture's flush section has all four answers and both drop reasons",
+  [activeKeyFixture.flush.some(c => c.act === "none"), activeKeyFixture.flush.some(c => c.act === "wait"),
+   activeKeyFixture.flush.some(c => c.act === "flush"), activeKeyFixture.flush.some(c => c.act === "drop" && c.reason === "init-failed"),
+   activeKeyFixture.flush.some(c => c.act === "drop" && c.reason === "save-failed")],
+  [true, true, true, true, true])
+
+// R9 / R11, THE ORDER AND THE GATE IN Service.qml. Structural pins, labelled
+// as such for the reason the D-SINK-18 pin above gives: Service.qml cannot
+// be instantiated here. The round 2 review's P2 found exactly this shape
+// unpinned -- the two lines in stateInitProc's exit swapped, and the gate
+// stayed green because the end state is identical and only the order
+// differs. What CALLS the shipping logic is the fixture run above; what
+// OBSERVES the sink is key-scenario.sh's D2 (the start-up chmod reload) and
+// the O segment (the interrupted order). These pins are the third leg.
+checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN settles the flush through the disposition, and never calls flushPendingEntry itself", () => {
+  const block = (serviceSource.match(/target: stateInitProc[\s\S]*?function onExited\(exitCode, exitStatus\) \{[\s\S]*?\n    \}/) || [""])[0]
+  const save = block.indexOf("root.saveState()")
+  const settle = block.indexOf("root.settleEntryFlush()")
+  const settleFn = (serviceSource.match(/function settleEntryFlush\(\)[\s\S]*?\n  \}/) || [""])[0]
+  const decide = settleFn.indexOf("Model.entryFlushDisposition(")
+  const flush = settleFn.indexOf("root.flushPendingEntry()")
+  return {
+    blockFound: block !== "",
+    readsExitCode: block.indexOf("exitCode === 0") !== -1,
+    savesThenSettles: save !== -1 && settle !== -1 && save < settle,
+    exitNeverFlushesDirectly: block.indexOf("flushPendingEntry") === -1,
+    // ONE call site for the flush, inside settleEntryFlush, after the decision.
+    flushSites: (serviceSource.match(/root\.flushPendingEntry\(\)/g) || []).length,
+    decidesBeforeFlush: decide !== -1 && flush !== -1 && decide < flush,
+    flushOnlyOnFlush: /d\.act === "flush"[\s\S]{0,40}root\.flushPendingEntry\(\)/.test(settleFn),
+    dropClearsAndWarns: /d\.act === "drop"[\s\S]{0,80}root\.pendingEntryKey = null[\s\S]{0,200}console\.warn\(/.test(settleFn),
+    // The drop line names the reason and nothing else: no key, no URL.
+    dropWarnsNoKey: !/d\.act === "drop"[\s\S]{0,400}console\.warn\([^\n]*(key|Url|url)[^\n]*\)/.test(settleFn),
+    // The FileView reports both outcomes and both settle the flush.
+    savedSettles: /onSaved: \{[\s\S]{0,300}root\.settleEntryFlush\(\)/.test(serviceSource),
+    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,400}root\.stateSaveFailed = true[\s\S]{0,300}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // The in-flight count goes up BEFORE setText and down on either signal.
+    countsBeforeWrite: /root\.stateSavesInFlight = root\.stateSavesInFlight \+ 1\n\s*stateFile\.setText\(text\)/.test(serviceSource),
+    countsDown: (serviceSource.match(/root\.stateSavesInFlight = Math\.max\(0, root\.stateSavesInFlight - 1\)/g) || []).length
+  }
+}, { blockFound: true, readsExitCode: true, savesThenSettles: true, exitNeverFlushesDirectly: true, flushSites: 1,
+     decidesBeforeFlush: true, flushOnlyOnFlush: true, dropClearsAndWarns: true, dropWarnsNoKey: true,
+     savedSettles: true, saveFailedSettles: true, countsBeforeWrite: true, countsDown: 2 })
+checkCall("R9 (structural): applyUserState asks Model.reloadDisposition FIRST and returns on anything but apply, before stateOnLoad, reconcile and the cache layout", () => {
+  const fn = (serviceSource.match(/function applyUserState\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const decide = fn.indexOf("Model.reloadDisposition(")
+  const ret = fn.indexOf('if (disposition.act !== "apply")')
+  const load = fn.indexOf("Model.stateOnLoad(")
+  const rec = fn.indexOf("root.reconcile(true)")
+  const layout = fn.indexOf("root.startCacheLayout()")
+  return {
+    found: fn !== "",
+    decidesFirst: decide !== -1 && load !== -1 && decide < load,
+    returnsBeforeLoad: ret !== -1 && ret < load,
+    loadBeforeReconcile: load < rec && rec < layout,
+    // The disposition is handed every fact it decides on.
+    handsOwnWrite: fn.indexOf("ownWrite: root.recentSaves.indexOf(text) !== -1") !== -1,
+    handsParked: fn.indexOf("savePending: root.stateSavePending") !== -1,
+    handsInFlight: fn.indexOf("savesInFlight: root.stateSavesInFlight") !== -1,
+    handsFailed: fn.indexOf("saveFailed: root.stateSaveFailed") !== -1,
+    // The old bare own-write return is gone (its reason lives in the decision).
+    noBareReturn: fn.indexOf("recentSaves.indexOf(text) !== -1) return") === -1
+  }
+}, { found: true, decidesFirst: true, returnsBeforeLoad: true, loadBeforeReconcile: true, handsOwnWrite: true,
+     handsParked: true, handsInFlight: true, handsFailed: true, noBareReturn: true })
+checkCall("R12 (structural): reconcile moves the EPG snapshot through Model.epgSnapshotAfter AFTER adoptActive answers, and the playlist snapshot before", () => {
+  const fn = (serviceSource.match(/function reconcile\(force\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const playlistSnap = fn.indexOf("root.reconciledPlaylistUrl = playlist")
+  const adopt = fn.indexOf("root.adoptActive(playlist, epg, plan)")
+  const epgSnap = fn.indexOf("root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, epgConsumed)")
+  const returnsConsumed = /function adoptActive\(playlist, epg, plan\) \{[\s\S]*?return out\.epgConsumed === true\n  \}/.test(serviceSource)
+  return [fn !== "", playlistSnap !== -1 && playlistSnap < adopt, adopt !== -1 && adopt < epgSnap, fn.indexOf("root.reconciledEpgUrl = epg") === -1, returnsConsumed]
+}, [true, true, true, true, true])
 
 // R7, the half node can grade: the migration over a TWO-source state keeps
 // the count it went in with, whichever record the entry names, and the

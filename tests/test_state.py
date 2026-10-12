@@ -14,6 +14,7 @@ from helper_loader import load_helper
 
 helper = load_helper()
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+HELPER_PATH = ROOT / "bin" / "omarchy-iptv"
 # The session vectors are shared with tests/Model.test.js (CLAUDE.md: a rule
 # written twice gets one fixture).
 FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
@@ -98,6 +99,47 @@ class StateCommandTest(unittest.TestCase):
         self.assertEqual(payload["state"]["favorites"], ["t:keep"])
         self.assertEqual(self.path.read_text(encoding="utf-8"), content)   # not rewritten
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    def _init_as_subprocess(self, mode):
+        """R10 (D-SRC-15), measured on the VERB as a subprocess the way the
+        service runs it, over a file seeded with `mode`. Returns the stat
+        before and after. ctime is the inotify IN_ATTRIB witness: a chmod
+        bumps it whether or not the mode changed; nothing else here does."""
+        import subprocess, sys, time
+        self.path.parent.mkdir(parents=True, mode=0o700)
+        content = json.dumps(v2(favorites=["t:keep"], activeKey="d990c2e4"), indent=2) + "\n"
+        self.path.write_text(content, encoding="utf-8")
+        os.chmod(self.path, mode)
+        before = self.path.stat()
+        time.sleep(0.02)   # so a chmod's ctime is distinguishable at any clock resolution
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), "state", "--state-dir", self.dir, "init"],
+                              capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertFalse(payload["created"])
+        after = self.path.stat()
+        self.assertEqual(self.path.read_text(encoding="utf-8"), content)   # never rewritten
+        self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)             # the content clock never moves
+        self.assertEqual(after.st_mode & 0o777, 0o600)
+        return before, after
+
+    def test_init_leaves_a_file_already_0600_alone(self):
+        """R10: a file that is already private is NOT chmod-ed, so the shell's
+        FileView sees no IN_ATTRIB from the ordinary start. ctime unchanged is
+        the measurement (a chmod to the same mode bumps it; measured on this
+        machine by the sibling test below, which seeds 0644)."""
+        before, after = self._init_as_subprocess(0o600)
+        self.assertEqual(after.st_ctime_ns, before.st_ctime_ns)
+
+    def test_init_still_tightens_a_0644_file(self):
+        """R10's other half, belt and braces: a file left 0644 (a FileView
+        created it before S-02, or the user chmod-ed it) is still tightened,
+        and that chmod IS the IN_ATTRIB the service has to survive (R9) --
+        ctime moves, mtime and content do not."""
+        before, after = self._init_as_subprocess(0o644)
+        self.assertEqual(before.st_mode & 0o777, 0o644)
+        self.assertGreater(after.st_ctime_ns, before.st_ctime_ns)
 
     def test_init_state_file_is_exclusive(self):
         os.makedirs(self.dir, mode=0o700)

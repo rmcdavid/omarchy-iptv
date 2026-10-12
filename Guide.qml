@@ -230,8 +230,8 @@ Item {
     // removed from shell.json by the plugin's next write (see the caption on
     // the first-run form, `firstRunTerminal`).
     unconfiguredCommand: "omarchy bar set " + root.pluginId + " playlistUrl <url>",
-    unconfiguredEpg: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>",
-    unconfiguredWhere: "Settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
+    unconfiguredEpg: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>  (converted; not kept in shell.json)",
+    unconfiguredWhere: "Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
     loadingTitle: "Loading playlist" + Model.ELLIPSIS,
     loadingFrom: "Fetching from ",
     loadingProse: "Fetching playlist",
