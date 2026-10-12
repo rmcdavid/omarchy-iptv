@@ -161,7 +161,12 @@ fail=0
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2074}
-PY_TESTS_MIN=${PY_TESTS_MIN:-1047}
+# 1047 -> 1082 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
+# script and ceiling tests (tests/test_split_model.py, test_release.py), the
+# .mjs byte scans, the ledger's resolver over every part, and the fidelity
+# guard over every model file. The python floor sat one under the 1048 on the
+# tree before them; it is level again.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1082}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -417,11 +422,17 @@ else
     errors=$(grep -c -E '^Error:|: error:|Error at' <<<"$output")
     (( lint_status == 0 )) || errors=$(( errors + 1 ))
     warnings=$(grep -c -E 'Warning:|: warning:' <<<"$output")
+    # D-REL-5: qmllint 6.11 reads no ES module's exports, so every call of a
+    # Model function is a `missing-property` on type "Model" since the model
+    # became Model.mjs (measured: the classic Model.js was not resolved
+    # either -- an unknown member drew no warning -- so no check was lost).
+    # They are counted apart so the rest stays comparable with the baseline.
+    model_members=$(grep -c -E 'not found on type "Model" \[missing-property\]' <<<"$output")
     if (( errors > 0 )); then
       bad "$(basename "$file"): $errors error(s), $warnings warning(s)"
       printf '%s\n' "$output"
     else
-      ok "$(basename "$file"): 0 errors, $warnings warning(s)"
+      ok "$(basename "$file"): 0 errors, $(( warnings - model_members )) warning(s) + $model_members on Model members"
       if [[ ${CHECK_VERBOSE:-0} == 1 && -n $output ]]; then printf '%s\n' "$output"; fi
     fi
   done

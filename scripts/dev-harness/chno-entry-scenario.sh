@@ -417,8 +417,8 @@ esac
 
 # The floor. A check that stops executing must turn the run red rather than
 # shorten the summary (D-PLY-9). Recount with
-#   grep -cE '^ *seam ' chno-entry-scenario.sh            plus 1  -> check-tree
-#   grep -cE '^ *(check|seam) ' chno-entry-scenario.sh    plus 3  -> live
+#   grep -cE '^ *(model_)?seam ' chno-entry-scenario.sh   plus 1  -> check-tree
+#   grep -cE '^ *(check|(model_)?seam) ' chno-entry-scenario.sh  plus 3  -> live
 # (the 1 is the run.sh option probe, which bumps `checks` by hand; the 3 are
 # that probe plus the privacy block's two bumps. The definitions of check()
 # and seam() do not match the pattern, and the floor's own bump lands after

@@ -600,11 +600,12 @@ edeclared_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CE" | sed -n 1p | cut -d= -
 edeclared_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$CE" | sed -n 2p | cut -d= -f2)
 # The recipes are written in that file's footer; these are them. The +1 is the
 # run.sh option probe, which bumps `checks` by hand; the live half adds the
-# privacy block's two.
+# privacy block's two. `model_seam` is `seam` over every file of the model
+# (D-REL-5) and counts with it.
 is "the chno-entry check-tree floor matches the preflight it actually has" \
-   "$edeclared_tree" "$(( $(qa_count '^ *seam ' "$CE") + 1 ))"
+   "$edeclared_tree" "$(( $(qa_count '^ *(model_)?seam ' "$CE") + 1 ))"
 is "the chno-entry live floor matches the assertions that scenario actually has" \
-   "$edeclared_live" "$(( $(qa_count '^ *(check|seam) ' "$CE") + 3 ))"
+   "$edeclared_live" "$(( $(qa_count '^ *(check|(model_)?seam) ' "$CE") + 3 ))"
 # And check.sh's own floor for the preflight must match what the preflight
 # prints: 20 assertions plus its "ran every check" line. A floor above what
 # the runner can produce would make the gate permanently red; one below it
@@ -623,15 +624,15 @@ pdeclared_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$PS5" | sed -n 2p | cut -d= 
 # the same kind of tree assertion, written so that an absence test proves the
 # file is there first (a `seam ... 0` would pass against a deleted file).
 is "the pip check-tree floor matches the preflight it actually has" \
-   "$pdeclared_tree" "$(( $(qa_count '^ *(seam|absent) ' "$PS5") + 1 ))"
+   "$pdeclared_tree" "$(( $(qa_count '^ *(model_)?(seam|absent) ' "$PS5") + 1 ))"
 is "the pip live floor matches the assertions that scenario actually has" \
-   "$pdeclared_live" "$(( $(qa_count '^ *(check|seam|absent) ' "$PS5") + 3 ))"
+   "$pdeclared_live" "$(( $(qa_count '^ *(check|(model_)?(seam|absent)) ' "$PS5") + 3 ))"
 # And no absence is ever asserted with a `want` of 0, which `seam` treats as
 # "at least none" and can therefore never fail. This is the fifth check-that-
 # cannot-fail this project has had to remove; it is worth one line to stop
 # the sixth.
 is "no seam in the pip scenario asserts a count of zero" \
-   "$(qa_count '^ *seam .* 0$' "$PS5")" "0"
+   "$(qa_count '^ *(model_)?seam .* 0$' "$PS5")" "0"
 is "check.sh's pip preflight floor matches the scenario's own" \
    "$(grep -oE 'PIP_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( pdeclared_tree + 1 ))"
 # And the one thing that makes the pip scenario safe to run at all: it drives

@@ -612,8 +612,8 @@ esac
 
 # The floor. A check that stops executing must turn the run red rather than
 # shorten the summary (D-PLY-9). Recount with
-#   grep -cE '^ *(seam|absent) ' pip-scenario.sh         plus 1  -> check-tree
-#   grep -cE '^ *(check|seam|absent) ' pip-scenario.sh   plus 3  -> live
+#   grep -cE '^ *(model_)?(seam|absent) ' pip-scenario.sh          plus 1  -> check-tree
+#   grep -cE '^ *(check|(model_)?(seam|absent)) ' pip-scenario.sh  plus 3  -> live
 # (the 1 is the executable probe, which bumps `checks` by hand; the 3 are that
 # probe plus the privacy block's two. The definitions of check() and seam() do
 # not match the pattern, and the floor's own bump lands after the count is
