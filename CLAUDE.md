@@ -486,10 +486,8 @@ requests and raise the batch.
      rule is: **while the plugin's form is open, no editable `TextInput`
      exists in the shell.** The form's fields are `readOnly: true`
      unconditionally; the plugin does the editing itself in
-     `handleFormKey` over the model value (editInsert and editDelete in
-     Model.js, node-tested; cited without the prefix until the lane that
-     adds them lands, because the ledger resolves a prefixed citation
-     against the tree), and paste is the out-of-process path
+     `handleFormKey` over the model value (`Model.editInsert` and
+     `Model.editDelete`, node-tested), and paste is the out-of-process path
      only: the helper's `clipboard` verb runs `wl-paste` as argv, reads at
      most 32 KiB (`MAX_CLIPBOARD_BYTES`, 8,192 characters at four bytes
      each) under a 5 s deadline, reaps the child even when the shell's
