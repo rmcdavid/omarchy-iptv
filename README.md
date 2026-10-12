@@ -126,12 +126,21 @@ obvious when it happens to you:
   to hand the plugin a playlist, not a place the playlist is stored. It is read
   when it arrives and again at every shell start — including a value you set
   while the shell was not running (that case is exercised on every commit's
-  test tree and was run under a headless compositor before release; a build
-  of this change that never shipped lost it, which is why it is tested). The
-  value is removed from the entry only after the plugin has written its own
-  file; if that write fails, your URL is left where you put it rather than
-  taken away. A guide URL (`epgUrl`) set before you have any playlist is
-  kept on the entry until your first source exists, and attached to it then.
+  test tree and was run under a headless compositor on 2026-10-12, and is
+  run again before each cut; a build of this change that never shipped lost
+  it, which is why it is tested). The value is removed from the entry only
+  after the plugin's own file has been written and the write has been
+  confirmed back to it — at a shell start and while the shell is running
+  alike (ruling R13 of this change's fourth round; until it only the
+  start-up write was confirmed, and a write that failed while the shell was
+  running could take the value off the entry with nothing written anywhere,
+  which was measured on a build that never shipped). If that write fails —
+  `~/.local/state` not writable, a full disk — your URL is left where you put
+  it rather than taken away, the source you set or switched to stays in
+  effect for this session only, the shell's journal says `state.json could
+  not be written`, and the next shell start reads the entry again. A guide
+  URL (`epgUrl`) set before you have any playlist is kept on the entry until
+  your first source exists, and attached to it then.
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -693,6 +702,13 @@ Nothing inside the plugin directory is written at runtime.
   lost and you do not need your URL again: on the form the guide shows you,
   follow the `Saved sources` link and pick the source. Settings above has the
   detail, including what happens when you update again.
+- "state.json could not be written" in the shell's journal: the plugin could
+  not save its own file, `~/.local/state/omarchy-iptv/state.json`. The source
+  you added, switched to or set on the command line is in effect for this
+  session only, and a URL you set with `omarchy bar set` is deliberately left
+  on the widget's entry until a save succeeds, so it is read again at the
+  next shell start. Check that the directory exists, is yours and is writable
+  (`ls -ld ~/.local/state/omarchy-iptv`) and that the disk is not full.
 - "Settings file could not be made private": the plugin would not write a URL
   into `~/.config/omarchy/shell.json`, because it could not make that file
   private and the URL would have gone into a file other accounts can read.

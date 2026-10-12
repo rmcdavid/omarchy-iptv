@@ -601,11 +601,26 @@ with `watchChanges: true`, `atomicWrites: true` and `onFileChanged: reload()`,
 and these four facts are what R9-R11 (`ARCHITECTURE-SOURCES.md`, round 3)
 are built on:
 
-- **`saved` fires once per `setText`.** Two `setText` calls back to back
-  delivered `saved, fileChanged, saved`; a third delivered `fileChanged,
-  saved` (probe summary: `saved=3 failed=0 fileChanged=4 loaded=3`). So "a
-  write is in flight" is a COUNTER, not a flag (`stateSavesInFlight`), and
-  `setText` returning says nothing about the file.
+- **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
+  for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
+  back delivered `saved, fileChanged, saved`; a third delivered `fileChanged,
+  saved` (probe summary: `saved=3 failed=0 fileChanged=4 loaded=3`). So
+  `setText` returning says nothing about the file. But a counter of `setText`
+  calls is NOT the instrument either: lane A's 26-write probe under cage
+  (2026-10-12) raised 25 `saved` + 1 `saveFailed`, `textChanged -> Tn`
+  preceded every `saved #n text()=Tn`, after a burst of twenty `text()` read
+  T19 while T20 was pending, a failed write read its own text and then
+  `saveFailed`, and the last content asked for was always written last; the
+  service under the same conditions coalesced 20 `setText` into 14 `saved`
+  (15 on lane-key-s2), so a signal counter stuck at 5-6 for the rest of the
+  session (and on lane-key-s2 read every later foreign reload as "save in
+  flight"). "A write is in flight" is therefore decided by CONTENT
+  (`stateSaveLanded`: the view's text IS the last text asked for;
+  `stateSavesInFlight` is 0 or 1 and keeps its name for the harness), and an
+  earlier write's `saved` changes nothing. Whether a replaced queued write can
+  ever be the LAST content is unmeasured (the probe and both live runs say
+  the last content is always written; a Quickshell source read would settle
+  it).
 - **A bare chmod reloads, mode changed or not.** A chmod 0644 -> 0600 AND a
   chmod 0600 -> 0600 each delivered `fileChanged` followed by `loaded` with
   the file's text. That is inotify `IN_ATTRIB`, and it is the trigger of
@@ -631,4 +646,10 @@ are built on:
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service
 connected to neither it nor `saved`, so a refused write was silent and the
-entry mirror went out anyway (R11 is the gate).
+entry mirror went out anyway (R11 is the gate). Since round 4 (R13, lane-key-t1)
+`saveFailed` clears the in-flight flag by content, logs `state.json could not
+be written (error N)` on every failure and emits
+`sourcesPersistFailed("state_write_failed")` once per failure episode; the
+key scenario's F segment drives it with the state directory 0500 under a
+running shell (F4: logged with no `://` in the line, signalled exactly once;
+lane B on lane-key-t2, 2026-10-12).

@@ -920,9 +920,12 @@ bare here because this document's tree carries them only after the merge):
   echoed back, a save parked behind `dirsReady`, a save in flight
   (`stateSavesInFlight`, counted up before `setText` and down on the
   FileView's `saved` / `saveFailed` -- one `saved` per `setText`, measured, so
-  a counter and not a flag), or a save that failed. An ignored reload runs
+  a counter and not a flag; **since R13 (round 4) 0 or 1, cleared by CONTENT
+  through `stateSaveLanded`, because a burst coalesces `saved`**), or a save
+  that failed. An ignored reload runs
   neither `reconcile(true)` nor `startCacheLayout`, and the count
-  `stateReloadsIgnored` is what the harness reads. The sibling is covered by
+  `stateReloadsIgnored` is what the harness reads (**since R15,
+  `stateReloadsByReason`, one number per reason, is what D3 reads**). The sibling is covered by
   the same flag: the switch or remove before `dirsReady` parks a save, so the
   reload that follows is ignored.
 - R10. The helper leaves a file that is already 0600 alone (`init_state_file`
@@ -936,7 +939,8 @@ bare here because this document's tree carries them only after the merge):
   `drop`). On failure the entry is NOT rewritten, so the URL stays on it as
   the backup it accidentally is, and a warning with no URL is logged. The
   order (save, then entry) is pinned by a structural check that reads
-  `Service.qml`, the D-SINK-18 shape.
+  `Service.qml`, the D-SINK-18 shape. **R13 (round 4, below) extends the
+  gate to the route with the directories ready.**
 Observed, not inferred: on lane-key-s2 `key-scenario.sh live` reads 49 passed
 / 0 failed and 36 / 13 over `--baseline lane-key-r2` (D2, D3, M1, M3, M5,
 C1-C5, E1, O5, O6 -- everything that rests on an adoption made at start-up);
@@ -949,6 +953,67 @@ missing path never sees the helper's create (N1-N4 green on the dropping tree,
 state directory unwritable at start (R11's `drop`), and a CLI `state ...`
 write landing inside a parked or in-flight shell save, which R9 as ruled
 loses to the shell's save (the helper's warning says so).
+
+**Round 4 (lead rulings R13-R15, 2026-10-12), after the third review measured
+lane A's own DQ-A2 live.** R11 gated the parked route only. With the
+directories READY, `persistActive` wrote the entry straight after `setText`
+and before the FileView reported, so a state write that failed then (an
+unwritable `~/.local/state`, a full disk) had already stripped the URL from
+the host's file: the record existed in memory only and the input had no copy
+anywhere -- a loss D-SINK-19 created, closed on one of its two routes, and
+recorded by the lane as a question rather than a defect. The lens's rule (an
+input lost or stripped unadopted is a blocker) is the right one, and the
+lesson is the one `CLAUDE.md` carries for D-SINK-16: a residual in our own
+words can be the same defect, softened. What the tree does on lane-key-t1
+(bb06540; round-4 symbols cited bare until the merge):
+- R13. The entry mirror is written only after the state write it depends on
+  has LANDED, on every route: `pointerWritePlan` takes `savesInFlight` and
+  `saveFailed`, answers `write-entry-after-saved` whenever a save is issued,
+  in flight or failed, and `write-entry` only with nothing outstanding; the
+  held key is settled by `entryFlushDisposition` from `saved` / `saveFailed`,
+  a save parked or in flight outranking a STALE failure. `switchSource` and
+  `removeSource` report `ok` on the state write being ISSUED (the state write
+  IS the switch); its failure arrives later as
+  `sourcesPersistFailed("state_write_failed")`, once per episode, with no
+  URL; a REFUSED mirror is logged and repaired on the next start, never
+  reported as the switch failing (SR25 as amended in
+  `ARCHITECTURE-SOURCES.md`). "Landed" is by CONTENT (`stateSaveLanded`):
+  one `saved` per `setText` held for two back-to-back writes and not for a
+  burst -- 10 warm switches issued 20 `setText` and raised 14 `saved` on this
+  tree, 15 on lane-key-s2 (a 26-write probe: 25 `saved` + 1 `saveFailed`,
+  `text()` tracking the write that started; lane A under cage, 2026-10-12)
+  -- and the signal-counting first version stuck at 5 of 20 for the rest of
+  the session, which on lane-key-s2 also read every later foreign reload as
+  "save in flight" (lane A's DQ-T4, a D-SRC-15 sibling awaiting its id).
+- R14. The two decisions only the live arm could see have structural pins in
+  `tests/Model.test.js`: the ignore branch of `applyUserState` RETURNS, and
+  `saveState` parks (sets the flag) before `dirsReady`; each seen red by
+  deleting the line.
+- R15. The reload counter counts BY REASON -- `stateReloadsByReason`, one
+  number per `reloadDisposition` reason through `countReload`, exposed on
+  the harness's `pointerState` -- because the plain total was satisfied by
+  the own-write echo that follows every start and could not go red for the
+  chmod reload D3 names; and a shell exiting with `pendingEntryKey` still
+  held logs one warning with no URL (DQ-B9).
+Observed, not inferred, on lane-key-t2 (lane B, 2026-10-12, the transcripts
+named in its report): `key-scenario.sh live` 62 / 0 (61 lettered checks);
+`--baseline lane-key-s2` 54 / 8 -- D3 and W3/W6 for the counter s2 lacks,
+F3-F7 the loss at the sink (the stored entry read with NO `playlistUrl` and
+the mirror moved, no `state_write_failed`, no record for the input after the
+restart, two records not three); `--baseline lane-key-r2` 38 / 24;
+`--baseline f275bde` 39 / 23; two throwaway mutations of this code,
+`reloadDisposition`'s save-parked clause deleted 56 / 6 (D2, D3, W2-W4, W6)
+and the R14 `return` deleted 57 / 5 (D3 GREEN beside D2/W2 red: the counter
+observes the decision, the sink is D2, and the `return` is the structural
+pin); `sources-scenario.sh` 66 / 0 under cage with the three checks on the
+ruled contract (62 / 4 for the same harness over an export of dev 93bbd5d,
+exactly the four moved checks). Node 2146 / 0 on lane-key-t1 (+21; the same
+files over an export of lane-key-s2: 21 failures, the P1 driver reading
+`urlStillStored:false ... fileSources:2`), python 1056, qml 78. Still not
+observed, said so: the state directory unwritable at START (R11's `drop`),
+a remove on a failed disk (F drives the CLI set and a switch), a `saved` for
+an EARLIER write arriving while a later one is pending and then fails, and a
+CLI `state ...` write inside a parked or in-flight shell save.
 
 **What REMAINS, with its size rather than a claim of zero.** The exposure is
 NOT closed. Three things remain, and the first is the one to quote:

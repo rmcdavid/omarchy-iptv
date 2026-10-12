@@ -409,7 +409,36 @@ SRC-MIG-11..17 and SRC-RM-10: the harness repair (R6) and the scenarios (R7)
 landed in `scripts/dev-harness/key-scenario.sh` (lane-key-r2, then
 lane-key-s2), and the rows carry the measured counts -- 49 / 0 forward on
 lane-key-s2, 36 / 13 over `--baseline lane-key-r2` -- with what each segment
-observes and what none does.
+observes and what none does. Round 4 (lane-key-t1, 2026-10-12; lead rulings
+R13-R15 after the third review graded the dirsReady-route entry write as a
+P1) grows the `order` section to 13 cases (`savesInFlight`, `saveFailed`;
+`R5/R13: pointerWritePlan over every \`order\` case ... the entry never gets
+ahead of a state save that has not landed`, plus a full-cube check), the
+`flush` section to 11 (a save in flight outranks a stale failure), adds a
+service-order DRIVER that runs the shipping decisions in `Service.qml`'s
+order under both host shapes with the FileView's signals queued and a
+coalescing disk (seven `R13 (lag host)` / `R13 (echo host)` checks each:
+the CLI set and the start-up adoption with `state.json` unwritable keep the
+URL on the entry and re-adopt it on the next start; a writable disk holds the
+entry until `saved` and writes it exactly once; a switch on an unwritable
+disk returns `ok` and `state_write_failed` follows; a refused mirror is
+logged and not signalled; a burst of coalesced writes still lands; a landed
+write clears the sticky flag), `countReload` checks (`R15`), and three
+structural pins (`R13 (structural)`: the plan is handed the in-flight count
+and the sticky failure; `R13 (structural, SR25 as amended)`: the failure is
+signalled from `onSaveFailed` and never returned; `R14 (structural)`: the
+ignore branch RETURNS and `saveState` parks before `dirsReady`; `R15
+(structural)`: the count precedes the decision and the exit warning exists).
+Seen red by lane A: the same test files over an export of lane-key-s2 read
+`2146 checks, 21 failure(s)` with the P1 driver's `urlStillStored:false,
+entryWrites:1 ... fileSources:2` (the loss, not a missing symbol), and each
+pin red under its own one-line mutation (fifteen, listed in the lane report:
+the `return` deleted, the park deleted, the in-flight branch of the plan
+deleted, the failure checked before in-flight, `stateSaveLanded` returning
+true, the count moved after the decision, among them). Counts on lane-key-t1:
+node 2146 / 0, python 1056, qml 78 (neither extended). The live half on
+lane-key-t2 is SRC-MIG-16..21: 62 / 0 forward, 54 / 8 over `--baseline
+lane-key-s2`, 38 / 24 over `--baseline lane-key-r2`.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 

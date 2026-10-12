@@ -1193,6 +1193,24 @@ No `https://` auto-prefix and no Xtream URL auto-parse (8).
 
 `<host>` is `Model.hostOf(url)`: never a path, query or userinfo.
 
+**Save failures (asynchronous, same line; D-SINK-19 round 4, R13,
+2026-10-12).** The state write is the switch, so the one failure a switch, a
+remove or an adoption can have is `state.json` not being written:
+`sourcesPersistFailed("state_write_failed")` -> `Could not write state.json -
+check ~/.local/state/omarchy-iptv` (`Model.sourceErrorMessage`; a directory,
+never a URL and never `omarchy bar set`, which would put the credential in
+the shell history). It arrives once per failure episode, after the call
+that issued the write has already returned `ok`. A host that refuses the KEY
+mirror is not an error on this screen: logged, repaired at the next start
+(SR25 as amended in `ARCHITECTURE-SOURCES.md`); `config_unsafe` keeps its
+own sentence (D-SINK-18). What ships on lane-key-t1 is UNVERIFIED against
+this paragraph: `Guide.showPersistFailed` renders the `persist_failed`
+sentence for every code, so the state-write failure shows `Could not save
+settings - try omarchy bar set` -- the opposite advice -- until the Guide
+owner routes the code through (`root.showPersistFailed(reason)` with
+`Model.sourceErrorMessage(reason)`; lane A's DQ-T1, open). The docs lane
+holds no display.
+
 ### 5.6 Default label and duplicates (S4, S5)
 
 `Model.deriveLabel(url, kind)`:
