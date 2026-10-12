@@ -503,10 +503,17 @@ write, and a user who looks for it there afterwards should have been told.
 The caption is `elide: Text.ElideMiddle` over the card width; whether the
 longer string elides at the shipped width, and what it looks like when it
 does, is UNVERIFIED (the docs lane holds no display). Two strings on the
-OLDER empty state (the one with the command box, UX.md 4.4) still present the
-URL settings as stored -- `Settings live in ~/.config/omarchy/shell.json
-(entry ...)` and `Optional EPG:  omarchy bar set ... epgUrl <url>` -- and are
-unchanged in this round; they are an open UX item for the lead, recorded
+OLDER empty state (the one with the command box, UX.md 4.4) still presented the
+URL settings as stored in that round -- `Settings live in ~/.config/omarchy/shell.json
+(entry ...)` and `Optional EPG:  omarchy bar set ... epgUrl <url>`. **Moved
+2026-10-12 (round 3, lead ruling):** they now read `Optional EPG:  omarchy bar
+set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)`
+and `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json;
+other settings live in ~/.config/omarchy/shell.json (entry
+io.github.rmcdavid.iptv)` -- `Guide.qml` `unconfiguredEpg` and
+`unconfiguredWhere` on lane-key-s1, the same parenthetical as the first-run
+caption so one phrase means one thing; UX.md 4.4 and 6.3 carry them. In round
+2 they were an open UX item for the lead, recorded
 here and in the lane report rather than given an id this lane cannot board.
 
 #### 3.1.2 After paste (both URLs masked)

@@ -265,8 +265,8 @@ bar entry, read by the service through `shell.barConfig`.
 | Key | Type | Default | Validation (service side, `Model.js`) |
 |---|---|---|---|
 | `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else. **Amended 2026-10-11 (D-SINK-19): an INPUT, not a stored setting.** A value here that this service has not consumed -- the first reconcile of a service, or a value different from the one it last saw -- is validated and adopted through `Model.reconcileSources` exactly as a CLI value always was (SR8; SR37 in `ARCHITECTURE-SOURCES.md` as amended), the adopted record becomes the active one, and the plugin then rewrites the entry WITHOUT this key (`Model.RETIRED_SETTINGS`, dropped by `Model.entryWith`), so reading the entry back does not show it. A refused value is reported (D16, narrowed by `Model.invalidInputBlocks` to the case with no active source to show instead) and stripped too. An empty value is a no-op: it is the steady state after the plugin's own strip, not a command. The plugin itself never writes a URL here any more |
-| `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key |
-| `sourceKey` | string | `""` | D-SINK-19. Written by the plugin, never derived from user input: `Model.activeKeyText` of the active source's key, 8 lowercase hex with D4's suffix rule, mirrored into the entry by every owned write (`Model.OWNED_SETTINGS` is `["sourceKey", "showLogos"]`). NOT the authority -- `state.json`'s `activeKey` is -- and consulted only when the state names no record (`Model.adoptActiveSource` step 3); a value naming none of the user's records reads as absent. Deliberately NOT declared in `manifest.json` (`barWidget.defaults` and `schema` do not name it): declaring it would offer the mirror as a user setting with help text. The host keeps an undeclared key through its own rewrite and `omarchy bar set` writes any key without a schema check -- both MEASURED on 2026-10-11 and recorded in `OMARCHY-PLUGIN-CONTRACT.md`, because the recovery path rests on them. Not a credential: SR36 states what it is (a 32-bit confirmation of a guessed URL) |
+| `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key. **Round 3 (R12, 2026-10-12): never stripped unadopted.** A value set while NO source is active stays on this key (the guide reads it as its fallback) until a source exists and the reconcile that brings it attaches the value to that source; only then is it taken off the entry. Round 2 stripped it in the same write with no copy anywhere |
+| `sourceKey` | string | `""` | D-SINK-19. Written by the plugin, never derived from user input: `Model.activeKeyText` of the active source's key, 8 lowercase hex with D4's suffix rule, mirrored into the entry by every owned write (`Model.OWNED_SETTINGS` is `["sourceKey", "showLogos"]`). NOT the authority -- `state.json`'s `activeKey` is -- and consulted only when the state names no record (`Model.adoptActiveSource` step 3); a value naming none of the user's records reads as absent. Deliberately NOT declared in `manifest.json` (`barWidget.defaults` and `schema` do not name it): declaring it would offer the mirror as a user setting with help text. The host keeps an undeclared key through its own rewrite -- MEASURED on 2026-10-11 (the host's `updateEntryInline` run in node over its own source, `OMARCHY-PLUGIN-CONTRACT.md`) -- and `omarchy bar set` writes any key without a schema check -- READ, not run: `setBarWidget` at `services/PluginRegistry.qml:342-380` ends `entry[String(key)] = value` with no schema lookup (the contract's "read rather than run" list). The recovery path rests on both; a round-2 sentence here called both measured and the contract entry it cited said otherwise for the second. Not a credential: SR36 states what it is (a 32-bit confirmation of a guessed URL) |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
 | `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in `Model.js` and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
 | `showChannelName` | boolean | true | widget-only, `!== false` |
@@ -850,9 +850,26 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   (rule 9), so the host keeps publishing the adopted URL until somebody else
   writes. A state reload is a forced reconcile, and reading that stale URL
   again would re-add and re-activate a source the user had just removed
-  through `state source remove`. The cost: re-setting the SAME URL in one
-  session after removing it is `ignore` until the next shell start, which is
-  what 0.13.5 did too.
+  through `state source remove`. A cost was written here in round 2 --
+  "re-setting the SAME URL in one session after removing it is `ignore` until
+  the next shell start" -- and it was FALSE: the review's data-loss lens walked
+  the shipping functions in the service's order over both host shapes, and
+  the owned write that follows the remove strips the stale echo from the entry
+  and moves the service's snapshot (on the one-write-behind host the published
+  entry falls back to the previous stored one, which carries no URL; on the
+  echoing host, omacom/omarchy#15082, the snapshot is `""` at once), so the
+  re-set value differs from the snapshot and is adopted. Withdrawn 2026-10-12
+  from every document that carried it; measured at the Model layer in node,
+  not live.
+- An input is never stripped unadopted (R12, round 3). An `epgUrl` set while
+  NO source is active cannot be attached to anything, and round 2 stripped it
+  in the same owned write anyway -- the user's value gone with no copy (review
+  P2). Now it stays on the entry, the guide reads it as its fallback meanwhile,
+  the service's EPG snapshot moves only for an input that reached a record
+  (`epgSnapshotAfter`, lane-key-s1, cited bare until the merge), and the
+  reconcile that brings the first source adopts it; `writeEntry` is asked of
+  `epgConsumed`, not of "the entry carries an EPG". The same already held for
+  `playlistUrl` by R1.
 - The empty input is a no-op, and that is a lever withdrawn rather than lost
   quietly: `omarchy bar set ... playlistUrl ""` and `... epgUrl ""` no longer
   clear anything, because an entry the plugin itself empties on every write
@@ -870,6 +887,68 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   re-adopted on the next run -- and never a record nobody points at. The
   first build wrote the entry ungated through `Qt.callLater` while the state
   save could still be deferred.
+
+**The start that was NOT interrupted lost it anyway (D-SRC-15), and round 3
+(lead rulings R9-R12, 2026-10-12) is what the tree does now.** R5 ordered
+the two writes for a shell that dies between them; the harness lane then ran
+the ordinary, uninterrupted first start live under a nested cage and the
+adopted pointer was gone (key-scenario 32 / 12 on lane-key-r2, the pre-existing
+sources scenario 46 / 22 against 66 / 0 on dev). The mechanism, measured and
+attributed with a helper whose `state init` does nothing: the helper's
+start-up `state init` ran `os.chmod(path, 0o600)` on the EXISTING `state.json`;
+that is an inotify `IN_ATTRIB` on the file the service's `stateFile` FileView
+watches (`watchChanges: true`, `onFileChanged: reload()`), and a FileView
+probe shows a chmod 0600 -> 0600 reloading too; `applyUserState` was handed
+the PRE-adoption text, which was not in `recentSaves` because the first save
+was parked behind `dirsReady`; `Model.stateOnLoad` keeps only the session
+record of the in-memory state; so the adopted key and any NEW record were
+replaced by the file, the parked save then wrote the key-less state and the
+entry flush stripped the URL with `sourceKey ""`. A 0.13.5 install with one
+source came up unconfigured with the URL gone; a URL set while the shell was
+down was lost outright. The shape is OLDER than D-SINK-19 -- any in-memory
+change before `dirsReady` was lost on that reload -- and the URL left on the
+entry recovered a known record by accident until D-SINK-19 removed the backup.
+The sibling, found by the data-loss lens: `startCacheLayout` sets `cacheReady`
+BEFORE `dirsReady`, so an IPC switch or remove in that window was undone by the
+same reload while its `cache remove` still deleted the directory.
+What the tree does now, on lane-key-s1 (3d2d8e7; the round-3 symbols are cited
+bare here because this document's tree carries them only after the merge):
+- R9. A reload NEVER replaces in-memory state that is newer than the file.
+  `reloadDisposition` is asked first in `applyUserState`: `apply` for the
+  first load and for a file that is genuinely newer (a CLI `state ...` write
+  with nothing of ours outstanding); `ignore` for the service's own write
+  echoed back, a save parked behind `dirsReady`, a save in flight
+  (`stateSavesInFlight`, counted up before `setText` and down on the
+  FileView's `saved` / `saveFailed` -- one `saved` per `setText`, measured, so
+  a counter and not a flag), or a save that failed. An ignored reload runs
+  neither `reconcile(true)` nor `startCacheLayout`, and the count
+  `stateReloadsIgnored` is what the harness reads. The sibling is covered by
+  the same flag: the switch or remove before `dirsReady` parks a save, so the
+  reload that follows is ignored.
+- R10. The helper leaves a file that is already 0600 alone (`init_state_file`
+  stats first). Belt and braces, not the fix: a 0644 file still gets the
+  chmod, and the service must survive that reload by R9 -- which the key
+  scenario forces by seeding the file 0644 on purpose (D3 reads the ignore
+  off the counter).
+- R11. `stateInitProc`'s exit gates the entry flush on the helper's exit code
+  AND on the parked save having LANDED -- the FileView's `saved`, not
+  `setText` returning (`entryFlushDisposition`: `none` | `wait` | `flush` |
+  `drop`). On failure the entry is NOT rewritten, so the URL stays on it as
+  the backup it accidentally is, and a warning with no URL is logged. The
+  order (save, then entry) is pinned by a structural check that reads
+  `Service.qml`, the D-SINK-18 shape.
+Observed, not inferred: on lane-key-s2 `key-scenario.sh live` reads 49 passed
+/ 0 failed and 36 / 13 over `--baseline lane-key-r2` (D2, D3, M1, M3, M5,
+C1-C5, E1, O5, O6 -- everything that rests on an adoption made at start-up);
+`sources-scenario.sh` under cage 63 / 3, the three pinning the pre-round-2
+SR25 contract rather than this. One assertion from the round-2 review is
+REFUTED by the same measurement and is recorded as a control: the created-file
+shape (no `state.json` at all) does not drop, because a FileView loaded over a
+missing path never sees the helper's create (N1-N4 green on the dropping tree,
+`stateReloadsIgnored` 0 across a fresh start). Not observed, said so: the
+state directory unwritable at start (R11's `drop`), and a CLI `state ...`
+write landing inside a parked or in-flight shell save, which R9 as ruled
+loses to the shell's save (the helper's warning says so).
 
 **What REMAINS, with its size rather than a claim of zero.** The exposure is
 NOT closed. Three things remain, and the first is the one to quote:
@@ -898,12 +977,18 @@ NOT closed. Three things remain, and the first is the one to quote:
    The shield runs on the startup path unconditionally, so the container is
    tightened at that start whether or not the write lands -- F-M3-16's
    lesson, that the artifact needs the fix as much as the derivation does.
-A fourth, smaller, and measured on 2026-10-11 (`OMARCHY-PLUGIN-CONTRACT.md`):
-when the plugin's id ALSO appears in the host's top-level `plugins[]` list,
-`updateEntryInline` rewrites only the `bar.layout` copy, so a URL in a
-`plugins[]` copy would stay there untouched by any write of ours. On this
-machine that list is empty and `omarchy plugin enable` writes to `bar.layout`;
-whether any supported command fills `plugins[]` is UNVERIFIED.
+A fourth, smaller, and measured on 2026-10-11 (`OMARCHY-PLUGIN-CONTRACT.md`,
+case B; the docs lane's DQ-2, recorded here as a residual rather than fixed):
+**a `plugins[]` copy of the entry is never rewritten by an owned write.** When
+the plugin's id ALSO appears in the host's top-level `plugins[]` list,
+`updateEntryInline` rewrites only the `bar.layout` copy (its `plugins[]` loop
+runs only `if (!foundInLayout)`), so a URL in a `plugins[]` copy stays there
+through every write of ours, the migration's included, and the mode shield is
+the only thing between it and another account. The plugin never READS that
+copy, so nothing is adopted from it either. On this machine that list is
+empty and `omarchy plugin enable` writes to `bar.layout`; whether any
+supported command fills `plugins[]` is UNVERIFIED, which is why this is not
+in the README.
 
 **The costs, accepted by the product owner on 2026-10-09 before the work was
 briefed, restated after the review as what the code does.** (1) `omarchy bar
@@ -968,12 +1053,16 @@ a proof of absence.
 
 **What this lane did not verify.** This is the docs lane; it holds no display.
 It has not run the shell, the migration, a downgrade or an upgrade; it cites
-the lead's 2026-10-09 mode measurements and lane A's 2026-10-11 node evidence
-rather than restating them as its own, and the one measurement it took itself
-is the host's `updateEntryInline` run in node over the host's own source
-(`OMARCHY-PLUGIN-CONTRACT.md`). The harness instrument that would observe the
-migration live derives the key from the entry's URL and is being repaired
-under R6; until that lands, every live half of this entry is UNVERIFIED.
+the lead's 2026-10-09 mode measurements, lane A's node and FileView-probe
+evidence and lane B's transcripts (2026-10-11) rather than restating them as
+its own, and the one measurement it took itself is the host's
+`updateEntryInline` run in node over the host's own source
+(`OMARCHY-PLUGIN-CONTRACT.md`). The harness instrument that observes the
+migration live landed under R6 (lane-key-r2, carried by lane-key-s2), and the
+live counts quoted in this entry are read from the transcripts lane B's report
+names, not re-run here. Two live halves remain UNVERIFIED by anyone: the
+downgrade-then-upgrade round trip, and an unwritable state directory at
+start-up (R11's `drop`).
 
 Raised 2026-10-09 (D-LOGO-11), and written here in the round that fixes it --
 the state of that fix is the board row in `docs/STATUS.md`, not this

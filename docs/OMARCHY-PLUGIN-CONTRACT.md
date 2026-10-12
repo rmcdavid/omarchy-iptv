@@ -587,3 +587,48 @@ Two neighbouring facts, read rather than run:
 - `omarchy plugin disable` removes the entry and everything on it, the mirror
   included (`QA.md` TC-INST-05); the plugin's own `state.json` still names the
   active source, so re-enabling does not need the URL again.
+
+## Quickshell `FileView` on this machine: what a reload means (D-SRC-15, measured 2026-10-11)
+
+Not the Omarchy plugin API but the runtime every plugin's `FileView` sits on
+(quickshell 0.3.1-1, Qt 6.11.2 as installed; re-measure on a Quickshell
+update). Measured by the D-SINK-19 code lane with a purpose-built FileView
+probe run by quickshell under a nested headless cage (lane A's
+`fv/probe.qml` + `run-probe.sh`, in the lane's scratch directory, not in the
+tree) and by the harness lane's key scenario (`scripts/dev-harness/
+key-scenario.sh`, segments D and N). The service's `stateFile` is a FileView
+with `watchChanges: true`, `atomicWrites: true` and `onFileChanged: reload()`,
+and these four facts are what R9-R11 (`ARCHITECTURE-SOURCES.md`, round 3)
+are built on:
+
+- **`saved` fires once per `setText`.** Two `setText` calls back to back
+  delivered `saved, fileChanged, saved`; a third delivered `fileChanged,
+  saved` (probe summary: `saved=3 failed=0 fileChanged=4 loaded=3`). So "a
+  write is in flight" is a COUNTER, not a flag (`stateSavesInFlight`), and
+  `setText` returning says nothing about the file.
+- **A bare chmod reloads, mode changed or not.** A chmod 0644 -> 0600 AND a
+  chmod 0600 -> 0600 each delivered `fileChanged` followed by `loaded` with
+  the file's text. That is inotify `IN_ATTRIB`, and it is the trigger of
+  D-SRC-15: the helper's start-up `state init` chmodded the existing
+  `state.json`, the FileView reloaded the PRE-adoption text while the first
+  save was still parked, and the parked save then wrote the loss. It is also
+  why the helper leaving a 0600 file alone (R10) is belt and braces and not
+  the fix.
+- **The view's own atomic write fires `fileChanged` too.** In the probe run
+  no `loaded` followed it, while the service's `recentSaves` comment assumes
+  one can; which it is was not settled (lane A's DQ-A7) and nothing depends
+  on it, because `reloadDisposition` ignores an own write by its text and a
+  parked or in-flight save by its count.
+- **A FileView loaded over a MISSING path does not see the file being
+  created by another process.** Over a fresh install (no state directory, no
+  file) the helper's `state init` creates `state.json` under the parked
+  adoption and no reload fires: `stateReloadsIgnored` reads 0 across the
+  whole fresh start and the key scenario's N1-N4 are green on the very tree
+  that drops D2. Whether the watch is installed by the first successful load
+  or by the first own write is unmeasured (lane B's DQ-B8); a reader of
+  `watchChanges` should not assume a missing file is watched.
+
+`saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
+and its argument is an enum, never a path; until round 3 the service
+connected to neither it nor `saved`, so a refused write was silent and the
+entry mirror went out anyway (R11 is the gate).

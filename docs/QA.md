@@ -79,7 +79,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-CFG-01 | `omarchy bar set ... playlistUrl <url>` fetches without restart | M 5.3, 5.4 US1 | helper runs within ~1 s (journal shows one run, 300 ms debounce); bar tooltip `IPTV - click to open the guide`; guide footer `1,475 channels - updated HH:MM` (count from the live list, thousands separator) **[Amended 2026-10-11, D-SINK-19: and afterwards `jq` of the entry in shell.json shows `sourceKey` = the record's key and NO `playlistUrl`; `state.json` `activeKey` = that key; the file is 0600. The same holds when the value was set while the shell was down (SRC-MIG-11 in QA-SOURCES.md); at the first build it was discarded and erased instead.]** |
+| TC-CFG-01 | `omarchy bar set ... playlistUrl <url>` fetches without restart | M 5.3, 5.4 US1 | helper runs within ~1 s (journal shows one run, 300 ms debounce); bar tooltip `IPTV - click to open the guide`; guide footer `1,475 channels - updated HH:MM` (count from the live list, thousands separator) **[Amended 2026-10-11, D-SINK-19: and afterwards `jq` of the entry in shell.json shows `sourceKey` = the record's key and NO `playlistUrl`; `state.json` `activeKey` = that key; the file is 0600. The same holds when the value was set while the shell was down (SRC-MIG-14 in QA-SOURCES.md, observed live under cage on lane-key-s2: key-scenario C1-C5); at the first build it was discarded and erased instead, and on the round-2 tree it was lost to the start-up reload (D-SRC-15).]** |
 | TC-CFG-02 | HTTP 404 with no cache | M 5.4 US1 step 4 | empty state `Playlist failed to load` / `HTTP 404 Not Found from iptv-org.github.io - check playlistUrl`; hint `r reload - Esc close`; bar glyph U+F0503, tooltip `IPTV - playlist error, open the guide`; notification `Playlist error` / `Could not fetch the playlist (HTTP 404 Not Found). Open the guide for details.` |
 | TC-CFG-03 | unresolvable host | M 5.4 US1 step 5 | reason `Could not resolve host` |
 | TC-CFG-04 | unsupported source scheme | A `python3 -m unittest discover -s tests` (`tests/test_helper.py::test_refuses_unsupported_scheme`); M optional | code `unsupported_scheme`, guide renders the message |
@@ -211,7 +211,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-UI-01 | not configured (UX 4.4, 6.3) | M 5.4 US1 step 1 | `No playlist configured`; `Set your M3U URL or path, then press r to load it:`; command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>`; `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>`; `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`; column hidden; hint `r reload - Esc close`; glyph U+F0502; click on the box copies (`wl-paste`) and footer `Copied` **[Noted 2026-10-11, D-SINK-19: these three strings are unchanged on the tree and still present `playlistUrl` / `epgUrl` as stored settings; they are inputs now (the value is converted and removed from the entry). The first-run form's caption says so (`(converted; not kept in shell.json)`, UX-SOURCES 5.1); these three are an open UX item for the lead, not a defect this lane can board.]** |
+| TC-UI-01 | not configured (UX 4.4, 6.3) | M 5.4 US1 step 1 | `No playlist configured`; `Set your M3U URL or path, then press r to load it:`; command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>`; `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)`; `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`; column hidden; hint `r reload - Esc close`; glyph U+F0502; click on the box copies (`wl-paste`) and footer `Copied` **[Amended 2026-10-12, D-SINK-19 round 3: the EPG line and the "where" line are the strings `Guide.qml` ships on lane-key-s1 (`unconfiguredEpg`, `unconfiguredWhere`; two spaces before the parenthesis, as shipped), ruled by the lead to the exact text the review's truth lens gave. Until that round they read `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` and `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`, presenting the URL keys as stored settings. The command box is unchanged because a click COPIES it. Both Texts wrap (`wrapMode: Text.WordWrap` over `parent.width`); how the longer lines wrap at the shipped width is UNVERIFIED on a display.]** |
 | TC-UI-02 | loading, no cache (UX 4.5) | M 5.4 US1 step 2 | glyph U+F01D8, `Loading playlist...`, `Fetching from iptv-org.github.io` (host only), hint `Esc close`; never shown when a cache exists |
 | TC-UI-03 | error with cache (banner, UX 4.6) and without cache | M 5.4 US7 step 3, US1 step 4 | banner spec (height `Style.space(28)`, urgent tint, glyph U+F0026, 140 ms fade); empty error state with glyph U+F0503 |
 | TC-UI-04 | now-playing cues (UX 4.7) | M 5.4 US3 step 4 | bold name + U+F040A + footer, column unchanged |
@@ -382,14 +382,34 @@ D-SINK-19 (2026-10-11), automated half, all in the gate: `node tests/Model.test.
 runs the shared fixture `tests/fixtures/active-key.json` -- `parse` (18 cases,
 also run by `tests/test_state.py::test_active_key_runs_the_shared_fixture`),
 `remove` (5, also `test_remove_runs_the_shared_fixture`), `resolve` (6), `adopt`
-(23, the R1 order, both refusals, the consumed echo, the R4 EPG rules) and
-`order` (8, the R5 write plan) -- plus the `D-SINK-19 migration 1..6`,
-`R1 (review P1)`, `R7` and `P3 sibling` checks; `tests/Model.spec.qml`
-`test_guideSurfaceClearedPlaylist` carries the R2 compare inside the Qt
-engine. Lane A measured 16 node checks and 1 qml compare red against the
-first build (f275bde) and the rest red by mutation. The LIVE half is
-`QA-SOURCES.md` SRC-MIG-08..12 and SRC-RM-10, which wait on the harness
-repair (R6) and are UNVERIFIED until it lands.
+(23 in round 2, the R1 order, both refusals, the consumed echo, the R4 EPG
+rules; 25 since round 3, with `epgConsumed` pinned on every case and the
+`R4/R12` flip) and `order` (8, the R5 write plan) -- plus the `D-SINK-19
+migration 1..6`, `R1 (review P1)`, `R7` and `P3 sibling` checks;
+`tests/Model.spec.qml` `test_guideSurfaceClearedPlaylist` carries the R2
+compare inside the Qt engine. Lane A measured 16 node checks and 1 qml compare
+red against the first build (f275bde) and the rest red by mutation. Round 3
+(lane-key-s1, 2026-10-12; D-SRC-15, lead rulings R9-R12) adds the fixture
+sections `reload` (10, `R9: reloadDisposition over every reload case`),
+`flush` (8, `R11: entryFlushDisposition over every flush case`) and
+`snapshot` (5, `R12: epgSnapshotAfter over every snapshot case`), three
+structural pins that read `Service.qml` (`R9 (structural)`: the disposition is
+asked first in `applyUserState`; `R11 (structural)`: the parked save is issued
+before the entry flush is settled and `flushPendingEntry` has one call site;
+`R12 (structural)`: the EPG snapshot moves after `adoptActive`), and two
+python tests that run the helper's `state init` as a subprocess over a 0600
+and a 0644 file (`ctime_ns` equal, then greater). Seen red by lane A: 10 node
+failures over an export of lane-key-r2 (`2125 checks, 10 failure(s)`), one
+python failure (`test_init_leaves_a_file_already_0600_alone`), and each
+structural pin red under its own mutation (the two `onExited` lines swapped;
+`flushPendingEntry` called straight from `onExited`; R9 narrowed to own-write
+only; the EPG snapshot always moving). Counts on lane-key-s2: node 2125
+checks, python 1056 tests, qml 78. The LIVE half is `QA-SOURCES.md`
+SRC-MIG-11..17 and SRC-RM-10: the harness repair (R6) and the scenarios (R7)
+landed in `scripts/dev-harness/key-scenario.sh` (lane-key-r2, then
+lane-key-s2), and the rows carry the measured counts -- 49 / 0 forward on
+lane-key-s2, 36 / 13 over `--baseline lane-key-r2` -- with what each segment
+observes and what none does.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 
@@ -923,12 +943,15 @@ codepoints for `...`, quotes and the middle dot).
    widget -> tooltip `IPTV - no playlist configured`; open the guide ->
    `No playlist configured`, body `Set your M3U URL or path, then press r to
    load it:`, command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl
-   <url>`, `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>`,
-   `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`,
+   <url>`, `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)`,
+   `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`,
    no group column, hint `r reload - Esc close`, glyph U+F0502; click the box,
    `wl-paste` prints the command, footer `Copied` [TC-UI-01, TC-BAR-02].
    (Since D-SINK-19 the command is an input: after step 2 the entry carries
-   `sourceKey` and no `playlistUrl`; see TC-CFG-01 as amended.)
+   `sourceKey` and no `playlistUrl`; see TC-CFG-01 as amended. The two lines
+   after the box are the round-3 strings; before 2026-10-12 they read
+   `Optional EPG:  omarchy bar set ... epgUrl <url>` and `Settings live in
+   ~/.config/omarchy/shell.json (entry ...)`.)
 2. Set `playlistUrl` (5.3) with the guide open: within a second the state
    becomes `Loading playlist...` / `Fetching from iptv-org.github.io` (host
    only) with hint `Esc close` [TC-UI-02], then the list renders; footer
