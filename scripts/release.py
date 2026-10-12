@@ -89,6 +89,19 @@ ALLOWLIST = (
     'contrib/windows.lua',
 )
 
+# D-REL-5. The marketplace's automated security baseline refuses to scan any
+# non-executable file over `securityFileByteLimit = 512 * 1024` bytes
+# (scripts/security-baseline-limits.mjs in omacom/omarchy-plugin-marketplace;
+# scripts/security-github-snapshot.mjs throws `security-baseline-scan-limit`),
+# and a baseline that cannot complete is a verification request nobody can
+# approve. Model.js passed at 0.13.4 with 2,105 bytes to spare and crossed it
+# at 0.13.5, and nothing here could have gone red for it: the gate proved the
+# allowlist whole, never that the artifact was one the marketplace can read.
+# So every file on the allowlist, the executable helper included, is held to a
+# ceiling 64 KiB below the scanner's number, and the gate goes red first.
+SCANNER_FILE_LIMIT = 512 * 1024
+FILE_CEILING = 448 * 1024
+
 # Files a coding agent discovers and obeys automatically. None may ship, and
 # the assertion is by NAME so a future edit to ALLOWLIST cannot sneak one in.
 AGENT_INSTRUCTION_NAMES = (
@@ -255,9 +268,19 @@ def check(root, out=sys.stdout):
     have = tracked(root)
     allow = set(ALLOWLIST)
 
+    largest = (0, '')
     for path in ALLOWLIST:
         if path not in have:
             problems.append('%s is on the allowlist but is not tracked' % path)
+        elif os.path.isfile(os.path.join(root, path)):
+            size = os.path.getsize(os.path.join(root, path))
+            largest = max(largest, (size, path))
+            if size > FILE_CEILING:
+                problems.append(
+                    '%s is %d bytes, over the %d-byte ceiling (448 KiB); the marketplace '
+                    'scanner refuses a file over %d bytes and the verification request '
+                    'could not be approved (D-REL-5) -- split it'
+                    % (path, size, FILE_CEILING, SCANNER_FILE_LIMIT))
         top = path.split('/')[0]
         if top in DEV_ONLY_DIRS or (top.startswith('.') and '/' in path):
             problems.append('%s is under a development-only directory' % path)
@@ -364,8 +387,9 @@ def check(root, out=sys.stdout):
                     'the rule or the document by name and say it is on the dev '
                     'branch' % (src, n, m.group(0)))
 
-    out.write('release allowlist: %d files, %d runtime sources scanned\n'
-              % (len(ALLOWLIST), len(reached)))
+    out.write('release allowlist: %d files, %d runtime sources scanned, largest %s at %d '
+              'of %d bytes\n'
+              % (len(ALLOWLIST), len(reached), largest[1] or '-', largest[0], FILE_CEILING))
     return problems
 
 

@@ -383,6 +383,42 @@ class ReleaseCase(unittest.TestCase):
         self.assertIn('%d runtime sources scanned' % (3 + len(model_files.model_paths(ROOT))),
                       out.getvalue())
 
+    # -- the size ceiling (D-REL-5) -----------------------------------------
+
+    def test_the_ceiling_sits_64_kib_under_the_scanners_limit(self):
+        self.assertEqual(release.SCANNER_FILE_LIMIT, 524288)   # 512 * 1024, the marketplace's number
+        self.assertEqual(release.FILE_CEILING, 458752)         # 448 KiB
+        self.assertEqual(release.SCANNER_FILE_LIMIT - release.FILE_CEILING, 64 * 1024)
+
+    def test_a_shipped_file_over_the_ceiling_is_red(self):
+        """The failure the marketplace hit at 0.13.5, with 64 KiB to spare."""
+        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 2) + '\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('%s is %d bytes, over the %d-byte ceiling'
+                            % (PARTS[-1], release.FILE_CEILING + 1, release.FILE_CEILING) in p
+                            for p in problems), problems)
+
+    def test_a_shipped_file_at_the_ceiling_is_fine(self):
+        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 3) + '\n')
+        self.commit_all()
+        out = io.StringIO()
+        self.assertEqual([], release.check(self.dir, out=out))
+        self.assertIn('largest %s at %d of %d bytes' % (PARTS[-1], release.FILE_CEILING, release.FILE_CEILING),
+                      out.getvalue())
+
+    def test_the_executable_helper_is_held_to_the_ceiling_too(self):
+        """The scanner exempts executables; this does not, because a helper
+        that grows past 448 KiB is the next file to split either way."""
+        self.write('bin/omarchy-iptv', '#!/usr/bin/env python3\n#' + 'x' * release.FILE_CEILING + '\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any(p.startswith('bin/omarchy-iptv is ') and 'ceiling' in p for p in problems), problems)
+
+    def test_the_real_tree_is_under_the_ceiling(self):
+        for path in release.ALLOWLIST:
+            self.assertLessEqual(os.path.getsize(os.path.join(ROOT, path)), release.FILE_CEILING, path)
+
     def test_a_manifest_entry_point_outside_the_allowlist_is_a_problem(self):
         self.write('manifest.json', '{"version": "0.9.9", "entryPoints": '
                    '{"overlay": "Other.qml"}}\n')
