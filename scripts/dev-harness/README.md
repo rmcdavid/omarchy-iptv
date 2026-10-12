@@ -907,7 +907,8 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline lane-key-v2  # the round-7 red run: round 6's code (66 / 5: U2, U3, U4, U6, U7)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-w2  # the round-8 red run: round 7's code (73 / 6: K1, K3, Z1, Z2, Z3, A2)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-v2  # the round-7 red run: round 6's code (66 / 5 before K, Z, A existed: U2, U3, U4, U6, U7)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-t2  # the round-5 red run: round 4's code (60 / 4 before U existed: L1, L2, F6, F7)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red run: round 3's code (54 / 10: D3, W3, W6, F3..F7, L1, L2)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (38 / 26)
@@ -1131,6 +1132,34 @@ under a nested headless cage on the same tree. `qa-lib-test.sh` now unsets
 `OMARCHY_IPTV_HARNESS_DIR` inside its default-directory pin itself (a bare
 run with the variable exported read 442 / 1 with the old line, 443 / 0 with
 the new one), and pins the `--host` lever (443 checks).
+
+**Round 8 (2026-10-12; K1..K3, Z1..Z3, A1, A2 added, 70 -> 78).** The
+round-7 data-loss lens reproduced two P1s live with drivers of its own,
+and this scenario carried no refused and no whitespace-wrapped value at
+all. K lifts its `loop-child.sh`: a refused `playlistUrl` (an ftp:// URL
+with a credential) beside an `epgUrl` R12 keeps, the shell's entry writes
+(the harness log's `updateEntryInline` lines) and its own CPU ticks
+(utime + stime of the recorded pid) counted over a 5 s window opening 2 s
+after the shell settles; at most 2 writes and 50 ticks is "settled". Z
+lifts `resurrect-child.sh` and `MODE=badws`: a whitespace-wrapped CLI
+playlist adopted then removed (Z1, Z2), and a whitespace-wrapped refused
+credential beside a working source (Z3). A drives the in-app add's probe
+commit through `ipc addSource`, with no guide URL in the form (A1, R17b's
+commit half, which the round-7 live lens found no segment reaching) and
+with one (A2, the lead's OQ-W3 ruling, R18d). Counts from the transcripts
+on lane-key-x1 (7a429cd), under the scenario's own nested cage: the
+forward run **79 passed, 0 failed** (133.0 s; every K window read 0
+writes and 0 ticks); `--baseline lane-key-w2` **73 passed, 6 failed** --
+K1 (17,414 writes, 596 ticks), K3 (19,943 / 637), Z1, Z2, Z3, A2, with K2
+and A1 green as the controls they are and nothing outside K, Z and A
+moved. Through `--tree` over 7a429cd with one decision removed: the keep
+decision comparing the raw entry value against the snapshot again, 75 / 4
+(K3, Z1, Z2, Z3 -- K3 reads `settled` and keeps the credential, because
+the write-settling half alone stops the loop); the funnel's two settling
+decisions removed, 78 / 1 (K1, 14,256 / 601); the probe commit no longer
+handing the form's guide URL over, 78 / 1 (A2). `sources-scenario.sh`
+**66 / 0** (the 10k switch median 33 ms) and `logo-scenario.sh live`
+**33 / 0** under a nested headless cage on the same tree.
 
 **The weak already-stored check, fixed in round 4.** 'a switch the host
 already stores is not reported as a persist failure' means to make the
