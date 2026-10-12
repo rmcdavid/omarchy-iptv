@@ -64,6 +64,18 @@ class LedgerCase(unittest.TestCase):
             fh.write(text)
         subprocess.run(['git', '-C', self.dir, 'add', rel], check=True)
 
+    def write_model(self, *parts, **unlisted):
+        """The split model (D-REL-5): Model.mjs naming each part in `parts`
+        (name, code), and `unlisted` parts written under model/ that the
+        aggregator does NOT name."""
+        agg = '// header (no defect id here: the fixture board has none for it)\n'
+        for name, code in parts:
+            agg += 'export {} from "./model/%s.mjs"\n' % name
+            self.write('model/%s.mjs' % name, code)
+        for name, code in unlisted.items():
+            self.write('model/%s.mjs' % name, code)
+        self.write('Model.mjs', agg)
+
     def write_bytes(self, rel, blob):
         """A tracked file that is not text at all -- this tree has two."""
         path = os.path.join(self.dir, rel)
@@ -250,13 +262,31 @@ class LedgerCase(unittest.TestCase):
         function that never existed in any commit.
         """
         self.good_ledger()
-        self.write('Model.js', 'function realThing() { return 1 }\n')
+        self.write_model(('one', 'function realThing() { return 1 }\n'))
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1 and D-AAA-2. See `Model.realThing`.\n')
         self.assertGreen()
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1 and D-AAA-2. See `Model.ghostThing`.\n')
         self.assertRed(r'Model\.ghostThing is cited in docs/QA-RESULTS\.md')
+
+    def test_a_symbol_resolves_in_any_part_the_aggregator_names(self):
+        """D-REL-5: the model is several files, and a symbol may live in any.
+
+        The resolver used to read the one file Model.js. It reads every part
+        Model.mjs names now, through scripts/model_files.py, so a citation of
+        a function in the LAST part resolves and one whose only declaration is
+        in a file the aggregator does not load does not -- a part the plugin
+        never loads cannot be what a document means."""
+        self.good_ledger()
+        self.write_model(('one', 'var FIRST = 1\n'), ('two', 'function inTheSecond() { return 2 }\n'),
+                         stray='function inNoPart() { return 3 }\n')
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.inTheSecond`.\n')
+        self.assertGreen()
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.inNoPart`.\n')
+        self.assertRed(r'Model\.inNoPart is cited in docs/QA-RESULTS\.md')
 
     def test_the_module_file_name_is_not_a_symbol_citation(self):
         """`Model.mjs` is a FILE, as `Model.js` is; neither cites a symbol.
@@ -268,19 +298,19 @@ class LedgerCase(unittest.TestCase):
         suffix. Both suffixes are file names and the exemption says so.
         """
         self.good_ledger()
-        self.write('Model.js', 'function realThing() { return 1 }\n')
+        self.write_model(('one', 'function realThing() { return 1 }\n'))
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1 and D-AAA-2; the fix renames '
                    '`Model.js` to `Model.mjs` and keeps `Model.realThing`.\n')
         self.assertGreen()
 
     def test_citations_with_no_model_file_are_red_but_silence_is_not(self):
-        """A repo with neither citations nor a Model.js is consistent."""
+        """A repo with neither citations nor a model is consistent."""
         self.good_ledger()
         self.assertGreen()
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1, D-AAA-2 and cites `Model.anything`.\n')
-        self.assertRed(r'Model\.js is unreadable')
+        self.assertRed(r'the model \(Model\.mjs and its parts\) is unreadable')
 
     def test_a_family_name_containing_digits_is_still_seen(self):
         """`D-A11Y-1` must be an id, not invisible text.

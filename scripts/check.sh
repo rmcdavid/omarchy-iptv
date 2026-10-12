@@ -2,9 +2,14 @@
 # scripts/check.sh -- the whole quality gate for omarchy-iptv, in one command.
 #   1. omarchy plugin validate   (manifest schema, entry points, no symlinks)
 #   2. qmllint on every .qml     (qs.Commons / qs.Ui mapped through $QMLROOT),
-#                                INCLUDING the dev-harness fake (CLAUDE.md 10)
+#                                INCLUDING the dev-harness fake (CLAUDE.md 10);
+#                                every `Model.X` it reports must be a name
+#                                Model.mjs exports (check-model-members.py)
 #   3. node tests                (tests/Model.test.js)
 #   4. python tests              (python3 -m unittest discover -s tests)
+#   4b. model split              (scripts/split-model.mjs --check: Model.mjs and
+#                                the parts under model/ are what the script
+#                                writes, and no initializer reads another part)
 #   5. QML spec                  (qmltestrunner on tests/Model.spec.qml)
 #   6. harness predicates        (scripts/qa-lib-test.sh)
 #   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
@@ -157,10 +162,20 @@ fail=0
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
 QML_SPEC_MIN=${QML_SPEC_MIN:-78}
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2074}
-PY_TESTS_MIN=${PY_TESTS_MIN:-1047}
+# 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
+# dev without its floor.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2075}
+# 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
+# script and ceiling tests (tests/test_split_model.py, test_release.py), the
+# .mjs byte scans, the ledger's resolver over every part, and the fidelity
+# guard over every model file. The python floor sat one under the 1048 on the
+# tree before them; it is level again. 1084 -> 1123 the same day, D-REL-5
+# round 2: the Model-member judge (11), every static import form and the
+# unreadable-model message (11), the generated header and the dropped-line
+# record (7), the shipped Model.js refusal (6), and F-HARNESS-19's shell pin (4).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1123}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
-A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-34}
+A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
 # The M2-05 picture-in-picture preflight: 34 seams (integration added the
@@ -294,7 +309,7 @@ gate_new_suffix() {   # $1: repo-relative path. A note if it is not in the index
 
 gate_ascii_scan() {
   local rel file suffix bad_any=0 scanned=0 newly=0
-  local -a specs=( '*.js' '*.py' '*.json' 'bin/*' 'scripts/*.sh' \
+  local -a specs=( '*.js' '*.mjs' '*.py' '*.json' 'bin/*' 'scripts/*.sh' \
                    'scripts/dev-harness/*' 'tests/fixtures/*' 'docs/ARCHITECTURE.md' )
   local -a exempt_files=( 'tests/fixtures/qa-player/qa-player.m3u' \
                           'scripts/dev-harness/fixtures/harness.m3u.in' )
@@ -344,7 +359,7 @@ gate_ascii_scan() {
 
 gate_control_scan() {
   local rel file suffix bad_any=0 scanned=0 newly=0
-  local -a specs=( '*.js' '*.py' '*.qml' '*.json' '*.sh' 'bin/*' 'scripts/dev-harness/*' )
+  local -a specs=( '*.js' '*.mjs' '*.py' '*.qml' '*.json' '*.sh' 'bin/*' 'scripts/dev-harness/*' )
   gate_load_corpus "${specs[@]}"
   for rel in "${gate_corpus[@]}"; do
     case $rel in
@@ -412,16 +427,18 @@ else
   # than the real host - was never linted. A QML error there leaves this gate
   # green while every harness scenario fails to start.
   #
-  # The harness fake imports "Model.js", which run.sh stages beside it in the
-  # scratch root. Lint it the way it actually runs, or the import warning is
-  # noise and the Model.* calls are never resolved at all.
+  # The harness fake imports "Model.mjs", which run.sh stages beside it in the
+  # scratch root with the parts under model/ it re-exports (D-REL-5). Lint it
+  # the way it actually runs, or the import warning is noise and the Model.*
+  # calls are never resolved at all.
   stage="$CHECK_TMP/dev-harness"
   mkdir -p "$stage"
   for f in "$ROOT"/scripts/dev-harness/*.qml "$ROOT"/scripts/dev-harness/*.js; do
     [[ -f $f ]] || continue
     cp "$f" "$stage/" || bad "could not stage $(basename "$f") for linting"
   done
-  ln -sfn "$ROOT/Model.js" "$stage/Model.js"
+  ln -sfn "$ROOT/Model.mjs" "$stage/Model.mjs"
+  ln -sfn "$ROOT/model" "$stage/model"
   for file in "$ROOT"/*.qml "$ROOT"/tests/*.qml "$stage"/*.qml; do
     [[ -f $file ]] || continue
     linted=$(( linted + 1 ))
@@ -430,12 +447,31 @@ else
     errors=$(grep -c -E '^Error:|: error:|Error at' <<<"$output")
     (( lint_status == 0 )) || errors=$(( errors + 1 ))
     warnings=$(grep -c -E 'Warning:|: warning:' <<<"$output")
+    # D-REL-5: qmllint 6.11 reads no ES module's exports, so since the model
+    # became Model.mjs every Model member it reaches is a `missing-property`
+    # on type "Model". The first version of this comment said the classic
+    # Model.js was not resolved either, so no check was lost. Measured, that
+    # was false: Model.js WAS resolved, a real member drew nothing and a
+    # mistyped one drew a warning naming it (BarWidget.qml 0 -> 1). Here that
+    # warning would be one line in a bucket of hundreds. So the member lines
+    # are counted apart, to keep the rest comparable with the baseline, and
+    # every name in them is judged against the aggregator's export names by
+    # check-model-members.py: an unknown one is red. Not covered, measured on
+    # the three entry points: a member qmllint never reaches (82 code
+    # positions; the classic Model.js reached 1 of them).
+    model_members=$(grep -c -E 'not found on type "Model" \[missing-property\]' <<<"$output")
+    members_out=$(python3 "$ROOT/scripts/check-model-members.py" --root "$ROOT" --file "$file" <<<"$output")
+    members_status=$?
     if (( errors > 0 )); then
       bad "$(basename "$file"): $errors error(s), $warnings warning(s)"
       printf '%s\n' "$output"
     else
-      ok "$(basename "$file"): 0 errors, $warnings warning(s)"
+      ok "$(basename "$file"): 0 errors, $(( warnings - model_members )) warning(s) + $model_members on Model members"
       if [[ ${CHECK_VERBOSE:-0} == 1 && -n $output ]]; then printf '%s\n' "$output"; fi
+    fi
+    if (( members_status != 0 )); then
+      bad "$(basename "$file"): a Model member that Model.mjs does not export"
+      printf '%s\n' "$members_out"
     fi
   done
   # `[[ -f $file ]] || continue` means an unmatched glob lints NOTHING while
@@ -485,6 +521,24 @@ if (cd "$ROOT" && python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
   fi
 else
   cat "$py_log"; bad "python tests"
+fi
+
+step "model split (scripts/split-model.mjs --check)"
+# D-REL-5. The model is Model.mjs and the parts under model/ it re-exports.
+# This proves the tree as it stands: every part's generated import and export
+# lines are what the script would write, no top-level initializer reads
+# another part (a cyclic import hands it undefined, silently -- measured), no
+# code writes to a top-level binding, every part loads, and Model.mjs exports
+# exactly the names its own lines list. `--relink` repairs the generated lines
+# after an edit adds a call across parts.
+if command -v node >/dev/null 2>&1; then
+  if node "$ROOT/scripts/split-model.mjs" --check --root "$ROOT" >"$CHECK_TMP/split.log" 2>&1; then
+    ok "model split ($(grep -oE '^declarations: [0-9]+ in [0-9]+ parts' "$CHECK_TMP/split.log" | head -1))"
+  else
+    bad "model split"; cat "$CHECK_TMP/split.log"
+  fi
+else
+  bad "node not found; the model split cannot be checked"
 fi
 
 step "qmltestrunner tests/Model.spec.qml"

@@ -19,7 +19,7 @@
 //                               when nothing matched
 //
 // Usage:
-//   node verify.js <channels.json> <post-Model.js> <pre-Model.js | -> <query>...
+//   node verify.js <channels.json> <post-Model.mjs> <pre-Model.mjs | -> <query>...
 //
 // <post-Model.js> is the shipping Model.js. <pre-Model.js> is a scratch copy
 // the test mutates back to the pre-fix ranking (tier 3 accepting a substring
@@ -98,7 +98,7 @@ function search(Model, loaded, query) {
 }
 
 function main(argv) {
-  if (argv.length < 4) die("usage: node verify.js <channels.json> <post-Model.js> <pre-Model.js|-> <query>...")
+  if (argv.length < 4) die("usage: node verify.js <channels.json> <post-Model.mjs> <pre-Model.mjs|-> <query>...")
   var cacheFile = argv[0]
   var postFile = argv[1]
   var preFile = argv[2]

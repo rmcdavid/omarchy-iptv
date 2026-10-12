@@ -1,8 +1,8 @@
-// Unit tests for Model.js. Run: node tests/Model.test.js
+// Unit tests for the model (Model.mjs and its parts under model/, D-REL-5). Run: node tests/Model.test.js
 // Console PASS/FAIL runner, nonzero exit on any failure (same style as the
 // installed dell-power plugin, so QA can read either without a framework).
 // ASCII only: non-ASCII expectations are written as \uXXXX escapes.
-const Model = require("../Model.js")
+const Model = require("../Model.mjs")
 // The shared vectors both languages run (CLAUDE.md: a rule written twice gets
 // one fixture). tests/test_player.py reads the same file.
 const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-argv.json"), "utf8"))
@@ -551,7 +551,15 @@ const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPl
 const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
 const serviceSource = require("fs").readFileSync(require("path").join(__dirname, "../Service.qml"), "utf8")
 const helperSource = require("fs").readFileSync(require("path").join(__dirname, "../bin/omarchy-iptv"), "utf8")
-const modelSource = require("fs").readFileSync(require("path").join(__dirname, "../Model.js"), "utf8")
+// The model's own text, for the few pins that read a decision's body. Since
+// D-REL-5 the model is Model.mjs and parts under model/, so no single file
+// holds it; the text is taken from the function the aggregator EXPORTS
+// (Function.prototype.toString returns its exact source in whichever part
+// declares it), so no list of the parts is kept here and a pin reads what
+// `Model.X` calls, not a file that might not be loaded.
+function modelFunctionSource(name) {
+  return typeof Model[name] === "function" ? Function.prototype.toString.call(Model[name]) : ""
+}
 function qmlBlock(id) {
   const at = guideSource.indexOf("id: " + id + "\n")
   if (at === -1) return ""
@@ -7703,7 +7711,7 @@ checkCall("R13 (structural): persistActive hands the plan the in-flight count an
     // The plan names no step the service does not execute, and vice versa.
     stepsInPlan: ["save-state", "defer-state", "wait-entry", "write-entry-after-saved", "write-entry"].every(st => fn.indexOf('"' + st + '"') !== -1),
     planNamesOnlyThose: (function () {
-      const body = (modelSource.match(/function pointerWritePlan\(input\) \{[\s\S]*?\n\}/) || [""])[0]
+      const body = (modelFunctionSource("pointerWritePlan").match(/function pointerWritePlan\(input\) \{[\s\S]*?\n\}/) || [""])[0]
       const named = (body.match(/"[a-z-]+"/g) || []).map(x => x.replace(/"/g, ""))
       return named.length > 0 && named.every(st => ["save-state", "defer-state", "wait-entry", "write-entry-after-saved", "write-entry"].indexOf(st) !== -1)
     })()
@@ -7803,7 +7811,7 @@ checkCall("R16: ownedWriteMode over every `ownedWrite` case of the shared fixtur
 checkCall("R16: the fixture covers the whole four-input cube, the mode is `patch` exactly when the state is not loaded or any save flag is raised, and the decision takes the four inputs and nothing else", () => {
   const combos = new Set(activeKeyFixture.ownedWrite.map(c => [c.stateLoaded, c.savePending, c.savesInFlight > 0, c.saveFailed].join("/")))
   const cube = activeKeyFixture.ownedWrite.every(c => Model.ownedWriteMode(c).mode === ((c.stateLoaded !== true || c.savePending || c.savesInFlight > 0 || c.saveFailed) ? "patch" : "heal"))
-  const body = (modelSource.match(/function ownedWriteMode\(flags\) \{[\s\S]*?\n\}/) || [""])[0]
+  const body = (modelFunctionSource("ownedWriteMode").match(/function ownedWriteMode\(flags\) \{[\s\S]*?\n\}/) || [""])[0]
   const reads = Array.from(new Set((body.match(/f\.([A-Za-z]+)/g) || []).map(x => x.slice(2)))).sort()
   return [combos.size, cube, reads, Model.ownedWriteMode(null).reason, Model.ownedWriteMode({}).reason, Model.ownedWriteMode({ stateLoaded: "true" }).reason,
           Model.ownedWriteMode({ stateLoaded: true }).mode, Model.ownedWriteMode({ stateLoaded: true, savesInFlight: "2" }).reason,
@@ -12622,4 +12630,4 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
-console.log("All Model.js tests passed.")
+console.log("All model tests passed.")

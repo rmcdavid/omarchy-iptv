@@ -19,6 +19,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 # The generated tree is a BUILD ARTIFACT, not source: it holds a copy of the
 # host UI kit and a transformed copy of Guide.qml, both regenerated on every
@@ -47,7 +50,7 @@ MUTATIONS = [
      ["bar"]),
 
     ("bar: idle and error collapse to one announcement (colour-only state)",
-     "Model.js",
+     "Model.mjs",
      'if (o.error) return "IPTV, playlist error"',
      'if (o.error) return "IPTV, idle"',
      ["bar"]),
@@ -95,13 +98,13 @@ MUTATIONS = [
      ["scale", "query"]),
 
     ("rows: 'row N of M' leaves the row name (the only position an AT gets)",
-     "Model.js",
+     "Model.mjs",
      'out += ", row " + formatCount(at + 1) + " of " + formatCount(total)',
      'out += ""',
      ["scale", "query"]),
 
     ("bar: the error glyph becomes the idle glyph (R7 codepoints collapse)",
-     "Model.js",
+     "Model.mjs",
      "if (o.error) return GLYPHS.tvOff",
      "if (o.error) return GLYPHS.tv",
      ["bar"]),
@@ -164,7 +167,7 @@ MUTATIONS = [
      ["firstrun"]),
 
     ("footer: the stale cache stops being said in words (UX 7.2)",
-     "Model.js",
+     "Model.mjs",
      'out += SEP + (o.stale ? "cached " + str(o.lastUpdated) + SEP + "offline" : "updated " + str(o.lastUpdated))',
      'out += SEP + "updated " + str(o.lastUpdated)',
      ["banner"]),
@@ -209,6 +212,14 @@ def main():
             continue
         print("=== %s" % label)
         build_tree()
+        if filename == "Model.mjs":
+            # The model is several files (D-REL-5): mutate the one part that
+            # holds the text, found by the shared reader, never by a list here.
+            try:
+                filename = model_files.file_containing(TREE, old)
+            except model_files.ModelLayoutError as error:
+                print("    SKIPPED: %s" % error)
+                continue
         path = os.path.join(TREE, filename)
         text = open(path).read()
         if old not in text:

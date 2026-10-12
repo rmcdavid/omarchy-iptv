@@ -143,6 +143,19 @@ seam() {
   if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in ${file#"$PLUGIN_ROOT/"})"; fi
 }
 
+# `model_seam <label> <ere> <want>`: `seam` over every file of the model
+# (D-REL-5: Model.mjs and its parts under model/, or a pre-split tree's
+# Model.js), through qa_model_files, so a seam names what the model must hold
+# and not which part holds it. A tree with no readable model is a failure,
+# never a count of 0.
+model_seam() {
+  local label=$1 ere=$2 want=$3
+  checks=$((checks + 1))
+  local got
+  if ! got=$(qa_model_count "$ere" "$PLUGIN_ROOT"); then bad "$label (no model in $PLUGIN_ROOT)"; return; fi
+  if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in the model)"; fi
+}
+
 preflight() {
   echo "== preflight: can this tree drive number entry? (plugin: $PLUGIN_ROOT)"
   # The four verbs of section 10.6, and the state() extension.
@@ -164,11 +177,11 @@ preflight() {
   # CN21 and D-CHNO-1, the two fixes this runner exists to keep fixed.
   seam "Guide.qml disarms the resume window"             "$PLUGIN_ROOT/Guide.qml" '^ *function disarmNumberResume\(\)' 1
   seam "Guide.qml lets the digit window outlive an auto-commit" "$PLUGIN_ROOT/Guide.qml" '^ *function numberTimerFired\(\)' 1
-  seam "Model.js owns the per-key sequence"              "$PLUGIN_ROOT/Model.js" '^function numberKeyStep\(entry, index, text, ctx\)' 1
-  seam "Model.js owns the commit"                        "$PLUGIN_ROOT/Model.js" '^function numberCommitStep\(entry, resolution, name, opts\)' 1
-  seam "Model.js owns Backspace"                         "$PLUGIN_ROOT/Model.js" '^function numberPopStep\(entry, index\)' 1
-  seam "Model.js arms the buffer an auto-commit closed"  "$PLUGIN_ROOT/Model.js" '^function closeNumberEntry\(entry, reason\)' 1
-  seam "the entry snapshot carries the pre-entry cursor" "$PLUGIN_ROOT/Model.js" 'cursorId: str\(c\.cursorId\)' 1
+  model_seam "the model owns the per-key sequence"              '^function numberKeyStep\(entry, index, text, ctx\)' 1
+  model_seam "the model owns the commit"                        '^function numberCommitStep\(entry, resolution, name, opts\)' 1
+  model_seam "the model owns Backspace"                         '^function numberPopStep\(entry, index\)' 1
+  model_seam "the model arms the buffer an auto-commit closed"  '^function closeNumberEntry\(entry, reason\)' 1
+  model_seam "the entry snapshot carries the pre-entry cursor" 'cursorId: str\(c\.cursorId\)' 1
   # What run.sh must parse for the live half to be driveable at all.
   checks=$((checks + 1))
   if qa_case_arm "$RUN" --entry-ms && qa_case_arm "$RUN" --order; then ok "run.sh parses --entry-ms and --order"
@@ -404,8 +417,8 @@ esac
 
 # The floor. A check that stops executing must turn the run red rather than
 # shorten the summary (D-PLY-9). Recount with
-#   grep -cE '^ *seam ' chno-entry-scenario.sh            plus 1  -> check-tree
-#   grep -cE '^ *(check|seam) ' chno-entry-scenario.sh    plus 3  -> live
+#   grep -cE '^ *(model_)?seam ' chno-entry-scenario.sh   plus 1  -> check-tree
+#   grep -cE '^ *(check|(model_)?seam) ' chno-entry-scenario.sh  plus 3  -> live
 # (the 1 is the run.sh option probe, which bumps `checks` by hand; the 3 are
 # that probe plus the privacy block's two bumps. The definitions of check()
 # and seam() do not match the pattern, and the floor's own bump lands after

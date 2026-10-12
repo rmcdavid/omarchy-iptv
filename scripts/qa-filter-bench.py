@@ -43,6 +43,8 @@ refuses to measure a channel list missing any field the helper emits.
 import argparse, json, os, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 
 # What bin/omarchy-iptv writes onto a parsed channel. ALWAYS is unconditional
 # -- the four fields of the record template plus the two derived keys; OPTIONAL
@@ -57,7 +59,7 @@ QUERIES = ("a", "e", "s", "t", "news", "sky sports")
 
 QML = '''import QtQuick
 import QtTest
-import "Model.js" as M
+import "Model.mjs" as M
 import "Channels.js" as C
 
 TestCase {
@@ -178,7 +180,7 @@ def main():
 
         bench = os.path.join(work, "bench")
         os.makedirs(bench, exist_ok=True)
-        os.symlink(os.path.join(ROOT, "Model.js"), os.path.join(bench, "Model.js"))
+        model_files.copy_model(ROOT, bench)
         with open(os.path.join(bench, "Channels.js"), "w") as fh:
             fh.write(".pragma library\nvar CHANNELS = ")
             json.dump(channels, fh, separators=(",", ":"))

@@ -299,7 +299,7 @@ class GuardCase(unittest.TestCase):
                           % (path, imp[len('import '):].replace(' 2.15', '')),
                           out)
             self.assertIn('1 problem(s) in 1 Text block(s)', out)
-        body = ('import QtQuick\nimport "Model.js" as Model\n\nItem {\n'
+        body = ('import QtQuick\nimport "Model.mjs" as Model\n\nItem {\n'
                 + declared + TAIL)
         path = self.write('Q2.qml', body)
         status, out = run([path])
@@ -371,7 +371,7 @@ class GuardCase(unittest.TestCase):
     def test_g2_file_list_comes_from_the_release_allowlist(self):
         self.write('scripts/release.py',
                    '"""stub"""\nALLOWLIST = (\n    "manifest.json",\n'
-                   '    "Shipped.qml",\n    "Model.js",\n)\n')
+                   '    "Shipped.qml",\n    "Model.mjs",\n)\n')
         self.write('Shipped.qml', HEAD + '  Text {\n    text: x\n  }\n' + TAIL)
         # A QML file NOT on the allowlist is not scanned, which is the point:
         # the harness fake and the tests are not what ships.

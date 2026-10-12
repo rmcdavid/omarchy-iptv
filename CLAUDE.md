@@ -26,7 +26,8 @@ the twelve days it sat on v0.7.1 are explained in the decisions log.
 ## Branches: `dev` is the tree, `main` is the artifact
 
 You are on `dev`. Everything is here. `main` holds ONLY the install artifact:
-the thirteen files in `ALLOWLIST` in `scripts/release.py`, exported from a
+the files in `ALLOWLIST` in `scripts/release.py` (31 since D-REL-5 split the
+model into `Model.mjs` and `model/`), exported from a
 clean, green `dev` by `scripts/release.py build`, committed onto `main` with
 its previous tip as parent, and tagged. Nobody commits to `main` by hand, and
 nothing is ever pushed to `main` except the output of that script.
@@ -516,7 +517,7 @@ requests and raise the batch.
 7. Performance budgets: the guide opens in under 150 ms with a 10,000 channel
    cache, typing stays responsive, and the helper parses 10,000 channels in
    under a second.
-8. ASCII only in `.js` and `.py` sources. Nerd Font glyphs belong in QML, by
+8. ASCII only in `.js`, `.mjs` and `.py` sources. Nerd Font glyphs belong in QML, by
    codepoint, verified present in the installed font.
 9. Never wait for the host to echo your own write back before updating your
    own UI. The Omarchy shell publishes a plugin's `barConfig` one write
@@ -542,7 +543,7 @@ requests and raise the batch.
    case that survived every mutation until a missing transcript was added.
 12. A test that mirrors logic instead of calling it can pass while the
    shipping path is broken. If pure logic is stranded somewhere a test cannot
-   reach, such as inside a QML component, lift it into `Model.js` and call it
+   reach, such as inside a QML component, lift it into the model and call it
    for real rather than reimplementing it in the test.
 13. The rule about names applies to documents too, not only to code.
    Wherever two things are joined by a NAME rather than by a call, nothing
@@ -642,10 +643,28 @@ omarchy plugin validate .
 warning baseline: `missing-property` and unqualified access on host-injected
 objects and on `Style` and `Color` children, `uncreatable-type` for
 `PanelWindow`, and `signal-handler-parameters` on `Process.onExited`.
-Anything outside that baseline is a real finding.
+Since D-REL-5 it also carries `missing-property` for every member of
+`Model`: qmllint reads no ES module exports, so each `Model.X` in QML warns.
+That lost the warning a MISTYPED member used to draw, so the gate runs
+`scripts/check-model-members.py` over those lines and goes red on any member
+`Model.mjs` does not export. Anything outside that baseline is a real finding.
 
-Pure logic belongs in `Model.js` so it is unit-testable from node, not only
-visible on screen. A rule implemented in both JavaScript and Python gets one
+Pure logic belongs in the model so it is unit-testable from node, not only
+visible on screen. Since D-REL-5 (2026-10-12) the model is ES modules:
+`Model.mjs` is a GENERATED aggregator that re-exports exactly the public
+names, and the code lives in parts under `model/`, split by domain. The
+marketplace's security scan refuses any non-executable file over 512 KiB
+(`securityFileByteLimit` in its own scripts), and the single `Model.js`
+crossed it in 0.13.5, which is why. `release.py check` holds every shipped
+file under 448 KiB, executables included. Edit the part a declaration
+belongs in, then `node scripts/split-model.mjs --relink` rewrites the
+generated import and export lines and `--check`, which the gate runs, judges
+the tree; `docs/ARCHITECTURE.md` section 9 holds the model's coding rules and
+how a new public name or a new part is added. Two of those rules are
+measured hazards under Quickshell that the script refuses: a part may not
+read another part's declaration in a top-level initializer (it reads
+`undefined`, silently, across an import cycle), and a `var` is declared
+above the first function in its part that names it. A rule implemented in both JavaScript and Python gets one
 shared JSON fixture that both implementations run.
 
 ## Working in parallel

@@ -1,12 +1,14 @@
 import QtQuick
 import QtTest
-import "../Model.js" as Model
+import "../Model.mjs" as Model
 import "fixtures/chno-cases.js" as ChnoCases
 import "fixtures/pip-cases.js" as PipCases
 import "fixtures/form-edit.js" as FormEdit
 
-// Proves Model.js loads inside the Qt QML engine (no ES module syntax, no
-// node-only globals) and that the QML-side results match the node tests:
+// Proves the model -- Model.mjs and the parts under model/ it re-exports, ES
+// modules since D-REL-5 -- loads inside the Qt QML engine (no node-only
+// globals, and a cyclic import graph between parts that links in V4) and
+// that the QML-side results match the node tests:
 // normalization vectors, ranking tiers, the two-mode keyboard state machine,
 // scope transitions, the zap ring, settings clamps and mpv argv.
 // Run: QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/Model.spec.qml

@@ -194,6 +194,10 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
+# Sourced here, above the tree checks, because they ask qa_model_files what a
+# plugin tree's model is (D-REL-5). It defines functions and touches nothing.
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
@@ -318,18 +322,16 @@ if [[ $MODE != rig ]]; then
     rm -rf "$PRE_DIR"
     exit 2
   fi
-  # run.sh refuses a tree with no Model.js, and the stage shell loads the helper
-  # from the same place; say so here rather than at the bottom of a transcript.
-  if [[ ! -f $PRE_DIR/Model.js || ! -f $PRE_DIR/bin/omarchy-iptv ]]; then
-    echo "the --pre-tls tree $PRE_TLS_REF ($PRE_TLS_SHA) holds no Model.js and bin/omarchy-iptv pair; that is not a plugin tree" >&2
+  # run.sh refuses a tree with no model (Model.mjs and its parts since
+  # D-REL-5, Model.js before it), and the stage shell loads the helper from the
+  # same place; say so here rather than at the bottom of a transcript.
+  if ! qa_model_files "$PRE_DIR" >/dev/null || [[ ! -f $PRE_DIR/bin/omarchy-iptv ]]; then
+    echo "the --pre-tls tree $PRE_TLS_REF ($PRE_TLS_SHA) holds no model and bin/omarchy-iptv pair; that is not a plugin tree" >&2
     rm -rf "$PRE_DIR"
     exit 2
   fi
   PRE_TLS_LINE="== S6 stage tree $PRE_TLS_REF ($PRE_TLS_SHA) exported; its own code composes the pre-update player's argv"
 fi
-
-# shellcheck source=scripts/qa-lib.sh
-. "$ROOT/scripts/qa-lib.sh"
 
 # ---- the two flags cleanup is guarded by. F-HARNESS-14: a scenario that
 # installed its trap above its refusals killed whatever held its port on a

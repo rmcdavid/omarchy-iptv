@@ -35,12 +35,15 @@ import pathlib
 import re
 import subprocess
 import tempfile
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 STUB = ROOT / "scripts" / "dev-harness" / "stub-hyprctl.py"
 SERVICE = (ROOT / "Service.qml").read_text(encoding="utf-8")
-MODEL = (ROOT / "Model.js").read_text(encoding="utf-8")
+MODEL = model_files.model_source(str(ROOT))
 GUIDE = (ROOT / "Guide.qml").read_text(encoding="utf-8")
 
 ADDRESS = "0x559c6893d940"
@@ -381,8 +384,8 @@ class ServiceShapeTest(unittest.TestCase):
         self.has(SERVICE, "Model.pipFindWindow(text, root.playerPid, root.pipClass)", "Service.qml")
         self.has(SERVICE, "playing: root.playing && root.playerPid > 0", "Service.qml")
         # The narrowing itself, where a node test can call it.
-        self.has(MODEL, "if (pipInteger(c.pid, -1) !== want) continue", "Model.js")
-        self.has(MODEL, 'if (hits.length > 1) return pipWindowFail("ambiguous")', "Model.js")
+        self.has(MODEL, "if (pipInteger(c.pid, -1) !== want) continue", "the model")
+        self.has(MODEL, 'if (hits.length > 1) return pipWindowFail("ambiguous")', "the model")
 
     def test_focus_is_narrowed_by_the_pid_like_every_other_window_command(self):
         # D-PIP-5. The D-PIP-1 repair fixed the spelling and kept the
@@ -393,14 +396,14 @@ class ServiceShapeTest(unittest.TestCase):
         self.has(SERVICE, "root.dispatchFocus(derived.address)", "Service.qml")
         self.has(SERVICE, "var argv = Model.focusPlayerArgv(address)", "Service.qml")
         self.has(SERVICE, "if (argv.length === 0) return false", "Service.qml")
-        self.has(MODEL, "function focusPlayerArgv(address) {", "Model.js")
-        self.has(MODEL, '  return pipDispatchArgv("focus", { window: pipAddressSelector(address) })', "Model.js")
+        self.has(MODEL, "function focusPlayerArgv(address) {", "the model")
+        self.has(MODEL, '  return pipDispatchArgv("focus", { window: pipAddressSelector(address) })', "the model")
         # And the class selector is GONE, not merely unused: the builder
         # cannot produce one for any verb, so no future caller can route back
         # to it. A constant left behind for "compatibility" is how this kind
         # of defect returns.
-        self.lacks(MODEL, "PIP_CLASS_SELECTOR", "Model.js must not keep a class selector")
-        self.lacks(MODEL, 'if (value === PIP_CLASS_SELECTOR) return value', "Model.js")
+        self.lacks(MODEL, "PIP_CLASS_SELECTOR", "the model must not keep a class selector")
+        self.lacks(MODEL, 'if (value === PIP_CLASS_SELECTOR) return value', "the model")
         self.lacks(SERVICE, "Model.focusPlayerArgv()", "Service.qml must not focus without an address")
         # The retry loop is still bounded, and now ends when a focus lands
         # rather than always spending its whole budget: an attempt made
@@ -441,8 +444,8 @@ class ServiceShapeTest(unittest.TestCase):
         # PIP10. Both conditionals must read the live window, and the two
         # words that would signal a blind instruction appear in no source
         # file in the tree.
-        self.has(MODEL, 'if (l.floating !== true) steps.push(pipDispatchArgv("float"', "Model.js")
-        self.has(MODEL, 'if (l.pinned !== true) steps.push(pipDispatchArgv("pin"', "Model.js")
+        self.has(MODEL, 'if (l.floating !== true) steps.push(pipDispatchArgv("float"', "the model")
+        self.has(MODEL, 'if (l.pinned !== true) steps.push(pipDispatchArgv("pin"', "the model")
         for source in (MODEL, SERVICE, GUIDE):
             self.assertNotIn('action = "set"', source)
             self.assertNotIn('action = "unset"', source)
@@ -460,10 +463,10 @@ class ServiceShapeTest(unittest.TestCase):
         # cannot route around it; the tag is a whitelist of two literals
         # rather than a pattern that would accept a channel name; and the
         # expression is re-checked as a whole before it leaves the builder.
-        self.has(MODEL, 'if (pipAddressSelector(address) === "") return pipWindowFail("bad_address")', "Model.js")
-        self.has(MODEL, '  tag: ["+" + PIP_TAG, "-" + PIP_TAG]', "Model.js")
-        self.has(MODEL, "  if (value < -PIP_COORD_LIMIT || value > PIP_COORD_LIMIT) return null", "Model.js")
-        self.has(MODEL, '  return PIP_EXPR_RE.test(expr) ? expr : ""', "Model.js")
+        self.has(MODEL, 'if (pipAddressSelector(address) === "") return pipWindowFail("bad_address")', "the model")
+        self.has(MODEL, '  tag: ["+" + PIP_TAG, "-" + PIP_TAG]', "the model")
+        self.has(MODEL, "  if (value < -PIP_COORD_LIMIT || value > PIP_COORD_LIMIT) return null", "the model")
+        self.has(MODEL, '  return PIP_EXPR_RE.test(expr) ? expr : ""', "the model")
 
     def test_the_service_builds_no_compositor_expression_of_its_own(self):
         # The strongest form of "one implementation": after integration the
@@ -502,7 +505,7 @@ class ServiceShapeTest(unittest.TestCase):
         # plugin's own directories -- in fact no write to disk at all. The
         # snapshot's lifetime is the window's because it lives in the process
         # that owns the window (4.5).
-        self.has(MODEL, 'var PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"', "Model.js")
+        self.has(MODEL, 'var PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"', "the model")
         start = SERVICE.index("// ------------ picture in picture (M2-05)".replace(
             "------------", "------------------------------------------------------------"))
         api = SERVICE[start:SERVICE.index("// Debounced: settings changes", start)]
@@ -533,7 +536,7 @@ class ServiceShapeTest(unittest.TestCase):
                  "Service.qml")
         self.has(SERVICE, "var derived = Model.pipDeriveState(text, root.playerPid, root.pipClass)", "Service.qml")
         self.has(SERVICE, "if (derived.decided && !root.pipBusy) root.pipOn = derived.on", "Service.qml")
-        self.has(MODEL, "function pipDeriveState(clients, pid, className) {", "Model.js")
+        self.has(MODEL, "function pipDeriveState(clients, pid, className) {", "the model")
 
     def test_nothing_reports_picture_in_picture_from_memory(self):
         # The defect in one property of the tree: every value `pipOn` can
@@ -593,7 +596,7 @@ class ServiceShapeTest(unittest.TestCase):
         # build is fine, leaving one is not, and integration proves it with a
         # grep. This is that grep, run over every file a stand-in could hide
         # in rather than over the one it was known to be in.
-        for name in ("Service.qml", "Guide.qml", "BarWidget.qml", "Model.js"):
+        for name in ["Service.qml", "Guide.qml", "BarWidget.qml"] + model_files.model_paths(str(ROOT)):
             text = (ROOT / name).read_text(encoding="utf-8")
             for marker in ("STANDIN_", "STAND-IN-M2-05-V1"):
                 self.lacks(text, marker, "%s still carries a stand-in" % name)

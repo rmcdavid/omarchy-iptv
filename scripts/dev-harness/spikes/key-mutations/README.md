@@ -11,11 +11,15 @@ copy. Round 4 kept those two mutations as throwaway git branches
 lane-key-t1) and cited them through `--baseline`; the lead ruled in round 5
 that a mutation is a PATCH FILE the reader applies to a copy, not a branch
 that can be merged by accident, and deleted the branches. These are those
-two diffs, byte for byte.
+two diffs, byte for byte, with one move: when the chain landed on the
+D-REL-5 split (2026-10-12) the model stopped being one `Model.js`, and
+`d3-save-parked.patch` was re-made against `model/state.mjs`, the part that
+declares `reloadDisposition` -- the same removed line and the same added
+line, only the file and the hunk's position changed.
 
 | patch | what it breaks | which checks go red |
 |---|---|---|
-| `d3-save-parked.patch` | `Model.reloadDisposition`'s `save-parked` clause deleted: a reload over a PARKED save is applied as `file-newer` (the D-SRC-15 drop, re-opened) | D2, D3, W2, W3, W4, W6 -- the per-reason counter reads `{"file-newer": 1, "first-load": 1, "own-write": 1}` and `save-parked` is absent |
+| `d3-save-parked.patch` | `Model.reloadDisposition`'s (in `model/state.mjs`) `save-parked` clause deleted: a reload over a PARKED save is applied as `file-newer` (the D-SRC-15 drop, re-opened) | D2, D3, W2, W3, W4, W6 -- the per-reason counter reads `{"file-newer": 1, "first-load": 1, "own-write": 1}` and `save-parked` is absent |
 | `r14-no-return.patch` | `Service.applyUserState`'s R14 `return` deleted: the reload is COUNTED as ignored and then applied anyway | D2, W2, W3, W4, W6 -- and D3 GREEN, with `{"save-parked": 1, ...}` beside the loss at the sink: a counter observes the decision, D2/W2 observe the sink, and the `return` itself is pinned structurally in `tests/Model.test.js` (R14) |
 
 Both apply to the tree they are checked in with (`scripts/qa-lib-test.sh`

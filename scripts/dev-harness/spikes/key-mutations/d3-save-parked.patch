@@ -1,8 +1,8 @@
-diff --git a/Model.js b/Model.js
+diff --git a/model/state.mjs b/model/state.mjs
 index 0000000..0000000 100644
---- a/Model.js
-+++ b/Model.js
-@@ -10393,7 +10393,7 @@ function reloadDisposition(ctx) {
+--- a/model/state.mjs
++++ b/model/state.mjs
+@@ -1089,7 +1089,7 @@ function reloadDisposition(ctx) {
    var c = ctx || {}
    if (c.loadedBefore !== true) return { act: "apply", reason: "first-load" }
    if (c.ownWrite === true) return { act: "ignore", reason: "own-write" }

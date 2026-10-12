@@ -37,16 +37,16 @@
 #   shell's `entryKey` reads `sourceKey` first and the `playlistUrl` hash
 #   second, NAMED CANDIDATES ONLY. It lives in harness-lib.js, which
 #   shell.qml imports and node loads (rule 12), and this arm drives it with
-#   the tree's own Model.js: a key beside a differing URL answers the key; a
+#   the tree's own model: a key beside a differing URL answers the key; a
 #   URL alone answers its hash; an entry whose only key-shaped values sit in
 #   OTHER settings (`mpvArgs` "deadbeef", a label of 8 hex) answers "" -- the
 #   first repair iterated every own value and would have reported the user's
 #   mpv argument as the active source; an empty or malformed mirror falls
 #   through to the URL. Then three seams: shell.qml's entryKey and hostEntry
-#   go through that function, and run.sh stages the file beside Model.js.
+#   go through that function, and run.sh stages the file beside the model.
 #
 #   the shell arm (live). The dev-harness fake shell with the REAL
-#   Service.qml and Model.js under cage (docs/SPIKE-CAGE-HEADLESS.md), IPC
+#   Service.qml and the model under cage (docs/SPIKE-CAGE-HEADLESS.md), IPC
 #   only -- no keystroke, no screenshot; the guide is opened once, in L,
 #   through `ipc open` and driven through `ipc sourcesKey`, the harness
 #   verb that calls the guide's own key handlers -- over a
@@ -68,7 +68,7 @@
 #   I7  the key-NAMES reader lists names sorted, `id` excluded, no value
 #   S1  shell.qml's entryKey is HarnessLib.entryKey over findBarEntry   (seam)
 #   S2  hostEntry reads BOTH sides through entryKey                     (seam)
-#   S3  run.sh stages harness-lib.js beside Model.js and proves the copy (seam)
+#   S3  run.sh stages harness-lib.js beside the model and proves the copy (seam)
 #
 #   D1  the first start over the 0.13.5 shape ADOPTS the entry's URL in memory
 #       while the state save is parked behind the start-up dirs (control: the
@@ -354,7 +354,7 @@
 #
 # RULE 11, THE RED RUN. `--baseline lane-key-r2` exports the round-2 tree
 # (lane-key-r1's code under this harness's predecessor, the tree D-SRC-15
-# was found on) and runs its Model.js, Service.qml and helper through the
+# was found on) and runs its model, Service.qml and helper through the
 # same rig, with this tree's harness. Measured 2026-10-12 on this harness
 # (round 5: L added, F5 from its own mark, the NULL sentinel; round 4: W
 # and F added, D3 by reason), recipe in the footer the run prints; the
@@ -457,7 +457,7 @@
 # the same three clauses on every commit.
 #
 # MODES. `check-tree` (what scripts/check.sh runs on every commit: no
-# transcript, no display, node over the tree's Model.js, under 2 s) and
+# transcript, no display, node over the tree's model, under 2 s) and
 # `live` (the default: a transcript, both arms, and the --baseline / --tree
 # levers; about 120 s). `--tree DIR` is --baseline pointed at a directory
 # that already exists -- an export with a patch from spikes/key-mutations/
@@ -569,8 +569,10 @@ TREE_LINE="== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null ||
 [[ -n $BASELINE && -n $TREE ]] && { echo "--baseline and --tree are the same lever; pass one" >&2; exit 2; }
 if [[ -n $TREE ]]; then
   PLUGIN_ROOT=$(cd "$TREE" 2>/dev/null && pwd) || { echo "--tree $TREE is not a directory I can enter" >&2; exit 2; }
-  [[ -f $PLUGIN_ROOT/Service.qml && -f $PLUGIN_ROOT/Model.js && -f $PLUGIN_ROOT/bin/omarchy-iptv ]] \
-    || { echo "--tree $PLUGIN_ROOT is not a plugin tree (no Service.qml / Model.js / bin/omarchy-iptv)" >&2; exit 2; }
+  # The model is whatever qa_model_files answers (D-REL-5: Model.mjs and its
+  # parts, or a pre-split tree's Model.js), never a file name kept here.
+  [[ -f $PLUGIN_ROOT/Service.qml && -f $PLUGIN_ROOT/bin/omarchy-iptv ]] && qa_model_files "$PLUGIN_ROOT" >/dev/null \
+    || { echo "--tree $PLUGIN_ROOT is not a plugin tree (no Service.qml / readable model / bin/omarchy-iptv)" >&2; exit 2; }
   TREE_LINE="== prepared tree $PLUGIN_ROOT"
 fi
 if [[ -n $BASELINE ]]; then
@@ -581,8 +583,8 @@ if [[ -n $BASELINE ]]; then
   if ! git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR"; then
     echo "could not export $BASELINE" >&2; rm -rf "$EXPORT_DIR"; exit 2
   fi
-  [[ -f $EXPORT_DIR/Service.qml && -f $EXPORT_DIR/Model.js && -f $EXPORT_DIR/bin/omarchy-iptv ]] \
-    || { echo "$BASELINE holds no Service.qml / Model.js / bin/omarchy-iptv" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
+  [[ -f $EXPORT_DIR/Service.qml && -f $EXPORT_DIR/bin/omarchy-iptv ]] && qa_model_files "$EXPORT_DIR" >/dev/null \
+    || { echo "$BASELINE holds no Service.qml / readable model / bin/omarchy-iptv" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
   PLUGIN_ROOT=$EXPORT_DIR
   TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported to $EXPORT_DIR"
 fi
@@ -652,7 +654,11 @@ ck() { local label=$1 got=$2 want=$3; [[ $got == "$want" ]] && pass "$label: $wa
 # ------------------------------------------------------- the instrument arm
 instrument() {
   local out seams
-  echo "== instrument arm: harness-lib.js entryKey over $PLUGIN_ROOT/Model.js ($(elapsed) s)"
+  local model
+  # The tree's model as node loads it: the first file qa_model_files names is
+  # the aggregator (Model.mjs, D-REL-5) or a pre-split tree's Model.js.
+  model=$(qa_model_files "$PLUGIN_ROOT" | head -n 1)
+  echo "== instrument arm: harness-lib.js entryKey over ${model:-<no readable model>} ($(elapsed) s)"
   # The probe hands the instrument the tree's own Model and prints one
   # `<label> <answer>` line per case. URLs are fixture paths under $WORK and
   # never reach stdout: the answers are keys, "" or names.
@@ -675,7 +681,7 @@ try { i6 = show(H.entryKey(M, M.findBarEntry({ layout: { right: ["io.github.othe
 console.log("I6 " + i6)
 console.log("I7 " + JSON.stringify(H.entryKeyNames({ id: "x", playlistUrl: url, sourceKey: key, epgUrl: other, showLogos: false })))
 JS
-  out=$(node "$WORK/probe.js" "$PLUGIN_ROOT/Model.js" "$HERE/harness-lib.js" "$WORK/fixtures/a.m3u" "$WORK/fixtures/b.m3u" 2>&1)
+  out=$(node "$WORK/probe.js" "$model" "$HERE/harness-lib.js" "$WORK/fixtures/a.m3u" "$WORK/fixtures/b.m3u" 2>&1)
   line() { printf '%s\n' "$out" | grep -a "^$1 " | head -1 | cut -d' ' -f2-; }
   local k1 k2; read -r k1 k2 <<<"$(line KEY)"
   if [[ ! $k1 =~ ^[0-9a-f]{8}$ || ! $k2 =~ ^[0-9a-f]{8}$ || $k1 == "$k2" ]]; then
@@ -696,7 +702,7 @@ JS
   seams="$(qa_count 'stored: harness\.entryKey\(fakeHost\.barConfig\), published: harness\.entryKey\(fakeShell\.barConfig\)' "$HERE/shell.qml") $(qa_count 'storedKeys: HarnessLib\.entryKeyNames\(Model\.findBarEntry\(fakeHost\.barConfig' "$HERE/shell.qml")"
   ck "S2 hostEntry reads both sides through entryKey and the names through entryKeyNames" "$seams" "1 1"
   seams="$(qa_count '^ *cp "\$HERE/harness-lib\.js" "\$root/harness-lib\.js" \|\| die' "$RUN") $(qa_count '^ *qa_same_file "\$HERE/harness-lib\.js" "\$root/harness-lib\.js"' "$RUN") $(qa_count '^import "harness-lib\.js" as HarnessLib$' "$HERE/shell.qml")"
-  ck "S3 run.sh stages harness-lib.js beside Model.js and proves the copy; shell.qml imports it" "$seams" "1 1 1"
+  ck "S3 run.sh stages harness-lib.js beside the model and proves the copy; shell.qml imports it" "$seams" "1 1 1"
   echo "== instrument arm done ($(elapsed) s)"
 }
 
@@ -731,7 +737,9 @@ print(json.dumps(v) if isinstance(v, bool) else ("NULL" if v is None else v))' "
     || printf '%s\n' "$QA_NO_FILE"
 }
 # The key of a URL or path, by the tree under test's own function.
-key_of() { node -e 'const M = require(process.argv[1]); const n = M.normalizeSourceUrl(process.argv[2], { origin: "cli" }); process.stdout.write(n === "" ? "" : M.sourceKey(n))' "$PLUGIN_ROOT/Model.js" "$1"; }
+# The tree's model through qa_model_files (D-REL-5): its first file is what
+# node requires, the aggregator or a pre-split tree's Model.js.
+key_of() { node -e 'const M = require(process.argv[1]); const n = M.normalizeSourceUrl(process.argv[2], { origin: "cli" }); process.stdout.write(n === "" ? "" : M.sourceKey(n))' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)" "$1"; }
 # Does the stored entry carry a key NAME? yes | no (names, never values).
 stored_has() { qa_json_field "'yes' if '$1' in d['storedKeys'] else 'no'" "$(ipc hostEntry)"; }
 published_has() { qa_json_field "'yes' if '$1' in d['publishedKeys'] else 'no'" "$(ipc hostEntry)"; }
@@ -1009,7 +1017,17 @@ shell_arm() {
   # stages the same shape for the same reason.
   SLOW_TREE="$WORK/slow-tree"; mkdir -p "$SLOW_TREE/bin"
   staged=1
-  for f in manifest.json Model.js Service.qml Guide.qml BarWidget.qml; do cp "$PLUGIN_ROOT/$f" "$SLOW_TREE/$f" 2>/dev/null || staged=0; done
+  for f in manifest.json Service.qml Guide.qml BarWidget.qml; do cp "$PLUGIN_ROOT/$f" "$SLOW_TREE/$f" 2>/dev/null || staged=0; done
+  # The model is every file qa_model_files names (Model.mjs and its parts since
+  # D-REL-5, or a pre-split tree's Model.js), each at its own relative path:
+  # rewind-scenario.sh's R16 stages its slow tree the same way.
+  local -a model_files=(); local mf rel
+  mapfile -t model_files < <(qa_model_files "$PLUGIN_ROOT")
+  (( ${#model_files[@]} > 0 )) || staged=0
+  for mf in "${model_files[@]}"; do
+    rel=${mf#"$PLUGIN_ROOT/"}
+    mkdir -p "$SLOW_TREE/$(dirname "$rel")" && cp "$mf" "$SLOW_TREE/$rel" 2>/dev/null || staged=0
+  done
   cp -R "$PLUGIN_ROOT/contrib" "$SLOW_TREE/contrib" 2>/dev/null || true
   cp "$PLUGIN_ROOT/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || staged=0
   cp "$HERE/fixtures/slow-helper.py" "$SLOW_TREE/bin/omarchy-iptv" 2>/dev/null || staged=0

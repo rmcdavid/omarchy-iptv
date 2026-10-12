@@ -188,10 +188,10 @@ HOST_CONFIG_FILE = "shell.json"
 # wider was asked for.
 CONFIG_GROUP_OTHER = 0o077
 # Every verdict `config shield` can print, and the subset that means the
-# container is private. Model.js switches on these strings, so the join is
+# container is private. The model (Model.mjs) switches on these strings, so the join is
 # made by a call rather than by a name (engineering rule 13, dev branch): one
 # shared config-shield JSON fixture (dev branch) is the single list, asserted
-# against this tuple by the python suite and against Model.js by the node
+# against this tuple by the python suite and against the model by the node
 # suite.
 CONFIG_SHIELD_VERDICTS = ("private", "exposed", "absent", "not_regular",
                           "symlink", "foreign", "replaced", "error")
@@ -738,7 +738,7 @@ def redact_urls(text: Any) -> str:
 
     The old pattern was `\\b([A-Za-z][A-Za-z0-9+.-]*)://[^\\s'"<>]+`. Its `\\b`
     hid the simplest shape -- a run of plain letters offers only one word
-    boundary -- so the Model.js mirror was measured first and this side read as
+    boundary -- so the model's mirror was measured first and this side read as
     cheap. It is not: any run that CONTAINS a word boundary every few
     characters gives the engine a fresh start position for a run that reaches
     to the end of the text, and `.`, `+` and `-` are scheme-legal and are not
@@ -842,7 +842,7 @@ def log(message: str) -> None:
 
 
 # ------------------------------------------------------- normalization
-# Must match Model.js normalizeText/searchKey/fnv1a32 byte for byte.
+# Must match the model's normalizeText/searchKey/fnv1a32 byte for byte.
 
 FOLD_GROUPS = [
     ("\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u0101\u0103\u0105", "a"),
@@ -875,7 +875,7 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 # them takes the four lists from 75 colliding name groups / 155 rows to 65 /
 # 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#` and `@`
 # were measured the same way and change nothing on any of the four, so they
-# are not in the class. Mirrors ID_PUNCT_RE in Model.js.
+# are not in the class. Mirrors ID_PUNCT_RE in the model.
 _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 
 
@@ -1060,7 +1060,7 @@ def normalize_text(value: Any) -> str:
     """Lower-case, fold Latin diacritics (precomposed via FOLD, decomposed via
     NFD + dropping U+0300-U+036F after an ASCII letter, then NFC so every
     other script recomposes), ASCII punctuation to one space (D-QA-08).
-    Mirrors Model.js decompose()/normalizeText byte for byte (NFD, not NFKD)."""
+    Mirrors the model's decompose()/normalizeText byte for byte (NFD, not NFKD)."""
     return fold_text(value, _PUNCT)
 
 
@@ -2370,7 +2370,7 @@ def clean_detail(text: str | None, limit: int) -> str:
 
     The cap is applied on the way IN as well as on the way out, and the
     order of the three steps is a SECURITY property, not a preference. The
-    rule is Model.epgDetailText's (Model.js, the JS mirror of this sink):
+    rule is Model.epgDetailText's (the model, the JS mirror of this sink):
     REDACTION NEVER SEES A TRUNCATED URL. Cutting first and redacting second
     was what this function did until 2026-10-03, and it leaked the username:
     `http://user:pw@host/x` cut after `pw` is `http://user:pw`, which has no
@@ -4197,7 +4197,7 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
 
 # ---- dead-channel memory (PO 2026-09-24, amending R8 / R11 / UX ruling 9)
 #
-# Mirror of Model.normalizeFailed / prunedFailed. Must match Model.js.
+# Mirror of Model.normalizeFailed / prunedFailed. Must match the model.
 # The marks live in the SOURCE CACHE, never in state.json: channel ids are
 # global across sources, so a state-level map would mark another provider's
 # working channel, and it would fall inside D-ID-1's id-rotation blast radius
@@ -7365,7 +7365,7 @@ def normalize_active_key(raw: Any) -> str:
     return key if SOURCE_KEY_RE.match(key) else ""
 
 
-# Must match Model.js MAX_SAVED_SEARCHES / MAX_SAVED_TERMS / MAX_SAVED_QUERY and
+# Must match the model's MAX_SAVED_SEARCHES / MAX_SAVED_TERMS / MAX_SAVED_QUERY and
 # savedSearchTerms / savedSearchRecord. One shared fixture runs both.
 MAX_SAVED_SEARCHES = 20
 # Mirror of Model.MAX_HIDDEN_GROUPS (M3-01); the hidden-groups fixture on the
@@ -7410,7 +7410,7 @@ def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
     if not saved_search_terms(query):
         return None
     # float() then int(), NOT int() alone, and the shared fixture is what
-    # forced it: Model.js does Math.trunc(Number(x)), which reads "12.9" as 12,
+    # forced it: the model does Math.trunc(Number(x)), which reads "12.9" as 12,
     # while int("12.9") raises and this reader would have stored 0. The vector
     # is in the fixture precisely so the two cannot drift apart again.
     #
@@ -7429,7 +7429,7 @@ def normalize_played(entry: Any) -> dict[str, Any] | None:
 
 
 def coerce_int(value: Any) -> int:
-    """D-STATE-1. Mirror Model.js's `Math.trunc(Number(x)) || 0` exactly.
+    """D-STATE-1. Mirror the model's `Math.trunc(Number(x)) || 0` exactly.
 
     This used to be `int(x)`, which accepts only a plain integer literal and
     RAISES on everything else -- so `"12.9"` stored 0 where the guide read 12,
@@ -7456,7 +7456,7 @@ def non_negative_int(value: Any) -> int:
     D-STATE-1 was filed against normalize_played alone. It was never only
     there: this function had the identical `int(x)` and therefore the identical
     disagreement, on five more keys -- `addedAt`, `lastUsed`, `fetchedAt`,
-    `channelCount` and `groupCount` on every source record. Model.js reads
+    `channelCount` and `groupCount` on every source record. The model reads
     "12.9" as 12 and "1e3" as 1000 for all of them; this read 0.
 
     One coercion with two callers, so a third caller cannot reintroduce the

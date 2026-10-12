@@ -46,8 +46,9 @@ L5  The shipping file declares no accessibility on the elements the transform
     (or on the harness window) could not be graded faithfully by this
     harness, so its arrival must be red rather than quietly regraded under a
     different type.
-L6  Files the transform copies verbatim (Model.js, which composes the row,
-    source and bar names) are byte-identical.
+L6  Files the transform copies verbatim (the model -- Model.mjs and every
+    part under model/ it names, D-REL-5 -- which composes the row, source
+    and bar names) are byte-identical.
 L7  Inventory: every tracked .qml that declares accessibility and has no
     generated counterpart is named as an UNGRADED SURFACE, so a missing
     scenario is visible instead of absent.
@@ -68,6 +69,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import qmlscan
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 
 
 SHELL_DIR = os.environ.get("OMARCHY_PATH", "/usr/share/omarchy") + "/shell"
@@ -525,8 +528,7 @@ def check_kit(src_dir, copy_dir, patched=None):
     return failures
 
 
-def guard_tree(tree_dir, repo=None, guide_copy="GuideProbe.qml",
-               model_copy="Model.js", kit=None):
+def guard_tree(tree_dir, repo=None, guide_copy="GuideProbe.qml", kit=None):
     """Grade a harness tree in one call, for the checker to use as its gate.
 
     The harness should refuse to report a result at all until this returns
@@ -548,8 +550,15 @@ def guard_tree(tree_dir, repo=None, guide_copy="GuideProbe.qml",
     with open(copy) as handle:
         generated_text = handle.read()
     found = check_pair(source_text, generated_text, "Guide.qml", guide_copy)
-    found.extend(check_copy(os.path.join(repo, "Model.js"),
-                            os.path.join(tree_dir, model_copy)))
+    # Every file of the model, each at its own relative path (D-REL-5): a
+    # tree with a stale part composes names the shipping model does not.
+    try:
+        model_paths = model_files.model_paths(repo)
+    except model_files.ModelLayoutError as error:
+        found.append(Failure("L6", "the shipping model is unreadable: %s" % error))
+        model_paths = []
+    for rel in model_paths:
+        found.extend(check_copy(os.path.join(repo, rel), os.path.join(tree_dir, rel)))
 
     # L8 and L7 used to be reachable ONLY from the command line, while this
     # function's own docstring told the checker to use it as its gate. So a

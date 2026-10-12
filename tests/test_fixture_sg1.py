@@ -79,7 +79,9 @@ FIXTURE_DIR = ROOT / "tests" / "fixtures" / "qa-sg1"
 SMALL_M3U = FIXTURE_DIR / "single-group.m3u"
 VERIFY_JS = FIXTURE_DIR / "verify.js"
 GENERATOR = ROOT / "scripts" / "gen-playlist.py"
-MODEL_JS = ROOT / "Model.js"
+sys.path.insert(0, str(ROOT / "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+MODEL_JS = ROOT / "Model.mjs"
 
 # The one decision ruling SG1 made, as it reads in Model.matchRank, and what
 # the parent commit had in its place. The pre-fix copy is built from the
@@ -145,12 +147,17 @@ def retitle(src, dst):
 
 
 def build_pre_fix_model(dst):
-    text = MODEL_JS.read_text(encoding="utf-8")
-    found = text.count(FIX_LINE)
+    """A copy of the whole model under `dst` (Model.mjs and its parts, D-REL-5)
+    with the one line replaced in the part that holds it. Returns the copy's
+    Model.mjs, which verify.js loads beside the shipping one."""
+    found = model_files.model_source(str(ROOT)).count(FIX_LINE)
     if found != 1:
-        raise AssertionError("expected exactly one %r in Model.js, found %d: the pre-fix copy "
+        raise AssertionError("expected exactly one %r in the model, found %d: the pre-fix copy "
                              "cannot be built from this tree" % (FIX_LINE, found))
-    pathlib.Path(dst).write_text(text.replace(FIX_LINE, PRE_FIX_LINE), encoding="utf-8")
+    entry = model_files.copy_model(str(ROOT), str(dst))
+    part = pathlib.Path(dst) / model_files.file_containing(str(ROOT), FIX_LINE)
+    part.write_text(part.read_text(encoding="utf-8").replace(FIX_LINE, PRE_FIX_LINE), encoding="utf-8")
+    return entry
 
 
 def run_verify(node, cache, pre_model, queries):
@@ -175,10 +182,10 @@ class SingleGroupSearchFixtureTest(unittest.TestCase):
         cls.tmp = pathlib.Path(tempfile.mkdtemp(prefix="omarchy-iptv-sg1-"))
         cls.addClassCleanup(shutil.rmtree, str(cls.tmp), True)
 
-        cls.pre_model = cls.tmp / "Model-pre-fix.js"
+        cls.pre_model = cls.tmp / "pre-fix" / "Model.mjs"
         cls.pre_error = ""
         try:
-            build_pre_fix_model(cls.pre_model)
+            cls.pre_model = build_pre_fix_model(cls.tmp / "pre-fix")
         except AssertionError as exc:
             # Recorded, not raised: the post-count tests still run and show
             # their numbers; every test that needs the pre side fails on this.

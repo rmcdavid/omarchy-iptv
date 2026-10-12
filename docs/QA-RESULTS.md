@@ -13135,6 +13135,54 @@ oldest tree any scenario stages asks whether it exists first, and the
 search is over every `Model.` call in `shell.qml` against `b731882^`'s
 exports (rule 15), not this one line.
 
+**Fixed on `dev` the same day (a7cb6a6, through the D-REL-5 lane, merged
+at c70eb32).** `shell.qml` now asks `typeof Model.X === "function"` before
+13 uses of the 10 model functions that `b731882^` does not export, which is
+the whole list (the lane compared every `Model.` call in the harness shell
+with that tree's exports), pinned structurally by
+`tests/test_harness_shell_model.py` and labelled as structural. Measured
+under a nested headless cage: S6 read 48 / 0 in each of three runs, "ADOPTED
+it rather than rejecting it (adoption lines 1, rejection lines 0)" every
+time and 0 TypeErrors in every log; the tree before the guard read 48 / 1
+with the same 109 TypeErrors. The one adoption failure the lane had seen on
+the split did not recur, and the round-2 review's own run read 48 / 0.
+
+**What it could have corrupted, settled rather than filed.** A documented
+count is suspect only if it was recorded after 51d686b (2026-10-11 11:29)
+with a staged tree whose model lacks `logoHaveCount`. Seven documented
+baseline trees lack it (159da94, 1a2a6a5, 2d3cee3, 2d7df1f, 396a69a,
+dbcbd0f, f88910f); the only count recorded against any of them after that
+minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
+`logo-scenario.sh` starts no Quickshell -- it drives the helper and a bare
+`qml` image probe, never the harness shell -- so it cannot carry this
+error. Every other count against those trees predates 51d686b.
+
+### D-SRC-17 and D-SRC-18: two guide-URL findings from the D-SINK-19 round-8 reviews
+
+**Filed 2026-10-12; both on the D-SINK-19 repair branch only, never
+shipped.** Round 8's ruling R18a put every comparison of a bar-entry input
+through one normaliser, after round 7's whitespace P1. The code lane's
+search for siblings of that comparison (rule 15) found **D-SRC-17**: an
+`omarchy bar set ... epgUrl` of control characters alone sanitized to the
+empty string, validated as the EMPTY guide URL, and was adopted onto the
+active source by R4 -- clearing a guide URL the user had, where R4 says an
+empty EPG input is a no-op. Fixed on `lane-key-x1` (1f8bd1b): the read goes
+through entryInputForm (Model.js on that branch, cited bare until it lands)
+and a node check named for the sibling pins it. The round-8 data-loss lens
+reported one way of mutating that read which no check catches yet; round 9
+adds the check.
+
+**D-SRC-18** is the data-loss lens's LF case, present identically on the
+round-7 and round-8 trees: R11 and R13 leave an input on the entry when the
+state write that would adopt it fails -- deliberately, as the only copy --
+and if the user then edits the same source's guide URL in the app and that
+write lands, nothing removes the older input, so the next start adopts it
+over the edit. Sixteen such runs per host shape in the lens's length-2
+matrix on `lane-key-x2`. It needs a failed state write that the user was
+told about. Round 9's ruling, that the latest explicit input wins by time,
+is the place it is either settled or shown to be unknowable: the write that
+would have recorded when the older input arrived is the write that failed.
+
 ### D-SINK-20: the patch-only logo write re-carries a stale URL on the lagging host
 
 **Filed 2026-10-12 from the D-SINK-19 round-5 lenses; P3; open; never
@@ -13267,6 +13315,55 @@ proves it under the nested cage on `dev`'s file. A declaration the manifest
 does not name goes to the part of its nearest named predecessor and is
 reported, which is how the chain's new functions get a home. Model.js on
 `dev` is frozen to everything but the chain until the split lands.
+
+**Fixed on `dev` at c70eb32 (2026-10-12), unreleased.** Two rounds on
+`lane-esm-1` and `lane-esm-2`, each reviewed, merged as a fast-forward. The
+model is 18 ES module parts under `model/` -- the largest `model/state.mjs`
+at 46,744 bytes -- behind a generated `Model.mjs` of 11 KB that re-exports
+exactly the 603 old export names; `split-model.mjs --verify --from-git
+ab545f4` reads "712 declarations of ab545f4:Model.js, each found
+byte-identical in exactly one part" and every name equal to `require` of
+the monolith. The allowlist is 31 files, every one under the new 448 KiB
+ceiling in `release.py check` (largest: the helper, 410,678 bytes, which
+leaves it 48 KB); an export of the allowlist passes `omarchy plugin
+validate`, and the round-1 live lens applied the scanner's own size rules
+to it (pass) and to `main` at 0.13.5 (fail on `Model.js`). Under the real
+Quickshell every dev-harness scenario read the same as `dev` on the same
+machine (sources 66 / 0, clip 20 / 0, pip 84 / 0, logo 33 / 0, rewind
+110 / 4 both, and so on), and the guide opened at 10,000 channels in
+130 / 96 ms first and about 20 ms warm against `dev`'s 107 / 137 and about
+20. Three things the module form changed, each measured and each now
+refused by the script: an initializer reading another part across an
+import cycle reads `undefined` silently (node, qmltestrunner and Quickshell
+alike); Quickshell logs `qt.qml.usedbeforedeclared` for a function naming a
+later `var` of its own part; and qmllint, which resolved the classic
+script's members, warns on every member of a module, so a typo lost its
+signal until `scripts/check-model-members.py` judged those lines against
+the export names (seen red with a made-up member swapped into each QML file).
+One shared instance replaces the per-component copies a classic script got;
+the one shared value a caller could corrupt, `CHNO_NONE`, was frozen on
+`dev` first (ab545f4), and the round-2 lens's fuzz over the regenerated
+parts read 0 shared values mutated.
+
+**The recipe the D-SINK-19 chain lands through, with the round-2 lens's two
+corrections.** The chain's `Model.js` is cut by the same script after a
+merge: `git merge <chain>`, `git rm Model.js`, `node
+scripts/split-model.mjs --write --from-git <chain tip>`, then `--verify`
+and `--check` with the same ref, the node suite, and a commit of the
+regenerated parts by explicit path. The lens showed two things the recipe
+as written got wrong. The ref's `Model.js` must ALREADY contain every
+model edit `dev` made, because the cut replaces the parts rather than
+merging them -- against a chain tip that had not merged `dev` it silently
+undid the ab545f4 freeze while `--verify` said ok, caught only because that
+edit came with a node check -- so the chain merges `dev` before it is cut,
+and every later chain round already does. And three more files conflict
+(`run.sh`, `shell.qml`, `qa-lib-test.sh`, resolved as the union of both
+sides) and four places on the chain read `Model.js` by path
+(`tests/Model.test.js`'s source pin, `qa-lib-test.sh`'s instrument probe,
+`key-scenario.sh`, and one mutation patch), each repointed by hand; any
+`Model.js` citation the chain's comments add is reworded in the chain's
+`Model.js` BEFORE the cut, never in a generated part, or the parts equal no
+monolith and `--verify` goes red.
 
 **The lesson, rule 14's shape at the artifact level.** The gate checks
 that the allowlist is whole, that every import resolves, that no

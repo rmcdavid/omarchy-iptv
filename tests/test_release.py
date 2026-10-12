@@ -8,6 +8,12 @@ than read from release.ALLOWLIST. A test that asserted "the tree equals the
 allowlist" would stay green if someone deleted bin/omarchy-iptv from the
 allowlist; this one goes red. Verified: drop that entry and
 test_the_artifact_holds_exactly_what_the_plugin_needs fails.
+
+The model's files (D-REL-5) are the one part not written out here: they are
+read from THIS repository's Model.mjs through scripts/model_files.py, the
+same reader everything else uses, and never from release.ALLOWLIST -- so a
+part dropped from the allowlist is still red, and a part added to the model
+is expected to ship the day it exists.
 """
 
 import importlib.util
@@ -25,15 +31,27 @@ _spec = importlib.util.spec_from_file_location(
     'release', os.path.join(ROOT, 'scripts', 'release.py'))
 release = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(release)
+sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+
+# The real model's layout, so the fixture tree has the same files the
+# artifact must carry. The first part holds the fixture's PLUGIN_VERSION.
+PARTS = model_files.part_paths(ROOT)
+VERSION_PART = PARTS[0]
 
 
 def must_ship():
     return {
         'manifest.json', 'README.md', 'LICENSE', 'CHANGELOG.md', 'preview.png',
-        'BarWidget.qml', 'Guide.qml', 'Service.qml', 'Model.js',
+        'BarWidget.qml', 'Guide.qml', 'Service.qml',
         'bin/omarchy-iptv',
         'contrib/bindings.lua', 'contrib/omarchy-menu.jsonc', 'contrib/windows.lua',
-    }
+    } | set(model_files.model_paths(ROOT))
+
+
+def aggregator(parts):
+    """A Model.mjs in the generated form, re-exporting nothing from each part."""
+    return '// fixture\n' + ''.join('export {} from "./%s"\n' % rel for rel in parts)
 
 
 TODAY = '2026-09-26'
@@ -57,13 +75,14 @@ class ReleaseCase(unittest.TestCase):
         self.write('manifest.json', '{"version": "0.9.9", "entryPoints": '
                    '{"barWidget": "BarWidget.qml", "overlay": "Guide.qml", '
                    '"service": "Service.qml"}}\n')
-        self.write('Service.qml', 'import "Model.js" as Model\n'
+        self.write('Service.qml', 'import "Model.mjs" as Model\n'
                    'x: Qt.resolvedUrl("bin/omarchy-iptv")\n')
+        self.write('Model.mjs', aggregator(PARTS))
         # D-HOST-1: the runtime compares this against manifest.json to notice a
         # hot reload that left an older component mounted, so the check demands
         # it and the double must carry it. A double more forgiving than the
         # real tree is what rule 10 forbids.
-        self.write('Model.js', 'var PLUGIN_VERSION = "0.9.9"\n')
+        self.write(VERSION_PART, 'var PLUGIN_VERSION = "0.9.9"\n')
         self.write('README.md', 'Copy `contrib/bindings.lua`. See the dev branch: '
                    'https://example.invalid/tree/dev/docs/UX.md\n')
         # The cut requires a heading naming this version and dated the day of
@@ -121,16 +140,16 @@ class ReleaseCase(unittest.TestCase):
         self.assertEqual(new, self.git('rev-parse', 'v0.9.9^{commit}').strip())
 
     def test_the_artifact_carries_dev_content_not_stale_main_content(self):
-        self.write('Model.js', 'new model\nvar PLUGIN_VERSION = "0.9.9"\n')
+        self.write(VERSION_PART, 'new model\nvar PLUGIN_VERSION = "0.9.9"\n')
         self.commit_all()
         self.build()
-        blob = self.git('show', 'main:Model.js')
+        blob = self.git('show', 'main:' + VERSION_PART)
         self.assertEqual('new model\nvar PLUGIN_VERSION = "0.9.9"\n', blob)
 
     # -- refusals --------------------------------------------------------
 
     def test_a_dirty_tree_is_refused(self):
-        self.write('Model.js', 'uncommitted\nvar PLUGIN_VERSION = "0.9.9"\n')
+        self.write(VERSION_PART, 'uncommitted\nvar PLUGIN_VERSION = "0.9.9"\n')
         with self.assertRaisesRegex(release.ReleaseError, 'dirty'):
             self.build()
 
@@ -154,7 +173,7 @@ class ReleaseCase(unittest.TestCase):
         # where they disagree -- otherwise every install shows the restart
         # notice forever. Bumping only the manifest here would be testing a
         # release that could not ship.
-        self.write('Model.js', self.git('show', 'dev:Model.js')
+        self.write(VERSION_PART, self.git('show', 'dev:' + VERSION_PART)
                    .replace('0.9.9', '1.0.0'))
         # And the release notes, because the cut now requires the heading to
         # name the version being shipped and to be dated the day it ships.
@@ -301,19 +320,240 @@ class ReleaseCase(unittest.TestCase):
     def test_a_shipped_source_that_cites_a_dev_path_is_a_problem(self):
         """D-REL-2: 0.7.1 shipped 70 comments naming CLAUDE.md, docs/, tests/
         or scripts/ -- citations to files that do not exist in an install."""
-        self.write('Model.js', '// see docs/UX.md section 3 and CLAUDE.md rule 12\n'
+        self.write(VERSION_PART, '// see docs/UX.md section 3 and CLAUDE.md rule 12\n'
                    'var PLUGIN_VERSION = "0.9.9"\n')
         self.write('bin/omarchy-iptv', '#!/usr/bin/env python3\n# pinned by tests/fixtures/x.json\n')
         self.commit_all()
         problems = release.check(self.dir, out=io.StringIO())
-        self.assertTrue(any("Model.js:1 names 'docs/UX.md'" in p for p in problems), problems)
+        self.assertTrue(any("%s:1 names 'docs/UX.md'" % VERSION_PART in p for p in problems), problems)
         self.assertTrue(any("bin/omarchy-iptv:2 names 'tests/fixtures/x.json'" in p for p in problems), problems)
 
     def test_a_shipped_source_naming_the_rule_and_the_branch_is_fine(self):
-        self.write('Model.js', '// engineering rule 12 (dev branch); UX.md section 3 on the dev branch\n'
+        self.write(VERSION_PART, '// engineering rule 12 (dev branch); UX.md section 3 on the dev branch\n'
                    'var PLUGIN_VERSION = "0.9.9"\n')
         self.commit_all()
         self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+
+    # -- the model's modules (D-REL-5) -------------------------------------
+
+    def test_a_part_the_aggregator_loads_must_be_on_the_allowlist(self):
+        """A part cut out of the model and not added to ALLOWLIST would ship
+        a Model.mjs whose import fails on every install."""
+        self.write('model/extra.mjs', 'var EXTRA = 1\nexport { EXTRA }\n')
+        self.write('Model.mjs', aggregator(PARTS + ['model/extra.mjs']))
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("Model.mjs loads './model/extra.mjs' at runtime and it is not on "
+                            "the allowlist" in p for p in problems), problems)
+
+    def test_an_import_between_parts_is_followed(self):
+        """The generated import block closes on its own line; a part another
+        PART imports is as much a runtime file as one the aggregator names."""
+        self.write('model/hidden.mjs', 'var HIDDEN = 1\nexport { HIDDEN }\n')
+        self.write(PARTS[-1], 'import {\n  HIDDEN\n} from "./hidden.mjs"\nvar LAST = HIDDEN\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("%s loads './hidden.mjs' at runtime and it is not on the allowlist"
+                            % PARTS[-1] in p for p in problems), problems)
+
+    def test_an_allowlisted_module_nothing_loads_is_a_problem(self):
+        self.write('Model.mjs', aggregator(PARTS[:-1]))
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('%s is on the allowlist but nothing the plugin loads imports it'
+                            % PARTS[-1] in p for p in problems), problems)
+
+    def test_a_module_reaching_outside_the_plugin_is_a_problem(self):
+        self.write(PARTS[-1], 'import { X } from "../../elsewhere.mjs"\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("loads '../../elsewhere.mjs', which is outside the plugin directory" in p
+                            for p in problems), problems)
+
+    # Every static form the engine accepts (measured on Qt 6.11.2: single
+    # quotes load in QML, in a module and in a classic script's .import).
+    # The round-1 lens put a single-quoted orphan import in a part and this
+    # check passed it; only split-model's column-0 rule caught it.
+    def assert_orphan_found(self, rel, text, ref):
+        self.write('model/orphan.mjs', 'var ORPHAN = 1\nexport { ORPHAN }\n')
+        self.write(rel, text)
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("%s loads '%s' at runtime and it is not on the allowlist" % (rel, ref) in p
+                            for p in problems), problems)
+
+    def test_a_single_quoted_import_from_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], "import { ORPHAN } from './orphan.mjs'\n", './orphan.mjs')
+
+    def test_a_double_quoted_one_line_import_from_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], 'import { ORPHAN } from "./orphan.mjs";\n', './orphan.mjs')
+
+    def test_a_namespace_and_default_import_are_followed(self):
+        self.assert_orphan_found(PARTS[-1], "import * as O from './orphan.mjs'\n", './orphan.mjs')
+        self.assert_orphan_found(PARTS[-1], 'import O, { ORPHAN } from "./orphan.mjs"\n', './orphan.mjs')
+
+    def test_a_single_quoted_export_from_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], "export * from './orphan.mjs'\n", './orphan.mjs')
+        self.assert_orphan_found(PARTS[-1], "export { ORPHAN as O } from './orphan.mjs'\n", './orphan.mjs')
+
+    def test_a_bare_import_is_followed_in_either_quoting(self):
+        self.assert_orphan_found(PARTS[-1], "import './orphan.mjs'\n", './orphan.mjs')
+        self.assert_orphan_found(PARTS[-1], 'import "./orphan.mjs"\n', './orphan.mjs')
+
+    def test_a_from_on_its_own_line_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], "import {\n  ORPHAN\n}\nfrom './orphan.mjs'\n", './orphan.mjs')
+
+    def test_a_single_quoted_qml_import_is_followed(self):
+        self.write('Extra.js', 'x\n')
+        self.write('Guide.qml', "import 'Extra.js' as Extra\nx: Qt.resolvedUrl('bin/elsewhere')\n")
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("Guide.qml loads 'Extra.js'" in p for p in problems), problems)
+        self.assertTrue(any("Guide.qml loads 'bin/elsewhere'" in p for p in problems), problems)
+
+    def test_a_classic_script_dot_import_is_followed(self):
+        self.write('lib.js', ".import 'orphan.js' as O\nfunction f() {}\n")
+        self.write('orphan.js', 'function g() {}\n')
+        self.write('Guide.qml', 'import "lib.js" as Lib\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("Guide.qml loads 'lib.js'" in p for p in problems), problems)
+        # lib.js is not allowlisted, so it is not followed; allowlist it in a
+        # fresh case to show the .import itself is read.
+        release_allow = release.ALLOWLIST
+        try:
+            release.ALLOWLIST = release_allow + ('lib.js',)
+            problems = release.check(self.dir, out=io.StringIO())
+        finally:
+            release.ALLOWLIST = release_allow
+        self.assertTrue(any("lib.js loads 'orphan.js' at runtime and it is not on the allowlist" in p
+                            for p in problems), problems)
+
+    def test_a_comment_that_reads_like_an_import_is_not_followed(self):
+        self.write(PARTS[-1], "// import { X } from './nowhere.mjs'\n"
+                              "// a dynamic import('./nowhere.mjs') would be refused\n"
+                              "/* the old form\n * export * from './nowhere.mjs'\n */\nvar LAST = 1\n")
+        self.commit_all()
+        self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+
+    def test_a_dynamic_import_is_a_problem(self):
+        self.write(PARTS[-1], "function load() { return import('./orphan.mjs') }\n")
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('%s:1 imports dynamically' % PARTS[-1] in p for p in problems), problems)
+
+    def test_an_unreadable_model_is_a_message_not_a_traceback(self):
+        """model_files raising used to leave `m` None and the next branch read
+        m.group: the gate went red on the traceback and the message that says
+        why was never printed (the round-1 lens, P3)."""
+        self.write('Model.mjs', '// an aggregator that names no part\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any(p.startswith('the model is unreadable: ') for p in problems), problems)
+
+    # No shipped file names Model.js in the present tense (round 2, R5).
+    def model_js_problems(self, rel, text):
+        self.write(rel, text)
+        self.commit_all()
+        return [p for p in release.check(self.dir, out=io.StringIO()) if 'names Model.js' in p]
+
+    def test_a_shipped_comment_naming_model_js_is_red_in_every_kind_of_file(self):
+        for rel, text in (('Guide.qml', 'import "Model.mjs" as Model\n// the value lives in Model.js\n'),
+                          ('bin/omarchy-iptv', '#!/usr/bin/env python3\n# Must match Model.js.\n'),
+                          (PARTS[-1], '// see Model.js for why\n'),
+                          ('README.md', 'The model is Model.js.\n'),
+                          ('CHANGELOG.md', '# Changelog\n\n## 0.9.9 (%s)\n\n- Model.js got smaller\n' % TODAY),
+                          ('contrib/bindings.lua', '-- calls into Model.js\n')):
+            problems = [p for p in self.model_js_problems(rel, text) if p.startswith(rel + ':')]
+            self.assertEqual(1, len(problems), (rel, problems))
+
+    def test_a_name_followed_by_punctuation_is_still_red(self):
+        # bin/omarchy-iptv:7415 at 1ebbc5b read "Mirror Model.js's ...", so the
+        # possessive is a form that shipped; the D-REL-5 round-2 lens showed a
+        # lookahead that also excludes the apostrophe passed every other test.
+        for line in ("// Mirror Model.js's Math.trunc\n", '// (see Model.js)\n', '// in Model.js, then\n',
+                     '// lives in Model.js.\n', '// "Model.js"\n'):
+            self.assertEqual(1, len(self.model_js_problems('Guide.qml', line)), line)
+
+    def test_an_import_of_model_js_by_path_is_red(self):
+        self.assertEqual(1, len(self.model_js_problems('Guide.qml', 'import "./Model.js" as Model\n')))
+
+    def test_history_that_names_its_commit_is_allowed(self):
+        self.assertEqual([], self.model_js_problems(
+            'Guide.qml', '// Model.js at 422c8e1 held this; Model.js at commit 0bd4515ab did too\n'))
+
+    def test_history_without_a_commit_is_still_red(self):
+        for line in ('// Model.js used to hold this\n', '// Model.js at some point\n',
+                     '// Model.js at 422c8e1 and then Model.js\n'):
+            self.assertEqual(1, len(self.model_js_problems('Guide.qml', line)), line)
+
+    def test_other_names_are_not_model_js(self):
+        self.assertEqual([], self.model_js_problems(
+            'Guide.qml', '// Model.mjs, Model.json, Model.test.js, xModel.js\n'))
+
+    def test_a_file_that_does_not_ship_may_name_model_js(self):
+        self.assertEqual([], self.model_js_problems('tests/test_x.py', '# Model.js\n'))
+
+    def test_every_reached_module_is_scanned_for_dev_paths(self):
+        self.write(PARTS[-1], '// pinned by tests/fixtures/x.json\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("%s:1 names 'tests/fixtures/x.json'" % PARTS[-1] in p
+                            for p in problems), problems)
+
+    def test_the_real_tree_reaches_the_whole_model(self):
+        out = io.StringIO()
+        self.assertEqual([], release.check(ROOT, out=out))
+        self.assertIn('%d runtime sources scanned' % (3 + len(model_files.model_paths(ROOT))),
+                      out.getvalue())
+
+    # -- the size ceiling (D-REL-5) -----------------------------------------
+
+    def test_the_ceiling_sits_64_kib_under_the_scanners_limit(self):
+        self.assertEqual(release.SCANNER_FILE_LIMIT, 524288)   # 512 * 1024, the marketplace's number
+        self.assertEqual(release.FILE_CEILING, 458752)         # 448 KiB
+        self.assertEqual(release.SCANNER_FILE_LIMIT - release.FILE_CEILING, 64 * 1024)
+
+    def test_a_shipped_file_over_the_ceiling_is_red(self):
+        """The failure the marketplace hit at 0.13.5, with 64 KiB to spare."""
+        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 2) + '\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('%s is %d bytes, over the %d-byte ceiling'
+                            % (PARTS[-1], release.FILE_CEILING + 1, release.FILE_CEILING) in p
+                            for p in problems), problems)
+
+    def test_a_shipped_file_at_the_ceiling_is_fine(self):
+        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 3) + '\n')
+        self.commit_all()
+        out = io.StringIO()
+        self.assertEqual([], release.check(self.dir, out=out))
+        self.assertIn('largest %s at %d of %d bytes' % (PARTS[-1], release.FILE_CEILING, release.FILE_CEILING),
+                      out.getvalue())
+
+    def test_the_executable_helper_is_held_to_the_ceiling_too(self):
+        """The scanner exempts executables from its size limit, and that is a
+        hole rather than a pass: an oversized mode-100755 file is probed as a
+        binary instead of being scanned, so a helper past the limit would
+        ship UNREAD. This does not exempt it.
+
+        The fixture must BE executable, on disk and in git, or the test proves
+        nothing about executables: the first version wrote it 0644 and the
+        D-REL-5 lens's mutation C4 (`and not os.access(path, os.X_OK)` on the
+        ceiling) survived it. Seen red against that mutation since."""
+        path = os.path.join(self.dir, 'bin', 'omarchy-iptv')
+        self.write('bin/omarchy-iptv', '#!/usr/bin/env python3\n#' + 'x' * release.FILE_CEILING + '\n')
+        os.chmod(path, 0o755)
+        self.commit_all()
+        self.assertTrue(os.access(path, os.X_OK), 'the fixture helper is not executable')
+        self.assertTrue(self.git('ls-files', '-s', 'bin/omarchy-iptv').startswith('100755 '),
+                        'git does not record the fixture helper as executable')
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any(p.startswith('bin/omarchy-iptv is ') and 'ceiling' in p for p in problems), problems)
+
+    def test_the_real_tree_is_under_the_ceiling(self):
+        for path in release.ALLOWLIST:
+            self.assertLessEqual(os.path.getsize(os.path.join(ROOT, path)), release.FILE_CEILING, path)
 
     def test_a_manifest_entry_point_outside_the_allowlist_is_a_problem(self):
         self.write('manifest.json', '{"version": "0.9.9", "entryPoints": '

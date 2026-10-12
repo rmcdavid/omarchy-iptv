@@ -12,10 +12,14 @@ shipped seven already follow are asserted here for all ten at once.
 Run: python3 -m unittest discover -s tests
 """
 import json
+import os
+import sys
 import pathlib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 MANIFEST = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
 BAR = MANIFEST["barWidget"]
 DEFAULTS = BAR["defaults"]
@@ -155,11 +159,11 @@ class PictureInPictureSettingsTest(unittest.TestCase):
     def test_the_clamp_behind_the_manifest_is_the_manifest(self):
         # The clamp is the half a user feels: a range declared here and a
         # different one clamped there is a control whose ends do nothing.
-        # Model.js is where it lives, and tests/Model.test.js asserts
+        # The model is where it lives, and tests/Model.test.js asserts
         # SETTING_RANGES against these very entries in both directions --
         # this is the Python side of that same pin, so a range edited here
         # with no model side is red in both suites rather than neither.
-        model = (ROOT / "Model.js").read_text(encoding="utf-8")
+        model = model_files.model_source(str(ROOT))
         self.assertIn("pipSizePercent: { def: %d, min: %d, max: %d }"
                       % (DEFAULTS["pipSizePercent"], BY_KEY["pipSizePercent"]["min"],
                          BY_KEY["pipSizePercent"]["max"]), model)

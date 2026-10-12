@@ -1042,10 +1042,10 @@ const M = require(process.argv[1]);
 const want = ["validateSourceUrl", "sourceView", "xtreamUrls"];
 const missing = want.filter(f => typeof M[f] !== "function");
 if (missing.length) { console.error("not callable: " + missing.join(", ")); process.exit(1); }
-' "$ROOT/Model.js" 2>/dev/null; then
-    gate_ok "Model.js source functions (loaded and callable)"
+' "$ROOT/Model.mjs" 2>/dev/null; then
+    gate_ok "the model's source functions (loaded and callable)"
   else
-    gate_missing "Model.js validateSourceUrl / sourceView / xtreamUrls not callable from node (Lane 1)"
+    gate_missing "the model's validateSourceUrl / sourceView / xtreamUrls not callable from node (Lane 1)"
   fi
   # Service.qml cannot be invoked from here, so anchor on the definition the
   # way have_verb does rather than on a bare mention.

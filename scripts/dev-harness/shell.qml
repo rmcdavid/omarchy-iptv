@@ -3,7 +3,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
-import "Model.js" as Model
+import "Model.mjs" as Model
 // The harness's own pure logic (entryKey), staged beside this file by run.sh
 // so node can call the same function a scenario's live arm observes here.
 import "harness-lib.js" as HarnessLib
@@ -1040,7 +1040,7 @@ ShellRoot {
       for (var i = 0; i < text.length; i++) {
         var ch = text.charAt(i)
         if (ch === "<") g.handleSharedKey({ text: "\b", modifiers: 0, key: Qt.Key_Backspace })
-        else if (Model.isNumberEntryKey(ch)) g.handleSharedKey({ text: ch, modifiers: 0, key: 0 })
+        else if (typeof Model.isNumberEntryKey === "function" && Model.isNumberEntryKey(ch)) g.handleSharedKey({ text: ch, modifiers: 0, key: 0 })
         else return JSON.stringify({ ok: false, error: "bad_key", key: ch })
       }
       return JSON.stringify(harness.numberSnapshot(g))
@@ -1228,12 +1228,12 @@ ShellRoot {
     // answers rather than throws.
     function back(n: int): string {
       var s = serviceLoader.item
-      if (!s || typeof s.seekBy !== "function") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
+      if (!s || typeof s.seekBy !== "function" || typeof Model.REWIND_STEP_S !== "number") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
       return JSON.stringify(s.seekBy(-(n > 0 ? n : Model.REWIND_STEP_S)))
     }
     function forward(n: int): string {
       var s = serviceLoader.item
-      if (!s || typeof s.seekBy !== "function") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
+      if (!s || typeof s.seekBy !== "function" || typeof Model.REWIND_STEP_S !== "number") return JSON.stringify({ ok: false, kind: "seek", error: { code: "no_verb" } })
       return JSON.stringify(s.seekBy(n > 0 ? n : Model.REWIND_STEP_S))
     }
     function live(): string {
@@ -1300,9 +1300,9 @@ ShellRoot {
             // same whether the data was missing or merely never looked up.
             var epg = Model.epgFields(c && String(c.tvgId || "") !== "" ? g.epgMap[c.tvgId] : null, g.nowSec)
             return Model.rowDetail({
-              showGroup: Model.rowShowsGroup({ scopeIsGroup: g.scopeIsGroup, groupsNarrow: g.groupAxis.narrows }),
+              showGroup: typeof Model.rowShowsGroup === "function" ? Model.rowShowsGroup({ scopeIsGroup: g.scopeIsGroup, groupsNarrow: g.groupAxis.narrows }) : false,
               group: Model.primaryGroup(c),
-              failedAt: Model.failedWhen(g.failedMap[id], g.nowSec),
+              failedAt: typeof Model.failedWhen === "function" ? Model.failedWhen(g.failedMap[id], g.nowSec) : "",
               nowTitle: epg.nowTitle, nextTitle: epg.nextTitle })
           })(),
           scopes: g.scopeList.map(function(e) { return e.id + "=" + e.count }),
@@ -1322,7 +1322,7 @@ ShellRoot {
             if (!(g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0)) return null
             var c = g.currentRows[g.cursorIndex]
             var id = c ? String(c.tvgId || "") : ""
-            return Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec })
+            return typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec }) : null
           })(),
           // The panel's fields as it draws them. The model's `fields` array
           // was removed when the review found the panel hardcoding the order
@@ -1334,18 +1334,19 @@ ShellRoot {
             if (g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0) {
               var c = g.currentRows[g.cursorIndex]
               var id = c ? String(c.tvgId || "") : ""
-              d = Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec })
+              d = typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec }) : null
             }
             if (!d) return []
             var out = []
-            for (var i = 0; i < Model.EPG_DETAIL_FIELDS.length; i++) {
-              var key = Model.EPG_DETAIL_FIELDS[i][0]
+            var fields = typeof Model.EPG_DETAIL_FIELDS === "object" && Model.EPG_DETAIL_FIELDS ? Model.EPG_DETAIL_FIELDS : []
+            for (var i = 0; i < fields.length; i++) {
+              var key = fields[i][0]
               if (d[key] !== undefined && String(d[key]) !== "") out.push(key)
             }
             return out
           })(),
           keyboardMap: (function () {
-            var secs = Model.keyboardMap(g.hintOpts !== undefined ? g.hintOpts : {})
+            var secs = typeof Model.keyboardMap === "function" ? Model.keyboardMap(g.hintOpts !== undefined ? g.hintOpts : {}) : []
             return (secs || []).map(function (s) {
               return s.title + ": " + (s.rows || []).map(function (r) { return r[0] + "=" + r[1] }).join(", ")
             })
@@ -1353,7 +1354,7 @@ ShellRoot {
           inTracks: g.inTracks === true, trackCursor: g.trackCursor,
           trackMessage: g.trackMessage !== undefined ? g.trackMessage : "",
           trackRows: (g.trackRows || []).map(function(r) { return r.kind + ":" + r.label + (r.selected ? "*" : "") }),
-          trackCursorName: (g.trackRows && g.trackRows[g.trackCursor]) ? Model.trackAccessibleName(g.trackRows, g.trackCursor) : "",
+          trackCursorName: (g.trackRows && g.trackRows[g.trackCursor] && typeof Model.trackAccessibleName === "function") ? Model.trackAccessibleName(g.trackRows, g.trackCursor) : "",
           // Sources screens (SR31): mode transitions, the cursor and the form
           // with masked values and lengths.
           returnMode: g.guide ? String(g.guide.returnMode || "") : "",
@@ -1396,7 +1397,17 @@ ShellRoot {
           // count would read 2 for every set; the count is the Model's, and
           // the tag is exposed so a live run can see the join the guide
           // compares (service.logoDir === logoHave.dir, or no logo draws).
-          logoCount: s2 && s2.logoHave ? Model.logoHaveCount(s2.logoHave) : null,
+          // F-HARNESS-19: S6 stages b731882^ (0.12.1-era) under THIS shell,
+          // and that model has no logoHaveCount: the call threw a TypeError
+          // on every state read and the whole reply was lost, so S6 read
+          // "the stage shell never parsed the playlist" for a rig reason. A
+          // tree from before D-LOGO-11 keeps a bare name set, counted as the
+          // shell counted it then. Every Model member this file uses that an
+          // older staged tree lacks is asked for first; the list, and the
+          // trees, are in tests/test_harness_shell_model.py.
+          logoCount: !(s2 && s2.logoHave) ? null
+            : typeof Model.logoHaveCount === "function" ? Model.logoHaveCount(s2.logoHave)
+            : Object.keys(s2.logoHave).length,
           logoHaveDir: s2 && s2.logoHave && typeof s2.logoHave.dir === "string" ? s2.logoHave.dir : null,
           logoDir: s2 && typeof s2.logoDir === "string" ? s2.logoDir : null,
           // M2-13. The view and the geometry it derived, so a scenario can
@@ -1414,7 +1425,7 @@ ShellRoot {
           pauseHint: (function () {
             var pairs = Model.footerHints({ mode: "list", playing: g.playingId !== "",
                                             paused: s2 && s2.paused === true })
-            var hit = pairs.filter(function (p) { return p[0] === Model.PAUSE_KEY })
+            var hit = pairs.filter(function (p) { return typeof Model.PAUSE_KEY === "string" && p[0] === Model.PAUSE_KEY })
             return hit.length ? hit[0][1] : ""
           })()
         }

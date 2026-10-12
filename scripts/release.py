@@ -38,8 +38,12 @@ import os
 import re
 import shutil
 import subprocess
+import posixpath
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 
 RELEASE_BRANCH = 'main'
 DEV_BRANCH = 'dev'
@@ -54,12 +58,54 @@ ALLOWLIST = (
     'BarWidget.qml',
     'Guide.qml',
     'Service.qml',
-    'Model.js',
+    # D-REL-5: the model, as ES modules. Model.mjs re-exports the public names
+    # from the parts under model/, which scripts/split-model.mjs cut out of the
+    # one-file Model.js when that file outgrew the marketplace scanner's
+    # per-file limit. check() follows every import and re-export line from
+    # the QML entry points down, so a part missing here is red and a module
+    # listed here that nothing loads is red too.
+    'Model.mjs',
+    'model/build.mjs',
+    'model/text.mjs',
+    'model/channels.mjs',
+    'model/browse.mjs',
+    'model/state.mjs',
+    'model/settings.mjs',
+    'model/logos.mjs',
+    'model/player.mjs',
+    'model/mpv.mjs',
+    'model/rewind.mjs',
+    'model/pip.mjs',
+    'model/privacy.mjs',
+    'model/epg.mjs',
+    'model/contrast.mjs',
+    'model/view.mjs',
+    'model/sources.mjs',
+    'model/source-records.mjs',
+    'model/form-edit.mjs',
     'bin/omarchy-iptv',
     'contrib/bindings.lua',
     'contrib/omarchy-menu.jsonc',
     'contrib/windows.lua',
 )
+
+# D-REL-5. The marketplace's automated security baseline refuses to scan any
+# non-executable file over `securityFileByteLimit = 512 * 1024` bytes
+# (scripts/security-baseline-limits.mjs in omacom/omarchy-plugin-marketplace;
+# scripts/security-github-snapshot.mjs throws `security-baseline-scan-limit`),
+# and a baseline that cannot complete is a verification request nobody can
+# approve. Model.js passed at 0.13.4 with 2,105 bytes to spare and crossed it
+# at 0.13.5, and nothing here could have gone red for it: the gate proved the
+# allowlist whole, never that the artifact was one the marketplace can read.
+# So every file on the allowlist, the executable helper included, is held to a
+# ceiling 64 KiB below the scanner's number, and the gate goes red first.
+# The executable is held on purpose, although the scanner's size refusal
+# skips mode 100755: an oversized executable is probed as a binary instead
+# of being scanned, so exempting it here would let the helper ship UNREAD by
+# the baseline, which is a hole and not a pass. Do not align this with the
+# scanner's exemption; tests/test_release.py goes red if it is.
+SCANNER_FILE_LIMIT = 512 * 1024
+FILE_CEILING = 448 * 1024
 
 # Files a coding agent discovers and obeys automatically. None may ship, and
 # the assertion is by NAME so a future edit to ALLOWLIST cannot sneak one in.
@@ -77,10 +123,31 @@ DEV_ONLY_DIRS = ('docs', 'tests', 'scripts', '.claude', '.github', '.cursor',
                  '.windsurf', '.clinerules', '.roo', '.junie', '.amazonq',
                  '.kiro')
 
-# The three QML entry points and the shared model: the runtime surface.
-RUNTIME_SOURCES = ('BarWidget.qml', 'Guide.qml', 'Service.qml', 'Model.js')
+# The three QML entry points: the runtime surface starts here, and check()
+# follows what they load. A QML file names a local file with `import "<file>"`
+# or Qt.resolvedUrl; an ES module (the model, D-REL-5) with `import ... from`,
+# `export ... from` and a bare `import "<file>"`, a classic script with
+# `.import "<file>" as X`. Every reference resolves against the directory of
+# the file that makes it, as the engine resolves it.
+#
+# EVERY quoting the engine accepts, not the one the generator writes:
+# measured 2026-10-12 on Qt 6.11.2 (qmltestrunner), `import 'a.mjs' as A` in
+# QML, `import { b } from './b.mjs'` in a module and `.import 'c2.js' as C2`
+# in a classic script all load. The first version matched double quotes on
+# a `}`-led line only, and a hand-written single-quoted import of an
+# unlisted file passed this check (the round-1 lens); only split-model's
+# column-0 rule happened to catch it. A module statement may also span
+# lines, so a specifier is taken from any line that starts like one.
+RUNTIME_SOURCES = ('BarWidget.qml', 'Guide.qml', 'Service.qml')
 RUNTIME_REF = re.compile(
-    r'(?:^\s*import\s+"([^"]+)"|Qt\.resolvedUrl\("([^"]+)"\))', re.M)
+    r"""^\s*import\s+(['"])([^'"\n]+)\1|Qt\.resolvedUrl\(\s*(['"])([^'"\n]+)\3\s*\)""", re.M)
+MODULE_STATEMENT = re.compile(r'^\s*(?:import\b|export\b|from\b|\}|\.import\b)')
+MODULE_SPECIFIER = re.compile(
+    r"""(?:(?<![\w$])from|(?<![\w$.])import|^\s*\.import)\s*(['"])([^'"\n]+)\1""")
+# A dynamic import cannot be followed by reading the text, so it is refused
+# rather than skipped: what the resolver cannot see, it cannot prove ships.
+DYNAMIC_IMPORT = re.compile(r'(?<![\w$.])import\s*\(')
+MODULE_SUFFIXES = ('.mjs', '.js')
 
 # A README on the artifact must not point at anything that is not there.
 README_DEV_REF = re.compile(
@@ -90,8 +157,22 @@ README_DEV_REF = re.compile(
 # citing CLAUDE.md by name and 36 naming docs/, tests/ or scripts/ paths that
 # do not exist in an install (D-REL-2). A reader who greps the plugin for
 # CLAUDE finds them first, and a cited path that cannot be opened is a
-# citation to nothing. The helper's --help text was one of them.
+# citation to nothing. The helper's --help text was one of them. The model's
+# modules join these as check() reaches them.
 SHIPPED_SOURCES = RUNTIME_SOURCES + ('bin/omarchy-iptv',)
+
+# Nor may ANY shipped file name `Model.js`, which no install has had since
+# the model became Model.mjs and its parts (D-REL-5). Round 1 of the split
+# left 34 such citations in the artifact -- "the value lives in Model.js",
+# "must match Model.js" -- each one D-REL-2's shape, a pointer to nothing, and
+# README_DEV_REF could not see them. Say "the model" or `Model.mjs`. History
+# may name the old file, and says it is history by naming the commit:
+# `Model.js at 422c8e1` (or `at commit <sha>`), seven to forty hex digits.
+# Nothing looser counts, because "was" and "used to" are exactly the words a
+# present-tense citation acquires when someone wants the gate quiet. The
+# D-SINK-19 chain brings more of them at integration; this is what finds them.
+MODEL_JS_NAME = re.compile(r'(?<![\w$-])Model\.js(?![\w-])')
+MODEL_JS_HISTORY = re.compile(r'(?<![\w$-])Model\.js at (?:commit )?[0-9a-f]{7,40}(?![\w-])')
 
 # Nor may shipped PROSE hand the user a command that does not exist. The
 # helper lives in the plugin directory and is on nobody's PATH, so a bare
@@ -217,27 +298,33 @@ def check(root, out=sys.stdout):
     have = tracked(root)
     allow = set(ALLOWLIST)
 
+    largest = (0, '')
     for path in ALLOWLIST:
         if path not in have:
             problems.append('%s is on the allowlist but is not tracked' % path)
+        elif os.path.isfile(os.path.join(root, path)):
+            size = os.path.getsize(os.path.join(root, path))
+            largest = max(largest, (size, path))
+            if size > FILE_CEILING:
+                problems.append(
+                    '%s is %d bytes, over the %d-byte ceiling (448 KiB); the marketplace '
+                    'scanner refuses a file over %d bytes and the verification request '
+                    'could not be approved (D-REL-5) -- split it'
+                    % (path, size, FILE_CEILING, SCANNER_FILE_LIMIT))
         top = path.split('/')[0]
         if top in DEV_ONLY_DIRS or (top.startswith('.') and '/' in path):
             problems.append('%s is under a development-only directory' % path)
         if path in AGENT_INSTRUCTION_NAMES or os.path.basename(path) in AGENT_INSTRUCTION_NAMES:
             problems.append('%s is an agent instruction file and may not ship' % path)
 
-    # Every file the runtime loads from its own directory must ship.
-    for src in RUNTIME_SOURCES:
-        if src not in have:
-            continue
-        for m in RUNTIME_REF.finditer(read(root, src)):
-            ref = m.group(1) or m.group(2)
-            if ref.startswith('qs.') or '://' in ref:
-                continue  # a host module or an absolute URL, not a file
-            if ref not in allow:
-                problems.append(
-                    '%s loads %r at runtime and it is not on the allowlist'
-                    % (src, ref))
+    # Every file the runtime loads from its own directory must ship, followed
+    # from the QML entry points through every module they import.
+    reached = runtime_files(root, have, allow, problems)
+    for path in ALLOWLIST:
+        if path.endswith(MODULE_SUFFIXES) and path not in reached:
+            problems.append(
+                '%s is on the allowlist but nothing the plugin loads imports it'
+                % path)
 
     # D-HOST-1. Model.PLUGIN_VERSION travels with the LOADED QML; the version
     # in manifest.json travels with the DIRECTORY. The plugin compares them at
@@ -245,11 +332,21 @@ def check(root, out=sys.stdout):
     # tells the user to restart. That comparison is only meaningful if the two
     # agree at release time, so this proves it -- otherwise every install would
     # show the notice permanently, or none ever would.
-    if 'manifest.json' in have and 'Model.js' in have:
+    if 'manifest.json' in have and model_files.AGGREGATOR in have:
         actual = json.loads(read(root, 'manifest.json')).get('version')
-        m = re.search(r'var\s+PLUGIN_VERSION\s*=\s*[\'"]([^\'"]+)[\'"]', read(root, 'Model.js'))
-        if not m:
-            problems.append('Model.js declares no PLUGIN_VERSION; D-HOST-1\'s stale-build notice cannot work')
+        try:
+            model = model_files.model_source(root)
+        except (IOError, model_files.ModelLayoutError) as error:
+            model = ''
+            problems.append('the model is unreadable: %s' % error)
+        m = re.search(r'var\s+PLUGIN_VERSION\s*=\s*[\'"]([^\'"]+)[\'"]', model)
+        # An unreadable model is already a problem above; there is no
+        # version to compare, and reading m.group of None here used to turn
+        # that message into a traceback that never printed it.
+        if not model:
+            pass
+        elif not m:
+            problems.append('the model declares no PLUGIN_VERSION; D-HOST-1\'s stale-build notice cannot work')
         elif m.group(1) != actual:
             problems.append(
                 'Model.PLUGIN_VERSION is %s but manifest.json says %s; every install would show the '
@@ -314,7 +411,7 @@ def check(root, out=sys.stdout):
                 'PATH; spell it %s (D-REL-3)' % (doc, n, hit, HELPER_PATH_FORM))
 
     # Shipped sources may not cite what does not ship, even in a comment.
-    for src in SHIPPED_SOURCES:
+    for src in SHIPPED_SOURCES + tuple(p for p in reached if p not in SHIPPED_SOURCES):
         if src not in have:
             continue
         for n, line in enumerate(read(root, src).splitlines(), 1):
@@ -325,9 +422,73 @@ def check(root, out=sys.stdout):
                     'the rule or the document by name and say it is on the dev '
                     'branch' % (src, n, m.group(0)))
 
-    out.write('release allowlist: %d files, %d runtime sources scanned\n'
-              % (len(ALLOWLIST), len(RUNTIME_SOURCES)))
+    # Nor may any of them name the model file that no longer exists.
+    for path in ALLOWLIST:
+        if path not in have or not os.path.isfile(os.path.join(root, path)):
+            continue
+        try:
+            text = read(root, path)
+        except UnicodeDecodeError:
+            continue  # preview.png
+        for n, line in enumerate(text.splitlines(), 1):
+            if len(MODEL_JS_NAME.findall(line)) > len(MODEL_JS_HISTORY.findall(line)):
+                problems.append(
+                    '%s:%d names Model.js, which no install has (D-REL-5); say "the model" or '
+                    'Model.mjs, or for history name the commit: "Model.js at <sha>"' % (path, n))
+
+    out.write('release allowlist: %d files, %d runtime sources scanned, largest %s at %d '
+              'of %d bytes\n'
+              % (len(ALLOWLIST), len(reached), largest[1] or '-', largest[0], FILE_CEILING))
     return problems
+
+
+def module_refs(src, text, problems):
+    """Every file a module or classic script names in a static import, in
+    any quoting; a dynamic import is a problem, since nothing here can say
+    what it loads. Comment lines are not code."""
+    refs = []
+    for n, line in enumerate(text.splitlines(), 1):
+        stripped = line.lstrip()
+        if stripped.startswith(('//', '/*', '*')):
+            continue
+        if MODULE_STATEMENT.match(line):
+            refs += [m.group(2) for m in MODULE_SPECIFIER.finditer(line)]
+        if DYNAMIC_IMPORT.search(line):
+            problems.append('%s:%d imports dynamically; the allowlist cannot be proven whole '
+                            'over a load it cannot read -- import statically' % (src, n))
+    return refs
+
+
+def runtime_files(root, have, allow, problems):
+    """Every tracked file the plugin loads, in the order it is reached: the
+    QML entry points, then whatever they import, transitively. A reference to
+    a local file that is not on the allowlist is appended to `problems`."""
+    reached = []
+    queue = [src for src in RUNTIME_SOURCES if src in have]
+    while queue:
+        src = queue.pop(0)
+        if src in reached:
+            continue
+        reached.append(src)
+        text = read(root, src)
+        refs = [m.group(2) or m.group(4) for m in RUNTIME_REF.finditer(text)]
+        if src.endswith(MODULE_SUFFIXES):
+            refs += module_refs(src, text, problems)
+        for ref in refs:
+            if ref.startswith('qs.') or '://' in ref:
+                continue  # a host module or an absolute URL, not a file
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(src), ref))
+            if target.startswith('../') or target == '..' or target.startswith('/'):
+                problems.append('%s loads %r, which is outside the plugin directory' % (src, ref))
+                continue
+            if target not in allow:
+                problems.append(
+                    '%s loads %r at runtime and it is not on the allowlist'
+                    % (src, ref))
+                continue
+            if target.endswith(MODULE_SUFFIXES) and target in have and target not in reached:
+                queue.append(target)
+    return reached
 
 
 # ---------------------------------------------------------------- build ----

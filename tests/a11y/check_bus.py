@@ -58,9 +58,9 @@ def check(cid, ok, label, detail=""):
 
 
 def model_says(expr):
-    """Ask the SHIPPING Model.js, so the check never mirrors its logic."""
+    """Ask the SHIPPING model (Model.mjs), so the check never mirrors its logic."""
     src = ('var M = require(%s); process.stdout.write(String(%s));'
-           % (json.dumps(os.path.join(REPO, "Model.js")), expr))
+           % (json.dumps(os.path.join(REPO, "Model.mjs")), expr))
     return subprocess.check_output(["node", "-e", src]).decode()
 
 
@@ -69,7 +69,7 @@ def redact(text):
     if text is None:
         return None
     src = ('var M = require(%s); process.stdout.write(M.redactUrls(%s));'
-           % (json.dumps(os.path.join(REPO, "Model.js")), json.dumps(str(text))))
+           % (json.dumps(os.path.join(REPO, "Model.mjs")), json.dumps(str(text))))
     out = subprocess.check_output(["node", "-e", src]).decode()
     for tok in TOKENS:
         out = out.replace(tok, "<" + tok + " redacted>")

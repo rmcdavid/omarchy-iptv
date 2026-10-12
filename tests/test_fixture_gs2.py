@@ -83,7 +83,9 @@ from helper_loader import load_helper
 helper = load_helper()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MODEL = ROOT / "Model.js"
+sys.path.insert(0, str(ROOT / "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+MODEL = ROOT / "Model.mjs"
 GENERATOR = ROOT / "scripts" / "gen-playlist.py"
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "qa-gs2"
 VERIFY = FIXTURE_DIR / "verify.js"
@@ -283,17 +285,20 @@ class Gs2FixtureTest(unittest.TestCase):
     def test_prefix_decision_reproduces_the_defect(self):
         """The fixture shows the DEFECT, not only the fix (rule 11, kept runnable).
 
-        A scratch copy of Model.js carries the one line 9d236d5 changed, put
+        A scratch copy of the model carries the one line 9d236d5 changed, put
         back the way it shipped before the fix. On case (a) every row then
         gets a second line and none of them has anything to print, which is
         D-GS-2 exactly. The tracked file is never touched. A no-op reversion
         cannot pass here: the shipping spelling must be found exactly once,
         and an unreverted copy answers rowsHaveDetail false."""
-        source = MODEL.read_text(encoding="utf-8")
+        source = model_files.model_source(str(ROOT))
         self.assertEqual(source.count(SHIPPED_LINE), 1, "the shipping decision moved; update SHIPPED_LINE")
         self.assertEqual(source.count(PREFIX_LINE), 0)
-        prefix = self.tmp / "Model.prefix.js"
-        prefix.write_text(source.replace(SHIPPED_LINE, PREFIX_LINE), encoding="utf-8")
+        # the whole model copied (Model.mjs and its parts, D-REL-5), the one
+        # line put back in the part that holds it
+        prefix = pathlib.Path(model_files.copy_model(str(ROOT), str(self.tmp / "prefix-model")))
+        part = self.tmp / "prefix-model" / model_files.file_containing(str(ROOT), SHIPPED_LINE)
+        part.write_text(part.read_text(encoding="utf-8").replace(SHIPPED_LINE, PREFIX_LINE), encoding="utf-8")
         _, epg, verdict = self.verdict(self.xml_disjoint, model=prefix)
         self.assertEqual(epg["matched"], 0)
         self.assertIs(verdict["coverage"]["carries"], False, "the data still fills no row")

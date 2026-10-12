@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // Lane 2 guide host: the states the prototype's host never reached.
 //

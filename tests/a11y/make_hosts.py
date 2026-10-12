@@ -51,18 +51,22 @@ def main():
                 os.path.join(TREE, "host2.qml"))
     print("[guide] host2.qml written (loads the shared GuideProbe.qml)")
 
-    # Model.js is already in the tree from make_tree.py; the bar reads
+    # The model is already in the tree from make_tree.py; the bar reads
     # Model.barAccessibleName, Model.barGlyph and Model.BAR_IDLE_DARKEN from
-    # the same copy the guide uses.
-    if not os.path.exists(os.path.join(TREE, "Model.js")):
-        print("no tree/Model.js -- run make_tree.py first")
-        return 2
-    mrepo = digest(os.path.join(REPO, "Model.js"))
-    mtree = digest(os.path.join(TREE, "Model.js"))
-    if mrepo != mtree:
-        print("FIDELITY: tree/Model.js differs from the repo file")
-        return 1
-    print("[bar] Model.js in the tree matches the repo file, sha256 %s" % mrepo[:16])
+    # the same copy the guide uses. Every file of it is compared (D-REL-5).
+    sys.path.insert(0, os.path.join(REPO, "scripts"))
+    import model_files
+    for rel in model_files.model_paths(REPO):
+        if not os.path.exists(os.path.join(TREE, rel)):
+            print("no tree/%s -- run make_tree.py first" % rel)
+            return 2
+        mrepo = digest(os.path.join(REPO, rel))
+        mtree = digest(os.path.join(TREE, rel))
+        if mrepo != mtree:
+            print("FIDELITY: tree/%s differs from the repo file" % rel)
+            return 1
+    print("[bar] the model in the tree matches the repo files (%d files)"
+          % len(model_files.model_paths(REPO)))
     return 0
 
 

@@ -569,11 +569,11 @@ class DId2SequenceTest(unittest.TestCase):
                          "and it is the channel the user did NOT star")
 
     def test_both_writers_agree_on_every_step(self):
-        """Model.js and the helper must produce the same ids, step for step."""
+        """The model and the helper must produce the same ids, step for step."""
         import json
         import subprocess
         script = (
-            'const M=require("./Model.js");'
+            'const M=require("./Model.mjs");'
             'const a=r=>{const v=M.channelIds(r);r.forEach((c,i)=>c.id=v[i]);return r};'
             'const c=(n,u)=>({name:n,url:u,group:"G"});'
             'console.log(JSON.stringify(['

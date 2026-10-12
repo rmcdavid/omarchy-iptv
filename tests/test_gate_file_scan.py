@@ -244,6 +244,28 @@ class TestStagedViolationsStillCaught(GateScanCase):
         self.assertEqual(self.counts(after)[0], self.counts(before)[0] - 1)
 
 
+class TestModuleSourcesAreScanned(GateScanCase):
+    """D-REL-5: the model is ES modules now, Model.mjs and model/*.mjs, and
+    rule 8 covers them. Both scans used to list '*.js' only, which a .mjs
+    file does not match, so the whole model would have left the scan."""
+
+    def test_ascii_scan_is_red_for_a_non_ascii_part(self):
+        self.seed()
+        self.stage("model/part.mjs", b"var NAME = 'caf" + E_ACUTE + b"'\n")
+        self.git("commit", "-q", "-m", "add it")
+        rc, out = self.scan("ascii")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("non-ASCII bytes in model/part.mjs", out)
+
+    def test_control_scan_is_red_for_a_nul_in_the_aggregator(self):
+        self.seed()
+        self.stage("Model.mjs", b"var SEP = '" + b"\x00" + b"'\n")
+        self.git("commit", "-q", "-m", "add it")
+        rc, out = self.scan("control")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("raw control bytes in Model.mjs", out)
+
+
 class TestIgnoredFilesStayOut(GateScanCase):
     """--exclude-standard is load-bearing, not tidiness."""
 

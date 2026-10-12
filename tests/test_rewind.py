@@ -16,6 +16,7 @@ Run: python3 -m unittest discover -s tests
 import json
 import os
 import pathlib
+import sys
 import unittest
 
 import helper_loader  # noqa: F401  (the sandboxed HOME, before the helper loads)
@@ -25,6 +26,8 @@ import helper_loader  # noqa: F401  (the sandboxed HOME, before the helper loads
 from test_player import PASSWORD, TOKEN, PlayerTestCase, helper, run
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 CLAMP_FIXTURE = ROOT / "tests" / "fixtures" / "rewind-clamp.json"
 OSD_FIXTURE = ROOT / "tests" / "fixtures" / "rewind-osd.json"
 
@@ -738,7 +741,7 @@ class DiskWarningTest(unittest.TestCase):
         fixture = json.loads((ROOT / "tests" / "fixtures" / "player-argv.json").read_text(encoding="utf-8"))["mpvHandoff"]
         self.assertEqual(helper.MPV_DISK_TEXT, fixture["diskText"])
         self.assertEqual(helper.MPV_DISK_WARN, frozenset(("--cache-on-disk",)))
-        model = (ROOT / "Model.js").read_text(encoding="utf-8")
+        model = model_files.model_source(str(ROOT))
         self.assertIn('var MPV_DISK_TEXT = "%s"' % fixture["diskText"], model)
         self.assertIn('var MPV_DISK_WARN = { "--cache-on-disk": true }', model)
         disk_cases = [c for c in fixture["cases"] if any("cache-on-disk" in t for t in c["tokens"])]

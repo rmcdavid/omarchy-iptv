@@ -3,7 +3,7 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // Guide.qml -- fullscreen channel guide overlay for io.github.rmcdavid.iptv
 // (manifest kind "overlay", keepLoaded so the layer-shell window stays
@@ -14,7 +14,7 @@ import "Model.js" as Model
 // Tab or "/" for list mode with j/k/h/l, f, x, s, r, Space, Enter, Esc),
 // a left group column (Recent / Favorites / All / GROUPS), rows with EPG
 // now/next + progress hairline, banners, empty states and a footer with
-// mode-aware hints. Pure decisions live in Model.js (ranking, scope rules,
+// mode-aware hints. Pure decisions live in the model (ranking, scope rules,
 // the mode state machine); this file only renders and dispatches.
 //
 // M2-01 Sources (UX-SOURCES.md (dev branch) under the rulings of
@@ -55,7 +55,7 @@ Item {
   property bool opened: false
 
   // ---- guide state (R8). `guide` is the pure state machine object from
-  // Model.js; replaced on every transition so bindings notice.
+  // the model; replaced on every transition so bindings notice.
   property var guide: Model.guideState(Model.SCOPE_ALL)
   // Where the user was when the guide closed to play something, so a FAILED
   // play can put them back. Narrow on purpose: see Model.placeToRestore.
@@ -217,7 +217,7 @@ Item {
   }
 
   // ---- microcopy, in one place (UX.md 5.9, section 6). Strings shared with
-  // the bar and notifications live in Model.js (footerStatus, footerHints,
+  // the bar and notifications live in the model (footerStatus, footerHints,
   // barTooltip, notifyArgv, rowDetail, scopeLabel, noMatchesTitle).
   readonly property var copy: ({
     searchPlaceholder: "Search channels" + Model.ELLIPSIS,
@@ -266,7 +266,7 @@ Item {
     accessibleGroups: "Groups",
     accessibleChannels: "Channels in ",
     // ---- Sources (UX-SOURCES.md 5.1); codes, transients and row strings
-    // come from Model.js (sourceErrorMessage, sourceTransient, sourceDetail).
+    // come from the model (sourceErrorMessage, sourceTransient, sourceDetail).
     sourcesTitle: "Sources",
     addSourceTitle: "Add source",
     editSourceTitle: "Edit source",
@@ -364,7 +364,7 @@ Item {
   // The ACTIVE ink. `cursorInk` mixes the accent the least distance toward the
   // menu text that clears 4.70:1 against the fill it is painted on, and returns
   // it untouched on the 15 themes that already do. The arithmetic lives in
-  // Model.js so a test calls it rather than mirroring it (rule 12); this
+  // the model so a test calls it rather than mirroring it (rule 12); this
   // binding evaluates once per theme, never per row.
   //
   // It means ACTIVE, not CURSOR -- see the rule in the channel delegate. Its
@@ -1099,7 +1099,7 @@ Item {
     var signature = parts.join("|")
     root.scopeList = entries
     root.groupAxis = surface.axis
-    // SG1 / D-SG-2: the one collection, in Model.js, called here and by the
+    // SG1 / D-SG-2: the one collection, in the model, called here and by the
     // qa-sg1 fixture, so the hint's candidate names cannot drift apart.
     root.groupNames = Model.groupNamesForHint(surface)
     if (signature === root.groupSignature) return
@@ -1470,7 +1470,7 @@ Item {
   // ------------------------------------------------------------ channel numbers (M2-03)
   //
   // The guide owns the timer, the cursor and the chip. Every decision below
-  // is a Model.js call; there is no number logic in this file.
+  // is a call into the model; there is no number logic in this file.
 
   // The channel behind an id, from the service's own index (the same map
   // `play` resolves against), independent of what is on screen.
@@ -2099,7 +2099,7 @@ Item {
   }
 
   // A synchronous action result -> error line. `duplicate` names the
-  // existing source's label; the copy always comes from Model.js.
+  // existing source's label; the copy always comes from the model.
   function resultError(result, field) {
     var code = result && result.code ? String(result.code) : "not_ready"
     var dup = code === "duplicate" && result ? root.findSourceView(result.id) : null
@@ -2429,7 +2429,7 @@ Item {
   //
   // INTEGRATION NOTE (engineering rule 12 (dev branch)): the equivalent
   // decision for the track picker lives in Model.onEscape's `tracks` branch,
-  // and this one belongs beside it. It is here because Model.js is another lane's file for
+  // and this one belongs beside it. It is here because the model was another lane's file in
   // this milestone; it is one line of state, it is mirrored in QML where no
   // node test can reach it, and it should be lifted into Model.onEscape with
   // the return mode carried in the guide state. Raised as a decision request.
@@ -3315,7 +3315,7 @@ Item {
                     // instead, at an alpha that holds the separation near 1.93x
                     // rather than at one fixed rung, so the header still reads
                     // as dimmed on all 23 themes instead of only clearing a
-                    // threshold. Arithmetic in Model.js (rule 12).
+                    // threshold. Arithmetic in the model (rule 12).
                     color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
                     fontFamily: root.fontFamily
                   }
@@ -4689,7 +4689,7 @@ Item {
           // ---- form column (UX-SOURCES 3.1 / 3.3 / 3.4 / 4.2): the first-run
           // input (in the empty-state column's place), the add / edit form
           // and the Xtream form. One Repeater over Model.formFields renders
-          // the fields; the form state in Model.js owns values, focus,
+          // the fields; the form state in the model owns values, focus,
           // reveal, error and probing.
           Column {
             id: formColumn
@@ -5124,7 +5124,7 @@ Item {
             id: footerHints
             // The one Text in the plugin that renders markup: the <font>
             // tags root.footerHintText wraps around the key/verb pairs of
-            // Model.footerHints. Every pair is a literal in Model.js; no
+            // Model.footerHints. Every pair is a literal in the model; no
             // query, name, label or form value is ever pushed into one.
             // That is not a comment's word for it: the F-TEXT-2 check in
             // the node suite (dev branch) drives footerHints over every
@@ -5376,7 +5376,7 @@ Item {
       // `description`, `next` -- and draws each exactly as it arrives. No
       // label is prepended, no two fields are joined, nothing is formatted or
       // abbreviated here: a line that needs the word "Next" in front of it
-      // arrives with the word in it. That keeps the composing in Model.js
+      // arrives with the word in it. That keeps the composing in the model
       // where a node test can call it (rule 12), and it is the only way this
       // panel can promise it renders nothing of its own invention. A field
       // the model omits leaves no gap, because Column skips an invisible
@@ -5632,7 +5632,7 @@ Item {
       //
       // Two nested Repeaters rather than one flattened model, because
       // flattening sections into rows is a decision and would have to live in
-      // Model.js to be testable (rule 12). This way the panel holds no logic
+      // the model to be testable (rule 12). This way the panel holds no logic
       // at all: it walks the structure the model returned.
       //
       // ACCESSIBILITY: the same check as the detail panel. Every Text is

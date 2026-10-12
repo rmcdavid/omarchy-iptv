@@ -7,7 +7,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // Service.qml -- headless state owner for io.github.rmcdavid.iptv
 // (manifest kind "service", keepLoaded). Exactly one instance per shell,
@@ -63,7 +63,7 @@ Item {
   readonly property int epgRecomputeMs: 5 * 60 * 1000
   readonly property int epgTickMs: 30 * 1000
   readonly property int healthCheckMs: 10 * 1000
-  // The shutdown ladder's grace periods live with its reducer in Model.js
+  // The shutdown ladder's grace periods live with its reducer in the model
   // (STOP_QUIT_GRACE_MS, STOP_KILL_GRACE_MS, HEALTH_SKIPS_BEFORE_RESTART);
   // the ladder itself now runs inside one detached helper (4.9).
   // ---- detached player timings (ARCHITECTURE-PLAYER.md 4.4, 4.7, spike C6)
@@ -3999,7 +3999,7 @@ Item {
   // The IPC verbs' argument is read by Model.seekVerbSeconds (design 2.4):
   // empty is one step, a positive whole number is itself, anything else is
   // 0 and refused as bad_seconds. The service lane had written a second
-  // parser here while Model.js was closed to it; the review found the
+  // parser here while the model was closed to it; the review found the
   // tested one dead (rule 12) and this one with different limits.
 
   function seekRefuse(requested, code) {
