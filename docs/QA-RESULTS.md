@@ -13572,6 +13572,9 @@ failed or cut paste stays silent this release, by decision); the
 primary-selection WRITE on a left-button selection in a revealed URL field
 is user-initiated, pre-existing and recorded in rule 5; the masked-field
 navigation no-ops stay `Guide.qml`-only decisions (cosmetic: the caret is
-hidden while masked). Upstream reports to Omarchy (the host kit's own
-`TextField`) and Qt (the released 6.11.x and 6.12.0 read text on every
-change) are drafted in `docs/ARCHITECTURE.md` section 6 for the lead to file.
+hidden while masked). Upstream: the Omarchy report (the host kit's own `TextField`) is filed as
+omacom/omarchy#15083 on 2026-10-11; the Qt side is QTBUG-149610, confirmed
+to be this bug and already Closed / Fixed for 6.8.10, 6.12.1 and 6.13 with
+no 6.11.x fix version -- a comment asking for one and recording the
+memory-exhaustion half is drafted in `docs/ARCHITECTURE.md` section 6 and
+waits on a tracker login.
