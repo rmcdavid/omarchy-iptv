@@ -585,13 +585,24 @@ Item {
   // D-SRC-15 (R9, R11). The three facts that say whether state.json on disk
   // is OLDER than memory, read by Model.reloadDisposition before any reload
   // is applied and by Model.entryFlushDisposition before the held entry
-  // mirror is written: saves issued and not yet confirmed by the FileView's
-  // `saved` (one per setText, measured 2026-10-11), whether the last write
+  // mirror is written: whether a save is PENDING (issued, and the
+  // FileView has not yet reported on THAT text -- Model.stateSaveLanded,
+  // read by content and not by counting `saved` signals, which a burst of
+  // writes coalesces: R13, measured 2026-10-12), whether the last write
   // failed, and whether the helper's start-up `state init` exited 0.
+  // `stateSavesInFlight` is 0 or 1 and keeps its name for the harness.
   property int stateSavesInFlight: 0
+  property string lastSaveText: ""
   property bool stateSaveFailed: false
   property bool stateInitOk: false
   property int stateReloadsIgnored: 0                   // observable by the harness; never a URL
+  // R15: the same reloads counted BY REASON -- one number per reason
+  // Model.reloadDisposition answers, applied and ignored alike, keyed by the
+  // reason string (Model.countReload). Never a URL. The harness reads it as
+  // pointerState's `stateReloadsByReason`; the plain total above could not
+  // go red for the start-up chmod reload because the own-write echo after
+  // every start satisfied it.
+  property var stateReloadsByReason: ({})
   // R5: the key whose entry mirror is WAITING for a parked state save
   // (Model.pointerWritePlan "wait-entry"); null when nothing waits. Written
   // by settleEntryFlush once that save has LANDED (R11), never before it.
@@ -609,12 +620,14 @@ Item {
   // already moved off. { playlistUrl, epgUrl } or null.
   property var pendingPersist: null
   property bool configShieldRerun: false
-  // Which of the two persist failures happened last, for the caller that has
-  // just been handed `false` by persistActive. Read immediately after that
-  // `false` and nowhere else: "persist_failed" (no writable bar entry, which
-  // is the only case that existed before D-SINK-18) or "config_unsafe" (the
-  // host settings file could not be made private, so the URL was withheld).
-  // The distinction is worth carrying because the two sentences give opposite
+  // Which persist failure happened last. Since R13 no source call returns
+  // it (a refused entry mirror is logged, not reported, SR25 as amended
+  // 2026-10-12); it is kept as the one record of the LAST failure for the
+  // harness and for a reader of the log: "persist_failed" (no writable bar
+  // entry), "config_unsafe" (the host settings file could not be made
+  // private, D-SINK-18) or "state_write_failed" (the plugin's own state.json
+  // could not be written, which is the failure the guide now reports).
+  // The distinction is worth carrying because the sentences give opposite
   // advice -- persist_failed sends the user to `omarchy bar set`, which is
   // precisely what must not happen with a credentialed URL.
   property string lastPersistFailure: "persist_failed"
@@ -822,9 +835,13 @@ Item {
   //     never-fetched switch / retry probe; on ok the switch is committed.
   //   sourceSwitched(id) once the new source's cache (or its absence) is in
   //     `channels`. sourceRemoved(id). sourcesPersistFailed(reason) when
-  //     updateEntryInline refused a change ("persist_failed") or the host
-  //     settings file could not be made private ("config_unsafe",
-  //     D-SINK-18); either way the guide shows its persist-failure line.
+  //     the plugin's own state.json could not be written
+  //     ("state_write_failed", R13: the state write is the switch, so this
+  //     is the failure a switch, a remove or an adoption can have), when
+  //     the logo toggle's entry write was refused ("persist_failed") or the
+  //     host settings file could not be made private ("config_unsafe",
+  //     D-SINK-18). A refused KEY mirror is logged and repaired on the next
+  //     start, not signalled (SR25 as amended 2026-10-12).
   signal sourceProbeFinished(var result)
   signal sourceSwitched(string id)
   signal sourceRemoved(string id)
@@ -1741,11 +1758,11 @@ Item {
   // the existing record), too_many, label_taken, label_too_long,
   // server_empty, server_scheme, server_path, server_userinfo,
   // server_too_long, user_empty, pass_empty, user_too_long, pass_too_long,
-  // busy, unknown_source, not_ready, persist_failed, config_unsafe
-  // (D-SINK-18: the host settings file could not be made private, so the URL
-  // was not written into it). Messages are
-  // Model.sourceErrorMessage sentences. Asynchronous outcomes arrive through
-  // sourceProbeFinished.
+  // busy, unknown_source, not_ready. persist_failed and config_unsafe
+  // (D-SINK-18) are no longer returned by any call since R13: a source call
+  // reports on the state write being issued, and a refused entry mirror is
+  // logged. Messages are Model.sourceErrorMessage sentences. Asynchronous
+  // outcomes arrive through sourceProbeFinished and sourcesPersistFailed.
 
   function sourceResult(ok, code, message, id, field) {
     var out = { ok: ok, code: code, message: message || "", id: id || "" }
@@ -1753,14 +1770,13 @@ Item {
     return out
   }
 
-  // The result for a persist that was refused, carrying WHICH refusal it was
-  // (D-SINK-18). One builder rather than the same pair of literals at three
-  // call sites: the code and the sentence have to agree, and they agreed by
-  // being typed out together, which is the join rule 13 is about.
-  function persistFailureResult(id) {
-    return root.sourceResult(false, root.lastPersistFailure,
-                             Model.sourceErrorMessage(root.lastPersistFailure), id)
-  }
+  // `persistFailureResult` USED TO BE HERE (D-SINK-18): the result for a
+  // refused entry write, returned by removeSource. Gone with R13 / SR25 as
+  // amended: a source call reports on the STATE write, which is issued
+  // synchronously and cannot be refused, and a refused entry mirror is
+  // logged and repaired on the next start. The failure a source call can
+  // still have is the state write failing later, which stateFile's
+  // saveFailed reports through sourcesPersistFailed("state_write_failed").
 
   function sourcesReady() {
     if (!root.stateLoaded || !root.cacheReady) return root.sourceResult(false, "not_ready", Model.sourceErrorMessage("not_ready"), "")
@@ -1841,16 +1857,17 @@ Item {
     root.saveState()
     root.sourceErrors = root.withoutKey(root.sourceErrors, key)
     root.queueCacheJob(["remove", "--key", key], null)
-    // D-SINK-19: clearing the pointer. The state write cannot be refused, so
-    // the removal always takes effect; only the entry mirror can fail, and a
-    // stale mirror naming a record that is gone resolves to "no active
-    // source" (Model.adoptActiveSource step 3 requires the key to name a
-    // record, and Model.removeSource itself clears the pointer in the state
-    // it returns, R3). The failure is still reported, because the user
-    // should know the host's file could not be updated.
+    // D-SINK-19: clearing the pointer. The state write IS the removal, and
+    // this reports on it being ISSUED (R13; its failure, if any, arrives
+    // through stateFile's saveFailed as sourcesPersistFailed with its own
+    // reason). Only the entry mirror can be refused, and a stale mirror
+    // naming a record that is gone resolves to "no active source"
+    // (Model.adoptActiveSource step 3 requires the key to name a record, and
+    // Model.removeSource itself clears the pointer in the state it returns,
+    // R3), so a refused mirror is logged and repaired on the next start
+    // (SR25 as amended 2026-10-12), never reported as the removal failing.
     if (wasActive && !root.persistActive("")) {
-      root.sourceRemoved(key)
-      return root.persistFailureResult(key)
+      console.warn("omarchy-iptv: removed the active source but could not mirror the cleared key into the bar entry")
     }
     root.sourceRemoved(key)
     return root.sourceResult(true, "ok", "", key)
@@ -2045,8 +2062,11 @@ Item {
                                                 savePending: root.stateSavePending,
                                                 savesInFlight: root.stateSavesInFlight,
                                                 saveFailed: root.stateSaveFailed })
+    root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)
     if (disposition.act !== "apply") {
       root.stateReloadsIgnored = root.stateReloadsIgnored + 1
+      // R14: this `return` IS the decision. Without it the reload is counted
+      // as ignored and then applied anyway, and only the live arm can tell.
       return
     }
     // Section 15's race: what arrives is a snapshot of the file from before
@@ -2088,9 +2108,11 @@ Item {
     saves.push(text)
     while (saves.length > 8) saves.shift()
     root.recentSaves = saves
-    // Counted BEFORE setText: the file is older than memory from here until
-    // stateFile's `saved` (or `saveFailed`) says otherwise (R9).
-    root.stateSavesInFlight = root.stateSavesInFlight + 1
+    // Marked BEFORE setText: the file is older than memory from here until
+    // stateFile reports on THIS text (R9, R13). The text is kept so `saved`
+    // can tell this write from an earlier one still being reported on.
+    root.lastSaveText = text
+    root.stateSavesInFlight = 1
     stateFile.setText(text)
   }
 
@@ -3333,26 +3355,40 @@ Item {
   // The state write comes FIRST and cannot be refused: it is our own file, it
   // is already private, and it is what every binding in this service reads.
   // So a switch completes in this turn whatever the host does, and nothing
-  // waits for an echo (rule 9). The entry write that follows can fail --
-  // there may be no writable bar entry at all -- and that is reported but is
-  // NOT a failed switch any more, because the fact it mirrors is already
-  // recorded. Before this change the entry WAS the fact, so a failed write
-  // had to abort the switch; keeping that would now refuse a switch that has
-  // already happened.
+  // waits for an echo (rule 9). The entry write that follows can be refused
+  // -- there may be no writable bar entry at all -- and that is logged and
+  // repaired on the next start, NOT a failed switch, because the fact it
+  // mirrors is already recorded (SR25 as amended 2026-10-12). Before this
+  // change the entry WAS the fact, so a failed write had to abort the
+  // switch; keeping that would now refuse a switch that has already
+  // happened. What CAN fail a switch is the state write itself, and that is
+  // reported from stateFile's saveFailed ("state_write_failed", R13).
   //
   // `key` is "" to clear the active source (removeSource).
   //
   // R5. The ORDER is Model.pointerWritePlan's and not this function's: state
   // first, and the entry WAITS when the state save is parked behind the
   // start-up dirs (saveState sets stateSavePending; stateInitProc's exit
-  // writes the parked state and then calls flushPendingEntry). A shell that
+  // writes the parked state and then settles the held entry). A shell that
   // dies in between leaves the URL still on the entry, which the next start
   // re-adopts -- never a source nobody points at.
+  //
+  // R13. The entry waits for the state write to LAND on every route, the
+  // dirsReady one included: "write-entry-after-saved" holds the key and
+  // settleEntryFlush writes it from stateFile's `saved`, or leaves the entry
+  // exactly as it is from `saveFailed`. The plan is handed the in-flight
+  // count because adoptActive saves and then reaches here through
+  // Qt.callLater with the key already in memory -- "nothing moved" with a
+  // write still in the air was the round-3 P1 -- and the sticky failure
+  // because after a failed write the file is older than memory until a
+  // later save lands, and a mirror written then would strip the one copy.
   function persistActive(key) {
     var want = Model.activeKeyText(key)
     var next = Model.withActiveKey(root.userState, want)
     var plan = Model.pointerWritePlan({ keyMoved: next !== root.userState, dirsReady: root.dirsReady,
-                                        savePending: root.stateSavePending })
+                                        savePending: root.stateSavePending,
+                                        savesInFlight: root.stateSavesInFlight,
+                                        saveFailed: root.stateSaveFailed })
     for (var i = 0; i < plan.steps.length; i++) {
       var step = plan.steps[i]
       if (step === "save-state" || step === "defer-state") {
@@ -3360,14 +3396,21 @@ Item {
         root.saveState()
       } else if (step === "wait-entry") {
         root.pendingEntryKey = want
+      } else if (step === "write-entry-after-saved") {
+        // Held, then decided at once: with a save in flight the disposition
+        // waits for `saved`; with the last save failed and nothing in flight
+        // it drops the hold here, because nothing else would wake it.
+        root.pendingEntryKey = want
+        root.settleEntryFlush()
       } else if (step === "write-entry") {
         return root.persistEntryKey(want)
       }
     }
-    // "wait-entry": accepted, not refused; nothing has been written to the
+    // A held entry: accepted, not refused; nothing has been written to the
     // host's file yet. The state write it waits for CAN fail (an unwritable
     // directory, a full disk -- the FileView reports it through saveFailed),
-    // and then the entry is not written at all (R11, settleEntryFlush).
+    // and then the entry is not written at all (R11 / R13, settleEntryFlush)
+    // and the failure is reported from there, as the state write's own.
     return true
   }
 
@@ -3459,8 +3502,15 @@ Item {
   // only a missing host or an entry updateEntryInline cannot rewrite:
   // `false` from a writable entry is its `!dirty` branch (shell.qml:1114),
   // i.e. the host already stores exactly what we asked for, which is success.
+  //
+  // R13 / SR25 as amended: `announce` false. The key is already in
+  // state.json, so a refused mirror loses nothing -- the next start repairs
+  // it (Model.adoptActiveSource step 2 rewrites a mirror that disagrees with
+  // the state) -- and reporting it as a failed switch sent the user to
+  // `omarchy bar set` for a switch that had succeeded. The funnel still logs
+  // the refusal.
   function writeActive(key) {
-    return root.writeOwnedEntry({ sourceKey: Model.activeKeyText(key) }, "settings change")
+    return root.writeOwnedEntry({ sourceKey: Model.activeKeyText(key) }, "settings change", false)
   }
 
   // THE ONLY PLACE THIS PLUGIN WRITES THE BAR ENTRY (D-LOGO-2, D-SINK-19).
@@ -4494,6 +4544,12 @@ Item {
   // only "the claim still names a pid that is still alive" means the plugin
   // was disabled or removed (4.14).
   Component.onDestruction: {
+    // R15 (DQ-B9): an entry mirror still HELD at exit never got its save
+    // landed (a parked save never issued, a write still in flight). The entry
+    // is left exactly as it is and the next start re-adopts it (R1); this
+    // line is what makes that visible in the journal. The key is a key or
+    // "", never a URL, and is not logged either way.
+    if (root.pendingEntryKey !== null) console.warn("omarchy-iptv: exiting with a bar-entry mirror still held (state save not landed); the entry is left as it is and the next start re-adopts it")
     Quickshell.execDetached(Model.helperArgv(root.helperPath,
       Model.playerOrphanCheckArgv(root.socketPath, Quickshell.processId, Model.PLAYER_ORPHAN_GRACE_SEC)))
   }
@@ -4619,19 +4675,36 @@ Item {
     // changed or not (measured 2026-10-11, D-SRC-15); applyUserState decides
     // whether what the reload delivers is newer than memory (R9).
     onFileChanged: reload()
-    // R9 / R11: one `saved` per setText (measured). The in-flight count is
-    // what tells a reload the file is older than memory, and the held entry
-    // mirror is written only once the count is back to zero.
+    // R9 / R11 / R13: `saved` is NOT one per setText -- a burst coalesces
+    // queued writes and the replaced ones raise nothing (measured, see
+    // Model.stateSaveLanded) -- so the write is landed when the view's text
+    // IS the last text asked for. An earlier write's `saved` changes
+    // nothing: the later write reports on itself. The flag is what tells a
+    // reload the file is older than memory, and the held entry mirror is
+    // written only once it is clear.
     onSaved: {
-      root.stateSavesInFlight = Math.max(0, root.stateSavesInFlight - 1)
-      root.stateSaveFailed = false
+      if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+        root.stateSavesInFlight = 0
+        root.stateSaveFailed = false
+      }
       root.settleEntryFlush()
     }
     onSaveFailed: (error) => {
-      root.stateSavesInFlight = Math.max(0, root.stateSavesInFlight - 1)
-      root.stateSaveFailed = true
-      // The error is an enum, never a path or a URL.
+      if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) root.stateSavesInFlight = 0
+      // The error is an enum, never a path or a URL. Logged on EVERY failure.
       console.warn("omarchy-iptv: state.json could not be written (error " + error + "); the in-memory state stands")
+      // R13: the state write IS the switch / remove / adoption, so its
+      // failure is the one a source call can have, reported here with a
+      // reason of its own rather than from the call that issued it (which
+      // returned when the write was issued, SR25 as amended 2026-10-12).
+      // Signalled once per failure EPISODE -- the flag below is sticky until
+      // a later write lands -- because one switch issues two writes (the
+      // touch, then the key move) and the guide would show the line twice.
+      if (!root.stateSaveFailed) {
+        root.lastPersistFailure = "state_write_failed"
+        root.sourcesPersistFailed("state_write_failed")
+      }
+      root.stateSaveFailed = true
       root.settleEntryFlush()
     }
   }

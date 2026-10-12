@@ -551,6 +551,7 @@ const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPl
 const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
 const serviceSource = require("fs").readFileSync(require("path").join(__dirname, "../Service.qml"), "utf8")
 const helperSource = require("fs").readFileSync(require("path").join(__dirname, "../bin/omarchy-iptv"), "utf8")
+const modelSource = require("fs").readFileSync(require("path").join(__dirname, "../Model.js"), "utf8")
 function qmlBlock(id) {
   const at = guideSource.indexOf("id: " + id + "\n")
   if (at === -1) return ""
@@ -6896,21 +6897,41 @@ check("R3: the stored key and the resolved key agree after a remove -- no dangli
   ["", "", "d990c2e4"])
 
 // R5: the write order, from the shared fixture.
-checkCall("R5: pointerWritePlan over every `order` case of the shared fixture -- the entry never gets ahead of a parked state save", () => {
-  return activeKeyFixture.order.map(c => {
-    const input = Object.prototype.hasOwnProperty.call(c, "input") ? c.input : { keyMoved: c.keyMoved, dirsReady: c.dirsReady, savePending: c.savePending }
-    const plan = Model.pointerWritePlan(input)
-    return c.name + ": " + JSON.stringify(plan)
-  })
+const planInputOf = c => Object.prototype.hasOwnProperty.call(c, "input") ? c.input
+  : { keyMoved: c.keyMoved, dirsReady: c.dirsReady, savePending: c.savePending, savesInFlight: c.savesInFlight, saveFailed: c.saveFailed }
+checkCall("R5/R13: pointerWritePlan over every `order` case of the shared fixture -- the entry never gets ahead of a state save that has not landed", () => {
+  return activeKeyFixture.order.map(c => c.name + ": " + JSON.stringify(Model.pointerWritePlan(planInputOf(c))))
 }, activeKeyFixture.order.map(c => c.name + ": " + JSON.stringify({ steps: c.steps, entryWaits: c.entryWaits })))
-checkCall("R5: in every plan the state step, when there is one, comes BEFORE the entry step, and a wait is never paired with a write",
+checkCall("R5/R13: in every plan the state step, when there is one, comes BEFORE the entry step, exactly one entry step closes the plan, and entryWaits is true exactly when the entry is held",
   () => activeKeyFixture.order.map(c => {
-    const plan = Model.pointerWritePlan(Object.prototype.hasOwnProperty.call(c, "input") ? c.input : c)
+    const plan = Model.pointerWritePlan(planInputOf(c))
+    const held = x => x === "wait-entry" || x === "write-entry-after-saved"
     const stateAt = plan.steps.findIndex(x => x === "save-state" || x === "defer-state")
-    const entryAt = plan.steps.findIndex(x => x === "write-entry" || x === "wait-entry")
+    const entryAt = plan.steps.findIndex(x => x === "write-entry" || held(x))
     return (stateAt === -1 || stateAt < entryAt) && entryAt === plan.steps.length - 1
-      && (plan.steps.indexOf("wait-entry") === -1) !== plan.entryWaits
+      && plan.steps.filter(x => x === "write-entry" || held(x)).length === 1
+      && plan.steps.some(held) === plan.entryWaits
   }), activeKeyFixture.order.map(() => true))
+// R13: an immediate "write-entry" is answered ONLY when nothing of ours is
+// outstanding. Every case that saves in the plan, has a save parked, has one
+// in flight or has the last one failed holds the entry. Asserted over the
+// fixture's inputs AND over the full cube, so a case the fixture forgot is
+// still covered.
+checkCall("R13: write-entry is immediate only when no save is issued, parked, in flight or failed -- over the fixture and over every combination", () => {
+  const cube = []
+  for (const keyMoved of [false, true]) for (const dirsReady of [false, true]) for (const savePending of [false, true])
+    for (const savesInFlight of [0, 1, 2]) for (const saveFailed of [false, true]) cube.push({ keyMoved, dirsReady, savePending, savesInFlight, saveFailed })
+  const bad = inputs => inputs.filter(i => {
+    const plan = Model.pointerWritePlan(i)
+    const outstanding = i.keyMoved || i.savePending || i.savesInFlight > 0 || i.saveFailed
+    const immediate = plan.steps.indexOf("write-entry") !== -1
+    return immediate === outstanding || plan.entryWaits === immediate
+  })
+  return [cube.length, bad(cube).length, bad(activeKeyFixture.order.filter(c => !Object.prototype.hasOwnProperty.call(c, "input")).map(planInputOf)).length,
+          activeKeyFixture.order.filter(c => c.steps.indexOf("write-entry-after-saved") !== -1).length >= 5,
+          activeKeyFixture.order.some(c => c.keyMoved === false && c.savePending === false && c.savesInFlight === 1 && c.saveFailed === false),
+          activeKeyFixture.order.some(c => c.keyMoved === false && c.savePending === false && c.savesInFlight === 0 && c.saveFailed === true)]
+}, [48, 0, 0, true, true, true])
 
 // P3 sibling (rule 15): cloneState coerced a non-string activeKey into the key
 // grammar exactly as activeKeyText used to, one fix having landed at one of
@@ -7037,14 +7058,17 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     dropWarnsNoKey: !/d\.act === "drop"[\s\S]{0,400}console\.warn\([^\n]*(key|Url|url)[^\n]*\)/.test(settleFn),
     // The FileView reports both outcomes and both settle the flush.
     savedSettles: /onSaved: \{[\s\S]{0,300}root\.settleEntryFlush\(\)/.test(serviceSource),
-    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,400}root\.stateSaveFailed = true[\s\S]{0,300}root\.settleEntryFlush\(\)/.test(serviceSource),
-    // The in-flight count goes up BEFORE setText and down on either signal.
-    countsBeforeWrite: /root\.stateSavesInFlight = root\.stateSavesInFlight \+ 1\n\s*stateFile\.setText\(text\)/.test(serviceSource),
-    countsDown: (serviceSource.match(/root\.stateSavesInFlight = Math\.max\(0, root\.stateSavesInFlight - 1\)/g) || []).length
+    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1200}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // R13: the outstanding flag is raised BEFORE setText with the text kept,
+    // and cleared on either signal ONLY when the view reports on that text
+    // (Model.stateSaveLanded), never by counting signals.
+    marksBeforeWrite: /root\.lastSaveText = text\n\s*root\.stateSavesInFlight = 1\n\s*stateFile\.setText\(text\)/.test(serviceSource),
+    landsByContent: (serviceSource.match(/if \(Model\.stateSaveLanded\(stateFile\.text\(\), root\.lastSaveText\)\)[^\n]*\n?[^\n]*root\.stateSavesInFlight = 0/g) || []).length,
+    neverCounts: serviceSource.indexOf("root.stateSavesInFlight - 1") === -1 && serviceSource.indexOf("root.stateSavesInFlight + 1") === -1
   }
 }, { blockFound: true, readsExitCode: true, savesThenSettles: true, exitNeverFlushesDirectly: true, flushSites: 1,
      decidesBeforeFlush: true, flushOnlyOnFlush: true, dropClearsAndWarns: true, dropWarnsNoKey: true,
-     savedSettles: true, saveFailedSettles: true, countsBeforeWrite: true, countsDown: 2 })
+     savedSettles: true, saveFailedSettles: true, marksBeforeWrite: true, landsByContent: 2, neverCounts: true })
 checkCall("R9 (structural): applyUserState asks Model.reloadDisposition FIRST and returns on anything but apply, before stateOnLoad, reconcile and the cache layout", () => {
   const fn = (serviceSource.match(/function applyUserState\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
   const decide = fn.indexOf("Model.reloadDisposition(")
@@ -7089,6 +7113,438 @@ checkCall("R7: the migration keeps the source count it went in with (two records
   return [twoOld.sources.length, survives(viaProvider), survives(viaSecond), survives(viaMirror),
           viaProvider.key, viaSecond.key, viaMirror.key]
 }, [2, true, true, true, OLD_KEY, "42839dd5", "42839dd5"])
+
+// ---- R13: the entry waits for the state write to LAND on every route ----
+//
+// The round-3 review's P1, measured live: on the dirsReady route persistActive
+// wrote the host entry straight after setText, so a state write that then
+// FAILED (full disk, unwritable ~/.local/state) had already stripped the URL
+// from the host's file -- the record existed in memory only, the input had no
+// copy anywhere. R11 had gated only the parked route. What follows is a
+// SERVICE-ORDER DRIVER: Service.qml cannot be instantiated from node, so its
+// call order is reproduced here over the SHIPPING decisions (adoptActiveSource,
+// reconcileAction, pointerWritePlan, reloadDisposition, entryFlushDisposition,
+// ownedEntryPatch, entryWith, stateOnLoad -- every one the real function,
+// rule 12), with the host modelled both ways rule 9 names (lagging one write
+// behind through 4.0.4; echoing at once with omacom/omarchy#15082) and the
+// FileView's `saved` / `saveFailed` as QUEUED events, so a failure can be
+// injected on the dirsReady route exactly where the FileView reports it. The
+// order this driver assumes is what the R13 structural pins below hold
+// Service.qml to; the sink itself is observed by key-scenario.sh.
+const r13 = (() => {
+  const PID = "io.github.rmcdavid.iptv"
+  const clone = x => JSON.parse(JSON.stringify(x))
+  class Host {
+    constructor(entry, mode) {
+      this.mode = mode
+      this.stored = { version: 1, bar: { layout: { left: [], center: [], right: [Object.assign({ id: PID }, entry)] } } }
+      this.published = clone(this.stored.bar)
+      this.listeners = []
+      this.refuse = false
+    }
+    get barConfig() { return this.refuse ? { layout: { left: [], center: [], right: [] } } : this.published }
+    storedEntry() { return this.stored.bar.layout.right[0] }
+    assign(next) {
+      const prev = clone(this.stored)
+      this.stored = clone(next)
+      this.published = clone(this.mode === "lag" ? prev.bar : this.stored.bar)
+      this.listeners.forEach(l => l())
+    }
+    updateEntryInline(id, settings) {
+      const copy = clone(this.stored)
+      const arr = copy.bar.layout.right
+      const next = { id: id }
+      for (const k in settings) if (k !== "id") next[k] = settings[k]
+      if (JSON.stringify(arr[0]) === JSON.stringify(next)) return false
+      arr[0] = next
+      this.assign(copy)
+      return true
+    }
+    externalSet(key, value) {
+      const copy = clone(this.stored)
+      if (value === null) delete copy.bar.layout.right[0][key]; else copy.bar.layout.right[0][key] = value
+      this.assign(copy)
+      if (this.mode === "lag") this.assign(copy)
+    }
+  }
+  // The FileView as measured (Model.stateSaveLanded): a write started sets
+  // the view's text; `coalesce` models a burst, where a write queued behind
+  // one in progress is replaced by a later setText and raises nothing.
+  class Disk {
+    constructor(text) { this.text = text; this.viewText = text; this.writeFails = false; this.events = []; this.coalesce = false; this.queued = 0 }
+    setText(text) {
+      // one write in progress, one queued: a third replaces the queued one
+      if (this.coalesce && this.queued > 1) { this.events[this.events.length - 1].text = text; return }
+      if (this.writeFails) { this.events.push({ kind: "saveFailed", text }); return }
+      this.queued++
+      this.events.push({ kind: "saved", text })
+    }
+    pop() {
+      const ev = this.events.shift()
+      if (!ev) return null
+      if (ev.kind === "saved") { this.queued = Math.max(0, this.queued - 1); this.text = ev.text }
+      this.viewText = ev.text
+      return ev
+    }
+  }
+  class Svc {
+    constructor(host, disk) {
+      this.host = host; this.disk = disk
+      this.userState = Model.emptyState()
+      this.stateLoaded = false; this.cacheReady = false; this.reconciled = false
+      this.reconciledPlaylistUrl = ""; this.reconciledEpgUrl = ""
+      this.dirsReady = false; this.stateSavePending = false; this.stateSavesInFlight = 0
+      this.stateSaveFailed = false; this.stateInitOk = false; this.stateReloadsByReason = {}
+      this.pendingEntryKey = null; this.ownWrite = null; this.recentSaves = []; this.lastSaveText = ""
+      this.later = []; this.warnings = []; this.signals = []; this.entryWrites = []; this.now = 1000
+      host.listeners.push(() => this.onHostChanged())
+    }
+    get hostSettings() { return Model.settingsFrom(Model.findBarEntry(this.host.barConfig, PID)) }
+    get settings() { return Model.settingsWithOwnWrite(this.hostSettings, this.ownWrite) }
+    get activeSourceKey() { return Model.activeKeyOf(this.userState) }
+    onHostChanged() {
+      if (this.ownWrite && !Model.ownWriteInForce(this.hostSettings, this.ownWrite)) this.ownWrite = null
+      this.reconcile(false)
+    }
+    runLater() { while (this.later.length) this.later.shift()() }
+    deliverOne() {
+      const ev = this.disk.pop()
+      if (!ev) return false
+      // a tree without R13's content rule COUNTED signals (lane-key-s2: one down per
+      // signal); modelled as that tree did it, so it fails on the LEAK, not on the symbol
+      const byContent = typeof Model.stateSaveLanded === "function"
+      const landed = byContent ? Model.stateSaveLanded(this.disk.viewText, this.lastSaveText) : true
+      if (!byContent) this.stateSavesInFlight = Math.max(0, this.stateSavesInFlight - 1)
+      if (ev.kind === "saved") {
+        if (landed && byContent) { this.stateSavesInFlight = 0; this.stateSaveFailed = false }
+        if (!byContent) this.stateSaveFailed = false
+        this.settleEntryFlush()
+        this.applyUserState(this.disk.text)       // the own-write reload that follows an atomic write
+      } else if (ev.kind === "saveFailed") {
+        if (landed && byContent) this.stateSavesInFlight = 0
+        this.warnings.push("state.json could not be written")
+        if (!this.stateSaveFailed) this.signals.push("state_write_failed")   // stateFile.onSaveFailed, R13: once per episode
+        this.stateSaveFailed = true
+        this.settleEntryFlush()
+      }
+      this.runLater()
+      return true
+    }
+    drain() { while (this.deliverOne()) {} this.runLater() }
+    // Service.applyUserState (R9, R15)
+    applyUserState(text) {
+      const d = Model.reloadDisposition({ loadedBefore: this.stateLoaded, ownWrite: this.recentSaves.indexOf(text) !== -1,
+        savePending: this.stateSavePending, savesInFlight: this.stateSavesInFlight, saveFailed: this.stateSaveFailed })
+      // guarded so a tree without R15 fails THIS driver on the loss it drives, not on the symbol
+      if (typeof Model.countReload === "function") this.stateReloadsByReason = Model.countReload(this.stateReloadsByReason, d.reason)
+      if (d.act !== "apply") return
+      const adopted = Model.stateOnLoad(Model.trimRecents(Model.parseState(text), 10), this.userState,
+        { loadedBefore: this.stateLoaded, savePending: this.stateSavePending, maxRecents: 10 })
+      this.userState = adopted.state; this.stateLoaded = true
+      const merged = this.userState
+      if (adopted.write && this.userState === merged) this.saveState()
+      this.reconcile(true)
+      if (!this.cacheReady && this.userState.cacheLayout === 2) this.cacheReady = true
+    }
+    saveState() {
+      if (!this.dirsReady) { this.stateSavePending = true; return }
+      this.stateSavePending = false
+      const text = JSON.stringify(this.userState, null, 2) + "\n"
+      this.recentSaves = this.recentSaves.concat([text]).slice(-8)
+      this.lastSaveText = text
+      this.stateSavesInFlight = typeof Model.stateSaveLanded === "function" ? 1 : this.stateSavesInFlight + 1
+      this.disk.setText(text)
+    }
+    settleEntryFlush() {
+      const d = Model.entryFlushDisposition({ pendingKey: this.pendingEntryKey, dirsReady: this.dirsReady, initOk: this.stateInitOk,
+        saveFailed: this.stateSaveFailed, savePending: this.stateSavePending, savesInFlight: this.stateSavesInFlight })
+      if (d.act === "flush") { const key = this.pendingEntryKey; this.pendingEntryKey = null; this.persistEntryKey(key) }
+      else if (d.act === "drop") { this.pendingEntryKey = null; this.warnings.push("entry left as it is (" + d.reason + ")") }
+    }
+    stateInitExit() {
+      this.dirsReady = true; this.stateInitOk = true
+      if (this.stateSavePending) this.saveState()
+      this.settleEntryFlush()
+      this.runLater()
+    }
+    reconcile(force) {
+      if (!this.stateLoaded) return
+      const st = this.settings
+      const playlist = String(st.playlistUrl || ""), epg = String(st.epgUrl || "")
+      const plan = Model.reconcileAction({ first: !this.reconciled, force: force === true, playlist, epg, lastPlaylist: this.reconciledPlaylistUrl, lastEpg: this.reconciledEpgUrl })
+      this.reconciled = true; this.reconciledPlaylistUrl = playlist
+      let consumed = false
+      if (!(plan.act === "ignore" && !plan.adoptEpg)) consumed = this.adoptActive(playlist, epg, plan)
+      this.reconciledEpgUrl = Model.epgSnapshotAfter(epg, this.reconciledEpgUrl, consumed)
+    }
+    adoptActive(playlist, epg, plan) {
+      const entry = { playlistUrl: playlist, epgUrl: epg, sourceKey: String(this.settings.sourceKey || "") }
+      const out = Model.adoptActiveSource(this.userState, entry, this.now++, "", { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true })
+      if (out.changed) { this.userState = out.state; this.saveState() }
+      if (out.writeEntry) { const key = out.key; this.later.push(() => this.persistActive(key)) }
+      return out.epgConsumed === true
+    }
+    // Service.persistActive (R5, R13)
+    persistActive(key) {
+      const want = Model.activeKeyText(key)
+      const next = Model.withActiveKey(this.userState, want)
+      const plan = Model.pointerWritePlan({ keyMoved: next !== this.userState, dirsReady: this.dirsReady, savePending: this.stateSavePending,
+                                            savesInFlight: this.stateSavesInFlight, saveFailed: this.stateSaveFailed })
+      for (const step of plan.steps) {
+        if (step === "save-state" || step === "defer-state") { this.userState = next; this.saveState() }
+        else if (step === "wait-entry") this.pendingEntryKey = want
+        else if (step === "write-entry-after-saved") { this.pendingEntryKey = want; this.settleEntryFlush() }
+        else if (step === "write-entry") return this.persistEntryKey(want)
+      }
+      return true
+    }
+    persistEntryKey(key) {
+      if (!Model.barEntryWritable(this.host.barConfig, PID)) { this.warnings.push("no writable bar entry"); return false }
+      const patch = Model.ownedEntryPatch(this.settings, { sourceKey: Model.activeKeyText(key) })
+      patch.id = PID
+      const entry = Model.entryWith(Model.findBarEntry(this.host.barConfig, PID), patch)
+      this.entryWrites.push(clone(entry))
+      const before = JSON.stringify(this.settings)
+      this.host.updateEntryInline(PID, entry)
+      this.ownWrite = Model.ownWriteOf(this.hostSettings, Model.ownedEntryPatch(this.settings, { sourceKey: Model.activeKeyText(key) }))
+      if (JSON.stringify(this.settings) !== before) this.reconcile(false)
+      return true
+    }
+    removeSource(key) {
+      const removed = Model.removeSource(this.userState, key)
+      if (!removed.removed) return { ok: false, code: "unknown_source" }
+      const wasActive = key === this.activeSourceKey
+      this.userState = removed.state; this.saveState()
+      if (wasActive && !this.persistActive("")) this.warnings.push("could not mirror the cleared key")
+      return { ok: true, code: "ok" }
+    }
+    switchSource(key) {
+      if (!Model.findSource(this.userState.sources, key)) return { ok: false, code: "unknown_source" }
+      if (key === this.activeSourceKey) return { ok: true, code: "ok" }
+      this.userState = Model.touchSource(this.userState, key, this.now++); this.saveState()
+      if (!this.persistActive(key)) this.warnings.push("switched but could not mirror")
+      return { ok: true, code: "ok" }
+    }
+    start(o) {
+      const opts = o || {}
+      this.reconcile(false)
+      if (opts.dirsFirst) this.stateInitExit()
+      this.applyUserState(this.disk.text); this.runLater()
+      if (!opts.dirsFirst) this.stateInitExit()
+      if (!opts.holdEvents) this.drain()
+      return this
+    }
+  }
+  const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
+  const keyOf = url => Model.sourceKey(Model.normalizeSourceUrl(url, { origin: "cli" }))
+  const KA = keyOf(A), KB = keyOf(B), KNEW = keyOf(NEW)
+  const rec = url => ({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "l", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 })
+  const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey }) + "\n"
+  const fileOf = svc => Model.parseState(svc.disk.text)
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k)
+  const restart = (svc, mode, o) => new Svc(new Host(clone(svc.host.storedEntry()), mode), new Disk(svc.disk.text)).start(o)
+  const boot = (entry, text, mode, o) => new Svc(new Host(entry, mode), new Disk(text)).start(o)
+  return { Host, Disk, Svc, A, B, NEW, KA, KB, KNEW, rec, stateText, fileOf, has, restart, boot }
+})()
+for (const mode of ["lag", "echo"]) {
+  // The P1 itself, on the mid-session route: a CLI playlistUrl set while the
+  // shell runs with the dirs ready and the state directory unwritable.
+  checkCall("R13 (" + mode + " host): CLI NEW set mid-session with state.json unwritable -- the URL STAYS on the entry, the failure is signalled as the state write's own, and the next start re-adopts the record", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.writeFails = true
+    svc.host.externalSet("playlistUrl", r13.NEW); svc.runLater(); svc.drain()
+    const stored = svc.host.storedEntry()
+    const file = r13.fileOf(svc)
+    svc.disk.writeFails = false
+    const next = r13.restart(svc, mode)
+    const nextFile = r13.fileOf(next)
+    return {
+      afterFail: { memKey: svc.activeSourceKey, fileKey: Model.activeKeyOf(file), fileSources: file.sources.length,
+                   urlStillStored: r13.has(stored, "playlistUrl"), storedMirror: stored.sourceKey, entryWrites: svc.entryWrites.length,
+                   signalled: svc.signals, dropped: svc.warnings.indexOf("entry left as it is (save-failed)") !== -1, held: svc.pendingEntryKey },
+      afterRestart: { memKey: next.activeSourceKey, fileKey: Model.activeKeyOf(nextFile), fileSources: nextFile.sources.length,
+                      urlStored: r13.has(next.host.storedEntry(), "playlistUrl"), storedMirror: next.host.storedEntry().sourceKey }
+    }
+  }, { afterFail: { memKey: r13.KNEW, fileKey: r13.KA, fileSources: 2, urlStillStored: true, storedMirror: r13.KA, entryWrites: 0,
+                    signalled: ["state_write_failed"], dropped: true, held: null },
+       afterRestart: { memKey: r13.KNEW, fileKey: r13.KNEW, fileSources: 3, urlStored: false, storedMirror: r13.KNEW } })
+  // The same loss by the start-up route with the dirs ready BEFORE the load
+  // (the lens's 6d): adoptActive saves with the dirs ready, so this is the
+  // dirsReady plan at start-up, not the parked one R11 gated.
+  checkCall("R13 (" + mode + " host): dirs ready before the first load, state.json unwritable -- the start-up adoption keeps the URL on the entry and the next start re-adopts it", () => {
+    const svc = new r13.Svc(new r13.Host({ playlistUrl: r13.NEW, sourceKey: r13.KA, showLogos: false }, mode), new r13.Disk(r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA)))
+    svc.disk.writeFails = true
+    svc.start({ dirsFirst: true })
+    const stored = svc.host.storedEntry()
+    svc.disk.writeFails = false
+    const next = r13.restart(svc, mode)
+    const nextFile = r13.fileOf(next)
+    return [svc.activeSourceKey, Model.activeKeyOf(r13.fileOf(svc)), r13.has(stored, "playlistUrl"), stored.sourceKey, svc.entryWrites.length, svc.signals,
+            next.activeSourceKey, Model.activeKeyOf(nextFile), nextFile.sources.length, r13.has(next.host.storedEntry(), "playlistUrl"), next.host.storedEntry().sourceKey]
+  }, [r13.KNEW, r13.KA, true, r13.KA, 0, ["state_write_failed"], r13.KNEW, r13.KNEW, 3, false, r13.KNEW])
+  // The route when the write LANDS: the entry is held until `saved` and
+  // written then -- not before, and not twice.
+  checkCall("R13 (" + mode + " host): with a writable disk the entry is HELD until the FileView's `saved` and written exactly once after it", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.host.externalSet("playlistUrl", r13.NEW); svc.runLater()
+    const inFlight = { held: svc.pendingEntryKey, inFlight: svc.stateSavesInFlight, urlStored: r13.has(svc.host.storedEntry(), "playlistUrl"), writes: svc.entryWrites.length, memKey: svc.activeSourceKey }
+    svc.drain()
+    const stored = svc.host.storedEntry()
+    return { inFlight, landed: { held: svc.pendingEntryKey, urlStored: r13.has(stored, "playlistUrl"), mirror: stored.sourceKey, writes: svc.entryWrites.length,
+                                 fileKey: Model.activeKeyOf(r13.fileOf(svc)), signals: svc.signals, dropped: svc.warnings.length } }
+  }, { inFlight: { held: r13.KNEW, inFlight: 1, urlStored: true, writes: 0, memKey: r13.KNEW },
+       landed: { held: null, urlStored: false, mirror: r13.KNEW, writes: 1, fileKey: r13.KNEW, signals: [], dropped: 0 } })
+  // SR25 as amended: a switch and a remove report on the state write being
+  // ISSUED; its failure arrives as state_write_failed; a REFUSED host mirror
+  // is logged, never reported as the call failing, and the next start
+  // repairs the mirror.
+  checkCall("R13 (" + mode + " host): switchSource with the disk unwritable returns ok (the write was issued), state_write_failed follows, the mirror is left alone, and the next start stands on the file", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.writeFails = true
+    const res = svc.switchSource(r13.KB)
+    const issued = { memKey: svc.activeSourceKey, held: svc.pendingEntryKey, signalsSoFar: svc.signals.length }
+    svc.drain()
+    const next = r13.restart(svc, mode)
+    return [res.ok, res.code, issued, svc.signals, svc.host.storedEntry().sourceKey, svc.entryWrites.length, Model.activeKeyOf(r13.fileOf(svc)),
+            next.activeSourceKey, next.host.storedEntry().sourceKey]
+  }, [true, "ok", { memKey: r13.KB, held: r13.KB, signalsSoFar: 0 }, ["state_write_failed"], r13.KA, 0, r13.KA, r13.KA, r13.KA])
+  checkCall("R13 (" + mode + " host): a switch and a remove whose host mirror is REFUSED both return ok with the refusal logged by the funnel and NOT signalled; the next start repairs the stale mirror through the immediate write-entry step", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.host.refuse = true
+    const sw = svc.switchSource(r13.KB); svc.drain()
+    const afterSwitch = [sw.ok, sw.code, svc.activeSourceKey, Model.activeKeyOf(r13.fileOf(svc)), svc.host.storedEntry().sourceKey, svc.signals.length, svc.warnings.filter(w => w === "no writable bar entry").length, svc.pendingEntryKey]
+    svc.host.refuse = false
+    // the next start: the file says KB, the mirror still says KA (R1 step 2)
+    const next = r13.restart(svc, mode)
+    const repaired = [next.activeSourceKey, next.host.storedEntry().sourceKey, next.entryWrites.length]
+    next.host.refuse = true
+    const rm = next.removeSource(r13.KB); next.drain()
+    const afterRemove = [rm.ok, rm.code, next.activeSourceKey, Model.activeKeyOf(r13.fileOf(next)), r13.fileOf(next).sources.length, next.host.storedEntry().sourceKey, next.signals.length, next.warnings.filter(w => w === "no writable bar entry").length]
+    next.host.refuse = false
+    // and again: a mirror naming a record that is gone is not a pointer; the
+    // entry is cleared by the immediate step (nothing of ours outstanding)
+    const last = r13.restart(next, mode)
+    return { afterSwitch, repaired, afterRemove, cleared: [last.activeSourceKey, last.host.storedEntry().sourceKey, last.entryWrites.length, last.pendingEntryKey] }
+  }, { afterSwitch: [true, "ok", r13.KB, r13.KB, r13.KA, 0, 1, null], repaired: [r13.KB, r13.KB, 1],
+       afterRemove: [true, "ok", "", "", 1, r13.KB, 0, 1], cleared: ["", "", 1, null] })
+  // The measured coalescing: ten warm switches, each two setText calls, with
+  // queued writes replaced. Counted by signal the flag stays raised for the
+  // session (the live run read 6 stuck of 20); by content it clears, the
+  // mirror names the last key, and a foreign reload is applied again.
+  checkCall("R13 (" + mode + " host): a burst of switches whose queued writes the FileView coalesces still lands -- nothing outstanding after it, the mirror names the last key, and a later foreign reload is applied", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.coalesce = true
+    let issued = 0
+    for (let i = 0; i < 5; i++) { svc.switchSource(r13.KB); issued += 2; svc.switchSource(r13.KA); issued += 2 }
+    const raised = svc.disk.events.length
+    svc.drain()
+    const after = [svc.stateSavesInFlight, svc.pendingEntryKey, svc.host.storedEntry().sourceKey, Model.activeKeyOf(r13.fileOf(svc)), svc.activeSourceKey]
+    const foreign = JSON.stringify(Object.assign(Model.parseState(svc.disk.text), { favorites: ["t:new"] })) + "\n"
+    svc.disk.text = foreign; svc.applyUserState(foreign); svc.runLater()
+    return { issued, raised, coalesced: issued > raised, after, foreignApplied: String(svc.userState.favorites), reasons: svc.stateReloadsByReason }
+  }, { issued: 20, raised: 2, coalesced: true, after: [0, null, r13.KA, r13.KA, r13.KA], foreignApplied: "t:new", reasons: { "first-load": 1, "save-in-flight": 1, "own-write": 1, "file-newer": 1 } })
+  checkCall("R13 (" + mode + " host): after a failed write a landed one clears the sticky flag, and the entry written then names the landed key", () => {
+    const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+    svc.disk.writeFails = true; svc.switchSource(r13.KB); svc.drain()
+    const failed = [svc.stateSaveFailed, svc.host.storedEntry().sourceKey, svc.entryWrites.length]
+    svc.disk.writeFails = false; svc.switchSource(r13.KA); svc.drain()
+    return [failed, svc.stateSaveFailed, svc.host.storedEntry().sourceKey, Model.activeKeyOf(r13.fileOf(svc)), svc.entryWrites.length, svc.signals]
+  }, [[true, r13.KA, 0], false, r13.KA, r13.KA, 1, ["state_write_failed"]])
+}
+
+// R13 / R14 / R15, THE WIRING IN Service.qml. Structural pins (Service.qml
+// cannot be instantiated here); the driver above is what CALLS the shipping
+// decisions in this order, key-scenario.sh is what OBSERVES the sink. Each
+// of these was seen red by deleting the line it names (round-3 review P2:
+// two of the R9/R11 decisions could not turn the GATE red).
+checkCall("R13 (structural): persistActive hands the plan the in-flight count and the sticky failure, holds the key on write-entry-after-saved and settles it through the disposition; every entry step is in the plan", () => {
+  const fn = (serviceSource.match(/function persistActive\(key\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const plan = fn.indexOf("Model.pointerWritePlan(")
+  return {
+    found: fn !== "",
+    handsInFlight: fn.indexOf("savesInFlight: root.stateSavesInFlight") > plan,
+    handsFailed: fn.indexOf("saveFailed: root.stateSaveFailed") > plan,
+    heldThenSettled: /step === "write-entry-after-saved"\) \{[\s\S]{0,400}?root\.pendingEntryKey = want\n\s*root\.settleEntryFlush\(\)/.test(fn),
+    waitHolds: /step === "wait-entry"\) \{\n\s*root\.pendingEntryKey = want\n/.test(fn),
+    immediateIsTheOnlyWrite: (fn.match(/root\.persistEntryKey\(want\)/g) || []).length === 1 && /step === "write-entry"\) \{\n\s*return root\.persistEntryKey\(want\)/.test(fn),
+    // The plan names no step the service does not execute, and vice versa.
+    stepsInPlan: ["save-state", "defer-state", "wait-entry", "write-entry-after-saved", "write-entry"].every(st => fn.indexOf('"' + st + '"') !== -1),
+    planNamesOnlyThose: (function () {
+      const body = (modelSource.match(/function pointerWritePlan\(input\) \{[\s\S]*?\n\}/) || [""])[0]
+      const named = (body.match(/"[a-z-]+"/g) || []).map(x => x.replace(/"/g, ""))
+      return named.length > 0 && named.every(st => ["save-state", "defer-state", "wait-entry", "write-entry-after-saved", "write-entry"].indexOf(st) !== -1)
+    })()
+  }
+}, { found: true, handsInFlight: true, handsFailed: true, heldThenSettled: true, waitHolds: true, immediateIsTheOnlyWrite: true, stepsInPlan: true, planNamesOnlyThose: true })
+checkCall("R13 (structural, SR25 as amended): the state write's failure is reported from stateFile.onSaveFailed as state_write_failed with no URL; a refused key mirror is logged, never returned by removeSource or switchSource, and writeActive does not announce", () => {
+  const failed = (serviceSource.match(/onSaveFailed: \(error\) => \{[\s\S]*?\n    \}/) || [""])[0]
+  const remove = (serviceSource.match(/function removeSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const sw = (serviceSource.match(/function switchSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const flag = failed.indexOf("root.stateSaveFailed = true")
+  const report = failed.indexOf('root.sourcesPersistFailed("state_write_failed")')
+  const settle = failed.indexOf("root.settleEntryFlush()")
+  return {
+    // Once per episode: the report is guarded by the flag NOT yet set, then
+    // the flag is set, then the flush settles (and drops, reading the flag).
+    reportsOncePerEpisode: /if \(!root\.stateSaveFailed\) \{[\s\S]{0,200}?root\.sourcesPersistFailed\("state_write_failed"\)/.test(failed),
+    reportThenFlagThenSettle: flag !== -1 && report !== -1 && settle !== -1 && report < flag && flag < settle,
+    noUrlInTheWarn: !/console\.warn\([^\n]*(Url|url|path)[^\n]*\)/.test(failed),
+    removeNeverReturnsAFailureAfterIssuing: remove.indexOf("persistFailureResult") === -1 && remove.indexOf("persist_failed") === -1
+      && /root\.saveState\(\)[\s\S]*root\.persistActive\(""\)\)[\s\S]{0,300}?console\.warn\([\s\S]*?return root\.sourceResult\(true, "ok", "", key\)/.test(remove),
+    switchLogsARefusal: /if \(!root\.persistActive\(key\)\) \{[\s\S]{0,700}?console\.warn\(/.test(sw) && sw.indexOf("persist_failed") === -1,
+    noFailureResultBuilder: serviceSource.indexOf("function persistFailureResult") === -1,
+    writeActiveSilent: /function writeActive\(key\) \{\n\s*return root\.writeOwnedEntry\(\{ sourceKey: Model\.activeKeyText\(key\) \}, "settings change", false\)/.test(serviceSource),
+    sentence: Model.sourceErrorMessage("state_write_failed") !== "" && Model.sourceErrorMessage("state_write_failed").indexOf("omarchy bar set") === -1
+      && Model.sourceErrorMessage("state_write_failed").indexOf("://") === -1
+      && Model.sourceErrorMessage("state_write_failed") !== Model.sourceErrorMessage("persist_failed")
+  }
+}, { reportsOncePerEpisode: true, reportThenFlagThenSettle: true, noUrlInTheWarn: true, removeNeverReturnsAFailureAfterIssuing: true, switchLogsARefusal: true,
+     noFailureResultBuilder: true, writeActiveSilent: true, sentence: true })
+checkCall("R14 (structural): the ignore branch of applyUserState RETURNS inside its block, and saveState PARKS (sets the flag) before the dirs are ready -- the two decisions only the live arm could see", () => {
+  const fn = (serviceSource.match(/function applyUserState\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const ignore = (fn.match(/if \(disposition\.act !== "apply"\) \{[\s\S]*?\n    \}/) || [""])[0]
+  const save = (serviceSource.match(/function saveState\(\) \{[\s\S]*?\n  \}/) || [""])[0]
+  return {
+    ignoreBlockFound: ignore !== "",
+    // A bare `return` as the block's last statement, not a return inside a
+    // nested condition and not `return` somewhere later in the function.
+    ignoreReturns: /\n\s*return\n\s*\}$/.test(ignore),
+    ignoreCountsThenReturns: ignore.indexOf("root.stateReloadsIgnored = root.stateReloadsIgnored + 1") !== -1 && ignore.indexOf("root.stateReloadsIgnored") < ignore.lastIndexOf("return"),
+    parksBeforeDirs: /function saveState\(\) \{\n\s*if \(!root\.dirsReady\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}/.test(save),
+    // and the park is cleared on the write itself, not left set
+    clearsOnWrite: /root\.stateSavePending = false\n[\s\S]*?stateFile\.setText\(text\)/.test(save)
+  }
+}, { ignoreBlockFound: true, ignoreReturns: true, ignoreCountsThenReturns: true, parksBeforeDirs: true, clearsOnWrite: true })
+
+// ---- R15: the reload counter counts BY REASON ----
+checkCall("R15: countReload keys by the reason string, starts from nothing, returns a NEW object, coerces counts and names an empty reason", () => {
+  const one = Model.countReload(null, "own-write")
+  const two = Model.countReload(one, "save-parked")
+  const three = Model.countReload(two, "own-write")
+  const frozen = Object.freeze({ "file-newer": "2" })
+  return [one, two, three, one !== two, two !== three, JSON.stringify(one), Model.countReload(frozen, "file-newer"), Model.countReload(undefined, ""), Model.countReload("junk", 7)]
+}, [{ "own-write": 1 }, { "own-write": 1, "save-parked": 1 }, { "own-write": 2, "save-parked": 1 }, true, true, '{"own-write":1}', { "file-newer": 3 }, { unknown: 1 }, { "7": 1 }])
+checkCall("R15: folding every `reload` case of the shared fixture through reloadDisposition and countReload lands every reason as its own key, and the keys are exactly the fixture's reasons", () => {
+  let counts = {}
+  for (const c of activeKeyFixture.reload) counts = Model.countReload(counts, Model.reloadDisposition(c.ctx).reason)
+  const reasons = Array.from(new Set(activeKeyFixture.reload.map(c => c.reason))).sort()
+  const total = Object.keys(counts).reduce((n, k) => n + counts[k], 0)
+  return [Object.keys(counts).sort(), total === activeKeyFixture.reload.length, counts["save-parked"] >= 1, counts["own-write"] >= 1, reasons.indexOf("save-parked") !== -1]
+}, [Array.from(new Set(activeKeyFixture.reload.map(c => c.reason))).sort(), true, true, true, true])
+checkCall("R15 (structural): applyUserState counts every reload by reason through Model.countReload BEFORE deciding, into a declared var property, and the service warns at exit when an entry mirror is still held", () => {
+  const fn = (serviceSource.match(/function applyUserState\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const count = fn.indexOf("root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)")
+  const decide = fn.indexOf('if (disposition.act !== "apply")')
+  const destruction = (serviceSource.match(/Component\.onDestruction: \{[\s\S]*?\n  \}/) || [""])[0]
+  return {
+    declared: /property var stateReloadsByReason: \(\{\}\)/.test(serviceSource),
+    countsBeforeDeciding: count !== -1 && decide !== -1 && count < decide,
+    countsOnce: (fn.match(/Model\.countReload\(/g) || []).length === 1,
+    warnsOnHeldAtExit: /if \(root\.pendingEntryKey !== null\) console\.warn\("omarchy-iptv: exiting with a bar-entry mirror still held/.test(destruction),
+    // the line names no key and no URL: the string is a literal with no concatenation
+    warnIsALiteral: !/pendingEntryKey !== null\) console\.warn\([^\n]*\+/.test(destruction)
+  }
+}, { declared: true, countsBeforeDeciding: true, countsOnce: true, warnsOnHeldAtExit: true, warnIsALiteral: true })
 
 // ---- SR8: `omarchy bar set ... playlistUrl <url>` still adopts ----
 //

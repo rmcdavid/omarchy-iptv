@@ -9108,6 +9108,11 @@ function sourceErrorMessage(code, opts) {
     unknown_source: "Source not found",
     not_ready: "Not ready yet" + SEP + "try again in a moment",
     persist_failed: "Could not save settings" + SEP + "try omarchy bar set",
+    // R13 / SR25 as amended 2026-10-12: the state write is the switch, so a
+    // state write that FAILED is the one failure a switch, a remove or an
+    // adoption can have. Names the directory, never a URL, and never
+    // `omarchy bar set` (which would put a credential in the shell history).
+    state_write_failed: "Could not write state.json" + SEP + "check ~/.local/state/omarchy-iptv",
     // D-SINK-18. Deliberately NOT the persist_failed sentence: that one sends
     // the user to `omarchy bar set`, which would write the credentialed URL
     // into their shell history permanently -- the durable exposure engineering
@@ -10230,7 +10235,8 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   return out
 }
 
-// D-SINK-19 repair, R5. THE ORDER OF THE TWO WRITES A POINTER CHANGE MAKES.
+// D-SINK-19 repair, R5 and R13. THE ORDER OF THE TWO WRITES A POINTER
+// CHANGE MAKES.
 //
 // A move of the active source is two writes: the key into state.json (the
 // authority) and the mirror into the bar entry, which is also the write that
@@ -10241,18 +10247,38 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
 // no key in the state -- a source nobody points at, with nothing left to
 // re-adopt from.
 //
-// The state is saved FIRST and the entry write WAITS for a deferred save. An
-// interrupted migration then leaves, at worst, the URL still on the entry
-// (the idempotent old shape, re-adopted on the next run) and never a
-// pointer-less source.
+// The state is saved FIRST and the entry write WAITS for the save to LAND
+// (R13: on EVERY route, not only the parked one). R11 gated the parked
+// route on the FileView's `saved`; the dirsReady route still wrote the
+// entry straight after setText, and a state write that then FAILED (a full
+// disk, an unwritable ~/.local/state) had already stripped the URL from the
+// host's file: the record existed in memory only and the input had no copy
+// anywhere (round-3 review P1, measured live). So an entry step is
+// immediate ONLY when nothing of ours is outstanding -- no save parked, none
+// in flight, and the last one did not fail. Otherwise the key is HELD and
+// Model.entryFlushDisposition settles it from `saved` / `saveFailed`: on any
+// failure the URL stays on the entry as the backup it accidentally is, and
+// the next start re-adopts it (R1).
 //
 // `steps` is executed in order by Service.persistActive:
-//   save-state   assign the state and call saveState() (which writes now)
-//   defer-state  the same call, which parks the write until the dirs are
-//                ready; named separately so a test can see the difference
-//   write-entry  mirror the key into the entry now
-//   wait-entry   hold the key; stateInitProc's exit writes the parked state
-//                and THEN the entry
+//   save-state              assign the state and call saveState() (which
+//                           writes now)
+//   defer-state             the same call, which parks the write until the
+//                           dirs are ready; named separately so a test can
+//                           see the difference
+//   write-entry             mirror the key into the entry now: the file
+//                           already says what memory says
+//   write-entry-after-saved hold the key; the FileView's `saved` (or
+//                           `saveFailed`) settles it through
+//                           Model.entryFlushDisposition (R13). Also the
+//                           answer when the LAST save failed and nothing is
+//                           in flight: the file is older than memory, the
+//                           disposition drops the hold at once and the URL
+//                           stays on the entry
+//   wait-entry              hold the key; stateInitProc's exit writes the
+//                           parked state and the same disposition settles it
+//                           once that save lands (R11)
+// `entryWaits` is true whenever the entry is held rather than written.
 // In Model.js rather than inline so node can call it (rule 12); the shared
 // fixture's `order` cases pin every combination.
 function pointerWritePlan(input) {
@@ -10260,19 +10286,65 @@ function pointerWritePlan(input) {
   var keyMoved = it.keyMoved === true
   var dirsReady = it.dirsReady === true
   var savePending = it.savePending === true
+  var inFlight = (Number(it.savesInFlight) || 0) > 0
+  var saveFailed = it.saveFailed === true
   if (keyMoved) {
-    return dirsReady ? { steps: ["save-state", "write-entry"], entryWaits: false }
+    return dirsReady ? { steps: ["save-state", "write-entry-after-saved"], entryWaits: true }
                      : { steps: ["defer-state", "wait-entry"], entryWaits: true }
   }
   // Nothing of ours to save, unless an EARLIER save is still parked: then the
   // entry must not get ahead of it. With the dirs ready that park is flushed
   // right here rather than waited on, because nothing else would wake the
-  // wait (stateInitProc's exit has already run).
+  // wait (stateInitProc's exit has already run) -- and the entry still waits
+  // for that flush to land.
   if (savePending) {
-    return dirsReady ? { steps: ["save-state", "write-entry"], entryWaits: false }
+    return dirsReady ? { steps: ["save-state", "write-entry-after-saved"], entryWaits: true }
                      : { steps: ["wait-entry"], entryWaits: true }
   }
+  // R13: a save issued by the caller a moment ago (adoptActive saves, then
+  // persistActive runs from Qt.callLater with the key already in memory) is
+  // in flight here with the key unmoved. That was the round-3 P1: the plan
+  // read "nothing to save" and wrote the entry before that save landed.
+  if (inFlight || saveFailed) return { steps: ["write-entry-after-saved"], entryWaits: true }
   return { steps: ["write-entry"], entryWaits: false }
+}
+
+// R13, the FileView's "landed". Whether the write the service last asked for
+// is the one the FileView has just reported on. One `saved` per setText was
+// measured for two back-to-back calls (2026-10-11) and does NOT hold for a
+// burst: ten warm switches issued 20 setText and raised 14 `saved` on this
+// tree, 15 on lane-key-s2 (a queued write replaced by a later one is dropped
+// without a signal), so a counter of setText calls stays above zero for the
+// rest of the session and every hold waits for ever -- and on lane-key-s2
+// the same stuck counter made every foreign reload read as "save in flight"
+// (D-SRC-15's sibling). Measured 2026-10-12 with a 26-write probe under
+// cage: `text()` tracks the content of the write job that STARTED (after a
+// burst of twenty it still read T19 while T20 was pending; a failed write
+// reads its own content and then `saveFailed`), `textChanged` precedes each
+// `saved`, and the last content asked for is always written last. So the
+// write has landed exactly when the view's text IS the last text asked for;
+// an earlier write's `saved` reads an earlier text and changes nothing.
+function stateSaveLanded(viewText, askedText) {
+  return str(viewText) === str(askedText) && str(askedText) !== ""
+}
+
+// R15. The reload counter counts BY REASON: one number per reason
+// Model.reloadDisposition can answer, keyed by the reason string itself so
+// the counter cannot name a reason the decision does not (rule 13: joined by
+// a call, not by a name). Returns a NEW object, because a QML `property var`
+// mutated in place raises no change signal. The harness reads it through
+// pointerState as `stateReloadsByReason`; key-scenario's D3 asserts the
+// `save-parked` count, which is the one the start-up chmod reload lands on,
+// where the plain total was satisfied by the own-write echo that follows
+// every start (round-3 review, lane B's P2).
+function countReload(counts, reason) {
+  var out = {}
+  var src = counts && typeof counts === "object" ? counts : {}
+  for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = Number(src[k]) || 0
+  var r = str(reason)
+  if (r === "") r = "unknown"
+  out[r] = (out[r] || 0) + 1
+  return out
 }
 
 // R12's other half. The service keeps a snapshot of the last EPG input it saw
@@ -10340,14 +10412,22 @@ function reloadDisposition(ctx) {
 //
 // -> { act: "none" | "wait" | "flush" | "drop", reason }. Called from
 // stateInitProc's exit (after the parked save is issued), from stateFile's
-// `saved` and from its `saveFailed`.
+// `saved` and from its `saveFailed`, and (R13) from persistActive the moment
+// it holds a key on the dirsReady route.
 function entryFlushDisposition(ctx) {
   var c = ctx || {}
   if (c.pendingKey === null || c.pendingKey === undefined) return { act: "none", reason: "nothing-held" }
   if (c.dirsReady !== true) return { act: "wait", reason: "dirs" }
   if (c.initOk !== true) return { act: "drop", reason: "init-failed" }
-  if (c.saveFailed === true) return { act: "drop", reason: "save-failed" }
+  // R13: a save still parked or in flight outranks a STALE failure. The flag
+  // is sticky until a later write lands, and persistActive settles a fresh
+  // hold at once while that write is in the air -- checked the other way
+  // round, a switch made after any earlier failure dropped its mirror
+  // before its own write had reported (found by the R13 service-order
+  // driver). The in-flight write's `saved` clears the flag and flushes;
+  // its `saveFailed` keeps the flag and drops.
   if (c.savePending === true || (Number(c.savesInFlight) || 0) > 0) return { act: "wait", reason: "save-in-flight" }
+  if (c.saveFailed === true) return { act: "drop", reason: "save-failed" }
   return { act: "flush", reason: "saved" }
 }
 
@@ -11727,6 +11807,8 @@ if (typeof module !== "undefined") {
     pointerWritePlan: pointerWritePlan,
     epgSnapshotAfter: epgSnapshotAfter,
     reloadDisposition: reloadDisposition,
+    countReload: countReload,
+    stateSaveLanded: stateSaveLanded,
     entryFlushDisposition: entryFlushDisposition,
     invalidInputBlocks: invalidInputBlocks,
     reconcileSources: reconcileSources,
