@@ -659,8 +659,10 @@ state is the Sources first-run form, see `UX-SOURCES.md` 1.2.
 |              |  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>     |                |
 |              +----------------------------------------------------------------+                |
 |                                                                                                |
-|                  Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>           |
-|                  Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv) |
+|        Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not    |
+|        kept in shell.json)                                                                     |
+|        Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other         |
+|        settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)           |
 |                                                                                                |
 |                                                                                                |
 |                                                             r retry - o sources - Esc close    |
@@ -1120,7 +1122,7 @@ key/verb contrast is the accepted cost of the footer being readable at all.
 
 | State | Title | Body |
 |---|---|---|
-| Not configured | `No playlist configured` | `Set your M3U URL or path, then press r to load it:` / command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` / `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` / `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` |
+| Not configured | `No playlist configured` | `Set your M3U URL or path, then press r to load it:` / command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` / `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)` / `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` **[Amended 2026-10-12, D-SINK-19 round 3: the last two lines are `Guide.qml`'s `unconfiguredEpg` and `unconfiguredWhere` as shipped on lane-key-s1 (two spaces before the parenthesis), ruled to this exact text by the lead after the review found the previous lines -- `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` and `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` -- presenting the URL keys as stored settings. The command box is unchanged: a click copies it. Both lines wrap (`Text.WordWrap` over the column width); the wireframe in 4.4 wraps them by hand, and the wrap at the shipped width is UNVERIFIED on a display.]** |
 | Loading, no cache | `Loading playlist...` | `Fetching from <host>` |
 | Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) |
 | Fetch failed, cache present (banner) | -- | `ó°¦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |

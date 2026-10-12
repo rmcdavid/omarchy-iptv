@@ -536,3 +536,120 @@ not provide a clipboard verb of its own; `Quickshell.clipboardText`
 (quickshell-core.qmltypes) is the same `QClipboard::text()` read in the same
 process and is not used, and the plugin's own unreachable `clipboardText()`
 in `Guide.qml` was deleted at 51866a3.
+
+## Verified host behavior: `updateEntryInline` stores every key it is handed, declared or not (verified 2026-10-11)
+
+Why it matters. D-SINK-19 mirrors the active source's key into the bar entry
+as `sourceKey`, a key `manifest.json` deliberately does not declare (declaring
+it would offer the plugin's own mirror as a user setting with help text). The
+recovery path `Model.adoptActiveSource` step 3 -- an install that lost
+`state.json`'s pointer but still has its sources finds its way back through
+the entry -- rests on the host KEEPING a key it was never told about, and that
+premise had been read off the host's source and never measured.
+
+Measured by running the host's OWN function, not a reimplementation of it:
+`shell.qml:1078-1117` (`/usr/share/omarchy/shell/shell.qml`, Omarchy 4.0.4-1,
+sha256 prefix `4a4b7694e5b9e0bd`) copied by line range into node with stubs
+for `Util.canonicalWidgetId`, `Util.isPlainObject` and `persistShellConfig`,
+over three stored configurations (the script, `host-undeclared-key.js`, and
+its output sit in the docs lane's scratch; re-run it with
+`sed -n 1078,1117p /usr/share/omarchy/shell/shell.qml > host-updateEntryInline.js && node host-undeclared-key.js`
+after checking the function still ends at line 1117):
+
+- **A. The entry is in `bar.layout` only** (the shape `omarchy plugin enable`
+  writes). Handed `{id, sourceKey, showLogos, refreshMinutes}` over a stored
+  entry that carried `playlistUrl`, the stored entry became exactly
+  `{id, sourceKey, showLogos, refreshMinutes}`: the undeclared key is kept, and
+  the key NOT handed over (`playlistUrl`) is GONE rather than emptied. The
+  code is `var next = { id: stripped }; for (var k in settings) if (k !== "id")
+  next[k] = settings[k]` (`shell.qml:1092-1093`); no schema is consulted. This
+  is what lets `Model.entryWith` remove the retired URL keys by omission.
+- **B. The same id is ALSO in the top-level `plugins[]` list.** Only the
+  `bar.layout` copy is rewritten -- the `plugins[]` loop runs only `if
+  (!foundInLayout)` (`shell.qml:1102`) -- and a `plugins[]` copy keeps whatever
+  it had, `playlistUrl` included. The plugin never READS that copy (`barConfig`
+  is built from `bar`), but no write of ours would remove a credential from
+  it. On this machine `plugins` is `[]`, and `omarchy plugin enable` writes
+  `{id}` objects into `bar.layout` (`services/PluginRegistry.qml:526`). Whether
+  any supported command fills `plugins[]` is UNVERIFIED.
+- **C. Handing back exactly what is stored** returns `false` and persists
+  nothing (the one-write-behind section above; `shell.qml:1114`).
+
+Two neighbouring facts, read rather than run:
+
+- `omarchy bar set <id> <key> <value>` writes ANY key. `setBarWidget`
+  (`services/PluginRegistry.qml:342-380`) finds the entry and does
+  `entry[String(key)] = value`; nothing checks the key against the manifest
+  schema, so a user can set `sourceKey` by hand (the plugin ignores a value
+  naming none of their records, and consults it at all only when `state.json`
+  names no source), and `omarchy bar set ... playlistUrl ""` stores an empty
+  string, which the plugin treats as a no-op since D-SINK-19.
+- `omarchy plugin disable` removes the entry and everything on it, the mirror
+  included (`QA.md` TC-INST-05); the plugin's own `state.json` still names the
+  active source, so re-enabling does not need the URL again.
+
+## Quickshell `FileView` on this machine: what a reload means (D-SRC-15, measured 2026-10-11)
+
+Not the Omarchy plugin API but the runtime every plugin's `FileView` sits on
+(quickshell 0.3.1-1, Qt 6.11.2 as installed; re-measure on a Quickshell
+update). Measured by the D-SINK-19 code lane with a purpose-built FileView
+probe run by quickshell under a nested headless cage (lane A's
+`fv/probe.qml` + `run-probe.sh`, in the lane's scratch directory, not in the
+tree) and by the harness lane's key scenario (`scripts/dev-harness/
+key-scenario.sh`, segments D and N). The service's `stateFile` is a FileView
+with `watchChanges: true`, `atomicWrites: true` and `onFileChanged: reload()`,
+and these four facts are what R9-R11 (`ARCHITECTURE-SOURCES.md`, round 3)
+are built on:
+
+- **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
+  for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
+  back delivered `saved, fileChanged, saved`; a third delivered `fileChanged,
+  saved` (probe summary: `saved=3 failed=0 fileChanged=4 loaded=3`). So
+  `setText` returning says nothing about the file. But a counter of `setText`
+  calls is NOT the instrument either: lane A's 26-write probe under cage
+  (2026-10-12) raised 25 `saved` + 1 `saveFailed`, `textChanged -> Tn`
+  preceded every `saved #n text()=Tn`, after a burst of twenty `text()` read
+  T19 while T20 was pending, a failed write read its own text and then
+  `saveFailed`, and the last content asked for was always written last; the
+  service under the same conditions coalesced 20 `setText` into 14 `saved`
+  (15 on lane-key-s2), so a signal counter stuck at 5-6 for the rest of the
+  session (and on lane-key-s2 read every later foreign reload as "save in
+  flight"). "A write is in flight" is therefore decided by CONTENT
+  (`stateSaveLanded`: the view's text IS the last text asked for;
+  `stateSavesInFlight` is 0 or 1 and keeps its name for the harness), and an
+  earlier write's `saved` changes nothing. Whether a replaced queued write can
+  ever be the LAST content is unmeasured (the probe and both live runs say
+  the last content is always written; a Quickshell source read would settle
+  it).
+- **A bare chmod reloads, mode changed or not.** A chmod 0644 -> 0600 AND a
+  chmod 0600 -> 0600 each delivered `fileChanged` followed by `loaded` with
+  the file's text. That is inotify `IN_ATTRIB`, and it is the trigger of
+  D-SRC-15: the helper's start-up `state init` chmodded the existing
+  `state.json`, the FileView reloaded the PRE-adoption text while the first
+  save was still parked, and the parked save then wrote the loss. It is also
+  why the helper leaving a 0600 file alone (R10) is belt and braces and not
+  the fix.
+- **The view's own atomic write fires `fileChanged` too.** In the probe run
+  no `loaded` followed it, while the service's `recentSaves` comment assumes
+  one can; which it is was not settled (lane A's DQ-A7) and nothing depends
+  on it, because `reloadDisposition` ignores an own write by its text and a
+  parked or in-flight save by its count.
+- **A FileView loaded over a MISSING path does not see the file being
+  created by another process.** Over a fresh install (no state directory, no
+  file) the helper's `state init` creates `state.json` under the parked
+  adoption and no reload fires: `stateReloadsIgnored` reads 0 across the
+  whole fresh start and the key scenario's N1-N4 are green on the very tree
+  that drops D2. Whether the watch is installed by the first successful load
+  or by the first own write is unmeasured (lane B's DQ-B8); a reader of
+  `watchChanges` should not assume a missing file is watched.
+
+`saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
+and its argument is an enum, never a path; until round 3 the service
+connected to neither it nor `saved`, so a refused write was silent and the
+entry mirror went out anyway (R11 is the gate). Since round 4 (R13, lane-key-t1)
+`saveFailed` clears the in-flight flag by content, logs `state.json could not
+be written (error N)` on every failure and emits
+`sourcesPersistFailed("state_write_failed")` once per failure episode; the
+key scenario's F segment drives it with the state directory 0500 under a
+running shell (F4: logged with no `://` in the line, signalled exactly once;
+lane B on lane-key-t2, 2026-10-12).
