@@ -907,7 +907,8 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline lane-key-t2  # the round-5 red run: round 4's code (60 / 4: L1, L2, F6, F7)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-v2  # the round-7 red run: round 6's code (66 / 5: U2, U3, U4, U6, U7)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-t2  # the round-5 red run: round 4's code (60 / 4 before U existed: L1, L2, F6, F7)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red run: round 3's code (54 / 10: D3, W3, W6, F3..F7, L1, L2)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (38 / 26)
 scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 25; O2 its one discriminator)
@@ -1106,6 +1107,25 @@ the first state load, which no harness reaches), so lane A did not run
 `--baseline lane-key-u3`; the round-6 live lens did, and it reads **64
 passed, 0 failed** (transcript key-20261012-122314-1907775.out, 72.7 s),
 as expected: no lettered check separates u3 from v1.
+
+**Round 7 (2026-10-12; U1..U7 added, 63 -> 70).** The round-6 data-loss
+lens found an input no oracle had covered: an `epgUrl` R12 leaves on the
+entry while no source is active, stripped by any heal write (the logo
+toggle on the lagging host, observed live by the lens; the switch alone on
+the echoing host). R17a keeps a retired input on the entry until it is
+consumed, R17b lands a pending EPG on the record a switch or an in-app add
+makes active. Segment U lifts the lens's `epg-child.sh`: U1..U4 on the
+lagging host through the toggle and then the switch, U5..U7 on the echoing
+fake host (`run.sh --host echo`, the lever above) through the switch alone.
+Counts from the transcripts on lane-key-w1 (2ccbb74), under the scenario's
+own nested cage: the forward run **71 passed, 0 failed** (83.7 s);
+`--baseline lane-key-v2` **66 passed, 5 failed** -- U2, U3, U4, U6, U7, with
+U1 and U5 green as the controls they are and nothing outside U moved.
+`sources-scenario.sh` **66 / 0** and `logo-scenario.sh live` **33 / 0**
+under a nested headless cage on the same tree. `qa-lib-test.sh` now unsets
+`OMARCHY_IPTV_HARNESS_DIR` inside its default-directory pin itself (a bare
+run with the variable exported read 442 / 1 with the old line, 443 / 0 with
+the new one), and pins the `--host` lever (443 checks).
 
 **The weak already-stored check, fixed in round 4.** 'a switch the host
 already stores is not reported as a persist failure' means to make the

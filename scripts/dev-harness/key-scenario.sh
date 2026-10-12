@@ -329,8 +329,18 @@
 # and F added, D3 by reason), recipe in the footer the run prints; the
 # counts of 2026-10-11 (49 / 0 forward, 36 / 13 on r2) were the harness
 # before W, F and the by-reason D3 existed, and the round-4 counts (62 / 0,
-# 54 / 8, 38 / 24, 39 / 23) the harness before L:
-#   lane-key-u2 (this tree, lane-key-u1's code):  64 passed,  0 failed
+# 54 / 8, 38 / 24, 39 / 23) the harness before L. Round 7 (U added) was
+# measured on lane-key-w1 (2ccbb74) under the scenario's own nested cage,
+# transcripts key-20261012-130320 and -130450:
+#   lane-key-w1 (round 7's code):                 71 passed,  0 failed
+#   --baseline lane-key-v2 (round 6's code):      66 passed,  5 failed
+#       U2, U3, U4, U6, U7   <- R17: the toggle's heal stripped the EPG
+#       (U2 `epgUrl:no kept:0`), so the switch had nothing to land (U3
+#       `on:none`); on the echoing host the switch alone lost it (U6
+#       `on:none`); both restarts stand on A with no EPG (U4, U7). U1 and
+#       U5 are the controls, and nothing outside U moved.
+# The rows below were measured before U existed (63 lettered checks):
+#   lane-key-u2 (lane-key-u1's code):             64 passed,  0 failed
 #   --baseline lane-key-t2 (round 4's code):      60 passed,  4 failed
 #       L1, L2, F6, F7   <- R16: the logo toggle after the failed write
 #   --baseline lane-key-s2 (round 3's code):      54 passed, 10 failed
@@ -1270,7 +1280,7 @@ else
 fi
 
 if [[ -n $BASELINE || -n $TREE ]]; then
-  echo "baseline ${BASELINE:-$TREE}: on lane-key-t2 (round 4's code) the reds are round 5's -- L1, L2 (the logo toggle on the failed disk mirrored the in-memory key and stripped the URL) and F6, F7 (the restart over that entry finds no record for B): 60 passed, 4 failed. On lane-key-s2 (round 3's code) round 4's join them -- D3, W3, W6 (no per-reason counter there), F3, F4, F5 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 10 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F and L reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 26 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 25 failed. The two patches under spikes/key-mutations/ read 58 / 6 (D2, D3, W2, W3, W4, W6) and 59 / 5 (D2, W2, W3, W4, W6; D3 green) through --tree. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
+  echo "baseline ${BASELINE:-$TREE}: on lane-key-v2 (round 6's code) the reds are round 7's -- U2, U3, U4 (the logo toggle's heal stripped an EPG no source had adopted, so the switch had nothing to land and the restart stands on A with no EPG) and U6, U7 (the same input lost by the switch alone on the echoing fake host): 66 passed, 5 failed. The counts that follow were measured before U existed (63 lettered checks). On lane-key-t2 (round 4's code) the reds are round 5's -- L1, L2 (the logo toggle on the failed disk mirrored the in-memory key and stripped the URL) and F6, F7 (the restart over that entry finds no record for B): 60 passed, 4 failed. On lane-key-s2 (round 3's code) round 4's join them -- D3, W3, W6 (no per-reason counter there), F3, F4, F5 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 10 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F and L reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 26 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 25 failed. The two patches under spikes/key-mutations/ read 58 / 6 (D2, D3, W2, W3, W4, W6) and 59 / 5 (D2, W2, W3, W4, W6; D3 green) through --tree. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
 fi
 echo "key-scenario: $PASS passed, $FAIL failed (mode $MODE, tree $PLUGIN_ROOT${BASELINE:+, baseline $BASELINE}${TREE:+, prepared tree}, $(elapsed) s)"
 (( FAIL == 0 ))
