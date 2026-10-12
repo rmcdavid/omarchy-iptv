@@ -13110,6 +13110,96 @@ switch. The sentence "one `saved` per `setText`" that the round-3 documents
 carried is false for a burst and was replaced on the round-4 docs branch
 with these numbers (`docs/OMARCHY-PLUGIN-CONTRACT.md`, SR38's amendment).
 
+### D-REL-5: the shipped Model.js is over the marketplace scanner's file limit, and nothing here could have gone red for it
+
+**Found 2026-10-12 reading the verification request for 0.13.5
+(omacom/omarchy-plugin-marketplace#11114); P1; open.** The request carries
+`needs-fixes`, and the automated security baseline that must pass before a
+maintainer can apply `approved-and-verified` reports: "The static scan could
+not safely process `Model.js` within its configured limits." The limit is
+not a guess: `scripts/security-baseline-limits.mjs` in the marketplace
+repository sets `securityFileByteLimit = 512 * 1024`, and
+`security-baseline-report.mjs` prints that sentence only for the
+`security-baseline-scan-limit` code with a path attached. The arithmetic
+agrees with the history:
+
+| Commit | Release | `Model.js` bytes | Baseline |
+|---|---|---|---|
+| d55149b | 0.13.4 | 522,183 | passed (#11077, 2026-10-11T18:27Z) |
+| 0bd4515 | 0.13.5 | 534,599 | could not complete (#11114, 2026-10-12T00:10Z) |
+| ce1d71a | dev today | 534,599 | -- |
+| f54f408 | lane-key-t2 (D-SINK-19) | 567,228 | -- |
+
+So 0.13.4 passed with 2 KB to spare, D-CLIP-1's 263 lines took the file
+over, and the D-SINK-19 repair adds 33 KB more. The verified snapshot is
+0.12.0; every release since 0.12.1 drew a finding on its own request, and
+this one would have been refused by a script before anyone read it.
+
+**What the file is made of** (measured on lane-key-t2's copy with a
+line-comment pass: `//` blocks counted by bytes): 735 comment blocks,
+312,721 bytes, 55 percent of the file; the code alone is about 252 KB. The
+weight is not in a few essays: the 34 blocks of 1,500 bytes or more total
+69 KB, the 81 of 1,000 or more 126 KB, and reaching a file that stays under
+the limit through the next few releases would mean relocating the 150
+blocks of 600 bytes or more, 179 KB, which is most of the reasoning the
+code carries. A comment move is the fallback, not the fix.
+
+**The fix is a module split, and its three preconditions were measured on
+this machine before the decision** (node v26.8.1, Qt 6.11.2 offscreen,
+`scratchpad/esm-probe/` on a `git archive dev` of ce1d71a):
+
+- Strict mode. An ES module is strict. With `"use strict";` prepended to
+  the shipping `Model.js`, `node tests/Model.test.js` exits 0, "All
+  Model.js tests passed" (2,074-floor suite, every check).
+- Node. All 603 `module.exports` keys are top-level declarations exported
+  under their own name (a regex over the source, 0 exceptions). A copy
+  named `Model.mjs` with the guarded CommonJS block replaced by
+  `export { ...the same 603 names... }` loads by `require("./Model.mjs")`
+  (node 26 resolves a synchronous ES module from CommonJS) and by
+  `import * as M`, both reporting 603 keys and `PLUGIN_VERSION` 0.13.5; the
+  node suite with its one `require` line pointed at the `.mjs` exits 0.
+- The QML engine. `qmltestrunner` over a `TestCase` that does
+  `import "Model.mjs" as Model` reaches the module (the one failing compare
+  was this author's wrong expectation of `redactUrls`' output, which strips
+  the scheme as well as the path); an aggregator `Agg.mjs` doing
+  `export * from "./Part.mjs"` plus its own function exposes the part's
+  function and constant to QML (`A.partFn`, `A.PART_CONST`: pass); and the
+  project's own `tests/Model.spec.qml` with its import pointed at the
+  `.mjs` reads **78 passed, 0 failed**. `omarchy plugin validate` on a copy
+  of the tree with `Model.js` removed, `Model.mjs` present and the three
+  QML imports renamed exits 0, and `qmllint` on `Service.qml` reports the
+  same count before and after.
+- The scanner. `security-baseline-scope.mjs` lists `.mjs` in
+  `scannedExtensions`, so a module is scanned exactly as the script was.
+  This is a split, not an evasion.
+
+**The plan, ruled 2026-10-12.** Step one, on `lane-esm-1` off `dev`: the
+rename to `Model.mjs` with the export block swapped and NOTHING else in the
+file changed (the lane proves the two files differ by that block alone),
+every importer repointed (three QML files, the QML spec, the harness
+shell, every node `require`, every python test that reads the file or
+spawns node over it, the release allowlist, the ledger's symbol resolver,
+the gate's `*.js` globs), gate green, and the dev harness run under the
+nested cage so the real Quickshell is seen loading the module and not only
+the Qt engine. Step two, after the D-SINK-19 chain (`lane-key-u3`) has
+landed, because a split of a file the chain is editing cannot be merged
+through rename detection: the module is cut by domain into parts each well
+under half the limit, `Model.mjs` re-exporting them so every `Model.X`
+call site and every `Model.X` citation stays as it is, and `release.py
+check` gains a ceiling below the scanner's so the gate goes red before the
+marketplace does. Step one merges with the chain through git's rename
+detection (a file renamed on one side and edited on the other), which the
+review lens rehearses against `lane-key-t2` before anything is merged.
+
+**The lesson, rule 14's shape at the artifact level.** The gate checks
+that the allowlist is whole, that every import resolves, that no
+agent-instruction file ships, and never that the artifact is one the
+marketplace can read. The limit was public in the marketplace's own
+scripts the whole time, and 0.13.4 passed under it by 2,105 bytes while
+every lane was told to keep the lessons beside the code. A ceiling the
+gate enforces is the only check that can go red for this; a reviewer
+noticing the file is large is not one.
+
 ### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
 
 Three reviewers over one fix. They found three P1s.
