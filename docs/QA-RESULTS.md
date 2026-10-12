@@ -12996,6 +12996,27 @@ and `playlistUrl` on the bar entry is a documented way for a user to configure
 the plugin directly. It is filed rather than rushed into a security release,
 which is what an id is for.
 
+### D-SINK-19 repair round, two things the lanes surfaced that are the lead's (F-M3-20, D-SRC-14)
+
+Filed the day they were reported, from the code and docs lanes' open
+questions, so they do not wait on the round's integration:
+
+- **F-M3-20.** The `SR` ruling register (`docs/ARCHITECTURE-SOURCES.md`,
+  SR1-SR38 and counting) is cited by id from 29 tracked files -- 40 distinct
+  ids -- and nothing validates the join: a ruling can be renumbered, retired
+  or overturned and every citation reads as current. Rule 13's shape, one
+  register along from the defect ids that `check-defect-ledger.py` already
+  pins. Found by the docs lane re-applying D-SINK-19's documents by hand.
+- **D-SRC-14.** The probe-commit edit of the ACTIVE source (`Service.qml`
+  ~3964-3999) removes the old record, adds the new one, assigns
+  `root.userState`, and only then calls `persistActive(newKey)`: for that
+  one assignment the state carries no valid active key, `configured` reads
+  false and `onConfiguredChanged -> clearSourceData` runs before the new key
+  lands. Pre-existing at f275bde (there the dangling old key resolved to ""
+  in the same intermediate), so the repair round's R3 did not introduce it,
+  only made it legible. A one-assignment flicker on an edit the user just
+  confirmed; P3.
+
 ### The review of D-SINK-18: three blockers, two of them mine (F-M3-17)
 
 Three reviewers over one fix. They found three P1s.
