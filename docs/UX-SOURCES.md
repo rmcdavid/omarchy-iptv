@@ -1194,22 +1194,67 @@ No `https://` auto-prefix and no Xtream URL auto-parse (8).
 `<host>` is `Model.hostOf(url)`: never a path, query or userinfo.
 
 **Save failures (asynchronous, same line; D-SINK-19 round 4, R13,
-2026-10-12).** The state write is the switch, so the one failure a switch, a
-remove or an adoption can have is `state.json` not being written:
+2026-10-12; the Guide half round 5, R16, the same day).** The state write is
+the switch, so the one failure a switch, a remove or an adoption can have is
+`state.json` not being written:
 `sourcesPersistFailed("state_write_failed")` -> `Could not write state.json -
 check ~/.local/state/omarchy-iptv` (`Model.sourceErrorMessage`; a directory,
 never a URL and never `omarchy bar set`, which would put the credential in
-the shell history). It arrives once per failure episode, after the call
-that issued the write has already returned `ok`. A host that refuses the KEY
-mirror is not an error on this screen: logged, repaired at the next start
-(SR25 as amended in `ARCHITECTURE-SOURCES.md`); `config_unsafe` keeps its
-own sentence (D-SINK-18). What ships on lane-key-t1 is UNVERIFIED against
-this paragraph: `Guide.showPersistFailed` renders the `persist_failed`
-sentence for every code, so the state-write failure shows `Could not save
-settings - try omarchy bar set` -- the opposite advice -- until the Guide
-owner routes the code through (`root.showPersistFailed(reason)` with
-`Model.sourceErrorMessage(reason)`; lane A's DQ-T1, open). The docs lane
-holds no display.
+the shell history). It arrives after the call that issued the write has
+already returned `ok`. A host that refuses the KEY mirror is not an error on
+this screen: logged, repaired at the next start (SR25 as amended in
+`ARCHITECTURE-SOURCES.md`); `config_unsafe` keeps its own sentence
+(D-SINK-18). The guide renders the sentence for THE reason the signal
+carried: `Guide.showPersistFailed(reason)` hands it to
+`persistFailureMessage` (in `Model.js`, cited bare until the merge; the three
+reasons are `PERSIST_FAILURE_REASONS`, and an unknown one falls back to
+`persist_failed`'s sentence), on the form's result line while a form is open
+and in the footer otherwise. Until round 5 the guide rendered
+`persist_failed`'s sentence for every code, so a write that failed in
+`~/.local/state` told the user to try `omarchy bar set` -- the opposite
+advice, and the durable sink rule 5 forbids advising (lane A's DQ-T1, the
+round-4 review's P2; closed on lane-key-u1 b42b5ab). OBSERVED at the code by
+two node checks on lane-key-u1, both red over an export of lane-key-t2:
+the routing read off `Guide.qml` (the reason handed through, the message
+composed by `persistFailureMessage` on both surfaces, never
+`persist_failed`'s sentence by name), and the copy for every reason
+`Service.qml` emits -- derived from the service source, none naming a URL,
+only `persist_failed`'s naming `omarchy bar set`, the fallback for an unknown
+reason. The rendered line on a display is UNVERIFIED: no scenario reads the
+result line or the footer for it (key-scenario's L reads the bar entry and
+the guide's `showLogos`), and the docs lane holds no display.
+
+**Once per episode, a decision with its consequence (round 4, kept in round
+5).** The failure is signalled on the FIRST `saveFailed` of an episode and
+not again until a later write LANDS (`stateSaveFailed` is sticky, cleared by
+content). So one switch -- two `setText`s -- shows one line, and that is the
+reason for the rule. The consequence, measured: a SECOND switch on the still
+failed disk reports `ok`, lands in memory only, holds no mirror, and shows
+NOTHING on this screen (key-scenario F5 on lane-key-u2 wants `signalled:0`
+counted from the switch's own mark, and reads it; lane B's transcript,
+2026-10-12); the journal line `state.json could not be written` is per
+failure, so the shell's log still says each time. A user who saw the line
+once and switches again is not told again until a save succeeds. The lead
+kept this over "once per call" on 2026-10-12 (round 5); a retry that is
+silent on screen is the stated cost.
+
+**The logo toggle on a failed disk (round 5, R16).** `g` and the consent's
+confirm behave as they always do -- `Logos on` / `Logos off` in the footer,
+no sentence about the save -- because that write carries no source and
+raises nothing on this channel. What changed is beneath the screen: while a
+state write is parked, in flight or failed, the toggle writes the logo
+setting ALONE and leaves the entry's source keys as the host holds them,
+where before round 5 it mirrored the in-memory key and stripped the URL the
+failed write had left on the entry as its only copy (the round-4 review's P1,
+measured live; `ARCHITECTURE-SOURCES.md` 4.3 and SRC-MIG-22). Observed at the
+sink by key-scenario L1/L2 on lane-key-u2 (64 / 0; 60 / 4 on `--baseline
+lane-key-t2` with L1 reading `stored:<C> playlistUrl:no` -- lane B,
+2026-10-12). One sentence of this screen's copy keeps `omarchy bar set`
+honestly: a LOGO write the host refuses outright (no writable bar entry;
+`setShowLogos` returns false) renders `Could not save settings - try omarchy
+bar set` through the return value, and that advice is sound there because
+the write it describes carries no credential (DQ-U5); nothing observes that
+line on a display either.
 
 ### 5.6 Default label and duplicates (S4, S5)
 

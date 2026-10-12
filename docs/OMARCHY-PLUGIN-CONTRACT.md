@@ -240,7 +240,19 @@ hosts, because `Model.ownWriteInForce` holds the local override only while
 the host still reports the PRE-write value and drops it on any other value
 -- the echo of our own write included -- after which `settings` is the host's
 copy carrying the same values; the echo path was built idempotent for
-exactly this. What is NOT yet true: `scripts/dev-harness/shell.qml` models
+exactly this. Round 5 of D-SINK-19 (R16, 2026-10-12) adds a second SHAPE of
+own write and it behaves the same way: while a state write is parked, in
+flight or failed the logo toggle writes `{ showLogos }` alone with the
+entry's source keys as the host holds them (patch-only; `ARCHITECTURE-
+SOURCES.md` 4.3), and its record is made against the host value exactly as
+the full write's is, so under the lagging host the override holds
+`showLogos` until the host catches up and lapses on the echo to the same
+value, and under the echoing host it is recorded against the already-echoed
+value and is inert rather than lapsed -- `inForce true` there is not a
+stale override (lane A's DQ-U4). The node driver asserts both shapes for
+both hosts (`R16 (lag host)` / `(echo host)`: `the patch-only write is
+recognised as our own`, lane-key-u1); the echoing host is still modelled,
+not run (D-HOST-4 below). What is NOT yet true: `scripts/dev-harness/shell.qml` models
 the one-write-behind host only (its line ~759), so the own-write scenarios
 have never run against an echoing host; that is D-HOST-4 on the board, due
 when a release carrying #15082 is on this machine. The section above stays

@@ -735,7 +735,23 @@ this plugin put into a container it does not own? Swept over the tree at
   values it writes come from `root.settings`, which is what the host already
   stores, so it puts nothing in the file that is not in it already, and
   refusing a logo toggle would cost a feature for no privacy gained. It does
-  get the re-arm.
+  get the re-arm. **Amended 2026-10-12 (D-SINK-19 round 5, R16):** still
+  not gated by the shield, and now gated on what it CARRIES. D-SINK-19 made
+  "any owned write heals the entry" strip the retired URL keys on this
+  write too, and R13 made a failed state write leave the URL on the entry
+  as the only copy of the input -- so one logo toggle after a failed write
+  mirrored the in-memory key and took that copy off, and the next start
+  found the record nowhere (the round-4 review's P1, measured live under
+  cage on lane-key-t2 and at the Model layer on every D-SINK-19 tree; rule
+  15's shape inside R13's own fix, since `writeOwnedEntry` has two callers
+  and R13 gated one). While a state write is parked, in flight or failed
+  the toggle now writes `showLogos` alone and leaves `sourceKey` and the
+  URL keys as the host holds them (`ownedWriteMode`, `entryWith` with
+  `keepRetired`; cited bare until the merge); with nothing outstanding it
+  heals as before. "It puts nothing in the file that is not in it already"
+  is true of both branches; "it can only ever take a credential out" is
+  true of the heal branch only (`ARCHITECTURE-SOURCES.md` 4.3, where the
+  lag residual of the patch is also stated).
 - **Every helper write.** Each is the existing `O_EXCL` temp + 0600 +
   `os.replace` into a directory the helper creates 0700 through
   `ensure_private_dir`, so no other borrowed container takes a URL. Cleared.
@@ -984,7 +1000,10 @@ words can be the same defect, softened. What the tree does on lane-key-t1
   `text()` tracking the write that started; lane A under cage, 2026-10-12)
   -- and the signal-counting first version stuck at 5 of 20 for the rest of
   the session, which on lane-key-s2 also read every later foreign reload as
-  "save in flight" (lane A's DQ-T4, a D-SRC-15 sibling awaiting its id).
+  "save in flight" (lane A's DQ-T4, a D-SRC-15 sibling fixed on lane-key-t1
+  by the content rule, unreleased; its D-id is the lead's at integration,
+  and these documents cite it the day the board row exists -- the ledger
+  refuses an id with no row, measured on lane-key-u3).
 - R14. The two decisions only the live arm could see have structural pins in
   `tests/Model.test.js`: the ignore branch of `applyUserState` RETURNS, and
   `saveState` parks (sets the flag) before `dirsReady`; each seen red by
@@ -1014,6 +1033,55 @@ observed, said so: the state directory unwritable at START (R11's `drop`),
 a remove on a failed disk (F drives the CLI set and a switch), a `saved` for
 an EARLIER write arriving while a later one is pending and then fails, and a
 CLI `state ...` write inside a parked or in-flight shell save.
+
+**Round 5 (lead ruling R16, 2026-10-12), after the fourth review measured
+R13's own fix losing the record through the writer R13 had not gated.**
+`writeOwnedEntry` has two callers. R13 gated `writeActive`, the key mirror.
+The second, `setShowLogos` -- the logo toggle, `g` in the guide's Sources
+view and the consent's confirm -- wrote `{ sourceKey: <memory>, showLogos }`
+with no plan and no disposition, and `entryWith` stripped `playlistUrl` and
+`epgUrl` on every owned write by design ("any owned write heals an old
+entry, including the logo toggle"). So in exactly the state R13 now leaves
+on purpose -- a failed state write, the URL kept on the entry as the only
+copy, the failure signalled -- one toggle rewrote the entry to a key the
+file did not have and took the URL off; the record then existed nowhere
+durable and the next start lost it. Measured live under a nested cage on
+lane-key-t2 (the stored entry after the toggle named the in-memory key with
+`playlistUrl` GONE, `state.json` still the old key, the restart found no
+record anywhere) and at the Model layer (4 of 4 routes under both host
+shapes; 308 of 4,392 driven sequences, all of them the four that end with a
+logo toggle, 0 in the other 4,084); pre-existing on every D-SINK-19 tree,
+and invisible to 2,146 node checks, 11 check-tree, 62 / 0 live and 66 / 0
+sources, because nothing drove a toggle after a failed write. The lesson is
+rule 15 one layer in: the round-3 P1 was fixed in one of two callers of the
+same funnel, and the search for the sibling has to be run over the FIX as
+well as over the defect. R16, as landed on lane-key-u1 (b42b5ab, lane A;
+round-5 symbols cited bare until the merge): an owned-entry write that is
+NOT the key mirror writes only the fields it owns while anything of ours is
+outstanding -- `ownedWriteMode` takes the three flags (`savePending`,
+`savesInFlight`, `saveFailed`) and nothing else and answers `patch` or
+`heal`; on `patch` the toggle writes `showLogos` alone with `keepRetired`,
+so `sourceKey`, `playlistUrl` and `epgUrl` stay exactly as the host holds
+them, and the entry is healed only by `writeActive` under R13 once the file
+agrees with memory; the own-write override recognises the patch as ours
+under both host shapes. Observed: sixteen node checks (the `ownedWrite`
+fixture section, the driver extended with `setShowLogos` under both host
+shapes auditing every entry write against the file's own pointer, the
+structural and copy pins), 17 red over an export of lane-key-t2 and 0 on
+lane-key-u1 (node 2,162), twelve one-decision mutations each reddening at
+least one; the lens's own drivers 4 -> 0 losses and 308 -> 0 of 4,392; at
+the sink, key-scenario L1/L2 inside F: 64 / 0 on lane-key-u2 and 60 / 4 on
+`--baseline lane-key-t2` (L1 `stored:<C> playlistUrl:no`, L2 `keys:0
+alone:0`, F6/F7 restarting over that entry find no record -- lane B's
+transcripts, 2026-10-12). The same ruling routes the persist failure's
+REASON to the guide (`persistFailureMessage`; the round-4 review's P2) and
+keeps once-per-episode signalling as a decision with its consequence
+(`UX-SOURCES.md` 5.5). The residual, measured in the driver and not live:
+under a host that publishes one write behind, a patch-only toggle right
+after a heal carries the URL the heal removed BACK onto the stored entry;
+it is the file's own active record's URL, re-adopted idempotently at the
+next start, nothing enters the file the host did not publish and no record
+is lost, and the echoing host has no such lag (DQ-U1).
 
 **What REMAINS, with its size rather than a claim of zero.** The exposure is
 NOT closed. Three things remain, and the first is the one to quote:

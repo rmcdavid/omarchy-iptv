@@ -438,7 +438,40 @@ deleted, the failure checked before in-flight, `stateSaveLanded` returning
 true, the count moved after the decision, among them). Counts on lane-key-t1:
 node 2146 / 0, python 1056, qml 78 (neither extended). The live half on
 lane-key-t2 is SRC-MIG-16..21: 62 / 0 forward, 54 / 8 over `--baseline
-lane-key-s2`, 38 / 24 over `--baseline lane-key-r2`.
+lane-key-s2`, 38 / 24 over `--baseline lane-key-r2`. Round 5 (lane-key-u1,
+2026-10-12; lead ruling R16 after the fourth review measured the logo toggle
+-- the entry writer's second caller, which R13 had not gated -- stripping
+the URL a failed state write had left on the entry as the only copy) adds
+the fixture section `ownedWrite` (8 cases, the whole cube of the three
+flags; `R16: ownedWriteMode over every \`ownedWrite\` case ...` and the
+cube check), `R16: entryWith with keepRetired ...`, extends the
+service-order driver with `setShowLogos` under both host shapes (five `R16
+(lag host)` / `(echo host)` checks each: a failed state write then the
+toggle keeps `playlistUrl` and names the file's own pointer at every entry
+write; the patch-only write is recognised as our own under both hosts; a
+parked save that fails then the toggle; a failed switch then the toggle,
+and the heal with nothing outstanding; heal, failed switch, toggle), a
+structural pin (`R16 (structural)`: `setShowLogos` asks the decision with
+the three flags, writes `showLogos` alone with `keepRetired` on `patch`,
+the funnel hands it to `entryWith`, the mirror never passes it) and the
+two round-4-P2 pins (`persistFailureMessage` renders THE reason's sentence
+over every reason `Service.qml` emits, none naming a URL, only
+`persist_failed`'s naming `omarchy bar set`; the guide hands the reason
+through on both surfaces). Seen red by lane A: the same test files over an
+export of lane-key-t2 read `2162 checks, 17 failure(s)` -- the sixteen R16
+titles with the driver's got being the loss (`urlKept:false`, the mirror
+on the memory key, two records after the restart) plus the D-SINK-19
+funnel pin re-levelled to `writeOwnedEntry`'s fourth parameter -- and
+twelve one-decision mutations on copies of the committed tree each
+reddening at least one check. Counts on lane-key-u1: node 2162 / 0 (+16),
+python 1056, qml 78 (neither extended; the `ownedWrite` section has no
+Python mirror, so node is its one consumer). The live half on lane-key-u2
+is SRC-MIG-22 (L1/L2 inside F) and SRC-MIG-23 (the harness's own repairs):
+64 / 0 forward on 63 lettered checks, 60 / 4 over `--baseline lane-key-t2`
+(L1, L2, F6, F7), 54 / 10 over `--baseline lane-key-s2`, 38 / 26 over
+`--baseline lane-key-r2`, 39 / 25 over `--baseline f275bde`, 58 / 6 and 59
+/ 5 for the two mutation patches through `--tree`; `qa-lib-test.sh` 435 /
+0 (+15); `check-tree` 11 / 0 (lane B's transcripts, 2026-10-12).
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 

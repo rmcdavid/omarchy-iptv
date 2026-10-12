@@ -126,9 +126,10 @@ obvious when it happens to you:
   to hand the plugin a playlist, not a place the playlist is stored. It is read
   when it arrives and again at every shell start — including a value you set
   while the shell was not running (that case is exercised on every commit's
-  test tree and was run under a headless compositor on 2026-10-12, and is
-  run again before each cut; a build of this change that never shipped lost
-  it, which is why it is tested). The value is removed from the entry only
+  test tree, and the whole scenario — `key-scenario.sh live` in the
+  development harness on the `dev` branch, 64 checks — passed under a
+  headless compositor on 2026-10-12; a build of this change that never
+  shipped lost it, which is why it is tested). The value is removed from the entry only
   after the plugin's own file has been written and the write has been
   confirmed back to it — at a shell start and while the shell is running
   alike (ruling R13 of this change's fourth round; until it only the
@@ -136,7 +137,10 @@ obvious when it happens to you:
   running could take the value off the entry with nothing written anywhere,
   which was measured on a build that never shipped). If that write fails —
   `~/.local/state` not writable, a full disk — your URL is left where you put
-  it rather than taken away, the source you set or switched to stays in
+  it rather than taken away (turning channel logos on or off in the meantime
+  does not take it away either: while a save is outstanding that write
+  changes the logo setting alone, which a build that never shipped got
+  wrong), the source you set or switched to stays in
   effect for this session only, the shell's journal says `state.json could
   not be written`, and the next shell start reads the entry again. A guide
   URL (`epgUrl`) set before you have any playlist is kept on the entry until
@@ -707,7 +711,8 @@ Nothing inside the plugin directory is written at runtime.
   you added, switched to or set on the command line is in effect for this
   session only, and a URL you set with `omarchy bar set` is deliberately left
   on the widget's entry until a save succeeds, so it is read again at the
-  next shell start. Check that the directory exists, is yours and is writable
+  next shell start — turning channel logos on or off in between leaves it
+  there too. Check that the directory exists, is yours and is writable
   (`ls -ld ~/.local/state/omarchy-iptv`) and that the disk is not full.
 - "Settings file could not be made private": the plugin would not write a URL
   into `~/.config/omarchy/shell.json`, because it could not make that file
