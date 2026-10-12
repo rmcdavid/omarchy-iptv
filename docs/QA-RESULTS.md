@@ -13510,3 +13510,68 @@ is the one switch on it, in every version of the slot (the January commit
 `a026cb69`, "check for read-only first in q_canPasteChanged()", only
 moved that check ahead of the
 read), which is what the fix rests on.
+
+### The review of D-CLIP-1, two rounds (F-M3-19): the fix held at the sink on the first pass, and the exhaust half was still open on the user's own keypress
+
+Fix round, three lanes then three lenses, no P1. The sink observation on the
+real `Guide.qml` under a nested headless cage: **+0 MB** and a worst IPC
+round-trip of 124 ms against a 100 MB foreign offer, where `d55149b` read
++240..+297 MB and 673..793 ms stalls over seven runs. The seat of a nested
+cage has NO keyboard, so the field never gains focus and the subscription
+never opens unless a virtual keyboard is held on the nested display -- a
+scenario that forgets this passes vacuously, and the lane found it before
+the lens did. What the lens found: **a user's own Ctrl+V over that offer
+cost the FIXED shell +298 MB, kept** -- `wl-paste` was collected whole in the
+shell and the 8,192-character cut applied afterwards; the bound was time,
+not bytes (a P2, measured). The masked-field range decision lived only in
+`Guide.qml` at two sites and deleting it left the whole gate green (rule 12).
+The scenario trapped EXIT only, so a TERM mid-run stranded a cage, a
+detached shell and a stale nested socket (its siblings carry INT/TERM traps).
+And a QA expectation that a dead-key sequence inserts NOTHING was false:
+measured, the dead key arrives as a bare press and the next key as ordinary
+text, so the base letter is inserted (both input contexts refuse to compose
+when the item does not accept input method); "accents cannot be TYPED"
+holds, the sentence did not.
+
+Repair round (R8): the helper's `clipboard` verb reads at most 32 KiB from
+`wl-paste` under a 5 s deadline and prints one bounded reply; the shell runs
+the verb, not `wl-paste`, and never holds more. Measured on the same rig: the
+user paste over the 100 MB offer now grows the shell by **+0..+7 MB**, the
+helper peaks at 32 MB (the interpreter's floor -- it peaks at 32 MB on a
+two-byte reply too) and is gone afterwards. `Model.editRangeFor` is called
+from both sites and reached from node; the cut is gated on the field not
+being opaque, as Qt gates it; the spec pins Ctrl+C and a mouse selection;
+the a11y transform that kept an unreachable function alive went with it.
+
+Verify lenses, no P1, and three things worth the record: a SIGTERM to the
+helper -- which is what the shell's watchdog sends -- orphaned the
+`wl-paste` child, because Python's default disposition skips every
+`finally` (seen red, then a handler reaps the child first); the shell's
+watchdog was one kill grace short of the helper's worst case (deadline plus
+a SIGTERM wait plus a SIGKILL wait plus start-up) and the node check pinned
+only one grace, so a 6,001 ms watchdog stayed green -- now two graces on
+both sides; and L10, labelled "the byte bound", asserted only the shell's
+growth, so a dropped cap left the live arm green -- the helper's peak joins
+the verdict under a 64 MB band.
+
+**Where it ends, at integration on 2026-10-11:** node 2,074 / 0; python
+1,047 / 0; qml 78; harness predicates 408; logo preflight 33 and clip
+preflight 7 in the gate (the probe arm at a 25 MB offer: editable +58..+64
+MB, read-only +0, no field +0); clip-scenario live 20 / 0 on the fixed tree,
+`--baseline 96f5261` red on L10 (+310 MB, the pre-R8 paste) and `--baseline
+d55149b` red on L4 and L10; capability scan 63 files, 0 hits; a TERM at 6 s
+and at 24 s and an INT at 24 s leave nothing behind.
+
+**Open, and filed rather than rounded away:** eight sibling scenarios keep
+`trap cleanup EXIT` alone and detach something (F-HARNESS-18, a display-lane
+round, since most hold the display); the playlist status line's per-channel
+`warnings` list is uncapped by COUNT, so a hostile playlist can make the one
+JSON line the shell collects a few MB (D-SRC-13, the D-LOGO-12 shape in the
+status line); `truncated` is reported by the verb and shown nowhere (a
+failed or cut paste stays silent this release, by decision); the
+primary-selection WRITE on a left-button selection in a revealed URL field
+is user-initiated, pre-existing and recorded in rule 5; the masked-field
+navigation no-ops stay `Guide.qml`-only decisions (cosmetic: the caret is
+hidden while masked). Upstream reports to Omarchy (the host kit's own
+`TextField`) and Qt (the released 6.11.x and 6.12.0 read text on every
+change) are drafted in `docs/ARCHITECTURE.md` section 6 for the lead to file.
